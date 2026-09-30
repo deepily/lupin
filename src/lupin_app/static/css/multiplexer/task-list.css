@@ -69,6 +69,20 @@
     font-variant-numeric: tabular-nums;
 }
 
+/* The updated-stamp while it carries "saved — board not re-read" (row 93ca4268).
+   ONE rule for all three panes, because the stamp is one element under three class
+   names (.task-list-updated · .holding-area-updated · .epic-board-updated) and a
+   per-pane copy is how they drift.
+
+   House amber, the same meaning .task-list-unreachable already carries: what you are
+   looking at is not current. It is NOT the refusal red — the write SUCCEEDED, and
+   dressing a stale board as a rejection is the confusion this row exists to end. The
+   warning sign is redundant with the ⚠ in the text itself (WCAG 1.4.1). */
+.multiplexer-read-back-failed {
+    color: #856404;
+    font-weight: 600;
+}
+
 /* ---- Table ----
    Status-color custom props (scoped to the table) drive the status-dot + the
    3px row left-accent below. Color is ALWAYS redundant with the status WORD in
@@ -152,9 +166,12 @@ tbody.task-group.collapsed .task-row {
 }
 
 /* Collapse-all / expand-all controls (card header, beside ⟳). Mirror the
-   .task-list-refresh affordance — actions, no active/dimmed state. */
+   .task-list-refresh affordance — actions, no active/dimmed state. The Epic
+   Board's pair (parity A-2 #9) shares the rule: one button language per column. */
 .task-list-collapse-all,
-.task-list-expand-all {
+.task-list-expand-all,
+.epic-board-collapse-all,
+.epic-board-expand-all {
     cursor: pointer;
     border: 1px solid #ced4da;
     border-radius: 6px;
@@ -166,12 +183,16 @@ tbody.task-group.collapsed .task-row {
 }
 
 .task-list-collapse-all:hover,
-.task-list-expand-all:hover {
+.task-list-expand-all:hover,
+.epic-board-collapse-all:hover,
+.epic-board-expand-all:hover {
     background: #e9ecef;
 }
 
 .task-list-collapse-all:focus-visible,
-.task-list-expand-all:focus-visible {
+.task-list-expand-all:focus-visible,
+.epic-board-collapse-all:focus-visible,
+.epic-board-expand-all:focus-visible {
     outline: 2px solid rgb(108, 117, 125, 0.6);
     outline-offset: 2px;
 }
@@ -184,14 +205,53 @@ tbody.task-group.collapsed .task-row {
     vertical-align: middle;
 }
 
+/* ---- Title column — TWO-LINE CLAMP, not a character cap ----
+
+   🔴 THIS IS A DELIBERATE, PROVISIONAL DUPLICATE of the rule in
+   static/css/task-list.css. María ruled it 2026-09-05: duplicate the clamp
+   scoped to this card rather than share the stylesheet, because sharing would
+   ANSWER Rick's open question about whether "no code reuse between the clients"
+   reaches CSS — and that question is his, not ours. The two sheets already
+   duplicate each other by design (this file's group-header rule says "Parity
+   with the in-service JS card"), so this follows the house convention rather
+   than inventing one. Revisit if and when Rick rules on CSS scope.
+
+   WHAT IT REPLACED: `white-space: nowrap; max-width: 30ch; text-overflow:
+   ellipsis`, plus a JS-side ~60-character cap. A cap LOSES text; a clamp only
+   hides it, and the `title=` tooltip on the <td> brings it back on hover.
+
+   ⚠️ THE CLAMP MUST LIVE ON THE SPAN, NOT THE CELL, and this is measured rather
+   than assumed (JS authors, live page 2026-09-03): a `<td>` is
+   `display: table-cell`, where BOTH `-webkit-line-clamp` and `max-height` are
+   ignored. The cell carried computed `max-height: 39px` + `overflow: hidden` and
+   still rendered 90px, `clientHeight == scrollHeight` (51/51) — nothing clamped.
+   The span, same declarations, bound at 39px against 78px of content.
+   ⚠️ Do NOT re-derive this from the computed `display` value: both compute
+   `flow-root`. Chrome says the same string either way, so it is not evidence.
+
+   ⚠️ AND THE FIRST CUT OF THE LEGACY RULE FAILED IN THE DANGEROUS DIRECTION:
+   `overflow: hidden` was live while the clamp was inert, so a long title WAS cut
+   — at whatever height the row happened to be rather than at a deliberate two
+   lines. An accidental bound looks exactly like an intended one until measured.
+   ⇒ THE CELL RULE AND THE SPAN RULE SHIP TOGETHER, AND SO DOES THE SPAN IN THE
+   DOM. Guard: task_row_disclosed.test.ts + the stylesheet guard beside it. */
 .task-row .task-col-title {
     font-weight: 600;
-    /* Truncated to ~60 chars in JS (full title rides the hover-tooltip); keep
-       the cell on one line so an over-long legacy title can't wrap the row. */
-    white-space: nowrap;
-    max-width: 30ch;
     overflow: hidden;
-    text-overflow: ellipsis;
+}
+
+/* The clamp binds on the `<span class="task-title">` that taskRowDisclosed.ts
+   puts inside the cell — the only child, and the carrier of the whole title.
+   `.epic-row` is here because ONE row renderer serves all three panes. */
+.task-row .task-col-title .task-title,
+.epic-row .task-col-title .task-title {
+    display            : -webkit-box;
+    -webkit-line-clamp : 2;
+    line-clamp         : 2;
+    -webkit-box-orient : vertical;
+    overflow           : hidden;
+    overflow-wrap      : anywhere;
+    line-height        : 19.5px;
 }
 
 /* ---- ID column (row redesign 2026.06.29 — leftmost) ----
@@ -239,13 +299,24 @@ tbody.task-group.collapsed .task-row {
     pointer-events: none;
 }
 
-/* ---- Detail column (row redesign 2026.06.29 — 📄 body overlay) ---- */
-.task-list-table .task-col-detail,
-.task-list-table th.task-col-detail {
-    text-align: center;
-    white-space: nowrap;
-    width: 1%;
-}
+/* ---- Detail column (row redesign 2026.06.29 — 📄 body overlay) ----
+   🔨 DELETED 2026-09-11 — the multiplexer half of Rick's P0 row 17393c56 (row 1657a852).
+   It read:
+
+       .task-list-table .task-col-detail,
+       .task-list-table th.task-col-detail { text-align: center;
+                                             white-space: nowrap; width: 1%; }
+
+   17393c56 deleted the identical rule from css/task-list.css on 09-04, for the reason
+   written there: there is no line-1 detail column any more, so `width: 1%` lands on the
+   disclosed `div.task-disclosed-field.task-col-detail` and collapses it to 9px. This copy
+   survived, and multiplexer.html links THIS sheet after css/task-list.css, so it put the
+   collapse straight back on the multiplexer. Measured 2026-09-11 on the served page at
+   1280, 1600 and 1920 wide: detail field 9px, a hit test at the 📄's centre returned the
+   Actions field's `task-disclosed-label`; with only this rule overridden, the field is
+   63px and the hit test returns the 📄. Found by the three multiplexer 📄 E2E tests in
+   ts-37979ae6, which were right to fail.
+*/
 
 .task-detail-emoji {
     cursor: pointer;
@@ -276,10 +347,14 @@ tbody.task-group.collapsed .task-row {
 }
 
 /* ---- Body overlay (row redesign 2026.06.29 / D2 — shows the task `body`) ---- */
+/* z-index 10000 sits above .lupin-nav (9999). 59b31b6f raised the legacy copy in css/task-list.css on
+ * 2026-09-01; this copy kept 1000 and loads after it, so in the multiplexer the nav covered the backdrop
+ * and its links stayed clickable through the open overlay (row 1657a852). The order is documented on
+ * the legacy rule; test_every_body_overlay_sits_above_the_nav.py guards both copies. */
 .task-body-overlay {
     position: fixed;
     inset: 0;
-    z-index: 1000;
+    z-index: 10000;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -309,6 +384,7 @@ tbody.task-group.collapsed .task-row {
 .task-body-overlay-body {
     margin: 0;
     white-space: pre-wrap;
+    /* stylelint-disable-next-line declaration-property-value-keyword-no-deprecated -- kept deliberately: the spec keeps this keyword for compatibility, and its replacement (word-break: normal + overflow-wrap: anywhere) is not pixel-neutral under a descendant that sets its own overflow-wrap (row d3d4a18c) */
     word-break: break-word;
     font-family: inherit;
     font-size: 13px;
@@ -444,43 +520,259 @@ tbody.task-group.collapsed .task-row {
 .task-list-table .task-priority-select.task-prio-mid  { border-color: #f57f17; }
 .task-list-table .task-priority-select.task-prio-low  { border-color: #2e7d32; }
 
-.task-list-table .task-drop-reason {
+/* Row-control conversion 2026.09.02 — the one-select row control replaces the
+   single Drop button. `.task-drop-reason` / `.task-drop-button` are retired.
+   Every control keeps the same 20px fixed box and integer line-height as the
+   priority/owner selects, because that is what makes the row height
+   deterministic (it is what killed the 169↔170 ±1px visual-snapshot flap). A
+   date box appears and disappears with the verb, so it must not change the row
+   height when it does. */
+.task-list-table .task-verb-select {
     font-size: 11px;
-    line-height: 14px;      /* integer line-height + fixed box → deterministic row height (kills 169↔170 ±1px flap) */
+    line-height: 14px;
+    height: 20px;
+    box-sizing: border-box;
+    padding: 2px 4px;
+    max-width: 170px;       /* a greyed option carries its reason in its own label */
+    margin-right: 4px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    background: #fff;
+    vertical-align: middle;
+}
+
+/* A greyed option states WHY it cannot be chosen, in its own label. The class is
+   what greys it; `disabled` alone tells the mouse and nobody else. */
+.task-list-table .task-verb-select option.task-action-disabled {
+    color: #9aa0a6;
+    font-style: italic;
+}
+
+.task-list-table .task-action-input {
+    font-size: 11px;
+    line-height: 14px;
     height: 20px;
     box-sizing: border-box;
     padding: 2px 6px;
-    width: 110px;
     margin-right: 4px;
     border: 1px solid #ced4da;
     border-radius: 4px;
     vertical-align: middle;
 }
 
-.task-list-table .task-drop-button {
+.task-list-table .task-reason-input { width: 150px; }
+.task-list-table .task-chase-input  { width: 120px; }
+
+/* A disabled reason box (Approve takes none) must READ as inert rather than as
+   an empty box the operator failed to fill in. */
+.task-list-table .task-action-input:disabled {
+    background: #f1f3f5;
+    color: #9aa0a6;
+    cursor: not-allowed;
+}
+
+.task-list-table .task-action-btn {
     font-size: 11px;
-    line-height: 14px;      /* integer line-height + fixed box → deterministic row height (kills 169↔170 ±1px flap) */
+    line-height: 14px;
     height: 20px;
     box-sizing: border-box;
     padding: 2px 8px;
-    border: 1px solid #f5c6cb;
+    border: 1px solid #ced4da;
     border-radius: 4px;
-    background: #f8d7da;
-    color: #721c24;
+    background: #f8f9fa;
+    color: #212529;
     cursor: pointer;
     vertical-align: middle;
 }
 
-.task-list-table .task-drop-button:hover {
+.task-list-table .task-action-btn:hover:not(:disabled) {
+    background: #e9ecef;
+}
+
+.task-list-table .task-action-btn:disabled,
+.task-list-table .task-verb-select:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+/* ARMED — won't-fix's second click. The colour change is redundant with the
+   label, which already reads "Confirm won't fix" (WCAG 1.4.1), so the state is
+   legible without relying on the red. */
+.task-list-table .task-submit-button.task-submit-armed {
+    border-color: #f5c6cb;
+    background: #f8d7da;
+    color: #721c24;
+    font-weight: 600;
+}
+
+.task-list-table .task-submit-button.task-submit-armed:hover:not(:disabled) {
     background: #f1b0b7;
 }
 
-/* Inline edit-failure stripe (appended to the row by the renderer). */
-.task-list-table .task-row-error-stripe {
-    display: block;
+/* Inline edit-failure stripe. The stripe is its own <tr class="task-row-error-stripe" hidden>
+   under each task row (rowDisclosure.ts renderErrorStripe, since f3cfe655 on 09-05), so this
+   styles its CELL. It used to style the row itself with `display: block` — a leftover from when
+   the stripe was a cell appended inside the row — and that display beat the `hidden` attribute,
+   so every task row in the multiplexer showed an empty pink band (row 1657a852). Never give the
+   stripe row a display: hiding it is the `hidden` attribute's job.
+   test_no_stylesheet_gives_the_error_stripe_row_a_display.py guards this. */
+.task-list-table .task-row-error-stripe td {
     padding: 4px 8px;
     font-size: 11px;
     color: #721c24;
     background: #f8d7da;
     border-top: 1px solid #f5c6cb;
+}
+
+/* ---------------------------------------------------------------------------
+   MULTIPLEXER-ONLY PANE CHROME — the classes that exist in NO sheet at any path
+   (row 87812328 · S3b · census src/rnd/2026.09.06-accordion-wiring-census.md)
+
+   🔴 WHY THIS IS FIVE RULES AND NOT TWENTY-THREE. The census found 23 classes
+   the four panes emit that no sheet defines at any path. Most MUST STAY
+   UNSTYLED, and authoring them would be a regression rather than a fix:
+
+     - 13 are emitted by the LEGACY card too and styled by no sheet it loads —
+       measured against notifications.html's own live CSSOM (7 sheets, 0
+       blocked, corpus 591). Rick's ruling is "look EXACTLY" like legacy, so a
+       rule there makes the multiplexer DIFFER. The controlled pair is one
+       property wide: `.fleet-col-stuck` HAS a rule and computes text-align
+       center; `.fleet-col-role/-state/-holding` have none and compute left,
+       every other sampled property identical.
+     - 3 more (`task-col-accountable`, `-filer`, `-project`) need nothing:
+       their wrapper `.task-disclosed-field` already sets `white-space: nowrap`
+       and `min-width: 0` (legacy task-list.css:1242).
+     - `holding-area-message` is a WRAPPER whose variants carry the look. Giving
+       it the house banner padding would override legacy's `.holding-area-empty`
+       (10px 6px, italic, dimmed) which is now linked — changing a legacy look
+       this row is supposed to preserve. The variant below styles itself instead.
+     - `task-class-task` is the DEFAULT badge. Legacy has no rule for it either;
+       the unaccented badge IS the default's look.
+
+   ⚠️ SPECIFICITY / CASCADE. multiplexer.html links the legacy pair at lines
+   37-38 and this sheet after it, so these rules WIN over legacy at equal
+   specificity. That is deliberate and only matters for `.task-col-blocked`
+   below, the one rule here that overrides an inherited legacy value. Every
+   other name was verified absent from BOTH `css/task-list.css` and this file
+   before being written.
+
+   Guard: src/tests/unit/test_pane_chrome_classes_reach_a_linked_sheet.py —
+   deleting this block reddens 4 named cases while its positive controls and
+   its parity cases stay green (measured, both directions).
+   --------------------------------------------------------------------------- */
+
+/* Holding Area + Epic Board refresh affordances. Mirrors `.task-list-refresh`
+   above rather than inventing a second button language — these panes sit in one
+   column and a user reads them as one surface. No legacy referent: the legacy
+   card has no per-pane refresh button, so parity does not constrain this and
+   internal consistency does. */
+.holding-area-refresh,
+.epic-board-refresh {
+    cursor: pointer;
+    border: 1px solid #ced4da;
+    border-radius: 6px;
+    background: #f8f9fa;
+    color: #495057;
+    font-size: 14px;
+    line-height: 1;
+    padding: 3px 8px;
+}
+
+.holding-area-refresh:hover,
+.epic-board-refresh:hover {
+    background: #e9ecef;
+}
+
+.holding-area-refresh:focus-visible,
+.epic-board-refresh:focus-visible {
+    outline: 2px solid rgb(108, 117, 125, 0.6);
+    outline-offset: 2px;
+}
+
+/* The "updated HH:MM:SS" stamp. Mirrors `.task-list-updated`; `margin-left:auto`
+   is what pushes it to the right of the section header's flex row, which is why
+   it is copied rather than approximated. */
+.holding-area-updated {
+    margin-left: auto;
+    color: #adb5bd;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+}
+
+/* The store-unreachable banner. A multiplexer-only STATE — the legacy card has
+   no sentinel — so it follows the house amber that `.task-list-unreachable` and
+   `.fleet-status-offline` already use for exactly this meaning.
+
+   🔴 IT CARRIES THE WHOLE BANNER, INCLUDING THE BASE. The element's class is
+   `holding-area-message holding-area-sentinel`, and styling the shared
+   `.holding-area-message` base would also repaint `.holding-area-empty`, whose
+   legacy look (dim italic) this row must preserve. Self-contained here so the
+   sibling state is untouched. */
+.holding-area-sentinel {
+    padding: 14px 12px;
+    margin: 0 0 8px;
+    text-align: center;
+    font-size: 13px;
+    border-radius: 6px;
+    background: #fff3cd;
+    color: #856404;
+    border: 1px solid #ffeeba;
+}
+
+/* Blocked-by is the ONE line-2 field holding a LIST rather than a token, so the
+   `white-space: nowrap` it inherits from `.task-disclosed-field` makes a
+   multi-blocker row overflow its flex line instead of wrapping. The other three
+   line-2 fields (accountable, filer, project) are single tokens and correctly
+   need no rule at all. */
+.task-col-blocked {
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+/* ---- The row mic 🎤 (parity A-2 #0) ----
+   The classic page styles this button through the shared `.stt-button` in
+   notifications.css, which this page does not load — so the base and the two recorder
+   states (`.recording`, `.processing`, toggled by TaskRowController) are stated here.
+   Sized to sit level with `.task-action-input`, as the classic row's override does. */
+.task-col-actions .task-reason-stt {
+    padding: 2px 6px;
+    font-size: 0.85rem;
+    line-height: 1.2;
+    flex: 0 0 auto;
+    border: 1px solid #007bff;
+    border-radius: 4px;
+    background: white;
+    color: #007bff;
+    cursor: pointer;
+}
+
+.task-col-actions .task-reason-stt.recording {
+    background-color: #dc3545;
+    border-color: #dc3545;
+    color: white;
+    animation: task-reason-stt-pulse 1s ease-in-out infinite;
+}
+
+.task-col-actions .task-reason-stt.processing {
+    background-color: #ffc107;
+    border-color: #ffc107;
+    color: white;
+    cursor: wait;
+    animation: task-reason-stt-pulse 1s ease-in-out infinite;
+}
+
+.task-col-actions .task-reason-stt:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+
+@keyframes task-reason-stt-pulse {
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.6;
+    }
 }

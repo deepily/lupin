@@ -15,7 +15,7 @@ src/rnd/v0.1.7/2026.04.30-swe-team-orchestrator-test-perf-fix.md.
 
 Venue: :8000 (scheduled monopolize-mode). Initially designed for :7999, but the
 real dispatcher takes ~196s wall-clock, exceeding the 2-min :7999 cap per the
-testing-venues rubric in CLAUDE.md. Submit via /api/test-suite/submit with
+testing-venues rubric in CLAUDE.md. Submit via the v2 test-suite submit with
 non-overlapping scheduled_at — DO NOT side-door inject. Non-destructive
 (dry_run=True), no DB writes, ~3-4 minute runtime.
 

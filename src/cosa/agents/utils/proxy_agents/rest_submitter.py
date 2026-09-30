@@ -55,11 +55,12 @@ _SERVER_TRANSPORT_TIMEOUT_SECONDS = 30
 def submit_notification_response(
     notification_id,
     response_value,
-    host     = DEFAULT_SERVER_HOST,
-    port     = DEFAULT_SERVER_PORT,
-    endpoint = "/api/notify/response",
-    debug    = False,
-    verbose  = False
+    host          = DEFAULT_SERVER_HOST,
+    port          = DEFAULT_SERVER_PORT,
+    endpoint      = "/api/notify/response",
+    debug         = False,
+    verbose       = False,
+    authorization = None
 ):
     """
     Submit a response to the Lupin notification API.
@@ -71,6 +72,9 @@ def submit_notification_response(
 
     Ensures:
         - POSTs to the specified endpoint
+        - sends `Authorization: <authorization>` when one is given. The answer door
+          refuses an uncredentialed caller with 401 (row e20e249a), so a proxy that
+          passes None will have every answer refused
         - Returns True on success (HTTP 200)
         - Returns False on any error
         - Never raises exceptions
@@ -83,6 +87,7 @@ def submit_notification_response(
         endpoint: REST endpoint path (default: /api/notify/response)
         debug: Enable debug output
         verbose: Enable verbose output
+        authorization: The `Bearer <jwt>` header value to send, or None
 
     Returns:
         bool: True if response was submitted successfully
@@ -94,11 +99,14 @@ def submit_notification_response(
         "response_value"  : response_value
     }
 
+    headers = { "Content-Type": "application/json" }
+    if authorization is not None: headers[ "Authorization" ] = authorization
+
     try:
         response = requests.post(
             url,
             json    = payload,
-            headers = { "Content-Type": "application/json" },
+            headers = headers,
             timeout = _SERVER_TRANSPORT_TIMEOUT_SECONDS
         )
 

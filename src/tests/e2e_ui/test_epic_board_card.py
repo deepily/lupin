@@ -30,7 +30,7 @@ Requires:
     - Dev server running on the test venue (:8000) with Testing config
     - Clean test database (via logged_in_page fixture)
 
-Venue: :8000 scheduled — submit via POST /api/test-suite/submit.
+Venue: :8000 scheduled — submit via POST /api/v2/submit.
 """
 
 import json
@@ -38,6 +38,7 @@ import json
 import pytest
 
 from .conftest import BASE_URL
+from .task_panes import EMPTY_TASKS, is_holding_area_query
 
 
 # ---------------------------------------------------------------------------
@@ -175,10 +176,22 @@ def _route_tasks( page, state ):
     Ensures:
         - mode "ok"          -> 200 { tasks: SEEDED_TASKS, count }
         - mode "unreachable" -> 500
-        - state["task_calls"] counts every GET /api/tasks the page makes, which
+        - the holding area's own query (`status=not_approved`) is answered 200 with an
+          empty body in either mode, as the real server would for these seeds, and is
+          counted in state["holding_calls"], never in state["task_calls"]
+        - state["task_calls"] counts every BOARD GET /api/tasks the page makes, which
           is what proves ONE fetch feeds BOTH panes
+
+    ⚠️ ROW 1657a852: this counter used to count the holding area's query too. That query
+    is a deliberate SECOND fetch on the same tick (notifications.js: "one clock, two
+    fetches" — not_approved rows are invisible to the board by design), so the one-fetch
+    claim read 2 while staying true. It is now counted separately, and pinned.
     """
     def tasks_handler( route ):
+        if is_holding_area_query( route.request.url ):
+            state[ "holding_calls" ] = state.get( "holding_calls", 0 ) + 1
+            route.fulfill( status=200, content_type="application/json", body=json.dumps( EMPTY_TASKS ) )
+            return
         state[ "task_calls" ] = state.get( "task_calls", 0 ) + 1
         if state[ "mode" ] == "unreachable":
             route.fulfill( status=500, content_type="application/json",
@@ -210,7 +223,7 @@ def _goto_notifications( page ):
 
 def _seeded_page( page, mode="ok" ):
     """Route-seed, navigate, and wait for the epic board's first render."""
-    state = { "mode": mode, "task_calls": 0, "story_calls": 0 }
+    state = { "mode": mode, "task_calls": 0, "holding_calls": 0, "story_calls": 0 }
     _route_tasks( page, state )
     _goto_notifications( page )
     if mode == "ok":
@@ -222,7 +235,7 @@ def _seeded_page( page, mode="ok" ):
 
 
 class TestEpicBoardMount:
-    """The section exists, sits below the task list, and renders."""
+    """The section exists, sits in its ruled position, and renders."""
 
     def test_section_mounts_with_its_controls( self, logged_in_page ):
         """
@@ -237,24 +250,65 @@ class TestEpicBoardMount:
         assert logged_in_page.get_by_test_id( "epic-board-collapse-all-btn" ).count() > 0
         assert logged_in_page.get_by_test_id( "epic-board-expand-all-btn" ).count() > 0
 
-    def test_section_sits_immediately_below_the_task_list( self, logged_in_page ):
+    def test_the_holding_area_sits_between_the_task_list_and_the_epic_board( self, logged_in_page ):
         """
-        Rick's ask was for an accordion "immediately underneath of the task
-        list" so he can toggle between them without hunting. Position is the
-        feature here, not decoration.
+        Position is the feature here, not decoration — but WHICH order is the
+        feature changed, so this test was rewritten rather than deleted.
+
+        Rick's original ask was for an accordion "immediately underneath of the
+        task list", and this test pinned exactly that: #section-epic-board as
+        the NEXT sibling of #section-task-list. Commit 0a53561d (2026-09-02, the
+        Holding Area pane, row 8af64f5a) put #section-holding-area between them
+        and the test went red. That red was a real open question, not a stale
+        selector, so it was split to decision row 5f289919 — and on 2026-09-11
+        Rick RULED option B: the Holding Area STAYS between the task list and
+        the epic board, and this test is rewritten to pin the new order.
+
+        It pins the whole three-section run, not one adjacency. "The holding
+        area follows the task list" alone would stay green if the epic board
+        drifted anywhere else on the page, which is the half of the original ask
+        the ruling did NOT retire.
 
         Ensures:
-            - #section-epic-board is the NEXT sibling of #section-task-list
+            - all three sections exist on the page BEFORE any order is read
+            - #section-task-list, #section-holding-area and #section-epic-board
+              are CONSECUTIVE element siblings, in that order
+
+        Venue: :8000 (e2e) — Playwright against the live classic page.
         """
         _goto_notifications( logged_in_page )
 
-        next_id = logged_in_page.evaluate(
+        # PRESENCE BEFORE ORDER. A sibling walk over a page that rendered no
+        # sections at all yields a short list, which fails the order assertion
+        # for a reason that has nothing to do with order — and reads in the log
+        # exactly like a layout regression. Asserting existence first splits the
+        # two failures apart. This is not hypothetical: the probe that developed
+        # this test reported every section MISSING on its first run, because it
+        # had not authenticated, and both the old and new order assertions came
+        # back red in both arms.
+        missing = logged_in_page.evaluate(
+            """() => [ "section-task-list", "section-holding-area", "section-epic-board" ]
+                .filter( id => document.getElementById( id ) === null )"""
+        )
+        assert missing == [ ], f"sections absent from the page: {missing}"
+
+        # Report the sequence actually found, so a failure names the drift
+        # instead of only denying the expectation.
+        observed = logged_in_page.evaluate(
             """() => {
                 const tl = document.getElementById( "section-task-list" );
-                return tl && tl.nextElementSibling ? tl.nextElementSibling.id : null;
+                if ( !tl ) return null;
+                const ids = [ tl.id ];
+                let node  = tl.nextElementSibling;
+                for ( let i = 0; i < 2 && node; i++ ) {
+                    ids.push( node.id );
+                    node = node.nextElementSibling;
+                }
+                return ids;
             }"""
         )
-        assert next_id == "section-epic-board"
+        assert observed == [ "section-task-list", "section-holding-area", "section-epic-board" ], \
+            f"section order drifted: {observed}"
 
     def test_rows_render_grouped_by_epic( self, logged_in_page ):
         """
@@ -341,48 +395,30 @@ class TestEpicBoardToolbarEntryPoint:
         )
         assert order.index( "section-epic-board" ) == order.index( "section-task-list" ) + 1
 
-    def test_the_task_accordion_pair_is_STILL_adjacent( self, logged_in_page ):
+    def test_the_task_accordion_pair_is_OFF_this_toolbar( self, logged_in_page ):
         """
-        THE TRAP. The collapse-all / expand-all pair must remain immediate
-        siblings with nothing wedged between them.
+        Replaces two tests that guarded the pair's adjacency and its wiring. Rick
+        ruled 2026-09-15 that collapse-all / expand-all task owners never belonged
+        on this toolbar, because the toolbar shows and hides accordion AREAS and
+        those two are task-list actions. This guard is what stops them coming back.
 
         Ensures:
-            - #task-list-expand-all is the NEXT sibling of #task-list-collapse-all
-            - neither has acquired a data-section (they are actions, not toggles)
+            - neither #task-list-collapse-all nor #task-list-expand-all is in the DOM
+            - the toolbar still holds its own buttons, so a page that failed to
+              render cannot pass this by being empty
         """
         _goto_notifications( logged_in_page )
 
         result = logged_in_page.evaluate(
-            """() => {
-                const c = document.getElementById( "task-list-collapse-all" );
-                const n = c ? c.nextElementSibling : null;
-                return {
-                    nextId       : n ? n.id : null,
-                    collapseSect : c ? c.dataset.section || null : "MISSING",
-                    expandSect   : n ? n.dataset.section || null : "MISSING",
-                };
-            }"""
+            """() => ( {
+                collapse    : document.getElementById( "task-list-collapse-all" ) !== null,
+                expand      : document.getElementById( "task-list-expand-all" ) !== null,
+                toolbarBtns : document.querySelectorAll( ".section-toolbar .toolbar-btn" ).length,
+            } )"""
         )
-        assert result[ "nextId" ] == "task-list-expand-all", \
-            "a button was wedged between the task-list accordion pair — collapse-all is broken"
-        assert result[ "collapseSect" ] is None
-        assert result[ "expandSect" ] is None
-
-    def test_collapse_all_still_drives_the_TASK_LIST_not_the_epic_board( self, logged_in_page ):
-        """
-        The behavioral half of the trap: the toolbar pair must still collapse
-        the OWNER groups. Adjacency alone would not catch a mis-wired handler.
-        """
-        _seeded_page( logged_in_page )
-        logged_in_page.wait_for_selector( "#task-list-container tbody.task-group", state="attached" )
-
-        logged_in_page.get_by_test_id( "task-list-collapse-all-btn" ).click()
-        logged_in_page.wait_for_function(
-            """() => {
-                const gs = document.querySelectorAll( "#task-list-container tbody.task-group" );
-                return gs.length > 0 && Array.from( gs ).every( g => g.classList.contains( "collapsed" ) );
-            }"""
-        )
+        assert result[ "toolbarBtns" ] > 0, "the toolbar did not render — this guard proves nothing"
+        assert result[ "collapse" ] is False, "collapse-all task owners is back on the toolbar"
+        assert result[ "expand" ] is False, "expand-all task owners is back on the toolbar"
 
     def test_toolbar_button_toggles_the_section( self, logged_in_page ):
         _seeded_page( logged_in_page )
@@ -562,6 +598,10 @@ class TestEpicBoardSharesOneFetch:
 
         assert state[ "task_calls" ] == 1, \
             f"expected ONE /api/tasks fetch feeding both panes, saw {state['task_calls']}"
+        # The holding area's query rides the same tick, once — "one clock, two fetches".
+        # Pinned rather than excused: a second holding fetch per tick would be a second clock.
+        assert state[ "holding_calls" ] == 1, \
+            f"expected ONE holding-area query on the same tick, saw {state['holding_calls']}"
         # And both panes actually rendered off it.
         assert logged_in_page.locator( "#epic-board-container table.epic-board-table" ).count() == 1
         assert logged_in_page.locator( "#task-list-container table.task-list-table" ).count() == 1

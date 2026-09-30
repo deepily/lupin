@@ -17,6 +17,8 @@
  * the live script across the 16 pages until this .ts is wired + proven.
  */
 
+import { jwtExpiryMs } from "../multiplexer/auth/jwt";
+
 // ===========================================================================
 // Types
 // ===========================================================================
@@ -114,7 +116,42 @@ export function getUserData( storage: StorageLike ): UserData | null {
 }
 
 export function isAuthenticated( storage: StorageLike ): boolean {
-    return !!getToken( storage );
+    /**
+     * 🔴 THIS WAS `!!getToken( storage )` — A PRESENCE CHECK ON A STRING (row ef16e88d).
+     * It never decoded the token, never read `exp`, and never asked the server, while
+     * driving the rendered "user email + Logout" half of the bar. Measured by Maya in
+     * Rick's own browser: a syntactically valid JWT with `exp` 86,400s in the past made
+     * this return TRUE while the SAME string came back 401 from the server.
+     *
+     * ⚠️ THAT IS WHY HIS REPORT READ AS A CONTRADICTION — "a 401 even when my account is
+     * authenticated and listed as logged in". Both halves were true of one token at one
+     * instant, and the nav is the half that was lying. The access token lives 30 minutes
+     * while the refresh token lives a week, so localStorage legitimately holds an expired
+     * access token for hours — this is the ordinary case, not an edge one.
+     *
+     * ⚠️ AND IT IS A REASSURANCE, WHICH IS THE EXPENSIVE KIND OF WRONG. A bar saying
+     * "logged in" does not merely misinform; it stops the reader checking.
+     *
+     * NO NEW EXPIRY LOGIC — `jwtExpiryMs()` is reused deliberately. A second decoder
+     * would be a second derivation of one value, and two derivations that agree only by
+     * careful copying diverge the first time somebody edits one of them.
+     *
+     * Requires:
+     *     - storage exposes getItem
+     *
+     * Ensures:
+     *     - false when no token is stored
+     *     - false when the token cannot be decoded (undecodable is not trusted)
+     *     - false when `exp` has passed
+     *     - true only for a stored, decodable, unexpired token
+     */
+    const token = getToken( storage );
+    if ( !token ) return false;
+    const expiryMs = jwtExpiryMs( token );
+    // An undecodable token, or one carrying no `exp`, is NOT vouched for. Fail closed:
+    // the whole defect was a predicate that said yes when it did not know.
+    if ( expiryMs === null ) return false;
+    return Date.now() < expiryMs;
 }
 
 export function isAdmin( storage: StorageLike ): boolean {

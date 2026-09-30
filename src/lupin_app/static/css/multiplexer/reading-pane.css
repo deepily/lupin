@@ -50,7 +50,7 @@ body:not( [ data-layout-mode="horizontal" ] ) .reading-pane-toolbar {
     transition    : background-color 0.15s, opacity 0.15s;
 }
 .layout-mode-btn:hover {
-    background-color: rgba( 0, 0, 0, 0.04 );
+    background-color: rgb( 0, 0, 0, 0.04 );
 }
 
 /* Reading Pane — hidden by default (vertical mode + pane-closed). */
@@ -93,7 +93,7 @@ body:not( [ data-layout-mode="horizontal" ] ) .reading-pane-toolbar {
 .content-pane-back:hover:not(:disabled),
 .content-pane-bustout:hover,
 .content-pane-close:hover {
-    background-color: rgba( 0, 0, 0, 0.04 );
+    background-color: rgb( 0, 0, 0, 0.04 );
 }
 .content-pane-title {
     flex          : 1;
@@ -194,6 +194,47 @@ body[data-layout-mode="horizontal"] .content-shell.pane-open .content-pane {
     height     : calc( 100vh - 100px );
     overflow-y : auto;
 }
+/* ---- VERTICAL mode + pane-open: the pane OVERLAYS the accordion stack ----
+   Row 47759aa3, Rick's ruling 2026-09-26: the doc viewer renders "on top of the
+   entire notification multiplexer UI stack" in vertical layout, and in the
+   right-hand pane in horizontal.
+
+   🔴 WITHOUT THIS BLOCK THE VERTICAL FIX IS A SILENT NO-OP, and that was
+   measured, not feared. Every rule above gates on
+   `[data-layout-mode="horizontal"]`, so before this block an opened pane in
+   vertical inherited nothing: `.content-shell` stayed `display:block`, the pane
+   fell into normal flow, and it rendered 1568x80 px at y=4584 — below the whole
+   accordion, off-screen — with a 40px body that collapsed the iframe to the
+   same "postage stamp" the horizontal rule above warns about. Clicking a doc
+   link would have done nothing the user could SEE, which is worse than the new
+   tab it replaced: an invisible failure gets no bug report.
+
+   `position: fixed` with all four insets is what gives the pane a DEFINITE
+   height here, the same job `height: calc( 100vh - 100px )` does above — the
+   flex:1 body and the iframe's height:100% both need something resolved to
+   measure against.
+
+   z-index 2000 is chosen, not guessed: page chrome (.section-toolbar, the
+   history dropdown) sits at 1000 and must be covered; the modals and the
+   podcast overlay sit at 10000/10001 and must still cover THIS. The nav strip
+   is 9999 and stays above, which is why the top inset is 100px rather than 0. */
+body:not( [ data-layout-mode="horizontal" ] ) .content-shell.pane-open .content-pane {
+    position      : fixed;
+    top           : 100px;
+    right         : 0;
+    bottom        : 0;
+    left          : 0;
+    z-index       : 2000;
+    /* The four insets ARE the height; `auto` keeps it from fighting them. */
+    height        : auto;
+    min-width     : 0;
+    max-width     : none;
+    border-left   : none;
+    border-top    : 1px solid #dee2e6;
+    box-shadow    : 0 -4px 16px rgb( 0, 0, 0, 0.18 );
+    overflow-y    : auto;
+}
+
 
 /* Layout-mode toolbar: in horizontal mode it floats fixed over the top-center
    of the left column. JS pushes the center percentage into --toolbar-center-x;

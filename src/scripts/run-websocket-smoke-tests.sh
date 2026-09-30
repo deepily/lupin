@@ -152,8 +152,10 @@ except Exception:
 
     if echo "$config_block" | grep -qi "testing"; then
         log_warning "Server is in TESTING mode — WebSocket smoke tests expect Development mode"
-        log_warning "Results may be unreliable. Swap back with:"
-        log_warning "  curl 'http://localhost:7999/api/init?config_block_id=Lupin:+Development'"
+        log_warning "Results may be unreliable. Swap back from the System Status pane's"
+        log_warning "Config reload, signed in as an admin — /api/init has required the"
+        log_warning "admin role since 2026-09-23 (row 977eaaf2), so the bare curl that"
+        log_warning "used to be printed here now answers 401 and swaps nothing."
     else
         log_success "Server is in Development mode"
     fi

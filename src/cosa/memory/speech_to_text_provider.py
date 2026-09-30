@@ -29,6 +29,14 @@ import cosa.utils.util as du
 from cosa.config.configuration_manager import ConfigurationManager
 
 
+# Local-mode decode defaults, applied to EVERY in-process transcription (speech.py's
+# mp3 and wav doors, and v2_ask's audio door). `return_timestamps=True` keeps
+# Whisper from ending the transcript at the first pause on noisy audio; the text
+# returned is unchanged in shape. Mirrors TRANSCRIBE_PIPELINE_KWARGS in
+# lupin_model_server/main.py, which is the model-server half. Row 05ddc8f0.
+LOCAL_WHISPER_DECODE_DEFAULTS = { "return_timestamps": True }
+
+
 class SpeechToTextProvider:
     """
     Singleton routing transcription requests between the in-process Whisper
@@ -206,6 +214,8 @@ class SpeechToTextProvider:
             # cloud-run cold-paths) don't pay the import tax.
             import gc as _gc
             import torch as _torch
+            # Decode defaults sit UNDER the caller's kwargs, so a caller can still override one.
+            kwargs = { **LOCAL_WHISPER_DECODE_DEFAULTS, **kwargs }
             try:
                 result = whisper_pipeline( audio_path, **kwargs )
             except _torch.cuda.OutOfMemoryError:

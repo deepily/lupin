@@ -1,8 +1,8 @@
 # Test-Suite Scheduling Guide
 
-> **Audience**: Lupin operators scheduling test runs and developers integrating with `/api/test-suite/submit`
+> **Audience**: Lupin operators scheduling test runs and developers integrating with `/api/v2/submit` (test-suite command)
 >
-> **Scope**: `src/cosa/agents/test_suite/`, the `/schedule-tests` skill, `POST /api/test-suite/submit`, remediation snapshot schema v1.0
+> **Scope**: `src/cosa/agents/test_suite/`, the `/schedule-tests` skill, `POST /api/v2/submit` (test-suite command), remediation snapshot schema v1.0
 >
 > **Last Updated**: 2026-04-10
 >
@@ -20,7 +20,7 @@
 2. [Supported Suite Types](#2-supported-suite-types)
 3. [Architecture](#3-architecture)
 4. [The `/schedule-tests` Skill](#4-the-schedule-tests-skill)
-5. [REST API: `/api/test-suite/submit`](#5-rest-api-apitest-suitesubmit)
+5. [REST API: `/api/v2/submit` (test-suite command)](#5-rest-api-apiv2submit-command-agent-router-go-to-test-suite)
 6. [Remediation Snapshot Schema (v1.0)](#6-remediation-snapshot-schema-v10)
 7. [Monopolize Mode](#7-monopolize-mode)
 8. [Cost Model](#8-cost-model)
@@ -63,17 +63,30 @@ TFE — can trigger automated remediation on failure.
 | `smoke_direct` | `src/tests/run-smoke-direct.sh` | 1200s (20 min) | ~10-20 min | Phase D live pipeline |
 | `websocket` | `src/scripts/run-websocket-smoke-tests.sh` | 300s (5 min) | ~3 min | ~50 tests |
 | `integration` | `src/tests/run-integration-tests.sh` | 2000s (33 min) | ~17 min | ~358 tests (320 passed + 38 skipped on ts-b51e63c9) |
-| `e2e` | `src/scripts/run-e2e-ui-tests.sh` | 3000s (50 min) | ~34 min | ~593 tests |
+| `e2e` | `src/scripts/run-e2e-ui-tests.sh` | 5000s (83 min) | 2992.7s full run (ts-cf9f5f85, 2026-09-12) | 830 tests. The whole suite under ONE timeout; the merge pyramid runs the halves below instead |
+| `e2e_a` | `src/scripts/run-e2e-ui-tests-half-a.sh` | 2500s (42 min) | 1467.0s (ts-2aa41f55, 2026-09-15) | files in `src/tests/e2e_ui/partition/half-a.txt` |
+| `e2e_b` | `src/scripts/run-e2e-ui-tests-half-b.sh` | 2500s (42 min) | 1452.0s (ts-2aa41f55, 2026-09-15) | files in `src/tests/e2e_ui/partition/half-b.txt` |
 | `all` | `src/tests/run-all-tests.sh` | 3600s (60 min) | ~1.5-2 h across legs | Full pyramid (expands into per-leg runs, each with its own budget) |
 | `presentation` | `src/tests/run-presentation-regression.sh` | 1800s (30 min) | ~10-30 min | Presentation regression |
 
 **Source**: `SUITE_SCRIPTS` and `SUITE_TIMEOUTS_SECONDS` dicts at the top of
 `src/cosa/agents/test_suite/job.py`.
 
-**Multi-suite runs**: the `test_types` parameter is a list. Pass
-`["integration", "e2e"]` to run both sequentially; the job aggregates results
+**Multi-suite runs**: at `POST /api/v2/submit` (`args.test_types`), `test_types` is ONE comma-separated
+string. Pass `"integration,e2e"` to run both sequentially — a JSON list is refused 422,
+because the request model declares a `str` (measured 2026-09-15, row 2818dad7). The job
+object itself holds a list after the router splits the string; the job aggregates results
 across all requested suites in a single Markdown report and a single remediation
 snapshot.
+
+**E2E halves (row 2818dad7, 2026-09-14)**: `e2e_a` and `e2e_b` split the e2e suite into two halves
+by file, balanced on measured per-file time. Submit `"e2e_a,e2e_b"` to run the whole suite with
+a separate timeout, junit and log per half: a timeout then discards one half's results, not both.
+They run back to back in one job and cannot run side by side. `:8000` runs one monopolize job at a
+time, the runner's PID file refuses a second copy, and every test truncates the shared
+`lupin_db_test`. `src/tests/unit/test_e2e_halves_partition.py` fails when a collectable e2e test
+file is in neither half or in both. A new e2e test file therefore goes into one of the two partition
+manifests, whichever half is lighter.
 
 **The `all` suite**: internally runs a curated pyramid (unit → smoke → websocket →
 integration → e2e) via `run-all-tests.sh`. Prefer `all` over manually passing
@@ -95,7 +108,7 @@ Cancellation produces a partial result dict with `exit_code=-1` and
 
 ```mermaid
 flowchart LR
-    User[User submits via<br/>REST API or /schedule-tests skill] --> API[POST /api/test-suite/submit]
+    User[User submits via<br/>REST API or /schedule-tests skill] --> API[POST /api/v2/submit]
     API --> TSJob[TestSuiteJob<br/>ts-xxxxxxxx]
     TSJob --> Todo[Todo Queue]
     Todo -->|scheduled_at reached| Running[Running Queue<br/>MONOPOLIZE]
@@ -158,7 +171,7 @@ something like "run the tests at 11pm" and the skill:
 4. **Authenticates** against the Lupin FastAPI server using
    `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL` / `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD`
    env vars (same credentials as the smoke tests)
-5. **Submits** a POST to `/api/test-suite/submit` with `test_types`, `scheduled_at`,
+5. **Submits** a POST to `/api/v2/submit` (test-suite command) with `test_types`, `scheduled_at`,
    and `monopolize=True`
 6. **Confirms scheduling** via a `notify()` call announcing the job ID and scheduled
    time
@@ -195,9 +208,12 @@ For programmatic/non-Claude-Code invocation, use the REST API directly (next sec
 
 ---
 
-## 5. REST API: `/api/test-suite/submit`
+## 5. REST API: `/api/v2/submit` (command `agent router go to test suite`)
 
-**Endpoint**: `POST /api/test-suite/submit`
+> **`POST /api/test-suite/submit` was retired to 410 on 2026-09-29** (row a3c59f2d). A test suite is
+> submitted through the general v2 door, naming the command. Everything below is that door.
+
+**Endpoint**: `POST /api/v2/submit`
 
 **Auth**: Bearer token via `/auth/login`. Same credentials as any other
 authenticated Lupin API.
@@ -206,40 +222,55 @@ authenticated Lupin API.
 
 ```json
 {
-  "test_types":   "integration,e2e",
-  "pytest_args":  "-v -k test_auth",
-  "scheduled_at": "2026-04-10T23:00:00-04:00",
-  "monopolize":   true,
-  "dry_run":      false
+  "command": "agent router go to test suite",
+  "args": {
+    "test_types":  "integration,e2e",
+    "pytest_args": "-v -k test_auth",
+    "dry_run":     false
+  },
+  "scheduled_at": "2026-04-10T23:00:00-04:00"
 }
 ```
 
-| Field | Type | Required | Default | Purpose |
-|-------|------|----------|---------|---------|
-| `test_types` | string (comma-separated) or list | Yes | — | Suite types to run. See [Section 2](#2-supported-suite-types). |
-| `pytest_args` | string or list | No | `""` | Extra pytest args passed through to the script. `--bg` flag is stripped (harmful for subprocess runs). |
-| `scheduled_at` | ISO datetime string | No | now | When to run the job. Past times run immediately. Honors project timezone. |
-| `monopolize` | bool | No | `true` | Exclusive DB access — only one monopolize job runs at a time. Required for most test suites due to DB hot-swap. |
-| `dry_run` | bool | No | `false` | Simulate execution without running tests. Returns synthetic success. |
+`cosa.agents.test_suite.v2_client.submit_body( … )` builds this; `src/scripts/submit-test-suite.py` is the
+command-line wrapper. The suite arguments go in `args`; `scheduled_at` and `websocket_id` are directives
+to the queue and stay top-level.
 
-**Response**:
+| Field | Where | Type | Default | Purpose |
+|-------|-------|------|---------|---------|
+| `test_types` | `args` | string, comma-separated | `"integration,e2e"` | Suite types to run. See [Section 2](#2-supported-suite-types). **An unregistered name is refused at submit**, naming it and the valid list (row 4e8f348e) — `e2e_ui` is the tests' directory, not a suite; use `e2e_a`, `e2e_b` or `e2e`. |
+| `pytest_args` | `args` | string, shell-style (shlex) parsed | none | Extra pytest args passed through to the script. Unbalanced quotes are refused at submit. `--bg` flag is stripped (harmful for subprocess runs). |
+| `dry_run` | `args` | bool | `false` | Skips the pytest subprocess, but still queues a real job and takes the monopolize slot for a few seconds. |
+| `auto_fix_on_failure` | `args` | bool | none | Per-run override for TFE auto-dispatch; omitted uses the INI default. |
+| `env_vars` | `args` | object of strings | none | Extra env vars for the pytest subprocess, filtered by prefix allowlist (`TFE_`, `BFE_`, `LUPIN_TEST_`). |
+| `scheduled_at` | top-level | ISO datetime string | none (run immediately) | When to run the job. Past times run immediately. Honors project timezone. |
+| `websocket_id` | top-level | string | none | WebSocket session ID for notifications. |
+| `parent_id_hash` | top-level | string | none | A monopolizing sweep's id, so Gate B admits its child through the hold. |
+
+⚠️ **There is no `monopolize` request field.** The job forces monopolize on in its own constructor.
+
+**Response** (a v2 `AskResponse`, the fields that matter):
 
 ```json
 {
-  "job_id": "ts-abc12345",
-  "status": "queued",
-  "scheduled_at": "2026-04-10T23:00:00-04:00",
-  "test_types": ["integration", "e2e"],
-  "monopolize": true
+  "path":           "agent",
+  "status":         "waiting",
+  "job_id":         "ts-abc12345",
+  "queue_position": 1
 }
 ```
+
+`queue_position` is the todo queue's size right after the push (the number the retired door returned);
+it is `null` when nothing was queued. **A refused submit is HTTP 200, not 400**: an unknown suite name,
+malformed `pytest_args`, or a per-test `--timeout` that contradicts the suite budget comes back with
+`status: "failed"` and the cause in `error`, and nothing is queued. A caller must check `status`
+(`read_reply()` in `v2_client` does), not only the HTTP code.
 
 **Polling**: Use `GET /api/get-queue/{queue}` where `queue ∈ {todo, run, done, dead}`
 to find your job. Or watch the Activity Log in the web UI for real-time updates.
 
 **Full endpoint schema**: available via the interactive Swagger UI at `/docs` on
-the running server. The schema lives in `src/lupin_app/main.py`'s router
-registration.
+the running server (`AskResponse` and `SubmitRequest`).
 
 ### Direct invocation via `/api/push`
 
@@ -394,7 +425,7 @@ However, there are indirect costs:
 **Typical cost per scheduled run**: $0 if tests pass, up to $15 if TFE fires.
 Auto-fix is **on by default** as of Session 1cfcdf73 (`test fix expediter auto
 fix enabled = true`); set the per-run `auto_fix_on_failure: false` override on
-`/api/test-suite/submit` (or uncheck the test runner UI checkbox) to suppress
+`/api/v2/submit` `args` (or uncheck the test runner UI checkbox) to suppress
 TFE for an individual run without changing the INI.
 
 **Budget discipline**: if you're running the full pyramid nightly, you're looking
@@ -413,7 +444,7 @@ the watchdog auto-dispatches a TFE job. The TFE job then walks Phases 0-6 as
 described in the [TFE guide](test-fix-expediter-guide.md).
 
 **Per-run override**: pass `auto_fix_on_failure: false` in the
-`/api/test-suite/submit` body (or uncheck the test runner UI checkbox) to skip
+`/api/v2/submit` `args` (or uncheck the test runner UI checkbox) to skip
 TFE on a single submission without changing the INI default. Pass
 `auto_fix_on_failure: true` to force-enable TFE for one run when the INI default
 is `false`. Omitting the field uses the INI default.
@@ -591,8 +622,8 @@ The TestSuiteJob will then return a cancelled result dict.
 - **[Test Fix Expediter Guide](test-fix-expediter-guide.md)** — TFE consumes remediation snapshots produced here
 - **[Bug Fix Expediter Guide](bug-fix-expediter-guide.md)** — BFE handles crashed TestSuiteJobs (dead queue path)
 - **[Shared Fix Primitives Reference](shared-fix-primitives-reference.md)** — shared expediter machinery
-- **[REST API Reference](../rest-api-reference.md)** — `/api/test-suite/submit` and `/api/push` endpoints
+- **[REST API Reference](../rest-api-reference.md)** — `/api/v2/submit` and the retired-door table
 - **`/schedule-tests` skill**: `~/.claude/skills/schedule-tests/SKILL.md` — voice-driven scheduling
 - **`src/tests/AUTH-TESTING-GUIDE.md`** — test credentials + env var setup
 - **Live E2E driver**: `src/tests/e2e/run-tfe-live-e2e.sh` — bash script that exercises TestSuiteJob → TFE end-to-end
-- **R&D**: [`src/rnd/v0.1.6/2026.03.31-test-suite-agentic-job-plan.md`](../../rnd/v0.1.6/2026.03.31-test-suite-agentic-job-plan.md) — original design doc
+- **R&D**: `src/rnd/v0.1.6/2026.03.31-test-suite-agentic-job-plan.md` *(REMOVED by `b113a3a7`; recover: `git show b113a3a7^:src/rnd/v0.1.6/2026.03.31-test-suite-agentic-job-plan.md`)* — original design doc

@@ -23,7 +23,8 @@ if _src_path not in sys.path:                 # pragma: no cover - bootstrap-exc
 
 from lupin_cli.claude_code.hooks.lib.hook_common import (
     read_hook_input, log_payload, emit_json, drain_and_acknowledge,
-    format_voice_context, build_voice_deny_response
+    format_voice_context, build_voice_deny_response, build_additional_context,
+    _context_has_human_voice,
 )
 from lupin_cli.claude_code.hooks.lib.session_bridge import (
     get_claude_session_id, resolve_stable_session_id, touch_bridge_mtime,
@@ -87,6 +88,24 @@ def main():
         emit_json( build_stash_deny_response( stash_reason ) )
         sys.exit( 0 )
 
+    # Branch-lock guard (row 3a592920): a git reference-transaction hook refuses to
+    # create a branch from a Claude session (Rick's branch lock, 2026-09-29). A local
+    # hook is a backstop a shell can walk around, so this denies the four routes:
+    # setting BRANCH_GUARD_ALLOW, changing core.hooksPath, writing into the hooks
+    # directory, and unsetting CLAUDECODE. Reading about the lock stays allowed —
+    # replayed over 29,565 distinct fleet commands it refused one, a real hook write.
+    # DEFAULT-ON; Rick's escape hatch lives only in the hook process's environment, never
+    # in the command. FAIL-OPEN by contract (the lib returns None on any error).
+    from lupin_cli.claude_code.hooks.lib.branch_lock_guard import (
+        branch_lock_deny_reason, build_branch_lock_deny_response,
+    )
+    branch_lock_reason = branch_lock_deny_reason(
+        payload.get( "tool_name", "" ), payload.get( "tool_input", {} ), cwd=payload.get( "cwd" ),
+    )
+    if branch_lock_reason:
+        emit_json( build_branch_lock_deny_response( branch_lock_reason ) )
+        sys.exit( 0 )
+
     # Kill guard (row cd332d2b): a seat's argv carries its whole spawn brief, so a
     # fleet-wide `ps`/`pgrep` sweep grepping for a test path matches LIVE SESSIONS,
     # not just tests. On 2026-08-21 one such sweep killed three seats in 612 ms —
@@ -101,6 +120,28 @@ def main():
     kill_reason = kill_deny_reason( payload.get( "tool_name", "" ), payload.get( "tool_input", {} ) )
     if kill_reason:
         emit_json( build_kill_deny_response( kill_reason ) )
+        sys.exit( 0 )
+
+    # Merge-head guard (row f3306404, Rick's ruling 2026-08-31): a `git commit`
+    # while MERGE_HEAD is live CONCLUDES that merge under the committer's message.
+    # A merge is a two-step operation over TREE-GLOBAL state, so between the stage
+    # and the commit it belongs to the tree rather than to whoever started it —
+    # measured 2026-08-31, parentage lost, the lane landed with one parent, four
+    # seats and an hour to repair. BOTH machine-readable status forms show nothing
+    # once the conflicts are staged, which is why this is plumbing
+    # (`git rev-parse -q --verify MERGE_HEAD`) and not a status parse, and why it
+    # must never be the `.git/MERGE_HEAD` path form — in a linked worktree `.git`
+    # is a FILE, so that path is absent while a merge is live. Runs BEFORE the
+    # commit scope guard: a live merge is the harder stop, and its message is the
+    # one the committer needs first. DEFAULT-ON with a LUPIN_ALLOW_MERGE_COMMIT
+    # hatch for the seat that started the merge and must finish it, and FAIL-OPEN
+    # by contract (the lib returns None on any error), so it cannot break a tool call.
+    from lupin_cli.claude_code.hooks.lib.merge_head_guard import (
+        merge_head_deny_reason, build_merge_head_deny_response,
+    )
+    merge_reason = merge_head_deny_reason( payload.get( "tool_name", "" ), payload.get( "tool_input", {} ) )
+    if merge_reason:
+        emit_json( build_merge_head_deny_response( merge_reason ) )
         sys.exit( 0 )
 
     # Commit scope guard (2026-08-25): `git commit` writes the WHOLE INDEX, not
@@ -135,8 +176,18 @@ def main():
     messages  = drain_and_acknowledge( session_id )
     voice_ctx = format_voice_context( messages )
 
-    if voice_ctx:
+    # Deny ONLY for a human line (row bb1a9062). The buffer carries peer DMs too, and
+    # the deny's reason names the user as the cause — so a DM from a peer or from the
+    # context tick blocked the call and blamed Rick (one seat: 19 of 19 denials were
+    # DMs). Decided from each line's `direction`, never by sniffing the rendered text.
+    if voice_ctx and _context_has_human_voice( messages ):
         emit_json( build_voice_deny_response( voice_ctx, messages ) )
+    elif voice_ctx:
+        # Peer DMs only: ALLOW the call and still deliver them. A commit-scope notice
+        # rides along in the same additionalContext, so neither is dropped.
+        parts = [ voice_ctx ]
+        if commit_verdict.notice: parts.append( commit_verdict.notice )
+        emit_json( build_additional_context( "\n\n".join( parts ), "PreToolUse" ) )
     elif commit_verdict.notice:
         # ALLOW, and say what went unreviewed. Only when nothing else is claiming
         # additionalContext — a voice deny blocks the commit anyway, and the seat's

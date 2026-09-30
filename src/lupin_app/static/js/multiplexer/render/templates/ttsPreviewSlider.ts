@@ -53,6 +53,8 @@ export function renderTtsPreviewSlider(
   const root = document.createElement( "div" );
   root.className = "tts-preview-slider";
   root.setAttribute( "data-testid", "multiplexer-tts-preview-slider" );
+  // Legacy tooltip, verbatim (notifications.html:492).
+  root.title = "Percentage of high-priority notification text rendered as TTS audio. 0% = silent; 100% = full message.";
 
   const percentStr = String( opts.percent );
 
@@ -61,9 +63,11 @@ export function renderTtsPreviewSlider(
     ( stop ) => html`<option value="${String( stop )}"></option>`,
   );
 
+  // Label "TTS:" is legacy's (notifications.html:493) — Rick's 2026-09-10 ruling 3,
+  // the slider now sits inside the notifications header bar.
   /* c8 ignore next 13 */ // tagged-template literal: c8 reports phantom branches on $-interpolations; the runtime path is straight-line and exercised by every test that renders the slider (ttsChrome.ts:105 precedent).
   const frag = html`
-    <label class="tts-preview-slider-label" for="cc-tts-fraction-slider">TTS preview</label>
+    <label class="tts-preview-slider-label" for="cc-tts-fraction-slider">TTS:</label>
     <input type="range"
            class="tts-preview-slider-input"
            id="cc-tts-fraction-slider"

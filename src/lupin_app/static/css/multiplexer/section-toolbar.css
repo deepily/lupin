@@ -27,10 +27,10 @@
     max-width      : 100%;
     margin         : 0 0 12px 0;
     padding        : 6px 8px;
-    background     : #ffffff;
+    background     : #fff;
     border         : 1px solid #dee2e6;
     border-radius  : 8px;
-    box-shadow     : 0 2px 8px rgba( 0, 0, 0, 0.12 );
+    box-shadow     : 0 2px 8px rgb( 0, 0, 0, 0.12 );
 }
 
 /* Whole-section hide (per-section visibility toggle off). `!important` mirrors
@@ -38,4 +38,77 @@
    display rule. */
 .section-hidden {
     display: none !important;
+}
+
+/* ============================================================================
+   Pane rhythm — Rick's P0, row 453e7e4d (2026-09-23).
+
+   The rule: the vertical gap between accordions is about HALF their side
+   margin. main.container's 20px padding gives every pane its 20px side margin,
+   so the gap is 10px. Measured before this rule: 0px between Fleet Status,
+   Finished Tasks and Task List (the panes carried no margin at all) and 14-16px
+   elsewhere (each pane sheet set its own `margin: 16px 0`).
+
+   One owner for the rhythm. This sheet links AFTER every pane sheet, so these
+   id rules win the tie with the per-pane margins they replace. Top margins are
+   zeroed so nothing collapses into the gap and changes it.
+
+   The notifications accordion is TWO siblings — the header region, then the
+   list pane — so the gap belongs to the pane, and moves to the header region
+   while the pane is collapsed or hidden by the toolbar (no box to carry it).
+   Mr. Radio caught the toolbar-hidden case in review.
+   ============================================================================ */
+#action-required-section,
+#tts-pane,
+#notifications-pane,
+#fleet-status-pane,
+#finished-tasks-pane,
+#task-list-pane,
+#holding-area-pane,
+#epic-board-pane,
+#jobs-pane {
+    margin-top    : 0;
+    margin-bottom : 10px;
+}
+
+/* The panes whose content is bare children (no padding or border of their own)
+   let a last child's margin collapse through and widen the gap — measured 14px
+   under the Holding Area, from .holding-area-group's margin-bottom. flow-root
+   keeps a child's margins inside its pane. Only panes with no display rule of
+   their own are listed, so this cannot override one. */
+#fleet-status-pane,
+#finished-tasks-pane,
+#task-list-pane,
+#holding-area-pane,
+#epic-board-pane {
+    display : flow-root;
+}
+
+/* A display value beats the [hidden] attribute the section toolbar sets, so
+   each pane above needs its own companion or the toolbar can no longer hide it
+   (test_every_toggled_section_honours_the_hidden_attribute caught exactly that). */
+#fleet-status-pane[hidden],
+#finished-tasks-pane[hidden],
+#task-list-pane[hidden],
+#holding-area-pane[hidden],
+#epic-board-pane[hidden],
+/* A-2 #4 — the notifications HEADER REGION, which the 💬 button now hides alongside the
+   pane. It carries `display: flex` from `.notifications-header-region`
+   (notifications-header.css), so it is the same trap as the panes above — but a CLASS
+   rule, which test_every_toggled_section_honours_the_hidden_attribute does not read
+   (its docstring says so: "It reads id selectors only"). So the guard cannot demand this
+   companion and it is written here deliberately rather than under compulsion.
+   Without it, hiding the region rests entirely on `.section-hidden`'s `display: none
+   !important`, and retiring that class in favour of these companions — which is the
+   direction this block represents — would silently stop hiding the header. */
+#notifications-header-region[hidden] {
+    display : none;
+}
+
+.notifications-header-region {
+    margin-bottom : 0;
+}
+
+.notifications-header-region:has( + #notifications-pane:is( [ data-collapsed="true" ], [ hidden ], .section-hidden ) ) {
+    margin-bottom : 10px;
 }

@@ -89,8 +89,14 @@ def fetch_board( settings, api_key, max_rows ):
     truncated = False
 
     while True:
+        # Ask for no more than the caller still has room for. A flat PAGE_SIZE here made
+        # `--max-rows` a page-stop THRESHOLD rather than a cap (row 9124b70a): `--max-rows 100`
+        # fetched 500 and then reported "truncated at 100 rows" — a figure the run never
+        # honoured. `max( 1, … )` is reachable only via a direct non-positive max_rows; the
+        # break below guarantees the subtraction is >= 1 on every later pass.
+        limit = max( 1, min( PAGE_SIZE, max_rows - len( rows ) ) )
         query = ( f"include_terminal=true&unscoped_audit=true&hide_parked=false"
-                  f"&limit={PAGE_SIZE}&offset={offset}" )
+                  f"&limit={limit}&offset={offset}" )
         ok, status, page = _request( "GET", f"{settings[ 'api_base_url' ]}/api/tasks?{query}",
                                      api_key, settings[ "timeout_seconds" ] )
         if not ok:
@@ -241,12 +247,17 @@ def main( argv=None ):
                 if stage == "transition":
                     print( f"      the row is STILL BLOCKED and now carries a stamp that has not "
                            f"come true — re-run to retry; the second stamp is honest.", file=sys.stderr )
-    elif eligible:
+    elif eligible and not args.json:
+        # `and not args.json` (row 022d4232): --json exists so a caller can parse stdout, and
+        # this line used to print after the JSON whenever the pass found something — making
+        # the output parseable only when there was nothing to report. It stays coupled to
+        # `if args.apply:` rather than moving into the human `else:` arm above, because it is
+        # the else-branch of "did we write"; up there it would also print after an --apply run.
         print( f"DRY RUN — nothing was written. Re-run with --apply --actor '<persona> <sid8>' "
                f"to rejoin these {len( eligible )} row(s)." )
 
     if truncated:
-        print( f"\n⚠️  BOARD TRUNCATED at {args.max_rows} rows — blockers outside the fetched set "
+        print( f"\n⚠️  BOARD TRUNCATED at {len( rows )} rows — blockers outside the fetched set "
                f"resolve as UNRESOLVED and were held, so this run under-reports. Re-run with a "
                f"larger --max-rows before believing it found everything.", file=sys.stderr )
         return 3

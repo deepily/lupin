@@ -61,6 +61,41 @@ BASH_TOOL_NAMES = ( "Bash", )
 _ENV_FLAG    = "LUPIN_ALLOW_UNSCOPED_KILL"
 _TRUE_VALUES = ( "1", "true", "on", "yes" )
 
+# 🔴 EVERY COMMAND-POSITION PATTERN BELOW GOES THROUGH THIS SPAN (row 084adbaf).
+#
+# Until 2026-08-31 the patterns anchored the program directly to a command slot,
+# so ANYTHING sitting between the two defeated the whole guard. MEASURED, one
+# variable, with a positive control established per shape first:
+#
+#   shape                     bare   FOO=1   FOO=    sudo    env   nohup
+#   A  literal kill <pid>     DENY   allow   allow   allow   allow  allow
+#   B  the real incident      DENY   allow   allow   allow   allow  allow
+#   C  pkill -f <pattern>     DENY   allow   allow   DENY    allow  allow
+#   D  kill $(pgrep …)        DENY   allow   allow   DENY    allow  allow
+#
+# The row that filed this called it an env-assignment quirk. It is a CLASS: an env
+# assignment, `env`, `nohup`, `sudo`, any transparent wrapper. All four shapes, not
+# one — including the literal kill that names a live seat by pid.
+#
+# ⚠️ THE TELL THAT IT WAS THE MATCHER AND NOT THE HATCH: `LUPIN_ALLOW_UNSCOPED_KILL=0`
+# — the FALSY spelling — also allowed. A working hatch refuses that. The guard was
+# simply not seeing the command, exactly as stash_guard was not seeing its own.
+#
+# ⚠️ AND THE GUARD ALREADY HALF-KNEW: `_PATTERN_SWEEP_RE` and `_KILL_SUBST_RE`
+# carried `(?:sudo\s+)?` while the literal and listing patterns did not. Two of four
+# modelling one prefix is how this stayed invisible — the shapes could not be
+# compared because they did not agree on what a command looked like. The span is
+# shared so they cannot drift apart again.
+#
+# THE LOOKAHEAD IS NOT DECORATION. `\b` after the assignment cannot match between the
+# `=` of an empty value and a following space (both non-word), which is the defect
+# that let `FOO= ` through in the other two guards. But simply DROPPING it lets the
+# greedy value backtrack INTO the program name, so `FOO=barkill 123` would match a
+# `kill` that is part of a value — a false allow traded for a false deny. Pinning the
+# value to a real token end does neither.
+_WRAPPERS = r"(?:env|command|builtin|exec|sudo|nohup|time|nice|stdbuf|setsid|ionice)"
+_PREFIXES = rf"(?:\s*(?:[A-Za-z_][A-Za-z0-9_]*=[^\s;&|]*(?=[\s;&|]|$)|{_WRAPPERS}\b))*"
+
 # A signal flag on a kill verb: `-9`, `-KILL`, `-SIGTERM`. Not a selector.
 _SIGNAL_FLAG_RE = re.compile( r"-\d+|-(?:SIG)?[A-Z]+" )
 
@@ -75,6 +110,7 @@ CLAUDE_COMM = "claude"
 _KILL_LITERAL_RE = re.compile(
     r"""
     (?:^|[;&|(`]|\n)             # command position
+    """ + _PREFIXES + r"""       # env assignments / transparent wrappers (row 084adbaf)
     \s*
     kill\b                       # the verb (not pkill/killall — different shapes)
     (?P<args>(?:\s+[^\s;&|)`\n]+)*)   # the remainder of THIS command only
@@ -86,7 +122,8 @@ _KILL_LITERAL_RE = re.compile(
 # an all-processes selector; `pgrep` is fleet-wide unless told otherwise.
 _UNSCOPED_LISTING_RE = re.compile(
     r"""
-    (?:^|[;&|(`]|\n)\s*
+    (?:^|[;&|(`]|\n)
+    """ + _PREFIXES + r"""\s*
     (?:
         ps\b(?=(?:\s+[^\s;&|)`\n]+)*\s+-?[aAe])   # ps -e / ps -A / ps aux / ps ax
       | pgrep\b
@@ -122,7 +159,7 @@ _FOR_SUBST_RE = re.compile( r"\bfor\s+(?P<var>\w+)\s+in\s+(?:\$\(|`)" )
 # ANOTHER seat and not yours sails straight through it. Found by Krishna
 # 2026-08-24 while reviewing this guard, together with SHAPE D below.
 _PATTERN_SWEEP_RE = re.compile(
-    r"(?:^|[;&|(`{]|\n|\bdo\b)\s*(?:sudo\s+)?(?:pkill|killall)\b(?P<args>(?:\s+[^\s;&|)`\n]+)*)"
+    rf"(?:^|[;&|(`{{]|\n|\bdo\b){_PREFIXES}\s*(?:pkill|killall)\b(?P<args>(?:\s+[^\s;&|)`\n]+)*)"
 )
 
 # SHAPE D — a substitution feeding a kill DIRECTLY: `kill $(pgrep …)` has the
@@ -130,14 +167,14 @@ _PATTERN_SWEEP_RE = re.compile(
 # Denying one and not the other draws an arbitrary line through identical
 # behaviour.
 _KILL_SUBST_RE = re.compile(
-    r"(?:^|[;&|(`{]|\n|\bdo\b)\s*(?:sudo\s+)?kill(?:all)?\b[^;&|\n]*?"
+    rf"(?:^|[;&|(`{{]|\n|\bdo\b){_PREFIXES}\s*kill(?:all)?\b[^;&|\n]*?"
     r"(?:\$\(|`)(?P<subst>[^)`]*)"
 )
 
 # `sudo` can sit before `xargs` OR between it and the kill (`xargs sudo kill`),
 # so it is optional in BOTH slots rather than only the first.
 _KILL_VERB_RE = re.compile(
-    r"(?:^|[;&|(`{]|\n|\bdo\b)\s*(?:sudo\s+)?(?:xargs\s+(?:-[^\s]+\s+)*(?:sudo\s+)?)?kill(?:all)?\b"
+    rf"(?:^|[;&|(`{{]|\n|\bdo\b){_PREFIXES}\s*(?:xargs\s+(?:-[^\s]+\s+)*{_PREFIXES}\s*)?kill(?:all)?\b"
 )
 
 
@@ -269,6 +306,59 @@ def _seats_a_sweep_would_hit( args: str, pgrep_probe, comm_reader ) -> List[ str
     if not selector:
         return []
     return [ pid for pid in pgrep_probe( selector ) if comm_reader( pid ) == CLAUDE_COMM ]
+
+
+# 🔴 CLOSING THE BYPASS CLOSED THE DOCUMENTED HATCH WITH IT, and this repairs that.
+#
+# The deny message has always ended "re-run with LUPIN_ALLOW_UNSCOPED_KILL=1" — the
+# INLINE form. A PreToolUse hook is a SEPARATE PROCESS reading its OWN environment,
+# and an inline `VAR=1 cmd` prefix belongs to a command that HAS NOT RUN YET, so
+# `_guard_disabled` could never see it. The instruction appeared to work only because
+# the env assignment pushed the program out of command position — indistinguishable
+# from the bypass this row exists to close.
+#
+# MEASURED both directions across that change, and the middle row is the proof it was
+# never the hatch:
+#
+#   case                          BEFORE the fix   AFTER the fix (no carve-out)
+#   the documented inline hatch        allow            DENY
+#   the hatch with a FALSY value       allow            DENY   <- a real hatch refuses this
+#   flag merely ECHOED first           DENY             DENY
+#
+# A falsy value opening a hatch is not a hatch. So the "allow" was the matcher
+# failing, and normalising the prefix span correctly removed it — along with the only
+# way the documented instruction ever worked. stash_guard learned this same lesson the
+# expensive way and carries the same carve-out; this is copied from there deliberately.
+_INLINE_FLAG_RE = re.compile(
+    rf"(?:^|[;&|(`{{]|\n|\bdo\b)"
+    rf"(?:\s*(?:[A-Za-z_][A-Za-z0-9_]*=[^\s;&|]*(?=[\s;&|]|$)|{_WRAPPERS}\b))*?"
+    rf"\s*{_ENV_FLAG}=(?P<value>[^\s;&|]*)"
+)
+
+
+def _hatch_in_prefix( command ) -> bool:
+    """
+    True iff the hatch flag is assigned truthy in a COMMAND-POSITION prefix.
+
+    Requires:
+        - command is the raw shell command string
+
+    Ensures:
+        - reads the flag from the COMMAND, never from os.environ — see the note
+          above for why an env read cannot honour an inline prefix
+        - only an env-assignment prefix at a command slot counts, so a flag that
+          merely appears elsewhere in the line (`echo FLAG=1; pkill …`) does NOT
+          unlock the sweep that follows it
+        - a FALSY value does not open it — the property whose absence proved the
+          old "allow" was the matcher rather than the hatch
+        - never raises
+    """
+    if not command: return False
+
+    found = _INLINE_FLAG_RE.search( command )
+    if not found: return False
+
+    return found.group( "value" ).strip().strip( "'\"" ).lower() in _TRUE_VALUES
 
 
 def _guard_disabled( env=None ) -> bool:
@@ -517,6 +607,10 @@ def kill_deny_reason(
         if not isinstance( command, str ) or not command:
             return None
         command     = _strip_heredocs( command )
+        # The hatch, read from the COMMAND. Placed after the heredoc strip so a flag
+        # quoted inside a heredoc body is data and cannot unlock anything.
+        if _hatch_in_prefix( command ):
+            return None
         reader      = comm_reader if comm_reader is not None else _default_comm_reader
         claude_pids = _claude_pids_targeted( command, reader )
         if claude_pids:

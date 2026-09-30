@@ -2,7 +2,7 @@
 The canonical `[tree-state]` line — ONE implementation, every caller.
 
 A pass is a statement about a TREE, not about a repository. This module renders the line
-that says which tree; see `src/rnd/v0.2.0/2026.08.26-every-green-states-its-tree.md`, and
+that says which tree; see `src/rnd/v0.2.0/2026.08.26-every-green-states-its-tree.md`, and — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.26-every-green-states-its-tree.md
 §6b for why it lives here rather than in `src/conftest.py`.
 
 WHY A MODULE AND NOT A SHELL FUNCTION. The root conftest reaches every pytest tier and
@@ -22,6 +22,7 @@ already imports `cosa.utils.secret_redaction`, so the precedent and the cost are
 Venue: :7999-eligible — read-only git, no network, no mutation.
 """
 import os
+import re
 import subprocess
 import time
 
@@ -38,11 +39,33 @@ def _git_reader( repo_root ):
           (Rio's audit, 2026-08-26, measured with an injected reader). The caller's
           `except Exception` did contain it, but that net carries `pragma: no cover`,
           so the only thing holding it up was the one line nobody tests.
+        - CROSSES FILESYSTEM BOUNDARIES while discovering the repository, because in
+          the `:8000` test container it must. Every `e2e-*.log` artifact carried
+          `[tree-state] UNKNOWN — cannot read HEAD`, so no E2E result could be tied to
+          a sha at all. The cause is not git and not the repo: `docker-compose.yml`
+          bind-mounts `/var/lupin/src` and `/var/lupin/.git` as SEPARATE mounts, and
+          both callers hand this reader a path under `src/` — conftest passes
+          `/var/lupin/src`, the module entry point passes `/var/lupin/src/cosa/utils`.
+          Discovery walks up, reaches the `/var/lupin/src` mount root, and stops one
+          directory short of the `.git` it was looking for:
+          `fatal: not a git repository (or any parent up to mount point /var/lupin)
+          Stopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).`
+          Measured in `lupin-rest-test`, one variable: bare -> exit 128, with the flag
+          -> `c7f2e804`, `--show-toplevel` -> `/var/lupin`.
+        - DOES NOT WEAKEN THE WALK-UP HEDGE the module already carries. Crossing a
+          mount can in principle land on some OTHER repository — which is exactly the
+          case `root=` was added for (Rio's audit, 2026-08-26). The reader stays
+          permissive and the LINE stays honest: whatever it finds, it names.
     """
+    # Inherit the caller's environment so a hostile or unusual git config is still the
+    # one the run actually used; add the one variable, rather than building an env from
+    # scratch and silently changing what git reads.
+    env = { **os.environ, "GIT_DISCOVERY_ACROSS_FILESYSTEM" : "1" }
+
     def read( *args ):
         try:
             done = subprocess.run( [ "git", "-C", repo_root, *args ],
-                                   capture_output=True, text=True, timeout=5 )
+                                   capture_output=True, text=True, timeout=5, env=env )
         except ( OSError, subprocess.SubprocessError, UnicodeDecodeError, ValueError ):
             return None
         try:
@@ -114,7 +137,7 @@ def capture_start_sha( git ):
     eight times the cost of the one that was. The row left this gap open with the
     reason attached — "the second probe's cost was not obviously worth it" — so the
     ceiling moves 45s to 50s rather than 45s to 90s. Design:
-    `src/rnd/v0.2.0/2026.08.28-tree-state-gap-1-start-and-end-sha.md` §2.
+    `src/rnd/v0.2.0/2026.08.28-tree-state-gap-1-start-and-end-sha.md` §2. — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.28-tree-state-gap-1-start-and-end-sha.md
     """
     return git( "rev-parse", "--short", "HEAD" ) or START_SHA_UNKNOWN
 
@@ -134,6 +157,41 @@ def _run_span( start_sha, end_sha ):
           as "nothing to report". `unmoved` is a measurement; silence is not
         - does not repeat the sha in the unmoved case — `sha=` already carries it, and
           by definition it equals the start
+
+    🔴 READING THIS FIELD: THE VALUE SPACE IS NOT ONE CHARACTER CLASS, AND A NAIVE PATTERN
+    FAILS ONLY IN THE CASE THE FIELD EXISTS FOR. Three of the four values are lowercase
+    words; the fourth is `<sha>..<sha>`, which contains digits. Measured 2026-09-01
+    (Tiberius 👑): `grep -o 'run-span=[a-z-]*'` over a real tier truncated
+    `run-span=0768a8b2..ec0bf947` at the `0`, so the field READ AS ABSENT — and it was
+    reported as a silent failure of this module before the regex was checked.
+
+    ⇒ **The asymmetry is the whole hazard**: a pattern tuned while the tree is still
+    reports `unmoved` perfectly, forever, and goes blind at exactly the moment the tree
+    moves. It is the same shape as the second-run trap and the narrowed-population rule —
+    an instrument returning a plausible partial answer with nothing saying so.
+
+    ⇒ Match to end-of-field, e.g. `grep -o 'run-span=[^ ]*'`, or read the whole line. This
+    is a note to READERS rather than a defect here: no emitted value can protect a pattern
+    that assumes a narrower alphabet than the field promises.
+
+    🔴 TWO INSTRUMENTS NOW PRINT `run-span=` AND THEIR PREDICATES ARE NOT THE SAME.
+    Verified by reading both, 2026-09-05 (row 73ebccb1):
+
+        THIS one (pytest, every tier)   compares HEAD SHAs ONLY — see the returns below
+        run-coverage-gate.sh            hashes HEAD + `git status --porcelain` + `git diff HEAD`
+
+    ⇒ **This field's `unmoved` means "no commit landed". It does NOT mean the working tree
+    held still.** A file becoming dirty, a file becoming clean, or a further edit to an
+    already-dirty file are ALL invisible here and ALL move the gate's fingerprint. So the
+    same word, in the same-named field, is a strictly weaker claim under a tier than under
+    the gate — and a reader who learns one meaning carries it to the other.
+
+    ⚠️ That asymmetry is not a defect in this function: CLAUDE.md § `run-span=unmoved` KEYS
+    ON THE SHA already rules on what this field answers, and this note CONFIRMS that ruling
+    by reading the code rather than discovering anything. What is new is only that a second
+    field now shares the name. If you need "did the working tree move", this is not the
+    instrument — read `tracked-dirty` beside it, and note that a COUNT cannot see one file
+    going clean while another goes dirty.
     """
     if start_sha is None:              return ""
     if start_sha == START_SHA_UNKNOWN: return " run-span=UNKNOWN — the start sha could not be read"
@@ -177,6 +235,23 @@ def tree_state_line( git, start_sha=None ):
         - reports dirty separately from behind: a clean tree 88 commits back and a
           dirty tree at the tip are different claims, and both invalidate a quoted
           figure in different ways
+        - SPLITS `deleted=` OUT OF THE DIRTY COUNT, because inside a container almost
+          all of it is neither dirt nor deletion. Measured 2026-09-01 at sha c7f2e804:
+          the host reported `tracked-dirty=1`, `lupin-rest-test` reported
+          `tracked-dirty=126` on THE SAME COMMIT AND THE SAME `.git`. 125 of those 126
+          are ` D` — `.claude/` (65), `history/` (39), `README.md`, `CLAUDE.md` and the
+          rest of the repo root, none of which `docker-compose.yml` bind-mounts. Git
+          sees a tracked file with nothing on disk and correctly calls it deleted; a
+          reader sees "126 tracked files modified" and concludes the tree is heavily
+          edited when exactly one is. The remaining 1 is the real one and it MATCHES
+          the host — so the two readings reconcile once the field is split
+        - NAMES THE COMPOSITION AND CLAIMS NOTHING ABOUT THE CAUSE. Git cannot tell an
+          un-mounted file from one somebody really deleted, so this does not guess:
+          `deleted=125` is a shape no human working tree has, and a reader recognises a
+          partial mount from it without the line having to assert one
+        - PRINTS `deleted=0` RATHER THAN OMITTING IT, on the same reasoning `_run_span`
+          states `unmoved`: a field that appears only when non-zero is indistinguishable
+          from a field that was never computed, which is this module's own failure shape
         - performs NO network access: `@{upstream}` reads the last-fetched ref, so a
           run stays offline and cannot hang on a remote
 
@@ -206,6 +281,91 @@ def tree_state_line( git, start_sha=None ):
         return "[tree-state] UNKNOWN — the tree-state probe failed; this run's result cannot be tied to a tree"
 
 
+DIRTY_PATH_CAP = 5
+
+
+def _dirty_paths( tracked ):
+    """
+    The `dirty-paths=` value: the edited paths, EDITS FIRST, capped at
+    `DIRTY_PATH_CAP` with a `+N-more` tail.
+
+    Requires:
+        - `tracked` is a list of `git status --porcelain` lines with the `??`
+          untracked rows already removed (never None — the failed-read case is
+          handled by the caller, which must render UNKNOWN rather than calling here)
+
+    Ensures:
+        - "none" on a clean tree, PRINTED rather than omitted. A missing field is
+          indistinguishable from a probe that never ran, and this module has already
+          ruled on that twice (`_run_span`'s `unmoved`, and `deleted=0`)
+        - THE CAP BELONGS TO THE EDITS whenever there are any: deletions never take a
+          slot while an edit exists, and are reported instead as a `+N-deleted` tail.
+          With no edits at all the deletions take the slots themselves, because then
+          they are the whole report
+
+          🔴 SORTING WAS NOT ENOUGH, AND THE FIRST VERSION OF THIS CONTRACT SAID IT WAS.
+          Inside `lupin-rest-test` 125 tracked files read ` D` for a bind-mount reason
+          that has nothing to do with anybody's work (row 11253df9, pocholo 2026-09-02)
+          while ONE file is genuinely edited. I shipped "sort edits first, then cap" and
+          wrote here that it dissolved the problem. Rachel 🕊️ measured it: the edit does
+          come first, and FOUR OF FIVE SLOTS STILL WENT TO PHANTOM DELETIONS. Ordering
+          SOFTENED it. Saying "dissolved" was the actual cost — it told a reviewer there
+          was nothing left to rule on
+
+          ⇒ `+121-more` CANNOT DISTINGUISH 121 phantom deletions from 121 more edits,
+          and that is the one distinction the container case exists to make. A tail that
+          names its own KIND can, which is why the two tails are counted separately and
+          why `+N-deleted` never appears without an edit for it to be relative to
+        - names the DESTINATION of a rename (`R old -> new`), because that is the path
+          on disk now
+        - costs NO git call. `git status --porcelain` is already issued once by the
+          caller and its output already carries these paths; before this they were
+          counted and thrown away. Neither budget moves — 8 with an upstream, 9 on the
+          no-upstream worst case, which is the one the canonical pin in
+          `test_tree_state_reporting.py` measures. BOTH are stated because a single
+          number here would be a fact about ONE FIXTURE presented as a fact about the
+          module, which is an error I made in a test on this very change
+
+    🔴 READING THIS FIELD — SAME ASYMMETRY `_run_span` DOCUMENTS ONE FUNCTION UP. The
+    quiet value is the lowercase word `none`; a real value carries `/`, `.`, digits and
+    `_`. So a pattern tuned while the tree is clean matches forever and goes blind at
+    exactly the moment the field has something to report. Match to end-of-field
+    (`[^ ]*`) or read the whole line.
+
+    ⚠️ THE FIELD IS COMMA-SEPARATED AND SPACE-FREE FOR ORDINARY PATHS ONLY, and the two
+    exceptions are documented rather than mangled to protect a tidy invariant: git
+    QUOTES a path containing a space (`"a b.py"`), so the field then contains a space;
+    and a rename line carries an arrow, of which only the destination survives here.
+    A reader who takes the WHOLE LINE is correct in every case.
+    """
+    if not tracked: return "none"
+
+    def path_of( line ):
+        # 🔴 NOT `line[ 3: ]`, AND THE LIVE RUN IS THE ONLY THING THAT CAUGHT IT. Porcelain
+        # is `XY<space>PATH`, so a fixed slice looks right — but `_git_reader` returns
+        # `stdout.strip()`, which eats the LEADING SPACE OF THE FIRST LINE ONLY. So the
+        # first row of the commonest case (` M path`, an unstaged edit) arrives one char
+        # short and a fixed slice silently swallows a character of the path:
+        # `dirty-paths=rc/cosa/utils/tree_state.py`, measured 2026-09-03. Every synthetic
+        # fixture passed, because a hand-built line keeps its leading space.
+        m = re.match( r"^\s*\S{1,2}\s+(.*)$", line )
+        rest = m.group( 1 ) if m else line.strip()
+        return rest.split( " -> " )[ -1 ] if " -> " in rest else rest
+
+    deletions = [ l for l in tracked if "D" in l[ :2 ] ]
+    edits     = [ l for l in tracked if "D" not in l[ :2 ] ]
+
+    # THE CAP BELONGS TO THE EDITS WHENEVER THERE ARE ANY. With no edits, the deletions
+    # are all there is to report and they take the slots themselves.
+    named     = edits if edits else deletions
+    shown     = [ path_of( l ) for l in named[ :DIRTY_PATH_CAP ] ]
+
+    remainder = len( named ) - len( shown )
+    if remainder:                shown.append( f"+{remainder}-more" )
+    if edits and deletions:      shown.append( f"+{len( deletions )}-deleted" )
+    return ",".join( shown )
+
+
 def _tree_state_line( git, start_sha=None ):
     """The body of `tree_state_line`; see it for the contract."""
     sha = git( "rev-parse", "--short", "HEAD" )
@@ -219,11 +379,12 @@ def _tree_state_line( git, start_sha=None ):
 
     ref = git( "rev-parse", "--abbrev-ref", "@{upstream}" ) or _primary_branch( git )
     dirty = git( "status", "--porcelain" )
-    tracked_dirty = (
-        len( [ l for l in dirty.splitlines() if l and not l.startswith( "??" ) ] )
-        if dirty is not None else None
-    )
-    dirty_txt = "dirty=?" if tracked_dirty is None else f"tracked-dirty={tracked_dirty}"
+    tracked   = [ l for l in dirty.splitlines() if l and not l.startswith( "??" ) ] if dirty is not None else None
+    tracked_dirty = None if tracked is None else len( tracked )
+    deleted       = None if tracked is None else len( [ l for l in tracked if "D" in l[ :2 ] ] )
+    dirty_txt = ( "dirty=? dirty-paths=UNKNOWN" if tracked_dirty is None
+                  else f"tracked-dirty={tracked_dirty} deleted={deleted} "
+                       f"dirty-paths={_dirty_paths( tracked )}" )
 
     if not ref:
         return ( f"[tree-state] sha={sha} root={root} branch={branch} {dirty_txt} "

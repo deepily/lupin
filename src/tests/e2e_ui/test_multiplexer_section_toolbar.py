@@ -18,22 +18,51 @@ mechanism as the phase-5 smoke), so sender cards + date accordions render
 without a live producer. The toolbar buttons + accordion headers are then
 clicked through their REAL delegated handlers.
 
-Venue: :8000 (scheduled monopolize-mode via /api/test-suite/submit). NEVER run
+Venue: :8000 (scheduled monopolize-mode via /api/v2/submit). NEVER run
 side-door (ad-hoc curl / direct queue push / in-process). Submit via:
 
-    POST /api/test-suite/submit
+    POST /api/v2/submit
     {
-        "test_types"         : "e2e_ui",
+        "test_types"         : "e2e_b",
         "pytest_args"        : "-k test_multiplexer_section_toolbar",
         "scheduled_at"       : "<verified-idle or post-queued slot>",
         "auto_fix_on_failure": false
     }
+
+`e2e_b` is this file's half (src/tests/e2e_ui/partition/half-b.txt). `e2e_ui` is the
+directory name, not a suite key: submitting it runs nothing (row 4e8f348e).
 """
 
 from __future__ import annotations
 
 from .conftest import BASE_URL
 
+# The toolbar's section toggles, in page order. COPIED from SECTION_TOGGLES in
+# src/lupin_app/static/js/multiplexer/render/templates/sectionToolbar.ts, not read from it:
+# a list derived from the thing it checks agrees with itself (that file's header says why).
+# Adding a pane means adding it in both places.
+EXPECTED_SECTION_TOGGLES = [
+    "action-required-section",
+    "notifications-pane",
+    "jobs-pane",
+    "commons-activity-pane",
+    "tts-pane",
+    "fleet-status-pane",
+    "finished-tasks-pane",
+    "task-list-pane",
+    "holding-area-pane",
+    "epic-board-pane",
+    # Phase B pre-allocation (3b5d48dd, row f0e00f01) — the seven mounts, copied
+    # by hand like the ten above (Mr. Radio's ruling 2026-09-18: a list derived
+    # from SECTION_TOGGLES would compare the list to itself).
+    "qa-pane",
+    "submit-jobs-pane",
+    "filter-settings-pane",
+    "time-saved-pane",
+    "system-status-pane",
+    "debug-pane",
+    "direct-tts-pane",
+]
 
 # notification_queue_update injector (mirrors phase-5 smoke _INJECT_JS).
 _INJECT_JS = """
@@ -99,11 +128,18 @@ class TestMultiplexerSectionToolbar:
     def test_toolbar_and_section_toggles_present( self, logged_in_page ):
         page = logged_in_page
         _open_multiplexer( page )
-        # Collapse-all + expand-all controls.
-        assert page.locator( "#section-toolbar-collapse-all" ).count() == 1
-        assert page.locator( "#section-toolbar-expand-all" ).count() == 1
-        # Six per-section visibility toggles.
-        assert page.locator( "#section-toolbar .toolbar-btn" ).count() == 6
+        # The collapse-all / expand-all pair came OFF this toolbar on 2026-09-15:
+        # Rick ruled the pair off BOTH toolbars (the legacy task-owner pair and this
+        # accordion pair). What can regress now is somebody putting it back.
+        assert page.locator( "#section-toolbar-collapse-all" ).count() == 0
+        assert page.locator( "#section-toolbar-expand-all" ).count() == 0
+        assert page.locator( "#section-toolbar .task-accordion-btn" ).count() == 0
+        # One visibility toggle per section, in page order. Row 75648b07: this said "six" from
+        # 08-03 until three panes gained buttons on 09-06/07, and it was red on every run since.
+        rendered = page.locator( "#section-toolbar .toolbar-btn" ).evaluate_all(
+            "( els ) => els.map( ( el ) => el.getAttribute( 'data-section' ) )"
+        )
+        assert rendered == EXPECTED_SECTION_TOGGLES, rendered
         # The layout-mode ⇆ is NOT duplicated into the section-toolbar.
         assert page.locator( "#section-toolbar .layout-mode-btn" ).count() == 0
 
@@ -112,28 +148,48 @@ class TestMultiplexerSectionToolbar:
         _open_multiplexer( page )
         jobs_btn  = page.locator( '#section-toolbar .toolbar-btn[data-section="jobs-pane"]' )
         jobs_pane = page.locator( "#jobs-pane" )
-        # Lane 0c (RATIFIED item 2aad5b7b — mux-consolidation ordering/default-
-        # visibility, commit 75a1bad3): the Job Queues pane is COLD-HIDDEN at boot
-        # (legacy parity, Q3 RULED). Visibility is OWNED by the section-toolbar
-        # toggle, NOT default-on — the pane boots hidden (`hidden` attr +
-        # `.section-hidden`), and the toggle drives show → hide from there. (This
-        # test previously asserted default-VISIBLE, which predated the 0c ruling;
-        # updated to the intended contract, verified against the real toggle DOM
-        # transitions — NOT green-forced.)
-        assert not jobs_pane.is_visible(), "jobs-pane is cold-hidden at boot (Lane 0c ratified default)"
+        # Parity A-2 #1 (2026-09-16, plan §3 R1): the Job Queues pane starts
+        # VISIBLE, reversing Lane 0c's cold-hidden default, whose premise — that
+        # legacy hides Job Queues — was false. The toggle drives hide → show.
+        assert jobs_pane.is_visible(), "jobs-pane starts visible (parity A-2 #1, R1)"
+        assert "section-hidden" not in ( jobs_pane.get_attribute( "class" ) or "" )
+        assert "active" in ( jobs_btn.get_attribute( "class" ) or "" )
+        assert jobs_btn.text_content() == "📋", "Jobs' toolbar glyph is 📋 (R6)"
+
+        # Toggle OFF → hidden.
+        jobs_btn.click()
+        page.wait_for_timeout( 80 )
+        assert not jobs_pane.is_visible(), "jobs-pane should be hidden after toggle off"
         assert "section-hidden" in ( jobs_pane.get_attribute( "class" ) or "" )
 
-        # Toggle ON → visible (hidden attr + .section-hidden cleared).
+        # Toggle ON → visible again.
         jobs_btn.click()
         page.wait_for_timeout( 80 )
         assert jobs_pane.is_visible(), "jobs-pane should be visible after toggle on"
         assert "section-hidden" not in ( jobs_pane.get_attribute( "class" ) or "" )
 
-        # Toggle OFF → hidden again.
-        jobs_btn.click()
+    def test_action_required_toggle_really_hides_the_section( self, logged_in_page ):
+        """
+        Parity A-2 #2a. `#action-required-section` sets `display: flex`, which beats the
+        browser's `[hidden] { display: none }`; only a real browser can see whether the
+        companion rule makes the toggle hide anything.
+        """
+        page    = logged_in_page
+        _open_multiplexer( page )
+        ar_btn  = page.locator( '#section-toolbar .toolbar-btn[data-section="action-required-section"]' )
+        section = page.locator( "#action-required-section" )
+        assert ar_btn.text_content() == "⚠️"
+        assert section.evaluate( "el => getComputedStyle( el ).display" ) != "none"
+
+        ar_btn.click()
         page.wait_for_timeout( 80 )
-        assert not jobs_pane.is_visible(), "jobs-pane should be hidden after toggle off"
-        assert "section-hidden" in ( jobs_pane.get_attribute( "class" ) or "" )
+        assert section.evaluate( "el => getComputedStyle( el ).display" ) == "none", (
+            "the ⚠️ toggle set `hidden` but the section still renders — the [hidden] companion rule is missing"
+        )
+
+        ar_btn.click()
+        page.wait_for_timeout( 80 )
+        assert section.evaluate( "el => getComputedStyle( el ).display" ) != "none"
 
     def test_per_accordion_header_click_collapses_one_accordion( self, logged_in_page ):
         page = logged_in_page
@@ -159,7 +215,11 @@ class TestMultiplexerSectionToolbar:
         _open_multiplexer( page )
         _seed_two_senders( page )
 
-        page.locator( "#section-toolbar-collapse-all" ).click()
+        # The toolbar buttons that used to drive this were removed on 2026-09-15
+        # (Rick's ruling), so the bulk intent is driven through the store it always
+        # called. requestBulkAccordionCollapse has no UI caller now; this keeps the
+        # store → renderer path guarded.
+        page.evaluate( "() => window.__multiplexerTestHook.stores.viewState.requestBulkAccordionCollapse( true )" )
         page.wait_for_timeout( 100 )
         collapsed = page.eval_on_selector_all(
             ".sender-card",
@@ -172,7 +232,7 @@ class TestMultiplexerSectionToolbar:
         )
         assert date_collapsed, "collapse-all must collapse every date accordion"
 
-        page.locator( "#section-toolbar-expand-all" ).click()
+        page.evaluate( "() => window.__multiplexerTestHook.stores.viewState.requestBulkAccordionCollapse( false )" )
         page.wait_for_timeout( 100 )
         expanded = page.eval_on_selector_all(
             ".sender-card",

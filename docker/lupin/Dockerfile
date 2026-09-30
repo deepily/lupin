@@ -38,7 +38,7 @@
 # is a bind-mounted static snapshot of a committed ref, materialized at deploy
 # time and refreshable by re-materializing + restart — never by an image rebuild.
 # "Not shadowed — ABSENT." Production is explicitly OUT OF SCOPE (postponed).
-# Plan of record: src/rnd/2026.07.12-gcp-bind-mount-revert-plan.md §3b + §4b.
+# Plan of record: src/rnd/v0.1.9/2026.07.12-gcp-bind-mount-revert-plan.md §3b + §4b.
 #
 #   BAKE_CODE=off  (DEFAULT) → codeless image. /var/lupin/src is an EMPTY
 #                              mountpoint. Deps venv, HF models, playwright,
@@ -98,6 +98,9 @@ RUN npm ci
 # TS sources + the esbuild driver (build-multiplexer.sh resolves PROJECT_ROOT
 # from its own location: src/scripts/../.. == /build).
 COPY src/scripts/build-multiplexer.sh ./src/scripts/build-multiplexer.sh
+# `npm run build` also runs build-console.sh — the standalone /app/console page's bundle
+# (row 27760534), whose sources live under js/multiplexer/console/ and are copied below.
+COPY src/scripts/build-console.sh ./src/scripts/build-console.sh
 COPY src/lupin_app/static/js/multiplexer ./src/lupin_app/static/js/multiplexer
 RUN npm run build
 
@@ -435,6 +438,10 @@ COPY --chown=rruiz:rruiz src/lupin_app  /var/lupin/src/lupin_app
 COPY --chown=rruiz:rruiz --from=multiplexer-builder \
      /build/src/lupin_app/static/dist/multiplexer \
      /var/lupin/src/lupin_app/static/dist/multiplexer
+# The standalone console page's bundle (/app/console), built by the same stage.
+COPY --chown=rruiz:rruiz --from=multiplexer-builder \
+     /build/src/lupin_app/static/dist/console \
+     /var/lupin/src/lupin_app/static/dist/console
 COPY --chown=rruiz:rruiz src/lib          /var/lupin/src/lib
 COPY --chown=rruiz:rruiz src/lupin_cli    /var/lupin/src/lupin_cli
 COPY --chown=rruiz:rruiz src/lupin_mcp    /var/lupin/src/lupin_mcp

@@ -1,7 +1,7 @@
 # Bridging Work Plan — notifications.js → multiplexer parity & deprecation
 
 **Author:** Rachel 🕊️ (for Tiberius 👑) · **Date:** 2026-06-10 · **Target:** **FULL PARITY by Sat 2026-06-14, hard redirect if green**
-**Deliverable 3 of 3** — builds on [`00-functional-change-summary.md`](00-functional-change-summary.md) + [`01-gap-analysis.md`](01-gap-analysis.md).
+**Deliverable 3 of 3** — builds on [`00-functional-change-summary.md`](00-functional-change-summary.md) + [`01-gap-analysis.md`](01-gap-analysis.md). *[referenced file removed in the 2026-09-22 R&D cleanup, ticket `3a2f726b`; recover with `git log --diff-filter=D -- <path>` then `git show <sha>^:<path>`]*
 
 > **Revision r2 (2026-06-10, post-Tiberius/Rick ratification).** The original r1 sized this in
 > *human* engineer-days and judged Saturday "not credible." Rick rejected the **units, not the

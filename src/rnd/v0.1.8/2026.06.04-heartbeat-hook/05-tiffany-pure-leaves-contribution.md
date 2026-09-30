@@ -39,4 +39,4 @@
 
 ## Cross-references
 - Design: `01`–`04` (this dir) + canonical PIP `2026.06.02-stop-hook-natural-heartbeat-poker.md` §0/§0.2/§0.3.
-- Arbiter wiring + integration: Rachel's `05-arbiter-consumer-implementation.md` · Mr. Radio's `05-mr-radio-integration-testing-contribution.md`.
+- Arbiter wiring + integration: Rachel's `05-arbiter-consumer-implementation.md` · Mr. Radio's `05-mr-radio-integration-testing-contribution.md`. *[referenced file removed in the 2026-09-22 R&D cleanup (Option A), ticket `3a2f726b`; recover with `git log --diff-filter=D -- <path>` then `git show <sha>^:<path>`]*

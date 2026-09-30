@@ -47,9 +47,23 @@ SUITE_SCRIPTS = {
     "websocket"    : "src/scripts/run-websocket-smoke-tests.sh",
     "integration"  : "src/tests/run-integration-tests.sh",
     "e2e"          : "src/scripts/run-e2e-ui-tests.sh",
-    "all"            : "src/tests/run-all-tests.sh",
+    "e2e_a"        : "src/scripts/run-e2e-ui-tests-half-a.sh",   # half A of e2e (row 2818dad7); the files are in src/tests/e2e_ui/partition/half-a.txt
+    "e2e_b"        : "src/scripts/run-e2e-ui-tests-half-b.sh",   # half B of e2e (row 2818dad7); the files are in src/tests/e2e_ui/partition/half-b.txt
+    "all"          : "src/tests/run-all-tests.sh",
     "presentation"   : "src/tests/run-presentation-regression.sh",
     "cosa"           : "src/tests/run-cosa-tests.sh",   # in-tree CoSA test tree (row c9d3ddcb); joined the merge pyramid 2026-08-13 (row d83d025b)
+    "typecheck"      : "src/tests/run-typecheck-gate.sh", # the three tsc projects as a BLOCKING merge gate (row 7bc67019, Rick 2026-09-09 02:35 UTC: "Yes, blocking gate", answered on a direct ask, default_used: false). Runs FIRST in ALL_SUITE_COMPONENTS: it is ~3s of static analysis (MEASURED 3.00s wall, 2026-09-09), so a type-red branch fails in seconds instead of after the ~25min TypeScript tier.
+    "stylelint"      : "src/tests/run-stylelint-gate.sh", # every git-tracked .css file as a BLOCKING merge gate (row d3d4a18c, Rick's ruling 2026-09-18 21:06). Runs SECOND, right after typecheck: MEASURED 1.5s wall for 32 files (2026-09-18), static like typecheck, so a style-red branch also fails in seconds. Its summary counts FILES, not tests.
+    "coverage"       : "src/tests/run-coverage-gate.sh", # the Python coverage gate (row e2099400, 2026-08-29). Until it existed, pyproject's fail_under was invoked by NOTHING — no addopts, no runner, no injection here — so the 100% mandate had teeth on the TypeScript side only. Runs AFTER unit+cosa have appended to one data file; pass --run-tiers to make it run them itself.
+                                                        # 🔴 EXIT-CODE CONTRACT, documented at this call site rather than only where it is
+                                                        # raised (row 73ebccb1, Mr. Radio's ruling 2026-09-05): a code is a contract, a
+                                                        # message drifts. This job stores `exit_code` verbatim and interprets none of it,
+                                                        # so whatever reads the record needs the meanings:
+                                                        #   0 measured · 1 floor/frame BREACH · 2 INCONCLUSIVE (a tier did not run — no
+                                                        #   number is owed) · 3 no interpreter · 4 REFUSED, the tree MOVED mid-run ·
+                                                        #   6 refused/contended.
+                                                        # Only 1 means coverage is too low. 2/3/4/6 all mean "no trustworthy number was
+                                                        # produced", which is a different response from "write more tests".
     "v2_eval"        : "src/tests/run-v2-eval.sh",     # CJ Flow v2 paired eval (row 7e2125a7 D6). NOT in ALL_SUITE_COMPONENTS — ~105 min on the metered LLM path; see the runner's header
 }
 
@@ -65,8 +79,12 @@ FILE_DRIVEN_TEST_TYPES = frozenset( { "smoke_direct", "pytest_direct" } )
 # non-pytest suites can be added here as the project grows.
 SUITES_SUPPORTING_JUNIT_XML = frozenset( {
     "unit", "smoke", "smoke_direct", "pytest_direct",
-    "integration", "e2e", "all", "cosa",
+    "integration", "e2e", "e2e_a", "e2e_b", "all", "cosa",
 } )
+# NOTE (row e2099400): "coverage" is deliberately NOT here. run-coverage-gate.sh is a
+# report-and-check wrapper, not a pytest run — an injected --junit-xml would reach
+# `coverage report` as an unknown option. It reports through _parse_non_pytest_stdout,
+# the same treatment as websocket and presentation.
 # NOTE (row 7e2125a7 D6): "v2_eval" is deliberately NOT here either. run-v2-eval.sh
 # wraps a plain python script, not pytest — an injected --junit-xml would reach
 # v2_eval.py's argparse as an unknown flag and kill the run at second one. It reports
@@ -90,15 +108,59 @@ SUITE_TIMEOUTS_SECONDS = {
                              # bare vs 29s under c8. The budget still holds comfortably, but note WHY it is not
                              # 29s for the suite: ONE file, audio_transport.test.ts, PASSES in 452s and owns
                              # essentially the entire wall clock. Fix that file and this budget could drop by an
-                             # order of magnitude. Provenance: src/rnd/v0.2.0/2026.08.24-typescript-suite-memory-measured.md
-    "unit"         : 300,    #  5 min (bumped from 180s on 2026-06-12: observed ~185s on ts-b51e63c9 — suite grew to ~6745 tests and the 180s budget killed it mid-run; ~1.6x margin over observed)
+                             # order of magnitude. Provenance: src/rnd/v0.2.0/2026.08.24-typescript-suite-memory-measured.md — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.24-typescript-suite-memory-measured.md
+    "unit"         : 1800,   # 30 min. ⚠️ RAISED 300 -> 1800 on 2026-08-29 (row e2099400). The 300s figure was set on 2026-06-12 against a ~6,745-test suite; the suite is 19,128 tests now and MEASURED 800.55s UNINSTRUMENTED on this box — i.e. the tier had been exceeding its own timeout by 2.67x with nothing to do with coverage. Under --cov it measured 936.17s (+18.6%). 1800 is ~1.9x over the instrumented figure. This was found while wiring the coverage gate, not by the gate: a suite killed at 300s reports a truncated run, and the budget had gone stale silently as the suite grew.
+    "typecheck"    : 300,    #  5 min. MEASURED 3.00s wall for all three projects (2026-09-09, row 7bc67019) — a 100x margin, and deliberately not the 600s default: a static gate that has run for five minutes has hung, not slowed down, and the budget is the only thing that says so.
+    "stylelint"    : 300,    #  5 min. MEASURED 1.5s wall for 32 files (2026-09-18, row d3d4a18c) — the typecheck gate's reasoning: a static gate that has run for five minutes has hung, and the budget is the only thing that says so.
+    "coverage"     : 2400,   # 40 min. As a pyramid STEP it is a report + a frame check, ~1 min; the budget covers the standalone --run-tiers form, which re-runs unit (936s) + cosa (301s) itself.
     "smoke"        : 3600,   # 60 min (bumped from 1800s on 2026-04-21: observed 2456s on ts-f55d172d — 160 tests + container_preflight adds overhead; ~1.46x margin over observed)
     "smoke_direct" : 1200,   # 20 min (longest: Phase D live ~10 min)
     "pytest_direct": 1200,   # 20 min (arbitrary pytest file — match smoke_direct budget)
     "websocket"    : 300,    #  5 min (~50 tests, server + WS)
     "integration"  : 30000,  # TEMP 2026-08-17 (row d8d019f6): 2000→30000 (~8.3h) for the full n=60 v2 paired CLOSING run — measured n=60 ≈ 4.8h (v1 ~6.7s/push + v2 ~22s/call), margin for the poweroff window. REVERT to 2000 at close. Prior: 33 min (bumped from 1200s on 2026-04-21: observed 1392s SWE-team dry-run — ~1.44x margin)
-    "e2e"          : 3000,   # 50 min (bumped from 2400s on 2026-06-12: observed 2020.6s on ts-b51e63c9 — suite grew to ~593 tests, 2400s was only 1.19x margin; ~1.48x over observed)
-    "all"            : 3600,   # 60 min (sequential pyramid, ~25-35 min observed)
+    "e2e"          : 5000,   # 83 min. RAISED 3000 -> 5000 on 2026-09-11 (row 1657a852). The 3000s figure was set
+                             # 2026-06-12 against ~593 tests; the suite is 862 now and MEASURED 3038.1s — i.e. it had
+                             # ALREADY outgrown its own budget, which is what killed ts-385c9862 at ~87% on 09-10.
+                             # Measured as two halves through /api/v2/submit (ts-6979205f 1549.0s / 446 tests,
+                             # ts-0dee4535 1491.1s / 416 tests) minus ONE copy of the ~2.0s per-run overhead, since
+                             # each half pays it once (job wall clock minus JUnit testsuite@time, n=16, range 1.1-2.7s).
+                             # 5000 is not a chosen multiplier. test_test_suite_runner_nits.py requires >= 1.4x
+                             # observed, and the margin must hold for the WHOLE window, not only on the day it is set —
+                             # a budget sized to exactly 1.4x today is under 1.4x tomorrow, and nobody looks again for
+                             # ~91 days. Projected runtime at the 2026-12-10 re-measure is 3038.1 + 485 = 3523.2s, so
+                             # the budget is 1.4 x 3523.2 = 4932.5s, rounded to 5000.
+                             # ⚠️ 4500 (1.481x today) was the first proposal and it is NOT enough: it tolerates only
+                             # 176.2s of growth before the margin drops under 1.4x, which is 33 days of a 90-day window,
+                             # and by 12-10 it would be at 1.277x. 5000 is 1.646x today and 1.419x at 12-10.
+                             # ⚠️ NOTHING IN THE TREE WOULD HAVE CAUGHT THAT. _OBSERVED_RUNTIMES_SECONDS is a static
+                             # constant, so `budget >= 1.4 x observed` stays true all window however much the suite
+                             # grows; the guard can only be tripped by lowering the budget or re-measuring observed.
+                             # The margin decay is real and the guard is blind to it — which is the whole reason the
+                             # re-measure date below is a commitment and not a note.
+                             # Of the 3038.1s, 119.6s is five locator-timeout reds — the ONLY red class that costs real
+                             # time (visual-snapshot reds run 4.4s, plain assertions 1.9s, i.e. about what a PASSING
+                             # test costs). A timeout red costs THE WAIT THE TEST ITSELF CONFIGURED plus ~3.7s, not one
+                             # flat price, so the five do not multiply out: 34.8 + 34.2 + 34.1 (three at Playwright's
+                             # 30000ms default) + 9.5 (a 5000ms wait) + 7.0 (a 2000ms wait) = 119.6s. Corpus by
+                             # configured wait: 30000ms n=87 median 33.7s · 15000ms n=2 · 5000ms n=5 · 2000ms n=1.
+                             # Budget arithmetic below uses 33.7s, the 30000ms class, since that is what a NEW timeout
+                             # red costs unless its author sets a shorter wait. Two such reds went GREEN on 09-11 when
+                             # the overlay z-index fix (41b98de1) landed, worth ~68s.
+                             # Headroom covers growth to a 2026-12-10 re-measure at 5.39 s/day — least squares over ten
+                             # August full runs, NOT an endpoint slope. ⚠️ That rate is a defensible slope, not a claim
+                             # the growth is linear: the same ten runs put 08-22 at 2311.2s BELOW 08-15's 2343.1s with
+                             # fewer tests, so week-to-week noise is ~40s and any two-run slope can say almost anything.
+                             # 90 days is not a round number either — it is the observed cadence: this budget and the
+                             # guard's observed figure were both last set 2026-06-12, exactly 91 days before this run.
+                             # SINCE 2026-09-14 (row 2818dad7) "e2e" is no longer a merge-pyramid component: the
+                             # gate runs "e2e_a" + "e2e_b" below. This budget covers a deliberate whole-suite run.
+    "e2e_a"        : 2500,   # 42 min. Half A (row 2818dad7). The halves were balanced on per-file JUnit time from the
+    "e2e_b"        : 2500,   # 42 min. Half B.  2026-09-12 full run: 1492.9s / 1492.5s of testcase time, before per-run
+                             # overhead. Until each half is measured on :8000, observed uses the slower half of the
+                             # 09-11 hand split (ts-6979205f, 1549.0s). 2500 is 1.61x that today. Scaling the 12-10
+                             # projection above (3523.2s) by half gives 1761.6s, and 1.4x of that is 2466.2s,
+                             # rounded up to 2500. The re-measure date above covers these figures too.
+    "all"          : 3600,   # 60 min (sequential pyramid, ~25-35 min observed)
     "presentation"   : 1800,   # 30 min (render-only + Sonnet; +Opus/R2P with flags)
     "cosa"           : 900,    # 15 min (~8,800 tests; both-roots hand run was ~11 min for 21,721 on 2026-08-06 — ~1.5x margin)
     "v2_eval"        : 9000,   # 150 min. MEASURED from io/v2-flow/eval-2026-08-21-11-37-48: cold ~93 min + warm ~11 min = ~105 min serial,
@@ -149,7 +211,42 @@ STDOUT_DRAIN_BUDGET_SECONDS = 5.0
 # merge pyramid would attach an hour and a half of billed work to every merge. Same
 # treatment as "presentation". Registration and gate-membership are separate decisions,
 # and conflating them is how a suite ends up either unreachable or unaffordable.
-ALL_SUITE_COMPONENTS = [ "unit", "cosa", "typescript", "smoke", "websocket", "integration", "e2e" ]
+# 🔴 "typecheck" IS FIRST ON PURPOSE (row 7bc67019, Rick's ruling 2026-09-09). It is ~3s of
+# static analysis against the ~25min TypeScript tier, so ordering it first means a type-red
+# branch fails in seconds rather than after the pyramid has spent half an hour proving the
+# same thing more slowly. Ordering here is not cosmetic: this list runs in sequence.
+# 🔴 "stylelint" IS SECOND (row d3d4a18c, Rick's ruling 2026-09-18 21:06), for typecheck's
+# reason: 1.5s of static analysis (measured), so a style-red branch fails before any tier runs.
+# Before it existed no gate ran stylelint, and 329 errors accumulated as "pre-existing".
+# 🔴 E2E RUNS AS TWO HALVES, "e2e_a" THEN "e2e_b" (row 2818dad7, Rick's ruling on decision row
+# 4103ea0f, 2026-09-14). The whole suite measured 3038.1s and grows ~5.39 s/day, and one timeout
+# threw away every result in the run (09-10: 633 passed, none written to JUnit). As two entries here,
+# each half gets its own timeout, junit and log, and a timeout loses one half. They run one after
+# the other, not side by side — see run-e2e-ui-tests.sh's header for why they cannot overlap. "e2e"
+# stays registered for a deliberate whole-suite run.
+ALL_SUITE_COMPONENTS = [ "typecheck", "stylelint", "unit", "cosa", "coverage", "typescript", "smoke", "websocket", "integration", "e2e_a", "e2e_b" ]
+
+
+def unknown_suite_names( test_types: List[ str ] ) -> List[ str ]:
+    """
+    Names in `test_types` that are not keys of SUITE_SCRIPTS, in first-seen order.
+
+    Requires:
+        - test_types is a list of strings (possibly empty)
+
+    Ensures:
+        - returns [] iff every name is a registered suite ("all" included)
+        - never mutates the input; duplicates are reported once
+
+    Row 4e8f348e: "e2e_ui" is the DIRECTORY, not a suite. A submit naming it was accepted,
+    took the monopolize slot on :8000, found no script and wrote a zero report — five times
+    since 2026-05-05. The door asks this before the job exists.
+    """
+    unknown = []
+    for t in test_types:
+        if t not in SUITE_SCRIPTS and t not in unknown:
+            unknown.append( t )
+    return unknown
 
 
 def _expand_all( test_types: List[ str ] ) -> List[ str ]:
@@ -491,13 +588,16 @@ class TestSuiteJob( AgenticJobBase ):
 
     @staticmethod
     def _classify_outcome( passed: int, failed: int, errors: int, skipped: int,
-                           not_executed: int = 0, collection_error: bool = False ) -> str:
+                           not_executed: int = 0, collection_error: bool = False,
+                           coverage_miss: bool = False ) -> str:
         """
         Classify a run outcome from its parsed counts.
 
         Requires:
             - passed, failed, errors, skipped, not_executed are non-negative ints
             - collection_error is True only when pytest failed during COLLECTION
+            - coverage_miss is True only when the runner PRINTED a coverage-threshold
+              failure (see _parse_c8_threshold_failures) — never inferred from exit code
 
         Ensures:
             - returns "COLLECTION ERROR" when collection_error is set, BEFORE any count
@@ -515,6 +615,13 @@ class TestSuiteJob( AgenticJobBase ):
               collected, which is an ERROR condition, not a test failure)
             - returns "FAILED"  when at least one test failed or errored (a genuine
               failure dominates — even if some tiers also did not run)
+            - returns "FAILED"  when tests ran and coverage_miss is set (row 1a11fe96).
+              The typescript tier ran 4020/4020 green on 2026-09-14 while c8 printed
+              three threshold ERROR lines and exited 1, and this method said PASSED,
+              because it reads counts only. The counts-only rule stays (the 335/0/0
+              false positive came from trusting the exit code), so the caller passes
+              the printed threshold miss as its own fact, the same way it passes
+              collection_error
             - returns "NOT EXECUTED" when nothing failed but at least one tier did
               not run (multi-tier runner: a tier that never ran is not a pass and
               not a failure — it must not read as green)
@@ -525,7 +632,7 @@ class TestSuiteJob( AgenticJobBase ):
             return "COLLECTION ERROR"
         if ( passed + failed + errors + skipped + not_executed ) == 0:
             return "NOT EXECUTED"
-        if ( failed + errors ) > 0:
+        if ( failed + errors ) > 0 or coverage_miss:
             return "FAILED"
         if not_executed > 0:
             return "NOT EXECUTED"
@@ -558,7 +665,8 @@ class TestSuiteJob( AgenticJobBase ):
         icon = self._OUTCOME_ICON[ self._classify_outcome(
             result[ "passed" ], result[ "failed" ], result[ "errors" ], result[ "skipped" ],
             result.get( "not_executed", 0 ),
-            collection_error = result.get( "collection_diagnosis" ) is not None
+            collection_error = result.get( "collection_diagnosis" ) is not None,
+            coverage_miss    = bool( result.get( "coverage_threshold_failures" ) )
         ) ]
         ne  = result.get( "not_executed", 0 )
         des = result.get( "deselected", 0 )
@@ -571,6 +679,11 @@ class TestSuiteJob( AgenticJobBase ):
         crash_output = result.get( "startup_crash_output" )
         if crash_output:
             line += f"\n  **STARTUP CRASH** (exit={result[ 'exit_code' ]}): `{crash_output[ :500 ]}`"
+
+        # A FAIL next to "0 failed" reads as a harness bug unless the card says why (row 1a11fe96).
+        coverage_misses = result.get( "coverage_threshold_failures" ) or []
+        if coverage_misses:
+            line += "\n  **COVERAGE BELOW THRESHOLD**: " + "; ".join( coverage_misses )
 
         # WHY THE COUNTS ALONE ARE NOT ENOUGH (row 24a85385). The junit XML has carried
         # the failure message all along — _parse_junit_xml puts it in failure_details —
@@ -718,7 +831,8 @@ class TestSuiteJob( AgenticJobBase ):
                 status       = self._classify_outcome(
                     result[ "passed" ], result[ "failed" ], result[ "errors" ], result[ "skipped" ],
                     result.get( "not_executed", 0 ),
-                    collection_error = result.get( "collection_diagnosis" ) is not None
+                    collection_error = result.get( "collection_diagnosis" ) is not None,
+                    coverage_miss    = bool( result.get( "coverage_threshold_failures" ) )
                 )
                 await voice_io.notify(
                     f"{suite_type}: {status} — {result[ 'passed' ]} passed, "
@@ -753,9 +867,13 @@ class TestSuiteJob( AgenticJobBase ):
             any_collection_error = any(
                 r.get( "collection_diagnosis" ) is not None for r in self.suite_results.values()
             )
+            any_coverage_miss = any(
+                r.get( "coverage_threshold_failures" ) for r in self.suite_results.values()
+            )
             overall_status = self._classify_outcome(
                 total_passed, total_failed, total_errors, total_skipped, total_not_executed,
-                collection_error = any_collection_error and ( total_failed + total_errors ) == 0
+                collection_error = any_collection_error and ( total_failed + total_errors ) == 0,
+                coverage_miss    = any_coverage_miss
             )
             all_passed = ( overall_status == "PASSED" )
 
@@ -845,9 +963,13 @@ class TestSuiteJob( AgenticJobBase ):
                 icon = self._OUTCOME_ICON[ self._classify_outcome(
                     result[ "passed" ], result[ "failed" ], result[ "errors" ], result[ "skipped" ],
                     result.get( "not_executed", 0 ),
-                    collection_error = result.get( "collection_diagnosis" ) is not None
+                    collection_error = result.get( "collection_diagnosis" ) is not None,
+                    coverage_miss    = bool( result.get( "coverage_threshold_failures" ) )
                 ) ]
                 report_lines.append( f"## {suite_type} — {icon}" )
+                for miss in result.get( "coverage_threshold_failures" ) or []:
+                    report_lines.append( f"" )
+                    report_lines.append( f"**COVERAGE BELOW THRESHOLD**: {miss}" )
                 report_lines.append( f"" )
                 report_lines.append( f"| Metric | Count |" )
                 report_lines.append( f"|--------|-------|" )
@@ -1620,6 +1742,11 @@ class TestSuiteJob( AgenticJobBase ):
             parsed[ "log_path" ]  = log_path
             parsed[ "duration" ]  = duration
 
+            # Row 1a11fe96: c8's threshold miss lives only in stdout, never in the counts.
+            parsed[ "coverage_threshold_failures" ] = (
+                self._parse_c8_threshold_failures( stdout ) if suite_type == "typescript" else []
+            )
+
             # A collection error is SILENCE, not a red (row bc83f2df). Detect it from
             # the exit code, which is the only signal that survives BOTH shapes: an error
             # in a test module writes a junit (and used to read as FAILED), while an error
@@ -1711,7 +1838,26 @@ class TestSuiteJob( AgenticJobBase ):
         "websocket"    : "websocket-latest.log",
         "integration"  : "integration-latest.log",
         "e2e"          : "e2e-ui-latest.log",
+        # ADDED 2026-09-14 with the e2e halves (row 2818dad7). One basename per half: the
+        # halves run back to back in one job, and a shared name would leave "latest" pointing
+        # at half B with half A's log reachable only by timestamp.
+        "e2e_a"        : "e2e-ui-half-a-latest.log",
+        "e2e_b"        : "e2e-ui-half-b-latest.log",
         "all"          : "all-tests-latest.log",
+        # ADDED 2026-08-29 with the coverage gate (row e2099400). Caught by
+        # test_every_runnable_suite_can_write_a_stdout_log, which is the whole point of
+        # that test: a suite absent from this map has its stdout silently discarded, and
+        # a coverage gate that fails with no log on disk explains nothing about WHY.
+        "coverage"     : "coverage-gate-latest.log",
+        # ADDED 2026-09-09 with the typecheck gate (row 7bc67019). Caught by the same test
+        # that caught "coverage" — which is now three suites in a row that this guard, not
+        # the author, remembered. The gate is 3 seconds and its whole output is the reason a
+        # branch is red; discarding that stdout would leave the FIRST step of the pyramid as
+        # the one that explains itself least.
+        "typecheck"    : "typecheck-gate-latest.log",
+        # ADDED 2026-09-18 with the stylelint gate (row d3d4a18c). Its stdout names every
+        # offending file:line:col, and it is the only record a non-pytest gate produces.
+        "stylelint"    : "stylelint-gate-latest.log",
         # ⚠️ ADDED 2026-08-28. These three are registered in SUITE_SCRIPTS and were
         # MISSING here, and a suite absent from this map has its stdout silently thrown
         # away: `_write_stdout_log` no-ops on a falsy basename, so the run's only
@@ -1962,6 +2108,33 @@ class TestSuiteJob( AgenticJobBase ):
         }
 
     @staticmethod
+    def _parse_c8_threshold_failures( stdout: str ) -> List[ str ]:
+        """
+        Extract c8's coverage-threshold failures from the typescript runner's stdout.
+
+        Row 1a11fe96. run-typescript-tests.sh runs c8 with --check-coverage, and a
+        miss prints lines like
+            ERROR: Coverage for branches (99.75%) does not meet global threshold (100%)
+        and exits 1. The TAP counts stay green, so without this the job reported
+        all_passed=True on 2026-09-14 (ts-0678b4dc) with three of these lines in its log.
+
+        Requires:
+            - stdout is the captured runner stdout (may be empty)
+
+        Ensures:
+            - returns each threshold ERROR line, stripped, in the order printed
+            - returns [] when there is none — including a --report-only run, where
+              c8 does not check thresholds and prints no ERROR line
+            - never keys on the exit code (the 335/0/0 false positive)
+        """
+        import re
+
+        return [
+            m.group( 0 ).strip()
+            for m in re.finditer( r"^ERROR: Coverage for .+ does not meet .*threshold.*$", stdout, re.MULTILINE )
+        ]
+
+    @staticmethod
     def _terminate_process_group( process ) -> None:
         """
         Kill the subprocess AND everything it spawned.
@@ -2147,7 +2320,27 @@ class TestSuiteJob( AgenticJobBase ):
         Returns:
             dict | None: Parsed counts or None if format unrecognized.
         """
-        if suite_type not in ( "websocket", "typescript", "presentation", "v2_eval" ):
+        # "typecheck" needs NO parse branch of its own: run-typecheck-gate.sh prints
+        #     Total Tests: N / Passed: X / Failed: Y
+        # byte-identical in shape to the websocket summary, so the shared regexes below
+        # already read it (verified against the runner's output, 2026-09-09, row 7bc67019).
+        # ⚠️ ITS UNIT IS PROJECTS, NOT TESTS. "Failed: 1" means one tsconfig project is red,
+        # which may be one type error or four hundred. The two readings coincide at 1, which
+        # is exactly how a count whose unit is unstated gets quoted later as something it
+        # never measured.
+        #
+        # 🟢 AND ITS REFUSAL PATH LANDS CORRECTLY HERE, which is why no branch was added.
+        # run-typecheck-gate.sh exits 2 WITHOUT printing a summary when a tsconfig or tsc is
+        # missing — deliberately, because a gate that checked nothing otherwise prints exactly
+        # what a clean tree prints. That stdout matches none of the regexes, so this returns
+        # None, the caller keeps its zero counts, and _classify_suite_status reads all-zero as
+        # NOT EXECUTED — never PASSED. Verified by driving both paths 2026-09-09 (row 7bc67019):
+        # a real green run parses {passed:3, failed:0}; "REFUSING: ..." parses None.
+        # "stylelint" (row d3d4a18c) is in the same position: run-stylelint-gate.sh prints the
+        # same three lines, and ITS UNIT IS FILES — "Failed: 1" is one red .css file, whatever
+        # its error count. The extra "Errors: N" line it prints matches none of these regexes.
+        # Its refusals exit 2 with no summary, so they too read NOT EXECUTED, never PASSED.
+        if suite_type not in ( "websocket", "typescript", "presentation", "v2_eval", "typecheck", "stylelint" ):
             return None
         if not stdout:
             return None

@@ -19,7 +19,7 @@ WHAT THESE PIN, and why each is the thing that decays silently rather than loudl
     "the tree held still" when the truth is "I could not look" is the exact defect shape
     this module exists to catch
 
-Design: `src/rnd/v0.2.0/2026.08.28-tree-state-gap-1-start-and-end-sha.md`.
+Design: `src/rnd/v0.2.0/2026.08.28-tree-state-gap-1-start-and-end-sha.md`. — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.28-tree-state-gap-1-start-and-end-sha.md
 Venue: :7999-eligible — no network, no mutation, injected git.
 """
 import os

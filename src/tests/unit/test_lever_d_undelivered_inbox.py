@@ -37,6 +37,9 @@ def _fake_notif( **kw ):
         "id": uuid.UUID( VALID_UUID ), "sender_id": "claude.code@lupin.deepily.ai#abcd1234",
         "title": "t", "message": "m", "abstract": "a", "type": "task", "priority": "high",
         "state": "created", "job_id": None, "created_at": None,
+        # the structured side-channel added with migration 9184990becdf (row 4f320c27);
+        # the undelivered projection carries it through
+        "payload": None,
     }
     base.update( kw )
     return types.SimpleNamespace( **base )
@@ -127,6 +130,12 @@ class TestProjection:
         assert d[ "id" ] == VALID_UUID
         assert d[ "message" ] == "m" and d[ "type" ] == "task" and d[ "state" ] == "created"
         assert d[ "created_at" ] is None
+        assert d[ "payload" ] is None
+
+    def test_projects_a_payload_when_the_row_carries_one( self ):
+        """Row 4f320c27: a broadcast ack's identity rides in this dict and nowhere else."""
+        d = nmod._project_undelivered_notification( _fake_notif( payload={ "broadcast_id": "b1" } ) )
+        assert d[ "payload" ] == { "broadcast_id": "b1" }
 
     def test_created_at_isoformat( self ):
         import datetime

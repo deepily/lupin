@@ -38,7 +38,13 @@ def session():
     query.limit.return_value           = query
     query.offset.return_value          = query
     query.with_for_update.return_value = query
+    query.populate_existing.return_value = query
     query.group_by.return_value        = query
+    # `options()` joins the chain because the REAL Query returns itself from it — the event
+    # readers attach joinedload( TaskEvent.item ) so `_serialize_event` can put the item's
+    # title on the wire without N+1. A mock that dropped the chain here would fail every
+    # assertion AFTER an options() call, which is a defect in the mock and not in the code.
+    query.options.return_value         = query
     return mock
 
 
@@ -593,6 +599,31 @@ def test_get_by_id_for_update_returns_none_when_missing( repo, session ):
     query.with_for_update.assert_called_once_with()
 
 
+def test_get_by_id_for_update_repopulates_the_session_copy( repo, session ):
+    """
+    The transition read MUST go through populate_existing — with_for_update
+    locks the ROW at the database but leaves an instance already in this
+    session's identity map holding its pre-lock attribute values, so a caller
+    validating on item.status would validate against what it read BEFORE the
+    lock (measured 2026-09-06: pocholo 📣 on real Postgres 16.14; Rio ⚡ on a
+    real SQLAlchemy session).
+
+    This is the CHAIN assertion and it is deliberately the weaker of the two
+    guards: the session fixture returns itself for every chain method, so it
+    can see PRESENCE and not order — order is irrelevant here, both are Query
+    options — and it cannot see whether populate_existing delivers freshness.
+    The VALUE assertion lives in
+    test_the_for_update_read_refreshes_a_row_the_session_already_holds.py,
+    which drives a real session and a second writer.
+    """
+    sentinel = _item()
+    query    = session.query.return_value
+    query.first.return_value = sentinel
+
+    assert repo.get_by_id_for_update( sentinel.id ) is sentinel
+    query.populate_existing.assert_called_once_with()
+
+
 # ---------------------------------------------------------------------------
 # Phase 2 — reason threading (C12 pulled forward)
 # ---------------------------------------------------------------------------
@@ -703,22 +734,19 @@ def test_apply_patch_no_change_records_noop_marker( repo ):
     assert event.transition == "patched"
 
 
-def test_apply_patch_caller_reason_wins_over_field_delta( repo ):
+def test_apply_patch_caller_reason_is_appended_not_substituted( repo ):
     """
-    ITEM A (Tiffany's Phase-1 finding) — the caller-reason-WINS branch of
-    apply_patch's `event_reason = reason if reason else <auto-delta>` ternary is
-    COVERAGE-INVISIBLE: coverage.py reports the line 100% covered whether or not
-    its truthy arm ever runs (intra-line ternary branches are not tracked). The
-    caller-supplied reason IS the headline of task_reassign — recording the
-    manager's WHY — so the truthy arm must be proven directly.
+    BUG a01e4e2a — a caller-supplied reason used to REPLACE the computed field
+    delta (`event_reason = reason if reason else <auto-delta>`), so an edit that
+    overwrote a field while passing a polite justification recorded only the
+    justification and the prior value was unrecoverable from the event log. The
+    conscientious caller got the WORSE audit trail.
 
-    WITH a reason: the caller's "why" is recorded verbatim and the auto-delta is
-    NOT used, even though the field genuinely changed (a delta string would
-    otherwise have been generated). WITHOUT a reason: the SAME field change falls
-    back to the field-delta string — proving the ternary's else-arm is the only
-    thing that flipped the outcome.
+    The delta now always leads and the caller's "why" rides after it. Coverage
+    cannot see this: the old ternary's arms are intra-line and report covered
+    either way, so the composition must be asserted directly.
     """
-    # Truthy-arm: caller reason wins, auto-delta suppressed (the headline path).
+    # WITH a reason: BOTH the delta and the caller's why are on the event.
     item  = _item( title="old title" )
     event = repo.apply_patch(
         item      = item,
@@ -727,12 +755,11 @@ def test_apply_patch_caller_reason_wins_over_field_delta( repo ):
         authority = "standing",
         reason    = "reassigned to balance the queue",
     )
-    assert item.title       == "new title"                        # the edit still lands
-    assert event.reason     == "reassigned to balance the queue"  # caller reason WINS
-    assert "title:"     not in event.reason                       # the auto-delta is NOT used
+    assert item.title       == "new title"                                       # the edit still lands
+    assert event.reason     == "title: 'old title' -> 'new title' | reason: reassigned to balance the queue"
     assert event.transition == "patched"
 
-    # Else-arm parity: an absent reason on the SAME change falls back to the delta.
+    # WITHOUT a reason: the delta alone, unchanged from before the fix.
     item2  = _item( title="old title" )
     event2 = repo.apply_patch(
         item      = item2,
@@ -740,10 +767,10 @@ def test_apply_patch_caller_reason_wins_over_field_delta( repo ):
         actor     = "mr_radio a1b2c3",
         authority = "standing",
     )
-    assert event2.reason == "title: 'old title' -> 'new title'"   # absent-reason falls back to the delta
+    assert event2.reason == "title: 'old title' -> 'new title'"                  # no trailing separator when absent
 
-    # Else-arm also covers an EMPTY-STRING reason — `reason if reason` gates on
-    # truthiness, not `is not None`, so "" must behave like absent, not win.
+    # EMPTY-STRING reason behaves like absent — the gate is truthiness, not `is
+    # not None`, so "" must not append a dangling " | reason: ".
     item3  = _item( title="old title" )
     event3 = repo.apply_patch(
         item      = item3,
@@ -752,8 +779,64 @@ def test_apply_patch_caller_reason_wins_over_field_delta( repo ):
         authority = "standing",
         reason    = "",
     )
-    assert event3.reason == "title: 'old title' -> 'new title'"   # "" is falsy -> delta, not the empty reason
+    assert event3.reason == "title: 'old title' -> 'new title'"
 
+
+def test_apply_patch_body_overwrite_records_the_overwritten_text( repo ):
+    """
+    BUG a01e4e2a, the specimen that motivated it: a body overwrite carrying a
+    justification must still name what it destroyed. This is the assertion that
+    goes red if the substitution ternary ever comes back — the OLD body text has
+    to be present in the audit event, not just the polite reason.
+    """
+    item  = _item( body="the sixty-thousand-character original" )
+    event = repo.apply_patch(
+        item      = item,
+        fields    = { "body": "replacement" },
+        actor     = "mr_radio a1b2c3",
+        authority = "standing",
+        reason    = "tightening the spec per Rick",
+    )
+    assert "the sixty-thousand-character original" in event.reason              # the OVERWRITTEN text survives
+    assert "tightening the spec per Rick"          in event.reason              # and so does the why
+    assert item.body == "replacement"
+
+
+def test_apply_patch_noop_with_reason_keeps_the_noop_marker( repo ):
+    """
+    The genuinely-empty case keeps its exact wording and gains the caller's why —
+    an unchanged-field patch must not read as though a delta was recorded.
+    """
+    item  = _item( title="same" )
+    event = repo.apply_patch(
+        item      = item,
+        fields    = { "title": "same" },
+        actor     = "a b",
+        authority = "standing",
+        reason    = "no change intended",
+    )
+    assert event.reason == "no-op patch (no field changed) | reason: no change intended"
+
+
+def test_apply_patch_delta_reason_and_flag_suffix_all_survive( repo ):
+    """
+    Three-way composition: the persona-flag marker rides the RESOLVED reason, so
+    it must land after the caller's why, with the delta still leading. Before the
+    fix this event carried only "manager handoff [persona_flag: ...]".
+    """
+    item  = _item( owner_persona="krishna" )
+    event = repo.apply_patch(
+        item        = item,
+        fields      = { "owner_persona": "ziggy" },
+        actor       = "a b",
+        authority   = "standing",
+        reason      = "manager handoff",
+        flag_suffix = "[persona_flag: owner 'ziggy' off-roster]",
+    )
+    assert event.reason == (
+        "owner_persona: 'krishna' -> 'ziggy' | reason: manager handoff "
+        "[persona_flag: owner 'ziggy' off-roster]"
+    )
 
 # ---------------------------------------------------------------------------
 # Phase 2.1 — query_chase_due + apply_chase (chase consumer support)
@@ -1034,7 +1117,11 @@ def test_apply_patch_appends_flag_suffix_to_caller_reason( repo ):
         reason      = "manager handoff",
         flag_suffix = "[persona_flag: owner 'ziggy' off-roster]",
     )
-    assert event.reason == "manager handoff [persona_flag: owner 'ziggy' off-roster]"
+    # delta LEADS (bug a01e4e2a), caller why in the middle, marker last
+    assert event.reason == (
+        "owner_persona: 'krishna' -> 'ziggy' | reason: manager handoff "
+        "[persona_flag: owner 'ziggy' off-roster]"
+    )
 
 
 def test_apply_patch_none_flag_suffix_is_noop( repo ):
@@ -1047,6 +1134,158 @@ def test_apply_patch_none_flag_suffix_is_noop( repo ):
     )
     assert "[persona_flag" not in event.reason
     assert "priority: 'P2' -> 'P0'" in event.reason
+
+
+# ---------------------------------------------------------------------------
+# UN-PARK: leaving `parked` must discard the quote that justified the park
+#
+# 🔴 WHY THIS BLOCK EXISTS. Reviewing the un-park verb (row b4bc91f2, parent P0
+# 03d3bf78) I removed the two clearing lines in `apply_transition`'s `else` branch
+# and ran the tier: 424 passed before, 424 passed after. Widened to every unit file
+# naming park_reason / task_repository / TaskRepository -- 42 files, 1576 tests --
+# still ZERO red. The integration tier names park_reason 52 times and asserts
+# presence, captured_at and staleness, never the CLEAR.
+#
+# So the store's own contract -- "a quote must never outlive the park it justified"
+# -- could be deleted and the whole fleet stayed green. The clearing code is older
+# than the un-park verb and was never the verb's defect; what the verb changes is
+# that leaving `parked` stops being rare. An unguarded rule nobody exercised is
+# cheap; an unguarded rule on the routine path is not.
+# ---------------------------------------------------------------------------
+
+_PARK_QUOTE = "Re-parked behind the four live P0s Rick ordered tonight, not abandoned."
+
+
+def _parked_item( **overrides ):
+    """A row mid-park: quote attached, capture stamped, chase pending."""
+    fields = dict(
+        status                  = "parked",
+        park_reason             = _PARK_QUOTE,
+        park_reason_captured_at = datetime( 2026, 9, 8, 17, 0, tzinfo=timezone.utc ),
+        next_chase_ts           = datetime( 2026, 9, 8, 20, 0, tzinfo=timezone.utc ),
+    )
+    fields.update( overrides )
+    return _item( **fields )
+
+
+def test_un_parking_CLEARS_the_park_reason_and_its_capture_stamp( repo ):
+    """THE REGRESSION TEST. Un-park is `parked -> queued`; the quote must not survive it.
+
+    Rick ruled the target status himself (row 03d3bf78, verbatim: "the proper state is
+    to go from parked to queued"), so this is the edge the verb actually posts.
+    """
+    item = _parked_item()
+
+    event = repo.apply_transition(
+        item      = item,
+        to_status = "queued",
+        actor     = "sam 684c7fdd",
+        authority = "standing",
+    )
+
+    assert item.status == "queued"
+    assert item.park_reason is None, (
+        "the park_reason survived an un-park -- a stale justification is now attached to a "
+        "row that is no longer parked, which is the exact outcome the store contract forbids" )
+    assert item.park_reason_captured_at is None, (
+        "the capture stamp outlived the quote it dated -- a date on a deleted quote dates "
+        "nothing, and it makes a later re-park's equality invariant unreadable" )
+    assert event.transition == "parked->queued"
+
+
+def test_RE_PARKING_KEEPS_a_quote_so_the_clear_is_not_unconditional( repo ):
+    """🔴 THE POSITIVE CONTROL.
+
+    Without it, a repository that discarded park_reason on EVERY transition would pass
+    the test above, and a re-park -- which exists precisely to refresh the quote -- would
+    silently store nothing. The clear must be a property of LEAVING parked, not of moving.
+    """
+    item = _parked_item()
+    fresh = "Re-parked behind the coverage gate, per Rick 2026-09-08."
+
+    repo.apply_transition(
+        item        = item,
+        to_status   = "parked",
+        actor       = "sam 684c7fdd",
+        authority   = "standing",
+        park_reason = fresh,
+    )
+
+    assert item.status == "parked"
+    assert item.park_reason == fresh, "a re-park must store the refreshed quote, not discard it"
+    assert item.park_reason_captured_at is not None, "a stored quote must carry its capture stamp"
+
+
+def test_un_parking_LEAVES_the_row_in_its_CATEGORY( repo ):
+    """Rick's scope ruling, verbatim: "un-parking means leaving in the category".
+
+    The parent row flagged this as an intention with nothing enforcing it. The client
+    cannot send a grouping field -- `transitionExtras` posts a whitelist and un-park's
+    is one key -- but nothing said the REPOSITORY leaves them alone, and that is the
+    half a client-side argument cannot cover.
+    """
+    item = _parked_item( project="lupin", correlation_key="epic:coverage-100-mandate" )
+
+    repo.apply_transition(
+        item      = item,
+        to_status = "queued",
+        actor     = "sam 684c7fdd",
+        authority = "standing",
+    )
+
+    assert item.correlation_key == "epic:coverage-100-mandate", (
+        "un-park moved the row out of its epic -- it changes ONE field, it is not a re-filing" )
+    assert item.project == "lupin", "un-park changed the row's project"
+
+
+def test_moving_a_parked_row_to_BLOCKED_ALSO_clears_the_quote( repo ):
+    """🔴 THE SECOND CLEAR SITE. There are TWO in this repository, not one.
+
+    `apply_transition` clears `park_reason` + `park_reason_captured_at` in two
+    mutually-exclusive branches:
+
+        :404  under `if to_status == "blocked":`   <- THIS test
+        :426  under `else:` — leaving parked       <- test_un_parking_CLEARS_...
+
+    Only `:426` was watched. Measured before this test existed: replacing the
+    `blocked` branch's clear with `pass` gave 470 passed before AND after, zero
+    red — the line was correct and nothing would have noticed if it were deleted.
+
+    ⚠️ WHY THIS IS NOT A DUPLICATE OF THE UN-PARK TEST. The two branches are an
+    `if`/`elif`/`else` chain, so `parked -> blocked` takes `:404` and ONLY `:404`.
+    Neuter that branch and the un-park test stays green, because it drives the
+    `else`. One assertion, one sufficient cause.
+
+    ⚠️ AND `parked -> blocked` IS A REAL EDGE, not a hypothetical: it is present
+    in `LEGAL_TRANSITIONS[ "parked" ]` (checked, not assumed — an unreachable
+    line wants a pragma, not a test).
+
+    The contract is the same one the `else` branch cites: a park_reason must
+    never outlive the park it justified, and NEITHER database CHECK fires in
+    this direction — both are guarded by `status != 'parked' OR ...`, which is
+    vacuously true the moment the status moves. The test is the only guard.
+    """
+    item = _parked_item()
+
+    event = repo.apply_transition(
+        item          = item,
+        to_status     = "blocked",
+        actor         = "sam 684c7fdd",
+        authority     = "standing",
+        blocked_by    = [ { "kind": "persona", "id": "maria" } ],
+        next_chase_ts = datetime( 2026, 9, 9, 12, 0, tzinfo=timezone.utc ),
+    )
+
+    assert item.status == "blocked"
+    assert item.park_reason is None, (
+        "a park_reason survived `parked -> blocked` -- the quote is now attached to a row "
+        "that is blocked rather than parked, and no DB CHECK fires in this direction" )
+    assert item.park_reason_captured_at is None, (
+        "the capture stamp outlived the quote it dated on the `blocked` branch -- the same "
+        "defect the un-park path guards against, one branch over" )
+    assert event.transition == "parked->blocked", (
+        "this test must exercise the BLOCKED branch specifically -- if the edge changed, it "
+        "is no longer covering the clear site it was written for" )
 
 
 if __name__ == "__main__":

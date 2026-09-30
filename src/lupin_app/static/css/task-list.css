@@ -40,6 +40,21 @@
     font-variant-numeric: tabular-nums;
 }
 
+/* THE STAMP GETS ITS OWN LINE, LEFT-ALIGNED (Rick, 2026-09-01).
+   It read as "far right" only because it was the last inline thing on the row — there
+   is no float or auto margin pushing it there. Going block puts it on its own line at
+   the h3's left edge, which hands the whole first line back to the counts and the gate
+   verdict. Size and colour are inherited from the rule above, unchanged, as asked.
+
+   ⚠️ SCOPED BY ID ON PURPOSE. `.task-list-updated` is shared — #epic-board-updated
+   wears the same class (notifications.html, the Epic Board header). Rick asked about
+   the task-list bar, so the twin is deliberately left alone rather than changed
+   uninvited; giving it the same treatment is a one-line addition to this selector. */
+#task-list-updated {
+    display: block;
+    margin-left: 0;
+}
+
 /* ---- Table ----
    Status-color custom props (scoped to the table) drive the status-dot + the
    3px row left-accent below. Color is ALWAYS redundant with the status WORD in
@@ -52,6 +67,13 @@
     --task-done:    #9e9e9e;  /* grey   — terminal: done            */
     --task-dropped: #bdbdbd;  /* l.grey — terminal: dropped         */
     --task-unknown: #bdbdbd;  /* l.grey — unrecognized status       */
+    /* Two statuses added 2026-09-02 (Rick's P0, row 8af64f5a). Each gets its OWN
+       colour rather than falling through to the unknown grey: a deliberate refusal,
+       a row awaiting triage, and a typo are three different situations, and one
+       grey for all three tells the operator nothing about which they are seeing. */
+    --task-parked:       #26a69a;  /* teal   — deferred by a human, bounded, NOT terminal */
+    --task-not-approved: #7e57c2;  /* violet — held in the triage area, NOT terminal */
+    --task-wont-fix:     #6d4c41;  /* brown  — terminal: refused on purpose          */
 
     width: 100%;
     border-collapse: collapse;
@@ -152,6 +174,37 @@ tbody.task-group.collapsed .task-row {
     vertical-align: middle;
 }
 
+/* ---- The id cell is a one-click copy — Rick's row dbb4c187 ----------------
+   ⚠️ DELIBERATELY NOT SCOPED TO `.task-list-table`. The rule directly below is,
+   and the epic board's table is `.epic-board-table`, so the id column's own
+   monospace and colour never reach that pane — the pane-scoped drift this file
+   has now recorded three times. A copy affordance that appears in two panes of
+   three would be the fourth. */
+.task-id-copy {
+    cursor        : pointer;
+    border-radius : 3px;
+    padding       : 0 2px;
+}
+
+.task-id-copy:hover,
+.task-id-copy:focus-visible {
+    background : rgb( 127, 127, 127, 0.14 );
+}
+
+/* Confirmation via `::after` rather than by replacing the label: the cell keeps
+   its width, and if the timer that clears this never fires, nothing has been
+   destroyed. A copy with no feedback is indistinguishable from a dead click. */
+.task-id-copied::after {
+    content     : " ✓";
+    color       : var( --task-done, #2f9e44 );
+    font-weight : 600;
+}
+
+.task-id-copy-failed::after {
+    content : " ✗";
+    color   : var( --error-color, #e06c75 );
+}
+
 /* ---- ID column (design 2026.06.29 row redesign — leftmost) ----
    The compact 8-char row identifier: monospace + tabular nums, no wrap. */
 .task-list-table .task-col-id,
@@ -162,23 +215,100 @@ tbody.task-group.collapsed .task-row {
     white-space: nowrap;
 }
 
-.task-row .task-col-title {
+.task-row .task-col-title,
+.epic-row .task-col-title {
     font-weight: 600;
-    /* Truncated to ~60 chars in JS (full title rides the hover-tooltip); keep
-       the cell on one line so an over-long legacy title can't wrap the row. */
-    white-space: nowrap;
-    max-width: 30ch;
+
+    /* 🔴 WAS A ONE-LINE CLIP; IT IS NOW A TWO-LINE WRAP. Rick's ruling 2026-09-03
+       (row 8af64f5a): the title carries NO character cap. It wraps to a second
+       line and the row grows taller.
+
+       The old rule paired `white-space: nowrap` with a JS truncation at
+       ~60 chars, so the ellipsis a reader saw was the JS cap, not this cell.
+       Maya removes that cap in the renderer; without the clamp below a long
+       title would then blow the row out, which is why the two changes are one
+       change split across two files.
+
+       ⚠️ `max-width: 30ch` is DELETED, not overridden. Left in place it fights
+       the column width set below and wins — the title cell would sit at 30ch
+       inside a 60.92% column and the layout would silently ignore its budget. */
+    white-space   : normal;
+    overflow-wrap : anywhere;
+
+    /* 🔴 THE CLAMP IS ON THE SPAN, NEVER ON THIS CELL — and the two failed attempts
+       that establish why are worth more than the rule that replaced them.
+
+       Both candidates REACH this cell and are IGNORED, because a `<td>` is
+       `display: table-cell`:
+
+         · `-webkit-line-clamp` did not bind on the cell. ⚠️ NOT because computed
+           `display` reads `flow-root` — that reading is a RED HERRING and both of
+           us reasoned from it. Measured on the span below: computed display is
+           ALSO `flow-root` there, and the clamp binds perfectly. Chrome reports
+           `flow-root` either way, so the string says nothing about whether the
+           clamp fired. THE GEOMETRY IS THE EVIDENCE: `clientHeight == scrollHeight`
+           (51/51) on the cell means nothing was clamped; 39 against 78 on the span
+           means it was.
+         · `max-height` is the bound a cell ought to honour and does not. Measured:
+           computed `max-height: 39px` and `overflow: hidden` both present ON THE
+           CELL, and the cell rendered 90px. Control, identical CSS and identical
+           text on a `div`: bound at 39px. `max-height` does not apply to
+           `display: table-cell`.
+
+       ⚠️ AND THE FIRST CUT FAILED IN THE DANGEROUS DIRECTION. `overflow: hidden`
+       was live while the clamp was inert, so a long title WAS cut — at whatever
+       height the row happened to be (51px, about two and a half lines) rather than
+       at a deliberate two. A four-line title measured clientHeight 51 against
+       scrollHeight 71. An accidental bound looks exactly like an intended one
+       until you measure it, which is the whole reason this comment exists. */
     overflow: hidden;
-    text-overflow: ellipsis;
 }
 
-/* ---- Detail column (design 2026.06.29 row redesign — rightmost 📄) ---- */
-.task-list-table .task-col-detail,
-.task-list-table th.task-col-detail {
-    text-align: center;
-    white-space: nowrap;
-    width: 1%;
+/* The clamp lives on Maya's `<span class="task-title">`, the only child of the
+   cell and the carrier of the whole title text. A span is an inline box, so it
+   takes `-webkit-box` and the clamp binds — which the cell could not do.
+
+   ⚠️ THE `title=` TOOLTIP STAYS ON THE `<td>`, so a clamped title is still
+   readable in full on hover. A clamp that hides text with no way to recover it
+   would be the character cap again wearing a different mechanism. */
+.task-row .task-col-title .task-title,
+.epic-row .task-col-title .task-title {
+    display            : -webkit-box;
+    -webkit-line-clamp : 2;
+    line-clamp         : 2;
+    -webkit-box-orient : vertical;
+    overflow           : hidden;
+    overflow-wrap      : anywhere;
+    line-height        : 19.5px;
 }
+
+/* ---- Detail column (design 2026.06.29 row redesign — rightmost 📄) ----
+   🔨 DELETED 2026-09-04 — Rick's P0, row 17393c56. It read:
+
+       .task-list-table .task-col-detail,
+       .task-list-table th.task-col-detail { text-align: center;
+                                             white-space: nowrap; width: 1%; }
+
+   🔴 IT WAS AIMED AT A COLUMN THAT NO LONGER EXISTS AND HIT A FIELD INSTEAD.
+   `ROW_SCHEMA.line1` is id · title · class · status · priority — there has been
+   no line-1 detail column since the six-column schema landed, so `width: 1%`
+   had drifted onto `div.task-disclosed-field.task-col-detail` on LINE 3, where
+   it collapsed the box to 9px. Measured open in the browser: label 37px and
+   value 21px inside a 9px box, the 📄 painting at x 241..262 while the actions
+   block began at x 219, and a hit test at the emoji's centre returning
+   `task-disclosed-label` — the neighbour's label, on top of the detail.
+
+   ⚠️ AND IT WAS PANE-SCOPED, so it broke two panes of three. `.task-list-table`
+   covers the task list and the holding area; the epic board's table is
+   `.epic-board-table` and measured 63px, correct, untouched. The epic board
+   escaped by being OUTSIDE THE SELECTOR — not by being different.
+
+   🔴 THIS IS THE SECOND TIME TONIGHT. The sticky `.task-col-actions` pin
+   (row 7bacb4ab) was the same species: a rule written for the old twelve-column
+   line 1, outliving its target, still matching something. That one was harmless;
+   this one shipped a defect Rick found from a chair. ⇒ WHEN A COLUMN LEAVES
+   LINE 1, ITS RULES DO NOT LEAVE WITH IT — they go looking for a new element,
+   and `task-col-*` names are reused on the disclosed fields by construction. */
 
 .task-detail-emoji {
     cursor: pointer;
@@ -209,10 +339,29 @@ tbody.task-group.collapsed .task-row {
 }
 
 /* ---- Body overlay (design 2026.06.29 / D2 — shows the task-store `body`) ---- */
+/* 🔴 THE INTENDED ORDER, SO THE NEXT PERSON RAISING A VALUE KNOWS WHAT THEY COMPETE WITH:
+ *
+ *     .lupin-nav ............................. 9999   lupin-nav.css:18, fixed 56px top bar
+ *     THIS OVERLAY, and every modal .......... 10000  must sit ABOVE the nav
+ *     a modal's own nested layer ............. 10001  broadcast/notification stack tops out here
+ *
+ * A modal BELOW the nav is not a modal. This rule read `z-index: 1000` until 2026-09-01, so
+ * the nav painted over the backdrop and swallowed clicks meant for it — measured, not
+ * theorised: playwright retried a backdrop click 60 times across 30s and every single retry
+ * reported `<div class="lupin-nav-inner"> from <nav id="lupin-nav"> subtree intercepts
+ * pointer events`.
+ *
+ * ⚠️ THE FAILING TEST WAS THE SMALLER HALF. The part that reaches a person is that the nav's
+ * LINKS stayed clickable through an open modal — an overlay that does not trap interaction is
+ * not modal, whatever it looks like.
+ *
+ * 10000 is not a new opinion; it is this app's existing convention for anything that must beat
+ * the nav — broadcast-panel.css:179 and notifications.css:1821, 2836, 2949, 4309 all use
+ * 10000/10001. This rule was the outlier. ⇒ If you raise the nav above 9999, these move too. */
 .task-body-overlay {
     position: fixed;
     inset: 0;
-    z-index: 1000;
+    z-index: 10000;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -242,6 +391,7 @@ tbody.task-group.collapsed .task-row {
 .task-body-overlay-body {
     margin: 0;
     white-space: pre-wrap;
+    /* stylelint-disable-next-line declaration-property-value-keyword-no-deprecated -- kept deliberately: the spec keeps this keyword for compatibility, and its replacement (word-break: normal + overflow-wrap: anywhere) is not pixel-neutral under a descendant that sets its own overflow-wrap (row d3d4a18c) */
     word-break: break-word;
     font-family: inherit;
     font-size: 13px;
@@ -293,6 +443,9 @@ tbody.task-group.collapsed .task-row {
 .task-status-queued  .task-status-dot { background: var( --task-queued ); }
 .task-status-done    .task-status-dot { background: var( --task-done ); }
 .task-status-dropped .task-status-dot { background: var( --task-dropped ); }
+.task-status-parked       .task-status-dot { background: var( --task-parked ); }
+.task-status-not-approved .task-status-dot { background: var( --task-not-approved ); }
+.task-status-wont-fix     .task-status-dot { background: var( --task-wont-fix ); }
 .task-status-unknown .task-status-dot { background: var( --task-unknown ); }
 
 /* ---- Parked rows (2026-07-22) ------------------------------------------------
@@ -326,18 +479,73 @@ tbody.task-group.collapsed .task-row {
     cursor: help;
 }
 
-/* Row left-edge accent (3px) on the first cell, keyed to the status class */
-.task-row.task-status-blocked td:first-child { box-shadow: inset 3px 0 0 var( --task-blocked ); }
-.task-row.task-status-active  td:first-child { box-shadow: inset 3px 0 0 var( --task-active ); }
-.task-row.task-status-review  td:first-child { box-shadow: inset 3px 0 0 var( --task-review ); }
-.task-row.task-status-queued  td:first-child { box-shadow: inset 3px 0 0 var( --task-queued ); }
-.task-row.task-status-done    td:first-child { box-shadow: inset 3px 0 0 var( --task-done ); }
-.task-row.task-status-dropped td:first-child { box-shadow: inset 3px 0 0 var( --task-dropped ); }
-.task-row.task-status-unknown td:first-child { box-shadow: inset 3px 0 0 var( --task-unknown ); }
+/* Row left-edge accent (3px) — Rick, row 3775155f: rows 2 and 3 carry the SAME
+   bar as row 1, and the epic board carries it too.
+
+   🔴 THE COLOUR IS NOW A VARIABLE ON THE ROW, NOT A SHADOW PER SELECTOR. The
+   previous form wrote the shadow ten times against `.task-row` alone, which is
+   why it was MEASURED absent from the epic board's row 1 (`box-shadow: none`)
+   and from every disclosed row in all three panes. A custom property inherits
+   into the cell, so one application rule now serves line 1, line 2/3 and the
+   epic board from a single definition and they cannot drift apart again.
+
+   ⚠️ THE DISCLOSED ROW HAD NO STATUS CLASS UNTIL THIS CHANGE — `_renderRow` now
+   stamps it on the controls row too, because a bar keyed to status cannot find
+   its colour on a row that never said which status it is. */
+.task-row.task-status-blocked,
+.epic-row.task-status-blocked,
+.task-controls-row.task-status-blocked { --row-accent: var( --task-blocked ); }
+.task-row.task-status-active,
+.epic-row.task-status-active,
+.task-controls-row.task-status-active { --row-accent: var( --task-active ); }
+.task-row.task-status-review,
+.epic-row.task-status-review,
+.task-controls-row.task-status-review { --row-accent: var( --task-review ); }
+.task-row.task-status-queued,
+.epic-row.task-status-queued,
+.task-controls-row.task-status-queued { --row-accent: var( --task-queued ); }
+.task-row.task-status-done,
+.epic-row.task-status-done,
+.task-controls-row.task-status-done { --row-accent: var( --task-done ); }
+.task-row.task-status-dropped,
+.epic-row.task-status-dropped,
+.task-controls-row.task-status-dropped { --row-accent: var( --task-dropped ); }
+.task-row.task-status-parked,
+.epic-row.task-status-parked,
+.task-controls-row.task-status-parked { --row-accent: var( --task-parked ); }
+.task-row.task-status-not-approved,
+.epic-row.task-status-not-approved,
+.task-controls-row.task-status-not-approved { --row-accent: var( --task-not-approved ); }
+.task-row.task-status-wont-fix,
+.epic-row.task-status-wont-fix,
+.task-controls-row.task-status-wont-fix { --row-accent: var( --task-wont-fix ); }
+.task-row.task-status-unknown,
+.epic-row.task-status-unknown,
+.task-controls-row.task-status-unknown { --row-accent: var( --task-unknown ); }
+
+.task-row td:first-child,
+.epic-row td:first-child,
+.task-controls-row > td:first-child { box-shadow: inset 3px 0 0 var( --row-accent, transparent ); }
 
 /* Blocked rows: subtle red wash so owed-and-waiting work stands out */
 .task-row.task-status-blocked td {
     background: rgb(198, 40, 40, 0.06);
+}
+
+/* ⚠️ THE PINNED ACTIONS CELL HAD TO GO OPAQUE, AND OPAQUE ERASES THIS WASH.
+   A sticky cell scrolls over its own row, so a transparent one shows the other
+   columns sliding underneath it; the fix below gives it a solid white ground.
+   That ground would otherwise paint straight over the blocked tint, leaving one
+   white notch at the right end of every blocked row — the tint's whole job is
+   to be readable at a glance down the column, and a gap in it reads as a row
+   that is not blocked.
+
+   Layered rather than pre-mixed: a gradient of the SAME rgba over #fff composites
+   to exactly what the wash produces elsewhere, so the two cannot drift if the
+   wash is ever re-tuned. A hand-computed hex here would be a second place to
+   remember. */
+.task-row.task-status-blocked .task-col-actions {
+    background: linear-gradient( rgb(198, 40, 40, 0.06), rgb(198, 40, 40, 0.06) ), #fff;
 }
 
 /* ---- Priority heat-tint (cell background) ----
@@ -404,4 +612,1268 @@ tbody.task-group.collapsed .task-row {
     border-left: 4px solid #5e35b1;
     text-align: left;
     line-height: 1.5;
+}
+
+/* ---- Operator controls for the ratio gate (2026-09-01) ----
+   The threshold slider moves the number the CREATE gate refuses on, fleet-wide, so
+   this cluster is deliberately quiet but legible — it is a policy control sitting in
+   an observability panel, and should not read as decoration.
+
+   Starts `hidden` in the markup, revealed only once the settings endpoint answers. A
+   slider parked at its HTML default would show the operator a threshold the gate is
+   not using — the same "looks identical whether it works or not" failure that let the
+   ratio endpoint answer 422 unnoticed. */
+.flow-ratio-controls {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px 14px;
+    margin: 0 0 12px 0;
+    padding: 8px 12px;
+    border: 1px solid #e9ecef;
+    border-left: 4px solid #5e35b1;
+    border-radius: 4px;
+    background: #fbfbfd;
+    font-size: 12px;
+    color: #495057;
+}
+
+/* THE `display: flex` ABOVE BEATS THE UA STYLESHEET'S `[hidden] { display: none }`,
+   so without this companion the `hidden` attribute on #flow-ratio-controls is INERT.
+   Measured in Chromium, not argued from the cascade: setting `root.hidden = true`
+   left `getComputedStyle( root ).display === "flex"` and the cluster still occupying
+   space. That is not cosmetic — it is the whole of what `_paintFlowRatioSettings`
+   relies on to keep an unreadable settings endpoint from showing an operator sliders
+   parked at their HTML defaults, i.e. a threshold the create gate is not using.
+   Same trap, same fix as `.persona-popover-borrowed[hidden]` in persona-modal.css. */
+.flow-ratio-controls[hidden] {
+    display: none;
+}
+
+/* KEEP EACH LABEL WITH ITS OWN SLIDER. The six controls were direct flex children,
+   so `flex-wrap` was free to break between a label and the input it names: measured
+   at a 700px viewport, "Window" sat on row 1 while its slider wrapped to row 2. The
+   pair is the unit that must survive a wrap, not the individual control. */
+.flow-ratio-field {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+}
+
+.flow-ratio-controls label {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.flow-ratio-controls output {
+    min-width: 40px;
+    padding: 1px 6px;
+    border-radius: 10px;
+    background: #ede7f6;
+    color: #4527a0;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+}
+
+.flow-ratio-controls input[ type="range" ] {
+    width: 140px;
+    accent-color: #5e35b1;
+    vertical-align: middle;
+}
+
+.flow-ratio-controls button {
+    padding: 3px 10px;
+    border: 1px solid #d1c4e9;
+    border-radius: 4px;
+    background: #fff;
+    color: #4527a0;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.flow-ratio-controls button:hover { background: #ede7f6; }
+
+/* THE GATE VERDICT, AS A COLOUR. Green means the gate would ADMIT a new row right
+   now; red means it would REFUSE one. Tied to the verdict rather than to "low is
+   green", so the colour cannot disagree with the behaviour if the comparison ever
+   changes. The comparison is STRICT, so exactly-at-threshold reads red.
+   The clause keeps its full description in a title tooltip, so the colour is a
+   second signal rather than the only one (WCAG 1.4.1). */
+.task-list-flow-ratio.flow-ratio-open   { color: #1b7f3b; }
+.task-list-flow-ratio.flow-ratio-closed { color: #c02b2b; }
+
+/* A PREVIEW MUST NOT LOOK LIKE STATE. While the operator is dragging the threshold
+   the colour is a hypothetical — the dashed underline says the setting shown is not
+   the one in force. It reverts to solid the moment the value is saved. */
+.task-list-flow-ratio.flow-ratio-preview {
+    text-decoration: underline dashed;
+    text-underline-offset: 3px;
+}
+
+/* Provenance / failure line: "saved override" vs "from config", and the admin-only
+   refusal. The TEXT is the signal, never a colour alone (WCAG 1.4.1). */
+.flow-ratio-controls-status {
+    color: #6c757d;
+    font-size: 11px;
+    font-style: italic;
+}
+
+/* ── Per-row state controls (Rick's P0, row 8af64f5a, 2026-09-02) ──────────
+   Inline in the row rather than behind a modal — the pattern the multiplexer
+   settled in render/templates/taskListTable.ts. Drop is legal from any status;
+   Park is rendered disabled where PARK_LEGAL_FROM_STATUSES would refuse it, so
+   the rule is visible at the point of use instead of arriving as a 422.        */
+
+.task-list-table .task-col-actions,
+.task-list-table th.task-col-actions {
+    white-space : nowrap;
+    text-align  : left;
+
+    /* 🔴 PINNED, BECAUSE THIS COLUMN WAS OFF-SCREEN AND UNCLICKABLE. Measured in
+       the live browser 2026-09-03: the twelve-column table is 1065px wide, its
+       pane is 916px, and `.section-content` clips at `overflow-x: hidden` with a
+       right edge of 1431 — while the ellipsis's own box ran 1499..1530. The
+       per-row editor was fully rendered, fully wired, and painted nowhere.
+
+       ⚠️ THE HIT TEST IS NOT THE EVIDENCE, and an earlier draft of this comment
+       said it was. `document.elementFromPoint` did return null on the first
+       reading — because the row sat below the VIEWPORT, not because of the clip.
+       Scrolled into view it returns the button in BOTH the clipped and the fixed
+       arm, so it discriminates nothing here. The box coordinates against the
+       clip edge are the measurement; the hit test was a coincidence that happened
+       to point the right way.
+
+       ⚠️ THAT IS WHY RICK SAW ONLY THE BULK CONTROL. The group header's
+       Approve-all / Won't-fix-all fit inside 916px; every per-row control lived
+       in the one column that did not. The editor was never missing — it was
+       unreachable, which reads identically from a chair.
+
+       ⚠️ THE EPIC BOARD ESCAPED IT BY BEING NARROWER, not by being different.
+       `_renderEpicRow` emits five columns to `_renderTaskRow`'s twelve and fits
+       its pane, so the SAME `_disclosureToggle` and the SAME `_taskActionsCell`
+       were reachable there and clipped here. Nothing about the editor differed.
+
+       Sticky rather than a narrower table: `table-layout: fixed` was measured
+       too and it fits, but it clips four column HEADERS at this width ("Next
+       chase", "Priority", "Detail", "Actions"). Natural widths + a pinned
+       actions column keeps every header legible AND the ellipsis always on
+       screen; the columns in between scroll.
+
+       🔨 THE PIN IS GONE — REMOVED 2026-09-03, AND THE HISTORY ABOVE IS KEPT
+       BECAUSE IT EXPLAINS WHY IT EXISTED. It solved a twelve-column table
+       overflowing a 916px pane. The six-column schema fits 916 exactly, so
+       there is no overflow left for it to solve. Measured by Maya on the
+       shipped page: the ⋯ is REACHABLE in all three panes, 10px inside the
+       right edge, `elementFromPoint` returning the button itself, horizontal
+       scroll 0 everywhere.
+
+       🔴 AND IT WAS NO LONGER AIMED AT ANYTHING IT WAS WRITTEN FOR. There is
+       no line-1 actions cell any more — measured independently by both of us:
+       ZERO `thead th.task-col-actions`, ZERO line-1 `td.task-col-actions`.
+       The selector had drifted onto the actions block INSIDE the disclosed
+       row: five matches, all `div.task-disclosed-field.task-col-actions`.
+
+       ⚠️ AND IT WAS APPLYING INCONSISTENTLY ACROSS PANES, which is the very
+       thing this schema exists to prevent. Of those five, THREE computed
+       `position: sticky, right: 0, z-index: 3` and TWO computed `static` —
+       because the rule is scoped to `.task-list-table` and the epic board's
+       table is `.epic-board-table`. The same element, styled two ways,
+       depending which view you were looking at.
+
+       Harmless in effect today — sticky does nothing without overflow — and
+       that is exactly what makes it worth removing rather than leaving: a
+       rule aimed at a column that no longer exists, quietly applying
+       somewhere it was never pointed, and nothing in any output saying so. */
+}
+
+/* The pane scrolls its own table. Without this the clip above has nowhere to go
+   and the sticky column has no scroll container to stick within. */
+#task-list-container,
+#holding-area-container {
+    overflow-x : auto;
+}
+
+/* The disclosed control strip is a full-width row, so it inherits the table's
+   1065px and would run past the pane exactly like the column above — putting
+   Submit and Update out of reach the moment the operator opened the editor.
+   Pinning it left keeps the whole strip inside the pane at any scroll offset. */
+.task-controls-row > td {
+    overflow : visible;
+}
+
+/* 🔴 `width: max-content` WAS WHY LINE 3 STOPPED SHORT OF THE RIGHT EDGE — Rick's
+   P1, row 5f982bbd: "not expanding fully to the rightmost edge of the table layout
+   area ... stopping before the priority column in all contexts."
+
+   MEASURED OPEN in the real browser at b78c7651, pane 916px, a row disclosed in
+   each pane:
+
+       pane            line 3 box   last field ends   short by   reason input
+       task list        200..1080         990.0         90.0px      175px
+       holding area     200..1080         973.0        107.0px      175px
+       epic board     201.5..1080         991.5         88.5px      175px
+
+   THE COLSPAN WAS NEVER THE DEFECT, and that was the first hypothesis. Every pane
+   has SIX header cells and the disclosed `<td>` declares `colspan="6"`; its box
+   measures 182..1098, identical to the table's own. The SPAN is complete — what
+   stopped short is the CONTENT inside it.
+
+   ⚠️ THE STOP LANDS AT THE PRIORITY COLUMN BY COINCIDENCE, NOT BY RULE. The
+   priority header runs 967..1047 and the strip ended at 973 / 990 / 991.5 — three
+   different numbers, because each is the strip's own max-content width and the
+   three panes render different button labels. A rule would have stopped all three
+   at one x. That it lands near the priority column is what the eye reports; it is
+   not what the code does.
+
+   `max-content` sizes this strip to its contents, so there is no free space in it
+   for anything to grow into — and `.task-reason-input` declares `flex: 1 1 260px`
+   and rendered at 175px, SHRUNK 85px BELOW ITS OWN BASIS while 90px of the line sat
+   empty to its right. `getComputedStyle` reported `flex-grow: 1` throughout: the
+   declaration was correct and never reached the surface, which is the shape counted
+   at 035105e2.
+
+   The `max-content` was written for the era above, where a 1065px table overflowed a
+   916px pane and the strip had to be pinned narrow. That overflow is gone — measured
+   here, `scrollWidth == clientWidth == 916` in all three panes — so sizing to the box
+   costs nothing and is what lets the reason field take the room it already asked for.
+   The sticky pin is left in place: inert without overflow, and its removal is not
+   this fix. */
+.task-controls-row .task-actions {
+    position  : sticky;
+    left      : 0;
+    width     : 100%;
+    max-width : 100%;
+}
+
+.task-actions {
+    display     : flex;
+    flex-wrap   : wrap;
+    gap         : 4px;
+    align-items : center;
+}
+
+.task-action-btn {
+    font-size     : 0.78rem;
+    padding       : 2px 8px;
+    border        : 1px solid var( --border-color, #444 );
+    border-radius : 3px;
+    background    : transparent;
+    color         : inherit;
+    cursor        : pointer;
+}
+
+.task-action-btn:hover:not( .task-action-disabled ) {
+    background : var( --hover-bg, rgb( 255, 255, 255, 0.08 ) );
+}
+
+/* 🔴 RICK'S "PERMANENTLY DISABLED" BUTTON. It was never stuck — it had no LOOK.
+   Measured in his browser 2026-09-03: an enabled `.task-priority-update` and a disabled
+   one returned identical computed style — opacity 1 on both, same background, same
+   colour, and `cursor: pointer` on BOTH. The button flips its `disabled` property
+   correctly on every change; nothing on screen ever said so.
+
+   ⚠️ THAT IS WHY THE TESTS AND THE OPERATOR DISAGREED AND BOTH WERE RIGHT. Every guard
+   reads `button.disabled` and watches it flip. He reads pixels, and they never moved.
+   A state nobody can see is not a control — it is something the software knows and the
+   person using it does not.
+
+   The omission is visible in this file's own neighbours: `.task-action-input:disabled`
+   and `.task-verb-select:disabled` both got a disabled style. The two siblings in that
+   same cell were dressed and the button was not — and the button is the one control
+   whose entire job is to say "not yet", then "now you can".
+
+   `cursor` matters as much as the dimming: a `pointer` on a dead button invites the
+   click that does nothing, which is exactly the interaction he reported. */
+.task-action-btn:disabled {
+    opacity : 0.35;
+    cursor  : not-allowed;
+}
+
+/* Dimmed IN PLACE rather than removed — the same ruling the empty detail emoji
+   follows. A control that vanishes teaches nothing; a disabled one with a title
+   says why it is unavailable. */
+.task-action-disabled {
+    opacity : 0.35;
+    cursor  : not-allowed;
+}
+
+.task-action-input {
+    font-size     : 0.78rem;
+    padding       : 2px 6px;
+    border        : 1px solid var( --border-color, #444 );
+    border-radius : 3px;
+    background    : transparent;
+    color         : inherit;
+    max-width     : 190px;
+}
+
+/* One field instead of three, so it gets the room the three used to share between
+   them. Park asks for a QUOTE of the row's own decisive sentence, and a box that
+   shows eight words at a time is how a quote becomes a paraphrase. */
+.task-reason-input {
+    flex      : 1 1 260px;
+    max-width : none;
+}
+
+/* Disabled because the VERB takes no input — Approve. Distinct from the greyed-out
+   disabled controls above, which mean "this move is not available": here the move is
+   available and simply asks for nothing, so the box recedes rather than looking
+   refused. */
+.task-action-input:disabled {
+    opacity    : 0.45;
+    cursor     : not-allowed;
+    background : rgb( 127, 127, 127, 0.06 );
+}
+
+/* The verb select — the row's one control. Sized to hold the longest option label,
+   which is a greyed one carrying its own reason ("Park — only from queued or in
+   progress"); an <option> has nowhere to put a tooltip, so the label is the only
+   place that explanation can live and it must not be clipped. */
+.task-verb-select {
+    font-size     : 0.78rem;
+    padding       : 2px 6px;
+    border        : 1px solid var( --border-color, #444 );
+    border-radius : 3px;
+    background    : transparent;
+    color         : inherit;
+    max-width     : 320px;
+    cursor        : pointer;
+}
+
+.task-verb-select:disabled {
+    opacity : 0.35;
+    cursor  : not-allowed;
+}
+
+/* A disabled option, greyed the same way its button was. Browsers vary in how much
+   of this they honour on an <option>; the `disabled` attribute is what actually
+   refuses the selection, and this is the visual half only. */
+.task-verb-select option.task-action-disabled {
+    opacity : 0.5;
+    color   : var( --muted-color, #888 );
+}
+
+/* ARMED — won't-fix has been chosen and Submit is one click from closing the row
+   permanently. The label already changes to "Confirm won't-fix"; this makes the state
+   change visible from across the row rather than only to someone reading the button.
+   A second click that looks identical to the first is not a confirmation step. */
+.task-submit-armed {
+    border-color : var( --error-color, #e06c75 );
+    color        : var( --error-color, #e06c75 );
+    font-weight  : 600;
+}
+
+.task-submit-armed:hover {
+    background : rgb( 224, 108, 117, 0.12 );
+}
+
+/* The error stripe is a real row so it lands directly under its own row and
+   scrolls with it; hidden via the `hidden` attribute, never display:none in JS. */
+.task-row-error-stripe td {
+    color         : var( --error-color, #e06c75 );
+    font-size     : 0.78rem;
+    padding       : 2px 8px 6px;
+    border-top    : none;
+}
+
+
+/* ── Holding Area (Rick's P0, row 8af64f5a, 2026-09-02) ────────────────────
+   Rows filed but not yet cleared to start, grouped by filer. Reuses
+   .task-list-table wholesale so a held row and a live row are visibly the SAME
+   row — the difference between them is which pane they are in and what the
+   controls offer, not a second visual language to learn.                     */
+
+.holding-area-group {
+    margin-bottom : 14px;
+}
+
+.holding-area-group-header {
+    display     : flex;
+    flex-wrap   : wrap;
+    gap         : 6px;
+    align-items : center;
+    padding     : 4px 6px;
+    border-left : 3px solid var( --task-not-approved );
+    background  : rgb( 126, 87, 194, 0.07 );
+}
+
+.holding-area-filer {
+    font-weight : 600;
+}
+
+.holding-area-group-count {
+    opacity     : 0.7;
+    font-size   : 0.8rem;
+    margin-right: 8px;
+}
+
+/* The batch status line. Not an error colour: it reports SUCCESS counts as often
+   as refusals, and colouring "8 of 8 approved" red would teach the operator to
+   read a working batch as a failed one. */
+.holding-area-group-status {
+    font-size  : 0.78rem;
+    opacity    : 0.85;
+    margin-left: 4px;
+}
+
+/* An empty holding area is a REAL state and says so in words. A blank pane is
+   indistinguishable from one that failed to load, and this pane is expected to
+   be empty most of the time — exactly when a silent blank is most likely to be
+   misread as broken. */
+.holding-area-empty {
+    padding    : 10px 6px;
+    opacity    : 0.7;
+    font-style : italic;
+}
+
+
+/* Epic-board Actions column. Rick asked for controls on this pane too — "the UI
+   toggles and controls that I need to manage the holding area along with the epic
+   board along with the task list" — so the macro view acts as well as reports.
+   Same cell as the task list, never a second implementation. */
+.epic-board-table .epic-col-actions,
+.epic-board-table th.epic-col-actions {
+    white-space : nowrap;
+    text-align  : left;
+}
+
+
+/* ── Progressive disclosure (Rick, 2026-09-02) ─────────────────────────────
+   His spec: an ellipsis right-justified on the title line indicating hidden
+   functionality; clicking it discloses the controls as ONE narrow row spanning
+   the full width of the item; that second row is NOT shown by default.
+
+   The board's job is seeing many rows at once. Nine controls inline on every row
+   paid that away to save a click, which is the trade he rejected.               */
+
+.task-disclose-button {
+    display       : block;
+    margin-left   : auto;          /* right-justified in its cell */
+    padding       : 0 6px;
+    border        : 1px solid transparent;
+    border-radius : 3px;
+    background    : transparent;
+    color         : inherit;
+    font-size     : 1rem;
+    line-height   : 1;
+    letter-spacing: 1px;
+    cursor        : pointer;
+    opacity       : 0.55;
+}
+
+.task-disclose-button:hover,
+.task-disclose-button[aria-expanded="true"] {
+    opacity : 1;
+    border-color : var( --border-color, #444 );
+}
+
+/* The disclosed row. NARROW is the point — it is a control strip, not a panel,
+   so it must not double the height of the row it belongs to. */
+/* stylelint-disable-next-line no-duplicate-selectors -- disjoint from the earlier block of this selector (overflow); this one sets padding, border-top, background, kept in its own documented section (row d3d4a18c) */
+.task-controls-row > td {
+    padding    : 3px 8px 5px;
+    border-top : none;
+    /* 🔨 TINT REMOVED — Rick, row 3775155f: rows 2 and 3 "look weird" being
+       darker than the title row. It was `rgba( 127, 127, 127, 0.06 )`, measured
+       as the ONLY difference: row 1's cell computes `rgba(0, 0, 0, 0)` in all
+       three panes, so transparent is what "the exact same background" means
+       here rather than a colour to copy. */
+    background : transparent;
+}
+
+/* Controls run as ONE line and wrap only when the viewport forces it. */
+/* stylelint-disable-next-line no-duplicate-selectors -- disjoint from the earlier block of this selector (position, left, width, max-width); this one sets flex-wrap, overflow-x, kept in its own documented section (row d3d4a18c) */
+.task-controls-row .task-actions {
+    flex-wrap : nowrap;
+    overflow-x: auto;
+}
+
+@media ( max-width: 900px ) {
+    .task-controls-row .task-actions { flex-wrap : wrap; }
+}
+
+/* ============================================================================
+   SIX-COLUMN ROW SCHEMA — Rick's ruling 2026-09-03, row 8af64f5a
+   ============================================================================
+
+   Always-visible line: ID · Title · Class · Status · Priority · the ⋯ control.
+   Everything else moves into the disclosed rows below. IDENTICAL IN ALL THREE
+   PANES — task list, holding area and epic board — because the requirement is
+   that a reader never re-parses the left-to-right layout when switching views.
+
+   🔴 WIDTHS ARE PERCENTAGES, AND THAT IS THE POINT. The pane is 916px, but 916
+   is NOT declared anywhere in this repo's CSS — it is a computed width
+   (`#task-list-container`; `.section-content` is 956 border-box and 916 after
+   its 20px padding, which is how two correct measurements of "the pane" can
+   differ by 40). Hard-coding 916 here would pin the layout to a number no rule
+   owns, and would overflow the moment any ancestor moved. Percentages of the
+   table's own 100% width give the identical layout in all three panes AND
+   survive a pane that is not 916.
+
+       column       %        px at 916    natural before (task list / holding)
+       ---------------------------------------------------------------------
+       id           8.52      78.0        77.8
+       title       59.06     541.0       216.8   <- the whole point of the change
+       class        6.77      62.0        58.4
+       status      11.35     104.0        87.4 / 100.4  <- panes DISAGREED
+       priority     8.73      80.0        75.0
+       disclose     5.57      51.0        (did not exist)
+
+   🔴 DISCLOSE WAS 3.71% (34px) AND THE ⋯ RENDERED 7px OUTSIDE THE PANE, adding a
+   horizontal scrollbar — paneScrollWidth 923 against clientWidth 916, measured by
+   Maya on a plain reload. The cell needs 10 + 31 + 10 = 51px: its own left and
+   right padding either side of a 31px button. 34px is 17px short, and 7px of the
+   shortfall escaped the pane.
+
+   ⚠️ SAME SHAPE AS THE 108px DEFECT EARLIER TONIGHT — a control rendering outside
+   the pane it belongs to, in the same column. Narrower, and NOT the same severity:
+   the button stayed clickable once scrolled to, so this breached the edge rather
+   than being unreachable. Said exactly, because overstating it would be the mirror
+   of the mistake that cost us the evening.
+
+   The 1.86% comes off the title, which lands at 541px — still 2.5x its 216.8
+   baseline, so the change that matters to Rick is untouched.
+       ---------------------------------------------------------------------
+                  100.00     916.0
+
+   ⚠️ `status` is set from the LARGER of the two panes (100.4, the holding
+   area), not the task list's 87.4. Sizing to the narrower one would clip the
+   longer status text in the other pane — and the two panes disagreeing by 13px
+   is exactly the re-parsing this ruling exists to remove.
+
+   `table-layout: fixed` is what makes the percentages binding. Under `auto`
+   the browser re-negotiates every column against its content, which is why the
+   panes drifted apart in the first place. The earlier objection to `fixed` —
+   that it clipped four column HEADERS — was measured at TWELVE columns; at six
+   there is 2.6x the room per column. Verified, not assumed: see the header
+   legibility check in the commit that landed this.                          */
+
+/* 🔴 THE EPIC BOARD'S TABLE IS `.epic-board-table`, NOT `.task-list-table`, so the
+   first cut reached two panes out of three. It fitted 916px anyway — by its own
+   `table-layout: auto` negotiation, which is a coincidence and not the schema —
+   and four of six columns disagreed with the other panes: id 70.6 vs 78, class
+   58.4 vs 62, status 101.3 vs 104, disclose 51 vs 34.
+
+   That is a partial miss on Rick's ACTUAL requirement. The reason the scope was
+   reversed to all three panes is that a reader must never re-parse the layout when
+   switching views, and four columns moving between views is exactly that re-parse.
+   Fitting the pane was never the requirement; being IDENTICAL was.                */
+.task-list-table,
+.epic-board-table {
+    table-layout: fixed;
+}
+
+.task-list-table thead th.task-col-id,
+.epic-board-table thead th.task-col-id       { width:  8.52%; }
+.task-list-table thead th.task-col-title,
+.epic-board-table thead th.task-col-title    { width: 59.06%; }
+.task-list-table thead th.task-col-class,
+.epic-board-table thead th.task-col-class    { width:  6.77%; }
+.task-list-table thead th.task-col-status,
+.epic-board-table thead th.task-col-status   { width: 11.35%; }
+.task-list-table thead th.task-col-priority,
+.epic-board-table thead th.task-col-priority { width:  8.73%; }
+.task-list-table thead th.task-col-disclose,
+.epic-board-table thead th.task-col-disclose { width:  5.57%; }
+
+/* ---- The ⋯ control column -------------------------------------------------
+   A CONTROL, NOT A FIELD. It gets its own cell rather than riding inside the
+   priority cell, because a cell doing two jobs is a cell that cannot be
+   styled for either — and because the toggle must not live behind the
+   disclosure it opens.                                                      */
+.task-list-table .task-col-disclose,
+.task-list-table th.task-col-disclose,
+.epic-board-table .task-col-disclose,
+.epic-board-table th.task-col-disclose {
+    text-align  : right;
+    white-space : nowrap;
+    padding-right: 10px;
+}
+
+/* ---- Vertical alignment against a row that is now TWO lines tall ----------
+   🔴 THIS IS THE CELL THAT WAS 108px OFF-SCREEN TONIGHT, and it is positioned
+   against a ONE-line row today. With the title wrapping, a default
+   `vertical-align: middle` would float the ⋯ and every other field to the
+   centre of a taller row while the title starts at the top — so the row would
+   read as two misaligned halves. Top-aligning puts every line-1 cell on the
+   title's FIRST line, which is where Rick's spec puts the ⋯.               */
+.task-list-table tbody tr.task-row > td,
+.task-list-table tbody tr.epic-row > td,
+.epic-board-table tbody tr.task-row > td,
+.epic-board-table tbody tr.epic-row > td {
+    vertical-align: top;
+}
+
+/* ---- The disclosed rows (lines 2 and 3) -----------------------------------
+   Field cells become CHIPS here and reuse the existing `task-col-*` vocabulary
+   rather than inventing a second set of names for the same five fields.
+
+   ⚠️ Scoping matters: the width rules above are bound to `thead th` precisely
+   so they cannot reach these chips. A `task-col-blocked` chip inside a
+   disclosed line must not inherit a column width.                          */
+.task-disclosed {
+    display        : flex;
+    flex-direction : column;
+    gap            : 6px;
+    padding        : 8px 10px 10px;
+}
+
+.task-disclosed-line {
+    display     : flex;
+    flex-wrap   : wrap;
+    align-items : baseline;
+    gap         : 6px 18px;
+}
+
+.task-disclosed-line--fields {
+    font-size     : 12px;
+    color         : #495057;
+    border-bottom : 1px dashed #e9ecef;
+    padding-bottom: 8px;
+}
+
+.task-disclosed-line--actions {
+    gap        : 10px;
+    align-items: center;
+}
+
+.task-disclosed-field {
+    display     : inline-flex;
+    align-items : baseline;
+    gap         : 5px;
+    white-space : nowrap;
+    min-width   : 0;
+}
+
+/* 🔴 THE DETAIL FIELD MUST NOT SHRINK — Rick's P0, row 17393c56.
+   MEASURED OPEN in the real browser on the served page, line 3 of a disclosed row:
+
+       pane            detail box   its label   its value
+       task list         9px          37px        21px      <- content 58px in a 9px box
+       holding area      9px          37px        21px      <- same
+       epic board       63px          37px        21px      <- fits
+
+   `.task-disclosed-field` is `flex: 0 1 auto` with `min-width: 0`, so under
+   pressure it shrinks to nothing. The actions field takes 717px of the line in
+   every pane; where the line is narrower the DETAIL field absorbs the whole
+   shortfall and collapses to 9px. Its label and value then overflow their own
+   box: the 📄 painted at x 241..262 while the actions block began at x 219, so
+   the emoji sat ENTIRELY INSIDE the actions box and a hit test at its centre
+   returned `task-disclosed-label` — the actions block's own label, on top of it.
+   That is Rick's "the actions cell overlaps it and the detail cannot be read".
+
+   ⚠️ THE EPIC BOARD ESCAPED BY BEING WIDER, NOT BY BEING DIFFERENT — its line
+   runs 202..991 against the task list's 200..936, so the same rule left it 63px.
+   Exactly the shape of the 108px incident, and the reason a per-pane eyeball
+   check would have cleared two panes out of three.
+
+   The line already wraps (`flex-wrap: wrap`), so refusing to shrink costs
+   nothing: the actions block moves to its own row rather than crushing the
+   detail. */
+.task-disclosed-line .task-disclosed-field.task-col-detail {
+    flex-shrink: 0;
+}
+
+/* 🔴 THE LAST FIELD ON LINE 3 TAKES THE REST OF THE LINE — Rick's P1, row 5f982bbd.
+   `.task-disclosed-field` is `flex: 0 1 auto`, so every field is sized by its own
+   content and line 3 ended wherever the actions strip happened to end. Growing the
+   actions field is what carries line 3 to the row's right edge; the strip inside it
+   is `width: 100%` (see the block above), so the room arrives at
+   `.task-reason-input`, which has been asking for it with `flex: 1 1 260px` all
+   along.
+
+   ⚠️ LINE 2 IS DELIBERATELY NOT GIVEN THIS. Its last field (`project`) ends at 718
+   against the same 1080 line box — shorter than line 3 ever was — and Rick did not
+   report it, because `--fields` carries a dashed `border-bottom` across the whole
+   line box and already reads as full width. Line 3 has no such rule, so its content
+   IS its visible extent. Stretching line 2's chips as well would space five labelled
+   values across 880px for no reason anybody asked for. */
+.task-disclosed-line--actions .task-disclosed-field.task-col-actions {
+    flex: 1 1 auto;
+}
+
+/* 🔴 THE FIELD IS NOT THE LAST LINK, AND STOPPING AT IT SHIPS AN INVISIBLE FIX.
+   Measured with the rule above in place and this one absent: the actions FIELD
+   reached 1080 in all three panes — 0.0px short, the assertion satisfied — while
+   `.task-actions` stayed at 665px ending at 990, byte-identical to the defect. The
+   box reached the right edge and NOTHING ON SCREEN MOVED.
+
+   The chain has four links and the middle one is a plain `<span>`:
+
+       .task-disclosed-field.task-col-actions   flex item of the line   grows (above)
+       .task-disclosed-value                    flex item of the field  <- THIS
+       .task-actions                            width: 100% of the span
+       .task-reason-input                       flex: 1 1 260px         absorbs it
+
+   `.task-disclosed-value` is `flex: 0 1 auto`, so it sized to its content and
+   `width: 100%` on the strip inside it resolved against that same content width —
+   100% of 665 is 665, and the growth stopped one element above where it was needed.
+   `min-width: 0` because the span is `overflow: hidden`, and a flex item's automatic
+   minimum would otherwise floor it at its content size. */
+.task-disclosed-line--actions .task-col-actions .task-disclosed-value {
+    flex      : 1 1 auto;
+    min-width : 0;
+}
+
+.task-disclosed-label {
+    font-size     : 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color         : #868e96;
+}
+
+.task-disclosed-value {
+    font-size  : 12px;
+    color      : #212529;
+    overflow   : hidden;
+    text-overflow: ellipsis;
+}
+
+/* A field with nothing in it says so, rather than rendering as a bare label
+   with a gap after it — an empty value and a missing field look identical
+   otherwise, and they are not the same thing. */
+.task-disclosed-value:empty::after {
+    content: "—";
+    color  : #adb5bd;
+}
+
+/* ============================================================
+   THE ROW MIC — a size-down of the shared `.stt-button`
+   ============================================================
+
+   🔴 IT OVERRIDES SIZE ONLY, AND DELIBERATELY INHERITS EVERYTHING ELSE.
+   `.stt-button` in notifications.css owns the colours and — the part that matters —
+   the `.recording` and `.processing` states the recorder toggles by class. Restyling
+   this button from scratch would give the task rows a mic that looks right at rest and
+   goes dead-looking the moment someone records into it, because those two states live
+   on the shared class and nowhere else.
+
+   ⚠️ THE BASE IS BUILT FOR A FORM, NOT FOR A TABLE ROW: 8px/12px padding, 16px text and
+   `min-width: 70px` — the min-width exists so the sender card's button does not resize
+   when its timer text appears. On a disclosed row that is a 70px slab beside a 0.78rem
+   input, which is the opposite of the "very small" control Rick asked for. Sized here to
+   sit level with `.task-action-input` (0.78rem / 2px 6px) instead.
+
+   The timer text the min-width was protecting still renders; it simply wraps the button
+   a few pixels wider mid-recording, which is a moving control that is ALREADY moving
+   and pulsing red. */
+.task-actions .task-reason-stt {
+    padding    : 2px 6px;
+    font-size  : 0.85rem;
+    min-width  : 0;
+    line-height: 1.2;
+    flex       : 0 0 auto;
+}
+
+/* =========================================================================
+   FINISHED TASKS pane — Rick's P0, broadcast e254ec7d, 2026-09-07, row 7c616656.
+   Design: src/rnd/2026.09.06-completed-work-accordion-design.md §6-§7.
+
+   Lives in task-list.css rather than a new sheet because notifications.html
+   already links this one (:17) and Rick's 2026-09-06 ruling scopes CSS OUT of
+   the no-reuse rule — a new sheet would need a new <link> line, which is the
+   exact gap (G2) that left the accordion work invisible in a browser for a day.
+   ========================================================================= */
+
+.finished-tasks-controls {
+    display       : flex;
+    flex-wrap     : wrap;
+    align-items   : center;
+    gap           : 12px;
+    padding       : 8px 4px 10px;
+    border-bottom : 1px solid rgb( 128, 128, 128, 0.25 );
+}
+
+.finished-tasks-pills {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.finished-pill {
+    display       : inline-flex;
+    align-items   : center;
+    gap           : 5px;
+    padding       : 3px 10px;
+    border        : 1px solid rgb( 128, 128, 128, 0.45 );
+    border-radius : 999px;
+    background    : transparent;
+    font-size     : 0.85rem;
+    line-height   : 1.4;
+    cursor        : pointer;
+}
+
+/* POSITIVE POLARITY: aria-pressed="true" is SHOWN. The attribute IS the state —
+   there is no parallel class to fall out of sync with it. */
+.finished-pill[ aria-pressed="true" ] {
+    border-color : rgb( 76, 175, 80, 0.9 );
+    background   : rgb( 76, 175, 80, 0.14 );
+    font-weight  : 600;
+}
+
+.finished-pill-count {
+    opacity: 0.75;
+    font-variant-numeric: tabular-nums;
+}
+
+/* A ZERO-COUNT PILL IS DIMMED, NOT HIDDEN, AND STAYS CLICKABLE.
+   "Zero is a claim, not a default" (design §7.1) — a pill that vanishes at zero
+   turns "nothing was refused today" into "this feature does not exist", and makes
+   the control bar change width as the day goes on. Opacity only; no display:none,
+   no pointer-events:none. */
+.finished-pill-zero { opacity: 0.55; }
+
+.finished-tasks-window { margin-left: auto; }
+
+.finished-tasks-table {
+    width           : 100%;
+    border-collapse : collapse;
+    font-size       : 0.85rem;
+}
+
+.finished-tasks-table th {
+    text-align    : left;
+    font-weight   : 600;
+    padding       : 4px 8px;
+    border-bottom : 1px solid rgb( 128, 128, 128, 0.35 );
+    opacity       : 0.8;
+}
+
+.finished-tasks-table td {
+    padding       : 4px 8px;
+    border-bottom : 1px solid rgb( 128, 128, 128, 0.12 );
+    vertical-align: top;
+}
+
+.finished-when {
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+    opacity: 0.8;
+}
+.finished-what { width: 55%; }
+/* The status glyph is a PREFIX inside WHEN, never its own column (design §6.4) — so the
+   grid keeps one shape across all seven filter combinations. Only the gap is styled here;
+   the character itself comes from FINISHED_STATUS_GLYPHS, which the pills also answer to. */
+.finished-status-glyph { margin-right: 0.4em; }
+.finished-who {
+    white-space: nowrap;
+    opacity: 0.85;
+}
+
+/* WHY IS CLAMPED TO ONE LINE, and the clamp is the design decision (§6.2):
+   ->done events DO carry reasons and some are long enough to bury the row. The
+   full text stays reachable on hover via the title attribute, so clamping costs
+   nothing the reader cannot recover. */
+.finished-why {
+    max-width     : 28ch;
+    white-space   : nowrap;
+    overflow      : hidden;
+    text-overflow : ellipsis;
+    opacity       : 0.7;
+}
+
+.finished-tasks-empty,
+.finished-tasks-partial {
+    padding: 10px 6px;
+    font-size: 0.85rem;
+    opacity: 0.8;
+}
+.finished-tasks-partial { color: #e6a700; }
+
+/* ---------------------------------------------------------------------------
+   TICKET LOOKUP BY HASH (row 732151f2, Rick's P0)
+   ---------------------------------------------------------------------------
+   Paste the 8-hex token you were handed in a DM and get the ticket. Shared by
+   both clients: the notifications page mounts it in the task-list section body,
+   the multiplexer in its section-header action slot. ONE stylesheet so the two
+   cannot drift into looking like different features.
+
+   THE RESULT REGION IS COLOUR-CODED BY data-state, and that is not decoration:
+   "no such ticket" and "your prefix matches three" call for opposite next moves,
+   so they must not look alike at a glance. */
+.task-lookup {
+    display     : flex;
+    align-items : center;
+    gap         : 6px;
+    flex-wrap   : wrap;
+    margin      : 6px 0 10px;
+}
+
+.task-lookup-input {
+    flex          : 1 1 14ch;
+    min-width     : 12ch;
+    max-width     : 26ch;
+    padding       : 3px 6px;
+    font-family   : ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size     : 0.82rem;
+    border        : 1px solid rgb( 128, 128, 128, 0.45 );
+    border-radius : 4px;
+    background    : transparent;
+    color         : inherit;
+}
+
+.task-lookup-go {
+    padding       : 2px 6px;
+    font-size     : 0.9rem;
+    line-height   : 1.2;
+    cursor        : pointer;
+    border        : 1px solid rgb( 128, 128, 128, 0.45 );
+    border-radius : 4px;
+    background    : transparent;
+}
+
+/* Empty until a lookup runs: no reserved gap, so the control does not look
+   broken before it has been used. */
+/* Board notices, hoisted out of #task-list-container 2026-09-17 so a container
+   re-render cannot wipe them. Full-width row at the end of the toolbar's wrap, and
+   invisible when empty — an empty notice row would otherwise add permanent padding
+   above a board that has nothing to say. `:empty` is exact here because
+   _paintTaskListNotices writes "" rather than whitespace. */
+.task-list-notices:empty { display: none; }
+
+/* 🔴 flex-basis:100% USED TO LIVE HERE, AND IT PUT THE NOTICE ON ITS OWN LINE AT
+   EVERY WIDTH. Rick asked for the notice to sit in the same horizontal space as
+   the id search and ＋ New. It was already in the right CONTAINER — this is the
+   toolbar's own flex row — but a 100% basis in a `flex-wrap: wrap` parent forces
+   a break unconditionally, so the element shared the toolbar and never the line.
+   Measured in Chromium 2026-09-17 against this stylesheet: 1264px wide and 30px
+   below the input at 1280, the same at 390. It read as a phone-width wrap and
+   was not one.
+
+   `flex: 1 1 auto` lets it take the room the controls leave; `min-width: 0` is
+   what lets it SHRINK below its content width, without which a flex item refuses
+   to go under its min-content size and wraps anyway. */
+.task-list-notices {
+    flex      : 1 1 auto;
+    min-width : 0;
+}
+
+/* The banners keep .task-list-message's own type and colour. The margin goes to
+   0 because they now sit ON the toolbar row rather than above a table, and the
+   ellipsis is what honours "must not wrap onto a second line" — a long server
+   warning is clipped rather than growing the toolbar.
+
+   ⚠️ BELOW ~700px THE NOTICE STILL TAKES ITS OWN LINE, and that is accepted, not
+   overlooked (Mr. Radio 🦉's ruling 2026-09-17, option 1 of three). At 390px the
+   controls already own the row: the input's max-width:26ch is 219px and ＋ New's
+   right edge lands at x=367 of 390. Sharing the line there would mean shrinking
+   the id box or dropping the ✕ — and Rick added that ✕ deliberately as "the real
+   clear" (row 700f0e1d), so both were refused in favour of one honest wrap. */
+.task-list-notices .task-list-message {
+    margin        : 0;
+    white-space   : nowrap;
+    overflow      : hidden;
+    text-overflow : ellipsis;
+    /* 🔴 THE TOOLBAR'S HEIGHT, NOT A BANNER'S. .task-list-message is the full-panel
+       banner (14px padding top and bottom), and on this row it stood 49.5px tall
+       beside a 23px id box — twice its neighbours (Mr. Radio 🦉, 2026-09-18).
+       Measured in Chromium against this page at 1280 and 390: these three lines
+       put the note at 23px, level with #task-lookup-input. line-height is in px
+       because the note is one nowrap line, and a unitless value landed at 23.8.
+       The e2e holding-note test compares the two heights. */
+    padding       : 3px 8px;
+    font-size     : 0.82rem;
+    line-height   : 15px;
+}
+
+.task-lookup-result:empty { display: none; }
+
+.task-lookup-result {
+    flex-basis  : 100%;
+    padding     : 3px 2px;
+    font-size   : 0.8rem;
+    line-height : 1.35;
+    opacity     : 0.9;
+}
+
+.task-lookup-result[data-state="pending"] {
+    opacity: 0.6;
+    font-style: italic;
+}
+.task-lookup-result[data-state="found"]          { color: #3fa34d; }
+/* Amber, not red: the caller did nothing wrong and has an obvious next move —
+   type more characters, or check the id. */
+.task-lookup-result[data-state="refused"],
+.task-lookup-result[data-state="ambiguous"],
+.task-lookup-result[data-state="missing"]        { color: #e6a700; }
+/* Red is reserved for "the system is not working", which is a different problem
+   from "that ticket is not there". */
+.task-lookup-result[data-state="auth_required"],
+.task-lookup-result[data-state="module_missing"],
+.task-lookup-result[data-state="unreachable"]    { color: #d9534f; }
+
+/* The filter's escape hatch. Sits beside the go button and is `hidden` until a
+   filter is live — see the markup comment for why a permanently-visible clear is
+   worse than none. Styled as a quiet control: it undoes, it does not act. */
+.task-lookup-clear {
+    background   : transparent;
+    border       : 1px solid var( --border-subtle, #444 );
+    border-radius: 4px;
+    color        : var( --text-secondary, #aaa );
+    cursor       : pointer;
+    font-size    : 0.85rem;
+    line-height  : 1;
+    padding      : 0.25rem 0.4rem;
+}
+.task-lookup-clear:hover { color: var( --text-primary, #eee ); }
+
+/* The filtered state. Deliberately calm — the ANSWER is the row in the list, and
+   a loud banner over it would compete with the thing it is announcing. */
+.task-lookup-result[ data-state="filtered" ] {
+    color      : var( --text-secondary, #aaa );
+    font-size  : 0.85rem;
+    font-style : italic;
+}
+
+/* Rick's New Ticket card (row c9895403). This file is loaded by BOTH clients, so the
+   button and the card are styled once. The backdrop is the existing .task-body-overlay. */
+.task-new-ticket,
+.task-list-new-ticket {
+    background   : var( --accent, #2f6fdf );
+    border       : none;
+    border-radius: 4px;
+    color        : #fff;
+    cursor       : pointer;
+    font-size    : 0.85rem;
+    font-weight  : 600;
+    line-height  : 1;
+    padding      : 0.3rem 0.55rem;
+    white-space  : nowrap;
+}
+.task-new-ticket:hover,
+.task-list-new-ticket:hover { filter: brightness( 1.1 ); }
+
+.new-ticket-card        { width: min( 640px, 92vw ); }
+.new-ticket-form {
+    display: grid;
+    gap: 8px;
+}
+.new-ticket-row {
+    display: grid;
+    grid-template-columns: 150px 1fr;
+    align-items: start;
+    gap: 8px;
+}
+.new-ticket-label {
+    color: #495057;
+    font-size: 13px;
+    font-weight: 600;
+    padding-top: 5px;
+}
+.new-ticket-input,
+.new-ticket-select,
+.new-ticket-details {
+    border       : 1px solid #ced4da;
+    border-radius: 4px;
+    box-sizing   : border-box;
+    font         : inherit;
+    font-size    : 13px;
+    padding      : 4px 6px;
+    width        : 100%;
+}
+/* Details is where Rick hands over background material, so it gets the room. */
+.new-ticket-details {
+    min-height: 9em;
+    resize: vertical;
+}
+.new-ticket-row-title .new-ticket-input {
+    font-size: 15px;
+    font-weight: 600;
+}
+
+/* ── The Title and Details mics (rows f9a449c3, ab1f06e7) ───────────────────────────
+   RICK'S LAYOUT, VERBATIM (row ab1f06e7): "instead of having a 2-column layout the left
+   column being labels and the right column being the editing widgets there would be a
+   third Column in the middle into which these 2 recording widgets buttons would be
+   inserted They would be right aligned so they would butt up against the left hand side
+   of the text widget they correspond to"
+
+   So with mics the FORM is the grid — labels | mics | fields — and every row is a
+   subgrid of it. That is what keeps the fields on one left edge: each row being its own
+   grid would size its middle column to its own contents, and the eight mic-less rows
+   would start their fields a mic's width further left than Title and Details.
+
+   ⚠️ "RIGHT ALIGNED" MEANS WITHIN THE MIDDLE COLUMN. It was read three times as the
+   card's or the field's right edge; the vertical the mics butt against is the fields'
+   LEFT edge, the one they start at. Column gap is 0 and the mic is `justify-self: end`,
+   so its right edge IS the field's left edge.
+
+   🔴 STYLED FROM SCRATCH ON PURPOSE, NOT INHERITED FROM `.stt-button`. This sheet is
+   loaded by BOTH clients; `.stt-button` lives in notifications.css, which the
+   multiplexer page does not load. A mic that borrowed it would look right on the classic
+   page and unstyled on the multiplexer — and the `.recording`/`.processing` states the
+   recorders toggle by class live on that same absent base, so the button would go dead
+   the moment anyone dictated. Same reasoning as the row mic's own block, one file over.
+
+   ⚠️ THE BASE IS ALSO BUILT FOR A FORM, NOT FOR A FIELD'S EDGE: 8px/12px padding, 16px
+   text and `min-width: 70px`. Beside a 13px input that is a slab, and "small" is half
+   of what he asked for. */
+.new-ticket-form-dictated { grid-template-columns: 150px max-content 1fr; }
+.new-ticket-form-dictated > .new-ticket-row {
+    column-gap           : 0;
+    grid-column          : 1 / -1;
+    grid-template-columns: subgrid;
+}
+/* The control is every row's last child, mic or no mic — so all nine start in column 3. */
+.new-ticket-form-dictated > .new-ticket-row > :last-child { grid-column: 3; }
+
+.new-ticket-mic {
+    background   : #fff;
+    border       : 1px solid #007bff;
+    border-radius: 4px;
+    color        : #007bff;
+    cursor       : pointer;
+    font-size    : 0.75rem;
+    justify-self : end;
+    line-height  : 1.2;
+    margin-left  : 8px;
+    min-width    : 0;
+    padding      : 1px 6px;
+}
+.new-ticket-mic:hover:not( :disabled ) { background-color: #e7f3ff; }
+.new-ticket-mic:focus {
+    box-shadow: 0 0 0 3px rgb( 0 123 255 / 40% );
+    outline   : none;
+}
+
+/* The two states the recorders toggle by class. Both clients set them on the button
+   they were handed, which is also what the card reads to keep Escape away from a live
+   dictation — so these are load-bearing, not decoration. */
+.new-ticket-mic.recording {
+    animation       : new-ticket-mic-pulse 1s ease-in-out infinite;
+    background-color: #dc3545;
+    border-color    : #dc3545;
+    color           : #fff;
+}
+.new-ticket-mic.processing {
+    animation       : new-ticket-mic-pulse 1s ease-in-out infinite;
+    background-color: #ffc107;
+    border-color    : #ffc107;
+    color           : #fff;
+    cursor          : wait;
+}
+.new-ticket-mic:disabled {
+    cursor : not-allowed;
+    opacity: 0.35;
+}
+
+@keyframes new-ticket-mic-pulse {
+    0%,
+    100% { opacity: 1; }
+    50%  { opacity: 0.6; }
+}
+
+.new-ticket-actions {
+    align-items: center;
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+}
+.new-ticket-result {
+    color: #495057;
+    flex: 1;
+    font-size: 13px;
+}
+.new-ticket-result[ data-state="invalid-form" ],
+.new-ticket-result[ data-state="invalid" ],
+.new-ticket-result[ data-state="refused" ],
+.new-ticket-result[ data-state="auth_required" ],
+.new-ticket-result[ data-state="failed" ],
+.new-ticket-result[ data-state="unreachable" ] { color: #c0392b; }
+.new-ticket-result[ data-state="petition" ]    { color: #b8860b; }
+
+.new-ticket-create {
+    background   : #2f6fdf;
+    border       : none;
+    border-radius: 4px;
+    color        : #fff;
+    cursor       : pointer;
+    font-weight  : 600;
+    padding      : 6px 14px;
+}
+.new-ticket-create:disabled {
+    cursor: progress;
+    opacity: 0.6;
+}
+.new-ticket-cancel {
+    background   : transparent;
+    border       : 1px solid #ced4da;
+    border-radius: 4px;
+    color        : #495057;
+    cursor       : pointer;
+    padding      : 6px 12px;
+}
+
+/* ── Row c9fafb9d — a manager's promote/demote REQUEST, on both clients ────────────────
+   The chip sits in the VISIBLE row's title cell, so the question waiting on Rick is on
+   screen without a disclosure. The badge sits beside a section's count chip; the two
+   boards' badges are two counts, never a sum. Every viewer sees Approve and Deny — the
+   verdict door is the control, and its refusal lands in .task-request-status verbatim. */
+.task-request-chip {
+    display        : flex;
+    flex-wrap      : wrap;
+    align-items    : center;
+    gap            : 4px 6px;
+    margin-top     : 4px;
+    padding        : 3px 6px;
+    border         : 1px solid #d39e00;
+    border-radius  : 4px;
+    background     : #fff8e1;
+    font-weight    : normal;
+    font-size      : 0.85em;
+}
+.task-request-text {
+    font-weight: 600;
+    color: #7a5b00;
+}
+.task-request-detail { color: #495057; }
+.task-request-status {
+    color: #b02a37;
+    flex-basis: 100%;
+}
+.task-request-status:empty { display: none; }
+.task-request-badge {
+    display       : inline-block;
+    margin-left   : 6px;
+    padding       : 0 6px;
+    border-radius : 8px;
+    background    : #d39e00;
+    color         : #fff;
+    font-size     : 0.75em;
+    font-weight   : 600;
+    vertical-align: middle;
+}
+/* The badge is hidden with the `hidden` attribute, which the display rule above would override. */
+.task-request-badge[hidden] { display: none; }
+
+/* Row 52142a84 — each filer's group is an ACCORDION, collapsed by default (Rick,
+   2026-09-24). Both clients link this sheet and emit the same markup: `.collapsed`
+   on the group div, aria-expanded on the header. The header bar keeps the filer,
+   the count and the batch controls visible, so a closed group still says how
+   many rows it holds. */
+.holding-area-group-header[ role="button" ] {
+    cursor      : pointer;
+    user-select : none;
+}
+
+.holding-area-group-header[ role="button" ]:focus-visible {
+    outline        : 2px solid var( --task-review, #1565c0 );
+    outline-offset : -2px;
+}
+
+.holding-area-group-chevron {
+    display    : inline-block;
+    width      : 1em;
+    color      : #6c757d;
+    font-size  : 11px;
+    text-align : center;
+}
+
+.holding-area-group.collapsed > .holding-area-table {
+    display : none;
 }

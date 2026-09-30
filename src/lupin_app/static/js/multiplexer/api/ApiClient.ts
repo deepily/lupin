@@ -20,6 +20,22 @@ export interface ApiCallOptions {
   timeoutMs? : number;           // override defaultTimeoutMs for this call
   // Skip the Authorization header (used for endpoints like /auth/login).
   noAuth?    : boolean;
+  /**
+   * Parity B-2 (J14) — extra request headers for THIS call.
+   *
+   * The submit cards send `X-Session-ID: <queue session id>` alongside the
+   * Authorization header, and this client had no way to express that: the options
+   * were `{signal, timeoutMs, noAuth}` and the header set was assembled entirely
+   * inside `request`. The alternative was a bare `fetch` in the store, which would
+   * have stepped around the auth trampoline, the timeout and the 401 handling
+   * together.
+   *
+   * ⚠️ IT CANNOT OVERRIDE `Authorization`, and that is enforced rather than
+   * documented — see where it is applied. A caller who could replace the auth header
+   * could send a request as somebody else, and the failure would look like a
+   * permissions bug rather than a client one.
+   */
+  headers?   : Readonly<Record<string, string>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -170,7 +186,14 @@ class ApiClientImpl implements ApiClient {
     const url = this.buildUrl(path);
     const timeoutMs = opts?.timeoutMs ?? this.defaultTimeoutMs;
 
+    // B-2 J14 — per-call headers go in FIRST, so the two assignments below always
+    // win. A caller cannot replace Authorization: that would let one send a request
+    // as somebody else, and it would read as a permissions bug rather than a client
+    // one. ORDERING is the whole guard — there is no filtering list to fall out of
+    // date as headers are added.
     const headers: Record<string, string> = {};
+    if (opts?.headers !== undefined) Object.assign(headers, opts.headers);
+
     if (body !== undefined) headers["Content-Type"] = "application/json";
 
     if (!opts?.noAuth) {

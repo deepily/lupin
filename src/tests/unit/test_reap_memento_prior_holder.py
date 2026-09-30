@@ -43,6 +43,7 @@ _REPO = "/repos/lupin"
 # sam's real shape on the day: HIS seat, a PRIOR holder's file in the slot.
 _SAM_SID    = "4fa58ddc0000"
 _PRIOR_SID  = "1fe241ea0000"
+_CHLOE_SID  = "61c032cd0000"
 
 
 def _now_fn():
@@ -126,16 +127,81 @@ def test_genuinely_unparseable_file_still_reads_unparseable_present():
 
 def test_the_seats_own_stale_memento_is_not_a_prior_holder():
     """
-    THE RACE CASE, which must be left exactly where it was. extra 1's file was HIS,
-    header session matching, just outside the freshness window at check time. That is
-    the recoverable open-and-read case and it must not be relabelled as somebody
-    else's file — the two verdicts would swap meanings and nothing would improve.
+    THE RACE CASE, which must stay on ITS OWN side of the prior-holder line. The file
+    was HIS, header session matching, just outside the freshness window at check time.
+    It must not be relabelled as somebody else's file — the two verdicts would swap
+    meanings and nothing would improve.
+
+    The LABEL sharpened in row 48b5f19e: this is `unproven_present`, not
+    `unparseable_present`. The header parses and names this seat, so the writer is
+    fine and only a gate failed — which is a different remedy from the header-less
+    case, and the whole point of splitting them.
     """
     stale = _memento( "Sam", _SAM_SID[ :8 ], written_at="2026-08-17T12:00:00+00:00" )
     disk  = _Disk( { _slot( "sam" ): stale } )
     out   = _coord( { "cc-author-sam-1": _ident( "Sam", _SAM_SID ) }, disk )
 
+    assert out[ "cc-author-sam-1" ][ "status" ] != "prior_holder_present"   # the original guarantee
+    assert out[ "cc-author-sam-1" ][ "status" ] == "unproven_present"
+    # the reason must NAME the gate, not merely say it could not be proven
+    assert "stale" in out[ "cc-author-sam-1" ][ "reason" ]
+
+
+def test_headerless_and_own_stale_no_longer_share_one_verdict():
+    """
+    ROW 48b5f19e, the discrimination itself. Measured live 2026-08-29: a seat 45s past
+    the poll deadline with a perfect memento, and a seat that hand-wrote a header-less
+    slot, BOTH drew `unparseable_present` — so a manager could not tell "mid-write"
+    from "written wrong" without opening both files. One reap, both seats, two verdicts.
+    """
+    headerless = "# Memento — Sam \u26a1 \u00b7 session deadbeef\n\n" + ( "body line\n" * 200 )
+    own_stale  = _memento( "Chloe", _CHLOE_SID[ :8 ], written_at="2026-08-17T12:00:00+00:00" )
+    disk = _Disk( { _slot( "sam" ): headerless, _slot( "chloe" ): own_stale } )
+    out  = _coord( {
+        "cc-author-sam-1"  : _ident( "Sam",   _SAM_SID ),
+        "cc-author-chloe-1": _ident( "Chloe", _CHLOE_SID ),
+    }, disk )
+
+    assert out[ "cc-author-sam-1"   ][ "status" ] == "unparseable_present"
+    assert out[ "cc-author-chloe-1" ][ "status" ] == "unproven_present"
+    assert out[ "cc-author-sam-1"   ][ "status" ] != out[ "cc-author-chloe-1" ][ "status" ]
+
+
+def test_the_headerless_verdict_names_the_writer_not_the_reader():
+    """
+    A header-less slot is a WRITER defect — somebody bypassed memento_io — and the
+    reason must say so, because the remedy differs from the gate cases. Without this
+    the split buys a new string and no new information.
+    """
+    headerless = "# Memento — Sam \u26a1\n\n" + ( "body line\n" * 200 )
+    out = _coord( { "cc-author-sam-1": _ident( "Sam", _SAM_SID ) },
+                  _Disk( { _slot( "sam" ): headerless } ) )
+
+    reason = out[ "cc-author-sam-1" ][ "reason" ]
     assert out[ "cc-author-sam-1" ][ "status" ] == "unparseable_present"
+    assert "no" in reason.lower() and "header" in reason.lower()
+    assert "memento_io" in reason
+
+
+def test_both_new_verdicts_reach_the_alarm():
+    """
+    A verdict that does not reach `memento_alarm` is invisible where a manager reads.
+    Splitting a losing verdict in two is exactly how one half silently stops alarming.
+    """
+    line = reap_memento.memento_alarm( {
+        "cc-a": { "status": "unproven_present",    "persona": "Chloe" },
+        "cc-b": { "status": "unparseable_present", "persona": "Sam" },
+    } )
+    assert line is not None
+    assert "unproven_present" in line and "unparseable_present" in line
+
+
+def test_slot_record_header_reads_through_a_pointer():
+    """The helper the split leans on must resolve a pointer exactly as the others do."""
+    disk = _Disk( { _slot( "sam" ): _memento( "Sam", _SAM_SID[ :8 ] ) } )
+    header = reap_memento.slot_record_header( _slot( "sam" ), disk.read )
+    assert header.get( "session_id" )[ :8 ] == _SAM_SID[ :8 ]
+    assert reap_memento.slot_record_header( _slot( "nobody" ), disk.read ) == {}
 
 
 def test_nothing_at_the_slot_is_still_absent_not_a_prior_holder():

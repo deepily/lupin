@@ -178,7 +178,7 @@ def _running_inside_container() -> bool:
 
 
 def _container_running() -> bool:
-    # When pytest is scheduled via /api/test-suite/submit it runs INSIDE the test
+    # When pytest is scheduled via /api/v2/submit it runs INSIDE the test
     # container, where the `docker` CLI does not exist. In that case we ARE the
     # container we'd otherwise be probing — short-circuit to True.
     if _running_inside_container():

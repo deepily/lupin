@@ -32,6 +32,8 @@
 // error fallbacks deterministically without a real browser database.
 
 /** A single cached job-completion record (in-memory + IndexedDB row shape). */
+import * as debugSink from "../shared/debugSink";
+
 export interface JobCacheEntry {
   jobId        : string;
   text         : string;
@@ -200,7 +202,7 @@ export class JobCompletionCache {
     // Eager auto-init (legacy behavior), surfaced as an awaitable `ready`.
     if ( this.cacheEnabled ) {
       this.ready = this.initializeIndexedDB().catch( ( err ) => {
-        console.warn( "JobCompletionCache: IndexedDB initialization failed, using memory cache only:", err );
+        debugSink.error( "JobCompletionCache: IndexedDB initialization failed, using memory cache only:", err );
       } );
     } else {
       this.ready = Promise.resolve();
@@ -230,7 +232,7 @@ export class JobCompletionCache {
       request.onerror = () => reject( request.error );
       request.onsuccess = () => {
         this.db = request.result;
-        console.log( "JobCompletionCache: IndexedDB initialized" );
+        debugSink.log( "JobCompletionCache: IndexedDB initialized" );
         resolve();
       };
 
@@ -291,7 +293,7 @@ export class JobCompletionCache {
 
     await this.evictOldEntries();
 
-    console.log( `JobCompletionCache: Stored job ${jobId} (${cacheEntry.size} bytes)` );
+    debugSink.log( `JobCompletionCache: Stored job ${jobId} (${cacheEntry.size} bytes)` );
   }
 
   /**
@@ -398,7 +400,7 @@ export class JobCompletionCache {
       transaction.objectStore( STORE_NAME ).delete( jobId );
     }
 
-    console.log( `JobCompletionCache: Deleted job ${jobId}` );
+    debugSink.log( `JobCompletionCache: Deleted job ${jobId}` );
   }
 
   /**
@@ -574,7 +576,7 @@ export class JobCompletionCache {
     this.analytics.popularPhrases.clear();
     this.analytics.topJobs.clear();
 
-    console.log( "JobCompletionCache: Cache cleared" );
+    debugSink.log( "JobCompletionCache: Cache cleared" );
   }
 
   /** Clear the cache and close the IndexedDB connection. */

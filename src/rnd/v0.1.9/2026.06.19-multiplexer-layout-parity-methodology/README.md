@@ -66,6 +66,6 @@ Current source read directly (`render/templates/{senderCard,notificationItem,dat
 `html/{multiplexer,notifications}.html`, `routers/pages.py`); prior R&D
 [`2026.06.10-notifications-ui-multiplexer-gap-bridge/`](../../v0.1.8/2026.06.10-notifications-ui-multiplexer-gap-bridge/README.md)
 (functional gap F1–F12 + Layer B) and
-[`2026.06.17-multiplexer-css-parity-audit.md`](../../v0.1.8/2026.06.17-multiplexer-css-parity-audit.md)
+[`2026.06.17-multiplexer-css-parity-audit.md`](../../v0.1.8/2026.06.17-multiplexer-css-parity-audit.md) *[referenced file removed in the 2026-09-22 R&D cleanup, ticket `3a2f726b`; recover with `git log --diff-filter=D -- <path>` then `git show <sha>^:<path>`]*
 (page-frame root cause); test infra (`e2e_ui/conftest.py`, `pytest.ini`,
 `test_multiplexer_*_visual.py`, `build-multiplexer.sh`).

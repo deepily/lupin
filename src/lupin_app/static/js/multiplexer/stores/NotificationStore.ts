@@ -38,15 +38,27 @@ import type {
   NotificationFilterMode,
   PredictionHint,
   SessionTopicPayload,
+  BroadcastAckPayload,
   StoreNotificationsChangedPayload,
   StoreNotificationTtsIntentPayload,
   VoicePersona,
 } from "../shared/types";
+// VALUE import, not type-only: the ONE TypeScript spelling of the ack type, pinned
+// against the server's by test_broadcast_ack_type_spellings_agree.py. Never inline it.
+import { COMMONS_BROADCAST_ACK_TYPE } from "../shared/types";
+import { parseResponseQuestions } from "./responseQuestions";
 // Cold-load hydration (2026-06-11): type-only import of the ONE canonical
 // senders-visible row shape (SessionStripStore owns the definition — WP9
 // introduced it; SenderStore + this store consume the SAME records from the
 // single boot fetch). No runtime coupling.
 import type { ServerSenderHydrationRecord } from "./SessionStripStore";
+// P0 5ebd2aff, Rick's ruling 1 — the history-window picker model (legacy parity).
+import {
+  HISTORY_WINDOW_KEY,
+  parseStoredHistoryWindow,
+  serializeHistoryWindow,
+  type HistoryWindow,
+} from "./historyWindow";
 
 // Persisted envelope shape (StorageService prepends `lupin:` prefix; key is
 // `notifications:unread-count`).
@@ -59,30 +71,16 @@ const STORAGE_KEY            = "notifications:unread-count";
 const STORAGE_SCHEMA_VERSION = 1;
 const PERSIST_DEBOUNCE_MS    = 250;
 
-// B3 (01-C) — own-only notification filter persistence (mirrors CommonsStore's
-// activity-filter envelope). The mode persists across reload via StorageService.
-const FILTER_STORAGE_KEY     = "notifications:filter-mode";
-const FILTER_SCHEMA_VERSION  = 1;
+// Row 98305d96 (Rick 2026-09-10 ~15:57, "port legacy user filter"): the Mine switch is
+// legacy's ADMIN filter over whose JOBS a notification came from, and the SERVER applies
+// it. "others" asks senders-visible for exclude_own_jobs (coldHistoryHydration); "own" and
+// "all" send the same request, exactly as legacy does, because every notification has one
+// recipient and "all users" cannot widen it. The mode is stored under legacy's raw
+// localStorage key, shared with it like the history window.
+// It REPLACES the 2026-06-29 message-DIRECTION predicate, which hid every reply bubble
+// under the default "own" (parity doc C2, second cause). Nothing filters in the browser.
+export const FILTER_MODE_KEY = "notifications_filter_preference";
 const DEFAULT_FILTER_MODE: NotificationFilterMode = "own";
-
-interface FilterModeEnvelope {
-  mode : NotificationFilterMode;
-}
-
-// B3 (01-C) — the filter predicate, keyed on the ONE client-available axis
-// (`direction`), per the Mr. Radio 2026-06-29 axis ruling. PURE + exported so
-// every mode branch is directly unit-coverable (only "own" is UI-wired today).
-//   - own    : inbound persona messages — direction absent/"incoming"
-//   - others : the user's own sent replies — direction === "outgoing"
-//   - all    : pass everything
-// (Single-user mux ⇒ recipient-based own/others is vacuous; `direction` is the
-// non-vacuous axis. A future real axis swaps in here with zero plumbing rework.)
-export function matchesNotificationFilter( n: Notification, mode: NotificationFilterMode ): boolean {
-  if ( mode === "all" )    return true;
-  if ( mode === "others" ) return n.direction === "outgoing";
-  // mode === "own"
-  return n.direction !== "outgoing";
-}
 
 // ---------------------------------------------------------------------------
 // Cold-load history hydration (2026-06-11) — supporting types + window helper.
@@ -98,9 +96,9 @@ export interface NotificationHistoryApiClient {
 
 export interface HydrateHistoryOptions {
   userEmail      : string;
-  // Rolling window in hours (DEFAULT_HISTORY_WINDOW_HOURS for the silent
-  // classic-parity default).
-  effectiveHours : number;
+  // Hours to look back (historyWindow.effectiveHoursForQuery). null = "All
+  // time": no cutoff and no `hours` param, exactly as legacy sends it.
+  effectiveHours : number | null;
   // The boot-time senders-visible snapshot — the SAME records the strip and
   // SenderStore hydrate from (single fetch, three consumers).
   senders        : ReadonlyArray<ServerSenderHydrationRecord>;
@@ -122,15 +120,20 @@ interface ServerHistoryRow {
   [k: string]       : unknown;
 }
 
-// Classic-verbatim VIRGIN default for the history window — notifications.js:360
-// (`parseInt( storedWindow ) || 48`). Ruling amended 2026-06-11 post-review
-// (Tiberius, reviewer Rio): classic's virgin default is a 48h ROLLING window;
-// 'today' is only a stored-sentinel option a user can pick later. 48h also
-// covers the originally-reported case — a pre-midnight external advisory must
-// still card the next morning — and moots the e2e midnight-straddle flake a
-// today-anchored window would have had. Silent default per ruling (a): no
-// selector, no localStorage key.
-export const DEFAULT_HISTORY_WINDOW_HOURS = 48;
+// The history window's virgin default (48 h, legacy `parseInt( storedWindow ) || 48`)
+// now lives in historyWindow.ts with the picker model. The 2026-06-11 ruling
+// made it a SILENT default with no selector; Rick's 2026-09-10 ruling 1
+// (P0 5ebd2aff) restores the legacy selector and its shared localStorage key.
+// Re-exported so existing importers keep working.
+export { DEFAULT_HISTORY_WINDOW_HOURS } from "./historyWindow";
+
+// P0 5ebd2aff — cold-load hydration lifecycle (see NotificationStore.historyHydrationState).
+export type HistoryHydrationState = "idle" | "loading" | "done" | "failed";
+
+// A rejection reason as a human-readable string (Error → message; anything else → String).
+function describeRejection(reason: unknown): string {
+  return reason instanceof Error ? reason.message : String(reason);
+}
 
 // ---------------------------------------------------------------------------
 // Public interface
@@ -148,20 +151,32 @@ export interface NotificationStore {
   /** Mark every active notification as read in one shot (e.g. inbox open). */
   markAllRead(): void;
   /**
-   * B3 (01-C) — active notifications passing the current filter mode (the
-   * render source for the sender section). `list()` stays the raw total.
+   * The render source for the sender section. Since row 98305d96 the filter runs on the
+   * SERVER (the history request), so this is every active notification, reply bubbles
+   * included — the same rows as `list()`. Both names stay because renderers read both.
    */
   visibleEntries(): ReadonlyArray<Notification>;
-  /** B3 (01-C) — the active filter mode. */
+  /** Row 98305d96 — the admin Mine switch: "own" (👤 Mine), "others" (🚫 Not Mine), "all" (👥 All Users). */
   filterMode(): NotificationFilterMode;
   /**
-   * B3 (01-C) — set the filter mode, persist it (StorageService), and emit
-   * `store_notifications_changed { changeKind: "filtered" }` so the renderer
-   * re-renders from `visibleEntries()`. (UI to call this is DEFERRED per Rick's
-   * scope — the mechanism is wired, only "own" is reachable today.)
+   * Row 98305d96 — set the mode, store it under legacy's raw key (FILTER_MODE_KEY),
+   * and emit `store_notifications_changed { changeKind: "filtered" }`.
+   * coldHistoryHydration reloads on that event, as legacy's setFilterMode reloads.
+   *
+   * 🔴 B-3 F3 — REFUSES FOR A NON-ADMIN, AND THE REFUSAL IS HERE RATHER THAN IN THE UI.
+   * The pane is admin-only and hidden by default, but a hidden control is not an absent
+   * one: the store is reachable from the test hook, from a stale persisted mode, and
+   * from any future caller that forgets. A refusal at the SETTER cannot be routed
+   * around by anything that fails to ask first.
+   *
+   * Refusing means refusing ENTIRELY — no state change, no persist, no emit. A persist
+   * alone would be the worst outcome available: the refusal would hold for this page
+   * and evaporate on the next reload, when the mode is read back from storage.
+   *
+   * @returns true when the mode was applied, false when it was refused.
    */
-  setFilterMode( mode: NotificationFilterMode ): void;
-  /** B3 (01-C) — true when the mode is off its "own" default (drives empty-state copy). */
+  setFilterMode( mode: NotificationFilterMode ): boolean;
+  /** Row 98305d96 — true only for "others", the one mode that narrows what the server returns (drives empty-state copy). */
   isFilterActive(): boolean;
   /**
    * B3 (01-C) — remove the given notifications from the active list (the
@@ -192,6 +207,46 @@ export interface NotificationStore {
    */
   hydrateHistory(api: NotificationHistoryApiClient, opts: HydrateHistoryOptions): Promise<void>;
   isHistoryHydrated(): boolean;
+  /**
+   * Cold-load hydration STATE (2026-09-10, P0 5ebd2aff). Lets the list pane say
+   * "loading" or "could not load" instead of painting a pending or failed
+   * hydration as an empty inbox — measured: senders-visible took 52.8 s for
+   * Rick against a 10 s client timeout, and the pane said "No notifications yet."
+   * Lifecycle: idle → loading → done | failed; failed → loading on retry.
+   */
+  historyHydrationState(): HistoryHydrationState;
+  /** The failure reason while the state is "failed"; null otherwise. */
+  historyHydrationError(): string | null;
+  /** Mark the cold-load hydration in flight. Emits `store_notifications_changed { "hydration_state" }`. */
+  markHistoryHydrationLoading(): void;
+  /** Mark the cold-load hydration failed with a human-readable reason. Emits `{ "hydration_state" }`. */
+  markHistoryHydrationFailed(reason: string): void;
+  /**
+   * The history window the picker shows (P0 5ebd2aff, Rick's ruling 1). Read
+   * from the legacy client's raw key at construction, so both clients agree.
+   */
+  historyWindow(): HistoryWindow;
+  /**
+   * Set the history window (legacy setHistoryWindow).
+   *
+   * Ensures:
+   *   - the same value as now → no write, no emit (legacy skips the reload)
+   *   - otherwise the legacy raw key holds the serialized value and one
+   *     `store_notifications_changed { "history_window" }` is emitted —
+   *     coldHistoryHydration reloads on it
+   */
+  setHistoryWindow(w: HistoryWindow): void;
+  /**
+   * Drop the loaded history so hydrateHistory can run again (legacy
+   * clearSenderGroups before a window-change reload).
+   *
+   * Ensures:
+   *   - the active list is empty, history is un-hydrated, the state is idle
+   *   - archived notifications and unread accounting are untouched (hydration
+   *     never counted unread either)
+   *   - one `store_notifications_changed { "history_reset" }` is emitted
+   */
+  resetHistoryHydration(): void;
   /** Test/cleanup helper: flush any pending persistence write immediately. */
   flushPersistenceForTesting(): void;
   /** Test/cleanup helper: cancel any pending persistence timer. */
@@ -206,6 +261,21 @@ export interface NotificationStoreOptions {
   clearTimeoutFn?  : (id: unknown) => void;
   // Test injection — production uses Date.now.
   nowFn?           : () => number;
+  // P0 5ebd2aff, ruling 1 — raw storage shared with the legacy client for the
+  // history window. Defaults to globalThis.localStorage; tests inject a fake or null.
+  sharedStorage?   : Pick<Storage, "getItem" | "setItem"> | null;
+  /**
+   * B-3 F3 — is the signed-in user an admin? REQUIRED, and deliberately given NO
+   * DEFAULT: a default here would have to be one of two wrong things. `true` opens an
+   * admin-only control to everyone the day a caller forgets to pass it; `false`
+   * silently disables the switch for the admin it was built for, which presents as
+   * "the buttons do nothing" and is the harder one to diagnose. A required field makes
+   * the compiler ask the question instead.
+   *
+   * A FUNCTION, not a boolean: admin-ness is resolved from the auth payload, which
+   * arrives after the stores are constructed.
+   */
+  isAdmin : () => boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -222,33 +292,44 @@ interface QueueUpdatePayload {
 }
 
 // Subset of server NotificationItem.to_dict() fields the store reads.
-// Server-side defined in `src/cosa/rest/notification_fifo_queue.py:173`.
+// Server-side defined in `src/cosa/rest/notification_fifo_queue.py` (NotificationItem.to_dict).
+//
+// `| null` marks every field to_dict() emits as None when the sender did not supply it.
+// A fire-and-forget /api/notify from a sender with no voice persona carries 19 null keys
+// (measured 2026-09-10 from the real producer). Before these were typed nullable,
+// normalize() copied them whenever they were `!== undefined`, so a null reached code that
+// read through it: `voice_persona.voice_id` threw inside the TTS-intent emit (nothing was
+// spoken) and `prediction_hint.confidence` threw inside the card render. EventBus swallows
+// listener throws, so both were silent. Keep this list in step with to_dict().
 interface ServerNotificationFields {
   id_hash             ?: string;
   id                  ?: string;
   message             ?: string;
-  title               ?: string;
-  sender_id           ?: string;
+  title               ?: string | null;
+  sender_id           ?: string | null;
   // R5 (2026-07-01) — control-notification discriminator + payload. The server
   // sends `notification_type` (legacy reads `type || notification_type`,
   // notifications.js:5855); neither survives normalize(), so the session_topic
   // intercept reads them off the RAW field here, before normalization.
   notification_type   ?: string;
   type                ?: string;
-  session_name        ?: string;
+  session_name        ?: string | null;
+  // Row 4f320c27 — the structured side-channel. Carries a broadcast ack's whole
+  // identity; raw-only, like session_name, so it is read before normalization.
+  payload             ?: unknown;
   timestamp           ?: string;       // ISO string — normalized to ms epoch
   response_requested  ?: boolean;       // → action_required
-  response_type       ?: Notification["response_type"];
-  response_options    ?: ReadonlyArray<string>;
-  response_default    ?: string;
-  timeout_seconds     ?: number;        // when present, sets expires_at
+  response_type       ?: Notification["response_type"] | null;
+  response_options    ?: unknown;       // { questions: [...] } dict — read by parseResponseQuestions
+  response_default    ?: string | null;
+  timeout_seconds     ?: number | null; // when present, sets expires_at
   // Phase 5 D-B (2026-05-05) — server-emitted renderer-surfaced fields.
-  voice_persona       ?: VoicePersona;
-  abstract            ?: string;
-  progress_group_id   ?: string;
+  voice_persona       ?: VoicePersona | null;
+  abstract            ?: string | null;
+  progress_group_id   ?: string | null;
   was_expired         ?: boolean;
   time_display        ?: string;
-  prediction_hint     ?: PredictionHint;   // WP14 (F8) — thumbs-vote training-signal source
+  prediction_hint     ?: PredictionHint | null;   // WP14 (F8) — thumbs-vote training-signal source
   // F0-d (2026-07-02) — TTS-intent gate fields. RAW-ONLY: normalize() drops all
   // three, so the store_notification_tts_intent emit reads them off the RAW
   // notification here (same pattern as the session_topic discriminator above).
@@ -287,6 +368,9 @@ class NotificationStoreImpl implements NotificationStore {
   private readonly setTimeoutFn   : (cb: () => void, ms: number) => unknown;
   private readonly clearTimeoutFn : (id: unknown) => void;
   private readonly nowFn          : () => number;
+  // B-3 F3 — resolved on each call, not captured: admin-ness arrives with the auth
+  // payload, after the stores are built.
+  private readonly isAdmin        : () => boolean;
 
   private active   : Notification[]                = [];
   private archived : Notification[]                = [];
@@ -294,7 +378,7 @@ class NotificationStoreImpl implements NotificationStore {
   // Tracks read state per id_hash so unread_count is recomputed deterministically.
   private readSet  : Set<string>                   = new Set();
   private unread   : number                        = 0;
-  // B3 (01-C) — active notification-filter mode (StorageService-persisted).
+  // Row 98305d96 — the admin Mine switch mode (legacy's raw key, via `shared`).
   private filterModeState : NotificationFilterMode = DEFAULT_FILTER_MODE;
 
   // Debounced persistence state.
@@ -302,6 +386,10 @@ class NotificationStoreImpl implements NotificationStore {
 
   // Cold-load history hydration guard (JobStore.historyHydrated precedent).
   private historyHydrated = false;
+
+  // P0 5ebd2aff, ruling 1 — the history window, shared raw with the legacy client.
+  private readonly shared : Pick<Storage, "getItem" | "setItem"> | null;
+  private windowState     : HistoryWindow;
 
   // Subscriptions (kept so dispose can unwire if ever needed; primarily used
   // by the lifetime-of-store assumption).
@@ -316,6 +404,10 @@ class NotificationStoreImpl implements NotificationStore {
     this.clearTimeoutFn = opts.clearTimeoutFn ?? ((id) => globalThis.clearTimeout(id as number));
     /* c8 ignore next */ // production-default fallback: Date.now() is the runtime clock; tests always inject a deterministic nowFn().
     this.nowFn          = opts.nowFn          ?? (() => Date.now());
+    this.isAdmin        = opts.isAdmin;
+    /* c8 ignore next */ // production-default fallback: the browser's localStorage; tests inject sharedStorage.
+    this.shared         = opts.sharedStorage !== undefined ? opts.sharedStorage : ( globalThis.localStorage ?? null );
+    this.windowState    = parseStoredHistoryWindow(this.shared !== null ? this.shared.getItem(HISTORY_WINDOW_KEY) : null);
 
     this.filterModeState = this.hydrateFilterMode();
     this.hydrate();
@@ -360,32 +452,39 @@ class NotificationStoreImpl implements NotificationStore {
   }
 
   // -------------------------------------------------------------------------
-  // B3 (01-C) — own-only notification filter + clear-all primitive
+  // Row 98305d96 — the admin Mine switch (a server-side filter) + clear-all primitive
   // -------------------------------------------------------------------------
 
   visibleEntries(): ReadonlyArray<Notification> {
-    return this.active.filter(n => matchesNotificationFilter(n, this.filterModeState));
+    return this.active;
   }
 
   filterMode(): NotificationFilterMode {
     return this.filterModeState;
   }
 
-  setFilterMode(mode: NotificationFilterMode): void {
+  setFilterMode(mode: NotificationFilterMode): boolean {
+    if ( !this.isAdmin() ) {
+      // One line, not a throw: a refused mode change is an expected outcome of a
+      // non-admin reaching a control that is not theirs, not an exceptional one.
+      console.warn( "[NotificationStore] setFilterMode refused: the view-mode switch is admin-only" );
+      return false;
+    }
     this.filterModeState = mode;
     this.persistFilterMode();
-    // Full re-render signal — the renderer's store_notifications_changed
-    // subscription re-reads visibleEntries() (F-Sam-BC2: no stale cards).
+    // coldHistoryHydration reloads the history for the new mode on this event, and
+    // the renderers repaint (F-Sam-BC2: no stale cards).
     this.bus.emit<StoreNotificationsChangedPayload>({
       type    : "store_notifications_changed",
       payload : { changeKind: "filtered" },
       source  : "NotificationStore",
       ts      : this.nowFn(),
     });
+    return true;
   }
 
   isFilterActive(): boolean {
-    return this.filterModeState !== DEFAULT_FILTER_MODE;
+    return this.filterModeState === "others";
   }
 
   removeByIdHashes(idHashes: ReadonlyArray<string>): void {
@@ -416,26 +515,44 @@ class NotificationStoreImpl implements NotificationStore {
     // Window filter — client-side equivalent of classic's server-side `hours`
     // on senders-visible (the param only drops senders by last_activity
     // cutoff; counts are unaffected — design note §1 window-equivalence).
-    const cutoffMs = this.nowFn() - opts.effectiveHours * 3_600_000;
+    // P0 5ebd2aff ruling 1: "All time" (null) has no cutoff — every sender loads.
+    const effectiveHours = opts.effectiveHours;
+    const cutoffMs = effectiveHours === null ? null : this.nowFn() - effectiveHours * 3_600_000;
     const inWindow = opts.senders.filter(rec => {
       if (!rec.sender_id) return false;
+      if (cutoffMs === null) return true;
       const ts = rec.last_activity !== undefined ? Date.parse(rec.last_activity) : Number.NaN;
       return !Number.isNaN(ts) && ts >= cutoffMs;
     });
 
     // Per-sender conversation fetch, classic-mirroring params: `hours` =
     // effective window, `anchor` = the sender's last_activity (classic's
-    // activity-anchored window loading).
+    // activity-anchored window loading). Legacy loadSenderConversation
+    // (notifications.js:19590-19603) omits each param it has no value for.
     const fetches = inWindow.map(rec => {
       const base   = `/api/notifications/conversation-by-date/${encodeURIComponent(rec.sender_id as string)}/${encodeURIComponent(opts.userEmail)}`;
       const params = new URLSearchParams();
-      params.append("hours", String(opts.effectiveHours));
-      params.append("anchor", rec.last_activity as string);
-      return api.get<Record<string, ReadonlyArray<ServerHistoryRow>>>(`${base}?${params.toString()}`);
+      if (effectiveHours !== null) params.append("hours", String(effectiveHours));
+      if (rec.last_activity !== undefined) params.append("anchor", rec.last_activity);
+      const query  = params.toString();
+      return api.get<Record<string, ReadonlyArray<ServerHistoryRow>>>(query !== "" ? `${base}?${query}` : base);
     });
 
     // Best-effort batch: a rejected sender fetch is skipped, the rest seed.
     const settled = await Promise.allSettled(fetches);
+
+    // P0 5ebd2aff — "skipped" is only honest while SOMETHING arrived. When every
+    // in-window sender fetch was rejected, nothing was measured: report failed
+    // (and stay un-hydrated so a retry can run) rather than seed zero rows and
+    // let the pane read that as an empty inbox.
+    const firstRejection = settled.find((r): r is PromiseRejectedResult => r.status === "rejected");
+    if (inWindow.length > 0 && firstRejection !== undefined && settled.every(r => r.status === "rejected")) {
+      this.markHistoryHydrationFailed(
+        `all ${inWindow.length} sender history requests failed — ${describeRejection(firstRejection.reason)}`,
+      );
+      return;
+    }
+
     const rows: Notification[] = [];
     for (const result of settled) {
       if (result.status !== "fulfilled") continue;
@@ -469,6 +586,8 @@ class NotificationStoreImpl implements NotificationStore {
     // per-sender new_count (SenderStore.hydrate) own unread accounting.
 
     this.historyHydrated = true;
+    this.hydrationState  = "done";
+    this.hydrationError  = null;
     // Single emission for the whole snapshot — renderer reconciles once.
     this.bus.emit<StoreNotificationsChangedPayload>({
       type    : "store_notifications_changed",
@@ -480,6 +599,70 @@ class NotificationStoreImpl implements NotificationStore {
 
   isHistoryHydrated(): boolean {
     return this.historyHydrated;
+  }
+
+  // P0 5ebd2aff — cold-load hydration state (see the interface docstring).
+  private hydrationState : HistoryHydrationState = "idle";
+  private hydrationError : string | null         = null;
+
+  historyHydrationState(): HistoryHydrationState {
+    return this.hydrationState;
+  }
+
+  historyHydrationError(): string | null {
+    return this.hydrationError;
+  }
+
+  markHistoryHydrationLoading(): void {
+    this.hydrationState = "loading";
+    this.hydrationError = null;
+    this.emitHydrationState();
+  }
+
+  markHistoryHydrationFailed(reason: string): void {
+    this.hydrationState = "failed";
+    this.hydrationError = reason;
+    this.emitHydrationState();
+  }
+
+  private emitHydrationState(): void {
+    this.bus.emit<StoreNotificationsChangedPayload>({
+      type    : "store_notifications_changed",
+      payload : { changeKind: "hydration_state" },
+      source  : "NotificationStore",
+      ts      : this.nowFn(),
+    });
+  }
+
+  // P0 5ebd2aff, ruling 1 — history window (see the interface docstrings).
+  historyWindow(): HistoryWindow {
+    return this.windowState;
+  }
+
+  setHistoryWindow(w: HistoryWindow): void {
+    if (w === this.windowState) return;   // legacy: unchanged → skip the reload
+    this.windowState = w;
+    if (this.shared !== null) this.shared.setItem(HISTORY_WINDOW_KEY, serializeHistoryWindow(w));
+    this.bus.emit<StoreNotificationsChangedPayload>({
+      type    : "store_notifications_changed",
+      payload : { changeKind: "history_window" },
+      source  : "NotificationStore",
+      ts      : this.nowFn(),
+    });
+  }
+
+  resetHistoryHydration(): void {
+    for (const n of this.active) this.byId.delete(n.id_hash);
+    this.active          = [];
+    this.historyHydrated = false;
+    this.hydrationState  = "idle";
+    this.hydrationError  = null;
+    this.bus.emit<StoreNotificationsChangedPayload>({
+      type    : "store_notifications_changed",
+      payload : { changeKind: "history_reset" },
+      source  : "NotificationStore",
+      ts      : this.nowFn(),
+    });
   }
 
   flushPersistenceForTesting(): void {
@@ -558,10 +741,33 @@ class NotificationStoreImpl implements NotificationStore {
     const raw  = env.notification;
     const kind = raw.notification_type ?? raw.type;
     if (kind === "session_topic") {
-      if (raw.sender_id !== undefined && raw.session_name !== undefined) {
+      if (raw.sender_id != null && raw.session_name != null) {
         this.bus.emit<SessionTopicPayload>({
           type   : "session_topic",
           payload: { sender_id: raw.sender_id, session_name: raw.session_name },
+          source : "notification-store",
+          ts     : this.nowFn(),
+        });
+      }
+      return;
+    }
+    // Row 4f320c27 M1 — a broadcast ack is CONTROL METADATA, NOT A MESSAGE, and is
+    // intercepted here for exactly the reasons session_topic is, one clause up. The
+    // server sends it with `message: ""` and the whole identity in `payload`;
+    // normalize() rejects an empty message AND drops raw-only fields, so an ack that
+    // reached it would be destroyed twice over. Routed to AckStore via the bus and
+    // NOT carded — a tally element is not a history entry.
+    //
+    // Loosening normalize()'s empty-message check instead would let every genuinely
+    // malformed message through, on the live AND hydration paths, to accommodate one
+    // type that should never have arrived there.
+    if (kind === COMMONS_BROADCAST_ACK_TYPE) {
+      const payload = raw.payload;
+      if (payload != null && typeof payload === "object" &&
+          typeof (payload as BroadcastAckPayload).broadcast_id === "string") {
+        this.bus.emit<BroadcastAckPayload>({
+          type   : COMMONS_BROADCAST_ACK_TYPE,
+          payload: payload as BroadcastAckPayload,
           source : "notification-store",
           ts     : this.nowFn(),
         });
@@ -623,12 +829,18 @@ class NotificationStoreImpl implements NotificationStore {
         // voice_persona, set at :770) so the downstream TTS request can speak in
         // the sender's own voice. OMITTED when the notification has no persona
         // (byte-identical to the pre-766bb609 payload → server default voice).
+        //
+        // Row 8105670f: `!= null`, not `!== undefined`. normalize() below already
+        // copies this field with `if (raw.voice_persona != null)`, so a null cannot
+        // reach here today and this changes no behaviour — it is written so the
+        // guard stands on its own rather than on a correct-but-distant caller.
+        // Row 275e5c57 is what that dependency cost the last time it was implicit.
         payload : {
           id_hash         : norm.id_hash,
           ttsText,
           priority        : raw.priority,
           action_required : norm.action_required,
-          ...( norm.voice_persona !== undefined ? { voice_id: norm.voice_persona.voice_id } : {} ),
+          ...( norm.voice_persona != null ? { voice_id: norm.voice_persona.voice_id } : {} ),
         },
         source  : "notification-store",
         ts      : this.nowFn(),
@@ -769,20 +981,23 @@ class NotificationStoreImpl implements NotificationStore {
       message         : raw.message,
       action_required : raw.response_requested === true,
     };
-    if (raw.title !== undefined)            norm.title         = raw.title;
-    if (raw.response_type !== undefined)    norm.response_type = raw.response_type;
-    if (raw.response_options)               norm.options       = raw.response_options;
-    if (raw.response_default !== undefined) norm.default_value = raw.response_default;
-    if (raw.timeout_seconds !== undefined && raw.response_requested === true) {
+    // `!= null` skips both absent and null: the server sends null for anything the sender
+    // did not supply, and every reader of the normalized fields treats "present" as usable.
+    if (raw.title != null)            norm.title         = raw.title;
+    if (raw.response_type != null)    norm.response_type = raw.response_type;
+    const questions = parseResponseQuestions(raw.response_options);
+    if (questions.length > 0)         norm.questions     = questions;
+    if (raw.response_default != null) norm.default_value = raw.response_default;
+    if (raw.timeout_seconds != null && raw.response_requested === true) {
       norm.expires_at = ts + raw.timeout_seconds * 1000;
     }
     // Phase 5 D-B (2026-05-05) — copy renderer-surfaced fields when present.
-    if (raw.voice_persona !== undefined)     norm.voice_persona     = raw.voice_persona;
-    if (raw.abstract !== undefined)          norm.abstract          = raw.abstract;
-    if (raw.progress_group_id !== undefined) norm.progress_group_id = raw.progress_group_id;
+    if (raw.voice_persona != null)           norm.voice_persona     = raw.voice_persona;
+    if (raw.abstract != null)                norm.abstract          = raw.abstract;
+    if (raw.progress_group_id != null)       norm.progress_group_id = raw.progress_group_id;
     if (raw.was_expired !== undefined)       norm.was_expired       = raw.was_expired;
     if (raw.time_display !== undefined)      norm.time_display      = raw.time_display;
-    if (raw.prediction_hint !== undefined)   norm.prediction_hint   = raw.prediction_hint;
+    if (raw.prediction_hint != null)         norm.prediction_hint   = raw.prediction_hint;
     return norm;
   }
 
@@ -808,21 +1023,17 @@ class NotificationStoreImpl implements NotificationStore {
     this.storage.setJSON<UnreadCountEnvelope>(STORAGE_KEY, env, STORAGE_SCHEMA_VERSION);
   }
 
-  // B3 (01-C) — filter-mode persistence (mirrors CommonsStore.hydrateFilter /
-  // persistFilter). A missing/corrupt/invalid envelope degrades to the "own"
-  // default rather than throwing.
+  // Row 98305d96 — the mode lives under legacy's raw key (notifications.js
+  // QUEUE_FILTER_PREF_KEY), so either client's last choice is the other's. Anything but
+  // a valid mode — absent, stale, or no localStorage at all — reads as "own", legacy's
+  // default (initializeFilterUI).
   private hydrateFilterMode(): NotificationFilterMode {
-    const env = this.storage.getJSON<FilterModeEnvelope>(FILTER_STORAGE_KEY, FILTER_SCHEMA_VERSION);
-    if (env !== null && (env.mode === "own" || env.mode === "others" || env.mode === "all")) {
-      return env.mode;
-    }
-    return DEFAULT_FILTER_MODE;
+    const raw = this.shared !== null ? this.shared.getItem(FILTER_MODE_KEY) : null;
+    return raw === "own" || raw === "others" || raw === "all" ? raw : DEFAULT_FILTER_MODE;
   }
 
   private persistFilterMode(): void {
-    this.storage.setJSON<FilterModeEnvelope>(
-      FILTER_STORAGE_KEY, { mode: this.filterModeState }, FILTER_SCHEMA_VERSION,
-    );
+    if (this.shared !== null) this.shared.setItem(FILTER_MODE_KEY, this.filterModeState);
   }
 
   // -------------------------------------------------------------------------

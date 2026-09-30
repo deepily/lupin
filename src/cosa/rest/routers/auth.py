@@ -160,6 +160,12 @@ def _user_dict_to_response( user_dict: dict ) -> UserResponse:
     )
 
 
+# The only roles an anonymous register may ask for. /auth/register takes no credential,
+# so anything it grants is granted to whoever can reach the port. Admin and every other
+# role are given through POST /admin/users, which requires an admin.
+SELF_REGISTER_ROLES = ( "user", )
+
+
 @router.post(
     "/register",
     response_model  = RegisterResponse,
@@ -167,23 +173,30 @@ def _user_dict_to_response( user_dict: dict ) -> UserResponse:
     summary         = "Register new user",
     description     = "Create new user account with email and password. Returns user info and JWT token pair."
 )
-async def register( request: RegisterRequest ) -> RegisterResponse:
+async def register( request: RegisterRequest, http_request: Request ) -> RegisterResponse:
     """
     Register new user account.
 
     Requires:
         - Valid email address
         - Password meeting strength requirements
-        - Optional roles (defaults to ["user"])
+        - roles absent, or naming only SELF_REGISTER_ROLES
 
     Ensures:
-        - User created in database
+        - User created in database with roles ["user"], whatever was sent
         - Password hashed securely
         - JWT tokens generated and returned
         - Returns 201 on success
         - Returns 400 if validation fails
+        - Success writes audit event "user_self_register" (email, roles, source IP) right after the
+          account is created, so a later failure (read-back, tokens) still leaves a record
+        - A refusal writes "user_self_register_refused" (success=False) naming the refused roles
 
     Raises:
+        - HTTPException 403 if the request names any role outside SELF_REGISTER_ROLES.
+          This route is unauthenticated, so honouring `roles` let anyone who could reach
+          the server register as an admin. Refused rather than silently downgraded, so
+          a caller that meant it is told
         - HTTPException 400 if email already exists
         - HTTPException 400 if password too weak
         - HTTPException 500 if registration fails
@@ -191,11 +204,27 @@ async def register( request: RegisterRequest ) -> RegisterResponse:
     Returns:
         RegisterResponse: User info and tokens
     """
+    client_ip = http_request.client.host if http_request.client else "unknown"
+    requested = request.roles or []
+    refused   = sorted( set( requested ) - set( SELF_REGISTER_ROLES ) )
+    if refused:
+        log_auth_event(
+            event_type = "user_self_register_refused",
+            email      = request.email,
+            ip_address = client_ip,
+            details    = f"Self-registration refused; requested roles {refused} are not self-grantable",
+            success    = False
+        )
+        raise HTTPException(
+            status_code = status.HTTP_403_FORBIDDEN,
+            detail      = f"Registration cannot grant roles {refused}; an admin grants them through /admin/users",
+        )
+
     # Create user
     success, message, user_id = create_user(
         email    = request.email,
         password = request.password,
-        roles    = request.roles
+        roles    = list( SELF_REGISTER_ROLES )
     )
 
     if not success:
@@ -203,6 +232,18 @@ async def register( request: RegisterRequest ) -> RegisterResponse:
             status_code = status.HTTP_400_BAD_REQUEST,
             detail      = message
         )
+
+    # Audit as soon as the account exists: a failure after this point (read-back, token
+    # creation) must not leave an account with no record. Roles are what create_user was
+    # handed, since the read-back has not happened yet.
+    log_auth_event(
+        event_type = "user_self_register",
+        user_id    = user_id,
+        email      = request.email,
+        ip_address = client_ip,
+        details    = f"Self-registered with roles {list( SELF_REGISTER_ROLES )}",
+        success    = True
+    )
 
     # Get user info
     user_dict = get_user_by_id( user_id )

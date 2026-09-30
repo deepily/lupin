@@ -4,7 +4,7 @@ Unit tests for API key authentication middleware.
 Tests the security and correctness of API key validation middleware
 including bcrypt verification and FastAPI dependency injection.
 
-Design reference: src/rnd/2025.11.10-phase-2.5-notification-authentication.md
+Design reference: src/rnd/v0.1.0/2025.11.10-phase-2.5-notification-authentication.md
 Section: Middleware Architecture Design (lines 1187-1336)
 
 Updated: 2026-02-02 - Fixed to mock ORM layer (get_db + ApiKeyRepository)

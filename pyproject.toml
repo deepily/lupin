@@ -39,6 +39,15 @@ dependencies = [
   "claude-agent-sdk==0.2.88",
   "fastmcp==2.14.2",
 
+  # --- Test instrumentation ---
+  # soupsieve is the CSS parser behind src/tests/e2e_ui/selector_census.py, which refuses a
+  # merge when a probe names a selector the product ships nowhere (row 485442ea). It is
+  # declared HERE rather than in a test extra because the census is imported by the unit tier,
+  # which is merge gate 3 — a dependency the gate needs is not optional.
+  # Pinned to the version the guard was measured against: 438 of 1,155 extracted candidates
+  # rejected as unparseable. An upgrade that loosens the parser would silently widen the gate.
+  "soupsieve==2.8.3",
+
   # --- Data / search / memory ---
   "kagiapi",
   "llama-index==0.14.14",
@@ -204,6 +213,32 @@ source = [
     "src/lupin_arbiter_app",
     "src/lupin_app",
     "src/lupin_model_server",
+    # ── src/scripts entered the frame 2026-08-29 (row e2099400, Rick's ruling) ──
+    # It is operational fleet code, not scaffolding: v2_eval.py is a REGISTERED build
+    # suite, plus secret_scan.py, check-arbiter-venv.py, bounce_dev_warn.py,
+    # bridge_pin_sweep.py, check_dead_claims.py and the schema-parity checks. Measured
+    # before it was added: 48.94% ALREADY covered, 32 of 61 files, several at 100% —
+    # tests reach it by `sys.path.insert(...)` + a bare `import secret_scan`, so the
+    # coverage was real and simply not counted. test_v2_eval.py:17 even says it imports
+    # the script "so coverage can target it", and all 603 of its covered statements were
+    # being discarded because this directory was not listed here.
+    "src/scripts",
+    # ⚠️ THE SUBDIRECTORIES ARE LISTED SEPARATELY AND MUST STAY THAT WAY — see the
+    # comment on `source` above about paths-not-names. That comment claimed a directory
+    # path makes coverage "enter every .py at 0%". MEASURED 2026-08-29: IT DOES NOT.
+    # coverage's unexecuted-file walk covers a source directory's TOP LEVEL only and does
+    # NOT descend into subdirectories that are not import packages. None of these has an
+    # __init__.py, so 12 files / 1,091 statements were silently outside a path that reads
+    # as inclusive — the same defect this row exists for, arriving through the fix.
+    # `include_namespace_packages = true` does NOT help; that was tested and made no
+    # difference. Listing each subdirectory as its own source entry does, and is why the
+    # file count is asserted by src/tests/unit/test_coverage_frame_completeness.py.
+    "src/scripts/auth_migration",
+    "src/scripts/debug",
+    "src/scripts/dm-experiment",
+    "src/scripts/lib",
+    "src/scripts/loc-analysis",
+    "src/scripts/presentation-gate-silence-proof",
 ]
 omit   = [
     "*/cosa/tests/*",               # CoSA's own test suites — test code, not a coverage denominator
@@ -214,6 +249,20 @@ omit   = [
     # prod modules from the 100% mandate: swe_team/test_runner.py, rest/routers/test_suite.py,
     # rest/test_suite_completion_watchdog.py. Those are production code that runs/manages
     # test suites — they must be measured, not omitted by an over-broad filename glob.
+    # ── src/sitecustomize.py (row f313fc2d, 2026-08-31) ──────────────────────────
+    # DECLARED, not silently absent. It already sat outside the frame — `source`
+    # lists src/ SUBDIRECTORIES and this is a top-level file, so it was
+    # never-measured with nothing saying so, which is the failure mode this repo
+    # documents as "absence from a report means never-measured, not zero".
+    # Omitted rather than measured because its one interesting path — the guard
+    # that keeps a failing shim from bricking every interpreter in the repo — is
+    # observable ONLY across a process boundary: `site` imports it before any test
+    # framework exists. That path is PROVEN by subprocess, not skipped:
+    # src/tests/unit/test_sitecustomize_fails_open.py starts real interpreters
+    # with a staged failing module and asserts they still run, with controls both
+    # ways. The logic it calls lives in cosa/utils/checked_hash_pyc.py, which is
+    # inside the frame at 100%.
+    "*/src/sitecustomize.py",
     "*/cosa/agents/*/__main__.py",  # CLI entrypoints — glue, run only via `python -m`
     "*/cosa/training/*",            # GPU + user-run-only; untestable in CI per never-grab-GPU mandate
     # ── Anything outside our own tree (row e2099400 §3a, 2026-08-26) ──────────────
@@ -266,7 +315,74 @@ omit   = [
 #
 # WHERE THE REMAINING 960 ARE: lupin_app 367 (its runtime is the :8000 tiers — the
 # ratified fold-in, §3c, is not done yet), cosa 334, lupin_cli 255, lupin_mcp 4.
-fail_under = 98
+# ── RE-BASED 98 -> 92 on 2026-08-29 (row e2099400; Rick ruled: include src/scripts
+#    and re-base the floor to the measured truth). NOT a lowered standard — the FRAME
+#    got bigger, so the same tests now answer a harder question.
+#
+#    MEASURED at sha e7724693, main tree, isolated COVERAGE_FILE, unit + cosa tiers,
+#    frame-dirty = 0 (the tree's 163 dirty paths were all src/rnd docs, outside every
+#    source entry, so they cannot move the number):
+#
+#        92.25%  ·  70,697 statements + 20,768 branch arcs = 91,465 denominator
+#                ·  5,626 lines missing  ·  696 files
+#        unit 936.17s (15 failed / 19,123 passed) + cosa 301.27s (0 failed / 8,769 passed)
+#
+#    ⚠️ DIRECTION, because this WILL be misread as a regression: 98.46 -> 92.25 IS NOT A
+#    FALL. Nothing got worse and no test was removed. src/scripts entered the denominator
+#    (8,271 statements at 42.61%) and the omission fix added 12 more files, so the
+#    denominator grew ~12.9%. The instrument got honest; the code did not get worse.
+#
+#    ⚠️ LOWER BOUND, not a point estimate. The 15 unit failures are peer-owned and
+#    pre-existing — verified by running them WITH and WITHOUT this config and getting the
+#    identical set — and a failing test dies early and executes less, so the true figure
+#    at this sha is at or above 92.25.
+#
+#    THIS IS A RUNG, NOT THE DESTINATION. The ramp to 100 is the row's standing work; the
+#    largest single lever is the 29 files under src/scripts still at 0% (lupin_config.py
+#    358 statements, seed_proxy_decisions.py 211). Raise this floor as they close — the
+#    rule is unchanged: the integer floor BELOW a measurement taken on a quiet box with an
+#    isolated COVERAGE_FILE, never a number anybody hoped for.
+#
+# ── RAISED 92 -> 97 on 2026-09-05 (row cd94cfb5; María's ruling 22:59:40 EDT, on Rick's
+#    2026-09-05 ~16:52 ruling that the floor gates merges and the shortfall gets an owned
+#    row). SAME RULE AS EVERY RUNG ABOVE: the integer floor BELOW a measurement taken on a
+#    quiet box with an isolated COVERAGE_FILE.
+#
+#        97.60%  at sha 545c73ab  ·  74,039 statements + 22,004 branch arcs
+#                ·  1,701 missing statements  ·  245 partial branches  ·  725 files
+#        unit 991.43s (3 failed / 22,781 passed) + cosa 279.86s (0 failed / 8,800 passed)
+#        frame OK — 725 files reported, 1 declared unseeable, 0 unaccounted
+#
+#    ✅ MEASURED TWICE, AT THE SAME SHA, BY TWO SEATS IN TWO SEPARATE WORKTREES WITH TWO
+#    SEPARATE COVERAGE_FILEs — Tiffany 21:12:59 and Rachel 23:11:49. The TOTAL lines are
+#    BYTE-IDENTICAL (74039 / 1701 / 22004 / 245 / 97.60%), as are the frame line and both
+#    tier counts. That is why this rung rests on a reproduction rather than on one run.
+#
+#    ✅ AND THE LEVER THE NOTE ABOVE NAMED IS CLOSED: lupin_config.py (358 stmts) and
+#    seed_proxy_decisions.py (211) both read 100.00% now, and NO file in the frame is at
+#    0.00% — the 29-files-at-zero sentence above is history, not a to-do.
+#
+#    WHERE THE REMAINING 1,701 ARE — 645 of 725 files are at 100%; only 80 carry any miss,
+#    and the top 5 hold 52% of the shortfall: lupin_app/main.py 290, scripts/
+#    presentation-gate-silence-proof/prove_gate_silence.py 222, scripts/
+#    tfe_to_cc_phase3_live.py 177, scripts/create_service_account.py 113,
+#    cosa/memory/two_tier_question_search.py 91. Top 10 hold 69%, top 25 hold 88%.
+#
+#    ⚠️ LOWER BOUND, not a point estimate — 3 unit tests failed in both runs and a failing
+#    test dies early and executes less, so the true figure at this sha is at or above 97.60.
+#    The 3 failures were NOT diagnosed by either seat; "97.60%" is not "everything is green".
+#
+#    🔴 OPEN QUESTION, NAMED AND DELIBERATELY NOT ANSWERED HERE (row cd94cfb5): THIS RULE
+#    SETS A FLOOR AND LETS THE FRACTION DECIDE THE BUDGET. Tonight's 0.60 headroom is worth
+#    594 all-missing units — where a unit is a statement OR a branch arc, the denominator
+#    being 96,043 of them, not 74,039 statements. But the identical rule applied to a
+#    measurement of 97.05 yields a floor of 97 and a budget of ~50 units, about a third of
+#    one module, and would redden on the first honest commit. A "measured minus 0.6" form
+#    was proposed and WITHDRAWN the same evening: it is LOOSER, not tighter (it would have
+#    set 95 where we set 96, and 97 where we set 98), and one instance is not enough to
+#    replace a rule three decisions rest on. Recorded so whoever has the instances has a
+#    starting point. DO NOT read this paragraph as a rule change; the rule is unchanged.
+fail_under = 97
 # exclude_also APPENDS to defaults (keeps `# pragma: no cover` working)
 exclude_also = [
     # ⚠️ EXCLUDED BY POLICY, NOT BECAUSE IT IS UNREACHABLE (row 3c0d3d1c, 2026-07-25).

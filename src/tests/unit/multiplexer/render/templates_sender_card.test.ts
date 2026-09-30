@@ -94,11 +94,14 @@ test("senderCard: groups notifications by date descending; multi-date produces m
   assert.equal(dates[1]!.getAttribute("data-date-key"), "2026-05-04");
 });
 
-test("senderCard: unread_count > 0 renders .sender-new-count badge with the number", () => {
+test("senderCard: unread_count > 0 renders .sender-new-count badge reading \"N new\" (A-2 #4)", () => {
+  // Legacy: notifications.js:19924 writes `${group.newCount} new`. The bare number this
+  // used to assert sits directly beside `(12)`, the message count — two adjacent numbers,
+  // one of which silently means something else. The word is the whole parity.
   const card = renderSenderCard(makeSender({ unread_count: 7 }), [], { appTimezone: "UTC" });
   const badge = card.querySelector(".sender-new-count");
   assert.notEqual(badge, null);
-  assert.equal(badge!.textContent, "7");
+  assert.equal(badge!.textContent, "7 new");
 });
 
 // ---------------------------------------------------------------------------
@@ -130,13 +133,13 @@ test("senderCard: ROOT (is_worker false) keeps the count and carries NO data-wor
   assert.equal(card.getAttribute("data-worker"), null, "root card not flagged");
   const badge = card.querySelector(".sender-new-count");
   assert.notEqual(badge, null);
-  assert.equal(badge!.textContent, "7");
+  assert.equal(badge!.textContent, "7 new");
 });
 
 test("senderCard: is_worker undefined (no lineage signal) behaves like a non-worker — count shown", () => {
   const card = renderSenderCard(makeSender({ unread_count: 4 }), [], { appTimezone: "UTC" });
   assert.equal(card.getAttribute("data-worker"), null);
-  assert.equal(card.querySelector(".sender-new-count")!.textContent, "4");
+  assert.equal(card.querySelector(".sender-new-count")!.textContent, "4 new");
 });
 
 test("senderCard: WORKER with zero unread still flags data-worker (pulse needs it) and shows no count", () => {
@@ -216,9 +219,13 @@ test("senderCard: CC session (sender_id with '#') emits the session block", () =
     [],
     { appTimezone: "UTC" },
   );
-  // V10a: the redundant `#<sessionHash>` span (.sender-session-id) was dropped —
-  // the copy button still exposes the session id; the visible duplicate is gone.
-  assert.ok( card.querySelector(".sender-session-id") === null, ".sender-session-id dropped (V10a redundant #id)" );
+  // S1 (2026-09-10): the `#<sessionHash>` span is back, immediately before the
+  // 📋 copy button — legacy parity (notifications.js:18746-18757). It had been
+  // dropped as redundant by V10a (ce164056); the parity P0 measured the gap.
+  const idSpan = card.querySelector(".sender-session-id");
+  assert.ok( idSpan !== null, ".sender-session-id present" );
+  assert.equal( idSpan.textContent, "#parity01" );
+  assert.ok( idSpan.nextElementSibling?.classList.contains("sender-session-copy") === true, "the id span sits immediately before the copy button" );
   assert.ok( card.querySelector(".sender-session-copy") !== null, ".sender-session-copy present" );
   assert.ok( card.querySelector(".sender-gist-btn") !== null, ".sender-gist-btn present" );
   assert.ok( card.querySelector(".sender-session-name") !== null, ".sender-session-name present (empty until rename lands)" );
@@ -230,9 +237,34 @@ test("senderCard: non-CC sender (no '#') omits the session block (legacy parity)
     [],
     { appTimezone: "UTC" },
   );
+  assert.ok( card.querySelector(".sender-session-id") === null );
   assert.ok( card.querySelector(".sender-session-copy") === null );
   assert.ok( card.querySelector(".sender-gist-btn") === null );
   assert.ok( card.querySelector(".sender-session-name") === null );
+});
+
+// ---------------------------------------------------------------------------
+// S4 (2026-09-10) — active / inactive session indicator (legacy
+// notifications.js:18759-18762). The renderer decides which card is active and
+// passes `isActive`; the template only paints it.
+// ---------------------------------------------------------------------------
+
+test("S4: an active card carries .sender-card-active and a filled ● titled Active session", () => {
+  const card = renderSenderCard(makeSender(), [], { appTimezone: "UTC", isActive: true });
+  assert.ok( card.classList.contains("sender-card-active") );
+  const dot = card.querySelector(".sender-active-indicator")!;
+  assert.equal( dot.textContent, "●" );
+  assert.equal( dot.getAttribute("title"), "Active session" );
+});
+
+test("S4: an inactive card (isActive false or absent) shows a hollow ○ titled Inactive session", () => {
+  for (const opts of [ { appTimezone: "UTC", isActive: false }, { appTimezone: "UTC" } ]) {
+    const card = renderSenderCard(makeSender(), [], opts);
+    assert.ok( !card.classList.contains("sender-card-active") );
+    const dot = card.querySelector(".sender-active-indicator")!;
+    assert.equal( dot.textContent, "○" );
+    assert.equal( dot.getAttribute("title"), "Inactive session" );
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -304,6 +336,71 @@ test("senderCard: conversation_mode_active=false omits is-active and uses the �
   const btn = card.querySelector(".sender-conversation-mode-btn")!;
   assert.ok(!btn.classList.contains("is-active"), "no is-active when conversation mode is off");
   assert.equal(btn.textContent, "🤭");
+});
+
+// ---------------------------------------------------------------------------
+// A-2 #4 — the SOLO icon set. Legacy carries two and switches on the interaction
+// mode (notifications.js:19192-19203); this page hardcoded the chorus pair.
+//
+// 🔴 THE TWO SETS DESCRIBE DIFFERENT THINGS, which is why the wrong one is worse
+// than a cosmetic slip. In chorus the button asks "does this session speak aloud?"
+// In solo it asks "does this session HOLD the line?" — a monopoly other sessions
+// wait behind. A solo host was shown speakerphone iconography and a tooltip about
+// going quiet, for a click whose actual effect was to claim or release the monopoly.
+//
+// Both sets are permanent (Rick, 2026-05-12: parallel preservation, not a flag with
+// a sunset), so neither is a migration state.
+// ---------------------------------------------------------------------------
+
+const CC_SENDER = "claude.code@lupin.deepily.ai#parity01";
+
+test("senderCard SOLO: conversation mode ON uses 📞 and the MONOPOLY tooltip (A-2 #4)", () => {
+  const card = renderSenderCard(
+    makeSender({ sender_id: CC_SENDER, conversation_mode_active: true }),
+    [], { appTimezone: "UTC", ttsInteractionMode: "solo" },
+  );
+  const btn = card.querySelector(".sender-conversation-mode-btn")!;
+  assert.equal(btn.textContent, "📞");
+  assert.ok(btn.classList.contains("is-active"));
+  assert.equal(btn.getAttribute("title"),
+    "Conversation mode ON — this session monopolizes TTS (click to release)");
+});
+
+test("senderCard SOLO: conversation mode OFF uses 🔔 and the CLAIM tooltip (A-2 #4)", () => {
+  const card = renderSenderCard(
+    makeSender({ sender_id: CC_SENDER, conversation_mode_active: false }),
+    [], { appTimezone: "UTC", ttsInteractionMode: "solo" },
+  );
+  const btn = card.querySelector(".sender-conversation-mode-btn")!;
+  assert.equal(btn.textContent, "🔔");
+  assert.ok(!btn.classList.contains("is-active"));
+  assert.equal(btn.getAttribute("title"), "Notification mode — no monopoly (click to claim TTS)");
+});
+
+test("senderCard CHORUS: the explicit mode keeps the 🔊/🤭 pair — the branch did not invert", () => {
+  // Passing "chorus" explicitly must land where omitting it lands. Without this, a
+  // reversed ternary would still pass both solo tests and both legacy tests above,
+  // because those omit the option and take the default path.
+  const on = renderSenderCard(
+    makeSender({ sender_id: CC_SENDER, conversation_mode_active: true }),
+    [], { appTimezone: "UTC", ttsInteractionMode: "chorus" },
+  );
+  const off = renderSenderCard(
+    makeSender({ sender_id: CC_SENDER, conversation_mode_active: false }),
+    [], { appTimezone: "UTC", ttsInteractionMode: "chorus" },
+  );
+  assert.equal(on.querySelector(".sender-conversation-mode-btn")!.textContent, "🔊");
+  assert.equal(off.querySelector(".sender-conversation-mode-btn")!.textContent, "🤭");
+});
+
+test("senderCard: an ABSENT mode paints chorus — legacy's `|| 'chorus'` fallback (A-2 #4)", () => {
+  // What the page shows before /api/config/client answers. It must not be solo:
+  // painting monopoly iconography first would claim a setting nobody has read.
+  const card = renderSenderCard(
+    makeSender({ sender_id: CC_SENDER, conversation_mode_active: true }),
+    [], { appTimezone: "UTC" },
+  );
+  assert.equal(card.querySelector(".sender-conversation-mode-btn")!.textContent, "🔊");
 });
 
 test("senderCard: non-CC sender (no '#') omits the voice-input row entirely (legacy parity)", () => {
@@ -455,6 +552,35 @@ describe("Bug#1 — progress-group head election (176× → 1×)", () => {
     const headMsg = card.querySelector(".progress-group-head")?.closest(".sender-message");
     assert.equal(headMsg?.getAttribute("data-id-hash"), "d1");   // earliest ts, regardless of list order
   });
+
+  // C3 (2026-09-10) — a day's count is every row of that day, like the card's
+  // header and like legacy's dateGroup.length, not only the rows left after the
+  // collapse above. Measured before the fix: a day read (30) under a header of (489).
+  test("C3: the date count includes collapsed progress members, matching the card header", () => {
+    const card = renderSenderCard(makeSender(), [
+      pgNotif("p1", 100, "g1"),
+      pgNotif("p2", 200, "g1"),
+      pgNotif("p3", 300, "g1"),
+      makeNotification("np", 150),
+    ], { appTimezone: "UTC" });
+    assert.equal(card.querySelector(".sender-message-count")!.textContent, "(4)");
+    assert.equal(card.querySelector(".date-count")!.textContent, "(4)", "the day counts the same rows as the header");
+    assert.equal(card.querySelectorAll(".sender-message").length, 2, "but renders only the head and the plain row");
+  });
+
+  test("C3: each day counts its own rows when a progress group spans two dates", () => {
+    const day1 = Date.UTC(2026, 4, 5, 10, 0);   // 2026-05-05
+    const day2 = Date.UTC(2026, 4, 6, 10, 0);   // 2026-05-06
+    const card = renderSenderCard(makeSender(), [
+      pgNotif("d1",  day1, "gx"),               // the elected head, on day 1
+      pgNotif("d2a", day2, "gx"),               // collapsed, but still a day-2 row
+      makeNotification("n2", day2 + 60_000),
+    ], { appTimezone: "UTC" });
+    const counts = Array.from(card.querySelectorAll(".date-accordion")).map(
+      a => `${a.getAttribute("data-date-key")}:${a.querySelector(".date-count")!.textContent}`,
+    );
+    assert.deepEqual(counts, ["2026-05-06:(2)", "2026-05-05:(1)"]);
+  });
 });
 
 // R5 — session name/topic rendered into .sender-session-name (CC sessions only).
@@ -472,4 +598,35 @@ test("R5: a CC session without a session_name renders an empty .sender-session-n
     [], { appTimezone: "UTC" },
   );
   assert.equal(card.querySelector(".sender-session-name")!.textContent, "");
+});
+
+// ===========================================================================
+// Row 8105670f — the null-vs-undefined persona predicate, senderCard sites.
+//
+// CONTRACT TESTS, NOT BUG REPRODUCTIONS. `SenderRecord.voice_persona` is typed
+// `?: VoicePersona` — optional, never NULLABLE — and every production writer of
+// that field normalises at the boundary (SenderStore.ts:229/:395 both sit behind
+// a truthiness guard, :387 `delete`s, NotificationsListRenderer.stubSender omits
+// the field). So a `null` CANNOT reach renderSenderCard at HEAD, and these two
+// cases cast one past the type deliberately. They exist because row 275e5c57
+// proved the identical predicate wrong one file over, where the null COULD
+// arrive — the guard is corrected here so the trap is not armed for the next
+// writer who adds a path into this field.
+//
+// Both sites live inside one renderSenderCard() call, so either one alone
+// reverting to `!== undefined` reddens BOTH cases. Per-site discrimination is
+// the mutation arm, not the assertion.
+// ===========================================================================
+
+test("senderCard: a NULL voice_persona sets no --persona-color (row 8105670f, site 1)", () => {
+  const sender = makeSender({ voice_persona: null as unknown as VoicePersona });
+  const card   = renderSenderCard(sender, [], { appTimezone: "UTC" });
+  assert.equal(card.style.getPropertyValue("--persona-color"), "");
+  assert.equal(card.style.getPropertyValue("--persona-color-rgb"), "");
+});
+
+test("senderCard: a NULL voice_persona builds no badge either (row 8105670f, site 2)", () => {
+  const sender = makeSender({ voice_persona: null as unknown as VoicePersona });
+  const card   = renderSenderCard(sender, [], { appTimezone: "UTC" });
+  assert.equal(card.querySelectorAll(".sender-persona-badge").length, 0);
 });

@@ -19,7 +19,7 @@ loop so shutdown interrupts the nap immediately). Time, DB access, the repo
 factory, and the signal sink are all injectable so the core is unit-testable
 with no live server, no Postgres, and no clock.
 
-Canonical design: planning-is-prompting -> src/rnd/2026.06.11-unified-task-store-design.md
+Canonical design: planning-is-prompting -> planning-is-prompting/src/rnd/2026.06.11-unified-task-store-design.md
 (I3 chase semantics); build plan src/rnd/v0.1.8/2026.06.15-task-store-phase2.1/01-build-plan.md (Item E).
 """
 

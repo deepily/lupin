@@ -76,8 +76,16 @@ def _snapshot( **fields ):
     fake missing `crud_factory`, which broke a dozen tests on paths production handles fine.
 
     Tests that WANT an unconfirmed row pass answer_is_correct=None or False explicitly.
+
+    `id_hash` is defaulted for the SAME reason, and it is the third time this shape has
+    bitten (row 7e2125a7, D7). A real SolutionSnapshot ALWAYS has one — the constructor
+    binds it on both of its branches, generated or supplied — so a fake without it is not a
+    stricter test, it is an unfaithful one: the replay path reads the id of the row it is
+    about to serve, and a fake that omits it fails on a path production handles fine.
+    Tests asserting on the recorded id pass id_hash= explicitly.
     """
     fields.setdefault( "answer_is_correct", True )
+    fields.setdefault( "id_hash", "snap-id-hash" )
     return types.SimpleNamespace( **fields )
 
 
@@ -93,7 +101,8 @@ def _lookup( is_replay_hit=False, snapshot=None, tier=1, similarity=0.0, best_sc
 
 
 def _outcome( status="done", answer="the answer", answer_raw="raw", job_id=None, error=None,
-              code=None, code_example="solution = do_something()", code_returns="string" ):
+              code=None, code_example="solution = do_something()", code_returns="string",
+              queue_position=None ):
     """A stand-in Outcome.
 
     `code` defaults to a real one-line solution because that is what a done outcome
@@ -105,7 +114,8 @@ def _outcome( status="done", answer="the answer", answer_raw="raw", job_id=None,
     return types.SimpleNamespace( status=status, answer=answer, answer_raw=answer_raw,
                                   job_id=job_id, error=error,
                                   code=[ "solution = 4" ] if code is None else code,
-                                  code_example=code_example, code_returns=code_returns )
+                                  code_example=code_example, code_returns=code_returns,
+                                  queue_position=queue_position )
 
 
 def _extraction( final_args=None, missing=(), fallback_questions=None ):
@@ -1362,6 +1372,24 @@ def test_submit_treats_waiting_as_a_success_not_a_degrade( tmp_path, notifier, m
     assert r[ "path" ]   != "receptionist", "waiting is an accepted job, not a failed one"
 
 
+def test_a_queued_outcomes_position_reaches_the_result_and_only_then( tmp_path, notifier, monkeypatch ):
+    """
+    Row a3c59f2d: the executor's queue_position is what `AskResponse.queue_position` reports.
+    The key is added ONLY when there is one, so every other path keeps the exact result dict
+    it always had — asserted on the same flow with the position absent.
+    """
+    monkeypatch.setattr( flow_mod, "resolve", lambda c, crud_enabled: FakeSpec( required_args=() ) )
+    queued = _submit_flow( tmp_path, notifier,
+                           executor=FakeExecutor( _outcome( status="waiting", answer=None, answer_raw=None,
+                                                            job_id="j-1", queue_position=4 ) ) )
+    assert queued.submit( job=FakeAgent(), question="q", **_CTX )[ "queue_position" ] == 4
+
+    unqueued = _submit_flow( tmp_path, notifier,
+                             executor=FakeExecutor( _outcome( status="waiting", answer=None, answer_raw=None,
+                                                              job_id="j-2" ) ) )
+    assert "queue_position" not in unqueued.submit( job=FakeAgent(), question="q", **_CTX )
+
+
 def test_a_prebuilt_job_that_fails_degrades_to_the_receptionist( tmp_path, notifier ):
     """The complement — a real failure must still degrade, or 'waiting is fine' would be
     satisfiable by treating everything as fine."""
@@ -2004,22 +2032,28 @@ class TestTheFlowAcksAQueuedJob:
         assert spoken == [ "4" ],                        "a finished job spoke something other than its answer"
         assert not any( "New " in line for line in spoken ), "a finished job was acked as if it had just been queued"
 
-    def test_a_queued_replay_is_acked_with_the_ROUTED_command( self, tmp_path, notifier, monkeypatch ):
+    def test_a_queued_replay_SAYS_NOTHING( self, tmp_path, notifier, monkeypatch ):
         """
-        The replay branch queues too, and since 6-pre its label comes from the
-        command the ROUTER chose — which now always ran, because routing happens
-        before the lookup.
+        THE PHANTOM ANNOUNCEMENT (bug 588b2f15). Rick, at the mic:
+        "I'm getting it every time when it should be only replaying the cached
+        answer or the cached code solution."
 
-        This test used to say the opposite ("its label comes from the snapshot's own
-        routing_command — not from the router, which never ran on a cache hit"). That
-        was true of the old order and is false of this one, so the premise is
-        rewritten rather than the assertion patched. The snapshot below carries a
-        DIFFERENT command from the routed one on purpose: reading the row's column
-        would name "todo list" here, and the row's column is the nullable,
-        blank-defaulted one this plan condemns.
+        ⚠️ THIS TEST IS THE INVERSE OF THE ONE IT REPLACES, and that is the point.
+        It used to be `test_a_queued_replay_is_acked_with_the_ROUTED_command` and it
+        asserted "New calendaring job..." — i.e. it required the defect. A replay
+        creates no job, so an ack naming one is a sentence about work that does not
+        exist; measured in the [DIAG-JR] trace as frame 11, with nothing behind it.
 
-        RED ON REVERT: resolve the snapshot's command again and the ack says "New
-        todo list job..." instead.
+        On a queued replay v1 speaks the cached answer itself, so v2 staying silent
+        is what keeps it to one spoken line — the same reason the receptionist case
+        below returns None.
+
+        The old test's OTHER claim is kept rather than dropped: the routed command
+        wins over the snapshot's own. It is asserted through `r["command"]`, which
+        is where it was always observable — the spoken line merely echoed it.
+
+        RED ON REVERT: drop the `path == "replay"` guard from `_spoken_line` and
+        this hears "New calendaring job..." again.
         """
         monkeypatch.setattr( flow_mod, "resolve", lambda command, crud_enabled:
                              FakeSpec( label="calendaring" ) if command == "agent router go to calendar"
@@ -2033,9 +2067,33 @@ class TestTheFlowAcksAQueuedJob:
 
         r = f.ask( "what is on my calendar", **_CTX, speak=True )
 
-        assert self._spoken( notifier ) == [ "New calendaring job..." ]
-        assert r[ "path" ] == "replay"
+        assert self._spoken( notifier ) == [ ],           "a replay announced a job it never created"
+        assert r[ "path" ]    == "replay"
         assert r[ "command" ] == "agent router go to calendar"
+
+    def test_a_replay_THAT_ALREADY_HAS_ITS_ANSWER_still_speaks_it( self, tmp_path, notifier, monkeypatch ):
+        """
+        THE NEGATIVE CONTROL, and it is what keeps the guard from being too wide.
+
+        The silence above is owed to `waiting` — v1 is speaking, so we must not.
+        A replay whose outcome is already `done` has its answer in hand and nobody
+        else is going to say it. Same path, opposite status, opposite answer.
+
+        RED ON REVERT: silence the whole replay path instead of only its waiting
+        arm, and the user asks a cached question and hears nothing at all.
+        """
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( label="math" ) )
+        snap  = _snapshot( routing_command="agent router go to math" )
+        cache = FakeCache( lookup_result=_lookup( is_replay_hit=True, snapshot=snap ) )
+        exe   = FakeExecutor( _outcome( status="done", answer="6", answer_raw="6" ) )
+        f     = _make_flow( tmp_path, cache, FakeRouter( "agent router go to math" ),
+                            FakeExpeditor(), exe, FakePending(), notifier )
+
+        r = f.ask( "what is 3 plus 3", **_CTX, speak=True )
+
+        assert self._spoken( notifier ) == [ "6" ]
+        assert r[ "path" ] == "replay"
 
     def test_a_waiting_outcome_with_no_label_stays_silent( self, tmp_path, notifier, monkeypatch ):
         """
@@ -2643,12 +2701,21 @@ def test_replay_reports_the_routed_command_not_the_snapshots_blank_column( tmp_p
 
     assert r[ "path" ] == "replay"
     assert r[ "command" ] == "agent router go to math", "the replay reported the row's blank column"
-    # The label rides the same fix: a waiting hand-off speaks v1's ack, and the ack
-    # names the agent. Resolved off the blank column there is no label and the user
-    # hears nothing at all.
-    assert notifier.requests, "a waiting replay spoke no acknowledgment"
-    assert "todo" not in notifier.requests[ -1 ].message
-    assert "math" in notifier.requests[ -1 ].message
+
+    # ⚠️ THE SPOKEN ACK IS NO LONGER AN OBSERVATION CHANNEL HERE, and saying so is
+    # better than quietly deleting three assertions. This test used to read the
+    # label out of the ack ("math" in the message, "todo" not in it), which worked
+    # only because a queued replay announced a job. It no longer does — bug
+    # 588b2f15, and the silence is the fix, not a regression.
+    #
+    # The consequence, stated rather than hidden: on a REPLAY the resolved
+    # `agent_label` now has no observable effect at all, because the only thing it
+    # ever fed was that ack. The label's provenance is still pinned where it does
+    # have an effect — the queued AGENT path, in
+    # TestTheFlowAcksAQueuedJob::test_a_queued_agent_is_acked_once_in_v1s_words.
+    # This test keeps the half that is still real: the COMMAND comes from the
+    # router, never from the row's blank column.
+    assert notifier.requests == [ ], "a queued replay announced a job it never created"
 
 
 # ─────────────────────── the log says whose words the verbatim is
@@ -3046,6 +3113,180 @@ class TestAWrittenRowCanActuallyBeReplayed:
         assert r[ "error" ] is not None, "a failed replay still reached the client with error=null"
         assert "empty code list" in r[ "error" ]
 
+    def test_a_failed_replay_names_the_row_it_read( self, tmp_path, notifier, monkeypatch ):
+        """
+        Row 7e2125a7, D7 — THE FAILURE COULD NOT BE TRACED TO A SNAPSHOT.
+
+        MEASURED in eval-2026-08-21-11-37-48, and the asymmetry is the whole defect:
+            route_reason=exact_hit      job_id present on  85 of  85 rows
+            route_reason=replay_error   job_id present on   0 of 126 rows
+        A successful replay named its row (the replay Outcome's job_id IS the row's
+        id_hash); a FAILED one named nothing, because `_receptionist` builds a NEW Outcome
+        and every field of the failed replay's outcome is discarded at that boundary — the
+        same boundary, and the same reason, that loses the router's command.
+
+        ⚠️ ASSERTS ON THE EMITTED RECORD, NOT ON THE OUTCOME. The original D7 was a
+        one-line change to the executor's Outcome that would have passed any
+        Outcome-level assertion and changed nothing in the artifact, because nothing
+        downstream reads that field. Only reading what the flow actually emits can tell
+        the difference.
+
+        RED ON REVERT: drop replayed_snapshot_id= from the replay degrade call and this
+        goes None while `test_a_failed_replay_now_says_why` above stays green.
+        """
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
+        snap     = _snapshot( routing_command="agent router go to math", id_hash="ROW-THAT-FAILED" )
+        cache    = FakeCache( lookup_result=_lookup( is_replay_hit=True, snapshot=snap ) )
+        outcomes = [ _outcome( status="failed", answer=None, error="Cannot execute empty code list" ),
+                     _outcome( status="done" ) ]
+
+        class _SeqExecutor( FakeExecutor ):
+            def submit( self, work, trace ):
+                self.works.append( work )
+                return outcomes.pop( 0 )
+
+        f = _make_flow( tmp_path, cache, FakeRouter(), FakeExpeditor(), _SeqExecutor(),
+                        FakePending(), notifier )
+
+        r = f.ask( "what is 2+2", **_CTX )
+
+        assert r[ "route_reason" ] == "replay_error"
+        assert r[ "replayed_snapshot_id" ] == "ROW-THAT-FAILED", (
+            "a failed replay must name the row it read — that is the whole of D7" )
+
+    def test_the_id_survives_a_replay_that_dies_before_the_executor_reads_the_row(
+        self, tmp_path, notifier, monkeypatch
+    ):
+        """
+        🔴 THE SUB-CASE THAT KILLED THE ORIGINAL D7, TESTED DIRECTLY.
+
+        D7 as ratified read the id off the EXECUTOR, where `job_id = snap.id_hash` binds
+        INSIDE the try, one line after `work.job.for_current_user(...)` — a call that can
+        itself raise. On that earliest failure the name is unbound, so referencing it in
+        the handler raises NameError INSIDE THE EXCEPTION HANDLER: a cleanly recorded
+        degrade becomes an uncaught crash, on the exact path this row exists to make
+        observable.
+
+        Reading the id from the row the FLOW already holds cannot be skipped by any
+        failure inside the replay, which is why this test raises before the executor gets
+        anywhere near the snapshot and still expects the id.
+        """
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
+        snap  = _snapshot( routing_command="agent router go to math", id_hash="ROW-READ-BEFORE-THE-CRASH" )
+        cache = FakeCache( lookup_result=_lookup( is_replay_hit=True, snapshot=snap ) )
+
+        class _DiesImmediately( FakeExecutor ):
+            """Fails at the FIRST thing _replay does, before any id could be bound."""
+            def __init__( self ):
+                super().__init__()
+                self._first = True
+            def submit( self, work, trace ):
+                self.works.append( work )
+                if self._first:
+                    self._first = False
+                    return _outcome( status="failed", answer=None,
+                                     error="per-user copy failed before the snapshot was read" )
+                return _outcome( status="done" )
+
+        f = _make_flow( tmp_path, cache, FakeRouter(), FakeExpeditor(), _DiesImmediately(),
+                        FakePending(), notifier )
+
+        r = f.ask( "what is 2+2", **_CTX )
+
+        assert r[ "route_reason" ] == "replay_error"
+        assert r[ "replayed_snapshot_id" ] == "ROW-READ-BEFORE-THE-CRASH"
+
+    def test_a_successful_replay_names_its_row_under_its_own_key( self, tmp_path, notifier, monkeypatch ):
+        """
+        THE CONTROL, and the reason this is a NEW key rather than a reuse of `job_id`.
+
+        `job_id` already carried the row id on the SUCCESS path — but on the agent path the
+        same key means a QUEUE job id. One key with two meanings cannot be grouped on, so
+        the row identity gets its own name and is set on BOTH replay exits. Without this
+        assertion the new field could have been wired only into the failure path, and a
+        consumer computing a per-row failure RATE would have a numerator and no denominator.
+        """
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
+        snap  = _snapshot( routing_command="agent router go to math", id_hash="ROW-THAT-SERVED" )
+        cache = FakeCache( lookup_result=_lookup( is_replay_hit=True, snapshot=snap ) )
+        f     = _make_flow( tmp_path, cache, FakeRouter(), FakeExpeditor(),
+                            FakeExecutor( outcome=_outcome( status="done" ) ), FakePending(), notifier )
+
+        r = f.ask( "what is 2+2", **_CTX )
+
+        assert r[ "route_reason" ] == "exact_hit"
+        assert r[ "replayed_snapshot_id" ] == "ROW-THAT-SERVED"
+
+    def test_a_route_that_never_replayed_carries_no_row_id( self, tmp_path, notifier, monkeypatch ):
+        """
+        THE NEGATIVE CONTROL. A field stamped on every exit says nothing. An agent route
+        read no cached row, so it must report None rather than a plausible-looking id —
+        which is the defect family this whole row is about: a confident value nobody
+        observed.
+        """
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
+        cache = FakeCache( lookup_result=_lookup( is_replay_hit=False ) )
+        f     = _make_flow( tmp_path, cache, FakeRouter(), FakeExpeditor(),
+                            FakeExecutor( outcome=_outcome( status="done" ) ), FakePending(), notifier )
+
+        r = f.ask( "what is 2+2", **_CTX )
+
+        assert r[ "route_reason" ] != "exact_hit"
+        assert r[ "replayed_snapshot_id" ] is None
+
+    def test_the_row_id_SURVIVES_THE_RESPONSE_MODEL_and_reaches_the_client(
+        self, tmp_path, notifier, monkeypatch
+    ):
+        """
+        🔴 THIS IS NOT REDUNDANT WITH THE TESTS ABOVE. DO NOT DELETE IT.
+
+        The tests above assert on the dict the FLOW returns. The client never sees that
+        dict: `/api/v2/ask` and `/api/v2/submit` both pass it through
+        `AskResponse( **result )`, and pydantic's default `extra` policy is **ignore** — so
+        a key the model does not declare is DROPPED IN SILENCE, with no error anywhere.
+
+        MEASURED before the model was updated:
+            AskResponse( ..., replayed_snapshot_id="ROW" ).model_dump()
+              -> the key is absent. The client receives nothing.
+
+        That is D7's own failure mode one layer further out: the original D7 attached a
+        field to an object that was discarded downstream, and it would have passed every
+        assertion made on that object. A field added to the flow but not to the response
+        model is the same defect wearing the fix's clothes — the eval artifact would be
+        exactly as empty as before while every flow test stayed green.
+
+        RED ON REVERT: remove `replayed_snapshot_id` from AskResponse and this reddens
+        while all four flow-level tests above stay green.
+        """
+        from cosa.rest.routers.v2_ask import AskResponse
+
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
+        snap     = _snapshot( routing_command="agent router go to math", id_hash="ROW-THE-CLIENT-MUST-SEE" )
+        cache    = FakeCache( lookup_result=_lookup( is_replay_hit=True, snapshot=snap ) )
+        outcomes = [ _outcome( status="failed", answer=None, error="Cannot execute empty code list" ),
+                     _outcome( status="done" ) ]
+
+        class _SeqExecutor( FakeExecutor ):
+            def submit( self, work, trace ):
+                self.works.append( work )
+                return outcomes.pop( 0 )
+
+        f = _make_flow( tmp_path, cache, FakeRouter(), FakeExpeditor(), _SeqExecutor(),
+                        FakePending(), notifier )
+
+        result   = f.ask( "what is 2+2", **_CTX )
+        # The exact call both routers make. Anything the model does not declare dies here.
+        delivered = AskResponse( **result ).model_dump()
+
+        assert delivered[ "replayed_snapshot_id" ] == "ROW-THE-CLIENT-MUST-SEE", (
+            "the flow recorded the row but the response model dropped it — the client, "
+            "and therefore the eval artifact, would see nothing" )
+
 
 # ────────────────────────────── 6b — the near-match ask
 
@@ -3109,6 +3350,88 @@ class TestTheFlowAsksAboutANearMatch:
         assert r[ "path" ] == "replay"
         assert r[ "route_reason" ] == "near_match_confirmed"
         assert r[ "cache_hit" ] is True
+
+    def test_a_confirmed_near_match_THAT_QUEUES_also_says_nothing( self, tmp_path, notifier, monkeypatch ):
+        """
+        THE OTHER REPLAY BRANCH, MEASURED RATHER THAN ASSUMED (bug 588b2f15).
+
+        María diagnosed the phantom announcement on the EXACT-hit branch and wrote
+        down, honestly, that she had not driven the near-match one: "it calls
+        `_finish` the same way with the same agent_label, so it LOOKS identical —
+        but I have not driven a near match." Looking identical is not a measurement,
+        so here is the measurement.
+
+        Both branches hand `_finish` the same literal path "replay", which is why
+        one guard covers both — but a reader should be able to check that rather
+        than take it, and a future refactor that gives branch 2b its own path label
+        would silently re-open the defect on this arm alone.
+
+        RED ON REVERT: drop the `path == "replay"` guard and a confirmed near match
+        that queues announces "New … job..." for a job it never created.
+        """
+        confirmer = _FakeConfirmer( response_value="yes" )
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False,
+                                                                     label="todo list" ) )
+        candidate = _snapshot( question="what is on my todo list", id_hash="near-1" )
+        cache     = FakeCache( lookup_result=_lookup( is_replay_hit=False, best_candidate=candidate,
+                                                      best_score=95.0, similarity=95.0, tier="ann" ) )
+        f = AskFlow(
+            cache, FakeRouter(), FakeExpeditor(),
+            FakeExecutor( _outcome( status="waiting", answer=None, answer_raw=None,
+                                    job_id=_SCOPED_JOB_ID ) ),
+            FakePending(),
+            crud_enabled=False, confirmation_threshold=90.0, confirmation_enabled=True,
+            confirmer=confirmer, receptionist_factory=FakeReceptionist, notifier=notifier,
+            trace_dir=str( tmp_path ),
+        )
+
+        r = f.ask( "what's on my todo list", **_CTX, speak=True )
+
+        assert r[ "path" ]         == "replay"
+        assert r[ "route_reason" ] == "near_match_confirmed"   # the branch really was 2b, not 2a
+        assert r[ "status" ]       == "waiting"                # ...and it really did queue
+        assert [ q.message for q in notifier.requests ] == [ ], (
+            "the near-match replay branch announced a job it never created"
+        )
+
+    def test_a_confirmed_near_match_that_then_FAILS_still_names_the_row( self, tmp_path, notifier, monkeypatch ):
+        """
+        Row 7e2125a7, D7 — the SECOND replay door, which had no test of its own at all.
+
+        The near-match degrade (`flow.py`, the `replay_error` return under 2b) was an
+        UNCOVERED LINE before this: every near-match test served a row successfully, so
+        nothing exercised a near match that the user confirmed and that then died. It is
+        the same defect on a different door, and a fix wired only into the exact-hit path
+        would have looked complete and left this one silent.
+
+        RED ON REVERT: drop replayed_snapshot_id= from the near-match degrade call.
+        """
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
+        candidate = _snapshot( question="what is on my todo list", id_hash="NEAR-ROW-THAT-FAILED" )
+        cache     = FakeCache( lookup_result=_lookup( is_replay_hit=False, best_candidate=candidate,
+                                                      best_score=95.0, similarity=95.0, tier="ann" ) )
+        outcomes  = [ _outcome( status="failed", answer=None, error="Cannot execute empty code list" ),
+                      _outcome( status="done" ) ]
+
+        class _SeqExecutor( FakeExecutor ):
+            def submit( self, work, trace ):
+                self.works.append( work )
+                return outcomes.pop( 0 )
+
+        f = AskFlow(
+            cache, FakeRouter(), FakeExpeditor(), _SeqExecutor(), FakePending(),
+            crud_enabled=False, confirmation_threshold=90.0, confirmation_enabled=True,
+            confirmer=_FakeConfirmer( response_value="yes" ), receptionist_factory=FakeReceptionist,
+            notifier=notifier, trace_dir=str( tmp_path ),
+        )
+
+        r = f.ask( "what's on my todo list", **_CTX )
+
+        assert r[ "route_reason" ] == "replay_error"
+        assert r[ "replayed_snapshot_id" ] == "NEAR-ROW-THAT-FAILED", (
+            "the near-match door must name its row too — a fix on one door only is half a fix" )
 
     def test_the_question_is_the_one_the_voice_path_asks( self, tmp_path, notifier, monkeypatch ):
         """
@@ -3405,27 +3728,46 @@ def test_a_degraded_receptionist_never_carries_the_deliberate_pick_marker(
     """
     A DEGRADED receptionist must never come back saying the user asked for it.
 
-    This is the assertion that made the fix worth keeping. `_receptionist` overwrites
-    the caller's command with its own on the way out, so EVERY degrade emits
-    command="agent router go to receptionist" — meaning a marker derived from the
-    EMITTED command would be set on all of these, and would look like a distinction
-    while making none. The helper reads the INCOMING command instead.
+    This is the assertion that made the fix worth keeping. The helper reads the INCOMING
+    command, so the marker cannot be faked by whatever the exit happens to emit.
+
+    ⚠️ ITS PRECONDITION CHANGED, and the change is row 13e7c573, not drift. This used to
+    assert `r["command"] == RECEPTIONIST` as a precondition, with the note that
+    `_receptionist` overwrites the caller's command so EVERY degrade emits the receptionist
+    command. That overwrite is gone: a degrade now reports the route the router chose, or
+    None where none was chosen. The assertion below is the SAME claim stated against the
+    new truth — a degrade must not come back claiming the user asked for the receptionist —
+    and it is strictly stronger, because it now checks the command as well as the reason.
     """
     monkeypatch.setattr( flow_mod, "resolve", lambda command, crud_enabled: None )
     f = _make_flow( tmp_path, FakeCache(), FakeRouter( command=router_command ), FakeExpeditor(),
                     FakeExecutor(), FakePending(), notifier )
     r = f.ask( "what is the weather", **_CTX )
 
-    assert r[ "command" ]      == RECEPTIONIST, "precondition: the degrade emits the receptionist command"
+    assert r[ "command" ] is None, (
+        "a degrade with no resolved route must claim no route — not the receptionist's" )
     assert r[ "route_reason" ] == expected_reason
     assert r[ "route_reason" ] != "user_picked_receptionist"
 
 
 def test_the_two_doors_are_distinguishable_on_route_reason_alone( tmp_path, notifier, monkeypatch ):
     """
-    The conflation, stated as a test: path and command are IDENTICAL on both doors, so
-    route_reason is the only field that separates them. If this ever passes because the
-    paths or commands differ, the fix has drifted into a contract change.
+    The two receptionist doors — DELIBERATELY PICKED vs DEGRADED — must never be confusable.
+
+    ⚠️ THIS TEST'S CONTRACT WAS CHANGED ON PURPOSE by row 13e7c573, and the old wording is
+    kept here so the change is visible rather than silent. It used to read: "path and
+    command are IDENTICAL on both doors, so route_reason is the only field that separates
+    them. If this ever passes because the paths or commands differ, the fix has drifted
+    into a contract change." That guard was right for its time and it fired on this change
+    exactly as intended.
+
+    THE CONTRACT IS NOW BETTER, not merely different. A deliberate pick IS a real route —
+    the receptionist is a positive choice in the router's own command list, not an
+    else-branch — so it keeps its command. A degrade with no resolved route reports None.
+    The doors are therefore distinguishable on TWO fields instead of one.
+
+    route_reason ALONE still separates them, which is asserted below unchanged: a consumer
+    reading only that field is unaffected by this row.
     """
     monkeypatch.setattr( flow_mod, "resolve", lambda command, crud_enabled: None )
 
@@ -3436,9 +3778,16 @@ def test_the_two_doors_are_distinguishable_on_route_reason_alone( tmp_path, noti
     picked   = _ask( RECEPTIONIST )
     degraded = _ask( "agent router go to nowhere at all" )
 
-    assert picked[ "path" ]    == degraded[ "path" ]
-    assert picked[ "command" ] == degraded[ "command" ]
-    assert picked[ "route_reason" ] != degraded[ "route_reason" ]
+    assert picked[ "path" ] == degraded[ "path" ], "both are served by the receptionist"
+    assert picked[ "route_reason" ] != degraded[ "route_reason" ], (
+        "route_reason alone must still separate them — consumers reading only it are unaffected" )
+
+    # THE NEW HALF. A deliberate pick keeps its route; a degrade that resolved none reports
+    # none. Before this row both said "agent router go to receptionist" and the command was
+    # useless as a discriminator.
+    assert picked[ "command" ]   == RECEPTIONIST
+    assert degraded[ "command" ] is None
+    assert picked[ "command" ] != degraded[ "command" ]
 
 
 def test_a_deliberate_pick_is_not_filed_in_the_trace_as_an_unknown_command( tmp_path, notifier, monkeypatch ):
@@ -3477,3 +3826,209 @@ def test_the_helper_reads_the_incoming_command_not_the_emitted_one():
     assert AskFlow._unresolved_route_reason( "agent router go to math" )   == "unknown_command"
     assert AskFlow._unresolved_route_reason( "unknown" )                   == "unknown_command"
     assert AskFlow._unresolved_route_reason( "" )                          == "unknown_command"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Row 13e7c573 — the degrade exit must report the ROUTE THAT WAS CHOSEN
+# ══════════════════════════════════════════════════════════════════════════════
+class TestTheDegradeExitReportsTheRouteThatWasChosen:
+    """
+    `_finish` was called with `command=RECEPTIONIST_COMMAND` on every degrade, overwriting
+    whatever the router chose. The record then named a command nobody selected — and did it
+    in well-formed fashion, with no error string, so no consumer could see it.
+
+    MEASURED in eval-2026-08-21-11-37-48: 317 rows carry the receptionist command, of which
+    188 are unknown_command, 126 replay_error and 3 agent_error. `route_reason` was the only
+    field that said otherwise.
+
+    ⚠️ WHY THIS IS NOT ONE TEST WITH A LOOP. The twelve degrade sites do NOT all behave the
+    same, and that is the substance of the row: eight had a resolved route and must carry it,
+    three resolved none and must report None, and one is CONDITIONAL — the deliberate
+    receptionist pick is a real route and keeps its command. A single parametrised assertion
+    would have hidden the split that makes this fix correct.
+    """
+
+    def _flow( self, tmp_path, notifier, **kw ):
+        return _make_flow( tmp_path, kw.pop( "cache", None ) or FakeCache(),
+                           kw.pop( "router", None ) or FakeRouter(), FakeExpeditor(),
+                           kw.pop( "executor", None ) or FakeExecutor(), FakePending(), notifier )
+
+    def test_an_agent_failure_reports_the_command_the_router_chose( self, tmp_path, notifier, monkeypatch ):
+        """The single largest class in the artifact after unknown_command, and the plainest."""
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
+        outcomes = [ _outcome( status="failed", answer=None, error="the agent died" ),
+                     _outcome( status="done" ) ]
+
+        class _SeqExecutor( FakeExecutor ):
+            def submit( self, work, trace ):
+                self.works.append( work ); return outcomes.pop( 0 )
+
+        f = self._flow( tmp_path, notifier,
+                        router=FakeRouter( command="agent router go to math" ),
+                        executor=_SeqExecutor() )
+        r = f.ask( "what is 2+2", **_CTX )
+
+        assert r[ "route_reason" ] == "agent_error"
+        assert r[ "path" ]         == "receptionist", "the receptionist really did serve it"
+        assert r[ "command" ]      == "agent router go to math", (
+            "the record must name the route the router chose, not the fallback that ran" )
+
+    def test_a_replay_failure_reports_the_command_the_router_chose( self, tmp_path, notifier, monkeypatch ):
+        """126 of the 317 relabelled rows. Same exit, different door."""
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
+        snap     = _snapshot( routing_command="agent router go to math", id_hash="ROW" )
+        outcomes = [ _outcome( status="failed", answer=None, error="Cannot execute empty code list" ),
+                     _outcome( status="done" ) ]
+
+        class _SeqExecutor( FakeExecutor ):
+            def submit( self, work, trace ):
+                self.works.append( work ); return outcomes.pop( 0 )
+
+        f = self._flow( tmp_path, notifier,
+                        cache=FakeCache( lookup_result=_lookup( is_replay_hit=True, snapshot=snap ) ),
+                        router=FakeRouter( command="agent router go to math" ),
+                        executor=_SeqExecutor() )
+        r = f.ask( "what is 2+2", **_CTX )
+
+        assert r[ "route_reason" ] == "replay_error"
+        assert r[ "command" ]      == "agent router go to math"
+        assert r[ "replayed_snapshot_id" ] == "ROW", "D7's field must survive this change"
+
+    def test_an_unresolvable_command_claims_NO_route_rather_than_inventing_one(
+        self, tmp_path, notifier, monkeypatch
+    ):
+        """
+        🔴 THE HALF A BLANKET PASS-THROUGH WOULD GET WRONG, and the reason this row is not
+        a one-liner.
+
+        188 of the 317 relabelled rows are `unknown_command`. There IS a command string in
+        scope at that door, so a fix that simply forwarded it would look complete and pass
+        any "the command survives" assertion — while asserting the router chose a route it
+        explicitly did not. That is the same defect with a different invented value.
+        """
+        monkeypatch.setattr( flow_mod, "resolve", lambda command, crud_enabled: None )
+        f = self._flow( tmp_path, notifier,
+                        router=FakeRouter( command="agent router go to nowhere at all" ) )
+        r = f.ask( "what is the weather", **_CTX )
+
+        assert r[ "route_reason" ] == "unknown_command"
+        assert r[ "command" ] is None, (
+            "no route resolved, so the record must name none — route_reason says which door" )
+
+    def test_a_deliberate_receptionist_pick_KEEPS_its_command( self, tmp_path, notifier, monkeypatch ):
+        """
+        THE CONDITIONAL SITE, and the one the existing suite caught me on.
+
+        My first pass sent None from every unresolved door. But the receptionist is a
+        POSITIVE choice in the router's own command list — `_unresolved_route_reason` already
+        knows this and answers `user_picked_receptionist` — so this door DID choose a route
+        and throwing it away would be a second, quieter data loss.
+
+        The record's command is derived from that same helper rather than a second copy of
+        the test, so the reason and the command cannot drift into disagreeing.
+        """
+        monkeypatch.setattr( flow_mod, "resolve", lambda command, crud_enabled: None )
+        f = self._flow( tmp_path, notifier, router=FakeRouter( command=RECEPTIONIST ) )
+        r = f.ask( "who are you", **_CTX )
+
+        assert r[ "route_reason" ] == "user_picked_receptionist"
+        assert r[ "command" ]      == RECEPTIONIST, (
+            "a deliberate pick is a real route and must keep it" )
+
+    def test_a_prebuilt_job_failure_reports_the_jobs_own_routing_command( self, tmp_path, notifier ):
+        """
+        THE SITE WITH NO `command` IN SCOPE — where my first pass raised NameError on the
+        degrade path, caught by the existing suite rather than by my reading. The success
+        exit two lines below reads `job.routing_command`; the degrade now agrees with it.
+        """
+        f = _submit_flow( tmp_path, notifier,
+                          executor=FakeExecutor( _outcome( status="failed", answer=None, error="boom" ) ) )
+        job = FakeAgent()
+        r   = f.submit( job=job, question="q", **_CTX )
+
+        assert r[ "route_reason" ] == "agent_error"
+        assert r[ "path" ]         == "receptionist"
+        assert r[ "command" ]      == job.routing_command
+
+    def test_a_route_that_never_degraded_is_untouched( self, tmp_path, notifier, monkeypatch ):
+        """
+        THE NEGATIVE CONTROL. A change that made every exit report the router's command
+        would satisfy the tests above while saying nothing — the non-degraded exits already
+        did, and must keep doing so.
+        """
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
+        f = self._flow( tmp_path, notifier, router=FakeRouter( command="agent router go to math" ),
+                        executor=FakeExecutor( _outcome( status="done" ) ) )
+        r = f.ask( "what is 2+2", **_CTX )
+
+        assert r[ "path" ]    == "agent", "no degrade happened"
+        assert r[ "command" ] == "agent router go to math"
+
+    def test_what_actually_ran_is_still_recorded_and_needs_no_new_field(
+        self, tmp_path, notifier, monkeypatch
+    ):
+        """
+        THE ROW ASKED FOR AN EXPLICIT FALLBACK MARKER. One already exists: `path`.
+
+        MEASURED on eval-2026-08-21-11-37-48 — `path == "receptionist"` is 1:1 with the
+        relabel in BOTH directions: all 317 relabelled rows carry it, and every row carrying
+        it is one of the 317. Read in the source, `_finish( trace, "receptionist", ... )` is
+        the ONLY producer of that value in the whole flow.
+
+        So "the route that was chosen" and "what actually served it" are now two fields that
+        already existed, and adding a third boolean meaning what `path` already means would
+        be a second source of truth for one fact — which is how the fields on this row's
+        parent drifted apart in the first place.
+        """
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
+        outcomes = [ _outcome( status="failed", answer=None, error="the agent died" ),
+                     _outcome( status="done" ) ]
+
+        class _SeqExecutor( FakeExecutor ):
+            def submit( self, work, trace ):
+                self.works.append( work ); return outcomes.pop( 0 )
+
+        f = self._flow( tmp_path, notifier, router=FakeRouter( command="agent router go to math" ),
+                        executor=_SeqExecutor() )
+        degraded = f.ask( "what is 2+2", **_CTX )
+
+        assert degraded[ "command" ] == "agent router go to math"   # what was ROUTED
+        assert degraded[ "path" ]    == "receptionist"              # what actually RAN
+
+    def test_the_honest_command_SURVIVES_THE_RESPONSE_MODEL( self, tmp_path, notifier, monkeypatch ):
+        """
+        🔴 THE BOUNDARY ASSERTION, and it is NOT the same shape as D7's.
+
+        D7 added a NEW key, so `AskResponse` dropped it silently until declared — a missing
+        field. `command` is an EXISTING declared key, so a WRONG value sails through the
+        response model untouched and no boundary check can catch it. The assertion therefore
+        has to be on the VALUE the client is handed, not on the key's presence.
+
+        Stated plainly because it is the trap one level on from D7's: the fix that worked
+        there — declare the field — would do nothing here, and a test copied from there
+        would pass while the client still received the wrong command.
+        """
+        from cosa.rest.routers.v2_ask import AskResponse
+
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
+        outcomes = [ _outcome( status="failed", answer=None, error="the agent died" ),
+                     _outcome( status="done" ) ]
+
+        class _SeqExecutor( FakeExecutor ):
+            def submit( self, work, trace ):
+                self.works.append( work ); return outcomes.pop( 0 )
+
+        f      = self._flow( tmp_path, notifier, router=FakeRouter( command="agent router go to math" ),
+                             executor=_SeqExecutor() )
+        result = f.ask( "what is 2+2", **_CTX )
+
+        delivered = AskResponse( **result ).model_dump()      # the exact call both routers make
+
+        assert delivered[ "command" ] == "agent router go to math", (
+            "the flow told the truth and the response model handed the client something else" )
+        assert delivered[ "path" ] == "receptionist"

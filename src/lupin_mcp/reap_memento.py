@@ -46,8 +46,11 @@ floor and rejects prior-task staleness.
 
 NO COLLISION WITH self_respin, and NOT for the reason first supposed. This reap
 coordinator reads/asks the `--slot io` slot `io/mementos/<persona-slug>.md`;
-self_respin writes and rehydrates from the `--slot root` slot `.claude-memento.md`
-(memento-management.md §3: io = spawned-worker, root = self-`/clear`). Different
+self_respin writes and rehydrates from the `--slot root` slot
+`.claude-memento-<persona-slug>.md` (memento-management.md §3: io = spawned-worker,
+root = self-`/clear`). BOTH SLOTS ARE PERSONA-SCOPED, and memento_slot is the single
+layout authority for both — the legacy shared root name `.claude-memento.md` is
+retired. Different
 files — a reap never reads what self_respin verifies, and the child answering a
 reap ask never rewrites what self_respin rehydrates from. It is also actor-disjoint:
 self_respin is a manager clearing its OWN pane, while a reap kills sessions a
@@ -68,12 +71,14 @@ provable with fakes and no live server.
 """
 
 import datetime
+import os
 import re
 import time
 
 from pathlib import Path
 from typing  import Any, Callable, Dict, Optional, Tuple
 
+from lupin_mcp.memento_repo_root     import _default_warn, repo_root_owning
 from lupin_mcp.persona_normalization import persona_slug
 from lupin_mcp.memento_merge_claim   import refuted_merge_claim
 
@@ -125,7 +130,127 @@ def seat_memento_slot( repo_root, persona_name ):
     return Path( repo_root ) / "io" / "mementos" / f"{persona_slug( persona_name )}.md"
 
 
-def seat_repo_root( ident ):
+def seat_memento_root_record( repo_root, persona_name, seat_sid8 ):
+    """
+    The ROOT-slot RECORD for one seat — the reap's SECOND place to look (Rick-ruled
+    via Mr. Radio, 2026-08-30, row 8068c65e).
+
+    WHY THE RECORD AND NEVER THE ROOT POINTER, which is the whole content of the
+    ruling. ⚠️ THE RULING'S ORIGINAL PREMISE IS RETIRED AND ITS CONCLUSION IS NOT, so
+    read the current reason rather than the story you may remember. The root pointer
+    USED TO BE `.claude-memento.md`, PERSONA-LESS — one file per repo shared by every
+    seat in it — and it was silently reassigned between seats twice inside forty
+    minutes on 2026-08-30 (Pocholo's record took it at 14:41, Mr. Radio's took it back
+    at 15:20). That cross-persona theft is DEAD BY CONSTRUCTION: the root pointer is
+    `.claude-memento-<persona-slug>.md` now and two personas cannot contend for one.
+
+    WHAT KEEPS THE RULING LOAD-BEARING IS THAT A PERSONA OUTLIVES ITS SESSIONS. A
+    persona-scoped pointer written by one session of Maria's is followed by the NEXT
+    session of Maria's, so on a batch reap it still resolves every seat of that persona
+    to whichever SESSION wrote last — which manufactures the exact failure this row
+    exists for, a memento that parses fine and names the wrong work. The RECORD carries
+    persona AND SESSION in its name, so it identifies whose work it holds and WHEN; the
+    pointer carries only the persona, and so can be right about the session only by
+    luck.
+
+    Requires:
+        - repo_root is the seat's OWN repo (seat_repo_root), never the host's
+        - persona_name, seat_sid8 identify the seat
+
+    Ensures:
+        - returns <repo_root>/.claude-memento-<persona-slug>-<sid8>.md
+        - derives it through memento_slot, which is the single layout authority —
+          a second copy of the derivation is a second thing to drift
+    """
+    # Local import: memento_slot composes THIS module's verify predicate, so importing
+    # it at module level would close a cycle. The layout lives there; the predicate
+    # lives here; neither is duplicated.
+    from lupin_mcp.memento_slot import SLOT_ROOT, slot_record_path
+    return slot_record_path( repo_root, persona_name, seat_sid8, SLOT_ROOT )
+
+
+def verify_seat_memento_at_any_readable_slot(
+    repo_root,
+    persona_name,
+    seat_sid8,
+    now,
+    *,
+    read_text_fn,
+    window_seconds = DEFAULT_WINDOW_SECONDS,
+    min_bytes      = DEFAULT_MIN_BYTES,
+    merge_claim_fn = None,
+    verify_fn      = None,
+):
+    """
+    Prove a reapable memento exists for this seat at EITHER readable location.
+
+    THE DEFECT THIS CLOSES (row 8068c65e): the verb offers `--slot root` as an
+    ordinary documented option and the reap read `--slot io` only, so a correct call
+    with a well-formed header produced a file nothing would find. Rachel's census of
+    all four of 2026-08-30's mementos found no misuse anywhere — one sanctioned verb,
+    right headers every time, and the entire split was that one field. A parameter
+    whose legal values are not all readable is the tool's defect, not the seat's.
+
+    ORDER, and it is not arbitrary: `io` is the reap's PRIMARY slot and its failure
+    reason is the actionable one, so it is tried first and its reason is what a total
+    miss reports. The root RECORD is a FALLBACK — it rescues an already-written
+    memento rather than blessing root as a reap destination.
+
+    Requires:
+        - repo_root is the seat's own repo; persona_name / seat_sid8 identify it
+        - now is AWARE; read_text_fn( path ) -> text or None
+        - verify_fn is verify_seat_memento (or a test double)
+
+    Ensures:
+        - returns ( usable, reason, slot_path ) where slot_path is the location that
+          ANSWERED — the io slot on success there, the root record on a fallback hit,
+          and the io slot on a total miss (so callers keep reporting the primary)
+        - the root POINTER is NEVER consulted (see seat_memento_root_record)
+        - a fallback hit says so in its reason, naming both the slot it was found at
+          and the slot it should have been written to — a silent rescue teaches the
+          fleet nothing and the next seat repeats it
+        - never raises
+    """
+    verify_fn = verify_fn if verify_fn is not None else verify_seat_memento
+    io_slot   = seat_memento_slot( repo_root, persona_name )
+    usable, reason = verify_fn( io_slot, seat_sid8, now, read_text_fn=read_text_fn,
+                                window_seconds=window_seconds, min_bytes=min_bytes,
+                                repo_root=repo_root, merge_claim_fn=merge_claim_fn )
+    if usable:
+        return True, reason, io_slot
+
+    root_record = seat_memento_root_record( repo_root, persona_name, seat_sid8 )
+    root_usable, root_reason = verify_fn( root_record, seat_sid8, now, read_text_fn=read_text_fn,
+                                          window_seconds=window_seconds, min_bytes=min_bytes,
+                                          repo_root=repo_root, merge_claim_fn=merge_claim_fn )
+    if root_usable:
+        return True, ( f"found at the root-slot RECORD {root_record}, not the io slot {io_slot} "
+                       f"({reason}) — usable, but write it with `--slot io` next time so the reap "
+                       f"finds it first: {root_reason}" ), root_record
+
+    return False, reason, io_slot
+
+
+def _nearest_existing_ancestor( cwd, exists_fn ):
+    """
+    Requires:
+        - cwd is a non-empty str; exists_fn( path ) -> bool
+
+    Ensures:
+        - returns the closest proper ancestor of an ABSOLUTE `cwd` that exists, as a str
+        - returns None for a relative `cwd` (its ancestors are the process cwd — the
+          ambient root this module refuses to guess from) or when no ancestor exists
+    """
+    path = Path( cwd )
+    if not path.is_absolute():
+        return None
+    for ancestor in path.parents:
+        if exists_fn( str( ancestor ) ):
+            return str( ancestor )
+    return None
+
+
+def seat_repo_root( ident, repo_root_fn=None, warn_fn=None, exists_fn=None ):
     """
     The repo a reaped seat ACTUALLY sits in, read from its own bridge `cwd`
     (row 80b930e6).
@@ -145,20 +270,80 @@ def seat_repo_root( ident ):
     reports on that. Guessing is the defect, so the caller refuses rather than
     guesses (`skipped_no_cwd`).
 
+    🔴 THE CWD IS THE SEAT'S TREE, WHICH IS NOT ALWAYS THE SEAT'S REPO (measured
+    2026-09-04). A seat working in a linked worktree reports that WORKTREE as its
+    cwd, and this returned it verbatim — so the reap derived
+    `<worktree>/io/mementos/` and verified a slot the writer never writes to. The
+    writer collapses a worktree to its main checkout on purpose (memento_io row
+    af0c5700: "Memento canonicality is a REPO question"), so a reap that does not
+    collapse asks about a different tree than the one the memento is in. Receipt:
+    623 records in the main checkout, 0 in the worktree, and a `timeout_no_memento`
+    alarm on a seat whose memento was on disk the whole time.
+
+    ⚠️ COLLAPSING IS NOT THE SAME MOVE AS FALLING BACK TO `LUPIN_ROOT`, and the
+    distinction is the whole reason this stays safe. `repo_root_owning` collapses a
+    worktree to ITS OWN main checkout — a lupin-mobile worktree resolves to
+    lupin-mobile, never to lupin. The cross-repo defect this function was written for
+    (row 80b930e6) is untouched: the seat's repo IDENTITY is preserved, only the
+    worktree/main distinction within it is erased.
+
+    🔴 THE CWD CAN BE GONE BY THE TIME THE REAP ASKS (María 🌸, 2026-09-18). A seat's
+    own session-end teardown runs `git worktree remove` on its tree, so a reap that
+    follows finds a bridge `cwd` naming a directory that no longer exists. git cannot
+    answer from a missing directory, this fell back to the cwd verbatim, and the reap
+    checked `<deleted worktree>/io/mementos/` — reporting Rachel's seat as memento-less
+    while `io/mementos/rachel-50a277fa.md` sat in the main checkout. So a missing cwd
+    resolves from its NEAREST EXISTING ANCESTOR: a seat tree lives under
+    `<repo>/.claude/worktrees/`, which is inside the main checkout, so that lands on
+    the repo the memento writer used. It stays per-seat — the ancestor of a deleted
+    lupin-mobile worktree is inside lupin-mobile, never LUPIN_ROOT (row 80b930e6).
+
     Requires:
         - ident is a `_capture_reap_identity` dict, or None
+        - repo_root_fn( start ) -> the repo root owning `start`, or None
+        - exists_fn( path ) -> True when `path` is an existing directory
 
     Ensures:
-        - truthy `cwd` in ident → that path as a str (the seat's own repo)
+        - truthy `cwd` in ident → the repo root that OWNS it (the MAIN checkout when
+          the cwd is a linked worktree; that tree itself for a plain repo, a
+          subdirectory, a nested repo or a submodule)
+        - an ABSOLUTE cwd that no longer exists → the repo root owning its nearest
+          existing ancestor, with one WARNING naming both. A relative cwd is never
+          walked: its ancestors are the process cwd, which is the ambient-root defect.
+        - a cwd git cannot resolve (from itself or from that ancestor) → that cwd
+          unchanged, which is what this returned before the collapse existed.
+          Degrading to today's answer beats refusing a reap over a git failure.
         - missing ident / missing or empty cwd / non-str cwd → None (caller refuses)
         - never raises
     """
     if not isinstance( ident, dict ):
         return None
     cwd = ident.get( "cwd" )
-    if isinstance( cwd, str ) and cwd.strip():
+    if not ( isinstance( cwd, str ) and cwd.strip() ):
+        return None
+    resolve = repo_root_fn if repo_root_fn is not None else repo_root_owning
+    warn    = warn_fn      if warn_fn      is not None else _default_warn
+    exists  = exists_fn    if exists_fn    is not None else os.path.isdir
+    start   = cwd
+    if not exists( cwd ):
+        ancestor = _nearest_existing_ancestor( cwd, exists )
+        if ancestor is not None:
+            warn( f"[reap_memento] WARNING: the seat's cwd {cwd!r} no longer exists (its "
+                  f"worktree was removed?); resolving its repo from the nearest existing "
+                  f"ancestor {ancestor!r}." )
+            start = ancestor
+    try:
+        owned = resolve( start )
+    except Exception as error:
+        # Contract says repo_root_owning never raises, so reaching this means the
+        # contract broke. Silence here would report a WORKTREE cwd as the seat's
+        # repo and verify a slot the writer never writes to — a reap alarming
+        # `timeout_no_memento` against a memento that is on disk (Rio ⚡, 2026-09-04).
+        warn( f"[reap_memento] WARNING: repo-root resolution RAISED for {cwd!r} "
+              f"({type( error ).__name__}: {error}); SETTLING FOR the seat's cwd. If that "
+              f"is a linked worktree, this reap is about to check the wrong tree." )
         return cwd
-    return None
+    return str( owned ) if owned else cwd
 
 
 def resolve_pointer_target( slot_path, text ):
@@ -353,6 +538,39 @@ def classify_slot_presence( slot_path, read_text_fn ):
     return "present"
 
 
+# ── The record's own header (pure) ────────────────────────────────────────────
+def slot_record_header( slot_path, read_text_fn ):
+    """
+    The parsed `memento-record` header of the RECORD this slot names, or {}.
+
+    Factored out because three callers need the same two steps — resolve a pointer
+    slot to its record, then parse that record's header — and a fourth reading of
+    those bytes by slightly different rules is how two verdicts start disagreeing
+    about the same file.
+
+    Requires:
+        - read_text_fn( path ) -> the file text, or None when unreadable
+
+    Ensures:
+        - resolves a pointer slot to its `current:` record first, exactly as
+          verify_seat_memento and classify_slot_owner do
+        - returns {} when the slot is unreadable, the record is unreadable, or no
+          header parses — the three cases that all mean "this file does not attest
+          to who wrote it or when"
+        - never raises
+    """
+    text = read_text_fn( slot_path )
+    if text is None:
+        return {}
+    record_path = resolve_pointer_target( slot_path, text )
+    if record_path is not None:
+        record_text = read_text_fn( record_path )
+        if record_text is None:
+            return {}
+        text = record_text
+    return parse_memento_header( text )
+
+
 # ── Whose file is in the slot? (pure) ─────────────────────────────────────────
 def classify_slot_owner( slot_path, seat_sid8, read_text_fn ):
     """
@@ -384,16 +602,7 @@ def classify_slot_owner( slot_path, seat_sid8, read_text_fn ):
           does, so the two never disagree about which bytes carry the header
         - never raises
     """
-    text = read_text_fn( slot_path )
-    if text is None:
-        return None
-    record_path = resolve_pointer_target( slot_path, text )
-    if record_path is not None:
-        record_text = read_text_fn( record_path )
-        if record_text is None:
-            return None
-        text = record_text
-    header  = parse_memento_header( text )
+    header  = slot_record_header( slot_path, read_text_fn )
     hdr_sid = ( header or {} ).get( "session_id" )
     if not hdr_sid:
         return None
@@ -428,7 +637,7 @@ def memento_alarm( outcomes ):
         - never raises
     """
     LOSING = ( "timeout_no_memento", "prior_holder_present", "unparseable_present",
-               "skipped", "skipped_no_cwd" )
+               "unproven_present", "skipped", "skipped_no_cwd" )
     losers = []
     for name in sorted( outcomes ):
         if name == "_error":
@@ -451,7 +660,8 @@ def memento_alarm( outcomes ):
 # `skipped*` verdicts are deliberately absent: they mean the slot could not be
 # derived at all (no persona/session, or no cwd), so there is no file to re-read
 # and nothing a second look could prove. They stay loud, untouched.
-RECHECKABLE = ( "timeout_no_memento", "prior_holder_present", "unparseable_present" )
+RECHECKABLE = ( "timeout_no_memento", "prior_holder_present", "unparseable_present",
+                "unproven_present" )
 
 
 def recheck_losing_seats(
@@ -520,11 +730,10 @@ def recheck_losing_seats(
         repo_root = seat_repo_root( identities.get( name ) )
         if repo_root is None:
             continue
-        slot           = seat_memento_slot( repo_root, outcome.get( "persona" ) )
-        usable, reason = verify_seat_memento( slot, ( outcome.get( "session_id" ) or "" )[ :8 ], now,
-                                              read_text_fn=read_text_fn,
-                                              window_seconds=window_seconds, min_bytes=min_bytes,
-                                              repo_root=repo_root, merge_claim_fn=merge_claim_fn )
+        usable, reason, slot = verify_seat_memento_at_any_readable_slot(
+            repo_root, outcome.get( "persona" ), ( outcome.get( "session_id" ) or "" )[ :8 ], now,
+            read_text_fn=read_text_fn, window_seconds=window_seconds, min_bytes=min_bytes,
+            merge_claim_fn=merge_claim_fn )
         if not usable:
             continue
         rechecked[ name ] = dict( outcome )
@@ -639,13 +848,31 @@ def coordinate_mementos(
                                  because the recovery actions are opposite: here, opening
                                  the file teaches you about somebody else's work, and the
                                  thing to hunt for is a memento written to the wrong place
-            "unparseable_present" the child was asked and still no PROVABLE memento, but a
-                                 file IS on disk at the slot — a manager can OPEN and READ
-                                 it (RECOVERABLE). The present-but-unparseable case the
-                                 rows asked to split out (dffebbd6 / ebcb763e): a real
-                                 memento with only a markdown H1 header, or a pointer whose
-                                 record vanished. A prior-holder's file NO LONGER lands
-                                 here — it has its own verdict above
+            "unparseable_present" the child was asked and a file IS on disk at the slot,
+                                 but it carries NO parseable memento-record header at all,
+                                 so nothing in it attests to who wrote it or when
+                                 (RECOVERABLE — a manager can OPEN and READ it). Cases:
+                                 a hand-written memento with only a markdown H1 heading,
+                                 or a pointer whose record vanished. THE CAUSE IS A WRITER
+                                 BYPASSING memento_io, and the remedy is a writer fix.
+                                 A prior-holder's file does NOT land here (its own verdict
+                                 above), and neither does this seat's own headered memento
+                                 (see "unproven_present" below)
+            "unproven_present"   the child was asked and THIS SEAT'S OWN memento is at the
+                                 slot — the header parsed and named this session — but one
+                                 verify gate failed: stale beyond the window, under the
+                                 byte floor (a partial write), or a refuted merge claim.
+                                 The reason NAMES the gate verbatim from verify_seat_memento.
+
+                                 SPLIT OUT OF "unparseable_present" (row 48b5f19e) because
+                                 the two read identically and mean opposite things. Measured
+                                 2026-08-29: one seat was 45 seconds past the poll deadline
+                                 with a perfect memento, another had hand-written a slot with
+                                 no header at all, and BOTH drew "unparseable_present" — so a
+                                 manager had to open every file to learn which. Here the
+                                 writer is fine and the remedy is a TIMEOUT (or the post-kill
+                                 re-check); there the writer is the defect. Same verdict for
+                                 both is what trains a manager to stop reading the alarm
             "skipped"            no persona/session in the bridge identity, so the
                                  slot cannot be derived — surfaced, not silently ok
             "skipped_no_cwd"     persona+session known but the bridge carries no `cwd`,
@@ -712,11 +939,10 @@ def coordinate_mementos(
                                            "and guessing one reads another persona's memento",
                                  "persona": persona_name, "session_id": session_id }
             continue
-        slot          = seat_memento_slot( repo_root, persona_name )
-        usable, reason = verify_seat_memento( slot, session_id[ :8 ], now,
-                                              read_text_fn=read_text_fn,
-                                              window_seconds=window_seconds, min_bytes=min_bytes,
-                                              repo_root=repo_root, merge_claim_fn=merge_claim_fn )
+        usable, reason, slot = verify_seat_memento_at_any_readable_slot(
+            repo_root, persona_name, session_id[ :8 ], now,
+            read_text_fn=read_text_fn, window_seconds=window_seconds, min_bytes=min_bytes,
+            merge_claim_fn=merge_claim_fn )
         if usable:
             outcomes[ name ] = { "status": "verified", "reason": reason,
                                  "persona": persona_name, "session_id": session_id, "slot": str( slot ) }
@@ -775,11 +1001,29 @@ def coordinate_mementos(
                        f"slot. Do not open it expecting this seat's context. If the seat wrote one "
                        f"elsewhere (the repo root is the usual wrong place), move it to the slot before "
                        f"re-spinning; otherwise it was never written; at ask time: {info[ 'pre_ask_reason' ]}" )
+        elif presence == "present" and slot_record_header( info[ "slot" ], read_text_fn ):
+            # The file ATTESTS to being this seat's — the header parsed and named this
+            # seat. So the failure is a GATE (stale / partial / merge-claim), never a
+            # missing writer, and verify_seat_memento already computed WHICH gate. Pass 4
+            # used to discard that sentence and substitute a generic one, which is what
+            # made "mid-write" and "written wrong" read identically (row 48b5f19e).
+            _usable, gate = verify_seat_memento( info[ "slot" ], info[ "session_id" ][ :8 ], now_fn(),
+                                                 read_text_fn=read_text_fn,
+                                                 window_seconds=window_seconds, min_bytes=min_bytes,
+                                                 repo_root=info[ "repo_root" ], merge_claim_fn=merge_claim_fn )
+            status = "unproven_present"
+            reason = ( f"asked{info[ 'ask_note' ]}, and THIS SEAT'S OWN memento is at the slot — the "
+                       f"header parses and names this session — but one gate failed within "
+                       f"{ask_timeout_sec}s: {gate}. A writer bug is NOT indicated; the seat used the "
+                       f"sanctioned path. If the gate is a small staleness it was still writing when "
+                       f"the window closed; at ask time: {info[ 'pre_ask_reason' ]}" )
         elif presence == "present":
             status = "unparseable_present"
-            reason = ( f"asked{info[ 'ask_note' ]}, a file is on disk at the slot but could not be "
-                       f"proven fresh+complete within {ask_timeout_sec}s — OPEN AND READ IT "
-                       f"(RECOVERABLE, not missing); at ask time: {info[ 'pre_ask_reason' ]}" )
+            reason = ( f"asked{info[ 'ask_note' ]}, a file is on disk at the slot but it carries NO "
+                       f"parseable memento-record header, so nothing in it attests to who wrote it or "
+                       f"when — hand-written, bypassing memento_io. OPEN AND READ IT (RECOVERABLE, not "
+                       f"missing), and note the slot may have overwritten a pointer; at ask time: "
+                       f"{info[ 'pre_ask_reason' ]}" )
         else:
             status     = "timeout_no_memento"
             empty_note = ( " slot file present but empty (0 bytes — a write started and died);"
@@ -827,8 +1071,15 @@ def describe_slot(
 
     Ensures:
         - returns { slot, verdict, detail, foreign_session_id }
-        - verdict is "ready" ONLY when verify_seat_memento proves the slot — the same
-          predicate the reap uses, so this command and the reap can never disagree
+        - verdict is "ready" ONLY when the memento is proven at one of the two
+          READABLE locations — the io slot, or this seat's root RECORD (row 8068c65e)
+          — via the same predicate the reap uses, so this command and the reap can
+          never disagree. `slot` then names WHERE it was actually found, which is the
+          fact the caller acts on; the root POINTER is never among them, because it
+          names a PERSONA and not a SESSION — a persona outlives its sessions, so the
+          pointer cannot say WHICH of that persona's sessions wrote what it holds
+        - every verdict below "ready" is about the IO slot specifically — whose
+          pointer it is, and whether anything sits there at all
         - verdict is "prior_holder" when the slot names a DIFFERENT session, and
           foreign_session_id names it
         - verdict is "absent" when nothing readable with content is at the slot
@@ -838,12 +1089,16 @@ def describe_slot(
         - never raises
     """
     read_text_fn = read_text_fn if read_text_fn is not None else _default_read_text
-    slot         = seat_memento_slot( repo_root, persona_name )
-    usable, detail = verify_seat_memento( slot, seat_sid8, now, read_text_fn=read_text_fn,
-                                          window_seconds=window_seconds, min_bytes=min_bytes )
+    slot           = seat_memento_slot( repo_root, persona_name )
+    usable, detail, found_at = verify_seat_memento_at_any_readable_slot(
+        repo_root, persona_name, seat_sid8, now, read_text_fn=read_text_fn,
+        window_seconds=window_seconds, min_bytes=min_bytes )
     if usable:
-        return { "slot": str( slot ), "verdict": "ready", "detail": detail,
+        return { "slot": str( found_at ), "verdict": "ready", "detail": detail,
                  "foreign_session_id": None }
+    # Below here the seat has NO usable memento at either readable location, so the
+    # remaining classification is about the io slot specifically — whose pointer it is,
+    # and whether anything is sitting there at all.
     foreign = classify_slot_owner( slot, seat_sid8, read_text_fn )
     if foreign is not None:
         return { "slot": str( slot ), "verdict": "prior_holder", "detail": detail,
@@ -901,3 +1156,116 @@ def main( argv=None ):   # pragma: no cover - thin argv/stdout boundary over tes
 if __name__ == "__main__":   # pragma: no cover - process entry point
     import sys
     sys.exit( main() )
+
+
+# ── The withhold predicate (pure) — row ee3d3c82 ──────────────────────────────
+#
+# THE DEFECT THIS CLOSES. `memento_alarm` above is honest and LOUD, and it is
+# composed at `session_spawner.py:1738` — AFTER the kill loop at :1574. So the seat
+# is already dead by the time anybody reads the sentence naming what it lost. The
+# coordinator runs BEFORE the kill (row 0a36d83d fixed the race) but its verdict has
+# never GATED the kill: the loop is `for name in targets:`, unconditional, and even
+# the coordination-raised branch says in its own words "reap proceeded WITHOUT
+# verified mementos".
+#
+# ⇒ self_respin REFUSES when it cannot prove a memento. The reap only NARRATES.
+#   This is the predicate that lets the reap refuse too.
+#
+# 🔴 IT MUST DISCRIMINATE, AND THE EXISTING VOCABULARY ALREADY SAYS HOW. The
+#   four-way split (row 48b5f19e / 3b0c5f90) was built so a manager could tell
+#   recovery actions apart WITHOUT opening the file. Collapsing it back into
+#   "anything that isn't verified" would throw away the distinction those rows paid
+#   for, and would withhold reaps that are perfectly safe.
+
+#: Verdicts where THE SEAT'S OWN WORK IS NOT PROVABLY ON DISK. Killing here destroys
+#: something nobody can recover, so the reap withholds the kill and says so.
+WITHHOLD_KILL = (
+    "prior_holder_present",   # ANOTHER session's file is at the slot; this seat's is not there
+    "unparseable_present",    # a file is there but nothing proves it is this seat's
+    "timeout_no_memento",     # asked, and nothing ever appeared
+)
+
+#: Verdicts that must NOT withhold, each for its own stated reason. This tuple is the
+#: negative half of the rule and is as load-bearing as the positive half — a predicate
+#: that withheld on these would block safe reaps and get itself switched off.
+PROCEED_KILL = (
+    "verified",         # proven this seat's, fresh, complete
+    "written",          # appeared after the ask, before the re-check — proven, just late
+    "not_requested",    # the manager never asked for a memento; nothing to protect
+    "unproven_present", # THIS SEAT'S OWN file IS at the slot; a freshness/size gate failed.
+                        # The work exists and is recoverable by hand, so this is a WARNING
+                        # case, not a refusal — row ee3d3c82 names it explicitly.
+    "skipped",          # the slot could not be derived at all (no persona/session)…
+    "skipped_no_cwd",   # …or no cwd. Nothing to read, so a second look proves nothing and
+                        # withholding would block the reap for a reason unrelated to safety.
+)
+
+
+def seats_to_withhold( outcomes ):
+    """
+    Name the seats whose kill must be WITHHELD because their work is not provably saved.
+
+    Pure: no I/O, no clock, no filesystem.
+
+    Requires:
+        - outcomes maps seat name -> a `coordinate_mementos` outcome dict; the reserved
+          `_error` / `_recheck_error` keys (coordination failures, not seats) are tolerated
+
+    Ensures:
+        - returns a dict of seat name -> its withholding status, for every seat whose
+          status is in WITHHOLD_KILL
+        - returns {} when every seat is safe to kill — the quiet case stays quiet, so a
+          non-empty result means something
+        - NEVER withholds on a status in PROCEED_KILL, and in particular never on
+          `unproven_present`: that is THIS SEAT'S OWN file with a gate failure, which is
+          a warning, not a loss
+        - ignores the reserved underscore keys rather than treating a coordination error
+          as a seat to protect — a raising coordinator is surfaced by its own field
+        - an UNKNOWN status does NOT withhold. A predicate that withheld on anything it
+          did not recognise would turn every future vocabulary addition into a fleet-wide
+          reap outage, and this repo has measured that the vocabulary DOES drift
+        - never raises
+    """
+    if not outcomes:
+        return {}
+
+    withheld = {}
+    for name, outcome in outcomes.items():
+        if name.startswith( "_" ):
+            continue
+        status = ( outcome or {} ).get( "status" )
+        if status in WITHHOLD_KILL:
+            withheld[ name ] = status
+    return withheld
+
+
+def withhold_notice( withheld ):
+    """
+    One sentence for the TOP of the reap result, naming every seat NOT killed and why.
+
+    A withheld kill that the caller has to go looking for is the same defect as the
+    alarm this row was raised about — see `memento_alarm`'s own docstring: "a verdict
+    nobody reads is the same as no verdict."
+
+    Requires:
+        - withheld is the dict returned by `seats_to_withhold`
+
+    Ensures:
+        - returns None when nothing was withheld
+        - otherwise returns a single string naming each withheld seat and its verdict,
+          sorted by seat name so the same reap reads the same way twice, and naming the
+          override explicitly so a manager is never stuck
+        - never raises FOR ANY INPUT SATISFYING Requires. It is a reporting helper, not
+          an input validator: handed something that is not a seat->status mapping it
+          WILL raise, and that is the honest behaviour. `seats_to_withhold` above really
+          does tolerate degenerate input and says so; this one does not, and a blanket
+          "never raises" here was a claim the code does not keep
+    """
+    if not withheld:
+        return None
+    named = ", ".join( f"{name} ({withheld[ name ]})" for name in sorted( withheld ) )
+    return (
+        f"KILL WITHHELD for {len( withheld )} seat(s) — their work is not provably on disk: "
+        f"{named}. Re-ask them for a memento before reaping, or reap knowingly and "
+        f"accept the loss."
+    )

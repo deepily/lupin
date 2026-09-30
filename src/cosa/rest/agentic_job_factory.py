@@ -10,12 +10,15 @@ Used by:
     - routers/deep_research.py (REST form submission)
     - routers/podcast_generator.py (REST form submission)
     - routers/deep_research_to_podcast.py (REST form submission)
-    - routers/mock_job.py (expeditor test mode)
+    - v2 submit (agent router go to mock job — the retired mock-job door's two modes)
 """
 
+import functools
 import shlex
 
 from typing import Optional
+
+from cosa.rest.v2.refusal import SubmitRefused
 
 _SEMANTIC_NONE = { "default", "no limit", "none", "skip", "no", "" }
 
@@ -207,6 +210,19 @@ def _build_deep_research( command, args_dict, user_id, user_email, session_id, d
         force_failure_mode = args_dict.get( "force_failure_mode" ),
         audience           = args_dict.get( "audience" ),
         audience_context   = args_dict.get( "audience_context" ),
+        # THE SEAM THE FEATURE DIED IN. The v2 door validates `source_document`,
+        # resolves each path to a real absolute path and writes the list back into
+        # args — and then this factory rebuilt the job WITHOUT it, so the validated
+        # documents never reached DeepResearchJob and every research run silently
+        # read nothing. Found by Krishna in review, not by my tests: the door test
+        # uses a fake factory and the job test constructs DeepResearchJob directly,
+        # so NOTHING crossed this line. That is why test_the_factory_CARRIES_
+        # source_document_through_to_the_job exists — it drives this real function.
+        source_document    = args_dict.get( "source_document" ),
+        # Rick's tick-box topic confirm (row b6cfbf8d) — ON for a run over a local
+        # document, OFF otherwise. no_confirm above stays True: this switch asks only
+        # about topics, never the clarification question or the plan yes/no.
+        confirm_topics     = bool( args_dict.get( "source_document" ) ),
         debug              = debug,
         verbose            = verbose
     )
@@ -295,6 +311,12 @@ def _build_research_to_podcast( command, args_dict, user_id, user_email, session
         dry_run          = _parse_boolean( args_dict.get( "dry_run" ) ),
         audience         = args_dict.get( "audience" ),
         audience_context = args_dict.get( "audience_context" ),
+        # THE SAME SEAM, TWO COMMANDS LATER (row 5726e3c5). Measured 2026-09-08:
+        # `_refuse_bad_source_documents` (v2/flow.py:692) never branches on `command`, so
+        # the door was ALREADY validating and resolving `source_document` for this command
+        # -- and this builder was already dropping it. A caller got a 200, the job ran, and
+        # the research read nothing. Krishna's no-op shape, live on two more doors.
+        source_document  = args_dict.get( "source_document" ),
         debug            = debug,
         verbose          = verbose
     )
@@ -410,6 +432,12 @@ def _build_research_to_presentation( command, args_dict, user_id, user_email, se
         dry_run                 = _parse_boolean( args_dict.get( "dry_run" ) ),
         audience                = args_dict.get( "audience" ),
         audience_context        = args_dict.get( "audience_context" ),
+        # THE SAME SEAM, TWO COMMANDS LATER (row 5726e3c5). Measured 2026-09-08:
+        # `_refuse_bad_source_documents` (v2/flow.py:692) never branches on `command`, so
+        # the door was ALREADY validating and resolving `source_document` for this command
+        # -- and this builder was already dropping it. A caller got a 200, the job ran, and
+        # the research read nothing. Krishna's no-op shape, live on two more doors.
+        source_document         = args_dict.get( "source_document" ),
         debug                   = debug,
         verbose                 = verbose,
     )
@@ -453,6 +481,36 @@ def _build_swe_team( command, args_dict, user_id, user_email, session_id, debug,
         verbose        = verbose
     )
     return _finish( job, command, args_dict, scheduled_at, monopolize, spawned_by_id_hash )
+
+def _refusing_bad_input( builder ):
+    """
+    Wrap a job builder so a ValueError becomes a SubmitRefused (row a3c59f2d, María's review).
+
+    WHY. The flow degrades any OTHER exception from a builder to the RECEPTIONIST, and the
+    queued executor then puts a real receptionist job on the todo queue: the caller gets
+    status "waiting", a job id and a queue position for a submit that was REFUSED. The two
+    retired doors this replaces answered 400 for the same inputs (an unregistered suite
+    name, malformed or contradictory pytest_args, an inverted mock-job range), so a caller
+    that reads `status` must see "failed" here. SubmitRefused is that: a terminal `failed`
+    carrying the cause in `error`, nothing queued.
+
+    Requires:
+        - builder is a job builder with the JOB_BUILDERS signature
+
+    Ensures:
+        - returns a builder that behaves identically except that a ValueError (pydantic's
+          ValidationError and PytestArgsRejected are both ValueErrors) surfaces as
+          SubmitRefused( "submit_refused", <the message> ); a SubmitRefused the builder
+          raised itself, and any non-ValueError, pass through unchanged
+    """
+    @functools.wraps( builder )
+    def wrapper( *args, **kwargs ):
+        try:
+            return builder( *args, **kwargs )
+        except ValueError as e:
+            raise SubmitRefused( "submit_refused", str( e ) ) from e
+    return wrapper
+
 
 def _build_test_suite( command, args_dict, user_id, user_email, session_id, debug, verbose,
                         scheduled_at, monopolize, spawned_by_id_hash ):
@@ -500,6 +558,21 @@ def _build_test_suite( command, args_dict, user_id, user_email, session_id, debu
     else:
         pytest_args = []
 
+    # Refuse an unregistered suite name AT SUBMIT (row 4e8f348e), where `/api/test-suite/submit`
+    # used to. A submit that cannot possibly run must not take the monopolize slot: "e2e_ui"
+    # (the directory, not a suite) did exactly that five times and measured nothing. Only the
+    # builder checks -- TestSuiteJob.__init__ also runs on persistence rehydration, where a
+    # stale name in an old row must not stop the queue coming back.
+    from cosa.agents.test_suite.job import SUITE_SCRIPTS, unknown_suite_names
+    if not test_types:
+        raise ValueError( f"test_types names no suite. Valid suites: {', '.join( SUITE_SCRIPTS )}" )
+    bad = unknown_suite_names( test_types )
+    if bad:
+        raise ValueError(
+            f"unknown test suite(s) {bad}. Valid suites: {', '.join( SUITE_SCRIPTS )}. "
+            f"(\"e2e_ui\" is the tests' directory name, not a suite — use e2e_a, e2e_b or e2e.)"
+        )
+
     job = TestSuiteJob(
         test_types          = test_types,
         user_id             = user_id,
@@ -513,6 +586,45 @@ def _build_test_suite( command, args_dict, user_id, user_email, session_id, debu
         verbose             = verbose
     )
     return _finish( job, command, args_dict, scheduled_at, monopolize, spawned_by_id_hash )
+
+def _build_mock_job( command, args_dict, user_id, user_email, session_id, debug, verbose,
+                     scheduled_at, monopolize, spawned_by_id_hash ):
+    """
+    Build the job for `agent router go to mock job` (rows 432511fd / a3c59f2d).
+
+    The retired `/api/mock-job/submit` door's two modes, kept as one command:
+    PLAIN builds a MockAgenticJob from the door's argument names; with `voice_command` it
+    is the EXPEDITOR TEST, which runs the RuntimeArgumentExpeditor on the voice command and
+    builds a DRY-RUN job of the command it matched. The logic lives in
+    cosa.agents.test_harness.mock_submit; this only chooses between the two and applies the
+    finishing tail each needs.
+
+    THE TWO TAILS DIFFER, and that is the whole reason this builder branches on the
+    result. A plain mock job is the job the caller asked for, so `_finish` records this
+    command on it. The expeditor-test job is a job of ANOTHER command that its own builder
+    already stamped (routing_command, original_args); running `_finish` over it would
+    rewrite both to the mock command and job_history would then describe a job that never
+    ran, so only the queue directives are stamped.
+
+    Raises:
+        - ValueError (pydantic ValidationError included) for bad args, an inverted range,
+          an unmatched voice command, or a matched command the factory cannot build
+        - SubmitRefused when the expeditor interview is cancelled or times out
+    """
+    from cosa.agents.test_harness.mock_submit import (
+        MockJobArgs, validate_ranges, build_plain_mock_job, build_expeditor_test_job )
+    from cosa.rest.v2.request_context import get_bearer_token
+
+    args = MockJobArgs( **args_dict )
+    validate_ranges( args )
+
+    if args.voice_command:
+        job = build_expeditor_test_job( args, user_id, user_email, get_bearer_token() )
+        return _stamp_queue_directives( job, scheduled_at, monopolize, spawned_by_id_hash )
+
+    job = build_plain_mock_job( args, user_id, user_email, session_id, debug=debug, verbose=verbose )
+    return _finish( job, command, args_dict, scheduled_at, monopolize, spawned_by_id_hash )
+
 
 def _build_bug_fix_expediter( command, args_dict, user_id, user_email, session_id, debug, verbose,
                         scheduled_at, monopolize, spawned_by_id_hash ):
@@ -670,7 +782,8 @@ JOB_BUILDERS = {
     "agent router go to presentation generator"    : _build_presentation_generator,
     "agent router go to research to presentation"  : _build_research_to_presentation,
     "agent router go to swe team"                  : _build_swe_team,
-    "agent router go to test suite"                : _build_test_suite,
+    "agent router go to test suite"                : _refusing_bad_input( _build_test_suite ),
+    "agent router go to mock job"                  : _refusing_bad_input( _build_mock_job ),
     "agent router go to bug fix expediter"         : _build_bug_fix_expediter,
     "agent router go to test fix expediter"        : _build_test_fix_expediter,
     "agent router go to test fix expediter resume" : _build_test_fix_expediter_resume,

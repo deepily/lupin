@@ -133,3 +133,207 @@ test("keyedListMerge: update() callback fires on matching keys; create() fires o
   assert.deepEqual(updated, [ "a"      ]);
   assert.equal(parent.children[0]!.textContent, "2");
 });
+
+// ---------------------------------------------------------------------------
+// P0 8cb5c22e — keyedListMerge moves ONLY out-of-position children. Re-appending
+// a child already in place detaches and re-inserts it, which in a browser drops
+// its scroll position and restarts its animations (the focus-mode flicker).
+// ---------------------------------------------------------------------------
+
+function ids(parent: Element): string[] {
+  return Array.from(parent.children).map(c => c.getAttribute("data-id-hash") ?? "");
+}
+
+async function childListMoves(parent: Element, run: () => void): Promise<string[]> {
+  const moved: string[] = [];
+  const observer = new MutationObserver((records) => {
+    for (const r of records) {
+      for (const n of Array.from(r.removedNodes)) moved.push(`-${(n as Element).getAttribute("data-id-hash")}`);
+    }
+  });
+  observer.observe(parent, { childList: true });
+  run();
+  await new Promise<void>(resolve => setTimeout(resolve, 0));
+  observer.disconnect();
+  return moved;
+}
+
+test("keyedListMerge: children already in target order are never detached", async () => {
+  const parent = document.createElement("ul");
+  const entries: Item[] = [ { idHash: "a", text: "1" }, { idHash: "b", text: "2" }, { idHash: "c", text: "3" } ];
+  keyedListMerge({ parent, entries, create: makeEl });
+
+  const moved = await childListMoves(parent, () => keyedListMerge({ parent, entries, create: makeEl }));
+
+  assert.deepEqual(moved, []);
+  assert.deepEqual(ids(parent), [ "a", "b", "c" ]);
+});
+
+test("keyedListMerge: raising one child to the top moves only that child", async () => {
+  const parent = document.createElement("ul");
+  keyedListMerge({ parent, entries: [ { idHash: "a", text: "" }, { idHash: "b", text: "" }, { idHash: "c", text: "" } ], create: makeEl });
+
+  const moved = await childListMoves(parent, () => keyedListMerge({
+    parent,
+    entries: [ { idHash: "c", text: "" }, { idHash: "a", text: "" }, { idHash: "b", text: "" } ],
+    create : makeEl,
+  }));
+
+  assert.deepEqual(moved, [ "-c" ]);
+  assert.deepEqual(ids(parent), [ "c", "a", "b" ]);
+});
+
+test("keyedListMerge: a full reversal plus a new child and an orphan still lands in target order", () => {
+  const parent = document.createElement("ul");
+  keyedListMerge({ parent, entries: [ { idHash: "a", text: "" }, { idHash: "b", text: "" }, { idHash: "c", text: "" }, { idHash: "x", text: "" } ], create: makeEl });
+
+  keyedListMerge({
+    parent,
+    entries: [ { idHash: "c", text: "" }, { idHash: "n", text: "" }, { idHash: "b", text: "" }, { idHash: "a", text: "" } ],
+    create : makeEl,
+  });
+
+  assert.deepEqual(ids(parent), [ "c", "n", "b", "a" ]);
+});
+
+// ---------------------------------------------------------------------------
+// Row 11793820 — the merge finds existing children by an index, not a scan
+// ---------------------------------------------------------------------------
+//
+// Each entry used to be located with `parent.querySelector(":scope > …")`, twice
+// when an update ran: every child visited for every entry, O(S²) — about ten
+// million visits at the 3,233 sender cards Rick's window returned. Counting the
+// calls is the test, because a quadratic lookup is still CORRECT and every
+// order/identity test above would stay green with it put back.
+
+function countQuerySelector(parent: Element): { calls: number } {
+  const counter  = { calls: 0 };
+  const original = parent.querySelector.bind(parent);
+  parent.querySelector = ((selector: string) => {
+    counter.calls += 1;
+    return original(selector);
+  }) as typeof parent.querySelector;
+  return counter;
+}
+
+test("keyedListMerge: 1,000 kept children are found with no per-entry querySelector", () => {
+  const parent  = document.createElement("ul");
+  const entries = Array.from({ length: 1000 }, (_, i) => ({ idHash: `k${i}`, text: `t${i}` }));
+  keyedListMerge({ parent, entries, create: makeEl });
+  const before  = Array.from(parent.children);
+
+  const counter = countQuerySelector(parent);
+  keyedListMerge({ parent, entries, create: makeEl, update: () => { /* keep the node */ } });
+
+  assert.equal(counter.calls, 0, `the merge called parent.querySelector ${counter.calls} times`);
+  assert.deepEqual(Array.from(parent.children), before, "a kept child lost its node identity");
+});
+
+test("keyedListMerge: an update that replaces its node is sequenced by the replacement, still with no scan", () => {
+  const parent  = document.createElement("ul");
+  const entries = Array.from({ length: 1000 }, (_, i) => ({ idHash: `k${i}`, text: `t${i}` }));
+  keyedListMerge({ parent, entries, create: makeEl });
+
+  // Reverse the order AND replace every other node — the replacement has to be
+  // found where the old node stood and then moved, or the order comes out wrong.
+  const reversed = [ ...entries ].reverse();
+  const fresh    = new Map<string, Element>();
+  const counter  = countQuerySelector(parent);
+  keyedListMerge({
+    parent,
+    entries: reversed,
+    create : makeEl,
+    update : (el, entry) => {
+      if (Number(entry.idHash.slice(1)) % 2 !== 0) return;
+      const replacement = makeEl({ idHash: entry.idHash, text: `fresh ${entry.text}` });
+      fresh.set(entry.idHash, replacement);
+      el.replaceWith(replacement);
+    },
+  });
+
+  assert.equal(counter.calls, 0, `the merge called parent.querySelector ${counter.calls} times`);
+  assert.deepEqual(ids(parent), reversed.map(e => e.idHash));
+  for (const [ key, el ] of fresh) {
+    assert.ok(parent.querySelector(`:scope > [data-id-hash="${key}"]`) === el, `${key}: the replacement is not the live child`);
+  }
+  assert.equal(parent.children.length, 1000);
+});
+
+// ---------------------------------------------------------------------------
+// Row 11793820 — a child that moves keeps its state where the browser allows it
+// ---------------------------------------------------------------------------
+//
+// insertBefore detaches a child before re-inserting it, so a sender card raised
+// to the top lost the scroll position inside it (Chrome, bundle 3d959d529554:
+// 100 → 0). Element.moveBefore moves an attached child without detaching it.
+// happy-dom has no moveBefore, so these tests put a recording stub on the parent.
+
+type Movable = Element & { moveBefore?: (node: Node, child: Node | null) => void };
+
+function spyPlacement(parent: Movable, moveBefore: ((node: Node, child: Node | null) => void) | null) {
+  const calls    = { moved: [] as string[], inserted: [] as string[] };
+  const insert   = parent.insertBefore.bind(parent);
+  const idOf     = (n: Node | null) => (n === null ? "null" : (n as Element).getAttribute("data-id-hash") ?? "");
+  parent.insertBefore = (<T extends Node>(node: T, child: Node | null): T => {
+    calls.inserted.push(idOf(node));
+    return insert(node, child);
+  }) as typeof parent.insertBefore;
+  if (moveBefore !== null) {
+    parent.moveBefore = (node: Node, child: Node | null) => {
+      calls.moved.push(`${idOf(node)}>${idOf(child)}`);
+      moveBefore(node, child);
+    };
+  }
+  return { calls, insert };
+}
+
+test("keyedListMerge: an attached child that moves goes through moveBefore; a new child is inserted", () => {
+  const parent: Movable = document.createElement("ul");
+  keyedListMerge({ parent, entries: [ { idHash: "a", text: "" }, { idHash: "b", text: "" }, { idHash: "c", text: "" } ], create: makeEl });
+  const kept = Array.from(parent.children);
+
+  const insertOriginal = parent.insertBefore.bind(parent);
+  const { calls } = spyPlacement(parent, (node, child) => { insertOriginal(node, child); });
+  keyedListMerge({
+    parent,
+    entries: [ { idHash: "c", text: "" }, { idHash: "n", text: "" }, { idHash: "a", text: "" }, { idHash: "b", text: "" } ],
+    create : makeEl,
+  });
+
+  assert.deepEqual(calls.moved, [ "c>a" ], "the moved card must go through moveBefore, in front of the cursor");
+  assert.deepEqual(calls.inserted, [ "n" ], "only the new card is inserted");
+  assert.deepEqual(ids(parent), [ "c", "n", "a", "b" ]);
+  for (const el of kept) assert.ok(el.parentNode === parent, "a kept card lost its node identity");
+});
+
+test("keyedListMerge: a moveBefore that throws falls back to insertBefore and the order still lands", () => {
+  const parent: Movable = document.createElement("ul");
+  keyedListMerge({ parent, entries: [ { idHash: "a", text: "" }, { idHash: "b", text: "" }, { idHash: "c", text: "" } ], create: makeEl });
+
+  const { calls } = spyPlacement(parent, () => { throw new DOMException("not allowed here", "HierarchyRequestError"); });
+  keyedListMerge({
+    parent,
+    entries: [ { idHash: "c", text: "" }, { idHash: "b", text: "" }, { idHash: "a", text: "" } ],
+    create : makeEl,
+  });
+
+  assert.deepEqual(calls.moved, [ "c>a", "b>a" ], "moveBefore was tried for each moved card");
+  assert.deepEqual(calls.inserted, [ "c", "b" ], "each refused move fell back to insertBefore");
+  assert.deepEqual(ids(parent), [ "c", "b", "a" ]);
+});
+
+test("keyedListMerge: without moveBefore every move uses insertBefore", () => {
+  const parent: Movable = document.createElement("ul");
+  assert.equal(typeof parent.moveBefore, "undefined", "precondition: this DOM has no moveBefore");
+  keyedListMerge({ parent, entries: [ { idHash: "a", text: "" }, { idHash: "b", text: "" } ], create: makeEl });
+
+  const { calls } = spyPlacement(parent, null);
+  keyedListMerge({
+    parent,
+    entries: [ { idHash: "b", text: "" }, { idHash: "n", text: "" }, { idHash: "a", text: "" } ],
+    create : makeEl,
+  });
+
+  assert.deepEqual(calls.inserted, [ "b", "n" ]);
+  assert.deepEqual(ids(parent), [ "b", "n", "a" ]);
+});

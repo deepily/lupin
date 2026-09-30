@@ -101,12 +101,22 @@ def _assignment_lines( source, name ):
     return lines
 
 
+# Files this scan could not parse — see `_offending_literals`. Asserted empty by its own
+# test so a shrunken census reddens instead of reading as a clean one.
+UNPARSEABLE = [ ]
+
+
 def _offending_literals( path ):
     """Every string constant in `path` that names a tier artifact under a forbidden root."""
     try:
         tree = ast.parse( open( path, encoding="utf-8" ).read(), filename=path )
-    except SyntaxError:
-        return []                                  # a broken file is another test's problem
+    except SyntaxError as e:
+        # A file that does not parse is a file this scan did not examine. Returning [] keeps
+        # one broken module from taking the whole guard down, but the caller is told, so the
+        # census cannot shrink in silence (row 5c3f3d94). The delegation is real and named:
+        # test_every_tracked_python_file_parses.py is the test that owns broken files.
+        UNPARSEABLE.append( f"{path}: {type( e ).__name__}: {e}" )
+        return []
     hits = []
     for node in ast.walk( tree ):
         if not ( isinstance( node, ast.Constant ) and isinstance( node.value, str ) ): continue
@@ -115,6 +125,20 @@ def _offending_literals( path ):
         if not any( hint in s for hint in TIER_ARTIFACT_HINTS ):  continue
         hits.append( ( node.lineno, s ) )
     return hits
+
+
+def test_every_scanned_module_parsed():
+    """
+    Reddens if any scanned module failed to parse, so this guard never reports clean over
+    fewer files than it walked. The broken file itself belongs to
+    test_every_tracked_python_file_parses.py; this only refuses to hide the gap.
+    """
+    UNPARSEABLE.clear()
+    for path in _test_modules(): _offending_literals( path )
+
+    assert UNPARSEABLE == [ ], (
+        f"{len( UNPARSEABLE )} module(s) did not parse, so this scan skipped them:\n  "
+        + "\n  ".join( UNPARSEABLE ) )
 
 
 def test_no_test_module_names_a_tier_artifact_under_the_live_root():

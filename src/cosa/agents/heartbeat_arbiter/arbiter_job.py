@@ -696,7 +696,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         user_gate_resurface_seconds : int               = 1800,  # 6929f4ac: aged-gate ceiling (30 min) — resurface a DARK session's open gate older than this to Rick
         operator_gates_fn        : Optional[ Callable ] = None,   # A2/A3 (fcb5dbc0): fleet-wide open-operator-gate store read () -> [gate-dict] (None → inert: operator-gate routing never fires)
         operator_digest_cadence_seconds : int           = DEFAULT_DIGEST_CADENCE_SECONDS,  # A2/A3: NORMAL-urgency operator-gate digest cadence (30 min)
-        worktree_janitor_fn      : Optional[ Callable ] = None,   # §4b janitor: per-poll abandoned-worktree reconcile (None → INERT, no sweep; the :8001 factory wires worktree_reaper.reconcile_worktrees)
+        worktree_janitor_fn      : Optional[ Callable ] = None,   # §4b janitor: per-poll abandoned-worktree reconcile (None → INERT, no sweep). The :8001 factory wires fleet_arbiter_loop.make_worktree_janitor_fn when `arbiter worktree janitor enabled` — since 2026-09-14 (row 033538f6); before that this comment claimed it did and it did not
         bridge_sweep_fn          : Optional[ Callable ] = None,   # ee59d5ed: per-poll orphan-bridge reconcile () -> {reaped:[...]} (None → INERT; the :8001 factory wires orphan_bridge_reaper.reconcile_orphan_bridges bound to a persistent debounce-state dict)
         count_dm_as_liveness_fn  : Optional[ Callable ] = None,   # DM-toggle: per-poll INI re-read (None → lambda True; runtime-tunable)
         dm_activity_fn           : Optional[ Callable ] = None,   # DM-toggle: per-poll SENT-DM store read (None → inert; dm_ts None everywhere)
@@ -1389,7 +1389,11 @@ class ArbiterConsumerJob( AgenticJobBase ):
         if self._worktree_janitor_fn is not None:
             try:
                 jr = self._worktree_janitor_fn()
-                worktrees_swept = len( jr.get( "swept", [] ) ) if isinstance( jr, dict ) else 0
+                # Count REMOVALS, not attempts: a refused drain also lands in "swept" (the
+                # refusal ledger reads it there), and counting it made the journal read
+                # "worktrees_swept: 17" every poll while nothing left disk (2026-09-29).
+                worktrees_swept = sum( 1 for e in jr.get( "swept", [] )
+                                       if isinstance( e, dict ) and ( e.get( "result" ) or {} ).get( "removed" ) ) if isinstance( jr, dict ) else 0
             except Exception:
                 worktrees_swept = 0
 

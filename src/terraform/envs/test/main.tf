@@ -92,7 +92,7 @@ module "onprem_vpn" {
 #     secret-manager module's inventory. Direct VPC egress attaches to the app
 #     VPC only once both the VPC self-link and a subnetwork are supplied (else
 #     the block is omitted → validate stays clean before the terraforming-vms
-#     net exists). See: src/rnd/2026.06.30-gpu-model-server-cloud-run-split/01-design.md
+#     net exists). See: src/rnd/v0.1.9/2026.06.30-gpu-model-server-cloud-run-split/01-design.md
 module "cloud_run_model_server" {
   source     = "../../modules/cloud-run-model-server"
   project_id = var.project_id

@@ -45,9 +45,26 @@ def _startup_accepted_types():
         - returns the set of lower-cased literals from `manager_type.lower() == "<x>"`
         - an empty result means the pattern moved and this guard has gone blind,
           which the first test below reports as a failure rather than a pass
+        - the literal class admits DIGITS, so the guard cannot go PARTIALLY blind. The
+          empty case above is already handled; a narrower class fails differently and
+          worse — it returns a non-empty set that is silently short, so the
+          gone-blind check passes while the drift check covers less than it claims
+
+    ⚠️ LATENT, NOT A LIVE DEFECT — stated plainly because the distinction is the point.
+    The only literal in `main.py` today is `"postgres"`, so widening `[a-z_]+` to
+    `[a-z0-9_]+` changes nothing right now: measured both ways, the extracted set is
+    `{"postgres"}` either side. It is worth the character anyway because the cost is one
+    character and the failure is silent — a value like `postgres2` or `pg_v2` would be
+    dropped without the guard noticing, since it only watches for EMPTY.
+
+    Found 2026-09-01 by sweeping for the shape behind `gate_reachability`'s
+    `_SUITE_SCRIPT_RE`, which really had dropped two keys (`e2e`, `v2_eval`). ⚠️ AND THIS
+    ONE WAS HIDDEN BY MY OWN SWEEP'S FILTER: I excluded candidate lines whose text
+    mentioned `slug|persona|ident|…`, which is name-based narrowing — the exact move that
+    hides cases. Six lines were filtered out that way and this was among them.
     """
     source = _MAIN_PY.read_text()
-    return set( re.findall( r'manager_type\.lower\(\)\s*==\s*"([a-z_]+)"', source ) )
+    return set( re.findall( r'manager_type\.lower\(\)\s*==\s*"([a-z0-9_]+)"', source ) )
 
 
 def _configured_types():

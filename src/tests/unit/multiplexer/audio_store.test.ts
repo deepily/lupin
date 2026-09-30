@@ -1,4 +1,14 @@
-// Multiplexer Phase 4 — AudioStore unit tests.
+// PARITY-CLAIM: B-1b
+// Parity B-1b — AudioStore unit tests.
+//
+// LEGACY BEING MIRRORED, cited by symbol so the coordinate survives an edit above it
+// (manifest standing rule 1). All in src/lupin_app/static/js/notifications.js:
+//   - `handleAudioChunk`    the binary entry point this store's `binaryHandler` mirrors:
+//                           one chunk in, mode decides what happens to it
+//   - `playPCMChunk`        the instant-mode decode-and-schedule path behind the
+//                           decoding → playing transitions asserted below
+//   - `playCollectedAudio`  the reliable-mode counterpart, chunks collected then played
+//
 // Run via `npx tsx --test src/tests/unit/multiplexer/audio_store.test.ts`.
 // AC4 floor: ≥ 18 tests per design doc § Verification matrix per-store floor.
 
@@ -7,6 +17,9 @@ import assert from "node:assert/strict";
 
 import { createEventBusForTesting } from "../../../lupin_app/static/js/multiplexer/shared/EventBus";
 import { createAudioStore } from "../../../lupin_app/static/js/multiplexer/stores/AudioStore";
+// Parity B-1b — the REAL decoder, so the fail-once-then-succeed arm below decodes
+// for real on its second call rather than through a second stub.
+import { pcm16ToAudioBuffer as realDecodeArrayBuffer } from "../../../lupin_app/static/js/multiplexer/audio/pcm-decoder";
 import type {
   AudioBufferSourceLike,
   AudioContextStateLike,
@@ -21,6 +34,7 @@ import type {
   StoreAudioChunkDecodedPayload,
   StoreAudioStateChangePayload,
   StoreAudioEndedPayload,
+  StoreTtsModeChangedPayload,
 } from "../../../lupin_app/static/js/multiplexer/shared/types";
 
 // ---------------------------------------------------------------------------
@@ -714,3 +728,168 @@ test("P6-e (F-Sam-C1): resume() rejection on a suspended context emits audiocont
   );
   assert.ok(blocked, "autoplay-blocked error emitted from the resume() rejection arm");
 });
+
+// ===========================================================================
+// Parity B-1b — the per-utterance first-chunk flag (firstInUtterance)
+//
+// The TTFA stamp is taken on this flag, which is legacy's `isFirstChunk` branch
+// in the PCM schedule path.
+//
+// 🔴 THE FLAG EXISTS BECAUSE `burstLength() === 1` IS NOT THE SAME PREDICATE, and
+// the difference is invisible for exactly one utterance. `chunksInBurst` is reset
+// by skip() and stop() and by NOTHING ELSE — the natural completion path
+// (maybeComplete) leaves it standing — so on the second utterance it reads N+1 and
+// never 1 again. A consumer keyed on the counter would stamp TTFA once per page
+// load and then silently stop. The two-utterance test below is the one that
+// separates the two implementations; a single-utterance test passes either way.
+// ===========================================================================
+
+test("B-1b: the first decoded chunk of an utterance carries firstInUtterance", () => {
+  const { store, chunkEvents } = setup();
+  store.binaryHandler(makePCM16(240));
+  assert.equal(chunkEvents.length, 1);
+  assert.equal(chunkEvents[0]!.payload.firstInUtterance, true);
+});
+
+test("B-1b: every LATER chunk of the same utterance carries it false", () => {
+  const { store, chunkEvents } = setup();
+  store.binaryHandler(makePCM16(240));
+  store.binaryHandler(makePCM16(240));
+  store.binaryHandler(makePCM16(240));
+  assert.deepEqual(
+    chunkEvents.map((e) => e.payload.firstInUtterance),
+    [true, false, false],
+  );
+});
+
+test("B-1b: a SECOND utterance flags its first chunk again, after a natural completion", () => {
+  // The discriminating case. Note what is NOT done here: no skip(), no stop(). The
+  // utterance ends the way a real one does — the stream-complete frame plus the last
+  // source's onended — which is precisely the path that leaves chunksInBurst alone.
+  const { store, getCtx, chunkEvents, endedEvents, sendStreamComplete } = setup();
+
+  store.binaryHandler(makePCM16(240));
+  store.binaryHandler(makePCM16(240));
+  const ctx = getCtx();
+  sendStreamComplete();
+  ctx.createdSources[0]!.fireEnded();
+  ctx.createdSources[1]!.fireEnded();
+  assert.equal(endedEvents.length, 1, "utterance 1 must have completed naturally");
+
+  // The counter is the thing that CANNOT tell you this is a new utterance.
+  assert.equal(store.burstLength(), 2, "chunksInBurst survives a natural completion");
+
+  store.binaryHandler(makePCM16(240));
+  assert.equal(chunkEvents.length, 3);
+  assert.equal(
+    chunkEvents[2]!.payload.firstInUtterance, true,
+    "the second utterance's first chunk must flag, though burstLength() is now 3",
+  );
+  assert.equal(store.burstLength(), 3);
+});
+
+test("B-1b: a chunk whose DECODE THREW does not consume the flag — the NEXT one carries it", () => {
+  // TTFA is time to first AUDIO. A chunk that failed to decode produced none, so the
+  // stamp belongs to whichever chunk first actually plays.
+  //
+  // This needs a decoder that fails ONCE and then works, which `setup`'s boolean
+  // cannot express — its decodeThrows stub throws forever, so the store would never
+  // emit a chunk event and the assertion below could not fail. Built by hand instead.
+  const bus = createEventBusForTesting();
+  const chunkEvents: LupinEvent<StoreAudioChunkDecodedPayload>[] = [];
+  bus.on<StoreAudioChunkDecodedPayload>("store_audio_chunk_decoded", (e) => chunkEvents.push(e));
+
+  let decodeCalls = 0;
+  const store = createAudioStore({
+    bus,
+    audioContextFactory : (): SchedulableAudioContext => new StubSchedulableContext({}),
+    decodeArrayBufferFn : (buf, ctx, rate) => {
+      decodeCalls++;
+      if (decodeCalls === 1) throw new Error("malformed PCM");
+      return realDecodeArrayBuffer(buf, ctx, rate);
+    },
+    nowFn : () => 1_000_000,
+  });
+
+  store.binaryHandler(makePCM16(240));                 // decode 1 — throws
+  assert.equal(chunkEvents.length, 0, "a failed decode emits no chunk event");
+
+  store.binaryHandler(makePCM16(240));                 // decode 2 — succeeds
+  assert.equal(chunkEvents.length, 1);
+  assert.equal(
+    chunkEvents[0]!.payload.firstInUtterance, true,
+    "the flag must survive a decode that produced no audio",
+  );
+});
+
+test("B-1b: after a stop(), the next chunk flags as first", () => {
+  const { store, chunkEvents } = setup();
+  store.binaryHandler(makePCM16(240));
+  store.stop();
+  store.binaryHandler(makePCM16(240));
+  assert.deepEqual(
+    chunkEvents.map((e) => e.payload.firstInUtterance),
+    [true, true],
+  );
+});
+
+// ---------------------------------------------------------------------------
+// The TTS-mode seam. It arrived with the Q&A pane and shipped with no test:
+// the coverage gate never said so because the TypeScript tier had been dying on
+// its RSS ceiling before c8 reached the report, so `setTtsMode` / `ttsMode` sat
+// at 0 behind a run that never produced a number. Measured 2026-09-23 at
+// 11a6f9f3 once the tier could finish: AudioStore.ts 647/661 lines, 31/33
+// functions, and the two missing functions are these.
+//
+// The no-op guard is the part worth pinning. `setTtsMode` returns early on a
+// write of the value already held, so a restore path that re-asserts the
+// current mode emits nothing and the pane does not repaint. An assertion on the
+// stored value alone cannot see that — it reads "instant" either way — so every
+// arm below counts the EVENTS.
+// ---------------------------------------------------------------------------
+
+function ttsModeSetup() {
+  const bus = createEventBusForTesting();
+  const modeEvents : LupinEvent<StoreTtsModeChangedPayload>[] = [];
+  bus.on<StoreTtsModeChangedPayload>( "store_tts_mode_changed", ( e ) => modeEvents.push( e ) );
+  const store = createAudioStore( {
+    bus,
+    audioContextFactory : (): SchedulableAudioContext => new StubSchedulableContext( {} ),
+    nowFn               : () => 1_000_000,
+  } );
+  return { bus, store, modeEvents };
+}
+
+test( "the store starts in instant mode and has emitted nothing to say so", () => {
+  const { store, modeEvents } = ttsModeSetup();
+  assert.equal( store.ttsMode(), "instant" );
+  assert.equal( modeEvents.length, 0, "the initial value is a default, not a change" );
+} );
+
+test( "a real mode change is stored and announced once, carrying the new mode", () => {
+  const { store, modeEvents } = ttsModeSetup();
+  store.setTtsMode( "reliable" );
+  assert.equal( store.ttsMode(), "reliable" );
+  assert.equal( modeEvents.length, 1 );
+  assert.equal( modeEvents[0]!.payload.mode, "reliable" );
+  assert.equal( modeEvents[0]!.source, "AudioStore" );
+  assert.equal( modeEvents[0]!.ts, 1_000_000 );
+} );
+
+test( "writing the mode it already holds emits nothing — the no-op guard", () => {
+  const { store, modeEvents } = ttsModeSetup();
+  store.setTtsMode( "instant" );                       // the value it starts on
+  assert.equal( modeEvents.length, 0, "a no-op write must not reach the bus" );
+  store.setTtsMode( "reliable" );
+  store.setTtsMode( "reliable" );                      // and again once moved
+  assert.equal( modeEvents.length, 1, "only the first of the two reached the bus" );
+  assert.equal( store.ttsMode(), "reliable" );
+} );
+
+test( "the mode moves back, so the guard is on equality and not on a one-way latch", () => {
+  const { store, modeEvents } = ttsModeSetup();
+  store.setTtsMode( "reliable" );
+  store.setTtsMode( "instant" );
+  assert.deepEqual( modeEvents.map( ( e ) => e.payload.mode ), [ "reliable", "instant" ] );
+  assert.equal( store.ttsMode(), "instant" );
+} );

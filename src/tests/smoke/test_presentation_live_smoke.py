@@ -11,7 +11,7 @@ Presentation Generator LIVE-RUN endpoint smoke test — Phase D verification.
    Evidence, from this file:
      - usage lines pass `--cost-cap-usd 2.00` and `--cost-cap-usd 5.00`
      - a documented variant runs `--timeout 1200` (20 min)
-     - the header block already names `POST /api/test-suite/submit` as the door
+     - the header block already names `POST /api/v2/submit` as the door
    WHY IT WAS NOT MOVED. `run-smoke-tests.sh` runs the whole `src/tests/smoke/` directory,
    so this file is executed on :7999 by the smoke merge gate regardless of what its
    docstring says. Relocating it, or excluding it from the runner the way
@@ -20,7 +20,7 @@ Presentation Generator LIVE-RUN endpoint smoke test — Phase D verification.
    red list. So it stays, it stays red on :7999, and the reason is written here instead of
    being re-derived by the next reader.
 
-   HOW TO RUN IT PROPERLY: submit via `POST /api/test-suite/submit` against :8000 on a
+   HOW TO RUN IT PROPERLY: submit via `POST /api/v2/submit` against :8000 on a
    verified-idle server (`PYTHONPATH=src python3 -m cosa.rest.venue_idle --port 8000`,
    exit 0 = IDLE). Never side-door it via curl or a direct queue push.
 
@@ -52,7 +52,7 @@ Usage:
     python src/tests/smoke/test_presentation_live_smoke.py --auto-proxy --timeout 1200
 
     # Schedule via test-suite endpoint (from Claude):
-    #   POST /api/test-suite/submit
+    #   POST /api/v2/submit
     #   {
     #     "test_types"   : "smoke",
     #     "pytest_args"  : "src/tests/smoke/test_presentation_live_smoke.py --auto-proxy --cost-cap-usd 2.00",
@@ -417,7 +417,7 @@ class PresentationLiveSmokeTest( InteractiveSmokeTest ):
                 raise RuntimeError(
                     "test_presentation_live_endpoint requires --auto-proxy when invoked under pytest. "
                     "The 4 presentation-gate approvals cannot complete without an auto-answer proxy. "
-                    "Re-submit via /api/test-suite/submit with pytest_args including "
+                    "Re-submit via /api/v2/submit with pytest_args including "
                     "'--auto-proxy --cost-cap-usd <N>' (e.g. '--auto-proxy --cost-cap-usd 5.00')."
                 )
             print( "\n  WARNING: --auto-proxy not set. Gates will NOT be auto-answered." )

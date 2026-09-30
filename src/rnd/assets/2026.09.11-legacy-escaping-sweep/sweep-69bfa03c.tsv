@@ -1,0 +1,453 @@
+4525	ident:param	method showTTSErrorModal	errorText
+4526	ident:param	method showTTSErrorModal	errorCode
+5653	escaped		this.escapeHtml( metadata.response_text )
+5694	escaped		this.escapeHtml( metadata.error )
+6748	member		job.id_hash
+6748	ident:local	decl:call:( job.question_text || '' ).replace( /'/g, "\\'" ).replace( 	questionSafe
+6753	member		job.id_hash
+6758	ident:local	decl:cond-safe-branches	retryBtn
+6758	ident:local	decl:template	deleteBtn
+7125	ident:local	decl:cond(call:new Date( notification.timestamp ).toLocaleTimeString|call:new Date().toLocaleTimeString)	ts
+7125	ident:local	decl:cond-safe-branches	priorityBadge
+7126	call:this.renderMarkdownInline		this.renderMarkdownInline( notification.message )
+7213	escaped		this.escapeHtml( oldTimestamp )
+7214	escaped		this.escapeHtml( oldMessage )
+7335	escaped		encodeURIComponent( notification.abstract )
+7339	ident:local	decl:cond(call:new Date( notification.timestamp ).toLocaleTimeString|call:new Date().toLocaleTimeString)	timestamp
+7340	escaped		this.escapeHtml( notification.message )
+7340	ident:local	decl:cond-safe-branches	abstractHtml
+7410	call:cost.toFixed		cost.toFixed( 4 )
+7412	ident:local	decl:cond(call:this.formatDuration|literal)	duration
+7414	call:tokens.toLocaleString		tokens.toLocaleString()
+7430	escaped		this.renderMarkdown( abstract )
+7443	escaped		encodeURIComponent( reportPath )
+7445	escaped		encodeURIComponent( remediationPath )
+7449	escaped		this.escapeHtml( yamlPath )
+7453	escaped		encodeURIComponent( pptxPath )
+7498	call:( job.agent_type || '' ).replace		( job.agent_type || '' ).replace( 'Agent', '' )
+7500	escaped		this.escapeHtml( job.user_email )
+7560	call:schedDate.toISOString		schedDate.toISOString()
+7560	ident:local	decl:call:schedDate.toLocaleDateString	schedDateStr
+7560	ident:local	decl:call:schedDate.toLocaleTimeString	schedTimeStr
+7609	ident:local	decl:cond-safe-branches	cls
+7609	ident:local	decl:cond-safe-branches	tip
+7609	ident:local	decl:cond-safe-branches	label
+7651	ident:local	decl:logical(member||template)	jobId
+7651	ident:local	decl:logical(member||template)	jobId
+7660	ident:local	decl:cond(template|ident)	idKey
+7660	ident:local	decl:template	deleteAction
+7666	cond-safe-branches		job.paused ? ' is-paused' : ''
+7666	ident:local	decl:cond(template|ident)	idKey
+7666	ident:local	decl:logical(member||template)	jobId
+7666	unary		!job.paused
+7666	cond-safe-branches		job.paused ? 'Resume this job' : 'Pause this job'
+7666	cond-safe-branches		job.paused ? '▶' : '⏸'
+7672	ident:local	decl:template	statusClass
+7672	ident:local	decl:literal ; assign:literal	pausedCardClass
+7672	ident:local	decl:cond(template|ident)	idKey
+7672	ident:local	decl:logical(member||template)	jobId
+7672	cond-safe-branches		job.paused ? 'true' : 'false'
+7673	ident:local	decl:literal ; assign:literal	headerCancelClass
+7673	ident:local	decl:cond(template|ident)	idKey
+7674	ident:local	decl:literal ; assign:template	cancelBtnHtml
+7674	ident:local	decl:cond-safe-branches	pauseBtnHtml
+7674	ident:local	decl:literal	deleteBtnHtml
+7675	ident:local	decl:cond-safe-branches	agentBadge
+7675	ident:local	decl:cond-safe-branches	ownerBadge
+7675	ident:local	decl:cond-safe-branches	cacheHitBadge
+7675	ident:local	decl:literal ; assign:literal ; assign:template	completionBadge
+7675	ident:local	decl:literal ; assign:literal	pausedBadge
+7675	ident:local	decl:literal ; assign:template	scheduledBadge
+7675	ident:local	decl:literal ; assign:literal	monopolizeBadge
+7676	ident:local	decl:logical(member||template)	jobId
+7676	ident:local	decl:logical(member||template)	jobId
+7676	ident:local	decl:cond(binary(call:idPrefix.substring+literal)|ident)	jobIdDisplay
+7677	escaped		this.escapeHtml( truncatedQuestion )
+7678	ident:local	decl:literal ; assign:literal	statusIndicator
+7678	ident:local	decl:literal ; assign:literal	interactionIndicator
+7679	ident:local	decl:call:this.formatJobTimestamp	timestamp
+7682	ident:local	decl:cond(template|ident)	idKey
+7683	ident:local	decl:literal ; assign:literal	durationSection
+7685	ident:local	decl:logical(member||template)	jobId
+7688	escaped		this.escapeHtml( job.question_text || '' )
+7690	cond-safe-branches		job.response_text ? '' : 'display: none'
+7691	cond-safe-branches		job.response_text ? `<strong>Response:</strong> ${this.escapeHtml( job.response_text )}` :
+7693	cond-safe-branches		job.abstract ? '' : 'display: none'
+7694	call:this.renderAbstractSection		this.renderAbstractSection( job.abstract )
+7696	cond-safe-branches		job.report_path ? '' : 'display: none'
+7697	call:this.renderReportLinkSection		this.renderReportLinkSection( job.report_path, job.agent_type, job.yaml_path, job.remediat
+7704	cond-safe-branches		( queueName === 'dead' && ( job.plan_path || ( job.remediation_snapshot_path && !job.repor
+7705	cond-safe-branches		queueName === 'dead' && job.plan_path ? ` <div class="partial-artifact"> <a href="/app/doc
+7710	cond-safe-branches		queueName === 'dead' && job.remediation_snapshot_path && !job.report_path ? ` <div class="
+7717	cond-safe-branches		isStalled ? '' : 'display: none'
+7718	cond-safe-branches		isStalled && job.plan_path ? ` <div class="stalled-artifact"> <a href="/app/docs?path=${en
+7723	cond(call:this.renderResumeOverrideControls|literal)		isStalled && this.isResumableWithOverrides( job ) ? this.renderResumeOverrideControls( job
+7724	cond-safe-branches		isStalled ? ` <button class="btn btn-sm btn-warning mt-1 resume-stalled-btn" data-job-id="
+7732	cond-safe-branches		job.cost_summary ? '' : 'display: none'
+7733	cond(call:this.renderCostSummaryContent|literal)		job.cost_summary ? this.renderCostSummaryContent( job.cost_summary, job.duration_seconds )
+7735	cond-safe-branches		job.error ? '' : 'display: none'
+7736	cond-safe-branches		job.error ? `<div class="error-header">❌ Error</div><div class="error-content">${this.esca
+7739	logical(member||literal)		job.agent_type || 'Unknown'
+7740	ident:local	decl:call:this.formatJobTimestamp	timestamp
+7742	cond-safe-branches		( queueName === 'run' || queueName === 'todo' ) ? ` <div class="job-interactions-section l
+7766	cond-safe-branches		( queueName === 'done' || queueName === 'history' ) ? ` <div class="job-interactions-secti
+7691	escaped		this.escapeHtml( job.response_text )
+7707	escaped		encodeURIComponent( job.plan_path || '' )
+7712	escaped		encodeURIComponent( job.remediation_snapshot_path || '' )
+7720	escaped		encodeURIComponent( job.plan_path || '' )
+7726	ident:local	decl:logical(member||template)	jobId
+7727	ident:local	decl:logical(member||template)	jobId
+7736	escaped		this.escapeHtml( job.error )
+7743	ident:local	decl:cond(template|ident)	idKey
+7744	ident:local	decl:cond(template|ident)	idKey
+7748	ident:local	decl:cond(template|ident)	idKey
+7750	ident:local	decl:cond(template|ident)	idKey
+7752	ident:local	decl:cond(template|ident)	idKey
+7755	ident:local	decl:cond(template|ident)	idKey
+7759	ident:local	decl:cond(template|ident)	idKey
+7762	ident:local	decl:cond(template|ident)	idKey
+7767	ident:local	decl:cond(template|ident)	idKey
+7768	ident:local	decl:cond(template|ident)	idKey
+7772	ident:local	decl:cond(template|ident)	idKey
+8055	ident:param	method renderResumeOverrideControls	jobId
+8058	ident:param	method renderResumeOverrideControls	jobId
+8060	call:sel		sel( 'claude-opus-4-7', modelPref )
+8061	call:sel		sel( 'claude-sonnet-4-6', modelPref )
+8062	call:sel		sel( 'claude-haiku-4-5-20251001', modelPref )
+8067	ident:param	method renderResumeOverrideControls	jobId
+8069	call:sel		sel( '', effortPref )
+8070	call:sel		sel( 'low', effortPref )
+8071	call:sel		sel( 'medium', effortPref )
+8072	call:sel		sel( 'high', effortPref )
+8073	call:sel		sel( 'xhigh', effortPref )
+8074	call:sel		sel( 'max', effortPref )
+8235	ident:local	decl:escaped	jobId
+8236	ident:local	decl:cond-safe-branches	conf
+8236	ident:local	decl:escaped	jobId
+8237	ident:local	decl:cond-safe-branches	stalled
+8238	ident:local	decl:escaped	summary
+8238	cond(binary(literal+ident)|literal)		reason ? ' — ' + reason : ''
+8247	ident:local	decl:call:candidates.map( ( c, i ) => { const conf = c.confidence != n	html
+8322	cond-safe-branches		priority === 'urgent' ? ' priority-urgent' : ''
+8323	ident:local	decl:call:new Date().toLocaleTimeString	timestamp
+8323	ident:local	decl:cond-safe-branches	priorityBadge
+8324	call:this.renderMarkdownInline		this.renderMarkdownInline( message )
+8522	ident:local	decl:cond-safe-branches	urgentClass
+8523	ident:local	decl:literal ; assign:call:new Date( interaction.timestamp ).toLocaleTimeString ; assign:logical(member||literal)	timestamp
+8523	ident:local	decl:cond-safe-branches	priorityBadge
+8524	call:this.renderMarkdownInline		this.renderMarkdownInline( interaction.message )
+8543	ident:local	decl:literal ; assign:call:new Date( interaction.timestamp ).toLocaleTimeString ; assign:logical(member||literal)	timestamp
+8544	ident:local	decl:call:this.formatResponseValue	responseStr
+8552	escaped		encodeURIComponent( interaction.abstract )
+8556	logical(member||literal)		interaction.priority || 'medium'
+8558	ident:local	decl:logical(member||literal)	typeIcon
+8558	member		interaction.type
+8559	ident:local	decl:literal ; assign:call:new Date( interaction.timestamp ).toLocaleTimeString ; assign:logical(member||literal)	timestamp
+8561	escaped		this.escapeHtml( interaction.message || '' )
+8561	ident:local	decl:cond-safe-branches	abstractIndicator
+8563	ident:local	decl:literal ; assign:template	responseHtml
+8679	binary(ident+literal)		idx + 1
+8680	escaped		this.escapeHtml( sol.question )
+8681	member		sol.replays
+8681	member		sol.time_saved_formatted
+8874	ident:local	decl:cond-safe-branches	label
+8933	cond-safe-branches		group.isUnmanaged ? " fleet-group-unmanaged" : ""
+8934	ident:local	decl:cond-safe-branches	headerLabel
+8949	ident:local	decl:literal	headerRow
+8949	ident:local	decl:call:model.groups.map( group => { const headerLabel = group.isUnm	body
+9071	cond-safe-branches		indented ? " fleet-row-worker" : " fleet-row-manager"
+9071	cond-safe-branches		isStuck ? " fleet-row-stuck" : ""
+9071	ident:local	decl:call:this._fleetVerdictClass	verdictClass
+9072	ident:local	decl:escaped	who
+9073	ident:local	decl:escaped	role
+9073	ident:local	decl:escaped	role
+9074	ident:local	decl:escaped	state
+9075	ident:local	decl:cond-safe-branches	holding
+9076	cond-safe-branches		isStuck ? " fleet-stuck-yes" : ""
+9076	ident:local	decl:cond-safe-branches	stuckCell
+9077	ident:local	decl:escaped	tooltip
+9077	ident:local	decl:escaped	verdict
+9078	cond(binary(literal+ident)|literal)		pctClass ? " " + pctClass : ""
+9078	ident:local	decl:escaped	pctCell
+9079	ident:local	decl:escaped	winCell
+10184	ident:param	fn@10184	f
+10184	escaped		this.escapeHtml( this.ROW_FIELD_LABELS[ f ] || f )
+10188	ident:local	decl:call:this.ROW_SCHEMA.line1 .map( f => `<th class="task-col-${f}">	heads
+10223	call:this._escapeTaskAttr		this._escapeTaskAttr( task.park_reason )
+10231	call:this._escapeTaskAttr		this._escapeTaskAttr( this._taskIdLabel( task ) )
+10231	call:this._escapeTaskAttr		this._escapeTaskAttr( task.body )
+10247	escaped		this.escapeHtml( this._taskIdLabel( task ) )
+10270	escaped		this.escapeHtml( this._taskTitleLabel( task ) )
+10271	ident:local	decl:escaped	classSlug
+10271	escaped		this.escapeHtml( itemClass )
+10272	ident:local	decl:escaped	statusWord
+10272	ident:local	decl:cond-safe-branches	parkedBadge
+10332	ident:param	fn@10332	f
+10332	member		parts[ f ].cls
+10332	cond-safe-branches		f === "title" ? ` title="${this._escapeTaskAttr( this._taskTitleLabel( task ) )}"` : ""
+10332	member		parts[ f ].html
+10337	ident:param	fn@10337	f
+10338	escaped		this.escapeHtml( this.ROW_FIELD_LABELS[ f ] || f )
+10339	member		parts[ f ].html
+10341	ident:param	fn@10335	modifier
+10341	ident:local	decl:call:this.ROW_SCHEMA[ which ] .map( f => `<div class="task-disclo	fields
+10344	call:discLine		discLine( "line2", "fields" )
+10344	call:discLine		discLine( "line3", "actions" )
+10347	ident:local	decl:cond(member|literal)	rowClass
+10347	call:this._taskStatusClass		this._taskStatusClass( task.status )
+10347	cond-safe-branches		isParked ? " task-row-parked" : ""
+10348	ident:local	decl:call:this.ROW_SCHEMA.line1 .map( f => `<td class="task-col-${f}${	cells
+10349	call:this._disclosureToggle		this._disclosureToggle( task )
+10351	call:this._taskStatusClass		this._taskStatusClass( task.status )
+10351	ident:local	decl:call:this._escapeTaskAttr	idAttr
+10351	ident:local	decl:call:this._rowWidth	width
+10351	ident:local	decl:template	disclosed
+10352	ident:local	decl:call:this._escapeTaskAttr	idAttr
+10352	ident:local	decl:call:this._rowWidth	width
+10398	ident:local	decl:call:this._escapeTaskAttr	id
+10529	ident:param	fn@10528	value
+10529	ident:param	fn@10528	label
+10530	ident:param	fn@10528	value
+10530	ident:param	fn@10528	label
+10530	ident:param	fn@10528	why
+10558	ident:local	decl:call:this._escapeTaskAttr	id
+10558	ident:local	decl:cond-safe-branches	off
+10559	ident:local	decl:call:[ option( "park", "Park", parkLegal, isTerminal ? deadReason	options
+10561	ident:local	decl:call:this._escapeTaskAttr	id
+10563	ident:local	decl:cond-safe-branches	off
+10564	ident:local	decl:call:this._escapeTaskAttr	id
+10566	ident:local	decl:call:this._escapeTaskAttr	id
+10566	ident:local	decl:cond-safe-branches	off
+10631	call:this._escapeTaskAttr		this._escapeTaskAttr( v )
+10631	cond-safe-branches		v === current ? " selected" : ""
+10631	escaped		this.escapeHtml( v )
+10634	ident:local	decl:call:this._escapeTaskAttr	id
+10638	ident:local	decl:call:this._escapeTaskAttr	id
+10901	ident:local	decl:call:this._escapeTaskAttr	id
+10904	ident:local	decl:call:this._escapeTaskAttr	id
+10904	call:this._escapeTaskAttr		this._escapeTaskAttr( chip.move )
+10904	ident:local	decl:call:this._escapeTaskAttr	ts
+10905	escaped		this.escapeHtml( text )
+10908	ident:local	decl:call:this._escapeTaskAttr	id
+10909	ident:local	decl:call:this._escapeTaskAttr	id
+11998	cond-safe-branches		isCollapsed ? "▸" : "▾"
+12001	cond-safe-branches		group.isUnassigned ? " task-group-unassigned" : ""
+12001	cond-safe-branches		isCollapsed ? "false" : "true"
+12001	ident:local	decl:call:this._taskGroupIdSlug	idSlug
+12002	call:this._rowWidth		this._rowWidth()
+12002	ident:local	decl:template	chevron
+12002	ident:local	decl:cond-safe-branches	headerLabel
+12006	cond-safe-branches		isCollapsed ? " collapsed" : ""
+12006	ident:local	decl:call:this._taskGroupIdSlug	idSlug
+12006	ident:local	decl:call:this._escapeTaskAttr	ownerAttr
+12006	ident:local	decl:template	groupHeaderHtml
+12006	ident:local	decl:call:group.tasks.map( t => this._renderTaskRow( t, ianaZone ) ).j	rows
+12009	ident:local	decl:call:this._taskTableHeaderRow	headerRow
+12009	ident:local	decl:call:model.groups.map( group => { const ownerKey = this._taskGrou	body
+12316	call:warnings.map( w => this._escapeTaskAttr( String( w ) ) ).joi		warnings.map( w => this._escapeTaskAttr( String( w ) ) ).join( " · " )
+12330	ident:local	decl:undefined-init ; assign:template ; assign:literal	detail
+12645	escaped		this.escapeHtml( error )
+12658	escaped		this.escapeHtml( names )
+12664	escaped		this.escapeHtml( error )
+12715	ident:local	decl:escaped	status
+12716	ident:local	decl:escaped	absolute
+12716	ident:local	decl:escaped	status
+12716	ident:local	decl:escaped	status
+12716	ident:local	decl:logical(member||literal)	glyph
+12716	escaped		this.escapeHtml( when )
+12717	ident:local	decl:escaped	title
+12718	ident:local	decl:escaped	who
+12719	ident:local	decl:escaped	why
+12719	ident:local	decl:escaped	why
+12725	ident:local	decl:call:rows.map( event => { const when = this._finishedTasksRelativ	cells
+13829	escaped		this.escapeHtml( sentinels[ composite.status ] )
+13897	ident:local	decl:call:this._escapeTaskAttr	key
+13899	ident:local	decl:escaped	label
+13900	member		tasks.length
+13901	ident:local	decl:call:this._escapeTaskAttr	key
+13902	ident:local	decl:escaped	label
+13903	ident:local	decl:call:this._escapeTaskAttr	key
+13904	ident:local	decl:escaped	label
+13905	ident:local	decl:call:this._escapeTaskAttr	key
+13907	ident:local	decl:call:this._escapeTaskAttr	key
+13910	call:this._taskTableHeaderRow		this._taskTableHeaderRow()
+13911	ident:local	decl:call:tasks.map( t => this._renderTaskRow( t, ianaZone ) ).join	rows
+14709	cond-safe-branches		isCollapsed ? "▸" : "▾"
+14712	cond(binary(binary(literal+ident)+literal)|literal)		extraClass ? " " + extraClass + "-header" : ""
+14712	cond-safe-branches		isCollapsed ? "false" : "true"
+14712	ident:local	decl:call:this._epicGroupIdSlug	idSlug
+14713	call:this._rowWidth		this._rowWidth()
+14713	ident:local	decl:template	chevron
+14713	ident:param	method _renderEpicGroup	headerLabel
+14713	member		tasks.length
+14719	call:this._rowWidth		this._rowWidth()
+14719	escaped		this.escapeHtml( storyText )
+14723	cond(binary(literal+ident)|literal)		extraClass ? " " + extraClass : ""
+14723	cond-safe-branches		isCollapsed ? " collapsed" : ""
+14723	ident:local	decl:call:this._epicGroupIdSlug	idSlug
+14723	ident:local	decl:call:this._escapeTaskAttr	epicAttr
+14723	ident:local	decl:template	groupHeaderHtml
+14723	ident:local	decl:cond-safe-branches	storyHtml
+14723	ident:local	decl:call:tasks.map( t => this._renderEpicRow( t ) ).join	rows
+14788	ident:local	decl:call:this._rowTableHeaderRow	headerRow
+14788	call:sections.join		sections.join( "" )
+15591	member		jobMetadata.job_id
+15592	ident:local	decl:cond-safe-branches	replayOpacity
+15593	ident:local	decl:cond-safe-branches	replayTitle
+15594	member		jobMetadata.job_id
+15971	ident:local	decl:literal ; assign:literal	stateClass
+15972	logical(member||literal)		persona.color || '#888'
+15973	ident:local	decl:logical(logical(member||member)||literal)	label
+15973	ident:local	decl:literal ; assign:literal	stateTitle
+15973	ident:local	decl:cond-safe-branches	profile
+15974	logical(member||literal)		persona.icon || '🎙️'
+15975	ident:local	decl:logical(logical(member||member)||literal)	label
+18562	escaped		this.escapeHtml( currentName )
+18570	ident:param	method showSessionNameEditModal	sessionId
+19063	ident:local	decl:member	sessionId
+19067	ident:local	decl:call:senderId.replace	escapedSenderId
+19070	ident:local	decl:member	sessionId
+19071	logical(ident||literal)		sessionName || ''
+19116	ident:local	decl:member	sessionId
+19116	ident:param	method createSenderCard	senderId
+19118	cond-safe-branches		conversationModeActive ? ' is-active' : ''
+19119	ident:local	decl:member	sessionId
+19120	ident:local	decl:member	sessionId
+19121	ident:local	decl:cond(cond-safe-branches|cond-safe-branches)	conversationModeTitle
+19121	ident:local	decl:cond(cond-safe-branches|cond-safe-branches)	conversationModeIcon
+19123	ident:local	decl:member	sessionId
+19126	ident:local	decl:member	sessionId
+19129	ident:local	decl:member	sessionId
+19135	ident:local	decl:call:senderId.replace	escapedSenderId
+19136	ident:local	decl:cond-safe-branches	activeTitle
+19136	ident:local	decl:cond-safe-branches	activeIndicator
+19137	ident:local	decl:call:this.getSenderStatusIndicator	statusIndicator
+19138	ident:local	decl:call:parsed.project.toUpperCase	projectName
+19139	ident:local	decl:cond-safe-branches	sessionDisplay
+19141	ident:local	decl:call:this._renderPersonaBadgeHTML	personaBadge
+19146	ident:local	decl:call:senderId.replace	escapedSenderId
+19149	ident:local	decl:cond-safe-branches	ccVoiceInput
+19150	call:senderId.replace		senderId.replace( /[@.#]/g, '-' )
+19230	ident:local	decl:call:senderId.replace	escapedSenderId
+19230	ident:param	method createDateAccordion	dateString
+19231	ident:param	method createDateAccordion	dateString
+19233	ident:local	decl:call:senderId.replace	escapedSenderId
+19233	ident:param	method createDateAccordion	dateString
+19236	call:senderId.replace		senderId.replace( /[@.#]/g, '-' )
+19236	ident:param	method createDateAccordion	dateString
+19388	escaped		encodeURIComponent( notification.abstract )
+19404	ident:local	decl:undefined-init ; assign:member ; assign:call:timestamp.toLocaleTimeString	timeStr
+19405	call:this.renderMarkdownInline		this.renderMarkdownInline( cleanMessage )
+19405	ident:local	decl:cond-safe-branches	expiredBadge
+19405	ident:local	decl:cond-safe-branches	abstractIndicator
+19416	ident:local	decl:undefined-init ; assign:member ; assign:call:timestamp.toLocaleTimeString	timeStr
+19417	call:this.renderMarkdownInline		this.renderMarkdownInline( cleanMessage )
+19417	ident:local	decl:cond-safe-branches	expiredBadge
+19417	ident:local	decl:cond-safe-branches	abstractIndicator
+19528	escaped		this.escapeHtml( oldTime )
+19529	escaped		this.escapeHtml( oldMessage )
+19739	ident:local	decl:undefined-init ; assign:member ; assign:call:timestamp.toLocaleTimeString	time
+19739	cond-safe-branches		isResponse ? ' →' : ''
+19740	call:this.renderMarkdownInline		this.renderMarkdownInline( displayMessage )
+20063	member		currentOption.label
+20067	call:this.WINDOW_OPTIONS.map( opt => ` <div class="dropdown-item 		this.WINDOW_OPTIONS.map( opt => ` <div class="dropdown-item ${opt.hours === this.historyWi
+20068	cond-safe-branches		opt.hours === this.historyWindowHours ? 'selected' : ''
+20069	call:JSON.stringify( opt.hours ).replace		JSON.stringify( opt.hours ).replace( /"/g, '&quot;' )
+20070	member		opt.label
+20191	ident:local	decl:member	prefix
+20191	ident:local	decl:member	remainingMessage
+20227	ident:local	decl:literal ; assign:literal	priorityColor
+20227	ident:local	decl:literal ; assign:literal	priorityEmoji
+20228	ident:local	decl:call:new Date( timestamp ).toLocaleTimeString	time
+20229	ident:local	decl:literal ; assign:literal	priorityColor
+20229	call:type.toUpperCase		type.toUpperCase()
+20230	ident:local	decl:literal ; assign:literal	priorityColor
+20230	ident:local	destructure:ident	priority
+20231	ident:local	destructure:ident	message
+20231	ident:local	decl:cond(binary(call:processedMessage.substring+literal)|ident)	displayMessage
+20232	ident:local	decl:logical(member||template)	notificationId
+20246	ident:local	decl:logical(member||template)	notificationId
+20251	ident:local	decl:logical(member||template)	notificationId
+21755	ident:param	method renderMinimizedNotificationDOM	queuePosition
+21756	ident:local	decl:logical(member||literal)	typeIcon
+21757	ident:local	decl:cond(binary(call:notification.message.substring+literal)|member)	truncatedMessage
+21758	ident:local	decl:call:this._renderPersonaBadgeHTML	personaBadge
+21759	ident:local	decl:call:this.formatTimeoutDisplay	timeoutDisplay
+22533	ident:local	decl:binary(member+cond-safe-branches)	totalCount
+22542	member		this.ttsQueue.length
+22549	ident:local	decl:binary(member+cond-safe-branches)	totalCount
+23085	ident:local	decl:cond-safe-branches	yesClass
+23085	member		notification.id
+23088	ident:local	decl:cond-safe-branches	noClass
+23088	member		notification.id
+23091	member		notification.id
+23095	member		notification.id
+23096	cond-safe-branches		notification.display_qualifier_widget ? 'You may comment on your answer here if you wish' 
+23098	cond-safe-branches		notification.display_qualifier_widget ? ' expanded' : ''
+23098	member		notification.id
+23100	member		notification.id
+23103	member		notification.id
+23117	member		notification.id
+23120	member		notification.id
+23120	logical(member||literal)		notification.response_default || ''
+23121	member		notification.id
+23135	escaped		this.renderMarkdown( notification.abstract )
+23143	ident:local	decl:call:this.getProjectFromSenderId	project
+23157	escaped		encodeURIComponent( notification.abstract )
+23162	member		notification.id
+23165	ident:local	decl:cond-safe-branches	projectBadge
+23165	logical(member||member)		notification.title || notification.message
+23167	ident:local	decl:cond-safe-branches	abstractIndicatorHTML
+23168	ident:local	decl:call:this._renderPersonaBadgeHTML	personaBadge
+23169	member		notification.id
+23172	member		notification.id
+23175	escaped		this.renderMarkdown( notification.message )
+23176	ident:local	decl:cond-safe-branches	abstractSection
+23177	ident:local	decl:call:this.buildPredictionHintSection	predictionHintSection
+23179	member		notification.id
+23181	ident:local	decl:literal ; assign:template ; assign:call:this.renderMultipleChoiceUI ; assign:call:this.renderOpenEndedBatchUI	responseUI
+23385	ident:local	decl:literal	i
+23385	escaped		this.escapeHtml( header )
+23386	binary(ident+literal)		i + 1
+23386	ident:local	decl:member	total
+23387	escaped		this.escapeHtml( q.question || '' )
+23389	ident:local	decl:literal	i
+23392	ident:local	decl:literal	i
+23392	escaped		this.escapeHtml( header )
+23392	escaped		this.escapeHtml( defaultValue )
+23400	ident:local	decl:literal ; append:template	questionsHTML
+23491	ident:local	decl:literal ; assign:cond-safe-branches ; assign:template	predictedText
+23492	ident:local	decl:call:this.formatStrategyLabel	strategy
+23493	ident:local	decl:call:this._buildPredictionVoteControls	voteControls
+23517	ident:local	decl:member	id
+23520	ident:local	decl:member	id
+23758	ident:local	decl:call:this.getProjectFromSenderId	project
+23778	ident:local	decl:cond-safe-branches	inputType
+23778	ident:local	decl:template	questionId
+23778	member		opt.label
+23779	ident:param	fn@23765	idx
+23779	cond-safe-branches		isChecked ? 'checked' : ''
+23781	member		opt.label
+23782	logical(member||literal)		opt.description || ''
+23810	ident:local	decl:cond-safe-branches	inputType
+23810	ident:local	decl:template	questionId
+23811	cond-safe-branches		otherChecked ? 'checked' : ''
+23816	member		notification.id
+23818	member		notification.id
+23819	ident:local	decl:literal ; assign:call:customAnswers.join ; assign:ident	otherText
+23833	member		notification.id
+23841	member		notification.id
+23842	cond-safe-branches		totalQuestions === 1 ? 'Submit' : 'Submit All ✓'
+23847	member		notification.id
+23856	member		notification.id
+23856	ident:param	method renderMultipleChoiceUI	questionIndex
+23858	ident:local	decl:cond-safe-branches	projectBadge
+23859	binary(ident+literal)		questionIndex + 1
+23859	ident:local	decl:member	totalQuestions
+23861	member		question.question
+23862	cond-safe-branches		question.multi_select ? '<div class="mc-multi-hint">(Select all that apply)</div>' : ''
+23864	ident:local	decl:call:question.options.map( ( opt, idx ) => { // Check if this opt ; append:template	optionsHTML
+23866	ident:local	decl:literal ; append:template ; append:literal	actionsHTML
+24562	ident:param	method showConfirmation	response
+24682	ident:local	decl:logical(member||literal) ; assign:call:input.value.trim	defaultValue
+24762	ident:local	decl:member	response

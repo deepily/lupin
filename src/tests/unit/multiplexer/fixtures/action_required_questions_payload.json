@@ -1,0 +1,124 @@
+{
+  "_about": "Real response_options payloads, built by cosa/utils/notification_utils.py from questions_in; answers is the shape legacy sends for them, and wire_value is that answer as JavaScript's JSON.stringify writes it. test_multiplexer_questions_fixture_matches_the_asking_tools.py fails if this file drifts from the builders.",
+  "multiple_choice": {
+    "questions_in": [
+      {
+        "question": "Which database should the service use?",
+        "header": "Database",
+        "multiSelect": false,
+        "options": [
+          {
+            "label": "PostgreSQL",
+            "description": "Relational, already deployed"
+          },
+          {
+            "label": "SQLite",
+            "description": "File-backed, no server"
+          }
+        ]
+      },
+      {
+        "question": "Which features ship first?",
+        "header": "Features",
+        "multiSelect": true,
+        "options": [
+          {
+            "label": "Search",
+            "description": "Full-text"
+          },
+          {
+            "label": "Export",
+            "description": "CSV download"
+          },
+          {
+            "label": "Audit log",
+            "description": "Who changed what"
+          }
+        ]
+      }
+    ],
+    "response_options": {
+      "questions": [
+        {
+          "question": "Which database should the service use?",
+          "header": "Database",
+          "multi_select": false,
+          "options": [
+            {
+              "label": "PostgreSQL",
+              "description": "Relational, already deployed"
+            },
+            {
+              "label": "SQLite",
+              "description": "File-backed, no server"
+            }
+          ]
+        },
+        {
+          "question": "Which features ship first?",
+          "header": "Features",
+          "multi_select": true,
+          "options": [
+            {
+              "label": "Search",
+              "description": "Full-text"
+            },
+            {
+              "label": "Export",
+              "description": "CSV download"
+            },
+            {
+              "label": "Audit log",
+              "description": "Who changed what"
+            }
+          ]
+        }
+      ]
+    },
+    "answers": {
+      "answers": {
+        "Database": "PostgreSQL",
+        "Features": [
+          "Search",
+          "Audit log"
+        ]
+      }
+    },
+    "wire_value": "{\"answers\":{\"Database\":\"PostgreSQL\",\"Features\":[\"Search\",\"Audit log\"]}}"
+  },
+  "open_ended_batch": {
+    "questions_in": [
+      {
+        "question": "What topic would you like to research?",
+        "header": "Topic"
+      },
+      {
+        "question": "Would you like to set a budget limit?",
+        "header": "Budget",
+        "default_value": "no limit"
+      }
+    ],
+    "response_options": {
+      "questions": [
+        {
+          "question": "What topic would you like to research?",
+          "header": "Topic",
+          "input_type": "text"
+        },
+        {
+          "question": "Would you like to set a budget limit?",
+          "header": "Budget",
+          "input_type": "text",
+          "default_value": "no limit"
+        }
+      ]
+    },
+    "answers": {
+      "answers": {
+        "Topic": "quantum computing",
+        "Budget": "no limit"
+      }
+    },
+    "wire_value": "{\"answers\":{\"Topic\":\"quantum computing\",\"Budget\":\"no limit\"}}"
+  }
+}

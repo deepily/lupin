@@ -22,6 +22,7 @@ import os
 import pytest
 
 import lupin_mcp.self_respin_core as sr
+from lupin_mcp.persona_normalization import persona_slug
 
 
 UTC = datetime.timezone.utc
@@ -159,9 +160,9 @@ def test_guarded_argv_carries_verbatim_clear_and_token():
 # build_wake_text + build_guarded_clear_argv WAKE path (row 275cb0b9, GAP 1)
 # ---------------------------------------------------------------------------
 def test_build_wake_text_names_memento_and_is_plain_english():
-    txt = sr.build_wake_text( "/data/lupin/.claude-memento.md", "nonce-7", "/data/.wake-proof.marker" )
-    assert "/data/lupin/.claude-memento.md" in txt
-    assert "re-spun" in txt.lower()
+    txt = sr.build_wake_text( "/data/lupin/.claude-memento-cheech.md", "nonce-7", "/data/.wake-proof.marker" )
+    assert "/data/lupin/.claude-memento-cheech.md" in txt
+    assert "rehydrated" in txt.lower()
     assert "memento" in txt.lower()
     assert "resume" in txt.lower()
     # consumer-proof instruction: the seat must write the nonce-echoing proof line
@@ -174,24 +175,69 @@ def test_build_wake_text_asks_instead_of_asserting_the_rehydrate():
     """
     Bug e88ebfae. The wake is composed from the SCHEDULING artifact, so it can prove a
     clear was scheduled and its token consumed — never that the pane actually reset.
-    It must therefore ASK the seat, and must not tell it in the second person that it
-    rehydrated at low context.
+    It must therefore leave the verdict to the seat, and must not tell it in the second
+    person that it rehydrated at low context.
     """
     txt = sr.build_wake_text( "/m/memento.md", "nonce-7", "/p/proof.marker" ).lower()
-
-    # It hedges rather than asserts.
-    assert "probably" in txt
-    assert "only you can confirm" in txt
 
     # The exact false claims the disputed run received are gone.
     assert "you just self-re-spun" not in txt
     assert "you typed /clear into your own pane" not in txt
     assert "rehydrated as the same seat at low context" not in txt
 
-    # It names the check that separates the two cases, and both branches.
-    assert "remember the work of this session" in txt
-    assert "if you rehydrated" in txt
-    assert "if you did not" in txt
+    # Both branches are named, and each says what to write.
+    assert "if yours differs" in txt
+    assert "if yours is the same" in txt
+
+
+def test_the_wake_never_asks_the_seat_what_it_remembers():
+    """
+    🔴 THE INSTRUMENT THE WAKE HANDS THE SEAT MUST NOT BE ITS OWN MEMORY (2026-09-02).
+
+    The e88ebfae fix stopped the wake ASSERTING the rehydrate and made it ask "do you
+    remember the work of this session". That question CANNOT return the right answer,
+    and the reason is structural rather than bad luck: it detects a MISSING memory and
+    cannot detect a RESTORED one. A seat that cleared and then re-read its own record
+    has no absence to find, so it answers "I remember" — confidently, and wrongly.
+
+    Measured twice, on the SAME seat, one day apart (2026-09-01 and 2026-09-02). The
+    second time the seat had READ that limit, QUOTED it in its own dispute file, and
+    still ruled the wrong way. Transcripts settled it: the session chain
+    611e3c47 -> 00249b1e -> 4bc5167d, an empty `local-command-stdout` at 21:13:15.828
+    which is the /clear signature, and the wake nonce three times in the POST-clear
+    transcript against zero in the pre-clear one. The clear had landed.
+
+    ⇒ So the question is removed rather than reworded. Knowing a rule is not applying
+    it, and an instrument that needs the reader to remember its own limit is not an
+    instrument. What replaces it is a COMPARISON against an artifact the seat cannot
+    author — see the test below.
+    """
+    txt = sr.build_wake_text( "/m/memento.md", "nonce-7", "/p/proof.marker" ).lower()
+    for banned in ( "do you remember", "remember the work", "is your context near-empty",
+                    "first you have seen of it" ):
+        assert banned not in txt, f"the wake still asks the seat to introspect: {banned!r}"
+
+
+def test_the_wake_hands_the_seat_an_oracle_it_cannot_author():
+    """
+    The replacement instrument: the wake quotes the session id the pane carried
+    IMMEDIATELY BEFORE the clear, and tells the seat to compare it against its own
+    `claude_code.session_id`. Both sides come from the bridge, which is written by the
+    SessionStart hook — a different actor from the seat, so the seat cannot move either
+    side of the comparison to suit its belief.
+
+    The id is unknowable when the text is composed (the clear has not been sent yet), so
+    the composer emits a sentinel and the detached chain substitutes the value it
+    captured at fire time. This test pins the sentinel's presence; the EXECUTION test in
+    test_self_respin_wake_gate_exec.py proves the substitution actually happens.
+    """
+    txt = sr.build_wake_text( "/m/memento.md", "nonce-7", "/p/proof.marker" )
+    assert sr._PRE_CLEAR_SID_SENTINEL in txt, \
+        "the wake must carry the pre-clear-session-id sentinel for the chain to substitute"
+    assert "get_session_info" in txt
+    assert "claude_code.session_id" in txt
+    # and it must degrade rather than hand the seat an empty string that reads like an answer
+    assert sr._PRE_CLEAR_SID_UNAVAILABLE in txt
 
 
 def test_build_wake_text_routes_a_disputed_wake_to_a_file_not_a_proof():
@@ -226,10 +272,11 @@ def test_guarded_argv_wake_path_gates_on_bridge_session_id_not_send_keys_exit():
     assert '"session_id"' in script                  # the bridge's session_id is the oracle
     assert '[ "$s" != "$s0" ]' in script             # value-change compare
     assert 'rm "$4" || exit 0' in script             # one-shot guard preserved
-    assert 'send-keys -t "$2" -l -- "$5"' in script  # literal (-l) wake keystroke
+    assert 'send-keys -t "$2" -l -- "$w"' in script  # literal (-l) wake keystroke
     assert "exit 3" in script                        # loud, bounded give-up on timeout
-    # the wake is typed AFTER the readiness gate, never before it
-    assert script.index( 's0=$(' ) < script.index( '-l -- "$5"' )
+    # the wake is typed AFTER the readiness gate, never before it. `$w` is `$5` with the
+    # fire-time session id substituted in — the wake is no longer typed verbatim.
+    assert script.index( 's0=$(' ) < script.index( '-l -- "$w"' )
 
 
 def test_wake_gate_does_not_key_on_mtime():
@@ -279,7 +326,7 @@ def test_perform_aborts_when_not_over_budget( tmp_path, status ):
         "sid1", persona="cheech", memento_path=mp, memento_nonce="u1",
         pre_clear_status=status, pre_clear_pct=None,
         now=_dt( 21 ), resolve_tmux_fn=_seat(), ask_fn=ask, schedule_fn=sched,
-        base_dir=str( tmp_path ),
+        base_dir=str( tmp_path ), repo_root=str( tmp_path ),
     )
     assert r.status == "aborted"
     assert "no grounds to clear" in r.reason
@@ -299,7 +346,7 @@ def test_perform_schedules_wake_argv_when_bridge_resolves( tmp_path ):
         pre_clear_status="over_budget", pre_clear_pct=61.0,
         now=_dt( 21 ), resolve_tmux_fn=_seat(), ask_fn=lambda: "yes",
         wake_nonce="wn-1", resolve_bridge_path_fn=lambda sid: "/s/cc-42.json",
-        schedule_fn=lambda argv: scheduled.append( argv ), base_dir=str( tmp_path ),
+        schedule_fn=lambda argv: scheduled.append( argv ), base_dir=str( tmp_path ), repo_root=str( tmp_path ),
     )
     assert r.status == "scheduled"
     argv = scheduled[ 0 ]
@@ -321,11 +368,12 @@ def test_perform_falls_back_to_plain_clear_when_bridge_unresolvable( tmp_path ):
         pre_clear_status="over_budget", pre_clear_pct=61.0,
         now=_dt( 21 ), resolve_tmux_fn=_seat(), ask_fn=lambda: "yes",
         wake_nonce="wn-1", resolve_bridge_path_fn=lambda sid: None,
-        schedule_fn=lambda argv: scheduled.append( argv ), base_dir=str( tmp_path ),
+        schedule_fn=lambda argv: scheduled.append( argv ), base_dir=str( tmp_path ), repo_root=str( tmp_path ),
     )
     assert r.status == "scheduled"
     argv = scheduled[ 0 ]
-    assert len( argv ) == 9                        # plain single-chain argv, no wake args
+    # plain argv: the 9 original positions, then the 6 idle-gate args appended (row 698a5aaf)
+    assert len( argv ) == 15
     assert argv[ 6 ] == "/clear"
     # $5 is the send stamp (row 855e4dd0) — present on the PLAIN chain too, because the
     # deadline it anchors has nothing to do with whether a wake was scheduled.
@@ -353,10 +401,31 @@ def _seat( tmux="cheech-mgr" ):
     return lambda sid: tmux
 
 
-def _write_memento( tmp_path, uuid, ts ):
-    p = tmp_path / ".claude-memento.md"
-    p.write_text( _memento_with_nonce( uuid, ts ) )
-    return str( p )
+# The go-path memento must now satisfy the SLOT check too (row 8068c65e), so this
+# helper writes the shape memento_io actually produces at `--slot root`: an immutable
+# RECORD carrying the machine-readable header, plus the mutable POINTER beside it
+# holding a copy of the record's bytes behind `current:`. The nonce is stamped into
+# the POINTER, which is the file self_respin is handed and rehydrates from.
+_SEAT_PERSONA = "cheech"
+_SEAT_SID     = "sid1"
+
+
+def _write_memento( tmp_path, uuid, ts, *, persona=_SEAT_PERSONA, sid=_SEAT_SID, written_at=None ):
+    """Write a real root-slot record+pointer pair under tmp_path; return the pointer path."""
+    stamp  = ( written_at if written_at is not None else ts ).isoformat()
+    slug   = persona_slug( persona )
+    record = tmp_path / f".claude-memento-{slug}-{sid[ :8 ].lower()}.md"
+    header = f"<!-- memento-record: persona={slug} session_id={sid[ :8 ].lower()} written_at={stamp} slot=root -->\n"
+    body   = header + "# memento\n" + _REAL_BODY * 4
+    record.write_text( body )
+
+    pointer = tmp_path / f".claude-memento-{slug}.md"
+    pointer.write_text(
+        "<!-- MEMENTO POINTER — NOT THE RECORD. Safe to overwrite; it destroys nothing. -->\n"
+        f"<!-- current: {record.name} -->\n"
+        + body + "\n" + sr.build_nonce_line( uuid, ts ) + "\n"
+    )
+    return str( pointer )
 
 
 def test_perform_aborts_when_no_tmux():
@@ -380,7 +449,7 @@ def test_perform_aborts_on_bad_memento_without_asking( tmp_path ):
         "sid1", persona="cheech", memento_path=mp, memento_nonce="this-cycle",
         pre_clear_status="over_budget", pre_clear_pct=61.0,
         now=_dt( 21 ), resolve_tmux_fn=_seat(), ask_fn=ask, schedule_fn=sched,
-        base_dir=str( tmp_path ),
+        base_dir=str( tmp_path ), repo_root=str( tmp_path ),
     )
     assert r.status == "aborted"
     assert ask.calls   == 0
@@ -394,7 +463,7 @@ def test_perform_declines_on_human_no_schedules_nothing( tmp_path ):
         "sid1", persona="cheech", memento_path=mp, memento_nonce="u1",
         pre_clear_status="over_budget", pre_clear_pct=61.0,
         now=_dt( 21 ), resolve_tmux_fn=_seat(), ask_fn=lambda: "no", schedule_fn=sched,
-        base_dir=str( tmp_path ),
+        base_dir=str( tmp_path ), repo_root=str( tmp_path ),
     )
     assert r.status == "declined"
     assert sched.calls == 0
@@ -409,7 +478,7 @@ def test_perform_scheduled_happy_path_writes_marker_and_token( tmp_path ):
         "sid1", persona="cheech", memento_path=mp, memento_nonce="u1",
         pre_clear_status="over_budget", pre_clear_pct=61.0,
         now=_dt( 21 ), resolve_tmux_fn=_seat( "cheech-mgr" ), ask_fn=lambda: "yes",
-        schedule_fn=lambda argv: scheduled.append( argv ), base_dir=str( tmp_path ),
+        schedule_fn=lambda argv: scheduled.append( argv ), base_dir=str( tmp_path ), repo_root=str( tmp_path ),
     )
     assert r.status == "scheduled"
     # observer marker persists (it is NOT the file the injector rm's)
@@ -431,7 +500,7 @@ def test_perform_proceeds_on_offline_default_used( tmp_path ):
         "sid1", persona="cheech", memento_path=mp, memento_nonce="u1",
         pre_clear_status="over_budget", pre_clear_pct=61.0,
         now=_dt( 21 ), resolve_tmux_fn=_seat(), ask_fn=lambda: f"{sr.DEFAULT_USED_MARKER}yes",
-        schedule_fn=lambda argv: scheduled.append( argv ), base_dir=str( tmp_path ),
+        schedule_fn=lambda argv: scheduled.append( argv ), base_dir=str( tmp_path ), repo_root=str( tmp_path ),
     )
     assert r.status == "scheduled"
     assert len( scheduled ) == 1
@@ -446,7 +515,7 @@ def test_perform_aborts_when_marker_readback_fails( tmp_path ):
         "sid1", persona="cheech", memento_path=mp, memento_nonce="u1",
         pre_clear_status="over_budget", pre_clear_pct=61.0,
         now=_dt( 21 ), resolve_tmux_fn=_seat(), ask_fn=lambda: "yes", schedule_fn=sched,
-        base_dir=str( tmp_path ), write_json_fn=lambda path, data: None,
+        base_dir=str( tmp_path ), repo_root=str( tmp_path ), write_json_fn=lambda path, data: None,
     )
     assert r.status == "aborted"
     assert sched.calls == 0
@@ -469,7 +538,7 @@ def test_perform_aborts_when_fire_token_readback_fails_and_removes_marker( tmp_p
         "sid1", persona="cheech", memento_path=mp, memento_nonce="u1",
         pre_clear_status="over_budget", pre_clear_pct=61.0,
         now=_dt( 21 ), resolve_tmux_fn=_seat(), ask_fn=lambda: "yes", schedule_fn=sched,
-        base_dir=str( tmp_path ), write_json_fn=selective_write,
+        base_dir=str( tmp_path ), repo_root=str( tmp_path ), write_json_fn=selective_write,
     )
     assert r.status == "aborted"
     assert sched.calls == 0
@@ -487,7 +556,7 @@ def test_perform_honors_grace_seconds_in_deadline( tmp_path ):
         pre_clear_status="over_budget", pre_clear_pct=61.0,
         now=_dt( 20 ), delay_seconds=20, grace_seconds=100,
         resolve_tmux_fn=_seat(), ask_fn=lambda: "yes",
-        schedule_fn=lambda argv: None, base_dir=str( tmp_path ),
+        schedule_fn=lambda argv: None, base_dir=str( tmp_path ), repo_root=str( tmp_path ),
     )
     # deadline = fired 02:20:00 + 20 + 100 = 02:22:00
     assert r.expected_return_by == _dt( 22 ).isoformat()
@@ -561,7 +630,7 @@ def test_from_bridge_mints_and_passes_wake_nonce():
         seen.update( k )
         return sr.SelfRespinResult( status="scheduled", reason="ok" )
     sr.self_respin_from_bridge(
-        "/data/.claude-memento.md", "n1",
+        "/data/.claude-memento-cheech.md", "n1",
         identity_fn = lambda: ( "sid-self", "cheech" ),
         pressure_fn = lambda persona: ( "over_budget", 61.0 ),
         perform_fn  = fake_perform,
@@ -651,7 +720,7 @@ def test_schedule_path_never_applies_speakerphone_rider( tmp_path, monkeypatch )
         "sid1", persona="cheech", memento_path=mp, memento_nonce="u1",
         pre_clear_status="over_budget", pre_clear_pct=61.0,
         now=_dt( 21 ), resolve_tmux_fn=_seat(), ask_fn=lambda: "yes",
-        schedule_fn=lambda argv: scheduled.append( argv ), base_dir=str( tmp_path ),
+        schedule_fn=lambda argv: scheduled.append( argv ), base_dir=str( tmp_path ), repo_root=str( tmp_path ),
     )
     assert r.status == "scheduled"
     assert wraps == []                              # the rider was NEVER applied
@@ -668,9 +737,47 @@ def test_parse_own_pressure_present_persona_returns_status_and_pct():
     assert sr.parse_own_pressure( section, "cheech" ) == ( "over_budget", 61.0 )
 
 
-def test_parse_own_pressure_absent_persona_is_unknown_none():
+def test_parse_own_pressure_absent_persona_is_UNMATCHED_not_unknown():
+    """
+    ⚠️ THIS TEST USED TO ASSERT `unknown`, AND THAT WAS THE DEFECT IT PINNED.
+    A roster we successfully READ, which does not contain this seat, is a different
+    fact from a roster we could not read at all — and returning the same answer for
+    both is how a lookup that asked the wrong KEY got reported as a missing seat.
+    """
     section = { "personas": { "someone_else": { "status": "within_budget" } } }
-    assert sr.parse_own_pressure( section, "cheech" ) == ( "unknown", None )
+    assert sr.parse_own_pressure( section, "cheech" ) == ( sr.PRESSURE_UNMATCHED, None )
+
+
+def test_parse_own_pressure_an_empty_roster_is_unknown_rather_than_unmatched():
+    """
+    The other side of the split, and it is DECIDABLE rather than a preference
+    (Tiberius): THE ASKER IS ITSELF A LIVE SEAT, so a roster that omits everyone —
+    the caller included — cannot be a true reading. A genuinely empty fleet cannot be
+    observed by a member of it.
+
+    ⚠️ Note that "unmatched" is LITERALLY TRUE here — the roster was read, and this
+    seat is not in it — and is still wrong. That is why this case has a test of its
+    own rather than being left to the reader: the tempting answer is the defensible-
+    sounding one.
+    """
+    assert sr.parse_own_pressure( { "personas": { } }, "cheech" ) == ( sr.PRESSURE_UNKNOWN, None )
+
+
+def test_parse_own_pressure_matches_a_display_capitalised_roster_key():
+    """
+    Rio's finding, measured live 2026-08-30: the roster keys by DISPLAY capitalisation
+    and the fleet mixes conventions in ONE payload — six of eleven keys were not
+    lowercase. `personas.get( "rio" )` returned None while `personas.get( "Rio" )`
+    returned a live row at 32.1%.
+    """
+    section = { "personas": { "Rio": { "status": "within_budget", "consumption_pct_of_window": 32.1 } } }
+    assert sr.parse_own_pressure( section, "rio" ) == ( "within_budget", 32.1 )
+
+
+def test_parse_own_pressure_matches_a_lowercase_roster_key_from_a_display_cased_name():
+    """The mirror direction — neither lowercasing nor title-casing is safe on its own."""
+    section = { "personas": { "pocholo": { "status": "within_budget", "consumption_pct_of_window": 40.1 } } }
+    assert sr.parse_own_pressure( section, "Pocholo" ) == ( "within_budget", 40.1 )
 
 
 def test_parse_own_pressure_missing_status_is_unknown_but_keeps_pct():
@@ -687,6 +794,61 @@ def test_parse_own_pressure_blank_status_is_unknown():
 def test_parse_own_pressure_personas_not_a_dict_is_unknown_none():
     assert sr.parse_own_pressure( { "personas": None }, "cheech" ) == ( "unknown", None )
     assert sr.parse_own_pressure( { "personas": [ "not", "a", "dict" ] }, "cheech" ) == ( "unknown", None )
+
+
+def test_parse_own_pressure_a_matched_but_malformed_record_is_unknown_not_unmatched():
+    """
+    The third state, and it lands on the RIGHT side of the split: we found the seat in
+    the roster, so it is not "unmatched" — but the record is unusable, so there is no
+    reading either. Calling this "unmatched" would report a seat as absent from a
+    roster that plainly lists it.
+    """
+    assert sr.parse_own_pressure( { "personas": { "Rio": "not a dict" } }, "rio" ) \
+           == ( sr.PRESSURE_UNKNOWN, None )
+
+
+# ---------------------------------------------------------------------------
+# lookup_persona_record — the case-tolerant match, tested on its own because the
+# KEY it reports is what lets a caller tell "absent" from "matched but empty"
+# ---------------------------------------------------------------------------
+def test_lookup_persona_record_reports_the_key_it_matched():
+    personas = { "Rio": { "status": "within_budget" } }
+    assert sr.lookup_persona_record( personas, "rio" ) == ( { "status": "within_budget" }, "Rio" )
+
+
+def test_lookup_persona_record_prefers_an_EXACT_key_over_a_case_insensitive_one():
+    """
+    A roster carrying both spellings must resolve to the one actually asked for.
+    Without the exact-first check the answer would depend on dict ORDER, which is a
+    property of how the roster was built rather than of what the caller wanted.
+    """
+    personas = { "rio": { "status": "lowercase-row" }, "Rio": { "status": "display-row" } }
+    assert sr.lookup_persona_record( personas, "Rio" )[ 1 ] == "Rio"
+    assert sr.lookup_persona_record( personas, "rio" )[ 1 ] == "rio"
+
+
+def test_lookup_persona_record_ignores_surrounding_whitespace():
+    assert sr.lookup_persona_record( { "Mr Radio": { } }, "  mr radio  " )[ 1 ] == "Mr Radio"
+
+
+def test_lookup_persona_record_reports_no_match_as_a_None_KEY_not_an_empty_record():
+    """
+    The distinction the whole fix rests on: a record may legitimately be EMPTY, so a
+    falsy record cannot mean "absent". The matched KEY is what carries that fact.
+    """
+    assert sr.lookup_persona_record( { "Rio": { } }, "rio" )   == ( { }, "Rio" )
+    assert sr.lookup_persona_record( { "Rio": { } }, "nobody" ) == ( None, None )
+
+
+def test_lookup_persona_record_tolerates_a_non_dict_roster_and_a_non_string_name():
+    assert sr.lookup_persona_record( None, "rio" )        == ( None, None )
+    assert sr.lookup_persona_record( [ "not", "a", "dict" ], "rio" ) == ( None, None )
+    assert sr.lookup_persona_record( { "Rio": { } }, None ) == ( None, None )
+
+
+def test_lookup_persona_record_skips_a_non_string_key_rather_than_raising():
+    """A malformed roster must not take down a seat's own pressure read."""
+    assert sr.lookup_persona_record( { 7: { "status": "x" }, "Rio": { "status": "y" } }, "rio" )[ 1 ] == "Rio"
 
 
 def test_parse_own_pressure_section_not_a_dict_is_unknown_none():
@@ -749,11 +911,14 @@ def test_the_default_ask_receives_the_persona( tmp_path, monkeypatch ):
     monkeypatch.setattr( sr, "_default_ask",
                          lambda persona: seen.setdefault( "persona", persona ) or "no" )
 
-    mp = _write_memento( tmp_path, "u1", _dt( 20 ) )
+    # The root pointer is per-persona now, so the memento must be written for the SAME
+    # persona perform is called with. Under the retired shared name this matched by
+    # accident of the name, whatever persona the seat carried.
+    mp = _write_memento( tmp_path, "u1", _dt( 20 ), persona="Tiberius" )
     r  = sr.perform_self_respin(
         "sid1", persona="Tiberius", memento_path=mp, memento_nonce="u1",
         pre_clear_status="over_budget", pre_clear_pct=61.0,
-        now=_dt( 21 ), resolve_tmux_fn=_seat(), base_dir=str( tmp_path ),
+        now=_dt( 21 ), resolve_tmux_fn=_seat(), base_dir=str( tmp_path ), repo_root=str( tmp_path ),
     )
 
     assert seen[ "persona" ] == "Tiberius"      # ...and NOT a zero-arg call
@@ -828,71 +993,82 @@ def test_substance_floor_sits_under_every_real_memento():
     assert sr.MIN_MEMENTO_SUBSTANCE_BYTES < 1226
 
 
-def test_stamp_appends_without_losing_the_body( tmp_path ):
+def test_stamp_nonce_into_is_retired_and_refuses( tmp_path ):
+    """
+    It used to append the nonce to the RECORD alone, leaving the memento's MIRROR one
+    line short of it — every self-respin cycle, guaranteed (row c9f4d613). Measured on
+    two personas at a 92-byte delta apiece: the blank line plus the nonce line.
+    """
     memento = tmp_path / "seat.md"
     memento.write_text( _REAL_BODY, encoding="utf-8" )
 
-    line = sr.stamp_nonce_into( str( memento ), "u1", _dt( 20 ) )
-
-    after = memento.read_text( encoding="utf-8" )
-    assert _REAL_BODY.strip() in after                     # every byte of the body survived
-    assert after.endswith( line + "\n" )
-    assert sr.verify_memento_content( after, "u1", _dt( 21 ) )[ 0 ] is True
-
-
-def test_stamp_is_the_fix_for_the_truncating_one_liner( tmp_path ):
-    """The regression itself: the hand-rolled form empties the file, the verb does not."""
-    hand = tmp_path / "hand.md"
-    hand.write_text( _REAL_BODY, encoding="utf-8" )
-    # Clayton's line, verbatim in shape: the outer open() truncates before the read runs.
-    open( hand, "w" ).write( open( hand ).read().rstrip( "\n" ) + "\n\nSTAMP\n" )
-    assert hand.read_text( encoding="utf-8" ) == "\n\nSTAMP\n"      # the body is gone
-
-    safe = tmp_path / "safe.md"
-    safe.write_text( _REAL_BODY, encoding="utf-8" )
-    sr.stamp_nonce_into( str( safe ), "u1", _dt( 20 ) )
-    assert _REAL_BODY.strip() in safe.read_text( encoding="utf-8" )
-
-
-def test_stamp_leaves_no_temp_file_behind( tmp_path ):
-    memento = tmp_path / "seat.md"
-    memento.write_text( _REAL_BODY, encoding="utf-8" )
-    sr.stamp_nonce_into( str( memento ), "u1", _dt( 20 ) )
-    assert [ p.name for p in tmp_path.iterdir() ] == [ "seat.md" ]
-
-
-def test_stamp_refuses_a_missing_memento( tmp_path ):
-    with pytest.raises( FileNotFoundError ):
-        sr.stamp_nonce_into( str( tmp_path / "nope.md" ), "u1", _dt( 20 ) )
-
-
-def test_stamp_refuses_a_blank_memento( tmp_path ):
-    memento = tmp_path / "blank.md"
-    memento.write_text( "   \n", encoding="utf-8" )
-    with pytest.raises( ValueError, match="blank" ):
+    with pytest.raises( ValueError, match="RETIRED" ):
         sr.stamp_nonce_into( str( memento ), "u1", _dt( 20 ) )
 
+    assert memento.read_text( encoding="utf-8" ) == _REAL_BODY   # it touched nothing
 
-def test_stamp_refuses_to_stamp_the_same_nonce_twice( tmp_path ):
+
+def test_the_retirement_refusal_names_BOTH_exits_not_just_the_pre_stamp_one():
+    """
+    THE POINT OF THIS TEST IS THE SECOND EXIT, and it is the one a refusal is likely to
+    omit. `write --self-respin-nonce` is closed to any seat that already has a root
+    record this session — records are IMMUTABLE and a second write exits 3 — which is
+    the USUAL case on a second self-respin, because the seat keeps its session id.
+    A refusal naming only the pre-stamp route strands exactly those seats, and
+    memento_io's own history records three correct refusals forming a loop with no exit.
+    """
+    with pytest.raises( ValueError ) as excinfo:
+        sr.stamp_nonce_into( "/nonexistent/seat.md", "u-abc", _dt( 20 ) )
+    msg = str( excinfo.value )
+
+    assert "--self-respin-nonce u-abc" in msg          # exit 1, carrying THIS cycle's uuid
+    assert "amend" in msg                              # exit 2 — the one that is easy to omit
+    assert "immutable" in msg.lower()                  # ...and WHY exit 1 is closed to them
+    assert sr.build_nonce_line( "u-abc", _dt( 20 ) ) in msg   # the exact line to paste
+
+
+def test_the_refusal_reaches_a_caller_that_passes_nothing_usable( tmp_path ):
+    """
+    The arguments are accepted only so a stale call site lands on the message instead of
+    a TypeError it has to go and diagnose. A missing file and a blank file both used to
+    raise their own errors FIRST; now the retirement outranks them, because the advice is
+    the same either way and a FileNotFoundError does not tell anybody what to do.
+    """
+    blank = tmp_path / "blank.md"
+    blank.write_text( "   \n", encoding="utf-8" )
+
+    for target in ( str( tmp_path / "nope.md" ), str( blank ) ):
+        with pytest.raises( ValueError, match="RETIRED" ):
+            sr.stamp_nonce_into( target, "u1", _dt( 20 ) )
+
+
+def test_it_never_touches_the_filesystem_at_all( tmp_path, monkeypatch ):
+    """
+    A retired writer that still opens files can still damage one. Positive control on the
+    sentinel itself: the same monkeypatch DOES fire when open() is genuinely called, so a
+    pass here means "never opened", not "the probe was inert".
+    """
     memento = tmp_path / "seat.md"
     memento.write_text( _REAL_BODY, encoding="utf-8" )
-    sr.stamp_nonce_into( str( memento ), "u1", _dt( 20 ) )
-    with pytest.raises( ValueError, match="already carries" ):
-        sr.stamp_nonce_into( str( memento ), "u1", _dt( 21 ) )
 
+    opened = []
+    real_open = open
+    def _watched( *a, **kw ):
+        opened.append( a[ 0 ] )
+        return real_open( *a, **kw )
+    monkeypatch.setattr( "builtins.open", _watched )
 
-def test_stamp_removes_the_temp_file_when_the_write_fails( tmp_path, monkeypatch ):
-    memento = tmp_path / "seat.md"
-    memento.write_text( _REAL_BODY, encoding="utf-8" )
-
-    def _boom( *a, **kw ):
-        raise OSError( "disk full" )
-    monkeypatch.setattr( sr.os, "replace", _boom )
-
-    with pytest.raises( OSError ):
+    with pytest.raises( ValueError ):
         sr.stamp_nonce_into( str( memento ), "u1", _dt( 20 ) )
-    assert [ p.name for p in tmp_path.iterdir() ] == [ "seat.md" ]      # tmp cleaned
-    assert memento.read_text( encoding="utf-8" ) == _REAL_BODY          # original untouched
+    assert opened == []                                        # the claim
+
+    # POSITIVE CONTROL — and it must go through the PATCHED name. Calling the captured
+    # `real_open` here bypasses the watch, so the control can never fire and the assertion
+    # above proves nothing; that is exactly how this test failed when it was first written.
+    open( memento, "r" ).close()
+    assert opened == [ memento ], "the open() watch is inert — the assertion above proves nothing"
+
+    assert [ q.name for q in tmp_path.iterdir() ] == [ "seat.md" ]   # no temp file either
 
 
 def test_only_the_BODY_moves_the_verdict_not_the_nonce_freshness():
@@ -914,3 +1090,202 @@ def test_only_the_BODY_moves_the_verdict_not_the_nonce_freshness():
     assert husk_ok is False and real_ok is True     # same nonce, same clock — only the body differs
     assert "nonce-only" in husk_why
     assert "stale" not in husk_why                  # it failed on SUBSTANCE, not freshness
+
+
+# ---------------------------------------------------------------------------
+# The SLOT gate inside perform_self_respin (row 8068c65e)
+#
+# The gap this closes: `dismiss_sessions` runs a real memento proof and raises
+# memento_alarm on a miss; `self_respin` ran no equivalent, so Tiberius's misplaced
+# memento went unreported on 2026-08-30 while Pocholo's was caught on the reap path.
+# These tests prove the gate exists, fires BEFORE the ask, and runs the reap's own
+# predicate — and the negative control proves it can fail on a real misplacement.
+# ---------------------------------------------------------------------------
+def _slot_kwargs( tmp_path, mp, **over ):
+    kw = dict(
+        persona=_SEAT_PERSONA, memento_path=mp, memento_nonce="u1",
+        pre_clear_status="over_budget", pre_clear_pct=61.0,
+        now=_dt( 21 ), resolve_tmux_fn=_seat(),
+        base_dir=str( tmp_path ), repo_root=str( tmp_path ),
+    )
+    kw.update( over )
+    return kw
+
+
+def test_slot_gate_aborts_and_never_asks_when_the_memento_is_off_slot( tmp_path ):
+    """
+    🔴 NEGATIVE CONTROL — Tiberius's real case, at the orchestrator.
+
+    The memento is complete, fresh, correctly nonce-stamped, and would have passed the
+    OLD check exactly as it did on 2026-08-30 — it is simply not at the seat's slot.
+    The verb must abort, and must never reach the human with a confirmation ask for a
+    clear that would land in nothing any reader follows.
+    """
+    stray = tmp_path / "elsewhere" / "tiberius-f032ae9f-memento.md"
+    stray.parent.mkdir()
+    stray.write_text( _memento_with_nonce( "u1", _dt( 20 ) ) )
+    ask, sched = _Spy(), _Spy()
+
+    r = sr.perform_self_respin( _SEAT_SID, ask_fn=ask, schedule_fn=sched,
+                                **_slot_kwargs( tmp_path, str( stray ) ) )
+
+    assert r.status == "aborted"
+    assert "memento slot check failed" in r.reason
+    assert "not at this seat's 'root' slot" in r.reason
+    assert ask.calls   == 0     # never asked
+    assert sched.calls == 0     # never scheduled
+
+
+def test_the_same_memento_passes_once_it_is_written_to_the_slot( tmp_path ):
+    """The paired positive: identical content, at the slot, schedules. Only place changed."""
+    mp    = _write_memento( tmp_path, "u1", _dt( 20 ) )
+    sched = _Spy()
+    r = sr.perform_self_respin( _SEAT_SID, ask_fn=lambda: "yes", schedule_fn=sched,
+                                **_slot_kwargs( tmp_path, mp ) )
+    assert r.status == "scheduled"
+    assert sched.calls == 1
+
+
+def test_slot_gate_runs_before_the_nonce_verify( tmp_path ):
+    """
+    Order matters: a nonce proves the file you NAMED is fresh and says nothing about
+    whether any reader will look at it. So an off-slot memento reports the SLOT failure,
+    not a nonce failure — even when its nonce is also wrong.
+    """
+    stray = tmp_path / "stray.md"
+    stray.write_text( _memento_with_nonce( "old", _dt( 20 ) ) )
+    r = sr.perform_self_respin( _SEAT_SID, ask_fn=_Spy(), schedule_fn=_Spy(),
+                                **_slot_kwargs( tmp_path, str( stray ), memento_nonce="this-cycle" ) )
+    assert "memento slot check failed" in r.reason
+    assert "memento verify failed"    not in r.reason
+
+
+def test_slot_gate_aborts_when_the_repo_root_cannot_be_resolved( tmp_path ):
+    """An unresolvable root REFUSES — a guessed root finds the WRONG memento, not none."""
+    mp = _write_memento( tmp_path, "u1", _dt( 20 ) )
+    r  = sr.perform_self_respin(
+        _SEAT_SID, ask_fn=_Spy(), schedule_fn=_Spy(),
+        **_slot_kwargs( tmp_path, mp, repo_root="" ),
+    )
+    assert r.status == "aborted"
+    assert "cannot resolve this seat's repo root" in r.reason
+
+
+def test_slot_gate_is_injectable_and_receives_the_seats_identity( tmp_path ):
+    seen = {}
+    def fake_verify( memento_path, **k ):
+        seen.update( k, memento_path=memento_path )
+        return True, "ok"
+    mp = _write_memento( tmp_path, "u1", _dt( 20 ) )
+    sr.perform_self_respin( _SEAT_SID, ask_fn=lambda: "yes", schedule_fn=_Spy(),
+                            verify_slot_fn=fake_verify, **_slot_kwargs( tmp_path, mp ) )
+    assert seen[ "memento_path" ] == mp
+    assert seen[ "persona" ]      == _SEAT_PERSONA
+    assert seen[ "session_id" ]   == _SEAT_SID
+    assert seen[ "repo_root" ]    == str( tmp_path )
+    assert seen[ "now" ]          == _dt( 21 )
+
+
+def test_default_verify_slot_delegates_to_memento_slot_with_the_root_slot( tmp_path ):
+    """The live seam: root slot, and the caller's repo_root passed straight through."""
+    read, pointer = None, str( tmp_path / f".claude-memento-{persona_slug( _SEAT_PERSONA )}.md" )
+    _write_memento( tmp_path, "u1", _dt( 20 ) )
+    ok, reason = sr._default_verify_slot(
+        pointer, repo_root=str( tmp_path ), persona=_SEAT_PERSONA, session_id=_SEAT_SID,
+        now=_dt( 21 ), read_text_fn=lambda p: open( p, encoding="utf-8" ).read()
+                       if os.path.exists( p ) else None,
+    )
+    assert ok is True
+    assert "'root' slot" in reason
+
+
+def test_default_verify_slot_resolves_the_repo_root_when_none_is_given( monkeypatch ):
+    """repo_root=None ⇒ resolve it live; an unresolvable one reaches the single refusal."""
+    monkeypatch.setattr( sr, "resolve_repo_root", lambda: None )
+    ok, reason = sr._default_verify_slot(
+        "/anywhere/.claude-memento-cheech.md", repo_root=None, persona="cheech",
+        session_id="sid1", now=_dt( 21 ), read_text_fn=lambda p: None,
+    )
+    assert ok is False
+    assert "cannot resolve this seat's repo root" in reason
+
+
+def test_negative_control_the_old_tautological_check_accepts_the_same_off_slot_memento( tmp_path ):
+    """
+    🔴 THE CONTROL, MADE PERMANENT — remove the fix and watch it redden, in-suite.
+
+    A test that only proves the new gate REJECTS an off-slot memento cannot show the
+    gate is what rejected it; the old check passed everything, so "it passes now" was
+    never the discriminator. This runs the SAME input twice, changing only whether the
+    slot check is the real one or the old tautological one — "does the file you named
+    exist?", whose success criterion comes from the caller it is checking.
+
+    REJECTED under the real check, SCHEDULED under the old one. That difference is the
+    fix, and it is asserted here rather than described in a commit message.
+    """
+    stray = tmp_path / "elsewhere" / "tiberius-f032ae9f-memento.md"
+    stray.parent.mkdir()
+    stray.write_text( _memento_with_nonce( "u1", _dt( 20 ) ) )
+
+    def old_tautological_check( memento_path, **k ):
+        return os.path.exists( memento_path ), "the file you named is where you said it is"
+
+    with_fix = sr.perform_self_respin(
+        _SEAT_SID, ask_fn=lambda: "yes", schedule_fn=_Spy(),
+        **_slot_kwargs( tmp_path, str( stray ) ) )
+    without_fix = sr.perform_self_respin(
+        _SEAT_SID, ask_fn=lambda: "yes", schedule_fn=_Spy(),
+        verify_slot_fn=old_tautological_check,
+        **_slot_kwargs( tmp_path, str( stray ) ) )
+
+    assert with_fix.status    == "aborted"      # the gate catches it
+    assert without_fix.status == "scheduled"    # ...and nothing else would have
+
+
+# ---------------------------------------------------------------------------
+# Row 698a5aaf — the deadline is stamped when the clear is SCHEDULED, after the ask
+# ---------------------------------------------------------------------------
+def test_the_marker_is_dated_after_the_confirmation_ask_not_before_it( tmp_path ):
+    """
+    Measured 2026-09-11: the ask held the call 120s, the marker kept the entry clock, and
+    expected_return_by passed one second before /clear was typed. The ask here advances
+    a fake clock by 120s; fired_at and the deadline must carry the post-ask reading.
+    """
+    mp      = _write_memento( tmp_path, "u1", _dt( 20 ) )
+    clock   = { "t": _dt( 21 ) }
+    def ask():
+        clock[ "t" ] = _dt( 23 )                          # the operator took two minutes
+        return "yes"
+    r = sr.perform_self_respin(
+        "sid1", persona="cheech", memento_path=mp, memento_nonce="u1",
+        pre_clear_status="over_budget", pre_clear_pct=61.0,
+        now=_dt( 21 ), clock_fn=lambda: clock[ "t" ], resolve_tmux_fn=_seat(), ask_fn=ask,
+        schedule_fn=lambda argv: None, base_dir=str( tmp_path ), repo_root=str( tmp_path ),
+    )
+    assert r.status == "scheduled"
+    marker = json.loads( ( tmp_path / ".self-respin-sid1.json" ).read_text() )
+    assert marker[ "fired_at" ] == _dt( 23 ).isoformat()
+    assert marker[ "expected_return_by" ] > _dt( 23 ).isoformat()
+    assert marker[ "idle_wait_max_seconds" ] == sr.DEFAULT_IDLE_WAIT_MAX_SECONDS
+
+
+def test_scheduled_tells_the_caller_to_end_its_turn( tmp_path ):
+    mp = _write_memento( tmp_path, "u1", _dt( 20 ) )
+    r  = sr.perform_self_respin(
+        "sid1", persona="cheech", memento_path=mp, memento_nonce="u1",
+        pre_clear_status="over_budget", pre_clear_pct=61.0,
+        now=_dt( 21 ), resolve_tmux_fn=_seat(), ask_fn=lambda: "yes",
+        schedule_fn=lambda argv: None, base_dir=str( tmp_path ), repo_root=str( tmp_path ),
+    )
+    assert "END YOUR TURN NOW" in r.reason
+
+
+def test_the_idle_gate_uses_the_dm_injectors_rule_not_a_copy():
+    from lupin_cli.claude_code.hooks.lib import cc_notification_listener as listener
+    argv = sr.build_guarded_clear_argv( "sess", "/data/.fire.token", 20, idle_wait_max_seconds=600 )
+    busy, dialog, divider = argv[ 9 ], argv[ 10 ], argv[ 11 ]
+    assert busy.split( "\x1f" )   == list( listener.BUSY_STATUS_SENTINELS )
+    assert dialog.split( "\x1f" ) == list( listener.DIALOG_SENTINELS )
+    assert divider                == listener.IDLE_PROMPT_DIVIDER
+    script = argv[ 2 ]
+    assert script.index( "_idle" ) < script.index( 'rm "$4"' ), "wait for idle BEFORE consuming the token"

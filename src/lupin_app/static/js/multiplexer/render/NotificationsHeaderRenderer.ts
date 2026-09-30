@@ -18,12 +18,25 @@
 // API delete loop → partial-failure UX) + the count/history DOM. The STORE owns
 // its data (filterMode/visibleEntries/removeByIdHashes). No cross-store leakage.
 //
-// DEFERRED per Rick's own-only scope (67fc18f0/a767e1ae): the filter-badge, the
-// own/others/all toggle, and admin-gating are NOT built here.
+// Row 98305d96 (Rick 2026-09-10 ~15:57, "port legacy user filter") reverses the
+// 67fc18f0/a767e1ae deferral: the filter badge and the Mine / Not Mine / All Users
+// switch are built here, admin-only. The store owns the mode; coldHistoryHydration
+// reloads for it.
+//
+// Rick's 2026-09-10 ruling 3 (P0 5ebd2aff, "legacy title, slider inline"): the bar
+// reads "Claude Code Notifications: N" and carries the TTS preview slider INSIDE
+// it, as legacy notifications.html:481-513 does. This renderer creates the empty
+// slot (#tts-preview-slider-mount); TtsPreviewSliderRenderer mounts into it.
 
 import type { EventBus } from "../shared/EventBus";
-import type { Notification, StoreNotificationsChangedPayload } from "../shared/types";
+import type { Notification, NotificationFilterMode, StoreNotificationsChangedPayload } from "../shared/types";
+import type { HistoryWindow } from "../stores/historyWindow";
+// A-2 #4 — legacy getFilterLabel, already ported. The clear-all confirm names the
+// window with the SAME function the picker paints with, so they cannot word it differently.
+import { historyWindowLabel } from "../stores/historyWindow";
+import { createHistoryWindowDropdown, type HistoryWindowDropdownHandle } from "./historyWindowDropdown";
 import {
+  headerClickShouldCollapse,
   renderSectionHeader,
   setSectionCollapsed,
   type SectionHeaderHandle,
@@ -36,6 +49,12 @@ export interface NotificationsHeaderStoreLike {
   history(): ReadonlyArray<Notification>;
   visibleEntries(): ReadonlyArray<Notification>;
   removeByIdHashes(idHashes: ReadonlyArray<string>): void;
+  // Rick's ruling 1 (2026-09-10) — the history-window picker reads and sets the window.
+  historyWindow(): HistoryWindow;
+  setHistoryWindow(w: HistoryWindow): void;
+  // Row 98305d96 — the admin Mine switch reads and sets the mode.
+  filterMode(): NotificationFilterMode;
+  setFilterMode(mode: NotificationFilterMode): void;
 }
 
 // Narrowed api surface — the generic delete<T> (clear-all) plus the managed
@@ -62,6 +81,17 @@ export interface NotificationsHeaderRendererOptions {
   // Test injection — production uses globalThis.confirm. Returns the user's
   // yes/no to the "cannot be undone" guard.
   confirmFn?: (message: string) => boolean;
+  // Row 98305d96 — whether to show the admin-only filter badge and switch. Production
+  // passes AuthManager.isCurrentUserAdmin; omitted means hidden, as for every non-admin.
+  isAdmin?  : () => boolean;
+  // Parity A-2 #11 — clicking the filter badge reveals Queue Filter Settings and scrolls
+  // to it (legacy's showAndScrollToFilterPanel). Boot passes one thunk shared with the
+  // jobs pane's badge; a test that does not care about the reveal omits it.
+  //
+  // NO isAdmin CHECK RIDES THIS. The badge is already hidden for a non-admin below, which
+  // is where legacy gates it too (initializeFilterUI) — its showAndScrollToFilterPanel
+  // has no role check of its own. A second gate here is the shape that produced cec9dd43.
+  revealFilterSettings? : () => void;
   // Managed dev-server bounce (row 1b4211ac R2). All test-injectable; production
   // uses globalThis.fetch to poll /health across the ~20s restart window.
   fetchFn?      : typeof fetch;
@@ -75,13 +105,33 @@ export interface NotificationsHeaderRenderer {
   unmount(): void;
 }
 
-const CLEAR_CONFIRM = "Clear all notifications? This cannot be undone.";
+// A-2 #4 — legacy names the COUNT and the WINDOW, not just the act
+// (notifications.js:20952). "Clear all notifications?" is true of every window, so the
+// operator cannot tell a 4-notification "Today" from a 900-notification "All time" — and
+// this button deletes on the SERVER, durably. The two facts that decide whether to press it
+// were the two the sentence left out.
+//
+// `n !== 1` rather than `n > 1`: legacy's own ternary, and the only n that reaches here is
+// ≥ 1 because onClearAll returns early on an empty scope. Written as legacy writes it so a
+// future zero-case does not silently read "0 notification".
+function clearConfirmMessage( count: number, windowLabel: string ): string {
+  return `Clear all ${count} notification${count !== 1 ? "s" : ""} (${windowLabel})? This cannot be undone.`;
+}
+
+// Row 98305d96 — legacy's labels, verbatim (notifications.js setFilterMode modeConfig).
+// Exported for the jobs pane (row 83c3ff74): legacy's single control has one set of labels.
+export const FILTER_MODES: ReadonlyArray<{ mode: NotificationFilterMode; icon: string; label: string }> = [
+  { mode: "own",    icon: "👤", label: "Mine" },
+  { mode: "others", icon: "🚫", label: "Not Mine" },
+  { mode: "all",    icon: "👥", label: "All Users" },
+];
 
 class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
   private readonly bus       : EventBus;
   private readonly store     : NotificationsHeaderStoreLike;
   private readonly api       : NotificationDeleteApiLike;
   private readonly confirmFn : (message: string) => boolean;
+  private readonly isAdmin   : () => boolean;
   private readonly fetchFn      : typeof fetch;
   private readonly bouncePollMs : number;
   private readonly bounceWaitMs : number;
@@ -97,12 +147,18 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
   private statusEl     : HTMLElement | null        = null;
   private envLabelEl   : HTMLElement | null        = null;
   private clockEl      : HTMLElement | null        = null;
+  private ttsSlot      : HTMLElement | null        = null;
+  private filterBadgeEl  : HTMLElement | null      = null;
+  private filterSwitchEl : HTMLElement | null      = null;
+  private readonly filterButtons : Map<NotificationFilterMode, HTMLButtonElement> = new Map();
+  private historyWindowDropdown : HistoryWindowDropdownHandle | null = null;
   // Lane 0a — the section-header handle + the collapse click-listener (the
   // notifications body pane is a SEPARATE mount, so collapse targets the sibling
   // #notifications-pane rather than a child .section-content).
   private header       : SectionHeaderHandle | null = null;
   private headerClick  : ( ( e: Event ) => void ) | null = null;
   private historyOpen  = false;
+  private readonly revealFilterSettings : ( () => void ) | undefined;
 
   private readonly unsubscribers : Array<() => void> = [];
 
@@ -113,6 +169,8 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
     this.api       = opts.api;
     /* c8 ignore next */ // production-default fallback: globalThis.confirm is the runtime guard; tests always inject confirmFn.
     this.confirmFn = opts.confirmFn ?? ((m) => globalThis.confirm(m));
+    this.isAdmin   = opts.isAdmin ?? ((): boolean => false);
+    this.revealFilterSettings = opts.revealFilterSettings;
     /* c8 ignore next */ // production-default fallback: globalThis.fetch is the runtime health poll; tests always inject fetchFn.
     this.fetchFn       = opts.fetchFn ?? globalThis.fetch.bind(globalThis);
     this.bouncePollMs  = opts.bouncePollMs  ?? 1500;
@@ -140,13 +198,74 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
     this.clockEl.id = "clock";
     this.clockEl.setAttribute("data-testid", "multiplexer-notifications-clock");
 
+    // Ruling 3 — the TTS preview slider's slot, first among the actions (legacy
+    // order: TTS · history window · Clear All · toggle). Nothing re-renders it:
+    // replaceChildren runs only in mount() and unmount(), never in refresh(), so a
+    // slider mounted here survives every store change. It swallows clicks so a
+    // drag never collapses the section (legacy `onclick="event.stopPropagation()"`).
+    this.ttsSlot = document.createElement("div");
+    this.ttsSlot.className = "notifications-tts-slot";
+    this.ttsSlot.id = "tts-preview-slider-mount";
+    this.ttsSlot.setAttribute("data-testid", "multiplexer-tts-preview-slider-mount");
+    this.ttsSlot.addEventListener("click", (e) => e.stopPropagation());
+
+    // Rick's ruling 1 (2026-09-10) — legacy's history-window picker, right after
+    // the TTS control as in legacy notifications.html:514. The store owns the
+    // value and the reload; the picker only reads and sets it.
+    this.historyWindowDropdown = createHistoryWindowDropdown(this.store, root.ownerDocument);
+
+    // Row 98305d96 — legacy's admin-only filter: a badge naming the mode (legacy puts it in
+    // the section header) and the Mine / Not Mine / All Users switch. Hidden for everyone
+    // else, as legacy hides it (initializeFilterUI). Mount only READS the mode: setting it
+    // here would reload the history on every page load, which is exactly legacy's
+    // doubled-count bug (row b670b76c).
+    this.filterBadgeEl = document.createElement("span");
+    this.filterBadgeEl.className = "filter-mode-badge";
+    this.filterBadgeEl.id = "notifications-filter-badge";
+    this.filterBadgeEl.setAttribute("data-testid", "multiplexer-notifications-filter-badge");
+    // Parity A-2 #11 — the badge reveals Queue Filter Settings, as legacy's does
+    // (notifications.js:1834-1839 → showAndScrollToFilterPanel).
+    //
+    // 🔴 stopPropagation() IS LOAD-BEARING, NOT DEFENSIVE COPYING. This badge sits in the
+    // section header, and `headerClickShouldCollapse` returns TRUE for any target not
+    // inside a `button, a, input, select`. The badge is a <span>, so without this the
+    // click reaches the header handler and COLLAPSES the notifications section on its way
+    // to revealing the pane — the operator asks to see the filters and loses the list.
+    // Legacy's comment on the same line reads "Prevent section toggle".
+    this.filterBadgeEl.addEventListener("click", (e: Event): void => {
+      e.stopPropagation();
+      this.revealFilterSettings?.();
+    });
+    this.filterSwitchEl = document.createElement("div");
+    this.filterSwitchEl.className = "notifications-filter-switch";
+    this.filterSwitchEl.setAttribute("role", "group");
+    this.filterSwitchEl.setAttribute("aria-label", "Show notifications from whose jobs");
+    this.filterSwitchEl.setAttribute("data-testid", "multiplexer-notifications-filter-switch");
+    for (const { mode, icon, label } of FILTER_MODES) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "notifications-filter-btn";
+      btn.setAttribute("data-mode", mode);
+      btn.setAttribute("data-testid", `multiplexer-notifications-filter-${mode}-btn`);
+      btn.textContent = `${icon} ${label}`;
+      btn.addEventListener("click", () => this.onFilterClick(mode));
+      this.filterButtons.set(mode, btn);
+      this.filterSwitchEl.appendChild(btn);
+    }
+    const admin = this.isAdmin();
+    this.filterBadgeEl.hidden  = !admin;
+    this.filterSwitchEl.hidden = !admin;
+
     // History dropdown — toggle button + (initially hidden) panel.
     this.historyBtn = document.createElement("button");
     this.historyBtn.type = "button";
     this.historyBtn.className = "notifications-history-toggle";
     this.historyBtn.id = "history-dropdown-toggle";
     this.historyBtn.setAttribute("data-testid", "multiplexer-notifications-history-toggle");
-    this.historyBtn.textContent = "History ▾";
+    // Rick's ruling (2026-09-10 ~15:57, row 98305d96): keep this multiplexer-only button, which
+    // lists EXPIRED notifications, and rename it so it no longer reads as a second history control
+    // beside the history-window picker.
+    this.historyBtn.textContent = "Expired ▾";
     this.historyBtn.addEventListener("click", () => this.toggleHistory());
 
     // Clear-all.
@@ -155,7 +274,8 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
     this.clearBtn.className = "notifications-clear-all";
     this.clearBtn.id = "clear-all-notifications";
     this.clearBtn.setAttribute("data-testid", "multiplexer-notifications-clear-all");
-    this.clearBtn.textContent = "Clear all";
+    // H6 (2026-09-10) — legacy label, verbatim.
+    this.clearBtn.textContent = "🗑️ Clear All";
     this.clearBtn.addEventListener("click", () => void this.onClearAll());
 
     // Managed dev-server bounce (row 1b4211ac R2) — the simplest access Rick asked
@@ -178,12 +298,13 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
     // status move into `.section-header-actions`; the count uses the shared
     // `.section-header-count` chip (its legacy id + testid preserved so existing
     // selectors resolve). The env-label prefix + live clock are injected into the
-    // h3 around the "🔔 Notifications" title (legacy parity).
+    // h3 around the title (legacy parity). Ruling 3: the title is legacy's
+    // "Claude Code Notifications:" with no icon, so the count reads as its value.
     const header = renderSectionHeader({
-      icon    : "🔔",
-      title   : "Notifications",
+      icon    : "",
+      title   : "Claude Code Notifications:",
       testid  : "multiplexer-notifications-header",
-      actions : [ this.historyBtn, this.clearBtn, this.bounceBtn, this.statusEl ],
+      actions : [ this.ttsSlot, this.historyWindowDropdown.element, this.filterSwitchEl, this.historyBtn, this.clearBtn, this.bounceBtn, this.statusEl ],
     });
     this.header  = header;
     this.countEl = header.countEl;
@@ -191,9 +312,14 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
     this.countEl.setAttribute("data-testid", "multiplexer-notifications-count");
 
     const h3 = header.header.querySelector("h3") as HTMLElement;
-    // env-label BEFORE the icon/title; clock AFTER the title, before the count.
+    // env-label BEFORE the title; clock AFTER the count (ruling 3 — "Claude Code
+    // Notifications: N" stays one phrase; env label + clock stay in the bar).
     h3.insertBefore(this.envLabelEl, h3.firstChild);
-    h3.insertBefore(this.clockEl, this.countEl);
+    h3.appendChild(this.clockEl);
+    // Row 98305d96 — the filter badge sits where legacy puts it (notifications.html:481-483): the
+    // h3's next sibling, OUTSIDE both the h3 (ruling 3 fixed it as env-label · title · count ·
+    // clock) and the actions (ruling 3 keeps the TTS slot first, ruling 1 the picker second).
+    header.header.insertBefore(this.filterBadgeEl, header.actionsEl);
 
     this.historyPanel = document.createElement("div");
     this.historyPanel.className = "notifications-history-panel";
@@ -209,10 +335,12 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
     // `#notifications-pane[data-collapsed="true"]` hides it), not a child of this
     // header's mount. A click on a header control (button/etc.) does not collapse.
     this.headerClick = ( e: Event ): void => {
-      const target = e.target as Element | null;
-      /* c8 ignore next */ // defensive: a dispatched click always carries a target.
-      if ( target === null ) return;
-      if ( target.closest("button, a, input, select") !== null ) return;
+      // The SHARED predicate — see sectionHeader.ts. This was a second
+      // hand-written copy of the same rule, and when the chevron became a real
+      // <button> (Rick's divergence #5) the copy swallowed its clicks while the
+      // original did not: the bar still collapsed and the CHEVRON stopped
+      // working. A rule living in two places is a rule that gets half-changed.
+      if ( !headerClickShouldCollapse( e.target as Element | null, header.toggleEl ) ) return;
       const pane = root.ownerDocument.getElementById("notifications-pane");
       if ( pane === null ) return;   // header-only context (no body pane): no-op
       const collapsed = pane.getAttribute("data-collapsed") === "true";
@@ -251,6 +379,12 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
     this.historyBtn = null;
     this.historyPanel = this.statusEl = null;
     this.envLabelEl = this.clockEl = null;
+    this.ttsSlot = null;
+    this.filterBadgeEl = this.filterSwitchEl = null;
+    this.filterButtons.clear();
+    /* c8 ignore next */ // defensive: mount() always sets the picker, and unmount() has already returned when not mounted.
+    if (this.historyWindowDropdown !== null) this.historyWindowDropdown.dispose();
+    this.historyWindowDropdown = null;
     this.historyOpen = false;
     this.mounted = false;
   }
@@ -273,7 +407,10 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
 
   private refresh(): void {
     /* c8 ignore next */ // defensive: refresh only fires between mount and unmount, when countEl/clearBtn are set.
-    if (this.countEl === null || this.clearBtn === null) return;
+    if (this.countEl === null || this.clearBtn === null || this.historyWindowDropdown === null) return;
+    // Ruling 1 — the picker follows the store's window (a change repaints its label).
+    this.historyWindowDropdown.sync();
+    this.syncFilter();
     // Lane 0a — the section-header count = the active-list TOTAL. RULED
     // 2026-07-02 (Tiberius, from legacy ground truth: notifications.js:14417-14428
     // updateTotalNotificationsCount() sums group.totalCount into
@@ -285,6 +422,28 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
     this.clearBtn.disabled = this.store.visibleEntries().length === 0;
     // Keep an open history panel in sync with the latest history().
     if (this.historyOpen) this.renderHistory();
+  }
+
+  // -------------------------------------------------------------------------
+  // Row 98305d96 — the admin Mine switch
+  // -------------------------------------------------------------------------
+
+  private syncFilter(): void {
+    /* c8 ignore next */ // defensive: refresh only runs between mount and unmount, when the badge is set.
+    if (this.filterBadgeEl === null) return;
+    const current = this.store.filterMode();
+    const config  = FILTER_MODES.find(m => m.mode === current) as (typeof FILTER_MODES)[number];
+    this.filterBadgeEl.textContent = `${config.icon} ${config.label}`;
+    this.filterBadgeEl.setAttribute("data-mode", config.mode);
+    for (const [mode, btn] of this.filterButtons) {
+      btn.classList.toggle("active", mode === current);
+      btn.setAttribute("aria-pressed", String(mode === current));
+    }
+  }
+
+  private onFilterClick(mode: NotificationFilterMode): void {
+    if (mode === this.store.filterMode()) return;   // already showing it: nothing to reload
+    this.store.setFilterMode(mode);
   }
 
   // -------------------------------------------------------------------------
@@ -335,7 +494,12 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
   private async onClearAll(): Promise<void> {
     const ids = this.store.visibleEntries().map(n => n.id_hash);
     if (ids.length === 0) return;                 // nothing in scope (button also disabled)
-    if (!this.confirmFn(CLEAR_CONFIRM)) return;   // user declined the "cannot be undone" guard
+    // The count is what this click actually deletes — `visibleEntries()`, the SAME
+    // filter-scoped list the loop below walks, so the number promised and the number
+    // deleted cannot drift. The label comes from the picker's own port of legacy
+    // getFilterLabel, so the two clients word the window identically.
+    const message = clearConfirmMessage(ids.length, historyWindowLabel(this.store.historyWindow()));
+    if (!this.confirmFn(message)) return;         // user declined the "cannot be undone" guard
 
     const succeeded: string[] = [];
     let failed = 0;

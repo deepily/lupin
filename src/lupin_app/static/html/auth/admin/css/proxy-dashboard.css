@@ -58,7 +58,7 @@
 .mode-bar .mode-selector:focus {
     outline: none;
     border-color: #3b82f6;
-    box-shadow: 0 0 0 3px rgba( 59, 130, 246, 0.15 );
+    box-shadow: 0 0 0 3px rgb( 59, 130, 246, 0.15 );
 }
 
 .mode-bar .mode-selector:hover {
@@ -101,14 +101,14 @@
     background: white;
     border-radius: 12px;
     padding: 20px;
-    box-shadow: 0 2px 8px rgba( 0, 0, 0, 0.08 );
+    box-shadow: 0 2px 8px rgb( 0, 0, 0, 0.08 );
     border-top: 4px solid #a0aec0;
     transition: transform 0.2s, box-shadow 0.2s;
 }
 
 .trust-card:hover {
     transform: translateY( -2px );
-    box-shadow: 0 4px 16px rgba( 0, 0, 0, 0.12 );
+    box-shadow: 0 4px 16px rgb( 0, 0, 0, 0.12 );
 }
 
 /* Level color top borders */
@@ -287,7 +287,7 @@
 .category-selector:focus {
     outline: none;
     border-color: #3b82f6;
-    box-shadow: 0 0 0 3px rgba( 59, 130, 246, 0.1 );
+    box-shadow: 0 0 0 3px rgb( 59, 130, 246, 0.1 );
 }
 
 /* Reuse decisions-table from proxy-ratify.css — duplicated here for standalone usage */
@@ -297,7 +297,7 @@
     background: white;
     border-radius: 8px;
     overflow: hidden;
-    box-shadow: 0 1px 3px rgba( 0, 0, 0, 0.1 );
+    box-shadow: 0 1px 3px rgb( 0, 0, 0, 0.1 );
     margin-bottom: 20px;
 }
 
@@ -344,7 +344,7 @@
     padding: 60px 20px;
     background: white;
     border-radius: 8px;
-    box-shadow: 0 1px 3px rgba( 0, 0, 0, 0.1 );
+    box-shadow: 0 1px 3px rgb( 0, 0, 0, 0.1 );
 }
 
 .empty-state .empty-icon {

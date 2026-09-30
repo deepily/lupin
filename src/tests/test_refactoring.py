@@ -30,7 +30,7 @@ class RefactoringTester:
             # System endpoints
             ("GET", "/", 200, False, None),
             ("GET", "/health", 200, False, None),
-            ("GET", "/api/init", 200, False, None),
+            ("GET", "/api/init", 401, False, None),  # admin-only since 2026-09-23 (row 977eaaf2): 401 unauthenticated, 403 without the admin role
             ("GET", "/api/get-session-id", 200, False, None),
             
             # Auth test
@@ -45,14 +45,14 @@ class RefactoringTester:
             ("GET", "/api/get-queue/dead", 200, True, None),
             
             # Notification endpoints
-            ("POST", "/api/notify", 200, False, {
+            ("POST", "/api/notify", 200, True, {
                 "message": "Test notification",
                 "type": "task",
                 "priority": "medium",
                 "target_user": "test@example.com"
             }),
-            ("GET", "/api/notifications/test@example.com", 200, False, None),
-            ("GET", "/api/notifications/test@example.com/next", 200, False, None),
+            ("GET", "/api/notifications/test@example.com", 200, True, None),
+            ("GET", "/api/notifications/test@example.com/next", 200, True, None),
             
             # Job endpoints
             ("GET", "/api/delete-snapshot/test-id", 200, False, None),

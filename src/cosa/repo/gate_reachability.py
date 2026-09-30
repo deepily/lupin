@@ -33,6 +33,7 @@ Reachability is a necessary condition for a gate signal, never a sufficient one.
 """
 
 import ast
+import posixpath
 import re
 
 from pathlib import Path
@@ -76,7 +77,48 @@ SUITE_SCRIPTS_SOURCE = "src/cosa/agents/test_suite/job.py"
 _PATH_TOKEN_RE = re.compile( r"src/[A-Za-z0-9_./-]+(?![A-Za-z0-9_./*-])" )
 
 # Matches one `"key" : "src/....sh"` entry of the SUITE_SCRIPTS dict literal.
-_SUITE_SCRIPT_RE = re.compile( r"^\s*\"[a-z_]+\"\s*:\s*\"(src/[^\"]+\.sh)\"" )
+#
+# 🔴 THE KEY CLASS CARRIES DIGITS, AND OMITTING THEM DROPPED TWO SUITES SILENTLY.
+# It read `[a-z_]+`, which matches neither `e2e` nor `v2_eval` — so of the 13 `.sh`
+# entries in the literal this returned 11, with nothing in the output saying which two
+# were missing or that any were. Measured 2026-09-01; generalised from the same defect
+# one field over, where `grep -o 'run-span=[a-z-]*'` truncated a sha at its first digit
+# (Tiberius 👑). A lowercase-only class goes blind exactly on the values that carry
+# information — a digit, a capital, a delimiter — while matching cleanly on the quiet
+# default, so it is correct for as long as nobody adds an interesting key.
+#
+# ⚠️ THE TWO DROPPED KEYS BEHAVED DIFFERENTLY, AND ONLY ONE WAS MASKED. `find_gate_targets`
+# seeds from here and then FOLLOWS `.sh` references, so `run-all-tests.sh` naming the e2e
+# runner at its line 94 put `src/tests/e2e_ui` back in the target set by a second route.
+# NOTHING names `run-v2-eval.sh` — the only hits are its own header comments, which the
+# walker skips — so that one was not masked at all.
+#
+# MEASURED, one variable, rather than left as a hedge (2026-09-01). The first version of
+# this note said the loss was masked and that no wrong census had been measured, which was
+# honest about what I had checked and not about what was true. Flipping only the character
+# class:
+#
+#     find_gate_targets            11 -> 12 targets, recovering `src/scripts/v2_eval.py`
+#     find_unreferenced_test_files 50 -> 50, no file's verdict moved in either direction
+#
+# ⇒ So the TARGET POPULATION really was short by one, while the census VERDICT was not
+# affected: the recovered path is a script, and reachability verdicts are about test files.
+# Both halves are worth stating. "Latent" and "actively wrong" are different claims, and
+# the only way to tell which you have is to run it both ways.
+_SUITE_SCRIPT_RE = re.compile( r"^\s*\"[A-Za-z0-9_]+\"\s*:\s*\"(src/[^\"]+\.sh)\"" )
+
+# Matches a path a runner names RELATIVE TO ITS OWN DIRECTORY, `$SCRIPT_DIR/x.sh` or
+# `${SCRIPT_DIR}/lib/y.sh` — the runners' convention for `SCRIPT_DIR="$( dirname
+# "${BASH_SOURCE[0]}" )"`. Group 1 is the part after the variable.
+#
+# 🔴 WITHOUT THIS THE MERGE GATE'S OWN E2E RUNNERS REACHED NOTHING (row 2818dad7, measured
+# 2026-09-15). The halves `e2e_a` / `e2e_b` run `exec bash "$SCRIPT_DIR/run-e2e-ui-tests.sh"`,
+# which carries no `src/` token, so the walk stopped at the wrapper. `src/tests/e2e_ui` stayed a
+# target only because `run-all-tests.sh` spells the runner's full path: deleting the `"e2e"` key
+# moved nothing (17 targets either way), and then un-naming the runner in `run-all-tests.sh`
+# dropped `src/tests/e2e_ui` and took unreferenced test files from 49 to 154 — with both half
+# keys still registered. The gate's real route was invisible; a coincidental one held the verdict.
+_SCRIPT_DIR_TOKEN_RE = re.compile( r"\$\{?SCRIPT_DIR\}?/([A-Za-z0-9_./-]+)(?![A-Za-z0-9_./*-])" )
 
 
 def read_suite_scripts( project_root: Path ) -> Set[ str ]:
@@ -106,13 +148,40 @@ def read_suite_scripts( project_root: Path ) -> Set[ str ]:
     return scripts
 
 
+def _resolve_script_dir_tokens( script_dir: Path, line: str ) -> List[ str ]:
+    """
+    Resolve every `$SCRIPT_DIR/...` token on one runner line to a normalised repo path.
+
+    🔴 `Path` joins keep `..` as text. The cosa runners write `PROJECT_ROOT="$SCRIPT_DIR/../../.."`,
+    which would otherwise become the target `src/cosa/tests/unit/scripts/../../..` — inert only
+    while targets are compared as strings, and the REPO ROOT the moment anyone resolves it, which
+    would make every test file reachable (Tiffany's review of 0e50fc15, 2026-09-15). So each token
+    is collapsed, and one that leaves `src/` is dropped rather than followed.
+
+    Requires:
+        - script_dir is the runner's repo-relative directory
+        - line is one non-comment line of that runner
+
+    Ensures:
+        - returns repo-relative POSIX paths with no `..` or `.` segments
+        - returns only paths under `src/`
+    """
+    resolved = []
+    for relative in _SCRIPT_DIR_TOKEN_RE.findall( line ):
+        token = posixpath.normpath( ( script_dir / relative ).as_posix() )
+        if token.startswith( "src/" ): resolved.append( token )
+
+    return resolved
+
+
 def find_gate_targets( project_root: Path ) -> Set[ str ]:
     """
     Collect every repo-relative path a gate-invocable runner names.
 
     Walks the SUITE_SCRIPTS runners, following `.sh` references (run-all-tests.sh
     delegates to the per-suite runners), and keeps the `src/...` tokens that
-    exist on disk. Comment lines are skipped — usage examples in a runner's
+    exist on disk. A `$SCRIPT_DIR/...` token is resolved against the runner's own
+    directory first. Comment lines are skipped — usage examples in a runner's
     header name paths the runner does not run.
 
     Requires:
@@ -121,6 +190,7 @@ def find_gate_targets( project_root: Path ) -> Set[ str ]:
     Ensures:
         - returns only paths that exist under project_root
         - returns directories and `.py` files; `.sh` files are followed, not returned
+        - a `$SCRIPT_DIR/x` or `${SCRIPT_DIR}/x` token counts as `<runner's dir>/x`
         - terminates even if two runners reference each other
     """
     pending = read_suite_scripts( project_root )
@@ -135,9 +205,12 @@ def find_gate_targets( project_root: Path ) -> Set[ str ]:
         script_path = project_root / script
         if not script_path.is_file(): continue
 
+        script_dir = Path( script ).parent
         for line in script_path.read_text( encoding="utf-8" ).splitlines():
             if line.lstrip().startswith( "#" ): continue
-            for token in _PATH_TOKEN_RE.findall( line ):
+            tokens  = _PATH_TOKEN_RE.findall( line )
+            tokens += _resolve_script_dir_tokens( script_dir, line )
+            for token in tokens:
                 token     = token.rstrip( "/" )
                 candidate = project_root / token
                 if not candidate.exists(): continue

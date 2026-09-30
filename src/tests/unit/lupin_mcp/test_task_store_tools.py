@@ -23,6 +23,7 @@ from lupin_mcp.task_store_tools import (
     task_correlate_impl,
     task_reassign_impl,
     task_amend_impl,
+    task_request_impl,
     task_edit_impl,
     task_query_impl,
     task_get_impl,
@@ -163,12 +164,23 @@ class TestTaskCreateImpl:
             "gate_class"          : "none",
             "priority"            : "P2",
             "urgency"             : "normal",
-            "status"              : "queued",       # DEFAULT mint status (build 1b5483f4)
+            # 🔴 NO "status" KEY, AND ITS ABSENCE IS THE ASSERTION (Rio ⚡, 2026-09-04).
+            # This dict used to carry `"status": "queued"` as the DEFAULT mint status
+            # (build 1b5483f4). That default is what made the holding-area flag
+            # unreachable: the route mints into the holding area only when the caller
+            # named no status, and it reads that off `payload.model_fields_set`, which
+            # can only see a field as unset when the KEY IS ABSENT from the JSON. So a
+            # create that named nothing still arrived carrying an explicit "queued",
+            # the route honoured it as stated intent, and the flag read True and
+            # changed nothing — for every row the fleet has ever created.
             "blocked_by"          : None,
             "next_chase_ts"       : None,
             "source_qid"          : None,
             "correlation_key"     : None,
         }
+        # Stated separately from the dict comparison above, because a missing key is
+        # exactly the kind of thing an == on a large dict makes easy to skim past.
+        assert "status" not in calls[ "json" ]
 
     def test_blocked_mint_fields_pass_through( self, capture_request ):
         # One-call blocked mint (Rick 2026-07-20): status/blocked_by/next_chase_ts
@@ -646,6 +658,57 @@ class TestProjectAliasRoundTrip:
 
         # The crux: the key written is the key queried -> no false-idle.
         assert stored_project == queried_project == "plan"
+
+
+class TestTaskRequestImpl:
+
+    def test_payload_and_route( self, capture_request ):
+        body  = { "id": "abc", "request_state": "pending", "request_move": "admit" }
+        calls = capture_request( FakeResponse( 200, json_body=body ) )
+        result = task_request_impl(
+            BASE_URL, API_KEY,
+            actor   = "mr radio d54262de",
+            task_id = "abc-def",
+            move    = "admit",
+            reason  = "fix merged; ready to work",
+        )
+        assert result == body
+        assert calls[ "method" ] == "POST"
+        assert calls[ "url" ]    == f"{BASE_URL}/api/tasks/abc-def/request"
+        assert calls[ "json" ]   == {
+            "move"   : "admit",
+            "reason" : "fix merged; ready to work",
+            "actor"  : "mr radio d54262de",
+        }
+
+    def test_a_409_surfaces_detail_verbatim( self, capture_request ):
+        # Transport only: the server decides "already pending", and says so in its words.
+        detail = "a 'admit' request is already pending on this row and waiting on Rick's board."
+        capture_request( FakeResponse( 409, json_body={ "detail": detail } ) )
+        result = task_request_impl( BASE_URL, API_KEY, actor="mr radio d54262de",
+                                    task_id="abc", move="admit", reason="r" )
+        assert result[ "status" ] == "error"
+        assert detail in str( result )
+
+    def test_a_deletion_ticket_is_sent_when_given( self, capture_request ):
+        # Sword of Damocles (row ab8c5728): the pledge rides in the body, under the server's field name.
+        calls = capture_request( FakeResponse( 200, json_body={ "id": "abc" } ) )
+        task_request_impl( BASE_URL, API_KEY, actor="mr radio d54262de", task_id="abc",
+                           move="admit", reason="r", deletion_task_id="0f0e-pledge" )
+        assert calls[ "json" ][ "deletion_task_id" ] == "0f0e-pledge"
+
+    def test_no_deletion_ticket_key_is_sent_when_none_is_given( self, capture_request ):
+        calls = capture_request( FakeResponse( 200, json_body={ "id": "abc" } ) )
+        task_request_impl( BASE_URL, API_KEY, actor="mr radio d54262de", task_id="abc", move="demote", reason="r" )
+        assert "deletion_task_id" not in calls[ "json" ]
+
+    def test_the_sword_refusal_surfaces_verbatim( self, capture_request ):
+        detail = "an admit request must name `deletion_task_id`: one live ticket of your own"
+        capture_request( FakeResponse( 422, json_body={ "detail": detail } ) )
+        result = task_request_impl( BASE_URL, API_KEY, actor="mr radio d54262de",
+                                    task_id="abc", move="admit", reason="r" )
+        assert result[ "status" ] == "error"
+        assert detail in str( result )
 
 
 class TestTaskAmendImpl:

@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<!--
+  SCREENSHOT HARNESS for row f9a449c3 — the New Ticket card's Title and Details mics.
+  Renders the REAL shared card through the REAL stylesheets each client loads, so the
+  layout in the picture is the layout the operator gets. Nothing here is production:
+  it exists to answer one question — where does the mic sit relative to its field.
+
+  ?client=classic  → notifications.html's sheet list
+  ?client=mux      → multiplexer.html's sheet list
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>New Ticket mics — render probe</title>
+    <script>
+        // The sheets each real page loads, in that page's own order — the cascade is
+        // what decides whether the mic is small or a 70px slab, so the order matters
+        // as much as the membership.
+        const CLASSIC = [
+            "/static/css/lupin-base.css",
+            "/static/css/shared/notifications-surface.css",
+            "/static/css/notifications.css",
+            "/static/css/lupin-nav.css",
+            "/static/css/broadcast-panel.css",
+            "/static/css/task-list.css",
+            "/static/css/epic-board.css",
+        ];
+        const MUX = [
+            "/static/css/lupin-base.css",
+            "/static/css/lupin-nav.css",
+            "/static/css/shared/notifications-surface.css",
+            "/static/css/task-list.css",
+            "/static/css/epic-board.css",
+            "/static/css/multiplexer/task-list.css",
+        ];
+        const which = new URLSearchParams( location.search ).get( "client" ) === "mux" ? MUX : CLASSIC;
+        for ( const href of which ) {
+            document.write( `<link rel="stylesheet" href="${ href }">` );
+        }
+    </script>
+    <style>
+        body { background: #f5f6f8; margin: 0; min-height: 100vh; }
+    </style>
+</head>
+<body>
+<script type="module">
+    import { openNewTicketCard } from "/static/js/shared/task-create.js";
+
+    // A hook is all it takes to put the mics on; it is never fired here.
+    const handle = openNewTicketCard( {
+        postTicket : () => Promise.resolve( { status: 201, body: {} } ),
+        assignees  : [ "maria", "mr radio", "maya", "clayton" ],
+        onCreated  : () => {},
+        onDictate  : () => {},
+    } );
+
+    // Fill both dictated fields so the picture shows the mic beside real text rather
+    // than beside a placeholder — a placeholder is grey and reads as an empty row.
+    const q = ( f ) => document.querySelector( `[data-field="${ f }"]` );
+    q( "title" ).value   = "Task list pane goes stale after a row write";
+    q( "details" ).value = "After changing a row's owner or priority the pane keeps "
+        + "showing the previous poll's board until the next tick.\n\nDictated with the "
+        + "Details mic.";
+    q( "title" ).blur();
+
+    window.__READY__ = handle.mics.title !== null && handle.mics.details !== null;
+</script>
+</body>
+</html>

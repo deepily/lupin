@@ -26,6 +26,7 @@ import vm from "node:vm";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 import { TASK_LIST_QUERY } from "../../../lupin_app/static/js/shared/task-list-query.js";
+import { TASK_VERB_SPECS } from "../../../lupin_app/static/js/shared/task-verbs.js";
 
 const HERE = dirname( fileURLToPath( import.meta.url ) );
 const NOTIFICATIONS_JS = resolve( HERE, "../../../lupin_app/static/js/notifications.js" );
@@ -35,6 +36,7 @@ before( () => {
     GlobalRegistrator.register();
   }
   window.LUPIN_TASK_LIST_QUERY = TASK_LIST_QUERY;
+  window.LUPIN_TASK_VERB_SPECS = TASK_VERB_SPECS;
   const fullSource = readFileSync( NOTIFICATIONS_JS, "utf8" );
   const initIdx    = fullSource.indexOf( "// Initialize when DOM is ready" );
   assert.ok( initIdx > 0, "bottom-of-file init marker must be found" );
@@ -67,6 +69,19 @@ type EpicUI = Record<string, unknown> & {
   _stampEpicBoardUpdated: () => void;
   _applyEpicGroupCollapseState: ( tbody: HTMLElement, isCollapsed: boolean ) => void;
   _handleEpicAccordionToggle: ( target: unknown ) => void;
+  _handleEpicBoardClick: ( target: unknown ) => void;
+  _captureOperatorState: ( container: unknown ) => unknown;
+  _restoreOperatorState: ( container: unknown, state: unknown ) => void;
+  _handleDisclosureToggle: ( button: unknown ) => void;
+  loadEpicGroupState: () => Record<string, boolean>;
+  _handleRowControlClick: ( target: unknown ) => boolean;
+  _disclosureToggle: ( task: Row ) => string;
+  _handleDisclosureToggle: ( button: unknown ) => void;
+  _handleTaskSubmitClick: ( button: unknown ) => unknown;
+  _renderTaskRowError: ( id: string, message: string, scope?: unknown ) => void;
+  _transitionTask: ( id: string, to: string, extras?: unknown ) => Promise<{ ok: boolean; message?: string }>;
+  _patchTaskFields: ( id: string, patch: Record<string, unknown> ) => Promise<{ ok: boolean; message?: string }>;
+  _handlePriorityUpdateClick: ( button: unknown ) => Promise<void>;
   _wireEpicBoardAccordion: () => void;
   _epicKeysInDom: () => string[];
   collapseAllEpics: () => void;
@@ -114,6 +129,56 @@ function buildPanelDOM(): void {
 
 function fakeResponse( status: number, ok: boolean, jsonBody: unknown ): unknown {
   return { status, ok, json: async () => jsonBody };
+}
+
+// ══════════ WIRING THE PANE, BECAUSE `buildPanelDOM` DOES NOT ══════════
+//
+// 🔴 It paints `#epic-board-container` and stops. So the tests below that called
+// `_handleEpicAccordionToggle` or `_handleDisclosureToggle` BY NAME were measuring a
+// correct handler against a pane with no listener on it — a control can be dead on
+// screen and the test still green.
+//
+// ⚠️ THIS FILE IS NOT AS BLIND AS `podcast_overlay` WAS. Measured 2026-09-02: delete
+// every click listener in notifications.js and it goes 70/0 -> 66 pass / 4 fail,
+// because it already carries four real click-path tests. These are gaps in a watched
+// file, which wants different framing from a watched denominator of zero.
+// ⚠️ IT DOES NOT RESET `_epicBoardAccordionWired`, AND THAT MATTERS. `renderEpicBoard`
+// already wires the pane, so forcing a re-wire installs a SECOND listener and one click
+// then fires the handler TWICE — which toggles the group open and straight back shut.
+// Measured on the way in: three of these tests failed with "expected false, actual true"
+// against a perfectly correct page, because the fixture was double-firing. The method's
+// own wired-once guard is the thing to lean on, not to defeat.
+//
+// ⚠️ AND IT DELIBERATELY DIVERGES FROM `task_list_panel.test.ts`, WHICH STILL RESETS.
+// Harmonising the two looked obviously right and was tried; measured, it re-introduced
+// that file's non-terminating break arm, while the resetting form leaves it readable at
+// 162 pass / 13 fail. So the two helpers differ ON PURPOSE — evidence-led, not drift —
+// and it is a third fact pointing at the same unexplained interaction over there.
+// Noted, not chased: see the open-item note beside that file's accordion tests.
+function wirePane( ui: EpicUI ): void {
+  ui._wireEpicBoardAccordion();
+}
+
+// Dispatch a real bubbling click and assert a handler was REACHED; the caller then goes
+// on asserting what the click DID.
+//
+// 🔴 THE REACHED-CHECK IS WHAT MAKES THE NO-OP CASES MEAN ANYTHING. "Nothing happened"
+// is satisfied by a handler that correctly declined AND by no listener existing — two
+// sufficient causes for one observation. Proving the handler ran kills the second, and
+// the check sits ON THE PATH, so a conversion cannot quietly skip it.
+function clickThrough( ui: EpicUI, method: string, el: Element | null, what: string ): void {
+  assert.ok( el, `${ what } did not render at all — this test cannot speak to wiring` );
+
+  const target   = ui as unknown as Record<string, ( t: unknown ) => unknown >;
+  const original = target[ method ];
+  let   reached  = false;
+  target[ method ] = ( t: unknown ) => { reached = true; return original.call( ui, t ); };
+  el!.dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+  target[ method ] = original;
+
+  assert.ok( reached,
+    `${ what } reached NO handler — the pane has no click listener for it, so the ` +
+    `control is dead on screen however correct the handler is` );
 }
 
 // Representative rows. Note R_NO_KEY and R_WRONG_KEY: the no-correlation_key path
@@ -395,15 +460,26 @@ test( "_epicGroupIdSlug: non-id-safe characters become dashes", () => {
 
 // ──────────────────────────── table rendering (pure) ──────────────────────────
 
-test( "renderEpicBoardTable: FOUR columns — owner is deliberately absent", () => {
+// UPDATED 2026-09-03 for Rick's one-schema ruling (row af0e5ea0). The epic board used to
+// carry its OWN four columns in its OWN order — ID · P · Status · Title — under its own
+// `epic-col-*` names. It now renders the same six cells as the other two panes, from the
+// same `_renderRow`, because moving between views must not mean re-parsing the layout.
+//
+// Owner is STILL deliberately absent: it is the group header, not a per-row field. That
+// claim survives the schema change and is what the last two assertions still pin.
+test( "renderEpicBoardTable: the shared six-cell schema — and owner is still deliberately absent", () => {
   const ui = newUI();
   const html = ui.renderEpicBoardTable( ui.groupTasksByEpic( [ R_SEAL_A ] ), {} );
-  assert.ok( html.includes( "epic-col-id" ) );
-  assert.ok( html.includes( "epic-col-priority" ) );
-  assert.ok( html.includes( "epic-col-status" ) );
-  assert.ok( html.includes( "epic-col-title" ) );
+  for ( const col of [ "task-col-id", "task-col-title", "task-col-class", "task-col-status",
+                       "task-col-priority", "task-col-disclose" ] ) {
+    assert.ok( html.includes( col ), `the epic board must render ${col}` );
+  }
+  // The private vocabulary is gone — one set of names for three panes, or the CSS has to
+  // be written twice and the two copies drift.
+  for ( const old of [ "epic-col-id", "epic-col-priority", "epic-col-status", "epic-col-title" ] ) {
+    assert.equal( html.includes( old ), false, `${old} was the second vocabulary; it must not survive` );
+  }
   assert.equal( html.includes( "epic-col-owner" ), false );
-  assert.equal( html.includes( "task-col-accountable" ), false );
 } );
 
 test( "renderEpicBoardTable: waiting-on-Rick leads, drift closes, epics in between", () => {
@@ -474,15 +550,25 @@ test( "renderEpicBoardTable: a hostile title/story is escaped, not injected", ()
   assert.ok( html.includes( "&lt;" ) );
 } );
 
-test( "_renderEpicRow: status class + priority heat class + truncated title with full tooltip", () => {
+// UPDATED 2026-09-03: the truncation assertion is INVERTED. The 60-char cap cut the title
+// in JS before the DOM, so a wider cell showed the same text — measured in the real
+// browser, 197px shown of an up-to-677px title. Rick ruled the cap away; the title wraps
+// to two lines in CSS instead. Everything else this test pinned is unchanged.
+test( "_renderEpicRow: status class + priority heat class + the FULL title, with tooltip", () => {
   const ui = newUI();
   const long = "x".repeat( 90 );
   const html = ui._renderEpicRow( { id: "abcdefgh12345", title: long, status: "blocked", priority: "P0" } );
   assert.ok( html.includes( "task-status-blocked" ) );
   assert.ok( html.includes( "task-prio-high" ) );
   assert.ok( html.includes( "abcdefgh" ) && !html.includes( "abcdefgh1<" ) );
-  assert.ok( html.includes( "…" ), "title is truncated" );
-  assert.ok( html.includes( `title="${long}"` ), "the FULL title rides the tooltip" );
+  // Asserted by PARSING, not by matching markup shape. The first cut pinned `>title</td>`
+  // and broke the moment the text moved into a span — which is a fact about where the
+  // characters sit, not about whether the whole title survives. The claim is the text.
+  const host = document.createElement( "table" );
+  host.innerHTML = `<tbody>${html}</tbody>`;
+  const titleCell = host.querySelector( "td.task-col-title" )!;
+  assert.equal( titleCell.textContent, long, "the cell carries the whole title — no cap, no ellipsis" );
+  assert.ok( html.includes( `title="${long}"` ), "the FULL title still rides the tooltip" );
 } );
 
 test( "_renderEpicRow: a row missing status/priority still renders, dashed and unknown", () => {
@@ -558,7 +644,8 @@ test( "clicking a group header toggles it in place and persists the choice", () 
   assert.ok( tbody.classList.contains( "collapsed" ), "epics start collapsed" );
 
   const header = tbody.querySelector( ".epic-group-header" ) as HTMLElement;
-  ui._handleEpicAccordionToggle( header );
+  wirePane( ui );
+  clickThrough( ui, "_handleEpicAccordionToggle", header, "the seal-the-test-tier group header" );
   assert.equal( tbody.classList.contains( "collapsed" ), false );
   assert.equal( header.getAttribute( "aria-expanded" ), "true" );
   assert.equal( tbody.querySelector( ".epic-group-chevron" )!.textContent, "▾" );
@@ -570,7 +657,8 @@ test( "clicking a descendant of the header (the chevron) still toggles the group
   buildAccordionDOM( ui );
   const tbody   = document.querySelector( 'tbody.epic-group[data-epic="epic:seal-the-test-tier"]' ) as HTMLElement;
   const chevron = tbody.querySelector( ".epic-group-chevron" ) as HTMLElement;
-  ui._handleEpicAccordionToggle( chevron );
+  wirePane( ui );
+  clickThrough( ui, "_handleEpicAccordionToggle", chevron, "the group chevron" );
   assert.equal( tbody.classList.contains( "collapsed" ), false );
 } );
 
@@ -578,7 +666,12 @@ test( "a click outside any header is a no-op", () => {
   const ui = newUI();
   buildAccordionDOM( ui );
   const before = document.getElementById( "epic-board-container" )!.innerHTML;
-  ui._handleEpicAccordionToggle( document.querySelector( ".epic-row" ) );
+  wirePane( ui );
+  clickThrough( ui, "_handleEpicAccordionToggle", document.querySelector( ".epic-row" ),
+    "an ordinary epic row" );
+  // ⚠️ `null` and `{}` STAY BY-NAME. Neither is an element, so there is no click to
+  // drive; what they pin is the handler's own tolerance of a junk target, and routing
+  // them through a real event would delete the case rather than strengthen it.
   ui._handleEpicAccordionToggle( null );
   ui._handleEpicAccordionToggle( {} );
   assert.equal( document.getElementById( "epic-board-container" )!.innerHTML, before );
@@ -624,7 +717,9 @@ test( "the collapse choice survives a re-render — the reload requirement, end 
   const ui = newUI();
   buildAccordionDOM( ui );
   const tbody  = document.querySelector( 'tbody.epic-group[data-epic="epic:seal-the-test-tier"]' ) as HTMLElement;
-  ui._handleEpicAccordionToggle( tbody.querySelector( ".epic-group-header" ) );
+  wirePane( ui );
+  clickThrough( ui, "_handleEpicAccordionToggle", tbody.querySelector( ".epic-group-header" ),
+    "the seal-the-test-tier group header" );
 
   // A brand-new instance rendering into a brand-new DOM, reading only storage.
   const reborn = newUI();
@@ -742,13 +837,22 @@ test( "the Epic Board never fetches /api/tasks itself — it renders off the sha
   ui.authedFetch = async ( url: string ) => {
     urls.push( url );
     if ( url === "/api/epic-stories" ) return fakeResponse( 200, true, { stories: {}, count: 0 } ) as never;
+    if ( url === "/api/tasks/flow-ratio" ) return fakeResponse( 200, true, { created: 1, closed: 2, ratio: 0.5, window_hours: 24 } ) as never;
     return fakeResponse( 200, true, { tasks: [ R_SEAL_A, R_NO_KEY ], count: 2 } ) as never;
   };
 
   await ui.refreshTaskList();
 
-  const taskUrls = urls.filter( u => u.startsWith( "/api/tasks" ) );
-  assert.equal( taskUrls.length, 1, "ONE fetch fed BOTH panes" );
+  // TIGHTENED 2026-09-01. This filtered on the prefix "/api/tasks", which also
+  // matches every sibling resource under it — so it could not tell "the rows were
+  // polled twice" (the defect it exists to catch) from "a second, different
+  // resource was read once" (not a defect). It now names the row list exactly.
+  const rowUrls = urls.filter( u => u.startsWith( "/api/tasks?" ) );
+  assert.equal( rowUrls.length, 1, "ONE row fetch fed BOTH panes" );
+  // The ratio is a SEPARATE resource — counted in SQL, so it cannot be derived
+  // from the rows above — but it must still ride this one tick, exactly once.
+  assert.equal( urls.filter( u => u === "/api/tasks/flow-ratio" ).length, 1,
+                "the ratio rides the shared tick, and is not polled on a timer of its own" );
   // Both panes actually rendered off it.
   assert.equal( document.getElementById( "epic-board-container" )!.querySelector( "table.epic-board-table" ) !== null, true );
   assert.equal( document.getElementById( "task-list-container" )!.querySelector( "table.task-list-table" ) !== null, true );
@@ -766,6 +870,7 @@ test( "a second refresh re-renders both panes without re-fetching the stories", 
   ui.authedFetch = async ( url: string ) => {
     urls.push( url );
     if ( url === "/api/epic-stories" ) return fakeResponse( 200, true, { stories: {}, count: 0 } ) as never;
+    if ( url === "/api/tasks/flow-ratio" ) return fakeResponse( 200, true, { created: 1, closed: 2, ratio: 0.5, window_hours: 24 } ) as never;
     return fakeResponse( 200, true, { tasks: [ R_SEAL_A ], count: 1 } ) as never;
   };
 
@@ -773,5 +878,733 @@ test( "a second refresh re-renders both panes without re-fetching the stories", 
   await ui.refreshTaskList();
 
   assert.equal( urls.filter( u => u === "/api/epic-stories" ).length, 1 );
-  assert.equal( urls.filter( u => u.startsWith( "/api/tasks" ) ).length, 2 );
+  // Row list: once per refresh. The stories are memoized; the rows are not.
+  assert.equal( urls.filter( u => u.startsWith( "/api/tasks?" ) ).length, 2 );
+  // The ratio is live state, so it re-fetches with the rows — NOT memoized like
+  // the stories. Two refreshes, two reads: that is the intended behaviour, and
+  // asserting it here is what stops someone "optimising" it into a stale number.
+  assert.equal( urls.filter( u => u === "/api/tasks/flow-ratio" ).length, 2 );
 } );
+
+// ═════════ progressive disclosure on the EPIC BOARD — the renderer, and the CLICK PATH ═════════
+//
+// 🔴 THE EPIC BOARD'S ROW CONTROLS WERE DEAD, AND NOTHING SAW IT. `_renderEpicRow`
+// emits the ellipsis and the nine controls behind it, but this pane's only click
+// listener went straight to `_handleEpicAccordionToggle`, which returns unless the
+// click landed in a group header. So on this board the ellipsis opened nothing and
+// Drop / Park / Won't-fix / Demote / Approve did nothing — no error, no console line,
+// the controls simply were not wired.
+//
+// ⚠️ THIS IS A MISSING ROUTE, NOT THE `_paneScope` LOOKUP DEFECT OF cd2ea523, and the
+// two look identical from the outside. Told apart by measurement: with the handlers
+// stubbed and ONE pane in the DOM — no second `data-task-id` for a lookup to pick
+// wrongly — the handlers were never invoked at all, while the same probe against the
+// task-list pane saw its click arrive. A wrong lookup happens INSIDE a handler that
+// runs; nothing ran here.
+//
+// It stayed invisible because every disclosure test in the tree called the toggle
+// method directly. Measured: deleting the disclosure route from the delegation reddened
+// 0 of 253 tests. These reach the buttons the way an operator does.
+
+function epicPaneWithRealRows( ui: EpicUI, ...tasks: Row[] ): HTMLElement {
+  document.body.replaceChildren();
+  const host = document.createElement( "div" );
+  host.id = "epic-board-container";
+  document.body.appendChild( host );
+  ui._epicBoardAccordionWired = false;
+  ui._wireEpicBoardAccordion();
+  host.innerHTML = `<table id="epic-board-table"><tbody class="epic-group" data-epic="epic:seal">`
+                 + tasks.map( t => ui._renderEpicRow( t ) ).join( "" )
+                 + `</tbody></table>`;
+  return host;
+}
+
+// Rick's redesign (46a3078c) collapsed five per-verb buttons and five boxes into ONE
+// select, ONE reason field and ONE Submit. Reaching a control therefore has an extra
+// step now: choose the verb, THEN fill, THEN submit.
+//
+// 🔴 A REAL `change`, NOT AN ASSIGNMENT. `.task-chase-input` does not exist until
+// `_handleVerbSelectChange` builds it, reached through the pane's own change listener.
+// Setting `.value` alone leaves a page state no operator can produce — which is the
+// same defect class these tests were written to remove, one level in.
+//
+// Idiom taken verbatim from Rio's `row_control_redesign.test.ts`, which took
+// `clickThrough` from mine; keeping them identical is what lets either file be read by
+// someone who knows the other.
+function selectVerb( scope: ParentNode, verb: string ): HTMLSelectElement {
+  const sel = scope.querySelector( ".task-verb-select" ) as HTMLSelectElement;
+  assert.ok( sel, "the row renders no verb select at all — this test cannot speak to the control it names" );
+  sel.value = verb;
+  sel.dispatchEvent( new window.Event( "change", { bubbles: true } ) );
+  return sel;
+}
+
+function clickIt( el: Element | null ): void {
+  assert.ok( el, "the element to click was not rendered" );
+  el!.dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+}
+
+test( "🔴 _renderEpicRow DECIDES collapsed: its own output carries hidden + aria-expanded=false", () => {
+  const ui   = newUI();
+  const host = document.createElement( "table" );
+  host.innerHTML = `<tbody>${ui._renderEpicRow( R_SEAL_A )}</tbody>`;
+
+  const controls = host.querySelector( ".task-controls-row" ) as HTMLElement;
+  const toggle   = host.querySelector( ".task-disclose-button" ) as HTMLElement;
+  assert.ok( controls, "no controls row emitted at all" );
+  assert.equal( controls.hidden, true,
+    "the epic renderer shipped its controls EXPANDED — the layout Rick rejected" );
+  assert.ok( toggle, "no ellipsis emitted, so the controls can never be reached" );
+  assert.equal( toggle.getAttribute( "aria-expanded" ), "false" );
+  assert.equal( toggle.dataset.taskId, controls.dataset.controlsFor,
+    "the toggle and its controls row carry different ids — the toggle opens nothing" );
+} );
+
+test( "🔴 renderEpicBoardTable: EVERY epic row ships collapsed", () => {
+  const ui    = newUI();
+  const model = ui.groupTasksByEpic( [ R_SEAL_A, R_SEAL_B, R_SEAL_C ] );
+  const host  = document.createElement( "div" );
+  host.innerHTML = ui.renderEpicBoardTable( model, {} );
+
+  const controls = Array.from( host.querySelectorAll( ".task-controls-row" ) ) as HTMLElement[];
+  assert.ok( controls.length >= 3, "the table emitted fewer controls rows than task rows" );
+  assert.ok( controls.every( c => c.hidden ), "at least one epic row shipped expanded" );
+} );
+
+test( "🔴 THROUGH THE CLICK PATH: the epic board's ellipsis is WIRED", () => {
+  // This is the defect itself. Before the shared dispatch, this click reached nothing.
+  const ui   = newUI();
+  const host = epicPaneWithRealRows( ui, R_SEAL_A );
+  const controls = host.querySelector( ".task-controls-row" ) as HTMLElement;
+
+  assert.equal( controls.hidden, true, "precondition: the row starts collapsed" );
+  clickIt( host.querySelector( ".task-disclose-button" ) );
+  assert.equal( controls.hidden, false,
+    "the epic board's ellipsis is dead — the click reached no handler" );
+} );
+
+test( "🔴 THROUGH THE CLICK PATH: the epic board's row ACTION buttons are WIRED", () => {
+  // The ellipsis alone is half a fix: disclosing controls that do nothing is worse
+  // than not disclosing them, because now the operator watches them fail silently.
+  const ui = newUI();
+  let submitted = false;
+  ui._handleTaskSubmitClick = (): void => { submitted = true; };
+  const host = epicPaneWithRealRows( ui, R_SEAL_A );
+
+  // Same question as before the redesign — does a row action control on THIS pane reach
+  // its handler — asked of the control that now carries every verb. Drop used to have a
+  // button of its own; it is an option on the select today.
+  selectVerb( host, "drop" );
+  clickIt( host.querySelector( ".task-submit-button" ) );
+  assert.equal( submitted, true, "Submit on the epic board reached no handler" );
+} );
+
+test( "🔴 a control click on the epic board does NOT also toggle its group", () => {
+  const ui = newUI();
+  let accordionFired = false;
+  ui._handleEpicAccordionToggle = (): void => { accordionFired = true; };
+  const host = epicPaneWithRealRows( ui, R_SEAL_A );
+
+  clickIt( host.querySelector( ".task-disclose-button" ) );
+  assert.equal( accordionFired, false,
+    "one gesture opened the row's controls and collapsed the group they live in" );
+} );
+
+test( "the epic group header still toggles — the new route did not swallow it", () => {
+  // The positive control for the test above. A dispatch that consumed everything would
+  // make that assertion pass while breaking the accordion this pane is built around.
+  const ui = newUI();
+  let toggledWith: unknown = null;
+  ui._handleEpicAccordionToggle = ( t: unknown ): void => { toggledWith = t; };
+  const host = epicPaneWithRealRows( ui, R_SEAL_A );
+  const header = document.createElement( "tr" );
+  header.className = "epic-group-header";
+  host.querySelector( "tbody" )!.appendChild( header );
+
+  clickIt( header );
+  assert.ok( toggledWith, "a header click no longer reaches the accordion" );
+} );
+
+// ═══════ the repaint destroys operator state HERE TOO — the same defect, third pane ═══════
+//
+// 🔴 All three panes repaint by replacing `container.innerHTML`. The task-list fix closed
+// the instance Rick reported; this pane renders the SAME controls off the same shared
+// composite and loses the same work. A fix that stops at the reported pane is one somebody
+// re-opens the first time an operator types here.
+
+test( "🔴 a repaint of the epic board keeps a typed reason, a shown refusal and a disclosed row", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  const model = ui.groupTasksByEpic( [ R_SEAL_A ] );
+  const container = document.getElementById( "epic-board-container" )!;
+  ui._epicBoardAccordionWired = false;
+  ui._wireEpicBoardAccordion();
+  container.innerHTML = ui.renderEpicBoardTable( model, ui.loadEpicGroupState() );
+
+  const box = container.querySelector( ".task-reason-input" ) as HTMLInputElement;
+  assert.ok( box, "no reason box rendered on the epic board — this test cannot speak" );
+  box.value = "not doing this";
+  clickThrough( ui, "_handleDisclosureToggle", container.querySelector( ".task-disclose-button" ),
+    "the epic board's disclosure ellipsis" );
+  ui._renderTaskRowError( R_SEAL_A.id as string, "A won't-fix reason is required.", container );
+  assert.equal( ( container.querySelector( ".task-controls-row" ) as HTMLElement ).hidden, false );
+
+  ui.renderEpicBoard( { status: "ok", tasks: [ R_SEAL_A ] }, false );      // the poll lands
+
+  assert.equal( ( container.querySelector( ".task-reason-input" ) as HTMLInputElement ).value,
+    "not doing this", "the repaint wiped a reason the operator had typed and not yet sent" );
+  assert.equal( ( container.querySelector( ".task-row-error-stripe" ) as HTMLElement ).hidden, false,
+    "the repaint wiped the refusal — the control now looks dead" );
+  assert.equal( ( container.querySelector( ".task-controls-row" ) as HTMLElement ).hidden, false,
+    "the repaint re-collapsed a row the operator had opened" );
+} );
+
+// ══════ collapsing an epic group must CLOSE the controls disclosed inside it ══════
+//
+// 🔴 Rick's own words name this pane: "if you close the epic-group-header it should
+// definitely hide the displayed task-actions". Collapse is a CSS class on the tbody and
+// the controls row carries its own `hidden`; the two were independent.
+
+test( "🔴 collapsing an epic group closes any controls disclosed inside it", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  const host = document.getElementById( "epic-board-container" )!;
+  ui._epicBoardAccordionWired = false;
+  ui._wireEpicBoardAccordion();
+  host.innerHTML = ui.renderEpicBoardTable( ui.groupTasksByEpic( [ R_SEAL_A ] ), {} );
+
+  // ⚠️ THIS GROUP RENDERS ALREADY COLLAPSED, so the operator's first header click EXPANDS
+  // it. Writing the test as disclose-then-click-once measured an expansion and reported the
+  // fix as broken — the test was wrong, not the code. Expand first, then follow the real
+  // sequence: open a row, then collapse the group around it.
+  const header = host.querySelector( ".epic-group-header" ) as HTMLElement;
+  assert.ok( ( host.querySelector( "tbody.epic-group" ) as HTMLElement ).classList.contains( "collapsed" ),
+    "precondition: this group renders collapsed" );
+  header.dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+  assert.ok( !( host.querySelector( "tbody.epic-group" ) as HTMLElement ).classList.contains( "collapsed" ),
+    "precondition: the first header click expands it" );
+
+  const toggle = host.querySelector( ".task-disclose-button" ) as HTMLElement;
+  toggle.dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+  assert.equal( ( host.querySelector( ".task-controls-row" ) as HTMLElement ).hidden, false,
+    "precondition: the row is disclosed" );
+
+  header.dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );   // collapse
+
+  assert.equal( ( host.querySelector( ".task-controls-row" ) as HTMLElement ).hidden, true,
+    "the epic group collapsed with its controls still on screen" );
+  assert.equal( toggle.getAttribute( "aria-expanded" ), "false",
+    "the ellipsis still claims the row is open inside a collapsed group" );
+} );
+
+
+// ══════ THE BLANK-REASON GUARD, WATCHED FROM THIS PANE — the gap these arms close ══════
+//
+// 🔴 MEASURED, NOT SUSPECTED. Deleting the blank-reason guard in the merged submit path
+// (`if ( needs.reason && !reason )`) killed 4 tests in row_control_redesign.test.ts, 5 in
+// holding_area_panel.test.ts, 1 of 176 in task_list_panel.test.ts — and ZERO here. Ten
+// kills is a comfortable-looking total that concealed the real shape: two of the three
+// panes barely watched a refusal whose whole point is being verb-specific.
+//
+// ⚠️ AND THE PANE REACHES IT. Verb legality in `_taskActionsCell` is computed from the
+// ROW'S STATUS ALONE — `drop` is legal on any open row and requires a reason — and this
+// pane renders off the SAME composite as the task list with no status filter of its own.
+// Queried live 2026-09-03: both epic rows on the board were non-terminal with Drop legal.
+// So this is not a hypothetical path being covered for symmetry.
+//
+// ⇒ The arms below are written to REDDEN when that guard is deleted. That was checked by
+// deleting it, not assumed — a test whose failure has never been observed is a claim.
+
+async function submitOnEpic(
+  ui: EpicUI, verb: string, scope: ParentNode, what: string
+): Promise<void> {
+  // The verb is chosen ON THE PATH to the click, for the same reason `clickThrough`
+  // asserts the handler was reached: submitting with nothing chosen refuses with "no
+  // verb chosen", and THAT red is indistinguishable from the blank-reason red these
+  // tests exist to observe. A step on the path cannot be skipped by accident.
+  const sel = scope.querySelector( ".task-verb-select" ) as HTMLSelectElement | null;
+  assert.ok( sel, `${ what }: no verb select rendered — this test cannot speak to the control it names` );
+  sel!.value = verb;
+  sel!.dispatchEvent( new window.Event( "change", { bubbles: true } ) );
+
+  const button = scope.querySelector( ".task-submit-button" );
+  assert.ok( button, `${ what }: no Submit button rendered` );
+
+  const target   = ui as unknown as Record<string, ( b: unknown ) => unknown >;
+  const original = target._handleTaskSubmitClick;
+  let   ran: unknown = null;
+  target._handleTaskSubmitClick = ( b: unknown ) => { ran = original.call( ui, b ); return ran; };
+  button!.dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+  target._handleTaskSubmitClick = original;
+
+  assert.ok( ran !== null,
+    `${ what } reached NO handler — this pane has no click listener for Submit, so the ` +
+    `control is dead on screen however correct the guard is` );
+  await ran;
+}
+
+function paintedEpicRow( ui: EpicUI, row: Row ): HTMLElement {
+  buildPanelDOM();
+  const model = ui.groupTasksByEpic( [ row ] );
+  const container = document.getElementById( "epic-board-container" )!;
+  ui._epicBoardAccordionWired = false;
+  ui._wireEpicBoardAccordion();
+  container.innerHTML = ui.renderEpicBoardTable( model, ui.loadEpicGroupState() );
+  return container;
+}
+
+test( "🔴 EPIC BOARD: a blank-reason Drop is refused and NOTHING reaches the server", async () => {
+  const ui = newUI();
+  const container = paintedEpicRow( ui, R_SEAL_B );          // queued → Drop is legal
+
+  const calls: unknown[] = [];
+  ui._transitionTask = async ( id, to, extras ) => { calls.push( [ id, to, extras ] ); return { ok: true }; };
+
+  await submitOnEpic( ui, "drop", container, "Drop with an empty reason on the epic board" );
+
+  assert.equal( calls.length, 0,
+    "a Drop with no reason reached the server from the epic board — the client-side guard " +
+    "is the only thing standing between an empty reason and a dropped row" );
+
+  const stripe = container.querySelector( ".task-row-error-stripe" ) as HTMLElement;
+  assert.ok( stripe && !stripe.hidden,
+    "the Drop was refused but the operator was told nothing — a control that declines in " +
+    "silence reads as broken, which is how a refusal turns into a bug report" );
+  assert.match( ( stripe.textContent || "" ), /drop reason is required/i,
+    "the refusal did not name Drop's own obligation — the merged control shares one box " +
+    "and must not share one complaint" );
+} );
+
+test( "EPIC BOARD: the SAME Drop WITH a reason does reach the server", async () => {
+  // POSITIVE CONTROL. Without it the test above passes just as well on a pane where
+  // submitting never works at all, which is the failure it is least able to notice.
+  const ui = newUI();
+  const container = paintedEpicRow( ui, R_SEAL_B );
+
+  const calls: [ string, string, Record<string, unknown> ][] = [];
+  ui._transitionTask = async ( id, to, extras ) => {
+    calls.push( [ id, to, extras as Record<string, unknown> ] ); return { ok: true };
+  };
+
+  const box = container.querySelector( ".task-reason-input" ) as HTMLInputElement;
+  assert.ok( box, "no reason box rendered on the epic board" );
+  box.value = "overtaken by events";
+
+  await submitOnEpic( ui, "drop", container, "Drop with a reason on the epic board" );
+
+  assert.equal( calls.length, 1, "a Drop carrying a reason did not reach the server" );
+  assert.equal( calls[ 0 ][ 0 ], R_SEAL_B.id );
+  assert.equal( calls[ 0 ][ 1 ], "dropped" );
+  assert.equal( calls[ 0 ][ 2 ].reason, "overtaken by events",
+    "the operator's words did not travel verbatim" );
+} );
+
+test( "🔴 EPIC BOARD: Park's blank-reason refusal names PARK's obligation, not a generic one", async () => {
+  // The second verb, because one verb passing proves the guard fires and not that it
+  // discriminates. Park's complaint asks for a QUOTE; Drop's does not.
+  const ui = newUI();
+  const container = paintedEpicRow( ui, R_SEAL_B );
+
+  const calls: unknown[] = [];
+  ui._transitionTask = async ( id, to, extras ) => { calls.push( [ id, to, extras ] ); return { ok: true }; };
+
+  await submitOnEpic( ui, "park", container, "Park with an empty reason on the epic board" );
+
+  assert.equal( calls.length, 0, "a Park with no reason reached the server from the epic board" );
+  const stripe = container.querySelector( ".task-row-error-stripe" ) as HTMLElement;
+  assert.match( ( stripe.textContent || "" ), /park reason is required/i,
+    "Park was refused with someone else's complaint — the quote requirement is the whole " +
+    "reason park_reason exists, and a generic refusal teaches none of it" );
+} );
+
+
+// ═══════ RICK'S PRIORITY PAIR, WATCHED FROM THE EPIC BOARD ITSELF ═══════
+//
+// The control landed at e2c353fc in `_taskActionsCell` — one cell shared by all three
+// panes — and was falsified there with seven arms. 🔴 THIS PANE IS WHY THAT IS NOT ENOUGH.
+// When María deleted the blank-reason guard this morning and counted kills PER FILE, the
+// epic board scored **ZERO** while the shared suite scored four; a comfortable ten-kill
+// total hid a pane that could not see the guard at all.
+//
+// Re-measured for the priority control before writing a line, three mutations — the option
+// losing `selected`, Update rendering permanently live, the click route deleted. Each
+// killed exactly one arm in `row_control_redesign.test.ts` and **zero here**. Same
+// position, same pane, and this time before an operator found it rather than after.
+//
+// So these paint through `renderEpicBoardTable` and reach the control through the listener
+// `_wireEpicBoardAccordion` installs — never `_renderEpicRow` or `_taskActionsCell` called
+// by hand, which is what the shared suite already covers and what cannot speak to whether
+// THIS pane routes a click.
+
+const R_PRIORITY = { id: "prio-1", title: "A row Rick wants re-prioritized", status: "queued",
+                     correlation_key: "epic:seal-the-test-tier", priority: "P2" };
+
+function epicPriorityBits( scope: ParentNode ): { sel: HTMLSelectElement; btn: HTMLButtonElement } {
+  const sel = scope.querySelector( ".task-priority-select" ) as HTMLSelectElement | null;
+  const btn = scope.querySelector( "button.task-priority-update" ) as HTMLButtonElement | null;
+  assert.ok( sel, "the epic board painted no priority select — this test cannot speak to the control it names" );
+  assert.ok( btn, "the epic board painted no priority Update button" );
+  return { sel: sel!, btn: btn! };
+}
+
+// A REAL `change`, never a bare assignment — for the same reason `selectVerb` above uses
+// one. The enable rule runs off the delegated change listener this pane wires for itself,
+// so an assignment alone would leave the arm passing against a pane that wired nothing.
+function chooseEpicPriority( scope: ParentNode, value: string ): HTMLSelectElement {
+  const { sel } = epicPriorityBits( scope );
+  sel.value = value;
+  sel.dispatchEvent( new window.Event( "change", { bubbles: true } ) );
+  return sel;
+}
+
+// The file's `clickThrough` is synchronous and drops the handler's promise; the priority
+// handler is async, so this is `submitOnEpic`'s shape — capture what the handler returned,
+// assert it was REACHED, then await it. The reached-check is what makes a later "nothing
+// was PATCHed" reading mean anything rather than being satisfied by no listener existing.
+async function clickEpicUpdate( ui: EpicUI, scope: ParentNode, what: string ): Promise<void> {
+  const button = scope.querySelector( "button.task-priority-update" );
+  assert.ok( button, `${ what }: no priority Update button rendered` );
+
+  const target   = ui as unknown as Record<string, ( b: unknown ) => unknown >;
+  const original = target._handlePriorityUpdateClick;
+  let   ran: unknown = null;
+  target._handlePriorityUpdateClick = ( b: unknown ) => { ran = original.call( ui, b ); return ran; };
+  button!.dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+  target._handlePriorityUpdateClick = original;
+
+  assert.ok( ran !== null,
+    `${ what } reached NO handler — the epic board has no click listener for this control, so it ` +
+    `is dead on screen however correct the handler is` );
+  await ran;
+}
+
+
+test( "🔴 EPIC BOARD: the priority select opens on the row's OWN current priority", () => {
+  for ( const priority of [ "P0", "P1", "P2", "P3" ] ) {
+    const ui        = newUI();
+    const container = paintedEpicRow( ui, { ...R_PRIORITY, priority } );
+    const { sel }   = epicPriorityBits( container );
+
+    // ⚠️ THE `selected` ATTRIBUTE, NOT `.value`. Measured by María on the shared arms and
+    // taken as given here: after `innerHTML` is rewritten happy-dom does not re-sync
+    // `selectedIndex`, so `.value` returned P1 for a select whose markup carried
+    // `<option value="P2" selected>` — correct for P0 and P1 by coincidence, which is the
+    // worst shape a fixture can have. A browser honours `selected` at parse; it is both
+    // what we render and what the browser reads.
+    const marked = sel.querySelector( "option[selected]" ) as HTMLOptionElement | null;
+    assert.ok( marked, `a ${ priority } epic row marked NO option selected — the select opens on ` +
+      `whatever happens to be first, misreporting every row that is not P0` );
+    assert.equal( marked!.value, priority,
+      `a ${ priority } epic row opened its priority select on ${ marked!.value } — a control that ` +
+      `MISREPORTS the current value is worse than one that offers nothing` );
+  }
+} );
+
+test( "🔴 EPIC BOARD: Update renders DISABLED, and says so to a screen reader", () => {
+  const ui        = newUI();
+  const container = paintedEpicRow( ui, R_PRIORITY );
+  const { btn }   = epicPriorityBits( container );
+
+  assert.equal( btn.disabled, true,
+    "Update was live on a freshly painted epic row — it offers a write before anything was chosen" );
+  assert.equal( btn.getAttribute( "aria-disabled" ), "true",
+    "the button is inert to the mouse and announces itself as available to a screen reader" );
+} );
+
+test( "🔴 EPIC BOARD: a real change enables Update, and the return trip kills it again", () => {
+  const ui        = newUI();
+  const container = paintedEpicRow( ui, R_PRIORITY );          // painted P2
+  const { btn }   = epicPriorityBits( container );
+
+  chooseEpicPriority( container, "P0" );
+  assert.equal( btn.disabled, false,
+    "a changed priority left Update dead on the epic board — either the rule is wrong or this pane " +
+    "never wired the change listener the rule runs off" );
+
+  chooseEpicPriority( container, "P2" );
+  assert.equal( btn.disabled, true,
+    "choosing the ORIGINAL priority again left Update enabled — it now offers a write that changes nothing" );
+} );
+
+test( "🔴 EPIC BOARD: a real bubbling click on Update reaches the handler and PATCHes", async () => {
+  const ui        = newUI();
+  const container = paintedEpicRow( ui, { ...R_PRIORITY, id: "prio-1", priority: "P3" } );
+
+  const patches: [ string, Record<string, unknown> ][] = [];
+  ui._patchTaskFields = async ( id, patch ) => { patches.push( [ id, patch ] ); return { ok: true }; };
+  ui.refreshTaskList  = async () => {};
+
+  chooseEpicPriority( container, "P1" );
+  await clickEpicUpdate( ui, container, "the epic board's priority Update" );
+
+  assert.equal( patches.length, 1, "Update reached the handler but not the field seam" );
+  assert.equal( patches[ 0 ][ 0 ], "prio-1" );
+  assert.deepEqual( patches[ 0 ][ 1 ], { priority: "P1" },
+    "the PATCH carried something other than the one field the operator changed" );
+} );
+
+
+// ═══════ THE THREE VERBS THIS PANE RENDERS AND NEVER WATCHED ═══════
+//
+// 🔴 THE DENOMINATOR IS THE FINDING. `_taskActionsCell` renders FIVE verbs — park, drop,
+// demote, wont_fix, approve — and until this block the epic board had driven arms for
+// TWO of them (drop x2, park x1). The other three are present, correctly gated, and
+// UNWATCHED: the third state. Not broken, not missing — untestable-if-wrong, which reads
+// as PRESENT to anyone reading the cell and as ABSENT to a mutation run.
+//
+// ⚠️ WHY THE GAP EXISTS IS NOT A MYSTERY AND IT IS NOT NEGLIGENCE. Coverage follows the
+// buttons somebody pressed. Drop and Park were exercised because they were used; Demote,
+// Won't-fix and Approve were not. Every one of them is fully COVERED — the lines run —
+// which is exactly why a percentage could never have shown this. The corpus was chosen by
+// usage, not by enumeration.
+//
+// ⇒ So each verb below gets an arm that can only pass for the RIGHT REASON, and the
+// per-verb obligation is what discriminates: Demote must ALSO carry a date, Won't-fix must
+// ARM before it posts, and Approve must post with the reason box EMPTY. A single "the verb
+// posts" arm would pass for all three and distinguish none of them.
+
+const R_HELD = { id: "held-1", title: "A row waiting in the holding area", status: "not_approved",
+                 correlation_key: "epic:seal-the-test-tier", priority: "P1" };
+
+// `submitOnEpic` chooses the verb and clicks in one move, which is right for a verb whose
+// only input is the reason box. Demote also needs a DATE, and the date input does not
+// exist until the verb-change handler inserts it — so these two split that helper in half:
+// choose, fill what the verb asks for, then click.
+function chooseEpicVerb( scope: ParentNode, verb: string, what: string ): void {
+  const sel = scope.querySelector( ".task-verb-select" ) as HTMLSelectElement | null;
+  assert.ok( sel, `${ what }: no verb select rendered — this test cannot speak to the control it names` );
+  sel!.value = verb;
+  sel!.dispatchEvent( new window.Event( "change", { bubbles: true } ) );
+}
+
+async function clickEpicSubmit( ui: EpicUI, scope: ParentNode, what: string ): Promise<void> {
+  const button = scope.querySelector( ".task-submit-button" );
+  assert.ok( button, `${ what }: no Submit button rendered` );
+
+  const target   = ui as unknown as Record<string, ( b: unknown ) => unknown >;
+  const original = target._handleTaskSubmitClick;
+  let   ran: unknown = null;
+  target._handleTaskSubmitClick = ( b: unknown ) => { ran = original.call( ui, b ); return ran; };
+  button!.dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+  target._handleTaskSubmitClick = original;
+
+  assert.ok( ran !== null,
+    `${ what } reached NO handler — this pane has no click listener for Submit, so the ` +
+    `control is dead on screen however correct the guard is` );
+  await ran;
+}
+
+
+// ─────────── DEMOTE ───────────
+
+test( "🔴 EPIC BOARD: a blank-reason Demote is refused, and the complaint is DEMOTE's own", async () => {
+  const ui        = newUI();
+  const container = paintedEpicRow( ui, R_SEAL_B );          // queued → Demote is legal
+
+  const calls: unknown[] = [];
+  ui._transitionTask = async ( id, to, extras ) => { calls.push( [ id, to, extras ] ); return { ok: true }; };
+
+  await submitOnEpic( ui, "demote", container, "Demote with an empty reason on the epic board" );
+
+  assert.equal( calls.length, 0,
+    "a Demote with no reason reached the server from the epic board — a row sent back to " +
+    "triage with no stated cause is indistinguishable from one that was never approved" );
+
+  const stripe = container.querySelector( ".task-row-error-stripe" ) as HTMLElement;
+  assert.ok( stripe && !stripe.hidden,
+    "the Demote was refused and the operator was told nothing" );
+  assert.match( ( stripe.textContent || "" ), /demote reason is required/i,
+    "Demote was refused with somebody else's complaint — five verbs share one box and must " +
+    "not share one refusal, or the box teaches none of them" );
+} );
+
+test( "EPIC BOARD: Demote carries BOTH a reason and a triage date, or it does not go", async () => {
+  // TWO ARMS IN ONE, and the pair is the point. Demote is the only verb here that asks for
+  // a date as well as a reason, so an arm that only ever fills the reason box would pass
+  // against a handler that had lost the date requirement entirely.
+  const ui        = newUI();
+  const container = paintedEpicRow( ui, R_SEAL_B );
+
+  const calls: [ string, string, Record<string, unknown> ][] = [];
+  ui._transitionTask = async ( id, to, extras ) => {
+    calls.push( [ id, to, extras as Record<string, unknown> ] ); return { ok: true };
+  };
+  ui.refreshTaskList = async () => {};
+
+  chooseEpicVerb( container, "demote", "Demote on the epic board" );
+
+  const box = container.querySelector( ".task-reason-input" ) as HTMLInputElement;
+  assert.ok( box, "no reason box rendered on the epic board" );
+  box.value = "the acceptance criteria moved under it";
+
+  // ARM ONE — reason present, date still blank. This must still refuse.
+  //
+  // 🔴 AND IT MUST REFUSE FOR THE RIGHT REASON, WHICH IS WHY THE STRIPE IS ASSERTED AND NOT
+  // JUST THE ABSENCE OF A POST. Measured, not reasoned: deleting `if ( needs.date &&
+  // !chaseDay )` outright leaves `calls.length` at 0 anyway, because an empty box falls
+  // through to the date-PARSE guard below it — `new Date( "T09:00:00" )` is Invalid Date —
+  // which returns just the same. Two sufficient paths, one observable. An arm that checked
+  // only "nothing was posted" SURVIVED that mutation, and I watched it survive.
+  //
+  // ⇒ What actually changes is the sentence the operator reads: the real complaint becomes
+  // `Date not understood: ` with nothing after the colon, which tells someone who typed no
+  // date that their nothing was unparseable. Naming the path is what makes this arm able to
+  // see the difference.
+  await clickEpicSubmit( ui, container, "Demote with a reason but no triage date" );
+  assert.equal( calls.length, 0,
+    "a Demote with no triage date reached the server — a held row is bounded, never " +
+    "indefinite, and an unbounded demote is a drop that nobody called a drop" );
+
+  const early = container.querySelector( ".task-row-error-stripe" ) as HTMLElement;
+  assert.match( ( early.textContent || "" ), /triage-by date is required/i,
+    "the Demote was refused, but by the date PARSER rather than by the requirement — the " +
+    "operator who entered no date is told their nothing was unparseable, and the guard that " +
+    "exists to say a held row is bounded never ran" );
+
+  // ARM TWO — the date the verb-change handler inserted, now filled.
+  const date = container.querySelector( ".task-chase-input" ) as HTMLInputElement;
+  assert.ok( date, "choosing Demote rendered NO date input — the verb asks for a triage-by " +
+    "date and the operator was given nowhere to put one" );
+  assert.equal( date.getAttribute( "aria-label" ), "Triage this by",
+    "the date box is labelled for the wrong verb — a control whose purpose the operator " +
+    "cannot infer is a defect in the control" );
+  date.value = "2026-09-30";
+
+  await clickEpicSubmit( ui, container, "Demote with a reason AND a triage date" );
+
+  assert.equal( calls.length, 1, "a complete Demote did not reach the server" );
+  assert.equal( calls[ 0 ][ 0 ], R_SEAL_B.id );
+  assert.equal( calls[ 0 ][ 1 ], "not_approved",
+    "Demote posted a status other than not_approved — it is the holding area's ENTRANCE" );
+  assert.equal( calls[ 0 ][ 2 ].reason, "the acceptance criteria moved under it",
+    "the operator's words did not travel verbatim" );
+  assert.ok( String( calls[ 0 ][ 2 ].next_chase_ts || "" ).startsWith( "2026-09-30" ),
+    `the triage date did not travel, or crossed a day boundary: ${ calls[ 0 ][ 2 ].next_chase_ts }` );
+} );
+
+
+// ─────────── WON'T-FIX ───────────
+
+test( "🔴 EPIC BOARD: a blank-reason Won't-fix is refused with won't-fix's own complaint", async () => {
+  const ui        = newUI();
+  const container = paintedEpicRow( ui, R_SEAL_B );
+
+  const calls: unknown[] = [];
+  ui._transitionTask = async ( id, to, extras ) => { calls.push( [ id, to, extras ] ); return { ok: true }; };
+
+  await submitOnEpic( ui, "wont_fix", container, "Won't-fix with an empty reason on the epic board" );
+
+  assert.equal( calls.length, 0, "a Won't-fix with no reason reached the server from the epic board" );
+  const stripe = container.querySelector( ".task-row-error-stripe" ) as HTMLElement;
+  assert.match( ( stripe.textContent || "" ), /won't-fix reason is required/i,
+    "a refusal must carry its justification exactly as a drop does — and say so in its own words" );
+} );
+
+test( "🔴 EPIC BOARD: Won't-fix ARMS on the first click and only posts on the SECOND", async () => {
+  // 🔴 THE ONLY TERMINAL VERB ON THE BOARD, and the only one where a single-click arm
+  // would pass while the control was broken in the direction that costs a row. wont_fix is
+  // append-only: the store refuses every edge out of it, so the second click is the last
+  // word this row will ever get. An arm that clicks once and sees no POST cannot tell
+  // "correctly armed" from "the button does nothing".
+  const ui        = newUI();
+  const container = paintedEpicRow( ui, R_SEAL_B );
+
+  const calls: [ string, string, Record<string, unknown> ][] = [];
+  ui._transitionTask = async ( id, to, extras ) => {
+    calls.push( [ id, to, extras as Record<string, unknown> ] ); return { ok: true };
+  };
+  ui.refreshTaskList = async () => {};
+
+  chooseEpicVerb( container, "wont_fix", "Won't-fix on the epic board" );
+  const box = container.querySelector( ".task-reason-input" ) as HTMLInputElement;
+  box.value = "superseded by the redesign";
+
+  const button = container.querySelector( ".task-submit-button" ) as HTMLButtonElement;
+  const before = button.textContent;
+
+  // FIRST CLICK — arms, posts nothing.
+  await clickEpicSubmit( ui, container, "the first Won't-fix click" );
+  assert.equal( calls.length, 0,
+    "the FIRST Won't-fix click posted — a terminal move went through with no confirmation, " +
+    "and the row it killed has no edge back out" );
+  assert.equal( button.dataset.armed, "1",
+    "the first click neither posted nor armed — from the operator's seat the button did " +
+    "nothing at all, which is how a working confirmation gets reported as a dead control" );
+  assert.notEqual( button.textContent, before,
+    "the button armed itself silently — the operator is one click from a terminal move and " +
+    "the control looks exactly as it did before" );
+  assert.match( ( button.textContent || "" ), /confirm/i,
+    "the armed button does not say what the next click will do" );
+
+  // SECOND CLICK — the confirmation. Now it posts.
+  await clickEpicSubmit( ui, container, "the second Won't-fix click" );
+  assert.equal( calls.length, 1, "the SECOND Won't-fix click did not post — the confirmation " +
+    "never resolves, so the verb cannot be used at all from this pane" );
+  assert.equal( calls[ 0 ][ 1 ], "wont_fix" );
+  assert.equal( calls[ 0 ][ 2 ].reason, "superseded by the redesign" );
+} );
+
+
+// ─────────── APPROVE ───────────
+
+test( "🔴 EPIC BOARD: Approve posts with the reason box EMPTY — and the box is disabled", async () => {
+  // 🔴 APPROVE IS THE ONE VERB THAT TAKES NO REASON, so it is the only arm that can catch a
+  // blank-reason guard which has stopped discriminating. Make the guard verb-blind — refuse
+  // every empty box — and the four other verbs stay green while Approve becomes unusable.
+  // This is the arm that fails.
+  const ui        = newUI();
+  const container = paintedEpicRow( ui, R_HELD );             // not_approved → Approve is legal
+
+  const calls: [ string, string, Record<string, unknown> ][] = [];
+  ui._transitionTask = async ( id, to, extras ) => {
+    calls.push( [ id, to, extras as Record<string, unknown> ] ); return { ok: true };
+  };
+  ui.refreshTaskList = async () => {};
+
+  chooseEpicVerb( container, "approve", "Approve on the epic board" );
+
+  const box = container.querySelector( ".task-reason-input" ) as HTMLInputElement;
+  assert.equal( box.disabled, true,
+    "the reason box stayed live under Approve — it invites the operator to type a reason " +
+    "that is then silently discarded, which teaches that reasons do not matter" );
+  assert.equal( box.value, "",
+    "text left over from another verb survived into Approve" );
+
+  await clickEpicSubmit( ui, container, "Approve with no reason, which is correct" );
+
+  assert.equal( calls.length, 1,
+    "Approve with an empty reason box was REFUSED from the epic board — Approve takes no " +
+    "reason, so a guard that demands one has stopped reading the verb" );
+  assert.equal( calls[ 0 ][ 0 ], R_HELD.id );
+  assert.equal( calls[ 0 ][ 1 ], "queued",
+    "Approve posted something other than queued — it is the holding area's EXIT" );
+  assert.equal( calls[ 0 ][ 2 ].reason, undefined,
+    "Approve carried a reason field it never asked for" );
+} );
+
+test( "🔴 EPIC BOARD: Approve and Demote are never both live on one row", async () => {
+  // ⚠️ OPPOSITE ENDS OF ONE DOOR. Approve is the holding area's exit, Demote its entrance,
+  // so offering both hands the operator a move that is a no-op in one direction — which the
+  // store rejects as a FAILURE rather than as nothing happening. The pair is checked in
+  // both directions because "exactly one" is the claim, and one row can only ever show half
+  // of it.
+  const liveOption = ( scope: ParentNode, verb: string ): HTMLOptionElement => {
+    const opt = scope.querySelector( `option[value="${ verb }"]` ) as HTMLOptionElement | null;
+    assert.ok( opt, `the epic board rendered no ${ verb } option at all` );
+    return opt!;
+  };
+
+  const held = paintedEpicRow( newUI(), R_HELD );             // not_approved
+  assert.equal( liveOption( held, "approve" ).disabled, false,
+    "a row sitting IN the holding area could not be approved from the epic board — the exit is shut" );
+  assert.equal( liveOption( held, "demote" ).disabled, true,
+    "a held row was offered Demote — sending it where it already is posts a no-op the store " +
+    "rejects as a failure" );
+
+  const open = paintedEpicRow( newUI(), R_SEAL_B );           // queued
+  assert.equal( liveOption( open, "demote" ).disabled, false,
+    "an open row could not be demoted from the epic board" );
+  assert.equal( liveOption( open, "approve" ).disabled, true,
+    "an open row was offered Approve — there is nothing to approve it out of" );
+} );
+

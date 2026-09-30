@@ -96,11 +96,11 @@ test("renderJobBucket: count display reflects jobs.length", () => {
   assert.equal(count?.textContent, "(3)");
 });
 
-test("renderJobBucket: empty bucket renders per-bucket 'No <name> jobs.' div (Q-A1 strict)", () => {
+test("renderJobBucket: an empty bucket renders its own empty-state div (Q-A1 strict; legacy's words since A-2 #10)", () => {
   const el    = renderJobBucket("history", []);
   const empty = el.querySelector(".jobs-bucket-empty");
   assert.notEqual(empty, null);
-  assert.equal(empty?.textContent?.trim(), "No history jobs.");
+  assert.equal(empty?.textContent?.trim(), "No job history found");
   // No cards container is rendered for empty buckets.
   assert.ok( el.querySelector(".jobs-bucket-cards") === null );
 });

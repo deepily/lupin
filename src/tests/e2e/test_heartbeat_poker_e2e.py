@@ -2,7 +2,7 @@
 """
 E2E test — HeartbeatPokerJob cascade replay (task I6, E2E tier).
 
-VENUE — :8000, scheduled via `POST /api/test-suite/submit` (§TESTING VENUES).
+VENUE — :8000, scheduled via `POST /api/v2/submit` (§TESTING VENUES).
 Full end-to-end: a cascade-flavored `HeartbeatPokerJob` preset poking a real
 multi-recipient cascade cast. Long-running, mutates state — NOT run locally.
 

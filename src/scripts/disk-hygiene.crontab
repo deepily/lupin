@@ -1,5 +1,41 @@
 # [PLAN] Disk hygiene — Plan 3 Phase 1 (María, 2026-08-23)
 # Install:  crontab -l > /tmp/c; cat src/scripts/disk-hygiene.crontab >> /tmp/c; crontab /tmp/c
-# Weekly report Sundays 03:00; weekly sweep Sundays 03:30 (14-day retention).
-0 3 * * 0 LUPIN_ROOT=/mnt/DATA01/include/www.deepily.ai/projects/lupin /mnt/DATA01/include/www.deepily.ai/projects/lupin/src/scripts/disk-hygiene-report.sh >> /mnt/DATA01/include/www.deepily.ai/projects/lupin/io/claude_code_hooks/logs/disk-hygiene-report.log 2>&1
-30 3 * * 0 LUPIN_ROOT=/mnt/DATA01/include/www.deepily.ai/projects/lupin /mnt/DATA01/include/www.deepily.ai/projects/lupin/src/scripts/sweep-hook-logs.sh --apply >> /mnt/DATA01/include/www.deepily.ai/projects/lupin/io/claude_code_hooks/logs/disk-hygiene-sweep.log 2>&1
+# Weekly report Sundays 19:00; weekly sweep Sundays 19:30 (14-day retention).
+# Moved from 03:00/03:30 on Rick's ruling 2026-09-26 ~14:36 EDT ("Move to Sunday 7 PM",
+# relayed by María, row 77422be2): the host is off in the small hours, so neither line
+# had ever fired, and the hook-logs directory had grown to 476,493 files.
+0 19 * * 0 LUPIN_ROOT=/mnt/DATA01/include/www.deepily.ai/projects/lupin /mnt/DATA01/include/www.deepily.ai/projects/lupin/src/scripts/disk-hygiene-report.sh >> /mnt/DATA01/include/www.deepily.ai/projects/lupin/io/claude_code_hooks/logs/disk-hygiene-report.log 2>&1
+30 19 * * 0 LUPIN_ROOT=/mnt/DATA01/include/www.deepily.ai/projects/lupin /mnt/DATA01/include/www.deepily.ai/projects/lupin/src/scripts/sweep-hook-logs.sh --apply >> /mnt/DATA01/include/www.deepily.ai/projects/lupin/io/claude_code_hooks/logs/disk-hygiene-sweep.log 2>&1
+
+# io/tmp expiry — row 730b33f2 (Rick's ruling 2026-09-26, María accountable).
+#
+# DAILY, not weekly, and that is deliberate: retention is 7 days, so a weekly tick
+# would let a file reach 14 before its first chance to be swept — "deleted after 7
+# days" would mean "deleted somewhere between 7 and 14". Daily makes the worst case
+# 8 days instead of 14.
+#
+# 🔴 19:00, NOT THE SMALL HOURS — THE BOX IS OFF THEN AND THE JOB SIMPLY NEVER RUNS.
+# CLAUDE.md § Off-peak scheduling calls ~11 PM–10 AM the dead window, and it is not
+# a record of habit. Re-derived 2026-09-26 from `journalctl --list-boots --no-pager`
+# (20 boots, 2026-09-04 to 2026-09-26): the LATEST any boot began is 18:12 and the
+# EARLIEST any completed boot ended is 20:13, so 19:00 is the one hour inside every
+# single boot window in the sample. Nothing in that sample was up at 04:00 — a
+# 04:00 entry would have been a job that reports success by never firing, which is
+# the same shape of bug as the -mtime off-by-one this row exists to avoid.
+#
+# @reboot is the catch-up arm: a day the box is off at 19:00 gets swept on the next
+# power-on instead of waiting a full extra day. Cheap — a no-op costs one `find`.
+#
+# ⚠️ --apply IS LOAD-BEARING. Without it the sweep dry-runs forever, printing an
+# eligible count and deleting nothing. test_the_crontab_entry_actually_applies
+# asserts it is present.
+#
+# ⚠️ A .crontab FILE IS NOT AN INSTALLED SWEEP. Install with the line at the top of
+# this file, then verify with `crontab -l | grep sweep-io-tmp` — and read the WHOLE
+# listing, not a `head`-truncated one.
+#
+# The two Sunday entries above were in the dead window too (03:00 and 03:30) until
+# row 77422be2 moved them to 19:00/19:30 on Rick's ruling. The guard test now holds
+# every timed entry in this file to the waking-hours window, with no exemptions.
+0 19 * * * LUPIN_ROOT=/mnt/DATA01/include/www.deepily.ai/projects/lupin /mnt/DATA01/include/www.deepily.ai/projects/lupin/src/scripts/sweep-io-tmp.sh --apply >> /mnt/DATA01/include/www.deepily.ai/projects/lupin/io/claude_code_hooks/logs/io-tmp-sweep.log 2>&1
+@reboot LUPIN_ROOT=/mnt/DATA01/include/www.deepily.ai/projects/lupin /mnt/DATA01/include/www.deepily.ai/projects/lupin/src/scripts/sweep-io-tmp.sh --apply >> /mnt/DATA01/include/www.deepily.ai/projects/lupin/io/claude_code_hooks/logs/io-tmp-sweep.log 2>&1

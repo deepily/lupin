@@ -340,15 +340,69 @@ def test_boot_handshake_emits_canonical_mounted_lines_in_order():
                 "[multiplexer] senderCardRecorderRenderer:mounted",
                 "[multiplexer] sessionStripRenderer:mounted",
                 "[multiplexer] readingPaneRenderer:mounted",
+                # Row 27760534 — the live CC console, hosted inside the reading pane.
+                "[multiplexer] sessionTranscriptRenderer:mounted",
                 "[multiplexer] commonsActivityRenderer:mounted",
                 # Lane E full-parity quartet (2026-06-10) — appended at the
                 # NEW-LANE MOUNT SLOT after the Phase 6c mounts, in this order.
                 "[multiplexer] ttsPreviewSliderRenderer:mounted",
+                # Row 8033756c — the listener_error subscriber mounts BEFORE the
+                # missed badge (it must be live for every renderer below it), so
+                # its handshake sits here. This list is ORDERED equality.
+                "[multiplexer] listenerErrorRenderer:mounted",
                 "[multiplexer] missedBadgeRenderer:mounted",
                 "[multiplexer] fleetStatusRenderer:mounted",
+                # Finished Tasks (7fd99010) mounted and named in the payload with no handshake line;
+                # the_hand_lists_are_checked_against_what_boot_reaches.test.ts found it (2026-09-14).
+                "[multiplexer] finishedTasksRenderer:mounted",
                 "[multiplexer] taskListRenderer:mounted",
+                # The two accordion panes (2026-09-06, row 3bd0024c). Both were
+                # mounted and named in bootCompletePayload.handlers while the
+                # handshake named neither -- and THIS list agreed with the
+                # omission, so the two hand lists checked each other and both
+                # were wrong the same way.
+                "[multiplexer] holdingAreaRenderer:mounted",
+                "[multiplexer] epicBoardRenderer:mounted",
                 "[multiplexer] sectionToolbarRenderer:mounted",
+                # Parity B-4 (Time Saved) mounts last of the panes, in the
+                # pre-allocated slot block below the toolbar.
+                "[multiplexer] timeSavedRenderer:mounted",
+                # Parity B-5 (System Status) mounts last of the panes, in the
+                # pre-allocated slot block below the toolbar.
+                "[multiplexer] systemStatusRenderer:mounted",
+                # Parity B-6 (Debug panel) mounts after Time Saved, in the same
+                # pre-allocated slot block below the toolbar.
+                "[multiplexer] debugPanelRenderer:mounted",
+                # Parity B-7 (Direct TTS) is the last of the pre-allocated
+                # slot block below the toolbar.
+                "[multiplexer] directTtsRenderer:mounted",
                 "[multiplexer] navBarRenderer:mounted",
+                # Parity B-1 (2026-09-23) -- the Q&A Interface pane, the first of
+                # B-0's seven pre-allocated slots to be filled. It mounts at boot.ts:547,
+                # BEFORE the broadcast tally below it, so it is ordered before it here.
+                # B-1 and Maya's B-5 appended to this list independently and the rebase
+                # landed both on the same line; the order is settled by mount line, not
+                # by which branch arrived first.
+                "[multiplexer] qaPaneRenderer:mounted",
+                # Parity B-2 (2026-09-23) -- Submit Agentic Jobs. Mounts at boot.ts:578,
+                # after the Q&A pane and before the broadcast tally; ordered by mount line.
+                "[multiplexer] submitJobsPaneRenderer:mounted",
+                # Row 4f320c27 M1 — the broadcast ack tally. Mounted by
+                # BroadcastCardRenderer onto the panel inside the card, not at a mount
+                # slot of its own, so it lands LAST in the ordered handshake.
+                #
+                # 🔴 THE FIFTH HAND LIST OF THE SAME POPULATION, and the file above
+                # already warned that two of them "checked each other and both were
+                # wrong the same way". Adding one renderer reddened THREE guards in
+                # sequence: the payload-count test, the payload-vs-handshake test, and
+                # then this one. Each caught a different list; none would have caught
+                # the others.
+                "[multiplexer] broadcastAckTallyRenderer:mounted",
+                # Parity row B-3 — Queue Filter Settings, mounted right after the
+                # broadcast card and after the tally's live fold. The ack tally is
+                # mounted by BroadcastCardRenderer DURING that card's mount, so it
+                # lands ahead of this one; ordered by mount line, as the entries above.
+                "[multiplexer] filterSettingsRenderer:mounted",
             ]
             assert mount_lines == expected, (
                 f"boot handshake mismatch:\nexpected={expected}\ngot     ={mount_lines}"

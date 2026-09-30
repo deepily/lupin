@@ -79,6 +79,18 @@ def test_get_gists_distinct( db_session ):
     assert sorted( repo.get_gists() ) == [ "g1", "g2" ]
 
 
+def test_get_all_snapshots_returns_every_row( db_session ):
+    # Row 8631144b: the stats endpoints aggregate replay_history across the whole
+    # table, so this one must not filter or cap — a LIMIT would silently under-report.
+    repo = SolutionSnapshotRepository( db_session )
+    assert repo.get_all_snapshots() == []
+    repo.upsert_snapshot( "h1", question="q1" )
+    repo.upsert_snapshot( "h2", question="q2" )
+    repo.upsert_snapshot( "h3", question_gist=None )
+    db_session.flush()
+    assert sorted( e.id_hash for e in repo.get_all_snapshots() ) == [ "h1", "h2", "h3" ]
+
+
 def test_get_stats( db_session ):
     repo = SolutionSnapshotRepository( db_session )
     assert repo.get_stats() == { "total_snapshots": 0 }

@@ -44,7 +44,7 @@ CONFIG_BLOCK_ID="${ARBITER_CONFIG_BLOCK_ID:-Lupin:+Testing-GCS}"
 # inside the deploy tree that every code push chowns to uid 1001 — a user that does not
 # exist on lupin-host-test. Result: a venv owned by nobody, unwritable by the service
 # account, and a hand-chown reverted by the next deploy. Override with LUPIN_ARBITER_VENV.
-# Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
+# Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
 VENV_DIR="${LUPIN_ARBITER_VENV:-${HOME}/.venvs/lupin-arbiter}"
 LEGACY_VENV_DIR_NAME=".venv-arbiter"
 
@@ -92,7 +92,7 @@ log "installing/updating arbiter requirements (light — no torch)"
 # NOTE the pipe discipline: `cmd | tee` reports TEE's status, not cmd's. This runs
 # the checker unpiped and tests $? directly — the same trap silently reported a
 # FAILED pip install as exit 0 while this fix was being built.
-# Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
+# Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
 CHECKER="${LUPIN_ROOT}/src/scripts/check-arbiter-venv.py"
 if [[ -f "${CHECKER}" ]]; then
   log "verifying the venv can import everything the arbiter runs"

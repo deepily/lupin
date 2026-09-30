@@ -909,7 +909,7 @@ c="$( http_code "$ARBITER_URL/health" 10 )"
 #       dead for two days while this exact check returned a clean 200 every run — the
 #       process was healthy, only its worker was gone. /health now reports per-thread
 #       liveness, so assert on THAT, and name which loop is down.
-#       Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
+#       Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
 if [ "$c" = "200" ]; then
     dead="$( curl -s --max-time 10 "$ARBITER_URL/health" 2>/dev/null \
              | python3 -c "

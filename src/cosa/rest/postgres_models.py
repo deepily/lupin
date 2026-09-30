@@ -22,6 +22,7 @@ from sqlalchemy import (
     func,
     text
 )
+from sqlalchemy import JSON
 from sqlalchemy.dialects.postgresql import UUID, JSONB, INET
 from sqlalchemy.orm import DeclarativeBase, relationship, Mapped, mapped_column
 from datetime import datetime
@@ -596,6 +597,17 @@ class Notification( Base ):
         index=True
     )
 
+    # Structured side-channel carried alongside the human-readable message — the
+    # same dict the in-memory push sends as `payload=`. Its first consumer is the
+    # broadcast ack (type='commons_broadcast_ack'), whose whole identity — which
+    # broadcast, which seat — lives here and nowhere else; without it an ack is a
+    # bodiless row that cannot be attributed to anything. Row 4f320c27, migration
+    # 9184990becdf. NULL for every row written before that revision.
+    payload: Mapped[Optional[dict]] = mapped_column(
+        JSONB,
+        nullable=True
+    )
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
         DateTime( timezone=True ),
@@ -694,6 +706,17 @@ class Notification( Base ):
             'idx_notifications_answer_owed',
             'sender_persona', 'responded_at',
             postgresql_where=text( "response_requested AND responded_at IS NOT NULL AND answer_delivered_at IS NULL" ),
+        ),
+        # Partial index over the broadcast-ack rows — the one reader is
+        # get_latest_acks_for_broadcast (row 4f320c27 S4). Declared here as the
+        # schema of record so `alembic autogenerate` does not report phantom drift
+        # (schema_drift.py checks columns only, never indexes); built CONCURRENTLY
+        # in migration 9184990becdf so the forever-kept table is never write-locked.
+        # The keys and the predicate are character-identical to that migration.
+        Index(
+            'idx_notifications_ack_broadcast',
+            'recipient_id', text( "(payload->>'broadcast_id')" ),
+            postgresql_where=text( "type = 'commons_broadcast_ack'" ),
         ),
     )
 
@@ -1277,6 +1300,31 @@ class ServerLifecycle( Base ):
 # Unified Task Store Models (Phase 1)
 # ============================================================================
 
+class ApprovalSetting( Base ):
+    """
+    One approval-policy setting, stored behind the server (row 80513825).
+
+    WHY A TABLE. The settings used to live in a JSON file that every process on the host —
+    the server containers and every Claude seat — could rewrite, all running as one UID, so
+    the file could not express "someone else may not write this". A row here can be reached
+    only through the server's validated setter, which sits behind a signature-checked login.
+
+    Requires:
+        - key is one of `task_approval_settings.WRITABLE_KEYS`, or the migration marker
+          `LEGACY_IMPORT_MARKER`
+
+    Ensures:
+        - one row per key; a write replaces the value and records who wrote it and when
+    """
+    __tablename__ = "approval_settings"
+
+    key           = Column( String( 64 ), primary_key=True )
+    value         = Column( JSON().with_variant( JSONB(), "postgresql" ), nullable=False )
+    updated_by    = Column( String( 255 ), nullable=True )
+    updated_ts    = Column( DateTime( timezone=True ), nullable=False,
+                            server_default=func.now(), onupdate=func.now() )
+
+
 class TaskItem( Base ):
     """
     Task-store item — one row per obligation (unified task store, Phase 1).
@@ -1287,7 +1335,7 @@ class TaskItem( Base ):
     at the API layer; this model carries the belt-and-suspenders CHECK.
 
     Canonical design: planning-is-prompting ->
-    src/rnd/2026.06.11-unified-task-store-design.md (v0.4) §2.1.
+    planning-is-prompting/src/rnd/2026.06.11-unified-task-store-design.md (v0.4) §2.1.
 
     Requires:
         - item_class: one of task|decision|review_request|bug|gate
@@ -1412,6 +1460,47 @@ class TaskItem( Base ):
        # assert a fact about history nobody recorded. NULL reads as FRESH
        # (ambiguity -> FRESH), which is also why migration 38e025169a73 does not
        # backfill — every value it could have written would be a fabrication.
+    title_trimmed: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable      = False,
+        default       = False,
+        server_default= "false"
+    )  # WHETHER THIS ROW'S STORED TITLE WAS CUT BY soft_guard_title. A RECORD of
+       # what the write did, not a re-derivation at read time — that distinction is
+       # the whole bug (769b3574, 2026-08-31).
+       #
+       # It replaces `title_may_be_trimmed( title )`, which is `len(title) == cap`
+       # and takes the CURRENT cap. Measured over all 2,278 rows of lupin_db_dev,
+       # driven through the real terse serializer, two arms over one variable:
+       #     cap  60 -> 1,606 rows flagged
+       #     cap 120 ->     1 row  flagged
+       # 951 of the 1,606 are provably trimmed (the overflow marker is in their
+       # body) and 21 of those are non-terminal. So raising the cap — decision
+       # cc6519a6 — would have switched the board signal off across the entire
+       # existing corpus, silently, with nothing failing.
+       #
+       # WRITTEN BY BOTH WRITE PATHS from `soft_guard_title`'s own third return
+       # value, which both sites already had in hand and discarded:
+       #     POST  /api/tasks       -> title_guard is not None
+       #     PATCH /api/tasks/{id}  -> False, on EVERY title edit
+       #
+       # ⚠️ THE PATCH SIDE CHANGED 2026-09-01 (bug 6ce252e7). It used to write
+       # `title_guard is not None` there too, because an over-cap edit was trimmed
+       # like a create. Rick's ruling makes an over-cap EDIT a 422 instead, so no
+       # title that reaches the write is over the cap and False is the only answer
+       # an edit can produce. The clearing behaviour below is UNCHANGED and is why
+       # the flag is still written on every title edit rather than skipped.
+       #
+       # ⚠️ THE PATCH PATH MUST CLEAR IT, NOT ONLY SET IT. A row trimmed once and
+       # later REPAIRED by a shorter retitle has a complete title, so False is the
+       # correct answer — six live rows are exactly that case. A set-only flag
+       # would get them wrong on purpose where the old length check got them right
+       # by accident of length. That is why the router writes this on every title
+       # change rather than only when the guard fires.
+       #
+       # NOT NULL with a default, which is the OPPOSITE choice from body_changed_ts
+       # above: that column had no recoverable history, this one does — migration
+       # 47513717b7e5 backfills from the overflow marker in the body.
     gate_class: Mapped[str] = mapped_column(
         String( 32 ),
         nullable=False,
@@ -1422,8 +1511,8 @@ class TaskItem( Base ):
     priority: Mapped[str] = mapped_column(
         String( 2 ),
         nullable=False,
-        default="P2",
-        server_default="P2"
+        default="P5",
+        server_default="P5"                                            # P5 default per Rick's broadcast e254ec7d, 2026-09-07: "The default Priority from here on now will be P5."
     )
     urgency: Mapped[str] = mapped_column(
         String( 8 ),
@@ -1443,6 +1532,42 @@ class TaskItem( Base ):
         String( 255 ),
         nullable=True
     )  # harness TodoWrite/TaskList <-> store uuid correlation (C1 upsert key); indexed via __table_args__
+
+    # ── A MANAGER'S REQUEST TO PROMOTE OR DEMOTE (row c9fafb9d, rules 3 and 4) ──
+    #
+    # Rick ruled the door on 2026-09-09 by keypress: a PERSISTENT QUEUE he works from a
+    # board. It does not expire and does not die at timeout.
+    #
+    # 🔴 THE REQUEST RIDES ON THE TICKET — Mr. Radio's ruling, not an implementer's
+    # convenience. No separate row, no `TaskPromotionTicket` (that carries the synchronous
+    # ask, a different mechanism with a similar noun), no background resolver.
+    # ⚠️ THE COST HE ACCEPTED, recorded rather than argued away: there is NO HISTORY of
+    # repeated requests on a row — a re-file overwrites the last one. Wanting history is a
+    # new ruling, not a quiet extra table.
+    #
+    # `request_state` NULL means NO REQUEST, which is where almost every row stays forever.
+    # The three CHECKs below make the trio all-or-nothing, so a half-written request cannot
+    # reach a reader as a request with no move or no date.
+    request_state: Mapped[Optional[str]] = mapped_column(
+        String( 32 ),
+        nullable=True
+    )  # pending | approved | denied — see task_request_lifecycle.REQUEST_STATES
+    request_move: Mapped[Optional[str]] = mapped_column(
+        String( 32 ),
+        nullable=True
+    )  # the move asked for; task_request_lifecycle.badge_for_move classifies it
+    request_ts: Mapped[Optional[datetime]] = mapped_column(
+        DateTime( timezone=True ),
+        nullable=True
+    )  # when it was filed
+    request_deletion_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID( as_uuid=True ),
+        nullable=True
+    )  # the ticket pledged for deletion on an admit request (row ab8c5728, migration ffbf50040d99)
+    request_pledged_by: Mapped[Optional[str]] = mapped_column(
+        String( 64 ),
+        nullable=True
+    )  # the persona that pledged it, re-checked against the ticket's owner at the verdict (RB-2, same migration)
 
     # Timestamps (design names: _ts, not _at)
     created_ts: Mapped[datetime] = mapped_column(
@@ -1510,6 +1635,42 @@ class TaskItem( Base ):
         CheckConstraint(
             "status != 'parked' OR park_reason_captured_at IS NOT NULL",
             name="ck_task_items_parked_requires_captured_at"
+        ),
+        # The request trio is ALL-OR-NOTHING, and enforced below Pydantic for the same
+        # reason the park pair is: a hand-written INSERT or a future non-ORM writer must
+        # not be able to create a request with no move or no date.
+        #
+        # THREE CHECKS RATHER THAN ONE CONJUNCTION, same convention as the park pair — a
+        # violation has to name WHICH field is wrong, or the reader bisects three fields
+        # by hand.
+        #
+        # ⚠️ These literals MUST match migration `8beada291153` VERBATIM.
+        # `src/tests/unit/test_task_request_columns_migration.py` asserts it verbatim — named
+        # rather than alluded to, so the claim is checkable instead of merely reassuring.
+        # It matters because a model/migration divergence is a CHECK that silently means
+        # two different things on a fresh-from-metadata DB versus a migrated one.
+        #
+        # ⚠️ AND THEY ENFORCE SHAPE, NEVER AUTHORITY. Nothing here can tell Rick's verdict
+        # from a manager typing one — the fact that would decide it (a validated account)
+        # does not exist at this layer. That check lives in the router. Moving it down
+        # here to tidy it up re-opens the hole it was designed around.
+        CheckConstraint(
+            "request_state IS NULL OR request_state IN ('pending', 'approved', 'denied')",
+            name="ck_task_items_request_state_is_ruled"
+        ),
+        CheckConstraint(
+            "request_state IS NULL OR request_move IS NOT NULL",
+            name="ck_task_items_request_requires_move"
+        ),
+        CheckConstraint(
+            "request_state IS NULL OR request_ts IS NOT NULL",
+            name="ck_task_items_request_requires_ts"
+        ),
+        # Sword of Damocles (row ab8c5728): a pledge only rides on an admit — demote is exempt.
+        # Literal must match migration ffbf50040d99 VERBATIM.
+        CheckConstraint(
+            "request_deletion_id IS NULL OR request_move = 'admit'",
+            name="ck_task_items_request_deletion_only_on_admit"
         ),
     )
 
@@ -1598,6 +1759,187 @@ class TaskEvent( Base ):
 
     def __repr__( self ) -> str:
         return f"<TaskEvent(id={self.id}, item_id={self.item_id}, transition='{self.transition}', actor='{self.actor}')>"
+
+
+class TaskPromotionTicket( Base ):
+    """
+    One promotion out of the holding area, and how it resolved.
+
+    Design of record: `src/rnd/v0.2.1/2026.09.06-asynchronous-promotion-approval-
+    and-its-observable-resolution.md` (row `3493ae9b`, Mr. Radio's conditional ruling
+    of 2026-09-06: option (b) ships ONLY with a resolution path the caller can observe).
+
+    🔴 WHY A ROW AND NOT FOUR COLUMNS ON `task_items`, NOR A FIELD ON THE NOTIFICATION.
+    The notification record knows THAT a human was asked; it does not know which task,
+    which `to_status`, or who asked — and the resolver needs all three to apply the
+    transition. Putting them there would make one record answer two owners' questions.
+    Columns on `task_items` were the other candidate: four columns on the hot table for a
+    state that is rare and short-lived, carried forever by every reader of that table.
+
+    🔴 AND IT IS THE VISIBILITY SURFACE, WHICH THE TASK ROW CANNOT BE. A row awaiting
+    promotion is still `not_approved`, and `task_store_rules.BOARD_INVISIBLE_STATUSES`
+    puts that status outside every board query BY DESIGN. So a pending marker on the task
+    row would be visible only to somebody who already knows the id — the one person who
+    does not need telling. Design §4.
+
+    ⚠️ THE STATE VOCABULARY IS ENFORCED AT THE API LAYER, NOT BY A CHECK, which is the
+    same choice `TaskItem.status` already makes (`task_store_rules.VALID_STATUSES`, with
+    no enum constraint in the schema). The two CHECKs below are STRUCTURAL invariants —
+    facts about a resolved ticket — not a membership test:
+
+        pending     the ask is out; nothing has been applied
+        approved    Rick said yes, or was away and the default stood; the row moved
+        refused     Rick said no, or the ask failed / returned an unrecognised status
+        superseded  the transition was no longer legal when the answer landed
+        stalled     the process was bounced mid-ask — the ONE true orphan (design §6.3)
+
+    ⚠️ `ask_status` CARRIES THE CLIENT'S RAW WORD ON PURPOSE. The allow/refuse decision is
+    made against `task_promotion_gate.THE_NOTIFICATION_SYSTEM_ANSWERED`, an ALLOWLIST of
+    four of the client's eleven statuses (row `96d2341c`) — an unknown status refuses
+    rather than being stamped as Rick's keypress. Storing the raw status keeps that
+    decision AUDITABLE afterwards; storing only the verdict would leave a reader unable to
+    tell a `no` from an `unknown`.
+
+    🔴 `response_body` IS WHAT MAKES THE CALLER'S ANSWER BYTE-IDENTICAL TO TODAY'S, AND IT
+    EXISTS BECAUSE THE FIRST DRAFT CLAIMED THAT WITHOUT IT (design §5.4.1). Today's 200 is
+    serialized INSIDE the transaction that wrote it. If the caller's poll re-read the row
+    instead, `updated_ts` would have moved, the event would have to be looked up rather
+    than handed over, and a concurrent writer could leave a returned item describing a
+    LATER state than the event beside it. The resolver serializes the response ONCE, here,
+    so equality holds by construction rather than by hope.
+
+    Requires:
+        - item_id: the task_items row being promoted
+        - to_status: the status the caller asked for
+        - requested_by: the caller-declared actor
+        - resolves_by: when this ticket must have resolved by — `requested_at` plus the
+          ask timeout plus grace. Past it and still `pending` means the ask died.
+        - answer_by: when Rick's answer window closes — `requested_at` plus the ask
+          timeout. Earlier than resolves_by, and a different fact (row dbe42964).
+
+    Ensures:
+        - id is an automatically generated UUID
+        - a non-`pending` ticket carries `resolved_at` (CHECK)
+        - a `refused` ticket carries its refusal text (CHECK)
+        - cascades delete with the task item, like task_events
+    """
+    __tablename__ = "task_promotion_tickets"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID( as_uuid=True ),
+        primary_key=True,
+        default=uuid.uuid4,
+        server_default=func.gen_random_uuid()
+    )
+
+    item_id: Mapped[uuid.UUID] = mapped_column(
+        UUID( as_uuid=True ),
+        ForeignKey( "task_items.id", ondelete="CASCADE" ),
+        nullable=False
+    )  # indexed via __table_args__
+
+    # ── What was asked for ──────────────────────────────────────────────────────
+    to_status: Mapped[str] = mapped_column(
+        String( 32 ),
+        nullable=False
+    )
+    requested_by: Mapped[str] = mapped_column(
+        String( 255 ),
+        nullable=False
+    )
+    requested_at: Mapped[datetime] = mapped_column(
+        DateTime( timezone=True ),
+        nullable=False,
+        default=func.now(),
+        server_default=func.now()
+    )
+    resolves_by: Mapped[datetime] = mapped_column(
+        DateTime( timezone=True ),
+        nullable=False
+    )  # requested_at + ask timeout + grace. A ticket still pending past this is STALLED,
+       # and that is the one case a human has to be TOLD about rather than left to query
+       # (design §6.3 — a state that expires into a list is a state nobody looks at).
+    answer_by: Mapped[Optional[datetime]] = mapped_column(
+        DateTime( timezone=True ),
+        nullable=True
+    )  # requested_at + ask timeout: when Rick's ANSWER WINDOW closes, which is NOT
+       # resolves_by (row dbe42964). Both come off one read in `deadlines_for`. NULL on a
+       # ticket minted before the column existed — never backfilled, because backfilling
+       # would re-derive an old window from today's timeout.
+
+    # The caller's original transition payload, so a resolver that is NOT the original
+    # request can re-apply it. Stored rather than reconstructed: rebuilding a caller's
+    # intent from the row would be re-deriving something we were handed.
+    payload: Mapped[Optional[dict]] = mapped_column(
+        JSONB,
+        nullable=True
+    )
+
+    # ── How it went ─────────────────────────────────────────────────────────────
+    state: Mapped[str] = mapped_column(
+        String( 32 ),
+        nullable=False,
+        default="pending",
+        server_default="pending"
+    )  # indexed via __table_args__ — the pending listing IS the visibility surface
+    notification_id: Mapped[Optional[str]] = mapped_column(
+        String( 255 ),
+        nullable=True
+    )  # the ask handle, captured off the opening SSE frame BEFORE the human answers
+       # (notify_user_sync.py). It is what makes an answer recoverable after a bounce.
+    ask_status: Mapped[Optional[str]] = mapped_column(
+        String( 32 ),
+        nullable=True
+    )  # the client's RAW status — see the allowlist note in the class docstring
+    approval_source: Mapped[Optional[str]] = mapped_column(
+        String( 32 ),
+        nullable=True
+    )  # keypress | default | self — Rick's third requirement, that a keypress and a
+       # timed-out default must never look identical on the record
+    refusal: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True
+    )
+    response_body: Mapped[Optional[dict]] = mapped_column(
+        JSONB,
+        nullable=True
+    )  # the serialized { item, event } the resolver produced — see the docstring
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime( timezone=True ),
+        nullable=True
+    )
+
+    item: Mapped["TaskItem"] = relationship( "TaskItem" )
+
+    # Indexes + structural CHECKs
+    __table_args__ = (
+        Index( 'idx_task_promotion_tickets_item_id', 'item_id' ),
+        # The visibility surface's query shape: "what is pending, and is it overdue?"
+        Index( 'idx_task_promotion_tickets_state_resolves_by', 'state', 'resolves_by' ),
+        # ⚠️ THESE TWO LITERALS MUST MATCH THE ALEMBIC MIGRATION STRINGS VERBATIM. A
+        # parity test asserts it, for the same reason the I3 chase CHECK above carries the
+        # same warning: two records of one fact drift, and a schema built by `create_all`
+        # would then disagree with one built by migration.
+        CheckConstraint(
+            "state = 'pending' OR resolved_at IS NOT NULL",
+            name='ck_task_promotion_tickets_resolved_has_timestamp'
+        ),
+        CheckConstraint(
+            "state != 'refused' OR refusal IS NOT NULL",
+            name='ck_task_promotion_tickets_refused_has_reason'
+        ),
+        # Row dbe42964, migration 525a4ad4067a — the same verbatim-parity rule as above.
+        CheckConstraint(
+            "answer_by IS NULL OR answer_by <= resolves_by",
+            name='ck_task_promotion_tickets_answer_by_before_resolves_by'
+        ),
+    )
+
+    def __repr__( self ) -> str:
+        return (
+            f"<TaskPromotionTicket(id={self.id}, item_id={self.item_id}, "
+            f"state='{self.state}', to_status='{self.to_status}')>"
+        )
 
 
 class FcmToken( Base ):
@@ -1724,7 +2066,14 @@ def quick_smoke_test():
         print( "Testing PostgreSQL connection and schema validation..." )
         import os
         from sqlalchemy import text
-        db_url = os.environ.get( 'DATABASE_URL', 'postgresql://lupin_dev:dev_password@localhost:5432/lupin_auth' )
+        # No baked-in credential default (row baac2474): build from the same env the
+        # app reads, so this smoke block cannot carry a password literal in the tree.
+        db_url = os.environ.get( 'DATABASE_URL' )
+        if not db_url:
+            _pw    = os.environ.get( 'DB_PASSWORD', '' )
+            _host  = os.environ.get( 'DB_HOST', 'localhost' )
+            _port  = os.environ.get( 'DB_PORT', '5432' )
+            db_url = f"postgresql://lupin_dev:{_pw}@{_host}:{_port}/lupin_auth"
         try:
             engine = create_engine( db_url )
             # Test connection

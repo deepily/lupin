@@ -292,7 +292,7 @@ class TestResearchCard:
         and are now full routing commands rendered from GET /api/v2/agents, so it
         looks for `agent router go to research to presentation`. The dropdown is no
         longer hand-written in notifications.html at all; see
-        src/rnd/v0.2.0/2026.08.22-qa-card-registry-driven-submit-panel-retirement.md.
+        src/rnd/v0.2.0/2026.08.22-qa-card-registry-driven-submit-panel-retirement.md. — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.22-qa-card-registry-driven-submit-panel-retirement.md
 
         The wait matters: options arrive from a fetch after auth, so a bare
         networkidle can land before the render. Locating the option itself with a

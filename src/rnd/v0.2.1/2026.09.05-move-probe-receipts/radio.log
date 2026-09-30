@@ -1,0 +1,8 @@
+probe arms finished — box free
+RBASE 8bfb1eac landed: 3 failing
+RTIP  ac37ea90 landed: 3 failing
+--- NEW at the tip, absent at the baseline (BY NAME) — count=0 ---
+--- present at the baseline, GONE at the tip (BY NAME) ---
+TIP-MINUS-BASELINE IS EMPTY ⇒ THIRD TIER NOT RUN, per Mr. Radio.
+  Nothing to attribute, so 82241ff8 would answer a question nobody asked.
+RADIO TIERS DONE

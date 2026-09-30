@@ -460,6 +460,68 @@ class TestEmitToUserAsync( unittest.TestCase ):
         self.assertFalse( result )                          # nothing sent → sent_count 0
         ws.send_json.assert_not_awaited()
 
+    def test_emit_to_user_mixed_delivery_reports_BOTH_halves( self ):
+        """
+        A partial delivery names the deliveries AND the declines, in one line.
+
+        THE REGRESSION THIS PINS, measured 2026-09-01 on row 88347f65. This method
+        logged the drop path and said NOTHING on success. A user whose two sockets
+        split one-per-transport — a queue socket and an audio socket under one
+        user — produced 749 loud "not subscribed" lines and complete silence about
+        the frames that DID land. Three seats read that as a six-hour delivery
+        outage and hunted a subscription bug in a path that was working correctly:
+        every decline was an AUDIO socket properly refusing a QUEUE event.
+
+        The decline count alone is not the defect and never was. The defect was
+        that it appeared WITHOUT its denominator.
+
+        Requires:
+            - two sessions under one user: one subscribed, one not
+            - app_debug FALSE, because the debug flag being off is exactly the
+              condition under which the old silence was mistaken for breakage
+
+        Ensures:
+            - the subscribed session receives the frame
+            - the unsubscribed one does not
+            - a summary line carries delivered=1 AND declined=1 AND names the
+              declining session
+        """
+        mgr = _make_manager( app_debug=False )
+        ws_yes, ws_no = _make_ws(), _make_ws()
+        mgr.connect( ws_yes, "queue-sock", user_id="u-1", subscribed_events=[ "job_update" ] )
+        mgr.connect( ws_no,  "audio-sock", user_id="u-1", subscribed_events=[ "audio_update" ] )
+
+        with patch( "builtins.print" ) as mock_print:
+            result = _run( mgr.emit_to_user( "u-1", "job_update", {} ) )
+
+        self.assertTrue( result )
+        ws_yes.send_json.assert_awaited_once()
+        ws_no.send_json.assert_not_awaited()
+
+        printed = " ".join( str( c ) for c in mock_print.call_args_list )
+        self.assertIn( "delivered=1", printed )
+        self.assertIn( "declined=1", printed )
+        self.assertIn( "audio-sock", printed, "the summary must name WHICH session declined" )
+
+    def test_emit_to_user_all_delivered_stays_quiet( self ):
+        """
+        No declines → no summary line. The line exists to explain a decline, so
+        emitting it on a clean delivery would just be new noise replacing old.
+
+        Ensures:
+            - a fully-delivered emit prints neither "declined=" nor "sent_count=0"
+        """
+        mgr = _make_manager( app_debug=False )
+        ws  = _make_ws()
+        mgr.connect( ws, "s-1", user_id="u-1", subscribed_events=[ "job_update" ] )
+
+        with patch( "builtins.print" ) as mock_print:
+            self.assertTrue( _run( mgr.emit_to_user( "u-1", "job_update", {} ) ) )
+
+        printed = " ".join( str( c ) for c in mock_print.call_args_list )
+        self.assertNotIn( "declined=", printed )
+        self.assertNotIn( "sent_count=0", printed )
+
     def test_emit_to_user_send_failure_disconnects( self ):
         mgr = _make_manager()
         ws  = _make_ws()

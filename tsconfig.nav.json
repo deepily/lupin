@@ -1,8 +1,9 @@
 {
   "//"              : "Standalone TS config for the nav-bar bundle. ADDITIVE — does not touch the mux tsconfig.json. Inherits the strict compilerOptions from the base config and only re-scopes rootDir/outDir/include to the nav module tree.",
   "extends"         : "./tsconfig.json",
+  "//rootDir"       : "⚠️ THE NAV PROJECT SPANS TWO DIRECTORIES, SO rootDir IS THEIR ANCESTOR, NOT THE NAV FOLDER. lupinNav.ts:20 imports `../multiplexer/auth/jwt` — one shared helper rather than a second copy of the expiry maths — and a rootDir of `.../js/nav` made that a TS6059 ('not under rootDir'), which is what kept `npm run typecheck:nav` red. It affects tsc's EMIT LAYOUT ONLY and this project is noEmit (inherited); the shipped bundle is built by esbuild in build-nav.sh with --outfile, which never reads this key.",
   "compilerOptions" : {
-    "rootDir" : "src/lupin_app/static/js/nav",
+    "rootDir" : "src/lupin_app/static/js",
     "outDir"  : "src/lupin_app/static/dist/nav"
   },
   "include" : [ "src/lupin_app/static/js/nav/**/*.ts" ]

@@ -105,11 +105,23 @@ class TestTheRatchet:
         risen = { p: ( n, baseline.get( p, 0 ) ) for p, n in current.items()
                   if n > baseline.get( p, 0 ) }
         assert not risen, (
-            "🔴 NEW `assert.<equal>(<DOM node>, ...)` — a FAILING one of these deep-inspects the "
-            "happy-dom Window graph at ~2.5 GB/s until the kernel intervenes (rows f5768ee4 / "
-            "32c58572).\n"
+            "🔴 NEW `assert.<equal>(...)` holding a DOM node — a FAILING one of these deep-inspects "
+            "the happy-dom Window graph at ~2.5 GB/s until the kernel intervenes (rows f5768ee4 / "
+            "32c58572). EITHER OPERAND does it: measured 2026-09-06, `assert.equal( null, el )` "
+            "aborts identically to `assert.equal( el, null )`.\n"
             "  file: (now, baseline)\n  %s\n"
-            "Assert a PRIMITIVE PROJECTION instead — .textContent, .id, .tagName, a count, a boolean."
+            "FIX IT BY ASKING WHAT THE ASSERTION MEANT — the two answers are different, and picking "
+            "the wrong one turns the test green while making it blind:\n"
+            "  • a VALUE question (what does this node contain / how many are there?)\n"
+            "      → project to a primitive: .textContent, .id, a count\n"
+            "      assert.equal( root.querySelectorAll('.x').length, 0 )\n"
+            "  • an IDENTITY question (are these the SAME node?)\n"
+            "      → assert a BOOLEAN of the comparison, NOT .tagName/.className\n"
+            "      assert.ok( a === b, '<why they must be the same>' )\n"
+            "      🔴 .tagName and .className are the WRONG projection here — two different "
+            "elements share a tag every day, so the projected assert passes where the original "
+            "would have failed. This message used to recommend .tagName and that advice was "
+            "withdrawn on 2026-09-06."
             % risen
         )
 
@@ -291,6 +303,212 @@ class TestItCoversTheNodeToNodeShapes:
         # Without these the parametrised test above would pass just as happily
         # against a rule that flagged every assert in the tree.
         assert not scan_text( src ), "false positive on: %s" % src
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 5. The EXPECTED side — the blind side, measured 2026-09-06 (Rio ⚡)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestItCoversTheExpectedOperandToo:
+    """
+    `node:assert` renders BOTH operands into its failure diff, so a DOM node OOMs
+    from either side. Five capped arms, one variable, happy-dom registered in all
+    five — the two negative controls are what make the three positives mean
+    something:
+
+        ACTUAL      EXPECTED    assertion   result
+        ─────────────────────────────────────────────────────────────
+        DOM node    null        FAILS       OOM, exit 134
+        null        DOM node    FAILS       OOM, exit 134   ← this class
+        DOM node    DOM node    FAILS       OOM, exit 134
+        plain obj   plain obj   FAILS       survives, 90 MB
+        DOM node    same node   PASSES      survives, 79 MB
+
+    The scanner read only the first argument until that measurement. It cost
+    nothing to widen: the tree carried ZERO expected-side-only sites across 161
+    `*.test.ts` files and 5,603 equal-family calls, so no baseline entry moved.
+    """
+
+    @pytest.mark.parametrize( "src", [
+        'assert.equal( 0, root.querySelector(".x") );',
+        'assert.strictEqual( null, document.getElementById("a") );',
+        'assert.deepEqual( expectedNode, el.firstChild );',
+        'assert.equal( undefined, container.children[0] );',
+        'assert.notEqual( ref, el.parentElement );',
+    ] )
+    def test_a_dom_node_as_the_EXPECTED_value_is_flagged( self, src ):
+        assert scan_text( src ), (
+            "A DOM node is the EXPECTED value here, and node:assert renders it into the same "
+            "failure diff — measured, it aborts identically. Not flagged: %s" % src
+        )
+
+    @pytest.mark.parametrize( "src", [
+        # The controls matter more here than anywhere else in this file: widening
+        # to a second argument is exactly the change most likely to start
+        # flagging every assertion in the tree.
+        'assert.equal( el.textContent, other.textContent );',
+        'assert.equal( 0, el.querySelectorAll(".x").length );',
+        'assert.equal( "DIV", el.firstElementChild.nodeName );',
+        'assert.deepEqual( expected, calls[0].body );',
+    ] )
+    def test_the_expected_side_controls_stay_unflagged( self, src ):
+        assert not scan_text( src ), "false positive on: %s" % src
+
+    def test_a_both_sides_violation_counts_ONCE_not_twice( self ):
+        # One offending CALL is one place to fix. Counting per-operand would make
+        # the ratchet's numbers stop matching the edits that move them.
+        found = scan_text( 'assert.equal( a.querySelector(".x"), b.querySelector(".y") );' )
+        assert len( found ) == 1, "a both-sides call must yield one violation, got %r" % ( found, )
+
+
+class TestTheMessageDoesNotRecommendTagNameForIdentity:
+    """
+    The lint's own advice was wrong for identity comparisons and this pins the
+    withdrawal. Projecting `a === b` to `a.tagName == b.tagName` turns the test
+    GREEN while making it blind — two different elements share a tag every day.
+    Measured instance: task_controls_survive_the_disclosure.test.ts:155.
+    """
+
+    def _ratchet_message( self ):
+        import inspect
+        return inspect.getsource( TestTheRatchet.test_no_file_has_MORE_violations_than_its_baseline )
+
+    def test_it_tells_the_reader_that_EITHER_operand_is_dangerous( self ):
+        text = self._ratchet_message()
+        assert "EITHER OPERAND" in text, (
+            "The message must say the hazard is not confined to the actual value — a reader "
+            "who fixes only the first argument leaves half the hazard in place."
+        )
+
+    def test_it_offers_a_boolean_for_an_identity_comparison( self ):
+        text = self._ratchet_message()
+        assert "assert.ok( a === b" in text, (
+            "The message must name the correct primitive for an identity question. Without it "
+            "the reader reaches for .tagName, which is the defect this class exists to stop."
+        )
+
+    def test_it_explicitly_WARNS_OFF_tagName_rather_than_merely_omitting_it( self ):
+        # Omission is not enough: .tagName is the obvious move, and this file
+        # recommended it for months. The withdrawal has to be legible.
+        text = self._ratchet_message()
+        assert "WRONG projection" in text and "share a tag" in text, (
+            "Silently dropping .tagName from the suggestion list leaves every reader who "
+            "already learned it doing the wrong thing. Say it was withdrawn."
+        )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 6. A node reached through a NAME — row 8d043758, ruling (b), 2026-09-16
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestItSeesANodeReachedThroughAName:
+    """
+    The scanner used to flag only an operand that TERMINATES in a DOM call written
+    inline. A node arriving through a one-hop `const` binding or an arrow helper
+    was invisible, and six real hazards sat in the tree behind a green ratchet
+    (row 8d043758): `sentinel( p.root, "partial" )`, `dateNow()` twice, and three
+    node-to-node identity checks through plain names.
+    """
+
+    @pytest.mark.parametrize( "src", [
+        # one-hop value binding, both sides
+        'const el = root.querySelector(".x");\nassert.equal( el, null );',
+        'const el = root.querySelector(".x");\nassert.equal( null, el );',
+        # non-null assertion and a cast on the binding and on the operand
+        'const a = portal.querySelector("#p")!;\nassert.strictEqual( a, b );',
+        'const a = host.querySelector(".x") as HTMLInputElement | null;\nassert.equal( a!, null );',
+        # a binding whose RHS continues on the next line
+        'const el = root\n  .querySelector(".x");\nassert.equal( el, null );',
+        # arrow helper, expression body
+        'const dateNow = () => host.querySelector( ".task-chase-input" ) as HTMLInputElement | null;\n'
+        'assert.equal( dateNow(), null, "msg" );',
+        # arrow helper whose body starts on the NEXT line after `=>` — verbatim shape of `sentinel`
+        'const sentinel = ( root: HTMLElement, variant: string ): HTMLElement | null =>\n'
+        '  root.querySelector( `[data-testid="x-${ variant }"]` );\n'
+        'assert.equal( sentinel( p.root, "partial" ), null, "msg" );',
+        # arrow helper, block body
+        'const pick = ( r ) => {\n  const k = 1;\n  return r.querySelector(".x");\n};\nassert.deepEqual( pick( root ), null );',
+    ] )
+    def test_it_FLAGS_a_dom_node_reached_through_a_name( self, src ):
+        assert scan_text( src ), "a DOM node reaches this assertion through a name — not flagged:\n%s" % src
+
+    @pytest.mark.parametrize( "src", [
+        # a PRIMITIVE bound to a name — the terminal rule applies to the binding too
+        'const t = root.querySelector(".x").textContent;\nassert.equal( t, "hi" );',
+        'const n = root.querySelectorAll(".x").length;\nassert.equal( n, 0 );',
+        # a projection OF a named node is safe
+        'const el = root.querySelector(".x");\nassert.equal( el.textContent, "x" );',
+        'const empty = () => root.querySelector(".e");\nassert.equal( empty()?.getAttribute("data-s"), "loading" );',
+        # a call on a helper's result must not be read as the helper's result
+        'const $ = ( r, s ) => r.querySelector( s );\nassert.equal( $(root, "#b").classList.contains("on"), true );',
+        # a helper that returns primitives
+        'const vals = () => items.map( x => x.textContent );\nassert.deepEqual( vals(), [ "a" ] );',
+        # a DOM helper passed bare is a function, not a node
+        'const q = () => root.querySelector(".x");\nassert.equal( q, handler );',
+        # a DOM value called as if it were a helper is not this rule's shape
+        'const el = root.querySelector(".x");\nassert.equal( el(), null );',
+        # a name with no binding in the file
+        'assert.equal( mystery, null );',
+    ] )
+    def test_it_does_NOT_flag_a_safe_name( self, src ):
+        assert not scan_text( src ), "false positive on:\n%s" % src
+
+    def test_the_NEAREST_preceding_binding_decides( self ):
+        # Measured scope collision (row 8d043758): `const body = document.body` at
+        # task_list_panel:867 poisoned an unrelated `const body = { tasks }` at :1059
+        # in a file-scoped sweep. The binding in force is the last one above the call.
+        dom_then_obj = 'const body = document.body;\nconst body = { tasks: [] };\nassert.deepEqual( body, { tasks: [] } );'
+        obj_then_dom = 'const body = { tasks: [] };\nconst body = document.body;\nassert.deepEqual( body, { tasks: [] } );'
+        assert not scan_text( dom_then_obj )
+        assert     scan_text( obj_then_dom )
+
+    def test_a_binding_BELOW_the_call_does_not_count( self ):
+        assert not scan_text( 'assert.equal( el, null );\nconst el = root.querySelector(".x");' )
+
+    @pytest.mark.parametrize( "verb", [ "notEqual", "notStrictEqual" ] )
+    def test_the_negative_family_through_a_name_is_NOT_flagged( self, verb ):
+        """
+        Measured 2026-09-16, four capped arms in jstest.slice, happy-dom registered:
+
+            strictEqual( node, null )     FAILS   killed, RSS > 2048 MB, rc=137  ← positive control
+            notStrictEqual( node, node )  FAILS   survives, 205 MB
+            notStrictEqual( null, null )  FAILS   survives, 188 MB
+            notStrictEqual( obj, obj )    FAILS   survives, 246 MB               ← negative control
+
+        A failing negative assertion does not deep-inspect its operands, so the 84
+        `notEqual( <name>, null )` sites in the tree are not hazards. Flagging them
+        would put 84 safe lines in front of the ratchet.
+        """
+        src = 'const el = root.querySelector(".x");\nassert.%s( el, other );' % verb
+        assert not scan_text( src )
+
+    def test_a_both_named_call_counts_ONCE( self ):
+        src = 'const a = r.querySelector(".a");\nconst b = r.querySelector(".b");\nassert.equal( a, b );'
+        assert len( scan_text( src ) ) == 1
+
+    def test_the_violation_names_the_line_of_the_CALL_and_the_named_operand( self ):
+        found = scan_text( 'const el = root.querySelector(".x");\n\nassert.equal( el, null );' )
+        assert [ ( v.line, v.expr ) for v in found ] == [ ( 3, "el" ) ]
+
+    # The real producer through the real reader: the six sites exactly as they sat in
+    # the tree at fa41c222, the commit before row 8d043758's conversions.
+    REAL_SITES = {
+        "src/tests/unit/multiplexer/render/finished_tasks_renderer.test.ts" : { 511 },
+        "src/tests/unit/multiplexer/render/html.test.ts"                    : { 101 },
+        "src/tests/unit/multiplexer/render/persona_modal_renderer.test.ts"  : { 160 },
+        "src/tests/unit/multiplexer/render/session_strip_renderer.test.ts"  : { 222 },
+        "src/tests/unit/notifications_js/row_control_redesign.test.ts"      : { 260, 262 },
+    }
+
+    @pytest.mark.parametrize( "path", sorted( REAL_SITES ) )
+    def test_it_flags_exactly_the_real_sites_as_they_were_committed( self, path ):
+        import subprocess
+        text = subprocess.run(
+            [ "git", "-C", str( ROOT ), "show", "fa41c222:%s" % path ],
+            capture_output=True, text=True, check=True,
+        ).stdout
+        assert text, "git show returned nothing for %s — the fixture did not load" % path
+        assert { v.line for v in scan_text( text ) } == self.REAL_SITES[ path ]
 
 
 def test_every_test_this_file_declares_is_actually_collected( request ):

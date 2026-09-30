@@ -80,7 +80,11 @@ class TestTaskCreateWrapper:
             "gate_class"          : "operator",
             "priority"            : "P1",
             "urgency"             : "normal",
-            "status"              : "queued",       # DEFAULT mint status (build 1b5483f4)
+            # Was "queued" (build 1b5483f4). None means THE CALLER DID NOT ASK, which
+            # the transport then expresses by OMITTING the key — the only way the route
+            # can see the field as unset and apply the holding-area default. See
+            # test_the_mcp_create_door_can_express_an_unset_status.py.
+            "status"              : None,
             "blocked_by"          : None,
             "next_chase_ts"       : None,
             "source_qid"          : "qid-1",
@@ -96,9 +100,17 @@ class TestTaskCreateWrapper:
         assert captured[ "priority" ]   == "P2"
         assert captured[ "authority" ]  == "standing"
         assert captured[ "body" ]       is None
-        # One-call blocked mint defaults (build 1b5483f4): status defaults queued,
-        # the two blocked fields default None (forwarded to the transport verbatim).
-        assert captured[ "status" ]        == "queued"
+        # One-call blocked mint defaults (build 1b5483f4): the two blocked fields
+        # default None (forwarded to the transport verbatim).
+        #
+        # 🔴 `status` DEFAULTS TO None, NOT "queued" (Rio ⚡, 2026-09-04). It was
+        # "queued", and that is precisely what bypassed the holding area: the tool
+        # handed the transport an explicit status on every call, the transport put the
+        # key in the body, and the route — which mints into the holding area ONLY when
+        # the caller named nothing — read a deliberate queued mint every time. Fixing
+        # the transport alone would NOT have been enough; this default would have
+        # re-supplied the string one layer up.
+        assert captured[ "status" ]        is None
         assert captured[ "blocked_by" ]    is None
         assert captured[ "next_chase_ts" ] is None
 
@@ -147,6 +159,29 @@ class TestTaskTransitionWrapper:
             "reason"        : "waiting on Rick's gate",
             "authority"     : "user_direct",
             "park_reason"   : None,          # park wiring (f68bc520) — always forwarded
+            # 🔴 ALWAYS FORWARDED, AND THE VALUE HERE IS NOT THE SAME AS ABSENT ON THE
+            # WIRE (row 3493ae9b). The wrapper hands the impl every field
+            # unconditionally; the impl is what OMITS `asynchronous` from the JSON body
+            # when it is None. Putting the omission at the wire boundary keeps it in ONE
+            # place instead of two.
+            #
+            # ⚠️ THIS ROW WAS ADDED BECAUSE THIS TEST WENT RED, WHICH IS THE TEST WORKING.
+            # It pins the wrapper->impl contract by EXACT dict equality, so a field added
+            # to the wrapper cannot reach the impl unnoticed. Widening it to a subset
+            # check would have made the red go away and taken the guard with it.
+            #
+            # 🔴 IT WENT RED A SECOND TIME, AND AGAIN THAT IS THE TEST WORKING (row
+            # 8ed76594, Krishna 🦚 2026-09-09). It read `None` until the verb's default
+            # flipped None -> True. The caller above does not mention `asynchronous`, so
+            # the value below IS the verb's default arriving at the impl — which is
+            # exactly the wiring this row exists to install: both gates were open and no
+            # caller was walking through, because every caller had to REMEMBER to ask.
+            #
+            # ⚠️ THE DEFAULT IS ON THE @mcp.tool VERB AND NOT ON `task_transition_impl`.
+            # The impl still defaults to None, so `session_spawner`, which calls the impl
+            # directly, keeps sending a byte-identical request. Two guards in
+            # test_the_promotion_opt_in_is_the_default_at_the_door.py pin that seam.
+            "asynchronous"  : True,
         }
 
     def test_defaults_match_spec( self, stamped_identity, monkeypatch ):
@@ -158,6 +193,22 @@ class TestTaskTransitionWrapper:
         assert captured[ "blocked_by" ]    is None
         assert captured[ "reason" ]        is None
         assert captured[ "authority" ]     == "standing"
+        assert captured[ "park_reason" ]   is None
+
+        # 🔴 THE ONE DEFAULT THAT IS NOT None, AND IT WAS MISSING FROM THE TEST WHOSE JOB
+        # IS DEFAULTS (row 8ed76594; the gap was Mr. Radio 🦉's catch, 2026-09-09).
+        # `test_stamps_actor_and_passes_through` above pins it too, but only as one entry
+        # in a whole-dict equality — so a future edit that relaxed that arm to a subset
+        # check would take this default's only guard with it. Asserted here on its own,
+        # where a reader looking for "what does this verb default to" will find it.
+        #
+        # ⚠️ True, NOT None, IS THE WHOLE POINT: the door opts into the 202 promotion path
+        # so no caller has to remember to. The default lives on the @mcp.tool VERB and NOT
+        # on `task_transition_impl`, whose own default stays None — that seam is pinned by
+        # `test_the_impl_still_DEFAULTS_TO_OMITTING_so_the_seam_is_the_verb` and
+        # `test_the_session_spawner_call_does_NOT_mention_the_opt_in`, both in
+        # test_the_promotion_opt_in_is_the_default_at_the_door.py.
+        assert captured[ "asynchronous" ]  is True
 
 
 class TestTaskCorrelateWrapper:
@@ -364,6 +415,42 @@ class TestTaskAmendWrapper:
         cv.task_amend.fn( task_id="abc", note="n" )
         assert captured[ "authority" ] == "standing"
         assert captured[ "reason" ]    is None
+
+
+class TestTaskRequestWrapper:
+
+    def test_stamps_actor_and_passes_through( self, stamped_identity, monkeypatch ):
+        # `actor` is the bridge identity, never a tool parameter: the server's manager check
+        # reads the session id off it, so a typed actor must not be able to reach the impl.
+        captured = { }
+        monkeypatch.setattr( cv, "task_request_impl", lambda **kwargs: captured.update( kwargs ) or SENTINEL )
+
+        result = cv.task_request.fn( task_id="abc-uuid", move="demote", reason="not worth the board" )
+
+        assert result is SENTINEL
+        assert captured == {
+            "api_base_url"     : "http://stub:7999",
+            "api_key"          : "ck_live_stub",
+            "actor"            : "krishna 38d15e3b",
+            "task_id"          : "abc-uuid",
+            "move"             : "demote",
+            "reason"           : "not worth the board",
+            "deletion_task_id" : None,
+        }
+
+    def test_the_deletion_ticket_passes_through( self, stamped_identity, monkeypatch ):
+        # Sword of Damocles (row ab8c5728): the admit's pledge reaches the impl unchanged.
+        captured = { }
+        monkeypatch.setattr( cv, "task_request_impl", lambda **kwargs: captured.update( kwargs ) or SENTINEL )
+
+        cv.task_request.fn( task_id="abc-uuid", move="admit", reason="ready", deletion_task_id="pledge-uuid" )
+
+        assert captured[ "deletion_task_id" ] == "pledge-uuid"
+        assert captured[ "move" ] == "admit"
+
+    def test_actor_is_not_a_parameter( self ):
+        import inspect
+        assert "actor" not in inspect.signature( cv.task_request.fn ).parameters
 
 
 class TestTaskEditWrapper:

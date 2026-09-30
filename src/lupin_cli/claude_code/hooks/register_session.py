@@ -368,22 +368,35 @@ def _spawn_listener_locked( session_id, session_data, session_file, accepted_ids
 
         listener_pid = proc.pid
 
-        # Brief liveness check — detect immediate crashes (e.g., missing credentials)
+        # Brief liveness check — detect immediate crashes (e.g., missing credentials).
+        #
+        # 🔴 proc.poll(), NOT os.kill( listener_pid, 0 ). This hook never wait()s the
+        # child, so a listener that has ALREADY EXITED is a ZOMBIE — still in the
+        # process table, and `os.kill( pid, 0 )` SUCCEEDS on it. Measured 2026-09-04:
+        # Popen( [ "/bin/true" ], start_new_session=True ), sleep 0.3, then
+        # os.kill( pid, 0 ) returns cleanly while poll() reports returncode 0.
+        #
+        # What the blind check cost: on 2026-09-04 a worktree seat's listener exited 1
+        # during credential resolution ~0.1s in; the check said ALIVE, the dead PID was
+        # written to the bridge, and the seat ran DEAF for two minutes while the roster
+        # reported it healthy. The centralized log carried 32 such deaths. A monitor
+        # that cannot fail is worse than no monitor: it converts a loud death into a
+        # silent one. See src/tests/unit/test_listener_spawn_liveness_sees_a_zombie.py.
         time.sleep( 0.3 )
-        try:
-            os.kill( listener_pid, 0 )
-        except ProcessLookupError:
+        exit_code = proc.poll()
+        if exit_code is not None:
             # Listener died immediately — read stderr for diagnostics
             stderr_file.close()
             try:
                 with open( stderr_path, "r" ) as f:
                     stderr_contents = f.read().strip()
                 if stderr_contents:
-                    print( f"[SessionStart] WARNING: Listener died immediately. stderr:\n{stderr_contents}", file=sys.stderr )
+                    print( f"[SessionStart] WARNING: Listener died immediately (exit {exit_code}). stderr:\n{stderr_contents}", file=sys.stderr )
                 else:
-                    print( f"[SessionStart] WARNING: Listener (PID {listener_pid}) died immediately with no stderr output", file=sys.stderr )
+                    print( f"[SessionStart] WARNING: Listener (PID {listener_pid}) died immediately (exit {exit_code}) with no stderr output — "
+                           f"check the centralized log {centralized_path} for an unprefixed startup failure", file=sys.stderr )
             except OSError:
-                print( f"[SessionStart] WARNING: Listener (PID {listener_pid}) died immediately, could not read stderr", file=sys.stderr )
+                print( f"[SessionStart] WARNING: Listener (PID {listener_pid}) died immediately (exit {exit_code}), could not read stderr", file=sys.stderr )
             return None
 
         # Record listener PID in session bridge file for SessionEnd cleanup
@@ -1022,6 +1035,22 @@ _MEMENTO_AMENDMENT_MARKER = "<!-- memento-amendment:"
 _MEMENTO_HEADER_MARKER    = "<!-- memento-record:"
 _MEMENTO_FILE_PREFIX      = ".claude-memento-"
 _MEMENTO_MAX_BYTES        = 8000
+# 🔴 A TAIL LONG ENOUGH TO FILL THE BUDGET LEAVES NO ROOM FOR WHO YOU ARE — 2026-09-05
+# (Krishna 🦚) on Tiberius 👑's corpus measurement. The amendment branch quoted the tail
+# and ONLY the tail, so a seat with a big tail rehydrated with its owed work and no
+# identity. MEASURED on the live `.claude-memento-maria-21979045.md`: 37,584-byte record,
+# 27,365-byte tail, 8,617 delivered, and `# 1. WHO I AM / SEAT` NOT among it.
+# Tiberius's corpus: 56 of 129 tailed records carry a tail over 8,000 bytes — 43% — and
+# across 161 bodies the first load-bearing marker sits at a median 0.166 of the way in,
+# with 111 of 161 in the FIRST QUARTER. The lead is where the identity lives.
+# ⇒ Reserve a slice for the body's opening. The total budget is unchanged, so boot
+# context does not grow; what changes is that some of it is spent on who the seat is.
+# ⚠️ 3,000 NOT 2,000, AND THE FIGURE IS TIBERIUS 👑'S, NOT A ROUND NUMBER I LIKED.
+# Measured on the corpus: a 2,000-byte lead reaches the opening in 80% of records; 3,000
+# reaches 90%. The extra 1,000 comes out of the tail's share, and that is the cheap side
+# of the trade — 43% of tails already exceed the whole budget and are truncated either
+# way, so 5,000 against 6,000 changes little for them, while the head gains ten points.
+_MEMENTO_BODY_LEAD_BYTES  = 3000
 
 
 def _persona_slugs( persona_name ):
@@ -1160,6 +1189,70 @@ def _names_this_seat( name, sid8, slugs ):
     return False
 
 
+def _stamp_instant( stamp ):
+    """
+    The INSTANT an ISO `written_at` names, as epoch seconds.
+
+    WHY NOT COMPARE THE STRINGS (row f99bed95). The ranking used to sort the raw
+    ISO text, and ISO text only orders chronologically when every stamp shares one
+    UTC offset. The live slot does not: measured 2026-08-29, 214 stamped records
+    carried two offsets (212 at -04:00, 2 at +00:00) and produced **12 inverted
+    pairs** — e.g. `2026-08-16T14:06:48-04:00` (18:06:48Z) sorts BELOW
+    `2026-08-16T17:44:53+0000` (17:44:53Z) as text while being the later moment.
+    Twelve pairs is small today and grows with every writer that stamps in UTC.
+
+    A NAIVE stamp is refused rather than assumed-local — the same call
+    `reap_memento._parse_iso_aware` makes, and for the same reason: ordering it
+    against an aware stamp means guessing a zone, and guessing a zone is what
+    produced the inversion in the first place. The caller demotes it to the mtime
+    tier, so it is ranked low, never dropped.
+
+    Requires:
+        - stamp is an ISO-8601 string, or None
+
+    Ensures:
+        - returns epoch seconds (float) for an AWARE stamp
+        - returns None for None, a naive stamp, or anything unparseable
+        - never raises
+    """
+    if not stamp: return None
+    try:
+        parsed = datetime.fromisoformat( stamp )
+    except ( ValueError, TypeError ):
+        return None
+    if parsed.tzinfo is None: return None
+    return parsed.timestamp()
+
+
+def _recency_key( path, stamp ):
+    """
+    Rank one memento record: ( tier, instant ), newest first, tier 1 over tier 0.
+
+    Tier 1 is a record whose header carries an orderable `written_at`; tier 0 is
+    everything else, ordered by mtime. The tier split is deliberate and predates
+    this row — the header stamp travels with the content, while mirroring and
+    rsync reset mtime — so a dated record must outrank an undated one even when
+    the undated file is newer on disk.
+
+    Requires:
+        - path is a filesystem path; stamp is an ISO string or None
+
+    Ensures:
+        - ( 1, epoch_seconds ) when the stamp names an instant
+        - ( 0, mtime ) when it does not — undated, naive, or unparseable
+        - ( 0, -inf ) when mtime is unreadable, so the record ranks last and is
+          still never dropped
+        - both tiers carry a float, so the second element is always comparable
+        - never raises
+    """
+    instant = _stamp_instant( stamp )
+    if instant is not None: return ( 1, instant )
+    try:
+        return ( 0, os.path.getmtime( path ) )
+    except OSError:
+        return ( 0, float( "-inf" ) )
+
+
 def _memento_candidates( repo_root, sid8=None, slugs=() ):
     """
     Memento RECORDS visible to this seat, across both slot families, newest first.
@@ -1170,9 +1263,11 @@ def _memento_candidates( repo_root, sid8=None, slugs=() ):
     hand one persona another persona's state. Empty is a safe answer; another
     seat's held merge and crew is not.
 
-    Ordering key is the header's `written_at` stamp, falling back to mtime only
-    when a record carries none. A record with neither still appears — it ranks
-    last, but it is never silently dropped.
+    Ordering key is the INSTANT the header's `written_at` names, falling back to
+    mtime only when a record carries no orderable stamp. A record with neither
+    still appears — it ranks last, but it is never silently dropped. The instant,
+    not the ISO text: mixed UTC offsets make text order disagree with time order
+    (row f99bed95, 12 inverted pairs measured on the live slot).
 
     Requires:
         - repo_root is a directory path
@@ -1204,16 +1299,8 @@ def _memento_candidates( repo_root, sid8=None, slugs=() ):
             if real in seen: continue      # the mirror and the repo can hold the same record
             seen.add( real )
 
-            header = _header_of( path )
-            stamp  = _written_at_of( header )
-            if stamp:
-                # ISO strings sort lexicographically; the "1" tier outranks mtime.
-                sort_key = ( 1, stamp )
-            else:
-                try:
-                    sort_key = ( 0, str( os.path.getmtime( path ) ) )
-                except OSError:
-                    sort_key = ( 0, "" )
+            header   = _header_of( path )
+            sort_key = _recency_key( path, _written_at_of( header ) )
             out.append( ( path, header, sort_key ) )
 
     return sorted( out, key=lambda row: row[2], reverse=True )
@@ -1271,21 +1358,59 @@ def _resolve_memento_path( stable_session_id, persona_name, repo_root ):
     """
     Find THIS seat's memento at the repo root.
 
-    Two-step, and the ORDER is the whole design:
+    Three-step, and the ORDER is the whole design:
 
       1. Exact session-id match. A self-re-spin types `/clear` into its own
          pane and keeps its session id, so when a record names this id it is
          unambiguously ours — the strongest signal available.
+      1.5 The canonical live slot `io/mementos/<slug>.md` in THIS repo. It is
+         where writers put the current record, so an exact-name hit beats any
+         historical sibling — including a sibling that carries a `written_at`
+         the bare slot does not (row f99bed95).
       2. Newest record for this PERSONA. A re-spin done as dismiss-then-spawn
          arrives as a brand-new session, so step 1 finds nothing while the
          memento sits right there named for the OLD id. The persona is what
          actually carries across that boundary, so it is what we match on.
          Newest-mtime breaks the tie when a persona has several.
 
-    Every candidate is confirmed by its `<!-- memento-record: … -->` header
-    before it is accepted. A filename that merely matches is a guess, and a
-    memento is the one artifact a rehydrating seat cannot afford to be wrong
-    about — handing it someone else's state is worse than handing it none.
+    WHAT IS AND IS NOT CONFIRMED, stated plainly because an earlier version of
+    this docstring claimed more than the code does and cost a reviewer an
+    evening. Only STEP 1 requires the `<!-- memento-record: … -->` header.
+    Steps 1.5 and 2 accept a HEADER-LESS file, and that is correct rather than
+    an oversight: real records frequently carry a human heading as their first
+    line instead of a machine header, and the canonical live slot
+    `io/mementos/<slug>.md` is a bare name that often has none at all. Demanding
+    a header at those steps would reject the very file the writers target.
+
+    What IS enforced at every step is PERSONA. `_persona_of` must agree before a
+    candidate is returned, because handing a seat another persona's state stays
+    worse than handing it none. Identity is the invariant here; the header is
+    corroboration where it exists.
+
+    A SLOT POINTER CAN BE RETURNED, AND THAT IS THE INTENDED ANSWER, NOT A BUG.
+    `_names_this_seat` admits `stem == slug`, which is the pointer's shape in
+    both families — `.claude-memento-<persona>.md` at the repo root and
+    `<persona>.md` in an io slot. It has to: step 1.5 depends on that exact
+    acceptance to prefer the live io slot over a historical sibling (row
+    f99bed95). Measured 2026-09-02 by removing `stem == slug` in-process:
+    resolution went `rio.md` -> `rio-ea46bc1a.md`, i.e. straight back to the
+    2.8-day-stale sibling that row exists to prevent. Refusing pointers by shape
+    is WIDER than it looks, not narrower.
+
+    And a returned pointer is not an empty answer. `memento_io.py` writes a
+    pointer as its header PLUS THE WHOLE RECORD BODY, so a seat that resolves one
+    receives its held state. Measured on the live tree the same day:
+    `.claude-memento-mr-radio.md` is 103 lines whose body is byte-identical to
+    the record it names.
+
+    THE ONE REAL COST, so the next reader does not rediscover it as a defect —
+    which is how this paragraph came to be written. A pointer is regenerated
+    when the record is written, so anything APPENDED to the record afterwards is
+    absent from it. On that same live pair the difference was the two-line
+    SELF-RESPIN-NONCE. So pointer fallback is STALE BY AT MOST ONE AMENDMENT, not
+    stateless. It is reached only when no record is readable at all, and in that
+    situation a full mirror missing its last amendment is the best available
+    answer; refusing it would hand the seat nothing.
 
     Requires:
         - stable_session_id is a string (full uuid) or None
@@ -1293,8 +1418,13 @@ def _resolve_memento_path( stable_session_id, persona_name, repo_root ):
         - repo_root is a directory path
 
     Ensures:
-        - Returns a confirmed memento path, or None when nothing resolves
+        - Returns a persona-confirmed memento path, or None when nothing
+          resolves. "Confirmed" means the PERSONA agrees; only step 1 also
+          requires the record header (see above)
         - Never returns a record belonging to a different persona
+        - Prefers this repo's `io/mementos/<slug>.md` over every sibling once an
+          exact session-id match has failed; never prefers the MIRROR's copy of
+          that same bare name
         - Never raises
     """
     sid8  = stable_session_id[:8] if stable_session_id and len( stable_session_id ) >= 8 else None
@@ -1311,6 +1441,28 @@ def _resolve_memento_path( stable_session_id, persona_name, repo_root ):
             if header and f"session_id={sid8}" in header:      return path
             if os.path.basename( path ).endswith( f"-{sid8}.md" ): return path
 
+    # 1.5 THE CANONICAL LIVE SLOT OUTRANKS EVERY HISTORICAL SIBLING (row f99bed95).
+    #     `<repo_root>/io/mementos/<slug>.md` is the slot the fleet's writers target and
+    #     the one `reap_memento.seat_memento_slot` verifies. It is a BARE name, so it
+    #     frequently carries no `written_at` header — and step 2's ranking demotes an
+    #     unstamped record below EVERY stamped one, regardless of age. Measured against
+    #     the live tree on 2026-08-29: Rio's fresh 18:35 `io/mementos/rio.md` ranked 44th
+    #     of 79 and the resolver returned `rio-ea46bc1a.md`, 2.8 days old. The successor's
+    #     boot receipt then named that file and the wake check alarmed STALE_MEMENTO
+    #     against a seat that was fine.
+    #
+    #     Only the REPO's slot qualifies. The mirror holds a same-named `<slug>.md` whose
+    #     copy goes stale on its own schedule — that is what respin_wake_check's
+    #     SLOT_MIRROR alarm exists to catch, so it must not be promoted here.
+    #
+    #     Persona is still confirmed before the slot is accepted: a bare name is a claim,
+    #     and handing a seat another persona's state stays worse than handing it none.
+    for slug in slugs:
+        slot = os.path.normpath( os.path.join( repo_root, "io", "mementos", f"{slug}.md" ) )
+        for path, header, _ in candidates:
+            if os.path.normpath( path ) == slot and _persona_of( path, header ) == slug:
+                return path
+
     # 2. Newest record for this persona — survives dismiss-then-spawn, where
     #    the seat is new but the persona carried over. Slugs are tried in
     #    order, accent-folded first.
@@ -1320,6 +1472,12 @@ def _resolve_memento_path( stable_session_id, persona_name, repo_root ):
                 return path
 
     return None
+
+
+# The "is there anything here at all" floor for a memento body — see
+# `_memento_body_after_header` for why it is a presence floor and NOT a
+# population split, and why tuning it to separate two clusters is a mistake.
+_MEMENTO_PRESENCE_FLOOR_BYTES = 200
 
 
 def _extract_amendment_tail( content ):
@@ -1354,7 +1512,46 @@ def _extract_amendment_tail( content ):
     return content[ idx: ].strip()
 
 
-def _truncate_visibly( text, path, max_bytes=_MEMENTO_MAX_BYTES ):
+_MEMENTO_COMMENT_BLOCK = re.compile( r"<!--.*?-->", re.DOTALL )
+
+
+def _substantive_body( content ):
+    """
+    Return the memento's body with HTML comment blocks and blank lines removed —
+    what a READER would actually read, as opposed to what the file weighs.
+
+    🔴 WHY THIS EXISTS: the near-blank warning used to key on the AMENDMENT TAIL,
+    which answers a different question than the one it printed. A memento written
+    the way the workflow prescribes — one `write --slot io|root` at prepare-for-
+    re-spin — puts ALL of its state in the BODY and has no tail at all. So a full
+    record was greeted with "MEMENTO FOUND BUT IT CARRIES NO STATE".
+
+    MEASURED 2026-09-05 over `io/mementos/` — 656 records, 517 with no amendment
+    tail, and the warning fired on every one of them:
+
+        strips to ZERO substantive bytes    1   <- `chloe.md`, a POINTER not a record
+        carries real prose                516   <- smallest 1,315 bytes
+
+    A gap of 0 to 1,315 needs no threshold and no judgement call, which is why
+    this is a PREDICATE ("is there prose here at all") rather than a byte cutoff.
+    A cutoff would be a hand-maintained number standing in for the question.
+
+    Requires:
+        - content is the memento text, or None
+
+    Ensures:
+        - returns the body with comment blocks and blank lines removed
+        - returns "" for None, for empty content, and for a pointer file whose
+          entire content is comment lines
+        - never raises
+
+    """
+    if not content: return ""
+    stripped = _MEMENTO_COMMENT_BLOCK.sub( "", content )
+    return "\n".join( line for line in stripped.splitlines() if line.strip() )
+
+
+def _truncate_visibly( text, path, max_bytes=_MEMENTO_MAX_BYTES, keep="tail" ):
     """
     Cap `text` at max_bytes KEEPING THE END, and say so IN BAND when it bites.
 
@@ -1381,6 +1578,24 @@ def _truncate_visibly( text, path, max_bytes=_MEMENTO_MAX_BYTES ):
     raw = text.encode( "utf-8" )
     if len( raw ) <= max_bytes: return text
 
+    # 🔴 WHICH END SURVIVES IS NOT ONE ANSWER — 2026-09-05 (Krishna 🦚) on Tiberius 👑's
+    # question, MEASURED against a real 20,765-byte record before it was believed. Keeping
+    # the TAIL is right for AMENDMENTS, which accrete oldest-first. It is WRONG for a
+    # BODY-ONLY memento, where the opening IS the state: on `clayton-d34333a9.md` the tail
+    # rule delivered 8,745 bytes and dropped the first line — the who-am-I the seat needs
+    # first. ⇒ The caller says which end it is quoting, because only the caller knows.
+    if keep == "head":
+        head    = raw[ :max_bytes ].decode( "utf-8", errors="ignore" )
+        omitted = len( raw ) - len( head.encode( "utf-8" ) )
+        return (
+            f"{head}\n"
+            f"──── CUT HERE — {omitted} later bytes omitted ────\n"
+            f"The rest of the body was dropped to keep boot context cheap; what you have\n"
+            f"is the OPENING and is INCOMPLETE. Read the full record before acting on it:\n"
+            f"  {path}\n"
+            f"────────────────────────────────────────────────────"
+        )
+
     tail    = raw[ -max_bytes: ].decode( "utf-8", errors="ignore" )
     omitted = len( raw ) - len( tail.encode( "utf-8" ) )
     return (
@@ -1394,7 +1609,26 @@ def _truncate_visibly( text, path, max_bytes=_MEMENTO_MAX_BYTES ):
     )
 
 
-def _resolve_repo_root( cwd=None ):
+def _repo_root_owning( start ):
+    """
+    Lazy seam onto lupin_mcp.memento_repo_root.repo_root_owning.
+
+    Imported INSIDE the call rather than at module scope because this hook runs on
+    every SessionStart fleet-wide, in repos that may not have lupin_mcp importable.
+    An ImportError here must degrade to the walk below, never take SessionStart down.
+
+    Ensures:
+        - the repo root owning `start`, or None when it cannot be resolved
+        - never raises
+    """
+    try:
+        from lupin_mcp.memento_repo_root import repo_root_owning
+        return repo_root_owning( start )
+    except Exception:
+        return None
+
+
+def _resolve_repo_root( cwd=None, repo_root_fn=None ):
     """
     Find the repo whose mementos this seat should read: the nearest `.git`
     ancestor of the session's own cwd.
@@ -1412,31 +1646,95 @@ def _resolve_repo_root( cwd=None ):
     the house rule rather than inventing a second one. `LUPIN_ROOT` survives
     only as the last fallback, for the case where cwd is absent or unrooted.
 
+    🔴 AND THE HOUSE RULE IS WRONG IN A WORKTREE — A `.git` FILE IS STILL A `.git`
+    (measured 2026-09-04). `os.path.exists( path/".git" )` does not ask WHAT KIND of
+    `.git` it found, and a linked worktree's `.git` is a FILE containing
+    `gitdir: <main>/.git/worktrees/<name>`. So the walk stops at the WORKTREE, and
+    this returned it — while the memento writer had already been fixed (memento_io
+    row af0c5700, 2026-07-21) to collapse a worktree to its MAIN checkout. The seat
+    then rehydrated from a tree holding none of its records: 623 in the main
+    checkout, 0 in the worktree, and the boot receipt reported `SEED_NOT_CONSUMED`
+    for a memento that was on disk.
+
+    ⚠️ THE SAME `.git`-EXISTS SHAPE TOOK THE SESSION LISTENER DOWN THE SAME DAY
+    (Rio ⚡, `resolve_project_name`), which is why this is a class rather than a
+    typo. A presence test that cannot distinguish a directory from a file agrees
+    with itself and answers about the wrong tree.
+
+    ⇒ `repo_root_owning` now answers FIRST and preserves every other case: a plain
+    repo, a subdirectory, a NESTED repo and a SUBMODULE all still resolve to their
+    OWN root. Repo IDENTITY is never crossed — a lupin-mobile worktree resolves to
+    lupin-mobile, so María's 2026-08-15 finding above stands untouched.
+
+    ⚠️ THE `.git` WALK SURVIVES AS THE FALLBACK, DELIBERATELY. This hook runs on
+    SessionStart fleet-wide, including where `git` is missing, the tree is not a
+    repo, or `lupin_mcp` is not importable — and a hook that raises takes the whole
+    SessionStart down, which is worse than a wrong root. So git answers when it can
+    and the walk answers when it cannot. The ORDER is the fix: the walk was never
+    wrong about a plain repo, only about a worktree, and git is asked before it now.
+
     Requires:
         - cwd is the session's working directory, or None
+        - repo_root_fn( start ) -> the repo root owning `start`, or None
 
     Ensures:
-        - Returns the nearest ancestor of cwd containing `.git`
-        - Falls back to LUPIN_ROOT, then os.getcwd(), when no ancestor has one
+        - Returns the repo root that OWNS cwd — the MAIN checkout when cwd is in a
+          linked worktree; that tree's own root for a plain repo, a subdirectory, a
+          nested repo or a submodule
+        - When git cannot answer, falls back to the nearest `.git` ancestor of cwd
+        - Falls back to LUPIN_ROOT, then os.getcwd(), when neither resolves
         - Never raises
     """
-    start = cwd or os.getcwd()
+    start   = cwd or os.getcwd()
+    resolve = repo_root_fn if repo_root_fn is not None else _repo_root_owning
+
+    # 🔴 THE CAUSE IS CARRIED, NOT SWALLOWED (maya 🌻's review finding, 2026-09-04).
+    # This was `except Exception: pass`, and the fallback below then announced "git
+    # could not resolve the repo root" — which is a LIE when the resolver RAISED.
+    # A wrong number gets re-derived by the next reader; a wrong MECHANISM sends them
+    # into innocent code, and git was the innocent party named here.
+    cause = None
+    try:
+        owned = resolve( start )
+        if owned: return str( owned )
+        cause = "git could not resolve a repo root"
+    except Exception as error:
+        cause = f"the repo-root resolver RAISED ({type( error ).__name__}: {error})"
+
+    # 🔴 BOTH FALLBACKS BELOW ANNOUNCE THEMSELVES (Rio ⚡, 2026-09-04). They were
+    # silent, and a silent fallback here does not merely lose precision — the walk
+    # is WRONG IN A WORKTREE by this function's own docstring, so reaching it IS the
+    # defect returning, reported as a normal boot. STDERR, never stdout: the hook
+    # pipes listener stdout into a shared 130 MB log where nobody would see it.
     try:
         path = os.path.abspath( start )
         while True:
-            if os.path.exists( os.path.join( path, ".git" ) ): return path
+            if os.path.exists( os.path.join( path, ".git" ) ):
+                print( f"[register_session] WARNING: {cause} for {start!r}; fell back to the "
+                       f"nearest .git ancestor and SETTLED FOR {path!r}. If that is a linked "
+                       f"worktree this is the WRONG tree — the memento writer uses its MAIN "
+                       f"checkout.", file=sys.stderr )
+                return path
             parent = os.path.dirname( path )
             if parent == path: break          # reached filesystem root
             path = parent
-    except OSError:
-        pass
+    except OSError as error:
+        # Same misattribution hazard one level down: without this the message below
+        # would report "no .git ancestor" when the WALK ITSELF errored — a different
+        # fault sending the reader somewhere else innocent.
+        cause = f"{cause}, then the .git-ancestor walk FAILED (OSError: {error})"
 
-    return os.environ.get( "LUPIN_ROOT", os.getcwd() )
+    settled = os.environ.get( "LUPIN_ROOT", os.getcwd() )
+    print( f"[register_session] WARNING: {cause} for {start!r} and no .git ancestor was found; "
+           f"SETTLED FOR {settled!r} from LUPIN_ROOT/cwd. This is the ambient root and it "
+           f"describes the HOST, not this seat — a non-lupin seat resolves to lupin here.",
+           file=sys.stderr )
+    return settled
 
 
 def _stamp_respin_boot_receipt( stable_session_id, persona_name, tmux_session,
                                 memento_path, memento_written_at, repo_root,
-                                memento_persona=None ):
+                                memento_persona=None, block=None, block_error=None ):
     """
     Leave the boot receipt a re-spin's wake check reads (row b0570b67).
 
@@ -1479,9 +1777,58 @@ def _stamp_respin_boot_receipt( stable_session_id, persona_name, tmux_session,
             memento_persona    = memento_persona,
             repo_root          = repo_root,
             base_dir           = str( fleet_data_root( repo_root ) ),
+            block              = block,
+            block_error        = block_error,
         )
     except Exception:
         return None
+
+
+def _memento_body_after_header( content ):
+    """
+    Return the record's substantive body — everything after the header line and
+    before the amendment tail — or None when there is nothing there.
+
+    🔴 WHY THIS EXISTS. `_build_memento_block` used to branch two ways: a record
+    either had an amendment tail, or it "carried no state". That was measured true
+    in August 2026 for records BORN thin and amended later, which was the only
+    shape then. It has been false since `memento_io.py write` started writing a
+    record WHOLE — all of the state in the body, no amendment marker anywhere —
+    and the block told those seats their full memento was near-blank.
+
+    MEASURED (row 508449b7, Tiberius, re-derived on a second instrument):
+    341 records, 128 with an amendment tail, 213 without — and 210 of those 213
+    are >= 2000 bytes of real state. The smallest is 1,433 bytes. The largest
+    record described as carrying no state was 21,025 bytes.
+
+    ⚠️ THE FLOOR BELOW IS NOT A POPULATION SPLIT AND MUST NOT BE TUNED INTO ONE.
+    At 200 bytes it sits an order of magnitude under the smallest real record
+    (1,433), so it separates "there is nothing here at all" from "there is
+    something" — it does not try to judge whether the something is any good.
+    Picking a number that lands between the two observed clusters would be
+    fitting a threshold to today's corpus, and the next shape of record would
+    land on the wrong side of it silently.
+
+    Requires:
+        - content is the memento text, or None
+
+    Ensures:
+        - Returns the body with the header line and any amendment tail removed
+        - Returns None when content is empty, or the remaining body is under the
+          presence floor — the caller then emits the near-blank warning
+        - Never raises
+    """
+    if not content: return None
+
+    body = content
+    idx  = body.find( _MEMENTO_AMENDMENT_MARKER )
+    if idx != -1: body = body[ :idx ]
+
+    lines = body.split( "\n" )
+    if lines and _MEMENTO_HEADER_MARKER in lines[ 0 ]: lines = lines[ 1: ]
+    body = "\n".join( lines ).strip()
+
+    return body if len( body.encode( "utf-8" ) ) >= _MEMENTO_PRESENCE_FLOOR_BYTES else None
 
 
 def _build_memento_block( stable_session_id, persona_name, repo_root=None, cwd=None,
@@ -1521,29 +1868,99 @@ def _build_memento_block( stable_session_id, persona_name, repo_root=None, cwd=N
           overwhelmingly common boot that has none)
         - Otherwise returns a block naming the path and quoting the newest
           amendment, visibly truncated if it exceeds the byte cap
-        - Never raises
+        - Stamps the boot receipt EXACTLY ONCE, on every path that reaches the
+          try — including the empty one and every failing one
+        - Never raises. Every failure — including a repo-root resolution that
+          throws — is recorded in the receipt's `block_error` and returns "".
     """
-    repo_root = repo_root if repo_root is not None else _resolve_repo_root( cwd )
+    # 🔴 THIS CALL WAS OUTSIDE THE try AND MY REASON FOR LEAVING IT THERE WAS
+    # FALSE. I argued that wiring it in risked a receipt landing in the AMBIENT
+    # repo's fleet directory, and that a misplaced receipt is worse than a
+    # missing one. The second half is still true; the first is not an argument
+    # for anything, because `_resolve_repo_root` DOES NOT RAISE — its contract
+    # says "Never raises" and it means it, falling back to LUPIN_ROOT and then
+    # cwd with a stderr warning.
+    #
+    # Clayton 😎 caught it (2026-09-06); the measurement is his claim confirmed:
+    #     cwd            /tmp/other-repo-…     (not a git repo)
+    #     resolved root  …/lupin-wt-…          <- the AMBIENT root
+    #     fleet dir      …/projects-data/lupin
+    #     correct dir    …/projects-data/other-repo-…
+    # ⇒ THE MISPLACED RECEIPT ALREADY HAPPENS on the ordinary SUCCESS path, via
+    # that silent settle, so leaving this outside prevented nothing. And moving
+    # it in adds no risk: if it ever did raise, repo_root stays None and
+    # fleet_data_root( None ) resolves to the SAME ambient directory the settle
+    # would have chosen. The objection was void, not merely weak.
+    #
+    # ⚠️ THE SETTLE IS A SEPARATE AND LARGER FINDING, NOT FIXED HERE: a seat in a
+    # non-lupin repo gets a healthy-looking receipt written into LUPIN's fleet
+    # directory — a false green for a wake check that is not its own. It is the
+    # ambient-root hazard this repo's CLAUDE.md already documents, arriving in
+    # the boot receipt. Do not fold it into this fix.
+    # 🔴 THIS SHAPE IS CLAYTON 😎's, NOT MINE (2026-09-06). All three parts are
+    # his and each is load-bearing: PRE-INITIALISE every name above the try,
+    # COMPUTE the argument expressions into locals INSIDE it, and let the
+    # finally's stamp evaluate NOTHING BUT BARE NAMES. He specified it after
+    # killing the fix I was about to write, which had none of the three.
+    # Attributed at the site deliberately — a variant credited to whoever typed
+    # it tells the next reader the review seat contributed nothing.
+    #
+    # A name bound INSIDE the try is unbound in the finally when the try failed
+    # before the binding, so a naive finally raises UnboundLocalError — and that
+    # error REPLACES the real fault, so the caller at :2445 swallows a message
+    # naming a variable instead of the actual failure. Measured:
+    #     naive           -> UnboundLocalError: cannot access local variable 'path'
+    #     pre-initialised -> RuntimeError: THE REAL FAULT   (survives)
+    # That is worse than the bug it fixes: a red herring pointing at innocent
+    # code, where today a reader at least gets a real exception name.
+    #
+    # And an ARGUMENT EXPRESSION in the finally re-opens the whole defect one
+    # level down — `_written_at_of( header )` and `_persona_of( path, header )`
+    # used to be evaluated in the stamp call itself, which is why four call
+    # sites still left NO RECEIPT AT ALL after the first fix covered the render.
+    path = header = written = memento_persona = None
+    block, block_error      = "", None
+    try:
+        repo_root       = repo_root if repo_root is not None else _resolve_repo_root( cwd )
+        path            = _resolve_memento_path( stable_session_id, persona_name, repo_root )
+        header          = _header_of( path ) if path else None
+        written         = _written_at_of( header ) if path else None
+        memento_persona = _persona_of( path, header ) if path else None
+        block           = _render_memento_block( path )
+    except Exception as error:
+        block           = ""
+        block_error     = type( error ).__name__
+    finally:
+        # THE ONLY WRITE, AND IT CANNOT BE SKIPPED. A missing receipt file is
+        # indistinguishable from "the hook never ran" — the exact silence this
+        # receipt exists to end — so the instrument must not be able to
+        # reproduce its own target defect.
+        _stamp_respin_boot_receipt(
+            stable_session_id, persona_name, tmux_session,
+            path, written, repo_root,
+            memento_persona = memento_persona,
+            block           = block,
+            block_error     = block_error,
+        )
 
-    path = _resolve_memento_path( stable_session_id, persona_name, repo_root )
+    return block
 
-    # The wake check's witness (row b0570b67). Stamped HERE because this is the
-    # one place that knows WHICH file the boot path actually opened — the fact
-    # that answers "did it wake?" and "did it read the right memento?" at once.
-    # Written before the early return so a blank rehydrate is recorded too.
-    # The record's OWN declared persona rides along with its stamp. `persona_name`
-    # is who the SEAT is; this is who the FILE says it belongs to, and the wake
-    # check's WRONG_PERSONA verdict is the difference between them (row c3670edc).
-    # Read from the header the resolver already confirmed, falling back to the
-    # filename — `_persona_of` is the same two-source rule the resolver itself
-    # uses, so the receipt cannot disagree with the decision it is recording.
-    header = _header_of( path ) if path else None
-    _stamp_respin_boot_receipt(
-        stable_session_id, persona_name, tmux_session,
-        path, _written_at_of( header ) if path else None, repo_root,
-        memento_persona = _persona_of( path, header ) if path else None,
-    )
 
+def _render_memento_block( path ):
+    """
+    Render the block for a resolved memento path, with no side effects.
+
+    Split out of `_build_memento_block` so the receipt can be stamped with what
+    this actually produced. Keeping the render pure is the point: the stamp is
+    the only write, and it happens once, after this has returned.
+
+    Requires:
+        - path is the memento file the boot path resolved, or None
+
+    Ensures:
+        - returns "" when path is None or the file cannot be read
+        - never raises
+    """
     if not path: return ""
 
     try:
@@ -1557,11 +1974,74 @@ def _build_memento_block( stable_session_id, persona_name, repo_root=None, cwd=N
 
     amendment = _extract_amendment_tail( content )
     if amendment:
-        body    = _truncate_visibly( amendment, path )
+        # The tail is what you had not yet acted on; the body's opening is who you are.
+        # A seat needs both, and before this the tail could consume the whole budget.
+        head_src = _substantive_body( content[ : content.find( amendment ) ] )
+        lead     = _truncate_visibly( head_src, path, max_bytes=_MEMENTO_BODY_LEAD_BYTES,
+                                      keep="head" ) if head_src else ""
+        body     = _truncate_visibly( amendment, path,
+                                      max_bytes=_MEMENTO_MAX_BYTES - _MEMENTO_BODY_LEAD_BYTES )
         headline = "  🧠  YOU HAVE A MEMENTO — YOU WROTE IT BEFORE THIS CONTEXT RESET"
         section = (
+            "  Who you are, from the top of the record:\n"
+            "\n"
+            f"{lead}\n"
+            "\n"
             "  Your amendments — what you wrote down but had not yet acted on —\n"
             "  follow. The full record is one read away at the path above.\n"
+            "\n"
+            f"{body}\n"
+        ) if lead else (
+            "  Your amendments — what you wrote down but had not yet acted on —\n"
+            "  follow. The full record is one read away at the path above.\n"
+            "\n"
+            f"{body}\n"
+        )
+    elif _memento_body_after_header( content ) and _substantive_body( content ):
+        # 🔴 THE THIRD CASE, AND ITS ABSENCE WAS THE BUG (row 508449b7).
+        # This branch did not exist: a record with no amendment tail fell
+        # straight to the near-blank warning below, and a memento written WHOLE
+        # by `memento_io.py write` has ALL its state in the body and no
+        # amendment marker anywhere. Measured: 213 of 341 records took the
+        # warning, and 210 of those were >= 2000 bytes of real state — the
+        # largest, at 21,025 bytes, was announced to its seat as carrying none.
+        #
+        # ⇒ A seat told its full record is blank does not read it. That is the
+        # same failure Rachel's warning was written to prevent, arrived at from
+        # the opposite direction: she stopped a thin record wearing a green
+        # banner; this stops a FULL record wearing a red one. Both mislead about
+        # what is in the file, and the fix for one must not reintroduce the other
+        # — which is why the warning below is kept, not replaced.
+        #
+        # 🔴 THIRD STATE, ADDED 2026-09-05 (Krishna 🦚) ON TIBERIUS 👑'S REPORT.
+        # The branch below is RIGHT about a genuinely empty record and was being
+        # reached by full ones, because the test was `has an amendment tail` while
+        # the message said `carries no state`. Those are different questions, and a
+        # memento written the way the workflow prescribes — one `write` at
+        # prepare-for-re-spin — answers YES to the second and NO to the first.
+        #
+        # MEASURED over io/mementos/: 656 records, 517 with no tail. 516 of those
+        # carry real prose (smallest 1,315 bytes); exactly ONE strips to nothing,
+        # and it is `chloe.md`, a POINTER rather than a record. So the warning was
+        # firing on 517 records and was correct about none of them.
+        #
+        # ⚠️ THE WARNING IS NOT WEAKENED — it is narrowed to the case it describes.
+        # Tiberius asked for exactly that and explicitly did not ask for a revert.
+        #
+        # ⚠️ MERGED (triage staging line, row ef0fa72b): the two fixes above landed
+        # separately and disagree on ONE thing — row 508449b7 uses a 200-byte presence
+        # floor after the header, Krishna's 2026-09-05 fix a comment-stripped prose predicate
+        # with no byte cutoff. Both are required here, so every case either side's tests
+        # pin keeps its answer. Between them sits an untested zone neither corpus contains
+        # (a record with 1-199 bytes of prose, or 200+ bytes of comments only): it takes
+        # the near-blank warning. The body is quoted from its OPENING (Krishna's
+        # measured finding that the tail rule dropped the who-am-I line).
+        body     = _truncate_visibly( _memento_body_after_header( content ), path, keep="head" )
+        headline = "  🧠  YOU HAVE A MEMENTO — ALL OF ITS STATE IS IN THE BODY"
+        section = (
+            "  This record was written WHOLE — its state is in the body, and it has no\n"
+            "  amendment tail, which is NORMAL: a memento written once at prepare-for-re-spin\n"
+            "  puts everything in the body. It follows; the full record is at the path above.\n"
             "\n"
             f"{body}\n"
         )
@@ -1573,11 +2053,20 @@ def _build_memento_block( stable_session_id, persona_name, repo_root=None, cwd=N
         # banner, which reads as success — a seat gets a pointer, no state, and
         # no signal that anything is missing. A near-blank rehydrate wearing a
         # green banner is worse than a red one, because nobody goes looking.
+        #
+        # ⚠️ STILL REACHED, AND STILL RIGHT — but for a NARROWER population than
+        # when it was written. It now means "no amendment tail AND no body worth
+        # the name", which is what Rachel actually measured. The 213 records that
+        # used to land here wrongly take the branch above.
+        #
+        # ⚠️ NARROWED 2026-09-05: this now fires only when the body carries no
+        # prose at all. Rachel's finding stands — what changed is that a record
+        # WITH state no longer lands here.
         headline = "  ⚠️  MEMENTO FOUND BUT IT CARRIES NO STATE — TREAT AS A NEAR-BLANK RETURN"
         section = (
-            "  The record exists and is yours, but it has NO amendment block —\n"
-            "  nothing was written down since it was first created, so there is\n"
-            "  nothing here about what you were doing.\n"
+            "  The record exists and is yours, but it has NO amendment block and\n"
+            "  no substantive body — so there is nothing here about what you were\n"
+            "  doing.\n"
             "\n"
             "  Read the full record before acting, and expect it to be thin.\n"
             "  If you owe anyone work, the store is the authority, not this file:\n"
@@ -1858,6 +2347,48 @@ def main():
         if session_id not in existing_ids:
             existing_ids.append( session_id )
 
+        # ── sender_id: computed HERE, on the host, and carried in the bridge ──
+        # Row 2184bebb, Option B (Mr. Radio's ruling 2026-09-19). The server used to
+        # re-derive this in `_sender_id_for_bridge` by walking `detect_project_for_path(
+        # bridge["cwd"] )` INSIDE the lupin-rest container — where host paths do not
+        # exist. The `.git` walk found nothing, fell back to the cwd BASENAME, and every
+        # worktree seat was served as `claude.code@seat-cc-author-<name>.deepily.ai#<hash>`
+        # while its own notifications said `claude.code@lupin.deepily.ai#<hash>`. Two
+        # identities for one seat; Krishna, Rio and Rachel each appeared TWICE on Rick's
+        # focus rail. Main-checkout seats looked right only by accident — their basename
+        # happens to be "lupin".
+        #
+        # The session is the only party that KNOWS its identity. Path-parsing INFERS it,
+        # and an inference that reads `/lupin/.claude/worktrees/seat-…` correctly today
+        # breaks the day someone nests a worktree or renames a repo. So the host writes
+        # what it knows and the server stops guessing.
+        #
+        # ⚠️ NOT `build_sender_id_for_cc()` HERE, DELIBERATELY. That helper anchors the
+        # project on the bridge file's cwd snapshot — and at THIS point in Phase 2 the
+        # bridge has not been written yet, so it would read an absent or PREVIOUS
+        # session's bridge. The payload's `cwd` is the SessionStart cwd, which is exactly
+        # the value that snapshot exists to preserve, so we resolve from it directly and
+        # get the same answer without the ordering hazard.
+        #
+        # On any failure this stays ABSENT rather than becoming a guess or a sentinel:
+        # Option A (infer from the path segment before `/.claude/worktrees/`) is BANNED,
+        # including as a silent fallback — "or we re-create the exact defect you just
+        # found, a wrong identity that looks like a right one."
+        sender_id = None
+        if cwd:
+            try:
+                from cosa.agents.utils.sender_id import build_sender_id, detect_project_for_path
+                sender_id = build_sender_id(
+                    "claude.code",
+                    project = detect_project_for_path( cwd ),
+                    suffix  = str( stable_session_id )[ :8 ],
+                )
+            except Exception as e:
+                print( f"[register_session] WARNING: could not compute sender_id for the bridge "
+                       f"({e!r}) — the bridge will carry none and /api/commons/active-sessions "
+                       f"will report sender_id null for this seat rather than guess it.",
+                       file=sys.stderr )
+
         session_data = {
             "session_id"        : session_id,
             "stable_session_id" : stable_session_id,
@@ -1869,6 +2400,10 @@ def main():
             "tmux_session"      : tmux_session,
             "window_size"       : _resolve_window_tokens(),
         }
+        # Only when we actually have one: an ABSENT key and a null both mean "the server
+        # must not guess", and absent keeps the bridge free of fields that carry nothing.
+        if sender_id:
+            session_data[ "sender_id" ] = sender_id
 
         # Manager-spawned headless reviewer tagging (2026-05-28). When this
         # session was launched by the cosa-voice spawn_sessions MCP tool, the
@@ -1972,6 +2507,16 @@ def main():
             except ( json.JSONDecodeError, OSError ):
                 existing = { }
         merged = { **existing, **session_data }
+        # 🔴 REBIND, not decoration (row from Clayton 😎's measurement, 2026-08-30).
+        # The write two dozen lines below persists `merged` correctly — and then
+        # `_record_listener_pid()` at the end of main() writes THIS dict WHOLESALE
+        # over the same path (atomic_write_json, not read-modify-write), so every
+        # on-disk key main() does not itself carry was erased ~180 lines later.
+        # `session_topic` is a confirmed production victim: silently dropped on
+        # every /clear. Same mechanism as the manager-figure stamp at row 6325123c,
+        # which was fixed by keeping the in-memory dict in sync; this closes it at
+        # the source instead of one field at a time.
+        session_data = merged
         # Atomic (row 49b2c80b). The stable-id lockfile twelve lines above
         # is already O_EXCL against "the documented double-fire on
         # --continue (two concurrent SessionStart hooks)" — that same
@@ -2136,9 +2681,20 @@ def main():
     if session_id:
         try:
             from lupin_cli.claude_code.hooks.lib.manager_figure import resolve_implicit_manager_figure
-            from lupin_cli.claude_code.hooks.lib.session_bridge import set_manager_figure_implicit
+            from lupin_cli.claude_code.hooks.lib.session_bridge import (
+                MANAGER_FIGURE_BRIDGE_FIELD, set_manager_figure_implicit )
             _mf_persona  = ( session_data.get( "voice_persona" ) or {} ).get( "name" )
             _mf_implicit = resolve_implicit_manager_figure( _mf_persona, os.environ )
+            # Keep the IN-MEMORY dict in sync with the disk stamp (row 6325123c).
+            # set_manager_figure_implicit() writes the FILE; _record_listener_pid()
+            # at the end of main() then writes this dict WHOLESALE over that same
+            # file (atomic_write_json, not read-modify-write), so a stamp that only
+            # reached disk was erased ~45 lines later on every real session — 0 of
+            # 47 bridges carried the field. Measured 2026-08-30: reproduced with a
+            # stamp-then-_record_listener_pid sequence; the field vanishes. The
+            # out-of-band drive never saw it because the test monkeypatches
+            # _spawn_listener, so the clobbering write never runs.
+            session_data[ MANAGER_FIGURE_BRIDGE_FIELD ] = _mf_implicit
             if not set_manager_figure_implicit( stable_session_id, _mf_implicit ):
                 print( "[register_session] WARNING: manager-figure stamp not written "
                        "(bridge unresolved); is_manager_figure will fall back to the "

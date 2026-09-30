@@ -18,7 +18,9 @@ Venue: :7999-eligible. Pure in-process; no server, no network, no GPU.
 """
 
 import base64
+import shutil
 import sys
+import tempfile
 import types
 import unittest
 from unittest.mock import MagicMock, patch, mock_open, AsyncMock
@@ -68,7 +70,8 @@ class _Executor:
     def submit( self, work, trace ):
         self.works.append( work )
         return types.SimpleNamespace( status="waiting", answer=None, answer_raw=None,
-                                      job_id="job-1", error=None, snapshotable=False )
+                                      job_id="job-1", error=None, snapshotable=False,
+                                      queue_position=None )
 
 
 class _Cache:
@@ -169,8 +172,13 @@ class TestDoor8DispatchesASpokenAgenticCommand( unittest.IsolatedAsyncioTestCase
     async def _call( self, munger, flow ):
         provider = MagicMock()
         provider.transcribe.return_value = MagicMock( strip=MagicMock( return_value=munger.transcription ) )
+        # Every config key answers with a real, per-test directory: the door writes the
+        # upload into `speech upload temp dir` (row 27bcdd79), and a made-up path there
+        # fails in setup before the flow is ever reached.
+        upload_dir = tempfile.mkdtemp( prefix="door8-upload-" )
+        self.addCleanup( shutil.rmtree, upload_dir, True )
         config_mgr = MagicMock()
-        config_mgr.get.return_value = "/audio.wav"
+        config_mgr.get.return_value = upload_dir
         main = MagicMock(); main.app_debug = False; main.app_verbose = False
         with _patch_fastapi_main( main ), \
              patch( "builtins.open", mock_open() ), \

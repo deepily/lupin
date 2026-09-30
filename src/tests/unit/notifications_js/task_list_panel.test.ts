@@ -15,7 +15,7 @@
 //   npx c8 --include='src/lupin_app/static/js/notifications.js' --reporter=text \
 //       npx tsx --test src/tests/unit/notifications_js/task_list_panel.test.ts
 
-import { test, before, beforeEach } from "node:test";
+import { test, before, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -30,6 +30,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 // rather than pasting the string keeps this test honest: if the constant changes,
 // the assertions below travel with it instead of pinning a stale literal.
 import { TASK_LIST_QUERY } from "../../../lupin_app/static/js/shared/task-list-query.js";
+import { TASK_VERB_SPECS } from "../../../lupin_app/static/js/shared/task-verbs.js";
 
 const HERE = dirname( fileURLToPath( import.meta.url ) );
 const NOTIFICATIONS_JS = resolve( HERE, "../../../lupin_app/static/js/notifications.js" );
@@ -43,6 +44,7 @@ before( () => {
   // correct production behavior and exactly what broke 3 unrelated tests when the
   // global was first introduced without a harness counterpart.
   window.LUPIN_TASK_LIST_QUERY = TASK_LIST_QUERY;
+  window.LUPIN_TASK_VERB_SPECS = TASK_VERB_SPECS;
   const fullSource = readFileSync( NOTIFICATIONS_JS, "utf8" );
   const initIdx    = fullSource.indexOf( "// Initialize when DOM is ready" );
   assert.ok( initIdx > 0, "bottom-of-file init marker must be found" );
@@ -71,9 +73,22 @@ type TaskUI = Record<string, unknown> & {
   _truncateTaskTitle: ( label: unknown ) => string;
   _taskBodyIsEmpty: ( task: unknown ) => boolean;
   _handleTaskListClick: ( target: unknown ) => void;
+  _handleRowControlClick: ( target: unknown ) => boolean;
+  _handleTaskSubmitClick: ( button: unknown ) => Promise<void>;
+  _transitionTask: ( id: string, to: string, extras?: unknown ) => Promise<{ ok: boolean; message?: string }>;
+  _patchTaskFields: ( id: string, patch: Record<string, unknown> ) => Promise<{ ok: boolean; message?: string }>;
+  _handlePriorityUpdateClick: ( button: unknown ) => Promise<void>;
+  startTaskListPolling: () => void;
+  fetchEpicStories: () => Promise<unknown>;
+  renderEpicBoard: ( composite: unknown ) => void;
+  renderHoldingArea: ( composite: unknown ) => void;
+  refreshHoldingArea: () => Promise<void>;
+  _epicBoardAccordionWired: boolean;
+  _holdingAreaControlsWired: boolean;
+  _disclosureToggle: ( task: Record<string, unknown> ) => string;
+  _handleDisclosureToggle: ( button: unknown ) => void;
   openTaskBodyOverlay: ( bodyText: string, idLabel: string ) => void;
   _dismissTaskBodyOverlay: () => void;
-  TASK_TITLE_TRUNCATE_LEN: number;
   _taskBodyOverlayKeyListener: ( ( e: KeyboardEvent ) => void ) | null;
   // Per-persona accordion (2026-06-17)
   _taskGroupOwnerKey: ( group: TaskGroupModel ) => string | null;
@@ -96,6 +111,11 @@ type TaskUI = Record<string, unknown> & {
   // Live/parked header split (2026-08-28)
   _taskIsParked: ( task: unknown, now?: number ) => boolean;
   _formatTaskListCount: ( live: number, parked: number ) => string;
+  // Closed-vs-new ratio in the header (2026-09-01)
+  _formatFlowRatio: ( payload: unknown ) => string;
+  fetchFlowRatio: () => Promise<unknown>;
+  _renderFlowRatio: ( payload: unknown ) => void;
+  log: ( ...args: unknown[] ) => void;
   _taskListCountText: ( openTasks: unknown, now?: number ) => string;
   _renderTaskListUnreachable: ( container: HTMLElement, countEl: HTMLElement | null ) => void;
   _stampTaskListUpdated: () => void;
@@ -128,7 +148,6 @@ function newUI(): TaskUI {
   ui.TASK_LIST_COLLAPSED_KEY    = "lupin.taskList.collapsedOwners";
   ui.TASK_LIST_UNASSIGNED_KEY   = "__unassigned__";
   ui._taskListAccordionWired    = false;
-  ui.TASK_TITLE_TRUNCATE_LEN    = 60;
   return ui;
 }
 
@@ -136,9 +155,16 @@ function buildPanelDOM(): void {
   document.body.replaceChildren();
   const section = document.createElement( "div" );
   section.id = "section-task-list";
+  // Mirrors notifications.html: the toolbar carries the PERSISTENT notice mount, a
+  // SIBLING of the container. A fixture without it would let _paintTaskListNotices
+  // no-op and every banner assertion below would fail for a reason the page does not
+  // have — the fixture, not the code (row moved 2026-09-17).
   section.innerHTML = `
     <h3>Task List: <span id="task-list-count">0</span>
         <span id="task-list-updated"></span></h3>
+    <div class="task-lookup" data-testid="task-lookup">
+      <div id="task-list-notices" class="task-list-notices" data-testid="task-list-notices" role="status"></div>
+    </div>
     <div id="task-list-container"></div>`;
   document.body.appendChild( section );
 }
@@ -173,12 +199,63 @@ function buildAccordionDOM( ui: TaskUI ): void {
     ui.renderTaskListTable( model, undefined, ui.loadCollapsedTaskOwners() );
 }
 
+// ══════════ WIRING THE PANE, BECAUSE THE FIXTURES ABOVE DO NOT ══════════
+//
+// 🔴 `buildPanelDOM` and `buildAccordionDOM` paint a container and stop. So every test
+// that called `_handleTaskListClick` or `_handleTaskAccordionToggle` BY NAME was
+// measuring a correct handler against a container carrying no listener at all — the
+// same shape that let a dead Won't-fix button survive five people looking at it.
+//
+// ⚠️ THIS FILE IS NOT AS BLIND AS `podcast_overlay` WAS, and the difference is worth
+// keeping straight. Measured 2026-09-02: delete every click listener in
+// notifications.js and this file goes 175/0 -> 166 pass / 9 fail, because it already
+// carries nine real click-path tests. The by-name sites are gaps in a watched file,
+// not a file with a watched denominator of zero.
+function wirePane( ui: TaskUI ): void {
+  ui._taskListAccordionWired = false;
+  ui._wireTaskListAccordion();
+}
+
+// Dispatch a real bubbling click and assert a handler was REACHED; the caller then goes
+// on asserting what the click DID.
+//
+// 🔴 THE REACHED-CHECK IS WHY THE NO-OP CASES MEAN ANYTHING. "Nothing happened" is
+// satisfied by a handler that correctly declined AND by no listener existing — two
+// sufficient causes for one observation. Proving the handler ran kills the second, and
+// the check sits ON THE PATH, so a conversion cannot quietly skip it.
+//
+// ⚠️ It is deliberately NOT used on the `{}` / detached-element tests below. Those pass
+// something that is not in any pane, on purpose, to pin the handler's own defensive
+// guard — a click cannot carry a non-element, and forcing one would delete the thing
+// they test rather than strengthen it.
+function clickThrough( ui: TaskUI, method: string, el: Element | null, what: string ): void {
+  assert.ok( el, `${ what } did not render at all — this test cannot speak to wiring` );
+
+  const target   = ui as unknown as Record<string, ( t: unknown ) => unknown >;
+  const original = target[ method ];
+  let   reached  = false;
+  target[ method ] = ( t: unknown ) => { reached = true; return original.call( ui, t ); };
+  el!.dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+  target[ method ] = original;
+
+  assert.ok( reached,
+    `${ what } reached NO handler — the pane has no click listener for it, so the ` +
+    `control is dead on screen however correct the handler is` );
+}
+
+
 // ─────────────────────────── isTaskOpenStatus (pure) ───────────────────────────
 
-test( "isTaskOpenStatus: terminal done/dropped → false; everything else (incl. missing) → true", () => {
+test( "isTaskOpenStatus: terminal done/dropped/wont_fix → false; everything else (incl. missing) → true", () => {
   const ui = newUI();
   assert.equal( ui.isTaskOpenStatus( "done" ), false );
   assert.equal( ui.isTaskOpenStatus( "dropped" ), false );
+  // wont_fix joined TERMINAL_STATUSES 2026-09-02. Before that this function knew
+  // only the first two, so every won't-fixed row counted as work still owed.
+  assert.equal( ui.isTaskOpenStatus( "wont_fix" ), false );
+  // not_approved is deliberately NOT terminal — a held row is waiting, not finished.
+  // It is hidden from the board by a server-side denylist, not by this predicate.
+  assert.equal( ui.isTaskOpenStatus( "not_approved" ), true );
   assert.equal( ui.isTaskOpenStatus( "blocked" ), true );
   assert.equal( ui.isTaskOpenStatus( "queued" ), true );
   assert.equal( ui.isTaskOpenStatus( null ), true );
@@ -188,17 +265,28 @@ test( "isTaskOpenStatus: terminal done/dropped → false; everything else (incl.
 
 // ─────────────────────────── _taskStatusRank / _taskPriorityRank (pure) ───────────────────────────
 
-test( "_taskStatusRank: known ranks, missing → 5, unknown → 5", () => {
+// Renumbered in TENS 2026-09-02 to make room for `parked` and `not_approved`, which
+// belong between `queued` and the unknown slot and had nowhere to go on the old
+// 0..7 scale. THE ORDER IS THE CONTRACT; the absolute values are arbitrary, so this
+// asserts the ORDERING rather than re-pinning a fresh set of magic numbers — a test
+// that pins literals has to be rewritten by whoever adds the next status, and that
+// edit is indistinguishable from breaking it.
+test( "_taskStatusRank: orders most-urgent first, unknown between open and terminal", () => {
   const ui = newUI();
-  assert.equal( ui._taskStatusRank( "blocked" ), 0 );
-  assert.equal( ui._taskStatusRank( "in_progress" ), 1 );
-  assert.equal( ui._taskStatusRank( "claimed" ), 2 );
-  assert.equal( ui._taskStatusRank( "review" ), 3 );
-  assert.equal( ui._taskStatusRank( "queued" ), 4 );
-  assert.equal( ui._taskStatusRank( "done" ), 6 );
-  assert.equal( ui._taskStatusRank( "dropped" ), 7 );
-  assert.equal( ui._taskStatusRank( null ), 5 );        // missing
-  assert.equal( ui._taskStatusRank( "bananas" ), 5 );   // unknown
+  const order = [ "blocked", "in_progress", "claimed", "review", "queued",
+                  "parked", "not_approved", "bananas", "done", "dropped", "wont_fix" ];
+  const ranks = order.map( s => ui._taskStatusRank( s ) );
+
+  for ( let i = 1; i < ranks.length; i++ ) {
+    assert.ok( ranks[ i - 1 ] < ranks[ i ],
+      `${order[ i - 1 ]} (${ranks[ i - 1 ]}) must sort before ${order[ i ]} (${ranks[ i ]})` );
+  }
+  // A missing status sorts exactly where an unrecognized one does.
+  assert.equal( ui._taskStatusRank( null ), ui._taskStatusRank( "bananas" ) );
+  // ...and that slot sits below every open status and above every terminal one,
+  // which is the property the "unknown" rank exists for.
+  assert.ok( ui._taskStatusRank( "bananas" ) > ui._taskStatusRank( "not_approved" ) );
+  assert.ok( ui._taskStatusRank( "bananas" ) < ui._taskStatusRank( "done" ) );
 } );
 
 test( "_taskPriorityRank: P<n> → n, missing/non-match → 99", () => {
@@ -207,6 +295,24 @@ test( "_taskPriorityRank: P<n> → n, missing/non-match → 99", () => {
   assert.equal( ui._taskPriorityRank( "P3" ), 3 );
   assert.equal( ui._taskPriorityRank( null ), 99 );
   assert.equal( ui._taskPriorityRank( "urgent" ), 99 );
+
+  // 🔴 THIS TEST USED TO STOP AT P3, AND THAT WAS THE FOUR-VALUE ASSUMPTION SITTING IN
+  // THE TEST RATHER THAN IN THE CODE. The value space was widened to P0–P5 (b4cdf47e,
+  // task_store_rules.py:119). The comparator was already right — it parses /^P(\d+)$/ —
+  // so nothing was broken, and nothing would have NOTICED if it regressed to P0–P3.
+  // Present, correct, and untestable-if-wrong is a third state, and this closes it.
+  assert.equal( ui._taskPriorityRank( "P4" ), 4 );
+  assert.equal( ui._taskPriorityRank( "P5" ), 5 );
+
+  // The specific quiet failure: a four-value comparator returns the UNKNOWN sentinel for
+  // both P4 and P5. They would then tie with each other and with every malformed value,
+  // fall through to the title tiebreak, and sort alphabetically while looking sorted.
+  const unknown = ui._taskPriorityRank( "urgent" );
+  assert.notEqual( ui._taskPriorityRank( "P4" ), unknown, "P4 ranks as an unrecognised value" );
+  assert.notEqual( ui._taskPriorityRank( "P5" ), unknown, "P5 ranks as an unrecognised value" );
+  assert.ok( ui._taskPriorityRank( "P3" ) < ui._taskPriorityRank( "P4" ) );
+  assert.ok( ui._taskPriorityRank( "P4" ) < ui._taskPriorityRank( "P5" ) );
+  assert.ok( ui._taskPriorityRank( "P5" ) < unknown, "P5 must outrank an unrecognised value" );
 } );
 
 // ─────────────────────────── label / cell formatters (pure) ───────────────────────────
@@ -323,12 +429,34 @@ test( "groupTasksByOwner: owner groups persona-sorted, Unassigned bucket LAST", 
   assert.equal( last.tasks.length, 1 );
 } );
 
-test( "groupTasksByOwner: within a group, sorts blocked-first, then priority, then title", () => {
+// 🔨 PRIORITY FIRST — Rick's ruling 2026-09-09, applied to BOTH clients on his
+// explicit instruction: "the notifications in JavaScript and the multiplexer in
+// TypeScript, in both places."
+//
+// 🔴 THE SHARED FIXTURES CANNOT TEST THIS. T_BLOCKED is blocked/P1 and T_ACTIVE is
+// in_progress/P2, so status-first and priority-first BOTH put T_BLOCKED first — the
+// old assertion stayed green through the key swap and proved nothing either way.
+// These rows are local and deliberately built so the two rules DISAGREE.
+test( "groupTasksByOwner: within a group, sorts priority-first, then status, then title", () => {
   const ui = newUI();
-  // Same owner Rio: blocked(P1) vs in_progress(P2) → blocked first by status rank
-  const model = ui.groupTasksByOwner( [ T_ACTIVE, T_BLOCKED ] );
+  // blocked carries the WORSE priority: status-first says blocked leads,
+  // priority-first says queued leads. They cannot both pass.
+  const blockedP3 = { ...T_BLOCKED, id: "s1", title: "blocked but low", status: "blocked", priority: "P3" };
+  const queuedP0  = { ...T_BLOCKED, id: "s2", title: "queued and urgent", status: "queued", priority: "P0" };
+  const model = ui.groupTasksByOwner( [ blockedP3, queuedP0 ] );
   const rio = model.groups.find( g => g.ownerPersona === "Rio" )!;
-  assert.deepEqual( rio.tasks.map( t => t.status ), [ "blocked", "in_progress" ] );
+  assert.deepEqual( rio.tasks.map( t => t.status ), [ "queued", "blocked" ] );
+} );
+
+// The second key still decides when priorities tie — without this, a comparator that
+// dropped the status term entirely would pass everything above.
+test( "groupTasksByOwner: equal priority falls through to status rank", () => {
+  const ui = newUI();
+  const blockedP1 = { ...T_BLOCKED, id: "s3", title: "blocked", status: "blocked",  priority: "P1" };
+  const queuedP1  = { ...T_BLOCKED, id: "s4", title: "queued",  status: "queued",   priority: "P1" };
+  const model = ui.groupTasksByOwner( [ queuedP1, blockedP1 ] );
+  const rio = model.groups.find( g => g.ownerPersona === "Rio" )!;
+  assert.deepEqual( rio.tasks.map( t => t.status ), [ "blocked", "queued" ] );
 } );
 
 test( "groupTasksByOwner: priority then title break a status tie", () => {
@@ -340,6 +468,48 @@ test( "groupTasksByOwner: priority then title break a status tie", () => {
   const rio = model.groups[ 0 ];
   // P0 first; then the two P2s alpha by title (Apple < Zebra)
   assert.deepEqual( rio.tasks.map( t => t.title ), [ "Yak", "Apple", "Zebra" ] );
+} );
+
+test( "groupTasksByOwner: a P4 and a P5 either side of a P0 still order P0, P4, P5", () => {
+  const ui = newUI();
+  // The row's own instruction: put a P5 and a P4 on either side of a P0. Titles run
+  // COUNTER to the priorities so a comparator that collapsed P4 and P5 onto the unknown
+  // sentinel breaks their tie on title and visibly reverses them, instead of producing
+  // an answer that merely looks sorted.
+  //
+  //   input order        aaa(P5), zzz(P0), bbb(P4)
+  //   four-value domain  zzz, aaa, bbb   (P4/P5 tie at 99, title decides)
+  //   title only         aaa, bbb, zzz
+  //   correct            zzz, bbb, aaa
+  const model = ui.groupTasksByOwner( [
+    { owner_persona: "Rio", status: "queued", priority: "P5", title: "aaa" },
+    { owner_persona: "Rio", status: "queued", priority: "P0", title: "zzz" },
+    { owner_persona: "Rio", status: "queued", priority: "P4", title: "bbb" }
+  ] );
+  assert.deepEqual( model.groups[ 0 ].tasks.map( t => t.title ), [ "zzz", "bbb", "aaa" ],
+    "P4 and P5 did not order against each other — a four-value comparator ties them and "
+    + "the title tiebreak then decides, which reads as sorted and is not" );
+} );
+
+// ⚠️ SCOPE, SAID RATHER THAN LEFT TO ASSUMPTION: the arm above discriminates a FOUR-VALUE
+// regression and does NOT discriminate a lexical sort. Across a single-digit domain P0–P5,
+// "P0" < "P4" < "P5" lexically AND numerically, so the two agree on every input and no
+// fixture built from this value space can separate them. The row asked for a case that
+// catches "a lexical or four-value comparator"; this catches one of the two, and claiming
+// both would be a guard nobody had watched fail.
+
+test( "groupTasksByOwner: a row with no priority sorts LAST in its group, never first", () => {
+  const ui = newUI();
+  // A NaN comparator scrambles a whole list silently, so the priority-less row is given
+  // the title that would sort FIRST alphabetically — title-only ordering fully reverses
+  // this fixture, and an unranked row landing first is then unmistakable.
+  const model = ui.groupTasksByOwner( [
+    { owner_persona: "Rio", status: "queued", title: "aaa" },
+    { owner_persona: "Rio", status: "queued", priority: "P5", title: "bbb" },
+    { owner_persona: "Rio", status: "queued", priority: "P0", title: "ccc" }
+  ] );
+  assert.deepEqual( model.groups[ 0 ].tasks.map( t => t.title ), [ "ccc", "bbb", "aaa" ],
+    "a row carrying no priority did not sort last — it must never outrank a real one" );
 } );
 
 test( "groupTasksByOwner: existing-bucket push (two tasks, same owner) → one group", () => {
@@ -366,27 +536,75 @@ test( "groupTasksByOwner: all-owned input → no Unassigned bucket", () => {
 
 // ─────────────────────────── _renderTaskRow / renderTaskListTable (pure) ───────────────────────────
 
-test( "_renderTaskRow: status class on <tr>, status dot, all ten cells, blocked_by shown", () => {
+// UPDATED 2026-09-03 for Rick's one-schema ruling (row af0e5ea0). The row no longer
+// carries twelve cells; it carries five fields plus the disclosure control, and the
+// other seven fields moved BEHIND the ⋯. Every value this test asserted is still
+// asserted — the locators moved, the expectations did not, which is the whole point of
+// re-pointing a test rather than deleting it.
+/**
+ * Parse a renderer's HTML into real rows.
+ *
+ * Added 2026-09-03 with the one-schema ruling: seven fields moved behind the disclosure,
+ * so the tests that asserted on them have to look inside a nested structure rather than
+ * regex a flat <td>. Parsing beats a longer regex here — a regex that misses tells you
+ * nothing about WHY, and these assertions are about values, not about markup shape.
+ */
+function rowsOfHtml( html: string ): HTMLTableRowElement[] {
+  const host = document.createElement( "table" );
+  host.innerHTML = `<tbody>${html}</tbody>`;
+  const rows = [ ...host.querySelectorAll( "tr" ) ] as HTMLTableRowElement[];
+  // An empty parse satisfies every assertion written over a loop of its results.
+  assert.ok( rows.length >= 1, "the renderer must have produced at least one <tr>" );
+  return rows;
+}
+
+test( "_renderTaskRow: status class on <tr>, status dot, six cells, and the moved fields still render", () => {
   const ui = newUI();
   const html = ui._renderTaskRow( T_BLOCKED, "America/New_York" );
   assert.match( html, /<tr class="task-row task-status-blocked">/ );
-  assert.match( html, /<td class="task-col-id">t1<\/td>/ );    // NEW leftmost ID col (first 8 of id)
+  // UPDATED 2026-09-04: this asserted a BARE `<td class="task-col-id">t1</td>`, which
+  // 046d9f52 ("Click the id cell, get the FULL id") made false — the id now rides a
+  // click-to-copy <span> inside that cell. The old form was a TEXT match against markup
+  // that had deliberately changed, so it read as a broken renderer rather than as a
+  // stale assertion. The CLAIM is unchanged; only how it is read is.
+  //
+  // ⚠️ And it is widened rather than merely repaired: nothing in this file watched the
+  // copy affordance at all, so the cell could have rendered the id with no way to copy
+  // it and every test here would have stayed green.
+  const idCell = rowsOfHtml( html )[ 0 ].querySelector( "td.task-col-id" )!;
+  assert.equal( idCell.textContent, "t1", "the id cell still shows the id" );
+  assert.equal( idCell.querySelector( ".task-id-copy" )!.getAttribute( "data-task-full-id" ), "t1",
+                "...and it is the click-to-copy affordance, carrying the FULL id" );
   assert.match( html, /<td class="task-col-status"><span class="task-status-dot"><\/span>blocked<\/td>/ );
   assert.match( html, /Wire the seam/ );
-  assert.match( html, /decision:abc/ );                 // blocked_by rendered
-  assert.match( html, /10:30/ );                        // next_chase in EDT
   assert.match( html, /task-col-priority task-prio-high/ );   // P1 → high tint
-  assert.match( html, />lupin</ );                      // project
   assert.match( html, /task-class-badge task-class-task/ );
-  assert.match( html, /<td class="task-col-detail">/ );       // NEW rightmost Detail col
+
+  // The visible line is exactly six cells — five fields plus the control.
+  const row = rowsOfHtml( html )[ 0 ];
+  assert.deepEqual(
+    [ ...row.querySelectorAll( "td" ) ].map( td => td.className.split( " " )[ 0 ] ),
+    [ "task-col-id", "task-col-title", "task-col-class", "task-col-status", "task-col-priority", "task-col-disclose" ] );
+
+  // …and the seven that moved are behind the disclosure, carrying the same values.
+  const disclosed = rowsOfHtml( html ).find( r => r.classList.contains( "task-controls-row" ) )!;
+  assert.match( disclosed.textContent!, /decision:abc/ );   // blocked_by
+  assert.match( disclosed.textContent!, /10:30/ );          // next_chase in EDT
+  assert.match( disclosed.textContent!, /lupin/ );          // project
+  assert.ok( disclosed.querySelector( ".task-col-detail" ), "the detail affordance moved, it did not vanish" );
 } );
 
+// UPDATED 2026-09-03: blocked_by and next-chase moved behind the ⋯, so these assert on
+// the disclosed values rather than on line-1 cells. The em-dash BEHAVIOUR is unchanged
+// and is still pinned — a field that moved must keep answering the same way, and that
+// is precisely what this re-pointing proves.
 test( "_renderTaskRow: 'none' blocked_by → em-dash; null next_chase → em-dash; no prio tint for missing", () => {
   const ui = newUI();
   const html = ui._renderTaskRow( T_ORPHAN, undefined );
-  assert.match( html, /<td class="task-col-blocked">—<\/td>/ );
-  assert.match( html, /<td class="task-col-chase">—<\/td>/ );
-  assert.match( html, /<td class="task-col-priority">—<\/td>/ );   // null priority → no tint class
+  const disclosed = rowsOfHtml( html ).find( r => r.classList.contains( "task-controls-row" ) )!;
+  assert.equal( disclosed.querySelector( ".task-col-blocked .task-disclosed-value" )!.textContent, "—" );
+  assert.equal( disclosed.querySelector( ".task-col-chase   .task-disclosed-value" )!.textContent, "—" );
+  assert.match( html, /<td class="task-col-priority">—<\/td>/ );   // still on line 1, still untinted
   assert.match( html, /task-status-queued/ );
 } );
 
@@ -413,7 +631,7 @@ test( "_renderTaskRow: item_class is slug-sanitized in the class attr (no attrib
   assert.match( html, /task-class-taskonmouseoverx/ );   // stripped to alnum/_/-
 } );
 
-test( "renderTaskListTable: owner group header (owner · count) + Unassigned label, ten columns, colspan 10", () => {
+test( "renderTaskListTable: owner group header (owner · count) + Unassigned label, six cells, colspan 6", () => {
   const ui = newUI();
   const model = ui.groupTasksByOwner( [ T_BLOCKED, T_QUEUED, T_ORPHAN ] );
   const html = ui.renderTaskListTable( model, undefined );
@@ -422,10 +640,22 @@ test( "renderTaskListTable: owner group header (owner · count) + Unassigned lab
   assert.match( html, /Krishna · 1/ );
   assert.match( html, /\(Unassigned\)/ );
   assert.match( html, /task-group-unassigned/ );
-  for ( const col of [ "ID", "Title", "Class", "Status", "Blocked by", "Next chase", "Accountable", "Priority", "Project", "Detail" ] ) {
-    assert.ok( html.includes( col ), `header "${col}" present` );
+  // UPDATED 2026-09-03: the header carries the five visible fields. The other seven are
+  // labelled inside the disclosure now, so a header label for them would be a lie.
+  for ( const col of [ "ID", "Title", "Class", "Status", "Priority" ] ) {
+    assert.ok( html.includes( `>${col}</th>` ), `header "${col}" present` );
   }
-  assert.match( html, /colspan="10"/ );                 // augmented 8 → 10 columns
+  for ( const gone of [ "Blocked by", "Next chase", "Accountable", "Filed by", "Project", "Detail" ] ) {
+    assert.ok( !html.includes( `>${gone}</th>` ), `"${gone}" must not head a visible column any more` );
+  }
+  // The group-header bar must span EVERY column. A stale colspan does not throw
+  // and does not look broken in a screenshot — the bar simply stops short of the
+  // last column, which is why this is asserted rather than eyeballed.
+  // 8 → 10 (row redesign) → 11 (Filed by) → 6 (one-schema ruling, 2026-09-03). It is no
+  // longer a literal in the source: every colspan now reads `_rowWidth()`, so this
+  // asserts the DERIVED value and cannot go stale the way its predecessors did.
+  assert.match( html, /colspan="6"/ );
+  assert.ok( !/colspan="1[01]"/.test( html ), "a stale colspan leaves the group bar short of the last column" );
   assert.ok( html.indexOf( "Krishna" ) < html.indexOf( "(Unassigned)" ), "Unassigned renders last" );
 } );
 
@@ -441,13 +671,23 @@ test( "_taskIdLabel: first 8 chars of id; long UUID truncated; absent/null → e
   assert.equal( ui._taskIdLabel( null ), "—" );                 // no task object
 } );
 
-test( "_truncateTaskTitle: under/at cap verbatim; over cap → slice(60)+ellipsis", () => {
+// 🔴 RETIRED 2026-09-03 — this test used to pin `_truncateTaskTitle`, and the reason it
+// is a retirement rather than a deletion is worth the six lines.
+//
+// The cap cut the title to 60 characters IN JAVASCRIPT, before it reached the DOM.
+// Measured in the real browser that day: the cell showed 197px of an up-to-677px title,
+// and because the cut happened upstream, WIDENING THE CELL REVEALED NOTHING. Any change
+// that gave the title more room was cosmetic by construction. Rick ruled the cap away —
+// the title wraps to two lines and the row grows.
+//
+// What replaces it is the inverse assertion: the function and its constant are GONE, so
+// nobody re-wires a cap that is still sitting there looking useful.
+test( "the 60-char title cap is retired — the function and its constant are gone", () => {
   const ui = newUI();
-  assert.equal( ui._truncateTaskTitle( "short title" ), "short title" );
-  const at = "x".repeat( 60 );
-  assert.equal( ui._truncateTaskTitle( at ), at );              // exactly at cap → no ellipsis
-  const over = "y".repeat( 90 );
-  assert.equal( ui._truncateTaskTitle( over ), "y".repeat( 60 ) + "…" );
+  assert.equal( typeof ui._truncateTaskTitle, "undefined",
+    "_truncateTaskTitle must not exist — a wider cell showing the same 60 chars is the defect this removed" );
+  assert.equal( ui.TASK_TITLE_TRUNCATE_LEN, undefined,
+    "the constant must go with it; a leftover constant is one somebody re-wires" );
 } );
 
 test( "_taskBodyIsEmpty: null/undefined/blank → true; non-blank → false", () => {
@@ -460,13 +700,31 @@ test( "_taskBodyIsEmpty: null/undefined/blank → true; non-blank → false", ()
   assert.equal( ui._taskBodyIsEmpty( { body: "detail here" } ), false );
 } );
 
-test( "_renderTaskRow: long title truncated in cell, FULL title in title= tooltip", () => {
+// UPDATED 2026-09-03: the assertion is INVERTED, deliberately. It used to require the
+// cell text to be cut at 60 characters; it now requires the whole title, because that
+// cut was the thing making the row-widening work cosmetic.
+test( "_renderTaskRow: the FULL title renders in the cell, and still rides the tooltip", () => {
   const ui = newUI();
   const longTitle = "Z".repeat( 90 );
   const html = ui._renderTaskRow( { id: "abcdef12", title: longTitle, status: "queued" }, undefined );
-  assert.match( html, /<td class="task-col-id">abcdef12<\/td>/ );
-  assert.ok( html.includes( "Z".repeat( 60 ) + "…" ), "cell text truncated + ellipsis" );
-  assert.ok( html.includes( `title="${longTitle}"` ), "full title rides the tooltip attr" );
+  // UPDATED 2026-09-04, same cause as the shape test above: 046d9f52 put the id inside
+  // a click-to-copy <span>, so the bare-<td> text match stopped describing the markup.
+  //
+  // ⚠️ THIS ONE IS A PREAMBLE, NOT THE SUBJECT — the test is about the FULL title — and
+  // that is exactly why it is worth keeping rather than deleting. An assertion ahead of
+  // the subject is the one that decides whether the subject is ever REACHED: assertions
+  // run in sequence, so while this line was red the three title assertions below it were
+  // carried, not exercised. Removing it would have been the tidy-looking move and would
+  // have quietly widened, not narrowed, what this file can fail to notice.
+  const row = rowsOfHtml( html )[ 0 ];
+  const idCell = row.querySelector( "td.task-col-id" )!;
+  assert.equal( idCell.textContent, "abcdef12", "the id cell still shows the id" );
+  assert.equal( idCell.querySelector( ".task-id-copy" )!.getAttribute( "data-task-full-id" ), "abcdef12",
+                "...carried on the copy affordance, which is where the FULL id lives" );
+  const cell = row.querySelector( "td.task-col-title" )!;
+  assert.equal( cell.textContent, longTitle, "the cell carries the whole title — no cap, no ellipsis" );
+  assert.ok( !cell.textContent!.includes( "…" ), "no ellipsis in the markup; overflow is the CSS clamp's job" );
+  assert.equal( cell.getAttribute( "title" ), longTitle, "full title still rides the tooltip attr" );
 } );
 
 test( "_renderTaskRow: body present → live clickable 📄 carrying data-task-body/-id", () => {
@@ -502,6 +760,10 @@ test( "_renderTaskRow: array blocked_by — typed ref, kind-less ref, and raw en
   assert.match( html, /raw-str/ );          // non-object entry → String(b)
 } );
 
+// ⚠️ STAYS BY-NAME, DELIBERATELY. A click cannot carry a `{}` — the dispatcher requires
+// an element — so there is no click path to drive here. What this pins is the handler's
+// own tolerance of a target with no `.closest`, and routing it through a real event
+// would delete the case rather than strengthen it.
 test( "_handleTaskListClick: a target lacking .closest is safely ignored (defensive guard)", () => {
   const ui = newUI();
   buildPanelDOM();
@@ -515,12 +777,22 @@ test( "_handleTaskListClick: a LIVE 📄 with NO dataset opens overlay with empt
   const emoji = document.createElement( "span" );
   emoji.className = "task-detail-emoji";    // live (not dimmed) but carries no data-task-* attrs
   document.getElementById( "task-list-container" )!.appendChild( emoji );
-  ui._handleTaskListClick( emoji );
-  const overlay = document.getElementById( "task-body-overlay" )!;
-  assert.ok( overlay, "overlay opened even with no dataset" );
-  assert.equal( overlay.querySelector( ".task-body-overlay-body" )!.textContent, "" );
-  assert.match( overlay.querySelector( ".task-body-overlay-header" )!.textContent!, /Task detail/ );
-  ui._dismissTaskBodyOverlay();
+  wirePane( ui );
+  // ⚠️ `finally`, not a trailing call. The overlay installs a listener on `document`
+  // itself, which only `_dismissTaskBodyOverlay` takes off again — so a dismiss placed
+  // after the assertions is skipped on exactly the run that matters, the break arm, and
+  // the leaked listener then hangs a later test in this file rather than failing it.
+  // Measured 2026-09-02: the whole file stopped terminating under the break until the
+  // cleanup was moved onto the failure path.
+  try {
+    clickThrough( ui, "_handleTaskListClick", emoji, "a live 📄 with no dataset" );
+    const overlay = document.getElementById( "task-body-overlay" )!;
+    assert.ok( overlay, "overlay opened even with no dataset" );
+    assert.equal( overlay.querySelector( ".task-body-overlay-body" )!.textContent, "" );
+    assert.match( overlay.querySelector( ".task-body-overlay-header" )!.textContent!, /Task detail/ );
+  } finally {
+    ui._dismissTaskBodyOverlay();
+  }
 } );
 
 test( "_handleTaskListClick: clicking a LIVE 📄 opens the body overlay", () => {
@@ -529,12 +801,18 @@ test( "_handleTaskListClick: clicking a LIVE 📄 opens the body overlay", () =>
   const container = document.getElementById( "task-list-container" )!;
   container.innerHTML = ui._renderTaskRow( { id: "abcd1234", title: "t", status: "queued", body: "overlay body text" }, undefined );
   const emoji = container.querySelector( ".task-detail-emoji" )!;
-  ui._handleTaskListClick( emoji );
-  const overlay = document.getElementById( "task-body-overlay" );
-  assert.ok( overlay, "overlay opened" );
-  assert.match( overlay!.querySelector( ".task-body-overlay-body" )!.textContent!, /overlay body text/ );
-  assert.match( overlay!.querySelector( ".task-body-overlay-header" )!.textContent!, /abcd1234/ );
-  ui._dismissTaskBodyOverlay();
+  wirePane( ui );
+  // `finally` for the same reason as the test above: the overlay's `document` keydown
+  // listener outlives a thrown assertion and the cleanup has to be on that path.
+  try {
+    clickThrough( ui, "_handleTaskListClick", emoji, "a live 📄" );
+    const overlay = document.getElementById( "task-body-overlay" );
+    assert.ok( overlay, "overlay opened" );
+    assert.match( overlay!.querySelector( ".task-body-overlay-body" )!.textContent!, /overlay body text/ );
+    assert.match( overlay!.querySelector( ".task-body-overlay-header" )!.textContent!, /abcd1234/ );
+  } finally {
+    ui._dismissTaskBodyOverlay();
+  }
 } );
 
 test( "_handleTaskListClick: a DIMMED 📄 is inert — no overlay, no accordion toggle", () => {
@@ -545,8 +823,9 @@ test( "_handleTaskListClick: a DIMMED 📄 is inert — no overlay, no accordion
   const dimmed = document.createElement( "span" );
   dimmed.className = "task-detail-emoji task-detail-empty";
   container.appendChild( dimmed );
+  wirePane( ui );
   const before = container.innerHTML;
-  ui._handleTaskListClick( dimmed );
+  clickThrough( ui, "_handleTaskListClick", dimmed, "a DIMMED 📄" );
   assert.ok( document.getElementById( "task-body-overlay" ) === null, "no overlay for dimmed emoji" );
   assert.equal( container.innerHTML, before, "no accordion toggle for dimmed emoji" );
 } );
@@ -557,7 +836,8 @@ test( "_handleTaskListClick: a non-emoji target delegates to the accordion toggl
   const header = document.querySelector( ".task-group-header" ) as HTMLElement;
   const tbody  = header.closest( "tbody.task-group" ) as HTMLElement;
   assert.ok( !tbody.classList.contains( "collapsed" ) );
-  ui._handleTaskListClick( header );
+  wirePane( ui );
+  clickThrough( ui, "_handleTaskListClick", header, "a group header" );
   assert.ok( tbody.classList.contains( "collapsed" ), "non-emoji click toggled the group (delegation intact)" );
 } );
 
@@ -669,7 +949,7 @@ test( "renderTaskList: auth_required → sign-in message, count 0", () => {
   buildPanelDOM();
   ui.renderTaskList( { status: "auth_required" } );
   assert.match( document.getElementById( "task-list-container" )!.innerHTML, /Sign-in required/ );
-  assert.equal( document.getElementById( "task-list-count" )!.textContent, "0" );
+  assert.equal( document.getElementById( "task-list-count" )!.textContent, "Live: 0" );
 } );
 
 test( "renderTaskList: unreachable with NO prior good fetch → indicator + 'No tasks loaded yet', count 0", () => {
@@ -679,7 +959,7 @@ test( "renderTaskList: unreachable with NO prior good fetch → indicator + 'No 
   const html = document.getElementById( "task-list-container" )!.innerHTML;
   assert.match( html, /Store unreachable/ );
   assert.match( html, /No tasks loaded yet/ );
-  assert.equal( document.getElementById( "task-list-count" )!.textContent, "0" );
+  assert.equal( document.getElementById( "task-list-count" )!.textContent, "Live: 0" );
 } );
 
 test( "renderTaskList: unreachable AFTER a good fetch → indicator + LAST-KNOWN rows (never blank)", () => {
@@ -693,7 +973,7 @@ test( "renderTaskList: unreachable AFTER a good fetch → indicator + LAST-KNOWN
   const html = document.getElementById( "task-list-container" )!.innerHTML;
   assert.match( html, /Store unreachable/ );
   assert.match( html, /Wire the seam/ );                // last-known row replayed
-  assert.equal( document.getElementById( "task-list-count" )!.textContent, "2" );
+  assert.equal( document.getElementById( "task-list-count" )!.textContent, "Live: 2" );
 } );
 
 test( "renderTaskList: non-array tasks (defensive) → unreachable branch", () => {
@@ -715,7 +995,7 @@ test( "renderTaskList: all-terminal rows → 'No open tasks', count 0 (terminal 
   buildPanelDOM();
   ui.renderTaskList( { tasks: [ T_DONE ] } );
   assert.match( document.getElementById( "task-list-container" )!.innerHTML, /No open tasks/ );
-  assert.equal( document.getElementById( "task-list-count" )!.textContent, "0" );
+  assert.equal( document.getElementById( "task-list-count" )!.textContent, "Live: 0" );
 } );
 
 test( "renderTaskList: empty tasks array → 'No open tasks', count 0", () => {
@@ -731,7 +1011,7 @@ test( "renderTaskList: populated → grouped table, count = OPEN rows only, stam
   ui.renderTaskList( { tasks: [ T_BLOCKED, T_ACTIVE, T_QUEUED, T_DONE ] } );   // 3 open, 1 done
   const container = document.getElementById( "task-list-container" )!;
   assert.match( container.innerHTML, /task-list-table/ );
-  assert.equal( document.getElementById( "task-list-count" )!.textContent, "3" );
+  assert.equal( document.getElementById( "task-list-count" )!.textContent, "Live: 3" );
   assert.match( document.getElementById( "task-list-updated" )!.textContent, /updated \d{2}:\d{2}:\d{2}/ );
 } );
 
@@ -740,7 +1020,7 @@ test( "renderTaskList: falsy row inside tasks is filtered defensively (isTaskOpe
   buildPanelDOM();
   ui.renderTaskList( { tasks: [ T_BLOCKED, null ] } );   // null row must not throw
   // null → {} → open → counted; table renders
-  assert.equal( document.getElementById( "task-list-count" )!.textContent, "2" );
+  assert.equal( document.getElementById( "task-list-count" )!.textContent, "Live: 2" );
 } );
 
 test( "renderTaskList: stampUpdated=false skips re-stamping", () => {
@@ -984,7 +1264,7 @@ test( "renderTaskListTable: collapsed owner → collapsed class + ▸ + aria-exp
   const model = ui.groupTasksByOwner( [ T_BLOCKED, T_QUEUED ] );           // Rio, Krishna
   const html  = ui.renderTaskListTable( model, undefined, new Set( [ "Rio" ] ) );
   assert.match( html, /<tbody class="task-group collapsed" id="task-group-Rio" data-owner="Rio">/ );
-  assert.match( html, /aria-expanded="false"[^>]*>\s*<td colspan="10"><span class="task-group-chevron" aria-hidden="true">▸/ );
+  assert.match( html, /aria-expanded="false"[^>]*>\s*<td colspan="6"><span class="task-group-chevron" aria-hidden="true">▸/ );
   // Krishna (not in the set) stays expanded
   assert.match( html, /<tbody class="task-group" id="task-group-Krishna"/ );
 } );
@@ -1102,12 +1382,28 @@ test( "_applyTaskGroupCollapseState: header without a chevron span → no throw 
 
 // ─────────────── toggle handler ───────────────
 
+// ⚠️ STAYS BY-NAME — same reason as the `_handleTaskListClick` guard above: `{}` is not
+// an element and cannot be clicked.
 test( "_handleTaskAccordionToggle: target lacking .closest → no-op (defensive)", () => {
   const ui = newUI();
   ui._handleTaskAccordionToggle( {} );                 // {}.closest is undefined → return, no throw
   assert.equal( ui.loadCollapsedTaskOwners().size, 0 );
 } );
 
+// ⚠️ STAYS BY-NAME FOR NOW, AND THIS IS AN OPEN ITEM RATHER THAN A DECISION.
+// Converting this test and its "header inside a group" sibling to the click path makes
+// the WHOLE FILE stop terminating under the listener break — not fail, HANG, with test
+// 104 ("delegation: a real click on a header toggles its group") as the boundary, and
+// that is a plain synchronous test which cannot hang on its own. Bisected: revert these
+// two and the same break arm reports 162 pass / 13 fail in seconds.
+//
+// Two hypotheses were posed and both MEASURED WRONG — the body overlay's `document`
+// keydown listener surviving a thrown assertion, and `wirePane` re-installing listeners
+// by resetting the wired guard. Neither changed the hang.
+//
+// ⇒ The mechanism is UNEXPLAINED, and a conversion whose break arm cannot be READ has no
+// evidence behind it. Left by-name deliberately until someone can say why — which is a
+// different reason from the `{}` guards below, where there is simply no click to drive.
 test( "_handleTaskAccordionToggle: target with no header ancestor → no-op", () => {
   const ui = newUI();
   buildAccordionDOM( ui );
@@ -1116,6 +1412,10 @@ test( "_handleTaskAccordionToggle: target with no header ancestor → no-op", ()
   assert.equal( ui.loadCollapsedTaskOwners().size, 0 );
 } );
 
+// ⚠️ STAYS BY-NAME, and this one is the interesting case. The header is deliberately
+// OUTSIDE any pane — that is the condition under test — so a click on it cannot reach
+// the container's listener by construction. Converting it would silently turn a test
+// about a detached header into a test about an unwired pane.
 test( "_handleTaskAccordionToggle: header detached from any tbody.task-group → no-op", () => {
   const ui = newUI();
   const tr = document.createElement( "tr" );
@@ -1392,11 +1692,14 @@ test( "_formatTaskListCount: parked present → the three-part disclosure", () =
   assert.equal( newUI()._formatTaskListCount( 3, 5 ), "Live: 3 · Parked: 5 · Total: 8" );
 } );
 
-test( "_formatTaskListCount: zero parked → the BARE number, no noise", () => {
-  // A clean board says "3". Printing "Live: 3 · Parked: 0 · Total: 3" spends the
-  // header on a disclosure with nothing to disclose.
-  assert.equal( newUI()._formatTaskListCount( 3, 0 ), "3" );
-  assert.equal( newUI()._formatTaskListCount( 0, 0 ), "0" );
+test( "_formatTaskListCount: zero parked → labelled, but no parked split", () => {
+  // CHANGED 2026-09-01. This used to assert the BARE number "3". The header now
+  // carries a SECOND number beside it — the closed-vs-new ratio — and a bare
+  // integer next to a bare decimal is two unlabelled quantities the reader has to
+  // tell apart by shape. The parked split stays conditional; only the label went
+  // unconditional.
+  assert.equal( newUI()._formatTaskListCount( 3, 0 ), "Live: 3" );
+  assert.equal( newUI()._formatTaskListCount( 0, 0 ), "Live: 0" );
 } );
 
 test( "_formatTaskListCount: all-parked board still shows the live zero", () => {
@@ -1406,7 +1709,124 @@ test( "_formatTaskListCount: all-parked board still shows the live zero", () => 
 test( "_formatTaskListCount: non-numeric counts degrade to 0, never NaN", () => {
   const ui = newUI();
   assert.equal( ui._formatTaskListCount( undefined as unknown as number, 2 ), "Live: 0 · Parked: 2 · Total: 2" );
-  assert.equal( ui._formatTaskListCount( 2, undefined as unknown as number ), "2" );
+  assert.equal( ui._formatTaskListCount( 2, undefined as unknown as number ), "Live: 2" );
+} );
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CLOSED-vs-NEW RATIO IN THE HEADER (2026-09-01). The number is counted in SQL by
+// GET /api/tasks/flow-ratio; the header is a thin consumer of it. Two things the
+// endpoint's own docstring insists on and these tests pin: the WINDOW travels with
+// the number, and ratio:null renders as an em dash rather than 0.00.
+// ═══════════════════════════════════════════════════════════════════════════
+
+test( "_formatFlowRatio: prints the ratio as a PERCENT, short enough for the bar", () => {
+  assert.equal(
+    newUI()._formatFlowRatio( { created: 10, closed: 13, ratio: 0.77, window_hours: 24 } ),
+    "10 created / 13 closed  over 1d = 77%"
+  );
+} );
+
+test( "_formatFlowRatio: the WINDOW is not cosmetic — same board, different window", () => {
+  // The measured pair from the endpoint's docstring. The verdict FLIPS on the
+  // window alone, so a header that showed 0.77 and 1.10 without saying which
+  // window produced each would be showing two numbers that look like a
+  // contradiction and are not. A fixture that hard-coded 24 could not see this.
+  const ui = newUI();
+  assert.equal( ui._formatFlowRatio( { ratio: 0.77, window_hours: 24 } ),
+                "1d = 77%" );
+  assert.equal( ui._formatFlowRatio( { ratio: 1.10, window_hours: 168 } ),
+                "7d = 110%" );
+} );
+
+test( "_formatFlowRatio: nothing closed is INFINITY, never a number", () => {
+  // closed === 0 with rows created means nothing was finished in the window, which
+  // is the WORST case and a DENY. Rendering it as 0% would read as the best, and a
+  // big number like 999% would be a lie carrying a number's authority.
+  const text = newUI()._formatFlowRatio( { created: 4, closed: 0, ratio: null, window_hours: 24 } );
+  assert.equal( text, "4 created / 0 closed  over 1d = \u221e" );
+  // ⚠️ NARROWED, NOT WEAKENED. This read `!/[0-9]/` — no digit anywhere — which was a
+  // correct proxy while the clause was only "Gate: <ratio>". The clause now also carries
+  // the window and the counts, so digits are expected and that form would fail on text
+  // that is entirely right. The INTENT was always that the unmeasurable RATIO must not
+  // acquire a number, so the assertion now says exactly that.
+  assert.ok( !/[0-9]+%/.test( text ),
+             "an unmeasurable ratio must not render as a percentage" );
+  assert.match( text, /\u221e/, "it renders as infinity instead" );
+} );
+
+test( "_formatFlowRatio: an IDLE window is an em dash, not infinity", () => {
+  // Nothing created and nothing closed is not a failing window — it is an empty one,
+  // and the gate allows. Distinct from the deny case above, which it would otherwise
+  // render identically to.
+  assert.equal( newUI()._formatFlowRatio( { created: 0, closed: 0, ratio: null, window_hours: 24 } ),
+                "0 created / 0 closed  over 1d = \u2014" );
+} );
+
+test( "_formatFlowRatio: percents are whole numbers, and above 100% is legal", () => {
+  assert.equal( newUI()._formatFlowRatio( { ratio: 1.1, window_hours: 24 } ),
+                "1d = 110%" );
+  assert.equal( newUI()._formatFlowRatio( { ratio: 2, window_hours: 24 } ),
+                "1d = 200%" );
+} );
+
+test( "_formatFlowRatio: unusable payloads yield an EMPTY clause, not a zero", () => {
+  const ui = newUI();
+  for ( const junk of [ null, undefined, "nope", 42, [], {}, { ratio: 0.5 } ] ) {
+    assert.equal( ui._formatFlowRatio( junk ), "",
+                  `expected an omitted clause for ${JSON.stringify( junk )}` );
+  }
+} );
+
+test( "_renderFlowRatio: writes the clause with its leading separator", () => {
+  document.body.innerHTML = `<span id="task-list-flow-ratio"></span>`;
+  newUI()._renderFlowRatio( { ratio: 0.77, window_hours: 24 } );
+  // "Gate: " is Rick's label, 2026-09-03 — the ratio floated in the header with
+  // nothing saying what it governs. It rides the SHORT form only; the hover already
+  // opens "Closed vs New Ratio — " and would say it twice.
+  assert.equal( document.getElementById( "task-list-flow-ratio" )!.textContent,
+                " \u00b7 Gate: 1d = 77%" );
+} );
+
+test( "_renderFlowRatio: an unreachable endpoint CLEARS the clause, leaving no stale number", () => {
+  document.body.innerHTML = `<span id="task-list-flow-ratio"> \u00b7 1d = 77%</span>`;
+  newUI()._renderFlowRatio( null );
+  assert.equal( document.getElementById( "task-list-flow-ratio" )!.textContent, "" );
+} );
+
+test( "_renderFlowRatio: absent span is a no-op, not a throw", () => {
+  document.body.innerHTML = ``;
+  assert.doesNotThrow( () => newUI()._renderFlowRatio( { ratio: 0.5, window_hours: 24 } ) );
+} );
+
+test( "fetchFlowRatio: returns the payload on a 2xx", async () => {
+  const ui = newUI();
+  const seen: string[] = [];
+  ui.authedFetch = async ( url: string ) => {
+    seen.push( url );
+    return { ok: true, status: 200, json: async () => ( { ratio: 0.77, window_hours: 24 } ) };
+  };
+  assert.deepEqual( await ui.fetchFlowRatio(), { ratio: 0.77, window_hours: 24 } );
+  assert.deepEqual( seen, [ "/api/tasks/flow-ratio" ] );
+} );
+
+test( "fetchFlowRatio: every failure shape returns null, and none of them throw", async () => {
+  const ui = newUI();
+  ui.log = () => {};
+
+  ui.authedFetch = async () => ( { ok: false, status: 401, json: async () => ( {} ) } );
+  assert.equal( await ui.fetchFlowRatio(), null, "401" );
+
+  ui.authedFetch = async () => ( { ok: false, status: 500, json: async () => ( {} ) } );
+  assert.equal( await ui.fetchFlowRatio(), null, "500" );
+
+  ui.authedFetch = async () => { throw new Error( "network down" ); };
+  assert.equal( await ui.fetchFlowRatio(), null, "network throw" );
+
+  ui.authedFetch = async () => ( { ok: true, status: 200, json: async () => { throw new Error( "bad json" ); } } );
+  assert.equal( await ui.fetchFlowRatio(), null, "unparseable body" );
+
+  ui.authedFetch = async () => ( { ok: true, status: 200, json: async () => "not an object" } );
+  assert.equal( await ui.fetchFlowRatio(), null, "wrong shape" );
 } );
 
 test( "_taskListCountText: splits a mixed board on the park-ACTIVE predicate", () => {
@@ -1433,13 +1853,13 @@ test( "🔴 _taskListCountText: an EXPIRED park counts LIVE, not parked", () => 
 test( "_taskListCountText: a null chase counts LIVE (fail-loud-toward-owed)", () => {
   // A malformed park is visible work — is_owed( "parked", None, now ) is True.
   const ui = newUI();
-  assert.equal( ui._taskListCountText( [ PARKED( { next_chase_ts: null } ) ], NOW_MS ), "1" );
+  assert.equal( ui._taskListCountText( [ PARKED( { next_chase_ts: null } ) ], NOW_MS ), "Live: 1" );
 } );
 
 test( "_taskListCountText: junk argument counts 0 rather than throwing", () => {
   const ui = newUI();
   for ( const junk of [ null, undefined, {}, "nope" ] ) {
-    assert.equal( ui._taskListCountText( junk, NOW_MS ), "0" );
+    assert.equal( ui._taskListCountText( junk, NOW_MS ), "Live: 0" );
   }
 } );
 
@@ -1459,7 +1879,7 @@ test( "renderTaskList: an unparked board keeps the plain single number", () => {
   withFrozenNow( NOW_MS, () => {
     ui.renderTaskList( { tasks: [ T_BLOCKED, T_ACTIVE ], count: 2, total: 2, has_more: false } );
   } );
-  assert.equal( document.getElementById( "task-list-count" )!.textContent, "2" );
+  assert.equal( document.getElementById( "task-list-count" )!.textContent, "Live: 2" );
 } );
 
 test( "the outage replay uses the SAME split, so the two states can't disagree", () => {
@@ -1481,6 +1901,65 @@ test( "the outage replay uses the SAME split, so the two states can't disagree",
 // ═══════════════════════════════════════════════════════════════════════════
 // TRUNCATION BANNER — the LOUD half. The defect was the silence, not the number.
 // ═══════════════════════════════════════════════════════════════════════════
+
+test( "board notices mount OUTSIDE the container, so a container re-render cannot wipe them", () => {
+  // THE DEFECT THIS MOVE FIXES (Rick via María, 2026-09-17): the banner used to be
+  // concatenated onto #task-list-container's innerHTML, and every render of that
+  // container assigns its whole innerHTML — so the notice lived until the next poll.
+  const ui = newUI();
+  buildPanelDOM();
+  ui.renderTaskList( { tasks: [ T_QUEUED ], count: 500, total: 1171, has_more: true } );
+
+  const mount    = document.getElementById( "task-list-notices" )!;
+  const listContainer = document.getElementById( "task-list-container" )!;
+  assert.ok( mount.querySelector( ".task-list-truncated" ), "the banner is in the toolbar mount" );
+  assert.ok( !listContainer.querySelector( ".task-list-truncated" ), "and NOT inside the container" );
+
+  // The old failure, reproduced directly: wipe the container the way a render does.
+  listContainer.innerHTML = "";
+  assert.ok( document.querySelector( ".task-list-truncated" ), "banner survives a container wipe" );
+} );
+
+test( "board notices clear when the board stops being truncated", () => {
+  // The cost of living outside the container: nothing else removes a stale notice.
+  const ui = newUI();
+  buildPanelDOM();
+  ui.renderTaskList( { tasks: [ T_QUEUED ], count: 500, total: 1171, has_more: true } );
+  assert.ok( document.querySelector( ".task-list-truncated" ), "banner present while truncated" );
+
+  ui.renderTaskList( { tasks: [ T_QUEUED ], count: 1, total: 1, has_more: false } );
+  assert.ok( !document.querySelector( ".task-list-truncated" ), "and gone once the board is complete" );
+} );
+
+test( "board notices clear on every full-panel state, so no banner hangs over a blank board", () => {
+  // A truncation banner above "Store unreachable" would describe a board that is not
+  // on screen. Each early return clears the mount explicitly.
+  for ( const composite of [
+    { status: "auth_required" },
+    { status: "query_unavailable" },
+    { status: "unreachable" },
+  ] ) {
+    const ui = newUI();
+    buildPanelDOM();
+    ui.renderTaskList( { tasks: [ T_QUEUED ], count: 500, total: 1171, has_more: true } );
+    assert.ok( document.querySelector( ".task-list-truncated" ), `banner present before ${composite.status}` );
+
+    ui.renderTaskList( composite );
+    assert.ok( !document.querySelector( ".task-list-truncated" ),
+               `banner cleared on ${composite.status}` );
+  }
+} );
+
+test( "the four full-panel states stay INSIDE the container — they are the panel's content", () => {
+  // María's scope ruling: hoisting these would leave an unexplained empty pane.
+  const ui = newUI();
+  buildPanelDOM();
+  ui.renderTaskList( { status: "unreachable" } );
+  const listContainer = document.getElementById( "task-list-container" )!;
+  assert.ok( listContainer.querySelector( ".task-list-unreachable" ), "the outage state renders in the container" );
+  assert.strictEqual( document.getElementById( "task-list-notices" )!.innerHTML, "",
+                      "and the notice mount is empty, not carrying it" );
+} );
 
 test( "truncation banner: absent when the server reports a complete board", () => {
   const ui = newUI();
@@ -1625,6 +2104,113 @@ test( "server warnings: empty / non-array is silent", () => {
   }
 } );
 
+// ── The HOLDING AREA note — one short line, not the server's paragraph (row 081dac6d) ──
+//
+// Shaped like the server's note. The exact server text is pinned from the Python side
+// (test_the_task_list_page_shortens_the_holding_area_note.py), which feeds the REAL
+// router output through this same method, so a wording change there turns that red.
+const HOLDING_NOTE = "⚠️ 4 row(s) matching your filters are in the HOLDING AREA ('not_approved') and were " +
+                     "WITHHELD from this result — they are NOT in `total`. To see them: " +
+                     "task_query( status=\"not_approved\", ... ) with the same filters.";
+
+test( "holding-area note renders as 'N waiting for your approval', not verbatim", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  ui.renderTaskList( { tasks: [ T_QUEUED ], count: 1, total: 1, has_more: false, warnings: [ HOLDING_NOTE ] } );
+  const text = document.getElementById( "task-list-container" )!.textContent ?? "";
+  const note = document.querySelector( ".task-list-holding-note" );
+  assert.ok( note !== null, "the short line is rendered" );
+  assert.equal( note!.textContent, "4 waiting for your approval" );
+  assert.ok( !text.includes( "task_query" ), "the session-facing advice is not on the page" );
+  assert.ok( !text.includes( "⚠️ Server:" ), "no verbatim server line when the note is the only warning" );
+} );
+
+test( "holding-area note is shortened while every other warning still prints verbatim", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  ui.renderTaskList( { tasks: [ T_QUEUED ], count: 1, total: 1, has_more: false,
+                       warnings: [ "first other warning", HOLDING_NOTE, "second other warning" ] } );
+  assert.equal( document.querySelector( ".task-list-holding-note" )!.textContent, "4 waiting for your approval" );
+  const lines = [ ...document.querySelectorAll( ".task-list-truncated" ) ].map( e => e.textContent ?? "" );
+  assert.equal( lines.length, 2, "one short holding line plus one verbatim server line" );
+  assert.equal( lines[ 1 ], "⚠️ Server: first other warning · second other warning" );
+} );
+
+// María's follow-up on 081dac6d: the short line is hidden when #holding-area-count
+// already shows the SAME count as the note. Not merely "a number": the page ships the
+// header as a placeholder "0" and draws the task list before the holding pane.
+function addHoldingAreaCount( text: string ): void {
+  const span = document.createElement( "span" );
+  span.id = "holding-area-count";
+  span.textContent = text;
+  document.body.appendChild( span );
+}
+
+test( "holding-area note is HIDDEN when the Holding Area header shows the same count", () => {
+  const ui = newUI();
+  for ( const shown of [ "4", " 4 " ] ) {
+    buildPanelDOM();
+    addHoldingAreaCount( shown );
+    ui.renderTaskList( { tasks: [ T_QUEUED ], count: 1, total: 1, has_more: false,
+                         warnings: [ HOLDING_NOTE, "another server warning" ] } );
+    // Notices moved to the toolbar mount 2026-09-17, so that is where this reads now;
+    // the container text is checked too, since a notice appearing in BOTH places would
+    // pass a mount-only assertion while double-printing on the page.
+    const notices = document.getElementById( "task-list-notices" )!.textContent ?? "";
+    const text    = ( document.getElementById( "task-list-container" )!.textContent ?? "" ) + notices;
+    assert.equal( document.querySelectorAll( ".task-list-holding-note" ).length, 0,
+                  `no short line while the header reads ${JSON.stringify( shown )}` );
+    assert.ok( !text.includes( "waiting for your approval" ) );
+    assert.ok( !text.includes( "HOLDING AREA" ), "and the long note is not printed in its place" );
+    assert.ok( notices.includes( "⚠️ Server: another server warning" ), "other warnings still print verbatim" );
+    assert.ok( !( document.getElementById( "task-list-container" )!.textContent ?? "" )
+                  .includes( "⚠️ Server:" ), "and print there ONLY — not also inside the container" );
+  }
+} );
+
+test( "holding-area note KEEPS its short line when the header has no count to show", () => {
+  const ui = newUI();
+  for ( const shown of [ null, "—", "", "4 rows" ] ) {
+    buildPanelDOM();
+    if ( shown !== null ) addHoldingAreaCount( shown );
+    ui.renderTaskList( { tasks: [ T_QUEUED ], count: 1, total: 1, has_more: false, warnings: [ HOLDING_NOTE ] } );
+    const notes = document.querySelectorAll( ".task-list-holding-note" );
+    assert.equal( notes.length, 1, `short line present when the header is ${JSON.stringify( shown )}` );
+    assert.equal( notes[ 0 ]!.textContent, "4 waiting for your approval" );
+  }
+} );
+
+test( "holding-area note KEEPS its short line while the header still reads the placeholder \"0\"", () => {
+  // Chloé's browser finding: first paint draws the task list against the HTML's "0",
+  // before the holding pane has written its real count.
+  const ui = newUI();
+  buildPanelDOM();
+  addHoldingAreaCount( "0" );
+  ui.renderTaskList( { tasks: [ T_QUEUED ], count: 1, total: 1, has_more: false, warnings: [ HOLDING_NOTE ] } );
+  const notes = document.querySelectorAll( ".task-list-holding-note" );
+  assert.equal( notes.length, 1, "a placeholder 0 does not match 4 held rows" );
+  assert.equal( notes[ 0 ]!.textContent, "4 waiting for your approval" );
+} );
+
+test( "holding-area note KEEPS its short line when the header shows a DIFFERENT count", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  addHoldingAreaCount( "12" );
+  ui.renderTaskList( { tasks: [ T_QUEUED ], count: 1, total: 1, has_more: false, warnings: [ HOLDING_NOTE ] } );
+  assert.equal( document.querySelectorAll( ".task-list-holding-note" ).length, 1 );
+} );
+
+test( "_holdingAreaWarningCount: recognizes only the holding note with a readable count", () => {
+  const ui = newUI() as TaskUI & { _holdingAreaWarningCount: ( w: unknown ) => number | null };
+  assert.equal( ui._holdingAreaWarningCount( HOLDING_NOTE ), 4 );
+  assert.equal( ui._holdingAreaWarningCount( HOLDING_NOTE.replace( "4 row(s)", "12 row(s)" ) ), 12 );
+  assert.equal( ui._holdingAreaWarningCount( "some other warning" ), null );
+  assert.equal( ui._holdingAreaWarningCount( "⚠️ 3 row(s) are elsewhere" ), null, "count alone is not enough" );
+  assert.equal( ui._holdingAreaWarningCount( HOLDING_NOTE.replace( "⚠️ 4 row(s) ", "⚠️ some rows " ) ), null,
+                "unreadable count prints verbatim rather than inventing a number" );
+  for ( const w of [ undefined, null, 42, {} ] ) assert.equal( ui._holdingAreaWarningCount( w ), null );
+} );
+
 // ═══════════════════════════════════════════════════════════════════════════
 // query_unavailable render branch — a deploy defect wearing its own face
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1637,7 +2223,7 @@ test( "renderTaskList: query_unavailable names the missing FILE and is not an ou
   assert.ok( el, "renders its own distinct state" );
   assert.match( el!.textContent ?? "", /task-list-query\.js/, "names the file an operator must go look for" );
   assert.ok( !document.querySelector( ".task-list-unreachable" ), "does NOT masquerade as a store outage" );
-  assert.equal( document.getElementById( "task-list-count" )!.textContent, "0" );
+  assert.equal( document.getElementById( "task-list-count" )!.textContent, "Live: 0" );
 } );
 
 test( "renderTaskList: query_unavailable does NOT replay last-known rows", () => {
@@ -1654,3 +2240,660 @@ test( "renderTaskList: query_unavailable does NOT replay last-known rows", () =>
 } );
 
 if ( typeof process !== "undefined" && process.argv.includes( "--run" ) ) { /* node --test entry */ }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FILED-BY COLUMN (2026-09-02). Rick asked by voice for the filer's name on every
+// board row — specifically the ones he was blocking — so a row he wants chased
+// names a person rather than only an id. `created_by` was already populated on
+// every live row; it was invisible only because it was absent from the terse
+// projection the board reads.
+// ═══════════════════════════════════════════════════════════════════════════
+
+test( "_taskFilerLabel: a TWO-WORD persona survives — the split()[0] trap", () => {
+  // 🔴 THE DEFECT THIS EXISTS TO PREVENT. `created_by.split( " " )[ 0 ]` returns
+  // "mr" for "mr radio 0e61abe3". María measured it wrong on 6 of 13 live rows,
+  // and those six are exactly the rows Rick asked about — the naive form fails
+  // hardest precisely where the feature is for.
+  const ui = newUI();
+  assert.equal( ui._taskFilerLabel( { created_by: "mr radio 0e61abe3" } ), "Mr Radio" );
+  assert.equal( ui._taskFilerLabel( { created_by: "Krishna 420f5ec9" } ),  "Krishna" );
+  assert.equal( ui._taskFilerLabel( { created_by: "rio b45d54db" } ),      "Rio" );
+} );
+
+test( "_taskFilerLabel: an unrecognised shape renders WHOLE, never sliced", () => {
+  // A truncated name is a WRONG name wearing a right one's clothes; a full odd
+  // string is visibly odd and sends the reader to the row. So the fall-through
+  // must not guess where the name stops.
+  const ui = newUI();
+  assert.equal( ui._taskFilerLabel( { created_by: "some automated importer" } ),
+                "Some Automated Importer" );
+  assert.equal( ui._taskFilerLabel( { created_by: "mr radio zzzzzzzz" } ),
+                "Mr Radio Zzzzzzzz",
+                "zzzzzzzz is 8 chars but not hex — it is part of the name, not a session id" );
+} );
+
+test( "_taskFilerLabel: absent, blank and whitespace-only all give an em dash", () => {
+  const ui = newUI();
+  for ( const row of [ {}, { created_by: "" }, { created_by: "   " }, { created_by: null } ] ) {
+    assert.equal( ui._taskFilerLabel( row ), "—", `${JSON.stringify( row )} → em dash` );
+  }
+  assert.equal( ui._taskFilerLabel( undefined ), "—" );
+} );
+
+test( "the Filed-by column renders the filer, and it is NOT the owner column", () => {
+  // Filer and owner differ on 3 of 13 live rows, so merging them into one "who"
+  // column misreports the person on roughly a quarter of the board. This asserts
+  // they are carried separately by giving one row a filer the owner is not.
+  const ui = newUI();
+  const html = ui._renderTaskRow( {
+    id: "abcdef12-0000-0000-0000-000000000000",
+    title: "a row filed by someone other than its owner",
+    status: "queued",
+    owner_persona: "maria",
+    accountable_manager: "maria",
+    created_by: "mr radio 0e61abe3",
+    priority: "P2",
+    project: "lupin"
+  }, undefined );
+
+  // UPDATED 2026-09-03: Filed-by moved behind the ⋯. The claim this test exists to make
+  // — that the filer is NOT the owner — is unchanged and is asserted on both sides.
+  const disclosed = rowsOfHtml( html ).find( r => r.classList.contains( "task-controls-row" ) )!;
+  assert.equal( disclosed.querySelector( ".task-col-filer .task-disclosed-value" )!.textContent, "Mr Radio" );
+  assert.equal( disclosed.querySelector( ".task-col-accountable .task-disclosed-value" )!.textContent, "maria",
+    "accountable must still carry the manager, not the filer — both moved, neither merged" );
+} );
+
+test( "the Filed-by cell is escaped like every other store-sourced value", () => {
+  // The card writes via innerHTML, so an unescaped cell is an injection point.
+  const ui = newUI();
+  const html = ui._renderTaskRow(
+    { id: "x", title: "t", status: "queued", created_by: '<img src=x onerror=alert(1)> aaaaaaaa' },
+    undefined
+  );
+  assert.ok( !html.includes( "<img src=x" ), "the filer cell rendered raw HTML" );
+  // Case-INSENSITIVE deliberately: display-casing runs after escaping, so the
+  // shipped output is "&lt;Img". A case-sensitive /&lt;img/ fails here on code
+  // that is escaping correctly — which is what it did on first run.
+  assert.match( html, /&lt;img/i );
+  assert.ok( !html.includes( "onerror=alert(1)>" ), "the raw handler survived unescaped" );
+} );
+
+// ═════════════ progressive disclosure — THE RENDERER'S OWN DECISION, and the CLICK PATH ═════════════
+//
+// 🔴 WHY THESE EXIST. Every disclosure test in the tree hand-wrote `hidden` into its
+// own fixture and then asserted `hidden` was there, so the renderer's decision —
+// collapsed or expanded — was supplied by the test rather than observed from the code.
+// And every one of them called `_handleDisclosureToggle` DIRECTLY, so the delegated
+// click path between the button and that handler had no coverage at all.
+//
+// Measured before these were written, six deliberate breaks against 253 tests in the
+// three panel files: task row always expanded → 1 red · epic row always expanded → 1 ·
+// toggle never opens → 2 · never closes → 2 · button lies about aria-expanded → 1 ·
+// ellipsis deleted → 5. Every red landed in holding_area_panel; these 161 tests caught
+// none of them. Two further breaks — DELETING the disclosure route from the click
+// delegation, and dropping its `return` so a disclosure click also toggles the accordion
+// — scored ZERO reds, which is how the dead epic-board controls stayed invisible.
+//
+// So: assert on what the RENDERER emits, and reach it the way an operator does, through
+// a real bubbling click on the wired container.
+
+function paneWithRealRows( ui: TaskUI, ...tasks: Record<string, unknown>[] ): HTMLElement {
+  document.body.replaceChildren();
+  const host = document.createElement( "div" );
+  host.id = "task-list-container";
+  document.body.appendChild( host );
+  ui._taskListAccordionWired = false;
+  ui._wireTaskListAccordion();
+  host.innerHTML = `<table id="task-list-table"><tbody>`
+                 + tasks.map( t => ui._renderTaskRow( t, undefined ) ).join( "" )
+                 + `</tbody></table>`;
+  return host;
+}
+
+function clickIt( el: Element | null ): void {
+  assert.ok( el, "the element to click was not rendered" );
+  el!.dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+}
+
+test( "🔴 _renderTaskRow DECIDES collapsed: its own output carries hidden + aria-expanded=false", () => {
+  // The fixture supplies only the task. Everything asserted here is emitted by the
+  // renderer, so replacing it with a constant cannot leave this green.
+  const ui   = newUI();
+  const host = document.createElement( "table" );
+  host.innerHTML = `<tbody>${ui._renderTaskRow( T_ACTIVE, undefined )}</tbody>`;
+
+  const controls = host.querySelector( ".task-controls-row" ) as HTMLElement;
+  const toggle   = host.querySelector( ".task-disclose-button" ) as HTMLElement;
+  assert.ok( controls, "no controls row emitted at all" );
+  assert.equal( controls.hidden, true,
+    "the renderer shipped the controls EXPANDED — the wall of widgets Rick rejected" );
+  assert.ok( toggle, "no ellipsis emitted, so the controls can never be reached" );
+  assert.equal( toggle.tagName, "BUTTON", "the affordance is not focusable" );
+  assert.equal( toggle.getAttribute( "aria-expanded" ), "false",
+    "the button announces itself OPEN while its controls are hidden" );
+  assert.equal( toggle.dataset.taskId, controls.dataset.controlsFor,
+    "the toggle and its controls row carry different ids — the toggle opens nothing" );
+} );
+
+test( "🔴 renderTaskListTable: EVERY row ships collapsed, not just the first one", () => {
+  // A per-row assertion cannot see a table path that expands some rows and not others.
+  const ui    = newUI();
+  const model = ui.groupTasksByOwner( [ T_BLOCKED, T_ACTIVE, T_QUEUED, T_ORPHAN ] );
+  const host  = document.createElement( "div" );
+  host.innerHTML = ui.renderTaskListTable( model, undefined, new Set<string>() );
+
+  const controls = Array.from( host.querySelectorAll( ".task-controls-row" ) ) as HTMLElement[];
+  const toggles  = Array.from( host.querySelectorAll( ".task-disclose-button" ) ) as HTMLElement[];
+  assert.equal( controls.length, 4, "one controls row per task row" );
+  assert.equal( toggles.length, 4, "one ellipsis per task row" );
+  assert.deepEqual( controls.map( c => c.hidden ), [ true, true, true, true ] );
+  assert.deepEqual( toggles.map( t => t.getAttribute( "aria-expanded" ) ),
+                    [ "false", "false", "false", "false" ] );
+} );
+
+test( "🔴 THROUGH THE CLICK PATH: a real click on the ellipsis discloses that row's controls", () => {
+  // Not _handleDisclosureToggle( button ). A bubbling MouseEvent at the rendered
+  // button, through the delegated listener the page actually installs — the gap where
+  // deleting the route scored zero reds.
+  const ui   = newUI();
+  const host = paneWithRealRows( ui, T_ACTIVE );
+  const controls = host.querySelector( ".task-controls-row" ) as HTMLElement;
+
+  assert.equal( controls.hidden, true, "precondition: the row starts collapsed" );
+  clickIt( host.querySelector( ".task-disclose-button" ) );
+  assert.equal( controls.hidden, false,
+    "the click never reached the disclosure — the ellipsis is a dead button" );
+  assert.equal( ( host.querySelector( ".task-disclose-button" ) as HTMLElement )
+                  .getAttribute( "aria-expanded" ), "true" );
+} );
+
+test( "🔴 THROUGH THE CLICK PATH: a second click collapses it again", () => {
+  const ui   = newUI();
+  const host = paneWithRealRows( ui, T_ACTIVE );
+  const controls = host.querySelector( ".task-controls-row" ) as HTMLElement;
+  const toggle   = host.querySelector( ".task-disclose-button" ) as HTMLElement;
+
+  clickIt( toggle );
+  clickIt( toggle );
+  assert.equal( controls.hidden, true, "the controls never collapsed again" );
+  assert.equal( toggle.getAttribute( "aria-expanded" ), "false" );
+} );
+
+test( "🔴 THROUGH THE CLICK PATH: opening one row leaves its neighbours collapsed", () => {
+  const ui   = newUI();
+  const host = paneWithRealRows( ui, T_ACTIVE, T_QUEUED, T_BLOCKED );
+  const controls = Array.from( host.querySelectorAll( ".task-controls-row" ) ) as HTMLElement[];
+  const toggles  = Array.from( host.querySelectorAll( ".task-disclose-button" ) ) as HTMLElement[];
+
+  clickIt( toggles[ 1 ] );
+  assert.deepEqual( controls.map( c => c.hidden ), [ true, false, true ],
+    "the ellipsis opened the wrong row, or opened every row at once" );
+} );
+
+test( "🔴 a disclosure click is CONSUMED — it must not also toggle the owner accordion", () => {
+  // Dropping the `return` after the disclosure branch scored zero reds. One gesture
+  // would then open the row's controls and collapse the group they live in.
+  const ui = newUI();
+  let accordionFired = false;
+  ui._handleTaskAccordionToggle = (): void => { accordionFired = true; };
+  const host = paneWithRealRows( ui, T_ACTIVE );
+
+  clickIt( host.querySelector( ".task-disclose-button" ) );
+  assert.equal( accordionFired, false,
+    "the disclosure click fell through and also toggled the group it lives in" );
+} );
+
+// ⚠️ STAYS BY-NAME. The subject here is the RETURN VALUE, and a dispatched event throws
+// it away — `_handleTaskListClick` is the only thing that reads it. The click-path half
+// of this contract is already the test directly above, which drives a real click and
+// asserts the accordion did NOT also fire; converting this one would duplicate that and
+// lose the direct check on the boolean both panes route on.
+test( "_handleRowControlClick reports whether it CONSUMED the click", () => {
+  // The boolean is the contract both panes route on; a dispatch that always returned
+  // false would swallow nothing and let every control click reach the accordion too.
+  const ui = newUI();
+  ui._handleDisclosureToggle = (): void => {};
+  const host = paneWithRealRows( ui, T_ACTIVE );
+
+  assert.equal( ui._handleRowControlClick( host.querySelector( ".task-disclose-button" ) ), true );
+  assert.equal( ui._handleRowControlClick( host.querySelector( ".task-submit-button" ) ), true );
+  assert.equal( ui._handleRowControlClick( host.querySelector( ".task-col-title" ) ), false,
+    "an ordinary cell click was swallowed as if it were a control" );
+} );
+
+// ═════ THE POLL REPAINT DESTROYS OPERATOR STATE — Rick's dead Won't-fix button ═════
+//
+// 🔴 THE CAUSE, and it needed no pane and no row identity. `renderTaskList` repaints by
+// replacing `container.innerHTML` every 60 seconds. Everything the operator has done and
+// not yet submitted lives in that markup. So:
+//
+//   type a reason -> a poll lands -> the box is EMPTY -> click -> the blank-reason guard
+//   fires -> NO REQUEST LEAVES THE BROWSER
+//
+// and the refusal stripe explaining it is wiped by the NEXT poll, so within a minute
+// there is nothing left on screen to see. Type, pause, click, nothing — and no evidence
+// afterwards. That is the whole report.
+//
+// ⚠️ WHY EVERY EARLIER CANDIDATE DIED AND THIS ONE DID NOT. A two-pane lookup collision, a
+// pane with no click listener, an item_class branch, the disclosure ellipsis — each was a
+// real thing and none of them fit a row that renders once, in the one wired pane, with the
+// controls enabled. This needs none of that.
+//
+// ⚠️ AND WHY NOBODY COULD REPRODUCE IT: a tester types and clicks in one motion, inside a
+// single poll interval. Every existing test is worse than that — it calls the handler by
+// name, so no poll can run between the typing and the click at all. The path that could
+// not be reached was the path the operator used.
+//
+// A SECOND, RARER WINDOW ON THE SAME MECHANISM is measured and kept deliberately: a
+// repaint landing between mousedown and mouseup detaches the pressed node, and the click
+// then reaches no handler — 0 requests, no stripe, one variable, reproduced. A press is
+// ~100ms against a 60s poll, so roughly one click in six hundred. Too rare to explain one
+// report; NOT too rare to happen to somebody. It is closed by the same fix, and the last
+// test here is what says so rather than leaving a reader to assume it.
+
+function pollUI(): { ui: TaskUI; sent: Array<Record<string, unknown>> } {
+  const sent: Array<Record<string, unknown>> = [];
+  const ui = newUI();
+  // 🔴 ALWAYS CLEAR THE INTERVAL. A failing assertion skips any stop() written at the end
+  // of the test body, and the surviving 25ms interval hangs the entire file — so the first
+  // real red here looked like a broken harness rather than a caught defect.
+  livePolls.push( ui );
+  ui.TASK_LIST_POLL_INTERVAL_MS = 25;               // the 60s poll, driven fast
+  ui.taskListPollIntervalHandle = null;
+  ui.fetchTaskList      = async () => ( { status: "ok", tasks: [ T_PARKED_GATE ] } ) as never;
+  ui.fetchEpicStories   = async () => ( {} );
+  ui.renderEpicBoard    = () => {};
+  ui.renderHoldingArea  = () => {};
+  ui.fetchFlowRatio     = async () => null;
+  ui._renderFlowRatio   = () => {};
+  ui.refreshHoldingArea = async () => {};
+  ui.refreshTaskList    = NotificationsUIProto().refreshTaskList;
+  ui.authedFetch = ( async ( url: string, opts: Record<string, unknown> ) => {
+    sent.push( { url, method: opts && opts.method } );
+    return { ok: true, status: 200, json: async () => ( {} ) };
+  } ) as never;
+  return { ui, sent };
+}
+
+function NotificationsUIProto(): Record<string, ( ...a: unknown[] ) => never > {
+  return ( ( globalThis as Record<string, unknown> ).NotificationsUI as { prototype: object } ).prototype as never;
+}
+
+// Rick's row: parked, gate, no epic key — renders ONCE, in the one wired pane.
+const T_PARKED_GATE = { id: "bc77cd79", title: "Rick's row", status: "parked",
+                        item_class: "gate", correlation_key: null, created_by: "rick",
+                        priority: "P0", project: "lupin", owner_persona: "rick",
+                        accountable_manager: "maria" };
+
+function bootPollPane(): void {
+  document.body.innerHTML = `
+    <div id="section-task-list"><h3><span id="task-list-count">0</span>
+      <span id="task-list-updated"></span></h3><div id="task-list-container"></div></div>`;
+}
+function pollPane(): HTMLElement { return document.getElementById( "task-list-container" )!; }
+// Rick's redesign (46a3078c): five per-verb boxes became ONE `.task-reason-input`, and
+// five per-verb buttons became ONE `.task-submit-button`. The polling tests below ask
+// what a repaint does to what the operator typed, which is the same question whichever
+// box it was typed into — so only the selector moves.
+function reasonBox(): HTMLInputElement {
+  return pollPane().querySelector( ".task-reason-input" ) as HTMLInputElement;
+}
+function submitBtn(): HTMLElement {
+  return pollPane().querySelector( ".task-submit-button" ) as HTMLElement;
+}
+
+// Choose the verb the way the operator does. `.task-chase-input` does not exist until
+// this fires — `_handleVerbSelectChange` builds it off the pane's change listener — so
+// assigning `.value` would leave a page state nobody can reach.
+function selectVerb( scope: ParentNode, verb: string ): HTMLSelectElement {
+  const sel = scope.querySelector( ".task-verb-select" ) as HTMLSelectElement;
+  assert.ok( sel, "the row renders no verb select at all — this test cannot speak to the control it names" );
+  sel.value = verb;
+  sel.dispatchEvent( new window.Event( "change", { bubbles: true } ) );
+  return sel;
+}
+function shownStripe(): HTMLElement | null {
+  const s = pollPane().querySelector( ".task-row-error-stripe" ) as HTMLElement | null;
+  return s && !s.hidden ? s : null;
+}
+const tick = ( ms: number ): Promise<void> => new Promise( r => setTimeout( r, ms ) );
+
+const livePolls: TaskUI[] = [];
+afterEach( () => { while ( livePolls.length ) livePolls.pop()!.stopTaskListPolling(); } );
+
+test( "ARM A — type and click FAST, inside one poll interval: the request goes", async () => {
+  // The control, and the reason this defect went unseen: this is how every tester does it.
+  const { ui, sent } = pollUI();
+  bootPollPane();
+  ui.startTaskListPolling();
+  await tick( 40 );
+
+  // The verb used to be named by WHICH button you pressed; one Submit serves five now,
+  // so choosing it is an explicit step. Skipping it does not merely change the verb — it
+  // makes the submit refuse with "no verb chosen", a DIFFERENT guard wearing the same
+  // red, which is how a re-point lands green on the wrong thing.
+  //
+  // 🔴 AND IT IS `drop`, NOT `wont_fix`, FOR A REASON THAT IS NOT COSMETIC. The redesign
+  // put a two-press confirm on TERMINAL verbs: the first Submit on won't-fix arms the
+  // button ("Confirm won't-fix") and returns WITHOUT sending. These tests are about what
+  // a poll repaint does to text the operator typed — one press, one request — so they
+  // use a non-terminal verb and keep that shape verbatim. Pressing twice here would fold
+  // an untested confirm gate into a test about repaints, and a test that measures two
+  // things tells you which one broke exactly never.
+  selectVerb( pollPane(), "drop" );
+  reasonBox().value = "not doing this";
+  submitBtn().dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+  await tick( 15 );
+  ui.stopTaskListPolling();
+
+  assert.equal( sent.length, 1, "the ordinary path does not reach the network — probe is broken" );
+  assert.match( String( sent[ 0 ].url ), /\/api\/tasks\/bc77cd79\/transition/ );
+} );
+
+test( "🔴 ARM B — type, let ONE POLL land, then click: the typed reason must survive", async () => {
+  // RED before the fix. The repaint replaces the markup the operator typed into, so the
+  // handler reads an empty box, refuses, and nothing leaves the browser.
+  const { ui, sent } = pollUI();
+  bootPollPane();
+  ui.startTaskListPolling();
+  await tick( 40 );
+
+  selectVerb( pollPane(), "drop" );
+  reasonBox().value = "not doing this";
+  await tick( 60 );                                  // the operator reads on; a poll lands
+  assert.equal( reasonBox().value, "not doing this",
+    "a poll repaint wiped a reason the operator had typed and not yet submitted" );
+
+  submitBtn().dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+  await tick( 15 );
+  ui.stopTaskListPolling();
+  assert.equal( sent.length, 1, "the click sent nothing — the reason was gone by the time it ran" );
+} );
+
+test( "🔴 a refusal stripe must SURVIVE a poll — a refusal nobody sees did not happen", async () => {
+  // RED before the fix, and not optional: fixing the input alone leaves the explanation
+  // transient, which is the same silent-refusal shape one layer along.
+  const { ui } = pollUI();
+  bootPollPane();
+  ui.startTaskListPolling();
+  await tick( 40 );
+
+  selectVerb( pollPane(), "drop" );
+  submitBtn().dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );   // blank reason
+  await tick( 10 );
+  assert.ok( shownStripe(), "precondition: the refusal is on screen" );
+  const before = shownStripe()!.textContent ?? "";
+
+  await tick( 60 );                                  // one poll later
+  ui.stopTaskListPolling();
+  const after = shownStripe();
+  assert.ok( after, "the poll wiped the refusal — the operator sees a control that did nothing" );
+  assert.equal( after!.textContent, before, "the refusal survived but its text changed" );
+} );
+
+test( "🔴 a DISCLOSED row must stay open across a poll", async () => {
+  // The same mechanism on the third piece of operator state. A repaint that re-collapses
+  // the row takes the reason box off screen mid-sentence, which is how the wiped input
+  // gets noticed as "the form vanished" rather than as a dead button.
+  const { ui } = pollUI();
+  bootPollPane();
+  ui.startTaskListPolling();
+  await tick( 40 );
+
+  ( pollPane().querySelector( ".task-disclose-button" ) as HTMLElement )
+    .dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+  const controls = () => pollPane().querySelector( ".task-controls-row" ) as HTMLElement;
+  assert.equal( controls().hidden, false, "precondition: the row is disclosed" );
+
+  await tick( 60 );
+  ui.stopTaskListPolling();
+  assert.equal( controls().hidden, false,
+    "the poll re-collapsed a row the operator had opened" );
+} );
+
+test( "🔴 the RARE window too: a repaint between press and click must not swallow the click", async () => {
+  // ~100ms of press against a 60s poll is about one click in six hundred — too rare to
+  // explain one report, not too rare to happen. Kept because demoting a finding is not
+  // the same as dropping it.
+  const { ui, sent } = pollUI();
+  bootPollPane();
+  ui.startTaskListPolling();
+  await tick( 40 );
+
+  selectVerb( pollPane(), "drop" );
+  const btn = submitBtn();
+  reasonBox().value = "not doing this";
+  btn.dispatchEvent( new window.MouseEvent( "mousedown", { bubbles: true } ) );
+  await tick( 60 );                                  // the poll lands mid-press
+  // In a browser the click's target is the nearest common ancestor of the mousedown and
+  // mouseup nodes, so with the pressed node replaced it lands on the container. Both
+  // readings are dispatched, because which one a browser picks is not measurable here.
+  btn.dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+  pollPane().dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+  await tick( 15 );
+  ui.stopTaskListPolling();
+
+  assert.equal( sent.length, 1, "a repaint during the press swallowed the click entirely" );
+} );
+
+test( "🔴 a paint HELD for a press is replayed the moment the press ends", async () => {
+  // Found by mutating my own fix: dropping the replay reddened NOTHING. Holding the paint
+  // is only safe because it is a delay — a hold that never replays is a pane frozen on
+  // stale rows until the next poll, which is a worse defect than the one it prevents.
+  const { ui } = pollUI();
+  bootPollPane();
+  ui.startTaskListPolling();
+  await tick( 40 );
+  ui.stopTaskListPolling();
+
+  // ⚠️ THE VERB IS CHOSEN BEFORE THE SNAPSHOT, and the order is load-bearing. Choosing
+  // one rewrites the row's placeholder and can add the date field, so a `before` taken
+  // first differs from the live markup immediately and the "paint is held" precondition
+  // fails for a reason that has nothing to do with holding paints.
+  selectVerb( pollPane(), "drop" );
+  const before = pollPane().innerHTML;
+  submitBtn().dispatchEvent( new window.MouseEvent( "mousedown", { bubbles: true } ) );
+  ui.renderTaskList( { status: "ok", tasks: [ { ...T_PARKED_GATE, title: "renamed by a peer" } ] } );
+  assert.equal( pollPane().innerHTML, before, "precondition: the paint is held during the press" );
+
+  submitBtn().dispatchEvent( new window.MouseEvent( "mouseup", { bubbles: true } ) );
+  assert.match( pollPane().textContent ?? "", /renamed by a peer/,
+    "the held paint was dropped, not delayed — the pane is frozen on stale rows" );
+} );
+
+test( "🔴 each box is restored into ITS OWN field, not merely into the right row", async () => {
+  // A row carries several inputs — park takes a reason AND a chase date. Keying the saved
+  // value on the task id alone would put the reason text into the date box.
+  //
+  // 🔴 THE FIXTURE MOVED AND THE PROPERTY DID NOT. This used to prove the point with the
+  // drop box and the won't-fix box, two of five reason fields on one row; the redesign
+  // leaves one shared reason box, so that pair no longer exists to tell apart. The
+  // property is still exactly what the comment above already named — park's reason AND
+  // its chase date — so it is now proved with those two. They are a STRONGER pair than
+  // the old one: different element types and different names, where the old two were
+  // both text inputs.
+  const { ui } = pollUI();
+  bootPollPane();
+  ui.startTaskListPolling();
+  await tick( 40 );
+
+  // Park is what puts two different fields on one row, so it is the verb this test needs.
+  selectVerb( pollPane(), "park" );
+  ( pollPane().querySelector( ".task-reason-input" ) as HTMLInputElement ).value = "REASON TEXT";
+  const chase = pollPane().querySelector( ".task-chase-input" ) as HTMLInputElement | null;
+  assert.ok( chase, "park rendered no chase date — this test cannot speak to per-field restore" );
+  chase!.value = "2026-09-09";
+  await tick( 60 );
+  ui.stopTaskListPolling();
+
+  assert.equal( ( pollPane().querySelector( ".task-reason-input" ) as HTMLInputElement ).value,
+                "REASON TEXT", "the reason box came back with another control's text" );
+  assert.equal( ( pollPane().querySelector( ".task-chase-input" ) as HTMLInputElement ).value,
+                "2026-09-09", "the chase box came back with another control's text" );
+} );
+
+// ══════ collapsing a group must CLOSE the controls disclosed inside it ══════
+//
+// 🔴 Rick, 2026-09-02: "if you close the epic-group-header it should definitely hide the
+// displayed task-actions… even when the containing parent group header is scrolled back
+// up, it does not hide the displayed task action."
+//
+// Collapse is a CSS class on the tbody; the controls row carries its own `hidden`. The two
+// were independent, so a group could be collapsed with a disclosed row still showing —
+// and, worse, re-expanding brought back a form the operator had not asked for, with the
+// ellipsis still claiming aria-expanded="true" for a row nobody could see.
+
+test( "🔴 collapsing an owner group closes any controls disclosed inside it", () => {
+  const ui = newUI();
+  document.body.replaceChildren();
+  const host = document.createElement( "div" );
+  host.id = "task-list-container";
+  document.body.appendChild( host );
+  ui._taskListAccordionWired = false;
+  ui._wireTaskListAccordion();
+  host.innerHTML = ui.renderTaskListTable( ui.groupTasksByOwner( [ T_ACTIVE ] ), undefined, new Set<string>() );
+
+  const toggle = host.querySelector( ".task-disclose-button" ) as HTMLElement;
+  toggle.dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+  assert.equal( ( host.querySelector( ".task-controls-row" ) as HTMLElement ).hidden, false,
+    "precondition: the row is disclosed" );
+
+  ( host.querySelector( ".task-group-header" ) as HTMLElement )
+    .dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+
+  assert.equal( ( host.querySelector( ".task-controls-row" ) as HTMLElement ).hidden, true,
+    "the group collapsed with its controls still on screen" );
+  assert.equal( toggle.getAttribute( "aria-expanded" ), "false",
+    "the ellipsis still claims the row is open inside a collapsed group" );
+} );
+
+
+// ═══════ RICK'S PRIORITY PAIR, WATCHED FROM THE TASK LIST ITSELF ═══════
+//
+// The control landed at e2c353fc in `_taskActionsCell`, the one cell all three panes share,
+// and was falsified there with seven arms. 🔴 A SHARED-CELL SUITE CANNOT SAY WHETHER THIS
+// PANE ROUTES THE CLICK, and this file has the receipt: when María deleted the blank-reason
+// guard this morning and counted kills PER FILE, this one scored **1 of 176** — technically
+// watched, and close enough to blind that the number was doing no work.
+//
+// Re-measured for the priority control before writing a line, three of her four mutations —
+// the option losing `selected`, Update rendering permanently live, the click route deleted.
+// Each killed exactly one arm in `row_control_redesign.test.ts` and **zero here**. Not
+// "barely watched" this time; not watched at all.
+//
+// So these go through `renderTaskList`, which paints AND installs this pane's own listener,
+// rather than `_renderTaskRow` or `_taskActionsCell` called by hand. Same reason `wirePane`
+// exists above: a correct handler measured against a container carrying no listener is the
+// shape that let a dead Won't-fix button survive five people looking at it.
+
+function taskPriorityBits( scope: ParentNode ): { sel: HTMLSelectElement; btn: HTMLButtonElement } {
+  const sel = scope.querySelector( ".task-priority-select" ) as HTMLSelectElement | null;
+  const btn = scope.querySelector( "button.task-priority-update" ) as HTMLButtonElement | null;
+  assert.ok( sel, "the task list painted no priority select — this test cannot speak to the control it names" );
+  assert.ok( btn, "the task list painted no priority Update button" );
+  return { sel: sel!, btn: btn! };
+}
+
+// A REAL `change`, never a bare assignment: the enable rule runs off the delegated change
+// listener this pane wires for itself, so an assignment alone leaves a page state no
+// operator can reach — and an arm that would pass against a pane that wired nothing.
+function chooseTaskPriority( scope: ParentNode, value: string ): HTMLSelectElement {
+  const { sel } = taskPriorityBits( scope );
+  sel.value = value;
+  sel.dispatchEvent( new window.Event( "change", { bubbles: true } ) );
+  return sel;
+}
+
+// The real render path — `renderTaskList` paints the rows AND calls
+// `_wireTaskListAccordion` itself, so nothing here hand-installs the listener under test.
+function paintedTaskPane( ui: TaskUI, over: Record<string, unknown> = {} ): HTMLElement {
+  buildPanelDOM();
+  ui._taskListAccordionWired = false;
+  ui.renderTaskList( { status: "ok", tasks: [ {
+    id: "prio-1", title: "A row Rick wants re-prioritized", status: "queued",
+    item_class: "task", owner_persona: "pocholo", priority: "P2", project: "lupin", ...over
+  } ] } );
+  return document.getElementById( "task-list-container" )!;
+}
+
+
+test( "🔴 TASK LIST: the priority select opens on the row's OWN current priority", () => {
+  for ( const priority of [ "P0", "P1", "P2", "P3" ] ) {
+    const ui      = newUI();
+    const pane    = paintedTaskPane( ui, { priority } );
+    const { sel } = taskPriorityBits( pane );
+
+    // ⚠️ THE `selected` ATTRIBUTE, NOT `.value`. Measured by María on the shared arms:
+    // after `innerHTML` is rewritten happy-dom does not re-sync `selectedIndex`, so
+    // `.value` read P1 for a select whose markup carried `<option value="P2" selected>` —
+    // correct for P0 and P1 by coincidence, which is the worst shape a fixture can have.
+    // A browser honours `selected` at parse; it is what we render and what it reads.
+    const marked = sel.querySelector( "option[selected]" ) as HTMLOptionElement | null;
+    assert.ok( marked, `a ${ priority } row marked NO option selected — the select opens on whatever ` +
+      `happens to be first, misreporting every row that is not P0` );
+    assert.equal( marked!.value, priority,
+      `a ${ priority } row opened its priority select on ${ marked!.value } — a control that ` +
+      `MISREPORTS the current value is worse than one that offers nothing` );
+  }
+} );
+
+test( "🔴 TASK LIST: Update renders DISABLED, and says so to a screen reader", () => {
+  const ui      = newUI();
+  const pane    = paintedTaskPane( ui );
+  const { btn } = taskPriorityBits( pane );
+
+  assert.equal( btn.disabled, true,
+    "Update was live on a freshly painted row — it offers a write before anything was chosen" );
+  assert.equal( btn.getAttribute( "aria-disabled" ), "true",
+    "the button is inert to the mouse and announces itself as available to a screen reader" );
+} );
+
+test( "🔴 TASK LIST: a real change enables Update, and the return trip kills it again", () => {
+  const ui      = newUI();
+  const pane    = paintedTaskPane( ui );                       // painted P2
+  const { btn } = taskPriorityBits( pane );
+
+  chooseTaskPriority( pane, "P0" );
+  assert.equal( btn.disabled, false,
+    "a changed priority left Update dead on the task list — either the rule is wrong or this pane " +
+    "never wired the change listener the rule runs off" );
+
+  chooseTaskPriority( pane, "P2" );
+  assert.equal( btn.disabled, true,
+    "choosing the ORIGINAL priority again left Update enabled — it now offers a write that changes nothing" );
+} );
+
+test( "🔴 TASK LIST: a real bubbling click on Update reaches the handler and PATCHes", async () => {
+  const ui   = newUI();
+  const pane = paintedTaskPane( ui, { id: "prio-1", priority: "P3" } );
+
+  const patches: [ string, Record<string, unknown> ][] = [];
+  ui._patchTaskFields = async ( id, patch ) => { patches.push( [ id, patch ] ); return { ok: true }; };
+  ui.refreshTaskList  = async () => {};
+
+  chooseTaskPriority( pane, "P1" );
+
+  // This file's `clickThrough` is synchronous and drops the handler's promise; the priority
+  // handler is async, so the promise is captured here and awaited. The reached-check is the
+  // point of both forms: it kills the second sufficient cause for a later "nothing was
+  // PATCHed" reading — that no listener exists at all.
+  const button   = pane.querySelector( "button.task-priority-update" );
+  assert.ok( button, "no priority Update button rendered" );
+  const target   = ui as unknown as Record<string, ( b: unknown ) => unknown >;
+  const original = target._handlePriorityUpdateClick;
+  let   ran: unknown = null;
+  target._handlePriorityUpdateClick = ( b: unknown ) => { ran = original.call( ui, b ); return ran; };
+  button!.dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+  target._handlePriorityUpdateClick = original;
+
+  assert.ok( ran !== null,
+    "the task list's priority Update reached NO handler — this pane has no click listener for it, " +
+    "so the control is dead on screen however correct the handler is" );
+  await ran;
+
+  assert.equal( patches.length, 1, "Update reached the handler but not the field seam" );
+  assert.equal( patches[ 0 ][ 0 ], "prio-1" );
+  assert.deepEqual( patches[ 0 ][ 1 ], { priority: "P1" },
+    "the PATCH carried something other than the one field the operator changed" );
+} );

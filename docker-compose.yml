@@ -56,7 +56,7 @@ services:
   #
   # Design doc: src/rnd/v0.1.7/2026.05.16-model-server-carveout/01-design.md
   lupin-model-server:
-    image: lupin-model-server:0.1.0   # candidate tag; per feedback_no_auto_promote_tags, never auto-promote to :latest or :1.0.0 without user confirmation
+    image: lupin-model-server:0.1.1   # 0.1.1 (Rick, 2026-09-16 ~14:59): Whisper return_timestamps fix 6e75695e + the API-key self-check work 0.1.0 predated; roll back by setting 0.1.0 and recreating. Candidate tag; per feedback_no_auto_promote_tags, never auto-promote to :latest or :1.0.0 without user confirmation
     container_name: lupin-model-server
     restart: unless-stopped
     user: "1001:1001"
@@ -165,7 +165,70 @@ services:
     # reaches the host-side standalone arbiter on :8001 (Option 2, 2026-06-08).
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # Speech upload audio lives in memory and dies with the container (row 27bcdd79,
+    # INI `speech upload temp dir`). 256m is a chosen cap, not a measured one. A tmpfs
+    # resolves at container CREATE: this needs --force-recreate, not a restart.
+    # uid/gid, not mode, is what makes it writable: Docker 24 re-mounts a tmpfs on
+    # every container restart WITHOUT `mode`, leaving root:root 755 and a 500 on
+    # upload (measured 2026-09-14). uid/gid survive the re-mount; keep them = `user:`.
+    tmpfs:
+      - "/tmp/lupin-stt:size=256m,uid=1001,gid=1001,mode=1777"
     volumes:
+      # FCM wake-ups, Route A (row 9b366409; Rick's go and his own allow rules,
+      # 2026-09-28): his daily gcloud ADC login, read-only. The DIRECTORY, not the
+      # file: gcloud replaces the file on every login, and a single-file bind would
+      # keep pointing at the old copy.
+      - ${HOME}/.config/gcloud:/home/rruiz/.config/gcloud:ro
+      # Live CC console (row 27760534; Rick's yes, 2026-09-28 16:06): the seats'
+      # transcripts, read-only, at the IDENTICAL host path, because the tailer uses
+      # each bridge's `transcript_path` verbatim. Without it every seat reads
+      # unwatchable: this container's ~/.claude is a Docker volume and only
+      # sessions/ is bound. ⚠️ Single-user: one host home, one Claude install. A
+      # multi-user test server needs a different design — see row 27760534.
+      - ${HOME}/.claude/projects:/home/rruiz/.claude/projects:ro
+      # ── THE REPO ROOT ITSELF — row 1661ece3, added 2026-09-23 ─────────────
+      # MEASURED 2026-09-23 against the running container: 127 files that
+      # `git ls-files` lists did not exist under /var/lupin. CLAUDE.md was one.
+      # Two merge-gate tests read it — test_typescript_suite_gate.py parses the
+      # `merge-pyramid-suites` marker out of it, test_bridge_dir_guard.py looks
+      # for the string `## PR MERGE REQUIREMENTS`. The first was FAILING with
+      # FileNotFoundError in the venue where the merge pyramid runs; the second
+      # had been taught to SKIP on the file's absence, which is the same
+      # blindness wearing a green.
+      #
+      # WHY THE ROOT AND NOT ONE MORE NAME ON THE LIST BELOW. Every mount under
+      # this one is a filename somebody had to think of. That list was extended
+      # for b5b6d252 and again for 719962ed and was still 127 files short. A
+      # list can always be short by one; a directory cannot.
+      #
+      # WHY READ-WRITE, WHICH LOOKS WRONG FOR WHAT IS MOSTLY DOCS.
+      # run-coverage-gate.sh:143 sets COVERAGE_FILE="$PROJECT_ROOT/.coverage-gate-$$"
+      # — a file created directly in the repo root whose name carries a PID, so
+      # it can neither be pre-declared as a nested mount nor written under a
+      # read-only root. `coverage` is in ALL_SUITE_COMPONENTS and runs in here.
+      # A read-only root would trade two red tests for a broken gate 5.
+      #   ⇒ the deploy artifacts the suite ASSERTS ABOUT keep their own :ro
+      #     overlays below. Nested mounts land on top of this one, so a test
+      #     still cannot rewrite the oracle it is asserting against. And write
+      #     access to the checkout is not new: ./src, ./io and ./.git have been
+      #     read-write in this service all along.
+      - .:/var/lupin
+      # Two things the root mount newly exposes, masked rather than accepted:
+      #   .env  — JWT_SECRET_KEY and POSTGRES_PASSWORD. Both are ALREADY in this
+      #           container's environment, so the mask buys no secrecy the env
+      #           has not already spent; what it keeps out is the FILE, which is
+      #           the thing that gets copied, shared and committed. Checked
+      #           2026-09-23: no test reads a repo-root .env.
+      #   .venv — the host developer venv, 6.9 GB, and candidate #1 in
+      #           src/scripts/lib/resolve-venv-pytest.sh's search from
+      #           PROJECT_ROOT. Its pytest shebang is an absolute /mnt/DATA01
+      #           path that does not exist in here, so the resolver WOULD fall
+      #           through to /opt/venv — by a path coincidence, not by design.
+      #           An empty tmpfs makes the fall-through deterministic and keeps
+      #           6.9 GB out of every rglob the suite runs from the repo root.
+      - /dev/null:/var/lupin/.env:ro
+      - type: tmpfs
+        target: /var/lupin/.venv
       - ./src:/var/lupin/src
       - ./io:/var/lupin/io
       # DM traffic corpus — lives OUTSIDE the repo (Rick 2026-08-13) so an
@@ -173,6 +236,12 @@ services:
       # -xdf` would take it and `git status` keeps offering it. Same host dir
       # for both servers; rows carry server_port + boot_id to stay separable.
       - /mnt/DATA01/include/www.deepily.ai/projects-data/lupin/dm-corpus:/var/lupin/dm-corpus
+      # Flow-ratio operator settings — the window + threshold the board header shows
+      # and the CREATE gate refuses on. OUTSIDE the repo on the host for the same
+      # reason dm-corpus is: `git clean -xdf` lists gitignored files as "would
+      # remove". Both rest services mount the SAME host dir, which is what lets an
+      # operator's slider move on :7999 and be honoured by the gate on :8000.
+      - /mnt/DATA01/include/www.deepily.ai/projects-data/lupin/flow-ratio:/var/lupin/flow-ratio
       - ./pytest.ini:/var/lupin/pytest.ini:ro
       # Repo-root deploy artifacts the unit suite ASSERTS ABOUT (bug b5b6d252).
       # Without these, 19 unit tests fail in-container with FileNotFoundError
@@ -234,13 +303,18 @@ services:
         bind:
           create_host_path: false
       # Multi-repo doc viewer (2026-05-12) — exposes Rick's other repos as
-      # named `scope`s in /api/docs/file. Read-only by design (viewer never writes).
+      # named `scope`s in /api/docs/file. WRITABLE since 2026-09-26 (row b84bbf1c, Rick ruling 02f3bc8f): doc uploads land here.
       # See src/rnd/v0.1.7/2026.05.12-multi-repo-doc-viewer.md §3h.
-      - /mnt/DATA01/include/www.deepily.ai/projects:/var/external-projects:ro
+      - /mnt/DATA01/include/www.deepily.ai/projects:/var/external-projects
       - ~/.claude/plans:/var/external-claude/plans:ro
     environment:
       LUPIN_ROOT: /var/lupin
       LUPIN_ENV: development
+      # FCM wake-ups (row 9b366409): firebase_admin needs the project with USER credentials.
+      # Never a literal — it outranks ANTHROPIC_VERTEX_PROJECT_ID and could bill the wrong
+      # project. The value is in the untracked .env (read from any shell; a bashrc export
+      # would abort non-interactive recreates) — Rick's ruling 2026-09-28.
+      GOOGLE_CLOUD_PROJECT: ${LUPIN_GCP_PROJECT_ID:?set LUPIN_GCP_PROJECT_ID in .env (row 9b366409)}
       # Row adce3547: the JWT signing secret comes from the ENVIRONMENT and nowhere
       # else — jwt_service.py has no literal fallback. The value lives in the
       # UNTRACKED, gitignored .env beside this file, which Compose auto-loads; it is
@@ -255,8 +329,20 @@ services:
       # ⚠️ Env + mounts resolve at container CREATE: picking this up needs
       # `docker compose up -d --force-recreate`, never a plain restart.
       LUPIN_DM_CORPUS_DIR: /var/lupin/dm-corpus
+      # Flow-ratio settings dir — points at the bind-mount above, the host's
+      # <projects-data>/lupin/flow-ratio. WITHOUT THIS the module falls back to
+      # fleet_data_root(), which inside the container resolves to /projects-data/lupin
+      # — a path that does not exist and is not writable, so every settings PATCH
+      # answered 500 (measured 2026-09-01, PermissionError [Errno 13]).
+      # ⚠️ Env + mounts resolve at container CREATE: picking this up needs
+      # `docker compose up -d --force-recreate`, never a plain restart.
+      LUPIN_FLOW_RATIO_DIR: /var/lupin/flow-ratio
       LUPIN_SERVER_PORT: "7999"
       DB_HOST: lupin-postgres
+      # database.py no longer carries a baked-in password default (row baac2474).
+      # Same untracked .env as POSTGRES_PASSWORD above; env resolves at container
+      # CREATE, so picking this up needs `up -d --force-recreate`, not a restart.
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env — see row 856882e4}
       LUPIN_API_URL: http://localhost:7999
       LUPIN_API_KEY_FILE: /var/lupin/src/conf/keys/notification-api-claude-code-dev
       # The model-server client's own credential — NOT the notifications key
@@ -272,6 +358,7 @@ services:
       #   src/rnd/v0.1.7/2026.05.16-model-server-carveout/01-design.md
       LUPIN_MODEL_SERVER_URL: ${LUPIN_MODEL_SERVER_URL:-http://lupin-model-server:7998}
       LUPIN_MODEL_SERVER_API_KEY_FILE: /var/lupin/src/conf/keys/lupin-model-server-auth
+      LUPIN_DEV_EMAIL: ricardo.felipe.ruiz@gmail.com
       LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL: ${LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL:?must be set in shell env}
       LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD: ${LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD:?must be set in shell env}
       # Mirrors the test container — enables proxy-integration tests when
@@ -338,7 +425,22 @@ services:
     # e2e visual tier sees no drift. Dev stays on 1.1.2 ONLY because recreating
     # lupin-rest-dev bounces Rick's live :7999; the image is correct for dev too.
     # Rollback: lupin:1.1.2-agy-candidate.
-    image: lupin:1.1.3-testtoolchain-candidate
+    # 2026-09-23 (Maya, row 9197e314, Rick approved ~18:00): TEST-ONLY bump to a rebuild of
+    # the SAME Dockerfile. 1.1.3 was built 2026-08-16; python-pptx==1.0.2 entered pyproject on
+    # 2026-08-29 in commit 8bf71a64 — the same commit that added `from pptx import Presentation`
+    # to pptx_deck_renderer.py. So the image was 13 days older than a pin it was meant to satisfy,
+    # and the unit tier could not COLLECT here: 6 import errors aborted a run that had selected
+    # 25,582 tests. Verified in the BUILT image before this line changed, with no mounts in play:
+    #   docker run --rm --entrypoint /opt/venv/bin/python lupin:1.1.4-pptx-candidate -c 'import pptx'
+    #   -> 1.0.2, and 0 of 48 declared runtime deps absent (each checked by IMPORT, not by
+    #      metadata name — a name match called huggingface_hub and flash-attn missing when both
+    #      import fine, so the name check is the thing that lies here, not the venv).
+    #
+    # DEV DELIBERATELY STAYS ON 1.1.3. Not an oversight and not parity drift to be tidied away:
+    # repointing dev means recreating Rick's live :7999, which is his call, not this row's. The
+    # merge pyramid runs HERE. Candidate tag, never auto-promoted (feedback_no_auto_promote_tags);
+    # rollback is this line set back to lupin:1.1.3-testtoolchain-candidate plus a force-recreate.
+    image: lupin:1.1.4-pptx-candidate
     container_name: lupin-rest-test
     restart: unless-stopped
     user: "1001:1001"
@@ -349,7 +451,53 @@ services:
     # reaches the host-side standalone arbiter on :8001 (Option 2, 2026-06-08).
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # Same speech upload tmpfs as lupin-rest-dev (row 27bcdd79).
+    tmpfs:
+      - "/tmp/lupin-stt:size=256m,uid=1001,gid=1001,mode=1777"
     volumes:
+      # ── THE REPO ROOT ITSELF — row 1661ece3, added 2026-09-23 ─────────────
+      # MEASURED 2026-09-23 against the running container: 127 files that
+      # `git ls-files` lists did not exist under /var/lupin. CLAUDE.md was one.
+      # Two merge-gate tests read it — test_typescript_suite_gate.py parses the
+      # `merge-pyramid-suites` marker out of it, test_bridge_dir_guard.py looks
+      # for the string `## PR MERGE REQUIREMENTS`. The first was FAILING with
+      # FileNotFoundError in the venue where the merge pyramid runs; the second
+      # had been taught to SKIP on the file's absence, which is the same
+      # blindness wearing a green.
+      #
+      # WHY THE ROOT AND NOT ONE MORE NAME ON THE LIST BELOW. Every mount under
+      # this one is a filename somebody had to think of. That list was extended
+      # for b5b6d252 and again for 719962ed and was still 127 files short. A
+      # list can always be short by one; a directory cannot.
+      #
+      # WHY READ-WRITE, WHICH LOOKS WRONG FOR WHAT IS MOSTLY DOCS.
+      # run-coverage-gate.sh:143 sets COVERAGE_FILE="$PROJECT_ROOT/.coverage-gate-$$"
+      # — a file created directly in the repo root whose name carries a PID, so
+      # it can neither be pre-declared as a nested mount nor written under a
+      # read-only root. `coverage` is in ALL_SUITE_COMPONENTS and runs in here.
+      # A read-only root would trade two red tests for a broken gate 5.
+      #   ⇒ the deploy artifacts the suite ASSERTS ABOUT keep their own :ro
+      #     overlays below. Nested mounts land on top of this one, so a test
+      #     still cannot rewrite the oracle it is asserting against. And write
+      #     access to the checkout is not new: ./src, ./io and ./.git have been
+      #     read-write in this service all along.
+      - .:/var/lupin
+      # Two things the root mount newly exposes, masked rather than accepted:
+      #   .env  — JWT_SECRET_KEY and POSTGRES_PASSWORD. Both are ALREADY in this
+      #           container's environment, so the mask buys no secrecy the env
+      #           has not already spent; what it keeps out is the FILE, which is
+      #           the thing that gets copied, shared and committed. Checked
+      #           2026-09-23: no test reads a repo-root .env.
+      #   .venv — the host developer venv, 6.9 GB, and candidate #1 in
+      #           src/scripts/lib/resolve-venv-pytest.sh's search from
+      #           PROJECT_ROOT. Its pytest shebang is an absolute /mnt/DATA01
+      #           path that does not exist in here, so the resolver WOULD fall
+      #           through to /opt/venv — by a path coincidence, not by design.
+      #           An empty tmpfs makes the fall-through deterministic and keeps
+      #           6.9 GB out of every rglob the suite runs from the repo root.
+      - /dev/null:/var/lupin/.env:ro
+      - type: tmpfs
+        target: /var/lupin/.venv
       - ./src:/var/lupin/src
       - ./io:/var/lupin/io
       # DM traffic corpus — lives OUTSIDE the repo (Rick 2026-08-13) so an
@@ -357,6 +505,12 @@ services:
       # -xdf` would take it and `git status` keeps offering it. Same host dir
       # for both servers; rows carry server_port + boot_id to stay separable.
       - /mnt/DATA01/include/www.deepily.ai/projects-data/lupin/dm-corpus:/var/lupin/dm-corpus
+      # Flow-ratio operator settings — the window + threshold the board header shows
+      # and the CREATE gate refuses on. OUTSIDE the repo on the host for the same
+      # reason dm-corpus is: `git clean -xdf` lists gitignored files as "would
+      # remove". Both rest services mount the SAME host dir, which is what lets an
+      # operator's slider move on :7999 and be honoured by the gate on :8000.
+      - /mnt/DATA01/include/www.deepily.ai/projects-data/lupin/flow-ratio:/var/lupin/flow-ratio
       - ./pytest.ini:/var/lupin/pytest.ini:ro
       # Repo-root deploy artifacts the unit suite ASSERTS ABOUT (bug b5b6d252).
       # Without these, 19 unit tests fail in-container with FileNotFoundError
@@ -417,9 +571,9 @@ services:
         bind:
           create_host_path: false
       # Multi-repo doc viewer (2026-05-12) — exposes Rick's other repos as
-      # named `scope`s in /api/docs/file. Read-only by design (viewer never writes).
+      # named `scope`s in /api/docs/file. WRITABLE since 2026-09-26 (row b84bbf1c, Rick ruling 02f3bc8f): doc uploads land here.
       # See src/rnd/v0.1.7/2026.05.12-multi-repo-doc-viewer.md §3h.
-      - /mnt/DATA01/include/www.deepily.ai/projects:/var/external-projects:ro
+      - /mnt/DATA01/include/www.deepily.ai/projects:/var/external-projects
       - ~/.claude/plans:/var/external-claude/plans:ro
     environment:
       LUPIN_ROOT: /var/lupin
@@ -437,8 +591,20 @@ services:
       # The two servers share ONE corpus; `server_port` + `boot_id` on every row
       # are what keep their traffic tellable apart.
       LUPIN_DM_CORPUS_DIR: /var/lupin/dm-corpus
+      # Flow-ratio settings dir — points at the bind-mount above, the host's
+      # <projects-data>/lupin/flow-ratio. WITHOUT THIS the module falls back to
+      # fleet_data_root(), which inside the container resolves to /projects-data/lupin
+      # — a path that does not exist and is not writable, so every settings PATCH
+      # answered 500 (measured 2026-09-01, PermissionError [Errno 13]).
+      # ⚠️ Env + mounts resolve at container CREATE: picking this up needs
+      # `docker compose up -d --force-recreate`, never a plain restart.
+      LUPIN_FLOW_RATIO_DIR: /var/lupin/flow-ratio
       LUPIN_SERVER_PORT: "8000"
       DB_HOST: lupin-postgres
+      # database.py no longer carries a baked-in password default (row baac2474).
+      # Same untracked .env as POSTGRES_PASSWORD above; env resolves at container
+      # CREATE, so picking this up needs `up -d --force-recreate`, not a restart.
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env — see row 856882e4}
       LUPIN_API_URL: http://localhost:7999
       LUPIN_API_KEY_FILE: /var/lupin/src/conf/keys/notification-api-claude-code-dev
       # The model-server client's own credential — NOT the notifications key

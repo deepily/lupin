@@ -21,9 +21,30 @@ commit sha, never the index.
 THE SUBSTITUTES, in the order you should reach for them:
   · TO HOLD WORK — make a WIP COMMIT ON YOUR OWN BRANCH. A stash is a shared
     mutable stack pretending to be a private one; a branch is actually yours.
-  · TO INSPECT AN OLD VERSION — `git checkout <sha> -- <path>`, restore with
-    `git checkout HEAD -- <path>`. Touches nothing shared, races nothing.
-  · A throwaway detached worktree at the old sha also works and is safer still.
+  · TO INSPECT AN OLD VERSION — a THROWAWAY DETACHED WORKTREE at the old sha.
+    Reach for this FIRST; it is the only form that cannot touch anybody's
+    working tree.
+  · The same job by `git checkout <sha> -- <path>` is a LAST RESORT, and only
+    after `cp <path> <path>.bak`. 🔴 THIS BULLET USED TO SAY IT "touches nothing
+    shared, races nothing", WHICH IS FALSE AND WAS THE MOST DANGEROUS SENTENCE
+    IN THIS FILE. A path-level checkout overwrites the WORKING-TREE copy of that
+    path — including a peer's uncommitted work in a shared checkout — and it
+    moves no HEAD, so it leaves NO REFLOG ENTRY and is invisible to forensics.
+    Measured 2026-09-01: four seats in one checkout, and a census of 96,258
+    commands found 73 such restores in the shared tree across 50 sessions.
+    The restore direction (`git checkout HEAD -- <path>`) is the same hazard.
+  · TO UNDO YOUR OWN EDIT — `cp` from a backup YOU took, IN A WORKTREE OF YOUR
+    OWN. The `cp` fixes only which BYTES come back: your copy holds your edit,
+    where `git checkout HEAD --` holds whatever was committed. 🔴 THE WRITE IS
+    IDENTICAL. A `cp` overwrites the working-tree file exactly as the git form
+    does, so if a peer edited it between your backup and your restore you revert
+    them — silently, no HEAD moved, no reflog. Substituting `cp` narrows the
+    hazard to the window between the two, and does not remove it.
+    ⇒ In a shared checkout the only form with no window at all is a detached
+    worktree, where nobody else can be in the file. Receipt, and it is this
+    file's own author: on 2026-09-02 I ran mutation arms with `cp` restores in a
+    four-seat shared checkout and they came out clean only because the other
+    three happened not to be in those two files.
 
 SCOPE: only the MUTATING subcommands are denied. `git stash list` and
 `git stash show` are read-only and stay allowed — they are how you inspect the
@@ -196,7 +217,23 @@ _COMMAND_POSITION = r"(?:^|[;&|(){}\n]|\bthen\b|\bdo\b|\belse\b|\belif\b)"
 # Things that sit between the command slot and the program while still running
 # it: environment assignments (FOO=bar) and transparent wrappers.
 _WRAPPERS = r"(?:env|command|builtin|exec|sudo|nohup|time|nice|stdbuf|xargs)"
-_PREFIXES = rf"(?P<prefix>(?:\s*(?:[A-Za-z_][A-Za-z0-9_]*=[^\s;&|]*|{_WRAPPERS})\b)*)"
+# 🔴 AN EMPTY ENV ASSIGNMENT USED TO WALK STRAIGHT PAST THIS (found 2026-08-31 by
+# a merge_head_guard test, measured in BOTH guards). The `\b` sat AFTER the whole
+# alternation, and a word boundary cannot exist between the `=` of `FOO=` and the
+# space that follows - two non-word characters. So the prefix group failed, the
+# match backtracked to zero prefixes, and the anchored program never matched:
+#
+#     FOO=1 git stash pop      DENIED
+#     FOO=  git stash pop      ALLOWED    <-- and `GIT_DIR= git stash pop` with it
+#
+# THE FIX IS A LOOKAHEAD, NOT A DROPPED `\b`. Simply removing the boundary lets the
+# greedy value backtrack INTO the program name, so `FOO=bargit commit` would match
+# a `git` that is part of the value - trading a false allow for a false deny, which
+# is the trade this fleet's guards exist to refuse. `(?=[\s;&|]|$)` pins the value
+# to a real token end instead, so it can neither swallow the program nor give back
+# part of itself. Measured both ways: the empty assignment now matches and
+# `FOO=bargit commit` still does not.
+_PREFIXES = rf"(?P<prefix>(?:\s*(?:[A-Za-z_][A-Za-z0-9_]*=[^\s;&|]*(?=[\s;&|]|$)|{_WRAPPERS}\b))*)"
 
 # The program itself, allowing any leading path. The bare name is matched by the
 # empty alternative of the path group.
@@ -307,9 +344,16 @@ def _deny_reason_for( subcommand: Optional[ str ] ) -> str:
         "2026-08-23 (bug 1ebc9be3).\n"
         "USE INSTEAD:\n"
         "  · to HOLD work — a WIP commit on your own branch;\n"
-        "  · to INSPECT an old version — `git checkout <sha> -- <path>`, restore "
-        "with `git checkout HEAD -- <path>`;\n"
-        "  · a throwaway detached worktree at the old sha.\n"
+        "  · to INSPECT an old version — a throwaway detached worktree at that "
+        "sha. Prefer this: it cannot touch anybody's working tree.\n"
+        "  · `git checkout <sha> -- <path>` is a LAST RESORT and only after "
+        "`cp <path> <path>.bak` — it OVERWRITES the working-tree copy, including "
+        "a peer's uncommitted work, and moves no HEAD, so there is no reflog "
+        "entry to recover from.\n"
+        "  · to undo your OWN edit — `cp` from a backup you took, in a worktree "
+        "of your own. The `cp` fixes only WHICH BYTES come back; the write is "
+        "identical, so it still overwrites a peer's edit made since your backup. "
+        "Only a detached worktree closes that window.\n"
         "`git stash list` and `git stash show` are read-only and still allowed. "
         "If you own an entry and must clear it, name the COMMIT SHA (never "
         "`stash@{N}` — indices renumber on every drop) and re-run with "

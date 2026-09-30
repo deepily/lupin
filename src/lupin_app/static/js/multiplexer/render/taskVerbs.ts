@@ -1,0 +1,321 @@
+/* c8 ignore next */ // tsx phantom-branch artifact on file-header line.
+// Task-list card — the verb table (row-control conversion, 2026.09.02).
+//
+// The multiplexer's Actions cell used to offer ONE verb, Drop, as a bare input
+// plus a button. Rick ruled the one-select shape for the notifications board and
+// then ruled it again for this surface: one select carrying all five verbs, one
+// shared reason field, one Submit.
+//
+// This module is the pure half of that — no DOM, no store, no fetch. It answers
+// three questions and nothing else: which verbs exist, what each one asks the
+// operator for, and which of them a row in a given status may legally take. The
+// cell renders what it says; the renderer posts what it says.
+//
+// Ported from notifications.js `_verbNeeds` / `_taskActionsCell` rather than
+// re-derived. The payload shapes in particular are SETTLED — a second derivation
+// is a second chance to get `park_reason` wrong.
+
+import { isOpenStatus } from "./taskListModel";
+import { ownLookup } from "../shared/ownLookup";
+
+// 🔴 EVERY LOOKUP IN THIS FILE USES `Object.hasOwn`, NOT AN INDEX-AND-COALESCE.
+// `NEEDS[ verb ] ?? null` walks the PROTOTYPE CHAIN: `verbNeeds( "toString" )`
+// returns `Object.prototype.toString` — truthy, so it reads as a legal verb, and
+// its `.status` is `undefined`, so the caller POSTs a transition with no target
+// status instead of refusing. `verbLabel` and `verbReasonComplaint` carry the
+// same hole one step down, each returning a FUNCTION where a sentence belongs.
+// THREE lookups, not four: `verbDateComplaint` is a ternary on `verb === "park"`
+// and never indexes anything, so it was never exposed. Said explicitly because
+// the first draft of this note claimed all four and a reader checking it would
+// have gone hunting a defect that is not there — which costs more than the
+// wrong count, since they find working code and must then decide whether the
+// code or their reading is wrong.
+//
+// ⚠️ IT IS UNREACHABLE FROM THE UI TODAY AND THAT IS NOT A REASON TO LEAVE IT.
+// Every caller reads `select.value` off a select this file's own table rendered,
+// so only the five real verbs can arrive — which is a property of TODAY'S CALL
+// GRAPH, not of this code. These are exported functions; the next call site is
+// one afternoon's work and it will not come with a note saying which strings it
+// may pass. Fixed alongside the identical hole in holdingAreaBatch.ts (found
+// there by a test that asked for "toString"), because leaving one of two
+// identical defects standing is how it returns wearing a different call site.
+
+
+/**
+ * The verbs, in the fixed order they render in — the SHARED MODULE's order.
+ *
+ * ✅ THE DRIFT THIS DOCSTRING USED TO FLAG IS CLOSED (row 507183ff, 2026-09-09).
+ * It read: *"PRE-EXISTING DRIFT, FLAGGED AND NOT FIXED HERE. The shared module
+ * also ships `fixed`, and this list does not… absorbing it into an un-park change
+ * would launder someone else's omission into this diff."* Sam was right to refuse
+ * the widening and right to name it instead — the flag is what made this row
+ * findable at all, and it is worth saying that the honest note did its job.
+ *
+ * `fixed` now sits where the shared module puts it, between `wont_fix` and
+ * `unpark`. Rick's standing instruction governs both lists: "This should be
+ * implemented in both apps for now, both the multiplexer and the notification
+ * client."
+ *
+ * 🔴 DO NOT HAND-MAINTAIN THIS AGAINST THE MODULE. Two hand-written copies of one
+ * vocabulary is what produced this row AND the un-park row (75044ab5) — the same
+ * defect in both directions inside one week. The guard is
+ * `src/tests/unit/multiplexer/render/the_multiplexer_offers_every_shared_verb.test.ts`,
+ * which reads the shared module as its ORACLE and reddens when this list falls
+ * behind it. Verb number eight cannot land on one side only.
+ */
+export const TASK_VERBS: ReadonlyArray<string> = [ "park", "drop", "demote", "wont_fix", "fixed", "unpark", "approve" ];
+
+/**
+ * What one verb asks the operator for, and what it posts.
+ *
+ * 🔴 This table is the point of the redesign. On the notifications board five
+ * verbs were five buttons because each carried a different obligation; the
+ * obligations did not go away when the buttons did, they moved into a table like
+ * this one. Here there was only ever one button, so the four other obligations
+ * arrive for the first time — which is why this file is an addition and not a
+ * merge, whatever the shape of the two surfaces looks like from outside.
+ *
+ * ⚠️ `dateLabel` answers a question Rick asked ("I really have no idea what the
+ * date chooser is for") rather than naming the field the server stores it in. A
+ * control whose purpose the operator cannot infer is a defect in the control.
+ */
+export interface VerbNeeds {
+  /** The `to_status` the transition endpoint is asked for. */
+  status      : string;
+  /** True when a non-blank reason is required before the verb may be submitted. */
+  reason      : boolean;
+  /** True when a chase/triage date is required. */
+  date        : boolean;
+  /** The label the date input announces itself with; "" when there is no date. */
+  dateLabel   : string;
+  /** The reason field's placeholder while this verb is chosen. */
+  placeholder : string;
+  /** True when the verb closes the row for good and earns a confirm step. */
+  terminal    : boolean;
+}
+
+const NEEDS: Readonly<Record<string, VerbNeeds>> = {
+  park     : { status: "parked",       reason: true,  date: true,
+               dateLabel: "Chase me again on",
+               placeholder: "quote the sentence that decided this…", terminal: false },
+  drop     : { status: "dropped",      reason: true,  date: false, dateLabel: "",
+               placeholder: "why this is being dropped…", terminal: false },
+  demote   : { status: "not_approved", reason: true,  date: true,
+               dateLabel: "Triage this by",
+               placeholder: "why this goes back to triage…", terminal: false },
+  wont_fix : { status: "wont_fix",     reason: true,  date: false, dateLabel: "",
+               placeholder: "why this will not be done…", terminal: true },
+  // FIXED (row 507183ff). Rick: "I see something's fixed, I'm going to mark it as
+  // fixed." A board whose only human-driven terminal verb is a NEGATIVE one drifts
+  // toward an inflated open count — and the create/close ratio gate reads that count,
+  // so the missing verb was not cosmetic.
+  //
+  // `reason: false` — a fix explains itself; the shared module rejected a mandatory
+  // note here as friction on the exact path Rick called too slow.
+  //
+  // `terminal: true` is the shared module's `armsTwice`. `done` is append-only, so a
+  // misclick cannot be undone, and it earns the same two-click arm won't-fix has.
+  fixed    : { status: "done",         reason: false, date: false, dateLabel: "",
+               placeholder: "Marking fixed needs no reason", terminal: true },
+  // UN-PARK (Rick's P0, row 03d3bf78). Target ruled by him: "the proper state is to
+  // go from parked to queued". No reason — un-parking DISCARDS the park's
+  // justification rather than answering it, and the server clears `park_reason` on
+  // leaving `parked`. No date input, and see `transitionExtras`: this verb actively
+  // CLEARS the old chase, because a chase exists to end a park and the park is over.
+  unpark   : { status: "queued",       reason: false, date: false, dateLabel: "",
+               placeholder: "Un-parking needs no reason", terminal: false },
+  approve  : { status: "queued",       reason: false, date: false, dateLabel: "",
+               placeholder: "Approve needs no reason", terminal: false },
+};
+
+/**
+ * Look up one verb's obligations.
+ *
+ * Ensures:
+ *   - an unknown verb (including "") returns null — the caller's cue that the
+ *     operator has not chosen anything yet
+ *   - a known verb returns its full obligation record
+ */
+export function verbNeeds( verb: string | null | undefined ): VerbNeeds | null {
+  if ( !verb ) return null;
+  return ownLookup<VerbNeeds | null>( NEEDS, verb, null );
+}
+
+/**
+ * The human name of a verb, for an option label or a refusal stripe.
+ *
+ * Ensures: returns the verb itself when unknown, never undefined.
+ */
+export function verbLabel( verb: string ): string {
+  const LABELS: Readonly<Record<string, string>> = {
+    park: "Park", drop: "Drop", demote: "Demote",
+    wont_fix: "Won't fix", fixed: "Fixed", unpark: "Un-park", approve: "Approve",
+  };
+  return ownLookup( LABELS, verb, verb );
+}
+
+/**
+ * The refusal each verb earns when its reason is blank.
+ *
+ * ⚠️ Five verbs share one box and must NOT share one complaint. "A reason is
+ * required" is true of four of them and teaches none of them: park needs a
+ * QUOTE, demote must say why a row goes back to triage, and won't-fix is a
+ * refusal whose justification is the only thing distinguishing it from work that
+ * got forgotten. Merging the controls was the ask; merging what they mean was not.
+ *
+ * Ensures: returns a verb-specific sentence, never a generic one for a known verb.
+ */
+export function verbReasonComplaint( verb: string ): string {
+  const COMPLAINTS: Readonly<Record<string, string>> = {
+    drop     : "A drop reason is required.",
+    park     : "A park reason is required — quote the row's own decisive sentence.",
+    demote   : "A demote reason is required — say why this goes back to triage, or the next reader cannot tell it from a row that was never approved.",
+    wont_fix : "A won't-fix reason is required — a refusal carries its justification, exactly as a drop does.",
+  };
+  return ownLookup( COMPLAINTS, verb, "A reason is required." );
+}
+
+/**
+ * The refusal a verb earns when its required date is blank. Park and Demote are
+ * the only two that reach here, and they mean different things by a date, so
+ * they say different things.
+ */
+export function verbDateComplaint( verb: string ): string {
+  return verb === "park"
+    ? "A chase date is required — a park is bounded, never indefinite."
+    : "A triage-by date is required — a held row is bounded, never indefinite. Use won't-fix to kill it outright.";
+}
+
+/** One verb's standing on one row: may it be chosen, and if not, why not. */
+export interface VerbLegality {
+  verb    : string;
+  label   : string;
+  enabled : boolean;
+  /** Empty when enabled; otherwise the sentence the greyed option carries. */
+  why     : string;
+}
+
+/**
+ * Which verbs a row in `status` may legally take.
+ *
+ * 🔴 A TERMINAL ROW OFFERS NOTHING. `done` / `dropped` / `wont_fix` are
+ * append-only — the server's `validate_transition` refuses every edge out of
+ * them. Every option is greyed and says so.
+ *
+ * ⚠️ Approve and Demote are opposite ends of one door, so exactly one of them is
+ * ever live on a row. Approve is the holding area's exit (`not_approved →
+ * queued`); Demote is its entrance. Offering both hands the operator a move that
+ * is a no-op in one direction, which the store rejects as a failure rather than
+ * as nothing happening.
+ *
+ * Requires:
+ *   - status is the row's status string, or null/undefined
+ * Ensures:
+ *   - returns exactly TASK_VERBS.length entries, in TASK_VERBS order
+ *   - a terminal row returns every entry disabled, each carrying the same
+ *     append-only sentence naming the row's own status
+ *   - Park is enabled ONLY from queued / in_progress
+ *   - Approve is enabled ONLY on a not_approved row; Demote on every OTHER
+ *     non-terminal row
+ *   - Drop and Won't-fix are enabled on every non-terminal row
+ */
+export function verbLegality( status: string | null | undefined ): ReadonlyArray<VerbLegality> {
+  const s          = ( status ?? "" ).toLowerCase();
+  const isTerminal = !isOpenStatus( s );
+  const isHeld     = s === "not_approved";
+  const shown      = s || "unknown";
+  const dead       = `this row is ${shown}; terminal rows are append-only and have no transitions out`;
+
+  const parkLegal   = !isTerminal && ( s === "queued" || s === "in_progress" );
+  // Keyed on the STORED status. An EXPIRED park still reads `parked` here — expiry is
+  // computed at read time by the store and never rewrites the row — so an expired park
+  // is offered the verb too, which is the case Rick raised (row 49b87212).
+  const isParked    = s === "parked";
+  const demoteLegal = !isTerminal && !isHeld;
+
+  const entry = ( verb: string, enabled: boolean, why: string ): VerbLegality =>
+    ( { verb, label: verbLabel( verb ), enabled, why: enabled ? "" : why } );
+
+  return [
+    entry( "park",     parkLegal,    isTerminal ? dead : "only from queued or in progress" ),
+    entry( "drop",     !isTerminal,  dead ),
+    entry( "demote",   demoteLegal,  isTerminal ? dead : "this row is already in the holding area" ),
+    entry( "wont_fix", !isTerminal,  dead ),
+    // Legal from every non-terminal status, exactly as drop and won't-fix are: the
+    // shared module's spec carries `legalFrom: null, illegalFrom: null`, so nothing
+    // narrows it. Marking a held row fixed is a real move — work can land before
+    // anyone gets round to approving the ticket for it.
+    entry( "fixed",    !isTerminal,  dead ),
+    entry( "unpark",   isParked,     isTerminal ? dead : "only a parked row can be un-parked" ),
+    entry( "approve",  isHeld,       isTerminal ? dead : "only a row in the holding area can be approved" ),
+  ];
+}
+
+/**
+ * The extra body fields a verb's transition carries, beyond `to_status`.
+ *
+ * 🔴 PARK POSTS ITS REASON UNDER `park_reason`, NOT `reason`. The server keys
+ * the two apart and a park filed under the generic key lands with no decisive
+ * sentence attached — which is the whole thing the field exists to carry. This
+ * mapping is copied from the notifications board rather than re-derived; a
+ * second derivation is a second chance to get it wrong.
+ *
+ * Requires:
+ *   - verb is a known verb (callers gate on verbNeeds first)
+ *   - reason is the trimmed reason text; chaseIso is an ISO instant or null
+ * Ensures:
+ *   - a verb that takes no reason contributes no reason key at all
+ *   - park's reason lands under `park_reason`; every other verb's under `reason`
+ *   - a verb that takes a date contributes `next_chase_ts`
+ */
+/** The `receipt_refs` a verb's transition carries — today only Fixed's operator attestation. */
+export interface TransitionReceiptRefs {
+  operator_attestation : string;
+}
+
+/**
+ * The extra body fields a transition carries: `string | null` for the reason and chase keys
+ * (un-park sends an explicit null), and an object for `receipt_refs`, which only Fixed sends.
+ */
+export type TransitionExtras = Record<string, string | null | TransitionReceiptRefs>;
+
+/**
+ * What the multiplexer sends as Fixed's operator attestation. THE VALUE IS NOT TRUSTED: the
+ * server refuses a ->done with an empty receipt, then REPLACES this string with the identity
+ * on the validated login before recording it (routers/tasks.py
+ * `_resolved_operator_attestation`). The key being present is what matters. Legacy sends
+ * `operator <queueSessionId>`; this names its client instead.
+ */
+export const MUX_OPERATOR_ATTESTATION = "operator (multiplexer)";
+
+/* c8 ignore next */ // tsx phantom-branch artifact on the multi-line exported function-declaration line; every internal branch is exercised.
+export function transitionExtras(
+  verb     : string,
+  reason   : string,
+  chaseIso : string | null,
+): TransitionExtras {
+  const needs = verbNeeds( verb );
+  /* c8 ignore next */ // defensive: callers gate on verbNeeds before reaching here.
+  if ( needs === null ) return {};
+  const extras: TransitionExtras = {};
+  if ( needs.reason ) extras[ verb === "park" ? "park_reason" : "reason" ] = reason;
+  if ( needs.date && chaseIso !== null ) extras.next_chase_ts = chaseIso;
+
+  // 🔴 UN-PARK CLEARS THE CHASE, and it is the one verb that sends an EXPLICIT null.
+  // Rick ruled it (row 03d3bf78): a chase date exists to END a park, so once the park
+  // is over the date has no job left and a surviving one re-chases him about a row
+  // already sitting on his board.
+  //
+  // ⚠️ OMITTING THE KEY WOULD NOT HAVE DONE THIS. Every other verb contributes
+  // `next_chase_ts` only when it has one, and an absent key leaves the stored value
+  // untouched — which is why the return type widens to `string | null` here. "Send
+  // nothing" and "send null" are different requests and only one of them clears.
+  if ( verb === "unpark" ) extras.next_chase_ts = null;
+
+  // 🔴 FIXED CLOSES A ROW, AND THE STORE REFUSES A ->done WITH NO RECEIPT (row 47377c92).
+  // The legacy card has always sent `receipt_refs.operator_attestation` on Fixed
+  // (notifications.js `_handleTaskSubmitClick`). The multiplexer picked the verb up in
+  // 709128d4 without it, so every multiplexer Fixed press was refused by the server.
+  if ( verb === "fixed" ) extras.receipt_refs = { operator_attestation: MUX_OPERATOR_ATTESTATION };
+  return extras;
+}

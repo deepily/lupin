@@ -27,7 +27,7 @@ without asking, that assertion goes red, which is the point. The resume MUST be
 accepted with route_reason='resumed' and reach the board.
 
 Venue: :8000 — the ask branch spends real routing inference and the resume executes
-the agent (may write a snapshot). Submit via POST /api/test-suite/submit on a
+the agent (may write a snapshot). Submit via the v2 test-suite submit on a
 verified-idle server; never :7999, never curl, never side-doored. The park probe
 that established this test's premise (router parks the question, wrote_snapshot=False)
 ran read-only on :7999; the resume-to-done half belongs here because it executes.

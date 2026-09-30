@@ -56,8 +56,31 @@ test("dateAccordion: messages container holds rendered .sender-message items in 
   assert.equal(messages[2]!.getAttribute("data-id-hash"), "n3");
 });
 
+// C3 (2026-09-10) — the sender card passes the day's row count before progress
+// collapse, so the header can say (4) over the 2 rows it renders.
+test("C3: an explicit count is shown instead of the number of rendered items", () => {
+  const items = [makeNotification("n1"), makeNotification("n2")];
+  const el = renderDateAccordion("2026-05-05", items, { appTimezone: "UTC" }, 4);
+  assert.equal(el.querySelector(".date-count")!.textContent, "(4)");
+  assert.equal(el.querySelectorAll(".sender-message").length, 2, "still renders only the items it was given");
+});
+
 test("dateAccordion: empty notifications still renders chrome (count = 0)", () => {
   const el = renderDateAccordion("2026-05-05", [], { appTimezone: "UTC" });
   assert.equal(el.querySelector(".date-count")!.textContent, "(0)");
   assert.equal(el.querySelectorAll(".sender-message").length, 0);
+});
+
+// S3 (2026-09-10) — legacy createDateAccordion emits a per-day × between the
+// count and the toggle (notifications.js:18914-18920). The click is wired in
+// NotificationsListRenderer (sender_card_header_controls.test.ts).
+test("S3: the header carries a × .date-delete-btn between the count and the toggle", () => {
+  const el = renderDateAccordion("2026-05-05", [makeNotification("n1")], { appTimezone: "UTC" });
+  const btn = el.querySelector(".date-accordion-header > button.date-delete-btn");
+  assert.ok(btn !== null, "date-delete-btn present in the header");
+  assert.equal(btn.textContent, "×");
+  assert.equal(btn.getAttribute("title"), "Delete this day");
+  assert.equal(btn.getAttribute("type"), "button");
+  assert.ok(btn.previousElementSibling!.classList.contains("date-count"), "after the count");
+  assert.ok(btn.nextElementSibling!.classList.contains("date-toggle"), "before the toggle");
 });

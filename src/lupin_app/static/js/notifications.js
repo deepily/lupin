@@ -23,7 +23,601 @@ const DELETE_HANDLERS = {
     history : ( jobId )            => window.notificationsUI.deleteHistoryJob( jobId )
 };
 
+// 🔴 THE ROW SCHEMA — ONE SHAPE FOR ALL THREE PANES, AND IT IS DATA.
+//
+// Rick, by voice 2026-09-03: he must never have to re-parse the left-to-right layout
+// when moving between the task list, the holding area and the epic board. So the three
+// panes render the SAME fields in the SAME order, and the renderer WALKS this table
+// rather than carrying the order in its markup — moving a field between lines is an
+// edit here, not a rewrite there.
+//
+// line1 is what is always visible. line2 and line3 appear behind the disclosure.
+//
+// ⚠️ IT LIVES ON THE PROTOTYPE, NOT ON `this`, AND THAT IS LOAD-BEARING FOR THE TESTS.
+// The notifications.js harness builds its subject with `Object.create( proto )` to skip
+// the constructor, so anything assigned in the constructor is simply ABSENT under test
+// and every harness has to hand-set its own copy. A hand-set copy is a second source of
+// truth that agrees with this one only until somebody edits one of them — which is the
+// drift this whole change exists to remove. A prototype getter is visible to every
+// caller and every harness, and there is nothing to keep in step.
+const ROW_SCHEMA = {
+    line1 : [ "id", "title", "class", "status", "priority" ],
+    line2 : [ "blocked", "chase", "accountable", "filer", "project" ],
+    line3 : [ "detail", "actions" ]
+};
+
+const ROW_FIELD_LABELS = {
+    id          : "ID",
+    title       : "Title",
+    class       : "Class",
+    status      : "Status",
+    priority    : "Priority",
+    blocked     : "Blocked by",
+    chase       : "Next chase",
+    accountable : "Accountable",
+    filer       : "Filed by",
+    project     : "Project",
+    detail      : "Detail",
+    actions     : "Actions"
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CONSOLE TEE — module-level state and the seat-id join.
+//
+// Row 27760534, phase 2, slice 8. Plan §4.
+//
+// MODULE-LEVEL BY RULING, not by accident. The multiplexer has a `stores/` layer to put
+// `SessionTranscriptStore` in; this file has no equivalent. Mr. Radio ruled 2026-09-27
+// that the legacy half keeps its console state at module level rather than inventing a
+// shared helper — a helper importable from both the TS bundle and plain legacy script is
+// a build question this feature should not open. Parity is held by TESTS (B4.11), not by
+// shared code: the two clients ship the same BEHAVIOUR and deliberately different
+// STRUCTURE.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// OSQ-9 — newest block at the BOTTOM. Mr. Radio's approval 2026-09-27; Rick may still
+// flip it. It is ONE CONSTANT ON PURPOSE: it decides which scroll edge auto-follow pins
+// to and which end "load earlier" prepends to, so a flip is a one-line change here rather
+// than a hunt through the renderer. The multiplexer holds the same decision the same way.
+const CC_CONSOLE_NEWEST_AT = "bottom";
+
+// The length of the session id a sender card carries. `parseSenderId` splits
+// `claude.code@lupin.deepily.ai#4cecf18a` and keeps the `#` suffix, which is EIGHT hex
+// characters — while the stream's `cc_session_id` is the seat's FULL `stable_session_id`.
+// Those are two different widths of the same thing, and the roster is what joins them.
+const CC_CONSOLE_CARD_ID_LENGTH = 8;
+
+// The client ring's budget, in UTF-8 bytes of block text. Plan §4/§5: the ring is a
+// scroll-back budget, not the record — when it fills, the OLDEST blocks are evicted and
+// "load earlier" is how they come back. 256 KB is the plan's PROVISIONAL default pending
+// Open sub-question 5; it is one constant so answering OSQ-5 is a one-line change.
+const CC_CONSOLE_RING_MAX_BYTES = 256 * 1024;
+
+// Per-tab console state. One console per tab in v1 (§4), so this is a single record
+// rather than a map keyed by seat.
+const ccConsoleState = {
+    watchedCcSessionId : null,   // the FULL stable id currently watched, or null
+    fileEpoch          : null,   // the epoch every offset below is scoped to
+    lastNextOffset     : null,   // where the next chunk must start, or a gap is declared
+    blocks             : [ ],    // the byte-bounded ring, oldest first
+    ringBytes          : 0,      // UTF-8 bytes held, per ccConsoleBlockBytes
+    evictedBlocks      : 0,      // blocks dropped off the old end since this stream began
+    roster             : [ ],    // seat rows from GET /api/cc-transcript-roster
+};
+
+
+/**
+ * Reset everything scoped to one epoch's byte stream, keeping the watched seat.
+ *
+ * Called on an epoch change and on `epoch_mismatch`. The WATCH survives — the seat is
+ * still the seat — but every offset and every buffered block belonged to a file that no
+ * longer exists, so continuing to render them would show the old transcript labelled as
+ * the new one.
+ */
+function ccConsoleResetStream() {
+    ccConsoleState.fileEpoch      = null;
+    ccConsoleState.lastNextOffset = null;
+    ccConsoleState.blocks         = [ ];
+    ccConsoleState.ringBytes      = 0;
+    ccConsoleState.evictedBlocks  = 0;
+}
+
+
+/**
+ * A block's size for the ring budget: the UTF-8 byte length of its text.
+ *
+ * Plan §5 (C8): the server cap and both client rings use this ONE definition, so "never
+ * exceeds its cap" means the same thing on each end. `String.length` counts UTF-16 code
+ * units, which undercounts every non-ASCII character — the unit mismatch §2 already
+ * named once on the server side.
+ *
+ * Ensures:
+ *     - returns a non-negative integer; a block with no text is 0 bytes, never NaN
+ */
+function ccConsoleBlockBytes( block ) {
+    return new TextEncoder().encode( String( ( block && block.text ) || "" ) ).length;
+}
+
+
+/**
+ * Resolve a sender card's 8-hex session id to the FULL `cc_session_id` to watch.
+ *
+ * 🔴 THE WHOLE POINT OF THIS FUNCTION IS THAT IT CAN FAIL, AND SAYS SO.
+ *
+ * The card carries only 8 hex characters; the stream is keyed on the seat's full
+ * `stable_session_id` (§3). A prefix is the only key available for the join, and a prefix
+ * is not a unique key — two live seats CAN share their first 8 characters. CLAUDE.md
+ * § "Pointing at something": make the pointer self-checking, say it must match exactly
+ * once, and say what to do when it matches zero or twice — come back, never guess.
+ *
+ * So this returns the full id only on EXACTLY ONE match. Zero matches means the chip has
+ * outlived its seat (the chip list and the fleet roster are different populations — a
+ * chip can outlive its seat, and a live seat that never sent a notification has no chip).
+ * Two or more means the prefix is ambiguous, and picking the first would silently attach
+ * the console to the wrong seat's output, which is worse than offering nothing.
+ *
+ * THE SAME SEAT AS THE MULTIPLEXER (row 27760534, 2026-09-28). The multiplexer's
+ * `resolveTranscriptSeat` narrows twin prefixes by the chip's project and persona name, and
+ * counts only WATCHABLE rows as candidates. Both clients open the same console page, so they
+ * must pick the same seat from the same roster: the optional `chip` carries the project and
+ * the persona name, and the candidate rules below are the multiplexer's. The REASON codes
+ * stay this client's own, finer-grained ones. Parity is held by
+ * `both_clients_resolve_the_same_seat_and_build_the_same_console_href.test.ts`.
+ *
+ * @param {string|null} cardSessionId - the card's 8-hex id, from parseSenderId
+ * @param {Array} roster - seat rows carrying a full `session_id`
+ * @param {{ project?: string|null, personaName?: string|null }} [chip] - what the card knows
+ *        about its seat; absent means no project filter and no persona tie-break
+ * @returns {{ ccSessionId: string|null, reason: string }} `reason` is "ok", "no-card-id",
+ *          "not-in-roster", "ambiguous-prefix" or "not-watchable"
+ */
+function ccConsoleResolveSessionId( cardSessionId, roster, chip ) {
+    if ( !cardSessionId ) return { ccSessionId : null, reason : "no-card-id" };
+
+    // Compared lower-case on both sides: it is the id that must match, not its spelling.
+    const prefix      = String( cardSessionId ).slice( 0, CC_CONSOLE_CARD_ID_LENGTH ).toLowerCase();
+    const project     = ( chip && chip.project ) || null;
+    const personaName = ( chip && chip.personaName ) || null;
+
+    // A row with no project is not excluded on that ground — the multiplexer's rule.
+    const matches = ( roster || [ ] ).filter( seat =>
+        seat && typeof seat.session_id === "string" &&
+        seat.session_id.slice( 0, CC_CONSOLE_CARD_ID_LENGTH ).toLowerCase() === prefix &&
+        ( !project || !seat.project || seat.project === project )
+    );
+    if ( matches.length === 0 ) return { ccSessionId : null, reason : "not-in-roster" };
+
+    // Only a watchable row is a candidate, so a twin with no live transcript does not make
+    // its watchable sibling ambiguous.
+    let candidates = matches.filter( seat => seat.transcript_watchable );
+    if ( candidates.length === 0 ) return { ccSessionId : null, reason : "not-watchable" };
+
+    // The persona tie-break: twins are narrowed by the card's persona name, case-insensitively.
+    // It only ever NARROWS — a name matching neither twin leaves nothing, never a guess.
+    if ( candidates.length > 1 && personaName ) {
+        const wanted = String( personaName ).toLowerCase();
+        candidates   = candidates.filter( seat => String( seat.persona || "" ).toLowerCase() === wanted );
+    }
+    if ( candidates.length !== 1 ) return { ccSessionId : null, reason : "ambiguous-prefix" };
+
+    // The FULL id, never the prefix we matched on.
+    return { ccSessionId : candidates[ 0 ].session_id, reason : "ok" };
+}
+
+
+/**
+ * Whether a sender card should offer a "open console" affordance at all.
+ *
+ * A chip with no roster row is not watchable, and its affordance is ABSENT rather than
+ * present-and-failing (§4). Same for an ambiguous prefix and a seat with no live
+ * transcript.
+ */
+function ccConsoleCanWatch( cardSessionId, roster, chip ) {
+    return ccConsoleResolveSessionId( cardSessionId, roster, chip ).reason === "ok";
+}
+
+
+// ── the sender-card console button (Rick's ruling, 2026-09-28) ─────────────────
+//
+// The legacy client gets NO in-pane console: its button opens the standalone console page in
+// a new tab, `/app/console?seat=<full id>&title=<title>`. One viewer to maintain.
+//
+// This file is plain script and cannot import the multiplexer's `consolePageUrl.ts`, so the
+// URL shape is written again here — and a parity test builds both hrefs from the same inputs
+// and demands identical strings, so a rename on either side reddens instead of drifting.
+//
+// 🔴 CARDS ARE PATCHED IN PLACE, SO THE BUTTON IS PAINTED FROM OUTSIDE. The persona badge is
+// swapped by `outerHTML`, inserted late, or removed as personas are assigned and released. So
+// the button is not baked into createSenderCard's template: a MutationObserver on the list
+// repaints idempotently, exactly as the multiplexer's SenderCardConsoleButtons does. A repaint
+// that changes nothing touches nothing, so it cannot feed its own observer.
+
+const CC_CONSOLE_PAGE_PATH    = "/app/console";
+const CC_CONSOLE_BUTTON_CLASS = "sender-console-btn";
+const CC_CONSOLE_ROSTER_PATH  = "/api/cc-transcript-roster";
+
+
+/**
+ * The standalone console page's URL for one seat — the legacy twin of the multiplexer's
+ * `buildConsolePageHref`.
+ *
+ * Requires:
+ *     - seat is the seat's FULL stable id
+ *
+ * Ensures:
+ *     - both values are percent-encoded, so a title carrying `&`, `#` or an emoji arrives
+ *       at the console page unchanged
+ *     - the string is byte-identical to the multiplexer's for the same inputs
+ */
+function ccConsoleBuildPageHref( seat, title ) {
+    return `${ CC_CONSOLE_PAGE_PATH }?seat=${ encodeURIComponent( seat ) }&title=${ encodeURIComponent( title ) }`;
+}
+
+
+/**
+ * Split a sender id into its project and its hex id prefix, the way the multiplexer does.
+ *
+ * 🔴 THE HOST IS NOT THE PROJECT. `claude.code@lupin.deepily.ai#e14bd712` belongs to project
+ * `lupin` — the host's FIRST dot-label — which is the roster's short key. This is the
+ * multiplexer's `parseSenderId` rule, not this class's own parseSenderId, which reports
+ * "unknown" for any host outside `.deepily.ai` and would filter out a seat the multiplexer keeps.
+ *
+ * Ensures:
+ *     - returns null for anything not shaped `<who>@<host>#<hex>`
+ *     - the prefix is lower-cased
+ */
+function ccConsoleParseSenderId( senderId ) {
+    const match = /^[^@#]+@([^#.]+)[^#]*#([0-9a-fA-F]+)$/.exec( String( senderId || "" ) );
+    if ( match === null ) return null;
+    return { project : match[ 1 ], prefix : match[ 2 ].toLowerCase() };
+}
+
+
+/**
+ * Paint, move or remove the console button on every sender card in `container`.
+ *
+ * Requires:
+ *     - container holds `.sender-card[data-sender-id]` elements
+ *     - roster is the latest roster read (empty for a non-admin, who never reads it)
+ *
+ * Ensures:
+ *     - a card whose seat resolves carries exactly ONE button, immediately LEFT of its
+ *       `.persona-badge` (first in the stats group when it has no badge yet)
+ *     - a card whose seat does not resolve carries none
+ *     - a card already painted correctly is not touched at all
+ */
+function ccConsolePaintSenderButtons( container, roster, openWindow ) {
+    for ( const card of Array.from( container.querySelectorAll( ".sender-card[data-sender-id]" ) ) ) {
+        ccConsolePaintSenderCard( card, roster, openWindow );
+    }
+}
+
+
+/**
+ * Paint one card's console button. See ccConsolePaintSenderButtons for the contract.
+ *
+ * The click opens the console page in a new tab and STOPS PROPAGATION: the header's own
+ * onclick collapses the card, and opening a console must not also fold it away.
+ *
+ * @param {Element} card - one `.sender-card[data-sender-id]`
+ * @param {Array} roster - seat rows
+ * @param {Function} [openWindow] - ( href, target ) => void; the page's window.open by default
+ */
+function ccConsolePaintSenderCard( card, roster, openWindow ) {
+    const header = card.querySelector( ":scope > .sender-card-header" );
+    if ( !header ) return;
+
+    const existing = header.querySelector( `.${ CC_CONSOLE_BUTTON_CLASS }` );
+    const badge    = header.querySelector( ".persona-badge" );
+    const senderId = card.getAttribute( "data-sender-id" );
+    const nameEl   = badge ? badge.querySelector( ".persona-badge-name" ) : null;
+    const name     = ( nameEl && nameEl.textContent.trim() ) || null;
+    const parsed   = ccConsoleParseSenderId( senderId );
+    const seat     = parsed
+        ? ccConsoleResolveSessionId( parsed.prefix, roster, { project : parsed.project, personaName : name } ).ccSessionId
+        : null;
+
+    if ( !seat ) {
+        if ( existing ) existing.remove();
+        return;
+    }
+    const iconEl = badge ? badge.querySelector( ".persona-badge-icon" ) : null;
+    const icon   = iconEl ? iconEl.textContent.trim() : "";
+    // The multiplexer's title, character for character: `${icon} ${name ?? senderId} — console`.
+    const title  = `${ icon } ${ name || senderId } — console`.trim();
+    const href   = ccConsoleBuildPageHref( seat, title );
+
+    // Already there, already in place, same link: change nothing, so the observer sees
+    // nothing. The HREF is compared, not just the seat, so a persona renamed in place (the
+    // badge is swapped by outerHTML) re-titles the tab the button opens.
+    if ( existing && existing.dataset.href === href && ( !badge || existing.nextElementSibling === badge ) ) return;
+    if ( existing ) existing.remove();
+
+    const btn = document.createElement( "button" );
+    btn.type                = "button";
+    btn.className           = CC_CONSOLE_BUTTON_CLASS;
+    btn.title               = "Open this seat's live console in a new tab";
+    btn.textContent         = "▤";
+    btn.dataset.seat        = seat;
+    btn.dataset.href        = href;
+    btn.dataset.testid      = "legacy-sender-console";
+    btn.addEventListener( "click", ( ev ) => {
+        ev.stopPropagation();
+        if ( openWindow ) openWindow( href, "_blank" );
+        else window.open( href, "_blank" );
+    } );
+
+    // Immediately LEFT of the persona chip. With no chip yet, first in the stats group — where
+    // the chip will land, so the late badge insert puts it on the right and a repaint moves
+    // the button back in front of it.
+    const statsGroup = header.querySelector( ":scope > .sender-stats-group" );
+    if ( badge ) badge.before( btn );
+    else if ( statsGroup ) statsGroup.insertBefore( btn, statsGroup.firstChild );
+    else header.appendChild( btn );
+}
+
+
+// ── the render rule (§3), in this client's terms ───────────────────────────────
+//
+// Two render paths, and the hazard they separate is MANGLING, not injection. A markdown
+// renderer turns `#` into a heading, `*` into a list, an indented line into a code block
+// and `__x__` into bold — so a diff, a config file or a shell transcript pushed through it
+// renders WRONG. Assistant prose is meant to be markdown; tool output is not.
+//
+// `thinking` IS RECOGNISED EXPLICITLY, never via the default arm. Mr. Radio's ruling
+// 2026-09-27 (Option A) on OSQ-7: folded and expandable, like a tool result. The behaviour
+// would be identical if it fell through to the plain-text default — which is exactly why
+// the ruling has to be visible in the code, or the next reader reads the fold as an
+// accident and re-litigates it.
+//
+// The default arm is PLAIN TEXT and it is load-bearing: the mapper is deliberately
+// open-ended (§2 item 1a) and OSQ-7 may add a fifth kind, so a switch with no fallback
+// would render NOTHING in the one surface whose whole job is to show everything, and do it
+// silently. Plain text is the safe fallback because it cannot mangle and cannot execute.
+
+const CC_CONSOLE_MARKDOWN_KINDS = [ "text" ];
+const CC_CONSOLE_FOLDED_KINDS   = [ "thinking", "tool_call", "tool_result" ];
+
+
+/**
+ * Decide how one block renders: which path, and whether it starts folded.
+ *
+ * Requires:
+ *     - kind is whatever arrived on the wire; anything at all is tolerated
+ *
+ * Ensures:
+ *     - returns { path: "markdown" | "plain", folded: bool, recognised: bool }
+ *     - `text` is the ONLY markdown path
+ *     - `thinking`, `tool_call` and `tool_result` are RECOGNISED and folded
+ *     - every other kind — including one invented after this code was written — is
+ *       recognised=false, rendered as PLAIN TEXT, and never dropped
+ *     - never raises
+ */
+function ccConsoleRenderPlanFor( kind ) {
+    if ( CC_CONSOLE_MARKDOWN_KINDS.includes( kind ) ) {
+        return { path : "markdown", folded : false, recognised : true };
+    }
+    if ( CC_CONSOLE_FOLDED_KINDS.includes( kind ) ) {
+        return { path : "plain", folded : true, recognised : true };
+    }
+    // The open-ended arm. Unrecognised, but rendered — not dropped, not thrown on.
+    return { path : "plain", folded : false, recognised : false };
+}
+
+
+/**
+ * Whether a block should be rendered at all.
+ *
+ * 🔴 ALWAYS TRUE, AND THAT IS THE POINT — this exists so the rule has a name and a test.
+ * An EMPTY block is still rendered: emptiness is content, and absence is a different
+ * thing. Measured 2026-09-27: every `thinking` block in the primary fixture, and all 145
+ * in its source transcript, carry zero-length text — so a "skip the empties" shortcut
+ * would drop the entire thinking path while looking like a tidy-up, and no test written
+ * over that fixture could have seen it.
+ *
+ * A dropped block is indistinguishable from a block that never arrived, which is the one
+ * failure a live console cannot have.
+ */
+function ccConsoleShouldRender( block ) {
+    return ccConsoleIsFrame( block );
+}
+
+
+/**
+ * Whether a value is a plain frame object.
+ *
+ * ⚠️ `typeof x === "object"` IS NOT ENOUGH, and that is why this has its own name. An
+ * ARRAY is typeof "object" AND truthy, so a bare check accepts `[]` as a well-formed
+ * wire frame — it then falls through to the seat comparison, where `undefined !== <seat>`
+ * makes it look like traffic for another seat rather than malformed input. Two different
+ * diagnoses for one bad frame, and the wrong one is the reassuring one.
+ *
+ * Caught by `the_console_drops_a_gapped_chunk_and_clears_on_an_epoch_change.test.ts`
+ * driving `[]` through the malformed arm, 2026-09-27.
+ */
+function ccConsoleIsFrame( value ) {
+    return !!value && typeof value === "object" && !Array.isArray( value );
+}
+
+
+// ── the watch lifecycle ────────────────────────────────────────────────────────
+
+/**
+ * The envelopes to send when the console moves to a seat.
+ *
+ * 🔴 UNWATCH BEFORE WATCH, ALWAYS, AND IN THAT ORDER. One console per tab in v1 (§4), so a
+ * tab must never hold two live watches — if the unwatch trailed the watch, a seat switch
+ * would briefly subscribe to both and the pane would interleave two transcripts. Returning
+ * an ORDERED LIST rather than sending from here is what lets a test assert the order,
+ * which is B4.4's actual requirement.
+ *
+ * Requires:
+ *     - ccSessionId is the FULL stable id from ccConsoleResolveSessionId, or null to close
+ *
+ * Ensures:
+ *     - returns an ordered array of envelopes to send, possibly empty
+ *     - any existing watch is unwatched FIRST
+ *     - re-watching the seat already watched is a no-op, not a churn of unwatch+watch
+ *     - the stream state is reset whenever the watched seat changes
+ *     - mutates ccConsoleState to reflect the new watch
+ */
+function ccConsoleBeginWatch( ccSessionId ) {
+    const current = ccConsoleState.watchedCcSessionId;
+
+    // Already there. Re-sending would drop and re-establish a healthy subscription.
+    if ( current && current === ccSessionId ) return [ ];
+
+    const envelopes = [ ];
+    if ( current ) {
+        envelopes.push( { type : "cc_transcript_unwatch", cc_session_id : current } );
+    }
+
+    ccConsoleResetStream();
+    ccConsoleState.watchedCcSessionId = ccSessionId || null;
+
+    if ( ccSessionId ) {
+        // `file_epoch: null` means "whatever file is current" — the server answers with the
+        // epoch it chose, so a first watch needs no prior REST call (§3).
+        envelopes.push( {
+            type          : "cc_transcript_watch",
+            cc_session_id : ccSessionId,
+            from_offset   : 0,
+            file_epoch    : null,
+        } );
+    }
+    return envelopes;
+}
+
+
+/**
+ * Close the console: unwatch whatever is watched and clear everything.
+ *
+ * Ensures:
+ *     - returns the unwatch envelope, or [] when nothing was watched
+ *     - leaves zero live watches — the invariant B4.4 asserts over the whole pane
+ *       lifecycle, not just the seat-switch path
+ */
+function ccConsoleEndWatch() {
+    const current = ccConsoleState.watchedCcSessionId;
+    ccConsoleResetStream();
+    ccConsoleState.watchedCcSessionId = null;
+    if ( !current ) return [ ];
+    return [ { type : "cc_transcript_unwatch", cc_session_id : current } ];
+}
+
+
+// ── the byte stream: gaps and epochs ──────────────────────────────────────────
+
+/**
+ * Apply one `cc_transcript_append` frame.
+ *
+ * The gap rule (§3): if `chunk.offset != last_next_offset`, DROP the chunk and repair over
+ * REST from `last_next_offset`. Dropping matters — rendering a chunk that does not abut
+ * what we have would silently splice the transcript, showing the reader a continuous
+ * narrative with a hole in it. A hole they can see is recoverable; one they cannot is not.
+ *
+ * Requires:
+ *     - chunk is whatever arrived on the wire; anything is tolerated
+ *
+ * Ensures:
+ *     - returns { action, repairFrom, blocksAdded }, plus blocksEvicted on "appended"
+ *     - action is "appended", "gap", "epoch-changed", "not-watched" or "malformed"
+ *     - after an append the ring holds at most CC_CONSOLE_RING_MAX_BYTES, evicting the
+ *       oldest blocks first; the newest block is never evicted, even alone over budget
+ *     - a chunk for a seat we are not watching is ignored, never rendered
+ *     - an epoch change CLEARS rather than repairs (§3) — the offsets named a file that no
+ *       longer exists, so there is no gap to repair, only a buffer to discard
+ *     - never raises
+ */
+function ccConsoleApplyChunk( chunk ) {
+    if ( !ccConsoleIsFrame( chunk ) ) {
+        return { action : "malformed", repairFrom : null, blocksAdded : 0 };
+    }
+    if ( !ccConsoleState.watchedCcSessionId ||
+         chunk.cc_session_id !== ccConsoleState.watchedCcSessionId ) {
+        return { action : "not-watched", repairFrom : null, blocksAdded : 0 };
+    }
+
+    // An epoch change is not a gap. Clear and re-fetch the backlog.
+    if ( ccConsoleState.fileEpoch !== null && chunk.file_epoch !== ccConsoleState.fileEpoch ) {
+        ccConsoleResetStream();
+        ccConsoleState.fileEpoch = chunk.file_epoch;
+        return { action : "epoch-changed", repairFrom : 0, blocksAdded : 0 };
+    }
+
+    // First chunk of a watch: learn the epoch from the frame.
+    if ( ccConsoleState.fileEpoch === null ) ccConsoleState.fileEpoch = chunk.file_epoch;
+
+    // The gap rule. `null` means we have not received anything yet, so any offset abuts.
+    if ( ccConsoleState.lastNextOffset !== null &&
+         chunk.offset !== ccConsoleState.lastNextOffset ) {
+        return {
+            action      : "gap",
+            repairFrom  : ccConsoleState.lastNextOffset,
+            blocksAdded : 0,
+        };
+    }
+
+    const blocks = Array.isArray( chunk.blocks ) ? chunk.blocks.filter( ccConsoleShouldRender ) : [ ];
+    for ( const block of blocks ) {
+        ccConsoleState.blocks.push( block );
+        ccConsoleState.ringBytes += ccConsoleBlockBytes( block );
+    }
+    ccConsoleState.lastNextOffset = chunk.next_offset;
+
+    // Evict oldest-first until the ring fits its budget. The NEWEST block always stays,
+    // even alone over budget: evicting what just arrived would drop live output the reader
+    // has not seen, and "load earlier" pages backwards, so it could not bring it back.
+    let blocksEvicted = 0;
+    while ( ccConsoleState.ringBytes > CC_CONSOLE_RING_MAX_BYTES && ccConsoleState.blocks.length > 1 ) {
+        const oldest = ccConsoleState.blocks.shift();
+        ccConsoleState.ringBytes -= ccConsoleBlockBytes( oldest );
+        blocksEvicted += 1;
+    }
+    ccConsoleState.evictedBlocks += blocksEvicted;
+
+    return { action : "appended", repairFrom : null, blocksAdded : blocks.length, blocksEvicted };
+}
+
+
+/**
+ * Apply one `cc_transcript_state` frame.
+ *
+ * Ensures:
+ *     - returns { action, repairFrom }
+ *     - `epoch_mismatch` CLEARS and re-fetches — it is never treated as a continuation.
+ *       A silent rebase would hand the client a whole new file labelled as its own
+ *       continuation (§3, T15).
+ *     - `rotated` behaves the same way, for the same reason
+ *     - `live` is acknowledged without disturbing the buffer
+ *     - `ended` leaves what was received on screen; the seat is gone, the record is not
+ *     - a frame for a seat we are not watching is ignored
+ *     - never raises
+ */
+function ccConsoleApplyState( frame ) {
+    if ( !ccConsoleIsFrame( frame ) ) return { action : "malformed", repairFrom : null };
+    if ( !ccConsoleState.watchedCcSessionId ||
+         frame.cc_session_id !== ccConsoleState.watchedCcSessionId ) {
+        return { action : "not-watched", repairFrom : null };
+    }
+
+    if ( frame.state === "epoch_mismatch" || frame.state === "rotated" ) {
+        ccConsoleResetStream();
+        ccConsoleState.fileEpoch = frame.file_epoch || null;
+        return { action : "cleared", repairFrom : 0 };
+    }
+    if ( frame.state === "ended" ) return { action : "ended", repairFrom : null };
+    if ( frame.state === "live" )  return { action : "live",  repairFrom : null };
+
+    // An unknown state is reported, not guessed at.
+    return { action : "unknown-state", repairFrom : null };
+}
+
+
 class NotificationsUI {
+    get ROW_SCHEMA()       { return ROW_SCHEMA; }
+    get ROW_FIELD_LABELS() { return ROW_FIELD_LABELS; }
+
     constructor() {
         // Configuration
         this.debug = true;
@@ -115,7 +709,6 @@ class NotificationsUI {
         
         // Notification state management
         this.notificationState = {
-            apiKey: "claude_code_simple_key",
             userId: null, // Will be set from WebSocket auth
             notifications: [], // Local cache of notifications
             lastSync: null
@@ -161,6 +754,7 @@ class NotificationsUI {
         // Storage keys
         this.QUEUE_SESSION_KEY = 'notifications_queue_session_id';
         this.AUDIO_SESSION_KEY = 'notifications_audio_session_id';
+        this.SESSION_FALLBACK_REASON_KEY = 'notifications_session_fallback_reason';
         this.USER_EMAIL_KEY = 'notifications_user_email';
         this.VERSION_KEY = 'notifications_version';
         this.QUEUE_FILTER_PREF_KEY = 'notifications_filter_preference';  // Filter mode storage
@@ -260,6 +854,10 @@ class NotificationsUI {
         this.userRoles = [];  // NEW: User's roles from JWT
         this.isAdmin = false;  // NEW: Quick admin check
         this.queueFilterMode = 'own';  // NEW: 'own' or 'all' (admin only)
+
+        // Console tee (row 27760534): the observer that repaints each sender card's
+        // console button. Started once, after auth, by startCcConsoleButtonObserver.
+        this.ccConsoleButtonObserver = null;
 
         // ========================================
         // PROGRESSIVE DISCLOSURE QUEUE UI STATE
@@ -416,12 +1014,19 @@ class NotificationsUI {
         this.EPIC_BLOCKER_OF_INTEREST   = 'rick';                           // the one human the highlight section watches for
         this.EPIC_BOARD_STATE_KEY       = 'lupin.epicBoard.groupState';     // localStorage key: JSON map of group key -> isExpanded CHOICES
         this._epicBoardAccordionWired   = false;                            // event-delegation guard (wire the container listener once)
+        this._holdingAreaControlsWired  = false;                            // event-delegation guard (this pane had NO listener at all)
+        this._taskListPressInFlight     = false;                            // a repaint mid-press replaces the pressed node and eats the click
+        this._taskListPendingComposite  = null;                             // the paint held for the length of that press
         this._epicStories               = {};                               // GET /api/epic-stories body, memoized for the page's life
         this._epicStoriesFetched        = false;                            // one-shot guard: hand-edited file, never polled
-        // Task-list row redesign (design 2026.06.29): the client title-truncation
-        // backstop length — IDENTICAL to the server-side store-guard cap (60 chars,
-        // handoff #5 / D4). Catches LEGACY rows written before the store guard.
-        this.TASK_TITLE_TRUNCATE_LEN    = 60;                               // truncate-with-ellipsis length; full title on hover-tooltip
+        // ⚠️ THE CHARACTER CAP IS GONE ON PURPOSE — DO NOT REINTRODUCE IT.
+        // `TASK_TITLE_TRUNCATE_LEN = 60` used to cut the title IN JAVASCRIPT, before it
+        // reached the DOM. Measured 2026-09-03 in the real browser: the title cell showed
+        // 197px of an up-to-677px string, and because the cut happened upstream, widening
+        // the cell revealed ZERO extra characters. Any "make the title wider" change was
+        // therefore cosmetic by construction. Rick's ruling: no cap — the title wraps to
+        // two lines and the row grows. The wrap is CSS; this file just emits the whole
+        // string. Guard: the_row_is_one_shape_in_all_three_panes.test.ts.
 
         // STT for Q&A input
         this.qaAudioRecorder = null;
@@ -556,6 +1161,11 @@ class NotificationsUI {
             // Start Fleet Status panel polling (read-only operator view, 60s auto-poll + manual ⟳).
             // Design: src/rnd/v0.1.8/2026.06.09-fleet-status-table-notifications-client/01-design.md §6.
             this.startFleetStatusPolling();
+
+            // Start Finished Tasks panel polling (read-only consumer of GET /api/tasks/events).
+            // Rick's P0, row 7c616656. Started BEFORE the task list purely to match the
+            // DOM order the user sees — the two are independent.
+            this.startFinishedTasksPolling();
 
             // Start Task List panel polling (read-only consumer of GET /api/tasks, 60s auto-poll + manual ⟳).
             // Brief: src/rnd/v0.1.8/2026.06.16-task-list-ui-card-build-brief.md.
@@ -703,6 +1313,12 @@ class NotificationsUI {
         // NEW: Start WebSocket health monitor
         // Periodic health checking during work hours for automatic reconnection
         this.startWebSocketHealthMonitor();
+
+        // Console tee (row 27760534): each resolvable sender card gets a button that opens its
+        // seat's live console in a new tab. Not awaited — the roster is an admin nicety and
+        // must never hold up the page.
+        this.startCcConsoleButtonObserver();
+        this.refreshCcConsoleRoster();
 
         this.log( `✓ Authentication setup complete for user: ${this.currentUserEmail} (admin: ${this.isAdmin}, config fetched, monitors started)` );
 
@@ -1178,6 +1794,31 @@ class NotificationsUI {
             const elapsed = ( performance.now() - startTime ).toFixed( 1 );
             this.log( `✓ Token valid (checked in ${elapsed}ms)` );
         }
+
+        // 🔴 ONE TOKEN OF RECORD FOR THE PAGE. Row 20775ec5, and this is the SOURCE of
+        // the broadcast 401 rather than its symptom.
+        //
+        // This method decides on `this.authToken`, an IN-MEMORY field, and only ever
+        // touched localStorage as a side effect of an actual refresh. So the fast path
+        // above — the common one — could return happily while the stored token said
+        // something else entirely, and nothing on the page would ever reconcile them.
+        //
+        // MEASURED 2026-09-04 in Rick's own browser: with the stored token blanked and
+        // the in-memory one still live, `authedFetch` returned 200 and left
+        // `localStorage.lupin_access_token` at length 0. Every OTHER reader of that key
+        // — the broadcast panel, `lupin-nav.js`'s logged-in indicator — then reads a
+        // value the page itself has already superseded, and Rick sees "logged in" and a
+        // 401 at the same instant, both readings truthful about different tokens.
+        //
+        // ⚠️ THE PANEL'S OWN FIX IS NOT THIS FIX. Routing the broadcast panel through
+        // `authedFetch` (broadcast-panel.js, row 20775ec5) removes THAT panel as an
+        // independent reader. It does nothing for the next one somebody writes, which
+        // is why this row's DONE MEANS calls a panel-only change "the symptom".
+        // Reconciling here makes the store authoritative for everyone.
+        if ( this.authToken && localStorage.getItem( "lupin_access_token" ) !== this.authToken ) {
+            localStorage.setItem( "lupin_access_token", this.authToken );
+            this.log( "Reconciled stored access token with the in-memory one (row 20775ec5)" );
+        }
     }
 
     async authedFetch( url, options = {} ) {
@@ -1348,7 +1989,11 @@ class NotificationsUI {
 
             this.log( 'Reinitializing configuration...' );
 
-            const response = await fetch( '/api/init' );
+            // Row 977eaaf2 (2026-09-23): /api/init is admin-gated at the server now,
+            // so this call has to carry the token. authedFetch is this file's own
+            // idiom for that — a bare fetch() here answers 401 for everyone, admin
+            // included, and the button reports a failure that is entirely our doing.
+            const response = await this.authedFetch( '/api/init' );
             const data = await response.json();
 
             if ( data.status === 'success' ) {
@@ -1975,11 +2620,8 @@ class NotificationsUI {
                 job_id      : sessionHash,
             } );
 
-            const response = await fetch( `/api/notify?${params.toString()}`, {
+            const response = await this.authedFetch( `/api/notify?${params.toString()}`, {
                 method  : 'POST',
-                headers : {
-                    'Authorization' : this.getAuthHeader(),
-                },
             } );
 
             if ( !response.ok ) {
@@ -2212,53 +2854,202 @@ class NotificationsUI {
         }
         
         // Generate new session ID
+        //
+        // Every throw below is TAGGED with an origin before it reaches the catch.
+        // The catch is shared by five distinguishable failures whose causes have
+        // nothing to do with each other, and the old single log line named none
+        // of them — see FALLBACK_ORIGIN for the list.
         try {
-            // Ensure token is valid before API call (auto-refresh if expired)
-            await this.ensureValidToken();
-
-            const response = await fetch( '/api/get-session-id', {
-                method: 'GET',
-                headers: {
-                    'Authorization': this.getAuthHeader()
-                }
-            });
-            
-            if ( response.ok ) {
-                const data = await response.json();
-                const sessionId = data.session_id;
-                
-                if ( !sessionId ) {
-                    throw new Error( 'Session ID not found in response' );
-                }
-                
-                localStorage.setItem( storageKey, sessionId );
-                this.log( `[SESSION] Generated new ${sessionType} session: ${sessionId}` );
-                return sessionId;
-            } else {
-                throw new Error( `HTTP ${response.status}: ${response.statusText}` );
+            // Ensure token is valid before API call (auto-refresh if expired).
+            // This runs BEFORE the fetch, so when it throws no HTTP request is
+            // ever made and the session endpoint is not implicated at all.
+            try {
+                await this.ensureValidToken();
+            } catch ( tokenError ) {
+                throw this.tagSessionIdFailure( tokenError, this.FALLBACK_ORIGIN.TOKEN_REFRESH_FAILED );
             }
-            
+
+            let response;
+            try {
+                response = await fetch( '/api/get-session-id', {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': this.getAuthHeader()
+                    }
+                });
+            } catch ( networkError ) {
+                // fetch() rejects only on a transport failure — DNS, refused
+                // connection, a dropped tunnel, CORS. It never rejects on an
+                // HTTP status, so this arm cannot be confused with one.
+                throw this.tagSessionIdFailure( networkError, this.FALLBACK_ORIGIN.NETWORK_UNREACHABLE );
+            }
+
+            if ( !response.ok ) {
+                throw this.tagSessionIdFailure(
+                    new Error( `HTTP ${response.status}: ${response.statusText}` ),
+                    this.FALLBACK_ORIGIN.HTTP_STATUS,
+                    { httpStatus: response.status }
+                );
+            }
+
+            let data;
+            try {
+                data = await response.json();
+            } catch ( parseError ) {
+                // A 200 that is not JSON. The likely author is an intermediary
+                // (proxy, tunnel, captive portal) answering with an HTML page
+                // instead of the endpoint — which is why this is NOT folded in
+                // with the missing-field case below.
+                throw this.tagSessionIdFailure( parseError, this.FALLBACK_ORIGIN.PAYLOAD_NOT_JSON );
+            }
+
+            const sessionId = data.session_id;
+
+            if ( !sessionId ) {
+                throw this.tagSessionIdFailure(
+                    new Error( 'Session ID not found in response' ),
+                    this.FALLBACK_ORIGIN.PAYLOAD_MISSING_FIELD
+                );
+            }
+
+            localStorage.setItem( storageKey, sessionId );
+            this.log( `[SESSION] Generated new ${sessionType} session: ${sessionId}` );
+            return sessionId;
+
         } catch ( error ) {
-            this.error( `Failed to get session ID for ${sessionType}:`, error );
-            
-            // Generate fallback session ID
-            const fallbackId = this.generateFallbackSessionId();
-            localStorage.setItem( storageKey, fallbackId );
-            this.log( `[SESSION] Using fallback ${sessionType} session: ${fallbackId}` );
-            return fallbackId;
+            // `error` is not guaranteed to be an object — a rejected promise can
+            // carry null or a primitive. Hardening, not a live crash: MEASURED
+            // with this guard reverted, the method still returns an id, because
+            // the strict-mode TypeError from tagging a primitive is itself
+            // caught here. What is lost is the DIAGNOSIS — the origin degrades
+            // to 'unclassified' and the TypeError's message replaces the real
+            // cause, which is the one thing this row exists to preserve.
+            const origin = ( error && error.lupinFallbackOrigin ) || this.FALLBACK_ORIGIN.UNCLASSIFIED;
+            throw this.failSessionIdAcquisition( sessionType, origin, error );
         }
     }
-    
-    generateFallbackSessionId() {
-        const adjectives = [ 'wise', 'clever', 'swift', 'bright', 'keen', 'bold', 'calm', 'cool', 'fair', 'fine' ];
-        const animals = [ 'penguin', 'dolphin', 'eagle', 'tiger', 'wolf', 'bear', 'lion', 'hawk', 'fox', 'owl' ];
-        
-        const adj = adjectives[ Math.floor( Math.random() * adjectives.length ) ];
-        const animal = animals[ Math.floor( Math.random() * animals.length ) ];
-        
-        return `${adj}_${animal}`;
+
+    /**
+     * The distinguishable reasons getOrCreateSessionId() can end up on the
+     * fallback. They have different causes and different owners, so the log
+     * line has to name which one fired.
+     */
+    get FALLBACK_ORIGIN() {
+        return {
+            TOKEN_REFRESH_FAILED  : 'token-refresh-failed',
+            NETWORK_UNREACHABLE   : 'network-unreachable',
+            HTTP_STATUS           : 'http-status',
+            PAYLOAD_NOT_JSON      : 'payload-not-json',
+            PAYLOAD_MISSING_FIELD : 'payload-missing-field',
+            UNCLASSIFIED          : 'unclassified'
+        };
     }
-    
+
+    tagSessionIdFailure( error, origin, detail = {} ) {
+        /**
+         * Stamp an origin onto an error on its way to the shared catch.
+         *
+         * Requires:
+         *     - error is an Error (or anything with settable properties)
+         *     - origin is one of the FALLBACK_ORIGIN values
+         *
+         * Ensures:
+         *     - returns the same error object, carrying lupinFallbackOrigin
+         *     - merges any detail fields onto the error for the log line
+         *
+         * Raises:
+         *     - None
+         */
+        // A primitive cannot carry a property, and assigning one in strict mode
+        // throws. Wrapping keeps the ORIGIN — without this the tagger's own
+        // TypeError becomes the error the catch sees, and the real cause is
+        // gone. Raised by Tiberius in review as hardening; measured as a
+        // diagnosis loss, not a crash.
+        if ( error === null || typeof error !== 'object' ) {
+            const wrapped = new Error( String( error ) );
+            wrapped.lupinFallbackOrigin = origin;
+            Object.assign( wrapped, detail );
+            return wrapped;
+        }
+
+        error.lupinFallbackOrigin = origin;
+        Object.assign( error, detail );
+        return error;
+    }
+
+    failSessionIdAcquisition( sessionType, origin, error ) {
+        /**
+         * Record WHY the session id could not be obtained, announce it, and
+         * return the error for the caller to throw.
+         *
+         * 🔨 RICK RULED 2026-09-02 (row a501a714, option A): the browser no
+         * longer invents a session id when the server will not give it one.
+         * What used to happen here — mint a two-word id, persist it, carry on —
+         * is gone. Three measured reasons, all on that row:
+         *   · a self-minted id was the ONLY source of id collisions. Server ids
+         *     come from TwoWordIdGenerator, which holds a uniqueness set; the
+         *     fallback drew from 100 names with no uniqueness check, 50 of them
+         *     inside the server's own space. A collision was probed to OVERWRITE
+         *     active_connections[id] and cross-route one user's notifications to
+         *     another user's socket.
+         *   · it PERSISTED, so one transient failure pinned that browser to a
+         *     self-minted id for every later page load — a transient fault with
+         *     a permanent symptom.
+         *   · the condition it existed to survive is exactly where a loud
+         *     failure costs less than a quiet wrong answer.
+         *
+         * WHAT IS KEPT, deliberately: the origin tagging and the persisted
+         * reason record. Removing the fallback without them would trade a quiet
+         * wrong answer for a loud UNEXPLAINED one, and the origin is the whole
+         * diagnostic value of what shipped before this.
+         *
+         * The caller (connectWebSockets) already catches and surfaces via the
+         * circuit-breaker banner, so the throw lands where a loud failure should.
+         *
+         * Requires:
+         *     - sessionType is 'queue' or 'audio'
+         *     - origin is one of the FALLBACK_ORIGIN values
+         *
+         * Ensures:
+         *     - returns an Error carrying the origin; it does NOT throw it
+         *     - the reason is persisted so it survives the browser being closed
+         *     - a rejecting localStorage degrades to console output, not a throw:
+         *       a full or disabled store must not replace the real cause with a
+         *       storage error on its way out
+         *
+         * Raises:
+         *     - None — the caller throws the returned Error
+         */
+        const record = {
+            origin      : origin,
+            sessionType : sessionType,
+            message     : error && error.message ? error.message : String( error ),
+            httpStatus  : error && error.httpStatus ? error.httpStatus : null,
+            at          : new Date().toISOString()
+        };
+
+        try {
+            localStorage.setItem( this.SESSION_FALLBACK_REASON_KEY, JSON.stringify( record ) );
+        } catch ( storageError ) {
+            this.error( '[SESSION] Could not persist session-id failure reason:', storageError );
+        }
+
+        this.error(
+            `[SESSION] COULD NOT OBTAIN a ${sessionType} session id — origin=${origin}. ` +
+            `The browser no longer invents one: an id the server never issued can ` +
+            `collide with a real session and cross-route notifications. ` +
+            `Cause: ${record.message}`,
+            record
+        );
+
+        const failure = new Error(
+            `Could not obtain a ${sessionType} session id (${origin}): ${record.message}`
+        );
+        failure.lupinFallbackOrigin = origin;
+        failure.sessionType         = sessionType;
+        return failure;
+    }
+
     // ========================================
     // WEBSOCKET CONNECTIONS
     // ========================================
@@ -2290,7 +3081,7 @@ class NotificationsUI {
             // a regular script, not an ES module — dynamic import is the only
             // way to pull in `createChannel` here).
             if ( !this._createChannel ) {
-                const mod = await import( "/static/js/ws-channel.js?v=20260503a" );
+                const mod = await import( "/static/js/ws-channel.js?v=20260902a" );
                 this._createChannel = mod.createChannel;
             }
 
@@ -2419,6 +3210,17 @@ class NotificationsUI {
                 // not as top-level WS events. See:
                 // src/rnd/v0.1.7/2026.04.29-ws-event-cleanup-to-custom-notification-types/01-design.md
                 // job_paused/job_resumed removed — now handled as job_state_transition events
+                // Console tee (row 27760534, plan §4). These two are the server -> client
+                // frames only; `cc_transcript_watch` / `cc_transcript_unwatch` are verbs this
+                // client SENDS and are deliberately not subscribed.
+                //
+                // ⚠️ THE QUEUE SOCKET ONLY. `_buildAudioAuthMessage` below is a DIFFERENT
+                // SOCKET (/ws/audio), not a second copy of this list — adding these there
+                // would subscribe the audio socket to traffic it must never carry. Both
+                // halves are asserted by
+                // src/tests/unit/notifications_js/the_console_events_reach_the_queue_socket_and_not_the_audio_one.test.ts
+                "cc_transcript_append",
+                "cc_transcript_state",
                 "auth_success",
                 "auth_error",
                 "connect",
@@ -3307,9 +4109,11 @@ class NotificationsUI {
     /**
      * Submit a Test Suite job.
      *
-     * Sends test suite parameters to /api/test-suite/submit for
-     * asynchronous execution via the CJ Flow queue. Always runs
-     * with monopolize=True (DB hot-swap is exclusive).
+     * Sends test suite parameters to /api/v2/submit (command
+     * `agent router go to test suite`) for asynchronous execution via the CJ Flow
+     * queue. The job forces monopolize=True itself (DB hot-swap is exclusive).
+     * v2 answers a refused submit (unknown suite, bad pytest_args) with HTTP 200 and
+     * status "failed", so the reply's status is read, not just the HTTP code.
      */
     async submitTestSuiteJob() {
         const typesSelect     = document.getElementById( 'test-suite-types' );
@@ -3360,19 +4164,24 @@ class NotificationsUI {
 
             this.log( `Submitting test suite job: types=${testTypes}, dryRun=${dryRun}, args="${combinedArgs}"` );
 
-            const body = {
+            const args = {
                 test_types : testTypes,
                 dry_run    : dryRun,
             };
             if ( combinedArgs ) {
-                body.pytest_args = combinedArgs;
+                args.pytest_args = combinedArgs;
             }
             // Per-run override for the TestSuiteCompletionWatchdog (TFE).
             // Initial state mirrors INI default `test_fix_expediter_auto_fix_enabled`,
             // but the user can flip it for this submission only without changing the INI.
             if ( autoFix !== null ) {
-                body.auto_fix_on_failure = autoFix;
+                args.auto_fix_on_failure = autoFix;
             }
+            const body = {
+                command      : 'agent router go to test suite',
+                args         : args,
+                websocket_id : this.queueSessionId,
+            };
 
             // Add scheduling params (schedule checkbox + monopolize is always on)
             const scheduleCheckbox = document.getElementById( 'test-suite-schedule' );
@@ -3381,7 +4190,7 @@ class NotificationsUI {
                 body.scheduled_at = new Date( scheduleTime.value ).toISOString();
             }
 
-            const response = await fetch( '/api/test-suite/submit', {
+            const response = await fetch( '/api/v2/submit', {
                 method  : 'POST',
                 headers : {
                     'Authorization' : this.getAuthHeader(),
@@ -3398,6 +4207,11 @@ class NotificationsUI {
 
             const result = await response.json();
             this.log( "Test suite job response:", result );
+
+            // v2 answers a refused submit with HTTP 200 + status "failed"; only "waiting" is queued.
+            if ( result.status !== 'waiting' ) {
+                throw new Error( result.error || `submit not accepted (${result.status})` );
+            }
 
             // Success feedback
             statusDiv.textContent = `✓ Test suite job submitted! Job ID: ${result.job_id}, Position: ${result.queue_position}`;
@@ -4028,7 +4842,8 @@ class NotificationsUI {
         this.log( "🔍 [DIRECT-TTS-DEBUG] Should NOT trigger handleJobCompletion" );
         
         // Call TTS directly - no Q&A, no job completion, no WebSocket events
-        await this.playTTS( text, mode );
+  // Row aa13fdd7 — a button press, so the 0% slider does not silence it.
+        await this.playTTS( text, mode, null, true );
         
         // Clear input after successful test
         inputElement.value = '';
@@ -4057,10 +4872,37 @@ class NotificationsUI {
         const testText = "This is a test of the text-to-speech system in " + mode + " mode.";
         this.log( `Testing TTS in ${mode} mode: ${testText}` );
         
-        await this.playTTS( testText, mode );
+  // Row aa13fdd7 — a button press, so the 0% slider does not silence it.
+        await this.playTTS( testText, mode, null, true );
     }
     
-    async playTTS( text, mode, voiceId = null ) {
+    async playTTS( text, mode, voiceId = null, userInitiated = false ) {
+        // 🔴 ROW aa13fdd7 — 0% MEANS SILENT, AND THIS IS THE SHARED POINT THAT DECIDES IT.
+        //
+        // Rick, ruling on af01bd4b (2026-09-26): "The only thing that is an issue is
+        // that playback occurs when it is NOT enabled." The slider's own label is the
+        // promise — notifications.html:491, "0% = silent; 100% = full message."
+        //
+        // THE GATE USED TO LIVE IN ONE PLACE ONLY, AND IT WAS NOT THIS ONE.
+        // `_computeTTSPreview` has exactly two references in this file: its own
+        // definition and a single call from `addToTTSQueue`. So the queued
+        // notification paths honoured the slider and every DIRECT caller of playTTS
+        // walked past it. Measured 2026-09-27: the live one was
+        // `handleJobCompletion` (:4035-4041), which calls this method straight and
+        // read no setting at all — so at 0% a finished job still spoke. It need not
+        // even be YOUR job; the frame arrives for any sender.
+        //
+        // ⚠️ A BUTTON PRESS IS NOT AUTOMATIC SPEECH. The five callers that pass
+        // `userInitiated = true` are all a key the user pressed asking to hear
+        // something — Direct TTS Test, testTTS, job replay, and the two
+        // notification-card play/replay controls. They keep working at 0%, which is
+        // also what the multiplexer does with its `user_initiated` item flag, so the
+        // two clients match. DEFAULTING TO FALSE is the point: a new automatic path
+        // is silent at 0% without its author having to know this argument exists.
+        if ( this.ttsPreviewFraction === 0 && !userInitiated ) {
+            this.log( `TTS suppressed: slider at 0% and this utterance was not user-initiated — "${text.substring( 0, 40 )}..."` );
+            return;
+        }
         this.log( `Playing TTS: "${text}" in ${mode} mode${ voiceId ? ` (voice: ${voiceId})` : "" }` );
 
         try {
@@ -4298,8 +5140,8 @@ class NotificationsUI {
             <div class="tts-error-modal-content">
                 <div class="tts-error-icon">⚠️</div>
                 <div class="tts-error-title">TTS Error</div>
-                <div class="tts-error-message">${errorText}</div>
-                <div class="tts-error-code">${errorCode}</div>
+                <div class="tts-error-message">${this.escapeHtml( errorText )}</div>
+                <div class="tts-error-code">${this.escapeHtml( errorCode )}</div>
                 <div class="tts-error-dismiss">Click to dismiss (auto-closes in 5s)</div>
             </div>
         `;
@@ -4936,7 +5778,7 @@ class NotificationsUI {
      *
      * Note: Uses animation-play-state toggle instead of class removal to prevent
      * compositor layer demotion which causes layout collapse. See:
-     * src/rnd/2026.01.09-debugging-css-layout-collapse.md
+     * src/rnd/v0.1.1/2026.01.09-debugging-css-layout-collapse.md
      */
     stopTTSPlayingIndicator( notificationId ) {
         if ( !notificationId ) return;
@@ -6065,7 +6907,7 @@ class NotificationsUI {
         }
     }
 
-    setFilterMode( mode ) {
+    setFilterMode( mode, { reloadHistory = true } = {} ) {
         /**
          * Change the queue filter mode for admin users.
          *
@@ -6079,10 +6921,14 @@ class NotificationsUI {
          *     - UI buttons update to reflect active mode
          *     - All three indicator locations update (toolbar, notifications header, queue header)
          *     - Filter preference persists in localStorage
-         *     - All queues refresh and conversation history reloads with new filter applied
+         *     - All queues refresh with the new filter applied
+         *     - Conversation history reloads with the new filter, unless reloadHistory is false
          *
          * Args:
          *     mode: 'own' (user's jobs only), 'others' (not user's jobs), or 'all' (all users' jobs)
+         *     reloadHistory: false only from initializeFilterUI() — init() runs its own awaited
+         *         loadConversationHistory() right after, and a second overlapping load from here
+         *         doubled every count on an admin login (row b670b76c)
          */
         if ( !this.isAdmin ) {
             this.warn( 'Only admin users can change filter mode' );
@@ -6127,8 +6973,10 @@ class NotificationsUI {
         // Refresh all queues and reload conversation history with new filter
         this.log( `Filter mode changed to: ${mode} - refreshing queues and notifications` );
         this.refreshAllQueues();
-        this.clearSenderGroups();  // Clear existing sender cards before reloading with new filter
-        this.loadConversationHistory();
+        if ( reloadHistory ) {
+            this.clearSenderGroups();  // Clear existing sender cards before reloading with new filter
+            this.loadConversationHistory();
+        }
     }
 
     showAndScrollToFilterPanel() {
@@ -6182,8 +7030,10 @@ class NotificationsUI {
             const validModes = [ 'own', 'others', 'all' ];
             this.queueFilterMode = validModes.includes( savedFilter ) ? savedFilter : 'own';
 
-            // Use setFilterMode to update both indicator locations consistently
-            this.setFilterMode( this.queueFilterMode );
+            // Use setFilterMode to update both indicator locations consistently. No history
+            // reload from here: init() awaits loadConversationHistory() right after, and an
+            // un-awaited second load from this call overlapped it and doubled every count (row b670b76c).
+            this.setFilterMode( this.queueFilterMode, { reloadHistory: false } );
 
             this.log( `Admin filter UI initialized - mode: ${this.queueFilterMode}` );
         } else {
@@ -6508,17 +7358,23 @@ class NotificationsUI {
          *     - Retry button shown only for failed/interrupted jobs
          *     - Buttons use stopPropagation to prevent card toggle
          */
-        const canRetry     = [ 'failed', 'interrupted' ].includes( job.status );
-        const questionSafe = ( job.question_text || '' ).replace( /'/g, "\\'" ).replace( /"/g, '&quot;' ).substring( 0, 100 );
+        const canRetry = [ 'failed', 'interrupted' ].includes( job.status );
 
+        // Row 2515ede4: values ride in data-* attributes, escaped for HTML, and each onclick is a
+        // constant that passes this.dataset as arguments. A value placed inside a JavaScript string
+        // in onclick was source code: an HTML escape is decoded before the handler runs, and the old
+        // quote-only escape let a backslash close the string. Keep the onclick strings free of ${}.
         const retryBtn = canRetry
             ? `<button class="history-action-btn retry-btn"
-                    onclick="event.stopPropagation(); window.notificationsUI.retryHistoryJob( '${job.id_hash}', '${questionSafe}' )"
+                    data-job-id="${this.escapeHtml( job.id_hash )}"
+                    data-question="${this.escapeHtml( ( job.question_text || '' ).substring( 0, 100 ) )}"
+                    onclick="event.stopPropagation(); window.notificationsUI.retryHistoryJob( this.dataset.jobId, this.dataset.question )"
                     >↻ Retry</button>`
             : '';
 
         const deleteBtn = `<button class="history-action-btn delete-btn"
-                    onclick="event.stopPropagation(); window.notificationsUI.deleteHistoryJob( '${job.id_hash}' )"
+                    data-job-id="${this.escapeHtml( job.id_hash )}"
+                    onclick="event.stopPropagation(); window.notificationsUI.deleteHistoryJob( this.dataset.jobId )"
                     >🗑 Delete</button>`;
 
         return `
@@ -7214,7 +8070,8 @@ class NotificationsUI {
         }
         // Re-render button for presentation jobs with existing YAML
         if ( agentType === 'presentation' && yamlPath ) {
-            html += ` <button class="report-link-btn rerender-btn" onclick="window.notificationsUI.submitRerender( '${this.escapeHtml( yamlPath )}' )" title="Re-render from YAML (Phases 6-8 only)">🔄 Re-render</button>`;
+            // Row 2515ede4: the path rides in data-yaml-path; the onclick is a constant (see renderHistoryActions).
+            html += ` <button class="report-link-btn rerender-btn" data-yaml-path="${this.escapeHtml( yamlPath )}" onclick="window.notificationsUI.submitRerender( this.dataset.yamlPath )" title="Re-render from YAML (Phases 6-8 only)">🔄 Re-render</button>`;
         }
         // PPTX download button for presentation jobs
         if ( pptxPath ) {
@@ -7858,7 +8715,7 @@ class NotificationsUI {
         /**
          * Resume a stalled job from its checkpoint.
          *
-         * POSTs to /api/jobs/{jobId}/resume-from-checkpoint. On success, a new job
+         * POSTs { resume_from: jobId, ...overrides } to /api/v2/resume-job. On success, a new job
          * is created and queued, resuming from the phase where it stalled.
          *
          * Session 9056c113 — checkpoint-resume infrastructure.
@@ -7894,10 +8751,10 @@ class NotificationsUI {
         }
 
         try {
-            const response = await this.authedFetch( `/api/jobs/${jobId}/resume-from-checkpoint`, {
+            const response = await this.authedFetch( '/api/v2/resume-job', {
                 method  : 'POST',
                 headers : { 'Content-Type': 'application/json' },
-                body    : JSON.stringify( overrides ),
+                body    : JSON.stringify( { resume_from: jobId, ...overrides } ),
             } );
 
             if ( !response.ok ) {
@@ -7923,7 +8780,7 @@ class NotificationsUI {
         /**
          * Smart TFE resume from free-form input (session 9056c113).
          *
-         * Sends the resume_from text to /api/test-fix-expediter/resume-from which
+         * Sends the resume_from text to /api/v2/resume-job which
          * auto-detects the input type (job ID, plan doc path, natural language) and
          * either auto-resumes (single match) or returns candidates for disambiguation.
          */
@@ -7942,7 +8799,7 @@ class NotificationsUI {
         if ( candidatesEl )  candidatesEl.style.display = 'none';
 
         try {
-            const response = await this.authedFetch( '/api/test-fix-expediter/resume-from', {
+            const response = await this.authedFetch( '/api/v2/resume-job', {
                 method  : 'POST',
                 headers : { 'Content-Type': 'application/json' },
                 body    : JSON.stringify( { resume_from: input } )
@@ -8959,6 +9816,201 @@ class NotificationsUI {
         el.textContent = `updated ${this._formatFleetTimestamp( new Date(), ianaZone )}`;
     }
 
+    // ========================================
+    // THE FLEET-SIZE DIAL — the cap the spawn path enforces, and its configured ceiling
+    // ========================================
+
+    async fetchFleetSizeCap() {
+        /**
+         * Read { cap, ceiling } from GET /api/arbiter/fleet-size-cap.
+         *
+         * Ensures:
+         *     - Returns the parsed body on 2xx, null on any non-2xx or throw
+         *     - Reports a failure via error(), NOT log(): log() is gated on this.debug,
+         *       so with debug off a control that quietly declines to paint is
+         *       indistinguishable from one nobody ever built
+         *     - Never throws
+         */
+        try {
+            const response = await this.authedFetch( "/api/arbiter/fleet-size-cap" );
+            if ( !response.ok ) {
+                this.error( `Fleet size cap unavailable (HTTP ${response.status})` );
+                return null;
+            }
+            const body = await response.json();
+            return ( body && typeof body === "object" ) ? body : null;
+        } catch ( error ) {
+            this.error( `Fleet size cap fetch failed: ${error}` );
+            return null;
+        }
+    }
+
+    _fleetSizeCapEls() {
+        /** The dial cluster, or null when the page does not carry it. */
+        const root = document.getElementById( "fleet-size-cap-controls" );
+        if ( !root ) return null;
+        return {
+            root,
+            slider : document.getElementById( "fleet-size-cap" ),
+            value  : document.getElementById( "fleet-size-cap-value" ),
+            status : document.getElementById( "fleet-size-cap-status" )
+        };
+    }
+
+    _paintFleetSizeCap( payload ) {
+        /**
+         * Move the dial to `payload.cap` and set its span to `payload.ceiling`.
+         *
+         * Ensures:
+         *     - No-op returning false when the cluster is absent
+         *     - The cluster stays HIDDEN when the payload is unusable. A control parked
+         *       at its HTML defaults would show a cap the spawn path is not enforcing —
+         *       the same "renders identically whether it works or not" failure the ratio
+         *       clause had, and the reason that one is hidden until it has real numbers
+         *     - `max` comes from payload.ceiling ON EVERY PAINT and is NEVER clamped to
+         *       anything else. See below
+         *     - RETURNS whether it painted, so a caller can tell a real paint from a
+         *       silent decline
+         *
+         * 🔴 THE CEILING IS THE KEY'S VALUE, VERBATIM. `cc session fleet size cap
+         * maximum` ships at 18 and Rick ruled it must stay tweakable in configuration.
+         * Trimming the displayed max to the persona-pool size, the live session count or
+         * any other number would make the dial disagree with the key — and a dial
+         * silently trimmed below what the operator typed cannot be told apart from a key
+         * that was ignored.
+         *
+         * ⚠️ AND IT IS READ AT CALL TIME, not baked into the HTML. The markup carries no
+         * `max` attribute at all, so a paint that never runs leaves the control hidden
+         * rather than showing a stale ceiling from a previous release.
+         */
+        const els = this._fleetSizeCapEls();
+        if ( !els ) return false;
+
+        const cap     = payload ? payload.cap     : undefined;
+        const ceiling = payload ? payload.ceiling : undefined;
+        if ( !Number.isFinite( cap ) || !Number.isFinite( ceiling ) ) {
+            els.root.hidden = true;
+            return false;
+        }
+
+        els.root.hidden        = false;
+        els.slider.min         = "1";
+        els.slider.max         = String( ceiling );
+        els.slider.value       = String( cap );
+        els.value.textContent  = `${cap} / ${ceiling}`;
+        els.slider.disabled    = false;
+
+        // The status line reports WHO is occupying the cap, because the number that
+        // matters when you are about to move this dial is how much headroom is left —
+        // and "every session counts, managers included" is Rick's ruling, not a detail.
+        const live = payload.live;
+        els.status.textContent = ( live && Number.isFinite( live.total ) )
+            ? `${live.total} live — ${live.managers} manager(s), ${live.workers} worker(s)`
+            : "";
+
+        // Bind here rather than at construction: the cluster is painted from a fetch, so
+        // there is no earlier moment at which the element is known to exist. The binder
+        // is idempotent, which is what makes calling it on every paint safe.
+        this._wireFleetSizeCap();
+        return true;
+    }
+
+    async refreshFleetSizeCap() {
+        /**
+         * Fetch the dial's numbers and paint them.
+         *
+         * Ensures:
+         *     - Returns whatever _paintFleetSizeCap reported
+         *     - Never throws (both halves are already fail-soft)
+         */
+        return this._paintFleetSizeCap( await this.fetchFleetSizeCap() );
+    }
+
+    async setFleetSizeCap( cap ) {
+        /**
+         * PUT the new cap and return what the SERVER SAYS IT PERSISTED.
+         *
+         * Ensures:
+         *     - Returns the parsed body on 2xx, null on any non-2xx or throw
+         *     - Reports a refusal via error() carrying the server's own `detail`,
+         *       because the server refuses for reasons the operator can act on —
+         *       a cap above the ceiling, a key defined twice — and swallowing that
+         *       text turns a fixable configuration problem into a dead slider
+         *     - Never throws
+         *
+         * 🔴 THE RETURN IS THE SERVER'S RE-READ OF THE FILE, NOT THE VALUE SENT.
+         * The caller repaints from it, so a dial that drifted from what was actually
+         * persisted corrects itself on the next paint instead of showing a number the
+         * spawn path is not enforcing.
+         */
+        try {
+            const response = await this.authedFetch( "/api/arbiter/fleet-size-cap", {
+                method  : "PUT",
+                headers : { "Content-Type": "application/json" },
+                body    : JSON.stringify( { cap } )
+            } );
+            if ( !response.ok ) {
+                let detail = `HTTP ${response.status}`;
+                try {
+                    const body = await response.json();
+                    if ( body && body.detail ) detail = body.detail;
+                } catch ( ignored ) { /* a non-JSON error body keeps the status line */ }
+                this.error( `Fleet cap not saved: ${detail}` );
+                return null;
+            }
+            const body = await response.json();
+            return ( body && typeof body === "object" ) ? body : null;
+        } catch ( error ) {
+            this.error( `Fleet cap save failed: ${error}` );
+            return null;
+        }
+    }
+
+    _wireFleetSizeCap() {
+        /**
+         * Bind the dial's handlers ONCE.
+         *
+         * Ensures:
+         *     - No-op returning false when the cluster is absent
+         *     - Binds at most once, however many times it is called: the paint runs on
+         *       every fleet refresh, and a listener added per refresh would fire the
+         *       PUT once per refresh that had happened
+         *     - `input` only moves the READOUT — it never writes
+         *     - `change` writes, then repaints from the server's response
+         *
+         * 🔴 THE WRITE IS ON `change`, NOT `input`, AND THAT IS THE WHOLE BINDING.
+         * A range input fires `input` continuously while the handle is moving — a drag
+         * from 4 to 18 would fire fourteen PUTs, each one a file write, and the fleet
+         * cap would briefly be every number in between. `change` fires once, on release.
+         */
+        const els = this._fleetSizeCapEls();
+        if ( !els || !els.slider ) return false;
+        if ( els.slider.dataset.wired === "true" ) return false;
+
+        els.slider.addEventListener( "input", () => {
+            // Readout only. No network, no persistence — see the ruling above.
+            if ( els.value ) els.value.textContent = `${els.slider.value} / ${els.slider.max}`;
+        } );
+
+        els.slider.addEventListener( "change", async () => {
+            const requested = Number( els.slider.value );
+            els.slider.disabled = true;
+            if ( els.status ) els.status.textContent = `saving ${requested}…`;
+            const persisted = await this.setFleetSizeCap( requested );
+            els.slider.disabled = false;
+            // Repaint from the SERVER's answer whether it succeeded or not. On a
+            // refusal `persisted` is null and this re-reads the live state, so the
+            // handle snaps back to the cap that is actually enforced rather than
+            // sitting at a number the operator never got.
+            if ( persisted ) this._paintFleetSizeCap( persisted );
+            else             await this.refreshFleetSizeCap();
+        } );
+
+        els.slider.dataset.wired = "true";
+        return true;
+    }
+
+
     async refreshFleetStatus() {
         /**
          * Orchestrate one fleet-status refresh: fetch → render. Shared by the 60s
@@ -8977,6 +10029,10 @@ class NotificationsUI {
         try {
             const composite = await this.fetchFleetState();
             this.renderFleetStatus( composite );
+            // The dial rides the SAME refresh as the table it sits above — the ⟳ button
+            // and the 60s tick both reach it — so the cap on screen and the fleet on
+            // screen are read at the same moment rather than drifting apart.
+            await this.refreshFleetSizeCap();
         } finally {
             this._fleetStatusFetchInFlight = false;
         }
@@ -9077,21 +10133,287 @@ class NotificationsUI {
         }
     }
 
+    async lookupTaskByRef( typed ) {
+        /**
+         * Resolve a pasted ticket reference to ONE row.
+         *
+         * RICK'S P0 (row 732151f2): "Every time someone refers to a row for a
+         * ticket by # I have no idea what they're talking about." Three seats
+         * broke the lead-with-the-title convention in a single evening, including
+         * the one carrying that rule in permanent memory, so the convention is
+         * MEASURED — not assumed — to be unreliable. A box works the same at
+         * 03:00 as at noon.
+         *
+         * 🔴 IT MUST HIT /api/tasks/<ref>, NEVER /api/tasks?id_prefix=<ref>.
+         * The query form chains `_apply_owed_filter` after the prefix match and
+         * so hides holding-area rows: measured 2026-09-09, exactly 1 of 23 held
+         * rows was findable that way. The single-row endpoint applies no
+         * visibility filter and returns held rows.
+         *
+         * Requires:
+         *     - `typed` is whatever is in the box (any value; junk is data)
+         *     - this.authedFetch is available (handles JWT refresh)
+         *
+         * Ensures:
+         *     - { state: "module_missing" } when the shared classifier did not
+         *       load. A DEPLOY defect, and its own state for the same reason
+         *       fetchTaskList separates one: a missing static asset and a down
+         *       store need different remedies
+         *     - { state: "refused", message } for a reference that cannot name a
+         *       row — decided LOCALLY, so no request is spent being told what we
+         *       already knew
+         *     - { state: "found", task } on 2xx
+         *     - { state: "missing" } on 404 · { state: "ambiguous", detail } on a
+         *       422, whose body NAMES every candidate id
+         *     - { state: "auth_required" } on 401 · { state: "unreachable" } on
+         *       anything else, including a network throw
+         *     - never throws
+         */
+        // Read at CALL time, never at load time, so module execution order cannot
+        // matter — the same discipline fetchTaskList uses one method up.
+        const buildPath = window.LUPIN_TASK_LOOKUP_PATH;
+        const refusalOf = window.LUPIN_TASK_REF_REFUSAL_MESSAGE;
+        if ( !buildPath || !refusalOf ) {
+            this.log( "Task lookup missing — /static/js/shared/task-lookup.js did not load" );
+            return { state: "module_missing" };
+        }
+
+        const path = buildPath( typed );
+        if ( path === null ) return { state: "refused", message: refusalOf() };
+
+        try {
+            const response = await this.authedFetch( path );
+            if ( response.status === 401 ) return { state: "auth_required" };
+            if ( response.status === 404 ) return { state: "missing" };
+            if ( response.status === 422 ) {
+                // The server's own detail NAMES the candidates for an ambiguous
+                // prefix, which is more useful than anything composed here.
+                const body = await response.json().catch( () => ( {} ) );
+                return { state: "ambiguous", detail: body.detail ?? null };
+            }
+            if ( !response.ok ) return { state: "unreachable" };
+            return { state: "found", task: await response.json() };
+        } catch ( error ) {
+            this.log( `Task lookup failed: ${error}` );
+            return { state: "unreachable" };
+        }
+    }
+
+    describeTaskLookup( typed, outcome ) {
+        /**
+         * Turn a lookup outcome into the ONE sentence shown in the result region.
+         *
+         * 🔴 EVERY OUTCOME GETS ITS OWN SENTENCE. "Not found", "your prefix is
+         * ambiguous", "you are logged out" and "the store is down" call for four
+         * different next moves, and collapsing them into a shared "not found"
+         * is the same defect as a status code shared by several conditions —
+         * which this repo has already paid for once on the api-key staircase.
+         *
+         * ⚠️ THE STATUS IS PART OF THE ANSWER, NOT DECORATION. A held row shown
+         * without its status reads as an ordinary live ticket, and the gap
+         * between "it is queued" and "it is in your holding area" is usually the
+         * whole reason the question was asked.
+         *
+         * Requires:
+         *     - `outcome` is what lookupTaskByRef returned
+         *
+         * Ensures:
+         *     - returns { text, state } — `state` lands on data-state for tests
+         *       and styling
+         *     - a found row leads with its TITLE, then status, owner, priority
+         *     - a missing field degrades to a dash, never the word "undefined"
+         *     - never throws
+         */
+        const state = outcome && outcome.state ? outcome.state : "unreachable";
+
+        if ( state === "found" ) {
+            const task     = outcome.task || {};
+            const title    = ( task.title         || "" ).trim() || "(untitled)";
+            const status   = ( task.status        || "" ).trim() || "—";
+            const owner    = ( task.owner_persona || "" ).trim() || "unassigned";
+            const priority = ( task.priority      || "" ).trim() || "—";
+            return { text: `${title} · ${status} · ${owner} · ${priority}`, state: "found" };
+        }
+        if ( state === "refused" )   return { text: outcome.message, state: "refused" };
+        if ( state === "missing" )   return { text: `No ticket matches "${typed}".`, state: "missing" };
+        if ( state === "ambiguous" ) {
+            return {
+                text  : outcome.detail || `"${typed}" matches more than one ticket — type more characters.`,
+                state : "ambiguous",
+            };
+        }
+        if ( state === "auth_required" ) {
+            // The wording comes from the shared module so the two clients cannot
+            // agree that 401 is its own outcome and then say it differently — the
+            // quieter half of the drift caught in review 2026-09-09.
+            //
+            // Read WITHOUT a fallback on purpose. This branch is reachable only
+            // through lookupTaskByRef, which returns `module_missing` before ever
+            // producing `auth_required` if the module did not load. A default here
+            // would be a fallback for a state that cannot occur, and would hide a
+            // real deploy defect behind a plausible sentence.
+            return { text: window.LUPIN_TASK_LOOKUP_AUTH_REQUIRED_MESSAGE, state: "auth_required" };
+        }
+        if ( state === "module_missing" ) {
+            // Named distinctly ON PURPOSE: a static asset that 404'd is a DEPLOY
+            // defect, and reporting it as "the store is down" sends whoever reads
+            // it to triage an outage that is not happening.
+            return { text: "Ticket lookup is unavailable — a page asset failed to load.", state: "module_missing" };
+        }
+        return { text: window.LUPIN_TASK_LOOKUP_UNREACHABLE_MESSAGE, state: "unreachable" };
+    }
+
+    async runTaskLookup() {
+        /**
+         * Read the box, run the lookup, paint the answer. The DOM half.
+         *
+         * Requires:
+         *     - #task-lookup-input and #task-lookup-result exist
+         *
+         * Ensures:
+         *     - a missing input or result element is a no-op, not a throw — this
+         *       is wired from an inline handler, and an exception there is
+         *       swallowed by the browser and invisible to everyone
+         *     - the result region carries data-state so a test can assert WHICH
+         *       outcome fired rather than pattern-matching prose
+         *     - never throws
+         */
+        const input  = document.getElementById( "task-lookup-input" );
+        const result = document.getElementById( "task-lookup-result" );
+        if ( !input || !result ) return;
+
+        const typed = ( input.value || "" ).trim();
+        result.textContent = "Looking up…";
+        result.setAttribute( "data-state", "pending" );
+
+        const outcome  = await this.lookupTaskByRef( typed );
+
+        if ( outcome && outcome.state === "found" ) {
+            // 🔴 THE ROW GOES TO THE LIST — see _renderPinnedTaskRow for Rick's
+            // rejection of the describe-only build. The result line drops to a
+            // short "showing 1" affordance because the ANSWER is now the list.
+            this._taskLookupPinned = outcome.task;
+            result.textContent = "Showing the one matching ticket — ✕ to see the whole list.";
+            result.setAttribute( "data-state", "filtered" );
+            const clear = document.getElementById( "task-lookup-clear" );
+            if ( clear ) clear.hidden = false;
+            this.renderTaskList( { status: "ok", tasks: this._taskListLastGoodTasks || [] }, false );
+            return;
+        }
+
+        // Not found / refused / signed out / unreachable: say so, and LEAVE THE
+        // BOARD ALONE. The list the operator was reading is not what went wrong.
+        const rendered = this.describeTaskLookup( typed, outcome );
+        result.textContent = rendered.text;
+        result.setAttribute( "data-state", rendered.state );
+    }
+
+    async fetchHoldingArea() {
+        /**
+         * Fetch the HOLDING AREA — rows filed but not yet cleared to start.
+         *
+         * Mirrors `fetchTaskList` exactly, including its four failure states, and
+         * for the same reason: this poll repeats, so collapsing a missing static
+         * asset into "unreachable" would have an operator triaging a deploy defect
+         * as an outage indefinitely.
+         *
+         * ⭐ THE ROWS THIS RETURNS ARE INVISIBLE TO THE BOARD QUERY BY DESIGN.
+         * `not_approved` is in the repository's BOARD_INVISIBLE_STATUSES, so the
+         * two panes show disjoint sets and neither is missing rows the other has.
+         * That is the gate working, not a discrepancy to reconcile.
+         *
+         * Ensures:
+         *     - Returns the parsed { tasks, count, … } body on 2xx
+         *     - Returns { status: "auth_required" } on a hard 401
+         *     - Returns { status: "query_unavailable", tasks: null } when the shared
+         *       query module did not load
+         *     - Returns { status: "unreachable", tasks: null } on any throw or other
+         *       non-2xx (never throws)
+         */
+        try {
+            const query = window.LUPIN_HOLDING_AREA_QUERY;
+            if ( !query ) {
+                this.log( "Holding-area query missing — /static/js/shared/task-list-query.js did not load" );
+                return { status: "query_unavailable", tasks: null };
+            }
+            const response = await this.authedFetch( query );
+            if ( response.status === 401 ) return { status: "auth_required" };
+            if ( !response.ok )            return { status: "unreachable", tasks: null };
+            return await response.json();
+        } catch ( error ) {
+            this.log( `Holding-area fetch failed: ${error}` );
+            return { status: "unreachable", tasks: null };
+        }
+    }
+
+    _groupHeldRowsByFiler( tasks ) {
+        /**
+         * Group held rows BY FILER, which is what the triage session actually needs.
+         *
+         * ⭐ FILER, NOT OWNER — and the two genuinely differ. `created_by` names who
+         * PUT the row in the holding area; `owner_persona` names who would do it if
+         * approved. On the live board they disagree on 3 of 13 rows, which is why
+         * they are two columns and never one merged "who". Triage asks "what did
+         * this person file", so it groups on the filer.
+         *
+         * Requires:
+         *     - tasks is an array of row objects (foreign wire data; any shape)
+         *
+         * Ensures:
+         *     - returns [ { filer, tasks } ], filers sorted alphabetically
+         *     - within a filer, rows sort by priority then title (status is
+         *       uniform here — every row is not_approved — so ranking by it would
+         *       discriminate nothing)
+         *     - a falsy/absent tasks argument yields []
+         *     - Pure: no DOM, no side effects; never throws
+         */
+        const rows = Array.isArray( tasks ) ? tasks : [];
+        const byFiler = new Map();
+        rows.forEach( raw => {
+            const task  = raw || {};
+            const filer = this._taskFilerLabel( task );
+            if ( byFiler.has( filer ) ) byFiler.get( filer ).push( task );
+            else byFiler.set( filer, [ task ] );
+        } );
+        return Array.from( byFiler.keys() ).sort( ( a, b ) => a.localeCompare( b ) ).map( filer => ( {
+            filer,
+            tasks : byFiler.get( filer ).slice().sort( ( a, b ) => {
+                const pr = this._taskPriorityRank( a.priority ) - this._taskPriorityRank( b.priority );
+                if ( pr !== 0 ) return pr;
+                return this._taskTitleLabel( a ).localeCompare( this._taskTitleLabel( b ) );
+            } )
+        } ) );
+    }
+
     isTaskOpenStatus( status ) {
         /**
-         * True when a task's status is non-terminal (work still owed). Terminal
-         * statuses are "done" / "dropped"; a missing status defaults to OPEN
-         * (degrade-safe — a row with no status is never silently hidden).
+         * True when a task's status is non-terminal (work still owed). A missing
+         * status defaults to OPEN (degrade-safe — a row with no status is never
+         * silently hidden).
+         *
+         * 🔴 `wont_fix` IS TERMINAL AND WAS MISSING HERE. The store's
+         * `TERMINAL_STATUSES` is ( "done", "dropped", "wont_fix" ); this function
+         * knew only the first two, so every won't-fixed row counted as work still
+         * owed. A refusal that keeps showing up as owed work is the exact thing the
+         * status was added to stop, and the dashboard would have reported it wrong
+         * from the moment the first row was closed that way.
+         *
+         * ⚠️ `not_approved` IS DELIBERATELY OPEN. It is not terminal — the store's
+         * own comment says adding it to the terminal set would tell every reader
+         * that a row in the holding area is finished, which is the opposite of the
+         * truth. It is hidden from the board by a different mechanism
+         * (`BOARD_INVISIBLE_STATUSES`), applied server-side, not by this predicate.
          *
          * Requires:
          *     - status is a string, or null/undefined
          *
          * Ensures:
-         *     - falsy → true; "done"/"dropped" → false; anything else → true
+         *     - falsy → true; "done"/"dropped"/"wont_fix" → false; anything else → true
+         *     - "not_approved" → true (waiting on triage is still owed)
          *     - Pure: no DOM, no side effects
          */
         if ( !status ) return true;
-        return status !== "done" && status !== "dropped";
+        return status !== "done" && status !== "dropped" && status !== "wont_fix";
     }
 
     _taskStatusRank( status ) {
@@ -9100,15 +10422,46 @@ class NotificationsUI {
          * An unknown/typo'd status sorts BETWEEN open and terminal so it never
          * hides above genuinely-blocked work.
          *
+         * ⚠️ NUMBERED IN TENS, AND THE GAPS ARE THE POINT. The first cut used
+         * 0..7 with no room between them, so adding `not_approved` — which belongs
+         * after `queued` and before the unknown slot — had nowhere to go without
+         * either a fractional rank or renumbering under a test that pinned every
+         * literal. Tens leave nine slots between each pair, and the store's status
+         * vocabulary has grown twice this week alone. Only the ORDER is behavior;
+         * the absolute numbers are arbitrary and are asserted as an ordering, not
+         * as a set of magic values.
+         *
+         * `parked` sits just after `queued`, ahead of `not_approved`: a parked row is
+         * approved work a human deferred, while a held row has not been cleared to
+         * start at all. `not_approved` follows it: it is genuinely open work
+         * (see isTaskOpenStatus) that nobody has been cleared to start, so it
+         * outranks a typo but never outranks a row somebody could pick up today.
+         * `wont_fix` sits last among terminals — a refusal is the coldest row on
+         * the board.
+         *
          * Ensures:
-         *     - blocked 0 · in_progress 1 · claimed 2 · review 3 · queued 4 ·
-         *       done 6 · dropped 7; unknown/missing → 5
+         *     - blocked 0 · in_progress 10 · claimed 20 · review 30 · queued 40 ·
+         *       parked 50 · not_approved 60 · done 80 · dropped 90 · wont_fix 100;
+         *       unknown/missing → 70
+         *     - EVERY status in the store's VALID_STATUSES has a rank
+         *     - the ORDER, not the literals, is the contract
          *     - Pure: no DOM, no side effects
          */
-        const ranks = { blocked: 0, in_progress: 1, claimed: 2, review: 3, queued: 4, done: 6, dropped: 7 };
-        if ( !status ) return 5;
+        const ranks = {
+            blocked      :   0,
+            in_progress  :  10,
+            claimed      :  20,
+            review       :  30,
+            queued       :  40,
+            parked       :  50,
+            not_approved :  60,
+            done         :  80,
+            dropped      :  90,
+            wont_fix     : 100
+        };
+        if ( !status ) return 70;
         const rank = ranks[ status ];
-        return rank === undefined ? 5 : rank;
+        return rank === undefined ? 70 : rank;
     }
 
     _taskPriorityRank( priority ) {
@@ -9167,9 +10520,27 @@ class NotificationsUI {
          * trimmed lowercase status. Color is ALWAYS redundant with the status WORD
          * in the Status cell (WCAG 1.4.1).
          *
+         * ⚠️ `wont_fix` AND `not_approved` GET THEIR OWN CLASSES, NOT `unknown`.
+         * Falling through to the unknown grey would render a deliberate refusal and
+         * a row awaiting triage identically to a typo'd status — three different
+         * situations, one colour, and the operator cannot tell which they are
+         * looking at. `wont_fix` reads as terminal; `not_approved` reads as
+         * waiting, deliberately NOT as terminal.
+         *
+         * ⚠️ `parked` WAS MISSING HERE TOO, AND HAD BEEN ALL ALONG — found by
+         * enumerating the store's VALID_STATUSES in a test rather than by reading
+         * this list and trusting it. A parked row was carrying the unknown grey and
+         * leaning entirely on its dimming and badge to say what it was, while the
+         * status dot and the row's left-edge accent — the two things the eye reaches
+         * first — said "unrecognized". Nobody had noticed because the dimming reads
+         * as intentional, so the row looked deliberate and was mislabelled.
+         *
          * Ensures:
          *     - blocked→…-blocked · in_progress/claimed→…-active · review→…-review ·
-         *       queued→…-queued · done→…-done · dropped→…-dropped
+         *       queued→…-queued · parked→…-parked · not_approved→…-not-approved ·
+         *       done→…-done · dropped→…-dropped · wont_fix→…-wont-fix
+         *     - EVERY status in the store's VALID_STATUSES has a branch; one added
+         *       server-side reddens a test instead of shipping as grey
          *     - anything else (empty/unrecognized/non-string) → task-status-unknown
          *     - Pure: no DOM, no side effects
          */
@@ -9178,8 +10549,11 @@ class NotificationsUI {
         if ( word === "in_progress" || word === "claimed" ) return "task-status-active";
         if ( word === "review" )                            return "task-status-review";
         if ( word === "queued" )                            return "task-status-queued";
+        if ( word === "parked" )                            return "task-status-parked";
+        if ( word === "not_approved" )                      return "task-status-not-approved";
         if ( word === "done" )                              return "task-status-done";
         if ( word === "dropped" )                           return "task-status-dropped";
+        if ( word === "wont_fix" )                          return "task-status-wont-fix";
         return "task-status-unknown";
     }
 
@@ -9270,11 +10644,19 @@ class NotificationsUI {
             }
         } );
 
+        // 🔨 PRIORITY FIRST — Rick's ruling, 2026-09-09, by voice: "obviously it's
+        // going to be priority first, but I also want to make sure that this is
+        // implemented for both clients, the notifications in JavaScript and the
+        // multiplexer in TypeScript, in both places." This is the JS half.
+        //
+        // ⚠️ Terminal rows never reach here — :11753 filters to openTasks before
+        // calling this, and _taskListLastGoodTasks is fed from the same array. Done
+        // work leaves the task list entirely and renders in the finished list.
         const byUrgency = ( a, b ) => {
-            const sr = this._taskStatusRank( a.status ) - this._taskStatusRank( b.status );
-            if ( sr !== 0 ) return sr;
             const pr = this._taskPriorityRank( a.priority ) - this._taskPriorityRank( b.priority );
             if ( pr !== 0 ) return pr;
+            const sr = this._taskStatusRank( a.status ) - this._taskStatusRank( b.status );
+            if ( sr !== 0 ) return sr;
             return this._taskTitleLabel( a ).localeCompare( this._taskTitleLabel( b ) );
         };
 
@@ -9307,25 +10689,6 @@ class NotificationsUI {
         return id ? id.slice( 0, 8 ) : "—";
     }
 
-    _truncateTaskTitle( label ) {
-        /**
-         * Client-side title-truncation backstop (design 2026.06.29 §4.4 / D1):
-         * trim a wall-of-text title to TASK_TITLE_TRUNCATE_LEN chars + an ellipsis.
-         * Backstops LEGACY rows written before the server store-guard; the full
-         * title rides the cell's hover-tooltip (title attr) so nothing is hidden.
-         *
-         * Requires:
-         *     - label is the (already fallback-resolved) title string
-         *
-         * Ensures:
-         *     - label.length > cap → label.slice( 0, cap ) + "…"; else label verbatim
-         *     - Pure: no DOM, no side effects
-         */
-        const cap = this.TASK_TITLE_TRUNCATE_LEN;
-        const s   = String( label );
-        return s.length > cap ? s.slice( 0, cap ) + "…" : s;
-    }
-
     _taskBodyIsEmpty( task ) {
         /**
          * Whether the task has no detail `body` to show in the overlay — drives
@@ -9340,83 +10703,1032 @@ class NotificationsUI {
         return body == null || String( body ).trim() === "";
     }
 
-    _renderTaskRow( task, ianaZone ) {
+    _taskFilerLabel( task ) {
         /**
-         * Render a single task row (one <tr>) with TEN columns: ID · Title · Class ·
-         * Status · Blocked by · Next chase · Accountable · Priority · Project ·
-         * Detail. The owner_persona is the GROUP HEADER (not a per-row column), so a
-         * row never repeats its owner.
+         * The PERSON who filed this row, from `created_by`, display-cased.
          *
-         * Row redesign (design 2026.06.29, AUGMENT ruling): the NEW leftmost ID
-         * column carries the 8-char id; the Title cell is truncated to ~60 chars +
-         * ellipsis with the FULL title on a hover-tooltip; the NEW rightmost Detail
-         * column carries a 📄 affordance opening the body overlay (dimmed in place
-         * when the body is empty).
+         * Rick asked by voice 2026-09-02 for the filer on every board row —
+         * specifically on the ones he was blocking — so a row he wants chased
+         * names somebody rather than only an id.
          *
-         * EVERY store-sourced value is escapeHtml'd (the in-service card writes via
-         * innerHTML, so unlike the TS createElement card it must escape explicitly).
+         * 🔴 DO NOT REACH FOR `created_by.split( " " )[ 0 ]`. The stored value is
+         * `<persona> <8-hex session>`, and a persona can be TWO WORDS: "mr radio"
+         * renders as "mr". Measured by María 2026-09-02 (planning-is-prompting
+         * cdae439): wrong on 6 of 13 live rows, and those six are exactly the ones
+         * Rick asked about — the naive implementation fails hardest precisely where
+         * the feature is for.
+         *
+         * ⇒ So this strips a TRAILING SESSION ID rather than keeping a leading word,
+         * and on a non-match returns the WHOLE string untouched. A truncated name is
+         * a WRONG name wearing a right one's clothes; an unexpected format shown in
+         * full is visibly odd and sends the reader to the row.
+         *
+         * Case is display-only. The store holds "Krishna" and "mr radio" both, so
+         * this normalises what the reader SEES without touching what is stored.
          *
          * Requires:
-         *     - task is a row object (fields rendered defensively — falsy → "—")
-         *     - ianaZone is the IANA zone for the next-chase cell, or null/undefined
+         *     - task is a row object; created_by may be absent
          *
          * Ensures:
-         *     - the <tr> carries a `task-status-*` class (status→accent); the Priority
-         *       cell carries a `task-prio-*` heat class when recognized
-         *     - ID cell: monospace, first 8 chars of id (absent → "—")
-         *     - Title cell: truncated text + `title=` tooltip carrying the FULL title
-         *     - Status cell leads with a `.task-status-dot` span + the status word
-         *     - Blocked-by / Accountable / Project: falsy/"none" → "—"
-         *     - Next-chase: ISO → "MM-DD HH:MM" in zone; absent → "—"
-         *     - Detail cell: 📄 — clickable (carries data-task-body/-id) when body
-         *       present; `.task-detail-empty` (disabled, non-clickable) when empty
-         *     - Pure: no DOM access, no side effects (string in → string out)
+         *     - "mr radio 0e61abe3"  -> "Mr Radio"
+         *     - "Krishna 420f5ec9"   -> "Krishna"
+         *     - no trailing session id -> the whole string, display-cased
+         *     - absent/blank -> "—"
+         *     - Pure: no DOM, no side effects
+         */
+        const raw = task && task.created_by ? String( task.created_by ).trim() : "";
+        if ( !raw ) return "—";
+
+        // Anchored at the END. A leading-word rule cannot express a two-word persona.
+        const stripped = raw.replace( /\s+[0-9a-f]{8}$/i, "" ).trim();
+
+        // A non-match leaves `stripped === raw`, which is the deliberate fall-through:
+        // render it whole rather than guess where the name stops.
+        return stripped.replace( /\b[a-z]/g, c => c.toUpperCase() );
+    }
+
+    _taskTableHeaderRow() {
+        /**
+         * The task list's and holding area's <thead> — now a wrapper over the shared
+         * `_rowTableHeaderRow`, which all three panes use.
+         *
+         * THIS DOCSTRING USED TO WARN ABOUT ONE COLSPAN AND MISS ANOTHER. It said the
+         * column count was load-bearing because `_renderTaskRow` emitted an error
+         * stripe with `colspan="12"` — true, and it never mentioned the group header's
+         * `colspan="11"`, which was equally load-bearing and equally hand-written. A
+         * warning that lists sites is a warning that will be incomplete the next time
+         * somebody adds one.
+         *
+         * So the count is no longer written down anywhere: every colspan in the three
+         * panes now reads `_rowWidth()`, which derives it from ROW_SCHEMA. There is
+         * nothing left here to keep in step.
+         *
+         * Ensures:
+         *     - returns the shared header markup
+         *     - Pure: no DOM access, no side effects (no arguments, constant out)
+         */
+        return this._rowTableHeaderRow();
+    }
+
+    _rowWidth() {
+        /**
+         * How many cells the visible line has: the ruled fields plus ONE control cell
+         * for the disclosure toggle.
+         *
+         * 🔴 EVERY colspan IN THE THREE PANES COMES FROM HERE. They used to be hand-
+         * written literals — 12, 12, 11, 5, 5, 5, 5 across seven sites — and a stale
+         * colspan does not look broken: the table still renders perfectly while the
+         * controls row and the error stripe quietly stop spanning it. Derive it once
+         * and the whole class of defect is gone by construction.
+         *
+         * Ensures:
+         *     - returns ROW_SCHEMA.line1.length + 1 (the toggle's own cell)
+         *     - Pure: no DOM access, no side effects
+         */
+        return this.ROW_SCHEMA.line1.length + 1;
+    }
+
+    _rowTableHeaderRow() {
+        /**
+         * The <thead> for every pane that renders rows, built from ROW_SCHEMA.
+         *
+         * ⭐ ONE HEADER FOR THREE TABLES. A header that has drifted from its rows
+         * mislabels every column to the right of the drift — silently, because the
+         * table still renders perfectly. Walking the same array the rows walk means
+         * they cannot disagree.
+         *
+         * The toggle's column is headed blank: it names a control, not a field, and a
+         * word there would read as a sixth field.
+         *
+         * Ensures:
+         *     - one <th class="task-col-*"> per ROW_SCHEMA.line1 entry, in order,
+         *       plus a trailing empty <th class="task-col-disclose">
+         *     - Pure: no DOM access, no side effects
+         */
+        const heads = this.ROW_SCHEMA.line1
+            .map( f => `<th class="task-col-${f}">${this.escapeHtml( this.ROW_FIELD_LABELS[ f ] || f )}</th>` )
+            .join( "" );
+        return `
+            <thead>
+                <tr>${heads}<th class="task-col-disclose" aria-label="Row controls"></th></tr>
+            </thead>`;
+    }
+
+    _rowFieldParts( task, ianaZone ) {
+        /**
+         * Every field a row can show, keyed by the names ROW_SCHEMA uses.
+         *
+         * WARNING: FILED-BY IS NOT THE OWNER AND NOT THE ACCOUNTABLE MANAGER. All three
+         * can differ on one row; filer and owner differ on 3 of 13 live rows, so these
+         * stay separate fields and are never merged into one "who".
+         *
+         * The owner_persona is the GROUP HEADER, not a per-row field, so a row never
+         * repeats its owner.
+         *
+         * EVERY store-sourced value is escapeHtml'd — these cards write via innerHTML,
+         * so unlike the TS createElement card they must escape explicitly.
+         *
+         * Requires:
+         *     - task is a row object (fields rendered defensively — falsy to "—")
+         *     - ianaZone is the IANA zone for the next-chase field, or null/undefined
+         *
+         * Ensures:
+         *     - returns { <field>: { html, cls } } for every name in ROW_SCHEMA
+         *     - `cls` is the EXTRA class the cell carries (priority heat), else ""
+         *     - the title is the WHOLE title — no cap, no ellipsis (see ROW_SCHEMA)
+         *     - Pure: no DOM access, no side effects
          */
         const statusWord  = this.escapeHtml( task.status || "unknown" );
-        const statusClass = this._taskStatusClass( task.status );
-        const prioClass   = this._taskPriorityClass( task.priority );
-
-        const idLabel     = this.escapeHtml( this._taskIdLabel( task ) );
-        const fullTitle   = this._taskTitleLabel( task );
-        const titleText   = this.escapeHtml( this._truncateTaskTitle( fullTitle ) );
-        const titleAttr   = this._escapeTaskAttr( fullTitle );
-        const itemClass   = task.item_class || "task";
-        const classBadge  = this.escapeHtml( itemClass );
-        const classSlug   = this.escapeHtml( String( itemClass ).replace( /[^a-zA-Z0-9_-]/g, "" ) );
         const blockedRaw  = Array.isArray( task.blocked_by )
             ? task.blocked_by.map( b => ( b && typeof b === "object" ) ? ( b.kind ? `${b.kind}:${b.id}` : `${b.id}` ) : String( b ) ).join( ", " )
             : task.blocked_by;
-        const blocked     = this.escapeHtml( this._taskCellOrDash( blockedRaw ) );
-        const chase       = this.escapeHtml( this._formatTaskChaseTime( task.next_chase_ts, ianaZone ) );
-        const accountable = this.escapeHtml( this._taskCellOrDash( task.accountable_manager ) );
-        const priority    = this.escapeHtml( this._taskCellOrDash( task.priority ) );
-        const project     = this.escapeHtml( this._taskCellOrDash( task.project ) );
 
-        const detailCell  = this._taskBodyIsEmpty( task )
-            ? `<span class="task-detail-emoji task-detail-empty" aria-disabled="true" title="No detail">📄</span>`
-            : `<span class="task-detail-emoji" role="button" tabindex="0" title="View detail" data-task-id="${this._escapeTaskAttr( this._taskIdLabel( task ) )}" data-task-body="${this._escapeTaskAttr( task.body )}">📄</span>`;
-
-        // Parked rows are SHOWN, dimmed and badged — never dropped (Rick
-        // 2026-07-22). The server hides them by default; the dashboard asks for
-        // them explicitly so it reports the same board agents see via task_query.
-        const isParked    = this._taskIsParked( task );
-        const parkedBadge = isParked
+        // Parked rows are SHOWN, dimmed and badged — never dropped (Rick 2026-07-22).
+        const parkedBadge = this._taskIsParked( task )
             ? `<span class="task-parked-badge" title="${this._escapeTaskAttr( task.park_reason )}">parked</span>`
             : "";
 
+        const itemClass   = task.item_class || "task";
+        const classSlug   = this.escapeHtml( String( itemClass ).replace( /[^a-zA-Z0-9_-]/g, "" ) );
+
+        const detailHtml  = this._taskBodyIsEmpty( task )
+            ? `<span class="task-detail-emoji task-detail-empty" aria-disabled="true" title="No detail">📄</span>`
+            : `<span class="task-detail-emoji" role="button" tabindex="0" title="View detail" data-task-id="${this._escapeTaskAttr( this._taskIdLabel( task ) )}" data-task-body="${this._escapeTaskAttr( task.body )}">📄</span>`;
+
+        const prioClass   = this._taskPriorityClass( task.priority );
+
+        return {
+            // 🔴 THE CELL SHOWS 8 CHARS AND THE CLIPBOARD GETS 36 — Rick, row dbb4c187:
+            // "I want the ID to be copy upon click ... I literally have to double click,
+            // copy. Want it to be 1 click." He pastes these into DMs and into store
+            // verbs, and `task_get` takes the FULL uuid. `_taskIdLabel` slices to 8 for
+            // the column's width, so copying the RENDERED TEXT would hand back a string
+            // that looks right and fails at the paste — silently, and only in the tool
+            // he pasted it into. The full id therefore rides on `data-task-full-id` and
+            // the handler reads THAT, never the label.
+            id          : { html: `<span class="task-id-copy" role="button" tabindex="0" `
+                                + `title="Click to copy the full id" `
+                                + `data-task-full-id="${this._escapeTaskAttr( task && task.id != null ? String( task.id ) : "" )}">`
+                                + `${this.escapeHtml( this._taskIdLabel( task ) )}</span>`, cls: "" },
+            // 🔴 THE SPAN IS LOAD-BEARING, NOT DECORATION — DO NOT UNWRAP IT.
+            //
+            // A `-webkit-line-clamp` / `max-height` on the CELL is inert; on a span inside
+            // it, the identical declarations bind. Measured on the live page 2026-09-03,
+            // and stated as geometry because geometry is the only thing that discriminates:
+            //
+            //     cell  declared max-height 39px, overflow hidden -> RENDERED 90px
+            //           clientHeight == scrollHeight (51/51): nothing was clamped
+            //     span  same declarations -> bounds at 39px against 78px of content,
+            //           clipped, two rendered lines
+            //
+            // ⚠️ DO NOT RE-DERIVE THIS FROM THE COMPUTED `display` VALUE. Two of us first
+            // explained it as "the cell computes flow-root, so the clamp cannot apply" —
+            // that is FALSE and Pocholo disproved it: the SPAN also computes `flow-root`
+            // and the clamp binds on it. Chrome reports the same string for both, so the
+            // display value is not evidence in either direction. A reader who chases it
+            // will spend their time on a property that was never the problem.
+            //
+            // Guard: arm 3c of the_row_is_one_shape_in_all_three_panes.test.ts — which can
+            // only assert that the SPAN EXISTS. The unit tier has no layout engine (every
+            // geometry value is 0 under happy-dom, while computed styles read back fine),
+            // so whether the clamp actually binds is measurable ONLY in a real browser.
+            title       : { html: `<span class="task-title">${this.escapeHtml( this._taskTitleLabel( task ) )}</span>`, cls: "" },
+            class       : { html: `<span class="task-class-badge task-class-${classSlug}">${this.escapeHtml( itemClass )}</span>`, cls: "" },
+            status      : { html: `<span class="task-status-dot"></span>${statusWord}${parkedBadge}`, cls: "" },
+            priority    : { html: this.escapeHtml( this._taskCellOrDash( task.priority ) ), cls: prioClass ? " " + prioClass : "" },
+            blocked     : { html: this.escapeHtml( this._taskCellOrDash( blockedRaw ) ), cls: "" },
+            chase       : { html: this.escapeHtml( this._formatTaskChaseTime( task.next_chase_ts, ianaZone ) ), cls: "" },
+            accountable : { html: this.escapeHtml( this._taskCellOrDash( task.accountable_manager ) ), cls: "" },
+            filer       : { html: this.escapeHtml( this._taskFilerLabel( task ) ), cls: "" },
+            project     : { html: this.escapeHtml( this._taskCellOrDash( task.project ) ), cls: "" },
+            detail      : { html: detailHtml, cls: "" },
+            actions     : { html: this._taskActionsCell( task ), cls: "" }
+        };
+    }
+
+    _renderRow( task, ianaZone, opts ) {
+        /**
+         * THE row renderer — one implementation, all three panes.
+         *
+         * THIS IS THE ONLY PLACE THE ROW MARKUP EXISTS, AND THAT IS THE POINT. The task
+         * list, the holding area and the epic board render the same shape because they
+         * run the same code, not because three copies happen to agree today. A second
+         * copy would drift invisibly — the trap already documented for
+         * `.task-priority-select` in two_renderers_one_class_name.test.ts, where one
+         * class name turned out to be two different controls with opposite semantics.
+         *
+         * RICK'S REQUIREMENT, and it is the reason for the unification rather than a
+         * consequence of it: he must never have to re-parse the left-to-right layout
+         * when moving between views.
+         *
+         * WHAT DIFFERS PER PANE IS A PARAMETER, not a fork: the row's own class, and
+         * the timezone the next-chase field is formatted in. Nothing else.
+         *
+         * THE TOGGLE IS NOT A FIELD. It gets its own cell rather than being counted
+         * among the five, because a control cannot live behind the disclosure it opens
+         * — and because folding it into a field cell would defeat the guard that fails
+         * when a field creeps back onto the visible line.
+         *
+         * Requires:
+         *     - task is a row object (fields rendered defensively — falsy to "—")
+         *     - ianaZone is the IANA zone for next-chase, or null/undefined
+         *     - opts.rowClass is the pane's row class (default "task-row")
+         *
+         * Ensures:
+         *     - line 1: one <td class="task-col-*"> per ROW_SCHEMA.line1, in order,
+         *       then <td class="task-col-disclose"> carrying the disclosure toggle
+         *     - the <tr> carries a `task-status-*` class; priority carries `task-prio-*`
+         *     - a hidden `.task-controls-row` carries ROW_SCHEMA.line2 then .line3
+         *     - a hidden `.task-row-error-stripe` follows
+         *     - both spanning rows use colspan = _rowWidth(), never a literal
+         *     - Pure: no DOM access, no side effects (object in to string out)
+         */
+        const rowClass  = ( opts && opts.rowClass ) ? opts.rowClass : "task-row";
+        const parts     = this._rowFieldParts( task, ianaZone );
+        // Row c9fafb9d: a pending request rides the VISIBLE row's title cell, so the question
+        // waiting on Rick is on screen without a disclosure. ⚠️ NOT ON THE EPIC BOARD — it
+        // shows the task list's rows again and wires no verdict handler.
+        if ( rowClass !== "epic-row" ) parts.title = { html: parts.title.html + this._requestChipHtml( task ), cls: parts.title.cls };
+        const width     = this._rowWidth();
+        const idAttr    = this._escapeTaskAttr( task.id );
+        const isParked  = this._taskIsParked( task );
+
+        const cells = this.ROW_SCHEMA.line1
+            .map( f => `<td class="task-col-${f}${parts[ f ].cls}"${f === "title" ? ` title="${this._escapeTaskAttr( this._taskTitleLabel( task ) )}"` : ""}>${parts[ f ].html}</td>` )
+            .join( "" );
+
+        const discLine = ( which, modifier ) => {
+            const fields = this.ROW_SCHEMA[ which ]
+                .map( f => `<div class="task-disclosed-field task-col-${f}">`
+                         + `<span class="task-disclosed-label">${this.escapeHtml( this.ROW_FIELD_LABELS[ f ] || f )}</span>`
+                         + `<span class="task-disclosed-value">${parts[ f ].html}</span></div>` )
+                .join( "" );
+            return `<div class="task-disclosed-line task-disclosed-line--${modifier}">${fields}</div>`;
+        };
+
+        const disclosed = `<div class="task-disclosed">${discLine( "line2", "fields" )}${discLine( "line3", "actions" )}</div>`;
+
         return `
-            <tr class="task-row ${statusClass}${isParked ? " task-row-parked" : ""}">
-                <td class="task-col-id">${idLabel}</td>
-                <td class="task-col-title" title="${titleAttr}">${titleText}</td>
-                <td class="task-col-class"><span class="task-class-badge task-class-${classSlug}">${classBadge}</span></td>
-                <td class="task-col-status"><span class="task-status-dot"></span>${statusWord}${parkedBadge}</td>
-                <td class="task-col-blocked">${blocked}</td>
-                <td class="task-col-chase">${chase}</td>
-                <td class="task-col-accountable">${accountable}</td>
-                <td class="task-col-priority${prioClass ? " " + prioClass : ""}">${priority}</td>
-                <td class="task-col-project">${project}</td>
-                <td class="task-col-detail">${detailCell}</td>
-            </tr>`;
+            <tr class="${rowClass} ${this._taskStatusClass( task.status )}${isParked ? " task-row-parked" : ""}">
+                ${cells}
+                <td class="task-col-disclose">${this._disclosureToggle( task )}</td>
+            </tr>
+            <tr class="task-controls-row ${this._taskStatusClass( task.status )}" data-controls-for="${idAttr}" hidden><td colspan="${width}">${disclosed}</td></tr>
+            <tr class="task-row-error-stripe" data-error-for="${idAttr}" hidden><td colspan="${width}"></td></tr>`;
+    }
+
+    _renderTaskRow( task, ianaZone ) {
+        /**
+         * The task list's and holding area's entry point — a thin wrapper over the one
+         * renderer. Kept as a named method because every call site and several tests
+         * address it by name; it holds no markup of its own.
+         *
+         * Requires:
+         *     - task is a row object; ianaZone is an IANA zone or null/undefined
+         *
+         * Ensures:
+         *     - returns `_renderRow` output with the "task-row" row class
+         *     - Pure: no DOM access, no side effects (object in to string out)
+         */
+        return this._renderRow( task, ianaZone, { rowClass: "task-row" } );
+    }
+
+    _disclosureToggle( task ) {
+        /**
+         * The ellipsis that stands in for a row's controls until they are asked for.
+         *
+         * ⭐ RICK'S SPEC, 2026-09-02, verbatim in shape: an ellipsis right-justified ON
+         * THE TITLE LINE indicating hidden functionality; clicking it discloses the
+         * controls as ONE narrow row spanning the full width of the item; that second
+         * row is NOT displayed by default.
+         *
+         * ⚠️ WHY A VERTICAL STACK WAS WRONG, in his words rather than mine — he did not
+         * want a stack of widgets on every row. Nine controls inline turned a dense,
+         * scannable board into a wall: the thing the board is FOR, seeing many rows at
+         * once, was paid away to make five verbs reachable without a click.
+         *
+         * 🔴 THE TOGGLE IS `aria-expanded`, NOT A STYLE. Screen readers and keyboards get
+         * the state from the attribute; `hidden` on the controls row carries the visual
+         * half. A disclosure that only exists in CSS is invisible to a keyboard user,
+         * who then has no way to reach any of these verbs at all.
+         *
+         * Requires:
+         *     - task carries `id`
+         *
+         * Ensures:
+         *     - returns a button carrying data-task-id, aria-expanded="false", and a title
+         *     - the SAME id its controls row carries, so the handler can pair them
+         */
+        const id = this._escapeTaskAttr( task.id );
+        return `<button type="button" class="task-disclose-button" data-task-id="${id}" `
+             + `aria-expanded="false" title="Show row controls">⋯</button>`;
+    }
+
+    _handleDisclosureToggle( button ) {
+        /**
+         * Show or hide one row's controls, scoped to the pane that was clicked.
+         *
+         * 🔴 SCOPED FOR THE REASON EVERY OTHER LOOKUP HERE IS. A row rendered in both
+         * panes has TWO controls rows carrying the same `data-controls-for`, and an
+         * unscoped query would open the task list's copy when the operator pressed the
+         * epic board's ellipsis — the same class of defect that made Won't-fix look dead
+         * to Rick, and the reason that one took a measurement to find rather than a look.
+         *
+         * ⚠️ COLLAPSING ALSO CLEARS THE ERROR STRIPE. A refusal left visible under a row
+         * whose controls are hidden is a complaint about a form nobody can see, and it
+         * survives the next repaint looking like a fresh failure.
+         *
+         * Ensures:
+         *     - toggles the controls row's `hidden` and the button's `aria-expanded`
+         *     - clears the row's error stripe on collapse
+         *     - a missing controls row is a no-op, never a throw
+         */
+        const taskId = button.dataset.taskId || "";
+        if ( !taskId ) return;
+        const pane = this._paneScope( button );
+        const controls = pane.querySelector( `.task-controls-row[data-controls-for="${CSS.escape( taskId )}"]` );
+        if ( !controls ) return;
+
+        const nowOpen = controls.hidden;
+        controls.hidden = !nowOpen;
+        button.setAttribute( "aria-expanded", String( nowOpen ) );
+        button.setAttribute( "title", nowOpen ? "Hide row controls" : "Show row controls" );
+        if ( !nowOpen ) this._renderTaskRowError( taskId, "", pane );
+    }
+
+    _taskActionsCell( task ) {
+        /**
+         * The per-row state controls: ONE verb select, ONE mic, ONE reason field, ONE Submit.
+         *
+         * 🎤 THE MIC SITS IMMEDIATELY BEFORE THE FIELD IT FILLS, and that is the
+         * whole of its placement rule. Rick asked for it "between the detail actions and
+         * the reason field"; `detail` is the OTHER cell on this disclosed line, so the
+         * only position inside this cell that is before the reason box and adjacent to
+         * it is here. A mic parked at the head of the cell would sit across the verb
+         * select from the box it writes into.
+         *
+         * 🔴 IT RESOLVES ITS TARGET BY SCOPE, NEVER BY ID — see `_handleReasonSttClick`.
+         * A row on both the task list and the epic board renders TWICE with the same
+         * `data-task-id`, deliberately, and that duplication is the feature. Giving this
+         * button a unique id would make the button unique and still leave the LOOKUP
+         * free to pick the wrong copy, which is exactly how Rick's Won't-fix on bc77cd79
+         * read the other pane's empty box.
+         *
+         * 🔴 RICK'S RULING, 2026-09-02, in his own words: "you literally repeated similar
+         * functionality in drop park and demote with three different buttons and three
+         * different text fields. You need to overload those actions and need to be
+         * consistent from row to row."
+         *
+         * The cell this replaces grew one verb at a time — Drop, then Park, then
+         * Won't-fix, then Demote, then Approve — each arriving with its own button and
+         * its own input, each correct against `validate_transition` on its own. Nobody
+         * looked at all five together until he did. Five buttons and five text boxes for
+         * five moves that differ only in which word gets posted to one endpoint.
+         *
+         * ⚠️ THE CONSISTENCY IS THE FEATURE, not a side effect of the tidy-up. The old
+         * cell rendered a different NUMBER of controls per status — park's two inputs
+         * appeared and vanished, demote's date came and went — so no two rows lined up
+         * and the eye had to re-find the control it wanted on every line. Every
+         * non-terminal row now renders exactly one select, one field and one button.
+         *
+         * 🔴 A GREYED OPTION CARRIES ITS REASON IN ITS OWN LABEL. The five buttons put
+         * their legality in `title`, and an `<option>` has nowhere to show a tooltip —
+         * so the explanation moves INTO the label rather than being quietly dropped in
+         * the move. "Park — only from queued or in progress" teaches the rule at the
+         * point of use, which is the whole reason the disabled state existed.
+         *
+         * 🔴 A TERMINAL ROW OFFERS NOTHING. `done` / `dropped` / `wont_fix` are
+         * append-only — `validate_transition` refuses every edge out of them. Every
+         * option is greyed and says so, and the select and Submit are disabled too.
+         *
+         * ⚠️ APPROVE AND DEMOTE ARE OPPOSITE ENDS OF ONE DOOR, so exactly one of them is
+         * ever live on a given row. Approve is the holding area's exit
+         * (`not_approved → queued`); Demote is its entrance. Offering both hands the
+         * operator a move that is a no-op in one direction, which the store rejects as
+         * a failure rather than as nothing happening.
+         *
+         * ⚠️ THE REASON FIELD'S PLACEHOLDER FOLLOWS THE VERB, and Park's still asks for a
+         * QUOTE on purpose: `park_reason` must carry the row's OWN decisive sentence,
+         * because that quote is what lets the next reader refute the park row-by-row
+         * instead of re-deriving the board. One shared box would otherwise flatten five
+         * different obligations into one bare "reason…".
+         *
+         * Requires:
+         *     - task is a row object carrying `id` and `status`
+         *
+         * Ensures:
+         *     - returns escaped HTML: one verb select, one mic, one reason input, one Submit
+         *     - the same four controls render for EVERY non-terminal status
+         *     - the seven verbs appear in a fixed order: park, unpark, drop, demote, wont_fix,
+         *       fixed, approve
+         *     - Un-park is enabled ONLY on a stored `parked` status — including an EXPIRED
+         *       park, whose row still reads `parked` because expiry is computed at read time
+         *     - an illegal verb renders as a DISABLED option whose label says why
+         *     - a terminal row renders every option disabled, plus a disabled select/button
+         *     - Park is enabled ONLY from queued / in_progress
+         *     - Approve is enabled ONLY on a not_approved row; Demote on every other
+         *       non-terminal row
+         *     - the date input is NOT in this markup — it is inserted by the verb-change
+         *       handler for the verbs that need one, so a row shows a date box only when
+         *       a date is the thing being asked for
+         */
+        const id          = this._escapeTaskAttr( task.id );
+        const status      = ( task.status || "" ).toLowerCase();
+        const isTerminal  = !this.isTaskOpenStatus( status );
+        const isHeld      = status === "not_approved";
+        const parkLegal   = !isTerminal && ( status === "queued" || status === "in_progress" );
+        // 🔴 THE STORED STATUS, NOT "is the park still active". Expiry is computed at READ
+        // time and never rewrites the row, so an EXPIRED park still stores `status: "parked"`.
+        // A predicate keyed on liveness would miss the majority case — the rows most likely
+        // to need un-parking are exactly the ones whose chase has already come round.
+        const unparkLegal = !isTerminal && status === "parked";
+        const demoteLegal = !isTerminal && !isHeld;
+        const shown       = this._escapeTaskAttr( status || "unknown" );
+        const deadReason  = `this row is ${shown}; terminal rows are append-only and have no transitions out`;
+
+        // A disabled option keeps `task-action-disabled` and `aria-disabled` from the
+        // buttons it replaces: the class is what the stylesheet greys, and the ARIA
+        // attribute is what a screen reader announces. `disabled` alone tells the mouse
+        // and nobody else.
+        const option = ( value, label, enabled, why ) => enabled
+            ? `<option value="${value}">${label}</option>`
+            : `<option value="${value}" disabled class="task-action-disabled" aria-disabled="true">${label} — ${why}</option>`;
+
+        const options = [
+            option( "park", "Park", parkLegal,
+                    isTerminal ? deadReason : "only from queued or in progress" ),
+            // Sits beside Park because that is where an operator looks for it. The spec has
+            // carried `unpark` since task-verbs.js:150 and the handler since :13011; only this
+            // list was hardcoded, so the verb reached the handler and never reached a button.
+            option( "unpark", "Un-park", unparkLegal,
+                    isTerminal ? deadReason : "only a parked row can be un-parked" ),
+            option( "drop", "Drop", !isTerminal, deadReason ),
+            option( "demote", "Demote", demoteLegal,
+                    isTerminal ? deadReason : "this row is already in the holding area" ),
+            option( "wont_fix", "Won't fix", !isTerminal, deadReason ),
+            // 🔴 THE ASYMMETRY RICK NAMED (row 1e12cc08): "when it's in the holding pane
+            // or when it's in the epic area I can mark something as won't fix… I see
+            // something's fixed, I'm going to mark it as fixed." Won't-fix and Fixed are
+            // the two terminal verbs an operator can observe DIRECTLY, and only one of
+            // them existed. A board whose only human-driven terminal verb is a negative
+            // one drifts toward an inflated open count — and the ratio gate reads it.
+            option( "fixed", "Fixed", !isTerminal, deadReason ),
+            option( "approve", "Approve", isHeld,
+                    isTerminal ? deadReason : "only a row in the holding area can be approved" )
+        ].join( "" );
+
+        const off = isTerminal ? ` disabled aria-disabled="true"` : "";
+
+        return `<div class="task-actions">` +
+                   `<select class="task-verb-select" data-task-id="${id}" aria-label="Action"${off}>` +
+                       `<option value="" selected>Choose an action…</option>${options}` +
+                   `</select>` +
+                   `<button type="button" class="stt-button task-reason-stt" data-task-id="${id}" ` +
+                          `title="Dictate the reason (click to record, click again to stop)" ` +
+                          `aria-label="Dictate reason"${off}>\u{1F3A4}</button>` +
+                   `<input type="text" class="task-action-input task-reason-input" data-task-id="${id}" ` +
+                          `placeholder="reason…" aria-label="Reason"${off}>` +
+                   `<button type="button" class="task-action-btn task-submit-button" data-task-id="${id}"${off}>Submit</button>` +
+                   this._priorityCell( task ) +
+               `</div>`;
+    }
+
+    _priorityCell( task ) {
+        /**
+         * Rick's third pair, far right: the row's priority and one Update button.
+         *
+         * 🔴 IT IS A SECOND, INDEPENDENT CONTROL SHARING ONE CELL — not a sixth verb.
+         * A priority edit is a field PATCH; the five verbs are transitions through the
+         * store's oracle, and the server refuses `priority` on the transition seam and
+         * `status` on the PATCH seam (routers/tasks.py, `extra="forbid"`). Folding this
+         * into the verb select would have put two different endpoints behind one
+         * control, and the operator would have had no way to tell which one refused.
+         *
+         * ⚠️ UPDATE STARTS DISABLED AND STAYS DISABLED UNTIL THE VALUE MOVES. Rick's
+         * own condition: "the update button would only be enabled if I had chosen a
+         * different value to update." The comparison is against `data-original`, the
+         * priority the row was PAINTED with — never against whatever the select happens
+         * to show — so choosing P2, then choosing P1 back again, correctly disables it.
+         *
+         * ⚠️ A TERMINAL ROW GETS THE SELECT DISABLED like every other control here.
+         * Re-prioritizing a closed row is not illegal at the store, but a control that
+         * offers it on a dead row invites an edit that changes nothing anyone reads.
+         *
+         * Requires:
+         *     - task carries `id`; `priority` may be absent (an unset row is legal)
+         *
+         * Ensures:
+         *     - the select shows the row's CURRENT priority as selected
+         *     - Update renders disabled, and carries the original for the change handler
+         *     - an unrecognized stored priority is shown as an extra selected option
+         *       rather than silently re-labelling the row as something it is not
+         */
+        // 🔴 `.task-priority-select` NAMES TWO DIFFERENT CONTROLS IN THIS PRODUCT, AND THEY
+        // HAVE OPPOSITE SEMANTICS. This one — the classic page's — pairs the select with a
+        // `.task-priority-update` button that stays disabled until the value differs from
+        // `data-original`, and PATCHes only on the click. The multiplexer paints the same
+        // class name (`static/js/multiplexer/render/templates/taskListTable.ts`, symbol
+        // `renderActionsCell`) with NO Update button at all, and COMMITS ON CHANGE.
+        //
+        // ⚠️ SO A GUARD WRITTEN AGAINST ONE SAYS NOTHING ABOUT THE OTHER, and it will not
+        // look wrong: the selector matches in both, the test goes green, and the renderer
+        // you meant was never exercised. Measured 2026-09-03 while chasing a report of a
+        // dead Update button — the multiplexer bundle carries `task-priority-select` and
+        // carries neither `task-priority-update` nor `.task-actions`. Name the renderer in
+        // the test, not just the class.
+        //
+        // Guard: src/tests/unit/notifications_js/two_renderers_one_class_name.test.ts
+        const id       = this._escapeTaskAttr( task.id );
+        const current  = ( task.priority || "" ).trim();
+        // WIDENED to P0–P5 on 2026-09-07 (row 0107c19e, Rick's broadcast e254ec7d).
+        // Deliberately a SECOND copy rather than an import: Rick's no-code-reuse
+        // ruling keeps the two clients independent. The server enum is the
+        // authority both copies answer to.
+        const known    = [ "P0", "P1", "P2", "P3", "P4", "P5" ];
+        const isTerminal = !this.isTaskOpenStatus( task.status );
+        const off      = isTerminal ? ` disabled aria-disabled="true"` : "";
+
+        // An unknown value gets its own option rather than being dropped. Dropping it
+        // would leave the select showing P0 for a row that is not P0 — a control that
+        // MISREPORTS the current state is worse than one that admits an odd value.
+        const values = known.includes( current ) || !current ? known : [ current, ...known ];
+        const options = values.map( v =>
+            `<option value="${this._escapeTaskAttr( v )}"${v === current ? " selected" : ""}>${this.escapeHtml( v )}</option>`
+        ).join( "" );
+
+        return `<select class="task-priority-select" data-task-id="${id}" ` +
+                      `data-original="${this._escapeTaskAttr( current )}" aria-label="Priority"${off}>` +
+                   `${current ? "" : `<option value="" selected>—</option>`}${options}` +
+               `</select>` +
+               `<button type="button" class="task-action-btn task-priority-update" data-task-id="${id}" ` +
+                       `disabled aria-disabled="true" title="Choose a different priority to enable">Update</button>`;
+    }
+
+    _handlePrioritySelectChange( select ) {
+        /**
+         * Enable Update only when the chosen priority DIFFERS from the painted one.
+         *
+         * ⚠️ AGAINST `data-original`, NOT AGAINST A REMEMBERED VALUE. The row repaints
+         * on every poll tick, so any state held outside the DOM is gone within seconds;
+         * the original has to travel ON the element that survives the repaint.
+         *
+         * Ensures:
+         *     - Update is enabled iff the select's value differs from data-original
+         *     - `aria-disabled` and the tooltip track `disabled`, so the reason a
+         *       control is inert is announced and not merely rendered
+         *     - never throws on a detached or malformed row
+         */
+        if ( !select || !select.closest ) return;
+        const cell   = select.closest( ".task-actions" );
+        const button = cell ? cell.querySelector( ".task-priority-update" ) : null;
+        if ( !button ) return;
+
+        const moved = ( select.value || "" ) !== ( select.dataset.original || "" );
+        button.disabled = !moved;
+        button.setAttribute( "aria-disabled", moved ? "false" : "true" );
+        button.setAttribute( "title", moved
+            ? `Set priority to ${select.value}`
+            : "Choose a different priority to enable" );
+    }
+
+    async _handlePriorityUpdateClick( button ) {
+        /**
+         * PATCH the row's priority, then let the next poll repaint it.
+         *
+         * 🔴 RE-CHECKED HERE, NOT TRUSTED FROM THE BUTTON'S STATE. `disabled` is a DOM
+         * attribute anyone can clear, and a repaint that raced the operator could leave
+         * it enabled against a value that no longer differs. The guard that matters is
+         * the one on the path to the request.
+         *
+         * Ensures:
+         *     - a no-op when the value has not moved (no request, no stripe)
+         *     - the server's own words reach the operator's row stripe on a refusal
+         *     - the board is refreshed on success, so the row shows what the server
+         *       stored rather than what the operator asked for
+         */
+        const taskId = button && button.dataset ? button.dataset.taskId : null;
+        if ( !taskId ) return;
+        const scope  = this._paneScope( button );
+        const cell   = button.closest ? button.closest( ".task-actions" ) : null;
+        const select = cell ? cell.querySelector( ".task-priority-select" ) : null;
+        if ( !select ) return;
+
+        const chosen = ( select.value || "" ).trim();
+        if ( !chosen || chosen === ( select.dataset.original || "" ) ) return;
+
+        const result = await this._patchTaskFields( taskId, { priority: chosen } );
+        if ( result.ok ) await this.refreshTaskList();
+        else this._renderTaskRowError( taskId, `Priority update refused: ${result.message}`, scope );
+    }
+
+    async _patchTaskFields( taskId, patch ) {
+        /**
+         * PATCH one or more editable FIELDS on a row — the field seam, not the oracle.
+         *
+         * ⚠️ A DIFFERENT ENDPOINT FROM `_transitionTask` ON PURPOSE, and the server
+         * enforces the split: the PATCH model sets `extra="forbid"` and deliberately
+         * omits `status`, `park_reason` and `correlation_key` so a field edit can never
+         * bypass `validate_transition`. Mirroring that split here keeps the client from
+         * being the place where the two seams blur.
+         *
+         * Ensures:
+         *     - returns { ok: true } on 2xx
+         *     - returns { ok: false, message } on any failure, never throws
+         */
+        try {
+            const response = await this.authedFetch( `/api/tasks/${encodeURIComponent( taskId )}`, {
+                method  : "PATCH",
+                headers : { "Content-Type": "application/json" },
+                body    : JSON.stringify( {
+                    actor     : `operator ${this.queueSessionId || "browser"}`,
+                    authority : "user_direct",
+                    ...patch
+                } )
+            } );
+            if ( response.ok ) return { ok: true };
+            let detail = `${response.status}`;
+            try {
+                const body = await response.json();
+                if ( body && body.detail ) detail = typeof body.detail === "string" ? body.detail : JSON.stringify( body.detail );
+            } catch ( e ) { /* non-JSON error body — the status alone is the message */ }
+            return { ok: false, message: detail };
+        } catch ( e ) {
+            return { ok: false, message: `unreachable: ${e && e.message ? e.message : e}` };
+        }
+    }
+
+    _verbNeeds( verb ) {
+        /**
+         * What one verb asks the operator for, and what it posts.
+         *
+         * 🔴 ONE TABLE PER VERB IS THE POINT OF THE REDESIGN. Five verbs used to be
+         * five buttons because each carried a different obligation; the obligations did
+         * not go away when the buttons did. One place now says what every verb
+         * requires — and since 2026-09-04 that place is `shared/task-verbs.js`, not
+         * this method. The rationale for each field, `dateLabel` included, lives beside
+         * the data it explains.
+         *
+         * 🔴 THE TABLE MOVED OUT — `shared/task-verbs.js` IS NOW THE ONE SOURCE, and
+         * this method CONSUMES it rather than carrying a copy beside it. It had grown
+         * three siblings keyed by the same five strings (`_verbLabel`,
+         * `_verbReasonComplaint`, and `_taskActionsCell`'s option list), which agreed
+         * by COINCIDENCE and not by construction. A sixth verb had four places to be
+         * added and three of them were easy to miss.
+         *
+         * Read at CALL time off `window`, never captured at load time, so module
+         * execution order cannot matter — the same contract `LUPIN_TASK_LIST_QUERY`
+         * already uses.
+         *
+         * Ensures:
+         *     - returns null for an unknown verb
+         *     - returns null when the shared module has not published (a missing
+         *       vocabulary is not silently replaced by a stale local copy)
+         *     - returns { status, reason, date, dateLabel, placeholder, terminal, ... }
+         *       otherwise — the shared spec object, unmodified
+         */
+        const SPECS = ( typeof window !== "undefined" && window.LUPIN_TASK_VERB_SPECS ) || null;
+        if ( !SPECS ) return null;
+        return SPECS[ verb ] || null;
+    }
+
+
+    _renderTaskRowError( taskId, message, scope ) {
+        /**
+         * Show (or clear) the inline error stripe under one row, IN THE PANE the
+         * operator clicked in.
+         *
+         * 🔴 SCOPED FOR THE REASON `_rowInputValue` IS. A row rendered in both panes has
+         * two stripes carrying the same `data-error-for`, and an unscoped query always
+         * revealed the first. A refusal shown in a pane the operator is not looking at
+         * has not been shown: from where they sit the control simply did nothing, which
+         * is indistinguishable from a broken button and was reported as one.
+         *
+         * Ensures:
+         *     - a non-empty `message` reveals the stripe with that text
+         *     - an empty `message` hides it again
+         *     - searches within `scope` when given, else the whole document
+         *     - a missing stripe is a no-op, never a throw (degrade-safe)
+         */
+        const root = scope || document;
+        const stripe = root.querySelector( `.task-row-error-stripe[data-error-for="${CSS.escape( taskId )}"]` );
+        if ( !stripe ) return;
+        const cell = stripe.querySelector( "td" );
+        if ( cell ) cell.textContent = message || "";
+        stripe.hidden = !message;
+    }
+
+    async _transitionTask( taskId, toStatus, extras = {} ) {
+        /**
+         * POST one state change to /api/tasks/{id}/transition.
+         *
+         * ⚠️ THE SERVER IS THE AUTHORITY AND THIS DOES NOT SECOND-GUESS IT. Structural
+         * rules (receipts on ->done, reason on ->dropped, park_reason + next_chase_ts
+         * on ->parked, terminal states) live in `task_store_rules.validate_transition`.
+         * The client pre-checks only what it can tell the operator FASTER — a blank
+         * required field — and otherwise surfaces the server's own words verbatim.
+         *
+         * Requires:
+         *     - taskId is a full row id; toStatus is a valid status string
+         *     - extras carries the transition-specific fields (reason / park_reason /
+         *       next_chase_ts)
+         *
+         * Ensures:
+         *     - returns { ok: true } on 2xx
+         *     - returns { ok: false, message } on any failure, never throws
+         */
+        try {
+            const response = await this.authedFetch( `/api/tasks/${encodeURIComponent( taskId )}/transition`, {
+                method  : "POST",
+                headers : { "Content-Type": "application/json" },
+                body    : JSON.stringify( {
+                    to_status : toStatus,
+                    actor     : `operator ${this.queueSessionId || "browser"}`,
+                    authority : "user_direct",
+                    ...extras
+                } )
+            } );
+            // 🔴 A 202 IS NOT AN APPROVAL, AND `response.ok` CANNOT TELL THE DIFFERENCE.
+            // `ok` is true for ANY 2xx, so the asynchronous promotion path — which answers
+            // "Rick has not been asked yet, here is a ticket" — used to arrive here as a
+            // plain success and the operator was told his promotion had been approved. A
+            // false FACT, not a false red, which is the species nobody investigates.
+            //
+            // ⚠️ THE STATUS CODE, NOT THE BODY MARKER, AND THAT DIFFERS FROM
+            // `HoldingAreaStore` DELIBERATELY. Here the raw Response is in hand, so the
+            // code is available and unambiguous — and "any 2xx reads as success" is
+            // precisely the defect, so the fix belongs on the code. The multiplexer store
+            // cannot do this: ApiClient returns the parsed body and never surfaces the
+            // status, so it reads the server's body marker instead. Two layers, two
+            // available signals, one behaviour.
+            if ( response.status === 202 ) {
+                let ticketId = "";
+                try {
+                    const pending = await response.json();
+                    if ( pending && typeof pending === "object" ) ticketId = String( pending.ticket_id || "" );
+                } catch ( parseError ) {
+                    // A 202 with an unreadable body is still a 202. Losing the ticket id
+                    // costs the operator a follow-up; reporting success would cost him the
+                    // truth — so the pending verdict does NOT depend on this parse.
+                    if ( this.debug ) console.log( "[TASK] 202 body unreadable:", parseError );
+                }
+                return { ok: false, pending: true, ticketId: ticketId, message: "Waiting on Rick — he has not been asked yet." };
+            }
+            if ( response.ok ) return { ok: true };
+            let detail = `${response.status}`;
+            try {
+                const body = await response.json();
+                if ( body && body.detail ) detail = typeof body.detail === "string" ? body.detail : JSON.stringify( body.detail );
+            } catch ( e ) { /* non-JSON error body — the status alone is the message */ }
+            return { ok: false, message: detail };
+        } catch ( e ) {
+            return { ok: false, message: `unreachable: ${e && e.message ? e.message : e}` };
+        }
+    }
+
+    // =========================================================================
+    // PROMOTE/DEMOTE REQUESTS — row c9fafb9d, design src/rnd/2026.09.10-request-door-design.md §6.
+    //
+    // A manager files a request (POST /api/tasks/{id}/request, MCP task_request); it waits on
+    // Rick's board with no expiry; his Approve performs the move and his Deny leaves the row
+    // exactly where it is. D4 ruled BOTH clients, so the chip's words, the verdict body and the
+    // badge text come from shared/task-request.js (window.LUPIN_TASK_REQUEST) — the multiplexer
+    // reads the same module, and neither client decides them alone.
+    //
+    // ⚠️ EVERY VIEWER SEES APPROVE AND DENY. The verdict door refuses anyone but Rick's account
+    // and its sentence is shown verbatim; hiding the buttons would be presentation, not a control.
+    // =========================================================================
+
+    _requestChipHtml( task ) {
+        /**
+         * The pending-request chip for one row, as HTML, or "" when nothing is pending.
+         *
+         * ⚠️ "" ALSO WHEN THE SHARED MODULE DID NOT LOAD. The chip is an addition to a row that
+         * works without it; a missing module must not take the row down with it.
+         *
+         * Requires:
+         *     - task is a row object
+         *
+         * Ensures:
+         *     - "" unless `pendingRequestChip` says the row has a pending, ruled move
+         *     - a `.task-request-chip` carrying data-task-id / data-request-move /
+         *       data-request-ts, its text and age, an empty detail span, a triage-by date
+         *       on a demote, Approve and Deny, and a status line — the SAME classes the
+         *       multiplexer's `renderRequestChip` builds
+         */
+        const shared = ( typeof window !== "undefined" ) ? window.LUPIN_TASK_REQUEST : undefined;
+        if ( !shared ) return "";
+        const chip = shared.pendingRequestChip( task, Date.now() );
+        if ( !chip ) return "";
+        const id   = this._escapeTaskAttr( task.id );
+        const ts   = this._escapeTaskAttr( typeof task.request_ts === "string" ? task.request_ts : "" );
+        const text = chip.age === "" ? `⏳ ${chip.text}` : `⏳ ${chip.text} · ${chip.age}`;
+        const date = chip.needsTriageDate
+            ? `<input type="date" class="task-action-input task-request-triage" data-task-id="${id}"`
+              + ` aria-label="${this._escapeTaskAttr( shared.TRIAGE_DATE_LABEL )}" title="${this._escapeTaskAttr( shared.TRIAGE_DATE_LABEL )}">`
+            : "";
+        return `<div class="task-request-chip" data-task-id="${id}" data-request-move="${this._escapeTaskAttr( chip.move )}" data-request-ts="${ts}">`
+             + `<span class="task-request-text">${this.escapeHtml( text )}</span>`
+             + `<span class="task-request-detail"></span>`
+             + date
+             + `<button type="button" class="task-action-btn task-request-approve" data-task-id="${id}">Approve</button>`
+             + `<button type="button" class="task-action-btn task-request-deny" data-task-id="${id}">Deny</button>`
+             + `<span class="task-request-status"></span>`
+             + `</div>`;
+    }
+
+    _handleRequestChipClick( target ) {
+        /**
+         * A click on a chip's Approve or Deny → a verdict. Called FIRST by both panes'
+         * delegated listeners, so a chip click is never also a row control or a toggle.
+         *
+         * Ensures:
+         *     - returns false for any click that is not on a chip button
+         *     - returns true and sends (asynchronously) otherwise
+         */
+        const el = target && typeof target.closest === "function" ? target : null;
+        const btn = el ? el.closest( ".task-request-approve, .task-request-deny" ) : null;
+        if ( !btn ) return false;
+        const chip = btn.closest( ".task-request-chip" );
+        if ( !chip ) return false;
+        const shared  = window.LUPIN_TASK_REQUEST;
+        const verdict = btn.classList.contains( "task-request-approve" ) ? shared.VERDICT_APPROVED : shared.VERDICT_DENIED;
+        void this._sendRequestVerdict( chip, verdict );
+        return true;
+    }
+
+    async _sendRequestVerdict( chip, verdict ) {
+        /**
+         * Build the verdict body through the shared module, POST it, and report.
+         *
+         * 🔴 A REFUSAL IS REMEMBERED PER REQUEST — `taskId@request_ts`, not the row alone. The 60s
+         * poll rebuilds every chip, and a sentence painted once would vanish before Rick read
+         * why his click did nothing; keyed on the row, a re-filed request would open showing
+         * the answered one's refusal. A typed triage date needs no map here: the row paints
+         * capture and restore `.task-action-input[data-task-id]`, and the date box is one.
+         *
+         * Ensures:
+         *     - an approved demote with no date is refused in the page; nothing is sent
+         *     - a second press while one verdict is on the wire is ignored
+         *     - a landed verdict re-reads the board (task list, holding area, badges) — an
+         *       approval moved the row between panes
+         *     - a refusal shows the server's own words and re-reads nothing
+         */
+        const shared = window.LUPIN_TASK_REQUEST;
+        const taskId = chip.getAttribute( "data-task-id" ) || "";
+        const move   = chip.getAttribute( "data-request-move" ) || "";
+        const key    = `${taskId}@${chip.getAttribute( "data-request-ts" ) || ""}`;
+        if ( !this._requestVerdictsInFlight ) this._requestVerdictsInFlight = new Set();
+        if ( !this._requestRefusals ) this._requestRefusals = new Map();
+        if ( taskId === "" || this._requestVerdictsInFlight.has( taskId ) ) return;
+
+        // Only a demote chip carries the date box, and `requestVerdictBody` decides whether the
+        // verdict needs it — so the move is never tested here. 09:00 LOCAL, the conversion the
+        // demote verb makes: a bare date is read as midnight UTC, the previous evening here.
+        const input  = chip.querySelector( ".task-request-triage" );
+        const day    = input ? input.value : "";
+        const parsed = day === "" ? null : new Date( `${day}T09:00:00` );
+        const triageByIso = parsed && !isNaN( parsed.getTime() ) ? parsed.toISOString() : null;
+        const built = shared.requestVerdictBody( verdict, move, { triageByIso } );
+        if ( !built.ok ) {
+            this._requestRefusals.set( key, built.message );
+            this._paintRequestStatus( chip, built.message );
+            return;
+        }
+
+        this._requestVerdictsInFlight.add( taskId );
+        const buttons = chip.querySelectorAll( ".task-request-approve, .task-request-deny" );
+        buttons.forEach( b => { b.disabled = true; } );
+        this._paintRequestStatus( chip, "Sending…" );
+        // ⚠️ THE GUARD HOLDS THROUGH THE RE-READ, not only the POST. Until the board has read
+        // the moved row, the chip is still on screen; releasing the guard at the POST would let
+        // a second press send a second verdict for a request that is already answered.
+        try {
+            const result = await this._postRequestVerdict( taskId, built.body );
+            if ( result.ok ) {
+                this._requestRefusals.delete( key );
+                this._paintRequestStatus( chip, "" );
+                await this._refreshTaskListAfterWrite();
+            } else {
+                this._requestRefusals.set( key, result.message );
+                this._paintRequestStatus( chip, result.message );
+            }
+        } finally {
+            this._requestVerdictsInFlight.delete( taskId );
+            buttons.forEach( b => { b.disabled = false; } );
+        }
+    }
+
+    async _postRequestVerdict( taskId, body ) {
+        /**
+         * POST /api/tasks/{id}/request-verdict. Never throws.
+         *
+         * Ensures:
+         *     - { ok: true } on 2xx
+         *     - { ok: false, message } carrying the server's `detail` when it gave one, the
+         *       bare status otherwise, and an "unreachable: …" line on a transport failure —
+         *       the same three shapes `_transitionTask` returns
+         */
+        try {
+            const response = await this.authedFetch( window.LUPIN_TASK_REQUEST.requestVerdictPath( taskId ), {
+                method  : "POST",
+                headers : { "Content-Type": "application/json" },
+                body    : JSON.stringify( body )
+            } );
+            if ( response.ok ) return { ok: true };
+            let detail = `${response.status}`;
+            try {
+                const parsed = await response.json();
+                if ( parsed && parsed.detail ) detail = typeof parsed.detail === "string" ? parsed.detail : JSON.stringify( parsed.detail );
+            } catch ( e ) { /* non-JSON error body — the status alone is the message */ }
+            return { ok: false, message: detail };
+        } catch ( e ) {
+            return { ok: false, message: `unreachable: ${e && e.message ? e.message : e}` };
+        }
+    }
+
+    _paintRequestStatus( chip, text ) {
+        const el = chip.querySelector( ".task-request-status" );
+        if ( el ) el.textContent = text;
+    }
+
+    _paintRequestDetail( chip, detail ) {
+        /**
+         * Paint "by <filer> — <reason>", or say the trail carries neither.
+         */
+        const el = chip.querySelector( ".task-request-detail" );
+        if ( !el ) return;
+        const parts = detail ? [ detail.filer ? `by ${detail.filer}` : "", detail.reason ].filter( t => t !== "" ) : [];
+        el.textContent = parts.length > 0 ? parts.join( " — " ) : "filer and reason not on the trail";
+    }
+
+    _hydrateRequestChips( container ) {
+        /**
+         * After a paint: fill each chip's filer and reason, and restore a refusal it carried.
+         *
+         * WHY THE TRAIL. The row carries request_state / request_move / request_ts only; the
+         * filer and reason were written onto the `request_filed` event (design §6.2), so they
+         * are read from GET /api/tasks/{id}/events ONCE per filing, cached by id AND
+         * request_ts so a re-filed request is read afresh.
+         *
+         * ⚠️ A FAILED READ IS NOT CACHED — caching it would pin "unknown" over an outage.
+         *
+         * Ensures: never throws; no-op without a container or the shared module.
+         */
+        const shared = ( typeof window !== "undefined" ) ? window.LUPIN_TASK_REQUEST : undefined;
+        if ( !container || !shared ) return;
+        if ( !this._requestDetails ) this._requestDetails = new Map();
+        if ( !this._requestRefusals ) this._requestRefusals = new Map();
+        container.querySelectorAll( ".task-request-chip" ).forEach( chip => {
+            const taskId = chip.getAttribute( "data-task-id" ) || "";
+            const key    = `${taskId}@${chip.getAttribute( "data-request-ts" ) || ""}`;
+            if ( this._requestRefusals.has( key ) ) this._paintRequestStatus( chip, this._requestRefusals.get( key ) );
+            if ( this._requestDetails.has( key ) ) {
+                this._paintRequestDetail( chip, this._requestDetails.get( key ) );
+                return;
+            }
+            const el = chip.querySelector( ".task-request-detail" );
+            if ( el ) el.textContent = "loading who asked…";
+            void ( async () => {
+                try {
+                    const response = await this.authedFetch( shared.requestEventsPath( taskId ) );
+                    if ( !response.ok ) return;
+                    this._requestDetails.set( key, shared.requestFiledDetail( await response.json() ) );
+                    this._paintRequestDetail( chip, this._requestDetails.get( key ) );
+                } catch ( e ) {
+                    if ( this.debug ) console.log( "[TASK] request detail unreadable:", e );
+                }
+            } )();
+        } );
+    }
+
+    async refreshRequestBadges() {
+        /**
+         * Paint the two request badges from GET /api/tasks/request-badges.
+         *
+         * 🔴 TWO COUNTS, NEVER A SUM. The task list's badge counts DEMOTE requests and the
+         * holding area's counts PROMOTE requests — a badge sits on the list the row is in now.
+         *
+         * ⚠️ A FAILED READ HIDES BOTH BADGES rather than leaving the last counts up: a stale
+         * "2 requests" tells Rick something is waiting that may already be answered.
+         *
+         * Ensures: never throws; each badge hidden exactly when its text is "".
+         */
+        const shared = ( typeof window !== "undefined" ) ? window.LUPIN_TASK_REQUEST : undefined;
+        if ( !shared ) return;
+        let counts = null;
+        try {
+            const response = await this.authedFetch( shared.REQUEST_BADGES_PATH );
+            if ( response.ok ) counts = await response.json();
+        } catch ( e ) {
+            counts = null;
+        }
+        for ( const [ id, key ] of [ [ "task-list-request-badge", shared.BADGE_TASK_AREA ], [ "holding-area-request-badge", shared.BADGE_HOLDING_AREA ] ] ) {
+            const badge = document.getElementById( id );
+            if ( !badge ) continue;
+            const text = shared.requestBadgeText( counts, key );
+            badge.textContent = text;
+            badge.hidden      = text === "";
+        }
     }
 
     _taskIsParked( task, now ) {
@@ -9491,22 +11803,710 @@ class NotificationsUI {
          * Parked rows are approved-not-now, blocked on nothing, and self-expiring;
          * counting them alongside live work makes the remaining-work figure fiction.
          *
-         * ZERO PARKED PRINTS THE BARE NUMBER. A clean board says "3", not
-         * "Live: 3 · Parked: 0 · Total: 3" — the split is a disclosure that only
-         * earns its space when there is something to disclose.
+         * "LIVE" IS UNCONDITIONAL; THE PARKED SPLIT IS NOT. A clean board says
+         * "Live: 3", not "3" and not "Live: 3 · Parked: 0 · Total: 3". The label is
+         * always carried because this number now sits in a header beside a SECOND
+         * number — the closed-vs-new ratio — and a bare integer next to a bare
+         * decimal is two unlabelled quantities the reader must tell apart by shape.
+         * The parked split stays conditional: it is a disclosure, and it earns its
+         * space only when there is something to disclose.
          *
          * Requires:
          *     - live and parked are non-negative counts (non-numeric tolerated)
          *
          * Ensures:
          *     - parked > 0  → "Live: L · Parked: P · Total: L+P"
-         *     - parked <= 0 → String( live )
+         *     - parked <= 0 → "Live: L"
          *     - Pure: no DOM, no side effects; never throws
          */
         const l = Number.isFinite( live )   ? live   : 0;
         const p = Number.isFinite( parked ) ? parked : 0;
-        if ( p <= 0 ) return String( l );
+        if ( p <= 0 ) return `Live: ${l}`;
         return `Live: ${l} · Parked: ${p} · Total: ${l + p}`;
+    }
+
+    _formatFlowRatio( payload, provisionalDays ) {
+        /**
+         * Header text for the closed-vs-new ratio, from GET /api/tasks/flow-ratio.
+         *
+         * THE WINDOW IS PART OF THE NUMBER, so it is printed with it. The same board
+         * measured minutes apart reads 0.77 over 24h and 1.10 over 168h — the verdict
+         * FLIPS on the window alone. A ratio shown without its window is a figure the
+         * reader cannot check, and would be quoted back later as a property of the
+         * board rather than of the question asked.
+         *
+         * AN EM DASH IS NOT A ZERO. The endpoint sends ratio:null when nothing closed
+         * in the window, deliberately, so a consumer cannot accidentally compare it.
+         * Rendering that as "0.00" would invert its meaning — a window in which
+         * nothing was finished is the WORST case, and 0.00 reads as the best.
+         *
+         * Requires:
+         *     - payload is the endpoint body, or null/undefined when unreachable
+         *
+         * Ensures:
+         *     - null/unreachable/bad shape -> "" (the header omits the clause rather
+         *       than showing a number nobody measured)
+         *     - a usable payload -> "5 created / 19 closed  over 7d = 25%"
+         *     - counts absent     -> the window and percent alone, "7d = 25%"
+         *     - Pure: no DOM, no fetch, no side effects; never throws
+         *
+         * ⚠️ THE COUNTS USED TO LIVE ONLY IN THE HOVER. They were moved there to make
+         * room when the sliders shared this row; the sliders now sit a row below, so
+         * Rick asked for them back on the face of it (2026-09-01): "I want you to
+         * reinstate that explicit text displayed without having to hover over it."
+         *
+         * @param {number} [provisionalDays] - a window slider being DRAGGED but not
+         *        committed. The counts describe the COMMITTED window, so quoting them
+         *        beside a different interval would be a lie with a number's authority.
+         *        They are withheld while provisional rather than shown stale, and so is the
+         *        PERCENT, which is computed from those same counts.
+         */
+        if ( !payload || typeof payload !== "object" ) return "";
+        const hours = Number.isFinite( payload.window_hours ) ? payload.window_hours : null;
+        const provisional = Number.isFinite( provisionalDays );
+        const days        = provisional ? provisionalDays : this._flowRatioWindowDays( hours );
+        if ( days === null ) return "";
+
+        // PROVISIONAL DROPS THE PERCENT TOO, not just the counts. The percent is
+        // computed FROM the committed window's counts, so "over 3d = 12%" while the
+        // slider sits at 3d asserts a figure nobody measured over that interval. The
+        // old word order hid this — "3d \u00b7 12% \u00b7 recounting\u2026" read as three
+        // loose facts; "over 3d = 12%" reads as ONE claim, and that claim is false.
+        if ( provisional ) return `recounting\u2026  over ${days}d`;
+
+        const counts = ( Number.isFinite( payload.created ) && Number.isFinite( payload.closed ) )
+            ? `${payload.created} created / ${payload.closed} closed  over ` : "";
+        return `${counts}${days}d = ${this._flowRatioPercentText( payload )}${this._flowRatioRoomText( payload )}`;
+    }
+
+    _flowRatioRoomText( payload ) {
+        /**
+         * Maria's clause, in three states: "Room for N more" | "FULL" | "CLOSE N".
+         *
+         * 🔴 READ FROM THE PAYLOAD, NEVER COMPUTED HERE (Mr. Radio's ruling 2026-09-05:
+         * the badge is a PROJECTION of the gate, never a second gate). The obvious
+         * version of this function is two lines of arithmetic over payload.created,
+         * payload.closed and the threshold — and those two lines would be a SECOND
+         * piece of code deciding what the gate decides, in a language the gate is not
+         * written in. The first time the gate's rules changed, the board would go on
+         * quoting the old ones with no test able to see it.
+         *
+         * 🔴 THE NUMBER IS ONE LOWER THAN THE GATE WILL ACCEPT. THAT IS RICK'S RULING,
+         * NOT AN OFF-BY-ONE. DO NOT "FIX" IT. He chose it by keypress on 2026-09-05 at
+         * 13:11:13 EDT, on the option labelled, verbatim:
+         *
+         *     "Keep your three states - badge under-reports by one."
+         *
+         * A real keypress, not a timeout default (relayed by Mr. Radio 🦉, who put the
+         * four options to him on row 307943fb). The trade was named on the option he
+         * pressed: the badge says there is no room while the gate would still take one
+         * more ticket. That is the SAFER error for a moratorium, and the moratorium is
+         * why the feature exists — "it is way too easy to add tickets and way too hard
+         * to get them removed."
+         *
+         * THE FORK HE RULED ON. Two ways to answer "how many more can I open", differing
+         * by exactly one wherever there is any room at all:
+         *
+         *   LOOP semantics (RULED, and what ships): probe created+1, created+2, … and
+         *     stop at the LAST increment that still PASSES. Asks whether the STATE AFTER
+         *     k creates is under the threshold. Server-side `ratio_loop_headroom`.
+         *   GATE semantics (not shipped): count the creates the gate actually ADMITS.
+         *     The router reads the counts, asks the advisory, and only THEN writes the
+         *     row — so each create is judged BEFORE it lands, and the one that tips the
+         *     ratio to exactly the threshold still gets in. Server-side
+         *     `ratio_gate_headroom`, still computed and still on the payload as
+         *     `headroom`, so the exact number stays available to anyone who needs it.
+         *
+         *     created 10, closed 13, allow_below 1.00  ->  we render 2, the gate takes 3
+         *
+         * ⇒ `FULL` IS REACHABLE ONLY UNDER LOOP SEMANTICS, WHICH IS THE SUBSTANCE OF THE
+         * RULING. It means N == 0, AT CAPACITY, STILL LEGAL. Under gate semantics that
+         * state had no inputs at all — headroom was 0 exactly when the gate already
+         * refused, which is the CLOSE N state — so the word Rick ratified by keypress
+         * would never once have appeared on screen. Adopting the loop brings it back and
+         * costs one on every other number. That was the trade, and he took it.
+         *
+         * ⚠️ SO IF YOU ARE HERE TO MAKE THE NUMBER MATCH THE GATE, YOU WOULD ALSO BE
+         * DELETING `FULL`. The two are one choice, not two. Read row 307943fb before
+         * touching either.
+         *
+         * ⚠️ THE IDLE CASE (created 0, closed 0) RENDERS `FULL` ON A COMPLETELY EMPTY
+         * BOARD, and that is a consequence of the same ruling rather than a separate
+         * decision. Row f7c4f537 called it "surprising and probably wrong" while it was
+         * still open; row ca08f05e, which asked it separately, was DROPPED as subsumed
+         * into 307943fb on the ground that the empty board and the at-the-line case are
+         * one vocabulary choice seen from two inputs. Rick's keypress settled both.
+         * Recorded here rather than silently: if it reads wrong on screen, that is a new
+         * decision for Rick, not a bug to patch in this function.
+         *
+         * Ensures:
+         *     - the gate already refusing -> "  · CLOSE N". Checked FIRST, because
+         *       already-failing must never read as capacity: FULL means AT CAPACITY,
+         *       STILL LEGAL, while this means ILLEGAL NOW — same number, different fact
+         *     - room_for > 0  -> "  · Room for N more". No singular form:
+         *       "Room for 1 more" already reads correctly
+         *     - room_for === 0 -> "  · FULL", in capitals, exactly as ratified
+         *     - neither available (no bound found either way, e.g. a zero threshold that
+         *       no closure can open) -> "". A badge naming a target that does not exist
+         *       is worse than no badge
+         *     - Pure: no DOM, no fetch; never throws
+         */
+        if ( !payload ) return "";
+
+        // CLOSE N FIRST. `room_for` is deliberately absent whenever the gate refuses, so
+        // the two cannot both fire — but the order is the control, not the arithmetic. A
+        // breach must never be rendered as a healthy edge.
+        if ( Number.isFinite( payload.close_needed ) && payload.close_needed > 0 ) {
+            return `  · CLOSE ${payload.close_needed}`;
+        }
+
+        if ( Number.isFinite( payload.room_for ) && payload.room_for > 0 ) {
+            return `  · Room for ${payload.room_for} more`;
+        }
+
+        // AT CAPACITY, STILL LEGAL. Not "Room for 0 more" — Rick ratified the word, in
+        // capitals, over the zero form.
+        if ( payload.room_for === 0 ) return "  · FULL";
+
+        return "";
+    }
+
+    _flowRatioPercentText( payload ) {
+        /**
+         * The ratio as a percentage, or the character that stands in for one.
+         *
+         * PERCENT, NOT HUNDREDTHS. 0.25 and 25% are the same number and only one of
+         * them reads at a glance next to a slider that is also in percent. Above 100%
+         * is legal and expected — it means more filed than closed.
+         *
+         * Ensures:
+         *     - a finite ratio  -> "25%" (rounded, no decimals)
+         *     - nothing closed but rows created -> "\u221e", which is the honest
+         *       rendering of a divide-by-zero. A big number like 999% would be a lie
+         *       carrying a number's authority
+         *     - an idle window (nothing created either) -> "\u2014"
+         *     - Pure; never throws
+         */
+        if ( Number.isFinite( payload.ratio ) ) return `${Math.round( payload.ratio * 100 )}%`;
+        return Number.isFinite( payload.created ) && payload.created > 0 ? "\u221e" : "\u2014";
+    }
+
+    _flowRatioWindowDays( hours ) {
+        /**
+         * The window in whole DAYS, for display only.
+         *
+         * DAYS ON SCREEN, HOURS ON THE WIRE. The store, the INI key and the API all
+         * speak hours and are unchanged by this — only the two places a human reads
+         * the number convert. Rick's words: nobody cares that a window is 82 hours.
+         *
+         * Rounded to a whole day and floored at 1, so a sub-day window still reads as
+         * a day rather than as "0d", which would look like the window was switched off.
+         *
+         * Ensures:
+         *     - a finite, positive hours -> an integer >= 1
+         *     - anything else -> null, so callers can decline to render
+         *     - Pure; never throws
+         */
+        if ( !Number.isFinite( hours ) || hours <= 0 ) return null;
+        return Math.max( 1, Math.round( hours / 24 ) );
+    }
+
+    _flowRatioLongForm( payload ) {
+        /** The hover text: the full description the short bar label drops.
+         *
+         * 🔴 THIS STRING IS THE ONLY LABEL A USER EVER SEES, AND IT CARRIES THE SCOPE
+         * CAVEAT FOR THAT REASON. The readout moved into the HOLDING AREA header on
+         * 2026-09-04 (Rick's ruling), and the placement argues for something untrue:
+         * the ratio gate governs CREATION EVERYWHERE — every project, every priority —
+         * not only rows bound for that pane.
+         *
+         * ⚠️ THE CAVEAT WAS FIRST WRITTEN INTO THE `title=` ATTRIBUTE IN THE HTML AND
+         * IT NEVER REACHED ANYBODY. This function overwrites `title` on every render,
+         * so the served markup carried the honest sentence and the live element showed
+         * this one. Measured: served title contained "ACROSS EVERY PROJECT AND
+         * PRIORITY", live title did not. A label that is overwritten before it is read
+         * is not a label — it is a comment addressed to whoever views source.
+         *
+         * ⇒ So the sentence lives HERE, at the writer, not at the markup the writer
+         * replaces.
+         */
+        if ( !payload || typeof payload !== "object" ) return "";
+        const hours = Number.isFinite( payload.window_hours ) ? payload.window_hours : null;
+        if ( hours === null ) return "";
+        // Delegates, so the face and the hover can never quote different numbers.
+        const clause = this._formatFlowRatio( payload );
+        return clause
+            ? `Closed vs New Ratio \u2014 ${clause}\nCounts creation across EVERY project and priority, not only this pane.`
+            : "";
+    }
+
+    _flowRatioIsOpen( payload, threshold ) {
+        /**
+         * Would the gate ADMIT a new row right now?
+         *
+         * Tied to the verdict rather than to "low is green", so the colour can never
+         * disagree with the behaviour. The comparison is STRICT — at exactly the
+         * threshold the gate refuses — so exactly-at reads red.
+         *
+         * Ensures: true when it would admit; an unmeasurable ratio is not a refusal
+         */
+        if ( !Number.isFinite( threshold ) ) return true;
+        if ( !payload || !Number.isFinite( payload.ratio ) ) {
+            // \u221e (created but nothing closed) is a deny; an idle window allows.
+            return !( payload && Number.isFinite( payload.created ) && payload.created > 0 );
+        }
+        return payload.ratio < threshold;
+    }
+
+    async fetchFlowRatio() {
+        /**
+         * Fetch the closed-vs-new ratio from GET /api/tasks/flow-ratio.
+         *
+         * NOT MEMOIZED, unlike fetchEpicStories. This one IS live state — it moves
+         * every time anybody files or closes a row — so it rides the existing 60s
+         * task-list tick. It is still a SECOND endpoint rather than a second poll of
+         * the first: the ratio is counted in SQL precisely because a page length is
+         * not a count, so it cannot be derived from the rows already on the client.
+         *
+         * Requires:
+         *     - this.authedFetch is available (handles JWT refresh)
+         *
+         * Ensures:
+         *     - Returns the payload object on 2xx with a well-formed body
+         *     - Returns null on ANY failure (401, non-2xx, network throw, bad JSON),
+         *       which _formatFlowRatio renders as an omitted clause, never a zero
+         *     - Never throws
+         */
+        try {
+            const response = await this.authedFetch( "/api/tasks/flow-ratio" );
+            if ( !response.ok ) {
+                this.log( `Flow ratio unavailable (HTTP ${response.status}) - header omits the ratio` );
+                return null;
+            }
+            const body = await response.json();
+            return ( body && typeof body === "object" ) ? body : null;
+        } catch ( error ) {
+            this.log( `Flow ratio fetch failed: ${error} - header omits the ratio` );
+            return null;
+        }
+    }
+
+    _renderFlowRatio( payload ) {
+        /**
+         * Write the ratio clause into #task-list-flow-ratio.
+         *
+         * Ensures:
+         *     - No-op when the span is absent (the panel renders without it)
+         *     - Empty text when payload is unusable — the header shrinks to the live
+         *       count rather than displaying a stale or invented number
+         *     - Never throws
+         */
+        const el = document.getElementById( "task-list-flow-ratio" );
+        if ( !el ) return;
+        // Kept so a slider drag can recolour without re-fetching. The ratio measures
+        // the last 24h; dragging the threshold moves the comparison line, not it.
+        this._flowRatioPayload = payload;
+        this._paintFlowRatioClause();
+        this._paintFlowRatioVerdict();
+    }
+
+    _paintFlowRatioClause( provisionalDays ) {
+        /**
+         * Write the clause into #task-list-flow-ratio from the LAST FETCHED payload.
+         *
+         * Split out of _renderFlowRatio so a window drag can repaint the text without
+         * a fetch — the same shape _paintFlowRatioVerdict already uses for the
+         * threshold. The two stay separate because they answer different questions: the
+         * threshold moves the VERDICT and leaves the counts alone, while the window
+         * moves the COUNTS and cannot know the new ones until the release refetches.
+         *
+         * @param {number} [provisionalDays] - a window being dragged, not committed
+         *
+         * Ensures:
+         *     - No-op when the span is absent
+         *     - Empty text on an unusable payload, never a stale or invented number
+         *     - Never throws
+         */
+        const el = document.getElementById( "task-list-flow-ratio" );
+        if ( !el ) return;
+        const text = this._formatFlowRatio( this._flowRatioPayload, provisionalDays );
+        // 🔨 "Gate: " IS RICK'S, 2026-09-03 BY VOICE, AND IT IS A LABEL NOT A DECORATION.
+        // The header read `Holding Area · 1 · 22 created / 37 closed over 3d = 59%` — a
+        // ratio floating with nothing saying what it governs, so a reader sees numbers
+        // and no indication they are the CREATION gate. Say what the thing IS before you
+        // say what it reads.
+        //
+        // ⚠️ IT GOES ONLY ON THE SHORT FORM. The hover already opens "Closed vs New
+        // Ratio — ", which names it in full; prefixing there would say it twice.
+        el.textContent = text ? ` \u00b7 Gate: ${text}` : "";
+        el.title       = this._flowRatioLongForm( this._flowRatioPayload );
+    }
+
+    _paintFlowRatioVerdict( provisionalThreshold ) {
+        /**
+         * Colour the clause by the verdict the gate would return RIGHT NOW.
+         *
+         * @param {number} [provisionalThreshold] - a threshold being dragged but not
+         *        committed. When given, the clause is marked provisional.
+         *
+         * A PREVIEW MUST NOT LOOK LIKE STATE. While the slider is uncommitted the
+         * colour is a hypothetical, so it renders with a dashed underline. An operator
+         * who drags, is interrupted, and glances back must not read a setting that is
+         * not in force as though it were.
+         *
+         * Ensures:
+         *     - No-op when the span is absent
+         *     - green when the gate would ADMIT, red when it would REFUSE
+         *     - state rides a CLASS, so colour is never the only carrier
+         */
+        const el = document.getElementById( "task-list-flow-ratio" );
+        if ( !el ) return;
+        const provisional = Number.isFinite( provisionalThreshold );
+        const threshold   = provisional ? provisionalThreshold : this._flowRatioThreshold;
+        const open        = this._flowRatioIsOpen( this._flowRatioPayload, threshold );
+        el.classList.toggle( "flow-ratio-open",    open );
+        el.classList.toggle( "flow-ratio-closed",  !open );
+        el.classList.toggle( "flow-ratio-preview", provisional );
+    }
+
+    // -----------------------------------------------------------------------
+    // Operator controls for the ratio gate (window + threshold).
+    //
+    // THE SLIDERS MOVE THE GATE, NOT THE DISPLAY. `allow_below` is the number the
+    // CREATE gate refuses on, fleet-wide, so a write here changes what other people
+    // can file. That is why the PATCH is admin-only and why a failed write says so
+    // out loud instead of leaving the slider sitting at a value nothing is using.
+    // -----------------------------------------------------------------------
+
+    async fetchFlowRatioSettings() {
+        /**
+         * Read the live { window_hours, allow_below } and their provenance.
+         *
+         * Ensures:
+         *     - Returns the payload on 2xx, else null (same shape as fetchFlowRatio)
+         *     - Never throws
+         */
+        try {
+            const response = await this.authedFetch( "/api/tasks/flow-ratio/settings" );
+            if ( !response.ok ) {
+                // error(), NOT log(). log() is gated on this.debug, so with debug off a
+                // failure here was silent — and a control that quietly declines to paint
+                // is indistinguishable from a control nobody ever built.
+                this.error( `Flow ratio settings unavailable (HTTP ${response.status})` );
+                return null;
+            }
+            const body = await response.json();
+            return ( body && typeof body === "object" ) ? body : null;
+        } catch ( error ) {
+            this.error( `Flow ratio settings fetch failed: ${error}` );
+            return null;
+        }
+    }
+
+    _flowRatioControlEls() {
+        /** The control cluster, or null when the page does not carry it. */
+        const root = document.getElementById( "flow-ratio-controls" );
+        if ( !root ) return null;
+        return {
+            root,
+            threshold      : document.getElementById( "flow-ratio-threshold" ),
+            thresholdValue : document.getElementById( "flow-ratio-threshold-value" ),
+            window         : document.getElementById( "flow-ratio-window" ),
+            windowValue    : document.getElementById( "flow-ratio-window-value" ),
+            reset          : document.getElementById( "flow-ratio-reset" ),
+            managerPull    : document.getElementById( "manager-pull-toggle" ),
+            status         : document.getElementById( "flow-ratio-controls-status" )
+        };
+    }
+
+    _paintFlowRatioSettings( settings ) {
+        /**
+         * Move the sliders to `settings` and label them with their provenance.
+         *
+         * Ensures:
+         *     - No-op when the controls are absent
+         *     - The cluster stays HIDDEN when settings is null. An unreadable
+         *       settings endpoint must not leave sliders parked at their HTML
+         *       defaults, which would show the operator a threshold the gate is
+         *       not using — the same "renders identically whether it works or not"
+         *       failure the ratio clause itself had
+         *     - The status line names the SOURCE, because a number alone cannot say
+         *       whether a saved override is masking the configured default
+         *     - RETURNS whether it painted. The caller retries on false, so this is a
+         *       report of what happened, not a courtesy return value
+         */
+        const els = this._flowRatioControlEls();
+        if ( !els ) return false;
+
+        if ( !settings || !Number.isFinite( settings.allow_below ) ||
+             !Number.isFinite( settings.window_hours ) ) {
+            els.root.hidden = true;
+            return false;
+        }
+
+        els.root.hidden           = false;
+        // The slider reads in PERCENT while the gate stores a ratio. Converted here
+        // and nowhere else: one unit on screen, the wire format unchanged.
+        this._flowRatioThreshold  = settings.allow_below;
+        els.threshold.value       = Math.round( settings.allow_below * 100 );
+        els.thresholdValue.textContent = `${Math.round( settings.allow_below * 100 )}%`;
+        // The slider POSITION is days; the setting stays hours. A saved override that
+        // is not a whole number of days paints at the nearest day, and the next save
+        // normalises it -- which is the point of moving the control to days.
+        const windowDays          = this._flowRatioWindowDays( settings.window_hours );
+        els.window.value          = windowDays;
+        els.windowValue.textContent    = `${windowDays}d`;
+
+        const overridden = settings.window_source === "override" ||
+                           settings.threshold_source === "override";
+        els.status.textContent = overridden ? "saved override" : "from config";
+        this._paintFlowRatioVerdict();
+        return true;
+    }
+
+    async saveFlowRatioSettings( patch ) {
+        /**
+         * PATCH the operator's ratio settings, then repaint from the SERVER's answer.
+         *
+         * @param {object} patch - { allow_below } and/or { window_hours }
+         *
+         * Ensures:
+         *     - Repaints from the RESPONSE, never from `patch`. The server clamps, so
+         *       echoing the request would leave the slider showing a number the gate
+         *       is not using — which is the whole class of bug this build is about
+         *     - Refreshes the header clause too, since the verdict depends on the
+         *       threshold that just moved
+         *     - A 403 says the write is admin-only rather than failing silently; the
+         *       control then repaints to the server's real values so it never sits at
+         *       a position nothing honours
+         *     - Never throws
+         */
+        const els = this._flowRatioControlEls();
+        try {
+            const response = await this.authedFetch( "/api/tasks/flow-ratio/settings", {
+                method  : "PATCH",
+                headers : { "Content-Type": "application/json" },
+                body    : JSON.stringify( patch )
+            } );
+            if ( !response.ok ) {
+                if ( els ) {
+                    els.status.textContent = response.status === 403
+                        ? "not saved — admin only"
+                        : `not saved (HTTP ${response.status})`;
+                }
+                this._paintFlowRatioSettings( await this.fetchFlowRatioSettings() );
+                return null;
+            }
+            const settings = await response.json();
+            this._paintFlowRatioSettings( settings );
+            this._renderFlowRatio( await this.fetchFlowRatio() );
+            return settings;
+        } catch ( error ) {
+            this.log( `Flow ratio settings save failed: ${error}` );
+            if ( els ) els.status.textContent = "not saved (network)";
+            return null;
+        }
+    }
+
+    async fetchManagerPullDisabled() {
+        /**
+         * Read Rick's manager-pull toggle from the server.
+         *
+         * Ensures:
+         *     - returns the server's { disabled, source } or null; never throws
+         *     - the CHECKBOX IS NEVER THE SOURCE OF TRUTH. It is painted from this,
+         *       so a control that fails to save cannot sit in a position nothing
+         *       honours — the defect this whole toggle exists downstream of
+         */
+        try {
+            const response = await this.authedFetch( "/api/tasks/manager-pull" );
+            if ( !response.ok ) return null;
+            return await response.json();
+        } catch ( error ) {
+            this.log( `Manager-pull read failed: ${error}` );
+            return null;
+        }
+    }
+
+    async saveManagerPullDisabled( disabled ) {
+        /**
+         * PATCH the toggle, then repaint from the SERVER's answer.
+         *
+         * @param {boolean} disabled - true = managers may NOT pull
+         *
+         * Ensures:
+         *     - Repaints from the RESPONSE, never from the argument. Echoing the
+         *       request would leave the box showing a state the gate is not in
+         *     - A 403 says admin-only rather than failing silently, and the box is
+         *       then repainted to the server's real value
+         *     - Never throws
+         */
+        const els = this._flowRatioControlEls();
+        try {
+            const response = await this.authedFetch( "/api/tasks/manager-pull", {
+                method  : "PATCH",
+                headers : { "Content-Type": "application/json" },
+                body    : JSON.stringify( { disabled: disabled } )
+            } );
+            if ( !response.ok ) {
+                if ( els ) {
+                    els.status.textContent = response.status === 403
+                        ? "not saved — admin only"
+                        : `not saved (HTTP ${response.status})`;
+                }
+                this._paintManagerPull( await this.fetchManagerPullDisabled() );
+                return null;
+            }
+            const live = await response.json();
+            this._paintManagerPull( live );
+            if ( els ) els.status.textContent = live.disabled
+                ? "manager pull FROZEN" : "manager pull allowed";
+            return live;
+        } catch ( error ) {
+            this.log( `Manager-pull save failed: ${error}` );
+            if ( els ) els.status.textContent = "not saved (network)";
+            return null;
+        }
+    }
+
+    _paintManagerPull( live ) {
+        /**
+         * Put the SERVER's state on the checkbox.
+         *
+         * Ensures:
+         *     - a null read leaves the box alone rather than asserting "allowed",
+         *       because an unreachable server is not evidence the gate is open
+         *     - never throws
+         */
+        const els = this._flowRatioControlEls();
+        if ( !els || !els.managerPull || !live ) return;
+        els.managerPull.checked = !!live.disabled;
+    }
+
+    async resetFlowRatioSettings() {
+        /**
+         * DELETE the override so the configured defaults govern again.
+         *
+         * Ensures:
+         *     - Repaints from the server's answer, so the operator sees what config
+         *       actually says rather than assuming it matches the shipped fallback
+         *     - Never throws
+         */
+        try {
+            const response = await this.authedFetch( "/api/tasks/flow-ratio/settings",
+                                                     { method: "DELETE" } );
+            if ( !response.ok ) {
+                const els = this._flowRatioControlEls();
+                if ( els ) {
+                    els.status.textContent = response.status === 403
+                        ? "not reset — admin only"
+                        : `not reset (HTTP ${response.status})`;
+                }
+                return null;
+            }
+            const settings = await response.json();
+            this._paintFlowRatioSettings( settings );
+            this._renderFlowRatio( await this.fetchFlowRatio() );
+            return settings;
+        } catch ( error ) {
+            this.log( `Flow ratio settings reset failed: ${error}` );
+            return null;
+        }
+    }
+
+    initFlowRatioControls() {
+        /**
+         * Bind the sliders ONCE, then paint them from the server — retrying the paint
+         * on later ticks until one succeeds.
+         *
+         * ⚠️ WRITES ON `change`, NOT `input`. `input` fires on every pixel of a drag,
+         * which would PATCH dozens of times and move the fleet's create gate through
+         * every intermediate value on the way. `input` only updates the label.
+         *
+         * THE BIND AND THE PAINT HAVE DIFFERENT LIFETIMES AND USED TO SHARE ONE GUARD.
+         * The method rides the task-list tick, so it is called repeatedly — but the
+         * bound-flag was set before the single paint was even issued, so every later
+         * call returned at the guard and the one paint was the only one there would
+         * ever be. A settings fetch that failed once — a bounce mid-load, an expired
+         * token — left the cluster unpainted with nothing retrying short of a page
+         * reload. Rebinding is not the fix: the `change` listeners PATCH, so binding
+         * twice would double every write the operator makes.
+         *
+         * Repainting STOPS at the first success on purpose. A paint that keeps firing
+         * every 60s would eventually land mid-drag and pull a slider back to the
+         * server's value under the operator's finger; a paint that already worked has
+         * nothing left to retry.
+         *
+         * Ensures:
+         *     - Listeners bind exactly once, however many times this is called
+         *     - A FAILED paint is retried on the next tick
+         *     - A SUCCEEDED paint is never repainted from here
+         *     - At most one settings fetch is in flight at a time
+         *     - No-op when the controls are absent (the multiplexer page has no
+         *       cluster; this file serves both)
+         */
+        const els = this._flowRatioControlEls();
+        if ( !els ) return;
+
+        if ( !this._flowRatioControlsBound ) {
+            this._flowRatioControlsBound = true;
+            this._bindFlowRatioControls( els );
+        }
+
+        if ( this._flowRatioSettingsPainted || this._flowRatioPaintInFlight ) return;
+        this._flowRatioPaintInFlight = true;
+        this.fetchFlowRatioSettings()
+            .then( settings => {
+                this._flowRatioSettingsPainted = this._paintFlowRatioSettings( settings );
+            } )
+            .finally( () => { this._flowRatioPaintInFlight = false; } );
+    }
+
+    _bindFlowRatioControls( els ) {
+        /**
+         * Attach the five listeners. Split out of initFlowRatioControls so the
+         * once-only bind and the retrying paint cannot be re-entangled by accident.
+         *
+         * Requires: els is a resolved control set from _flowRatioControlEls()
+         * Ensures:  the caller has already guaranteed this runs at most once
+         */
+
+        els.threshold.addEventListener( "input", () => {
+            const pct = Number( els.threshold.value );
+            els.thresholdValue.textContent = `${pct}%`;
+            // Live preview: the NUMBER does not move, the VERDICT does.
+            this._paintFlowRatioVerdict( pct / 100 );
+        } );
+        els.threshold.addEventListener( "change", () => {
+            this.saveFlowRatioSettings( { allow_below: Number( els.threshold.value ) / 100 } );
+        } );
+
+        els.window.addEventListener( "input", () => {
+            els.windowValue.textContent = `${els.window.value}d`;
+            // Live preview on the header clause too. The interval moves immediately;
+            // the counts go to "recounting" because they belong to the window still in
+            // force, and the release is what fetches the new ones.
+            this._paintFlowRatioClause( Number( els.window.value ) );
+        } );
+        els.window.addEventListener( "change", () => {
+            // x24 HERE and in the paint, nowhere else: the slider is the only thing
+            // that speaks days, so the API keeps taking the hours it always took.
+            this.saveFlowRatioSettings( { window_hours: Number( els.window.value ) * 24 } );
+        } );
+
+        els.reset.addEventListener( "click", () => this.resetFlowRatioSettings() );
+
+        // RICK'S MANAGER-PULL TOGGLE. Guarded because the control is newer than some
+        // cached copies of this page: an absent element must not take the whole wiring
+        // block down with it and silently kill the two sliders above.
+        if ( els.managerPull ) {
+            els.managerPull.addEventListener( "change", () => {
+                this.saveManagerPullDisabled( els.managerPull.checked );
+            } );
+            // Paint from the SERVER on open, so the box never shows a state the gate
+            // is not in. Deliberately not awaited — the sliders must not wait on it.
+            this.fetchManagerPullDisabled().then( ( live ) => this._paintManagerPull( live ) );
+        }
     }
 
     _taskListCountText( openTasks, now ) {
@@ -9586,9 +12586,10 @@ class NotificationsUI {
          * "owner · N" label) followed by that owner's task rows; the Unassigned group
          * renders last.
          *
-         * Ten columns: ID · Title · Class · Status · Blocked by · Next chase ·
-         * Accountable · Priority · Project · Detail (design 2026.06.29 row redesign:
-         * the leading ID column + trailing Detail 📄 column augment the original 8).
+         * Eleven columns: ID · Title · Class · Status · Blocked by · Next chase ·
+         * Accountable · Filed by · Priority · Project · Detail (design 2026.06.29 row
+         * redesign gave the leading ID + trailing Detail 📄; Filed by was added
+         * 2026-09-02 on Rick's voice request).
          *
          * Requires:
          *     - model is the { totalCount, groups } shape from groupTasksByOwner
@@ -9607,21 +12608,7 @@ class NotificationsUI {
          */
         const collapsed = collapsedOwners instanceof Set ? collapsedOwners : new Set();
 
-        const headerRow = `
-            <thead>
-                <tr>
-                    <th class="task-col-id">ID</th>
-                    <th class="task-col-title">Title</th>
-                    <th class="task-col-class">Class</th>
-                    <th class="task-col-status">Status</th>
-                    <th class="task-col-blocked">Blocked by</th>
-                    <th class="task-col-chase">Next chase</th>
-                    <th class="task-col-accountable">Accountable</th>
-                    <th class="task-col-priority">Priority</th>
-                    <th class="task-col-project">Project</th>
-                    <th class="task-col-detail">Detail</th>
-                </tr>
-            </thead>`;
+        const headerRow = this._taskTableHeaderRow();
 
         const body = model.groups.map( group => {
             const ownerKey    = this._taskGroupOwnerKey( group );
@@ -9637,7 +12624,7 @@ class NotificationsUI {
 
             const groupHeaderHtml = `
                 <tr class="task-group-header${group.isUnassigned ? " task-group-unassigned" : ""}" role="button" tabindex="0" aria-expanded="${isCollapsed ? "false" : "true"}" aria-controls="${idSlug}">
-                    <td colspan="10">${chevron}${headerLabel}</td>
+                    <td colspan="${this._rowWidth()}">${chevron}${headerLabel}</td>
                 </tr>`;
 
             const rows = group.tasks.map( t => this._renderTaskRow( t, ianaZone ) ).join( "" );
@@ -9678,9 +12665,16 @@ class NotificationsUI {
         // is not), so a single delegated listener survives every re-render.
         this._wireTaskListAccordion();
 
+        // CLEAR THE NOTICE MOUNT ON EVERY FULL-PANEL STATE. The notices now live
+        // OUTSIDE the container, which is the point — and the cost is that the
+        // container's own re-render no longer removes them. A truncation banner left
+        // hanging over a "Store unreachable" panel would describe a board that is not
+        // on screen, so each early return clears it explicitly rather than relying on
+        // a later render to overwrite it.
         if ( composite && composite.status === "auth_required" ) {
+            this._paintTaskListNotices( "" );
             container.innerHTML = `<p class="task-list-message task-list-signin">🔒 Sign-in required.</p>`;
-            if ( countEl ) countEl.textContent = "0";
+            if ( countEl ) countEl.textContent = "Live: 0";
             return;
         }
 
@@ -9688,36 +12682,268 @@ class NotificationsUI {
         // Distinct from "unreachable" on purpose: same blank board, different
         // remedy, and this branch never resolves on its own the way an outage does.
         if ( composite && composite.status === "query_unavailable" ) {
+            this._paintTaskListNotices( "" );
             container.innerHTML =
                 `<p class="task-list-message task-list-query-unavailable">🧩 Task-list query did not load` +
                 ` — /static/js/shared/task-list-query.js is missing or failed to parse.` +
                 ` This is a deploy problem, not a store outage.</p>`;
-            if ( countEl ) countEl.textContent = "0";
+            if ( countEl ) countEl.textContent = "Live: 0";
             return;
         }
 
         if ( !composite || composite.status === "unreachable" || !Array.isArray( composite.tasks ) ) {
+            this._paintTaskListNotices( "" );
             this._renderTaskListUnreachable( container, countEl );
             return;
         }
 
         const openTasks = composite.tasks.filter( t => this.isTaskOpenStatus( ( t || {} ).status ) );
         this._taskListLastGoodTasks = openTasks;
+
+        // 🔴 A POLL MUST NOT DROP THE OPERATOR'S FILTER. `lastGoodTasks` is updated
+        // FIRST, on purpose, so clearing the filter returns to CURRENT rows rather
+        // than to a snapshot from whenever the filter was applied. Then the pin is
+        // re-asserted. Without this the filtered view would evaporate a second or
+        // two after Rick applied it and read as a bug in the box.
+        if ( this._taskLookupPinned ) { this._renderPinnedTaskRow( container, countEl ); return; }
+
         if ( countEl ) countEl.textContent = this._taskListCountText( openTasks );
 
-        const truncation = this._renderTaskListTruncationBanner( composite );
+        if ( this._taskListPressInFlight ) {
+            // Held, not dropped: _releaseTaskListPress replays this composite the instant
+            // the operator lets go, so the pane is never more than one press behind.
+            this._taskListPendingComposite = { composite, stampUpdated };
+            return;
+        }
 
+        // Notices go to the PERSISTENT mount in the toolbar, not into the container —
+        // see _paintTaskListNotices. The container writes below overwrite their whole
+        // subtree, which is exactly what used to wipe these banners.
+        this._paintTaskListNotices( this._renderTaskListTruncationBanner( composite ) );
+
+        const operatorState = this._captureOperatorState( container );
         if ( openTasks.length === 0 ) {
-            container.innerHTML = truncation + `<p class="task-list-message task-list-empty">✅ No open tasks.</p>`;
+            container.innerHTML = `<p class="task-list-message task-list-empty">✅ No open tasks.</p>`;
         } else {
             const model = this.groupTasksByOwner( openTasks );
-            container.innerHTML = truncation + this.renderTaskListTable( model, undefined, this.loadCollapsedTaskOwners() );
+            container.innerHTML = this.renderTaskListTable( model, undefined, this.loadCollapsedTaskOwners() );
         }
+        this._restoreOperatorState( container, operatorState );
+        this._hydrateRequestChips( container );
 
         if ( stampUpdated ) this._stampTaskListUpdated();
     }
 
-    _renderTaskListTruncationBanner( composite ) {
+    _renderPinnedTaskRow( container, countEl ) {
+        /**
+         * Render the task list as the ONE row the lookup found.
+         *
+         * 🔴 RICK REJECTED THE FIRST BUILD FOR NOT DOING THIS: "it doesn't display
+         * it it only puts the title up in green text… what do you think search
+         * does? Not confirm that it can find it but find it and then display it.
+         * It's like a filter… hide all of the other tickets in the task list and
+         * only display the 1 that was found." His original ask said the same:
+         * "I need the search capacity to FILTER OUT THE TASK LIST."
+         *
+         * 🔴 THE PINNED ROW IS THE FETCHED ROW, NOT AN ID FILTER OVER THE BOARD.
+         * The row he pastes a hash for is usually NOT on the board — that is why
+         * the lookup uses the visibility-free single-row endpoint. Filtering
+         * `composite.tasks` by id would show nothing for exactly the held rows he
+         * is most often asked about.
+         *
+         * Requires:
+         *     - `this._taskLookupPinned` is the fetched row
+         *
+         * Ensures:
+         *     - renders through the SAME table renderer as any other row, so verbs
+         *       and controls behave identically — no second rendering path
+         *     - the count reflects what is ON SCREEN, not the board total
+         *     - never throws
+         */
+        if ( !container || !this._taskLookupPinned ) return;
+        const model = this.groupTasksByOwner( [ this._taskLookupPinned ] );
+        const operatorState = this._captureOperatorState( container );
+        container.innerHTML = this.renderTaskListTable( model, undefined, this.loadCollapsedTaskOwners() );
+        this._restoreOperatorState( container, operatorState );
+        this._hydrateRequestChips( container );
+        if ( countEl ) countEl.textContent = "Live: 1";
+    }
+
+    clearTaskLookup() {
+        /**
+         * Drop the filter and put the whole list back.
+         *
+         * Ensures:
+         *     - clears the pin, the input and the result line
+         *     - re-renders from the LAST GOOD rows, which the poll keeps current
+         *     - never throws; safe to call when nothing is filtered
+         */
+        this._taskLookupPinned = null;
+        const input  = document.getElementById( "task-lookup-input" );
+        const result = document.getElementById( "task-lookup-result" );
+        const clear  = document.getElementById( "task-lookup-clear" );
+        if ( input )  input.value = "";
+        if ( result ) { result.textContent = ""; result.setAttribute( "data-state", "" ); }
+        if ( clear )  clear.hidden = true;
+        this.renderTaskList( { status: "ok", tasks: this._taskListLastGoodTasks || [] }, false );
+    }
+
+    openNewTicketCard() {
+        /**
+         * Open Rick's New Ticket card (row c9895403) over the page.
+         *
+         * 🔴 THE CARD IS NOT BUILT HERE. shared/task-create.js builds it for BOTH
+         * clients, so this client and the multiplexer cannot offer different fields.
+         * This method supplies only what is specific to this page: the fetch, the
+         * roster, and what to show once the row exists.
+         *
+         * Requires:
+         *     - shared/task-create.js published window.LUPIN_OPEN_NEW_TICKET_CARD and
+         *       window.LUPIN_NEW_TICKET_ASSIGNEES
+         *
+         * Ensures:
+         *     - a missing module is reported in the Find result line as a deploy
+         *       defect (data-state "module_missing") and returns null — it never
+         *       throws out of the inline onclick, where nobody would see it
+         *     - offers as assignees every owner on the board as last fetched
+         *     - returns the card handle otherwise
+         */
+        const open        = window.LUPIN_OPEN_NEW_TICKET_CARD;
+        const assigneesOf = window.LUPIN_NEW_TICKET_ASSIGNEES;
+        if ( !open || !assigneesOf ) {
+            const result = document.getElementById( "task-lookup-result" );
+            if ( result ) {
+                result.textContent = "New ticket is unavailable — a page asset failed to load.";
+                result.setAttribute( "data-state", "module_missing" );
+            }
+            return null;
+        }
+        const owners = ( this._taskListLastGoodTasks || [] ).map( ( t ) => t.owner_persona );
+        return open( {
+            postTicket : ( payload ) => this.postNewTicket( payload ),
+            assignees  : assigneesOf( owners ),
+            onCreated  : ( row ) => this.showCreatedTicket( row ),
+            onDictate  : ( ctx ) => { void this._handleNewTicketDictate( ctx ); },
+        } );
+    }
+
+    async _handleNewTicketDictate( { field, button, input } ) {
+        /**
+         * Rick dictating his own ticket, row f9a449c3: *"I've been forced to use the
+         * shitty OSX ASR, which is profoundly inferior to the one that I have built in
+         * to Lupin."* Two mics, Title and Details.
+         *
+         * 🔴 THERE IS NO LOOKUP HERE, AND THAT IS DELIBERATE. `_handleReasonSttClick`
+         * has to resolve its box by scope because a row renders in two panes and an id
+         * lookup once filled the copy Rick could not see (bc77cd79). The card avoids the
+         * question entirely: it built the element, so it hands the element over. Do not
+         * "tidy" this into a `getElementById` on the card's field id — that is the same
+         * defect wearing the fix's clothes, and the card can be open over either pane.
+         *
+         * Toggle semantics, the 30s cap, Escape-to-cancel, insert-at-caret and the
+         * button's own recording/processing classes are all `recordingManager`'s, exactly
+         * as they are for every other mic on this page. Nothing is reimplemented.
+         *
+         * Requires:
+         *     - `input` is the live element the operator is typing into
+         *     - `button` is the mic that was clicked
+         *
+         * Ensures:
+         *     - no-op on a page whose recorder never initialised — the card he is
+         *       filling in must not throw out from under him
+         *     - a click while recording STOPS; a click while processing is ignored
+         *     - records under a context id naming the field, so Title and Details are
+         *       two contexts and never one
+         */
+        const mgr = this.recordingManager;
+        if ( !mgr ) return;
+
+        if ( mgr.isRecording() ) {
+            await mgr.stopRecording();
+        } else if ( !mgr.isProcessing() ) {
+            await mgr.startRecording( `new-ticket-${field}`, button, input, {} );
+        }
+    }
+
+    async postNewTicket( payload ) {
+        /**
+         * Send the card's POST, in the shape the shared card reads.
+         *
+         * Ensures:
+         *     - POSTs JSON to /api/tasks through authedFetch, so Rick's login token
+         *       travels with it — the server's operator checks read that token
+         *     - 2xx → { status, body } with the parsed row
+         *     - any other status → { status, text } with the raw body, whose detail
+         *       the card shows verbatim
+         *     - a throw → { status: 0 }, shown as "the store did not answer"
+         *     - never rejects
+         */
+        try {
+            const response = await this.authedFetch( "/api/tasks", {
+                method  : "POST",
+                headers : { "Content-Type": "application/json" },
+                body    : JSON.stringify( payload ),
+            } );
+            if ( response.ok ) return { status: response.status, body: await response.json() };
+            return { status: response.status, text: await response.text() };
+        } catch ( err ) {
+            this.log( `New ticket POST failed: ${ err }` );
+            return { status: 0 };
+        }
+    }
+
+    showCreatedTicket( row ) {
+        /**
+         * After Rick files a ticket: show him the row he just made, and refresh.
+         *
+         * Ensures:
+         *     - when the Find box exists and the row has an id, the row is looked up
+         *       THROUGH it and pinned — the same filtered view, with the same ✕ back to
+         *       the whole list, rather than a second way of showing one row
+         *     - the board refreshes either way
+         *     - never throws
+         */
+        const input = document.getElementById( "task-lookup-input" );
+        if ( input && row && typeof row.id === "string" ) {
+            input.value = row.id;
+            void this.runTaskLookup();
+        }
+        void this.refreshTaskList();
+    }
+
+    _paintTaskListNotices( html ) {
+        /**
+         * Paint the Task List's board notices into their PERSISTENT toolbar mount.
+         *
+         * WHY A MOUNT OUTSIDE THE CONTAINER (Rick via María, 2026-09-17). These
+         * notices — the truncation banner, the holding-area note, the verbatim server
+         * warning — used to be concatenated onto the front of `#task-list-container`'s
+         * innerHTML. Every render of that container assigns its whole innerHTML, so a
+         * notice survived exactly until the next render, which on a polling pane is
+         * seconds. `#task-list-notices` lives in `div.task-lookup`, a sibling of the
+         * container, so a container re-render cannot reach it.
+         *
+         * The four FULL-PANEL states (sign-in, query-unavailable, store-unreachable,
+         * empty) deliberately do NOT come here: they are the panel's entire content,
+         * and hoisting them would leave the pane blank with its explanation elsewhere.
+         *
+         * Requires:
+         *     - html is a string of notice markup, or "" for none
+         *
+         * Ensures:
+         *     - writes html into #task-list-notices when that element exists
+         *     - a no-op when the element is absent (older markup, or a test fixture
+         *       that renders only the container) — never throws
+         *     - "" clears the mount, so a notice that no longer applies disappears
+         *       rather than persisting precisely because it is now outside the
+         *       container's re-render
+         */
+        const mount = document.getElementById( "task-list-notices" );
+        if ( !mount ) return;
+        mount.innerHTML = html || "";
+    }
+
+    _renderTaskListTruncationBanner( composite, queryString ) {
         /**
          * The LOUD half of the truncation fix. Returns banner HTML when the server
          * says it held rows back, or "" when it did not.
@@ -9783,7 +13009,7 @@ class NotificationsUI {
         // exactly `limit` rows legitimately, which is why this says UNKNOWN and
         // not "truncated". The limit is read off the shared query rather than
         // hardcoded, so raising it there cannot leave a stale 500 here.
-        const limit      = this._taskListQueryLimit();
+        const limit      = this._taskListQueryLimit( queryString );
         const pageIsFull = Number.isFinite( limit ) && Number.isFinite( shown ) && shown === limit;
         const totalUnknown = !Number.isFinite( total );
 
@@ -9793,10 +13019,24 @@ class NotificationsUI {
         // off the table. Deliberately NOT folded into the count sentence — an
         // unrecognized warning has no numbers, and inventing them would be worse
         // than saying nothing.
-        const warnings = Array.isArray( composite.warnings ) ? composite.warnings : [];
-        const warningLine = warnings.length > 0
-            ? `<p class="task-list-message task-list-truncated">⚠️ Server: ${warnings.map( w => this._escapeTaskAttr( String( w ) ) ).join( " · " )}</p>`
-            : "";
+        //
+        // ONE EXCEPTION (Rick, row 081dac6d): the HOLDING AREA note. It is written for
+        // Claude sessions, arrives on every load of this all-statuses list, and runs to
+        // several sentences, so it renders as one short line of its own — and not at all
+        // when the Holding Area header already shows the SAME count, which says the same
+        // thing. Everything the recognizer does not claim still prints word for word.
+        const warnings    = Array.isArray( composite.warnings ) ? composite.warnings : [];
+        const headerCount = this._holdingAreaHeaderCount();
+        const heldLines   = [];
+        const verbatim    = [];
+        for ( const w of warnings ) {
+            const held = this._holdingAreaWarningCount( w );
+            if ( held === null ) verbatim.push( w );
+            else if ( held !== headerCount ) heldLines.push( `<p class="task-list-message task-list-truncated task-list-holding-note">${held} waiting for your approval</p>` );
+        }
+        const warningLine = heldLines.join( "" ) + ( verbatim.length > 0
+            ? `<p class="task-list-message task-list-truncated">⚠️ Server: ${verbatim.map( w => this._escapeTaskAttr( String( w ) ) ).join( " · " )}</p>`
+            : "" );
 
         if ( !claimsMore && !countsShort && !( pageIsFull && totalUnknown ) ) return warningLine;
 
@@ -9812,10 +13052,63 @@ class NotificationsUI {
         return `<p class="task-list-message task-list-truncated">✂️ Board truncated: ${detail}.</p>` + warningLine;
     }
 
-    _taskListQueryLimit() {
+    _holdingAreaWarningCount( warning ) {
         /**
-         * The `limit` this panel actually asked for, read off the shared query
-         * constant at call time.
+         * Recognize the server's HOLDING AREA note and return its row count.
+         *
+         * The note is built in `list_tasks` (src/cosa/rest/routers/tasks.py, the
+         * `holding_notice` f-string). It is matched on a stable phrase plus its leading
+         * count, not on the whole sentence, so rewording the advice does not break it.
+         * The coupling is pinned from the server side by
+         * test_the_task_list_page_shortens_the_holding_area_note.py: change the note's
+         * wording there and that test turns red.
+         *
+         * Requires:
+         *     - warning is any value (one entry of the server's `warnings[]`)
+         *
+         * Ensures:
+         *     - Returns the integer count when the warning is the holding-area note
+         *     - Returns null for anything else, including a note whose count cannot be
+         *       read — that one prints verbatim rather than as a made-up number
+         *     - Pure; never throws
+         */
+        if ( typeof warning !== "string" ) return null;
+        if ( !warning.includes( "matching your filters are in the HOLDING AREA" ) ) return null;
+        const match = /^⚠️\s*(\d+) row\(s\) /.exec( warning );
+        return match ? Number( match[ 1 ] ) : null;
+    }
+
+    _holdingAreaHeaderCount() {
+        /**
+         * The number the Holding Area header (#holding-area-count, notifications.html)
+         * currently displays, or null when it displays none.
+         *
+         * ⚠️ THE CALLER MUST COMPARE IT, NOT JUST TEST FOR IT. The page ships the
+         * header as a placeholder "0", and the task list is drawn BEFORE the holding
+         * pane on every refresh, so on first paint this reads 0 however many rows are
+         * held (found by Chloé's browser test). Only a header that agrees with the
+         * note's count says the same thing the note does. `renderHoldingArea` writes
+         * "—" when it cannot read the store; that reads as null.
+         *
+         * Ensures:
+         *     - the integer shown when the element exists and its text is a whole number
+         *     - null otherwise
+         */
+        const countEl = document.getElementById( "holding-area-count" );
+        const text    = countEl === null ? "" : countEl.textContent.trim();
+        return /^\d+$/.test( text ) ? Number( text ) : null;
+    }
+
+    _taskListQueryLimit( queryString ) {
+        /**
+         * The `limit` a panel actually asked for, read off its query at call time.
+         *
+         * ⚠️ TAKES THE QUERY NOW, because a SECOND panel reads a SECOND query. The
+         * holding area asks a different question with its own `limit`, and having it
+         * silently measure itself against the BOARD's limit would break the full-page
+         * trigger exactly when the two diverge — a guard that cannot fire, which is
+         * the failure this whole mechanism exists to prevent. Omitted, it still falls
+         * back to the board query, so the original call site is unchanged.
          *
          * Parsed rather than hardcoded on purpose: a hardcoded 500 here would
          * silently stop matching the day someone edits the query, and the
@@ -9826,7 +13119,9 @@ class NotificationsUI {
          *     - Returns the numeric limit, or NaN when absent/unparseable
          *     - Pure; never throws on a missing global
          */
-        const query = ( typeof window !== "undefined" && window.LUPIN_TASK_LIST_QUERY ) || "";
+        const query = queryString
+            || ( typeof window !== "undefined" && window.LUPIN_TASK_LIST_QUERY )
+            || "";
         const match = /[?&]limit=(\d+)/.exec( query );
         return match ? Number( match[ 1 ] ) : NaN;
     }
@@ -9850,10 +13145,11 @@ class NotificationsUI {
         const lastGood  = this._taskListLastGoodTasks;
         if ( lastGood && lastGood.length > 0 ) {
             container.innerHTML = indicator + this.renderTaskListTable( this.groupTasksByOwner( lastGood ), undefined, this.loadCollapsedTaskOwners() );
+            this._hydrateRequestChips( container );
             if ( countEl ) countEl.textContent = this._taskListCountText( lastGood );
         } else {
             container.innerHTML = indicator + `<p class="task-list-message task-list-empty">No tasks loaded yet.</p>`;
-            if ( countEl ) countEl.textContent = "0";
+            if ( countEl ) countEl.textContent = "Live: 0";
         }
     }
 
@@ -9886,6 +13182,10 @@ class NotificationsUI {
             return;
         }
         this._taskListFetchInFlight = true;
+        // Row c9fafb9d (Tiffany L1): a caller that just WROTE needs to wait for this run to end
+        // before it asks for its own read — see `_refreshTaskListAfterWrite`.
+        let settle;
+        this._taskListRefreshSettled = new Promise( resolve => { settle = resolve; } );
         try {
             const composite = await this.fetchTaskList();
             this.renderTaskList( composite );
@@ -9896,9 +13196,398 @@ class NotificationsUI {
             // request on the first tick only and never again.
             await this.fetchEpicStories();
             this.renderEpicBoard( composite );
+            // The ratio is counted in SQL, so it cannot come off the rows above.
+            // It rides THIS tick rather than a timer of its own — same reason the
+            // Epic Board shares the composite: two clocks read as a bug the first
+            // time they disagree.
+            this._renderFlowRatio( await this.fetchFlowRatio() );
+            // Bind + paint the operator controls. Idempotent, so riding the
+            // existing tick costs nothing after the first one.
+            this.initFlowRatioControls();
+            // The holding area is a SECOND query (not_approved is invisible to the
+            // board's), so it cannot ride the composite the way the epic board does.
+            // It rides the same TICK instead — one clock, two fetches, rather than a
+            // timer of its own: two clocks read as a bug the first time they disagree.
+            await this.refreshHoldingArea();
+            // Row c9fafb9d — the two request badges ride the same tick, for the same reason.
+            await this.refreshRequestBadges();
         } finally {
             this._taskListFetchInFlight = false;
+            settle();
         }
+    }
+
+    async _refreshTaskListAfterWrite() {
+        /**
+         * The read a caller needs AFTER it has written (row c9fafb9d, Tiffany L1).
+         *
+         * 🔴 `refreshTaskList` SKIPS A COLLISION. A verdict that lands while the 60s tick is in
+         * flight used to call it and get nothing back — no list read, no holding-area read, no
+         * badges — so the moved row kept a live Approve/Deny for up to a minute and a second
+         * press sent a second POST. This waits out the tick in flight, then takes a fresh one,
+         * the first read that can see the write: the multiplexer's `refreshAfterWrite` shape.
+         *
+         * 🔴 A REFRESH IN FLIGHT AFTER THE WAIT BEGAN AFTER THIS CALL, SO IT IS JOINED, NOT
+         * RE-REQUESTED. Two verdicts landing on one tick both wait it out; the first starts the
+         * fresh read, and the second's `refreshTaskList` would SKIP that read and resolve — and
+         * release its guard — before the board had read anything (Mr. Radio, measured at
+         * fcf2b6bc).
+         *
+         * Ensures:
+         *     - a refresh that BEGAN after this call has run to its end when this resolves,
+         *       including when several writers call it against the same tick
+         */
+        if ( this._taskListFetchInFlight && this._taskListRefreshSettled ) await this._taskListRefreshSettled;
+        if ( this._taskListFetchInFlight && this._taskListRefreshSettled ) { await this._taskListRefreshSettled; return; }
+        await this.refreshTaskList();
+    }
+
+    // =========================================================================
+    // FINISHED TASKS — Rick's P0 (broadcast e254ec7d, 2026-09-07), row 7c616656.
+    // Design: src/rnd/2026.09.06-completed-work-accordion-design.md
+    //
+    // 🔴 SOURCE IS THE EVENT STREAM, AND THAT IS A RULING, NOT A PREFERENCE.
+    // Rick's R5 via María 2026-09-07 19:21. /api/tasks cannot answer "which rows
+    // became terminal in the last 24 hours": no terminal-timestamp column exists
+    // anywhere in the schema, so its updated_ts moves on every write and an
+    // amended three-day-old row reads as freshly finished; and it orders by
+    // created_ts, so a row finished ten minutes ago sorts below 500 rows created
+    // today. `task_events` is append-only, one row per state change, ordered
+    // ts DESC — the only honest record of WHEN a row finished and WHO finished it.
+    // =========================================================================
+
+    // The three terminal statuses, in the order the pills render. Mirrors the
+    // server's TERMINAL_STATUSES; kept as its own copy because Rick's no-code-reuse
+    // ruling (row 87812328) keeps this client independent of the multiplexer, and
+    // the server enum is the authority both copies answer to.
+    static get FINISHED_STATUSES() { return [ "done", "dropped", "wont_fix" ]; }
+
+    static get FINISHED_STATUS_GLYPHS() {
+        /**
+         * The row glyph and the filter pill MUST show the SAME character, so there is
+         * ONE definition and the pill markup answers to it.
+         *
+         * 🔴 THESE THREE ARE COPIED FROM THE PILLS, NOT CHOSEN HERE — notifications.html
+         * :814 ✅ Done, :820 🗑️ Dropped, :826 🚫 Won't-fix. A guard asserts the two
+         * agree, because a pill and a row disagreeing about what "dropped" looks like is
+         * the kind of drift nobody reports and everybody misreads.
+         *
+         * Ensures:
+         *     - an UNRECOGNISED status maps to "" rather than to a wrong glyph. The pane
+         *       only ever fetches FINISHED_STATUSES, so this is unreachable today; if it
+         *       ever fires, a blank prefix is honest and a borrowed glyph would be a
+         *       confident wrong answer. The row's data-status still carries the truth.
+         */
+        return {
+            done     : "✅",
+            dropped  : "🗑️",
+            wont_fix : "🚫"
+        };
+    }
+
+    _finishedTasksEls() {
+        /**
+         * Resolve the pane's elements once per call.
+         *
+         * Ensures:
+         *     - returns null if the pane is absent from the DOM (the method is then
+         *       a no-op rather than a TypeError) — this client's HTML is shared with
+         *       test harnesses that render a subset
+         */
+        const root = document.getElementById( "section-finished-tasks" );
+        if ( !root ) return null;
+        return {
+            root,
+            count     : document.getElementById( "finished-tasks-count" ),
+            updated   : document.getElementById( "finished-tasks-updated" ),
+            container : document.getElementById( "finished-tasks-container" ),
+            window    : document.getElementById( "finished-tasks-window" ),
+            windowVal : document.getElementById( "finished-tasks-window-value" ),
+            pills     : Array.from( root.querySelectorAll( ".finished-pill" ) )
+        };
+    }
+
+    _finishedTasksLitStatuses() {
+        /**
+         * Which pills are currently lit.
+         *
+         * POSITIVE POLARITY, DECLARED (design §9): aria-pressed="true" means SHOWN.
+         * This pane deliberately does NOT copy either group-level convention in this
+         * file — collapsedOwners is an ARRAY of COLLAPSED keys, groupState is a MAP
+         * of key -> isEXPANDED. Same feature, inverted sense, different container.
+         * Porting one from the other inverts a user's saved state and fails
+         * invisibly, so the polarity is stated here at the point of definition.
+         */
+        const els = this._finishedTasksEls();
+        if ( !els ) return [ ];
+        return els.pills
+            .filter( pill => pill.getAttribute( "aria-pressed" ) === "true" )
+            .map(    pill => pill.dataset.status );
+    }
+
+    async fetchFinishedTasks( windowDays ) {
+        /**
+         * Fetch every terminal event inside the window, one call per status.
+         *
+         * Requires:
+         *     - windowDays is a positive integer (the slider's own range is 1..14)
+         *
+         * Ensures:
+         *     - returns { eventsByStatus, error } — never throws
+         *     - ALL THREE statuses are fetched regardless of which pills are lit,
+         *       so toggling a pill is a client-side re-render of data already in
+         *       hand rather than a round trip. Design §7.3: the whole population is
+         *       ~47 rows/day, so this costs three cheap calls and buys an instant
+         *       control.
+         *     - a status that fails leaves its key ABSENT rather than empty — an
+         *       empty array would render as "nothing finished", which is a claim,
+         *       and a failed fetch has not measured anything
+         *
+         * ⚠️ ONE CALL PER STATUS IS DELIBERATE, NOT A MISSING OPTIMISATION.
+         * `to_status` takes a single status. A comma-separated form is filed as its
+         * own change (María, 2026-09-07): it would touch _apply_owed_filter, where
+         * `status != PARK_STATUS` and `status is None` gate park suppression and the
+         * terminal-exclusion default — the COUNT-vs-page parity seam. Trading a
+         * rendered pane for two saved requests against that seam is backwards.
+         */
+        const sinceIso = new Date( Date.now() - windowDays * 24 * 60 * 60 * 1000 ).toISOString();
+        const eventsByStatus = { };
+        let   error          = null;
+
+        for ( const status of NotificationsUI.FINISHED_STATUSES ) {
+            try {
+                const qs       = `to_status=${ encodeURIComponent( status ) }&since=${ encodeURIComponent( sinceIso ) }&limit=500`;
+                const response = await this.authedFetch( `/api/tasks/events?${ qs }` );
+                if ( !response.ok ) { error = error || `HTTP ${ response.status }`; continue; }
+                const body = await response.json();
+                eventsByStatus[ status ] = Array.isArray( body.events ) ? body.events : [ ];
+            } catch ( err ) {
+                error = error || String( err && err.message ? err.message : err );
+            }
+        }
+        return { eventsByStatus, error };
+    }
+
+    renderFinishedTasks( eventsByStatus, error ) {
+        /**
+         * Paint the pane from data already fetched. Pure with respect to the network.
+         *
+         * Ensures:
+         *     - the header badge shows the count of VISIBLE rows, or "—" when nothing
+         *       has been measured yet. NEVER "0" before a poll returns: 0 is a claim
+         *       that something was counted, and an unmeasured pane has counted nothing
+         *     - every pill shows its own count and stays VISIBLE at zero, dimmed but
+         *       clickable — "zero is a claim, not a default". A pill that vanishes at
+         *       zero turns "nothing was refused today" into "this feature does not
+         *       exist", and makes the control bar change width as the day goes on
+         *     - rows are merged across lit statuses and sorted newest-finished-first
+         */
+        const els = this._finishedTasksEls();
+        if ( !els ) return;
+
+        const measured = Object.keys( eventsByStatus ).length > 0;
+        const lit      = this._finishedTasksLitStatuses();
+
+        // Per-pill counts, from the FULL fetch rather than the visible set — a pill's
+        // number must not depend on whether it happens to be lit.
+        for ( const pill of els.pills ) {
+            const status = pill.dataset.status;
+            const rows   = eventsByStatus[ status ];
+            const badge  = pill.querySelector( ".finished-pill-count" );
+            if ( badge ) badge.textContent = rows === undefined ? "—" : String( rows.length );
+            pill.classList.toggle( "finished-pill-zero", Array.isArray( rows ) && rows.length === 0 );
+        }
+
+        const visible = lit
+            .flatMap( status => eventsByStatus[ status ] || [ ] )
+            .sort( ( a, b ) => String( b.ts || "" ).localeCompare( String( a.ts || "" ) ) );
+
+        if ( els.count ) els.count.textContent = measured ? String( visible.length ) : "—";
+        if ( els.updated ) els.updated.textContent = measured ? new Date().toLocaleTimeString() : "";
+
+        if ( !els.container ) return;
+
+        // SIX EMPTY STATES, and they are six because they mean six different things.
+        // Collapsing them into one "no results" is what turns a broken fetch into an
+        // apparently quiet day.
+        if ( error && !measured ) {
+            els.container.innerHTML = `<div class="finished-tasks-empty" data-testid="finished-tasks-error">Could not reach the event stream (${ this.escapeHtml( error ) }). Nothing was measured — this is not "no finished work".</div>`;
+            return;
+        }
+        if ( !measured ) {
+            els.container.innerHTML = `<div class="finished-tasks-empty" data-testid="finished-tasks-unmeasured">Loading…</div>`;
+            return;
+        }
+        if ( lit.length === 0 ) {
+            els.container.innerHTML = `<div class="finished-tasks-empty" data-testid="finished-tasks-no-filter">No status selected. Pick at least one pill above.</div>`;
+            return;
+        }
+        if ( visible.length === 0 ) {
+            const names = lit.join( ", " );
+            els.container.innerHTML = `<div class="finished-tasks-empty" data-testid="finished-tasks-none-in-window">Nothing reached ${ this.escapeHtml( names ) } in this window. That is a measured zero, not a missing fetch.</div>`;
+            return;
+        }
+        if ( error ) {
+            // PARTIAL: some statuses answered, some did not. Rendering what we have
+            // WITHOUT saying so would present an incomplete set as a complete one.
+            els.container.innerHTML = `<div class="finished-tasks-partial" data-testid="finished-tasks-partial">⚠️ Partial result — at least one status failed to load (${ this.escapeHtml( error ) }). The rows below are incomplete.</div>` + this._finishedTasksTable( visible );
+            return;
+        }
+        els.container.innerHTML = this._finishedTasksTable( visible );
+    }
+
+    _finishedTasksTable( rows ) {
+        /**
+         * WHEN / TITLE / WHO / WHY — four columns, chosen because at-a-glance beats
+         * completeness.
+         *
+         * 🔴 THE HEADER READS "TITLE", NOT "WHAT". Rick's ruling, 2026-09-07 ~20:10 by
+         * voice, and it OVERRIDES design §6.1's naming: "it's pretty obvious that the
+         * WHAT column should actually read TITLE, because that's the most interesting or
+         * relevant piece."
+         *
+         * ⚠️ THE CSS CLASS STAYS `finished-what` AND THE HEADER SAYS "Title" — THEY
+         * DISAGREE ON PURPOSE. Renaming the class would churn the stylesheet and every
+         * selector in the guards to buy nothing a reader can see. Said here because the
+         * next reader will otherwise "fix" one of them to match the other.
+         *
+         * Ensures:
+         *     - WHEN is RELATIVE ("14m", "1h12m"), with the absolute time on hover —
+         *       the pane's premise is recency, and relative saves the reader a
+         *       subtraction
+         *     - TITLE is the item title, which is the whole reason the event stream
+         *       needed a title on the wire (merged at 86920d8f)
+         *     - the STATUS GLYPH is a PREFIX INSIDE THE WHEN CELL, never a fifth column
+         *       (design §6.4). In a DONE-only view every glyph is an identical ✅ and the
+         *       tempting move is to hide it until a second filter is lit — rejected there
+         *       and rejected here: a grid that changes shape when you click a filter makes
+         *       the reader re-find every column, which costs more than one redundant
+         *       character. A prefix costs no horizontal space, so the layout is constant
+         *       across all seven filter combinations.
+         *     - WHO is the persona only; the raw actor field is "persona sessionid"
+         *       and the session id is noise at a glance
+         *     - WHY is clamped to one line — ->done events DO carry reasons, and some
+         *       are long enough to bury the row
+         */
+        const cells = rows.map( event => {
+            const when    = this._finishedTasksRelative( event.ts );
+            const title   = this.escapeHtml( event.title || "(untitled)" );
+            const who     = this.escapeHtml( String( event.actor || "" ).split( /\s+/ )[ 0 ] || "—" );
+            const why     = this.escapeHtml( event.reason || "" );
+            // Raw FIRST, escaped SECOND. The glyph map is keyed on the store's own word,
+            // so looking it up with an HTML-escaped key would miss on any status that ever
+            // contains an escapable character and silently render no glyph.
+            const rawStatus = String( event.transition || "" ).split( "->" ).pop();
+            const status    = this.escapeHtml( rawStatus );
+            const glyph     = NotificationsUI.FINISHED_STATUS_GLYPHS[ rawStatus ] || "";
+            const absolute  = this.escapeHtml( String( event.ts || "" ) );
+            return `<tr class="finished-task-row" data-testid="finished-task-row" data-status="${ status }">
+                <td class="finished-when" title="${ absolute }"><span class="finished-status-glyph" data-testid="finished-status-glyph" data-status="${ status }" title="${ status }">${ glyph }</span>${ this.escapeHtml( when ) }</td>
+                <td class="finished-what">${ title }</td>
+                <td class="finished-who">${ who }</td>
+                <td class="finished-why" title="${ why }">${ why }</td>
+            </tr>`;
+        } ).join( "" );
+
+        return `<table class="finished-tasks-table" data-testid="finished-tasks-table">
+            <thead><tr><th>When</th><th>Title</th><th>Who</th><th>Why</th></tr></thead>
+            <tbody>${ cells }</tbody>
+        </table>`;
+    }
+
+    _finishedTasksRelative( iso ) {
+        /**
+         * "14m" / "1h12m" / "19h" / "3d". Pure; never throws.
+         *
+         * Ensures:
+         *     - an absent or unparseable timestamp returns "—" rather than "NaN…",
+         *       because a rendered NaN reads as a bug in the row and not in the clock
+         */
+        if ( !iso ) return "—";
+        const then = new Date( iso ).getTime();
+        if ( Number.isNaN( then ) ) return "—";
+        const mins = Math.max( 0, Math.floor( ( Date.now() - then ) / 60000 ) );
+        if ( mins < 60 ) return `${ mins }m`;
+        const hours = Math.floor( mins / 60 );
+        if ( hours < 24 ) return mins % 60 ? `${ hours }h${ mins % 60 }m` : `${ hours }h`;
+        return `${ Math.floor( hours / 24 ) }d`;
+    }
+
+    async refreshFinishedTasks() {
+        /**
+         * One refresh: fetch -> render. Shared by the 60s tick, the ⟳ button and the
+         * slider's `change` handler.
+         *
+         * Ensures:
+         *     - at most one fetch in flight (guard reset in finally), so a manual
+         *       click landing on an interval tick cannot double-fetch
+         */
+        if ( this._finishedTasksFetchInFlight ) return;
+        const els = this._finishedTasksEls();
+        if ( !els ) return;
+
+        this._finishedTasksFetchInFlight = true;
+        try {
+            const days = Number( els.window ? els.window.value : 1 ) || 1;
+            const { eventsByStatus, error } = await this.fetchFinishedTasks( days );
+            this._finishedTasksData = eventsByStatus;
+            this._finishedTasksError = error;
+            this.renderFinishedTasks( eventsByStatus, error );
+        } finally {
+            this._finishedTasksFetchInFlight = false;
+        }
+    }
+
+    startFinishedTasksPolling() {
+        /**
+         * Wire the controls, paint once, then poll every 60s.
+         *
+         * Ensures:
+         *     - a pill click is a CLIENT-SIDE re-render of data already fetched, not
+         *       a round trip (design §7.3) — the pane stays instant, which is what
+         *       at-a-glance requires
+         *     - clicking every pill off re-lights DONE rather than showing an empty
+         *       pane: there is no useful state in which this pane shows nothing on
+         *       purpose (design §7.1)
+         *     - the slider's `input` fires NO fetch (live preview only) and `change`
+         *       commits — the same split #flow-ratio-window uses
+         */
+        const els = this._finishedTasksEls();
+        if ( !els ) return;
+
+        for ( const pill of els.pills ) {
+            pill.addEventListener( "click", () => {
+                const lit = pill.getAttribute( "aria-pressed" ) === "true";
+                pill.setAttribute( "aria-pressed", lit ? "false" : "true" );
+
+                // Turning the last one off re-lights DONE. DONE pre-lit is
+                // non-negotiable per design §1.2, and an all-off pane shows nothing
+                // useful on purpose.
+                if ( this._finishedTasksLitStatuses().length === 0 ) {
+                    const done = els.pills.find( p => p.dataset.status === "done" );
+                    if ( done ) done.setAttribute( "aria-pressed", "true" );
+                }
+                this.renderFinishedTasks( this._finishedTasksData || { }, this._finishedTasksError );
+            } );
+        }
+
+        if ( els.window ) {
+            els.window.addEventListener( "input", () => {
+                // PREVIEW ONLY — no fetch. Dragging a slider must not fire a request
+                // per pixel.
+                if ( els.windowVal ) els.windowVal.textContent = `${ els.window.value }d`;
+            } );
+            els.window.addEventListener( "change", () => {
+                // COMMIT. The x24 lives here and nowhere else: the slider is the only
+                // thing that speaks days, so the API keeps taking the ISO instant it
+                // always took.
+                if ( els.windowVal ) els.windowVal.textContent = `${ els.window.value }d`;
+                this.refreshFinishedTasks();
+            } );
+        }
+
+        this.refreshFinishedTasks();
+        this._finishedTasksTimer = setInterval( () => this.refreshFinishedTasks(), 60000 );
     }
 
     startTaskListPolling() {
@@ -10004,6 +13693,48 @@ class NotificationsUI {
         return isCollapsed;
     }
 
+    _closeDisclosedRowsIn( scope ) {
+        /**
+         * Close every controls row disclosed inside a group that is being collapsed.
+         *
+         * 🔴 RICK, 2026-09-02: "if you close the epic-group-header it should definitely
+         * hide the displayed task-actions… even when the containing parent group header is
+         * scrolled back up, it does not hide the displayed task action."
+         *
+         * ⚠️ COLLAPSE AND DISCLOSURE WERE INDEPENDENT STATES. A group collapses by a CSS
+         * class on its tbody; a controls row hides by its own `hidden` attribute. Nothing
+         * connected them, so a group could be collapsed with a form still on screen — and
+         * re-expanding brought that form back unasked, with the ellipsis still reporting
+         * `aria-expanded="true"` for a row nobody could see.
+         *
+         * ⚠️ IT CLEARS THE ERROR STRIPE TOO, for the reason `_handleDisclosureToggle`
+         * does: a refusal left under a form that is no longer visible is a complaint about
+         * something the operator cannot look at, and it survives the next repaint reading
+         * like a fresh failure.
+         *
+         * Requires:
+         *     - scope is the group element being collapsed
+         *
+         * Ensures:
+         *     - every disclosed controls row inside it is hidden
+         *     - each matching toggle returns to aria-expanded="false" and its Show title
+         *     - a group with nothing disclosed is a no-op, never a throw
+         */
+        if ( !scope || typeof scope.querySelectorAll !== "function" ) return;
+        for ( const row of scope.querySelectorAll( ".task-controls-row[data-controls-for]" ) ) {
+            if ( row.hidden ) continue;
+            row.hidden = true;
+            const taskId = row.dataset.controlsFor;
+            const toggle = scope.querySelector(
+                `.task-disclose-button[data-task-id="${CSS.escape( taskId )}"]` );
+            if ( toggle ) {
+                toggle.setAttribute( "aria-expanded", "false" );
+                toggle.setAttribute( "title", "Show row controls" );
+            }
+            this._renderTaskRowError( taskId, "", scope );
+        }
+    }
+
     _applyTaskGroupCollapseState( tbody, isCollapsed ) {
         /**
          * Reflect a group's collapsed state into its already-rendered DOM (class +
@@ -10018,6 +13749,7 @@ class NotificationsUI {
          *     - the header's aria-expanded + chevron reflect the new state
          */
         tbody.classList.toggle( "collapsed", isCollapsed );
+        if ( isCollapsed ) this._closeDisclosedRowsIn( tbody );
         const header = tbody.querySelector( ".task-group-header" );
         if ( header ) {
             header.setAttribute( "aria-expanded", String( !isCollapsed ) );
@@ -10062,14 +13794,1207 @@ class NotificationsUI {
          *       toggles the group (the dim-in-place ruling #3)
          *     - otherwise → delegate to the accordion toggle (unchanged behavior)
          */
-        const emoji = target.closest ? target.closest( ".task-detail-emoji" ) : null;
-        if ( emoji ) {
-            if ( !emoji.classList.contains( "task-detail-empty" ) ) {
-                this.openTaskBodyOverlay( emoji.dataset.taskBody || "", emoji.dataset.taskId || "" );
-            }
-            return;   // a detail-emoji click is never also an accordion toggle
-        }
+        if ( this._handleRequestChipClick( target ) ) return;   // a request verdict, never a toggle
+        if ( this._handleTaskIdCopyClick( target ) ) return;    // never also a row toggle
+        if ( this._handleDetailEmojiClick( target ) ) return;   // never also an accordion toggle
+
+        // STATE CONTROLS — same shape as the detail emoji above: match, act, RETURN,
+        // so a control click is never also an accordion toggle. A disabled Park is
+        // inert here by virtue of `disabled`, which stops the click reaching us at
+        // all; the aria-disabled attribute is for the screen reader, not the guard.
+        if ( this._handleRowControlClick( target ) ) return;
+
         this._handleTaskAccordionToggle( target );
+    }
+
+    _handleRowControlClick( target ) {
+        /**
+         * The row-control dispatch SHARED by both panes that render these rows.
+         *
+         * 🔴 IT IS SHARED BECAUSE IT WAS NOT, AND THE EPIC BOARD PAID FOR IT. Both
+         * `_renderTaskRow` and `_renderEpicRow` emit the ellipsis and the nine controls
+         * behind it, but only the task list's container ever routed a click to them —
+         * the epic board's only listener went straight to its accordion handler, which
+         * returns unless the click landed in a group header. So on the epic board the
+         * ellipsis opened nothing and Drop / Park / Won't-fix / Demote / Approve did
+         * nothing, with no error anywhere: the controls RENDERED, they just were not
+         * WIRED.
+         *
+         * ⚠️ THIS IS A MISSING ROUTE, NOT THE `_paneScope` LOOKUP DEFECT OF cd2ea523,
+         * and the two are easy to confuse because both end in a control that does
+         * nothing. Measured with the handlers stubbed and ONE pane in the DOM, so there
+         * was no second `data-task-id` for a lookup to pick wrongly: the handlers were
+         * never invoked at all. `_paneScope` runs inside a handler that never ran.
+         *
+         * Requires:
+         *     - target is the clicked DOM node (or a descendant of a control)
+         *
+         * Ensures:
+         *     - returns true when the click was CONSUMED by a row control, so the
+         *       caller returns instead of also firing its accordion toggle
+         *     - returns false for anything else, leaving the caller's own routing intact
+         */
+        const discloseBtn = target && target.closest ? target.closest( ".task-disclose-button" ) : null;
+        if ( discloseBtn ) { this._handleDisclosureToggle( discloseBtn ); return true; }
+
+        // The mic is routed BEFORE `.task-action-btn` and does not carry that class.
+        // `.task-action-btn` is the submit-shaped family the dispatcher below branches
+        // through; the mic is not one of those verbs, it fills the box one of them reads.
+        const sttBtn = target && target.closest ? target.closest( ".task-reason-stt" ) : null;
+        if ( sttBtn ) { this._handleReasonSttClick( sttBtn ); return true; }
+
+        const actionBtn = target && target.closest ? target.closest( ".task-action-btn" ) : null;
+        if ( actionBtn ) {
+            // ONE row control now, not five. The verb lives on the select and is read
+            // inside the handler, so the dispatcher no longer needs a branch per verb —
+            // which is what let a sixth verb be added with its own button and its own
+            // box, five times over, without anyone seeing the shape it was making.
+            if ( actionBtn.classList.contains( "task-submit-button" ) ) this._handleTaskSubmitClick( actionBtn );
+            else if ( actionBtn.classList.contains( "task-priority-update" ) ) this._handlePriorityUpdateClick( actionBtn );
+            else if ( actionBtn.classList.contains( "holding-approve-all" ) ) this._handleHoldingApproveAllClick( actionBtn );
+            else if ( actionBtn.classList.contains( "holding-wont-fix-all" ) ) this._handleHoldingWontFixAllClick( actionBtn );
+            return true;
+        }
+
+        return false;
+    }
+
+    _rowInputValue( taskId, className, scope ) {
+        /**
+         * The trimmed value of one inline action input, looked up WITHIN THE PANE the
+         * control lives in.
+         *
+         * 🔴 `scope` EXISTS BECAUSE A BARE document.querySelector SHIPPED A DEAD BUTTON.
+         * Since fe8642c7 the epic board renders the same actions cell as the task list,
+         * so a row carrying an epic key appears TWICE in the document with the same
+         * `data-task-id` on both copies. `document.querySelector` returns the FIRST
+         * match — always the task list — so an operator typing a reason on the epic
+         * board had it read from the OTHER pane's empty box, was refused for a blank
+         * reason, and saw the complaint land in a stripe they were not looking at.
+         *
+         * Measured 2026-09-02: Rick pressed Won't-fix on bc77cd79 and nothing happened.
+         * From the far end the row was untouched, the store held zero wont_fix events,
+         * and thirty minutes of server log carried no PATCH to any task row. The request
+         * never left the browser.
+         *
+         * ⇒ THE DUPLICATE ID IS NOT THE BUG TO FIX. Both panes SHOULD offer the control
+         * on the same row — that is the feature. What was wrong is a lookup that ignores
+         * which copy was clicked. Scoping to the button's own container answers "which
+         * one" from the only thing that knows: the element the operator actually hit.
+         *
+         * Requires:
+         *     - scope is an ancestor element of the input, or omitted
+         *
+         * Ensures:
+         *     - searches within `scope` when given, else the whole document (legacy)
+         *     - returns "" for a missing input, never throws
+         */
+        const el = this._rowInputElement( taskId, className, scope );
+        return el && typeof el.value === "string" ? el.value.trim() : "";
+    }
+
+    _rowInputElement( taskId, className, scope ) {
+        /**
+         * The ELEMENT `_rowInputValue` reads — split out so the scoping rule lives in
+         * exactly one expression.
+         *
+         * 🔴 THE SPLIT IS THE POINT, NOT A TIDY-UP. The mic needs the element (it
+         * hands it to the recorder to write into); the submit path needs the trimmed
+         * value. Two call sites re-deriving "which copy of this row did the operator
+         * touch" is precisely how the panes drift, and the answer to that question is
+         * the thing bc77cd79 got wrong. One query, two thin readers.
+         *
+         * Requires:
+         *     - scope is an ancestor element of the input, or omitted
+         *
+         * Ensures:
+         *     - searches within `scope` when given, else the whole document (legacy)
+         *     - returns null for a missing input, never throws
+         */
+        const root = scope || document;
+        return root.querySelector( `.${className}[data-task-id="${CSS.escape( taskId )}"]` );
+    }
+
+    async _handleReasonSttClick( button ) {
+        /**
+         * The row mic: dictate straight into THIS row's reason box, in THIS pane.
+         *
+         * 🔴 IT RESOLVES THE BOX BY SCOPE, NEVER BY ID, AND THAT IS THE WHOLE
+         * DESIGN. `handleSTTButtonClick` — the sender-card path this reuses the machinery
+         * of — takes an `inputId` and calls `document.getElementById`. That is correct
+         * where a control is unique on the page and WRONG here: a row carrying an epic
+         * key renders on the task list AND the epic board with the same `data-task-id`
+         * on both copies, deliberately. An id-keyed lookup would return the first copy —
+         * always the task list — so dictating on the epic board would fill a box the
+         * operator cannot see, and the box in front of them would stay empty.
+         *
+         * ⚠️ THAT IS NOT A HYPOTHETICAL. Measured 2026-09-02: Rick pressed
+         * Won't-fix on bc77cd79 and nothing happened — a bare `document.querySelector`
+         * read the other pane's empty box, the blank-reason guard fired, and the request
+         * never left the browser. Zero events in the store, no PATCH in thirty minutes of
+         * log. This handler is one `_controlScope` call away from repeating it.
+         *
+         * ⚠️ A UNIQUE ID ON THE BUTTON WOULD NOT HAVE HELPED. It makes the button
+         * unique and leaves the LOOKUP free to pick the wrong copy — the two are separate
+         * problems and only the second one bites.
+         *
+         * Toggle semantics match every other mic on the page: click to record, click
+         * again to stop, ESC to cancel, 30s cap — all of it owned by `recordingManager`,
+         * which already handles insert-at-caret and the button's own recording/processing
+         * states. Nothing about the recorder is reimplemented here.
+         *
+         * Requires:
+         *     - button carries data-task-id and sits inside its row's `.task-actions`
+         *
+         * Ensures:
+         *     - no-op without a task id or without a recording manager
+         *     - fills the reason input in the CLICKED button's own pane, never another's
+         *     - refuses in words, in the operator's own pane, when that input is missing
+         *     - a click while recording STOPS; a click while processing is ignored
+         */
+        const taskId = button && button.dataset ? ( button.dataset.taskId || "" ) : "";
+        if ( !taskId ) return;
+
+        const mgr = this.recordingManager;
+        if ( !mgr ) return;
+
+        const input = this._rowInputElement( taskId, "task-reason-input", this._controlScope( button ) );
+        if ( !input ) {
+            this._renderTaskRowError(
+                taskId,
+                "No reason box found beside this mic — nothing to dictate into.",
+                this._paneScope( button )
+            );
+            return;
+        }
+
+        if ( mgr.isRecording() ) {
+            await mgr.stopRecording();
+        } else if ( !mgr.isProcessing() ) {
+            await mgr.startRecording( `task-reason-${taskId}`, button, input, {} );
+        }
+    }
+
+    _releaseTaskListPress() {
+        /**
+         * The press is over — take any repaint that was held for it.
+         *
+         * Ensures:
+         *     - a held composite is rendered exactly once, then forgotten
+         *     - a release with nothing held is a no-op
+         */
+        this._taskListPressInFlight = false;
+        const held = this._taskListPendingComposite;
+        if ( !held ) return;
+        this._taskListPendingComposite = null;
+        this.renderTaskList( held.composite, held.stampUpdated );
+    }
+
+    _captureOperatorState( container ) {
+        /**
+         * Everything the operator has done in this pane and NOT yet submitted, read off
+         * the markup that is about to be thrown away.
+         *
+         * 🔴 THIS IS RICK'S DEAD BUTTON. Every pane here repaints by replacing
+         * `container.innerHTML` on a 60-second poll, and the operator's half-finished
+         * work lives in that markup. Type a won't-fix reason, let one poll land, then
+         * click: the box the handler reads is EMPTY, the blank-reason guard fires, and no
+         * request ever leaves the browser. The stripe explaining the refusal is wiped by
+         * the NEXT poll, so within a minute there is nothing on screen either. Type,
+         * pause, click, nothing — and no evidence afterwards.
+         *
+         * ⚠️ IT NEEDED NO PANE AND NO ROW IDENTITY, which is why it survived while a
+         * two-pane lookup collision, a pane with no listener, an item_class branch and
+         * the disclosure ellipsis were each examined and ruled out. And it went unseen
+         * because a tester types and clicks in one motion, inside a single interval,
+         * while every test called the handler by name so no poll could run between them.
+         *
+         * THREE KINDS OF STATE, all destroyed by the same assignment:
+         *   · typed input      — the reason/date boxes, keyed by task id and class
+         *   · a shown refusal  — the error stripe, which is the ONLY thing telling the
+         *                        operator why a control did nothing
+         *   · a disclosed row  — re-collapsing takes the form off screen mid-sentence
+         *
+         * ⚠️ AND FOCUS WITH ITS CARET, because restoring the text into a box the operator
+         * is no longer typing in is half a repair: the next keystroke would land nowhere.
+         *
+         * Requires:
+         *     - container is the pane element whose innerHTML is about to be replaced
+         *
+         * Ensures:
+         *     - returns a plain object safe to hand back to _restoreOperatorState
+         *     - never throws on a missing or empty container (degrade-safe)
+         */
+        const state = { inputs: [], selects: [], priorities: [], stripes: [], disclosed: [], focusKey: null, selStart: 0, selEnd: 0 };
+        if ( !container || typeof container.querySelectorAll !== "function" ) return state;
+
+        const active = document.activeElement;
+        // ⚠️ TWO KEYING SCHEMES, because the markup has two. Row controls carry
+        // `data-task-id`; the holding area's BATCH reason carries `data-filer` and no task
+        // id at all, so a per-row sweep misses it — and losing that one costs a whole
+        // group's worth of typing rather than one row's.
+        const boxes = [ ...container.querySelectorAll( ".task-action-input[data-task-id]" ),
+                        ...container.querySelectorAll( ".task-action-input[data-filer]" ) ];
+        for ( const el of boxes ) {
+            const key = this._operatorInputKey( el );
+            if ( !key ) continue;
+            state.inputs.push( [ key, el.value ] );
+            if ( el === active ) {
+                state.focusKey = key;
+                state.selStart = el.selectionStart === null ? el.value.length : el.selectionStart;
+                state.selEnd   = el.selectionEnd   === null ? el.value.length : el.selectionEnd;
+            }
+        }
+        // 🔴 THE CHOSEN VERB IS THE PIECE THE REDESIGN ADDED, and it is destroyed by the
+        // same assignment as the typed text. Restoring the reason without the verb is
+        // half a repair: the select falls back to "Choose an action…", the operator's
+        // next click is refused for having chosen nothing, and the words still on screen
+        // make that refusal look wrong.
+        for ( const el of container.querySelectorAll( ".task-verb-select[data-task-id]" ) ) {
+            if ( el.value ) state.selects.push( [ el.dataset.taskId, el.value ] );
+        }
+        // 🔴 RICK'S SECOND DEAD BUTTON, AND THE SAME ASSIGNMENT KILLED IT. He reported the
+        // priority Update as "permanently disabled — no change in value re-enables it".
+        // The control works when you call it; what it could not survive was a POLL LANDING
+        // BETWEEN the choice and the click. Choose P2, wait one tick, and the repaint puts
+        // the row's stored priority back and the button back to `disabled`. From his side
+        // that is a button that never works, with nothing left on screen to show why.
+        //
+        // ⚠️ ONLY A PENDING EDIT IS CARRIED — a select still showing the row's own value is
+        // deliberately NOT captured. Restoring an untouched select would re-assert a stale
+        // value over a row somebody else has since re-prioritized, which would light Update
+        // over an edit this operator never made. `data-original` is what makes "pending"
+        // decidable, and it is re-rendered with the row, so it is always the fresh truth.
+        for ( const el of container.querySelectorAll( ".task-priority-select[data-task-id]" ) ) {
+            const chosen = ( el.value || "" ).trim();
+            if ( chosen && chosen !== ( el.dataset.original || "" ) ) {
+                state.priorities.push( [ el.dataset.taskId, chosen ] );
+            }
+        }
+        for ( const el of container.querySelectorAll( ".task-row-error-stripe[data-error-for]" ) ) {
+            if ( el.hidden ) continue;
+            const cell = el.querySelector( "td" );
+            state.stripes.push( [ el.dataset.errorFor, cell ? cell.textContent : "" ] );
+        }
+        for ( const el of container.querySelectorAll( ".task-controls-row[data-controls-for]" ) ) {
+            if ( !el.hidden ) state.disclosed.push( el.dataset.controlsFor );
+        }
+        return state;
+    }
+
+    _restoreOperatorState( container, state ) {
+        /**
+         * Put back what `_captureOperatorState` saved, after the repaint.
+         *
+         * ⚠️ A ROW THAT IS GONE IS LEFT GONE, DELIBERATELY. If the poll returns a board
+         * without that row — somebody else closed it — its saved text has nowhere to go
+         * and re-creating the row to hold it would be worse than losing it. Restoration
+         * is best-effort by construction; the property being kept is that a repaint does
+         * not destroy work on rows that are STILL THERE.
+         *
+         * Ensures:
+         *     - typed values, shown refusals and disclosed rows survive a repaint
+         *     - focus and its selection return to the box the operator was typing in
+         *     - a control that no longer exists is skipped, never a throw
+         */
+        if ( !container || !state || typeof container.querySelector !== "function" ) return;
+
+        // ⚠️ THE VERB GOES BACK FIRST, AND THE ORDER IS LOAD-BEARING. Park and Demote's
+        // date box exists only because their verb is chosen — the change handler builds
+        // it — so restoring text before the verb would look for a field that has not
+        // been created yet and silently drop the date.
+        for ( const [ taskId, verb ] of state.selects ) {
+            const sel = container.querySelector(
+                `.task-verb-select[data-task-id="${CSS.escape( taskId )}"]` );
+            if ( !sel ) continue;
+            sel.value = verb;
+            this._handleVerbSelectChange( sel );
+        }
+        // ⚠️ THE VALUE GOES BACK FIRST AND THE BUTTON IS RECOMPUTED SECOND, NEVER FORCED.
+        // Restoring the value alone is half a repair — the fresh markup renders Update
+        // `disabled`, so the operator would get their choice back above a button they still
+        // cannot press. And forcing it ENABLED would be wrong the other way: if the board
+        // caught up to the chosen value while the poll was in flight, there is nothing left
+        // to submit. Handing the saved value to the same change handler the operator's own
+        // keystroke uses is what makes both cases come out right without a second rule.
+        //
+        // A saved value with no matching option is left alone: assigning it would set the
+        // select to "" and light a button over a value the click handler then refuses.
+        for ( const [ taskId, priority ] of state.priorities ) {
+            const sel = container.querySelector(
+                `.task-priority-select[data-task-id="${CSS.escape( taskId )}"]` );
+            if ( !sel ) continue;
+            if ( !sel.querySelector( `option[value="${CSS.escape( priority )}"]` ) ) continue;
+            sel.value = priority;
+            this._handlePrioritySelectChange( sel );
+        }
+        for ( const [ key, value ] of state.inputs ) {
+            if ( !value ) continue;
+            const el = this._operatorInputByKey( container, key );
+            if ( el ) el.value = value;
+        }
+        for ( const [ taskId, message ] of state.stripes ) {
+            if ( !message ) continue;
+            this._renderTaskRowError( taskId, message, container );
+        }
+        for ( const taskId of state.disclosed ) {
+            const row = container.querySelector(
+                `.task-controls-row[data-controls-for="${CSS.escape( taskId )}"]` );
+            if ( !row ) continue;
+            row.hidden = false;
+            const toggle = container.querySelector(
+                `.task-disclose-button[data-task-id="${CSS.escape( taskId )}"]` );
+            if ( toggle ) {
+                toggle.setAttribute( "aria-expanded", "true" );
+                toggle.setAttribute( "title", "Hide row controls" );
+            }
+        }
+        if ( state.focusKey ) {
+            const el = this._operatorInputByKey( container, state.focusKey );
+            if ( el && typeof el.focus === "function" ) {
+                el.focus();
+                if ( typeof el.setSelectionRange === "function" ) {
+                    try { el.setSelectionRange( state.selStart, state.selEnd ); }
+                    catch ( e ) { /* input types that refuse a selection range, e.g. date */ }
+                }
+            }
+        }
+    }
+
+    _operatorInputKey( el ) {
+        /**
+         * The identity of one inline input across a repaint: its row plus WHICH box.
+         *
+         * A row carries several (a reason and a date on park and demote), so the owner id
+         * alone would restore a chase date into a reason field. And the owner is not always
+         * a row: the holding area's batch reason is keyed by FILER, so the attribute has to
+         * travel with the key or the lookup afterwards searches the wrong one.
+         *
+         * Ensures:
+         *     - returns "<attr>\u0000<owner>\u0000<className>", or null if any part is missing
+         */
+        if ( !el || !el.dataset || !el.className ) return null;
+        const owner = el.dataset.taskId || el.dataset.filer || "";
+        if ( !owner ) return null;
+        const attr  = el.dataset.taskId ? "data-task-id" : "data-filer";
+        const which = String( el.className ).split( /\s+/ )
+            .find( c => c !== "task-action-input" && ( c.startsWith( "task-" ) || c.startsWith( "holding-" ) ) );
+        return which ? `${attr}\u0000${owner}\u0000${which}` : null;
+    }
+
+    _operatorInputByKey( container, key ) {
+        /**
+         * Find the input a saved key names, inside the freshly painted markup.
+         *
+         * Ensures:
+         *     - returns the element, or null when that row/control is no longer rendered
+         */
+        const parts = key.split( "\u0000" );
+        if ( parts.length !== 3 ) return null;
+        const [ attr, owner, which ] = parts;
+        return container.querySelector(
+            `.${which}[${attr}="${CSS.escape( owner )}"]` );
+    }
+
+    _controlScope( button ) {
+        /**
+         * The pane-local container for one action control: its `.task-actions` cell,
+         * falling back to the enclosing table and finally to the document.
+         *
+         * ⚠️ THE FALLBACK CHAIN IS NOT DEFENSIVE PADDING. `.task-actions` is the tight
+         * scope and is right for the inputs, which sit beside their button. The error
+         * STRIPE is a sibling <tr> and therefore outside it, so that one needs the
+         * table. Both are real cases, not a guess about shapes that might exist.
+         *
+         * Ensures:
+         *     - returns the nearest `.task-actions`, else the nearest table, else document
+         *     - tolerates a plain object with no closest() (test doubles) → document
+         */
+        if ( !button || typeof button.closest !== "function" ) return document;
+        return button.closest( ".task-actions" ) || button.closest( "table" ) || document;
+    }
+
+    _paneScope( button ) {
+        /**
+         * The enclosing TABLE for one action control — the scope the error stripe needs,
+         * because the stripe is a sibling row and sits outside `.task-actions`.
+         */
+        if ( !button || typeof button.closest !== "function" ) return document;
+        return button.closest( "table" ) || document;
+    }
+
+    _wireVerbSelects( container ) {
+        /**
+         * One delegated `change` listener so the row's fields follow the chosen verb.
+         *
+         * 🔴 A SEPARATE LISTENER FROM THE CLICK ONE, AND IT HAS TO BE. A select fires
+         * `change`, not `click`, when the value moves by keyboard — and a keyboard user
+         * who never generates a click would otherwise get a row whose reason box still
+         * carries the previous verb's placeholder and whose date input never appears.
+         *
+         * ⚠️ WIRED FROM EACH PANE'S OWN SETUP because the three panes each wire
+         * themselves by hand. That is a known weak seam — three panes were missing a
+         * CLICK listener as recently as last night, and every row control on them was
+         * dead — so this is one function called three times rather than three copies
+         * that can drift apart.
+         *
+         * Ensures:
+         *     - no-op on a missing container
+         *     - a change on any `.task-verb-select` inside it reaches the verb handler
+         */
+        if ( !container ) return;
+        container.addEventListener( "change", ( e ) => {
+            const sel = e.target && e.target.closest ? e.target.closest( ".task-verb-select" ) : null;
+            if ( sel ) this._handleVerbSelectChange( sel );
+            // The priority select rides the SAME delegated listener rather than getting
+            // its own. Three panes each wire themselves by hand and were missing a click
+            // listener entirely as recently as last night — a second listener here would
+            // be a fourth thing to forget in three places.
+            const prio = e.target && e.target.closest ? e.target.closest( ".task-priority-select" ) : null;
+            if ( prio ) this._handlePrioritySelectChange( prio );
+        } );
+    }
+
+    _handleVerbSelectChange( select ) {
+        /**
+         * The chosen verb decides what the row asks for. One select, so the FIELDS have
+         * to follow it — otherwise the merge would be five controls hidden behind one
+         * label rather than one control that means five things.
+         *
+         * Three things move:
+         *   · the reason placeholder, so each verb still states its own obligation;
+         *   · the reason field's DISABLED state — Rick: "the field disables for
+         *     approved". Approve takes no input, and a live box beside a verb that
+         *     discards its contents invites a justification nothing will ever read;
+         *   · the date input, inserted only for the verbs that require one.
+         *
+         * 🔴 AND IT DISARMS SUBMIT. Won't-fix arms the button for a second click; an
+         * armed button surviving a change of verb is worse than no arming at all,
+         * because the operator switches to Drop, clicks once expecting the usual single
+         * click, and that click is swallowed by a confirmation for a verb they left.
+         *
+         * Ensures:
+         *     - no-op when the select or its cell cannot be resolved
+         *     - the reason input is disabled iff the verb takes no reason
+         *     - a date input exists iff the verb requires one, labelled for THAT verb
+         *     - Submit is returned to its unarmed label and state
+         */
+        if ( !select || typeof select.closest !== "function" ) return;
+        const cell = select.closest( ".task-actions" );
+        if ( !cell ) return;
+
+        const id    = select.dataset.taskId || "";
+        const needs = this._verbNeeds( select.value );
+        const box   = cell.querySelector( ".task-reason-input" );
+        const btn   = cell.querySelector( ".task-submit-button" );
+
+        if ( box ) {
+            box.disabled    = !!needs && !needs.reason;
+            box.placeholder = needs ? needs.placeholder : "reason…";
+            if ( box.disabled ) box.value = "";
+        }
+
+        const existing = cell.querySelector( ".task-chase-input" );
+        if ( needs && needs.date ) {
+            const date = existing || document.createElement( "input" );
+            date.type      = "date";
+            date.className = "task-action-input task-chase-input";
+            date.dataset.taskId = id;
+            date.setAttribute( "aria-label", needs.dateLabel );
+            date.setAttribute( "title", needs.dateLabel );
+            if ( !existing ) cell.insertBefore( date, btn || null );
+        } else if ( existing ) {
+            existing.remove();
+        }
+
+        this._disarmSubmit( btn );
+    }
+
+    _disarmSubmit( button ) {
+        /**
+         * Return Submit to its resting state: one click, one action.
+         *
+         * Ensures:
+         *     - no-op on a missing button
+         *     - the armed flag is cleared and the label reads "Submit"
+         */
+        if ( !button ) return;
+        delete button.dataset.armed;
+        button.classList.remove( "task-submit-armed" );
+        button.textContent = "Submit";
+    }
+
+    async _handleTaskSubmitClick( button ) {
+        /**
+         * The ONE door. Read the verb off the select, check what that verb requires,
+         * then post it — five moves through one control instead of five controls.
+         *
+         * ⚠️ THE BLANK CHECKS ARE A COURTESY, NOT THE CONTROL. `validate_transition`
+         * rejects a blank `->dropped` / `->wont_fix` reason and a park with no
+         * `next_chase_ts` server-side regardless. Checking here only saves a round-trip
+         * and puts the message beside the field the operator has to fix.
+         *
+         * 🔴 WON'T-FIX TAKES TWO CLICKS, AND THE REASON IS THE REDESIGN ITSELF. The old
+         * cell had NO confirmation — measured before this change: eleven `confirm(`
+         * calls in the file, none of them in these handlers. What stood in for one was
+         * written in the comment at the old won't-fix handler: "the reversible sibling
+         * is one button to the left", meaning Demote. Once five verbs share one Submit
+         * there IS no button to the left, so that safeguard stops existing at exactly
+         * the moment the terminal verb moves behind a shared control. The risk did not
+         * merely survive the merge, it grew.
+         *
+         * ⇒ So the step is a second CLICK IN THE PAGE, not a browser `confirm()` —
+         * Rick's ruling. It is a real extra step, and it keeps the standing objection
+         * to modals intact: a browser dialog blocks the event loop, and this page is
+         * driven by an extension that cannot afford that.
+         *
+         * ⚠️ THE BLANK CHECK RUNS BEFORE THE ARMING, deliberately. Arm first and the
+         * operator's second click — the one they believe IS the confirmation — lands on
+         * a refusal for an empty field instead, so the confirmation they gave was never
+         * asked for and the row sits one more click from closing than they think.
+         *
+         * Ensures:
+         *     - no-op without a task id
+         *     - refuses in words, in the operator's own pane, when no verb is chosen
+         *     - refuses a blank reason / missing date before any network call
+         *     - a terminal verb arms on the first click and posts on the second
+         *     - every other verb posts on the first click
+         *     - the row list is refreshed on success; the server's own words are shown
+         *       verbatim on refusal
+         */
+        const taskId = button.dataset.taskId || "";
+        if ( !taskId ) return;
+        const inputScope = this._controlScope( button );
+        const paneScope  = this._paneScope( button );
+
+        const select = inputScope.querySelector
+            ? inputScope.querySelector( `.task-verb-select[data-task-id="${CSS.escape( taskId )}"]` )
+            : null;
+        const verb  = select ? select.value : "";
+        const needs = this._verbNeeds( verb );
+        if ( !needs ) {
+            this._disarmSubmit( button );
+            this._renderTaskRowError( taskId, "Choose an action first — the row does not know what you want done.", paneScope );
+            return;
+        }
+
+        const reason   = this._rowInputValue( taskId, "task-reason-input", inputScope );
+        const chaseDay = this._rowInputValue( taskId, "task-chase-input", inputScope );
+
+        if ( needs.reason && !reason ) {
+            this._disarmSubmit( button );
+            this._renderTaskRowError( taskId, this._verbReasonComplaint( verb ), paneScope );
+            return;
+        }
+        if ( needs.date && !chaseDay ) {
+            this._disarmSubmit( button );
+            this._renderTaskRowError( taskId, verb === "park"
+                ? "A chase date is required — a park is bounded, never indefinite."
+                : "A triage-by date is required — a held row is bounded, never indefinite. Use won't-fix to kill it outright.", paneScope );
+            return;
+        }
+
+        // ⚠️ THE DATE INPUT YIELDS A LOCAL CALENDAR DAY AND THE SERVER WANTS AN INSTANT.
+        // `<input type="date">` gives "YYYY-MM-DD" with no time and no zone, so this
+        // stamps 09:00 LOCAL and converts through the browser's own zone rather than
+        // pasting the bare date and letting it be read as midnight UTC — which lands the
+        // chase on the previous evening for anyone west of Greenwich, i.e. everyone here.
+        let chaseTs = null;
+        if ( needs.date ) {
+            chaseTs = new Date( `${chaseDay}T09:00:00` );
+            if ( isNaN( chaseTs.getTime() ) ) {
+                this._disarmSubmit( button );
+                this._renderTaskRowError( taskId, `Date not understood: ${chaseDay}`, paneScope );
+                return;
+            }
+        }
+
+        if ( needs.armsTwice && button.dataset.armed !== "1" ) {
+            button.dataset.armed = "1";
+            button.classList.add( "task-submit-armed" );
+            // NAMED, not generic. Two terminal verbs now share this arm and they are
+            // opposites — a button reading "Confirm won't-fix" while the select says
+            // Fixed tells the operator the control misheard them, and one reading
+            // "Confirm" tells them nothing about which of the two they are about to do.
+            button.textContent = `Confirm ${this._verbLabel( verb ).toLowerCase()}`;
+            this._renderTaskRowError( taskId, "", paneScope );
+            return;
+        }
+
+        const extras = {};
+        if ( needs.reason ) extras[ verb === "park" ? "park_reason" : "reason" ] = reason;
+        if ( needs.date )   extras.next_chase_ts = chaseTs.toISOString();
+
+        // 🔴 UN-PARK CLEARS THE CHASE — Rick's ruling, row 03d3bf78. A chase date
+        // exists to END a park; once the park is over the date has no job, and leaving
+        // it re-chases him about a row already on his board.
+        //
+        // ⚠️ AN EXPLICIT null, NOT AN OMITTED KEY. Every other verb contributes
+        // `next_chase_ts` only when it has one, and an absent key leaves the stored
+        // value untouched. "Send nothing" and "send null" are different requests and
+        // only one of them clears. Kept identical to the multiplexer's
+        // `transitionExtras` — the two clients must not disagree about what a verb posts.
+        if ( verb === "unpark" ) extras.next_chase_ts = null;
+
+        // ── THE OPERATOR ATTESTATION (Rick's ruling 2026-09-04, row 1e12cc08) ──────
+        //
+        // `->done` requires a receipt that can CARRY a close, and a human marking a row
+        // fixed has no artifact to cite — "I looked at it and it is fixed" is a
+        // judgement. Manufacturing a test-shaped receipt for it would be the dishonest
+        // option; this records what actually happened.
+        //
+        // 🔴 THE VALUE BELOW IS A PLACEHOLDER AND THE SERVER OVERWRITES IT. Enforcement
+        // is bound to `account_email` off a signature-validated token, which nothing in
+        // this file can see or influence — see `_resolved_operator_attestation` in
+        // routers/tasks.py. Whatever string is sent here is discarded and replaced with
+        // the identity the SERVER resolves, so a reader of the stored row is seeing the
+        // server's answer and never the browser's claim. It is sent anyway because a
+        // request nobody can read is harder to debug than one that says what it meant.
+        //
+        // ⚠️ AND AN AGENT SENDING THIS EXACT BODY IS REFUSED 403. Every seat in the
+        // fleet authenticates by API key and has no login account, so this door is open
+        // to a logged-in human and to nobody else. The client is not the control and
+        // must never be read as one.
+        if ( verb === "fixed" ) {
+            extras.receipt_refs = {
+                operator_attestation: `operator ${this.queueSessionId || "browser"}`
+            };
+        }
+
+        this._renderTaskRowError( taskId, "", paneScope );
+        this._disarmSubmit( button );
+
+        // 🔴 DEAD AND LABELLED FOR THE WHOLE ROUND TRIP, because this one can be a two-minute
+        // round trip. An `approve` out of the holding area IS the promotion, so it fires the
+        // gate at `routers/tasks.py` and blocks on Rick up to `task approval promotion ask
+        // timeout seconds` (120 today). `_disarmSubmit` above puts the label back to "Submit"
+        // — correct for the armed state, and it leaves a LIVE button reading exactly what a
+        // never-pressed button reads.
+        //
+        // ⚠️ THE SECOND CLICK IS THE REAL COST, NOT THE MISSING SPINNER. Re-entering fires a
+        // SECOND transition and therefore a SECOND ask at Rick; if the first has already
+        // landed, the second is an illegal edge out of `queued` and returns refused — so the
+        // operator reads a refusal for a promotion that actually worked.
+        //
+        // ⚠️ "Waiting…" DELIBERATELY DOES NOT SAY "waiting on Rick". Four of the five verbs
+        // never reach the gate, and the client cannot tell a gated wait from a slow one
+        // without inferring it from elapsed time. It reports that a wait is in progress,
+        // which is the question the operator actually has.
+        //
+        // The restore is in a `finally` and may land on a DETACHED button — `refreshTaskList`
+        // repaints the pane out from under it. That is harmless by design, and cheaper than
+        // re-finding the row to avoid it.
+        const resting = button ? button.textContent : "";
+        if ( button ) {
+            button.disabled    = true;
+            button.textContent = "Waiting…";
+        }
+        let result;
+        try {
+            result = await this._transitionTask( taskId, needs.status, extras );
+        } finally {
+            if ( button ) {
+                button.disabled    = false;
+                button.textContent = resting;
+            }
+        }
+        if ( result.ok ) {
+            this._settlePinnedRowAfterVerb( taskId, needs.status );
+            await this.refreshTaskList();
+        }
+        else this._renderTaskRowError( taskId, `${this._verbLabel( verb )} refused: ${result.message}`, paneScope );
+    }
+
+    _settlePinnedRowAfterVerb( taskId, toStatus ) {
+        /**
+         * After a verb lands on the row the Find box filtered to, decide what the
+         * filter does next (Rick, row 700f0e1d: "whenever delete from a row
+         * filtered by the search box takes place, the search card results should be
+         * cleared so that the whole task list is displayed again").
+         *
+         * 🔴 THE PIN IS A FETCHED SNAPSHOT, so after ANY verb it shows the row as it
+         * was. Two outcomes, keyed on where the row goes:
+         *   · the verb takes it OFF the task list (drop, won't-fix, fixed, park,
+         *     demote) → clear the filter and show the whole list, which is his ask;
+         *   · the row STAYS on the list (un-park, approve → queued) → re-fetch the
+         *     pin, so the filter he chose survives and shows the row's new state.
+         * Kept identical to the multiplexer's `settlePinnedAfterVerb`.
+         *
+         * Requires:
+         *     - toStatus is the status the verb transitioned the row TO
+         *
+         * Ensures:
+         *     - no-op unless a row is pinned AND it is this row
+         *     - "queued" re-runs the lookup; every other status clears the filter
+         *     - never throws
+         */
+        const pinned = this._taskLookupPinned;
+        if ( !pinned || pinned.id !== taskId ) return;
+        if ( toStatus === "queued" ) { void this.runTaskLookup(); return; }
+        this.clearTaskLookup();
+    }
+
+    _verbReasonComplaint( verb ) {
+        /**
+         * The refusal each verb earns when its reason is blank.
+         *
+         * ⚠️ FIVE VERBS SHARE ONE BOX AND MUST NOT SHARE ONE COMPLAINT. "A reason is
+         * required" would be true of four of them and would teach none of them: park
+         * needs a QUOTE, demote needs to say why a row goes back to triage, and
+         * won't-fix is a refusal whose justification is the only thing distinguishing
+         * it from work that got forgotten. Merging the controls was the ask; merging
+         * what they mean was not.
+         *
+         * Ensures:
+         *     - returns a verb-specific sentence, never a generic one
+         */
+        const spec = this._verbNeeds( verb );
+        return ( spec && spec.complaint ) || "A reason is required.";
+    }
+
+    _verbLabel( verb ) {
+        /**
+         * The human name of a verb, for a refusal stripe.
+         *
+         * Ensures: returns the verb itself when unknown, never undefined.
+         */
+        const spec = this._verbNeeds( verb );
+        return ( spec && spec.label ) || verb;
+    }
+
+
+    renderHoldingArea( composite ) {
+        /**
+         * Paint the holding-area pane: rows filed but not yet cleared to start,
+         * grouped by FILER, each group carrying batch approve / batch won't-fix.
+         *
+         * ⚠️ AN EMPTY HOLDING AREA IS A REAL STATE AND SAYS SO. Rendering nothing
+         * would be indistinguishable from the pane failing to load, and this pane
+         * is expected to be empty most of the time — which is exactly when a silent
+         * blank is most likely to be read as "broken" and least likely to be checked.
+         *
+         * Requires:
+         *     - composite is the fetchHoldingArea result (may carry a status sentinel)
+         *
+         * Ensures:
+         *     - a sentinel status renders its own message, never a blank pane
+         *     - rows render grouped by filer, groups alphabetical
+         *     - the count in the header is the number of HELD rows
+         *     - no-op (never throws) when the container is absent from the page
+         *     - the pane's delegated control listener is installed before any paint
+         */
+        const container = document.getElementById( "holding-area-container" );
+        if ( !container ) return;
+
+        this._wireHoldingAreaControls();
+
+        const countEl = document.getElementById( "holding-area-count" );
+        const sentinels = {
+            auth_required     : "Sign-in required to read the holding area.",
+            query_unavailable : "The shared query module did not load — this is a deploy defect, not an outage.",
+            unreachable       : "Task store unreachable — last known state not shown."
+        };
+        if ( composite && sentinels[ composite.status ] ) {
+            container.innerHTML = `<div class="holding-area-empty">${this.escapeHtml( sentinels[ composite.status ] )}</div>`;
+            if ( countEl ) countEl.textContent = "—";
+            return;
+        }
+
+        const groups = this._groupHeldRowsByFiler( composite && composite.tasks );
+        const total  = groups.reduce( ( n, g ) => n + g.tasks.length, 0 );
+
+        if ( countEl ) countEl.textContent = String( total );
+
+        // Row 52142a84 — forget an open filer once its rows drain, so a filer who files
+        // again comes back COLLAPSED, as the multiplexer's renderer does.
+        if ( this._holdingAreaExpandedFilers instanceof Set ) {
+            const present = new Set( groups.map( g => g.filer ) );
+            for ( const filer of Array.from( this._holdingAreaExpandedFilers ) ) {
+                if ( !present.has( filer ) ) this._holdingAreaExpandedFilers.delete( filer );
+            }
+        }
+
+        // 🔴 THE SAME CAP, AND IT IS NOT SYMMETRY — IT IS MEASURED. Called live
+        // against :7999 today, `status=done` returned EXACTLY 500 of 1,912 matching
+        // rows, silently. The holding area asks a status-filtered question of the
+        // same endpoint with the same limit, so it inherits the same silence the
+        // moment the triage queue passes 500. The banner's own comment says it
+        // best: the defect was never the number, it was the silence, and headroom
+        // expires without telling anyone.
+        const truncation = this._renderTaskListTruncationBanner(
+            composite,
+            ( typeof window !== "undefined" && window.LUPIN_HOLDING_AREA_QUERY ) || ""
+        );
+
+        if ( total === 0 ) {
+            container.innerHTML = truncation + `<div class="holding-area-empty">Nothing waiting on triage.</div>`;
+            return;
+        }
+
+        const holdingState = this._captureOperatorState( container );
+        container.innerHTML = truncation + groups.map( g => this._renderHoldingAreaGroup( g.filer, g.tasks ) ).join( "" );
+        this._restoreOperatorState( container, holdingState );
+        this._hydrateRequestChips( container );
+    }
+
+    _renderHoldingAreaGroup( filer, tasks ) {
+        /**
+         * One filer's held rows: a header bar carrying the batch controls, then the
+         * rows themselves reusing the task-list row renderer.
+         *
+         * 🔴 THE BATCH WON'T-FIX REASON IS PER GROUP, NOT PER ROW, AND THAT IS A
+         * REAL COST STATED PLAINLY. Every row closed by one press gets the SAME
+         * justification. That is honest for the case the batch exists to serve —
+         * "everything this person filed on Tuesday is overtaken" — and dishonest for
+         * a mixed group, where it stamps one reason onto rows that were refused for
+         * different reasons. The per-row control is still there and is the right
+         * tool whenever the reasons differ; this one is deliberately the blunt
+         * instrument, labelled as such in its tooltip.
+         *
+         * ⚠️ BATCH APPROVE CARRIES NO CONFIRM. It is the non-destructive direction —
+         * an over-approved row can be demoted straight back, which is precisely the
+         * transition Rick added for this. Batch won't-fix is terminal and therefore
+         * requires the reason box to be filled before it will fire, which is the
+         * friction a confirm dialog would otherwise provide without blocking the
+         * extension's event loop.
+         *
+         * Requires:
+         *     - filer is the display label; tasks is that filer's held rows
+         *
+         * Ensures:
+         *     - returns escaped HTML for one group
+         *     - the group's controls carry data-filer so the handler can find its rows
+         */
+        const key   = this._escapeTaskAttr( filer );
+        const label = this.escapeHtml( filer );
+        const ianaZone = this.getResolvedTimeZone ? this.getResolvedTimeZone() : undefined;
+
+        const rows = tasks.map( t => this._renderTaskRow( t, ianaZone ) ).join( "" );
+
+        // Row 52142a84 — every group is an accordion, COLLAPSED until the operator
+        // opens it; the open set survives the 60s repaint (see _toggleHoldingAreaGroup).
+        const expanded = this._holdingAreaExpandedFilers instanceof Set && this._holdingAreaExpandedFilers.has( filer );
+
+        return `
+            <div class="holding-area-group${expanded ? "" : " collapsed"}" data-filer="${key}">
+                <div class="holding-area-group-header" role="button" tabindex="0" aria-expanded="${expanded ? "true" : "false"}"
+                     title="Click to show or hide this filer's held rows">
+                    <span class="holding-area-group-chevron" aria-hidden="true">${expanded ? "▼" : "▶"}</span>
+                    <span class="holding-area-filer">${label}</span>
+                    <span class="holding-area-group-count">${tasks.length}</span>
+                    <button type="button" class="task-action-btn holding-approve-all" data-filer="${key}"
+                            title="Approve every row ${label} filed — reversible, a row approved by mistake can be demoted straight back">Approve all</button>
+                    <button type="button" class="task-action-btn holding-wont-fix-all" data-filer="${key}"
+                            title="Close every row ${label} filed as won't-fix. TERMINAL, and every row gets the SAME reason — use the per-row control when the reasons differ">Won't fix all</button>
+                    <input type="text" class="task-action-input holding-wont-fix-all-reason" data-filer="${key}"
+                           placeholder="one reason, applied to every row below…" aria-label="Batch won't-fix reason">
+                    <span class="holding-area-group-status" data-filer="${key}"></span>
+                </div>
+                <table class="task-list-table holding-area-table">
+                    ${this._taskTableHeaderRow()}
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>`;
+    }
+
+    _wireHoldingAreaControls() {
+        /**
+         * Install this pane's single delegated click listener.
+         *
+         * 🔴 THIS PANE HAD NONE AT ALL, AND SO EVERY CONTROL IN IT WAS DEAD — batch
+         * approve, batch won't-fix, and all five per-row controls. Its two sibling panes
+         * each wire one on render (`renderTaskList` -> `_wireTaskListAccordion`,
+         * `renderEpicBoard` -> `_wireEpicBoardAccordion`); `renderHoldingArea` wired
+         * nothing, so the buttons painted and the clicks landed on no handler. The pane
+         * exists for exactly these controls.
+         *
+         * Measured before the fix, on the page's real shape — `#task-list-container` and
+         * `#holding-area-container` are SIBLING sections, not nested — with the handlers
+         * stubbed: all three probes failed on "handler was called = false", never on a
+         * missing button, while the same probe against the task-list pane saw its click
+         * arrive. So this is a MISSING ROUTE, the same class as the epic board's, and not
+         * a lookup picking the wrong copy.
+         *
+         * Row 52142a84 — a click on a group's header bar that no control claims now
+         * toggles that filer's group (collapsed by default, Rick 2026-09-24). Any
+         * other unclaimed click is ignored.
+         *
+         * Ensures:
+         *     - listener attached at most once (guarded by _holdingAreaControlsWired)
+         *     - no-op if the container is absent (degrade-safe)
+         *     - row controls AND batch controls both reach their handlers
+         */
+        if ( this._holdingAreaControlsWired ) return;
+        const container = document.getElementById( "holding-area-container" );
+        if ( !container ) return;
+
+        container.addEventListener( "click", ( e ) => {
+            // The detail 📄 first: this pane wired row controls ONLY, so the icon
+            // rendered and reached no handler at all (Rick's P0, row 17393c56).
+            if ( this._handleRequestChipClick( e.target ) ) return;   // a request verdict, never a row verb
+            if ( this._handleTaskIdCopyClick( e.target ) ) return;
+            if ( this._handleDetailEmojiClick( e.target ) ) return;
+            if ( this._toggleHoldingAreaGroup( e.target ) ) return;
+            this._handleRowControlClick( e.target );
+        } );
+        container.addEventListener( "keydown", ( e ) => {
+            // Enter / Space on a focused group header toggles it, as the task list's does.
+            if ( e.key !== "Enter" && e.key !== " " && e.key !== "Spacebar" ) return;
+            if ( this._toggleHoldingAreaGroup( e.target ) ) e.preventDefault();
+        } );
+        this._wireVerbSelects( container );
+
+        this._holdingAreaControlsWired = true;
+        this.log( "Holding-area control delegation wired" );
+    }
+
+    _toggleHoldingAreaGroup( target ) {
+        /**
+         * Open or close one filer's holding-area group from a click or key on its bar.
+         *
+         * ⚠️ THE BATCH CONTROLS LIVE ON THE SAME BAR, so a target inside a button or
+         * an input is NOT a toggle: pressing "Approve all" or typing a reason must
+         * never fold the group away from under the operator.
+         *
+         * Ensures:
+         *     - returns false for anything that is not bare header bar
+         *     - otherwise flips .collapsed, aria-expanded and the chevron IN PLACE,
+         *       records the choice in _holdingAreaExpandedFilers so the next repaint
+         *       keeps it, and returns true
+         */
+        if ( !target || typeof target.closest !== "function" ) return false;
+        const header = target.closest( ".holding-area-group-header" );
+        if ( !header ) return false;
+        if ( target.closest( "button, input, select, textarea, a" ) ) return false;
+        const group = header.closest( ".holding-area-group" );
+        if ( !group ) return false;
+        if ( !( this._holdingAreaExpandedFilers instanceof Set ) ) this._holdingAreaExpandedFilers = new Set();
+        const filer    = group.dataset.filer || "";
+        const expanded = group.classList.contains( "collapsed" );
+        group.classList.toggle( "collapsed", !expanded );
+        header.setAttribute( "aria-expanded", expanded ? "true" : "false" );
+        const chevron = header.querySelector( ".holding-area-group-chevron" );
+        if ( chevron ) chevron.textContent = expanded ? "▼" : "▶";
+        if ( expanded ) this._holdingAreaExpandedFilers.add( filer );
+        else this._holdingAreaExpandedFilers.delete( filer );
+        return true;
+    }
+
+    _heldRowIdsForFiler( filer ) {
+        /**
+         * The full row ids in one filer's group, read off the rendered DOM.
+         *
+         * ⚠️ READ FROM THE DOM, NOT FROM A CACHED ARRAY. The pane repaints on every
+         * poll; a captured list would go stale the moment a peer approved something,
+         * and the batch would then act on ids that had already moved. What is on
+         * screen is what the operator pressed the button about.
+         *
+         * Ensures:
+         *     - returns the data-task-id of every row control in that group
+         *     - returns [] for an unknown filer (never throws)
+         */
+        const group = document.querySelector( `.holding-area-group[data-filer="${CSS.escape( filer )}"]` );
+        if ( !group ) return [];
+        // 🔴 READ OFF THE VERB SELECT, WHICH EVERY ROW HAS. This used to key on
+        // `.task-approve-button`, and when the five per-verb buttons merged into one
+        // Submit that selector matched NOTHING — so the batch would have reported
+        // success over zero rows. A "which rows are here" lookup must key on a control
+        // that is present on every row unconditionally, never on one that renders only
+        // when a particular verb happens to be legal.
+        // 🔴 ONLY THE ROWS APPROVE IS LEGAL ON, which is what the old selector meant
+        // without ever saying so: `.task-approve-button[data-task-id]` matched enabled
+        // buttons only, because the DISABLED form was rendered with no data-task-id.
+        // Every row now carries a select, so the group scope alone would widen the batch
+        // to rows it was never reaching — and today that is invisible, since this pane is
+        // fed a held-rows-only query. Asking the option is the same question the old
+        // markup was answering by accident.
+        return Array.from( group.querySelectorAll( ".task-verb-select[data-task-id]" ) )
+            .filter( sel => {
+                const approve = sel.querySelector( 'option[value="approve"]' );
+                return !!approve && !approve.disabled;
+            } )
+            .map( b => b.dataset.taskId )
+            .filter( Boolean );
+    }
+
+    _renderHoldingGroupStatus( filer, message ) {
+        /**
+         * Show (or clear) one group's inline status line.
+         *
+         * Ensures:
+         *     - a missing element is a no-op, never a throw (degrade-safe)
+         */
+        const el = document.querySelector( `.holding-area-group-status[data-filer="${CSS.escape( filer )}"]` );
+        if ( el ) el.textContent = message || "";
+    }
+
+    _setHoldingBatchControls( filer, disabled ) {
+        /**
+         * Take one filer's batch controls out of service for the length of a batch, and
+         * put them back.
+         *
+         * 🔴 BOTH BUTTONS, NOT THE ONE THAT WAS PRESSED. Approve-All and Won't-Fix-All act
+         * on the SAME rows, so leaving the other live mid-batch lets an operator close a
+         * group that is halfway through being approved — a race between two verbs over one
+         * set of ids, decided by whichever transition the server happens to see last.
+         *
+         * ⚠️ NOT A DISCLOSURE OR A REPAINT. `_heldRowIdsForFiler` reads the rendered DOM
+         * on purpose, and the pane does not repaint until the batch is done — so on a
+         * second click the same ids are still there and the group starts over. Measured:
+         * a second click mid-batch took the transition count from 1 to 2.
+         *
+         * Requires:
+         *     - filer identifies a rendered group
+         *
+         * Ensures:
+         *     - both batch buttons for that group take the given disabled state
+         *     - a missing group is a no-op, never a throw (degrade-safe, same as
+         *       _renderHoldingGroupStatus above)
+         */
+        const sel = `.holding-approve-all[data-filer="${CSS.escape( filer )}"], ` +
+                    `.holding-wont-fix-all[data-filer="${CSS.escape( filer )}"]`;
+        document.querySelectorAll( sel ).forEach( b => { b.disabled = disabled; } );
+    }
+
+    async _applyHoldingBatch( filer, toStatus, extras, verb ) {
+        /**
+         * Apply one transition to every row in a filer's group, then report what
+         * actually happened.
+         *
+         * 🔴 A PARTIAL FAILURE IS REPORTED AS A PARTIAL FAILURE. The obvious
+         * implementation fires N requests, awaits them, and refreshes — which
+         * renders a shorter list and looks like success. If two of eight were
+         * refused, those two are still on screen and nothing says why; the operator
+         * reads the shrunken list as "it worked" and the refusals are invisible.
+         * So this counts both outcomes and keeps the FIRST server message, which is
+         * the one carrying the actor and the allowlist on a 403.
+         *
+         * ⚠️ SEQUENTIAL, NOT Promise.all. The refusals worth reading are
+         * authorization refusals, and firing eight at once against an allowlist
+         * check produces eight identical 403s in a race whose order is not
+         * reproducible. One at a time is slower and its failure report is stable.
+         *
+         * 🔴 AND SEQUENTIAL BECAME UNBOUNDED WHEN THE PROMOTION GATE LANDED, WHICH IS
+         * WHY THE COUNTER MOVES INSIDE THE LOOP. `not_approved → queued` IS the
+         * promotion, so with `task approval enforcement active = True` every row of a
+         * batch approve trips the gate at `routers/tasks.py` and asks Rick, bounded by
+         * `task approval promotion ask timeout seconds` (120 today). `authedFetch`
+         * passes no AbortSignal and there is no AbortController anywhere in this file,
+         * so eight held rows can hold the pane for eight timeouts.
+         *
+         * The old line was painted ONCE before the loop and not touched again until
+         * every row had been attempted — so for the whole of that wait the operator saw
+         * a frozen `Approved 8…` and could not tell "waiting on Rick" from "hung".
+         * Neither decision was wrong when it was made: the sequential loop is correct,
+         * and it was written when a refusal came back instantly.
+         *
+         * ⚠️ THE IN-FLIGHT COUNTER COUNTS ATTEMPTS; THE FINAL LINE COUNTS SUCCESSES.
+         * Deliberate, and the opposite choice is the tempting one. Counting successes
+         * in flight would leave a wholly-refused batch sitting at `0 of 8…` — frozen
+         * again, and now frozen in a way that looks exactly like the defect this fixes.
+         * The `…` marks the line as in-flight; the final line drops it and resolves the
+         * two numbers apart with `— N refused`.
+         *
+         * ⚠️ IT DOES NOT NAME THE ROW BEING WAITED ON, which would be the more useful
+         * message. The ids come off the DOM by design (see `_heldRowIdsForFiler`) and
+         * the title lives in a SIBLING `<tr>`, reachable only by walking DOM order —
+         * a coordinate, not a reference. Left out on purpose rather than forgotten.
+         *
+         * Requires:
+         *     - filer identifies a rendered group; toStatus is the target status
+         *
+         * Ensures:
+         *     - returns { ok, failed, firstError }
+         *     - the group's status line names both counts whenever any row failed
+         *     - the status line is repainted after EVERY row, never only at the end
+         *     - the in-flight count advances on a refusal as well as on a success
+         *     - refreshes the pane once, after all rows have been attempted
+         */
+        const ids = this._heldRowIdsForFiler( filer );
+        if ( ids.length === 0 ) {
+            this._renderHoldingGroupStatus( filer, "No rows in this group." );
+            return { ok: 0, failed: 0, firstError: null };
+        }
+
+        this._renderHoldingGroupStatus( filer, `${verb} 0 of ${ids.length}…` );
+        this._setHoldingBatchControls( filer, true );
+
+        let ok = 0, failed = 0, firstError = null;
+        try {
+        for ( const id of ids ) {
+            const result = await this._transitionTask( id, toStatus, extras );
+            if ( result.ok ) ok += 1;
+            else {
+                failed += 1;
+                if ( firstError === null ) firstError = result.message;
+            }
+            // 🔴 REPAINT INSIDE THE LOOP, NOT ONLY AFTER IT. See the counter note in the
+            // docstring: one static line painted before an unbounded wait is
+            // indistinguishable from a hang.
+            this._renderHoldingGroupStatus( filer, `${verb} ${ok + failed} of ${ids.length}…` );
+        }
+        } finally {
+            this._setHoldingBatchControls( filer, false );
+        }
+
+        this._renderHoldingGroupStatus(
+            filer,
+            failed === 0
+                ? `${ok} of ${ids.length} ${verb.toLowerCase()}.`
+                : `${ok} of ${ids.length} ${verb.toLowerCase()} — ${failed} refused. First refusal: ${firstError}`
+        );
+        await this.refreshHoldingArea();
+        return { ok, failed, firstError };
+    }
+
+    async _handleHoldingApproveAllClick( button ) {
+        /**
+         * Batch approve — promote every row this filer put in the holding area.
+         *
+         * No reason field and no confirm: this is the non-destructive direction, and
+         * a row approved by mistake is demoted straight back, which is the exact
+         * transition Rick added for the purpose.
+         */
+        const filer = button.dataset.filer || "";
+        if ( !filer ) return;
+        await this._applyHoldingBatch( filer, "queued", {}, "Approved" );
+    }
+
+    async _handleHoldingWontFixAllClick( button ) {
+        /**
+         * Batch won't-fix — close every row this filer put in the holding area, all
+         * under ONE reason, which the server requires non-blank on each.
+         *
+         * The blank check is enforced here because the alternative is N identical
+         * 422s the operator has to read one at a time to learn a single fact.
+         */
+        const filer = button.dataset.filer || "";
+        if ( !filer ) return;
+        const input  = document.querySelector( `.holding-wont-fix-all-reason[data-filer="${CSS.escape( filer )}"]` );
+        const reason = input && typeof input.value === "string" ? input.value.trim() : "";
+        if ( !reason ) {
+            this._renderHoldingGroupStatus( filer, "A reason is required — it will be applied to every row in this group." );
+            return;
+        }
+        await this._applyHoldingBatch( filer, "wont_fix", { reason }, "Closed" );
+    }
+
+    async refreshHoldingArea() {
+        /**
+         * One holding-area refresh: fetch → render, with the same in-flight debounce
+         * the task list uses so a manual press landing on a poll tick cannot
+         * double-fetch.
+         */
+        if ( this._holdingAreaFetchInFlight ) {
+            this.log( "Holding-area refresh skipped — fetch already in flight (debounce)" );
+            return;
+        }
+        this._holdingAreaFetchInFlight = true;
+        try {
+            this.renderHoldingArea( await this.fetchHoldingArea() );
+        } finally {
+            this._holdingAreaFetchInFlight = false;
+        }
     }
 
     openTaskBodyOverlay( bodyText, idLabel ) {
@@ -10160,6 +15085,17 @@ class NotificationsUI {
         if ( !container ) return;
 
         container.addEventListener( "click", ( e ) => this._handleTaskListClick( e.target ) );
+        this._wireVerbSelects( container );
+        // A repaint landing BETWEEN a press and its release replaces the pressed node, and
+        // the click then reaches no handler at all — no request, no refusal, nothing. The
+        // window is only as long as a press (~100ms against a 60s poll, roughly one click
+        // in six hundred), which is too rare to explain any one report and not too rare to
+        // happen. Preserving state cannot help here: the node itself is gone. So hold the
+        // paint for the length of the press instead, and take it the moment it ends.
+        container.addEventListener( "mousedown", () => { this._taskListPressInFlight = true; } );
+        for ( const release of [ "mouseup", "mouseleave", "blur" ] ) {
+            container.addEventListener( release, () => this._releaseTaskListPress() );
+        }
         container.addEventListener( "keydown", ( e ) => {
             // Enter / Space activate the focused header OR the focused detail 📄
             // (a11y). " " is the modern key value; "Spacebar" the legacy spelling.
@@ -10394,11 +15330,14 @@ class NotificationsUI {
             if ( this._taskWaitsOnRick( task ) ) onRick.push( task );
         } );
 
+        // 🔨 PRIORITY FIRST — Rick's ruling 2026-09-09. Fourth and last copy of this
+        // comparator (two here, two in the TS multiplexer). ⚠️ Keep all four
+        // identical until a parity guard exists — row 507183ff.
         const byUrgency = ( a, b ) => {
-            const sr = this._taskStatusRank( a.status ) - this._taskStatusRank( b.status );
-            if ( sr !== 0 ) return sr;
             const pr = this._taskPriorityRank( a.priority ) - this._taskPriorityRank( b.priority );
             if ( pr !== 0 ) return pr;
+            const sr = this._taskStatusRank( a.status ) - this._taskStatusRank( b.status );
+            if ( sr !== 0 ) return sr;
             return this._taskTitleLabel( a ).localeCompare( this._taskTitleLabel( b ) );
         };
 
@@ -10543,41 +15482,27 @@ class NotificationsUI {
 
     _renderEpicRow( task ) {
         /**
-         * Render one epic-board row (a <tr>) with FOUR columns: ID · Priority ·
-         * Status · Title.
+         * The epic board's entry point — a thin wrapper over the one renderer.
          *
-         * DELIBERATELY narrower than the task-list row. Owner is omitted because
-         * that is precisely what the pane above is for — repeating it here would
-         * make the macro view a worse copy of the micro one (plan §6).
+         * IT USED TO BE A SECOND IMPLEMENTATION, with its own column order (ID · P ·
+         * Status · Title · Actions), no Class field, and its own colspans. That is
+         * exactly the shape Rick asked us to kill: moving between the epic board and
+         * the task list meant re-parsing the layout. The markup now lives in
+         * `_renderRow` alone and this method chooses the row class, nothing more.
          *
-         * EVERY store-sourced value is escapeHtml'd (this card writes via
-         * innerHTML, so it must escape explicitly).
+         * NO TIMEZONE IS PASSED, and that is deliberate rather than an omission: this
+         * pane never had one, so next-chase formats exactly as it did before. When the
+         * epic board learns a zone, hand it through here.
          *
          * Requires:
-         *     - task is a row object (fields rendered defensively — falsy → "—")
+         *     - task is a row object (fields rendered defensively — falsy to "—")
          *
          * Ensures:
-         *     - the <tr> carries a `task-status-*` class; the Priority cell carries
-         *       a `task-prio-*` heat class when recognized
-         *     - Title is truncated with the FULL title on a hover-tooltip
-         *     - Pure: no DOM access, no side effects (object in → string out)
+         *     - returns `_renderRow` output with the "epic-row" row class
+         *     - identical cell-for-cell to the task list's row, by construction
+         *     - Pure: no DOM access, no side effects (object in to string out)
          */
-        const statusWord  = this.escapeHtml( task.status || "unknown" );
-        const statusClass = this._taskStatusClass( task.status );
-        const prioClass   = this._taskPriorityClass( task.priority );
-        const idLabel     = this.escapeHtml( this._taskIdLabel( task ) );
-        const fullTitle   = this._taskTitleLabel( task );
-        const titleText   = this.escapeHtml( this._truncateTaskTitle( fullTitle ) );
-        const titleAttr   = this._escapeTaskAttr( fullTitle );
-        const priority    = this.escapeHtml( this._taskCellOrDash( task.priority ) );
-
-        return `
-            <tr class="epic-row ${statusClass}">
-                <td class="epic-col-id">${idLabel}</td>
-                <td class="epic-col-priority${prioClass ? " " + prioClass : ""}">${priority}</td>
-                <td class="epic-col-status"><span class="task-status-dot"></span>${statusWord}</td>
-                <td class="epic-col-title" title="${titleAttr}">${titleText}</td>
-            </tr>`;
+        return this._renderRow( task, null, { rowClass: "epic-row" } );
     }
 
     _renderEpicGroup( epicKey, headerLabel, tasks, state, extraClass, storyText ) {
@@ -10607,13 +15532,13 @@ class NotificationsUI {
 
         const groupHeaderHtml = `
             <tr class="epic-group-header${extraClass ? " " + extraClass + "-header" : ""}" role="button" tabindex="0" aria-expanded="${isCollapsed ? "false" : "true"}" aria-controls="${idSlug}">
-                <td colspan="4">${chevron}<span class="epic-group-label">${headerLabel}</span><span class="epic-group-count">${tasks.length}</span></td>
+                <td colspan="${this._rowWidth()}">${chevron}<span class="epic-group-label">${headerLabel}</span><span class="epic-group-count">${tasks.length}</span></td>
             </tr>`;
 
         // The story rides INSIDE the group, so opening an epic answers "what is
         // this?" in the same gesture that reveals its rows.
         const storyHtml = storyText
-            ? `<tr class="epic-story-row"><td colspan="4">${this.escapeHtml( storyText )}</td></tr>`
+            ? `<tr class="epic-story-row"><td colspan="${this._rowWidth()}">${this.escapeHtml( storyText )}</td></tr>`
             : "";
 
         const rows = tasks.map( t => this._renderEpicRow( t ) ).join( "" );
@@ -10645,15 +15570,7 @@ class NotificationsUI {
          */
         const choices = ( state && typeof state === "object" ) ? state : {};
 
-        const headerRow = `
-            <thead>
-                <tr>
-                    <th class="epic-col-id">ID</th>
-                    <th class="epic-col-priority">P</th>
-                    <th class="epic-col-status">Status</th>
-                    <th class="epic-col-title">Title</th>
-                </tr>
-            </thead>`;
+        const headerRow = this._rowTableHeaderRow();
 
         const sections = [];
 
@@ -10746,7 +15663,9 @@ class NotificationsUI {
         const model     = this.groupTasksByEpic( openTasks );
         if ( countEl ) countEl.textContent = String( model.groups.length );
 
+        const epicState = this._captureOperatorState( container );
         container.innerHTML = this.renderEpicBoardTable( model, this.loadEpicGroupState() );
+        this._restoreOperatorState( container, epicState );
 
         if ( stampUpdated ) this._stampEpicBoardUpdated();
     }
@@ -10778,6 +15697,7 @@ class NotificationsUI {
          *     - the header's aria-expanded + chevron reflect the new state
          */
         tbody.classList.toggle( "collapsed", isCollapsed );
+        if ( isCollapsed ) this._closeDisclosedRowsIn( tbody );
         const header = tbody.querySelector( ".epic-group-header" );
         if ( header ) {
             header.setAttribute( "aria-expanded", String( !isCollapsed ) );
@@ -10806,6 +15726,161 @@ class NotificationsUI {
         this._applyEpicGroupCollapseState( tbody, isCollapsed );
     }
 
+    _handleDetailEmojiClick( target ) {
+        /**
+         * The line-3 detail 📄, for EVERY pane. Rick's P0, row 17393c56.
+         *
+         * 🔴 ONE BRANCH, THREE DISPATCHERS, BECAUSE THREE COPIES IS HOW THIS BROKE.
+         * `_handleTaskListClick` carried this logic and the other two dispatchers did
+         * not, so the same rendered icon was live in one pane and inert in two —
+         * measured open in the browser: the click opened the overlay on the task list
+         * and did nothing on the holding area or the epic board. Unifying the MARKUP
+         * did not unify the BEHAVIOUR, which is the same lesson as the pane-scoped CSS
+         * rule this fix also removed.
+         *
+         * Requires:
+         *     - target is the clicked element (or any descendant of the emoji)
+         *
+         * Ensures:
+         *     - returns true iff the click was a detail-emoji click and is now HANDLED
+         *     - a DIMMED (empty-body) emoji is inert but still returns true, so it
+         *       never falls through to an accordion toggle
+         *     - returns false for anything else, leaving the caller's dispatch intact
+         */
+        const emoji = target && target.closest ? target.closest( ".task-detail-emoji" ) : null;
+        if ( !emoji ) return false;
+        if ( !emoji.classList.contains( "task-detail-empty" ) ) {
+            this.openTaskBodyOverlay( emoji.dataset.taskBody || "", emoji.dataset.taskId || "" );
+        }
+        return true;
+    }
+
+    _handleTaskIdCopyClick( target ) {
+        /**
+         * Click the id cell, get the FULL id on the clipboard. Rick's row dbb4c187.
+         *
+         * 🔴 ONE BRANCH, THREE DISPATCHERS — the shape `_handleDetailEmojiClick` was
+         * rewritten into after three copies of one behaviour shipped live in one pane
+         * and inert in two (row 17393c56). The same three call sites carry this one.
+         *
+         * ⚠️ IT RETURNS TRUE SO THE CLICK STOPS HERE — DEFENSIVELY, AND THE ORIGINAL
+         * REASON GIVEN FOR IT WAS FALSE. 046d9f52's message and this docstring both said
+         * "the id cell sits inside a row whose click already toggles the disclosure;
+         * falling through would copy AND toggle on one click". MEASURED FALSE (Rachel,
+         * reviewing 2026-09-04): the handler was changed to `return false` so the click
+         * falls through, and the row did not toggle in ANY pane. Against a positive
+         * control that proves the instrument can see one — `.task-disclose-button` moves
+         * a pane's open-disclosure count 0 -> 1 in all three — a click on the id cell,
+         * the status cell or the title cell moved NOTHING, and no group collapsed either.
+         *
+         * ⇒ A ROW'S DISCLOSURE IS TOGGLED ONLY BY `.task-disclose-button`, via
+         * `_handleRowControlClick`. Everything else falls through to
+         * `_handleTaskAccordionToggle`, which returns unless the click landed in a group
+         * header. So there is no copy-AND-toggle to prevent TODAY.
+         *
+         * KEEP THE `return true` ANYWAY. It is cheap insurance against a future change
+         * that makes rows click-to-toggle, and the guard test's "did not also toggle"
+         * clause is correct and should stay — it is simply UNWATCHED, because there is
+         * nothing there to watch. What is corrected here is the REASON, not the code: a
+         * future reader who deletes this line to test the stated consequence will find no
+         * consequence and conclude the guard was pointless.
+         *
+         * ⚠️ IT COPIES `data-task-full-id`, NEVER THE CELL'S TEXT. The column renders
+         * `_taskIdLabel`'s 8-char slice; the store's verbs take 36. A handler reading
+         * `textContent` returns something that looks like an id and fails at the paste.
+         *
+         * ⚠️ CONFIRMATION IS REQUIRED, NOT DECORATION — a copy with no feedback is
+         * indistinguishable from a dead click. `task-id-copied` is added and removed on
+         * a timer; it paints a tick via `::after` rather than replacing the label, so
+         * the cell does not change width and nothing is destroyed if the timer never
+         * fires.
+         *
+         * ⚠️ `navigator.clipboard` IS UNAVAILABLE ON AN INSECURE ORIGIN. localhost is a
+         * secure context so :7999 and :8000 are fine; served over plain http to another
+         * host it is absent, and the cell then shows `task-id-copy-failed` rather than
+         * reporting a success that did not happen.
+         *
+         * Requires:
+         *     - target is the clicked element (or any descendant of the id span)
+         *
+         * Ensures:
+         *     - returns true iff the click was an id-cell click and is now HANDLED
+         *     - the FULL id reaches the clipboard; an empty id copies nothing but
+         *       still returns true, so it never falls through to a row toggle
+         *     - returns false for anything else, leaving the caller's dispatch intact
+         */
+        const cell = target && target.closest ? target.closest( ".task-id-copy" ) : null;
+        if ( !cell ) return false;
+
+        const full = cell.dataset.taskFullId || "";
+        if ( full ) this._copyTaskIdToClipboard( cell, full );
+        return true;
+    }
+
+    _copyTaskIdToClipboard( cell, full ) {
+        /**
+         * Write one id to the clipboard and say on the cell whether it landed.
+         *
+         * Split out from the dispatch branch so the branch stays synchronous: a
+         * dispatcher that awaited would hand its caller a promise where every other
+         * branch hands it a boolean.
+         *
+         * Ensures:
+         *     - `task-id-copied` on success, `task-id-copy-failed` on refusal or on a
+         *       missing `navigator.clipboard`, either cleared after the timeout
+         *     - never throws into the click dispatcher
+         */
+        const mark = ok => {
+            cell.classList.remove( "task-id-copied", "task-id-copy-failed" );
+            cell.classList.add( ok ? "task-id-copied" : "task-id-copy-failed" );
+            cell.dataset.copyState = ok ? "copied" : "failed";
+            setTimeout( () => {
+                cell.classList.remove( "task-id-copied", "task-id-copy-failed" );
+            }, 1200 );
+        };
+
+        const clip = ( typeof navigator !== "undefined" && navigator.clipboard )
+            ? navigator.clipboard : null;
+        if ( !clip || typeof clip.writeText !== "function" ) { mark( false ); return; }
+
+        try {
+            Promise.resolve( clip.writeText( full ) ).then( () => mark( true ), () => mark( false ) );
+        } catch ( e ) {
+            mark( false );
+        }
+    }
+
+    _handleEpicBoardClick( target ) {
+        /**
+         * The epic board's delegated click entry point: row controls first, then the
+         * group accordion.
+         *
+         * ⚠️ THE ORDER IS THE WHOLE POINT, and it is the order the task list already
+         * used. A control click that fell through to the accordion would open the row's
+         * form and collapse the group it lives in, in one gesture.
+         *
+         * Keyboard activation is deliberately NOT routed here: the controls are real
+         * `<button>` elements, which a BROWSER activates on Enter/Space by dispatching
+         * a click, so they arrive through the click listener above. The keydown
+         * listener stays on the header, a `<tr>`, which gets no such courtesy.
+         *
+         * ⚠️ THAT LAST CLAIM IS ABOUT BROWSERS AND IS NOT COVERED BY THIS TIER. Measured:
+         * happy-dom does NOT synthesize a click from a dispatched Enter keydown (0 clicks),
+         * so no unit test here can observe it, and none pretends to. If keyboard reach
+         * for these controls needs a guard, it belongs in the Playwright E2E suite.
+         *
+         * Ensures:
+         *     - a row control consumes the click and the accordion does not also fire
+         *     - anything else falls through to _handleEpicAccordionToggle unchanged
+         */
+        if ( this._handleTaskIdCopyClick( target ) ) return;
+
+        if ( this._handleDetailEmojiClick( target ) ) return;
+
+        if ( this._handleRowControlClick( target ) ) return;
+        this._handleEpicAccordionToggle( target );
+    }
+
     _wireEpicBoardAccordion() {
         /**
          * Install the single delegated click+keyboard listener for the epic
@@ -10820,7 +15895,8 @@ class NotificationsUI {
         const container = document.getElementById( "epic-board-container" );
         if ( !container ) return;
 
-        container.addEventListener( "click", ( e ) => this._handleEpicAccordionToggle( e.target ) );
+        container.addEventListener( "click", ( e ) => this._handleEpicBoardClick( e.target ) );
+        this._wireVerbSelects( container );
         container.addEventListener( "keydown", ( e ) => {
             // " " is the modern key value; "Spacebar" the legacy spelling.
             if ( e.key !== "Enter" && e.key !== " " && e.key !== "Spacebar" ) return;
@@ -11035,18 +16111,19 @@ class NotificationsUI {
             return;
         }
 
-        toolbar.querySelectorAll( '.toolbar-btn' ).forEach( btn => {
+        // `[data-section]` is the predicate, not a list of ids: a section toggle is a
+        // toolbar button that NAMES a section. The 📂 roots button borrows `toolbar-btn`
+        // for its styling and names nothing, so an unfiltered selector bound it too and
+        // every click called toggleSectionVisibility( undefined ) — row 47759aa3.
+        toolbar.querySelectorAll( '.toolbar-btn[data-section]' ).forEach( btn => {
             btn.addEventListener( 'click', () => this.toggleSectionVisibility( btn.dataset.section ) );
         } );
 
-        // Task-list accordion collapse-all / expand-all controls. These live in the
-        // #section-toolbar beside the 🗒️ entry point but carry a DISTINCT class
-        // (.task-accordion-btn, NOT .toolbar-btn) so the section-visibility
-        // dispatcher above skips them — they are actions, not section toggles.
-        const collapseAllBtn = document.getElementById( 'task-list-collapse-all' );
-        const expandAllBtn   = document.getElementById( 'task-list-expand-all' );
-        if ( collapseAllBtn ) collapseAllBtn.addEventListener( 'click', () => this.collapseAllTaskOwners() );
-        if ( expandAllBtn )   expandAllBtn.addEventListener( 'click', () => this.expandAllTaskOwners() );
+        // The task-list collapse-all / expand-all buttons were removed from the
+        // #section-toolbar on 2026-09-15 (Rick: the toolbar shows and hides accordion
+        // areas; those two were task-list actions). collapseAllTaskOwners() and
+        // expandAllTaskOwners() below are unchanged, so a future card-header control
+        // can wire straight to them.
 
         // Apply saved visibility state
         this.applySectionVisibility();
@@ -11103,9 +16180,12 @@ class NotificationsUI {
          * Ensures:
          *     - All section visibility states saved as JSON
          *     - Persists across page refreshes and browser restarts
+         *     - Only buttons that NAME a section are saved, so no "undefined" key is
+         *       written; the object is rebuilt from scratch each time, which is also
+         *       what drops an "undefined" key left by an earlier build (row 47759aa3)
          */
         const visibility = {};
-        document.querySelectorAll( '.toolbar-btn' ).forEach( btn => {
+        document.querySelectorAll( '#section-toolbar .toolbar-btn[data-section]' ).forEach( btn => {
             visibility[ btn.dataset.section ] = btn.classList.contains( 'active' );
         } );
         localStorage.setItem( this.SECTION_VISIBILITY_KEY, JSON.stringify( visibility ) );
@@ -11495,7 +16575,8 @@ class NotificationsUI {
             const currentMode = document.getElementById( 'tts-mode' )?.value || this.TTS_MODE_DEFAULT;
             
             // Play using existing TTS infrastructure
-            await this.playTTS( replayText, currentMode );
+  // Row aa13fdd7 — a button press, so the 0% slider does not silence it.
+            await this.playTTS( replayText, currentMode, null, true );
             
             this.log( `✅ Job replay completed for: ${jobId}` );
             
@@ -11790,6 +16871,68 @@ class NotificationsUI {
         } else {
             header.appendChild( badgeNode );
         }
+    }
+
+    /**
+     * Re-read the console roster and repaint every sender card's console button.
+     *
+     * The roster is the join from a card's 8-hex to the seat's FULL id (row 27760534), and
+     * the endpoint is admin-only — so a non-admin never asks, and never gets a button.
+     *
+     * Requires:
+     *     - this.isAdmin reflects the authenticated user
+     *
+     * Ensures:
+     *     - a non-admin issues no request and the roster is left as it was
+     *     - a successful read replaces ccConsoleState.roster with its `seats` (an empty list
+     *       when the body carries none, e.g. an unreachable arbiter) and repaints
+     *     - a refused or failed read leaves the previous roster in place and never throws
+     */
+    async refreshCcConsoleRoster() {
+        if ( !this.isAdmin ) return;
+        try {
+            const response = await fetch( CC_CONSOLE_ROSTER_PATH, { headers : this.getAuthHeaders() } );
+            if ( !response.ok ) {
+                console.warn( `[CC-CONSOLE] roster read refused: HTTP ${ response.status }` );
+                return;
+            }
+            const body = await response.json();
+            ccConsoleState.roster = ( body && Array.isArray( body.seats ) ) ? body.seats : [ ];
+        } catch ( err ) {
+            console.warn( "[CC-CONSOLE] roster read failed:", err );
+            return;
+        }
+        this.repaintCcConsoleButtons();
+    }
+
+    /**
+     * Repaint the console buttons on every sender card in #notifications-list.
+     *
+     * Ensures:
+     *     - a non-admin's cards carry no button, whatever the roster holds
+     *     - no-op when the list is absent
+     */
+    repaintCcConsoleButtons() {
+        const container = document.getElementById( "notifications-list" );
+        if ( !container ) return;
+        ccConsolePaintSenderButtons( container, this.isAdmin ? ccConsoleState.roster : [ ] );
+    }
+
+    /**
+     * Watch #notifications-list so a card that is created, re-rendered or re-badged gets its
+     * console button back. Idempotent: a second call starts no second observer.
+     *
+     * Ensures:
+     *     - at most one observer, on childList + subtree
+     *     - one immediate repaint, for the cards already rendered
+     */
+    startCcConsoleButtonObserver() {
+        if ( this.ccConsoleButtonObserver ) return;
+        const container = document.getElementById( "notifications-list" );
+        if ( !container ) return;
+        this.ccConsoleButtonObserver = new MutationObserver( () => this.repaintCcConsoleButtons() );
+        this.ccConsoleButtonObserver.observe( container, { childList : true, subtree : true } );
+        this.repaintCcConsoleButtons();
     }
 
     // ============================================================
@@ -12909,6 +18052,26 @@ class NotificationsUI {
             } );
         }
 
+        // Row 47759aa3 — the global file-browser entry point Rick asked for. It routes
+        // through `_openContentPane`, the SAME door a doc-link click uses, so the button
+        // and the links cannot drift into two behaviours. That drift is what this row was
+        // filed about: one condition written twice, in two languages, disagreeing.
+        // ⚠️ DELEGATED ON document, NOT bound to the element. A direct listener is the
+        // idiom the layout-mode button above uses, and it is the wrong one here: this
+        // button lives in the section toolbar, which is re-rendered, and a listener on a
+        // replaced element is silently gone. The doc-link interception three blocks down
+        // delegates for the same reason. Caught by a test whose fixture rebuilt the DOM —
+        // which is precisely what a toolbar re-render does at runtime.
+        document.addEventListener( "click", ( ev ) => {
+            const rootsBtn = ev.target.closest( "#doc-roots-toggle" );
+            if ( !rootsBtn ) return;
+            ev.stopPropagation();
+            // /app/docs with NO ?path= — the viewer answers a bare visit with the Roots
+            // panel expanded (Rick, "A roots page, fully open"). No scope list lives
+            // here; the page asks the live /api/docs/scopes (bug 3d41fcba).
+            this._openContentPane( "doc", "/app/docs", "Files" );
+        } );
+
         // Splitter — draggable divider between .left-column and .content-pane.
         this._initPaneSplitter();
         // Apply persisted ratio on init so the geometry is right from the first open.
@@ -12942,13 +18105,23 @@ class NotificationsUI {
             } );
         }
 
-        // Doc-link click interception (horizontal mode only). Document-level
-        // delegation catches anchors that resolve to /app/docs?path=... —
+        // Doc-link click interception — EVERY layout mode (row 47759aa3; this
+        // line read "horizontal mode only" until the gate below was removed, and
+        // a comment that vouches for a deleted guard is worse than none).
+        // Document-level delegation catches anchors that resolve to /app/docs?path=... —
         // both bare relative form AND absolute http://localhost:port/ form.
         // Applies to abstracts, notification bodies, recent-activity entries,
         // everywhere on the page outside the iframe.
         document.addEventListener( "click", ( ev ) => {
-            if ( this._layoutMode !== "horizontal" ) return;
+            // 🔴 NO LAYOUT-MODE GATE (row 47759aa3). This listener used to open with
+            // `if ( this._layoutMode !== "horizontal" ) return;`, so in vertical
+            // layout the click was never claimed and the anchor's baked-in
+            // `target="_blank"` opened a new tab. Measured on :7999 2026-09-26:
+            // horizontal rendered in the pane, vertical did not — same anchor.
+            // Rick's ruling 2026-09-26: a history doc link renders in the content
+            // area wherever the layout puts it, on top of the accordion stack or
+            // to the right of it. The pane already renders correctly in both, so
+            // this is about REACHING it.
             const anchor = ev.target.closest( "a[href]" );
             if ( !anchor ) return;
             // Self-exception (bug 11c01fbc): a doc-link inside the action-required
@@ -12964,7 +18137,19 @@ class NotificationsUI {
             // #action-required-content — an ancestry-only test misses it. It only ever
             // shows the abstract just clicked, so a doc-link in it is self-content by
             // construction and must fall through to its baked-in target=_blank.
-            if ( anchor.closest( "#action-required-content, .abstract-tooltip" ) ) return;
+            // 🔴 EXPLICIT window.open, NOT a fall-through any more. This used to
+            // `return` bare and let the anchor's baked-in `target="_blank"` open
+            // the tab — but the markdown post-process no longer stamps `_blank` on
+            // a doc link, so a bare return would navigate the CURRENT tab and
+            // destroy the pane anyway. The behaviour Rick and María ratified is
+            // unchanged; what changed is that the code now states it.
+            if ( this._isPaneResidentAnchor( anchor ) ) {
+                const paneResidentHref = this._normalizeDocLinkHref( anchor.getAttribute( "href" ) );
+                if ( !this._isDocLinkHref( paneResidentHref ) ) return;
+                ev.preventDefault();
+                window.open( paneResidentHref, "_blank", "noopener,noreferrer" );
+                return;
+            }
             // Iframe-internal clicks don't fire on the parent document anyway,
             // but defense-in-depth bail if the target somehow resolves inside.
             if ( ev.target.closest( "#content-pane-body iframe" ) ) return;
@@ -13109,6 +18294,38 @@ class NotificationsUI {
     _normalizeDocLinkHref( href ) {
         if ( !href ) return href;
         return href.replace( /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?/, "" );
+    }
+
+    /**
+     * True when this href addresses the in-app doc viewer, in either the bare
+     * relative form or the absolute-loopback form.
+     *
+     * THE ONE PREDICATE both the markdown post-process and the click
+     * interception consult (row 47759aa3). They used to decide independently:
+     * the renderer stamped `target="_blank"` on every anchor while the
+     * interception only claimed clicks in horizontal layout, so the two
+     * disagreed and the disagreement was the bug. One function, two callers.
+     *
+     * @param {string|null} href
+     * @returns {boolean}
+     */
+    _isDocLinkHref( href ) {
+        const normalized = this._normalizeDocLinkHref( href );
+        return !!normalized && normalized.startsWith( "/app/docs?path=" );
+    }
+
+    /**
+     * The surfaces whose doc links must KEEP opening a new tab, because the
+     * Reading Pane is SHARED with the live action-required response buttons and
+     * `_renderContentPaneEntry` clears it — which would destroy the buttons the
+     * user is mid-way through pressing. Paid for twice: 11c01fbc (the card) and
+     * 17ce50a5 (the tooltip, which is fixed-position and appended to <body>, so
+     * an ancestry test against the card alone misses it). María ratified the
+     * carve-out 2026-09-26; it does not contradict Rick's ruling, whose
+     * population is doc links in the NOTIFICATION HISTORY.
+     */
+    _isPaneResidentAnchor( anchor ) {
+        return !!anchor.closest( "#action-required-content, .abstract-tooltip" );
     }
 
     /**
@@ -13932,9 +19149,9 @@ class NotificationsUI {
      */
     async pushSessionTopicNotification( sessionId, topic ) {
         try {
-            await fetch( '/api/notify', {
+            await this.authedFetch( '/api/notify', {
                 method  : 'POST',
-                headers : { ...this.getAuthHeaders(), 'Content-Type': 'application/json' },
+                headers : { 'Content-Type': 'application/json' },
                 body    : JSON.stringify( {
                     message       : topic,
                     type          : 'custom',
@@ -14466,9 +19683,9 @@ class NotificationsUI {
 
         try {
             // Call backend API to generate gist (include abstracts for richer semantic signal)
-            const response = await fetch( '/api/notifications/generate-gist', {
+            const response = await this.authedFetch( '/api/notifications/generate-gist', {
                 method  : 'POST',
-                headers : { ...this.getAuthHeaders(), 'Content-Type': 'application/json' },
+                headers : { 'Content-Type': 'application/json' },
                 body    : JSON.stringify( { messages, abstracts } )
             } );
 
@@ -14565,11 +19782,28 @@ class NotificationsUI {
                 collapsed    : false,
                 lastActivity : timestamp,
                 totalCount   : 0,
-                newCount     : 0
+                newCount     : 0,
+                seenKeys     : new Set()
             };
             this.senderGroups.set( senderId, group );
             // During initial load, append to preserve API order; at runtime, prepend to show new activity first
             this.createSenderCard( senderId, !this.isInitialLoad );
+        }
+
+        // Skip a row this card already holds (row b670b76c). Two history loads can overlap — a
+        // filter change mid-load, or a live arrival racing the startup load — and each used to
+        // push and count the same row again. The key carries direction because the live answer
+        // path re-adds the question's own object, same id, as the outgoing reply. A row with no
+        // id cannot be recognised as a repeat, so it is always added. Matches the multiplexer's
+        // NotificationStore, which keys rows by id.
+        const rowId = notification.id ?? notification.id_hash;
+        if ( rowId !== undefined && rowId !== null ) {
+            const seenKey = `${isResponse ? 'out' : 'in'}:${rowId}`;
+            if ( group.seenKeys.has( seenKey ) ) {
+                this.log( `Skipping a notification this card already holds: ${seenKey}` );
+                return;
+            }
+            group.seenKeys.add( seenKey );
         }
 
         // Get or create date group within sender
@@ -14797,7 +20031,7 @@ class NotificationsUI {
                        title="Generate smart gist from conversation">✨</button>
                <span class="sender-session-name"
                      onclick="event.stopPropagation(); window.notificationsUI.editSessionName('${sessionId}')"
-                     title="Click to rename">${sessionName || ''}</span>`
+                     title="Click to rename">${this.escapeHtml( sessionName || '' )}</span>`
             : '';
 
         // Active indicator: filled circle for most recent sender, hollow for others
@@ -14916,6 +20150,10 @@ class NotificationsUI {
             // strip ordering — initial-load passes false (preserve API
             // order, newest-first), runtime passes true (newest leftmost).
             this._addStripIcon( senderId, projectName, persona, sessionId, insertAtTop );
+            // A card created at RUNTIME is usually a seat that has just started, so its roster
+            // row is new too (the multiplexer re-reads on the same cue). Initial-load cards are
+            // painted by the read that authentication already started.
+            if ( insertAtTop ) this.refreshCcConsoleRoster();
             if ( this.ccFocusState.enabled
                  && this.ccFocusState.focused_sender_id !== senderId ) {
                 const icon = document.getElementById( this._stripIconIdFor( senderId ) );
@@ -15351,12 +20589,9 @@ class NotificationsUI {
         }
 
         try {
-            const response = await fetch(
+            const response = await this.authedFetch(
                 `/api/notifications/date/${encodeURIComponent( senderId )}/${encodeURIComponent( this.currentUserEmail )}/${dateString}`,
-                {
-                    method  : 'DELETE',
-                    headers : this.getAuthHeaders()
-                }
+                { method: 'DELETE' }
             );
 
             if ( response.ok ) {
@@ -15576,9 +20811,7 @@ class NotificationsUI {
             }
             const params = queryParams.toString() ? `?${queryParams.toString()}` : '';
 
-            const sendersResponse = await fetch( sendersUrl + params, {
-                headers: this.getAuthHeaders()
-            } );
+            const sendersResponse = await this.authedFetch( sendersUrl + params );
 
             if ( !sendersResponse.ok ) {
                 if ( sendersResponse.status === 404 ) {
@@ -15646,9 +20879,7 @@ class NotificationsUI {
 
             const url = params.toString() ? `${baseUrl}?${params}` : baseUrl;
 
-            const response = await fetch( url, {
-                headers: this.getAuthHeaders()
-            } );
+            const response = await this.authedFetch( url );
 
             if ( !response.ok ) {
                 if ( response.status === 404 ) {
@@ -15918,17 +21149,28 @@ class NotificationsUI {
                 break;
         }
         
-        // Process message for project prefix formatting (e.g., [LUPIN] -> LUPIN:)
-        let processedMessage = message;
+        // Process message for project prefix formatting (e.g., [LUPIN] -> LUPIN:), and truncate
+        // long messages for list display.
+        //
+        // Row b5e13bd0: the message is the sender's text, so it is escaped — AFTER the cut, on
+        // the raw text. Escaping first would let the cut split an entity; cutting the marked-up
+        // string also counted the <strong><em> tags as characters. The 80-character limit is on
+        // what the user sees, "LUPIN: rest of the message".
+        let displayMessage;
         const prefixMatch = message.match( /^\[([A-Z]+)\]\s*(.*)$/ );
         if ( prefixMatch ) {
-            const prefix = prefixMatch[1];  // Extract "LUPIN"
+            const prefix           = prefixMatch[1];  // Extract "LUPIN"
             const remainingMessage = prefixMatch[2];  // Extract remaining message
-            processedMessage = `<strong><em>${prefix}:</em></strong> ${remainingMessage}`;
+            const visibleLength    = prefix.length + 2 + remainingMessage.length;
+            const shownRemainder   = visibleLength > 80
+                ? remainingMessage.substring( 0, Math.max( 0, 77 - prefix.length - 2 ) ) + "..."
+                : remainingMessage;
+            // The regex admits only A-Z here, so this escape changes nothing today and no test can
+            // see it removed. It stays so that widening the regex cannot reopen the hole.
+            displayMessage = `<strong><em>${this.escapeHtml( prefix )}:</em></strong> ${this.escapeHtml( shownRemainder )}`;
+        } else {
+            displayMessage = this.escapeHtml( message.length > 80 ? message.substring( 0, 77 ) + "..." : message );
         }
-        
-        // Truncate long messages for list display (use processed message)
-        const displayMessage = processedMessage.length > 80 ? processedMessage.substring( 0, 77 ) + "..." : processedMessage;
         
         // Use the server-provided id_hash for proper identification
         const notificationId = data.id_hash || `notification_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -15964,7 +21206,7 @@ class NotificationsUI {
                 <span style="color: #666; margin-right: 10px; font-size: 10px; font-style: italic; font-weight: bold;">${time}</span>
                 <span style="color: ${priorityColor}; font-weight: bold; margin-right: 5px;">${type.toUpperCase()}</span>
                 <span style="color: ${priorityColor}; font-size: 10px; margin-right: 10px;">(${priority})</span>
-                <span style="flex: 1; color: #333;" title="${message}">${displayMessage}</span>
+                <span style="flex: 1; color: #333;" title="${this.escapeHtml( message )}">${displayMessage}</span>
                 <span class="audio-control-panel" data-notification-id="${notificationId}" style="margin-left: auto; margin-right: 8px; display: flex; gap: 3px; align-items: center;">
                     <span class="audio-restart-btn audio-control-enabled" 
                           style="cursor: pointer; opacity: 1.0; transition: opacity 0.2s; font-size: 14px;" 
@@ -16309,7 +21551,8 @@ class NotificationsUI {
             const currentMode = document.getElementById( 'tts-mode' )?.value || this.TTS_MODE_DEFAULT;
             
             // Use playTTS() to ensure cache checking and proper currentTTSText handling
-            await this.playTTS( ttsMessage, currentMode );
+  // Row aa13fdd7 — a button press, so the 0% slider does not silence it.
+            await this.playTTS( ttsMessage, currentMode, null, true );
             
             // If we have currentAudio and this is a restart, reset position to beginning
             if ( restart && this.currentAudio ) {
@@ -16322,7 +21565,7 @@ class NotificationsUI {
             // tracking stays consistent across clients (mobile + other web sessions).
             // Playback already succeeded locally; a failed POST is a consistency concern
             // we log-only, not a user-visible error.
-            fetch( `/api/notifications/${notificationId}/played?api_key=${this.notificationState.apiKey}`, {
+            this.authedFetch( `/api/notifications/${notificationId}/played`, {
                 method: "POST"
             } ).catch( err => this.log( `mark-played POST failed (non-fatal): ${err.message}` ) );
 
@@ -16348,7 +21591,7 @@ class NotificationsUI {
         }
         
         try {
-            const response = await fetch( `/api/notifications/${this.notificationState.userId}?include_played=true&api_key=${this.notificationState.apiKey}` );
+            const response = await this.authedFetch( `/api/notifications/${this.notificationState.userId}?include_played=true` );
             
             if ( !response.ok ) {
                 this.error( "Failed to load initial notifications:", response.status, response.statusText );
@@ -16380,7 +21623,7 @@ class NotificationsUI {
         this.log( `Delete button clicked for notification: ${notificationId}` );
         
         try {
-            const response = await fetch( `/api/notifications/${notificationId}?api_key=${this.notificationState.apiKey}`, {
+            const response = await this.authedFetch( `/api/notifications/${notificationId}`, {
                 method: 'DELETE'
             });
             
@@ -16452,12 +21695,9 @@ class NotificationsUI {
         this.log( `Deleting conversation with ${projectName} (${count} messages)...` );
 
         try {
-            const response = await fetch(
+            const response = await this.authedFetch(
                 `/api/notifications/conversation/${encodeURIComponent( senderId )}/${encodeURIComponent( this.currentUserEmail )}`,
-                {
-                    method  : 'DELETE',
-                    headers : this.getAuthHeaders()
-                }
+                { method: 'DELETE' }
             );
 
             if ( !response.ok ) {
@@ -16549,7 +21789,7 @@ class NotificationsUI {
             }
 
             const url = `/api/notifications/bulk/${encodeURIComponent( this.currentUserEmail )}?${params}`;
-            const response = await fetch( url, {
+            const response = await this.authedFetch( url, {
                 method: 'DELETE'
             });
 
@@ -16661,7 +21901,8 @@ class NotificationsUI {
             const currentMode = document.getElementById( 'tts-mode' )?.value || this.TTS_MODE_DEFAULT;
             
             // Use playTTS() to ensure cache checking and proper currentTTSText handling
-            await this.playTTS( ttsMessage, currentMode );
+  // Row aa13fdd7 — a button press, so the 0% slider does not silence it.
+            await this.playTTS( ttsMessage, currentMode, null, true );
             
             this.log( `Successfully replayed ${type}/${priority} notification` );
             
@@ -16824,7 +22065,8 @@ class NotificationsUI {
                     'table', 'thead', 'tbody', 'tr', 'th', 'td'
                 ],
                 ALLOWED_ATTR: [
-                    'href', 'target', 'rel', 'title'
+                    'href', 'target', 'rel', 'title',
+                    'align'          // marked writes a `|:-:|` column as align="…" on its th/td
                 ],
                 // Force all links to open in new tab safely
                 ADD_ATTR: [ 'target', 'rel' ],
@@ -16832,10 +22074,18 @@ class NotificationsUI {
                 FORBID_ATTR: [ 'onerror', 'onclick', 'onload', 'onmouseover' ]
             } );
 
-            // Post-process: add target="_blank" and rel="noopener" to all links
+            // Post-process: add target="_blank" and rel="noopener" to EXTERNAL links.
+            //
+            // 🔴 IN-APP DOC LINKS ARE LEFT BARE (row 47759aa3). Stamping `_blank`
+            // on them made a new tab the silent fallback for any click the
+            // doc-link interception failed to claim — which is exactly how the
+            // vertical-layout regression presented: the guard bailed, the
+            // attribute took over, and the doc opened outside the app. Leaving it
+            // off makes the shared in-app path the only way a doc link resolves.
             const tempDiv = document.createElement( 'div' );
             tempDiv.innerHTML = sanitizedHtml;
             tempDiv.querySelectorAll( 'a' ).forEach( link => {
+                if ( this._isDocLinkHref( link.getAttribute( 'href' ) ) ) return;
                 link.setAttribute( 'target', '_blank' );
                 link.setAttribute( 'rel', 'noopener noreferrer' );
             } );
@@ -16845,6 +22095,28 @@ class NotificationsUI {
             this.error( `Markdown rendering failed: ${error.message}` );
             return this.escapeHtml( text );
         }
+    }
+
+    /**
+     * Whether marked would build a table anywhere in this markdown, nested ones included.
+     *
+     * Requires:
+     *     - marked.js loaded globally (window.marked)
+     *     - text is a string with real newlines
+     *
+     * Ensures:
+     *     - true iff marked's GFM lexer emits a `table` token, at any depth
+     *     - pipes in prose, or a header row with no delimiter row, return false
+     *
+     * @param {string} text - Markdown text
+     * @returns {boolean}
+     */
+    containsMarkdownTable( text ) {
+        let found = false;
+        marked.walkTokens( marked.lexer( text, { gfm: true } ), ( token ) => {
+            if ( token.type === 'table' ) found = true;
+        } );
+        return found;
     }
 
     /**
@@ -16892,6 +22164,14 @@ class NotificationsUI {
                 breaks : true
             } );
 
+            // A GFM table is block-level too, so parseInline() shows its pipes as text (row
+            // 5ae3ce90). Like a fence, only a message that contains one goes to the block
+            // renderer — Rick's ruling, 2026-09-10: legacy stays minimal until it is deleted.
+            // marked's own lexer decides what a table is, so pipes in prose never qualify.
+            if ( this.containsMarkdownTable( text ) ) {
+                return this.renderMarkdown( text );
+            }
+
             // parseInline() produces NO wrapping <p> tags
             const rawHtml = marked.parseInline( text );
 
@@ -16903,10 +22183,18 @@ class NotificationsUI {
                 FORBID_ATTR  : [ 'onerror', 'onclick', 'onload', 'onmouseover' ]
             } );
 
-            // Post-process: add target="_blank" and rel="noopener" to all links
+            // Post-process: add target="_blank" and rel="noopener" to EXTERNAL links.
+            //
+            // 🔴 IN-APP DOC LINKS ARE LEFT BARE (row 47759aa3). Stamping `_blank`
+            // on them made a new tab the silent fallback for any click the
+            // doc-link interception failed to claim — which is exactly how the
+            // vertical-layout regression presented: the guard bailed, the
+            // attribute took over, and the doc opened outside the app. Leaving it
+            // off makes the shared in-app path the only way a doc link resolves.
             const tempDiv = document.createElement( 'div' );
             tempDiv.innerHTML = sanitizedHtml;
             tempDiv.querySelectorAll( 'a' ).forEach( link => {
+                if ( this._isDocLinkHref( link.getAttribute( 'href' ) ) ) return;
                 link.setAttribute( 'target', '_blank' );
                 link.setAttribute( 'rel', 'noopener noreferrer' );
             } );
@@ -17462,7 +22750,7 @@ class NotificationsUI {
         card.innerHTML = `
             <div class="minimized-position">#${queuePosition}</div>
             <div class="minimized-icon">${typeIcon}</div>
-            <div class="minimized-message">${truncatedMessage}</div>
+            <div class="minimized-message">${this.escapeHtml( truncatedMessage )}</div>
             ${personaBadge}
             <div class="minimized-timeout">${timeoutDisplay}</div>
         `;
@@ -18813,11 +24101,6 @@ class NotificationsUI {
                 </div>
             `;
         } else if ( notification.response_type === 'open_ended' ) {
-            // DEBUG: Log notification object and response_default value
-            console.log( '[DEBUG] Open-ended notification object:', notification );
-            console.log( '[DEBUG] response_default value:', notification.response_default );
-            console.log( '[DEBUG] response_default type:', typeof notification.response_default );
-
             // Voice-first layout: mic button first for immediate keyboard activation
             responseUI = `
                 <div class="response-open-ended">
@@ -18825,7 +24108,7 @@ class NotificationsUI {
                         <button class="response-mic-button" data-notification-id="${notification.id}" title="Press Enter or Space to record (30s max, ESC to cancel)">
                             🎤
                         </button>
-                        <input type="text" class="response-text-input" id="response-input-${notification.id}" value="${notification.response_default || ''}" placeholder="Type your response...">
+                        <input type="text" class="response-text-input" id="response-input-${notification.id}" value="${this.escapeHtml( notification.response_default || '' )}" placeholder="Type your response...">
                         <button class="response-submit-button" data-notification-id="${notification.id}">
                             Submit
                         </button>
@@ -18870,7 +24153,7 @@ class NotificationsUI {
                 <button class="action-required-cancel-btn" data-notification-id="${notification.id}" title="Cancel and use default (Esc)">
                     ✕
                 </button>
-                <div class="action-required-title">${projectBadge}${notification.title || notification.message}</div>
+                <div class="action-required-title">${projectBadge}${this.escapeHtml( notification.title || notification.message )}</div>
                 <div class="action-required-timer-controls">
                     ${abstractIndicatorHTML}
                     ${personaBadge}
@@ -18947,11 +24230,6 @@ class NotificationsUI {
             const submitButton = card.querySelector( '.response-submit-button' );
             const input = card.querySelector( '.response-text-input' );
             const micButton = card.querySelector( '.response-mic-button' );
-
-            // DEBUG: Verify input element and its value attribute
-            console.log( '[DEBUG] Input element found:', input );
-            console.log( '[DEBUG] Input value attribute:', input ? input.value : 'INPUT NOT FOUND' );
-            console.log( '[DEBUG] Input getAttribute("value"):', input ? input.getAttribute( 'value' ) : 'N/A' );
 
             // Phase 2.4.1: Real-time validation for open-ended input
             const validateInput = () => {
@@ -19196,7 +24474,7 @@ class NotificationsUI {
 
         return `
             <div class="prediction-hint">
-                <div class="prediction-hint-label">${predictedText}</div>
+                <div class="prediction-hint-label">${this.escapeHtml( predictedText )}</div>
                 <div class="prediction-hint-strategy">${strategy}</div>
                 ${voteControls}
             </div>
@@ -19483,11 +24761,11 @@ class NotificationsUI {
 
             return `
                 <label class="mc-option">
-                    <input type="${inputType}" name="${questionId}" value="${opt.label}"
+                    <input type="${inputType}" name="${questionId}" value="${this.escapeHtml( opt.label )}"
                            class="mc-input" data-idx="${idx}" ${isChecked ? 'checked' : ''}>
                     <div class="mc-option-content">
-                        <span class="mc-option-label">${opt.label}</span>
-                        <span class="mc-option-desc">${opt.description || ''}</span>
+                        <span class="mc-option-label">${this.escapeHtml( opt.label )}</span>
+                        <span class="mc-option-desc">${this.escapeHtml( opt.description || '' )}</span>
                     </div>
                 </label>
             `;
@@ -19524,7 +24802,7 @@ class NotificationsUI {
                                 data-notification-id="${notification.id}"
                                 title="Press Enter or Space to record (30s max, ESC to cancel)">🎤</button>
                         <input type="text" class="mc-other-input" id="mc-other-input-${notification.id}"
-                               placeholder="Type or speak custom answer..." value="${otherText}">
+                               placeholder="Type or speak custom answer..." value="${this.escapeHtml( otherText )}">
                     </div>
                 </div>
             </label>
@@ -19566,7 +24844,7 @@ class NotificationsUI {
                     ${projectBadge}
                     <span class="mc-question-indicator">Question ${questionIndex + 1} of ${totalQuestions}</span>
                 </div>
-                <div class="mc-question-text">${question.question}</div>
+                <div class="mc-question-text">${this.escapeHtml( question.question )}</div>
                 ${question.multi_select ? '<div class="mc-multi-hint">(Select all that apply)</div>' : ''}
                 <div class="mc-options">
                     ${optionsHTML}
@@ -20039,6 +25317,12 @@ class NotificationsUI {
      *     - Notification transitions to conversation history
      *     - Default response indicator is shown
      */
+    // The two honest sentences a closed window can produce. Named so the wording
+    // lives in ONE place and a test can assert the constant rather than a literal it
+    // has retyped -- two copies of a string is two things to keep in step.
+    get NO_ANSWER_RECORDED() { return '(no answer was recorded)'; }
+    get OUTCOME_UNKNOWN()    { return '(outcome could not be read)'; }
+
     handleGracePeriodExceeded( notificationId, state ) {
         this.log( `Grace period exceeded for ${notificationId}` );
 
@@ -20048,7 +25332,13 @@ class NotificationsUI {
         // Show message in card
         const msgDiv = document.createElement( 'div' );
         msgDiv.className = 'grace-period-exceeded-message';
-        msgDiv.innerHTML = '\u23F0 Response window has closed. Default response was used.';
+        // 🔴 IT NO LONGER CLAIMS A DEFAULT WAS USED, because usually none was. A
+        // past-grace `/respond` records NOTHING -- response_value NULL, responded_at
+        // NULL -- and the sweeper passes apply_default=False. The old sentence told
+        // the reader their keypress had been replaced by a default that, on most of
+        // these rows, does not exist. What actually happened is filed into history by
+        // `reportGracePeriodOutcome` below, read from the server rather than guessed.
+        msgDiv.innerHTML = '\u23F0 Response window has closed \u2014 your answer was not recorded.';
         card.insertBefore( msgDiv, card.firstChild );
 
         // Mark as expired and stop timer
@@ -20076,9 +25366,28 @@ class NotificationsUI {
             card.addEventListener( 'animationend', () => {
                 card.remove();
 
-                // Route to conversation with default indicator
-                const defaultValue = state.notification.response_default || '(no response)';
-                this.routeCompletedNotification( state.notification, defaultValue, true );
+                // 🔴 ASK THE SERVER WHAT ACTUALLY HAPPENED. DO NOT INFER IT FROM
+                // `response_default` (row bf4f65c3, Rick's ruling 2026-09-08).
+                //
+                // THE DEFECT THIS REPLACES: this line used to file
+                // `response_default || '(no response)'` into history as the OUTCOME,
+                // under a message that claimed a default had been used. But a
+                // past-grace `/respond` returns 400 with `response_value` NULL and
+                // `responded_at` NULL -- NOTHING is recorded server-side. The orphan
+                // sweeper passes `apply_default=False` explicitly, so it applies no
+                // default either.
+                //
+                // ⇒ The client was reporting a default the server never applied. On a
+                // row whose `response_default` is "no", a human pressing YES had "no"
+                // filed as their answer. That is e5f21fff -- an unanswered question
+                // read as a ruling -- arriving client-side, and it is the exact defect
+                // class this epic exists to kill.
+                //
+                // ⚠️ AND IT CANNOT BE FIXED BY GUESSING THE OTHER WAY EITHER. Some
+                // paths DO apply a default (`mark_expired( apply_default=True )`), so
+                // hard-coding "(no response)" would be wrong exactly as often. The
+                // only honest source is the row itself.
+                this.reportGracePeriodOutcome( notificationId, state );
 
                 // Cleanup
                 this.actionRequiredNotifications.delete( notificationId );
@@ -20092,6 +25401,51 @@ class NotificationsUI {
                 }
             }, { once: true } );
         }, 2000 );  // Show message for 2 seconds before transitioning
+    }
+
+    /**
+     * Files the TRUE outcome of a closed-window response into conversation history.
+     *
+     * Requires:
+     *     - notificationId is a notification id the server knows
+     *     - state is the notification state object, carrying `.notification`
+     *
+     * Ensures:
+     *     - reads {state, response_value, responded_at} from the server rather than
+     *       inferring an outcome from `response_default`
+     *     - files the server's `response_value` when one is actually recorded
+     *     - files an explicit "no answer was recorded" when it is not
+     *     - never files `response_default` as though it were an answer
+     *     - on a failed read, files the honest unknown rather than a guess
+     *     - never throws; a routing failure must not strand the card
+     */
+    async reportGracePeriodOutcome( notificationId, state ) {
+
+        let recorded = null;
+        let known    = false;
+
+        try {
+            const r = await this.authedFetch(
+                `/api/notifications/response/${encodeURIComponent( notificationId )}` );
+            if ( r.ok ) {
+                const data = await r.json();
+                recorded = data.response_value ?? null;
+                known    = true;
+            }
+        } catch ( e ) {
+            this.error( "Could not read the recorded outcome:", e );
+        }
+
+        // ⚠️ THREE OUTCOMES, THREE DIFFERENT SENTENCES. Collapsing "nothing was
+        // recorded" into "we could not tell" would be the same class of defect one
+        // step quieter -- reporting a known fact as an unknown.
+        const outcome = known
+            ? ( recorded !== null && recorded !== undefined
+                    ? recorded
+                    : this.NO_ANSWER_RECORDED )
+            : this.OUTCOME_UNKNOWN;
+
+        this.routeCompletedNotification( state.notification, outcome, true );
     }
 
     showConfirmation( notificationId, response, serverTimeDisplay = null, serverDateDisplay = null ) {
@@ -20311,7 +25665,7 @@ class NotificationsUI {
             if ( buttonsContainer ) {
                 buttonsContainer.innerHTML = `
                     <div class="notification-status-badge expired">
-                        ⏰ Expired - Default used: ${defaultValue}
+                        ⏰ Expired - Default used: ${this.escapeHtml( defaultValue )}
                     </div>
                 `;
             }
@@ -20391,7 +25745,7 @@ class NotificationsUI {
             if ( buttonsContainer ) {
                 buttonsContainer.innerHTML = `
                     <div class="notification-status-badge responded">
-                        ✓ Responded in another session: ${response}
+                        ✓ Responded in another session: ${this.escapeHtml( response )}
                     </div>
                 `;
             }
@@ -20856,7 +26210,8 @@ class NotificationsUI {
                     collapsed    : false,
                     lastActivity : new Date(),
                     totalCount   : 0,
-                    newCount     : 0
+                    newCount     : 0,
+                    seenKeys     : new Set()
                 } );
             }
             this.createSenderCard( senderId );
@@ -20902,7 +26257,8 @@ class NotificationsUI {
                 collapsed    : false,
                 lastActivity : new Date(),
                 totalCount   : 0,
-                newCount     : 0
+                newCount     : 0,
+                seenKeys     : new Set()
             } );
         }
 

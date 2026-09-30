@@ -30,7 +30,7 @@ set -e  # Exit on error
 # ============================================================
 CONTAINER_NAME="lupin-postgres"
 DB_USER="lupin_dev"
-DB_PASSWORD="dev_password"
+DB_PASSWORD="${DB_PASSWORD:?set DB_PASSWORD in your environment — this value was published in a public repo and is being rotated, row baac2474}"
 DB_NAME="lupin_db_dev"
 TEST_DB_NAME="lupin_db_test"
 MAX_WAIT=30  # Maximum seconds to wait for PostgreSQL startup

@@ -12,7 +12,7 @@ arbiter host venv drifting behind the arbiter's import graph. A control that
 cannot itself fail is worthless, so these tests assert BOTH directions — it passes
 a good venv AND it fails a venv missing the closure, naming the module.
 
-Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
+Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
 """
 import importlib.util
 import os
@@ -119,3 +119,10 @@ def test_enabled_flag_adds_the_db_closure_to_the_checked_set( monkeypatch, capsy
     monkeypatch.setattr( CHK, "REQUIRED_WHEN_FOLLOW_THROUGH_ENABLED", [ "os", "sys" ] )
     assert CHK.main( [ ] ) == 0
     assert "modules checked: 3" in capsys.readouterr().out
+
+
+def test_the_lazily_imported_worktree_janitor_modules_are_checked():
+    """Row 033538f6: the janitor's modules are imported inside the :8001 factory only when
+    the flag is on, so no module-level import in the list would ever exercise them."""
+    assert "cosa.agents.shared.worktree_reaper"         in CHK.ALWAYS_REQUIRED
+    assert "cosa.agents.shared.worktree_refusal_ledger" in CHK.ALWAYS_REQUIRED

@@ -3,7 +3,7 @@
 E2E — Multiplexer Phase 2: per-worker task EDITING in the task-list card.
 
 Exercises the Phase-2 editing surface end-to-end in a real browser: the per-row
-priority dropdown (P0–P3), the owner-reassignment dropdown (active personas,
+priority dropdown (P0–P5 since 2026-09-07), the owner-reassignment dropdown (active personas,
 'Sam' overflow INCLUDED per Rick's Q5), and the inline drop-with-reason control
 (Q4 — inline row input, not a modal). The store's optimistic patchTask/dropTask
 fire the real HTTP PATCH / transition calls; those endpoints are STUBBED via
@@ -22,11 +22,53 @@ What this verifies that the unit tests cannot:
 COLOR / class-presence: like the read-only card E2E, the redundancy carriers are
 CLASS names (WCAG 1.4.1), so class assertions are the right check.
 
+🔴 THE PATCH GLOB IS WIDER THAN THE THING IT NAMES — AND `_record_patch` REFUSES
+RATHER THAN FAKES (added 2026-09-01, and DELIBERATELY UNREACHABLE TODAY).
+
+`TASKS_PATCH_ROUTE` is `**/api/tasks/*`, meant for `/api/tasks/<id>`. A task id is
+a single path segment and so is a LITERAL sibling route, so the glob cannot tell
+them apart. Measured with the function `page.route` itself calls
+(`playwright._impl._helper.url_matches`, playwright 1.58.0):
+
+    "**/api/tasks/*"  vs /api/tasks/flow-ratio  -> True
+    "**/api/tasks/*"  vs /api/tasks/events      -> True
+    "**/api/tasks?*"  vs /api/tasks/flow-ratio  -> False   <- positive control
+
+An unguarded handler would answer those GETs `{"ok": true}` with 200 AND push them
+into `recorded["patch"]`, which the assertions in this file read — mocking an
+endpoint nobody meant to mock and corrupting a wire assertion in one move. That is
+the `/api/tasks/flow-ratio` defect exactly: a Playwright test `route.fulfill`-ing
+the call it is nominally proving. That endpoint shipped answering 422 for its
+entire life and the E2E "covering" it faked the broken call.
+
+⚠️ THIS PARAGRAPH USED TO SAY THE GUARD COULD NOT FIRE. IT CAN, AND IT DOES — the
+correction is left visible here rather than reworded away, because the stale
+reassurance is what let the same break land three times.
+
+It read: "the multiplexer fetches neither literal path — `git grep flow-ratio` over
+`src/lupin_app/static/js/multiplexer/` is empty, against 5 `api/tasks` hits as a
+positive control. It is armed for the day this card gains the ratio header."
+
+The card gained the ratio header in 2beb1ff3 (parity A-2 #8, row c1bb2be7). Re-measured
+2026-09-22 over the same corpus: `flow-ratio` now hits 8 files (was 0), `api/tasks` 15
+(was 5), and the multiplexer polls all three literal siblings by name —
+`/api/tasks/events`, `/api/tasks/flow-ratio`, `/api/tasks/manager-pull`. A count taken
+once ages without ever changing, and a reader who trusts it stops looking.
+
+If you are reading this because the 501 fired, the guard did its job — give that path
+its own `page.route` registered AFTER the patch route (Playwright does
+`self._routes.insert( 0, ... )`, so the newest handler is checked first). Do not widen
+the refusal away. An unreachable branch nobody flags is how the FIRST repair of the
+flow-ratio hole went wrong: its fix sat behind an `if` that no request could reach, and
+the tests around it looked green.
+
+Audit + every measurement: src/rnd/v0.2.1/2026.09.01-mocked-seam-audit-e2e-ui.md
+
 Venue: :8000 (monopolize, scheduled) — `test_multiplexer_*` E2E batch. Uses
 page.route stubs (no real state mutation) but runs via the manager's :8000
 Playwright batch per the venue rubric. Per CLAUDE.local.md "USER IS NEVER A
 TESTER": every assertion is AI. Authored by the task-reassign Phase-2 lane
-(Clayton); RUN by the manager via `POST /api/test-suite/submit` (NEVER
+(Clayton); RUN by the manager via `POST /api/v2/submit` (NEVER
 side-door curl/inject).
 
 Usage:
@@ -42,6 +84,10 @@ import os
 import pytest
 import requests
 
+from .task_panes import (
+    MUX_TASK_LIST_PANE, ROW_LINE1_COLUMNS, DISCLOSED_FIELDS, tasks_route_handler, disclose_row,
+)
+
 BASE_URL        = os.environ.get( "LUPIN_API_URL", "http://localhost:7999" )
 MULTIPLEXER_URL = f"{BASE_URL}/app/multiplexer"
 
@@ -53,6 +99,141 @@ TASKS_LIST_ROUTE  = "**/api/tasks?*"
 TASKS_PATCH_ROUTE = "**/api/tasks/*"
 TASKS_TRANS_ROUTE = "**/api/tasks/*/transition"
 FLEET_ROUTE       = "**/api/arbiter/fleet-state"
+
+# 🔴 TASKS_PATCH_ROUTE IS WIDER THAN THE THING IT NAMES. Measured 2026-09-01 with
+# playwright._impl._helper.url_matches (playwright 1.58.0), the function page.route
+# itself calls:
+#
+#     "**/api/tasks/*"  vs  /api/tasks/flow-ratio   -> True
+#     "**/api/tasks/*"  vs  /api/tasks/events       -> True
+#     "**/api/tasks?*"  vs  /api/tasks/flow-ratio   -> False   (positive control)
+#
+# `<id>` is a single path segment and so is a LITERAL sibling route, so the patch
+# glob cannot tell them apart. Today this is latent — the multiplexer fetches
+# neither path (`git grep flow-ratio` over static/js/multiplexer/ is empty, with a
+# positive control of 5 `api/tasks` hits in the same corpus). The day it gains the
+# ratio header, an unguarded handler would answer that GET `{"ok": true}` with 200
+# AND push it into `recorded["patch"]`, which the assertions below read — faking a
+# live endpoint and corrupting a wire assertion in one move.
+#
+# That is the /api/tasks/flow-ratio defect exactly: a Playwright test that
+# `route.fulfill`s the very call it is nominally proving. So the handler REFUSES a
+# literal sibling rather than serving it — per CLAUDE.md, a step that cannot do
+# the job declines and names what it did not do, instead of returning something
+# the caller will read as success.
+LITERAL_TASK_SIBLINGS = (
+    "/api/tasks/flow-ratio", "/api/tasks/events", "/api/tasks/request-badges",
+    "/api/tasks/manager-pull",
+)
+
+# ⚠️ THE GUARD ABOVE WAS NO LONGER UNREACHABLE, AND IT MISSED THE PATH THAT REACHED IT.
+# Row 1657a852, ts-37979ae6 (2026-09-11): the multiplexer now polls GET
+# /api/tasks/request-badges (TaskRequestStore, row c9fafb9d). That literal sibling was not
+# in the list, so `_record_patch` pushed the GET into recorded["patch"] and the two PATCH
+# tests read `2 == 1`. It is in the list now, and it gets its own route (below, registered
+# after the patch glob) answering the real endpoint's shape for a board with no requests.
+TASKS_BADGES_ROUTE = "**/api/tasks/request-badges"
+_NO_REQUEST_BADGES = { "task_area": 0, "holding_area": 0 }
+
+# ⚠️ AND THE SAME DEFECT LANDED A THIRD TIME, FROM A THIRD DIRECTION. Commit 2beb1ff3
+# (parity A-2 #8, row c1bb2be7) gave the multiplexer's Holding Area legacy's flow-ratio
+# gate, and its `FlowRatioStore` polls THREE endpoints on a 60 s timer:
+#
+#     /api/tasks/flow-ratio            <- already in LITERAL_TASK_SIBLINGS -> 501 refused
+#     /api/tasks/flow-ratio/settings   <- TWO segments, so the single-segment glob misses it
+#     /api/tasks/manager-pull          <- was in NEITHER list
+#
+# So the manager-pull GET fell through to `_record_patch`, which pushed it into
+# recorded["patch"] and answered it `{"ok": true}`. The two PATCH tests below read that
+# list and failed `1 == 0` and `2 == 1` (e2e_b, ts-94ff578e, 2026-09-22 16:09 EDT).
+# Identical in shape to the request-badges break above, identical in shape to flow-ratio
+# before it: the PRODUCT correctly added a poll, and a TEST glob that cannot tell a task
+# id from a literal sibling binned a GET as a PATCH. Test side, every time.
+#
+# It gets its own route below, registered AFTER the patch glob so it is checked first,
+# answering the real endpoint's shape (`get_manager_pull` in
+# src/cosa/rest/routers/tasks.py: `{ disabled, source }`, source "override" or "config").
+# 🔴 THE SIBLING-LIST ENTRY IS NOT THE BELT I CLAIMED IT WAS. An earlier draft of this
+# comment said "if the route ordering ever breaks, the 501 fires by name instead of
+# silently poisoning a wire assertion." THAT IS FALSE, and it is left here corrected
+# rather than reworded, because it is the same false-reassurance defect this file has
+# now recorded three times — authored, this time, in the very commit that corrected the
+# other two.
+#
+# The guard is INVERTED (Mr. Radio, 2026-09-22):
+#     ABSENT  from LITERAL_TASK_SIBLINGS -> lands in recorded["patch"] -> a count
+#                                           assertion reddens          -> SIGNAL
+#     PRESENT in LITERAL_TASK_SIBLINGS   -> 501, recorded nowhere       -> SILENCE
+#
+# Measured: `grep -rE "assert.*(501|REFUSED)" src/tests/e2e_ui/*.py` returns NOTHING,
+# against a positive control of 1,825 assert statements across 118 files in that corpus.
+# No test anywhere observes a refusal. So the 501 does not "fail the test loudly" — it
+# fails nothing at all, and the docstring above that says otherwise is false too.
+#
+# AND WITH THE ROUTE REGISTERED BELOW, THIS ENTRY IS UNREACHABLE: the route is checked
+# first, so manager-pull never reaches _record_patch and never consults this tuple. The
+# header of this file warns that "an unreachable branch nobody flags is how the FIRST
+# repair of the flow-ratio hole went wrong" — and this entry is one. It is flagged here.
+#
+# It earns its place back the moment a refusal is OBSERVABLE. Until then, read it as a
+# marker, not a guard.
+#
+# BOTH halves were measured separately (2026-09-22), and EITHER ALONE clears the two
+# reds — so do not read the route line as the load-bearing one:
+#
+#     route only,   no sibling entry  -> 2 passed   (route is checked first)
+#     sibling entry, no route         -> 2 passed   (501, never reaches recorded["patch"])
+#     NEITHER                         -> 2 failed, `2 == 1` and `1 == 0`  <- the venue red
+#
+# The last arm is the control: it reproduces ts-94ff578e's e2e_b failure exactly. Deleting
+# either half leaves the tests green and the guard half-gone, which is the state this file
+# has now been in three times.
+TASKS_MANAGER_PULL_ROUTE = "**/api/tasks/manager-pull"
+_MANAGER_PULL_ON         = { "disabled": False, "source": "config" }
+
+# The other two literal siblings the multiplexer polls, stubbed rather than refused.
+# Mr. Radio's ruling, 2026-09-22: "a guard that lands red does not merge." The loudness
+# guard below reported these four as 501s — three `events` reads and one `flow-ratio` —
+# and reporting them was the point; leaving them reported is not. So each gets its own
+# route here, registered AFTER the patch glob (checked first), answering the REAL
+# endpoint's shape rather than a convenient one:
+#
+#   /api/tasks/events    -> FinishedTasksStore polls once per terminal status
+#                           (done / dropped / wont_fix), each with a query string. The
+#                           store reads `body.events` and ignores a body without it
+#                           (`Array.isArray( body?.events )`), so `{ "events": [] }` is
+#                           the honest empty answer, NOT {} — an empty finished-tasks
+#                           pane, which is what a board with no terminal rows shows.
+#   /api/tasks/flow-ratio -> FlowRatioStore's gate read. Shape from the handler's own
+#                           return in src/cosa/rest/routers/tasks.py: created, closed,
+#                           ratio, verdict, close_needed, room_for. The values below are
+#                           an OPEN gate with room, which is the uninteresting case —
+#                           this file tests task editing, not the ratio badge, and a
+#                           fixture that made the gate interesting would be a second
+#                           subject smuggled into every test here.
+#
+# `*` is single-segment in Playwright globs but a query string contains no "/", so
+# "**/api/tasks/events*" covers all three query forms with one route.
+TASKS_EVENTS_ROUTE = "**/api/tasks/events*"
+_NO_EVENTS         = { "events": [] }
+
+TASKS_FLOW_RATIO_ROUTE = "**/api/tasks/flow-ratio"
+_FLOW_RATIO_OPEN       = {
+    "created"      : 0,
+    "closed"       : 0,
+    "ratio"        : None,
+    "verdict"      : "open",
+    "close_needed" : 0,
+    "room_for"     : None,
+}
+
+# ⚠️ NOT STUBBED, AND SAID OUT LOUD: /api/tasks/flow-ratio/settings. It has TWO path
+# segments, so the single-segment patch glob never matched it, it was never refused, and
+# it is therefore not one of the four the guard named. It reaches the REAL server on
+# every _open_card in this file — measured 2026-09-22, HTTP 200 from :7999. That is a
+# live read inside a test that stubs everything around it. Out of scope for this commit
+# (Mr. Radio asked for the four refusals); recorded here so the next reader finds it
+# named rather than discovering it.
 
 
 # ---------------------------------------------------------------------------
@@ -125,18 +306,25 @@ _FLEET = {
 }
 
 
-def _open_card( page, tasks: dict | None = None ) -> dict:
+def _open_card( page, tasks=None ) -> dict:
     """
     Seed auth, stub list/fleet/patch/transition, navigate, wait for boot hook.
 
-    `tasks` overrides the list-endpoint payload (defaults to `_TASKS`); the
+    `tasks` overrides the list-endpoint payload (defaults to `_TASKS`) — a dict, or a
+    zero-argument callable when the board must answer differently after a write; the
     F1 copy-ID tests inject a full-uuid task so the clipboard assertion can
     distinguish the FULL id from the 8-char displayed prefix.
 
     Returns a mutable `recorded` dict capturing the PATCH / transition requests
     the controls fire, so tests can assert the wire bodies.
     """
-    recorded: dict = { "patch": [], "transition": [] }
+    # "refused" is the loudness seam (row f1c76bf4): every literal-sibling refusal is
+    # RECORDED, not dropped. Before this, a 501 was loud in the network log and silent in
+    # the result — `grep -rE "assert.*(501|REFUSED)" src/tests/e2e_ui/*.py` was EMPTY
+    # against 1,825 asserts across 118 files. Nothing could see the guard fire, so adding
+    # a path to LITERAL_TASK_SIBLINGS converted a loud failure into a silent one. The
+    # bucket plus `test_no_literal_sibling_is_silently_refused` below inverts that back.
+    recorded: dict = { "patch": [], "transition": [], "refused": [] }
 
     access, refresh = _login_tokens()
     _seed_auth( page.context, access, refresh )
@@ -148,6 +336,29 @@ def _open_card( page, tasks: dict | None = None ) -> dict:
 
     def _record_patch( route ):
         req = route.request
+        # See LITERAL_TASK_SIBLINGS above. Refuse rather than fake: a silent {"ok": true}
+        # would both mock an endpoint nobody meant to mock AND poison recorded["patch"],
+        # so refusing is still the right half of the trade.
+        #
+        # 🔴 BUT THIS USED TO READ "a 501 naming the path fails the test loudly", AND THAT
+        # IS FALSE. Nothing observes the refusal: `grep -rE "assert.*(501|REFUSED)"
+        # src/tests/e2e_ui/*.py` is EMPTY, against 1,825 asserts across 118 files in that
+        # corpus (measured 2026-09-22). The 501 is loud in the network log and silent in
+        # the result, which is the opposite of what this comment promised a reader.
+        # The refusal is a correct REFUSAL and a non-existent ALARM — do not mistake the
+        # first for the second.
+        if any( sib in req.url for sib in LITERAL_TASK_SIBLINGS ):
+            recorded[ "refused" ].append( req.url )
+            route.fulfill(
+                status       = 501,
+                content_type = "application/json",
+                body         = json.dumps( { "detail":
+                    f"REFUSED: {req.url} is a LITERAL /api/tasks sibling caught by the "
+                    f"'**/api/tasks/*' patch glob, not a task id. This handler will not "
+                    f"fake it. Give that path its own page.route registered AFTER this "
+                    f"one (Playwright checks the newest handler first)." } )
+            )
+            return
         recorded[ "patch" ].append( { "url": req.url, "method": req.method, "body": json.loads( req.post_data or "{}" ) } )
         route.fulfill( status=200, content_type="application/json", body=json.dumps( { "ok": True } ) )
 
@@ -157,19 +368,87 @@ def _open_card( page, tasks: dict | None = None ) -> dict:
         route.fulfill( status=200, content_type="application/json", body=json.dumps( { "ok": True } ) )
 
     # Most-specific (transition) registered LAST so it wins over the patch glob.
-    page.route( TASKS_LIST_ROUTE,  _fulfill( tasks or _TASKS ) )
+    # The list handler answers the holding area's own query with its own (empty) body —
+    # row 1657a852: answering both with the board fixture put every row in two panes.
+    page.route( TASKS_LIST_ROUTE,  tasks_route_handler( tasks or _TASKS ) )
     page.route( FLEET_ROUTE,       _fulfill( _FLEET ) )
     page.route( TASKS_PATCH_ROUTE, _record_patch )
     page.route( TASKS_TRANS_ROUTE, _record_transition )
+    page.route( TASKS_BADGES_ROUTE, _fulfill( _NO_REQUEST_BADGES ) )   # after the patch glob: checked first
+    page.route( TASKS_MANAGER_PULL_ROUTE, _fulfill( _MANAGER_PULL_ON ) )   # ditto — FlowRatioStore's 60 s tick
+    page.route( TASKS_EVENTS_ROUTE, _fulfill( _NO_EVENTS ) )               # ditto — FinishedTasksStore, 3 reads
+    page.route( TASKS_FLOW_RATIO_ROUTE, _fulfill( _FLOW_RATIO_OPEN ) )     # ditto — FlowRatioStore's gate read
 
     page.goto( MULTIPLEXER_URL, wait_until="networkidle", timeout=15_000 )
     _wait_for_test_hook( page )
-    page.wait_for_selector( ".task-list-table", timeout=3000 )
+    page.wait_for_selector( f"{ MUX_TASK_LIST_PANE } .task-list-table", timeout=3000 )
     return recorded
 
 
+# The verb keys in shared/task-verbs.js on 2026-09-11, as literals. The <option> values are
+# these keys (`select_option( "drop" )` below relies on it).
+_VERB_KEYS = [ "park", "drop", "demote", "wont_fix", "fixed", "unpark", "approve" ]
+
+
+def _pane( page ):
+    """The task-list pane. The Epic Board renders the same rows, so every locator is scoped."""
+    return page.locator( MUX_TASK_LIST_PANE )
+
+
 def _row( page, task_id: str ):
-    return page.locator( f'tr.task-row[data-task-id="{task_id}"]' )
+    return _pane( page ).locator( f'tr.task-row[data-task-id="{task_id}"]' )
+
+
+def _controls( page, task_id: str ):
+    """Open the row's controls row (row 1657a852: the controls left the row) and return it."""
+    return disclose_row( _pane( page ), task_id )
+
+
+# ---------------------------------------------------------------------------
+# The loudness guard (row f1c76bf4)
+# ---------------------------------------------------------------------------
+
+def test_no_literal_sibling_is_silently_refused( page ):
+    """
+    The guard must be an ALARM, not only a refusal.
+
+    `_record_patch` refuses a literal /api/tasks sibling rather than faking it, which is
+    right. But until row f1c76bf4 nothing OBSERVED the refusal, so the guard was inverted:
+    a sibling ABSENT from LITERAL_TASK_SIBLINGS landed in recorded["patch"] and reddened a
+    count assertion (SIGNAL), while one PRESENT in it was refused and recorded nowhere
+    (SILENCE). Adding a path to that tuple made the failure quieter.
+
+    This test is the missing half. It reddens BY NAME and prints every refused URL, so a
+    new sibling — or a route-ordering break that drops one through — is reported instead
+    of swallowed.
+
+    🔴 "ONE RED" MEANS ONE OBSERVER, NOT ONE OCCURRENCE. Every test in this file calls
+    _open_card, so every test triggers the same refusals; only this one looks at them.
+    Measured 2026-09-22 by tallying the refusal branch per test via PYTEST_CURRENT_TEST:
+
+        16 of 16 tests triggered refusals, 4 each  ->  64 refusals in one run
+         1 of 16 tests asserted on them            ->  63 unobserved
+
+    So the guard does not make the refusals rarer; it makes one test's worth of them
+    audible. Do not read the single red as "it happens once". If you silence this test
+    without giving each refused path its own route, you return all 64 to silence.
+
+    Requires:
+        - the page has finished its boot polls (_open_card waits for the task-list table)
+
+    Ensures:
+        - fails, naming each path, when any literal sibling reached the refusal branch
+        - a path listed in LITERAL_TASK_SIBLINGS that the multiplexer actually polls must
+          be given its own page.route registered AFTER the patch glob — that is the fix,
+          NOT deleting this assertion
+    """
+    recorded = _open_card( page )
+    page.wait_for_timeout( 1500 )   # the boot polls are async; let them land before reading
+    assert recorded[ "refused" ] == [], (
+        "literal /api/tasks siblings were REFUSED (501) and nothing else would have told "
+        "you. Each needs its own page.route registered AFTER the patch glob:\n  "
+        + "\n  ".join( sorted( set( recorded[ "refused" ] ) ) )
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -178,20 +457,37 @@ def _row( page, task_id: str ):
 
 def test_actions_column_and_controls_render( page ):
     _open_card( page )
-    # Actions header + per-row controls present.
-    assert page.locator( "thead th.task-col-actions" ).text_content() == "Actions"
-    row = _row( page, "t1" )
-    assert row.locator( ".task-priority-select" ).count() == 1
-    assert row.locator( ".task-owner-select" ).count() == 1
-    assert row.locator( ".task-drop-reason" ).count() == 1
-    assert row.locator( ".task-drop-button" ).count() == 1
+    # There is no Actions COLUMN any more (ROW_SCHEMA line 3): the controls sit in the
+    # row's disclosed controls row, and the header's last column is the disclosure toggle.
+    assert _pane( page ).locator( "thead th.task-col-actions" ).count() == 0
+    controls = _controls( page, "t1" )
+    actions  = controls.locator( ".task-col-actions" )
+    assert actions.locator( ".task-priority-select" ).count() == 1
+    assert actions.locator( ".task-owner-select" ).count() == 1
+    # Row-control conversion 2026.09.02 — the single Drop button became one
+    # select carrying every verb, one shared reason field and one Submit.
+    assert actions.locator( ".task-verb-select" ).count() == 1
+    assert actions.locator( ".task-reason-input" ).count() == 1
+    assert actions.locator( ".task-submit-button" ).count() == 1
+    assert actions.locator( ".task-submit-button" ).text_content() == "Submit"
+    # A placeholder plus EVERY verb in shared/task-verbs.js — greyed when illegal, NEVER
+    # REMOVED. Pinned exactly (María's review): adding or dropping a verb must redden this.
+    # The count was 6 when this was written; the table carried these seven on 2026-09-11.
+    t1_values = actions.locator( ".task-verb-select option" ).evaluate_all( "os => os.map( o => o.value )" )
+    assert len( t1_values ) == 1 + len( _VERB_KEYS ), f"expected a placeholder plus { len( _VERB_KEYS ) } verbs, got { t1_values }"
+    assert sorted( v for v in t1_values if v ) == sorted( _VERB_KEYS ), f"verb options drifted from shared/task-verbs.js: { t1_values }"
+    # ...and the same options on a row in a different status: greyed, not removed.
+    t2_values = _controls( page, "t2" ).locator( ".task-verb-select option" ).evaluate_all( "os => os.map( o => o.value )" )
+    assert t1_values == t2_values, f"verbs were removed by status: in_progress { t1_values } vs queued { t2_values }"
+    # No date box until a verb asks for one.
+    assert controls.locator( ".task-chase-input" ).count() == 0
     # Current priority pre-selected.
-    assert row.locator( ".task-priority-select" ).input_value() == "P2"
+    assert actions.locator( ".task-priority-select" ).input_value() == "P2"
 
 
 def test_owner_roster_includes_sam( page ):
     _open_card( page )
-    options = _row( page, "t1" ).locator( ".task-owner-select option" ).all_text_contents()
+    options = _controls( page, "t1" ).locator( ".task-owner-select option" ).all_text_contents()
     # Current owner amy + live targets bob/carol/Sam; Sam INCLUDED (Q5 — same
     # roster the fleet-status card shows, which carries Sam as a live persona).
     assert "amy" in options
@@ -205,8 +501,19 @@ def test_owner_roster_includes_sam( page ):
 # ---------------------------------------------------------------------------
 
 def test_priority_edit_fires_patch_with_actor_and_authority( page ):
+    """
+    Priority is a STAGED edit: choosing a value arms Update, and only the click sends it.
+    Ruled in 2e28a992 (parity A-2 #0, row 53b011cd): "Update stays disabled until the value
+    differs from data-original, and only the click sends the PATCH." This test predates
+    that and fired on the select alone (0 PATCHes, e2e_b 20260918-231051).
+    """
     recorded = _open_card( page )
-    _row( page, "t1" ).locator( ".task-priority-select" ).select_option( "P0" )
+    controls = _controls( page, "t1" )
+    controls.locator( ".task-priority-select" ).select_option( "P0" )
+    page.wait_for_timeout( 300 )
+    assert len( recorded[ "patch" ] ) == 0, "choosing a priority must not send it — Update does"
+
+    controls.locator( ".task-priority-update" ).click()
     page.wait_for_timeout( 300 )
 
     assert len( recorded[ "patch" ] ) == 1, "exactly one PATCH fired"
@@ -225,7 +532,7 @@ def test_priority_edit_fires_patch_with_actor_and_authority( page ):
 
 def test_owner_reassign_fires_patch_owner_persona( page ):
     recorded = _open_card( page )
-    _row( page, "t1" ).locator( ".task-owner-select" ).select_option( "bob" )
+    _controls( page, "t1" ).locator( ".task-owner-select" ).select_option( "bob" )
     page.wait_for_timeout( 300 )
 
     assert len( recorded[ "patch" ] ) == 1
@@ -236,14 +543,32 @@ def test_owner_reassign_fires_patch_owner_persona( page ):
 
 
 # ---------------------------------------------------------------------------
-# Drop-with-reason → transition→dropped
+# Choose a verb → transition. Drop is one of five now, not the only one.
 # ---------------------------------------------------------------------------
 
 def test_drop_with_reason_fires_transition_dropped( page ):
-    recorded = _open_card( page )
-    row = _row( page, "t1" )
-    row.locator( ".task-drop-reason" ).fill( "superseded by rewrite" )
-    row.locator( ".task-drop-button" ).click()
+    """
+    ⚠️ THE BOARD ANSWERS THE DROP. Since 32f0322f (§6 item 18, row 645a7da5, Mr. Radio's
+    ruling: call-site routing) a row write settles on `refreshAfterWrite()`, so the pane
+    READS THE BOARD BACK after the transition. A board fixture frozen before the drop
+    still lists t1 as in_progress, and the read-back paints it straight back
+    (e2e_b 20260918-231051: the transition fired, and t1 was still there). A real board
+    answers with t1 dropped, so this one does too, once the transition has been recorded.
+    """
+    recorded = None
+
+    def board() -> dict:
+        dropped = { c[ "url" ].rstrip( "/" ).split( "/" )[ -2 ]
+                    for c in ( recorded or {} ).get( "transition", [] )
+                    if c[ "body" ].get( "to_status" ) == "dropped" }
+        return { **_TASKS, "tasks": [ { **t, "status": "dropped" } if t[ "id" ] in dropped else t
+                                      for t in _TASKS[ "tasks" ] ] }
+
+    recorded = _open_card( page, board )
+    row = _controls( page, "t1" )
+    row.locator( ".task-verb-select" ).select_option( "drop" )
+    row.locator( ".task-reason-input" ).fill( "superseded by rewrite" )
+    row.locator( ".task-submit-button" ).click()
     page.wait_for_timeout( 300 )
 
     assert len( recorded[ "transition" ] ) == 1, "exactly one transition fired"
@@ -261,15 +586,28 @@ def test_drop_with_reason_fires_transition_dropped( page ):
 
 def test_drop_blank_reason_shows_inline_error_and_fires_no_request( page ):
     recorded = _open_card( page )
-    row = _row( page, "t1" )
-    # Leave the reason blank → click Drop.
-    row.locator( ".task-drop-button" ).click()
+    row = _controls( page, "t1" )
+    # Row 1657a852: before any refusal the stripe must be HIDDEN. Asserting only that it shows
+    # after one let a sheet that painted every row's empty stripe pass this test.
+    stripe_before = _pane( page ).locator( 'tr.task-row-error-stripe[data-error-for="t1"]' )
+    assert stripe_before.count() == 1
+    assert stripe_before.is_hidden(), "the error stripe shows before any refusal — an empty band under the row"
+    # Choose Drop, leave the reason blank, press Submit.
+    row.locator( ".task-verb-select" ).select_option( "drop" )
+    row.locator( ".task-submit-button" ).click()
     page.wait_for_timeout( 200 )
 
-    # No transition fired; inline error stripe surfaced; row still present.
+    # No transition fired; inline error stripe surfaced; row still present. The stripe is
+    # its own row (`tr.task-row-error-stripe[data-error-for]`), rendered hidden for every
+    # task, so presence proves nothing — it must be the one for t1, and SHOWING.
     assert len( recorded[ "transition" ] ) == 0
-    assert row.locator( ".task-row-error-stripe" ).count() == 1
-    assert "reason" in row.locator( ".task-row-error-stripe" ).text_content().lower()
+    stripe = _pane( page ).locator( 'tr.task-row-error-stripe[data-error-for="t1"]' )
+    assert stripe.count() == 1
+    assert stripe.is_visible(), "the error stripe exists but was never shown"
+    # Row 1657a852: the stripe's styling moved from the row to its cell; a shown refusal still paints pink.
+    assert stripe.locator( "td" ).evaluate( "td => getComputedStyle( td ).backgroundColor" ) == "rgb(248, 215, 218)", (
+        "the refusal stripe is shown but its cell no longer paints the error background" )
+    assert "reason" in stripe.text_content().lower()
     assert _row( page, "t1" ).count() == 1
 
 
@@ -307,6 +645,14 @@ def test_task_editing_controls_visual( page, assert_snapshot_structure_only ):
     (the existing font flags are already present + insufficient for THIS card).
     """
     _open_card( page )
+    # Row 1657a852: ROW_SCHEMA (09-05) moved the editing controls into the disclosed controls
+    # row, so an undisclosed card showed none of them and measured 167px against the 08-03
+    # baseline's 169. Disclose one row so the snapshot holds the controls it is named for, and
+    # prove they are on screen before the baseline is taken or compared.
+    controls = _controls( page, "t1" )
+    assert controls.is_visible(), "the t1 controls row is not visible; the snapshot would hold no controls"
+    assert controls.locator( ".task-priority-select" ).is_visible(), "the priority select is not visible in the disclosed row"
+    assert controls.locator( ".task-verb-select" ).is_visible(), "the verb select is not visible in the disclosed row"
     container = page.locator( ".task-list-container" )
     # Deterministic pre-snapshot settle (kept as a genuine improvement): wait for
     # the network to idle, web fonts to finish, and two full animation frames
@@ -321,19 +667,18 @@ def test_task_editing_controls_visual( page, assert_snapshot_structure_only ):
 
 
 # ---------------------------------------------------------------------------
-# F2 (task fdfb5b05) — Detail column repositioned 10 → 3 (after Title, before
-# Class). Verified in the REAL page: the served bundle actually paints the
-# Detail header + cell in slot 3, which the render-unit tests cannot confirm
-# (they assert the DOM the template BUILDS, not the DOM the browser SERVES).
+# Column layout, verified in the REAL page: the served bundle paints what
+# ROW_SCHEMA says, which the render-unit tests cannot confirm (they assert the
+# DOM the template BUILDS, not the DOM the browser SERVES).
+#
+# History: F2 (task fdfb5b05) moved Detail to slot 3 of an eleven-column row.
+# ROW_SCHEMA then split the row in two (row 1657a852 found these tests still
+# asserting the eleven columns): five columns plus the disclosure toggle stay on
+# the row, and the other seven fields — Detail and Actions last — live in the
+# disclosed controls row.
 # ---------------------------------------------------------------------------
 
-# Target L→R order (0-based) after the F2 reposition — Detail at index 2.
-_EXPECTED_COL_ORDER = [
-    "task-col-id", "task-col-title", "task-col-detail", "task-col-class",
-    "task-col-status", "task-col-blocked", "task-col-chase",
-    "task-col-accountable", "task-col-priority", "task-col-project",
-    "task-col-actions",
-]
+_EXPECTED_COL_ORDER = ROW_LINE1_COLUMNS + [ "task-col-disclose" ]
 
 
 def _classes( locator ) -> list[ str ]:
@@ -345,28 +690,30 @@ def _classes( locator ) -> list[ str ]:
     return out
 
 
-def test_detail_header_in_position_three( page ):
+def test_header_follows_the_row_schema( page ):
     _open_card( page )
-    # Scope to the task-list table — the multiplexer page ALSO renders a
-    # fleet-status table whose <thead th> would otherwise collide.
-    order = _classes( page.locator( ".task-list-table thead th" ) )
+    # Scoped to the task-list pane: the page ALSO renders a fleet-status table and the
+    # Epic Board, whose <thead th> would otherwise be read into the same list.
+    order = _classes( _pane( page ).locator( ".task-list-table thead th" ) )
     assert order == _EXPECTED_COL_ORDER, f"header order drifted: { order }"
-    # Detail sits in slot 3 (index 2), directly between Title and Class.
-    assert order[ 1 ] == "task-col-title"
-    assert order[ 2 ] == "task-col-detail"
-    assert order[ 3 ] == "task-col-class"
 
 
-def test_detail_cell_in_position_three_in_row( page ):
+def test_row_cells_and_disclosed_fields_follow_the_row_schema( page ):
     _open_card( page )
-    row_cells = _row( page, "t1" ).locator( "td" )
-    order = _classes( row_cells )
+    order = _classes( _row( page, "t1" ).locator( "td" ) )
     assert order == _EXPECTED_COL_ORDER, f"row cell order drifted: { order }"
-    # Detail affordance (📄) survives the move — the emoji still renders in the
-    # repositioned cell (renderDetailCell unchanged, only its append site moved).
-    assert _row( page, "t1" ).locator( "td.task-col-detail .task-detail-emoji" ).count() == 1
-    # Actions remains the trailing column (no regression to the edit controls).
-    assert order[ -1 ] == "task-col-actions"
+
+    # The other seven fields, in schema order, inside the controls row. `_classes` takes
+    # the first class token, which for a disclosed field is `task-disclosed-field`, so
+    # read the field's own column class instead.
+    controls = _controls( page, "t1" )
+    fields   = controls.locator( ".task-disclosed-field" )
+    disclosed = [ next( c for c in ( fields.nth( i ).get_attribute( "class" ) or "" ).split() if c.startswith( "task-col-" ) )
+                  for i in range( fields.count() ) ]
+    assert disclosed == DISCLOSED_FIELDS, f"disclosed field order drifted: { disclosed }"
+    # The 📄 affordance renders inside the Detail field, and Actions is last.
+    assert controls.locator( ".task-col-detail .task-detail-emoji" ).count() == 1
+    assert disclosed[ -1 ] == "task-col-actions"
 
 
 # ---------------------------------------------------------------------------
@@ -410,7 +757,7 @@ def test_id_cell_click_copies_full_uuid_to_clipboard( page ):
     id_cell = _row( page, _FULL_UUID ).locator( "td.task-col-id" )
     id_cell.click()
     # Transient no-reflow "copied" flash appears...
-    page.wait_for_selector( "td.task-col-id.task-id-copied", timeout=2000 )
+    page.wait_for_selector( f"{ MUX_TASK_LIST_PANE } td.task-col-id.task-id-copied", timeout=2000 )
     # ...and the FULL uuid (not the 8-char prefix) landed on the real clipboard.
     clip = page.evaluate( "() => navigator.clipboard.readText()" )
     assert clip == _FULL_UUID, f"clipboard has { clip!r }, expected full uuid"
@@ -422,7 +769,7 @@ def test_id_cell_keyboard_enter_copies_full_uuid( page ):
     id_cell = _row( page, _FULL_UUID ).locator( "td.task-col-id" )
     id_cell.focus()
     page.keyboard.press( "Enter" )
-    page.wait_for_selector( "td.task-col-id.task-id-copied", timeout=2000 )
+    page.wait_for_selector( f"{ MUX_TASK_LIST_PANE } td.task-col-id.task-id-copied", timeout=2000 )
     assert page.evaluate( "() => navigator.clipboard.readText()" ) == _FULL_UUID
 
 
@@ -436,6 +783,72 @@ def test_id_cell_copied_flash_does_not_reflow_row( page ):
     id_cell = row.locator( "td.task-col-id" )
     width_before = row.bounding_box()[ "width" ]
     id_cell.click()
-    page.wait_for_selector( "td.task-col-id.task-id-copied", timeout=2000 )
+    page.wait_for_selector( f"{ MUX_TASK_LIST_PANE } td.task-col-id.task-id-copied", timeout=2000 )
     width_after = row.bounding_box()[ "width" ]
     assert width_after == width_before, f"row reflowed on copy: { width_before } → { width_after }"
+
+
+# ---------------------------------------------------------------------------
+# Row-control conversion 2026.09.02 — the four ADDED verbs.
+#
+# UNVERIFIED AT WRITE TIME. This file is a :8000 e2e suite and could not be run
+# from the worktree where the conversion was built; the three cases above were
+# re-pointed and these two are new, both against markup proven by the unit tier
+# (src/tests/unit/multiplexer/render/task_row_control.test.ts, 15 tests, and
+# task_list_renderer.test.ts, 67). Say so rather than let a green elsewhere read
+# as a green here.
+# ---------------------------------------------------------------------------
+
+def test_park_posts_park_reason_and_a_chase_instant( page ):
+    """Park's reason rides `park_reason`, never the generic `reason` key.
+
+    Ensures:
+        - one transition fires, to_status=parked
+        - the body carries park_reason and next_chase_ts
+        - the body carries NO `reason` key — a park filed under the generic key
+          lands with no decisive sentence attached
+    """
+    recorded = _open_card( page )
+    row = _controls( page, "t1" )
+    row.locator( ".task-verb-select" ).select_option( "park" )
+    # The date box is inserted BY the verb change, so it exists only now.
+    assert row.locator( ".task-chase-input" ).count() == 1
+    row.locator( ".task-reason-input" ).fill( "the sentence that decided this" )
+    row.locator( ".task-chase-input" ).fill( "2026-09-10" )
+    row.locator( ".task-submit-button" ).click()
+    page.wait_for_timeout( 300 )
+
+    assert len( recorded[ "transition" ] ) == 1, "exactly one transition fired"
+    body = recorded[ "transition" ][ 0 ][ "body" ]
+    assert body[ "to_status" ] == "parked"
+    assert body[ "park_reason" ] == "the sentence that decided this"
+    assert "reason" not in body
+    assert body[ "next_chase_ts" ].startswith( "2026-09-10" )
+
+
+def test_wont_fix_takes_two_clicks_in_the_page( page ):
+    """Won't-fix arms on the first click and posts on the second.
+
+    The confirmation is on the button's own label, never a browser confirm() — a
+    modal blocks the extension's event loop, so the one control that closes a row
+    for good must not be the one that freezes the board.
+
+    Ensures:
+        - the first click posts nothing and relabels the button
+        - the second click posts to_status=wont_fix with the reason
+    """
+    recorded = _open_card( page )
+    row = _controls( page, "t1" )
+    row.locator( ".task-verb-select" ).select_option( "wont_fix" )
+    row.locator( ".task-reason-input" ).fill( "will not be done" )
+
+    row.locator( ".task-submit-button" ).click()
+    page.wait_for_timeout( 200 )
+    assert len( recorded[ "transition" ] ) == 0, "the first click must not transition"
+    assert "confirm" in row.locator( ".task-submit-button" ).text_content().lower()
+
+    row.locator( ".task-submit-button" ).click()
+    page.wait_for_timeout( 300 )
+    assert len( recorded[ "transition" ] ) == 1
+    assert recorded[ "transition" ][ 0 ][ "body" ][ "to_status" ] == "wont_fix"
+    assert recorded[ "transition" ][ 0 ][ "body" ][ "reason" ] == "will not be done"

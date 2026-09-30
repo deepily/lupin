@@ -41,17 +41,19 @@ Requires:
     - Dev server running on the test venue (:8000) with Testing config
     - Clean test database (via logged_in_page fixture)
 
-Venue: :8000 scheduled — submit via POST /api/test-suite/submit. Do NOT run
+Venue: :8000 scheduled — submit via POST /api/v2/submit. Do NOT run
 against :7999 (monopolize-mode E2E UI suite). The live-smoke variant mutates
 the task_items table (seeds + tears down its own rows), reinforcing the :8000
 routing.
 """
 
 import json
+import re
 
 import pytest
 
 from .conftest import BASE_URL
+from .task_panes import LEGACY_TASK_LIST_PANE, EMPTY_TASKS, is_holding_area_query, disclose_row, disclosed_value
 
 
 # ---------------------------------------------------------------------------
@@ -162,8 +164,25 @@ def _route_tasks( page, state ):
         - mode "ok"          -> 200 { tasks: SEEDED_TASKS, count }
         - mode "unreachable" -> 500 (drives the card's unreachable sentinel)
         - flipping state["mode"] between fetches changes the served response
+        - GET /api/tasks/flow-ratio is answered by its OWN route, registered last
+
+    ⚠️ "**/api/tasks*" DOES NOT MATCH /api/tasks/flow-ratio — MEASURED, not read
+    off the glob. Playwright compiles `*` to `[^/]*`, so the trailing star stops
+    at the slash:
+
+        playwright 1.58.0, playwright._impl._helper.url_matches( None, url, glob )
+          "**/api/tasks*"   vs /api/tasks/flow-ratio   -> False
+          "**/api/tasks*"   vs /api/tasks?status=open  -> True   (positive control)
+          "**/api/tasks/*"  vs /api/tasks/flow-ratio   -> True   (positive control)
+
+    An earlier cut of this docstring claimed the opposite and put the flow-ratio
+    body behind an `if` inside this handler, where it was UNREACHABLE: the seed
+    never applied, the request went to the live server, and the two header tests
+    below were asserting fixture numbers against a real board. Hence a SECOND
+    `page.route` on the literal path — registered LAST, because Playwright does
+    `self._routes.insert( 0, ... )` and therefore checks the newest handler first.
     """
-    def handler( route ):
+    def flow_ratio_handler( route ):
         if state[ "mode" ] == "unreachable":
             route.fulfill( status=500, content_type="application/json",
                            body=json.dumps( { "detail": "store down" } ) )
@@ -171,16 +190,51 @@ def _route_tasks( page, state ):
         route.fulfill(
             status       = 200,
             content_type = "application/json",
-            body         = json.dumps( { "tasks": SEEDED_TASKS, "count": len( SEEDED_TASKS ) } )
+            body         = json.dumps( state.get( "ratio", {
+                "created": 10, "closed": 13, "ratio": 0.77,
+                "verdict": "allow", "window_hours": 24
+            } ) )
         )
 
+    def handler( route ):
+        if state[ "mode" ] == "unreachable":
+            route.fulfill( status=500, content_type="application/json",
+                           body=json.dumps( { "detail": "store down" } ) )
+            return
+        # The holding area asks its own question (`status=not_approved`) and the real
+        # server answers it with a disjoint set — none of these seeds (row 1657a852).
+        body = EMPTY_TASKS if is_holding_area_query( route.request.url ) \
+               else { "tasks": SEEDED_TASKS, "count": len( SEEDED_TASKS ) }
+        route.fulfill( status=200, content_type="application/json", body=json.dumps( body ) )
+
     page.route( "**/api/tasks*", handler )
+    page.route( "**/api/tasks/flow-ratio*", flow_ratio_handler )   # LAST = checked first
 
 
 def _goto_notifications( page ):
     """Navigate to the classic notifications page and settle the network."""
     page.goto( f"{BASE_URL}/app/notifications?classic=1" )
     page.wait_for_load_state( "networkidle" )
+
+
+def _disclose_legacy_row( row ):
+    """
+    Open a legacy task row's controls row and return it.
+
+    The legacy row carries no data-task-id of its own; its disclosure button does. The
+    blocked-by and chase fields and the 📄 icon live in that controls row, hidden until the
+    row is disclosed (row 1657a852).
+    """
+    task_id = row.locator( ".task-disclose-button" ).get_attribute( "data-task-id" )
+    return disclose_row( row.page.locator( LEGACY_TASK_LIST_PANE ), task_id )
+
+
+def _open_live_detail( page ):
+    """Disclose the t-blocked row (the only seed with a body) and open its live 📄."""
+    page.wait_for_selector( f"{ LEGACY_TASK_LIST_PANE } .task-row", state="attached" )
+    controls = disclose_row( page.locator( LEGACY_TASK_LIST_PANE ), "t-blocked" )
+    controls.locator( ".task-detail-emoji:not(.task-detail-empty)" ).click()
+    page.wait_for_selector( "#task-body-overlay", state="attached" )
 
 
 # Measures the open #task-body-overlay's computed position + geometry vs the
@@ -380,7 +434,7 @@ class TestTaskListCardAccordion:
         assert header.get_attribute( "aria-expanded" ) == "false"
         assert "▸" in header.locator( ".task-group-chevron" ).text_content()
         assert kri.locator( ".task-row" ).first.is_visible(), "other owners unaffected"
-        assert logged_in_page.locator( "#task-list-count" ).text_content() == str( OPEN_COUNT )
+        assert logged_in_page.locator( "#task-list-count" ).text_content() == f"Live: {OPEN_COUNT}"
 
         stored = logged_in_page.evaluate( f'JSON.parse( localStorage.getItem( "{ACCORDION_KEY}" ) || "[]" )' )
         assert stored == [ "tiberius" ], f"collapsed owner not persisted; got {stored!r}"
@@ -418,7 +472,13 @@ class TestTaskListCardAccordion:
 
     def test_collapse_all_then_expand_all( self, logged_in_page ):
         """
-        The #section-toolbar collapse-all / expand-all controls drive every group.
+        collapseAllTaskOwners() / expandAllTaskOwners() drive every group.
+
+        The #section-toolbar buttons that used to drive them were removed on
+        2026-09-15 (Rick's ruling — they were task-list actions on a toolbar that
+        shows and hides accordion areas), so this calls the two methods directly.
+        Legacy has no visible entry point for them until the pair moves into the
+        task-list card header; the behavior stays guarded either way.
 
         Requires:
             - Authenticated session, seeded rows
@@ -432,7 +492,7 @@ class TestTaskListCardAccordion:
         _goto_notifications( logged_in_page )
         logged_in_page.wait_for_selector( "#task-list-container .task-row", state="attached" )
 
-        logged_in_page.get_by_test_id( "task-list-collapse-all-btn" ).click()
+        logged_in_page.evaluate( "() => window.notificationsUI.collapseAllTaskOwners()" )
         logged_in_page.wait_for_function(
             "() => Array.from( document.querySelectorAll('#task-list-container tbody.task-group') )"
             ".every( e => e.classList.contains('collapsed') )"
@@ -441,7 +501,7 @@ class TestTaskListCardAccordion:
         stored = sorted( logged_in_page.evaluate( f'JSON.parse( localStorage.getItem( "{ACCORDION_KEY}" ) || "[]" )' ) )
         assert stored == sorted( [ "tiberius", "krishna", ACCORDION_UNASSIGNED ] ), stored
 
-        logged_in_page.get_by_test_id( "task-list-expand-all-btn" ).click()
+        logged_in_page.evaluate( "() => window.notificationsUI.expandAllTaskOwners()" )
         logged_in_page.wait_for_function(
             "() => Array.from( document.querySelectorAll('#task-list-container tbody.task-group') )"
             ".every( e => !e.classList.contains('collapsed') )"
@@ -515,7 +575,7 @@ class TestTaskListCardRows:
         assert "krishna · 1" in joined
         assert "(Unassigned)" in joined
 
-        assert logged_in_page.locator( "#task-list-count" ).text_content() == str( OPEN_COUNT )
+        assert logged_in_page.locator( "#task-list-count" ).text_content() == f"Live: {OPEN_COUNT}"
 
         table_text = logged_in_page.locator( "#task-list-container" ).text_content()
         for task in OPEN_TASKS:
@@ -574,12 +634,15 @@ class TestTaskListCardRows:
         blocked.first.wait_for( state="attached" )
         assert blocked.count() == 1
 
-        blocked_cell = blocked.locator( ".task-col-blocked" ).text_content()
+        # Both fields live in the disclosed controls row. Read the VALUE spans: each field
+        # also renders its label, which alone would satisfy "not blank, not —".
+        controls     = _disclose_legacy_row( blocked )
+        blocked_cell = disclosed_value( controls, "task-col-blocked" )
         # Each typed ref renders as "kind:id"; the item-ref id is a UUID prefix.
         assert "persona:krishna" in blocked_cell, f"expected stringified persona ref, got {blocked_cell!r}"
         assert "item:82e4eaf0" in blocked_cell,   f"expected stringified item ref, got {blocked_cell!r}"
 
-        chase_cell = blocked.locator( ".task-col-chase" ).text_content().strip()
+        chase_cell = disclosed_value( controls, "task-col-chase" )
         assert chase_cell not in ( "", "—" ), f"expected a formatted chase time, got {chase_cell!r}"
 
     def test_blocked_row_sorts_first_in_group( self, logged_in_page ):
@@ -669,15 +732,9 @@ class TestTaskListRowRedesign:
         """
         _route_tasks( logged_in_page, { "mode": "ok" } )
         _goto_notifications( logged_in_page )
-        logged_in_page.wait_for_selector( "#task-list-container .task-row", state="attached" )
 
         # The t-blocked row is the only one with a live (non-dimmed) 📄.
-        emoji = logged_in_page.locator(
-            "#task-list-container .task-detail-emoji:not(.task-detail-empty)"
-        ).first
-        emoji.click()
-
-        logged_in_page.wait_for_selector( "#task-body-overlay", state="attached" )
+        _open_live_detail( logged_in_page )
         body = logged_in_page.locator( "#task-body-overlay .task-body-overlay-body" ).text_content()
         assert "DM namespace cutover" in body
 
@@ -695,12 +752,7 @@ class TestTaskListRowRedesign:
         """
         _route_tasks( logged_in_page, { "mode": "ok" } )
         _goto_notifications( logged_in_page )
-        logged_in_page.wait_for_selector( "#task-list-container .task-row", state="attached" )
-
-        logged_in_page.locator(
-            "#task-list-container .task-detail-emoji:not(.task-detail-empty)"
-        ).first.click()
-        logged_in_page.wait_for_selector( "#task-body-overlay", state="attached" )
+        _open_live_detail( logged_in_page )
 
         # Click the backdrop at a corner, away from the centered content panel.
         logged_in_page.locator( "#task-body-overlay" ).click( position={ "x": 5, "y": 5 } )
@@ -743,12 +795,7 @@ class TestTaskListRowRedesign:
         """
         _route_tasks( logged_in_page, { "mode": "ok" } )
         _goto_notifications( logged_in_page )
-        logged_in_page.wait_for_selector( "#task-list-container .task-row", state="attached" )
-
-        logged_in_page.locator(
-            "#task-list-container .task-detail-emoji:not(.task-detail-empty)"
-        ).first.click()
-        logged_in_page.wait_for_selector( "#task-body-overlay", state="attached" )
+        _open_live_detail( logged_in_page )
 
         metrics = logged_in_page.evaluate( _OVERLAY_METRICS_JS )
 
@@ -1012,9 +1059,354 @@ class TestTaskListCardLiveSmoke:
         seeded = blocked.filter( has_text=SMOKE_BLOCKED_TITLE )
         assert seeded.count() == 1, "seeded blocked row not found among rendered blocked rows"
 
-        blocked_cell = seeded.locator( ".task-col-blocked" ).text_content()
+        # The fields live in the row's disclosed controls row (row 1657a852); read values.
+        controls     = _disclose_legacy_row( seeded )
+        blocked_cell = disclosed_value( controls, "task-col-blocked" )
         assert f"item:{SMOKE_BLOCKED_REF_ID}" in blocked_cell, \
             f"expected stringified item ref, got {blocked_cell!r}"
 
-        chase_cell = seeded.locator( ".task-col-chase" ).text_content().strip()
+        chase_cell = disclosed_value( controls, "task-col-chase" )
         assert chase_cell not in ( "", "—" ), f"expected a formatted chase time, got {chase_cell!r}"
+
+
+class TestTaskListHeaderFlowRatio:
+    """
+    The closed-vs-new ratio in the task-list header (2026-09-01).
+
+    Rick's durable replacement for the ticket moratorium he declared by voice:
+    "It's way too easy for you guys to add tickets to the list and way too hard to
+    get them removed." The gate refuses a create; THIS is the half he can see.
+
+    🔴 THESE TWO TESTS PIN THE HEADER'S EXACT COPY, ON PURPOSE, AND THAT MAKES THEM
+    THE ONES TO EDIT WHEN THE COPY CHANGES. Deliberate: somebody must own the
+    wording, and a mocked test with a fixed payload is the cheap place to own it.
+
+    ⇒ AND IT WAS PARTLY REVERSED THE SAME DAY (Rick, 2026-09-01, second ruling). The
+    shortening at 3919a1ea moved the window and the counts to the hover to make room
+    for the sliders; the sliders then moved down a row, and Rick asked for the counts
+    back on the face of it: "I want you to reinstate that explicit text displayed
+    without having to hover over it." The bar now reads
+    "1d  \u00b7  77%  \u00b7  10 created / 13 closed" \u2014 DAYS, not hours, per the
+    same ruling. The assertions below were updated with it. Change the strings here to
+    whatever you ship; do not weaken them to a substring match, or nothing anywhere
+    pins the wording and a blank label passes every test we have.
+
+    ⚠️ AN ASSERTION IS NOT THE ONLY THING THAT PINS THE COPY. Each test WAITS on the
+    clause before reading it, and that wait names a word too. When the label changed,
+    the assertions here were updated and BOTH waits were left polling for "Ratio" — a
+    word the bar no longer contains. They would not have failed on the assertion; they
+    would have hung until the wait timed out, reporting a timeout rather than the copy
+    change that caused it. Fixed 2026-09-01. If you edit the copy again, grep this file
+    for the OLD word rather than only re-reading the asserts.
+    """
+
+    def test_header_shows_the_ratio_with_its_window( self, logged_in_page ):
+        """
+        The header renders the ratio AND the window that produced it.
+
+        Requires:
+            - Authenticated session, /api/tasks and /api/tasks/flow-ratio seeded
+
+        Ensures:
+            - #task-list-count carries the LABELLED live count, not a bare integer
+            - #task-list-flow-ratio carries the ratio as a PERCENT — 77%, not
+              "0.77" — because the bar and the threshold slider must read in one
+              unit rather than asking the operator to convert in their head
+            - the window and the counts are on the FACE of the bar, not the hover.
+              The same board reads 77% over 1d and 110% over 7d, so a ratio without
+              its window cannot be checked — and Rick's ruling is that checking it
+              must not require a hover
+            - the window reads in DAYS. Hours remain the wire format; only the
+              display converts
+        """
+        _route_tasks( logged_in_page, { "mode": "ok" } )
+        _goto_notifications( logged_in_page )
+
+        logged_in_page.wait_for_selector( "#task-list-container .task-row", state="attached" )
+        logged_in_page.wait_for_function(
+            # The clause no longer carries the word "Gate"; the separator is the stable
+            # thing to wait on across the allow / infinity / idle payloads alike.
+            "() => document.getElementById( 'task-list-flow-ratio' ).textContent.includes( '\u00b7' )"
+        )
+
+        assert logged_in_page.locator( "#task-list-count" ).text_content() == f"Live: {OPEN_COUNT}"
+
+        ratio_text = logged_in_page.locator( "#task-list-flow-ratio" ).text_content()
+        # Updated 2026-09-01 for Rick's SECOND ruling the same day: the counts came
+        # back onto the face of the bar and the window reads in days. window_hours 24
+        # in the seeded payload renders as "1d". PERCENT, not hundredths.
+        assert "1d" in ratio_text, ratio_text
+        assert "77%" in ratio_text, ratio_text
+        assert "10 created / 13 closed" in ratio_text, ratio_text
+        assert "0.77" not in ratio_text, "hundredths leaked into the percent header"
+        assert "hrs" not in ratio_text, "the bar reads days; hours are the wire format only"
+
+    def test_a_window_with_no_closures_shows_infinity_not_a_zero( self, logged_in_page ):
+        """
+        created > 0 with closed == 0 renders ∞, never a number.
+
+        A window in which NOTHING was closed is the worst case. Rendering it as "0%"
+        would read as the BEST, which is why the endpoint sends ratio:null rather than
+        a sentinel number.
+
+        ⚠️ THIS TEST USED TO ASSERT AN EM DASH AND ITS PREMISE WAS WRONG, not just its
+        string. The 2026-09-01 percent rewrite splits what this conflated: nothing
+        closed WITH rows created is ∞ — the honest rendering of a divide-by-zero — while
+        an idle window that created nothing either is an em dash. A big number like 999%
+        would be a lie carrying a number's authority; so would folding both cases into
+        one dash.
+
+        Ensures:
+            - the clause shows ∞ for the divide-by-zero case
+            - "0%" and "0.00" appear nowhere
+        """
+        _route_tasks( logged_in_page, {
+            "mode"  : "ok",
+            "ratio" : { "created": 4, "closed": 0, "ratio": None,
+                        "verdict": "refuse", "window_hours": 24 },
+        } )
+        _goto_notifications( logged_in_page )
+
+        logged_in_page.wait_for_function(
+            # The clause no longer carries the word "Gate"; the separator is the stable
+            # thing to wait on across the allow / infinity / idle payloads alike.
+            "() => document.getElementById( 'task-list-flow-ratio' ).textContent.includes( '\u00b7' )"
+        )
+        ratio_text = logged_in_page.locator( "#task-list-flow-ratio" ).text_content()
+        assert "\u221e" in ratio_text, ratio_text
+        assert "0%" not in ratio_text and "0.00" not in ratio_text, \
+            "an unmeasurable ratio must never render as a number"
+
+    def test_an_idle_window_shows_an_em_dash_not_infinity( self, logged_in_page ):
+        """
+        created == 0 AND closed == 0 is IDLE, and idle is not failing.
+
+        The twin of the test above, and the reason ∞ alone is not enough: a quiet board
+        that filed nothing has no ratio to report, but it has not failed at anything.
+        Showing ∞ there would read as "catastrophically behind" on the calmest possible
+        day.
+        """
+        _route_tasks( logged_in_page, {
+            "mode"  : "ok",
+            "ratio" : { "created": 0, "closed": 0, "ratio": None,
+                        "verdict": "idle", "window_hours": 24 },
+        } )
+        _goto_notifications( logged_in_page )
+
+        logged_in_page.wait_for_function(
+            # The clause no longer carries the word "Gate"; the separator is the stable
+            # thing to wait on across the allow / infinity / idle payloads alike.
+            "() => document.getElementById( 'task-list-flow-ratio' ).textContent.includes( '\u00b7' )"
+        )
+        ratio_text = logged_in_page.locator( "#task-list-flow-ratio" ).text_content()
+        assert "\u2014" in ratio_text, ratio_text
+        assert "\u221e" not in ratio_text, "an idle window is not a failing window"
+
+
+def _payload_digest( body ):
+    """
+    The fields that decide what the header should say, for an assertion message.
+
+    🔴 WHY THIS EXISTS. This test failed on 2026-09-01 and could not answer for itself:
+    it asserted only `window_hours`, so when a reviewer asked what `ratio`, `created` and
+    `closed` had been, the log did not know — and the run was gone. A live test that does
+    not record the payload it judged forces the next reader to re-run it, by which time
+    the board has moved and the answer is about a different moment.
+
+    Requires:
+        - body is the decoded /api/tasks/flow-ratio payload, or None
+
+    Ensures:
+        - returns a short one-line digest naming ratio / created / closed / verdict
+        - never raises, including on a None or partial body — a diagnostic that can fail
+          takes the real failure's message down with it
+    """
+    if not isinstance( body, dict ):
+        return f"payload={body!r}"
+    fields = ( "ratio", "created", "closed", "verdict", "window_hours" )
+    return " ".join( f"{k}={body.get( k )!r}" for k in fields )
+
+
+class TestTaskListHeaderFlowRatioLive:
+    """
+    The ratio header against the REAL endpoint, with NO route mock (2026-09-01).
+
+    WHY THIS CLASS EXISTS. `GET /api/tasks/flow-ratio` shipped registered BELOW
+    `GET /api/tasks/{task_id}`. FastAPI matches in registration order, so the
+    literal path was swallowed by its parameterised sibling and answered 422 for
+    as long as it existed. Three tests were nominally proving that endpoint and
+    all three were blind to it:
+
+      · test_flow_ratio_endpoint.py     calls the handler, so ordering never applies
+      · task_list_panel.test.ts         renders a hand-built payload, no HTTP at all
+      · TestTaskListHeaderFlowRatio     `page.route`s this very path — it faked the
+                                        exact call that was broken
+
+    The client hides the failure BY DESIGN: `fetchFlowRatio` returns null on any
+    non-2xx and `_renderFlowRatio` writes an empty string, so a broken endpoint
+    and a quiet board render identically. Nothing short of driving the real wire
+    can tell them apart, which is why this class mocks nothing.
+
+    ⚠️ IT ASSERTS THE WINDOW AND THE SHAPE, NEVER THE DIGITS. The ratio is live
+    state — the fleet files and closes rows while the suite runs — so an exact
+    number would be flaky for a reason that has nothing to do with the defect.
+    `window_hours` is a server constant and cannot drift.
+    """
+
+    def test_the_app_s_own_fetch_of_the_real_flow_ratio_answers_200( self, logged_in_page ):
+        """
+        The page's OWN request to the real endpoint comes back 200, not 422.
+
+        Requires:
+            - Authenticated session (logged_in_page)
+            - NO page.route anywhere in this test — the wire is the subject
+
+        Ensures:
+            - the browser actually issued GET /api/tasks/flow-ratio (an absent
+              request fails LOUDLY rather than passing vacuously)
+            - it answered 200
+            - a 401 is called out as an AUTH failure, distinct from the 422
+              routing defect — otherwise a broken fixture reads as the bug and
+              this guard reports on the auth layer instead of the route table
+
+        RED ON REVERT: move the `/tasks/flow-ratio` registration in
+        `src/cosa/rest/routers/tasks.py` back below `/tasks/{task_id}` and the
+        observed status becomes 422.
+        """
+        seen: list[ dict ] = []
+
+        def _record( response ):
+            if "/api/tasks/flow-ratio" in response.url:
+                seen.append( { "status": response.status, "url": response.url } )
+
+        logged_in_page.on( "response", _record )
+        _goto_notifications( logged_in_page )
+
+        # The card fetches the ratio on its first tick; wait for the wire, not a
+        # fixed sleep. An empty `seen` here means the request was never issued —
+        # which is a failure of this test's premise and must not read as a pass.
+        logged_in_page.wait_for_function(
+            "() => !!document.getElementById( 'task-list-flow-ratio' )"
+        )
+        logged_in_page.wait_for_timeout( 2000 )
+
+        assert seen, (
+            "the page never requested /api/tasks/flow-ratio — this guard proves "
+            "nothing until it does; check the card mounted and its first tick ran"
+        )
+
+        statuses = [ r[ "status" ] for r in seen ]
+        assert 401 not in statuses, (
+            f"AUTH failed, not routing — statuses {statuses}. This guard is about the "
+            f"route table; a 401 means it never got far enough to measure that."
+        )
+        assert all( s == 200 for s in statuses ), (
+            f"expected every /api/tasks/flow-ratio response to be 200, got {statuses}. "
+            f"422 is the registration-order defect: the literal path parked below "
+            f"/api/tasks/{{task_id}} and was swallowed by it."
+        )
+
+    def test_the_real_payload_reaches_the_rendered_header( self, logged_in_page ):
+        """
+        The clause in the header is the one the LIVE endpoint just produced.
+
+        The status check above proves the endpoint answers. This proves the answer
+        travelled endpoint → fetchFlowRatio → _formatFlowRatio → the DOM, which is
+        the leg no unit or TypeScript test can reach.
+
+        Requires:
+            - Authenticated session, NO route mock
+
+        Ensures:
+            - the live payload carries window_hours (without it the client renders
+              an empty clause and this test would be asserting nothing)
+            - #task-list-flow-ratio is NON-EMPTY and names that same window
+            - it carries a 2dp number or the em dash — never "0.00" standing in for
+              an unmeasurable window
+        """
+        _goto_notifications( logged_in_page )
+
+        payload = logged_in_page.evaluate(
+            """async () => {
+                const r = await window.notificationsUI.authedFetch( "/api/tasks/flow-ratio" );
+                return { status: r.status, body: r.ok ? await r.json() : null };
+            }"""
+        )
+
+        assert payload[ "status" ] == 200, \
+            f"live endpoint answered {payload['status']} — see the status guard above"
+
+        body = payload[ "body" ]
+        assert isinstance( body.get( "window_hours" ), int ), (
+            f"live payload has no integer window_hours ({body!r}); the client renders "
+            f"an EMPTY clause in that case, so the assertion below would pass on a "
+            f"header that shows nothing"
+        )
+
+        logged_in_page.wait_for_function(
+            "() => { const e = document.getElementById( 'task-list-flow-ratio' );"
+            "        return e && e.textContent.includes( '\u00b7' ); }"
+        )
+        ratio_text = logged_in_page.locator( "#task-list-flow-ratio" ).text_content()
+
+        # ⚠️ ASSERTS THE PROPERTY, NOT THE COPY. This test's job is "the live payload
+        # reached the DOM" — it is NOT the place to pin the header's wording or the
+        # number's format. Rick is actively shortening this label and moving the value to
+        # percent (2026-09-01), and an E2E that reddens on a copy edit is a brake on the
+        # people editing the copy, not a guard on the wire. The exact strings ARE pinned,
+        # deliberately, in the mocked TestTaskListHeaderFlowRatio above and in the
+        # TypeScript unit tier — the right altitude for wording.
+        #
+        # What must hold whatever the copy says: the window the endpoint just returned
+        # appears in the header, and some number does. Both are properties of the payload
+        # having travelled, and neither cares how it is spelled.
+        # ⚠️ THE WINDOW LEFT THE VISIBLE BAR on 2026-09-01 — Rick's shortening moved the
+        # long "Closed vs New Ratio (Nhrs)" form into the hover text, so asserting it in
+        # textContent would now fail for a reason that has nothing to do with the wire.
+        # Read it where it actually lives; if the title is absent, that IS a finding.
+        long_form = logged_in_page.locator( "#task-list-flow-ratio" ).get_attribute( "title" ) or ""
+        # ⚠️ THE WINDOW IS SHOWN IN DAYS, so the raw hour count is not on the page (row
+        # 1657a852: 24 renders as "1d", and this asserted "24"). Ask the page's own
+        # converter what the payload's window becomes rather than restating its rule here,
+        # so a change to the rounding cannot redden a test about the wire.
+        window_days = logged_in_page.evaluate(
+            "hours => window.notificationsUI._flowRatioWindowDays( hours )", body[ "window_hours" ]
+        )
+        assert window_days is not None, \
+            f"the page's converter returned nothing for window_hours={body['window_hours']}"
+        assert f"{window_days}d" in ( ratio_text + long_form ), (
+            f"neither the header clause {ratio_text!r} nor its hover text {long_form!r} "
+            f"carries the window the live endpoint returned ({body['window_hours']}h = "
+            f"{window_days}d) — the payload did not reach the DOM. Payload: {_payload_digest( body )}"
+        )
+
+        # 🔴 AN EM-DASH IS THE CORRECT RENDER FOR AN IDLE WINDOW, AND THIS ASSERTION USED
+        # TO CALL IT A DEFECT. It read `assert ratio_text.strip() and re.search( r"\d", … )`
+        # unconditionally, so it demanded a DIGIT whatever the payload said. Measured
+        # 2026-09-01: `:8000` answers `{"created": 0, "closed": 0, "ratio": null,
+        # "verdict": "idle", "window_hours": 24}` because it runs against `lupin_db_test`,
+        # which is empty — so the header correctly shows " · Gate: —" and this test could
+        # NEVER pass in the venue it is routed to. `:7999`, for contrast, answers
+        # `created 2, closed 17, ratio 0.12, verdict allow` and renders a number.
+        #
+        # The failure message above it already named the ambiguity — "a broken endpoint and
+        # a quiet board both render empty" — and then asserted straight through it. Naming a
+        # trap in the message you print is not the same as handling it in the predicate.
+        #
+        # ⚠️ WHICH BRANCH APPLIES IS DECIDED BY THE PAYLOAD, NOT BY THE VENUE. Keying this
+        # on "is this :8000" would go wrong the first time the test database has rows in it.
+        idle = body.get( "ratio" ) is None and body.get( "created" ) == 0
+
+        if idle:
+            assert "—" in ratio_text or "-" in ratio_text, (
+                f"the live payload is IDLE ({_payload_digest( body )}) so the header must "
+                f"render a dash, and it rendered {ratio_text!r} instead. A number here would "
+                f"mean the client invented one for a window with nothing in it."
+            )
+        else:
+            assert ratio_text.strip() and re.search( r"\d", ratio_text ), (
+                f"header clause {ratio_text!r} carries no value, but the live payload is NOT "
+                f"idle ({_payload_digest( body )}) — it has a ratio and a non-zero created "
+                f"count, so a number was owed and none arrived. This is the case the test "
+                f"exists for: the wire answered and the DOM did not show it."
+            )

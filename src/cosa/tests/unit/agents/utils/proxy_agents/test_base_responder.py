@@ -45,6 +45,7 @@ def test_init_stores_params_and_stats():
     r = _Responder( host="h", port=1234, dry_run=True, debug=True, verbose=True )
     assert ( r.host, r.port, r.dry_run, r.debug, r.verbose ) == ( "h", 1234, True, True, True )
     assert r.stats == { "events_received": 0, "responses_sent": 0, "skipped": 0, "errors": 0 }
+    assert r.authorization_fn is None      # unwired until the entry point hands it the listener
 
 
 def test_abstract_handle_event_body_is_noop():
@@ -111,8 +112,23 @@ def test_submit_response_delegates_to_rest_submitter():
     with patch.object( mod, "submit_notification_response", return_value=True ) as m:
         assert r.submit_response( "nid", "val" ) is True
     m.assert_called_once_with(
-        notification_id="nid", response_value="val", host="h", port=99, debug=True, verbose=True
+        notification_id="nid", response_value="val", host="h", port=99, debug=True, verbose=True,
+        authorization=None
     )
+
+
+def test_submit_response_sends_the_token_its_listener_holds_at_post_time():
+    """
+    Row e20e249a. The token is read at POST time, not captured at wiring time, so a listener
+    that logs in again after a reconnect hands its FRESH token to the next answer.
+    """
+    r      = _Responder( host="h", port=99 )
+    tokens = iter( [ "Bearer first", "Bearer second" ] )
+    r.authorization_fn = lambda: next( tokens )
+    with patch.object( mod, "submit_notification_response", return_value=True ) as m:
+        r.submit_response( "n1", "a" )
+        r.submit_response( "n2", "b" )
+    assert [ c.kwargs[ "authorization" ] for c in m.call_args_list ] == [ "Bearer first", "Bearer second" ]
 
 
 # =========================================================================== #

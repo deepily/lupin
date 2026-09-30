@@ -17,7 +17,7 @@ human-readable error strings back (empty list == valid). The router maps a
 non-empty list to HTTP 422; the repository never sees invalid input.
 
 Canonical design: planning-is-prompting ->
-src/rnd/2026.06.11-unified-task-store-design.md (v0.4). Gate rulings (Tiberius,
+planning-is-prompting/src/rnd/2026.06.11-unified-task-store-design.md (v0.4). Gate rulings (Tiberius,
 qid c8c73fde): item_class naming, terminal-state rule, blocked requires >=1 ref,
 log_line shape = "<scope>/<rel-path>:<lineno>" with exists check.
 """
@@ -35,8 +35,8 @@ from lupin_mcp.persona_normalization import canonical_persona_key
 # Enums (design §2.1) — plain tuples, app-validated (house style: no PG ENUM)
 # ---------------------------------------------------------------------------
 
-VALID_STATUSES         = ( "queued", "claimed", "in_progress", "blocked", "parked", "review", "done", "dropped" )
-TERMINAL_STATUSES      = ( "done", "dropped" )
+VALID_STATUSES         = ( "not_approved", "queued", "claimed", "in_progress", "blocked", "parked", "review", "done", "dropped", "wont_fix" )
+TERMINAL_STATUSES      = ( "done", "dropped", "wont_fix" )
 VALID_ITEM_CLASSES     = ( "task", "decision", "review_request", "bug", "gate" )
 
 # The deliberate-hold status (2026-07-19). A row is `parked` when a HUMAN ruled it
@@ -75,8 +75,48 @@ PARK_LEGAL_FROM_STATUSES = ( "queued", "in_progress" )
 # self-healing arm was also the only one with no staleness oracle — six rows sat
 # unsatisfiable for up to eight days before two seats found them by hand.
 BLOCKED_STATUS           = "blocked"
+
+# ── THE HOLDING AREA (Rick's P0, 2026-09-02) ────────────────────────────────────
+#
+# Two words, deliberately asymmetric, because they answer different questions and
+# borrowing one shape for the other breaks a live reader.
+#
+# `wont_fix` is TERMINAL. A row nobody will act on, closed on purpose rather than
+# left to rot in the owed count. Terminal membership is not a convenience here —
+# it is what hides the row from EVERY denylist reader in one edit (the two
+# `TERMINAL_STATUSES.notin_` filters in task_repository), gives it no out-edges
+# through the derived LEGAL_TRANSITIONS graph, and keeps `blocker_is_terminal`
+# honest: a row blocked on a won't-fix row IS unblocked, because nothing further
+# is coming.
+WONT_FIX_STATUS          = "wont_fix"
+
+# `not_approved` is NOT terminal, and must never be added to TERMINAL_STATUSES to
+# borrow its hiding. Doing so would tell `blocker_is_terminal` that a row waiting
+# on an unapproved row is free to proceed — the exact opposite of the truth — and
+# would break the rejoin logic, which reads terminality as "no further movement".
+# An unapproved row's whole point is that it is WAITING for movement.
+#
+# It is a PRE-queued state: filed, not yet admitted to anyone's board.
+NOT_APPROVED_STATUS      = "not_approved"
+
+# The board-invisibility set — what an un-status'd query drops. TERMINAL plus the
+# holding area, and it exists precisely BECAUSE the two have different reasons to
+# be invisible: terminal rows are finished, `not_approved` rows have not started.
+# Kept as its own name so a future reader cannot mistake "hidden from the board"
+# for "terminal", which is the confusion the paragraph above exists to prevent.
+BOARD_INVISIBLE_STATUSES = TERMINAL_STATUSES + ( NOT_APPROVED_STATUS, )
 VALID_GATE_CLASSES     = ( "none", "manager", "operator" )
-VALID_PRIORITIES       = ( "P0", "P1", "P2", "P3" )
+# Priority value space. WIDENED from P0-P3 to P0-P5 on 2026-09-07 (Rick's broadcast
+# e254ec7d): "the editors for the tickets will mean that you need to have a range of
+# P0 through P5." P5 is the new floor AND the new default for every creation path.
+#
+# THE ORDER MATTERS AND IT IS NOT WHAT THE INSTRUCTION SOUNDS LIKE: P4 and P5 were not
+# legal values before this line changed, so a default flipped to P5 first would have
+# made every create fail validation here. The enum widens, THEN the defaults move.
+#
+# Read by BOTH validators — the create path at ~:978 and the edit path at ~:2000 — so
+# this tuple is the single decider and neither one carries its own copy.
+VALID_PRIORITIES       = ( "P0", "P1", "P2", "P3", "P4", "P5" )
 # proactive-manager A2 (fcb5dbc0): operator-gate TIME-SENSITIVITY, distinct from the
 # `priority` IMPORTANCE field. Default "normal". The arbiter (single pusher) routes an
 # operator gate by this: urgent→interrupt, normal→digest, low→queue-until-pulled.
@@ -103,14 +143,70 @@ LEGAL_TRANSITIONS = {
 }
 
 # Receipt key whitelist + shape rules (design §4.1 AC1)
-RECEIPT_KEY_WHITELIST = ( "commit", "test_run", "qid", "doc_path", "log_line" )
+RECEIPT_KEY_WHITELIST = ( "commit", "test_run", "qid", "doc_path", "log_line", "operator_attestation", "manager_attestation" )
 
 # The subset a THIRD PARTY can independently check without taking the closer's word
-# (row 9bfb4b73). A ->done receipt must carry at least one of these. The others are
-# not junk — they are context — but `doc_path` and `log_line` only prove a file
-# exists, which is true whether or not the work landed, and `qid` names a question
-# rather than an outcome. None of the three can carry a close on its own.
+# (row 9bfb4b73). The others are not junk — they are context — but `doc_path` and
+# `log_line` only prove a file exists, which is true whether or not the work landed,
+# and `qid` names a question rather than an outcome. None of the three can carry a
+# close on its own.
 CHECKABLE_RECEIPT_KEYS = ( "commit", "test_run" )
+
+# ---------------------------------------------------------------------------
+# The operator attestation (Rick's ruling, 2026-09-04, row 1e12cc08)
+# ---------------------------------------------------------------------------
+#
+# "HIS CLICK IS THE RECEIPT." Rick can already mark a row won't-fix from the
+# progressive-disclosure controls and cannot mark one FIXED, and he named the cost
+# himself: "I'm not waiting around for you guys to do proper task list hygiene." A
+# board whose only human-driven terminal verb is a NEGATIVE one drifts toward an
+# inflated open count, and the ticket ratio gate reads that count.
+OPERATOR_ATTESTATION_KEY = "operator_attestation"
+
+# 🔴 TWO PROPERTIES, KEPT APART ON PURPOSE — AND CONFLATING THEM IS THE ONE WAY TO
+# BUILD THIS WRONG. An attestation is SUFFICIENT TO CLOSE and is NOT INDEPENDENTLY
+# CHECKABLE: its whole content is that a human looked and said so. Adding it to
+# CHECKABLE_RECEIPT_KEYS would have been the one-line version of this change, and it
+# would have silently redefined that constant to mean "sufficient", taking the
+# doc_path/log_line refusal's stated reason — "something a third party can
+# independently check" — with it. So the closing set is its own name.
+#
+# This is also María's constraint 1 falling out of the data model rather than out of
+# a convention somebody has to remember: a reader looking at a closed row sees the
+# KEY, and `operator_attestation: "rick"` cannot be mistaken for `commit: "f4e0370"`.
+# ---------------------------------------------------------------------------
+# The manager attestation (Rick's ruling, 2026-09-10, row adaf7698)
+# ---------------------------------------------------------------------------
+#
+# "A manager should be able to close a ticket. That is not a matter of state security."
+# Scope ruled ~17:28 EDT: close only, and a manager's close COUNTS toward the
+# create/close ratio like any other close.
+#
+# A decision row's product is a ruling, so it has no commit and no test run to cite,
+# and every agent seat is refused `operator_attestation`. This key is what closes it.
+# Its own key rather than a reuse of the operator's, so a reader of a closed row can
+# tell "a manager said so" from "Rick said so" from "commit f4e0370".
+#
+# ⚠️ THE SAME SPLIT AS THE OPERATOR KEY, AND FOR THE SAME REASON. This module only
+# checks the SHAPE. Whether the caller is a manager is decided in the ROUTER, by
+# `_resolved_manager_attestation`, which also overwrites the caller's value with the
+# identity the server resolved.
+MANAGER_ATTESTATION_KEY = "manager_attestation"
+
+CLOSING_RECEIPT_KEYS = CHECKABLE_RECEIPT_KEYS + ( OPERATOR_ATTESTATION_KEY, MANAGER_ATTESTATION_KEY )
+
+# Shape only — 1..255 chars, no control characters. The column is String(255), the
+# same cap `task_events.actor` carries.
+#
+# ⚠️ THIS PATTERN AUTHENTICATES NOTHING, AND SAYING SO HERE IS LOAD-BEARING. The
+# rules module is PURE: it has no request, no token, no account. It cannot tell
+# Rick's attestation from an agent typing {"operator_attestation": "rick"} straight
+# at the API, and it must not be read as though it could. The enforcement lives in
+# the ROUTER, where `account_email` exists — see `_resolved_operator_attestation` in
+# routers/tasks.py. A future reader who moves that check down here to "tidy it up"
+# re-opens the hole this key was designed around, because the fact the check needs
+# does not exist at this layer.
+OPERATOR_ATTESTATION_PATTERN = re.compile( r"^[^\x00-\x1f\x7f]{1,255}$" )
 
 
 # ---------------------------------------------------------------------------
@@ -386,6 +482,10 @@ def validate_receipt_refs( receipt_refs, scope_roots: Optional[dict] = None,
             qid      - canonical lowercase UUID
             doc_path - "<scope>/<rel>" existing file in a registered scope
             log_line - "<scope>/<rel>:<lineno>" with the file existing
+            operator_attestation
+                     - 1-255 chars, no control characters. SHAPE ONLY: this
+                       module cannot tell a real operator from a caller who
+                       typed the key, and the router is where that is decided
         - a non-empty-but-junk receipt ({doc_path: "trust me"}) returns errors
         - never raises on malformed input — errors are data, not exceptions
 
@@ -410,7 +510,26 @@ def validate_receipt_refs( receipt_refs, scope_roots: Optional[dict] = None,
     Deliberately NOT done: classifying a row as "code-bearing" to decide whether
     it needs a commit. That is a category test standing in for the property —
     the same mistake as the `--no-merges` filter and the withdrawn squash-shape
-    detector. Every closing row must cite something checkable, full stop.
+    detector. Every closing row must cite something that can CARRY a close.
+
+    WHAT THE OPERATOR ATTESTATION CHANGES HERE, AND WHAT IT DELIBERATELY DOES NOT
+    (Rick's ruling 2026-09-04, row 1e12cc08)
+
+    `require_checkable` now looks for CLOSING_RECEIPT_KEYS rather than
+    CHECKABLE_RECEIPT_KEYS. That is a WIDENING of what may close a row and NOT a
+    weakening of the 9bfb4b73 rule, and the distinction is the whole design:
+
+      · For an AGENT nothing moves. Every seat authenticates by API key, has no
+        login account, and is refused the attestation key upstream in the router.
+        The commit/test_run requirement is exactly as hard as it was.
+      · For a HUMAN OPERATOR the receipt is the assertion itself, because there is
+        no artifact to cite — "I looked at it and it is fixed" is a judgement, and
+        manufacturing a test-shaped receipt for it would be the dishonest option.
+
+    ⚠️ SO A GREEN FROM THIS FUNCTION IS NOT AN AUTHORIZATION. It says the shape is
+    legal. Whether this caller may assert an attestation is answered one layer up,
+    and a test that exercises only this function CANNOT speak to that — it enters
+    below the layer the enforcement lives at.
 
     ANY branch, never `main`: every commit landed on this branch tonight sits on
     a wip branch, and requiring main would refuse every legitimate pre-merge
@@ -439,6 +558,14 @@ def validate_receipt_refs( receipt_refs, scope_roots: Optional[dict] = None,
             errors.append( f"receipt test_run '{value}' must match 'ts-<8 hex chars>'" )
         elif key == "qid" and not QID_PATTERN.fullmatch( value ):
             errors.append( f"receipt qid '{value}' must be a canonical lowercase UUID" )
+        elif key in ( OPERATOR_ATTESTATION_KEY, MANAGER_ATTESTATION_KEY ) and not OPERATOR_ATTESTATION_PATTERN.fullmatch( value ):
+            # Shape only, for both attestations. Whether this caller may ASSERT one is
+            # the router's question and cannot be asked here — see
+            # OPERATOR_ATTESTATION_PATTERN's note.
+            errors.append(
+                f"receipt {key} '{value}' must be 1-255 chars "
+                f"with no control characters"
+            )
         elif key == "doc_path":
             errors.extend( _validate_scoped_path( value, scope_roots ) )
         elif key == "log_line":
@@ -449,13 +576,18 @@ def validate_receipt_refs( receipt_refs, scope_roots: Optional[dict] = None,
                 errors.extend( _validate_scoped_path( match.group( 1 ), scope_roots ) )
 
     if require_checkable:
-        present = [ k for k in CHECKABLE_RECEIPT_KEYS if isinstance( receipt_refs.get( k ), str ) and receipt_refs[ k ] ]
+        present = [ k for k in CLOSING_RECEIPT_KEYS if isinstance( receipt_refs.get( k ), str ) and receipt_refs[ k ] ]
         if not present:
             errors.append(
-                f"a ->done receipt must cite at least one INDEPENDENTLY CHECKABLE ref "
-                f"{CHECKABLE_RECEIPT_KEYS} — got only {sorted( receipt_refs )}. A doc_path or "
+                f"a ->done receipt must cite at least one ref that can CARRY a close "
+                f"{CLOSING_RECEIPT_KEYS} — got only {sorted( receipt_refs )}. A doc_path or "
                 f"log_line proves a file exists, which is true whether or not the work landed; "
-                f"it may accompany a close but cannot be the close (row 9bfb4b73)."
+                f"it may accompany a close but cannot be the close (row 9bfb4b73). "
+                f"'{OPERATOR_ATTESTATION_KEY}' is a HUMAN OPERATOR's assertion and is accepted "
+                f"ONLY from a logged-in account the server resolves itself — an API-key caller "
+                f"cannot mint one (row 1e12cc08). '{MANAGER_ATTESTATION_KEY}' is a MANAGER "
+                f"seat's assertion, also resolved by the server — a worker seat cannot mint "
+                f"one, and should ask its manager to close the row (row adaf7698)."
             )
         # Reachability is checked only on a shape-valid sha — otherwise the caller
         # would get two errors for one mistake, the second of them confusing.
@@ -841,7 +973,18 @@ def compose_drop_marker( dropped, existing_reason=None ) -> Optional[str]:
 # needs park_reason + captured_at and is legal ONLY from queued/in_progress (a
 # human ruling EXISTING work not-now), never at mint. `claimed`/`in_progress`/
 # `review` are transition-only lifecycle states, not mintable.
-CREATE_ALLOWED_STATUSES = ( "queued", "blocked" )
+CREATE_ALLOWED_STATUSES = ( "queued", "blocked", "not_approved" )
+
+# 🔴 `not_approved` JOINED THE MINT WHITELIST FOR PHASE 4 (Rick's P0, 2026-09-02) AND
+# THE ORDER MATTERED. It is the LAST thing to land, after the holding-area view that
+# reads it — this fleet's own rule, learned from 072ef7e/d4f6c29 landing an instruction
+# for a file no code created, which cost two days. Ship the mint before the reader and
+# every submission fleet-wide falls into a bin nobody can open.
+#
+# It is mintable where `parked` is not, and the difference is not arbitrary: parking is
+# a HUMAN ruling EXISTING work not-now, so it needs a park_reason quoting a row that
+# already exists. A holding-area row has no history to quote — being unexamined is its
+# whole content, and it is the state a row is BORN in, not one it is moved to.
 
 def validate_create( item_class: str, gate_class: str, priority: str, authority: str,
                      urgency: str = "normal" ) -> list:
@@ -929,7 +1072,21 @@ def validate_create_status( status, blocked_by, next_chase_ts ) -> list:
 # Both write paths now route through soft_guard_title (bug 28fc1fb4). The claim is
 # true again — it is recorded here rather than quietly corrected because a comment
 # that was wrong for months is evidence about how this file gets maintained.
-TITLE_SOFT_CAP = 60
+#
+# 🔴 RAISED 60 -> 120 BY RICK'S RULING, 2026-09-01 (decision cc6519a6, bug 6ce252e7):
+# "Raise to 120 with a 422 over it." The cap moved AND the two doors deliberately
+# stopped agreeing about what happens above it — see validate_edit_title_length.
+#
+# WHY 120, with the population named both times rather than quoted once:
+#   Rio, n=44 (the four newest full-row pages of 1,748): median 76 · p95 106 · max 144.
+#   Maria, whole-board re-measurement, n=960: p95 is 130, and ~7.7% of authored
+#   titles exceed 120.
+# ⇒ Those two do not agree, and the fuller count is the one that survives: at n=960
+# the number 120 sits BELOW p95, so the "between p95 and the max" argument Rio and I
+# both carried does NOT hold on the whole board. 120 is Rick's dial, chosen knowing
+# it refuses roughly one authored title in thirteen — and refusing is now the point
+# on the edit path, where a writer is present to shorten the string.
+TITLE_SOFT_CAP = 120
 
 # The marker the relocated title overflow is filed under when the body is NOT
 # empty (bug 28fc1fb4, 2026-07-21). It is a literal, greppable line rather than
@@ -937,6 +1094,25 @@ TITLE_SOFT_CAP = 60
 # — a reader who never saw the write can still find every row whose title was
 # cut, and reconstruct the original from `title + overflow`.
 TITLE_OVERFLOW_MARKER = "[title overflow — the stored title was trimmed at the cap; the original continues here]"
+
+
+# `title_may_be_trimmed` LIVED HERE AND WAS DELETED 2026-08-31 (bug 769b3574).
+#
+# It answered "was this title cut" with `len( title ) == TITLE_SOFT_CAP` — a
+# re-derivation against whatever the cap currently is, rather than a record of
+# what the write actually did. Measured over all 2,278 rows of lupin_db_dev
+# through the real terse serializer, two arms over one variable: at cap 60 it
+# flagged 1,606 rows, at cap 120 it flagged 1. So the pending cap raise
+# (decision cc6519a6) would have switched the board's trim signal off across the
+# whole existing corpus with nothing failing.
+#
+# The answer now lives on the row: `TaskItem.title_trimmed`, written by both
+# write paths from this module's own `soft_guard_title` third return value, and
+# backfilled by migration 47513717b7e5.
+#
+# ⚠️ DO NOT REINTRODUCE A LENGTH-DERIVED SECOND OPINION. Two answers to one
+# question is the drift this bug was; the guard's return value is the only one
+# that knows whether it cut.
 
 
 def soft_guard_title( title, body, cap=TITLE_SOFT_CAP ):
@@ -948,8 +1124,15 @@ def soft_guard_title( title, body, cap=TITLE_SOFT_CAP ):
     only show ~60 chars and the store's `body` field (the proper home for
     detail) sits underused. This guard fixes the data at its SOURCE — the one
     server-side write path EVERY caller (MCP wrapper, hook, raw POST) flows
-    through — so a paragraph-title never lands in the store unguarded. It is
-    FAIL-OPEN by ruling: an over-long title is NEVER a rejected write.
+    through — so a paragraph-title never lands in the store unguarded.
+
+    ⚠️ THE FAIL-OPEN RULING IS NOW SCOPED TO CREATE, NOT TO THE STORE (Rick,
+    2026-09-01, bug 6ce252e7). This docstring used to say flatly "an over-long
+    title is NEVER a rejected write", and that sentence outlived the ruling it
+    described. It still holds HERE and on POST /api/tasks: a create is the
+    unattended door — hooks, the MCP wrapper, an agent filing mid-task — and a
+    rejected create loses the filing. The EDIT door now rejects instead, because a
+    writer editing a title is present to shorten it; see validate_edit_title_length.
 
     Requires:
         - title is a non-empty string (the column is NOT NULL; the wire model
@@ -970,8 +1153,33 @@ def soft_guard_title( title, body, cap=TITLE_SOFT_CAP ):
 
     The original ruling — "an existing body always wins" — forbade CLOBBERING a
     body, and it still holds: the pre-existing body is preserved verbatim, in
-    full, and the overflow is filed ABOVE it under TITLE_OVERFLOW_MARKER. Adding
-    to a body is not overwriting one, so nothing about that ruling is reversed.
+    full, and the overflow is filed under TITLE_OVERFLOW_MARKER. Adding to a body
+    is not overwriting one, so nothing about that ruling is reversed.
+
+    ⚠️ THE OVERFLOW IS APPENDED, NOT PREPENDED (row a6cb24e8, 2026-08-31). It was
+    prepended until now, and prepending damages the body in a way the ruling was
+    never asked about: the body's own opening line stops being the first thing a
+    reader sees, and a RETITLE over the cap prepends a SECOND marker above the
+    first. Tiberius 👑 and Maya 🌻 hit that independently within minutes — a body
+    opening with two stacked banners and the fragment "us", the tail of the word
+    "Tiberius", with the real opening line buried two blocks down. Both had to be
+    unpicked by hand.
+
+    Appending satisfies the same ruling and costs the reader nothing: the body
+    still wins, still appears verbatim, and now still STARTS where its author
+    started it. Stacked overflows from repeated retitles collect at the foot in
+    the order they happened, which is a readable history instead of a corrupted
+    head. The marker STRING is deliberately unchanged so the grep-recovery
+    property holds for rows written before this.
+
+    ⚠️ WHAT THIS STILL DOES NOT FIX, on the create path only: the trim silently
+    deletes the TAIL of a title, which is where writers put qualifiers —
+    "…DECLINED", "CONDITIONAL on…", "…by design". Six instances in one night each
+    lost a word whose job was to LIMIT the claim in front of it. Three fixes were
+    put to Rick and he took all three (bug 6ce252e7): the trim is marked where
+    readers are (`title_trimmed`, in the terse projection), the cap is raised to
+    120, and an over-cap write is rejected — on the EDIT door. Above 120 a create
+    still trims, by ruling, and that is the residue this paragraph now names.
 
     Requires:
         - title is a non-empty string (the column is NOT NULL; the wire model
@@ -987,14 +1195,20 @@ def soft_guard_title( title, body, cap=TITLE_SOFT_CAP ):
             * when body is empty (None / whitespace-only): new_body IS the
               overflow (title[cap:]) — unmarked, because there is nothing for it
               to be distinguished FROM
-            * when body is non-empty: new_body is the marker line + the overflow
-              + the ORIGINAL BODY VERBATIM, in that order. The pre-existing body
-              is never truncated, reordered, or rewritten
+            * when body is non-empty: new_body is the ORIGINAL BODY VERBATIM,
+              then the marker line, then the overflow — in that order. The
+              pre-existing body is never truncated, reordered, or rewritten,
+              and its FIRST LINE is never displaced (see the append note below)
             * `title + <the overflow substring of new_body>` reconstructs the
               original title EXACTLY, on BOTH arms — nothing is ever lost
             * advisory is { trimmed, original_length, cap,
-              overflow_moved_to_body }, and overflow_moved_to_body is now True
-              on BOTH arms because both arms relocate
+              overflow_moved_to_body, lost_tail }, and overflow_moved_to_body is
+              now True on BOTH arms because both arms relocate
+            * `lost_tail` is the exact text cut from the title — the same string
+              relocated into the body — so the writer is shown the words they lost
+              rather than a count of them. It is advisory ONLY: it changes nothing
+              about what is stored, rejects nothing, and leaves the fail-open
+              ruling and the exact-reconstruction guarantee untouched
         - never raises; never returns a title longer than cap
     """
     if len( title ) <= cap:
@@ -1009,10 +1223,178 @@ def soft_guard_title( title, body, cap=TITLE_SOFT_CAP ):
         "original_length"       : len( title ),
         "cap"                   : cap,
         "overflow_moved_to_body": True,
+        # THE WORDS THAT FELL OFF, not just how many (row a6cb24e8, 2026-08-31).
+        # The advisory used to report only a LENGTH, so a writer had to reconstruct
+        # what was cut from a number. Seven titles lost their qualifier in one night
+        # and nobody noticed, including three seats who had this advisory in hand.
+        # `original_length: 106` is a fact about a string; "by design" is the claim
+        # you just deleted. Showing the text is what makes the advisory readable at
+        # the speed people actually read tool output.
+        "lost_tail"             : overflow,
     }
     if body_is_empty:
         return trimmed, overflow, advisory
-    return trimmed, f"{TITLE_OVERFLOW_MARKER}\n{overflow}\n\n{body}", advisory
+    return trimmed, f"{body}\n\n{TITLE_OVERFLOW_MARKER}\n{overflow}", advisory
+
+
+# The markers a CLOSED row's title may be prefixed with (Rick's ruling, 2026-09-01,
+# decision 45c4c932: "Prefix only"). A closed row is otherwise immutable — that wall
+# is applied deliberately in three places — and this is the one carve-out.
+#
+# WHY A PREFIX AND NOT AN EDIT. The wall exists so a closed verdict cannot be
+# silently RESTATED. A prefix restates nothing: the original text survives verbatim
+# after the marker, so a reader sees both what the row said and that it no longer
+# stands. It is the same add-never-overwrite rule the store already applies to
+# bodies, which is why it needs no new trust model.
+#
+# WHY IT SITS AT THE FRONT. The head of a title is the only part the cap guarantees
+# survives, so a correction anywhere else is a correction a skimming reader may not
+# see — and a skimming reader is exactly who a false headline misleads.
+#
+# ⚠️ THIS RULING WAITED ON THE CAP, and the dependency was arithmetic rather than
+# taste. At 60, prefixing the live case (`82ec60be`, already AT the cap because
+# that is WHY it needed correcting) pushed 12 more characters off the tail the
+# correction existed to rescue: the remedy ate the thing it was called in to save.
+# At 120 it fits. Pocholo found that; the cap moved first, deliberately.
+TERMINAL_TITLE_PREFIXES = ( "WITHDRAWN", "SUPERSEDED", "CORRECTED" )
+
+
+def validate_terminal_title_prefix( old_title, new_title ):
+    """
+    Decide whether a CLOSED row's proposed new title is a legal correction prefix
+    (Rick's ruling, 2026-09-01, decision 45c4c932: "Prefix only").
+
+    A terminal row refuses `edit` and `transition` and accepts only `amend`, which
+    writes to `body` — and `_serialize_item_terse` DROPS body, so a correction filed
+    there is invisible to every routine board glance. Measured live: `82ec60be` still
+    reads "APPROVED 757820dd + 08fce017" while its body records that the 08fce017
+    approval is WITHDRAWN. The false headline is what every reader sees and the
+    retraction is in the one field nobody is shown.
+
+    This is the narrow carve-out that lets the headline be corrected WITHOUT letting
+    it be rewritten.
+
+    Requires:
+        - old_title is the row's stored title (a non-empty string)
+        - new_title is the proposed replacement (a non-empty string)
+
+    Ensures:
+        - new_title == "<MARKER> — <old_title>" for a marker in
+          TERMINAL_TITLE_PREFIXES -> [] (legal: the original survives VERBATIM)
+        - anything else -> a ONE-element list naming the markers AND showing the
+          exact string that would have been accepted, because "prefix only" without
+          the literal format is a rule the caller has to guess at
+        - the original text is compared byte-for-byte, so a "prefix" that also
+          reworded the tail is REFUSED — that is a rewrite wearing a prefix, and it
+          is precisely what the immutability wall exists to stop
+        - stacking is permitted: a row already prefixed WITHDRAWN may later take
+          SUPERSEDED in front of it, because the previous marker is part of the
+          old title it must reproduce verbatim. Corrections accumulate at the front
+          in the order they happened, which is a readable history
+        - never raises, never mutates
+    """
+    for marker in TERMINAL_TITLE_PREFIXES:
+        if new_title == f"{marker} — {old_title}":
+            return [ ]
+    return [
+        f"a terminal row's title may only be PREFIXED, never rewritten (decision "
+        f"45c4c932). Send exactly one of "
+        f"{', '.join( f'{m} — <the existing title>' for m in TERMINAL_TITLE_PREFIXES )}, "
+        f"with the existing title reproduced verbatim after the marker. The row's "
+        f"current title is: {old_title!r}"
+    ]
+
+
+def validate_terminal_edit_fields( fields, current_title, status ):
+    """
+    Gate a PATCH against a TERMINAL row: refuse everything except a title
+    correction prefix (Rick's ruling, 2026-09-01, decision 45c4c932).
+
+    This replaces a flat "item is terminal — no edits to closed history". The wall
+    is unchanged for every other field; what it stops doing is blocking the ONE
+    change that makes a closed board honest.
+
+    ⚠️ THE FIELD SET IS CHECKED BEFORE THE PREFIX, and the order is load-bearing.
+    A caller who sends a legal prefix AND a priority change must be refused whole,
+    not have the prefix accepted while the priority rides along — a carve-out that
+    leaks other fields is not a carve-out, it is a hole.
+
+    Requires:
+        - fields is the post-validation patch dict (may contain `title_trimmed`,
+          which this verb ignores: the router derives it, no caller can send it)
+        - current_title is the row's stored title
+        - status is the row's terminal status, used only in the message
+
+    Ensures:
+        - no `title` in fields -> refused, naming the status (the old behaviour,
+          unchanged, for a patch that touches only non-title fields)
+        - `title` present ALONGSIDE any other caller-settable field -> refused,
+          NAMING the extra fields rather than silently dropping them
+        - `title` alone, and a legal prefix of current_title -> [] (accepted)
+        - `title` alone, not a legal prefix -> the prefix verb's own message,
+          which shows the exact string that would have been accepted
+        - never raises, never mutates `fields`
+    """
+    # `title_trimmed` is derived by the router from the guard's own verdict, never
+    # sent by a caller (TaskPatchIn forbids it at the wire), so it is not an
+    # "extra field" a caller could be refused for.
+    caller_fields = { k for k in fields if k != "title_trimmed" }
+
+    if "title" not in caller_fields:
+        return [
+            f"item is terminal ('{status}') — no edits to closed history. The ONE "
+            f"exception is a title correction PREFIX "
+            f"({', '.join( TERMINAL_TITLE_PREFIXES )}); see decision 45c4c932."
+        ]
+
+    extras = sorted( caller_fields - { "title" } )
+    if extras:
+        return [
+            f"item is terminal ('{status}') — a closed row accepts ONLY a title "
+            f"correction prefix, and this patch also sets {extras}. Send the title "
+            f"prefix on its own."
+        ]
+
+    return validate_terminal_title_prefix( current_title, fields[ "title" ] )
+
+
+def validate_edit_title_length( title, cap=TITLE_SOFT_CAP ):
+    """
+    Reject an over-cap title on the EDIT door (Rick's ruling, 2026-09-01, bug
+    6ce252e7: "Raise to 120 with a 422 over it.").
+
+    THE TWO DOORS DELIBERATELY DISAGREE, and the asymmetry is the ruling rather
+    than the drift bug 28fc1fb4 was. A CREATE is unattended — a hook, the MCP
+    wrapper, an agent filing mid-task — and rejecting it loses the filing, so
+    create still trims fail-open through soft_guard_title. An EDIT is somebody
+    retyping a title with their hands on the keys: they can shorten it, and they
+    are the only party who knows which half of it is the qualifier.
+
+    That is the whole argument the trim bug turned on. A trim cuts the TAIL, and
+    a writer puts the limiting word at the end — "…DECLINED", "CONDITIONAL on…",
+    "(4 receipts)". Row 298af249's stored title ended "DM non-deli", losing the
+    word that named the defect. A flag tells a reader something is missing; a
+    rejection hands the choice back to the only person who can make it well.
+
+    Requires:
+        - title is a string (the wire model already rejects empty / non-string)
+        - cap is a positive int
+
+    Ensures:
+        - len( title ) <= cap -> [] (no error; the caller proceeds untouched)
+        - len( title )  > cap -> a ONE-element list carrying the ACTUAL LENGTH and
+          the cap, because "too long" without a number makes the writer count
+          characters by hand to find out how much to cut
+        - never raises, never mutates, never trims — this verb only reports
+    """
+    if len( title ) <= cap:
+        return [ ]
+    return [
+        f"title is {len( title )} characters and the cap is {cap} — an EDIT rejects "
+        f"an over-cap title rather than trimming it, because the trim cuts the TAIL "
+        f"and the tail is where the qualifier lives. Shorten the title yourself, or "
+        f"move the detail into `body`. (A CREATE still trims fail-open: bug 6ce252e7.)"
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -1324,8 +1706,23 @@ def validate_transition(
     """
     Validate one state transition against the Phase-1/2 structural rules.
 
-    The full legal-transition graph is Phase-2+ backlog (design §4.1 C-items);
-    enforced here are enum validity + the ratified structural rules only.
+    A RICHER legal-transition graph — which specific edges are MEANINGFUL — is
+    Phase-2+ backlog (design §4.1 C-items). ⚠️ Do NOT read that as "no edge is
+    checked here": the DERIVED `LEGAL_TRANSITIONS` graph IS enforced below, and
+    with it the terminal rule. A `dropped`/`done`/`wont_fix` source has no
+    out-edges at all, so a caller trying to move a closed row is refused by name
+    ("item is terminal … append-only, no transitions out"), and a ->done from a
+    live row must additionally carry a CHECKABLE receipt.
+
+    This wording is disambiguated rather than corrected — the old sentence was
+    true about the RICH graph and read as a statement about ALL edge checking.
+    The cost of that reading is not academic: it invites a caller to assume the
+    store will take any status pair and to build a client-side guard the server
+    already has, or worse, to treat a wrong verb arriving from a UI as data
+    corruption when this function refuses it. Measured 2026-09-02 against a
+    reported client defect sending a Drop button's verb as `done`: refused in
+    BOTH readings — terminal source by the rule above, live source by the
+    ->done receipt gate.
 
     Requires:
         - from_status is the item's CURRENT status (read inside the same DB
@@ -1377,11 +1774,87 @@ def validate_transition(
     # rejects the no-op — behavior-preserving. The receipt / blocked / dropped
     # payload rules below are PREPENDED-to, never replaced.
     if from_status in TERMINAL_STATUSES:
-        errors.append( f"item is terminal ('{from_status}') — done/dropped are append-only, no transitions out" )
+        errors.append( f"item is terminal ('{from_status}') — {'/'.join( TERMINAL_STATUSES )} are append-only, no transitions out" )
     elif to_status not in LEGAL_TRANSITIONS[ from_status ] and not is_blocker_repoint(
         from_status, to_status, blocked_by, next_chase_ts, current_blocked_by, current_next_chase_ts
     ) and not is_park_refresh( from_status, to_status, park_reason, next_chase_ts ):
-        errors.append( f"no-op transition '{from_status}'->'{to_status}' rejected — not a legal edge" )
+        # 🔴 TWO DIFFERENT FACTS, AND THE OLD MESSAGE TOLD THE CALLER THE WRONG ONE
+        # (row 96cf5cec item 3). "not a legal edge" reads as "you asked for something
+        # forbidden"; the actual condition, whenever from == to, is "the row is
+        # ALREADY there" — i.e. SOMEBODY'S WRITE LANDED. A manager who reads a refusal
+        # tells the worker it is still blocked, or retries a verb that may not be
+        # idempotent. Measured twice on live rows (9c3b817a, bfcea79d): the 422 was the
+        # success signal wearing a rejection's clothes.
+        #
+        # ⚠️ THE DISCRIMINATOR IS `from_status == to_status`, NOT AN ASSUMPTION ABOUT
+        # THE GRAPH. Today LEGAL_TRANSITIONS[ src ] is "every status except src", so
+        # this branch can ONLY be a no-op and a blanket reword would be correct — by
+        # coincidence. Narrow that graph later and the blanket version starts calling a
+        # genuine illegal edge "already there", which is a lie in the safer-sounding
+        # direction. Ask the real condition; keep the old wording for the case it was
+        # actually written for.
+        # ⚠️ THE LEADING `no-op transition` IS A LOAD-BEARING MARKER — DO NOT DROP IT.
+        # Eight assertions across the suite key on that exact phrase to tell "the
+        # self-edge was refused" from "it was allowed", and ONE OF THEM IS NEGATIVE:
+        # test_repoint_still_enforces_the_blocked_payload_invariant asserts the phrase
+        # is ABSENT, proving the blocker-repoint carve-out really opened the edge.
+        # Reword the phrase away and that guard passes VACUOUSLY — it stops being able
+        # to see the thing it watches, while staying green.
+        #
+        # 🔴 THE NO-OP AND THE ILLEGAL EDGE ARE TWO DIFFERENT FACTS AND MUST NOT SHARE ONE
+        # VOCABULARY (row 3bf6ad1b, Krishna 🦚 2026-09-05). This string used to end
+        # "rejected — not a legal edge". For a genuine illegal edge that would be correct.
+        # This branch never sees one: it is reachable on exactly 7 of the 100 ordered
+        # (from, to) pairs and every one has from_status == to_status — MEASURED
+        # exhaustively rather than reasoned off the comprehension, and pinned by
+        # src/tests/unit/test_a_noop_transition_does_not_read_as_a_refusal.py. The three
+        # terminal sources route to the terminal message above; an illegal park routes to
+        # validate_park. So the softened wording cannot reach anything that ought to be
+        # refused.
+        #
+        # MEASURED COST OF THE OLD WORDING: María 🌸 hit it three times on 2026-09-05
+        # (rows 9c3b817a, bfcea79d, 88f4dfdb). Her admission call timed out client-side,
+        # she retried, and the retry answered with this string. She read it as the
+        # approval having FAILED twice. It had succeeded — the event log carries exactly
+        # one not_approved->queued write per row (lupin_db_dev events 11428, 11435,
+        # 11448). On that path this string was the ONLY evidence available that the
+        # earlier call had landed, and it was phrased so as to say the opposite. A manager
+        # DM'd a worker that a live row was still blocked and had to retract it.
+        #
+        # ⚠️ AND THE OBVIOUS REPAIR IS AN OVERCLAIM, WHICH IS WHY THE WORDING IS SO
+        # CAREFUL. "Your earlier call landed" ATTRIBUTES the move. A no-op is genuinely
+        # ambiguous about WHO moved the row — your own timed-out call, another actor, and
+        # a retry of something that never needed doing are indistinguishable from here.
+        # THE ONE THING ALWAYS TRUE IS THAT THE ROW IS NOW AT THE REQUESTED STATUS. Say
+        # that; do not attribute it.
+        #
+        # ⚠️ WHAT WAS NOT DONE, and it is the row's other sanctioned option: returning an
+        # idempotent 2xx instead of a 422. Not chosen — and NOT because it was shown
+        # unsafe, it was not analysed. Permitting the no-op here would let the caller fall
+        # through to APPLY, writing an audit event for a change that did not happen and
+        # running the leave-`parked` field-clearing path; that blast radius is unmeasured.
+        # The wording discharges the row's stated done-condition without touching the HTTP
+        # contract any existing caller reads.
+        #
+        # MERGED (triage staging line, row ef0fa72b): both fixes above landed separately.
+        # This keeps the `from == to` discriminator and the illegal-edge wording from row
+        # 96cf5cec, and uses row 3bf6ad1b's wording for the no-op itself, which names the
+        # row's status without saying whose call moved it; row 96cf5cec's closing advice to
+        # re-read rather than retry is kept on the end of it.
+        if from_status == to_status:
+            errors.append(
+                f"no-op transition '{from_status}'->'{to_status}' — NOTHING TO DO, and this is "
+                f"NOT a refusal of your intent: the row is ALREADY at '{to_status}', so this "
+                f"call changed nothing and wrote nothing. "
+                f"⚠️ It does NOT tell you WHO moved the row there — your own earlier (possibly "
+                f"timed-out) call, another actor, and a retry of something that never needed "
+                f"doing are indistinguishable from here, so do not report this as your call "
+                f"having landed. What it does establish is that the row is now at "
+                f"'{to_status}'."
+                f" Re-read the row rather than retrying."
+            )
+        else:
+            errors.append( f"transition '{from_status}'->'{to_status}' rejected — not a legal edge" )
 
     if to_status == "done" or receipt_refs is not None:
         # require_checkable ONLY on ->done: a receipt attached to any other
@@ -1405,8 +1878,61 @@ def validate_transition(
         errors.extend( validate_blocked_fields( blocked_by, next_chase_ts ) )
     if to_status == "dropped" and ( not isinstance( reason, str ) or not reason.strip() ):
         errors.append( "reason is REQUIRED (non-blank) when transitioning to 'dropped' (C12 — the escape hatch carries its justification)" )
+    # `wont_fix` carries the SAME obligation as `dropped`, for the same reason and
+    # not by analogy: both are a refusal to do filed work, and a refusal whose
+    # justification is not written down is indistinguishable from the work being
+    # forgotten. The receipt gate above deliberately does NOT fire here
+    # (`to_status == "done"` only) — a won't-fix has no commit to cite, which is
+    # exactly why the reason is the only thing standing behind it.
+    if to_status == WONT_FIX_STATUS and ( not isinstance( reason, str ) or not reason.strip() ):
+        errors.append(
+            f"reason is REQUIRED (non-blank) when transitioning to '{WONT_FIX_STATUS}' — "
+            "a refusal carries its justification, exactly as 'dropped' does"
+        )
+    # -- THE DEMOTE REASON (Rick's P0, 2026-09-07, row d8be585a) ---------------
+    #
+    # Rick, by voice: "I want to be able to demote out of the active task list items
+    # that I don't think merit being in the active task list." A demote is the
+    # holding area's ENTRANCE -- the exact inverse of the admission out of it that
+    # `task_approval_settings.refusal_for_admission` already guards at the exit.
+    #
+    # It carries the SAME obligation as `dropped` and `wont_fix` above, for the same
+    # reason and not by analogy: a row that leaves the active list and reappears in
+    # holding with no justification is INDISTINGUISHABLE FROM A BUG. The two produce
+    # one observable -- a row that was on a board and now is not -- and the reason is
+    # the only thing that tells the next reader which of them happened.
+    #
+    # The receipt gate above deliberately does not fire here (`to_status == "done"`
+    # only): a demote has no commit to cite, which is precisely why the reason is the
+    # only thing standing behind it.
+    #
+    # WHY THE `from_status` CLAUSE. It mirrors the approval gate's own shape. A
+    # `not_approved -> not_approved` no-op is ALREADY refused as an illegal edge by
+    # the derived LEGAL_TRANSITIONS graph, and telling that caller their REASON is
+    # missing would name the wrong defect -- shape first, obligation second, the same
+    # ordering every gate in this file is placed by.
+    if to_status == NOT_APPROVED_STATUS and from_status != NOT_APPROVED_STATUS and (
+        not isinstance( reason, str ) or not reason.strip()
+    ):
+        errors.append(
+            f"reason is REQUIRED (non-blank) when transitioning to '{NOT_APPROVED_STATUS}' -- "
+            "a demote sends a row back to triage, and a demote whose justification is "
+            "not written down is indistinguishable from a row that was never approved"
+        )
     if to_status == PARK_STATUS:
         errors.extend( validate_park( from_status, next_chase_ts, park_reason ) )
+
+    # Envelope-tail refusal, row 91ccbc26 (Mr. Radio's ruling 2026-08-29). Runs on
+    # EVERY transition, not just ->parked: the probe measured that `reason` carries
+    # caller markup exactly as `park_reason` does, and guarding the field we happened
+    # to notice while its sibling stays open is half a fix. Placed LAST so a caller
+    # who is both mis-transitioning and carrying a captured tag hears about the
+    # transition first — that is the error they can act on, and a markup complaint on
+    # a write that was going to be refused anyway is noise.
+    errors.extend( validate_no_envelope_tail( {
+        "park_reason" : park_reason,
+        "reason"      : reason,
+    } ) )
 
     return errors
 
@@ -1616,6 +2142,747 @@ def validate_patch( fields: dict ) -> list:
     if "urgency" in fields and fields[ "urgency" ] not in VALID_URGENCIES:
         errors.append( f"urgency '{fields[ 'urgency' ]}' must be one of {VALID_URGENCIES}" )
     return errors
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# TOOL-CALL ENVELOPE TAIL — A LOUD REFUSAL (row 91ccbc26)
+#
+# THE DEFECT. Two writes, sam's and Rio's, on different rows at different
+# fragment sizes, silently stored the tail of the writer's own tool-call
+# envelope inside a free-text field. Neither failed. Neither warned. Both were
+# caught only when a human re-read his own prose later.
+#
+# WHERE IT ENTERS, established by measurement rather than by the shape of the
+# bytes. A differential probe (2026-08-29, Maya) sent one 242-byte canary
+# through two entry paths — raw HTTP, and an MCP tool call — and read back an
+# identical sha256 both ways. Krishna corroborated independently with an md5
+# read straight out of postgres. So the transport and the store are FAITHFUL:
+# `park_reason` is `Optional[str]` with only a max_length, and the repository
+# does a verbatim assignment. The corruption is composed by the CALLER, above
+# the JSON boundary, and nothing this repo owns can prevent it.
+#
+# WHY THIS REFUSES RATHER THAN ADVISES (Mr. Radio's ruling, 2026-08-29). What a
+# boundary CAN fix is the property both incidents shared: silence. A refusal is
+# recoverable and known to work — sam's THIRD attempt landed clean — and it
+# turns a silent corruption into a loud, actionable failure at the moment the
+# author can still fix it.
+#
+# 🔴 TAIL-ONLY, AND THE NARROWNESS IS THE WHOLE SAFETY ARGUMENT. A corrupted
+# write and an HONEST quote are BYTE-IDENTICAL here — proven by deliberately
+# sending the exact corruption bytes as legitimate content. Nothing at this
+# boundary can read intent. So the signature must be as tight as the evidence
+# allows: a CLOSED list of known envelope tags, matched only at the very END of
+# the field. A reason may legitimately quote code, angle brackets and all, and
+# row 91ccbc26 itself quotes both specimens mid-sentence — a guard that barred
+# the characters outright, or that fired on any trailing close-tag, would refuse
+# the very rows written about this defect. Under a REFUSAL policy a false
+# positive blocks real work, so breadth is a liability; the negative tests in
+# test_task_store_markup_tail.py are the load-bearing half of this feature.
+#
+# The closed list is Krishna's (commit bb73e857), kept over an open regex on
+# Mr. Radio's ruling. The tags are assembled from pieces rather than written as
+# literals: a real close-tag typed into a source file TERMINATES the tool call
+# that writes it — the second failure mode of this same defect, which bit both
+# of us while building the fix.
+_LT = "<" + "/"
+_ENVELOPE_TAGS = (
+    _LT + "park_reason>",
+    _LT + "invoke>",
+    _LT + "parameter>",
+    _LT + "function_calls>",
+    _LT + "antml:invoke>",
+    _LT + "antml:parameter>",
+)
+
+# EXACTLY THE THREE FIELDS Mr. Radio RULED, no more. The probe MEASURED that all
+# three carry caller markup verbatim: `park_reason` on a park, `reason` on every
+# transition, `note` on every amendment. Guarding one while its siblings stay
+# open is half a fix. `body` and `title` are composed the same way and are
+# presumably exposed too, but nobody has measured them and the ruling did not
+# name them — listing an unmeasured field here would imply coverage that the
+# call sites do not provide.
+MARKUP_PRONE_FIELDS = ( "park_reason", "reason", "note" )
+
+
+def envelope_tail_tag( text ):
+    """
+    Name the tool-call closing tag `text` ENDS with, if any.
+
+    Requires:
+        - text is anything; only a str can produce a non-None result
+
+    Ensures:
+        - returns the offending tag when the value, ignoring trailing
+          whitespace, ends with one of _ENVELOPE_TAGS
+        - returns None for legitimate content, INCLUDING a value that quotes one
+          of these tags anywhere but the very end
+        - returns None for a non-str and for a blank value — validate_park and
+          the amend handler already own the "missing / blank" message and must
+          keep owning it, so this never competes for that error
+        - NEVER mutates or truncates: refusal is the caller's job, and the
+          caller still holds every byte it sent
+    """
+    if not isinstance( text, str ): return None
+    trimmed = text.rstrip()
+    for tag in _ENVELOPE_TAGS:
+        if trimmed.endswith( tag ): return tag
+    return None
+
+
+def validate_no_envelope_tail( fields ) -> list:
+    """
+    Refuse any free-text field ending in a tool-call envelope tag.
+
+    Requires:
+        - fields is a dict mapping field name -> candidate value
+
+    Ensures:
+        - returns one error string per offending field, naming BOTH the field
+          and the tag, and telling the author what to do about it — a refusal
+          the author cannot act on is just a different kind of silence
+        - returns [] when every value is clean, non-str, or absent
+        - reports EVERY violation rather than the first, matching this module's
+          existing validators
+        - never mutates the input dict and never rewrites a value
+    """
+    errors = [ ]
+    for name in sorted( fields ):
+        tag = envelope_tail_tag( fields[ name ] )
+        if tag is None: continue
+        errors.append(
+            f"{name} ends with the tool-call markup '{tag}', which is almost certainly "
+            f"your own envelope captured into the text rather than something you wrote. "
+            f"Re-send it without the trailing tag. If you genuinely meant to END on that "
+            f"tag, add a closing sentence after it."
+        )
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# Epic-key guard at creation (row 5246bb67)
+# ---------------------------------------------------------------------------
+#
+# RICK RULED THIS TWICE. First on 2026-08-31 ~19:40 EDT (reject on creation,
+# `epic:unassigned` named in the error, warn-only for one week). Then again at
+# ~20:35 EDT with Maya's evidence in front of him, keeping the decision and
+# FIXING THE PREDICATE. The second ruling is the operative one.
+#
+# 🔴 THE PREDICATE IS `startswith("epic:")`, NOT `key != ""`, AND THAT IS THE
+# WHOLE POINT. `correlation_key` has THREE tenants, measured on the live board:
+#
+#     epic:<slug>                          191 rows   the epic layer
+#     cascade-* and other free-form        289 rows   cascade runs, historical
+#     cc-task:<sid>:<n>                     52 rows   the harness mirror, automatic
+#
+# A blank-check is satisfied by all three, so it is INERT on two of the three
+# lanes: a row carrying only an auto-stamped machine key passes the guard while
+# carrying no epic at all, and the board then reads as covered precisely because
+# the check passed. That is the defect this row was filed about, one level up.
+#
+# ⚠️ MAYA'S OBJECTION IS ANSWERED RATHER THAN OVERRIDDEN, and the distinction
+# matters to anyone reading her amendment on the row. She argued a creation guard
+# on a three-tenant field "buys the appearance of a covered field, which on a
+# board people read INSTEAD of reading bodies is worse than the honest gap."
+# That was aimed at a BLANK-check, which cannot discriminate. A startswith check
+# is exactly the discrimination she showed was missing. Her DETECTOR
+# recommendation was not taken; the DEFECT she found was.
+#
+# ⚠️ WHAT HER RECOMMENDATION STILL HOLDS THAT THIS DOES NOT: a detector reads the
+# ROWS, so its stated reach is its actual reach and it covers creation paths
+# nobody enumerated. This covers the doors somebody thought of. Her survey found
+# `repo.create_item` has exactly ONE non-test caller today, so the door list is
+# short — but it is a door list. A fifth creation path would be silent here.
+# Worth revisiting when someone pays for the `epic_key` column migration.
+
+EPIC_KEY_PREFIX     = "epic:"
+EPIC_KEY_UNASSIGNED = "epic:unassigned"
+
+# The harness mirror writes this on a path with NO HUMAN PRESENT to answer a 422.
+# Exempt by ruling, not by oversight — see the enforcement note below.
+MIRROR_KEY_PREFIX = "cc-task:"
+
+# Warn-only ramp. Rick: "Ship it warn-only for one week first so no caller breaks
+# by surprise." Flipping this to True turns the advisory into a 422 at the router.
+#
+# 🔴 THE DATE IS NOT DECORATION — `test_epic_key_guard.py` goes RED once it passes
+# while the mode is still warn-only, so the flip is a forced decision rather than
+# a remembered one. Prose does not fail a build; that lesson is Clayton's, from
+# the xfail(strict=True) pin on e9b78e51, and it is why a ramp with only a comment
+# on it silently becomes permanent.
+EPIC_KEY_ENFORCEMENT_STARTS = "2026-09-08"
+
+# 🔨 FLIPPED 2026-09-08 ~15:05 EDT ON RICK'S KEYPRESS (answered=true, default_used=false —
+# a real click, not a timeout). His option, verbatim: "Enforce now — 422 on a bad key."
+#
+# The ramp ran its week and the guard above did exactly what it was written to do: it went
+# red the day the date passed and forced the choice instead of letting warn-only become
+# permanent by inattention. Recording that because the mechanism, not the date, is what
+# made this a decision rather than a drift.
+#
+# ⚠️ WHAT HE ACCEPTED, written into the option he clicked: a create whose correlation_key
+# is blank, or populated but not "epic:"-prefixed, now gets a 422 instead of a log line.
+# The escape hatch is not new and is not a loophole — "epic:unassigned" is a legal,
+# deliberate answer for a row that genuinely belongs to no story, and the "cc-task:"
+# harness-mirror lane stays exempt by his earlier ruling (that path has no human present
+# to answer a 422).
+#
+# ⚠️ NOT MEASURED BEFORE THE FLIP, and said plainly rather than left to be discovered: how
+# many live callers pass a bare or machine key today. I offered to count first; he chose to
+# enforce now. If a caller starts failing, that is the ramp working late rather than a
+# regression — the fix is that caller's correlation_key, not this flag.
+EPIC_KEY_ENFORCEMENT_ACTIVE = True
+
+
+def epic_key_advisory( correlation_key ):
+    """
+    Judge one `correlation_key` against the epic-layer rule (row 5246bb67).
+
+    PURE — no I/O, no clock, no config. The caller decides what to do with the
+    verdict, which is what keeps the warn-only ramp a one-line change at the
+    router rather than a behaviour hidden in here.
+
+    Requires:
+        - correlation_key is a str or None (any other type is treated as absent,
+          because a create payload is client-supplied and a TypeError here would
+          turn a soft advisory into a 500)
+
+    Ensures:
+        - returns None when the row is COMPLIANT or EXEMPT:
+            * a key beginning "epic:" — including the explicit "epic:unassigned"
+            * a key beginning "cc-task:" — the harness mirror lane, exempt by ruling
+        - otherwise returns a non-empty advisory string naming BOTH the offending
+          value and "epic:unassigned" as a legal explicit answer, per the ruling
+        - never raises, and never rejects — rejection is the ROUTER's call, gated
+          on EPIC_KEY_ENFORCEMENT_ACTIVE
+
+    ⚠️ BLANK AND MACHINE-KEYED ARE DIFFERENT FAILURES and the message says which,
+    because "add an epic key" is unhelpful to someone staring at a row that
+    already has a correlation_key on it.
+    """
+    key = correlation_key if isinstance( correlation_key, str ) else None
+    key = ( key or "" ).strip()
+
+    if key.startswith( EPIC_KEY_PREFIX ):   return None
+    if key.startswith( MIRROR_KEY_PREFIX ): return None
+
+    if not key:
+        return (
+            f"no epic key: correlation_key is absent, so this row cannot be grouped on the "
+            f"board and will not appear under any story. Pass correlation_key='{EPIC_KEY_PREFIX}<slug>' "
+            f"naming the story this belongs to — or '{EPIC_KEY_UNASSIGNED}' if it genuinely "
+            f"belongs to none, which is a deliberate answer rather than a blank one."
+        )
+    return (
+        f"correlation_key {key!r} is not an epic key — it does not begin '{EPIC_KEY_PREFIX}'. "
+        f"The field has several tenants and only the '{EPIC_KEY_PREFIX}' one groups the board, "
+        f"so a row carrying this is ungrouped even though the field is populated. Pass "
+        f"'{EPIC_KEY_PREFIX}<slug>', or '{EPIC_KEY_UNASSIGNED}' if it belongs to no story."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Closed-vs-new ratio gate at creation (María's design, planning-is-prompting
+# planning-is-prompting/src/rnd/2026.09.01-closed-vs-new-ratio-gate.md @ 845a34b)
+# ---------------------------------------------------------------------------
+#
+# Rick's DURABLE, MECHANICAL replacement for the ticket moratorium he declared by
+# voice on 2026-09-01: "It's way too easy for you guys to add tickets to the list
+# and way too hard to get them removed. So in order to battle this asymmetry, I'm
+# simply going to declare a moratorium on new tickets."
+#
+# A moratorium depends on everyone remembering. This does not — which is the whole
+# point, and is why anything that makes it easy to switch off defeats it.
+#
+# HIS RULINGS, all six, and every one a real keypress:
+#   Q1  ratio created ÷ closed, rolling window, ALLOW below 1.0
+#   Q2  `done` only — `dropped` is NOT a closure
+#   Q3  warn-only for one week first, then arm
+#   Q4  P0 is EXEMPT, and every use LOGGED
+#   Q5  scope is fleet-wide
+#   Q6  the header label is always shown
+#
+# ⚠️ AND HE HOLDS THE THRESHOLD AS AN OPERATOR DIAL. By voice, later the same day:
+# "I wouldn't worry too much about optimizing this gate member... it is dynamically
+# adjustable on the fly... We're not creating perfection simply something that is
+# good enough." So this is built to be tuned, not tuned to be right.
+
+RATIO_GATE_EXEMPT_PRIORITIES = ( "P0", )
+
+# 🔴 THE REFUSAL'S CLOSING HINT HAS TWO AUDIENCES, AND ONE OF THEM WAS BEING LIED TO
+# (row d2b1b59a, Finding 4, measured live 2026-09-10 21:31Z). A P0 PETITION is judged
+# here at the P1 it is minted at — deliberately, see `create_task` — so it is never
+# exempt. It used to be refused with the same "(A P0 is exempt…)" every other caller
+# gets: a manager who had just asked for P0, on Rick's order, was told P0 is exempt by
+# the very refusal that had declined to exempt it. The rule is unchanged; only the
+# sentence a petitioner reads now matches what the gate did.
+RATIO_GATE_P0_EXEMPT_HINT = "(A P0 is exempt if this genuinely cannot wait.)"
+RATIO_GATE_PETITION_HINT  = (
+    "(Your P0 request was filed as a petition, so this gate judged it at P1 — the "
+    "priority it holds until Rick approves. The P0 exemption covers only a P0 that is "
+    "already granted, so it does not apply here. Rick's own tickets skip this gate: he "
+    "can file it himself, or open the gate on the board's slider.)"
+)
+
+
+def _ratio_refusal_exemption_hint( petition ):
+    """
+    The closing sentence of a ratio-gate refusal, chosen by who is being refused.
+
+    Requires:
+        - petition is truthy when the create being judged is a P0 petition minted at P1
+
+    Ensures:
+        - returns RATIO_GATE_PETITION_HINT for a petition, never offering it the P0
+          exemption the gate has just declined to give it
+        - returns RATIO_GATE_P0_EXEMPT_HINT otherwise, byte-identical to the sentence
+          every non-petition refusal carried before
+    """
+    return RATIO_GATE_PETITION_HINT if petition else RATIO_GATE_P0_EXEMPT_HINT
+
+# Warn-only ramp, same shape as the epic-key guard above and for the same reason:
+# a one-week ramp with only a comment on it is a permanent ramp, because prose does
+# not fail a build. `test_flow_ratio_gate.py` goes RED once this date passes while
+# enforcement is still off, so the flip is a forced choice rather than a remembered one.
+RATIO_GATE_ENFORCEMENT_STARTS = "2026-09-08"
+
+# 🔨 `RATIO_GATE_ENFORCEMENT_ACTIVE` USED TO LIVE HERE AND IS GONE — Rick, 2026-09-02:
+# "Why is this not included as a configuration instead of a constant in the Python code
+# file? Put it where it belongs!" It is now the INI key `task flow ratio enforcement
+# active`, read through `cosa.rest.flow_ratio_settings.get_enforcement_active()` beside
+# the window and the threshold, which were already operator-adjustable at runtime.
+#
+# ⚠️ DO NOT REINTRODUCE IT. Two sources for one switch is exactly the drift this file
+# already warns about for `allow_below` — the board saying "allow" while the gate
+# refuses, and nothing reporting the disagreement. A test pins its absence.
+
+
+def ratio_gate_advisory( created, closed, priority=None, correlation_key=None, allow_below=None,
+                         petition=False ):
+    """
+    Judge one create against the closed-vs-new ratio.
+
+    `petition=True` changes ONLY the refusal's closing sentence (row d2b1b59a, Finding 4):
+    a P0 petition is judged at the P1 it is minted at and must not be told "A P0 is
+    exempt". It never changes the verdict — the router passes the minted priority.
+
+    PURE — no I/O, no clock, no database. The caller supplies the counts and decides
+    what to do with the verdict, which keeps the warn-only ramp a one-line change at
+    the router and makes every case below testable without a store.
+
+    Requires:
+        - created / closed are non-negative ints for the ruled window
+        - priority is the create payload's priority (e.g. "P0"), or None
+        - correlation_key is the payload's key, or None
+        - allow_below is the operator's live threshold, or None to read it from
+          cosa.rest.flow_ratio_settings
+
+    🔴 PASS `allow_below` FROM THE ROUTER AND THIS FUNCTION STAYS PURE. It was 1.0
+    hardcoded here AND 1.0 hardcoded in the endpoint's verdict — two copies of one
+    number that the endpoint's docstring promises is computed in one place "so the
+    header and the gate cannot drift apart". Editing one and not the other would have
+    left the board saying "allow" while this refused the create, and nothing anywhere
+    would have reported the disagreement.
+
+    ⚠️ THE None DEFAULT READS A FILE, so it is NOT pure. It exists so an existing caller
+    keeps working, not as the intended path — the router supplies the value. If you are
+    writing a test that cares about purity, pass the threshold.
+
+    Ensures:
+        - returns None when the write is ALLOWED or EXEMPT
+        - otherwise returns a refusal string naming the REAL COUNTS, the gate, and what
+          to do about it — Rick asked for "the appropriate message… success if under 1.0
+          and failure and why", so a bare refusal is not enough
+        - EXEMPTIONS, both returning None before any arithmetic:
+            * priority P0 — a gate that refuses the filing of an outage row is a gate
+              that gets switched off the first Friday it is wrong
+            * the harness mirror's `cc-task:` lane — it writes where no human is present
+              to answer a 422, the same carve-out the epic-key guard makes
+        - `closed == 0` with creations REFUSES (a window where nothing was finished is
+          exactly what the gate is for, and it is the common case on a quiet day);
+          `0/0` ALLOWS (an idle window is not a failing window)
+        - never raises, and never itself rejects — the ROUTER decides, gated on
+          RATIO_GATE_ENFORCEMENT_ACTIVE
+
+    ⚠️ SUCCESS IS SILENT. A confirmation on every ordinary create is noise, and the
+    success signal is the number already sitting in the board header.
+    """
+    key = correlation_key if isinstance( correlation_key, str ) else ""
+    if ( priority or "" ).upper() in RATIO_GATE_EXEMPT_PRIORITIES: return None
+    if key.strip().startswith( MIRROR_KEY_PREFIX ):                return None
+
+    if allow_below is None:
+        from cosa.rest import flow_ratio_settings as frs      # local: keeps the module
+        allow_below = frs.get_allow_below()                   # import-time side-effect free
+
+    # ⚠️ A ZERO THRESHOLD IS A HARD STOP, AND IT MUST BE HANDLED BEFORE THE ARITHMETIC.
+    # The gate opens STRICTLY BELOW allow_below, and no ratio is below 0 — so 0 means
+    # "refuse every new ticket", which is exactly what the operator asked for when they
+    # dragged the slider to 0% (Rick's ruling 2026-09-01: 0% = gate fully ON).
+    #
+    # It sits ABOVE the `closed == 0` branch on purpose. At 0 an IDLE window must refuse
+    # too: "every new ticket" does not have an exception for a quiet day, and the idle
+    # allowance below exists to stop a quiet window reading as a failing one, which is a
+    # different question from an operator having deliberately shut the gate.
+    #
+    # 🔴 IT ALSO GUARDS A LIVE DIVIDE-BY-ZERO. `MIN_ALLOW_BELOW` is 0.0, so PATCHing
+    # allow_below=0 was already reachable before the slider could reach it, and the
+    # refusal builder below does `math.floor( created / allow_below )` — a
+    # ZeroDivisionError out of a function whose contract says it never raises.
+    # Measured 2026-09-01 at created=14, closed=3, allow_below=0.0.
+    #
+    # There is no "close N more" to offer: no number of closures opens a gate at 0, so
+    # the message names the setting instead of quoting a target that cannot be reached.
+    if allow_below <= 0:
+        return (
+            f"New tickets are gated: the create gate is set to open below 0%, so it is "
+            f"shut for everything. In the last window the fleet created {created} and "
+            f"closed {closed}. Closing more rows will not open it — raise the threshold "
+            f"on the board's gate slider. "
+            f"{_ratio_refusal_exemption_hint( petition )}"
+        )
+
+    if closed == 0:
+        if created == 0: return None
+        return (
+            f"New tickets are gated: in the last window the fleet created {created} and "
+            f"closed 0. Nothing was finished, so the ratio has no denominator and the gate "
+            f"stays shut. Close or finish something before filing this one. "
+            f"{_ratio_refusal_exemption_hint( petition )}"
+        )
+
+    ratio = created / closed
+    if ratio < allow_below: return None
+
+    # How many more closures reach the threshold. The gate opens STRICTLY BELOW it, so
+    # the target is the smallest `c` with created/c < allow_below, i.e.
+    # floor( created / allow_below ) + 1 — the +1 is what covers the exact-boundary case.
+    #
+    # ⚠️ `ceil()` IS WRONG HERE AND LOOKS RIGHT. At created=14, allow_below=1.0 it gives
+    # 14 closures, i.e. 14/14 = 1.00, which REFUSES — the message would have told the
+    # operator to close a number that still leaves the gate shut. Caught by
+    # test_the_refusal_says_how_many_more_to_close, which is why that test exists.
+    #
+    # Generalises the old `created - closed + 1`: at allow_below = 1.0 the two agree
+    # exactly, and this one is also correct for every other threshold.
+    import math
+    # 🔴 DERIVED FROM THE GATE'S OWN COMPARISON, NOT FROM ARITHMETIC THAT HAS TO AGREE WITH
+    # IT (row aba30387, defect 3, measured 2026-09-04). The line below used to be
+    # `max( 1, math.floor( created / allow_below ) + 1 - closed )`, and it was WRONG at
+    # every exact boundary once the operator dial moved off 1.0:
+    #
+    #     created=209  closed=184  allow_below=1.10  ->  "close 6 more", i.e. reach 190
+    #     at closed=190 the ratio is 1.100000 and the gate STILL REFUSES; 191 is the answer
+    #
+    # `209/1.10` is exactly 190.0 in real arithmetic and 189.99999999999997 in IEEE double,
+    # so floor() returned one low and the `+1` — which exists precisely to clear the
+    # boundary — only got back TO the boundary. The gate opens STRICTLY below.
+    #
+    # ⚠️ THE OLD FORM WAS UNTESTABLE-IF-WRONG, WHICH IS WHY IT SURVIVED. The guard written
+    # for exactly this hazard runs created=14, closed=3 at threshold 1.0, where `14/1.0` is
+    # exact and the error cannot appear. Swept exact-boundary pairs across six thresholds:
+    # 18 cases where the prescribed target still refused.
+    #
+    # The fix is not better arithmetic — it is to stop deriving the target arithmetically
+    # at all and ASK THE SAME COMPARISON THE GATE USES. The message can no longer disagree
+    # with the gate, because it is now reading the gate. Both loops are bounded by the
+    # float error, so they step at most once or twice.
+    target = max( closed + 1, math.floor( created / allow_below ) )
+    while created / target >= allow_below:                                 # not open yet
+        target += 1
+    while target - 1 > closed and created / ( target - 1 ) < allow_below:  # overshot
+        target -= 1
+    need = target - closed
+    # 🔴 THE REMEDY MUST BE ONE THE CALLER CAN PERFORM (row aba30387, defect 2, maria's
+    # finding). This used to say only "Close or finish N more rows before filing this one."
+    # The count is FLEET-WIDE, and a worker who owns no open rows cannot close any — the
+    # instruction sounded entirely actionable and was impossible for them to carry out.
+    # Measured 2026-09-04: john was told to close 6 while holding zero open rows.
+    #
+    # So it now says whose number it is, and names the tier-1 fallback from
+    # session-end.md — amending onto a related existing row — which a refused caller can
+    # ALWAYS do. The finding gets routed instead of waiting on other people's work.
+    return (
+        f"New tickets are gated: in the last window THE FLEET created {created} and closed "
+        f"{closed} (ratio {ratio:.2f} — the gate opens below {allow_below:.2f}). "
+        f"Close or finish {need} more row{'s' if need != 1 else ''} before filing this one. "
+        f"⚠️ THAT IS A FLEET-WIDE COUNT, NOT YOURS — you may own none of those rows, so "
+        f"do not wait on it. Route the finding instead: amend it onto a related existing "
+        f"row (task_amend), the tier-1 fallback in session-end.md, which is always "
+        f"available to you. "
+        f"{_ratio_refusal_exemption_hint( petition )}"
+    )
+
+
+def ratio_gate_reading( created, closed, allow_below, verdict ):
+    """
+    The gate's reading, for the paths that do NOT refuse — row aba30387, defect 1.
+
+    PURE. Returns the line the caller should log; the caller decides where it goes.
+
+    🔴 WHY THIS EXISTS. `ratio_gate_advisory` returns None on an allow, and the router
+    discarded created / closed / ratio / threshold with all four in hand. So a PERMIT
+    produced no reading at all, and a working gate was indistinguishable from an absent
+    one from outside. Measured cost, 2026-09-04: Tiffany's three creates were permitted,
+    the row filed against them said the gate was "ARMED AND INERT", and settling that
+    needed the ratio AT THE TIME of each permit — which nothing had recorded. Mr Radio
+    reconstructed what he could and reported that the deciding value "remains INFERRED,
+    NOT MEASURED." It is unrecoverable now.
+
+    ⚠️ THIS REVERSES A DELIBERATE PRIOR DECISION, and the reasoning is worth keeping
+    rather than deleting: "SUCCESS IS SILENT. A confirmation on every ordinary create is
+    noise, and the success signal is the number already sitting in the board header."
+    That was not wrong about noise. It was wrong that the header substitutes — the header
+    is a LIVE number read at page time, while a verdict is a reading taken AT REQUEST TIME
+    over a specific window. When the two differ, the header cannot say what the gate saw.
+
+    Requires:
+        - created / closed are the non-negative ints the verdict was computed from
+        - allow_below is the threshold in force at that moment
+        - verdict is a short tag for the path taken, e.g. "allow" or "exempt-p0"
+
+    Ensures:
+        - returns a single line naming the verdict, both counts, the threshold, and the
+          ratio — or "n/a" for the ratio when closed is 0, since printing one without a
+          denominator would be inventing a reading
+        - never raises
+    """
+    ratio = f"{created / closed:.2f}" if closed else "n/a (nothing closed)"
+    return (
+        f"[task INFO] ratio gate {verdict}: created={created} closed={closed} "
+        f"ratio={ratio} threshold={allow_below:.2f}"
+    )
+# 🔴 HEADROOM IS A PROJECTION OF THE GATE, NEVER A SECOND GATE (Mr. Radio 🦉, 2026-09-05).
+# The gate above ALREADY decides this question. A headroom check that re-derived the
+# answer from the same inputs would be two pieces of code deciding one rule — the defect
+# family this fleet spent two days on. So this function contains NO ratio arithmetic at
+# all: it ASKS `ratio_gate_advisory` itself, which makes agreement structural rather than
+# something a future editor has to maintain in two places.
+#
+# ⇒ If this number ever disagrees with what the gate does, the number is wrong — and it
+# cannot, because the gate is the only thing here that decides anything.
+
+_HEADROOM_PROBE_CEILING = 1 << 20   # a threshold high enough to admit a million more
+                                    # creates is not a gate; report unbounded instead of
+                                    # looping. Returns None, never a large-looking number.
+
+
+def ratio_gate_headroom( created, closed, allow_below ):
+    """
+    How many MORE ordinary creates the ratio gate would admit right now.
+
+    🔴 A PROJECTION OF THE GATE, NOT A SECOND GATE. Every answer below is
+    `ratio_gate_advisory`'s answer — this function asks it and counts, and holds no
+    threshold comparison of its own.
+
+    🔴 AND IT COUNTS ADMITTED CREATES, WHICH IS NOT THE SAME AS THE SPEC'S ALGEBRA —
+    THE TWO DISAGREE BY ONE AND THE GATE IS RIGHT. The design formula reads
+    `(created + N) / closed < allow_below`, i.e. "after N more creates the ratio is
+    still under". But the gate judges a create against the counts BEFORE it lands
+    (routers/tasks.py reads the counts, calls the advisory, and only then calls
+    create_item), so the create that TIPS the ratio to exactly the threshold is
+    admitted — it was judged one row earlier.
+
+        created 10, closed 13, allow_below 1.00
+            create #1 judged at 10/13 = 0.77  ADMITTED
+            create #2 judged at 11/13 = 0.85  ADMITTED
+            create #3 judged at 12/13 = 0.92  ADMITTED   <- ratio is now 1.00
+            create #4 judged at 13/13 = 1.00  REFUSED
+        the gate admits 3. The spec formula yields 2.
+
+    Reporting 2 would tell an operator the gate is shut while it is still open, which is
+    exactly the disagreement this projection exists to make impossible.
+
+    Requires:
+        - created / closed are non-negative ints for the ruled window
+        - allow_below is the operator's live threshold, read ONCE by the caller and
+          passed in — this function must never read it, or the projection and the gate
+          would be reading two values that can differ between two calls
+
+    Ensures:
+        - returns the count of additional ORDINARY creates the gate would admit, i.e.
+          the smallest n >= 0 at which the gate refuses
+        - 0 when the gate refuses right now — including a zero threshold, which is a
+          hard stop no closure can open
+        - 1 for an idle window (created 0, closed 0): the gate admits the next create
+          and refuses the one after, because nothing has been closed
+        - None when no bound is found below _HEADROOM_PROBE_CEILING — "effectively
+          unbounded", never a large number a caller might render as a target
+        - PURE: no clock, no database, no settings read
+
+    ⚠️ ORDINARY MEANS ORDINARY. The gate exempts P0 and the harness mirror lane
+    unconditionally, so headroom does not describe either — for those the answer is
+    "always admitted", which is not a number and is deliberately not returned as one.
+
+    ⚠️ AND IT DESCRIBES THE GATE'S VERDICT, NOT TODAY'S BLOCKING. While
+    `task flow ratio enforcement active` is off, the router logs the refusal and lets
+    the write through. Headroom 0 then means "the gate would refuse", not "your create
+    will fail".
+    """
+    return _walk_the_gate( created, closed, allow_below, direction="create" )
+
+
+def ratio_gate_close_needed( created, closed, allow_below ):
+    """
+    How many MORE closures the gate needs before it would admit an ordinary create.
+
+    🔴 THE SAME LOOP WITH ONE VARIABLE SWAPPED, as the row requires — one function with a
+    direction flag, not two implementations that can drift. Both verbs delegate to
+    `_walk_the_gate`; the only difference is which count moves.
+
+    Increasing `closed` LOWERS created ÷ closed, so walking it upward moves back toward
+    allow — the mirror of walking `created` upward, which moves toward refuse.
+
+    Ensures:
+        - 0 when the gate already admits (there is nothing to close)
+        - otherwise the smallest number of additional closures at which it admits
+        - None when no bound is found below _HEADROOM_PROBE_CEILING — which is the REAL
+          answer for a zero threshold: no number of closures opens a gate set to 0, so a
+          number here would name a target that does not exist
+        - PURE: no clock, no database, no settings read
+    """
+    return _walk_the_gate( created, closed, allow_below, direction="close" )
+
+
+def ratio_loop_headroom( created, closed, allow_below ):
+    """
+    The badge's number: how many more creates leave the ratio STILL UNDER the threshold
+    AFTER they land. This is one LESS than the gate admits, deliberately.
+
+    🔴 RICK RULED THIS BY KEYPRESS, 2026-09-05 13:11:13 EDT, on the option labelled
+    "Keep your three states — badge under-reports by one." Read the next three paragraphs
+    before "fixing" the off-by-one — it is the ruling, not a defect.
+
+    RECEIPT, so this is a reference and not a rumour: notifications row
+    `819dc891-7451-4a52-8eff-3a5c550e323f`, sender `claude.code@lupin.deepily.ai#e97796db`,
+    `state = responded`, `responded_at = 2026-09-05 17:11:13Z`, `source = "ui"` — a real
+    interaction, not a timeout default. The ask he answered read: "The capacity badge:
+    keep the gate's boundary and retire the word FULL, or keep your three states and
+    under-report by one?"
+
+    ⚠️ THIS WAS RELAYED BEFORE IT WAS SOURCED, AND THE CORRECTION IS WORTH THE LINES.
+    The ruling reached me through two DMs and I built to it on their specificity alone —
+    a label, a minute, an explicit "not a default". Then the relaying seat cleared, its
+    row still read "unanswered", and for a while each of us was the other's only source.
+    The DB row above is what closed it, and it moved the published time by 47 seconds
+    (13:12 was the relay's; 13:11:13 is the artifact's). A specific claim is not a sourced
+    one — quote the row id, never the recollection.
+
+    THE TWO SEMANTICS, which differ by exactly one wherever there is any room:
+
+      LOOP (this function, ruled)  probe created+1, created+2, … and stop at the LAST
+        increment that still PASSES. Asks whether the STATE AFTER k creates is under
+        the threshold. This is the method Rick specified on row f7c4f537 and the one
+        he re-affirmed when the divergence was put to him.
+      GATE (`ratio_gate_headroom`)  count the creates the gate actually ADMITS. The
+        router reads the counts, asks the advisory, and only THEN writes the row, so
+        each create is judged BEFORE it lands and the one that tips the ratio to
+        exactly the threshold still gets in.
+
+        created 10, closed 13, allow_below 1.00  ->  LOOP says 2, the GATE admits 3
+
+    ⚠️ SO THE BADGE KNOWINGLY UNDER-REPORTS BY ONE. It will say there is no room while
+    the gate would still accept one more ticket. That is the SAFER error for a
+    moratorium — the feature exists because "it is way too easy to add tickets and way
+    too hard to get them removed" — and Rick chose it over the exact number with the
+    trade named on the option.
+
+    🔴 THIS IS THE ONE PLACE THE DISPLAY IS ALLOWED TO DIFFER FROM THE GATE, AND IT
+    DIFFERS BY SUBTRACTING FROM THE GATE'S OWN ANSWER — never by re-deriving one. There
+    is still exactly ONE comparison in this module's projection, inside
+    `ratio_gate_advisory`. A version of this function that compared a ratio to a
+    threshold itself would be a second gate, and the first time the gate's rules moved
+    the board would go on quoting the old ones with no test able to see it.
+
+    Requires:
+        - created / closed are non-negative ints for the ruled window
+        - allow_below is the operator's live threshold, read ONCE by the caller and
+          passed in — never read here, or the number and the gate would be reading two
+          values that can differ between two calls
+
+    Ensures:
+        - returns `ratio_gate_headroom( … ) - 1` when the gate admits at all
+        - returns 0 when the gate admits exactly one more: the `FULL` state, meaning AT
+          CAPACITY AND STILL LEGAL. Under loop semantics this state is REACHABLE, which
+          is the whole substance of Rick's ruling — under gate semantics it had no
+          inputs at all
+        - returns None when the gate REFUSES right now. The honest answer there is
+          NEGATIVE, not zero: you are past the line, not at it. That case belongs to
+          `ratio_gate_close_needed` and its `CLOSE N` badge, and folding it into 0 would
+          make a healthy edge and a breach look identical
+        - returns None when the gate finds no bound (e.g. a zero threshold no closure
+          can open) — a badge naming a target that does not exist is worse than none
+        - PURE: no clock, no database, no settings read
+
+    ⚠️ IDLE (created 0, closed 0) RETURNS 0 AND SO RENDERS `FULL` ON AN EMPTY BOARD.
+    Row f7c4f537 called that "surprising and probably wrong" while it was still an open
+    question. It is no longer open: Mr. Radio collapsed row ca08f05e into 307943fb as
+    subsumed, on the ground that the empty board and the at-the-line case are ONE
+    vocabulary choice seen from two inputs, and Rick's keypress settled both together.
+    Recorded here rather than silently — if this reads wrong on screen it is a new
+    decision for Rick, not a bug to patch here.
+
+    ⚠️ ORDINARY MEANS ORDINARY. The gate exempts P0 and the harness mirror lane
+    unconditionally, so this number does not describe either.
+
+    ⚠️ AND IT DESCRIBES THE GATE'S VERDICT, NOT TODAY'S BLOCKING. While
+    `task flow ratio enforcement active` is off, the router logs the refusal and lets
+    the write through.
+    """
+    admitted = ratio_gate_headroom( created, closed, allow_below )
+    if admitted is None or admitted == 0: return None
+    return admitted - 1
+
+
+def _walk_the_gate( created, closed, allow_below, direction ):
+    """
+    The one loop both verbs share. Asks `ratio_gate_advisory` and counts; holds no
+    threshold comparison of its own.
+
+    direction="create" -> move `created` up; count admissions before the first refusal
+    direction="close"  -> move `closed`  up; count closures until the first admission
+
+    ⚠️ THE TWO DIRECTIONS ARE NOT SYMMETRIC IN WHAT THEY RETURN, and the asymmetry is the
+    behaviour rather than an oversight. "create" counts how many pass BEFORE the flip;
+    "close" counts how many it takes to REACH the flip. Off by one from each other by
+    construction, because they answer opposite questions about the same boundary.
+    """
+    def _admits( n ):
+        # The ONE decision point in this module's projection. No comparison sits beside it.
+        if direction == "create":
+            return ratio_gate_advisory( created + n, closed, allow_below=allow_below ) is None
+        return ratio_gate_advisory( created, closed + n, allow_below=allow_below ) is None
+
+    if direction == "close":
+        if _admits( 0 ): return 0
+        # Monotone the other way: raising `closed` LOWERS the ratio, so once it admits it
+        # keeps admitting. Probe for ANY admitting point, then bisect for the SMALLEST.
+        hi = 1
+        while not _admits( hi ):
+            hi *= 2
+            if hi > _HEADROOM_PROBE_CEILING: return None
+        lo = 0                                   # refuses, checked above
+        while lo + 1 < hi:                       # hi admits
+            mid = ( lo + hi ) // 2
+            if _admits( mid ): hi = mid
+            else:              lo = mid
+        return hi
+
+    if not _admits( 0 ): return 0
+
+    # Monotone: raising `created` raises the ratio, so once the gate refuses it stays
+    # refused. That is what makes a search over it exact rather than a sample.
+    hi = 1
+    while _admits( hi ):
+        hi *= 2
+        if hi > _HEADROOM_PROBE_CEILING: return None
+
+    lo = 0                                   # admits
+    while lo + 1 < hi:                       # hi refuses
+        mid = ( lo + hi ) // 2
+        if _admits( mid ): lo = mid
+        else:              hi = mid
+    return hi                                # smallest n that refuses == creates admitted
 
 
 def quick_smoke_test():

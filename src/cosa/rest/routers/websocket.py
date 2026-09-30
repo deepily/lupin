@@ -19,7 +19,7 @@ from urllib.parse import unquote
 
 # Import dependencies
 from cosa.rest.auth import get_current_user, TokenExpiredException
-from cosa.rest.websocket_manager import WebSocketManager
+from cosa.rest.websocket_manager import WebSocketManager, CLOSE_CODE_SUPERSEDED
 
 router = APIRouter(tags=["websocket"])
 
@@ -42,10 +42,28 @@ router = APIRouter(tags=["websocket"])
 #         subscribed_events). Reserved for future RBAC enforcement; not
 #         currently emitted by any branch (audio subscriptions are filtered
 #         silently today).
+#
+#         ⚠️ RESERVED SERVER-SIDE IS NOT UNUSED. The clients already speak this
+#         code: QueueTransport.ts lists it in PERMANENT_CLOSE_CODES, and
+#         notifications.js renders it "Permission denied for one or more
+#         notification streams." Do not borrow it for an unrelated meaning —
+#         row dc446601 tried, and that is why the supersede code below is 4004.
+#
+#   4004  Superseded (row dc446601): a NEWER /ws/queue connection claimed this
+#         socket's ( user_id, device_id ) slot. Permanent — the client must NOT
+#         reconnect this socket. Emitted only for MOBILE sessions, the only ones
+#         that hold a slot. Defined in `websocket_manager` because that is where
+#         it is emitted, and imported here so this block stays the ONE place
+#         every application close code is catalogued. This module already imports
+#         that one, so defining it there and importing here avoids a cycle.
 # =============================================================================
 CLOSE_CODE_AUTH_INVALID_TOKEN     = 4001
 CLOSE_CODE_AUTH_SESSION_CONFLICT  = 4002
 CLOSE_CODE_AUTH_SUBSCRIPTION_DENIED = 4003
+# Row 3bafdf12: the resume replay failed AFTER auth succeeded (the socket died mid-backlog, or
+# a send raised). RFC 6455's own "internal error", not an application code: 4001 is "your
+# token is bad", which the mobile client answers with a refresh or a sign-out.
+CLOSE_CODE_RESUME_FAILED          = 1011
 
 # Global dependencies (temporary access via main module)
 def get_websocket_manager():
@@ -348,6 +366,212 @@ async def websocket_audio_endpoint(websocket: WebSocket, session_id: str):
         else:
             print( f"[WS-AUDIO] Skipping disconnect for {session_id} — replaced by new connection" )
 
+# ── CC transcript console verbs (row 27760534) ────────────────────────────────
+
+# One tailer per WATCHED seat, keyed by cc_session_id. Module-level rather than per-socket,
+# because several browser sessions may watch one seat and they must share its tailer — a
+# tailer per watcher would read the same file N times and emit N copies of every block.
+_cc_transcript_tailers = { }
+
+
+async def handle_cc_transcript_verb( websocket, session_id, message ):
+    """
+    Handle `cc_transcript_watch` / `cc_transcript_unwatch` on the queue socket.
+
+    Requires:
+        - websocket is the caller's live socket
+        - session_id is the BROWSER session id (the socket's own id)
+        - message carries `type` and, for both verbs, `cc_session_id`
+
+    Ensures:
+        - a NON-ADMIN caller is refused, and receives an error frame naming the reason, with
+          no blocks and no watch registered (ruling Q5, the WS half of the gate)
+        - a watch registers the caller and STARTS the seat's tailer only if this was the
+          seat's FIRST watcher; the tailer is shared by every watcher of that seat
+        - a watch honours `from_offset`, so the server never silently starts at the current
+          end of the file and opens a gap against the client's REST backlog
+        - a non-null `file_epoch` naming a file that is no longer current is REFUSED with
+          `cc_transcript_state {state: epoch_mismatch}` and NO blocks — never silently
+          rebased, which would hand the client a whole new file as its own continuation
+        - an unwatch deregisters the caller and STOPS the tailer only when the seat has lost
+          its LAST watcher
+        - a missing `cc_session_id` is refused rather than registering a watch on ""
+        - never raises out to the receive loop: a bad verb must not drop the socket
+    """
+    websocket_manager = get_websocket_manager()
+
+    verb          = message.get( "type" )
+    cc_session_id = ( message.get( "cc_session_id" ) or "" ).strip()
+
+    if not cc_session_id:
+        await websocket.send_json( {
+            "type"    : "error",
+            "event"   : verb,
+            "message" : "cc_transcript verbs require a cc_session_id",
+        } )
+        return
+
+    # 🔴 The WS half of ruling Q5, on state connect() already stores. The REST half is
+    # require_admin — a different mechanism, so a test of one proves nothing about the other.
+    if not websocket_manager.session_is_admin.get( session_id, False ):
+        await websocket.send_json( {
+            "type"          : "error",
+            "event"         : verb,
+            "cc_session_id" : cc_session_id,
+            "message"       : "the CC transcript console is admin-only",
+        } )
+        return
+
+    if verb == "cc_transcript_unwatch":
+        await _stop_watching_cc_transcript( session_id, cc_session_id )
+        return
+
+    await _start_watching_cc_transcript( websocket, session_id, cc_session_id, message )
+
+
+async def _start_watching_cc_transcript( websocket, session_id, cc_session_id, message ):
+    """
+    Register a watcher and start the seat's tailer if it is the first.
+
+    Requires:
+        - the caller has already been admin-checked
+
+    Ensures:
+        - a seat with no resolvable transcript is answered with
+          `cc_transcript_state {state: "refused", reason: "not_found"}` and nothing else: no
+          watcher is registered and no tailer is started
+        - a stale non-null `file_epoch` is answered with `epoch_mismatch` and nothing else
+        - the tailer is created at most once per seat
+        - the watcher is registered even when the tailer already exists
+    """
+    websocket_manager = get_websocket_manager()
+
+    from cosa.rest.cc_transcript_tailer import (
+        REASON_NOT_FOUND,
+        STATE_EPOCH_MISMATCH,
+        STATE_EVENT,
+        STATE_REFUSED,
+        CcTranscriptTailer,
+        epoch_for_path,
+        resolve_transcript_path,
+    )
+
+    requested_epoch = message.get( "file_epoch" )
+    current_path    = resolve_transcript_path( cc_session_id )
+
+    # A seat that does not exist here has no transcript to follow. Say so and stop, BEFORE the
+    # epoch check (a nonexistent seat has no current epoch to compare) and before any watcher
+    # or tailer exists — otherwise the pane would sit "live" on nothing. A real seat that is
+    # merely idle still has its file, so it resolves and falls through to `live` (row a68b10a3).
+    if not current_path:
+        await websocket.send_json( {
+            "type"          : STATE_EVENT,
+            "cc_session_id" : cc_session_id,
+            "file_epoch"    : None,
+            "state"         : STATE_REFUSED,
+            "reason"        : REASON_NOT_FOUND,
+        } )
+        return
+
+    current_epoch   = epoch_for_path( current_path )
+
+    # A client that does not yet know the epoch sends null and learns it from the first
+    # frame, so a FIRST watch needs no prior REST call. A non-null epoch that no longer
+    # matches is refused rather than rebased (§3).
+    if requested_epoch is not None and requested_epoch != current_epoch:
+        await websocket.send_json( {
+            "type"          : STATE_EVENT,
+            "cc_session_id" : cc_session_id,
+            "file_epoch"    : current_epoch,
+            "state"         : STATE_EPOCH_MISMATCH,
+        } )
+        return
+
+    is_first = websocket_manager.add_cc_transcript_watcher( cc_session_id, session_id )
+
+    if is_first and cc_session_id not in _cc_transcript_tailers:
+        # The predicate closes the loop the sync `disconnect()` path would otherwise leave
+        # open: it can drop a watcher but cannot await a stop, so the tailer checks for
+        # itself and terminates after the grace period.
+        tailer = CcTranscriptTailer(
+            cc_session_id,
+            _emit_to_cc_transcript_watchers,
+            has_watchers = lambda: bool(
+                get_websocket_manager().cc_transcript_watchers.get( cc_session_id )
+            ),
+        )
+        _cc_transcript_tailers[ cc_session_id ] = tailer
+        tailer.start( from_offset=int( message.get( "from_offset" ) or 0 ) )
+
+
+async def _stop_watching_cc_transcript( session_id, cc_session_id ):
+    """
+    Deregister a watcher and stop the seat's tailer if it was the last.
+
+    Ensures:
+        - the tailer is stopped and forgotten only when NO watcher remains
+        - an unwatch for a seat this session was not watching is a no-op
+    """
+    websocket_manager = get_websocket_manager()
+
+    if websocket_manager.remove_cc_transcript_watcher( cc_session_id, session_id ):
+        await _stop_cc_transcript_tailer( cc_session_id )
+
+
+async def _stop_cc_transcript_tailer( cc_session_id ):
+    """
+    Stop and forget one seat's tailer.
+
+    Ensures:
+        - stopping an unknown seat is a no-op, so the disconnect sweep can call this for
+          every emptied seat without checking first
+    """
+    tailer = _cc_transcript_tailers.pop( cc_session_id, None )
+    if tailer is not None:
+        await tailer.stop()
+
+
+async def stop_cc_transcript_tailers_for_disconnect( session_id ):
+    """
+    Stop the tailers a disconnecting session left with no watchers.
+
+    🔴 THIS IS THE OTHER HALF OF THE SWEEP, AND IT IS ASYNC, WHICH IS WHY IT IS NOT INSIDE
+    `disconnect()`. `WebSocketManager.disconnect()` is synchronous and is called from
+    threads, so it can remove the REGISTRY entries but cannot await a tailer's stop. It
+    therefore drops the watches and this coroutine reaps the tailers those drops emptied.
+
+    Ensures:
+        - every seat the session was the last watcher of has its tailer stopped
+        - a session that was watching nothing costs one dict scan and no awaits
+        - never raises
+    """
+    websocket_manager = get_websocket_manager()
+
+    for cc_session_id in websocket_manager.drop_all_cc_transcript_watches( session_id ):
+        await _stop_cc_transcript_tailer( cc_session_id )
+
+
+async def _emit_to_cc_transcript_watchers( cc_session_id, event_name, payload ):
+    """
+    Fan one console frame out to the seat's watchers, and ONLY to them.
+
+    The watcher set is the single filter: `emit_to_session` applies no subscription check, so
+    there is exactly one place a frame can be dropped.
+
+    Requires:
+        - cc_session_id names a seat; event_name and payload are the frame
+
+    Ensures:
+        - one send per watching browser session
+        - a watcher whose socket has already gone is skipped by emit_to_session's own
+          early return, so a dead tab does not break the fan-out for live ones
+    """
+    websocket_manager = get_websocket_manager()
+
+    for watcher_session_id in websocket_manager.cc_transcript_watchers_of( cc_session_id ):
+        await websocket_manager.emit_to_session( watcher_session_id, event_name, payload )
+
+
 @router.websocket("/ws/queue/{session_id}")
 async def websocket_queue_endpoint(websocket: WebSocket, session_id: str):
     """
@@ -496,9 +720,27 @@ async def websocket_queue_endpoint(websocket: WebSocket, session_id: str):
             client_type = auth_message.get( "client_type" )
             if client_type: print( f"[WS-QUEUE-AUTH] Client type for session [{session_id}]: {client_type}" )
 
+            # Row dc446601: the device slot's key. A stable per-install id from the
+            # mobile app; ONLY consulted for a mobile session, so a browser sending
+            # one cannot opt itself into displacing anything. Absent ⇒ the slot falls
+            # back to the client_type, which is what makes supersession work against
+            # the app as shipped rather than waiting on a client change.
+            device_id = auth_message.get( "device_id" )
+            if device_id: print( f"[WS-QUEUE-AUTH] Device id for session [{session_id}]: {device_id}" )
+
+            # Row dc446601 part 2: the client's highest received frame. Absent or 0
+            # means a fresh client with nothing to resume. Anything non-integer is
+            # treated as absent rather than trusted — this arrives over the wire.
+            last_seq = auth_message.get( "last_seq", 0 )
+            if not isinstance( last_seq, int ) or isinstance( last_seq, bool ) or last_seq < 0:
+                last_seq = 0
+
             # Connect with user association and subscriptions
             print(f"[WS-QUEUE-AUTH] Connecting session [{session_id}] to user [{user_id}] in WebSocket manager...")
-            websocket_manager.connect( websocket, session_id, user_id, subscribed_events, email=user_info.get( "email" ), roles=user_info.get( "roles", [] ), client_type=client_type )
+            websocket_manager.connect( websocket, session_id, user_id, subscribed_events, email=user_info.get( "email" ), roles=user_info.get( "roles", [] ), client_type=client_type, device_id=device_id )
+            # Part 2 (María's F2): hold this device's live frames until the replay below
+            # drains them. MUST stay adjacent to connect() — no await between the two.
+            websocket_manager.begin_resume( session_id )
             session_type = "listener" if session_id.startswith( "cc-listener-" ) else "browser"
             print( f"[WS-QUEUE] Authenticated {session_type} session [{session_id}] for user [{user_id}] ({user_info.get( 'email', '?' )})" )
 
@@ -536,6 +778,43 @@ async def websocket_queue_endpoint(websocket: WebSocket, session_id: str):
                 "message" : str( e )
             })
             await websocket.close(code=CLOSE_CODE_AUTH_INVALID_TOKEN, reason="invalid_token")
+            return
+
+        # ── Row 3bafdf12: the resume replay is NOT authentication ─────────────────────────
+        # It used to sit inside the auth try above, whose generic `except` answered ANY failure
+        # with {"type": "auth_error"} and a 4001 close, logged as "Token verification failed".
+        # A send that died mid-backlog was reported as a bad token, and the mobile client
+        # answers 4001 with a token refresh or a sign-out. Auth has succeeded by here, so a
+        # failure now is a transport failure and says so: the real exception at error level
+        # with the session id, no auth_error frame, and a 1011 close.
+        # Row dc446601 part 2: replay this device's backlog, then say where the
+        # backlog ENDS. Only a slot holder has one — a web tab has nothing to
+        # resume, so it gets neither the replay nor the marker.
+        #
+        # `gap` is the load-bearing field. A partial replay that stayed quiet
+        # would leave the client believing it is current, and it would stop
+        # asking; gap=True is the server admitting it cannot prove continuity and
+        # that a full refetch is owed.
+        # replay_and_resume also releases the frames held since connect(), in seq
+        # order, so no live frame can overtake the replay (María's F2), and its
+        # resume_complete.seq is the server's current seq (F1).
+        try:
+            resume = await websocket_manager.replay_and_resume( session_id, last_seq, websocket.send_json )
+            if resume is not None:
+                print( f"[WS-QUEUE-RESUME] Session [{session_id}] resumed from {last_seq}: "
+                       f"{resume[ 'replayed' ]} frame(s) replayed, gap={resume[ 'gap' ]}, now at seq {resume[ 'seq' ]}" )
+        except Exception as e:
+            print( f"[WS-QUEUE-RESUME] ERROR resume replay failed for session [{session_id}]: {type( e ).__name__}: {e}" )
+            import traceback
+            traceback.print_exc()
+            # ONE deregister that carries the close code, then an explicit close for the case
+            # where disconnect() could not schedule one (no running loop). Both say 1011.
+            if websocket_manager.active_connections.get( session_id ) is websocket:
+                websocket_manager.disconnect( session_id, close_code=CLOSE_CODE_RESUME_FAILED, close_reason="resume_failed" )
+            try:
+                await websocket.close( code=CLOSE_CODE_RESUME_FAILED, reason="resume_failed" )
+            except Exception:
+                pass  # Socket already closed
             return
 
     except TokenExpiredException:
@@ -576,6 +855,25 @@ async def websocket_queue_endpoint(websocket: WebSocket, session_id: str):
                         "type": "sys_pong",
                         "timestamp": du.get_current_datetime_iso()
                     })
+                elif message.get("type") in ( "cc_transcript_watch", "cc_transcript_unwatch" ):
+                    # CC transcript console (row 27760534). Two NEW verbs — update_subscriptions
+                    # cannot absorb them, because it is type-level only and carries no
+                    # per-target argument, while a watch is parameterised by cc_session_id.
+                    #
+                    # 🔴 ADMIN ONLY (ruling Q5), checked HERE against session_is_admin. The REST
+                    # half uses require_admin — a DIFFERENT mechanism — so neither gate proves
+                    # anything about the other.
+                    await handle_cc_transcript_verb( websocket, session_id, message )
+
+                elif message.get( "type" ) == "ack":
+                    # Row dc446601 part 2: the client confirms what it has processed,
+                    # and the server drops it. Without this the buffer only ever
+                    # shrinks by eviction, which is the thing that causes a gap.
+                    ack_seq = message.get( "seq", 0 )
+                    if isinstance( ack_seq, int ) and not isinstance( ack_seq, bool ) and ack_seq > 0:
+                        dropped = websocket_manager.ack_frames( session_id, ack_seq )
+                        if app_debug: print( f"[WS-QUEUE-ACK] Session [{session_id}] acked {ack_seq}, trimmed {dropped}" )
+
                 elif message.get("type") == "update_subscriptions":
                     # Handle subscription updates
                     events = message.get("events", [])
@@ -599,6 +897,11 @@ async def websocket_queue_endpoint(websocket: WebSocket, session_id: str):
         # Only disconnect if OUR websocket is still the active one
         # (prevents race: reconnection with same session_id already replaced us)
         if websocket_manager.active_connections.get( session_id ) is websocket:
+            # BEFORE disconnect(), because disconnect() sweeps the watcher registry
+            # synchronously and would leave this coroutine nothing to reap. The tailer also
+            # self-terminates on its watcher count, so the two are belt and suspenders rather
+            # than one control — this reaps promptly, that one cannot be ordered wrong.
+            await stop_cc_transcript_tailers_for_disconnect( session_id )
             websocket_manager.disconnect( session_id )
             session_type = "listener" if session_id.startswith( "cc-listener-" ) else "browser"
             print( f"[WS-QUEUE] Queue WebSocket disconnected for {session_type} session: {session_id}" )

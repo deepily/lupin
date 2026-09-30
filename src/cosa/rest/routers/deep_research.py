@@ -30,6 +30,34 @@ except ImportError:
 router = APIRouter( tags=[ "deep-research" ] )
 
 
+def _is_within( candidate, base ):
+    """
+    Report whether candidate lies inside base, comparing on a PATH BOUNDARY.
+
+    A bare `startswith` is not a containment test: "/proj/io-secrets" starts with
+    "/proj/io" while sitting entirely outside it. commonpath compares whole path
+    segments, so a sibling whose NAME merely shares a prefix cannot slip through.
+
+    Requires:
+        - candidate is an absolute path that has already been symlink-resolved
+        - base is an absolute path
+
+    Ensures:
+        - returns True iff candidate IS base or sits beneath it
+        - returns False for a sibling sharing a textual prefix ("io-secrets" vs "io")
+        - returns False rather than raising when the two share no common root
+
+    Raises:
+        - nothing; a ValueError from commonpath is caught and reported as False
+    """
+    base = os.path.realpath( base )
+    try:
+        return os.path.commonpath( [ candidate, base ] ) == base
+    except ValueError:
+        # Different drives, or one path relative -- not containment either way.
+        return False
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Job Submission Endpoint — retired
 #
@@ -176,14 +204,20 @@ async def get_report(
             # Relative path - treat as relative to allowed_base
             full_path = os.path.join( allowed_base, decoded_path )
 
-        # Normalize to prevent directory traversal
-        full_path = os.path.normpath( full_path )
+        # Resolve ".." AND symlinks. normpath is purely TEXTUAL, so a symlink
+        # under io/ pointing elsewhere used to satisfy the check below while the
+        # file served came from outside the project entirely (row 0cd3811a).
+        full_path = os.path.realpath( full_path )
 
-        # Security check: ensure path is within allowed directories
-        if not full_path.startswith( allowed_base ) and not full_path.startswith( project_root + "/io/" ):
+        io_root = project_root + "/io"
+
+        # Security check: compare on a PATH BOUNDARY, not a string prefix. Both
+        # arms are deliberate -- io/deep-research, or anywhere else under io/ --
+        # and test_local_absolute_io_other_success asserts the second one.
+        if not _is_within( full_path, allowed_base ) and not _is_within( full_path, io_root ):
             raise HTTPException(
                 status_code=400,
-                detail="Invalid path: must be within project io/deep-research directory"
+                detail="Invalid path: must resolve to a file within the project io/ directory"
             )
 
         # Check if file exists

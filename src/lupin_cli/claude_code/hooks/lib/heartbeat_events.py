@@ -9,7 +9,7 @@ emit must NEVER raise into / block the poke path: an emission failure leaves
 the poke proceeding unchanged.
 
 Design authority: canonical schema in planning-is-prompting →
-    src/rnd/2026.06.02-stop-hook-natural-heartbeat-poker.md §0.2 (María, arbiter owner).
+    planning-is-prompting/src/rnd/2026.06.02-stop-hook-natural-heartbeat-poker.md §0.2 (María, arbiter owner).
 Lupin-side seam: lupin →
     src/rnd/v0.1.8/2026.06.04-heartbeat-hook/02-stop-py-seam-factoring-proposal.md
 

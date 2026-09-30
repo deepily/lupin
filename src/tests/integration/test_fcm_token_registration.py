@@ -1,7 +1,7 @@
 """
 Integration — FCM token registration round-trip + durable rehydration (AC-S6.1).
 
-Runs against the live test server (:8000, scheduled via POST /api/test-suite/submit).
+Runs against the live test server (:8000, scheduled via the v2 test-suite submit).
 
 AC-S6.1 (F-S6-S2-1a, mechanism per F-S6-S3-1): register a token through the
 ENDPOINT (the server process writes it), then RE-INSTANTIATE the registry

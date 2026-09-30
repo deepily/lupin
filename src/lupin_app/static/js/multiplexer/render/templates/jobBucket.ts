@@ -6,8 +6,9 @@
 // todo + running expanded; done + dead + history collapsed.
 //
 // Per Q-A1 (strict ratification): when a bucket is empty, render a per-bucket
-// "No <name> jobs." div under the header. NO global "all empty" fallback;
-// 5 empty buckets render 5 empty-state divs.
+// empty-state div under the header. NO global "all empty" fallback;
+// 5 empty buckets render 5 empty-state divs. The WORDS are legacy's (parity A-2 #10):
+// "No jobs in queue" for a live queue, "No job history found" for history.
 //
 // Per Pass 2 F30 (WAI-ARIA 1.2 §5.4 contract for role="button"): the bucket
 // header gets a keydown handler for Enter + Space (preventDefault on Space to
@@ -36,6 +37,17 @@ interface RenderOptions {
   historyWindowDays?  : number;
   historyLoadedCount? : number;
   historyTotalCount?  : number;
+  /**
+   * Parity A-1c1 — the operator's saved open/closed choice for this bucket. Absent means
+   * no choice has been made, and the Q-A2 default below applies.
+   */
+  expanded? : boolean;
+  /**
+   * Parity A-1c1 — told the NEW expanded state after the operator toggles the header, so
+   * the pane can carry the choice across its next re-render and a reload. The template
+   * itself keeps nothing: every job event rebuilds this element from scratch.
+   */
+  onToggle? : ( bucket: JobBucket, expanded: boolean ) => void;
 }
 
 // Default-expansion table per Pass 1 F1 (derived from Q-A2):
@@ -46,6 +58,22 @@ const DEFAULT_EXPANDED: Record<JobBucket, boolean> = {
   dead    : false,
   history : false,
 };
+
+// Parity A-2 #10 (Phase 2 A12 B9d) — legacy's heading for each queue: the glyph in
+// `.queue-status-indicator`, the `<h4>` text, and the delete-all button's title
+// (notifications.html:1163-1250). The raw bucket key used to be the heading.
+const BUCKET_HEADINGS: Record<JobBucket, { glyph: string; label: string; deleteAllTitle: string }> = {
+  todo    : { glyph: "🟡", label: "TODO",        deleteAllTitle: "Delete all TODO jobs" },
+  running : { glyph: "🔵", label: "Running",     deleteAllTitle: "Cancel and delete all running jobs" },
+  done    : { glyph: "✅", label: "Done",        deleteAllTitle: "Delete all Done jobs" },
+  dead    : { glyph: "❌", label: "Dead",        deleteAllTitle: "Delete all Dead jobs" },
+  history : { glyph: "📋", label: "Job History", deleteAllTitle: "Delete all visible history" },
+};
+
+// Parity A-2 #10 (Phase 2 A12 B10) — legacy's empty copy: `updateQueueEmptyMessage`
+// for a live queue (notifications.js:5735), `loadJobHistory` for history (:6622).
+const EMPTY_LIVE_QUEUE = "No jobs in queue";
+const EMPTY_HISTORY    = "No job history found";
 
 // W3 — history time-window select options (legacy #history-time-window: 1/7/14/
 // 30 days + all). `value` is the query `days` param; "all" maps to all-time
@@ -85,7 +113,9 @@ const HISTORY_WINDOW_OPTIONS: ReadonlyArray<{ value: string; label: string }> = 
  *   - Header is `role="button" tabindex="0"` with `aria-expanded` reflecting
  *     the cards-container collapsed state; `aria-controls` references the
  *     cards container's unique id
- *   - Empty bucket → renders `<div class="jobs-bucket-empty">No ${bucketName} jobs.</div>`
+ *   - Header shows legacy's glyph (`.jobs-bucket-glyph`) and label (`.jobs-bucket-label`)
+ *   - Empty bucket → renders `<div class="jobs-bucket-empty">` carrying legacy's copy:
+ *     "No job history found" for history, "No jobs in queue" for every live queue
  *   - Non-empty bucket → renders cards via `keyedListMerge` keyed by `data-id-hash`
  *   - Header click toggles `.collapsed` on the cards container + flips
  *     `aria-expanded`; keydown(Enter or Space) does the same (Space
@@ -97,7 +127,8 @@ export function renderJobBucket(
   jobs: ReadonlyArray<Job>,
   opts: RenderOptions = {},
 ): HTMLElement {
-  const initiallyExpanded = DEFAULT_EXPANDED[bucketName];
+  const initiallyExpanded = opts.expanded ?? DEFAULT_EXPANDED[bucketName];
+  const heading           = BUCKET_HEADINGS[bucketName];
   const cardsContainerId  = `bucket-${bucketName}-content`;
 
   const root = document.createElement("section");
@@ -106,14 +137,15 @@ export function renderJobBucket(
   // For keyed-merge participation across all 5 buckets in the parent container.
   root.setAttribute("data-id-hash", `bucket:${bucketName}`);
 
-  /* c8 ignore next 11 */ // tagged-template literal: c8 reports phantom branches on $-interpolations; the runtime path is straight-line and exercised by every test that renders a bucket.
+  /* c8 ignore next 12 */ // tagged-template literal: c8 reports phantom branches on $-interpolations; the runtime path is straight-line and exercised by every test that renders a bucket.
   const headerFrag = html`
     <header class="jobs-bucket-header"
             role="button"
             tabindex="0"
             aria-expanded="${initiallyExpanded ? "true" : "false"}"
             aria-controls="${cardsContainerId}">
-      <span class="jobs-bucket-label">${bucketName}</span>
+      <span class="jobs-bucket-glyph" aria-hidden="true">${heading.glyph}</span>
+      <span class="jobs-bucket-label">${heading.label}</span>
       <span class="jobs-bucket-count">(${jobs.length})</span>
       <span class="jobs-bucket-toggle">${initiallyExpanded ? "▼" : "▶"}</span>
     </header>
@@ -134,8 +166,8 @@ export function renderJobBucket(
   deleteAllBtn.className    = "queue-delete-all-btn";
   deleteAllBtn.textContent  = "🗑";
   deleteAllBtn.setAttribute("data-bucket", bucketName);
-  deleteAllBtn.title = `Delete all ${bucketName} jobs`;
-  deleteAllBtn.setAttribute("aria-label", `Delete all ${bucketName} jobs`);
+  deleteAllBtn.title = heading.deleteAllTitle;
+  deleteAllBtn.setAttribute("aria-label", heading.deleteAllTitle);
   header.insertBefore(deleteAllBtn, toggleSpan);
 
   // W3 (plan 04 §W3) — history time-window <select> + count-badge-reflects-total.
@@ -168,7 +200,7 @@ export function renderJobBucket(
   if (jobs.length === 0) {
     /* c8 ignore next 4 */ // tagged-template literal: same phantom-branch caveat as the header above.
     const emptyFrag = html`
-      <div class="jobs-bucket-empty">No ${bucketName} jobs.</div>
+      <div class="jobs-bucket-empty">${bucketName === "history" ? EMPTY_HISTORY : EMPTY_LIVE_QUEUE}</div>
     ` as DocumentFragment;
     root.appendChild(emptyFrag);
   } else {
@@ -221,7 +253,10 @@ export function renderJobBucket(
     /* c8 ignore next */ // defensive: browser-dispatched clicks always carry a target.
     if (target === null) return;
     if (target.closest("button, select") !== null) return;
-    toggleBucket(root);
+    // ⚠️ TOGGLE FIRST, REPORT SECOND — never `onToggle?.(…, toggleBucket(root))`: an
+    // optional call skips its ARGUMENTS too, so a bucket with no listener would not toggle.
+    const expanded = toggleBucket(root);
+    opts.onToggle?.(bucketName, expanded);
   });
   header.addEventListener("keydown", (e: Event) => {
     const ke     = e as KeyboardEvent;
@@ -231,7 +266,8 @@ export function renderJobBucket(
     if (target.closest("button, select") !== null) return;
     if (ke.key === "Enter" || ke.key === " ") {
       ke.preventDefault();   // Space else scrolls the page
-      toggleBucket(root);
+      const expanded = toggleBucket(root);
+      opts.onToggle?.(bucketName, expanded);
     }
   });
 
@@ -257,9 +293,10 @@ export function renderJobBucket(
  *   - On non-empty bucket: `.jobs-bucket-cards` toggles its `.collapsed` class
  *   - In all cases: `.jobs-bucket-header[aria-expanded]` flips true ↔ false
  *   - `.jobs-bucket-toggle` text flips ▼ ↔ ▶
+ *   - returns the NEW expanded state
  */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
-function toggleBucket(root: HTMLElement): void {
+function toggleBucket(root: HTMLElement): boolean {
   const header = root.querySelector(".jobs-bucket-header") as HTMLElement;
   const cards  = root.querySelector(".jobs-bucket-cards") as HTMLElement | null;
   const toggle = root.querySelector(".jobs-bucket-toggle") as HTMLElement;
@@ -272,4 +309,5 @@ function toggleBucket(root: HTMLElement): void {
   if (cards !== null) {
     cards.classList.toggle("collapsed", !nowExpanded);
   }
+  return nowExpanded;
 }

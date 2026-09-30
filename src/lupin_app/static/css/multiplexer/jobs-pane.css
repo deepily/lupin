@@ -32,10 +32,17 @@
    Pane scaffolding (new — no legacy precedent)
    ============================================================================ */
 
+/* Row 453e7e4d (Rick, 2026-09-23): the five buckets must sit INSIDE the Jobs
+   accordion. The pane was transparent and unbordered, so the buckets read as
+   loose cards below a header bar. The pane now draws the same box as a legacy
+   .collapsible-section (2px #e9ecef border, 6px radius, #f8f9fa fill), and the
+   buckets container insets them. Vertical spacing is owned by section-toolbar.css. */
 #jobs-pane {
-    margin           : 16px 0;
     padding          : 0;
-    background-color : transparent;
+    background-color : #f8f9fa;
+    border           : 2px solid #e9ecef;
+    border-radius    : 6px;
+    overflow         : hidden;
 }
 
 .jobs-pane-header {
@@ -71,7 +78,7 @@
     display        : flex;
     flex-direction : column;
     gap            : 8px;
-    padding        : 8px 0;
+    padding        : 10px 12px 12px;
 }
 
 /* ============================================================================
@@ -235,6 +242,22 @@
     font-size  : 12px;
     font-style : italic;
     text-align : left;
+}
+
+/* Row 52142a84 — an EMPTY bucket collapses too. It carries no .jobs-bucket-cards,
+   only this message, so the `.collapsed` rule above had nothing to act on and the
+   caret flipped over a body that stayed put — 4 of 5 buckets read as dead. */
+.jobs-bucket-header[ aria-expanded="false" ] ~ .jobs-bucket-empty {
+    display : none;
+}
+
+/* Row 52142a84 — the pane-level collapse. The shared
+   `[data-collapsed="true"] > .section-content` rule is (0,2,0) and loses to the
+   `#jobs-buckets-container { display: flex }` above (1,0,0), so the header's
+   caret and data-collapsed flipped while the buckets stayed on screen. Matching
+   the id here is what outranks it. */
+#jobs-pane[ data-collapsed="true" ] > #jobs-buckets-container {
+    display : none;
 }
 
 /* ============================================================================

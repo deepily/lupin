@@ -6,6 +6,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
+import { QUESTIONS_PAYLOAD } from "./fixtures/actionRequiredQuestionsPayload";
+
 import { createEventBusForTesting } from "../../../lupin_app/static/js/multiplexer/shared/EventBus";
 import {
   createActionRequiredStore,
@@ -57,6 +59,40 @@ function makeFakeIntervals() {
   };
 }
 
+// 360de81b — one-shot timers for the grace period before a finished card leaves.
+interface TimeoutEntry {
+  id : number;
+  cb : () => void;
+  ms : number;
+}
+
+function makeFakeTimeouts() {
+  let nextId = 1;
+  const map = new Map<number, TimeoutEntry>();
+  return {
+    setTimeoutFn: ((cb: () => void, ms: number): unknown => {
+      const id = nextId++;
+      map.set(id, { id, cb, ms });
+      return id;
+    }) as (cb: () => void, ms: number) => unknown,
+    clearTimeoutFn: ((id: unknown): void => {
+      map.delete(id as number);
+    }) as (id: unknown) => void,
+    /** Fire every scheduled timeout once, removing each before it runs. */
+    fireAll(): void {
+      const snapshot = Array.from(map.values());
+      for (const entry of snapshot) {
+        if (!map.has(entry.id)) continue;
+        map.delete(entry.id);
+        entry.cb();
+      }
+    },
+    delays(): number[] {
+      return Array.from(map.values(), e => e.ms);
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Test setup helpers
 // ---------------------------------------------------------------------------
@@ -66,12 +102,15 @@ function setup(opts: { now?: number } = {}) {
   const events: LupinEvent<StoreActionRequiredChangedPayload>[] = [];
   bus.on<StoreActionRequiredChangedPayload>("store_action_required_changed", (e) => events.push(e));
   let now      = opts.now ?? 1_700_000_000_000;
-  const timers = makeFakeIntervals();
+  const timers   = makeFakeIntervals();
+  const timeouts = makeFakeTimeouts();
   let postCalls: Array<{ path: string; body: unknown }> = [];
   let postRejects = false;
+  let postGate: Promise<void> | null = null;
   const api: ActionRequiredApiClient = {
     post: async (path, body) => {
       postCalls.push({ path, body });
+      if (postGate !== null) await postGate;
       if (postRejects) throw new Error("network down");
       return { ok: true };
     },
@@ -81,6 +120,8 @@ function setup(opts: { now?: number } = {}) {
     api,
     setIntervalFn   : timers.setIntervalFn,
     clearIntervalFn : timers.clearIntervalFn,
+    setTimeoutFn    : timeouts.setTimeoutFn,
+    clearTimeoutFn  : timeouts.clearTimeoutFn,
     nowFn           : () => now,
   });
   return {
@@ -88,10 +129,17 @@ function setup(opts: { now?: number } = {}) {
     store,
     events,
     timers,
+    timeouts,
     postCalls,
     setNow: (n: number) => { now = n; },
     getNow: () => now,
     setPostRejects: (b: boolean) => { postRejects = b; },
+    /** Hold every POST until the returned release() is called. */
+    holdPosts: (): (() => void) => {
+      let release!: () => void;
+      postGate = new Promise<void>((resolve) => { release = resolve; });
+      return release;
+    },
   };
 }
 
@@ -101,7 +149,7 @@ function emitArPrompt(bus: ReturnType<typeof createEventBusForTesting>, fields: 
   timestamp           ?: string;
   response_requested  ?: boolean;
   response_type       ?: "yes_no" | "multiple_choice" | "open_ended" | "open_ended_batch";
-  response_options    ?: ReadonlyArray<string>;
+  response_options    ?: unknown;
   response_default    ?: string;
   timeout_seconds     ?: number;
 }): void {
@@ -134,9 +182,10 @@ test("notification_queue_update with response_requested=true spawns a prompt; em
   assert.equal(item!.state, "pending");
   assert.equal(item!.prompt, "Proceed?");
   assert.equal(item!.response_type, "yes_no");
-  assert.deepEqual(item!.options, ["yes", "no"]);
+  assert.deepEqual(item!.questions, [], "yes_no carries no questions, whatever response_options holds");
   assert.equal(item!.default, "no");
   assert.equal(item!.expires_at, 1_000_000 + 30_000);
+  assert.equal(item!.timeout_seconds, 30, "the queued row shows the ask's timeout (legacy formatTimeoutDisplay)");
   const added = ctx.events.find(e => e.payload.changeKind === "added");
   assert.ok(added);
 });
@@ -161,11 +210,11 @@ test("duplicate notification_queue_update for same id_hash: dedup, no second spa
 // 4-6 : Interval ticking
 // ===========================================================================
 
-test("setInterval(1000) is scheduled on prompt spawn; cleared on terminal state", () => {
+test("setInterval(1000) is scheduled on prompt spawn; cleared on terminal state", async () => {
   const ctx = setup({ now: 1_000_000 });
   emitArPrompt(ctx.bus, { id_hash: "ar1", message: "x", response_requested: true, timeout_seconds: 30, timestamp: new Date(1_000_000).toISOString() });
   assert.equal(ctx.timers.pending(), 1);
-  ctx.store.respond("ar1", "yes");                                 // → responded (terminal)
+  await ctx.store.respondAndAwait("ar1", "yes");                                 // → responded (terminal)
   assert.equal(ctx.timers.pending(), 0);
 });
 
@@ -199,57 +248,10 @@ test("countdown reaching zero auto-expires locally + does NOT POST", () => {
 // 7-10 : respond() flow
 // ===========================================================================
 
-test("respond() flips state to responded optimistically + emits responded", async () => {
-  const ctx = setup();
-  emitArPrompt(ctx.bus, { id_hash: "ar1", message: "x", response_requested: true, timeout_seconds: 30 });
-  await ctx.store.respond("ar1", "yes");
-  assert.equal(ctx.store.getById("ar1")!.state, "responded");
-  assert.equal(ctx.store.getById("ar1")!.response, "yes");
-  const responded = ctx.events.find(e => e.payload.changeKind === "responded");
-  assert.ok(responded);
-});
 
-test("respond() POSTs to /api/notify/response with notification_id + response_value", async () => {
-  const ctx = setup();
-  emitArPrompt(ctx.bus, { id_hash: "ar1", message: "x", response_requested: true, timeout_seconds: 30 });
-  await ctx.store.respond("ar1", "yes");
-  assert.equal(ctx.postCalls.length, 1);
-  assert.equal(ctx.postCalls[0]!.path, "/api/notify/response");
-  const body = ctx.postCalls[0]!.body as { notification_id: string; response_value: { response: string } };
-  assert.equal(body.notification_id, "ar1");
-  assert.equal(body.response_value.response, "yes");
-});
 
-test("respond() on already-responded prompt is a no-op", async () => {
-  const ctx = setup();
-  emitArPrompt(ctx.bus, { id_hash: "ar1", message: "x", response_requested: true, timeout_seconds: 30 });
-  await ctx.store.respond("ar1", "yes");
-  const before = ctx.events.length;
-  await ctx.store.respond("ar1", "no");
-  assert.equal(ctx.events.length, before, "second respond does not emit");
-  assert.equal(ctx.postCalls.length, 1, "second respond does not POST");
-  // Original response retained.
-  assert.equal(ctx.store.getById("ar1")!.response, "yes");
-});
 
-test("respond() network failure leaves local state at responded (UI feedback already delivered)", async () => {
-  const ctx = setup();
-  emitArPrompt(ctx.bus, { id_hash: "ar1", message: "x", response_requested: true, timeout_seconds: 30 });
-  ctx.setPostRejects(true);
-  await ctx.store.respond("ar1", "yes");
-  assert.equal(ctx.store.getById("ar1")!.state, "responded");
-});
 
-test("respond() on unknown id_hash is a no-op", async () => {
-  const ctx = setup();
-  await ctx.store.respond("ghost", "yes");
-  assert.equal(ctx.postCalls.length, 0);
-  assert.equal(ctx.events.length, 0);
-});
-
-// ===========================================================================
-// 11-13 : notification_responded (server fanout) cancellation
-// ===========================================================================
 
 test("notification_responded from server cancels pending prompt → cancelled state", () => {
   const ctx = setup();
@@ -263,7 +265,7 @@ test("notification_responded from server cancels pending prompt → cancelled st
 test("notification_responded on already-responded local prompt is a no-op (server confirming)", async () => {
   const ctx = setup();
   emitArPrompt(ctx.bus, { id_hash: "ar1", message: "x", response_requested: true, timeout_seconds: 30 });
-  await ctx.store.respond("ar1", "yes");
+  await ctx.store.respondAndAwait("ar1", "yes");
   const before = ctx.events.length;
   ctx.bus.emit({ type: "notification_responded", payload: { id_hash: "ar1" }, source: "test", ts: 0 });
   assert.equal(ctx.events.length, before);
@@ -348,7 +350,7 @@ test("connection_state_change → connected after backoff: thaws + emits offline
 test("freeze does not affect already-terminal prompts", async () => {
   const ctx = setup({ now: 1_000_000 });
   emitArPrompt(ctx.bus, { id_hash: "ar1", message: "x", response_requested: true, timeout_seconds: 30 });
-  await ctx.store.respond("ar1", "yes");
+  await ctx.store.respondAndAwait("ar1", "yes");
   const before = ctx.events.length;
   ctx.bus.emit({ type: "connection_state_change", payload: { state: "offline", prev: "connected", attempts: 1, transport: "QueueTransport" }, source: "test", ts: 0 });
   // No offline-frozen for the responded prompt.
@@ -360,24 +362,38 @@ test("freeze does not affect already-terminal prompts", async () => {
 // 20-22 : Multi-prompt independence + edge cases
 // ===========================================================================
 
-test("multi-prompt independence: two prompts have separate timers + separate state", () => {
+test("360de81b: two prompts — only the first counts down; the queued one has no timer and no expiry until it reaches the slot", async () => {
   const ctx = setup({ now: 1_000_000 });
   emitArPrompt(ctx.bus, { id_hash: "ar1", message: "p1", response_requested: true, timeout_seconds: 30, timestamp: new Date(1_000_000).toISOString() });
   emitArPrompt(ctx.bus, { id_hash: "ar2", message: "p2", response_requested: true, timeout_seconds: 60, timestamp: new Date(1_000_000).toISOString() });
-  assert.equal(ctx.timers.pending(), 2);
-  // Respond ar1 → its interval cleared; ar2's interval untouched.
-  ctx.store.respond("ar1", "yes");
-  assert.equal(ctx.timers.pending(), 1);
+  assert.equal(ctx.timers.pending(), 1, "one card at a time: only the active card ticks");
+  assert.deepEqual(ctx.store.list().map(i => i.id_hash), ["ar1", "ar2"], "arrival order is queue order");
+  assert.deepEqual(ctx.events.map(e => [e.payload.changeKind, e.payload.id_hash]), [["added", "ar1"], ["added", "ar2"]],
+    "an arrival is ONE emission, even when it takes the empty slot (stores_integration.test.ts pins the fanout)");
+  assert.equal(ctx.store.getById("ar2")!.expires_at, null, "a queued card has not started its countdown");
+  assert.equal(ctx.store.getById("ar2")!.timeout_seconds, 60);
+  // Respond ar1 → its interval cleared; ar2 still waits for ar1 to leave.
+  await ctx.store.respondAndAwait("ar1", "yes");
+  assert.equal(ctx.timers.pending(), 0);
   assert.equal(ctx.store.getById("ar1")!.state, "responded");
   assert.equal(ctx.store.getById("ar2")!.state, "pending");
+  assert.equal(ctx.store.getById("ar2")!.expires_at, null);
 });
 
-test("malformed timestamp drops the prompt silently (no spawn, no emission)", () => {
-  const ctx = setup();
+test("360de81b: the countdown starts at ACTIVATION, not at arrival — a stale or malformed timestamp does not move it (legacy activateNextNotification :21467)", async () => {
+  const ctx = setup({ now: 1_000_000 });
+  emitArPrompt(ctx.bus, { id_hash: "ar1", message: "p1", response_requested: true, timeout_seconds: 30, timestamp: new Date(0).toISOString() });
+  emitArPrompt(ctx.bus, { id_hash: "ar2", message: "p2", response_requested: true, timeout_seconds: 60, timestamp: "garbage-not-a-date" });
+  assert.equal(ctx.store.getById("ar1")!.expires_at, 1_030_000, "activated on arrival into an empty slot: now + timeout, whatever the timestamp says");
+  await ctx.store.respondAndAwait("ar1", "yes");
+  ctx.setNow(1_020_000);
   const before = ctx.events.length;
-  emitArPrompt(ctx.bus, { id_hash: "ar1", message: "x", response_requested: true, timeout_seconds: 30, timestamp: "garbage-not-a-date" });
-  assert.equal(ctx.store.list().length, 0);
-  assert.equal(ctx.events.length, before);
+  ctx.timeouts.fireAll();                                          // ar1's grace ends → ar1 leaves → ar2 activates
+  assert.equal(ctx.store.getById("ar1"), undefined);
+  assert.equal(ctx.store.getById("ar2")!.expires_at, 1_020_000 + 60_000, "ar2's countdown starts when it reaches the slot");
+  assert.equal(ctx.timers.pending(), 1, "ar2 now ticks");
+  const kinds = ctx.events.slice(before).map(e => [e.payload.changeKind, e.payload.id_hash]);
+  assert.deepEqual(kinds, [["removed", "ar1"], ["activated", "ar2"]]);
 });
 
 test("notification without id_hash + without id is dropped silently", () => {
@@ -521,13 +537,13 @@ test("freezeAll is idempotent — already-frozen entries are not re-emitted on a
   assert.equal(newOfflineFrozen.length, 0, "second freeze is a no-op for already-frozen entries");
 });
 
-test("freezeAll skips terminal entries (responded prompt is not re-emitted as offline-frozen)", () => {
+test("freezeAll skips terminal entries (responded prompt is not re-emitted as offline-frozen)", async () => {
   const ctx = setup({ now: 1_000_000 });
   // Spawn two prompts — pending one + one we'll respond to.
   emitArPrompt(ctx.bus, { id_hash: "ar1", message: "q1", response_requested: true, timeout_seconds: 30 });
   emitArPrompt(ctx.bus, { id_hash: "ar2", message: "q2", response_requested: true, timeout_seconds: 30 });
   // Respond to ar2 → terminal state, but entry stays in entries map until cleanup.
-  void ctx.store.respond("ar2", "ok");
+  await ctx.store.respondAndAwait("ar2", "ok");
 
   // Capture events from this point only.
   const eventsBefore = ctx.events.length;
@@ -540,7 +556,7 @@ test("freezeAll skips terminal entries (responded prompt is not re-emitted as of
   assert.equal(newEvents[0]?.payload.id_hash, "ar1");
 });
 
-test("thawAll skips terminal entries AND skips already-non-frozen pending entries", () => {
+test("thawAll skips terminal entries AND skips already-non-frozen pending entries", async () => {
   const ctx = setup({ now: 1_000_000 });
   // ar1: pending + frozen (will be thawed)
   // ar2: pending + NOT frozen (manually unfrozen — covers !entry.frozen continue)
@@ -548,7 +564,7 @@ test("thawAll skips terminal entries AND skips already-non-frozen pending entrie
   emitArPrompt(ctx.bus, { id_hash: "ar1", message: "q1", response_requested: true, timeout_seconds: 30 });
   emitArPrompt(ctx.bus, { id_hash: "ar2", message: "q2", response_requested: true, timeout_seconds: 30 });
   emitArPrompt(ctx.bus, { id_hash: "ar3", message: "q3", response_requested: true, timeout_seconds: 30 });
-  void ctx.store.respond("ar3", "ok"); // terminal
+  await ctx.store.respondAndAwait("ar3", "ok"); // terminal
 
   // Freeze all (only ar1 + ar2 are pending and will be frozen; ar3 is terminal).
   ctx.bus.emit({ type: "connection_offline", payload: {}, source: "test", ts: 0 });
@@ -567,11 +583,35 @@ test("thawAll skips terminal entries AND skips already-non-frozen pending entrie
   // Trigger thawAll via connection_online.
   ctx.bus.emit({ type: "connection_online", payload: {}, source: "test", ts: 0 });
 
-  // Resumed events should include ar1 + ar2 (frozen pending), but NOT ar3
-  // (terminal — state-check continue) and NOT ar4 (already non-frozen — !frozen continue).
+  // 360de81b: only the ACTIVE card (ar1) counts down, so only it was frozen and only it
+  // resumes. ar2 and ar4 are queued (no countdown yet); ar3 was answered while queued and
+  // has already left the store.
   const resumed = ctx.events.slice(eventsBefore).filter((e) => e.payload.changeKind === "offline-resumed");
   const idsResumed = resumed.map((e) => e.payload.id_hash).sort();
-  assert.deepEqual(idsResumed, ["ar1", "ar2"], "only frozen pending entries resume");
+  assert.deepEqual(idsResumed, ["ar1"], "only the frozen active entry resumes");
+  assert.equal(ctx.timers.pending(), 1, "a queued card never starts a timer on thaw");
+});
+
+test("thawAll does not restart the countdown of a frozen card answered while offline (its POST failed, it waits for retry)", async () => {
+  const ctx = setup({ now: 1_000_000 });
+  emitArPrompt(ctx.bus, { id_hash: "ar1", message: "q1", response_requested: true, timeout_seconds: 30 });
+  ctx.bus.emit({ type: "connection_offline", payload: {}, source: "test", ts: 0 });
+  ctx.setPostRejects(true);
+  await ctx.store.respondAndAwait("ar1", "yes").catch(() => {});
+  assert.equal(ctx.store.getById("ar1")!.state, "failed");
+  const before = ctx.events.length;
+  ctx.bus.emit({ type: "connection_online", payload: {}, source: "test", ts: 0 });
+  assert.equal(ctx.events.slice(before).filter(e => e.payload.changeKind === "offline-resumed").length, 0);
+  assert.equal(ctx.timers.pending(), 0);
+});
+
+test("thawAll skips an active entry that was never frozen (connection_online with no prior offline)", () => {
+  const ctx = setup({ now: 1_000_000 });
+  emitArPrompt(ctx.bus, { id_hash: "ar1", message: "q1", response_requested: true, timeout_seconds: 30 });
+  const before = ctx.events.length;
+  ctx.bus.emit({ type: "connection_online", payload: {}, source: "test", ts: 0 });
+  assert.equal(ctx.events.slice(before).filter(e => e.payload.changeKind === "offline-resumed").length, 0);
+  assert.equal(ctx.timers.pending(), 1);
 });
 
 // ===========================================================================
@@ -651,59 +691,514 @@ test("respondAndAwait() on already-responded entry throws (cannot re-submit term
   assert.match((thrown as Error).message, /Cannot respondAndAwait in state responded/);
 });
 
-test("respondAndAwait() POSTs structured wire shape: notification_id + response_value: { response }", async () => {
+// P0 5ebd2aff — a string answer goes bare, as legacy sends it. The server wraps a
+// bare string as {"value"} and every reader reads "value"; the old `{ response }`
+// wrapper was stored as sent and read back as no answer.
+test("respondAndAwait() POSTs a string answer bare: notification_id + response_value: \"yes\"", async () => {
   const ctx = setup();
   emitArPrompt(ctx.bus, { id_hash: "ar1", message: "q", response_requested: true, timeout_seconds: 30 });
   await ctx.store.respondAndAwait("ar1", "yes");
   assert.equal(ctx.postCalls.length, 1);
   assert.equal(ctx.postCalls[0]!.path, "/api/notify/response");
-  const body = ctx.postCalls[0]!.body as { notification_id: string; response_value: { response: unknown } };
+  const body = ctx.postCalls[0]!.body as { notification_id: string; response_value: unknown };
   assert.equal(body.notification_id, "ar1");
-  assert.equal(body.response_value.response, "yes");
+  assert.equal(body.response_value, "yes");
+});
+
+// 5ebd2aff step 2 — multiple_choice and batch answers go as legacy's JSON string. wire_value in the
+// fixture is the exact string the Python readers are fed (test_both_clients_answers_read_back_the_same.py).
+test("respondAndAwait() POSTs a multiple_choice or batch answer as legacy's JSON string, never a { response } wrapper", async () => {
+  const ctx = setup();
+  emitArPrompt(ctx.bus, { id_hash: "ar1", message: "q", response_requested: true, timeout_seconds: 30 });
+  emitArPrompt(ctx.bus, { id_hash: "ar2", message: "q", response_requested: true, timeout_seconds: 30 });
+  await ctx.store.respondAndAwait("ar1", QUESTIONS_PAYLOAD.multiple_choice.answers);
+  await ctx.store.respondAndAwait("ar2", QUESTIONS_PAYLOAD.open_ended_batch.answers);
+  assert.deepEqual(ctx.postCalls.map(c => (c.body as { response_value: unknown }).response_value), [
+    QUESTIONS_PAYLOAD.multiple_choice.wire_value,
+    QUESTIONS_PAYLOAD.open_ended_batch.wire_value,
+  ]);
 });
 
 // ---------------------------------------------------------------------------
-// Phase 6b A2 — widened response shape (string | array | record)
+// Phase 6b A2, reshaped by 5ebd2aff step 2 — a response is a string or { answers }
 // ---------------------------------------------------------------------------
 
-test("respond() accepts ReadonlyArray<string> for multi-select response", async () => {
-  const ctx = setup();
-  emitArPrompt(ctx.bus, { id_hash: "ar1", message: "q", response_requested: true, timeout_seconds: 30 });
-  await ctx.store.respond("ar1", ["red", "blue"]);
-  assert.deepEqual(ctx.store.getById("ar1")!.response, ["red", "blue"]);
-  const body = ctx.postCalls[0]!.body as { response_value: { response: unknown } };
-  assert.deepEqual(body.response_value.response, ["red", "blue"]);
-});
 
-test("respond() accepts Record<string, string> for open_ended_batch response", async () => {
-  const ctx = setup();
-  emitArPrompt(ctx.bus, { id_hash: "ar1", message: "q", response_requested: true, timeout_seconds: 30 });
-  await ctx.store.respond("ar1", { Topic: "AI", Budget: "100" });
-  assert.deepEqual(ctx.store.getById("ar1")!.response, { Topic: "AI", Budget: "100" });
-  const body = ctx.postCalls[0]!.body as { response_value: { response: unknown } };
-  assert.deepEqual(body.response_value.response, { Topic: "AI", Budget: "100" });
-});
 
-test("respond() back-compat: still accepts a plain string response", async () => {
-  const ctx = setup();
-  emitArPrompt(ctx.bus, { id_hash: "ar1", message: "q", response_requested: true, timeout_seconds: 30 });
-  await ctx.store.respond("ar1", "yes");
-  assert.equal(ctx.store.getById("ar1")!.response, "yes");
-});
 
-test("respondAndAwait() accepts ReadonlyArray<string> + emits payload with array response", async () => {
+test("respondAndAwait() accepts an { answers } response, emits it on responded and keeps it on the item", async () => {
   const ctx = setup();
   emitArPrompt(ctx.bus, { id_hash: "ar1", message: "q", response_requested: true, timeout_seconds: 30 });
   const before = ctx.events.length;
-  await ctx.store.respondAndAwait("ar1", ["A", "B", "C"]);
+  await ctx.store.respondAndAwait("ar1", QUESTIONS_PAYLOAD.multiple_choice.answers);
   const responded = ctx.events.slice(before).find(e => e.payload.changeKind === "responded");
-  assert.deepEqual(responded!.payload.response, ["A", "B", "C"]);
-  assert.deepEqual(ctx.store.getById("ar1")!.response, ["A", "B", "C"]);
+  assert.deepEqual(responded!.payload.response, QUESTIONS_PAYLOAD.multiple_choice.answers);
+  assert.deepEqual(ctx.store.getById("ar1")!.response, QUESTIONS_PAYLOAD.multiple_choice.answers);
 });
 
-test("respondAndAwait() accepts Record<string, string> + emits payload with object response", async () => {
+test("a real multiple_choice or batch ask spawns a prompt carrying its questions, read from response_options.questions (5ebd2aff step 2)", () => {
   const ctx = setup();
-  emitArPrompt(ctx.bus, { id_hash: "ar1", message: "q", response_requested: true, timeout_seconds: 30 });
-  await ctx.store.respondAndAwait("ar1", { q1: "yes", q2: "no" });
-  assert.deepEqual(ctx.store.getById("ar1")!.response, { q1: "yes", q2: "no" });
+  emitArPrompt(ctx.bus, {
+    id_hash            : "ar1",
+    message            : "Pick",
+    response_requested : true,
+    response_type      : "multiple_choice",
+    response_options   : QUESTIONS_PAYLOAD.multiple_choice.response_options,
+    timeout_seconds    : 30,
+  });
+  emitArPrompt(ctx.bus, {
+    id_hash            : "ar2",
+    message            : "Tell me",
+    response_requested : true,
+    response_type      : "open_ended_batch",
+    response_options   : QUESTIONS_PAYLOAD.open_ended_batch.response_options,
+    timeout_seconds    : 30,
+  });
+  assert.deepEqual(ctx.store.getById("ar1")!.questions.map(q => [q.header, q.multiSelect, q.options.map(o => o.label)]), [
+    ["Database", false, ["PostgreSQL", "SQLite"]],
+    ["Features", true,  ["Search", "Export", "Audit log"]],
+  ]);
+  assert.deepEqual(ctx.store.getById("ar2")!.questions.map(q => [q.header, q.defaultValue]), [
+    ["Topic",  undefined],
+    ["Budget", "no limit"],
+  ]);
+});
+
+// ===========================================================================
+// bcf15f08 guards — the store must have exactly ONE answer path, and EVERY
+// answer path must refuse to read "responded" after the server rejected.
+//
+// Written as a PREDICATE over the discovered surface rather than a hardcoded
+// list, so a re-added second path is caught with nobody remembering to update
+// these tests. That is the whole point: the deleted respond() had zero callers
+// and zero guards, so re-adding it would have fired no alarm at all.
+// ===========================================================================
+
+/** Every method whose name begins with "respond" — own fields AND prototype. */
+function answerPathsOf(store: object): string[] {
+  const own   = Object.getOwnPropertyNames(store);
+  const proto = Object.getOwnPropertyNames(Object.getPrototypeOf(store) as object);
+  return Array.from(new Set([...own, ...proto])).filter(n => /^respond/i.test(n)).sort();
+}
+
+test("bcf15f08: the store exposes exactly ONE answer path", () => {
+  const ctx = setup();
+  assert.deepEqual(
+    answerPathsOf(ctx.store as object),
+    ["respondAndAwait"],
+    "a second answer path re-opens bcf15f08 — the deleted respond() swallowed a rejected " +
+    "answer and left the UI reading \"responded\". Add a path only with its own rejection guard.",
+  );
+});
+
+test("bcf15f08: EVERY answer path leaves a REJECTED answer not reading \"responded\"", async () => {
+  const paths = answerPathsOf(setup().store as object);
+
+  // POSITIVE CONTROL — without this, an empty discovery would pass the loop
+  // below vacuously and this test would prove nothing.
+  assert.ok(
+    paths.includes("respondAndAwait"),
+    `answer-path discovery returned ${JSON.stringify(paths)}; it must find respondAndAwait ` +
+    "or the loop below is asserting over an empty set",
+  );
+
+  for (const name of paths) {
+    const ctx = setup();
+    emitArPrompt(ctx.bus, { id_hash: "ar1", message: "q", response_requested: true, timeout_seconds: 30 });
+    ctx.setPostRejects(true);
+    // Throwing is a legitimate way to fail. Silence is not — that is the defect.
+    try {
+      await (ctx.store as unknown as Record<string, (a: string, b: string) => Promise<void>>)[name]!("ar1", "yes");
+    } catch { /* expected on the honest path */ }
+    assert.notEqual(
+      ctx.store.getById("ar1")!.state,
+      "responded",
+      `${name}() left the store reading "responded" after the server REJECTED the answer`,
+    );
+  }
+});
+
+// ---------------------------------------------------------------------------
+// bcf15f08 guard 3 — THE SURFACE CENSUS. María 🌸's finding, 2026-09-05.
+//
+// The two guards above share ONE premise: answerPathsOf() filters on
+// /^respond/i. That is an ENUMERATION OF NAMES wearing a regex, so a new
+// answer path called anything else is invisible to BOTH of them and they fail
+// together. MEASURED, not argued: re-adding the deleted swallowing method as
+// `submitAnswer` left the whole file GREEN at 40/40.
+//
+// Their positive control does not cover it either — it asserts the discovery
+// found respondAndAwait, which is true in both arms. It guards a discovery
+// that finds NOTHING, never one that finds TOO LITTLE.
+//
+// So this guard drops the name filter entirely and censuses the WHOLE surface
+// against a hand-written list. The two sides have DIFFERENT PROVENANCE on
+// purpose: the left is read off the live object, the right is typed by a
+// person. A census whose expectation is derived from the same walk it is
+// checking cannot disagree with itself.
+//
+// ⇒ ADDING ANY METHOD BREAKS THIS TEST. That is the feature, not the cost:
+//   it converts "nobody remembered to guard the new path" from SILENCE into a
+//   DELIBERATE ACT. To add a method you must come here and say so — and if it
+//   POSTs to /api/notify/response it is an answer path and owes a rejection
+//   guard like respondAndAwait's.
+// ---------------------------------------------------------------------------
+
+/** The store's ENTIRE public surface — own fields AND prototype, unfiltered. */
+function surfaceOf(store: object): string[] {
+  const own   = Object.getOwnPropertyNames(store);
+  const proto = Object.getOwnPropertyNames(Object.getPrototypeOf(store) as object);
+  return Array.from(new Set([...own, ...proto])).sort();
+}
+
+test("bcf15f08: the store's surface is UNCHANGED — a new member must be classified here", () => {
+  // Typed by hand from a probe of the live object on 2026-09-05. Do not
+  // regenerate this from surfaceOf() — that would compare the walk to itself.
+  // 360de81b (2026-09-10) added, all classified NOT an answer path — none POSTs:
+  //   activateHead, clearTimeoutFn, expireEntry, onExpired, removeEntry, retire, setTimeoutFn.
+  // A-2 #2f (2026-09-16) added, all classified NOT an answer path — none POSTs:
+  //   audioControl, audioPausedByPrompt, emitCountdown, togglePause.
+  // A-1c2 (2026-09-16) added, all classified NOT an answer path — none POSTs, they only read and
+  // write the StorageService: persist, recordStep, restore, storage.
+  // A-2 #2d (2026-09-18) added, both classified NOT an answer path — neither POSTs, they only read
+  // the TTS queue: ttsHoldsHead, ttsSlot.
+  const EXPECTED = [
+    "activateHead", "api", "audioControl", "audioPausedByPrompt", "bus", "clearIntervalFn",
+    "clearTimeoutFn", "clockOffset",
+    "constructor", "disposeForTesting", "emit", "emitCountdown", "emitWithDetails", "entries",
+    "expireEntry", "freezeAll", "getById", "list", "nowFn", "onConnectionState",
+    "onExpired", "onQueueUpdate", "onResponded", "onSysTimeUpdate", "persist", "recordStep",
+    "removeEntry", "respondAndAwait", "restore", "retire", "setIntervalFn", "setTimeoutFn",
+    "startInterval", "stopInterval", "storage", "subscribe", "thawAll", "tick", "togglePause",
+    "ttsHoldsHead", "ttsSlot", "unsubscribers",
+  ].sort();
+
+  assert.deepEqual(
+    surfaceOf(setup().store as object),
+    EXPECTED,
+    "the store's surface changed. If you ADDED a member: does it POST to " +
+    "/api/notify/response? If so it is an ANSWER PATH and re-opens bcf15f08 " +
+    "unless it fails loudly on rejection — give it a guard like " +
+    "respondAndAwait's, then add the name above. If it is not an answer path, " +
+    "just add the name. Either way this is a decision you are now making on " +
+    "purpose rather than by forgetting.",
+  );
+});
+
+// ===========================================================================
+// 360de81b — STALE CARDS LEAVE, and the next card is promoted.
+//
+// Grace periods are typed from legacy notifications.js, not read off the store's constants,
+// so a changed constant cannot agree with itself:
+//   answered here        600 ms  — showConfirmation's fallback timer (:24295)
+//   answered elsewhere  1500 ms  — handleNotificationResponded (:24541-24560)
+//   expired              600 ms  — the same bound as an answer; legacy's no-animation path deletes at once (:24462)
+//   a QUEUED card        0 ms    — handleNotificationResponded's card-not-found branch (:24561-24570)
+// ===========================================================================
+
+function twoCards(ctx: ReturnType<typeof setup>): void {
+  emitArPrompt(ctx.bus, { id_hash: "ar1", message: "p1", response_requested: true, timeout_seconds: 30, response_default: "no" });
+  emitArPrompt(ctx.bus, { id_hash: "ar2", message: "p2", response_requested: true, timeout_seconds: 60 });
+}
+
+test("360de81b: answered HERE — the card reads 'responded' for 600 ms, then leaves the store and the next card activates", async () => {
+  const ctx = setup({ now: 1_000_000 });
+  twoCards(ctx);
+  await ctx.store.respondAndAwait("ar1", "yes");
+  assert.equal(ctx.store.getById("ar1")!.state, "responded", "still visible during the grace period");
+  assert.deepEqual(ctx.timeouts.delays(), [600]);
+  ctx.timeouts.fireAll();
+  assert.equal(ctx.store.getById("ar1"), undefined, "gone after the grace period");
+  assert.deepEqual(ctx.store.list().map(i => i.id_hash), ["ar2"]);
+  assert.notEqual(ctx.store.getById("ar2")!.expires_at, null, "ar2 promoted");
+});
+
+test("360de81b: answered in ANOTHER SESSION — the active card is cancelled, stays 1500 ms, then leaves and the next card activates", () => {
+  const ctx = setup({ now: 1_000_000 });
+  twoCards(ctx);
+  ctx.bus.emit({ type: "notification_responded", payload: { notification_id: "ar1" }, source: "test", ts: 0 });
+  assert.equal(ctx.store.getById("ar1")!.state, "cancelled");
+  assert.deepEqual(ctx.timeouts.delays(), [1500]);
+  ctx.timeouts.fireAll();
+  assert.equal(ctx.store.getById("ar1"), undefined);
+  assert.notEqual(ctx.store.getById("ar2")!.expires_at, null);
+});
+
+test("360de81b: countdown reaches zero — expired for 600 ms, then the card leaves and the next card activates", () => {
+  const ctx = setup({ now: 1_000_000 });
+  twoCards(ctx);
+  ctx.setNow(1_031_000);
+  ctx.timers.fireAll();
+  assert.equal(ctx.store.getById("ar1")!.state, "expired");
+  assert.deepEqual(ctx.timeouts.delays(), [600]);
+  ctx.timeouts.fireAll();
+  assert.equal(ctx.store.getById("ar1"), undefined);
+  assert.equal(ctx.store.getById("ar2")!.expires_at, 1_031_000 + 60_000);
+});
+
+test("360de81b: the server's notification_expired removes the ACTIVE card whatever its countdown shows (María's rule; legacy handleNotificationExpired :24591)", () => {
+  const ctx = setup({ now: 1_000_000 });
+  twoCards(ctx);
+  // 29 s left on the local countdown — the server's clock ran from arrival and has already expired it.
+  const before = ctx.events.length;
+  ctx.bus.emit({ type: "notification_expired", payload: { notification_id: "ar1" }, source: "test", ts: 0 });
+  assert.equal(ctx.store.getById("ar1")!.state, "expired");
+  assert.equal(ctx.store.getById("ar1")!.response, "no", "same default read-back as a local expiry");
+  assert.equal(ctx.timers.pending(), 0, "its countdown stops");
+  assert.deepEqual(ctx.events.slice(before).map(e => e.payload.changeKind), ["expired"]);
+  assert.deepEqual(ctx.timeouts.delays(), [600]);
+  ctx.timeouts.fireAll();
+  assert.equal(ctx.store.getById("ar1"), undefined);
+  assert.notEqual(ctx.store.getById("ar2")!.expires_at, null);
+});
+
+test("360de81b: notification_expired on a QUEUED card removes it at once, with no grace, and leaves the active card alone (legacy's early return at :24375 is not copied)", () => {
+  const ctx = setup({ now: 1_000_000 });
+  twoCards(ctx);
+  const before = ctx.events.length;
+  ctx.bus.emit({ type: "notification_expired", payload: { id_hash: "ar2" }, source: "test", ts: 0 });
+  assert.equal(ctx.store.getById("ar2"), undefined);
+  assert.deepEqual(ctx.timeouts.delays(), [], "no grace for a card nobody could see");
+  assert.deepEqual(ctx.events.slice(before).map(e => [e.payload.changeKind, e.payload.id_hash]), [["expired", "ar2"], ["removed", "ar2"]]);
+  assert.equal(ctx.store.getById("ar1")!.state, "pending");
+  assert.equal(ctx.timers.pending(), 1);
+});
+
+test("360de81b: notification_responded on a QUEUED card removes it at once (legacy :24561-24570)", () => {
+  const ctx = setup({ now: 1_000_000 });
+  twoCards(ctx);
+  ctx.bus.emit({ type: "notification_responded", payload: { id_hash: "ar2" }, source: "test", ts: 0 });
+  assert.equal(ctx.store.getById("ar2"), undefined);
+  assert.deepEqual(ctx.timeouts.delays(), []);
+  assert.equal(ctx.store.getById("ar1")!.state, "pending");
+});
+
+test("360de81b: a FAILED card answered in another session leaves too — it would otherwise sit in the slot forever", async () => {
+  const ctx = setup({ now: 1_000_000 });
+  twoCards(ctx);
+  ctx.setPostRejects(true);
+  await ctx.store.respondAndAwait("ar1", "yes").catch(() => {});
+  assert.equal(ctx.store.getById("ar1")!.state, "failed");
+  assert.deepEqual(ctx.timeouts.delays(), [], "a failed answer stays in the slot for retry");
+  ctx.bus.emit({ type: "notification_responded", payload: { id_hash: "ar1" }, source: "test", ts: 0 });
+  assert.equal(ctx.store.getById("ar1")!.state, "cancelled");
+  ctx.timeouts.fireAll();
+  assert.equal(ctx.store.getById("ar1"), undefined);
+});
+
+test("360de81b: a FAILED card that the server expires leaves too", async () => {
+  const ctx = setup({ now: 1_000_000 });
+  twoCards(ctx);
+  ctx.setPostRejects(true);
+  await ctx.store.respondAndAwait("ar1", "yes").catch(() => {});
+  ctx.bus.emit({ type: "notification_expired", payload: { id_hash: "ar1" }, source: "test", ts: 0 });
+  assert.equal(ctx.store.getById("ar1")!.state, "expired");
+  ctx.timeouts.fireAll();
+  assert.equal(ctx.store.getById("ar1"), undefined);
+});
+
+test("360de81b: notification_expired while the answer is still SUBMITTING expires the card; the late POST result changes nothing", async () => {
+  const ctx = setup({ now: 1_000_000 });
+  twoCards(ctx);
+  const release = ctx.holdPosts();
+  const answer = ctx.store.respondAndAwait("ar1", "yes");
+  assert.equal(ctx.store.getById("ar1")!.state, "submitting");
+  ctx.bus.emit({ type: "notification_expired", payload: { id_hash: "ar1" }, source: "test", ts: 0 });
+  assert.equal(ctx.store.getById("ar1")!.state, "expired");
+  const before = ctx.events.length;
+  release();
+  await answer;
+  assert.deepEqual(ctx.events.slice(before), [], "no 'responded' for a card the server already expired");
+  assert.equal(ctx.store.getById("ar1")!.state, "expired");
+  assert.deepEqual(ctx.timeouts.delays(), [600], "exactly one removal scheduled");
+});
+
+test("360de81b: a submitting answer whose card already LEFT the store still re-throws its POST failure, and emits nothing", async () => {
+  const ctx = setup({ now: 1_000_000 });
+  twoCards(ctx);
+  const release = ctx.holdPosts();
+  ctx.setPostRejects(true);
+  const answer = ctx.store.respondAndAwait("ar1", "yes");
+  ctx.bus.emit({ type: "notification_expired", payload: { id_hash: "ar1" }, source: "test", ts: 0 });
+  ctx.timeouts.fireAll();                                          // grace ends; ar1 leaves
+  assert.equal(ctx.store.getById("ar1"), undefined);
+  const before = ctx.events.length;
+  release();
+  await assert.rejects(answer, /network down/);
+  assert.deepEqual(ctx.events.slice(before), [], "no 'failed' for a card that is gone");
+});
+
+test("360de81b: notification_expired for an unknown id, for no id, or for a card already in its grace period is a no-op", async () => {
+  const ctx = setup({ now: 1_000_000 });
+  twoCards(ctx);
+  await ctx.store.respondAndAwait("ar1", "yes");
+  const before = ctx.events.length;
+  ctx.bus.emit({ type: "notification_expired", payload: { id_hash: "ghost" }, source: "test", ts: 0 });
+  ctx.bus.emit({ type: "notification_expired", payload: {}, source: "test", ts: 0 });
+  ctx.bus.emit({ type: "notification_expired", payload: { id_hash: "ar1" }, source: "test", ts: 0 });
+  assert.deepEqual(ctx.events.slice(before), []);
+  assert.equal(ctx.store.getById("ar1")!.state, "responded");
+  assert.deepEqual(ctx.timeouts.delays(), [600], "still one removal");
+});
+
+test("360de81b: the last card leaving empties the store and activates nothing", async () => {
+  const ctx = setup({ now: 1_000_000 });
+  emitArPrompt(ctx.bus, { id_hash: "ar1", message: "p1", response_requested: true, timeout_seconds: 30 });
+  await ctx.store.respondAndAwait("ar1", "yes");
+  const before = ctx.events.length;
+  ctx.timeouts.fireAll();
+  assert.deepEqual(ctx.store.list(), []);
+  assert.deepEqual(ctx.events.slice(before).map(e => e.payload.changeKind), ["removed"]);
+  assert.equal(ctx.timers.pending(), 0);
+});
+
+test("360de81b: a card arriving while the active card is in its grace period waits in the queue", async () => {
+  const ctx = setup({ now: 1_000_000 });
+  emitArPrompt(ctx.bus, { id_hash: "ar1", message: "p1", response_requested: true, timeout_seconds: 30 });
+  await ctx.store.respondAndAwait("ar1", "yes");
+  emitArPrompt(ctx.bus, { id_hash: "ar2", message: "p2", response_requested: true, timeout_seconds: 60 });
+  assert.equal(ctx.store.getById("ar2")!.expires_at, null, "the slot is still ar1's");
+  ctx.timeouts.fireAll();
+  assert.notEqual(ctx.store.getById("ar2")!.expires_at, null);
+});
+
+test("360de81b: the connection freeze touches only the active card — a queued card has no countdown to freeze", () => {
+  const ctx = setup({ now: 1_000_000 });
+  twoCards(ctx);
+  const before = ctx.events.length;
+  ctx.bus.emit({ type: "connection_offline", payload: {}, source: "test", ts: 0 });
+  assert.deepEqual(ctx.events.slice(before).map(e => [e.payload.changeKind, e.payload.id_hash]), [["offline-frozen", "ar1"]]);
+});
+
+// ===========================================================================
+// A server NULL voice_persona must not be admitted to the item
+// ===========================================================================
+
+// 🔴 The store's guard used to read `n.voice_persona !== undefined`, and a JSON `null` is
+// not `undefined`, so `null` was STORED. `ActionRequiredItem` declares
+// `voice_persona ?: VoicePersona` — optional, never NULLABLE — so every reader downstream
+// was written against a type the store was violating. personaBadge() read `.borrowed` off
+// it and threw; EventBus swallowed the throw; reconcile() died after writing the header
+// count and before painting, so the operator saw "⚠️ Action Required 1" over an empty
+// panel. Measured 2026-09-22 on :7999. The badge is hardened too, but THIS is the line
+// that should never have let it in.
+test("a NULL voice_persona from the server is NOT stored — the item stays inside its declared type", () => {
+  const ctx = setup({ now: 1_000_000 });
+  ctx.bus.emit({
+    type    : "notification_queue_update",
+    payload : { notification: {
+      id_hash            : "arnull",
+      message            : "Proceed?",
+      response_requested : true,
+      response_type      : "yes_no",
+      timeout_seconds    : 30,
+      timestamp          : new Date(1_000_000).toISOString(),
+      // What the server actually sends for a sender whose id suffix has no bridge entry.
+      voice_persona      : null,
+    } },
+    source  : "test",
+    ts      : 0,
+  });
+  const item = ctx.store.getById("arnull");
+  assert.ok(item, "the prompt still spawns — a missing persona must not cost the operator the ask");
+  assert.equal(item!.voice_persona, undefined,
+    "a null persona must be ABSENT on the item, not stored as null");
+  assert.ok(!("voice_persona" in item!) || item!.voice_persona === undefined,
+    "the key must not carry a null past the store boundary");
+});
+
+test("a REAL voice_persona is still carried through — the guard narrowed nothing it should keep", () => {
+  const ctx = setup({ now: 1_000_000 });
+  const persona = { name: "Maya", voice_id: "v1", icon: "🌻", color: "#abc", borrowed: false };
+  ctx.bus.emit({
+    type    : "notification_queue_update",
+    payload : { notification: {
+      id_hash            : "arpersona",
+      message            : "Proceed?",
+      response_requested : true,
+      response_type      : "yes_no",
+      timeout_seconds    : 30,
+      timestamp          : new Date(1_000_000).toISOString(),
+      voice_persona      : persona,
+    } },
+    source  : "test",
+    ts      : 0,
+  });
+  assert.deepEqual(ctx.store.getById("arpersona")!.voice_persona, persona);
+});
+
+// A-2 #2m — the abstract and the prediction hint ride the same conditional seam
+//
+// `sender_id` and `voice_persona` are guarded above and tested above. `abstract`
+// and `prediction_hint` sit on the two lines after them and were never driven, so
+// both assignment arms read 0. Found 2026-09-23 at 11a6f9f3, the first run in
+// which the TypeScript tier survived its RSS ceiling far enough for c8 to print a
+// report (ActionRequiredStore.ts, 251/253 branches).
+//
+// The pair matters because the renderer's chrome reads `=== undefined` on both:
+// a store that assigned `undefined` rather than skipping would put the KEY on the
+// item and the guard would still hold, which is why each case below asserts the
+// absent arm on the key and not only on the value.
+
+test("A-2 #2m: an abstract from the server is carried onto the item", () => {
+  const ctx = setup({ now: 1_000_000 });
+  ctx.bus.emit({
+    type    : "notification_queue_update",
+    payload : { notification: {
+      id_hash            : "arabs",
+      message            : "Proceed?",
+      response_requested : true,
+      response_type      : "yes_no",
+      timeout_seconds    : 30,
+      timestamp          : new Date(1_000_000).toISOString(),
+      abstract           : "the full abstract body",
+    } },
+    source  : "test",
+    ts      : 0,
+  });
+  assert.equal(ctx.store.getById("arabs")!.abstract, "the full abstract body");
+});
+
+test("A-2 #2m: a prediction_hint from the server is carried onto the item", () => {
+  const ctx = setup({ now: 1_000_000 });
+  const hint = { predicted: "yes", strategy: "history", confidence: 0.8 };
+  ctx.bus.emit({
+    type    : "notification_queue_update",
+    payload : { notification: {
+      id_hash            : "arhint",
+      message            : "Proceed?",
+      response_requested : true,
+      response_type      : "yes_no",
+      timeout_seconds    : 30,
+      timestamp          : new Date(1_000_000).toISOString(),
+      prediction_hint    : hint,
+    } },
+    source  : "test",
+    ts      : 0,
+  });
+  assert.deepEqual(ctx.store.getById("arhint")!.prediction_hint, hint);
+});
+
+test("A-2 #2m: neither key is planted when the server omits it", () => {
+  // The absent arm, asserted on the KEY. An assignment of `undefined` would leave
+  // the value reading `undefined` here and still put the key on the item, and the
+  // renderer's `=== undefined` guards would not notice — so value-only assertions
+  // cannot tell the two apart.
+  const ctx = setup({ now: 1_000_000 });
+  ctx.bus.emit({
+    type    : "notification_queue_update",
+    payload : { notification: {
+      id_hash            : "arbare",
+      message            : "Proceed?",
+      response_requested : true,
+      response_type      : "yes_no",
+      timeout_seconds    : 30,
+      timestamp          : new Date(1_000_000).toISOString(),
+    } },
+    source  : "test",
+    ts      : 0,
+  });
+  const item = ctx.store.getById("arbare")!;
+  assert.ok(!("abstract" in item), "no abstract key on an item the server sent none for");
+  assert.ok(!("prediction_hint" in item), "no prediction_hint key either");
 });

@@ -156,7 +156,14 @@ def test_the_router_forwards_id_prefix_to_every_repo_call_site():
     ⚠️ THIS COUNT IS LOAD-BEARING AND MUST BE RAISED DELIBERATELY. It went 4 -> 5 when
     `count_tasks_by_project` was added for the aperture disclosure (row `d23147e8`),
     then 5 -> 6 when `count_tasks_by_priority` was added so the poke could name
-    WHICH rows matter (Rick, 2026-07-27). Both times the test FAILED FIRST, which is it
+    WHICH rows matter (Rick, 2026-07-27), and 6 -> 7 when the holding-area disclosure added
+    a SECOND `count_tasks` probe (row `d254c397`, 2026-09-05). That bump was CONFIRMED
+    before it was made, which is what this docstring asks for and is worth recording:
+    `re.findall( r"id_prefix\s*=\s*id_prefix" )` over the same source returns 7 against 7
+    call sites. It matters here more than usual — a holding count taken WITHOUT the
+    caller's filters would report the whole fleet's held rows to a seat asking about one
+    id, and the notice's wording would not reveal it.
+    All three times the test FAILED FIRST, which is it
     working: a new repo call site is exactly the event that re-opens this bug, and a
     hand-threaded filter reaching five of six seams is indistinguishable from reaching
     all of them until something counts. Raise it only after CONFIRMING the new call site
@@ -170,8 +177,8 @@ def test_the_router_forwards_id_prefix_to_every_repo_call_site():
     # literal alone: if someone adds a call site and bumps this number without
     # forwarding the filter, the two counts disagree and THAT is the finding.
     repo_call_sites = len( re.findall( r"repo\.\w+\(", source ) )
-    assert repo_call_sites == 6, f"repo call sites changed to {repo_call_sites} — re-audit the forwards"
-    assert source.count( "id_prefix           = id_prefix," ) == 6
+    assert repo_call_sites == 7, f"repo call sites changed to {repo_call_sites} — re-audit the forwards"
+    assert source.count( "id_prefix           = id_prefix," ) == 7
 
 
 # ----------------------------------------------------------------------------------

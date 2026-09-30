@@ -4,8 +4,10 @@
   "private": true,
   "description": "Lupin multiplexer notifications UI — TypeScript build infrastructure (Phase 1 scaffolding).",
   "scripts": {
-    "build": "bash src/scripts/build-multiplexer.sh",
+    "build": "bash src/scripts/build-multiplexer.sh && bash src/scripts/build-console.sh",
     "build:watch": "bash src/scripts/build-multiplexer.sh --watch",
+    "build:console": "bash src/scripts/build-console.sh",
+    "build:console:watch": "bash src/scripts/build-console.sh --watch",
     "build:nav": "bash src/scripts/build-nav.sh",
     "build:nav:watch": "bash src/scripts/build-nav.sh --watch",
     "build:diagnostic": "bash src/scripts/build-diagnostic.sh",

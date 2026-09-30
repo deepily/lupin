@@ -45,7 +45,7 @@ _TRUE_VALUES = ( "1", "true", "on", "yes" )
 #   • COSA_VOICE_PREFERRED_PERSONA__<PROJECT> — the per-repo preferred-persona
 #     CHAIN; every NAMED element (the "*" wildcard excluded) is a standing
 #     manager for that repo.
-# Design: src/rnd/2026.06.22-fleet-roster-to-user-level-migration-spec.md §5.
+# Design: planning-is-prompting/src/rnd/2026.06.22-fleet-roster-to-user-level-migration-spec.md §5.
 #
 # ⚠️ CHAIN-TAIL SEMANTICS CHANGED 2026-08-18 (row a1a84682). This module used to
 # take the chain HEAD only, while manager_figure.resolve_implicit_manager_figure

@@ -119,7 +119,7 @@ CASE_MANAGER_AWAITING_USER  = 16
 CASE_MANAGER_DONE_ADVISORY  = 17
 
 # 6929f4ac ADDITION (2026-06-22, receipts-of-progress outward twin — design
-# src/rnd/2026.06.22-receipts-of-progress-heartbeat-owed-calc.md §9.2):
+# planning-is-prompting/src/rnd/2026.06.22-receipts-of-progress-heartbeat-owed-calc.md §9.2):
 #   18  USER-GATE-RESURFACE — a session that went DARK while still holding an
 #       OPEN, AGED direct user-gate (it stopped re-asking) → the arbiter surfaces
 #       the buried question to Rick ON THE SESSION'S BEHALF. Rick ONLY: a direct

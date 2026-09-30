@@ -314,7 +314,8 @@ class TestResolveDmNullPersonaReachability:
 
     def test_null_persona_listed_in_candidate_alternatives_on_miss( self ):
         # Regression for "candidate_alternatives never list the worker": even when
-        # the supplied id misses, a null-persona worker must now appear (persona "").
+        # the supplied id misses, a null-persona worker must still appear — but in the
+        # labelled session-id-only bucket, never as a nameless persona candidate (4b2dd847).
         null_sess = _build_null_persona_session( self._FULL )
         _register_fixture( null_sess )
         result = self._resolve(
@@ -322,10 +323,23 @@ class TestResolveDmNullPersonaReachability:
         )
         assert result[ "http_status" ] == 422
         assert result[ "detail" ][ "error" ] == "recipient_inactive"
-        alts = result[ "detail" ][ "candidate_alternatives" ]
-        worker = next( ( c for c in alts if c[ "session_id" ] == self._FULL ), None )
+        detail = result[ "detail" ]
+        assert detail[ "candidate_alternatives" ] == [ ]
+        worker = next( ( c for c in detail[ "session_id_only_candidates" ] if c[ "session_id" ] == self._FULL ), None )
         assert worker is not None
-        assert worker[ "persona" ] == ""   # null persona → empty string, but VISIBLE
+        assert worker[ "persona" ] == ""
+        assert "session id only" in worker[ "note" ]
+
+    def test_released_persona_not_offered_as_nameless_candidate( self ):
+        # Row 4b2dd847: named and released sessions together — only the named one is a persona candidate.
+        named = _build_raw_session( "aaaaaaaa-1111-1111-1111-111111111111", "radio" )
+        gone  = _build_null_persona_session( self._FULL )
+        _register_fixture( named )
+        _register_fixture( gone )
+        result = self._resolve( recipient_persona="nobody", sessions=[ named, gone ] )
+        detail = result[ "detail" ]
+        assert [ c[ "persona" ] for c in detail[ "candidate_alternatives" ] ] == [ "radio" ]
+        assert [ c[ "session_id" ] for c in detail[ "session_id_only_candidates" ] ] == [ self._FULL ]
 
     def test_null_persona_not_addressable_by_name( self ):
         # A persona-less worker has no name; the persona path must 422, never crash.

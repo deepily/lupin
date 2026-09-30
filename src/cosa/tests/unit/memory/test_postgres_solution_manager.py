@@ -462,6 +462,87 @@ class TestGetGists( unittest.TestCase ):
         self.assertIn( "Failed to get gists", buffer.getvalue() )
 
 
+class TestGetAllSnapshots( unittest.TestCase ):
+    """
+    get_all_snapshots — guard, marshal-inside-the-session, debug, error.
+
+    Added with the method itself (row 8631144b). `/api/stats/time-saved` and its
+    `/global` sibling had been calling this name since they were written, and it
+    existed nowhere — both endpoints answered 500 on every request.
+    """
+
+    def test_uninitialized_raises( self ):
+        with self.assertRaises( RuntimeError ):
+            _build_manager().get_all_snapshots()
+
+    def test_marshals_every_row_while_the_session_is_still_open( self ):
+        """
+        Ensures:
+            - one snapshot per row, in row order
+            - every marshal happens BEFORE the session closes
+
+        The ordering assertion is the point, not decoration: _pg_record_from_entity
+        reads ORM attributes, and a row detached at session close raises on access.
+        A list comprehension written outside the `with` reddens this test and passes
+        every other one here.
+        """
+        state = { "closed": False }
+
+        @contextmanager
+        def _closing_db():
+            try:
+                yield MagicMock()
+            finally:
+                state[ "closed" ] = True
+
+        def _marshal( entity ):
+            self.assertFalse( state[ "closed" ], "row marshalled after the session closed" )
+            return { "id_hash": entity.id_hash }
+
+        mgr = _build_manager()
+        mgr.initialize()
+        rows = [ Mock( id_hash="h1" ), Mock( id_hash="h2" ) ]
+        repo = MagicMock( name="SolutionSnapshotRepository" )
+        repo.return_value.get_all_snapshots.return_value = rows
+
+        with patch( "cosa.rest.db.database.get_db", _closing_db ), \
+             patch( "cosa.rest.db.repositories.solution_snapshot_repository.SolutionSnapshotRepository", repo ), \
+             patch.object( mgr, "_pg_record_from_entity", side_effect=_marshal ), \
+             patch.object( mgr, "_record_to_snapshot", side_effect=lambda record: record[ "id_hash" ] ):
+            snapshots = mgr.get_all_snapshots()
+
+        self.assertEqual( snapshots, [ "h1", "h2" ] )
+        self.assertTrue( state[ "closed" ] )
+
+    def test_debug_prints_count( self ):
+        import io, contextlib
+        mgr = _build_manager( {}, debug=True )
+        mgr.initialize()
+        session = MagicMock()
+        db_patch, repo_patch, repo = _patch_db( session )
+        repo.return_value.get_all_snapshots.return_value = [ Mock() ]
+        with contextlib.redirect_stdout( io.StringIO() ) as buffer, db_patch, repo_patch, \
+             patch.object( mgr, "_pg_record_from_entity", return_value={} ), \
+             patch.object( mgr, "_record_to_snapshot", return_value=Mock() ):
+            mgr.get_all_snapshots()
+        self.assertIn( "Retrieved 1 snapshots", buffer.getvalue() )
+
+    def test_error_returns_empty( self ):
+        mgr = _build_manager()
+        mgr.initialize()
+        with patch( "cosa.rest.db.database.get_db", side_effect=RuntimeError( "boom" ) ):
+            self.assertEqual( mgr.get_all_snapshots(), [] )
+
+    def test_error_prints_when_debug( self ):
+        import io, contextlib
+        mgr = _build_manager( {}, debug=True )
+        mgr.initialize()
+        with contextlib.redirect_stdout( io.StringIO() ) as buffer, \
+             patch( "cosa.rest.db.database.get_db", side_effect=RuntimeError( "boom" ) ):
+            mgr.get_all_snapshots()
+        self.assertIn( "Failed to get all snapshots", buffer.getvalue() )
+
+
 class TestGetStats( unittest.TestCase ):
     """get_stats — guard, happy shape, error shape."""
 

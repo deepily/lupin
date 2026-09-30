@@ -26,6 +26,8 @@ cannot, so that proof runs on every unit-suite pass — not once, at authoring t
 """
 
 import json
+import os
+import re
 import subprocess
 
 from pathlib import Path
@@ -35,6 +37,7 @@ import pytest
 import cosa.utils.util as cu
 from cosa.repo.gate_reachability import (
     EXCLUDED_PATH_PARTS,
+    SUITE_SCRIPTS_SOURCE,
     find_gate_targets,
     find_stale_allowlist_entries,
     find_test_file_population,
@@ -201,6 +204,11 @@ def _build_synthetic_tree( root: Path ):
         '    "unit" : "src/tests/run-unit-tests.sh",\n'
         '    "all"  : "src/tests/run-all-tests.sh",\n'
         '    "gone" : "src/tests/run-missing.sh",\n'
+        # 🔴 A DIGIT IN THE KEY. Every key here used to be lowercase-only, so the fixture
+        # could not tell a `[a-z_]+` key class from a correct one — the assertions were
+        # right and blind. The real literal carries `e2e` and `v2_eval`, and the narrow
+        # class dropped both.
+        '    "e2e"  : "src/tests/run-e2e-tests.sh",\n'
         "}\n"
     )
 
@@ -230,7 +238,34 @@ def test_read_suite_scripts_extracts_only_shell_values( tmp_path ):
         "src/tests/run-unit-tests.sh",
         "src/tests/run-all-tests.sh",
         "src/tests/run-missing.sh",
+        "src/tests/run-e2e-tests.sh",
     }
+
+
+def test_every_shell_entry_of_the_real_literal_is_extracted():
+    """
+    THE ARM THAT CANNOT GO BLIND ON A FIXTURE. The synthetic tree above is written by this
+    file, so it only ever contains keys somebody here thought to write — which is how a
+    `[a-z_]+` key class survived: every synthetic key was lowercase, and the assertions
+    were correct and unfalsifiable.
+
+    This counts the REAL literal instead. Measured 2026-09-01 before the fix: 13 `.sh`
+    entries present, 11 returned, `e2e` and `v2_eval` dropped for carrying a digit, with
+    nothing in the output saying any were missing.
+
+    ⚠️ The e2e loss was MASKED and that is why it lasted: `find_gate_targets` follows `.sh`
+    references and `run-all-tests.sh` names the e2e runner, so `src/tests/e2e_ui` reached
+    the target set by a second route. The masking holds only while some other seeded runner
+    happens to name the dropped one, which is not a property anybody chose.
+    """
+    root    = Path( os.environ[ "LUPIN_ROOT" ] )
+    source  = ( root / SUITE_SCRIPTS_SOURCE ).read_text( encoding="utf-8" )
+    present = re.findall( r'^\s*"[^"]+"\s*:\s*"(src/[^"]+\.sh)"', source, re.M )
+
+    assert present, "positive control: the literal must hold some .sh entries at all"
+    assert set( present ) == read_suite_scripts( root ), (
+        "every .sh value in the literal must be extracted; missing "
+        f"{sorted( set( present ) - read_suite_scripts( root ) )}" )
 
 
 def test_read_suite_scripts_raises_when_source_absent( tmp_path ):
@@ -272,6 +307,78 @@ def test_find_gate_targets_ignores_a_glob_root( tmp_path ):
 
     assert "src/tests" not in find_gate_targets( tmp_path )
     assert find_unreferenced_test_files( tmp_path, {} ) == [ "src/tests/orphan/test_dark.py" ]
+
+
+def test_find_gate_targets_follows_a_runner_named_through_SCRIPT_DIR( tmp_path ):
+    """
+    Row 2818dad7. The merge gate's e2e halves are one-line wrappers that
+    `exec bash "$SCRIPT_DIR/run-e2e-ui-tests.sh"` — no `src/` token — so the walk stopped at
+    them, and the directory their runner names reached the target set only because another
+    runner happened to spell the path out. Here the ONLY route is the wrapper.
+    """
+    _build_synthetic_tree( tmp_path )
+    job = tmp_path / "src/cosa/agents/test_suite/job.py"
+    job.write_text( job.read_text().replace( "}\n", '    "half" : "src/scripts/run-half.sh",\n}\n' ) )
+    scripts = tmp_path / "src/scripts"
+    ( scripts / "lib" ).mkdir( parents=True )
+    ( scripts / "run-half.sh" ).write_text(
+        '#!/bin/bash\nSCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"\n'
+        'exec bash "$SCRIPT_DIR/run-real.sh" --half a "$@"\n'
+    )
+    ( scripts / "run-real.sh" ).write_text( 'source "${SCRIPT_DIR}/lib/helper.sh"\npytest src/tests/e2e_only/\n' )
+    ( scripts / "lib/helper.sh" ).write_text( "pytest src/tests/helper_named/\n" )
+    for d in ( "e2e_only", "helper_named" ):
+        ( tmp_path / "src/tests" / d ).mkdir()
+        ( tmp_path / "src/tests" / d / "test_x.py" ).write_text( "def test_x(): pass\n" )
+
+    targets = find_gate_targets( tmp_path )
+
+    assert "src/tests/e2e_only"     in targets, "a runner reached only through $SCRIPT_DIR was not followed"
+    assert "src/tests/helper_named" in targets, "the ${SCRIPT_DIR} brace form was not followed"
+
+
+def test_a_SCRIPT_DIR_token_that_resolves_to_nothing_is_ignored( tmp_path ):
+    _build_synthetic_tree( tmp_path )
+    runner = tmp_path / "src/tests/run-unit-tests.sh"
+    runner.write_text( runner.read_text() + 'bash "$SCRIPT_DIR/does-not-exist.sh"\n' )
+
+    assert find_gate_targets( tmp_path ) == { "src/tests/unit" }
+
+
+def test_a_SCRIPT_DIR_token_is_normalised_and_one_that_leaves_src_is_dropped( tmp_path ):
+    """
+    Tiffany's review of 0e50fc15. The cosa runners write `PROJECT_ROOT="$SCRIPT_DIR/../../.."`.
+    Unnormalised, that token exists on disk as a directory and entered the target set as the
+    literal `src/tests/../..` — the repo root, one resolve away from making every file reachable.
+    """
+    _build_synthetic_tree( tmp_path )
+    runner = tmp_path / "src/tests/run-unit-tests.sh"
+    runner.write_text( runner.read_text() + 'PROJECT_ROOT="$SCRIPT_DIR/../.."\nsource "$SCRIPT_DIR/../tests/lib/up.sh"\n' )
+    ( tmp_path / "src/tests/lib" ).mkdir()
+    ( tmp_path / "src/tests/lib/up.sh" ).write_text( "pytest src/tests/up_named/\n" )
+    ( tmp_path / "src/tests/up_named" ).mkdir()
+    ( tmp_path / "src/tests/up_named/test_x.py" ).write_text( "def test_x(): pass\n" )
+
+    targets = find_gate_targets( tmp_path )
+
+    assert targets == { "src/tests/unit", "src/tests/up_named" }, f"escaping or unnormalised token kept: {sorted( targets )}"
+
+
+def test_the_real_e2e_directory_is_reachable_through_the_merge_gate_halves_alone( monkeypatch ):
+    """
+    THE REAL-TREE ARM. Only the two half runners are seeded — the suites the merge gate runs
+    — so the whole-suite `e2e` key and `run-all-tests.sh` cannot carry the verdict for them.
+    """
+    root = Path( os.environ[ "LUPIN_ROOT" ] )
+    from cosa.repo import gate_reachability as gr
+
+    halves = { s for s in read_suite_scripts( root ) if s.endswith( ( "-half-a.sh", "-half-b.sh" ) ) }
+    assert len( halves ) == 2, f"expected the two e2e half runners in SUITE_SCRIPTS, found {sorted( halves )}"
+
+    monkeypatch.setattr( gr, "read_suite_scripts", lambda project_root: set( halves ) )
+    targets = gr.find_gate_targets( root )
+
+    assert "src/tests/e2e_ui" in targets, f"the e2e halves reach {sorted( targets )}, not src/tests/e2e_ui"
 
 
 def test_find_gate_targets_keeps_a_directly_named_test_file( tmp_path ):

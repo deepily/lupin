@@ -62,6 +62,7 @@ delivery) is injectable.
 
 import datetime
 import glob
+import hashlib
 import json
 import os
 import re
@@ -71,6 +72,7 @@ import unicodedata
 
 from dataclasses import dataclass
 from enum        import Enum
+from pathlib     import Path
 
 
 # The on-disk receipt filename shape: <RECEIPT_PREFIX><session_id>.json, living
@@ -137,6 +139,34 @@ class WakeAssessment:
     reason       : str
     is_alarm     : bool
     memento_path : "str | None" = None
+
+    # LOCATION, carried as a FIRST-CLASS FIELD for the same reason the holds family
+    # carries it (row 011f1f90): a receipt that is ABSENT and a receipt that is
+    # MISPLACED read identically, because `find_receipt_by_identity` globs ONE
+    # directory non-recursively and anything outside it is simply not seen. So
+    # DEAD_NO_WAKE — "it never came back" — is also what a seat gets when it DID
+    # come back and wrote its receipt to the wrong root. Two failures, one output,
+    # wanting opposite remedies: chase a dead seat, or fix a writer.
+    #
+    # This is EVIDENCE, not a verdict. The list stays empty on every path that does
+    # not look, and populating it changes no verdict and no alarm flag — a reader
+    # who ignores it sees exactly what it saw before.
+    misplaced    : "list | None" = None
+
+    # THE IDENTITY THE WATCH WAS ARMED ON, carried so the alert can say WHICH SEAT
+    # it is shouting about (row 7ad5eba6). Measured 2026-09-03: the live arm hands
+    # the watch a `tmux_session` and NO persona and NO session_id — `persona` is not
+    # even a parameter of `verify_respin_wake`. On a no-receipt DEAD_NO_WAKE the
+    # receipt is absent too, so `persona` and `session_id` BOTH fall back to None and
+    # `render_alert` printed "unknown persona / unknown session" on every such alarm,
+    # unconditionally. That string is a property of the renderer, not a reading of
+    # the seat — and a manager read it as evidence the arm carried no identity,
+    # built five one-variable cases on top of it, and reached a wrong diagnosis.
+    #
+    # A constant that looks like a variable is worse than no field at all. The watch
+    # KNEW the seat's tmux name the whole time and was the only thing that did not
+    # say it.
+    tmux_session : "str | None" = None
 
 
 def _parse_iso( value ):
@@ -226,9 +256,87 @@ def receipt_path( base_dir, session_id ):
     return os.path.join( base_dir, f"{RECEIPT_PREFIX}{session_id}.json" )
 
 
+_RULE_CHARS = set( "\u2550=-_" )   # the characters a horizontal rule is drawn from
+
+
+def describe_block( block ):
+    """
+    Measure the memento block the boot path actually PRODUCED.
+
+    🔴 WHY THIS EXISTS. Every other field on the receipt describes the memento
+    FILE — which file was opened, when it was written, whose it is. None of them
+    describes the BLOCK, and the block is the only thing a session ever sees.
+    So three outcomes share one silence today:
+
+        (1) resolved, block produced, DELIVERED          — the healthy case
+        (2) resolved, block produced, LOST in transit    — between the hook's
+                                                           additionalContext and
+                                                           the session
+        (3) resolved, block came back EMPTY              — producer-side
+
+    This splits (3) from (1)+(2). It does NOT prove delivery — nothing written
+    at the producing end can. That needs an echo from the far end, and even an
+    echo leaves two states (not received / received-and-ignored) rather than
+    zero. Do not read a healthy `block_bytes` as proof a seat received anything.
+
+    THE HEADLINE IS FOUND BY A PREDICATE, NOT A POSITION. Taking line index 2
+    would be an enumeration in hiding: it encodes today's rule-then-headline
+    layout, and goes silently wrong the first time a blank line or a second rule
+    is added above it. The predicate is "the first line that carries content
+    other than the horizontal rule", which survives that edit.
+
+    Requires:
+        - block is the rendered block string, or "" / None when none was produced
+
+    Ensures:
+        - returns a dict with block_bytes, block_sha256, block_headline
+        - block_bytes counts UTF-8 BYTES, never characters — the two differ on
+          exactly the emoji-carrying headlines this block is built from
+        - a block of None returns all three fields as None — NOT MEASURED,
+          because nothing was supplied. This is a DIFFERENT fact from an empty
+          block and the two must never render alike
+        - block_sha256 is taken over those same bytes for every SUPPLIED input
+          including the empty string, so a produced-but-empty block carries a
+          stable, recognisable digest that a not-measured null cannot imitate
+        - block_headline is None when the block carries no content line
+        - never raises
+    """
+    # 🔴 None AND "" ARE DIFFERENT FACTS AND MUST NOT COLLAPSE (CLAYTON 😎,
+    # 2026-09-06 — credit CORRECTED 2026-09-06 01:30; the commit that added this
+    # line, `32929647`, says "MARÍA'S FINDING" and is WRONG. She RELAYED it; he
+    # FOUND it, with the receipt in hand. She made the correction herself,
+    # unprompted, against her own credit. A finding attributed to the manager who
+    # passed it on tells the next reader THE REVIEW SEAT FOUND NOTHING). `None` means NO BLOCK WAS SUPPLIED — an old caller, or a
+    # wiring that dropped it. `""` means a block WAS produced and came back
+    # empty, which is state (3), the one thing this instrument exists to name.
+    # Rendering both as `0 bytes / e3b0c442…` made those indistinguishable, so
+    # the receipt could not tell "the renderer produced nothing" from "nobody
+    # asked the renderer" — and that is precisely why the state-3 test was blind
+    # to the unwiring arm. `None` is NOT MEASURED and says so.
+    if block is None:
+        return { "block_bytes": None, "block_sha256": None, "block_headline": None }
+
+    text  = block
+    data  = text.encode( "utf-8" )
+
+    headline = None
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:                          continue
+        if set( stripped ) <= _RULE_CHARS:        continue   # a horizontal rule, not content
+        headline = stripped
+        break
+
+    return {
+        "block_bytes"    : len( data ),
+        "block_sha256"   : hashlib.sha256( data ).hexdigest(),
+        "block_headline" : headline,
+    }
+
+
 def build_receipt_dict( *, session_id, persona, tmux_session, memento_path,
                         memento_written_at, repo_root, booted_at,
-                        memento_persona=None ):
+                        memento_persona=None, block=None, block_error=None ):
     """
     Build the receipt body a rehydrated seat writes at SessionStart.
 
@@ -257,9 +365,15 @@ def build_receipt_dict( *, session_id, persona, tmux_session, memento_path,
 
     Ensures:
         - returns a JSON-serializable dict carrying identity, the boot stamp, the
-          memento path, its written_at stamp, its declared persona, and the
-          classified slot
+          memento path, its written_at stamp, its declared persona, the
+          classified slot, and the three block_* measurements
         - memento_slot is SLOT_NONE when no memento resolved
+        - the block_* fields describe what was PRODUCED, never what was
+          RECEIVED — see describe_block
+        - block_error names the exception type when the render RAISED, and is
+          None otherwise. Zero bytes with block_error None is a clean empty
+          block; zero bytes with a name is a crash, and the two want different
+          fixes
         - never raises
     """
     return {
@@ -272,6 +386,8 @@ def build_receipt_dict( *, session_id, persona, tmux_session, memento_path,
         "memento_persona"    : memento_persona,
         "memento_slot"       : classify_memento_slot( memento_path, repo_root ),
         "repo_root"          : repo_root,
+        "block_error"        : block_error,
+        **describe_block( block ),
     }
 
 
@@ -292,7 +408,7 @@ def _resolve_base_dir( base_dir ):
 def write_boot_receipt( *, session_id, persona=None, tmux_session=None,
                         memento_path=None, memento_written_at=None,
                         memento_persona=None, repo_root=None, base_dir=None,
-                        now=None ):
+                        now=None, block=None, block_error=None ):
     """
     Write this seat's boot receipt. Best-effort — a boot must never fail on it.
 
@@ -327,6 +443,8 @@ def write_boot_receipt( *, session_id, persona=None, tmux_session=None,
             memento_persona    = memento_persona,
             repo_root          = repo_root,
             booted_at          = stamp,
+            block              = block,
+            block_error        = block_error,
         )
         path = receipt_path( base, session_id )
         with open( path, "w", encoding="utf-8" ) as fh:
@@ -465,12 +583,120 @@ def find_receipt_by_identity( base_dir, *, persona=None, tmux_session=None, sinc
 # The verdict — pure
 # ---------------------------------------------------------------------------
 
+def receipt_is_misplaced( path, correct_base_dir ):
+    """
+    Is this receipt file OUTSIDE the directory the check actually reads?
+
+    Mirrors `heartbeat_hold.hold_is_misplaced` deliberately, down to the fail-safe:
+    the two families have the same defect and should not have two different shapes
+    for the reader to learn.
+
+    ⚠️ THE PREDICATE IS ABOUT THE PARENT, NOT ABOUT ANCESTRY, and that is the whole
+    difference from the holds version. `find_receipt_by_identity` globs
+    `<base_dir>/<prefix>*.json` NON-RECURSIVELY, so a receipt one level DEEPER
+    inside the correct root is just as invisible as one in a sibling repo. An
+    ancestry test would call that nested file correctly placed and it would still
+    never be found — a detector agreeing with the defect it exists to catch.
+    Measured: a receipt at <base>/nested/ returns None from the finder exactly as a
+    receipt in a sibling root does.
+
+    Requires:
+        - path is a path-like or string; correct_base_dir is the directory the
+          finder globs, or None when it could not be resolved
+
+    Ensures:
+        - True iff `path`'s immediate parent is not `correct_base_dir`
+        - fail-safe: an unresolvable base dir or path returns False — the detector
+          never OVER-flags a receipt it cannot place, because a false "misplaced"
+          sends a manager to fix a writer that is working
+    """
+    if correct_base_dir is None:
+        return False
+    try:
+        return Path( path ).resolve().parent != Path( correct_base_dir ).resolve()
+    except Exception:
+        return False
+
+
+def find_misplaced_receipts( correct_base_dir, *, persona=None, tmux_session=None,
+                             since=None, search_root=None, glob_fn=None ):
+    """
+    Find receipts for THIS seat that exist but sit where the finder cannot see them.
+
+    This is the counterpart the receipt family never had. It searches RECURSIVELY,
+    which is the only way to observe the thing being detected: the defect IS the
+    non-recursive glob, so a detector that globs the same way is guaranteed to find
+    nothing and report a clean result — the vacuous-green shape.
+
+    Requires:
+        - correct_base_dir is the directory `find_receipt_by_identity` globs
+        - at least one of persona / tmux_session identifies the seat; with both
+          absent NOTHING is returned, matching find_receipt_by_identity's own rule
+          that a blank query must never claim some arbitrary seat's receipt
+        - search_root defaults to the PARENT of correct_base_dir — the zone that
+          holds the sibling roots a receipt actually lands in when it goes astray
+        - since is an aware datetime, or None for no recency floor
+
+    Ensures:
+        - returns a list of {"path", "receipt"} dicts, oldest path first, for every
+          matching receipt whose immediate parent is NOT correct_base_dir
+        - a receipt the finder WOULD have found is never included — this reports
+          only what the existing read is blind to
+        - never raises; an unreadable tree yields []
+    """
+    if not persona and not tmux_session:
+        return []
+    if correct_base_dir is None:
+        return []
+
+    try:
+        base = Path( correct_base_dir ).resolve()
+    except Exception:
+        return []
+
+    root = search_root if search_root is not None else base.parent
+
+    try:
+        if glob_fn is not None:
+            paths = sorted( glob_fn( root ) )
+        else:
+            paths = sorted( glob.glob( os.path.join( str( root ), "**",
+                                                     f"{RECEIPT_PREFIX}*.json" ),
+                                       recursive=True ) )
+    except OSError:                                # pragma: no cover - unreadable tree
+        return []
+
+    found = []
+    for path in paths:
+        if not receipt_is_misplaced( path, base ):
+            continue                               # the existing read already sees it
+        try:
+            with open( path, "r", encoding="utf-8" ) as fh:
+                data = json.load( fh )
+        except ( OSError, json.JSONDecodeError, ValueError ):
+            continue
+        if not isinstance( data, dict ):
+            continue
+        if persona and _norm( data.get( "persona" ) ) != _norm( persona ):
+            continue
+        if tmux_session and _norm( data.get( "tmux_session" ) ) != _norm( tmux_session ):
+            continue
+        if since is not None:
+            booted = _parse_iso( data.get( "booted_at" ) )
+            if booted is None or booted < since:
+                continue
+        found.append( { "path": path, "receipt": data } )
+
+    return found
+
+
 def classify_wake( receipt, *, fired_at, now,
                    deadline_seconds        = DEFAULT_WAKE_DEADLINE_SECONDS,
                    expect_memento          = True,
                    max_memento_age_seconds = DEFAULT_MAX_MEMENTO_AGE_SECONDS,
                    session_id              = None,
-                   persona                 = None ):
+                   persona                 = None,
+                   tmux_session            = None ):
     """
     Decide what happened to a successor. Pure — no IO, no clock of its own.
 
@@ -518,7 +744,8 @@ def classify_wake( receipt, *, fired_at, now,
 
     def _v( verdict, reason, is_alarm, memento_path=None ):
         return WakeAssessment( session_id=sid, persona=who, verdict=verdict,
-                               reason=reason, is_alarm=is_alarm, memento_path=memento_path )
+                               reason=reason, is_alarm=is_alarm, memento_path=memento_path,
+                               tmux_session=tmux_session )
 
     if fired_at is None or now is None:
         return _v( WakeVerdict.MALFORMED_RECEIPT,
@@ -608,17 +835,59 @@ def render_alert( assessment, *, fired_at=None ):
     Requires:
         - assessment is a WakeAssessment
 
+    🔴 THE IDENTITY CLAUSE HAS THREE STATES, NOT TWO, AND THAT IS THE WHOLE POINT OF
+    THIS FUNCTION'S 2026-09-03 REWRITE (row 7ad5eba6). It used to render
+    `assessment.persona or "unknown persona"` and `assessment.session_id or
+    "unknown session"`. On the live path the arm supplies NEITHER — measured: the
+    watch is handed `tmux_session` and nothing else — and on a no-receipt
+    DEAD_NO_WAKE there is no receipt to fall back to either. So the alert printed
+    "unknown persona / unknown session" on EVERY such alarm, unconditionally.
+
+    ⚠️ A reader cannot tell a constant from a variable by looking at one sample.
+    A manager read that string as evidence about the ARM, built five one-variable
+    cases on it, and reached a diagnosis that had to be retracted off a closed row.
+    The string was never wrong; it simply never varied, and nothing said so.
+
+    ⇒ So the three states are now DIFFERENT WORDS, and the middle one is the state
+    that was invisible:
+      · identity KNOWN            -> "<persona> / <session id>"
+      · identity NOT SUPPLIED     -> names the tmux session it was armed on and says
+                                     plainly that no persona or session id reached
+                                     the watch — actionable, because the tmux name
+                                     is the one identity that survives a re-spin
+      · nothing known at all      -> says so outright, rather than dressing an empty
+                                     hand as an unknown seat
+
+    Requires:
+        - assessment is a WakeAssessment
+
     Ensures:
-        - names the verdict, the persona/session, the reason, and — when one is
-          known — the memento file the seat actually opened
+        - names the verdict, the identity, the reason, and — when one is known — the
+          memento file the seat actually opened
+        - the three identity states above render as three DISTINGUISHABLE strings, so
+          a reader can tell "we were never told who this is" from "we were told and
+          it is unknown"
         - never raises
     """
-    who  = assessment.persona    or "unknown persona"
-    sid  = assessment.session_id or "unknown session"
+    who  = assessment.persona
+    sid  = assessment.session_id
+    tmux = assessment.tmux_session
+
+    if who or sid:
+        # At least one real identity. Keep the long-standing shape, and keep naming
+        # the missing half as unknown — here that genuinely IS an unknown, because
+        # something identified this seat and this field was not it.
+        subject = f"{who or 'unknown persona'} / {sid or 'unknown session'}"
+    elif tmux:
+        subject = ( f"the seat armed as tmux session {tmux} — no persona or session id "
+                    f"reached the watch, so this line cannot name who it was" )
+    else:
+        subject = "a seat the watch was given NO identity for — not an unknown seat, an unnamed one"
+
     when = f" (re-spin fired {fired_at.isoformat()})" if fired_at is not None else ""
     tail = f" Memento it opened: {assessment.memento_path}." if assessment.memento_path else ""
     return (
-        f"RE-SPIN WAKE CHECK — {assessment.verdict.value} for {who} / {sid}{when}. "
+        f"RE-SPIN WAKE CHECK — {assessment.verdict.value} for {subject}{when}. "
         f"{assessment.reason}.{tail} "
         f"The seat will read as IDLE rather than broken, so nothing else will alarm on it."
     )
@@ -673,8 +942,22 @@ def check_respin_wake( *, fired_at, session_id=None, persona=None, tmux_session=
             max_memento_age_seconds = max_memento_age_seconds,
             session_id              = session_id,
             persona                 = persona,
+            tmux_session            = tmux_session,
         )
         if assessment.verdict is not WakeVerdict.PENDING:
+            # THE ONE PLACE THE TWO FAILURES ARE CONFUSABLE. DEAD_NO_WAKE means the
+            # finder saw nothing — which is equally true of a seat that never woke
+            # and of one that woke and wrote its receipt somewhere the finder does
+            # not look. Only here is the extra scan worth its cost, and only here
+            # does it tell the reader something the verdict cannot.
+            #
+            # The verdict and the alarm are left EXACTLY as classify_wake set them.
+            # Deciding what to DO about a misplaced receipt is an operator call, not
+            # this function's; all it does is stop the reader having to guess which
+            # of two failures they are looking at.
+            if assessment.verdict is WakeVerdict.DEAD_NO_WAKE:
+                assessment.misplaced = find_misplaced_receipts(
+                    base, persona=persona, tmux_session=tmux_session, since=fired_at )
             return assessment
         if now >= deadline:
             # classify_wake cannot return PENDING past the deadline, but a clock
@@ -742,7 +1025,8 @@ def start_wake_watch( *, alert_fn, fired_at, thread_factory=None, **kwargs ):
     return thread
 
 
-def arm_watches_for_spawn( spawn_result, *, alert_fn, fired_at, start_fn=None, **kwargs ):
+def arm_watches_for_spawn( spawn_result, *, alert_fn, fired_at, start_fn=None,
+                           base_dir_for=None, **kwargs ):
     """
     Arm one wake watch per seat a re-spin spawn actually launched.
 
@@ -750,6 +1034,17 @@ def arm_watches_for_spawn( spawn_result, *, alert_fn, fired_at, start_fn=None, *
         - spawn_result is the dict session_spawner.spawn_sessions returned
         - alert_fn is the shout rail; fired_at is an aware datetime
         - start_fn is an injected start_wake_watch stand-in, or None
+        - base_dir_for is an injected callable taking ONE spawn record and
+          returning that seat's data root, or None to keep today's behaviour
+
+    ⚠️ THE RESOLVER IS INJECTED, NOT IMPORTED, AND THAT IS THE WHOLE POINT.
+    Resolving a project NAME to a repo root lives in `lupin_mcp.session_spawner`,
+    and importing that here would drag requests / urllib3 / certifi / websockets
+    into a module the :8001 arbiter loads on a deliberately LIGHT venv — where a
+    missing import kills a worker THREAD while the process stays `active` and
+    /health still answers 200 (measured 2026-08-08, invisible for two days). This
+    module keeps even `fleet_data_root` behind a function-local import for the
+    same reason. So the CALLER resolves and this leaf only forwards.
 
     Ensures:
         - arms a watch ONLY for records whose status is "spawned" — a record that
@@ -757,6 +1052,15 @@ def arm_watches_for_spawn( spawn_result, *, alert_fn, fired_at, start_fn=None, *
           top of it would report the same thing twice under a different name
         - watches on the tmux session_name, which is the only identity that
           survives dismiss-then-spawn (the successor mints its own session id)
+        - each watch reads the SEAT'S OWN data root when base_dir_for supplies
+          one — the boot-receipt WRITER already keys on the spawned seat's repo
+          (register_session, `fleet_data_root( repo_root )`), so a reader keyed on
+          the firing manager's ambient LUPIN_ROOT looks in the wrong directory for
+          any cross-repo spawn and reports DEAD_NO_WAKE for a seat that woke fine
+        - a base_dir_for that returns None, or raises, leaves that record on the
+          ambient default: a resolver failure must never cost the watch itself
+        - an explicit base_dir in kwargs WINS over base_dir_for — a caller naming
+          one directory outright is not overridden by a per-record guess
         - returns the list of started watch handles
         - a spawn_result of the wrong shape arms nothing rather than raising
     """
@@ -773,8 +1077,16 @@ def arm_watches_for_spawn( spawn_result, *, alert_fn, fired_at, start_fn=None, *
         name = record.get( "session_name" )
         if not name:
             continue
+        per_record = dict( kwargs )
+        if base_dir_for is not None and "base_dir" not in per_record:
+            try:
+                resolved = base_dir_for( record )
+            except Exception:
+                resolved = None          # a resolver failure must not cost the watch
+            if resolved:
+                per_record[ "base_dir" ] = resolved
         started.append( starter( alert_fn=alert_fn, fired_at=fired_at,
-                                 tmux_session=name, **kwargs ) )
+                                 tmux_session=name, **per_record ) )
     return started
 
 

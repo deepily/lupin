@@ -37,7 +37,7 @@ import { createJobStore } from "./JobStore";
 import type { SenderStore } from "./SenderStore";
 import { createSenderStore } from "./SenderStore";
 import type { ActionRequiredStore, ActionRequiredApiClient } from "./ActionRequiredStore";
-import { createActionRequiredStore } from "./ActionRequiredStore";
+import { createActionRequiredStore, isActionRequiredLive } from "./ActionRequiredStore";
 import type { AudioStore, AudioStoreOptions } from "./AudioStore";
 import { createAudioStore } from "./AudioStore";
 import type { SessionStripStore } from "./SessionStripStore";
@@ -55,13 +55,28 @@ import type { FleetStatusStore, FleetApiClient } from "./FleetStatusStore";
 import { createFleetStatusStore } from "./FleetStatusStore";
 import type { TaskListStore, TaskListApiClient } from "./TaskListStore";
 import { createTaskListStore } from "./TaskListStore";
+import type { HoldingAreaStore } from "./HoldingAreaStore";
+import { createHoldingAreaStore } from "./HoldingAreaStore";
+import type { FlowRatioStore, FlowRatioApiClient } from "./FlowRatioStore";
+import { createFlowRatioStore } from "./FlowRatioStore";
+import type { TaskRequestStore } from "./TaskRequestStore";
+import { createTaskRequestStore } from "./TaskRequestStore";
+import { bothBoardsReadBack } from "./bothBoardsReadBack";
+import type { FinishedTasksStore } from "./FinishedTasksStore";
+import { createFinishedTasksStore } from "./FinishedTasksStore";
+import type { EpicStoriesStore } from "./EpicStoriesStore";
+import { createEpicStoriesStore } from "./EpicStoriesStore";
 import type { ViewStateStore } from "./ViewStateStore";
 import { createViewStateStore } from "./ViewStateStore";
 // Lane C (v0.1.9) — broadcast-to-all-CC compose store.
 import type { BroadcastStore } from "./BroadcastStore";
 import { createBroadcastStore } from "./BroadcastStore";
+import type { AckStore } from "./AckStore";
+import { createAckStore } from "./AckStore";
 // F0 (00b, v0.1.9) — notification-level TTS queue + active-item identity store.
 import type { TtsQueueStore } from "./TtsQueueStore";
+import { createQaStore, type QaStore } from "./QaStore";
+import { createSubmitJobsStore, type SubmitJobsStore, type SubmitJobsApiClient } from "./SubmitJobsStore";
 import { createTtsQueueStore } from "./TtsQueueStore";
 
 export interface StoreSet {
@@ -90,6 +105,29 @@ export interface StoreSet {
   predictionVote : PredictionVoteStore;
   fleetStatus    : FleetStatusStore;
   taskList       : TaskListStore;
+  // Row 87812328 — the holding-area pane's own poll. It is a SECOND query
+  // (not_approved is invisible to the task list's), so unlike the epic board it
+  // cannot ride the task list's composite; it takes its own 60s timer.
+  holdingArea    : HoldingAreaStore;
+  // Parity B-1 — the Q&A Interface's model. Action-driven (the pane's gestures) plus
+  // one server frame (`tts_job_request`), so it sits outside the pinned
+  // subscription-order chain and its construction order is irrelevant.
+  qa             : QaStore;
+  // Parity B-2 — the four submit cards' model. Action-driven only (no server frame),
+  // so its construction order is irrelevant.
+  submitJobs     : SubmitJobsStore;
+  // Parity A-2 #8 — the Holding Area's flow-ratio gate: three endpoints of its own
+  // (the ratio, its settings, the manager-pull toggle), on its own 60 s timer.
+  flowRatio      : FlowRatioStore;
+  taskRequests   : TaskRequestStore;
+  // Row 470b7509 — the finished-tasks pane's own poll. A THIRD door:
+  // /api/tasks/events, not /api/tasks, because no terminal-timestamp column
+  // exists and /api/tasks therefore cannot answer "what finished today".
+  finishedTasks  : FinishedTasksStore;
+  // Row 87812328 — the epic board's hand-maintained titles/stories. NOT a poll:
+  // a memoized one-shot against a hand-edited file, whose memo covers the
+  // FAILURE case too so a down endpoint is not retried on every paint.
+  epicStories    : EpicStoriesStore;
   // Section-toolbar + accordion-collapse parity (2026-06-23) — view-preference
   // state (section visibility + accordion collapse), persisted. Order-neutral
   // (subscribes to no server frames), so it appends after the pinned five.
@@ -97,6 +135,8 @@ export interface StoreSet {
   // Lane C (v0.1.9) — broadcast-to-all-CC compose store. Order-neutral
   // (subscribes to no server frames); persists only its card-open flag.
   broadcast      : BroadcastStore;
+  // Row 4f320c27 M1 — the per-broadcast acknowledgement tally.
+  acks           : AckStore;
   // F0 (00b, v0.1.9) — notification-level TTS queue + active-item identity.
   // Order-neutral: subscribes to AUDIO-store emissions (store_audio_ended /
   // store_audio_state_change), NOT server frames, so it appends after the
@@ -107,11 +147,16 @@ export interface StoreSet {
 
 export interface CreateStoresOptions {
   eventBus            : EventBus;
+  // Row aa13fdd7 — the TTS preview fraction in force NOW, for TtsQueueStore's
+  // 0%-means-silent gate. Omitted → the queue is not gated (see
+  // TtsQueueStoreOptions.liveFraction for why that direction is the safe one).
+  ttsLiveFraction    ?: () => number;
   storage             : StorageService;
   // post (ActionRequired / Missed / PredictionVote) + get (FleetStatus) +
   // get/patch/post (TaskList Phase-2 writes). The production ApiClient satisfies
   // all three structurally.
-  api                 : ActionRequiredApiClient & FleetApiClient & TaskListApiClient;
+  api                 : ActionRequiredApiClient & FleetApiClient & TaskListApiClient & FlowRatioApiClient
+                        & SubmitJobsApiClient;
   // Forward AudioStore options so boot.ts can pass production-side
   // `audioContextFactory`. Tests usually omit (default factory is browser-only).
   audioContextFactory?: AudioStoreOptions["audioContextFactory"];
@@ -119,8 +164,35 @@ export interface CreateStoresOptions {
   // `actor` (Q1). Boot wires `() => authManager.getCurrentUserEmail()`; omitted
   // in read-only test constructions (the store defaults to anonymous).
   actorProvider?      : () => string | null;
+  // Parity B-1 — the queue socket's session id, the `websocket_id` every v2 door is
+  // handed. A thunk, not a string: see the construction site.
+  qaSessionId?        : () => string;
+  // Parity B-2 (B8) — called after a SUCCESSFUL Claude Code submit and after nothing
+  // else. Legacy calls refreshAllQueues() from that card alone.
+  onCcSubmitted?      : () => void;
+  /**
+   * B-3 F3 — is the signed-in user an admin? REQUIRED, no default, and forwarded
+   * verbatim to NotificationStore, whose `setFilterMode` refuses for a non-admin.
+   * Boot wires `() => authManager.isCurrentUserAdmin()`; a test must say which it
+   * means, because for this one control the two answers are the whole behaviour.
+   */
+  isAdmin             : () => boolean;
 }
 
+/**
+ * Both boards re-read after a verdict, and BOTH reads are awaited to the end.
+ *
+ * ⚠️ NOT `Promise.all` (row 93ca4268, HARDENING). `all` settles on the FIRST rejection
+ * while the other board's read is still running — it is never cancelled, its outcome is
+ * simply discarded — so one failed read would hide whether the other board had caught up.
+ * The caller still needs to know something failed, so the first rejection is re-raised
+ * once both are done; `TaskRequestStore.submitVerdict` catches it and reports staleness
+ * rather than letting it look like a verdict that did not land.
+ *
+ * Ensures:
+ *   - both `refreshAfterWrite()` calls are awaited to completion, whatever either does
+ *   - resolves when both succeeded; otherwise rejects with the FIRST rejection's reason
+ */
 /**
  * Construct the canonical 6-store set. Subscription order is pinned at
  * construction time — see file-header comment.
@@ -138,9 +210,22 @@ export interface CreateStoresOptions {
 export function createStores(opts: CreateStoresOptions): StoreSet {
   // ORDER MATTERS — see file header. Do not reorder without also updating
   // the integration test assertion.
-  const notifications  = createNotificationStore({ bus: opts.eventBus, storage: opts.storage });
+  const notifications  = createNotificationStore({ bus: opts.eventBus, storage: opts.storage, isAdmin: opts.isAdmin });
   const senders        = createSenderStore       ({ bus: opts.eventBus, storage: opts.storage });
-  const actionRequired = createActionRequiredStore({ bus: opts.eventBus, api: opts.api });
+  // A-2 #2f — the ⏸️ pauses TTS with the countdown. `audio` is constructed on the next line (the
+  // order above is pinned), so these closures read it at call time, never at construction.
+  // A-1c2 — the queue, pause and stepper survive a reload through the shared StorageService.
+  // A-2 #2d — a prompt arriving while TTS plays waits for the current item. `ttsQueue` is built
+  // last (it asks this store about a restored focus), so these closures read it at call time too;
+  // the store never calls them while it is being constructed.
+  const actionRequired = createActionRequiredStore({ bus: opts.eventBus, api: opts.api, storage: opts.storage, audioControl: {
+    isPlaying : () => audio.state() === "playing",
+    pause     : () => audio.pause(),
+    resume    : () => audio.resume(),
+  }, ttsSlot: {
+    isPlaying : () => ttsQueue.isPlaying(),
+    current   : () => ttsQueue.current(),
+  } });
   const audio          = createAudioStore        ({
     bus                 : opts.eventBus,
     audioContextFactory : opts.audioContextFactory,
@@ -163,6 +248,26 @@ export function createStores(opts: CreateStoresOptions): StoreSet {
   const predictionVote = createPredictionVoteStore({ bus: opts.eventBus, api: opts.api });
   const fleetStatus    = createFleetStatusStore   ({ bus: opts.eventBus, api: opts.api });
   const taskList       = createTaskListStore      ({ bus: opts.eventBus, api: opts.api, actorProvider: opts.actorProvider });
+  // ⚠️ actorProvider IS NOT OPTIONAL HERE ANY MORE, AND FORGETTING IT IS SILENT.
+  // The holding area now WRITES (the batch verbs), and a store built without a
+  // provider records every batch transition as "anonymous (multiplexer)" — a
+  // full audit trail, correctly shaped, naming nobody. Nothing fails; the rows
+  // just stop being attributable, which is the one property an audit trail is
+  // for. Pinned by test_holding_area_store_is_built_with_the_operator.
+  const holdingArea    = createHoldingAreaStore   ({ bus: opts.eventBus, api: opts.api, actorProvider: opts.actorProvider });
+  const flowRatio      = createFlowRatioStore     ({ bus: opts.eventBus, api: opts.api });
+  // Row c9fafb9d — managers' promote/demote requests: both boards' badges and Rick's
+  // verdict. After a verdict lands, BOTH panes re-read, because an approval moved the row
+  // from one to the other. BOTH take the after-write read: it waits out a poll already in
+  // flight and then fetches, so neither pane repaints a row the verdict already moved.
+  // ⚠️ NOT `taskList.refresh()`. That SKIPS a collision rather than joining it, so a verdict
+  // landing mid-poll got no task-list read at all (Tiffany L1, measured 2026-09-10).
+  // 🔴 AND BOTH BOARDS ARE AWAITED TO THE END, not raced — `allSettled`, not `all`
+  // (row 93ca4268, hardening). The reasoning lives with the code, in ./bothBoardsReadBack.
+  const taskRequests   = createTaskRequestStore   ({ bus: opts.eventBus, api: opts.api,
+    afterVerdict: () => bothBoardsReadBack( taskList, holdingArea ) });
+  const finishedTasks  = createFinishedTasksStore ({ bus: opts.eventBus, api: opts.api });
+  const epicStories    = createEpicStoriesStore   ({ api: opts.api });
   // Section-toolbar + accordion-collapse parity — order-neutral; hydrates
   // persisted section-visibility + accordion-collapse maps at construction.
   const viewState      = createViewStateStore     ({ bus: opts.eventBus, storage: opts.storage });
@@ -170,12 +275,62 @@ export function createStores(opts: CreateStoresOptions): StoreSet {
   // subscription), persists only card-open. Recipient auto-refresh rides the
   // existing store_session_strip_changed (handled in BroadcastCardRenderer).
   const broadcast      = createBroadcastStore     ({ storage: opts.storage });
+  // Row 4f320c27 M1 — the ack tally fold. Its live subscription is NOT started
+  // here: boot owns start/stop lifetimes, and a store that subscribed in its own
+  // constructor could never be torn down by the caller that built it.
+  const acks           = createAckStore           ({ bus: opts.eventBus });
   // F0 (00b) — TTS item-queue store. Order-neutral (subscribes to AudioStore
   // emissions, not server frames). Its active id (current()) is set by the
   // F0-d speak-initiation seam in boot.ts and rolled by its own self-advance.
-  const ttsQueue       = createTtsQueueStore      ({ bus: opts.eventBus });
+  // A-1c3 — the queue survives a reload; a restored focus is kept only while its
+  // prompt is still owed. actionRequired restored its prompts in its own
+  // constructor above, so it can answer now — legacy's order too (notifications.js:596-599).
+  const ttsQueue       = createTtsQueueStore      ({
+    bus             : opts.eventBus,
+    storage         : opts.storage,
+    // Row aa13fdd7 — 0% means silent. Forwarded as a closure read at enqueue time,
+    // never a value: boot resolves the live fraction from controls built AFTER this
+    // call, and the user can move the slider at any moment afterwards.
+    liveFraction    : opts.ttsLiveFraction,
+    focusItemIsLive : ( idHash ) => {
+      const prompt = actionRequired.getById( idHash );
+      return prompt !== undefined && isActionRequiredLive( prompt );
+    },
+  });
 
-  return { notifications, senders, actionRequired, audio, jobs, sessionStrip, readingPane, commons, missed, predictionVote, fleetStatus, taskList, viewState, broadcast, ttsQueue };
+  // Parity B-1 — the Q&A store. `sessionId` is read at CALL time because the queue
+  // socket's id is resolved in boot before createStores but the contract is "whatever
+  // the queue socket is bound to now", and a captured string cannot follow a rebind.
+  const qa             = createQaStore({
+    bus       : opts.eventBus,
+    api       : opts.api,
+    /* c8 ignore next */ // production-default fallback: boot always supplies qaSessionId; the empty string is the read-only test construction.
+    sessionId : opts.qaSessionId ?? ( () => "" ),
+    // Review finding (María 🌸 + Mr. Radio 🦉, 2026-09-23): a job's answer has to be
+    // SPOKEN, not only written. It is ENQUEUED rather than played, so it takes its
+    // turn behind any utterance already going out — see QaTtsEnqueuer's docstring
+    // for why that is a deliberate divergence from legacy's immediacy.
+    ttsQueue  : ttsQueue,
+    // Legacy getVoiceIdForSender: the sender's own persona voice, or undefined,
+    // which omits the key and lets the server speak in its default voice.
+    voiceFor  : ( senderId ) => {
+      if ( senderId === undefined ) return undefined;
+      const voiceId = senders.get( senderId )?.voice_persona?.voice_id;
+      return voiceId === undefined || voiceId === "" ? undefined : voiceId;
+    },
+  });
+
+  // Parity B-2 — the submit cards. Same session-id thunk as the Q&A store: it is the
+  // `websocket_id` in the body AND the `X-Session-ID` header on all four doors.
+  const submitJobs     = createSubmitJobsStore({
+    bus       : opts.eventBus,
+    api       : opts.api,
+    /* c8 ignore next */ // production-default fallback: boot always supplies qaSessionId.
+    sessionId : opts.qaSessionId ?? ( () => "" ),
+    ...( opts.onCcSubmitted === undefined ? {} : { onCcSubmitted: opts.onCcSubmitted } ),
+  });
+
+  return { notifications, senders, actionRequired, audio, jobs, sessionStrip, readingPane, commons, missed, predictionVote, fleetStatus, taskList, holdingArea, flowRatio, taskRequests, finishedTasks, epicStories, viewState, broadcast, acks, ttsQueue, qa, submitJobs };
 }
 
 // Re-exports so consumers can import everything from the barrel.
@@ -196,7 +351,14 @@ export type {
   ActionRequiredApiClient,
 } from "./ActionRequiredStore";
 export { createActionRequiredStore } from "./ActionRequiredStore";
-export type { AudioStore, AudioStoreOptions, SchedulableAudioContext } from "./AudioStore";
+export type { AudioStore, AudioStoreOptions, SchedulableAudioContext, TtsMode } from "./AudioStore";
+export type { QaStore, QaStoreOptions, QaApiClient, QaMetrics, QaAgentsPayload, QaFlowResult } from "./QaStore";
+export { createQaStore, QA_EMPTY_RESPONSE } from "./QaStore";
+export type {
+  SubmitJobsStore, SubmitJobsStoreOptions, SubmitJobsApiClient, CardKey,
+  CardStatus, TfeCandidate, SchedulingInput,
+} from "./SubmitJobsStore";
+export { createSubmitJobsStore, FILE_DRIVEN_TEST_TYPES } from "./SubmitJobsStore";
 export { createAudioStore } from "./AudioStore";
 // WP2 (parity bridge) — SessionStripStore IS part of the canonical store set
 // built by createStores() (folded at the boot-integration step per Lane A's
@@ -223,6 +385,13 @@ export type { FleetStatusStore, FleetStatusStoreOptions, FleetApiClient } from "
 export { createFleetStatusStore } from "./FleetStatusStore";
 export type { TaskListStore, TaskListStoreOptions, TaskListApiClient } from "./TaskListStore";
 export { createTaskListStore } from "./TaskListStore";
+export { createHoldingAreaStore } from "./HoldingAreaStore";
+export { createFlowRatioStore } from "./FlowRatioStore";
+export type { TaskRequestStore, TaskRequestStoreOptions, TaskRequestApiClient } from "./TaskRequestStore";
+export { createTaskRequestStore } from "./TaskRequestStore";
+export type { FinishedTasksStore, FinishedTasksStoreOptions, FinishedTasksApiClient } from "./FinishedTasksStore";
+export { createFinishedTasksStore, FINISHED_TASKS_ENDPOINT } from "./FinishedTasksStore";
+export { createEpicStoriesStore } from "./EpicStoriesStore";
 export type { ViewStateStore, ViewStateStoreOptions } from "./ViewStateStore";
 export { createViewStateStore } from "./ViewStateStore";
 // Lane C (v0.1.9) — broadcast compose store.

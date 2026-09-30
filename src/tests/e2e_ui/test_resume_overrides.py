@@ -9,7 +9,7 @@ Automated verification that:
     3. Defaults for first-time users are Opus 4.7 / high
     4. localStorage pre-selection round-trips across renders
     5. `saveResumeModelPref` / `saveResumeEffortPref` persist to localStorage
-    6. The POST body of `/api/jobs/{id}/resume-from-checkpoint` carries the
+    6. The POST body of `/api/v2/resume-job` carries the
        override fields (lead_model_override / worker_model_override /
        thinking_effort) when the user picks specific values
     7. "(default)" effort is NOT sent in the POST body (None maps to omission)
@@ -232,7 +232,7 @@ class TestSaveHandlers:
 class TestResumePOSTBody:
     """
     Click Resume on a synthetic stalled card and intercept the POST to
-    /api/jobs/{id}/resume-from-checkpoint. Assert the override fields
+    /api/v2/resume-job. Assert the override fields
     land in the request body.
     """
 
@@ -255,7 +255,7 @@ class TestResumePOSTBody:
         captured = {}
 
         def handle( route, request ):
-            if request.method == "POST" and "resume-from-checkpoint" in request.url:
+            if request.method == "POST" and "/api/v2/resume-job" in request.url:
                 captured[ "body" ] = request.post_data
                 route.fulfill(
                     status       = 200,
@@ -272,7 +272,7 @@ class TestResumePOSTBody:
             else:
                 route.continue_()
 
-        page.route( "**/api/jobs/**", handle )
+        page.route( "**/api/v2/resume-job", handle )
 
         page.locator( "#e2e-sandbox .resume-stalled-btn" ).click()
         # Give the async POST a moment to fire + the route handler to capture it
@@ -289,6 +289,7 @@ class TestResumePOSTBody:
         body = self._run_and_capture(
             logged_in_page, "claude-haiku-4-5-20251001", "max"
         )
+        assert body.get( "resume_from" )           == "tfe-intercept", "the job id moved from the URL into the body"
         assert body.get( "lead_model_override" )   == "claude-haiku-4-5-20251001"
         assert body.get( "worker_model_override" ) == "claude-haiku-4-5-20251001"
         assert body.get( "thinking_effort" )       == "max"

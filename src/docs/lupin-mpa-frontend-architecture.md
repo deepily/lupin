@@ -804,5 +804,5 @@ Each of the 6 category cards shows:
 - **WebSocket Architecture**: `src/docs/websocket-architecture.md`
 - **WebSocket Events**: `src/docs/websocket-events.md`
 - **Notification API**: `src/docs/notification-api.md`
-- **UI Design Spec (Proxy)**: `src/rnd/2026.02.14-swe-team-phase-4-decision-proxy-architecture/04-ui-design-ratification-dashboard.md`
-- **Testing Validation**: `src/rnd/2026.02.14-swe-team-phase-4-decision-proxy-architecture/06-testing-validation.md`
+- **UI Design Spec (Proxy)**: `src/rnd/v0.1.4/2026.02.14-swe-team-phase-4-decision-proxy-architecture/04-ui-design-ratification-dashboard.md`
+- **Testing Validation**: `src/rnd/v0.1.4/2026.02.14-swe-team-phase-4-decision-proxy-architecture/06-testing-validation.md`

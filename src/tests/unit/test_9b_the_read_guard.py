@@ -80,15 +80,16 @@ def _traces( tmp_path ):
     return texts
 
 
-@pytest.mark.parametrize( "verdict, what", [
-    ( None,  "never answered — the confirmation timed out or has not fired yet" ),
-    ( False, "the user said the answer was WRONG" ),
+@pytest.mark.parametrize( "verdict, what, served", [
+    ( None,  "never answered — the confirmation timed out or has not fired yet", True  ),
+    ( False, "the user said the answer was WRONG",                               False ),
 ] )
-def test_an_unconfirmed_exact_hit_is_not_served_and_the_agent_re_runs(
-        verdict, what, tmp_path, notifier, monkeypatch ):
+def test_an_exact_hit_is_served_when_UNKNOWN_and_refused_when_the_user_said_NO(
+        verdict, what, served, tmp_path, notifier, monkeypatch ):
     """
-    THE STEP. An exact cache hit on a row whose answer was not confirmed correct: the row is
-    not served, and the question is answered by running the agent instead.
+    THE STEP. An exact cache hit is SERVED when the answer was never confirmed (`None`) and
+    REFUSED when the user said it was wrong (`False`). The exemption is from UNKNOWN, never
+    from NO.
 
     Both unconfirmed states are driven, because they are different facts about the world and
     only one of them is a timeout.
@@ -103,10 +104,26 @@ def test_an_unconfirmed_exact_hit_is_not_served_and_the_agent_re_runs(
 
     result = flow.ask( "what is 2 plus 2", **_CTX )
 
-    assert "replay" not in executor.kinds, f"an unconfirmed row was SERVED ({what})"
-    assert executor.kinds == [ "agent" ], f"the agent did not re-run: {executor.kinds}"
-    assert result[ "path" ] == "agent", f"the answer did not come back on the agent path: {result}"
-    assert result[ "cache_hit" ] is False, "an unconfirmed row was reported to the caller as a cache hit"
+    # RULING REVERSED — row fe1c0d3f, Rick 2026-09-04. This block asserted the OPPOSITE
+    # until then. An EXACT hit is the same question this user already had answered, so an
+    # UNKNOWN verdict no longer withholds it. Measured cost of the old reading: 103 perfect
+    # matches refused and re-run, every one reading `exact_hit:None` — never a single False.
+    # ⚠️ EXEMPT FROM UNKNOWN, NOT FROM NO — the False case is a separate test below and it
+    # still refuses.
+    if served:
+        assert executor.kinds == [ "replay" ], f"an exact hit was NOT served ({what}): {executor.kinds}"
+        assert result[ "path" ] == "replay", f"the answer did not come back on the replay path: {result}"
+        assert result[ "cache_hit" ] is True, "a served exact hit was not reported as a cache hit"
+    else:
+        # THE HALF THAT DID NOT MOVE, AND THE REASON THE PARAMETRIZE IS KEPT RATHER THAN
+        # SPLIT INTO TWO FILES: the two verdicts now diverge, and holding them side by side
+        # is what stops a later reader reading "exact matches are exempt" as "the verdict is
+        # never consulted". A user who said the answer was WRONG is not overridden by a
+        # perfect string match.
+        assert "replay" not in executor.kinds, f"a row the user REJECTED was served ({what})"
+        assert executor.kinds == [ "agent" ], f"the agent did not re-run: {executor.kinds}"
+        assert result[ "path" ] == "agent", f"the answer did not come back on the agent path: {result}"
+        assert result[ "cache_hit" ] is False, "a rejected row was reported to the caller as a cache hit"
 
 
 def test_a_confirmed_exact_hit_is_still_served( tmp_path, notifier, monkeypatch ):
@@ -187,12 +204,19 @@ def test_a_verdict_that_merely_looks_true_is_refused( impostor, tmp_path, notifi
 
     RED ON REVERT: change `verdict is True` to `if verdict:` and all four are served.
     """
-    executor = _RecordingExecutor( v2._outcome() )
-    row      = v2._snapshot( routing_command="agent router go to math", answer_is_correct=impostor )
-    flow     = _flow( tmp_path, notifier, monkeypatch,
-                      v2._lookup( is_replay_hit=True, snapshot=row ), executor )
+    # RE-AIMED, NOT WEAKENED (row fe1c0d3f). The exact-hit path no longer consults the
+    # verdict except to honour an explicit False, so driving this through a tier-1 hit would
+    # assert the SUPERSEDED ruling and pass for a reason unrelated to typing. It is aimed at
+    # the near-match gate, which Rick kept guarded — where loose typing can still do harm.
+    confirmer = v2._FakeConfirmer( response_value="yes" )
+    executor  = _RecordingExecutor( v2._outcome() )
+    candidate = v2._snapshot( question="what is 2 plus 2", id_hash="near-1", answer_is_correct=impostor )
+    flow      = _flow( tmp_path, notifier, monkeypatch,
+                       v2._lookup( is_replay_hit=False, best_candidate=candidate,
+                                   best_score=95.0, similarity=95.0, tier="ann" ),
+                       executor, confirmer=confirmer )
 
-    flow.ask( "what is 2 plus 2", **_CTX )
+    flow.ask( "what's 2 plus 2", **_CTX )
 
     assert executor.kinds == [ "agent" ], (
         f"a row whose verdict was {impostor!r} — not the boolean True — was served"
@@ -209,10 +233,15 @@ def test_a_row_missing_the_field_entirely_is_refused( tmp_path, notifier, monkey
 
     RED ON REVERT: default the lookup to True when the attribute is missing.
     """
+    # Aimed at the near-match gate, still guarded after row fe1c0d3f — the exact-hit path
+    # is now exempt from UNKNOWN, so it could no longer exercise a refusal at all.
+    confirmer = v2._FakeConfirmer( response_value="yes" )
     executor = _RecordingExecutor( v2._outcome() )
     row      = types.SimpleNamespace( routing_command="agent router go to math" )   # no field at all
     flow     = _flow( tmp_path, notifier, monkeypatch,
-                      v2._lookup( is_replay_hit=True, snapshot=row ), executor )
+                      v2._lookup( is_replay_hit=False, best_candidate=row,
+                                   best_score=95.0, similarity=95.0, tier="ann" ),
+                       executor, confirmer=confirmer )
 
     flow.ask( "what is 2 plus 2", **_CTX )
 
@@ -227,10 +256,15 @@ def test_the_refusal_says_so_in_the_trace( tmp_path, notifier, monkeypatch ):
 
     RED ON REVERT: drop the `trace.set` in `_may_serve`.
     """
+    # Aimed at the near-match gate, still guarded after row fe1c0d3f — the exact-hit path
+    # is now exempt from UNKNOWN, so it could no longer exercise a refusal at all.
+    confirmer = v2._FakeConfirmer( response_value="yes" )
     executor = _RecordingExecutor( v2._outcome() )
     row      = v2._snapshot( routing_command="agent router go to math", answer_is_correct=None )
     flow     = _flow( tmp_path, notifier, monkeypatch,
-                      v2._lookup( is_replay_hit=True, snapshot=row ), executor )
+                      v2._lookup( is_replay_hit=False, best_candidate=row,
+                                   best_score=95.0, similarity=95.0, tier="ann" ),
+                       executor, confirmer=confirmer )
 
     flow.ask( "what is 2 plus 2", **_CTX )
 

@@ -8,19 +8,44 @@ TaskEvent row in the same session that updates the TaskItem — atomicity is
 the caller's get_db() transaction.
 
 Canonical design: planning-is-prompting ->
-src/rnd/2026.06.11-unified-task-store-design.md (v0.4) §2.1-§2.2.
+planning-is-prompting/src/rnd/2026.06.11-unified-task-store-design.md (v0.4) §2.1-§2.2.
 """
 
 from datetime import datetime, timezone
 from typing import Optional, List
 import uuid
 
-from sqlalchemy import func, select, cast, String
-from sqlalchemy.orm import Session
+from sqlalchemy import func, select, cast, String, and_, or_
+from sqlalchemy.orm import Session, joinedload
 
 from cosa.rest.postgres_models import TaskItem, TaskEvent
 from cosa.rest.db.repositories.base import BaseRepository
+
+# ---------------------------------------------------------------------------
+# Closed-vs-new ratio gate — the two SQL LIKE patterns, exported so they can be
+# tested against a real LIKE engine rather than asserted through a mock.
+# ---------------------------------------------------------------------------
+#
+# A creation stamp has an EMPTY left side ("->queued", "->blocked"); a closure
+# has any left side and "done" on the right. Census, whole board, lupin_db_dev,
+# 2026-09-01 — these are matched patterns, NOT an enumerated status list, because
+# a list is something somebody has to keep current:
+#
+#   created  ->queued 2292 · ->blocked 4
+#   closed   in_progress->done 941 · queued->done 659 · blocked->done 210
+#            review->done 56 · parked->done 24
+#
+# Neither pattern matches the non-arrow events (amended 2086, patched 1123,
+# amended_post_terminal 188, re-correlated 108), and "%->dropped" is deliberately
+# NOT a closure — see count_created_and_closed's docstring for why that exclusion
+# is the load-bearing choice.
+CREATED_TRANSITION_LIKE = "->%"
+CLOSED_TRANSITION_LIKE  = "%->done"
+# Rows under this correlation-key prefix are excluded from both counts — the worktree
+# janitor's straggler tickets (cosa.agents.shared.worktree_straggler_tickets).
+FLOW_EXCLUDED_KEY_PREFIX = "worktree:"
 from cosa.rest.task_store_rules import (
+    BOARD_INVISIBLE_STATUSES,
     TERMINAL_STATUSES,
     UNSCOPED_QUERY_THRESHOLD,
     UnscopedQueryError,
@@ -34,7 +59,17 @@ from cosa.rest.task_store_rules import (
 # COUNT(*) seam / the :8001 arbiter), so applying the clause HERE is what makes
 # "three readers, one definition" true rather than aspirational. NEVER re-derive
 # park-expiry locally — import it. Design: src/rnd/v0.1.9/2026.07.19-parked-status-board-hygiene.md
-from cosa.rest.task_store_owed import PARK_STATUS, owed_clause, owed_status_clause
+from cosa.rest.task_store_owed import (
+    NOT_APPROVED_STATUS,
+    PARK_STATUS,
+    holding_is_active_clause,
+    owed_clause,
+    owed_status_clause,
+)
+
+# Whether a pending request survives a move is the lifecycle module's rule, asked here
+# rather than restated (row c9fafb9d, design §7).
+from cosa.rest import task_request_lifecycle as request_lifecycle
 
 
 class TaskRepository( BaseRepository[TaskItem] ):
@@ -64,23 +99,160 @@ class TaskRepository( BaseRepository[TaskItem] ):
 
     def get_by_id_for_update( self, id: uuid.UUID ) -> Optional[TaskItem]:
         """
-        Load one item under a row lock (SELECT ... FOR UPDATE) for a
+        Load one item under a row lock (SELECT ... FOR UPDATE), REPOPULATING
+        this session's copy of the row from that read, for a
         read-validate-write transition.
 
         Cold-review N3: without the lock, two concurrent transitions both
         validate against the same stale from_status and the terminal lockout
         is bypassable under race — and concurrent multi-session writes are
         this store's reason to exist. The lock serializes transitions per
-        item: the second transaction blocks until the first commits, then
-        reads the COMMITTED status, so validation always sees fresh state.
+        item: the second transaction blocks until the first commits.
 
+        🔴 THE LOCK ALONE DOES NOT MAKE THE READ FRESH — `.populate_existing()`
+        IS WHAT DOES. IT IS LOAD-BEARING. DO NOT DELETE IT.
+
+        This docstring used to end "so validation always sees fresh state",
+        unconditionally, over a body that had no `.populate_existing()` in it.
+        That sentence was FALSE for any caller still holding the row.
+
+        POCHOLO 📣 reproduced it on real Postgres 16.14, SQLAlchemy 2.0.40,
+        two real sessions, one variable per arm. His write-up is
+        `src/rnd/v0.2.1/2026.09.06-with-for-update-does-not-refresh-a-held-object.md`
+        at commit 0d45bdda on branch `pocholo-land-orphan-sweeper` — it is the
+        authority, not this paragraph, and it asks to be quoted bare because two
+        summaries of it went stale in transit. His statement, verbatim:
+
+            "`with_for_update` serializes the row at the database and does not
+             repopulate the Python attributes of an object the session already
+             holds. The lock buys serialization, not freshness. A
+             `SELECT ... FOR UPDATE` that re-reads a row already in the
+             session's identity map returns the existing object with the
+             attributes it carried when that session last loaded it — the lock
+             is real, the refresh is not."
+
+        🔴 HIS PRECONDITION, EXACT, AND IT IS EASY TO GET BACKWARDS: not "a
+        session that once loaded the row" but a session STILL HOLDING A LIVE
+        REFERENCE to the loaded object. SQLAlchemy's identity map is WEAK — drop
+        the reference and the object is collected, and the next read goes to the
+        database and comes back fresh. He notes the loose version is wrong in
+        the REASSURING direction: two of his own first arms discarded the scan
+        result and made a genuinely exposed session look safe.
+
+        ⚠️ AND HIS CENSUS IS OF THE FORMS HE DROVE, at one sha on one Postgres
+        version — `get_by_id`, `session.get( with_for_update=True )` and
+        `query().with_for_update()` all STALE; `populate_existing()`,
+        `session.refresh()` and raw SQL fresh. It is not a proof that no other
+        read form is stale.
+
+        ⇒ HIS TABLE PUT THESE FOUR CALL SITES UNDER "SAFE BY CALLER FRESHNESS",
+        with a red "no" against surviving a dirty session injected by a caller.
+        `.populate_existing()` is what moves them to SAFE BY CONSTRUCTION.
+
+        Re-measured here on a real SQLAlchemy session (2026-09-06, Rio ⚡): a
+        second writer commits queued->done, and the re-read through this method
+        returned `queued` without `.populate_existing()` and `done` with it,
+        same Python object both times. The sentence is true now because the
+        code makes it true, not because the lock implies it.
+
+        🔴 THE FOUR CALL SITES WERE **UNGUARDED** — NOT BROKEN, AND NOT
+        GUARDED. UNGUARDED IS A TRUE STATEMENT THAT MUST NOT BE MISTAKEN FOR A
+        SAFE ONE. All four — routers/tasks.py transition (:995), correlate
+        (:1335), amend (:1406), patch (:1525) — read `item.status` expecting the
+        COMMITTED value, and all four were correct only because each happens to
+        be the FIRST load of that row in a freshly opened `with get_db()`.
+        Correct-by-accident reads identically to correct-by-construction, and
+        no test would have noticed the day one of them stopped being the first
+        load. That is why the guarantee moved INTO this method instead of
+        staying a habit at four call sites.
+
+        ⚠️ THE FALSE SENTENCE WAS BELIEVED AND ACTED ON — quoted to another seat
+        as settled precedent for a scan-then-mark sweeper, precisely the shape
+        it breaks, before anyone read the body. A docstring is what the next
+        reader trusts INSTEAD of reading the implementation, so a wrong one does
+        not merely fail to help: it manufactures the belief and spends the
+        caution that would have caught it.
+
+        Guard (delete the `.populate_existing()` below and it goes red, naming
+        the stale value): src/tests/unit/
+        test_the_for_update_read_refreshes_a_row_the_session_already_holds.py
+
+        🔴 AND THE TWO ARMS TOGETHER SAY SOMETHING NEITHER SAYS ALONE — measured
+        2026-09-06, full unit tier both times, against a 3-red baseline:
+
+            unwire the CALL SITE (routers/tasks.py:995 -> get_by_id)  56 new reds
+            break the METHOD's freshness (drop populate_existing)      2 new reds
+
+        The WIRING was already guarded and this reviewer predicted, on record,
+        that it was not — wrong, and pocholo 📣 was right to ask.
+        ⚠️ BUT READ THE 56 CORRECTLY, BECAUSE THE COUNT FLATTERS THE SUITE. Those
+        tests drive a MagicMock repository that stubs `get_by_id_for_update` by
+        NAME; calling anything else hands the route a bare mock whose `.status`
+        fails enum validation with a 422. So they guard the NAME OF THE CALL and
+        are blind to WHAT IT RETURNS — which is why breaking the freshness
+        inside the method left all 56 of them green. The only two that saw it
+        are the ones added here. Pocholo 📣's wording for it, so nobody reads the
+        56 as depth: "56 tests assert the call site names this method; 2 assert
+        what it hands back."
+
+        AND THE CENSUS IS NOW A PREDICATE, NOT A COUNT — Tiberius 👑's
+        suggestion, after he found the fifth call site this docstring said could
+        not exist. src/tests/unit/
+        test_every_locked_read_is_the_first_load_in_its_session.py enumerates the
+        call sites FROM THE TREE and asserts the property the Requires clause
+        needs — nothing may touch the session before the locked read — rather
+        than asserting how many there are. It carries a positive control on its
+        own walk, and it REPORTS rather than skips a call site whose session
+        comes from outside the function, which is the one shape an AST walk
+        cannot judge and is exactly the shape his resolver has.
         Requires:
             - id: TaskItem UUID
             - called inside the SAME get_db() transaction that will apply
               the transition (the lock lives and dies with that transaction)
+            - the caller has NOT modified that instance earlier in this session
+              and left the change unflushed. BOTH session factories are built
+              autoflush=False — the module-level `SessionLocal`
+              (db/database.py:245-249) and the one rebuilt on the reconfigure
+              path (:280) — so this is the setting on EVERY construction path,
+              not one line somebody could flip. With autoflush=False,
+              populate_existing OVERWRITES a pending in-memory edit with the
+              database row; with autoflush=True the edit survives, because the
+              flush lands before the read. This method is for
+              load-validate-write, never for re-reading a row you have already
+              edited in memory.
+              🔴 THE CALL-SITE CENSUS IS A FACT ABOUT A MOMENT, NOT A PROPERTY.
+              FOUR callers in THIS tree at 3fe6ac26, 2026-09-06 — the four
+              routers/tasks.py sites named above — and each takes the locked
+              read as its first statement in a fresh session, so none of THOSE
+              is exposed. That is a count I took, not a guarantee anything
+              enforces. Tiberius 👑 reported a FIFTH at
+              src/cosa/rest/task_promotion_resolver.py:433 on branch
+              wt-tiberius-nonce-prestamp at 0ea90082, which does not exist in
+              this tree at all — verified both directions. A RESOLVER is exactly
+              the shape that holds a session across a scan and a mark, so
+              "none is exposed" may already be false on his branch and will need
+              re-deriving at the merge. Do not read the number as a bound.
+              MEASURED by Rio ⚡ on SQLite. REPRODUCED independently by
+              pocholo 📣 on Postgres 16.14 against the real model. One backend
+              each, 2026-09-06 — neither of us ran both, and an earlier cut of
+              this line said he ran both, which he corrected. He declined to
+              confirm it by agreeing and ran the arms instead, which is why it
+              is recorded as reproduced rather than as endorsed.
+              ⚠️ AND HIS CAVEAT, VERBATIM, because it is stricter than what
+              this reviewer was about to write: autoflush is decided in the
+              Session before any SQL is emitted, so the agreement is expected —
+              but "two backends agreeing is consistent with it being
+              backend-independent and does not establish it as a universal
+              truth." The mechanism is the reason to believe it; two data
+              points are not a proof of universality.
 
         Ensures:
             - returns the row-locked entity, or None if not found
+            - the row is locked against concurrent writers for the life of the
+              transaction
+            - the returned instance's attributes are REPOPULATED from that
+              read even when this session already held the row, so a caller
+              validating on `item.status` sees the COMMITTED value
 
         Returns:
             TaskItem instance or None
@@ -88,6 +260,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
         return (
             self.session.query( TaskItem )
             .filter( TaskItem.id == id )
+            .populate_existing()
             .with_for_update()
             .first()
         )
@@ -219,7 +392,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
         owner_persona       : Optional[str] = None,
         accountable_manager : Optional[str] = None,
         gate_class          : str = "none",
-        priority            : str = "P2",
+        priority            : str = "P5",                             # P5 default per Rick's broadcast e254ec7d, 2026-09-07: "The default Priority from here on now will be P5."
         urgency             : str = "normal",
         status              : str = "queued",
         blocked_by          : Optional[list] = None,
@@ -227,6 +400,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
         source_qid          : Optional[str] = None,
         correlation_key     : Optional[str] = None,
         flag_suffix         : Optional[str] = None,
+        title_trimmed       : bool = False,
     ) -> TaskItem:
         """
         Create a new task item plus its "->{status}" creation event.
@@ -300,6 +474,13 @@ class TaskRepository( BaseRepository[TaskItem] ):
             urgency             = urgency,
             source_qid          = source_qid,
             correlation_key     = correlation_key,
+            # A RECORD of what soft_guard_title did on THIS write, never a
+            # read-time re-derivation from length (bug 769b3574). The CREATE
+            # router passes `title_guard is not None`; it defaults False so every
+            # other caller and every test fixture keeps its current shape.
+            # (The EDIT door writes it through apply_patch instead, and always
+            # False since 2026-09-01 — an over-cap edit is a 422, bug 6ce252e7.)
+            title_trimmed       = title_trimmed,
         )
         self._append_event( item.id, created_by, f"->{status}", authority, receipt_refs=None, reason=creation_reason )
         return item
@@ -391,11 +572,47 @@ class TaskRepository( BaseRepository[TaskItem] ):
             item.park_reason_captured_at = None
 
         if to_status == PARK_STATUS:
-            return self._append_event(
+            event = self._append_event(
                 item.id, actor, transition_label, authority, receipt_refs, reason=reason, ts=captured
             )
+        else:
+            event = self._append_event( item.id, actor, transition_label, authority, receipt_refs, reason=reason )
 
-        return self._append_event( item.id, actor, transition_label, authority, receipt_refs, reason=reason )
+        # 🔨 A PENDING REQUEST THE MOVE HAS MADE IMPOSSIBLE IS WITHDRAWN (row c9fafb9d, design
+        # §7, Mr. Radio's D2). Rick moving the row himself, a close, a drop, a park — each can
+        # leave a request asking for a move the row can no longer make, and the badge would
+        # keep counting a question with no subject. HERE rather than in a router, because
+        # every status change in the store comes through this method, the promotion
+        # resolver's included. After the transition's own event, so the trail reads cause
+        # then consequence.
+        self._withdraw_stale_request( item, actor, authority, transition_label )
+        return event
+
+    def _withdraw_stale_request( self, item: TaskItem, actor: str, authority: str, transition_label: str ) -> None:
+        """
+        Clear a pending request the row's new status has made impossible, with its own event.
+
+        Requires:
+            - item.status is ALREADY the new status
+
+        Ensures:
+            - when `task_request_lifecycle.request_is_stale` holds: request_state,
+              request_move and request_ts go to NULL and ONE 'request_withdrawn' event is
+              appended naming the move and the transition that stranded it
+            - otherwise nothing is written — an answered request, no request, or a pending
+              request the row can still make (a demote from queued -> in_progress) stays
+            - a withdrawal is neither a denial nor an approval, so it writes neither state
+        """
+        if not request_lifecycle.request_is_stale( item.request_state, item.request_move, item.status ): return
+        move               = item.request_move
+        item.request_state = None
+        item.request_move  = None
+        item.request_ts    = None
+        self._append_event(
+            item.id, actor, "request_withdrawn", authority, receipt_refs=None,
+            reason = f"a pending {move!r} request no longer fits: the row moved {transition_label}. "
+                     f"Not a denial — the question lost its subject.",
+        )
 
     def _db_clock_now( self ) -> datetime:
         """
@@ -562,7 +779,8 @@ class TaskRepository( BaseRepository[TaskItem] ):
               (router validated via task_store_rules.validate_patch); values
               already wire-checked by the TaskPatchIn Pydantic model
             - reason is an OPTIONAL caller-supplied justification (e.g. why a
-              task was reassigned); None / "" means "auto-describe the edit"
+              task was reassigned); None / "" means "no justification given".
+              It is APPENDED to the field delta, never substituted for it
             - flag_suffix is an OPTIONAL advisory marker (the persona-flag
               "[persona_flag: … off-roster]") appended to the resolved event
               reason; None means no marker (the reason is unchanged)
@@ -579,16 +797,25 @@ class TaskRepository( BaseRepository[TaskItem] ):
         invalidated by text that did not change, and stamping there would re-import
         the false-positive class through a narrower door.
 
+        ⚠️ THE DELTA IS NEVER SUBSTITUTED (bug a01e4e2a, 2026-08-28). This used to
+        read `reason if reason else <delta>`: a caller-supplied reason REPLACED the
+        computed before/after, so a `task_edit` overwriting a 60,000-character body
+        with a polite justification recorded only the justification and the prior
+        text was unrecoverable from the event log. That rewarded the careless caller
+        with the better audit trail. The delta now always leads and the caller's
+        reason rides after it.
+
         Ensures:
             - each provided field whose value differs is written onto the item
             - body_changed_ts stamped from the DB clock IFF `body` changed value
             - exactly one TaskEvent appended: transition='patched',
-              receipt_refs=None, reason = the caller-supplied `reason` when it is
-              non-empty, else the field delta ("k: old -> new; ...") or a no-op
-              marker when nothing actually changed (R3 — the edit is auditable
-              either way), with flag_suffix appended when present (so the
-              off-roster marker rides the existing event — zero schema churn,
-              field-delta preserved)
+              receipt_refs=None, reason ALWAYS opens with the field delta
+              ("k: old -> new; ...") — or the no-op marker when nothing actually
+              changed — and the caller-supplied `reason`, when non-empty, is
+              APPENDED after " | reason: " rather than replacing it (bug
+              a01e4e2a). flag_suffix is appended last when present, so delta +
+              caller reason + off-roster marker all survive on the one event
+              (R3 — zero schema churn)
             - flush() called; commit NOT called (caller's get_db() commits)
 
         Returns:
@@ -609,14 +836,161 @@ class TaskRepository( BaseRepository[TaskItem] ):
         # whether the body changed.
         if body_changed: item.body_changed_ts = self._db_clock_now()
 
-        # Caller-supplied reason wins (the manager's "why" for a reassignment);
-        # otherwise auto-describe the field delta so the event is never blank.
-        event_reason = reason if reason else ( "; ".join( changes ) if changes else "no-op patch (no field changed)" )
+        # The field delta ALWAYS leads (bug a01e4e2a) — a caller "why" is additive,
+        # never a substitute, so an overwrite can no longer erase what it overwrote.
+        event_reason = "; ".join( changes ) if changes else "no-op patch (no field changed)"
+        if reason: event_reason = f"{event_reason} | reason: {reason}"
         # Fold the persona-flag marker into the resolved reason (policy 1) —
         # AFTER the field-delta is composed, so both survive on the one event.
         if flag_suffix:
             event_reason = f"{event_reason} {flag_suffix}"
         return self._append_event( item.id, actor, "patched", authority, receipt_refs=None, reason=event_reason )
+
+    def apply_request_filing(
+        self,
+        item      : TaskItem,
+        move        : str,
+        actor       : str,
+        authority   : str,
+        reason      : str,
+        deletion_id : Optional[uuid.UUID] = None,
+        pledged_by  : Optional[str]       = None,
+    ) -> TaskEvent:
+        """
+        File a manager's promote/demote request on a row + append its event.
+
+        Row c9fafb9d, rule 3. The row's STATUS is never touched here: a request asks, it
+        does not move (Rick, 2026-09-08). One request per row — a re-file over an ANSWERED
+        request overwrites the three columns, and the verdict it replaces survives as its
+        own event, so the history lives in the audit trail rather than the columns.
+
+        Requires:
+            - item is a TaskItem loaded in THIS session, row-locked by the router
+            - move has ALREADY passed `task_request_lifecycle.refusal_for_filing` and
+              `refusal_for_refiling` against the row's real state — this method decides
+              nothing
+            - actor is the router's `recorded_actor(...)` result; reason is non-blank
+            - deletion_id, when given, has ALREADY passed `task_request_pledge.refusal_for_pledge`
+              under a lock on the pledged row (Sword of Damocles, row ab8c5728)
+            - pledged_by is the persona that rule resolved for the requester when deletion_id
+              is given, else None
+
+        Ensures:
+            - request_state := 'pending', request_move := move, request_ts := the DB clock
+            - request_deletion_id := deletion_id, INCLUDING None — a re-file replaces the
+              old pledge rather than inheriting it, so a demote never carries one
+            - request_pledged_by := pledged_by, replaced the same way (RB-2)
+            - item.status untouched
+            - exactly one TaskEvent appended: transition='request_filed',
+              receipt_refs=None, reason naming the move, the prior request state, the
+              pledged row when there is one, and the caller's reason
+            - flush() called; commit NOT called (caller's get_db() commits)
+
+        Returns:
+            The appended TaskEvent instance
+        """
+        before                   = item.request_state
+        item.request_state       = "pending"
+        item.request_move        = move
+        item.request_ts          = self._db_clock_now()
+        item.request_deletion_id = deletion_id
+        item.request_pledged_by  = pledged_by
+        pledge                   = f" | pledged for deletion: {deletion_id}" if deletion_id is not None else ""
+        event_reason             = f"move: {move!r} (prior request: {before!r}){pledge} | reason: {reason}"
+        return self._append_event( item.id, actor, "request_filed", authority, receipt_refs=None, reason=event_reason )
+
+    def find_pending_admit_pledging( self, pledge_id: uuid.UUID, excluding_id: uuid.UUID ) -> Optional[uuid.UUID]:
+        """
+        The row whose PENDING admit request already pledges `pledge_id` for deletion, if any.
+
+        Sword of Damocles (row ab8c5728): one pledge pays for one admit. Called by the filing
+        door while it holds the lock on the pledged row, so two requests racing to pledge the
+        same row are serialised on that lock and the second one sees the first.
+
+        Requires:
+            - pledge_id / excluding_id are UUIDs; excluding_id is the row being filed on, so a
+              re-file over its own stranded request does not count against itself
+
+        Ensures:
+            - returns the id of one other row with request_state 'pending', request_move
+              'admit' and request_deletion_id == pledge_id, or None
+            - an ANSWERED request does not count: its pledge was consumed or released
+        """
+        row = (
+            self.session.query( TaskItem.id )
+            .filter( TaskItem.request_deletion_id == pledge_id )
+            .filter( TaskItem.request_state == "pending" )
+            .filter( TaskItem.request_move == "admit" )
+            .filter( TaskItem.id != excluding_id )
+            .first()
+        )
+        return row[ 0 ] if row is not None else None
+
+    def pledge_facts_for_id( self, id: uuid.UUID ) -> tuple:
+        """
+        Read one pledged row's ( status, owner_persona ) WITHOUT locking it.
+
+        The filing door's stranding check (RB-2): a pending admit whose pledge died or changed
+        hands may be re-filed. That permission is only a re-file of the manager's own request —
+        the verdict re-reads both facts under its lock before anything is dropped.
+
+        Ensures:
+            - returns ( status, owner_persona ) of the row, or ( None, None ) when it does not exist
+        """
+        row = self.session.query( TaskItem.status, TaskItem.owner_persona ).filter( TaskItem.id == id ).first()
+        return ( row[ 0 ], row[ 1 ] ) if row is not None else ( None, None )
+
+    def peek_request_deletion_id( self, id: uuid.UUID ) -> Optional[uuid.UUID]:
+        """
+        Read a row's pledged deletion id WITHOUT locking it.
+
+        Exists only so the verdict door can learn which second row it must lock before it
+        locks the first, and so take both locks in id order — the same order the filing
+        door uses, which is what keeps the two doors from deadlocking on a crossed pair.
+        The caller re-reads the value under the lock and refuses if it moved.
+
+        Ensures:
+            - returns the stored request_deletion_id, or None when the row has none or does
+              not exist
+        """
+        row = self.session.query( TaskItem.request_deletion_id ).filter( TaskItem.id == id ).first()
+        return row[ 0 ] if row is not None else None
+
+    def apply_request_verdict(
+        self,
+        item      : TaskItem,
+        verdict   : str,
+        actor     : str,
+        authority : str,
+    ) -> TaskEvent:
+        """
+        Write the operator's verdict onto a pending promote/demote request + append its event.
+
+        Row c9fafb9d. The verdict door used to set `request_state` on the row inline and
+        append nothing, so an answer Rick gave left no record of WHO gave it — and the
+        identity census (`test_the_edit_door_records_a_real_identity.py`) could not see the
+        door as a store writer at all. Routing the write through here gives it both.
+
+        Requires:
+            - item is a TaskItem loaded in THIS session, row-locked by the router
+            - verdict has ALREADY passed `task_request_lifecycle.refusal_for_verdict`
+              against the row's real state — this method decides nothing
+            - actor is the router's `recorded_actor(...)` result, never a typed string
+
+        Ensures:
+            - item.request_state := verdict; request_move / request_ts and the ticket's
+              status are untouched (a denial finishes the REQUEST, not the row)
+            - exactly one TaskEvent appended: transition='request_<verdict>',
+              receipt_refs=None, reason naming the before/after state and the move
+            - flush() called; commit NOT called (caller's get_db() commits)
+
+        Returns:
+            The appended TaskEvent instance
+        """
+        before             = item.request_state
+        item.request_state = verdict
+        reason             = f"request_state: {before!r} -> {verdict!r} (move: {item.request_move!r})"
+        return self._append_event( item.id, actor, f"request_{verdict}", authority, receipt_refs=None, reason=reason )
 
     def apply_amendment(
         self,
@@ -795,6 +1169,8 @@ class TaskRepository( BaseRepository[TaskItem] ):
         owed_only           : bool = False,
         hide_parked         : bool = False,
         now                 : Optional[datetime] = None,
+        updated_since       : Optional[datetime] = None,
+        updated_until       : Optional[datetime] = None,
     ) -> List[TaskItem]:
         """
         The deterministic owed-work query (design R4) — identical for every caller.
@@ -855,7 +1231,18 @@ class TaskRepository( BaseRepository[TaskItem] ):
             # Without them the guard counts every non-terminal row and could reject
             # an owed_only query whose real result is well under threshold —
             # rejecting a small answer because a big one was hypothetically possible.
-            non_terminal = self.count_tasks( include_terminal=False, owed_only=owed_only, hide_parked=hide_parked, now=now, **filters )
+            # Window threaded in for the SAME reason owed_only/now are, one comment
+            # up: the guard must measure the payload this query will ACTUALLY
+            # return. Counting every row outside a 24h window and then refusing
+            # would reject a small answer because a big one was hypothetically
+            # possible. Deliberately NOT added to `filters` — that dict feeds
+            # `is_unscoped`, and whether a date window counts as a NARROWING filter
+            # is a separate ruling nobody has made. A windowed-but-otherwise-bare
+            # query still meets the guard, exactly as it did before.
+            non_terminal = self.count_tasks(
+                include_terminal=False, owed_only=owed_only, hide_parked=hide_parked, now=now,
+                updated_since=updated_since, updated_until=updated_until, **filters
+            )
             if non_terminal > UNSCOPED_QUERY_THRESHOLD:
                 raise UnscopedQueryError( non_terminal, UNSCOPED_QUERY_THRESHOLD )
 
@@ -863,7 +1250,8 @@ class TaskRepository( BaseRepository[TaskItem] ):
 
         query = self._apply_scalar_filters(
             query, owner_persona, status, gate_class, urgency,
-            accountable_manager, project, item_class, correlation_key, id_prefix
+            accountable_manager, project, item_class, correlation_key, id_prefix,
+            updated_since=updated_since, updated_until=updated_until
         )
         query = self._apply_owed_filter( query, owed_only, hide_parked, status, include_terminal, now )
 
@@ -872,7 +1260,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
     @staticmethod
     def _apply_scalar_filters( query, owner_persona, status, gate_class, urgency,
                                accountable_manager, project, item_class, correlation_key,
-                               id_prefix ):
+                               id_prefix, updated_since=None, updated_until=None ):
         """
         The ONE place the exact-match filters are applied — shared by query_tasks,
         count_tasks and status_breakdown.
@@ -913,6 +1301,27 @@ class TaskRepository( BaseRepository[TaskItem] ):
         if id_prefix is not None:
             hyphened = hyphenate_compact_prefix( id_prefix )
             query    = query.filter( cast( TaskItem.id, String ).like( f"{hyphened}%" ) )
+        # Activity window (row 0107c19e / Rick's Finished-Tasks P0, 2026-09-07).
+        #
+        # KEYED ON `updated_ts`, NOT `created_ts`, AND THE CHOICE IS THE WHOLE
+        # POINT: a row minted three weeks ago and closed this afternoon belongs
+        # in "the last 24 hours". Keying on creation would show the rows that
+        # were BORN in the window — a different question, and not the one a
+        # finished-work view asks. `created_ts` remains the ORDER (see
+        # query_tasks); this is the FILTER. Two different columns doing two
+        # different jobs is deliberate.
+        #
+        # Bounds are INCLUSIVE on both ends, matching the events stream's
+        # since/until at `query_event_stream` rather than inventing a second
+        # convention on the same page.
+        #
+        # Landing here rather than at the five call sites is this helper's own
+        # stated reason for existing: the page seam, the COUNT(*) seam and the
+        # breakdown seam cannot disagree about the window if there is only one
+        # window. A caller that passes neither argument is byte-identical to
+        # its behaviour before this block existed.
+        if updated_since is not None:       query = query.filter( TaskItem.updated_ts >= updated_since )
+        if updated_until is not None:       query = query.filter( TaskItem.updated_ts <= updated_until )
         return query
 
     @staticmethod
@@ -967,9 +1376,16 @@ class TaskRepository( BaseRepository[TaskItem] ):
               terminal-exclusion default EXACTLY when both are False
             - never mutates the caller's query in place
         """
+        # HOISTED out of the owed/park branch (2026-09-02). It used to be defaulted
+        # only inside that branch, which was correct while `now` was read there and
+        # nowhere else. The holding-area chase made the terminal-exclusion default
+        # read it too, on a path the branch never covers — so a plain un-statused
+        # query arrived with now=None and raised. Defaulting once, up front, is what
+        # makes "read time" mean the same thing on every path through this function.
+        if now is None:
+            now = datetime.now( timezone.utc )
+
         if owed_only or ( hide_parked and status != PARK_STATUS ):
-            if now is None:
-                now = datetime.now( timezone.utc )
             if owed_only and status is None:
                 # owed_status_clause is the CANONICAL one-call admission:
                 # queued U in_progress U (parked AND NOT park-active). Composing
@@ -982,13 +1398,55 @@ class TaskRepository( BaseRepository[TaskItem] ):
             # rows — correct here precisely because these callers already select
             # the parked status themselves (all-non-terminal / explicit filter).
             if not include_terminal and status is None:
-                query = query.filter( TaskItem.status.notin_( TERMINAL_STATUSES ) )
+                query = query.filter( or_(
+                TaskItem.status.notin_( BOARD_INVISIBLE_STATUSES ),
+                # 🔨 Rick 2026-09-02: the holding area is SELF-EXPIRING. A
+                # `not_approved` row hides only while its triage chase is still
+                # in the future; once it comes due the row stops hiding itself,
+                # which is the whole point of the chase. Terminal rows have no
+                # chase and are unaffected — this widens the visible set for one
+                # status only.
+                and_( TaskItem.status == NOT_APPROVED_STATUS,
+                      # 🔴 `isnot( None )` ADDED 2026-09-03 (P0 46799ba3, Rick). Without
+                      # it a held row carrying NO chase at all was re-admitted here, and
+                      # NOTHING sets a chase when a row is minted into holding — so every
+                      # held row was born chase-less and came straight back onto the
+                      # board. The gate was inert by construction, not for one row.
+                      #
+                      # Rick's self-expiry ruling is UNCHANGED and is what the next line
+                      # still implements: a held row hides until its triage chase comes
+                      # due. This conjunct only says that COMING DUE REQUIRES A DUE DATE.
+                      # A row with no chase has no expiry to reach, so it keeps holding.
+                      TaskItem.next_chase_ts.isnot( None ),
+                      ~holding_is_active_clause( TaskItem, now ) ),
+            ) )
             return query.filter( owed_clause( TaskItem, now ) )
         # Terminal-exclusion default: an un-status'd query drops done/dropped unless
         # the caller opts in via include_terminal. An explicit `status` filter (incl.
         # status=done/dropped) governs on its own — no double-filtering.
         if not include_terminal and status is None:
-            query = query.filter( TaskItem.status.notin_( TERMINAL_STATUSES ) )
+            query = query.filter( or_(
+                TaskItem.status.notin_( BOARD_INVISIBLE_STATUSES ),
+                # 🔨 Rick 2026-09-02: the holding area is SELF-EXPIRING. A
+                # `not_approved` row hides only while its triage chase is still
+                # in the future; once it comes due the row stops hiding itself,
+                # which is the whole point of the chase. Terminal rows have no
+                # chase and are unaffected — this widens the visible set for one
+                # status only.
+                and_( TaskItem.status == NOT_APPROVED_STATUS,
+                      # 🔴 `isnot( None )` ADDED 2026-09-03 (P0 46799ba3, Rick). Without
+                      # it a held row carrying NO chase at all was re-admitted here, and
+                      # NOTHING sets a chase when a row is minted into holding — so every
+                      # held row was born chase-less and came straight back onto the
+                      # board. The gate was inert by construction, not for one row.
+                      #
+                      # Rick's self-expiry ruling is UNCHANGED and is what the next line
+                      # still implements: a held row hides until its triage chase comes
+                      # due. This conjunct only says that COMING DUE REQUIRES A DUE DATE.
+                      # A row with no chase has no expiry to reach, so it keeps holding.
+                      TaskItem.next_chase_ts.isnot( None ),
+                      ~holding_is_active_clause( TaskItem, now ) ),
+            ) )
         return query
 
     def count_tasks_by_status(
@@ -1002,6 +1460,8 @@ class TaskRepository( BaseRepository[TaskItem] ):
         item_class          : Optional[str] = None,
         correlation_key     : Optional[str] = None,
         id_prefix           : Optional[str] = None,
+        updated_since       : Optional[datetime] = None,
+        updated_until       : Optional[datetime] = None,
         include_terminal    : bool = False,
         owed_only           : bool = False,
         hide_parked         : bool = False,
@@ -1050,7 +1510,8 @@ class TaskRepository( BaseRepository[TaskItem] ):
 
         query = self._apply_scalar_filters(
             query, owner_persona, status, gate_class, urgency,
-            accountable_manager, project, item_class, correlation_key, id_prefix
+            accountable_manager, project, item_class, correlation_key, id_prefix,
+            updated_since=updated_since, updated_until=updated_until
         )
         # The SAME helper count_tasks and query_tasks use — the breakdown MUST select
         # the identical admitted set, or the sum-parity gate is comparing two
@@ -1070,6 +1531,8 @@ class TaskRepository( BaseRepository[TaskItem] ):
         item_class          : Optional[str] = None,
         correlation_key     : Optional[str] = None,
         id_prefix           : Optional[str] = None,
+        updated_since       : Optional[datetime] = None,
+        updated_until       : Optional[datetime] = None,
         include_terminal    : bool = False,
         owed_only           : bool = False,
         hide_parked         : bool = False,
@@ -1096,12 +1559,15 @@ class TaskRepository( BaseRepository[TaskItem] ):
             - returns { priority: count } over ONLY the priorities actually present —
               an absent priority is absent, never a 0 bucket, so a caller cannot
               mistake "no P0 rows" for "P0 was not measured"
-            - keys are the RAW stored priority strings (P0..P3)
+            - keys are the RAW stored priority strings (P0..P5 since row
+              0107c19e widened VALID_PRIORITIES on 2026-09-07; VALID_PRIORITIES
+              is the authority and this line is not a second copy of it)
         """
         query = self.session.query( TaskItem.priority, func.count( TaskItem.id ) )
         query = self._apply_scalar_filters(
             query, owner_persona, status, gate_class, urgency,
-            accountable_manager, project, item_class, correlation_key, id_prefix
+            accountable_manager, project, item_class, correlation_key, id_prefix,
+            updated_since=updated_since, updated_until=updated_until
         )
         query = self._apply_owed_filter( query, owed_only, hide_parked, status, include_terminal, now )
 
@@ -1117,6 +1583,8 @@ class TaskRepository( BaseRepository[TaskItem] ):
         item_class          : Optional[str] = None,
         correlation_key     : Optional[str] = None,
         id_prefix           : Optional[str] = None,
+        updated_since       : Optional[datetime] = None,
+        updated_until       : Optional[datetime] = None,
         include_terminal    : bool = False,
         owed_only           : bool = False,
         hide_parked         : bool = False,
@@ -1164,7 +1632,8 @@ class TaskRepository( BaseRepository[TaskItem] ):
         query = self.session.query( TaskItem.project, func.count( TaskItem.id ) )
         query = self._apply_scalar_filters(
             query, owner_persona, status, gate_class, urgency,
-            accountable_manager, None, item_class, correlation_key, id_prefix
+            accountable_manager, None, item_class, correlation_key, id_prefix,
+            updated_since=updated_since, updated_until=updated_until
         )
         query = self._apply_owed_filter( query, owed_only, hide_parked, status, include_terminal, now )
 
@@ -1181,6 +1650,8 @@ class TaskRepository( BaseRepository[TaskItem] ):
         item_class          : Optional[str] = None,
         correlation_key     : Optional[str] = None,
         id_prefix           : Optional[str] = None,
+        updated_since       : Optional[datetime] = None,
+        updated_until       : Optional[datetime] = None,
         include_terminal    : bool = False,
         owed_only           : bool = False,
         hide_parked         : bool = False,
@@ -1218,7 +1689,8 @@ class TaskRepository( BaseRepository[TaskItem] ):
 
         query = self._apply_scalar_filters(
             query, owner_persona, status, gate_class, urgency,
-            accountable_manager, project, item_class, correlation_key, id_prefix
+            accountable_manager, project, item_class, correlation_key, id_prefix,
+            updated_since=updated_since, updated_until=updated_until
         )
         # The SAME helper query_tasks uses — this is the COUNT(*)/page parity seam
         # the Stop-hook oracle reads. Rachel's gate asserts
@@ -1241,8 +1713,13 @@ class TaskRepository( BaseRepository[TaskItem] ):
         Returns:
             List of TaskEvent instances (may be empty)
         """
+        # joinedload for the SAME reason as query_events: `_serialize_event` reads
+        # `event.item.title`. Here every event shares one item, so the cost avoided is one
+        # query rather than N — but the serializer's requirement must hold at EVERY call site,
+        # not only the one where the saving is large.
         return (
             self.session.query( TaskEvent )
+            .options( joinedload( TaskEvent.item ) )
             .filter( TaskEvent.item_id == item_id )
             .order_by( TaskEvent.id )
             .all()
@@ -1252,6 +1729,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
         self,
         actor      : Optional[str] = None,
         transition : Optional[str] = None,
+        to_status  : Optional[str] = None,
         project    : Optional[str] = None,
         since      : Optional[datetime] = None,
         until      : Optional[datetime] = None,
@@ -1279,16 +1757,173 @@ class TaskRepository( BaseRepository[TaskItem] ):
         Returns:
             List of TaskEvent instances (may be empty)
         """
-        query = self.session.query( TaskEvent )
+        # EAGER-LOAD THE ITEM. `_serialize_event` puts the item's TITLE on the wire, and a
+        # lazy relationship would emit one SELECT per event — N+1 across a page capped at 500.
+        # The fix that creates a worse problem than it solves is not a fix (row 2c6a87f3).
+        query = self.session.query( TaskEvent ).options( joinedload( TaskEvent.item ) )
 
         if project is not None:
             query = query.join( TaskItem, TaskEvent.item_id == TaskItem.id ).filter( TaskItem.project == project )
         if actor is not None:      query = query.filter( TaskEvent.actor == actor )
         if transition is not None: query = query.filter( TaskEvent.transition == transition )
+        # `to_status` asks the question the CALLER means — "which rows reached `done`?" — which
+        # the exact-match `transition` filter cannot express: transitions are "from->to" strings
+        # and 7 non-terminal sources x 3 terminal targets is 21 separate calls. The suffix is
+        # exact because a transition carries exactly one "->" (creation stamps "->queued", which
+        # this matches deliberately).
+        # ⚠️ THE ROUTER'S VALIDATION IS LOAD-BEARING, NOT COSMETIC: `%` and `_` are LIKE
+        # wildcards, so an unvalidated value would silently widen the match instead of erroring.
+        if to_status is not None:  query = query.filter( TaskEvent.transition.like( f"%->{to_status}" ) )
         if since is not None:      query = query.filter( TaskEvent.ts >= since )
         if until is not None:      query = query.filter( TaskEvent.ts <= until )
 
         return query.order_by( TaskEvent.ts.desc(), TaskEvent.id.desc() ).limit( limit ).offset( offset ).all()
+
+    def count_admissions_since( self, actor: str, since: datetime ) -> int:
+        """
+        How many rows this caller has admitted OUT of the holding area since `since`.
+
+        THE COUNT BEHIND "NO MANAGER BATCHES" (Rick, 2026-09-04, row 998c7529's successor).
+        His words: "A manager should never be able to fire a batch. They should only ever
+        request 1 ticket at a time."
+
+        🔴 WHY THIS IS A QUERY AND NOT A COUNTER. There is no batch endpoint to refuse —
+        measured 2026-09-04: 14 task routes, 10 paths, zero bulk doors, and no task model
+        carrying a list of row ids. The UI's batch approve is a CLIENT-SIDE LOOP
+        (notifications.js `_applyHoldingBatch`) firing N single-row transitions, each one
+        byte-indistinguishable from a legitimate single request. So the only thing that can
+        tell a batch from a ticket is HOW MANY arrived and how fast — which the append-only
+        event trail already records, in the same transaction that moved each row.
+        ⇒ No new state, no in-memory counter to lose on a bounce, and the evidence for any
+        refusal is a row somebody can go and read.
+
+        ⚠️ POLICY CONTROL, NOT A SECURITY BOUNDARY, and it inherits that honestly from the
+        actor it keys on. `actor` is caller-DECLARED, so a caller who varies it between
+        requests is not counted together. That is the same limit `refusal_for_admission`
+        already documents about the approver allowlist; this does not widen it and does not
+        pretend to close it.
+
+        Requires:
+            - actor is the caller-declared actor string; since is a tz-aware datetime
+
+        Ensures:
+            - counts ONLY admissions out of the holding area — events whose transition
+              begins "not_approved->" — never every transition the caller made
+            - excludes the not_approved->not_approved no-op, which admits nothing
+            - counts in SQL, so a long window costs one round trip rather than N rows
+            - returns 0 for an actor with no such events
+
+        Returns:
+            int — admissions by this actor at or after `since`
+        """
+        return (
+            self.session.query( func.count( TaskEvent.id ) )
+                .filter( TaskEvent.actor == actor )
+                .filter( TaskEvent.ts >= since )
+                .filter( TaskEvent.transition.like( "not_approved->%" ) )
+                .filter( TaskEvent.transition != "not_approved->not_approved" )
+                .scalar()
+        ) or 0
+
+    def count_created_and_closed(
+        self,
+        since   : datetime,
+        until   : Optional[datetime] = None,
+        project : Optional[str]      = None,
+    ) -> dict:
+        """
+        Count creations and closures in a time window — SERVER-SIDE, in SQL.
+
+        Feeds the closed-vs-new ratio gate (María's design,
+        planning-is-prompting/src/rnd/2026.09.01-closed-vs-new-ratio-gate.md), which is
+        Rick's durable, mechanical replacement for the ticket moratorium he declared by
+        voice: "It's way too easy for you guys to add tickets to the list and way too hard
+        to get them removed."
+
+        🔴 WHY THIS EXISTS RATHER THAN A CALLER PAGING query_events. Two reasons, both
+        measured rather than argued:
+
+        1. `query_events` filters are EXACT-MATCH ("each filter is None or an exact-match
+           value" — its own contract, one method up). Neither half of this question is an
+           exact match. Closures arrive as several distinct strings, and an enumeration is
+           a list somebody has to keep current: add a status, and the closure count
+           silently undercounts with nothing failing.
+
+        2. `query_events` returns a PAGE, and a caller counting `len( rows )` gets a number
+           that is right until it quietly is not. The endpoint caps `limit` at 500. This
+           returns a COUNT from the database, so there is no page to cap.
+
+        SUFFIX AND PREFIX MATCHING, and the census behind each (whole board,
+        `lupin_db_dev`, 2026-09-01):
+
+            created  = transition LIKE '->%'      an EMPTY left side is the creation stamp
+                       ->queued   2292
+                       ->blocked     4
+            closed   = transition LIKE '%->done'
+                       in_progress->done  941   queued->done  659   blocked->done  210
+                       review->done        56   parked->done   24
+
+        ⚠️ A HARDCODED '->queued' WOULD UNDERCOUNT, and the rate depends entirely on the
+        window you measure. María measured 2 of 10 creations as `->blocked` in one 24-hour
+        window — 20%. Across the whole board it is 4 of 2296 — 0.17%. Both numbers are
+        correct about different populations; neither is the rate. That is exactly why this
+        matches a PREFIX instead of a status list.
+
+        🔴 `dropped` IS EXCLUDED FROM `closed`, BY RULING, AND IT IS THE LOAD-BEARING
+        CHOICE. If dropping counted, the gate is trivially defeated: drop three stale rows,
+        mint three new ones, ratio holds at 1.0 forever and the list never shrinks — the
+        exact asymmetry this was filed against, wearing a green light. The cost is that
+        legitimate board hygiene earns no credit, accepted deliberately: the alternative is
+        a gate satisfied by deleting the evidence.
+
+        ⚠️ THE TWO PATTERNS CAN OVERLAP IN PRINCIPLE. A `->done` stamp — a row created
+        directly into done — matches BOTH, and would count once in each. That is the right
+        answer (a row really was created, and it really was closed), not a bug to suppress.
+        Measured today: ZERO such events exist, and no `->dropped` either. Pinned by
+        `test_a_row_born_done_would_count_as_both` so the assumption fails loudly rather
+        than drifting.
+
+        Requires:
+            - since is a datetime bounding TaskEvent.ts inclusively (>=)
+            - until is None (meaning "up to now") or a datetime bounding it inclusively
+            - project is None (fleet-wide, which is Rick's ruling) or an exact project name
+
+        Ensures:
+            - returns { "created": int, "closed": int, "window_start": datetime,
+                        "window_end": datetime | None, "project": str | None }
+            - counts come from SQL COUNT, never from len() of a page, so no cap applies
+            - the caller computes the ratio — division by zero is a POLICY question
+              (`closed == 0` with creations is a DENY, `0/0` is an ALLOW showing "—"),
+              and policy does not belong in a repository
+
+        Returns:
+            dict as described above; both counts are 0 on an empty window, never None
+        """
+        created_pattern = CREATED_TRANSITION_LIKE
+        closed_pattern  = CLOSED_TRANSITION_LIKE
+
+        def _scoped( pattern ):
+            q = self.session.query( func.count( TaskEvent.id ) )
+            # The janitor's straggler lane is not flow (Rick's keypress, 2026-09-29): its
+            # rows are minted by the arbiter and close as `dropped`, which this count never
+            # credits, so counting their creation would tax every other create forever.
+            # A NOT IN over that lane's (few) ids keeps fleet-wide free of the join.
+            q = q.filter( ~TaskEvent.item_id.in_(
+                select( TaskItem.id ).where( TaskItem.correlation_key.startswith( FLOW_EXCLUDED_KEY_PREFIX ) ) ) )
+            if project is not None:
+                q = q.join( TaskItem, TaskEvent.item_id == TaskItem.id ).filter( TaskItem.project == project )
+            q = q.filter( TaskEvent.transition.like( pattern ) )
+            q = q.filter( TaskEvent.ts >= since )
+            if until is not None: q = q.filter( TaskEvent.ts <= until )
+            return q.scalar() or 0
+
+        return {
+            "created"      : _scoped( created_pattern ),
+            "closed"       : _scoped( closed_pattern ),
+            "window_start" : since,
+            "window_end"   : until,
+            "project"      : project,
+        }
 
     def _append_event(
         self,

@@ -92,7 +92,7 @@ class TestWatcherInitialResolution:
     """
 
     def test_a_resolved_id_upgrades_both_the_session_and_the_sender( self, monkeypatch, caplog ):
-        monkeypatch.setattr( cv, "wait_for_session_id", lambda **k: "bbbbbbbb-1111-2222" )
+        monkeypatch.setattr( cv, "wait_for_session_id_with_source", lambda **k: ( "bbbbbbbb-1111-2222", "ppid" ) )
         monkeypatch.setattr( cv, "_get_cc_metadata", lambda: { "source": "session_file" } )
         monkeypatch.setattr( cv, "CANONICAL_PROJECT", "lupin", raising=False )
         with caplog.at_level( "INFO", logger=cv.logger.name ):
@@ -109,7 +109,7 @@ class TestWatcherInitialResolution:
         it are attributed to a project rather than a session. The warning is the
         only signal that the roster will not show this seat.
         """
-        monkeypatch.setattr( cv, "wait_for_session_id", lambda **k: "aaaaaaaa-x" )
+        monkeypatch.setattr( cv, "wait_for_session_id_with_source", lambda **k: ( "aaaaaaaa-x", "ppid" ) )
         monkeypatch.setattr( cv, "_get_cc_metadata", lambda: { "source": "fallback" } )
         with caplog.at_level( "WARNING", logger=cv.logger.name ):
             cv._session_watcher_thread()
@@ -125,7 +125,7 @@ class TestWatcherInitialResolution:
         """
         def boom( **k ):
             raise RuntimeError( "no bridge ever appeared" )
-        monkeypatch.setattr( cv, "wait_for_session_id", boom )
+        monkeypatch.setattr( cv, "wait_for_session_id_with_source", boom )
         with caplog.at_level( "CRITICAL", logger=cv.logger.name ):
             cv._session_watcher_thread()
 
@@ -139,7 +139,7 @@ class TestWatcherInitialResolution:
 class TestWatcherMonitoringLoop:
 
     def _phase1_ok( self, monkeypatch ):
-        monkeypatch.setattr( cv, "wait_for_session_id", lambda **k: "aaaaaaaa-x" )
+        monkeypatch.setattr( cv, "wait_for_session_id_with_source", lambda **k: ( "aaaaaaaa-x", "ppid" ) )
         monkeypatch.setattr( cv, "_get_cc_metadata", lambda: { "source": "session_file" } )
         monkeypatch.setattr( cv, "clear_cached_session_id", lambda: None )
         monkeypatch.setattr( cv, "CANONICAL_PROJECT", "lupin", raising=False )
@@ -230,7 +230,17 @@ class TestDieNoSessionId:
         assert ei.value.args[ 0 ] == 1
         assert sent[ "req" ].sender_id.endswith( "#mcp-error" )
         assert sent[ "req" ].priority.value == "high"
-        assert "Restart Claude Code" in sent[ "req" ].message
+        # ⚠️ THIS LINE USED TO ASSERT "Restart Claude Code" IS IN THE MESSAGE, and it
+        # was pinning a FALSE instruction. Measured 2026-09-03 for Rick's P0 (row
+        # f6a43e37): no Claude-Code-managed cosa-voice server failed anywhere that
+        # day, so a restart could not have fixed this and the operator was being sent
+        # to do something that cannot work. Deleting the assertion would have left the
+        # sender/priority pair as the only claim about the alert; it is re-pointed at
+        # the property that actually matters instead — the message names the mechanism
+        # and prescribes nothing false. The full contract lives in
+        # test_the_alert_names_what_actually_failed.py.
+        assert "Restart Claude Code" not in sent[ "req" ].message
+        assert "session identity" in sent[ "req" ].message.lower()
 
     def test_it_exits_even_when_the_alert_cannot_be_sent( self, monkeypatch, caplog ):
         # The exit is the point. A server that cannot be told is still a server
@@ -300,7 +310,15 @@ class TestWaitForSenderId:
         assert cv._wait_for_sender_id( timeout=0.1 ) == cv.SENDER_ID
 
     def test_a_gate_that_never_opens_takes_the_exit_path( self, monkeypatch ):
+        # ⚠️ THE RETRY LOOP NOW SITS BETWEEN THE UNOPENED GATE AND THE EXIT (Rick's
+        # P0, row f6a43e37), so resolution has to be stubbed to keep failing. Without
+        # the stub this test would call the REAL resolver, find one of the live
+        # bridges on the box, and pass or fail on whether a machine happened to have
+        # a session running — the exit path is the claim, not the environment.
         called = []
+        monkeypatch.setattr( cv, "wait_for_session_id_with_source",
+                             lambda **k: ( _ for _ in () ).throw( RuntimeError( "no bridge" ) ) )
+        monkeypatch.setattr( cv.time, "sleep", lambda *a, **k: None )
         monkeypatch.setattr( cv, "_die_no_session_id", lambda: called.append( True ) )
         cv._wait_for_sender_id( timeout=0.01 )             # event never set
         assert called == [ True ]
@@ -309,6 +327,11 @@ class TestWaitForSenderId:
         # The gate opens in a `finally` regardless of outcome, so "opened" alone
         # does not mean "resolved". The flag is the real verdict.
         called = []
+        # Same reason as the test above: the retry now stands between the failed
+        # resolution and the alert, so it is stubbed to keep failing.
+        monkeypatch.setattr( cv, "wait_for_session_id_with_source",
+                             lambda **k: ( _ for _ in () ).throw( RuntimeError( "no bridge" ) ) )
+        monkeypatch.setattr( cv.time, "sleep", lambda *a, **k: None )
         monkeypatch.setattr( cv, "_die_no_session_id", lambda: called.append( True ) )
         monkeypatch.setattr( cv, "_session_failed", True, raising=False )
         cv._session_ready.set()

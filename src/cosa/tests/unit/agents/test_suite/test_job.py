@@ -624,6 +624,72 @@ def test_execute_not_executed_tier_reports_not_run_not_failed( monkeypatch, tmp_
     assert job.cost_summary[ "total_not_executed" ] == 1
 
 
+# =========================================================================== #
+# c8 threshold miss  (row 1a11fe96 — 4020/4020 green read as ALL PASSED under c8 red)
+# =========================================================================== #
+# Verbatim from io/test-suite/2026.09.14-at-19:25-EDT-typescript-results.md:30342-30344 (ts-0678b4dc).
+C8_RED_TAIL_2026_09_14 = (
+    "# tests 4020\n# pass 4020\n# fail 0\n# skipped 0\n"
+    "ERROR: Coverage for lines (99.99%) does not meet global threshold (100%)\n"
+    "ERROR: Coverage for branches (99.75%) does not meet global threshold (100%)\n"
+    "ERROR: Coverage for statements (99.99%) does not meet global threshold (100%)\n"
+)
+
+
+def test_parse_c8_threshold_failures_reads_the_2026_09_14_log():
+    """The three ERROR lines from the false-green run are found, in order, stripped."""
+    assert TSJob._parse_c8_threshold_failures( C8_RED_TAIL_2026_09_14 ) == [
+        "ERROR: Coverage for lines (99.99%) does not meet global threshold (100%)",
+        "ERROR: Coverage for branches (99.75%) does not meet global threshold (100%)",
+        "ERROR: Coverage for statements (99.99%) does not meet global threshold (100%)",
+    ]
+
+
+@pytest.mark.parametrize( "stdout", [
+    "",
+    "# tests 4020\n# pass 4020\n# fail 0\n",                                 # green c8, no ERROR line
+    "ok 12 - ERROR: Coverage for lines is mentioned inside a test name\n",   # not at line start
+] )
+def test_parse_c8_threshold_failures_ignores_non_threshold_output( stdout ):
+    assert TSJob._parse_c8_threshold_failures( stdout ) == []
+
+
+@pytest.mark.parametrize( "counts, kwargs, expected", [
+    ( ( 4020, 0, 0, 0 ), { "coverage_miss": True  }, "FAILED" ),          # the 09-14 run
+    ( ( 4020, 0, 0, 0 ), { "coverage_miss": False }, "PASSED" ),
+    ( ( 0, 0, 0, 0 ),    { "coverage_miss": True  }, "NOT EXECUTED" ),    # nothing ran → still non-execution
+    ( ( 5, 0, 0, 0 ),    { "coverage_miss": True, "collection_error": True }, "COLLECTION ERROR" ),
+] )
+def test_classify_outcome_coverage_miss( counts, kwargs, expected ):
+    assert TSJob._classify_outcome( *counts, **kwargs ) == expected
+
+
+def test_execute_c8_threshold_miss_is_not_all_passed( monkeypatch, tmp_path, patched_voice ):
+    """A typescript run with every test green but c8 red is FAILED everywhere a reader looks."""
+    job = _make_job( test_types=[ "typescript" ] )
+    monkeypatch.setattr( job_mod.cu, "get_project_root", lambda: str( tmp_path ) )
+    misses = TSJob._parse_c8_threshold_failures( C8_RED_TAIL_2026_09_14 )
+    monkeypatch.setattr( job, "_run_suite", lambda st, pr: {
+        "passed": 4020, "failed": 0, "skipped": 0, "errors": 0,
+        "exit_code": 1, "log_path": None, "duration": 1.0,
+        "coverage_threshold_failures": misses,
+    } )
+
+    summary = asyncio.run( job._execute() )
+
+    assert "ALL PASSED" not in summary
+    assert job.cost_summary[ "all_passed" ] is False
+    spoken = [ c.args[ 0 ] for c in patched_voice.call_args_list if c.args ]
+    per_suite = [ m for m in spoken if m.startswith( "typescript:" ) ]
+    assert per_suite and "FAILED" in per_suite[ 0 ]
+    import pathlib
+    report = pathlib.Path( job.report_path ).read_text()
+    assert "typescript — FAIL" in report
+    assert "**COVERAGE BELOW THRESHOLD**: ERROR: Coverage for branches (99.75%)" in report
+    assert "COVERAGE BELOW THRESHOLD" in job.artifacts[ "abstract" ]
+    assert "remediation_snapshot_path" not in job.artifacts   # no failing test to remediate
+
+
 def test_execute_expands_all_with_debug( monkeypatch, tmp_path, patched_voice, capsys ):
     """test_types=['all'] + debug logs the expansion and runs each component."""
     job = _make_job( test_types=[ "all" ], debug=True )
@@ -745,6 +811,21 @@ def test_run_suite_parses_deselected_from_stdout( monkeypatch, no_real_log ):
     job = _make_job()
     res = job._run_suite( "unit", "/proj" )
     assert res[ "deselected" ] == 687
+
+
+@pytest.mark.parametrize( "suite_type, expected_misses", [
+    ( "typescript", 3 ),      # the c8 runner: ERROR lines become the result's own fact
+    ( "unit",       0 ),      # a pytest tier: the same text is never read as a c8 miss
+] )
+def test_run_suite_records_c8_threshold_failures( monkeypatch, no_real_log, suite_type, expected_misses ):
+    """Row 1a11fe96: _run_suite carries c8's printed threshold misses into the result, typescript only."""
+    _patch_config_mgr( monkeypatch, extra="" )
+    monkeypatch.setattr( job_mod.os.path, "exists", lambda p: True )
+    fake = _FakeProcess( lines=C8_RED_TAIL_2026_09_14.splitlines( keepends=True ), returncode=1 )
+    monkeypatch.setattr( job_mod.subprocess, "Popen", lambda *a, **k: fake )
+
+    res = _make_job()._run_suite( suite_type, "/proj" )
+    assert len( res[ "coverage_threshold_failures" ] ) == expected_misses
 
 
 def test_run_suite_appends_ini_extra_args( monkeypatch, no_real_log ):

@@ -37,6 +37,13 @@ test("renders a .tts-preview-slider root with data-testid", () => {
   assert.equal(el.getAttribute("data-testid"), "multiplexer-tts-preview-slider");
 });
 
+test("ruling 3 (2026-09-10): legacy's label 'TTS:' and legacy's tooltip, now that the slider sits inside the header bar", () => {
+  const { handlers } = makeHandlers();
+  const el = renderTtsPreviewSlider({ percent: 25 }, handlers);
+  assert.equal(el.querySelector(".tts-preview-slider-label")!.textContent, "TTS:");
+  assert.equal(el.title, "Percentage of high-priority notification text rendered as TTS audio. 0% = silent; 100% = full message.");
+});
+
 test("range input has min=0 / max=100 / step=12.5 + list binding", () => {
   const { handlers } = makeHandlers();
   const el = renderTtsPreviewSlider({ percent: 25 }, handlers);

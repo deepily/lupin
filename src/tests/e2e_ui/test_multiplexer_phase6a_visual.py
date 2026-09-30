@@ -2,7 +2,7 @@
 Multiplexer Phase 6a — visual regression baseline capture.
 
 Per AC11a + AC11b ratification (design doc 08):
-    - AC11a: submission via `POST /api/test-suite/submit` with
+    - AC11a: submission via `POST /api/v2/submit` with
       `--update-snapshots -k multiplexer_phase6a` returns HTTP 200 + valid
       `submission_id`.  The HUMAN gate is slot-coordination ONLY (calendar);
       the AI executes the submission via the /schedule-tests skill.
@@ -16,7 +16,7 @@ the e2e_ui conftest standard (`LUPIN_TEST_BASE_URL` env var; default
 `http://localhost:8000`). NO hardcoded `:8000` literal.
 
 **Venue**: `:8000` monopolize-mode (e2e_ui suite gate). Schedule via
-`POST /api/test-suite/submit` with non-overlapping `scheduled_at` slot per
+`POST /api/v2/submit` with non-overlapping `scheduled_at` slot per
 `feedback_test_server_monopolize_mode`. Side-door injection (ad-hoc curl,
 direct queue push, in-process server instantiation) is PROHIBITED.
 
@@ -202,19 +202,35 @@ def test_multiplexer_phase6a_jobs_pane_visual(
     Per design doc 08 § AC11: the baseline established here is the canonical
     Phase 6a visual state. NOT measured against `/app/notifications`.
 
-    Cold-hidden-wait CLASS SWEEP (2026-07-02, Rachel 🕊️ — Tiberius sweep-for-
-    pattern-offenders rule): the Job Queues pane boots COLD-HIDDEN (ratified item
-    2aad5b7b / commit 75a1bad3; multiplexer.html:195 `<section id="jobs-pane"
-    hidden`). `DEFAULT_HIDDEN_SECTION_IDS = {"jobs-pane"}` is the ONLY cold-hidden
-    section, so every e2e/visual test that waits-for-visible or snapshots the
-    jobs-pane must reveal it via the section-toolbar toggle first. Class swept +
-    closed: the 3 mux waiters — this test, test_multiplexer_section_toolbar.py, and
-    test_multiplexer_cold_load_hydration.py (last two via bug 302d170f) — are all
-    fixed toggle-first. The 4 other job-card e2e files (test_job_history_ui,
-    test_cj_flow_pause_schedule, test_history_card_parity, test_repair_loop_ui)
-    target legacy `/app/notifications?classic=1`, NOT the mux pane — out of class.
+    Parity A-2 #1 (2026-09-16, plan §3 R1) reversed Lane 0c: the Job Queues
+    pane now starts VISIBLE, so the toggle-first reveal the 2026-07-02 sweep added
+    to this test, test_multiplexer_section_toolbar.py and
+    test_multiplexer_cold_load_hydration.py is gone from all three — a click on
+    that toggle would now hide the pane.
     """
     page = logged_in_page
+
+    # JOB-HISTORY COUNT STUB (row f0e00f01 R5, 2026-09-17). The pane renders a LIVE
+    # `total` from GET /api/job-history in the band at x761–789, so a capture freezes
+    # whatever the box's history held that day and the test reddens the next day —
+    # the reason R5 said to rebaseline only AFTER a stub existed. Nobody owned it.
+    #
+    # The route is fulfilled with a fixed, empty history: the endpoint's real shape
+    # (`jobs`/`total`/`filtered_by`/`limit`/`offset`, queues.py) with total 0. The five
+    # cards in this frame do NOT come from this response — they are injected through
+    # the boot test hook below — so stubbing it removes the moving number and leaves
+    # the fixture intact. Only the collection endpoint is intercepted: `/job-history/all`
+    # and the per-id DELETE keep their real routes, since this test never calls them and
+    # a broader glob would silently swallow a future caller's request.
+    def _stub_job_history( route ):
+        route.fulfill(
+            status       = 200,
+            content_type = "application/json",
+            body         = '{"jobs": [], "total": 0, "filtered_by": "all", "limit": 20, "offset": 0}',
+        )
+
+    page.route( "**/api/job-history?**", _stub_job_history )
+    page.route( "**/api/job-history", _stub_job_history )
 
     page.goto( f"{BASE_URL}/app/multiplexer" )
     page.wait_for_load_state( "networkidle" )
@@ -228,15 +244,7 @@ def test_multiplexer_phase6a_jobs_pane_visual(
     # Inject the 5 job fixtures.
     page.evaluate( _INJECT_JOB_FIXTURES_JS )
 
-    # Lane 0c (RATIFIED item 2aad5b7b / commit 75a1bad3; multiplexer.html:195
-    # `<section id="jobs-pane" hidden` cold-start): the Job Queues pane boots
-    # COLD-HIDDEN — its cards render into the DOM but resolve HIDDEN, so the
-    # visible-wait below (and the snapshot) can't see them. Reveal the pane via
-    # its real section-toolbar toggle first (the user flow), NOT a default-visible
-    # assumption (that predated the 0c ruling), so the seeded cards become visible
-    # and the pane snapshots in its rendered state.
-    page.wait_for_selector( '#section-toolbar .toolbar-btn[data-section="jobs-pane"]', timeout=5000 )
-    page.locator( '#section-toolbar .toolbar-btn[data-section="jobs-pane"]' ).click()
+    # Parity A-2 #1: the Job Queues pane starts visible, so no toolbar reveal.
     page.wait_for_selector( '[data-testid="multiplexer-jobs-pane"]', state="visible", timeout=10000 )
 
     # Wait for all 5 cards to render across their buckets.
@@ -273,7 +281,13 @@ def test_multiplexer_phase6a_jobs_pane_visual(
     # (e.g. 403 vs 404). The stock assert_snapshot is zero-tolerance on
     # dimensions (hard ValueError on a 1px flap); assert_snapshot_height_tolerant
     # forgives ≤1px height while staying strict on width + overlapping pixels.
+    #
+    # snap_y (rows 807a03bf, f0e00f01): the pane sits below the TTS pane, so its top
+    # lands on whatever fraction the content above adds up to, and that fraction
+    # moved between runs on unchanged code (398 px, 397 px, then 289 px of glyph
+    # anti-aliasing in three text bands). The fixture moves it to an integer y
+    # with a spacer and asserts it landed; see snap_to_integer_y in conftest.py.
     pane = page.locator( '[data-testid="multiplexer-jobs-pane"]' )
-    assert_snapshot_height_tolerant( pane, name="multiplexer_phase6a_jobs_pane.png" )
+    assert_snapshot_height_tolerant( pane, name="multiplexer_phase6a_jobs_pane.png", snap_y=True )
 
     print( "✓ multiplexer_phase6a_jobs_pane: visual snapshot compared" )

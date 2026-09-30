@@ -30,11 +30,36 @@ beforeEach(() => { localStorage.clear(); });
 // Drain microtasks so a mutation's .then/.catch/.finally chain settles.
 const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
+// ---------------------------------------------------------------------------
+// 🔴 THE ERROR STRIPE IS NOW RENDERED WITH EVERY ROW, HIDDEN, RATHER THAN GROWN
+// ON DEMAND. So `querySelector(".task-row-error-stripe") === null` — the way
+// these tests used to say "no error" — is now false on a perfectly clean row,
+// and asserting it would pin the OLD mechanism. Absence stopped being the
+// signal; VISIBILITY is. The JS card's own docstring says why the stripe stays
+// in the DOM: "a stripe carrying no text is still a stripe... it matches every
+// `.task-row-error-stripe` selector a test or a stylesheet reaches for, and
+// reads as an error that says nothing."
+// ---------------------------------------------------------------------------
+function shownStripes( root: HTMLElement ): HTMLElement[] {
+  return Array.from( root.querySelectorAll<HTMLElement>( ".task-row-error-stripe" ) )
+    .filter( ( el ) => !el.hidden );
+}
+function stripeText( root: HTMLElement ): string {
+  const shown = shownStripes( root );
+  return shown.length === 0 ? "" : ( shown[ 0 ]!.textContent ?? "" );
+}
+
+
 interface FakeStore extends TaskListStoreLike {
   setComposite(c: TaskListComposite | null): void;
   refreshCalls: number;
+  // ⚠️ COUNTED APART FROM `refreshCalls`, because the two reads differ: `refresh()`
+  // SKIPS a read already in flight (right for the poll and the ⟳ button, which
+  // wrote nothing), while `refreshAfterWrite()` joins and then takes a fresh one
+  // (right for a caller that just wrote). §6 item 18.
+  readsAfterWrite: number;
   patchArgs: Array<{ id: string; fields: TaskPatchFields }>;
-  dropArgs: Array<{ id: string; reason: string }>;
+  transitionArgs: Array<{ id: string; toStatus: string; extras: Record<string, string> }>;
   /** Whether the most recent mutation's restoreState() was invoked. */
   lastRestoreCalled(): boolean;
   /** Settle the most recent mutation's `done` promise. */
@@ -44,7 +69,7 @@ interface FakeStore extends TaskListStoreLike {
 function makeStore(): FakeStore {
   let composite: TaskListComposite | null = null;
   const patchArgs: Array<{ id: string; fields: TaskPatchFields }> = [];
-  const dropArgs: Array<{ id: string; reason: string }> = [];
+  const transitionArgs: Array<{ id: string; toStatus: string; extras: Record<string, string> }> = [];
   let lastRestore = { called: false };
   let lastDeferred: { resolve: () => void; reject: (e: unknown) => void } | null = null;
 
@@ -59,13 +84,15 @@ function makeStore(): FakeStore {
 
   const store: FakeStore = {
     refreshCalls: 0,
+    readsAfterWrite: 0,
     patchArgs,
-    dropArgs,
+    transitionArgs,
     composite: () => composite,
     refresh: async (): Promise<void> => { store.refreshCalls += 1; },
+    refreshAfterWrite: async (): Promise<void> => { store.readsAfterWrite += 1; },
     setComposite: (c) => { composite = c; },
     patchTask: (id: string, fields: TaskPatchFields): TaskMutation => { patchArgs.push({ id, fields }); return makeMutation(); },
-    dropTask: (id: string, reason: string): TaskMutation => { dropArgs.push({ id, reason }); return makeMutation(); },
+    transitionTask: (id: string, toStatus: string, extras: Record<string, string>): TaskMutation => { transitionArgs.push({ id, toStatus, extras }); return makeMutation(); },
     lastRestoreCalled: () => lastRestore.called,
     settleLast: (ok, err) => { if (ok) lastDeferred!.resolve(); else lastDeferred!.reject(err); },
   };
@@ -129,7 +156,7 @@ test("initial paint with null composite → unreachable indicator + 'no tasks lo
   const { root } = setup();
   assert.ok(root.querySelector(".task-list-unreachable"));
   assert.ok(root.querySelector(".task-list-empty"));
-  assert.equal(root.querySelector(".section-header-count")?.textContent, "0");
+  assert.equal(root.querySelector(".section-header-count")?.textContent, "Live: 0");
   assert.equal(root.querySelector(".task-list-updated")?.textContent, ""); // no stamp on initial (stampUpdated=false path)
 });
 
@@ -142,7 +169,7 @@ test("auth_required → sign-in banner, count 0", () => {
   store.setComposite({ status: "auth_required" });
   emit(true);
   assert.ok(root.querySelector(".task-list-signin"));
-  assert.equal(root.querySelector(".section-header-count")?.textContent, "0");
+  assert.equal(root.querySelector(".section-header-count")?.textContent, "Live: 0");
 });
 
 // ---------------------------------------------------------------------------
@@ -158,11 +185,17 @@ test("ok with open tasks → table renders, count = open count, stamp set", () =
   ]));
   emit(true);
   assert.ok(root.querySelector(".task-list-table"));
-  assert.equal(root.querySelector(".section-header-count")?.textContent, "2"); // done excluded
+  assert.equal(root.querySelector(".section-header-count")?.textContent, "Live: 2"); // done excluded
   // The blocked row surfaces blocked_by + next_chase.
-  const blockedRow = root.querySelector(".task-status-blocked");
-  assert.ok(blockedRow);
-  assert.match(blockedRow?.textContent ?? "", /x/);
+  // ⚠️ blocked_by AND next_chase ARE DISCLOSED FIELDS NOW — they live in the
+  // hidden controls row, not on the visible line. `.task-status-blocked` matches
+  // BOTH rows (the controls row carries the status class too), and
+  // querySelector returns the visible one, which no longer carries either value.
+  // Re-pointed at the row that actually holds them rather than deleted.
+  assert.ok( root.querySelector( "tr.task-row.task-status-blocked" ), "the blocked row renders" );
+  const disclosed = root.querySelector( "tr.task-controls-row.task-status-blocked" );
+  assert.ok( disclosed, "the blocked row has its disclosed controls row" );
+  assert.match( disclosed?.querySelector( ".task-col-blocked" )?.textContent ?? "", /x/ );
   assert.match(root.querySelector(".task-list-updated")?.textContent ?? "", /^updated /);
 });
 
@@ -172,7 +205,7 @@ test("ok but all terminal → filtered to empty → 'No open tasks.', count 0", 
   emit(true);
   assert.ok(root.querySelector(".task-list-empty"));
   assert.equal(root.querySelector(".task-list-empty")?.textContent, "✅ No open tasks.");
-  assert.equal(root.querySelector(".section-header-count")?.textContent, "0");
+  assert.equal(root.querySelector(".section-header-count")?.textContent, "Live: 0");
 });
 
 // ---------------------------------------------------------------------------
@@ -185,7 +218,7 @@ test("explicit unreachable (no prior good) → indicator + 'no tasks loaded yet'
   emit(true);
   assert.ok(root.querySelector(".task-list-unreachable"));
   assert.ok(root.querySelector(".task-list-empty"));
-  assert.equal(root.querySelector(".section-header-count")?.textContent, "0");
+  assert.equal(root.querySelector(".section-header-count")?.textContent, "Live: 0");
 });
 
 test("composite with non-array tasks → unreachable branch (3rd OR leg)", () => {
@@ -201,14 +234,14 @@ test("graceful degradation: good fetch then unreachable → last-known rows repl
   store.setComposite(okComposite([{ id: "1", title: "live", status: "in_progress", owner_persona: "amy" }]));
   emit(true);
   assert.ok(root.querySelector(".task-list-table"));
-  assert.equal(root.querySelector(".section-header-count")?.textContent, "1");
+  assert.equal(root.querySelector(".section-header-count")?.textContent, "Live: 1");
 
   // 2) store goes unreachable — indicator + LAST-KNOWN table (never blank).
   store.setComposite({ status: "unreachable", tasks: null });
   emit(true);
   assert.ok(root.querySelector(".task-list-unreachable"), "indicator shown");
   assert.ok(root.querySelector(".task-list-table"), "last-known rows still rendered");
-  assert.equal(root.querySelector(".section-header-count")?.textContent, "1", "count holds at last-known");
+  assert.equal(root.querySelector(".section-header-count")?.textContent, "Live: 1", "count holds at last-known");
 });
 
 // ---------------------------------------------------------------------------
@@ -386,18 +419,30 @@ function changeSelect( root: HTMLElement, selector: string, value: string ): voi
   sel!.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
-function clickDrop( root: HTMLElement, reason: string | null ): void {
+// Parity A-2 #0 — a priority edit is STAGED: the change arms Update, the click posts.
+function stagePriority( root: HTMLElement, value: string ): void {
+  changeSelect(root, ".task-priority-select", value);
+  root.querySelector<HTMLButtonElement>(".task-priority-update")!
+    .dispatchEvent(new Event("click", { bubbles: true }));
+}
+
+// Choose a verb the way the operator does — a real bubbling change event, never
+// the handler called by name — then type a reason and press Submit.
+function submitVerb( root: HTMLElement, verb: string, reason: string | null ): void {
+  changeSelect(root, ".task-verb-select", verb);
   if (reason !== null) {
-    const input = root.querySelector<HTMLInputElement>(".task-drop-reason");
+    const input = root.querySelector<HTMLInputElement>(".task-reason-input");
     input!.value = reason;
   }
-  const btn = root.querySelector<HTMLButtonElement>(".task-drop-button");
+  const btn = root.querySelector<HTMLButtonElement>(".task-submit-button");
   btn!.dispatchEvent(new Event("click", { bubbles: true }));
 }
 
-test("priority select change → patchTask({priority})", () => {
+test("priority Update click → patchTask({priority}); the change alone posts nothing", () => {
   const { store, root } = renderOne(makeFleet(FLEET()));
   changeSelect(root, ".task-priority-select", "P0");
+  assert.deepEqual(store.patchArgs, [], "a priority change must only arm Update");
+  stagePriority(root, "P0");
   assert.deepEqual(store.patchArgs, [{ id: "t1", fields: { priority: "P0" } }]);
 });
 
@@ -426,27 +471,26 @@ test("fleet store present but null composite → empty roster (only current owne
   assert.deepEqual(Array.from(sel!.options).map(o => o.value), ["amy"]);
 });
 
-test("drop button with a non-blank reason → dropTask(id, reason)", () => {
+test("Drop chosen + a non-blank reason → transitionTask(id, 'dropped', {reason})", () => {
   const { store, root } = renderOne(makeFleet(FLEET()));
-  clickDrop(root, "superseded");
-  assert.deepEqual(store.dropArgs, [{ id: "t1", reason: "superseded" }]);
-  assert.ok( root.querySelector(".task-row-error-stripe") === null, "no error on a valid drop" );
+  submitVerb(root, "drop", "superseded");
+  assert.deepEqual(store.transitionArgs, [{ id: "t1", toStatus: "dropped", extras: { reason: "superseded" } }]);
+  assert.deepEqual( shownStripes( root ), [], "no error on a valid drop" );
 });
 
-test("drop button with a blank reason → NO dropTask + inline error stripe", () => {
+test("Drop chosen + a blank reason → NO transition + inline error stripe", () => {
   const { store, root } = renderOne(makeFleet(FLEET()));
-  clickDrop(root, "   ");   // whitespace-only → blank after trim
-  assert.equal(store.dropArgs.length, 0);
-  const stripe = root.querySelector(".task-row-error-stripe");
-  assert.ok(stripe, "error stripe rendered");
-  assert.match(stripe?.textContent ?? "", /reason is required/i);
+  submitVerb(root, "drop", "   ");   // whitespace-only → blank after trim
+  assert.equal(store.transitionArgs.length, 0);
+  assert.equal( shownStripes( root ).length, 1, "error stripe revealed" );
+  assert.match( stripeText( root ), /reason is required/i );
 });
 
-test("blank-drop error stripe does not stack on repeat", () => {
+test("blank-reason error stripe does not stack on repeat", () => {
   const { root } = renderOne(makeFleet(FLEET()));
-  clickDrop(root, "");
-  clickDrop(root, "");
-  assert.equal(root.querySelectorAll(".task-row-error-stripe").length, 1);
+  submitVerb(root, "drop", "");
+  submitVerb(root, "drop", "");
+  assert.equal( shownStripes( root ).length, 1, "a repeat refusal must reveal ONE stripe, not stack" );
 });
 
 test("change on a non-control element is ignored", () => {
@@ -455,48 +499,53 @@ test("change on a non-control element is ignored", () => {
   assert.equal(store.patchArgs.length, 0);
 });
 
-test("idless row → priority change and drop are no-ops", () => {
+test("idless row → priority change and a submitted verb are both no-ops", () => {
   const ctx = setup(makeFleet(FLEET()));
   ctx.store.setComposite(okComposite([{ title: "noid", status: "queued", owner_persona: "amy" }]));
   ctx.emit(true);
   changeSelect(ctx.root, ".task-priority-select", "P0");
-  clickDrop(ctx.root, "reason");
+  submitVerb(ctx.root, "drop", "reason");
   assert.equal(ctx.store.patchArgs.length, 0);
-  assert.equal(ctx.store.dropArgs.length, 0);
+  assert.equal(ctx.store.transitionArgs.length, 0);
 });
 
 test("in-flight dedupe: a second same-control edit is a no-op until the first settles", async () => {
   const { store, root } = renderOne(makeFleet(FLEET()));
-  changeSelect(root, ".task-priority-select", "P0");
-  changeSelect(root, ".task-priority-select", "P1");   // same key → deduped while in flight
+  stagePriority(root, "P0");
+  stagePriority(root, "P1");   // same key → deduped while in flight
   assert.equal(store.patchArgs.length, 1);
   store.settleLast(true);
   await tick();
-  changeSelect(root, ".task-priority-select", "P3");   // key cleared → allowed again
+  stagePriority(root, "P3");   // key cleared → allowed again
   assert.equal(store.patchArgs.length, 2);
 });
 
 test("mutation success (2xx) → no rollback, no error stripe", async () => {
   const { store, root } = renderOne(makeFleet(FLEET()));
-  changeSelect(root, ".task-priority-select", "P0");
+  stagePriority(root, "P0");
   store.settleLast(true);
   await tick();
   assert.equal(store.lastRestoreCalled(), false);
-  assert.ok( root.querySelector(".task-row-error-stripe") === null );
+  assert.deepEqual( shownStripes( root ), [] );
+  // 🔴 AND IT TOOK A READ. Without this the pane keeps painting the last poll's
+  // board after every row write, which is §6 item 18 — the assertions above are
+  // all about what did NOT happen, and stay green through a pane that reads nothing.
+  assert.equal( store.readsAfterWrite, 1, "the row write settled without reading the board back" );
+  assert.equal( store.refreshCalls, 0, "a write must not take the SKIPPING read" );
 });
 
 test("mutation ApiError 404 → treated as success (no rollback, no stripe)", async () => {
   const { store, root } = renderOne(makeFleet(FLEET()));
-  changeSelect(root, ".task-priority-select", "P0");
+  stagePriority(root, "P0");
   store.settleLast(false, new ApiError(404, "/api/tasks/t1", "gone"));
   await tick();
   assert.equal(store.lastRestoreCalled(), false);
-  assert.ok( root.querySelector(".task-row-error-stripe") === null );
+  assert.deepEqual( shownStripes( root ), [] );
 });
 
 test("mutation ApiError (non-404) → rollback + error stripe with HTTP code", async () => {
   const { store, root } = renderOne(makeFleet(FLEET()));
-  changeSelect(root, ".task-priority-select", "P0");
+  stagePriority(root, "P0");
   store.settleLast(false, new ApiError(500, "/api/tasks/t1", "boom"));
   await tick();
   assert.equal(store.lastRestoreCalled(), true);
@@ -710,3 +759,382 @@ test("F1: writeText rejection (permission denied) is swallowed — no flash, no 
   assert.equal(timers.length, 0);
   restore();
 });
+
+// ---------------------------------------------------------------------------
+// Row-control conversion 2026.09.02 — the four ADDED verbs.
+//
+// This card had ONE verb before tonight. Drop's path was already guarded, so the
+// tests above re-point cleanly and prove almost nothing about the conversion:
+// what is new is park, demote, won't-fix and approve, the legality that decides
+// which of them a row may take, the date affordance two of them need, and the
+// two-click confirm the terminal one earns. Every sweep below states how many
+// verbs it drove, because a loop that drives none passes every assertion in it.
+// ---------------------------------------------------------------------------
+
+// Denominator, measured off the tree: taskVerbs.TASK_VERBS carries five.
+const CONVERSION_VERB_FLOOR = 5;
+
+// Render one row in a chosen status, so a test can reach a verb that is only
+// legal from somewhere other than in_progress (approve needs not_approved).
+function renderInStatus( status: string ): ReturnType<typeof setup> {
+  const ctx = setup(makeFleet(FLEET()));
+  ctx.store.setComposite(okComposite([
+    { id: "t1", title: "one", status, owner_persona: "amy", priority: "P2" },
+  ]));
+  ctx.emit(true);
+  return ctx;
+}
+
+function reasonBox( root: HTMLElement ): HTMLInputElement {
+  return root.querySelector<HTMLInputElement>(".task-reason-input")!;
+}
+function submitBtn( root: HTMLElement ): HTMLButtonElement {
+  return root.querySelector<HTMLButtonElement>(".task-submit-button")!;
+}
+function clickSubmit( root: HTMLElement ): void {
+  submitBtn(root).dispatchEvent(new Event("click", { bubbles: true }));
+}
+function setDate( root: HTMLElement, day: string ): void {
+  root.querySelector<HTMLInputElement>(".task-chase-input")!.value = day;
+}
+
+test("Submit with NO verb chosen → a stripe saying so, and no store call", () => {
+  const { store, root } = renderOne(makeFleet(FLEET()));
+  clickSubmit(root);
+  assert.equal(store.transitionArgs.length, 0);
+  assert.match(stripeText( root ),
+    /choose an action first/i);
+});
+
+test("choosing a verb sets THAT verb's placeholder — five distinct captions, one box", () => {
+  const { root } = renderInStatus("in_progress");
+  const seen = new Set<string>();
+  let driven = 0;
+  for (const verb of ["park", "drop", "demote", "wont_fix", "approve"]) {
+    changeSelect(root, ".task-verb-select", verb);
+    seen.add(reasonBox(root).placeholder);
+    driven += 1;
+  }
+  assert.equal(driven, CONVERSION_VERB_FLOOR, `drove ${driven} of ${CONVERSION_VERB_FLOOR} verbs`);
+  assert.equal(seen.size, CONVERSION_VERB_FLOOR,
+    `one shared box must not flatten ${CONVERSION_VERB_FLOOR} obligations into one caption; ${seen.size} distinct`);
+});
+
+test("un-choosing a verb returns the box to its resting caption", () => {
+  const { root } = renderOne(makeFleet(FLEET()));
+  changeSelect(root, ".task-verb-select", "drop");
+  changeSelect(root, ".task-verb-select", "");
+  assert.equal(reasonBox(root).placeholder, "reason…");
+  assert.equal(reasonBox(root).disabled, false);
+});
+
+test("Approve DISABLES the shared reason field and clears whatever was typed", () => {
+  // Rick's ruling. A live box beside a verb that discards its contents invites a
+  // justification nothing will ever read.
+  const { root } = renderInStatus("not_approved");
+  changeSelect(root, ".task-verb-select", "drop");
+  reasonBox(root).value = "typed before switching";
+  changeSelect(root, ".task-verb-select", "approve");
+  assert.equal(reasonBox(root).disabled, true);
+  assert.equal(reasonBox(root).value, "", "text left in a disabled box would be posted by the next verb");
+});
+
+test("switching AWAY from approve re-enables the box", () => {
+  const { root } = renderInStatus("not_approved");
+  changeSelect(root, ".task-verb-select", "approve");
+  changeSelect(root, ".task-verb-select", "drop");
+  assert.equal(reasonBox(root).disabled, false);
+});
+
+test("a date input appears for EXACTLY the two verbs that need one, labelled for each", () => {
+  const { root } = renderInStatus("in_progress");
+  const EXPECT: ReadonlyArray<[string, string | null]> = [
+    ["park", "Chase me again on"], ["drop", null], ["demote", "Triage this by"],
+    ["wont_fix", null], ["approve", null],
+  ];
+  assert.equal(EXPECT.length, CONVERSION_VERB_FLOOR, "every verb must be driven");
+  let withDate = 0, withoutDate = 0;
+  for (const [verb, label] of EXPECT) {
+    changeSelect(root, ".task-verb-select", verb);
+    const date = root.querySelector<HTMLInputElement>(".task-chase-input");
+    if (label === null) { assert.equal(date, null, `${verb}: an unwanted date box`); withoutDate += 1; }
+    else {
+      assert.ok(date, `${verb}: no date box`);
+      assert.equal(date!.type, "date");
+      assert.equal(date!.getAttribute("aria-label"), label, `${verb}: the caption must say what the date DOES`);
+      withDate += 1;
+    }
+  }
+  assert.equal(withDate, 2, `two dated verbs expected; ${withDate} seen`);
+  assert.equal(withoutDate, 3, `three undated verbs expected; ${withoutDate} seen`);
+});
+
+test("the date box is REUSED across two dated verbs, not stacked", () => {
+  const { root } = renderInStatus("in_progress");
+  changeSelect(root, ".task-verb-select", "park");
+  setDate(root, "2026-09-10");
+  changeSelect(root, ".task-verb-select", "demote");
+  assert.equal(root.querySelectorAll(".task-chase-input").length, 1, "one date box, relabelled");
+  assert.equal(root.querySelector<HTMLInputElement>(".task-chase-input")!.getAttribute("aria-label"), "Triage this by");
+});
+
+test("the date box sits BEFORE Submit, so the row reads left to right", () => {
+  const { root } = renderInStatus("in_progress");
+  changeSelect(root, ".task-verb-select", "park");
+  // ⚠️ SCOPE TO THE CONTROLS ROW. The actions cell used to be a <td> on the
+  // visible row; after the reshape it is the line-3 disclosed field, so a
+  // `.task-row .task-col-actions` query finds nothing and every "0 found" that
+  // follows reads like a broken render rather than a stale selector.
+  const cell = root.querySelector<HTMLElement>("tr.task-controls-row .task-col-actions")!;
+  assert.ok(cell, "the row's own actions field must be found, not the header's");
+  // Read DOCUMENT ORDER over the controls themselves rather than walking direct
+  // children: the reshape put them one level down inside the field's value span,
+  // and left-to-right is a claim about the controls, not about nesting depth.
+  const order = Array.from(cell.querySelectorAll<HTMLElement>(
+    ".task-priority-select, .task-owner-select, .task-verb-select, .task-reason-input, .task-chase-input, .task-submit-button",
+  )).map((el) => el.className);
+  assert.ok(order.length >= 5,
+    `positive control: priority, owner, verb, reason, date and Submit; ${order.length} controls found`);
+  const dateAt   = order.findIndex(c => c.includes("task-chase-input"));
+  const submitAt = order.findIndex(c => c.includes("task-submit-button"));
+  assert.ok(dateAt >= 0 && submitAt >= 0, `both controls must be found: date=${dateAt} submit=${submitAt}`);
+  assert.ok(dateAt < submitAt, `the date box must precede Submit; date=${dateAt} submit=${submitAt}`);
+});
+
+
+test("Park submits parked with park_reason AND a chase instant — never the generic key", () => {
+  const { store, root } = renderInStatus("in_progress");
+  changeSelect(root, ".task-verb-select", "park");
+  reasonBox(root).value = "the sentence that decided it";
+  setDate(root, "2026-09-10");
+  clickSubmit(root);
+  assert.equal(store.transitionArgs.length, 1);
+  const [call] = store.transitionArgs;
+  assert.equal(call!.toStatus, "parked");
+  assert.equal(call!.extras.park_reason, "the sentence that decided it");
+  assert.ok(!("reason" in call!.extras), "a park under the generic key carries no decisive sentence");
+  assert.match(call!.extras.next_chase_ts!, /^2026-09-10T/, "the local calendar day became an instant");
+});
+
+test("Demote submits not_approved with reason AND a triage-by instant", () => {
+  const { store, root } = renderInStatus("in_progress");
+  changeSelect(root, ".task-verb-select", "demote");
+  reasonBox(root).value = "back to triage";
+  setDate(root, "2026-09-11");
+  clickSubmit(root);
+  assert.deepEqual(store.transitionArgs.map(c => c.toStatus), ["not_approved"]);
+  assert.equal(store.transitionArgs[0]!.extras.reason, "back to triage");
+  assert.ok("next_chase_ts" in store.transitionArgs[0]!.extras);
+});
+
+test("Approve submits queued with an EMPTY body — no reason, no date", () => {
+  const { store, root } = renderInStatus("not_approved");
+  changeSelect(root, ".task-verb-select", "approve");
+  clickSubmit(root);
+  assert.deepEqual(store.transitionArgs, [{ id: "t1", toStatus: "queued", extras: {} }]);
+});
+
+test("a dated verb with no date → that verb's OWN complaint, and no store call", () => {
+  const CASES: ReadonlyArray<[string, RegExp]> = [
+    ["park", /chase date is required/i], ["demote", /triage-by date is required/i],
+  ];
+  assert.equal(CASES.length, 2, "both dated verbs must be driven");
+  let driven = 0;
+  for (const [verb, pattern] of CASES) {
+    const { store, root } = renderInStatus("in_progress");
+    changeSelect(root, ".task-verb-select", verb);
+    reasonBox(root).value = "a reason";
+    clickSubmit(root);
+    assert.equal(store.transitionArgs.length, 0, `${verb}: submitted without a date`);
+    assert.match(stripeText( root ), pattern);
+    driven += 1;
+  }
+  assert.equal(driven, 2, `drove ${driven} of 2 dated verbs`);
+});
+
+test("each reason-taking verb earns its OWN blank-reason complaint, not a shared one", () => {
+  const CASES: ReadonlyArray<[string, string, RegExp]> = [
+    ["in_progress", "park", /quote the row's own decisive sentence/i],
+    ["in_progress", "drop", /a drop reason is required/i],
+    ["in_progress", "demote", /why this goes back to triage/i],
+    ["in_progress", "wont_fix", /a refusal carries its justification/i],
+  ];
+  assert.equal(CASES.length, 4, "four verbs take a reason; approve does not");
+  const messages = new Set<string>();
+  for (const [status, verb, pattern] of CASES) {
+    const { store, root } = renderInStatus(status);
+    changeSelect(root, ".task-verb-select", verb);
+    clickSubmit(root);
+    assert.equal(store.transitionArgs.length, 0, `${verb}: submitted with a blank reason`);
+    const text = stripeText( root );
+    assert.match(text, pattern, `${verb}: wrong or generic complaint`);
+    messages.add(text);
+  }
+  assert.equal(messages.size, 4, `four distinct complaints required; ${messages.size} seen`);
+});
+
+test("an unparseable date is refused BY NAME, and nothing is posted", () => {
+  // A real `<input type="date">` refuses an invalid value outright — assigning
+  // "not-a-day" leaves it empty, which is why the first draft of this test hit
+  // the blank-date complaint instead. The bad string can only reach the handler
+  // from a runtime that degraded the input to a plain text box, so that is the
+  // condition driven here rather than one the widget makes impossible.
+  const { store, root } = renderInStatus("in_progress");
+  changeSelect(root, ".task-verb-select", "park");
+  reasonBox(root).value = "why";
+  const date = root.querySelector<HTMLInputElement>(".task-chase-input")!;
+  date.type  = "text";                 // the degraded runtime
+  date.value = "not-a-day";
+  assert.equal(date.value, "not-a-day", "positive control: the bad string must actually be in the box");
+  clickSubmit(root);
+  assert.equal(store.transitionArgs.length, 0);
+  assert.match(stripeText( root ), /date not understood: not-a-day/i);
+});
+
+// --- the two-click confirm, which only won't-fix earns ----------------------
+
+test("Won't-fix takes TWO clicks: the first ARMS in the page, and posts nothing", () => {
+  // Rick's ruling: the confirmation is on the button's own label, never a
+  // browser confirm() — a modal blocks the extension's event loop, so the one
+  // control that closes a row for good must not be the one that freezes the board.
+  const { store, root } = renderInStatus("in_progress");
+  changeSelect(root, ".task-verb-select", "wont_fix");
+  reasonBox(root).value = "will not be done";
+  clickSubmit(root);
+  assert.equal(store.transitionArgs.length, 0, "the first click must not transition");
+  assert.equal(submitBtn(root).dataset.armed, "1");
+  assert.equal(submitBtn(root).textContent, "Confirm won't fix");
+  assert.ok(submitBtn(root).classList.contains("task-submit-armed"));
+  clickSubmit(root);
+  assert.deepEqual(store.transitionArgs, [{ id: "t1", toStatus: "wont_fix", extras: { reason: "will not be done" } }]);
+});
+
+test("every NON-terminal verb submits on ONE click — the arming is won't-fix's alone", () => {
+  const SINGLE: ReadonlyArray<[string, string, string]> = [
+    ["in_progress", "park", "parked"], ["in_progress", "drop", "dropped"],
+    ["in_progress", "demote", "not_approved"], ["not_approved", "approve", "queued"],
+  ];
+  assert.equal(SINGLE.length, CONVERSION_VERB_FLOOR - 1,
+    `${CONVERSION_VERB_FLOOR - 1} single-click verbs expected; ${SINGLE.length} driven`);
+  let driven = 0;
+  for (const [status, verb, toStatus] of SINGLE) {
+    const { store, root } = renderInStatus(status);
+    changeSelect(root, ".task-verb-select", verb);
+    reasonBox(root).value = "a reason";
+    if (root.querySelector(".task-chase-input") !== null) setDate(root, "2026-09-10");
+    clickSubmit(root);
+    assert.deepEqual(store.transitionArgs.map(c => c.toStatus), [toStatus],
+      `${verb}: did not transition on the first click`);
+    driven += 1;
+  }
+  assert.equal(driven, SINGLE.length, `drove ${driven} of ${SINGLE.length}`);
+});
+
+test("changing the verb DISARMS Submit — an armed button must not outlive its verb", () => {
+  // Otherwise the operator switches to Drop, clicks once expecting the usual
+  // single click, and that click is swallowed by a confirmation for a verb they
+  // have already left.
+  const { store, root } = renderInStatus("in_progress");
+  changeSelect(root, ".task-verb-select", "wont_fix");
+  reasonBox(root).value = "will not be done";
+  clickSubmit(root);
+  assert.equal(submitBtn(root).dataset.armed, "1");
+
+  changeSelect(root, ".task-verb-select", "drop");
+  assert.equal(submitBtn(root).dataset.armed, undefined, "the arming survived a change of verb");
+  assert.equal(submitBtn(root).textContent, "Submit");
+  assert.equal(submitBtn(root).classList.contains("task-submit-armed"), false);
+
+  reasonBox(root).value = "dropped instead";
+  clickSubmit(root);
+  assert.deepEqual(store.transitionArgs.map(c => c.toStatus), ["dropped"],
+    "the click after a re-choice must act, not confirm");
+});
+
+test("a REFUSED confirm disarms — an arming must not survive a blanked reason", () => {
+  // Arm won't-fix, clear the box, get refused. If the button stayed armed the
+  // next click would close the row on a confirmation never successfully given.
+  const { store, root } = renderInStatus("in_progress");
+  changeSelect(root, ".task-verb-select", "wont_fix");
+  reasonBox(root).value = "will not be done";
+  clickSubmit(root);
+  assert.equal(submitBtn(root).dataset.armed, "1");
+
+  reasonBox(root).value = "";
+  clickSubmit(root);
+  assert.equal(store.transitionArgs.length, 0);
+  assert.equal(submitBtn(root).dataset.armed, undefined, "a refusal left the button armed");
+  assert.equal(submitBtn(root).textContent, "Submit");
+});
+
+test("a successful submit clears a stripe left by an earlier refusal", () => {
+  const { root } = renderInStatus("in_progress");
+  changeSelect(root, ".task-verb-select", "drop");
+  clickSubmit(root);                                   // blank → stripe
+  assert.equal( shownStripes( root ).length, 1 );
+  reasonBox(root).value = "now with a reason";
+  clickSubmit(root);
+  // A COUNT, NOT THE NODE. When this assertion FAILS the stripe is still there, so a
+  // node-valued actual hands node:assert a happy-dom element to deep-inspect — the walk
+  // goes element -> ownerDocument -> defaultView -> the whole Window graph and never
+  // terminates, killing the run at ~2.5 GB/s (rows f5768ee4 / 32c58572). The failure
+  // path is the only path that matters here, and it was the lethal one.
+  assert.equal( shownStripes( root ).length, 0,
+    "an empty message must CLEAR the stripe, not paint a wordless one");
+});
+
+test("a terminal row never reaches the table at all — there is no control to click", () => {
+  // The renderer shows OPEN work only, so done / dropped / wont_fix rows are
+  // filtered before the cell is ever built. The cell's own terminal branch — the
+  // greyed options and the disabled select — is therefore reachable from the
+  // template and not from here, and it is guarded in task_row_control.test.ts.
+  // Saying that plainly beats a renderer test that asserts a control it can
+  // never obtain.
+  const TERMINAL = ["done", "dropped", "wont_fix"];
+  assert.equal(TERMINAL.length, 3, "positive control: three terminal statuses");
+  let checked = 0;
+  for (const status of TERMINAL) {
+    const { store, root } = renderInStatus(status);
+    assert.equal(root.querySelectorAll(".task-row").length, 0, `${status}: a terminal row was rendered`);
+    assert.equal(root.querySelectorAll(".task-verb-select").length, 0, `${status}: a terminal row got controls`);
+    assert.equal(store.transitionArgs.length, 0);
+    checked += 1;
+  }
+  assert.equal(checked, 3, `checked ${checked} of 3`);
+  // The other arm: an OPEN row in the same fixture DOES render, so the zero
+  // above is the filter working and not the fixture rendering nothing at all.
+  const { root } = renderInStatus("in_progress");
+  assert.equal(root.querySelectorAll(".task-verb-select").length, 1,
+    "positive control: an open row must render exactly one verb select");
+});
+
+test("two rows do not share a control — a verb chosen on one leaves the other at rest", () => {
+  const ctx = setup(makeFleet(FLEET()));
+  ctx.store.setComposite(okComposite([
+    { id: "t1", title: "one", status: "in_progress", owner_persona: "amy" },
+    { id: "t2", title: "two", status: "in_progress", owner_persona: "amy" },
+  ]));
+  ctx.emit(true);
+  // 🔴 THE CONTROLS ROW IS THE PER-ROW SCOPE NOW, not `.task-row`. This guard is
+  // about one row's controls not reaching another's, so it must hold the element
+  // that actually CONTAINS a row's controls — otherwise it passes by finding
+  // nothing on either side, which is the failure mode it exists to catch.
+  const rows = Array.from(ctx.root.querySelectorAll<HTMLElement>("tr.task-controls-row"));
+  assert.equal(rows.length, 2, `positive control: two controls rows rendered, ${rows.length} found`);
+  assert.deepEqual(rows.map((r) => r.getAttribute("data-controls-for")), ["t1", "t2"],
+    "the two controls rows must belong to the two tasks, in order");
+
+  const sel = rows[0]!.querySelector<HTMLSelectElement>(".task-verb-select")!;
+  sel.value = "park";
+  sel.dispatchEvent(new Event("change", { bubbles: true }));
+
+  assert.equal(rows[0]!.querySelectorAll(".task-chase-input").length, 1, "row 1 got its date box");
+  assert.equal(rows[1]!.querySelectorAll(".task-chase-input").length, 0, "row 2 grew a date box it never asked for");
+  assert.equal(rows[1]!.querySelector<HTMLInputElement>(".task-reason-input")!.placeholder, "reason…");
+
+  rows[0]!.querySelector<HTMLInputElement>(".task-reason-input")!.value = "why";
+  rows[0]!.querySelector<HTMLInputElement>(".task-chase-input")!.value  = "2026-09-10";
+  rows[0]!.querySelector<HTMLButtonElement>(".task-submit-button")!.dispatchEvent(new Event("click", { bubbles: true }));
+  assert.deepEqual(ctx.store.transitionArgs.map(c => c.id), ["t1"], "the wrong row was transitioned");
+});
+

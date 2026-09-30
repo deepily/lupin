@@ -10,13 +10,13 @@ listing needs a trailing slash, e.g. `?path=claude-plans/`).
 Auth note: /api/docs/file is JWT-gated; an unauthenticated visit must
 redirect to `/app/login?next=<original-url>`.
 
-Venue: :8000 (scheduled monopolize-mode via /api/test-suite/submit).
+Venue: :8000 (scheduled monopolize-mode via /api/v2/submit).
 
 Design doc: src/rnd/v0.1.7/2026.05.12-multi-repo-doc-viewer.md §5 (E2E)
 
 Run:
     Manual: pytest src/tests/e2e_ui/test_doc_viewer_multi_repo.py -v
-    Scheduled: POST /api/test-suite/submit with test_types="e2e" + pytest_args="-k doc_viewer_multi_repo"
+    Scheduled: POST /api/v2/submit with test_types="e2e" + pytest_args="-k doc_viewer_multi_repo"
 """
 
 from .conftest import BASE_URL
@@ -142,6 +142,10 @@ class TestExternalScopeVisual:
         # (emoji font-race, per 3c7e0aab / task_editing.py).
         logged_in_page.evaluate( "() => document.fonts.ready" )
         logged_in_page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
+        # The 🗂 Roots panel (ticket 416d4b00) shows the LIVE count of registered repos, so
+        # it would break this frozen snapshot whenever a repo is registered. Its behaviour
+        # is pinned in test_doc_viewer_folder_roots_upload.py; the pixels here are the listing.
+        logged_in_page.evaluate( "() => document.querySelectorAll( '.doc-roots' ).forEach( e => e.remove() )" )
         listing_container = logged_in_page.locator( ".doc-viewer-container" )
         assert_snapshot(
             listing_container,

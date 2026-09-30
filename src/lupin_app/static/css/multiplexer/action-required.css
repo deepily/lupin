@@ -22,12 +22,22 @@
      `.action-required-btn-no`, `.action-required-btn-submit`,
      `.action-required-btn-submit-all`
    - `.action-required-options-group` + `.action-required-options-checkbox`/`-radio`
-   - `.action-required-option-label`, `.action-required-option-text`
-   - `.action-required-batch-group`/`-row`/`-label`/`-input`
+   - `.action-required-option-label`, `.action-required-option-text`,
+     `.action-required-option-description`
+   - `.action-required-questions`/`-question`/`-question-header`/`-question-text`
+     (5ebd2aff step 2 — one block per question; `.invalid` when unanswered)
+   - `.action-required-batch-group`/`-row`/`-label`/`-question`/`-input` (`.invalid` when blank)
+   - `.action-required-no-questions` — an ask that carried no questions
    - `.action-required-countdown`     — live ms-precision ticker
    - `.action-required-error-stripe`  — inline error stripe (role=alert)
    - `.action-required-expired-msg`, `.action-required-responded-msg`,
-     `.action-required-submitting-msg`
+     `.action-required-submitting-msg`, `.action-required-cancelled-msg`
+   - 360de81b — one card at a time:
+     `.action-required-active-slot` (one full widget) + `.action-required-pending-queue`
+     of `.action-required-minimized` rows (`-position` #N badge, `-icon`, `-message`, `-timeout`)
+   - 360de81b — multiple_choice stepper: `.action-required-stepper`,
+     `.action-required-question-indicator`, `.action-required-multi-hint`,
+     `.action-required-btn-back`, `.action-required-btn-next`
 
    Scope-leak protection (per Pass 2 F28 layer-1 grep + layer-2 stylelint):
    - NO global selectors (*, html, body, :root) — fail-build rule in
@@ -52,6 +62,15 @@
     border           : 3px solid #0d6efd;
     border-radius   : 6px;
     background-color : #e7f1ff;
+}
+
+/* Parity A-2 #2a (2026-09-16): the toolbar's ⚠️ toggle hides this section with
+   the `hidden` attribute, and the `display: flex` above (and in
+   notifications-list.css) beats the browser's `[hidden] { display: none }`.
+   Without this rule the button dims and the section stays on screen. Guard:
+   src/tests/unit/test_every_toggled_section_honours_the_hidden_attribute.py */
+#action-required-section[hidden] {
+    display : none;
 }
 
 /* L2: widget default retuned amber→neutral so the blue section accordion is the
@@ -196,6 +215,45 @@
     color      : #fff;
 }
 
+/* Parity A-2 #2i — ⊘ Neither and the default highlight, after legacy notifications.css
+   `.response-button.neither` / `.response-button.default-value` (Phase 2.2). */
+.action-required-widget .action-required-btn-neither {
+    background   : #fff;
+    color        : #6c757d;
+    border-color : #6c757d;
+}
+
+.action-required-widget .action-required-btn-neither:hover {
+    background : #6c757d;
+    color      : #fff;
+}
+
+.action-required-widget .action-required-btn.default-value {
+    position     : relative;
+    border       : 3px solid #ffc107;
+    box-shadow   : 0 0 0 2px rgb( 255, 193, 7, 0.3 );
+}
+
+.action-required-widget .action-required-btn.default-value::after {
+    content          : "⭐ Default";
+    position         : absolute;
+    top              : -10px;
+    right            : -5px;
+    padding          : 2px 6px;
+    border-radius    : 3px;
+    background-color : #ffc107;
+    color            : #333;
+    font-size        : 10px;
+    font-weight      : 700;
+    box-shadow       : 0 2px 4px rgb( 0, 0, 0, 0.2 );
+}
+
+.action-required-widget .action-required-btn .keyboard-hint {
+    margin-left : 5px;
+    font-size   : 11px;
+    opacity     : 0.75;
+}
+
 .action-required-widget .action-required-btn-submit,
 .action-required-widget .action-required-btn-submit-all {
     background   : #3b82f6;
@@ -204,8 +262,32 @@
 }
 
 .action-required-widget .action-required-btn-submit:hover,
-.action-required-widget .action-required-btn-submit-all:hover {
+.action-required-widget .action-required-btn-submit-all:hover,
+.action-required-widget .action-required-btn-next:hover {
     background : #2563eb;
+}
+
+/* 360de81b — stepper buttons. Next is primary like Submit; Back is legacy's outlined gray
+   (notifications.css .mc-back :3369-3378). Legacy right-aligns the row (.mc-actions :3362). */
+.action-required-widget .action-required-stepper .action-required-controls {
+    justify-content : flex-end;
+}
+
+.action-required-widget .action-required-btn-next {
+    background   : #3b82f6;
+    color        : #fff;
+    border-color : #2563eb;
+}
+
+.action-required-widget .action-required-btn-back {
+    background   : #fff;
+    color        : #6c757d;
+    border       : 2px solid #6c757d;
+}
+
+.action-required-widget .action-required-btn-back:hover {
+    background : #6c757d;
+    color      : #fff;
 }
 
 /* ============================================================================
@@ -245,6 +327,113 @@
     flex      : 1 1 auto;
     color     : #111827;
     font-size : 14px;
+}
+
+/* Parity A-2 #2l — the "Other" option: its label, a 🎤 and a text box on one row. Values from
+   legacy notifications.css .mc-other-input (3367) and .mc-other-input-container (3426). */
+.action-required-widget .action-required-option-other .action-required-option-text {
+    flex : 0 0 auto;
+}
+
+.action-required-widget .mc-other-input-container {
+    display     : flex;
+    align-items : center;
+    gap         : 8px;
+    flex        : 1;
+}
+
+.action-required-widget .action-required-option-label .mc-other-input {
+    flex          : 1;
+    min-width     : 0;
+    padding       : 6px 10px;
+    border        : 1px solid #ced4da;
+    border-radius : 4px;
+    font-size     : 14px;
+}
+
+.action-required-widget .action-required-option-label .mc-other-input:focus {
+    outline      : none;
+    border-color : #007bff;
+}
+
+/* ============================================================================
+   Questions — multiple_choice / open_ended_batch, read from response_options.questions
+   (P0 5ebd2aff step 2). Values mirror legacy notifications.css: .mc-question-text (3276),
+   .batch-question-text (3454), and the invalid states (1272, 3393).
+   ============================================================================ */
+
+.action-required-widget .action-required-questions {
+    display        : flex;
+    flex-direction : column;
+    gap            : 12px;
+    margin         : 4px 0 10px;
+}
+
+/* 360de81b — "Question N of X" pill and the multi-select hint (legacy .mc-question-indicator :3267,
+   .mc-multi-hint :3284). */
+.action-required-widget .action-required-question-indicator {
+    display          : inline-block;
+    margin-bottom    : 6px;
+    padding          : 4px 10px;
+    border-radius    : 12px;
+    background-color : #e9ecef;
+    color            : #6c757d;
+    font-size        : 12px;
+    font-weight      : 600;
+}
+
+.action-required-widget .action-required-multi-hint {
+    margin-bottom : 10px;
+    color         : #6c757d;
+    font-size     : 12px;
+    font-style    : italic;
+}
+
+.action-required-widget .action-required-question-header {
+    font-size     : 13px;
+    font-weight   : 600;
+    color         : #374151;
+    margin-bottom : 4px;
+}
+
+.action-required-widget .action-required-question-text,
+.action-required-widget .action-required-batch-question {
+    font-size     : 15px;
+    font-weight   : 500;
+    color         : #333;
+    line-height   : 1.4;
+    margin-bottom : 8px;
+}
+
+.action-required-widget .action-required-option-description {
+    flex      : 0 1 auto;
+    color     : #6b7280;
+    font-size : 12px;
+}
+
+.action-required-widget .action-required-no-questions {
+    color      : #6b7280;
+    font-style : italic;
+    margin     : 4px 0 10px;
+}
+
+.action-required-widget .action-required-question.invalid .action-required-options-group {
+    border        : 2px solid #dc3545;
+    border-radius : 8px;
+    padding       : 4px;
+}
+
+.action-required-widget .action-required-question.invalid::after {
+    content    : "Please select at least one option";
+    display    : block;
+    color      : #dc3545;
+    font-size  : 12px;
+    margin-top : 8px;
+}
+
+.action-required-widget .action-required-batch-input.invalid {
+    border-color     : #dc3545;
+    background-color : #fff5f5;
 }
 
 /* ============================================================================
@@ -301,7 +490,8 @@
 
 .action-required-widget .action-required-submitting-msg,
 .action-required-widget .action-required-responded-msg,
-.action-required-widget .action-required-expired-msg {
+.action-required-widget .action-required-expired-msg,
+.action-required-widget .action-required-cancelled-msg {
     margin       : 6px 0 0;
     font-size    : 13px;
     font-style   : italic;
@@ -313,6 +503,300 @@
 }
 
 .action-required-widget-expired .action-required-expired-msg,
-.action-required-widget-cancelled .action-required-expired-msg {
+.action-required-widget-cancelled .action-required-cancelled-msg {
     color : #6b7280;
+}
+
+/* ============================================================================
+   360de81b — one card at a time: the active slot and the queued rows.
+   Values mirror legacy notifications.css .action-required-minimized (:957-1017).
+   ============================================================================ */
+
+#action-required-section .action-required-pending-queue {
+    display        : flex;
+    flex-direction : column;
+    gap            : 6px;
+}
+
+#action-required-section .action-required-pending-queue:empty {
+    display : none;
+}
+
+#action-required-section .action-required-minimized {
+    display          : flex;
+    align-items      : center;
+    gap              : 12px;
+    padding          : 10px 14px;
+    border           : 1px solid #dee2e6;
+    border-radius    : 6px;
+    background-color : #f8f9fa;
+    cursor           : default;
+    transition       : background-color 0.2s ease;
+}
+
+#action-required-section .action-required-minimized:hover {
+    background-color : #e9ecef;
+}
+
+#action-required-section .action-required-minimized-position {
+    display          : flex;
+    align-items      : center;
+    justify-content  : center;
+    min-width        : 28px;
+    height           : 28px;
+    border-radius    : 50%;
+    background-color : #6c757d;
+    color            : #fff;
+    font-size        : 12px;
+    font-weight      : 600;
+}
+
+#action-required-section .action-required-minimized-icon {
+    font-size : 16px;
+}
+
+#action-required-section .action-required-minimized-message {
+    flex          : 1;
+    min-width     : 0;
+    overflow      : hidden;
+    color         : #495057;
+    font-size     : 14px;
+    white-space   : nowrap;
+    text-overflow : ellipsis;
+}
+
+#action-required-section .action-required-minimized-timeout {
+    padding          : 2px 8px;
+    border-radius    : 10px;
+    background-color : #e9ecef;
+    color            : #6c757d;
+    font-size        : 12px;
+    font-weight      : 500;
+}
+
+/* ---- The card header and its ⏸️ (parity A-2 #2f) ----
+   Ported from notifications.css `.action-required-header` / `.action-required-pause-btn` /
+   `.grace-period-message`. This page does not load that sheet. The ✕ (A-2 #2g) sits at the
+   left and the timer cluster at the right; the title (A-2 #2m) will go between them. */
+.action-required-widget .action-required-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.action-required-widget .action-required-timer-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.action-required-widget .action-required-pause-btn {
+    width: 32px;
+    height: 32px;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    background: #f8f9fa;
+    cursor: pointer;
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+
+.action-required-widget .action-required-pause-btn:hover {
+    background: #e9ecef;
+    border-color: #adb5bd;
+    transform: scale(1.05);
+}
+
+.action-required-widget .action-required-pause-btn:focus {
+    outline: none;
+    box-shadow: 0 0 0 3px rgb(13, 110, 253, 0.25);
+}
+
+.action-required-widget .action-required-pause-btn.paused {
+    background: #fff3cd;
+    border-color: #ffc107;
+    animation: ar-pause-pulse 2s ease-in-out infinite;
+}
+
+@keyframes ar-pause-pulse {
+    0%,
+    100% {
+        background: #fff3cd;
+        box-shadow: 0 0 0 0 rgb(255, 193, 7, 0.4);
+    }
+
+    50% {
+        background: #ffe69c;
+        box-shadow: 0 0 0 4px rgb(255, 193, 7, 0.2);
+    }
+}
+
+/* Paused state — amber, as legacy's timer and card. */
+.action-required-widget .action-required-countdown.paused {
+    color: #ffc107;
+}
+
+.action-required-widget.paused {
+    border-color: #ffc107;
+    box-shadow: 0 2px 8px rgb(255, 193, 7, 0.3);
+}
+
+.action-required-widget .grace-period-message {
+    background: rgb(255, 193, 7, 0.1);
+    border: 1px solid #ffc107;
+    border-radius: 6px;
+    padding: 8px 12px;
+    margin-top: 8px;
+    margin-bottom: 8px;
+    font-size: 13px;
+    color: #856404;
+    text-align: center;
+}
+
+/* ---- The card's ✕ (parity A-2 #2g) ----
+   Ported from notifications.css `.action-required-cancel-btn`. It opens the header on the
+   left, so the header's right-aligned timer cluster is pushed back to the right. */
+.action-required-widget .action-required-cancel-btn {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 2px solid #6c757d;
+    border-radius: 4px;
+    background-color: white;
+    color: #6c757d;
+    font-size: 14px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.action-required-widget .action-required-cancel-btn:hover {
+    background-color: #6c757d;
+    color: white;
+}
+
+/* A-2 #2e — the draining progress bar, carbon-copied from legacy notifications.css. */
+.action-required-widget .action-required-progress-bar {
+    width            : 100%;
+    height           : 8px;
+    background-color : #e9ecef;
+    border-radius    : 4px;
+    overflow         : hidden;
+    margin-bottom    : 12px;
+}
+
+.action-required-widget .action-required-progress-fill {
+    height           : 100%;
+    background-color : #28a745;
+    transition       : width 1s linear, background-color 0.5s ease;
+}
+
+.action-required-widget .action-required-progress-fill.warning {
+    background-color : #ffc107;
+}
+
+.action-required-widget .action-required-progress-fill.danger {
+    background-color : #dc3545;
+}
+
+.action-required-widget .action-required-progress-fill.paused {
+    background-color : #ffc107;
+}
+
+/* Parity A-2 #2j/#2k/#2l — a card 🎤, after legacy notifications.css `.response-mic-button`.
+   The renderer's mic handler toggles `.recording` and `.processing`. */
+.action-required-widget .action-required-mic {
+    flex-shrink      : 0;
+    padding          : 6px 12px;
+    border           : 2px solid #007bff;
+    border-radius    : 4px;
+    background-color : #fff;
+    color            : #007bff;
+    font-size        : 16px;
+    cursor           : pointer;
+    transition       : all 0.2s;
+}
+
+.action-required-widget .action-required-mic:hover {
+    background-color : #007bff;
+    color            : #fff;
+}
+
+.action-required-widget .action-required-mic:focus {
+    outline      : none;
+    border-color : #0056b3;
+    box-shadow   : 0 0 0 3px rgb( 0, 123, 255, 0.4 );
+}
+
+.action-required-widget .action-required-mic.recording {
+    background-color : #dc3545;
+    border-color     : #dc3545;
+    color            : #fff;
+}
+
+.action-required-widget .action-required-mic.processing {
+    background-color : #ffc107;
+    border-color     : #ffc107;
+    color            : #fff;
+    cursor           : wait;
+}
+
+/* Parity A-2 #2j — the yes_no comment row, after legacy notifications.css
+   "Yes/No comment hint and expandable comment field". */
+.action-required-widget .yes-no-comment-hint {
+    padding     : 4px 0 0;
+    color       : #999;
+    font-size   : 11px;
+    text-align  : center;
+    cursor      : pointer;
+    user-select : none;
+    transition  : color 0.2s;
+}
+
+.action-required-widget .yes-no-comment-hint:hover {
+    color : #666;
+}
+
+.action-required-widget .yes-no-comment-container {
+    max-height : 0;
+    overflow   : hidden;
+    opacity    : 0;
+    transition : max-height 0.3s ease, opacity 0.3s ease;
+}
+
+.action-required-widget .yes-no-comment-container.expanded {
+    max-height : 60px;
+    margin-top : 6px;
+    opacity    : 1;
+}
+
+.action-required-widget .yes-no-comment-input-row {
+    display     : flex;
+    align-items : center;
+    gap         : 6px;
+}
+
+.action-required-widget .yes-no-comment-input {
+    flex          : 1;
+    padding       : 6px 10px;
+    border        : 1px solid #ddd;
+    border-radius : 6px;
+    font-size     : 13px;
+    outline       : none;
+    transition    : border-color 0.2s, box-shadow 0.2s;
+}
+
+.action-required-widget .yes-no-comment-input::placeholder {
+    color      : #aaa;
+    font-style : italic;
+}
+
+.action-required-widget .yes-no-comment-input:focus {
+    border-color : #5b9bd5;
+    box-shadow   : 0 0 0 2px rgb( 91, 155, 213, 0.2 );
 }

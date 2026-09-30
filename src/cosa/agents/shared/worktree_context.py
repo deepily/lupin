@@ -34,6 +34,8 @@ from typing import Optional
 
 import cosa.utils.util as cu
 from cosa.agents.shared.worktree_reaper import drain_then_remove
+from cosa.utils.worktree_venv import provision_worktree_venv
+from cosa.utils.worktree_artifacts import provision_worktree_artifacts
 
 
 logger = logging.getLogger( __name__ )
@@ -155,6 +157,36 @@ class WorktreeContext:
             )
 
         self.path = target_path
+
+        # ── Give the new worktree a .venv (row 9b2abfb7) ──────────────────────────
+        #
+        # `.venv` is gitignored, so the `git worktree add` above CANNOT have produced
+        # one, and four unit files shell out to `<PROJECT_ROOT>/.venv/bin/{python,
+        # pytest}`. Every `.claude/worktrees/<job_id>` tree came up without an
+        # interpreter before this line existed — re-derived 2026-08-31, 6 such trees on
+        # disk and 0 with a usable one. That is a census with a date on it, not a
+        # standing fact; re-run it rather than quoting it. A BFE/TFE job running its own
+        # tests in here would see failures caused by the sandbox rather than by the code
+        # it was sent to fix.
+        #
+        # ⚠️ FAIL OPEN, and off the event loop. `provision_worktree_venv` never raises,
+        # so a provisioning failure cannot break a job that would otherwise have run;
+        # it logs at WARNING instead. It shells out, so it goes through `to_thread` for
+        # the same reason `__aexit__` does with the reaper.
+        venv_result = await asyncio.to_thread( provision_worktree_venv, target_path, self.debug )
+        if self.debug: print( f"[WorktreeContext] venv: {venv_result[ 'status' ]} - {venv_result[ 'detail' ]}" )
+
+        # ── And the rest of the untracked tree (row dde8b87a) ─────────────────────
+        #
+        # 🔴 `INTERPRETER OK` AND A TIER-CAPABLE TREE ARE DIFFERENT CLAIMS. The line
+        # above gives this sandbox a `.venv`; it gives it nothing else, so a BFE/TFE job
+        # sent to fix a `.test.ts` in here would watch every one of them die with
+        # `Cannot find package 'tsx'` — a failure naming a PACKAGE rather than a tree,
+        # which reads as the code being broken rather than the sandbox being unfinished.
+        # Same fail-open, same `to_thread`, same reason as the venv call.
+        artifacts_result = await asyncio.to_thread( provision_worktree_artifacts, target_path, self.debug )
+        if self.debug: print( f"[WorktreeContext] artifacts: {artifacts_result[ 'status' ]} - {artifacts_result[ 'artifacts' ]}" )
+
         if self.debug: print( f"[WorktreeContext] Created: {target_path} @ {effective_ref}" )
         return self
 
@@ -168,7 +200,8 @@ class WorktreeContext:
             - Cleanup errors are logged as warnings but never raised
             - Delegates to worktree_reaper.drain_then_remove, which DIRTY-GATES:
               it auto-commits WIP to the branch ONLY when `git status --porcelain`
-              is non-empty, then removes the dir + KEEPS the branch (never pushes).
+              is non-empty, then removes the dir + KEEPS the branch (never pushes;
+              only the arbiter janitor deletes a branch, and only a merged one).
               A NORMAL exit is expected-clean (FixExecutor/GitStrategist commit
               their own work by design — verified 2026-06-22), so the auto-commit
               fires ONLY on the abnormal-exit path (an exception / early-return

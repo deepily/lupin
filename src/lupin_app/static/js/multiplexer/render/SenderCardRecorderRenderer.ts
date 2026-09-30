@@ -110,6 +110,14 @@ class SenderCardRecorderRendererImpl implements SenderCardRecorderRenderer {
         () => this.reapplyAll(),
       ),
     );
+    // Row 11793820 — the list renderer now replaces rows once per turn, AFTER the
+    // store events, so `store_senders_changed` can arrive before the row it names
+    // has been re-created. Re-apply again once the cards are in place — which also
+    // covers a row replaced by a NOTIFICATIONS event (a message arriving for the
+    // session being recorded), previously left idle-looking until a sender event.
+    this.unsubscribers.push(
+      this.bus.on( "notifications_list_rendered", () => this.reapplyAll() ),
+    );
 
     this.reapplyAll();
   }

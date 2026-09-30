@@ -31,30 +31,19 @@ def _request_returning( payload: bytes ):
     return req
 
 
-# The endpoint joins the REAL project root with this value. Patching
-# get_project_root instead would break the ConfigurationManager, which reads
-# src/conf/lupin-app.ini from that same root — the first attempt did exactly
-# that and every test failed in "setup" for the wrong reason.
-_TEST_RECORDING = "/io/_stage_reporting_test.mp3"
-
-
-def _config_mgr():
+# The endpoint writes each upload into `speech upload temp dir` (row 27bcdd79),
+# so every config key this fake is asked for answers with a per-test directory.
+# A test that did not reach the save step would fail in "setup" for the wrong
+# reason, which is why the two post-setup tests also check the file was written
+# and then removed.
+def _config_mgr( upload_dir ):
     cfg = MagicMock()
-    cfg.get = MagicMock( return_value=_TEST_RECORDING )
+    cfg.get = MagicMock( return_value=str( upload_dir ) )
     return cfg
 
 
-@pytest.fixture( autouse=True )
-def _cleanup_recording():
-    yield
-    import cosa.utils.util as du
-    import os
-    stray = du.get_project_root() + _TEST_RECORDING
-    if os.path.exists( stray ): os.remove( stray )
-
-
 @pytest.mark.asyncio
-async def test_post_transcription_failure_is_not_blamed_on_transcription( capsys ):
+async def test_post_transcription_failure_is_not_blamed_on_transcription( capsys, tmp_path ):
     """
     Transcription SUCCEEDS, post-processing raises. The log and the HTTP detail
     must both say post-processing — never 'transcription failed'.
@@ -70,11 +59,13 @@ async def test_post_transcription_failure_is_not_blamed_on_transcription( capsys
                 request          = _request_returning( b"fake-audio" ),
                 whisper_pipeline = None,
                 provider         = provider,
-                config_mgr       = _config_mgr(),
+                config_mgr       = _config_mgr( tmp_path ),
                 ask_flow         = MagicMock(),
                 current_user     = { "uid": "u1", "email": "t@t.com" },
             )
 
+    assert str( tmp_path ) in provider.transcribe.call_args.args[ 0 ], "setup must have saved the upload"
+    assert list( tmp_path.iterdir() ) == [ ], "the upload must be removed after a post-processing failure"
     assert exc.value.status_code == 500
     detail = exc.value.detail
     assert "post-processing" in detail
@@ -87,7 +78,7 @@ async def test_post_transcription_failure_is_not_blamed_on_transcription( capsys
 
 
 @pytest.mark.asyncio
-async def test_transcription_failure_is_still_reported_as_transcription( capsys ):
+async def test_transcription_failure_is_still_reported_as_transcription( capsys, tmp_path ):
     """
     The complement — without this, 'never say transcription failed' would be
     satisfiable by never naming transcription at all, which would be a
@@ -101,11 +92,12 @@ async def test_transcription_failure_is_still_reported_as_transcription( capsys 
             request          = _request_returning( b"fake-audio" ),
             whisper_pipeline = None,
             provider         = provider,
-            config_mgr       = _config_mgr(),
+            config_mgr       = _config_mgr( tmp_path ),
             ask_flow         = MagicMock(),
             current_user     = { "uid": "u1", "email": "t@t.com" },
         )
 
+    assert list( tmp_path.iterdir() ) == [ ], "the upload must be removed after a transcription failure"
     assert exc.value.status_code == 500
     assert "transcription failed" in exc.value.detail.lower()
     assert "post-processing" not in exc.value.detail
@@ -120,7 +112,7 @@ async def test_setup_failure_names_setup_not_transcription( capsys ):
     provider = MagicMock()
 
     bad_cfg = MagicMock()
-    bad_cfg.get = MagicMock( side_effect=KeyError( "path to audio recording file" ) )
+    bad_cfg.get = MagicMock( side_effect=KeyError( "speech upload temp dir" ) )
     with pytest.raises( HTTPException ) as exc:
         await _endpoint()(
             request          = _request_returning( b"fake-audio" ),

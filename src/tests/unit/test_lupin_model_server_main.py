@@ -448,3 +448,48 @@ def test_admin_metrics_returns_401_without_key( client ):
     _set_valid_api_key_hash()
     resp = client.get( "/admin/metrics" )
     assert resp.status_code == 401
+
+
+# ── /transcribe decode kwargs (row 05ddc8f0) ────────────────────────────────
+
+
+def _ready_state_with_pipeline( pipeline ):
+    from lupin_model_server import main as ms
+
+    ms._state.models_loaded    = [ "whisper", "code_rank_embed", "nomic_embed_text_v1_5" ]
+    ms._state.whisper_pipeline = pipeline
+    return _set_valid_api_key_hash()
+
+
+def test_transcribe_decodes_with_timestamps_on( client ):
+    """
+    Without return_timestamps the model ends the transcript at the first pause on
+    noisy audio (row 05ddc8f0). The kwargs are pinned to LITERALS, not to the
+    module constant, so emptying the constant reddens this test.
+    """
+    pipeline = MagicMock( return_value={ "text": "Testing, testing. One, two, three." } )
+    key      = _ready_state_with_pipeline( pipeline )
+
+    resp = client.post( "/transcribe", headers={ "x-api-key": key }, files={ "audio": ( "a.wav", b"RIFF", "audio/wav" ) } )
+
+    assert resp.status_code == 200
+    assert resp.json() == { "text": "Testing, testing. One, two, three." }
+    assert pipeline.call_count == 1
+    assert pipeline.call_args.kwargs == { "chunk_length_s": 30, "stride_length_s": 5, "return_timestamps": True }
+
+
+def test_transcribe_oom_retry_decodes_with_the_same_kwargs( client ):
+    """The CUDA-OOM retry must not fall back to the old kwargs — both calls share one dict."""
+    import torch
+
+    pipeline = MagicMock( side_effect=[ torch.cuda.OutOfMemoryError( "oom" ), { "text": "after retry" } ] )
+    key      = _ready_state_with_pipeline( pipeline )
+
+    with patch( "torch.cuda.empty_cache" ):
+        resp = client.post( "/transcribe", headers={ "x-api-key": key }, files={ "audio": ( "a.wav", b"RIFF", "audio/wav" ) } )
+
+    assert resp.status_code == 200
+    assert resp.json() == { "text": "after retry" }
+    assert pipeline.call_count == 2
+    expected = { "chunk_length_s": 30, "stride_length_s": 5, "return_timestamps": True }
+    assert [ c.kwargs for c in pipeline.call_args_list ] == [ expected, expected ]

@@ -116,7 +116,7 @@ python src/tests/smoke/test_proxy_integration.py --group all --auto-proxy --no-c
 | Context | `LUPIN_API_URL` value | How it's set |
 |---|---|---|
 | Local dev (manual `pytest`) | unset → defaults to `http://localhost:7999` | nothing to do |
-| Test server scheduled batch (`/api/test-suite/submit` → `:8000`) | `http://localhost:8000` | exported by the test-suite agent's pytest subprocess invocation |
+| Test server scheduled batch (`/api/v2/submit` → `:8000`) | `http://localhost:8000` | exported by the test-suite agent's pytest subprocess invocation |
 | Unit tests (mocked) | `http://test.example/` or unused | use `requests_mock` / `responses`; no network |
 | CI / GitHub Actions | environment-specific override | exported by CI workflow |
 

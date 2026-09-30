@@ -38,7 +38,7 @@ This skill activates when the user says any of:
 >
 > **`reload_enabled()` reads the environment at container START**, so re-arming reload needs a **recreate**, not a restart.
 
-> ⚠️ **Bouncing `:8000` while a test is in flight invalidates the snapshot guarantee.** That is *why* `:8000` is monopolize-mode and gated by `/api/test-suite/submit` with a confirmed slot.
+> ⚠️ **Bouncing `:8000` while a test is in flight invalidates the snapshot guarantee.** That is *why* `:8000` is monopolize-mode and gated by `/api/v2/submit` with a confirmed slot.
 
 ---
 
@@ -86,6 +86,8 @@ It does what a bare `docker restart` cannot: posts an **ack-confirmed** warning 
 | Python / bind-mounted source | `bounce-dev-server.sh` (`docker restart`) | reuses the container; serves the new code |
 | `docker-compose.yml`, a bind mount, an env var | `docker compose up -d --force-recreate <svc>` | mount specs + env resolve at container **CREATE**; a restart reuses them and the change silently does not land |
 
+**On `:7999` the bounce script now catches the second row for you** (row `92374685`, 2026-09-15): `compose_drift_probe.py` compares the container's tmpfs, mounts and compose environment against its compose service, and on drift the script recreates instead of restarting and names the drifted fields. When the probe cannot answer, it restarts as before. `:8000` has no such check in `docker restart lupin-rest-test`; run `pytest src/tests/smoke/test_compose_drift_live.py` (both containers, read-only, about 1s) to see drift there.
+
 **A recreate also discards container-local state.** Measured 2026-08-01 on `lupin-rest-dev`: `projects/`, `backups/`, `plans/`, `mcp-needs-auth-cache.json` sit in the writable layer with no bind behind them; `.credentials.json` and `sessions/` **are** host-bound and survive. Nothing precious — but "nothing is lost" would be false.
 
 See `feedback_fastapi_auto_reload.md` for the reversal and the incident history behind the old rule.
@@ -107,7 +109,7 @@ See `feedback_dev_server_bounce_courtesy.md` for the rationale.
 The test server is monopolize-mode. **Never** issue `docker restart lupin-rest-test`, `compose up`, or any state-changing command on `:8000` outside the canonical channel.
 
 The canonical channel:
-- Schedule work via `POST /api/test-suite/submit` with a non-overlapping `scheduled_at`
+- Schedule work via `POST /api/v2/submit` with a non-overlapping `scheduled_at`
 - Confirm the slot with the user (slot-availability, NOT budget approval)
 - The scheduling system handles bounce timing at the end of the prior scheduled run
 
@@ -224,6 +226,37 @@ curl -sS http://localhost:8000/api/code-identity
 
 ---
 
+## Dumping a HUNG server's stacks — `kill -USR1` (row `abe4188d`)
+
+A server that is hung, rather than crashed, is the one state no log explains: it answers
+`/health`, it holds its connections, and it writes nothing. Since row `abe4188d` every Lupin
+server registers a `faulthandler` handler for **SIGUSR1** at bootstrap
+(`register_sigusr1_faulthandler` in `src/lupin_app/bootstrap_helpers.py`, called from
+`main.py`), so one signal prints **every thread's Python stack to stderr** and the process
+carries on running:
+
+```bash
+docker exec lupin-rest-dev kill -USR1 1        # in-container PID 1 is the server
+docker logs --tail 200 lupin-rest-dev          # the dump lands on stderr
+```
+
+Read the `[BOOT] SIGUSR1 thread-dump handler:` line in the startup log first — it prints
+`registered`, `already-registered`, `declined-existing-handler` or `unsupported-platform`,
+and only the first two mean the signal is safe to send.
+
+🔴 **On a server that does NOT print that line, `kill -USR1` KILLS IT.** The default
+disposition of SIGUSR1 is to terminate, so on an older image the signal is not a probe, it
+is a shutdown — of the exact process whose state you were trying to capture. This is not
+hypothetical: on 2026-09-25 a hang investigation found `faulthandler.is_enabled()` False,
+with py-spy absent in the container *and* on the host, gdb absent, and `CapAdd=[]` so no
+`SYS_PTRACE`. There was no read-only way to get a single Python frame, and signalling the
+process would have destroyed the evidence. That is the gap this closes.
+
+The handler declines rather than clobbers if something else already owns SIGUSR1, so it can
+never silently take the signal away from another user of it.
+
+---
+
 ## What This Skill Does NOT Cover
 
 - **Container debugging** (won't start, keeps restarting, OOM): use `docker logs`, `docker inspect`, `docker compose logs -f` — out of scope here.
@@ -245,3 +278,4 @@ This skill is purely about *intentional* lifecycle actions and the decision tree
 - `src/cosa/rest/code_identity.py` + `GET /api/code-identity` — the same answer over HTTP, captured at module import
 - `src/scripts/refresh-test-server.sh` — canonical `:8000` refresh script
 - `.claude/commands/refresh-test.md` — slash-command wrapper for the same
+- `src/lupin_app/bootstrap_helpers.py` `register_sigusr1_faulthandler` — the SIGUSR1 thread-dump handler (row `abe4188d`)

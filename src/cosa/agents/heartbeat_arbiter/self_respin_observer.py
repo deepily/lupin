@@ -30,6 +30,8 @@ import datetime
 import glob
 import json
 import os
+import subprocess
+import sys
 import threading
 
 from dataclasses import dataclass
@@ -239,6 +241,74 @@ def _parse_iso( value ):
 #     DEAD_NO_RETURN alarms; it can never manufacture a new one.
 KEYS_SENT_AT = "keys_sent_at"
 
+# The longest the fire point may wait for an idle prompt before typing /clear
+# (row 698a5aaf). Recorded in the marker so the stamp-less deadline can allow for it.
+IDLE_WAIT_MAX_SECONDS = "idle_wait_max_seconds"
+
+# ── The MARKER's own code version (row b5035039) ──────────────────────────────
+# WHY A MARKER NEEDS A VERSION AT ALL. Measured 2026-09-11 on two seats: an MCP
+# process that started before the idle-gate merge kept running the pre-merge module
+# for hours, because lupin_mcp loads only when the SEAT RESTARTS and a /clear does
+# not reload it. The only thing that betrayed it was a marker missing
+# `idle_wait_max_seconds` — a field whose absence happened to be diagnostic ONCE.
+# Relying on that is relying on an accident: the next drift will drop some other
+# field, or none at all. A version stamp makes the writer's vintage READABLE instead
+# of inferrable, and self_respin compares this in-memory value against the one
+# declared in the source ON DISK (see self_respin_core.stale_module_warning) —
+# disk-ahead-of-memory being the only signature a running process can actually see.
+#
+# BUMP THIS whenever the marker's field set changes, and add the new field to
+# MARKER_REQUIRED_FIELDS below in the same edit.
+#   v1 (row b5035039): the first versioned shape — everything build_marker_dict
+#   writes today, idle_wait_max_seconds included.
+MARKER_SCHEMA_VERSION_KEY = "marker_schema_version"
+MARKER_SCHEMA_VERSION     = 1
+
+# Every key build_marker_dict is contracted to write. The verb re-reads its OWN
+# marker after writing and asserts this set (row b5035039, fix 3) — a WRITE-INTEGRITY
+# check, catching a partial or truncated write, or a field the writer failed to
+# populate. It does NOT detect a stale writer: a stale writer emits a complete marker
+# under its own older schema, so every field it knows about is present. Staleness is
+# MARKER_SCHEMA_VERSION's job, above. A test pins this tuple to the builder's actual
+# output so the two cannot drift apart silently.
+MARKER_REQUIRED_FIELDS = (
+    "session_id",
+    "persona",
+    "tmux_session",
+    "fired_at",
+    "expected_return_by",
+    "pre_clear_status",
+    "pre_clear_pct",
+    "memento_path",
+    "memento_verified",
+    "wake_nonce",
+    IDLE_WAIT_MAX_SECONDS,
+    MARKER_SCHEMA_VERSION_KEY,
+)
+
+
+def missing_marker_fields( marker ):
+    """
+    Report which contracted marker keys are absent from a marker read back off disk.
+
+    Requires:
+        - marker is a parsed marker (any object; a non-dict is handled, not trusted)
+
+    Ensures:
+        - returns the MARKER_REQUIRED_FIELDS absent from `marker`, in declaration order
+        - returns () for a complete marker
+        - keys on PRESENCE, never truthiness: `wake_nonce` and `pre_clear_pct` are
+          legitimately None on real markers, and a truthiness test would report every
+          no-wake re-spin as malformed
+        - a non-dict (None, list, scalar — i.e. an unreadable or non-marker payload)
+          reports EVERY field missing rather than raising
+        - never raises
+    """
+    if not isinstance( marker, dict ):
+        return tuple( MARKER_REQUIRED_FIELDS )
+    return tuple( field for field in MARKER_REQUIRED_FIELDS if field not in marker )
+
+
 # The injector's send stamp lives in its OWN file, not inside the marker JSON —
 # `<KEYS_SENT_PREFIX><session_id>.marker`, whose MTIME is the timestamp. Rationale
 # in read_keys_sent_at. The `.marker` suffix keeps it out of the `.json` marker glob.
@@ -259,16 +329,24 @@ def effective_deadline( marker, fired_at, deadline ):
         - when the marker carries a well-formed `keys_sent_at` STRICTLY AFTER
           fired_at, effective = keys_sent_at + ( deadline - fired_at ) — the same
           total window, measured from the send — and anchor is ANCHOR_KEYS_SENT
-        - otherwise returns ( deadline, ANCHOR_FIRE ) UNCHANGED: absent, non-string,
+        - otherwise returns ( deadline + idle wait, ANCHOR_FIRE ): absent, non-string,
           unparseable, naive, or at/before fired_at all take the old anchor, which
-          still reaches DEAD_NO_RETURN on time. A missing or junk stamp degrades to
+          still reaches DEAD_NO_RETURN. A missing or junk stamp degrades to
           today's behaviour — never to silence, never to an alarm of its own.
+        - "idle wait" is the marker's IDLE_WAIT_MAX_SECONDS when it is a non-negative
+          number, else 0. A fire that waits for an idle prompt stamps nothing until it
+          sends, so without this a seat that is merely BUSY would be called dead while
+          its fire is still legitimately waiting (row 698a5aaf). Old markers carry no
+          field and are judged exactly as before.
         - effective is NEVER earlier than deadline
         - never raises
     """
     sent = _parse_iso( marker.get( KEYS_SENT_AT ) )
     if sent is None or sent <= fired_at:
-        return deadline, ANCHOR_FIRE
+        idle_wait = marker.get( IDLE_WAIT_MAX_SECONDS )
+        if isinstance( idle_wait, bool ) or not isinstance( idle_wait, ( int, float ) ) or idle_wait < 0:
+            idle_wait = 0
+        return deadline + datetime.timedelta( seconds=idle_wait ), ANCHOR_FIRE
     return sent + ( deadline - fired_at ), ANCHOR_KEYS_SENT
 
 
@@ -277,7 +355,8 @@ def effective_deadline( marker, fired_at, deadline ):
 # ---------------------------------------------------------------------------
 def build_marker_dict( *, session_id, persona, tmux_session, fired_at, delay_seconds,
                        pre_clear_status, pre_clear_pct, memento_path, memento_verified,
-                       wake_nonce=None, grace_seconds=DEFAULT_GRACE_SECONDS ):
+                       wake_nonce=None, grace_seconds=DEFAULT_GRACE_SECONDS,
+                       idle_wait_max_seconds=0 ):
     """
     Build the self-re-spin marker dict the verb writes to disk BEFORE it schedules
     the clear (the pre-clear facts must survive the context wipe — the cleared
@@ -292,6 +371,13 @@ def build_marker_dict( *, session_id, persona, tmux_session, fired_at, delay_sec
     Ensures:
         - returns the full marker dict with expected_return_by =
           fired_at + delay_seconds + grace_seconds (ISO-8601)
+        - records idle_wait_max_seconds, the most the fire point may wait for an idle
+          prompt; expected_return_by does NOT include it (it is the deadline for a seat
+          that is idle), the observer's stamp-less deadline does
+        - stamps MARKER_SCHEMA_VERSION, so a reader can tell WHICH CODE wrote this
+          marker instead of inferring the writer's vintage from which fields happen
+          to be absent (row b5035039)
+        - writes exactly MARKER_REQUIRED_FIELDS — the verb re-reads and asserts them
         - all fields JSON-serializable
     """
     # Normalize to aware UTC so our OWN markers can never reach the malformed
@@ -310,6 +396,8 @@ def build_marker_dict( *, session_id, persona, tmux_session, fired_at, delay_sec
         "memento_path"       : memento_path,
         "memento_verified"   : memento_verified,
         "wake_nonce"         : wake_nonce,     # the seat must echo THIS in its wake proof for RETURNED
+        IDLE_WAIT_MAX_SECONDS     : idle_wait_max_seconds,
+        MARKER_SCHEMA_VERSION_KEY : MARKER_SCHEMA_VERSION,   # WHICH CODE wrote this (row b5035039)
     }
 
 
@@ -518,30 +606,74 @@ def classify_marker( marker, pressure_record, *, now, wake_proof_nonce=None, wak
 # ---------------------------------------------------------------------------
 # Disk read — glob markers under a base dir (fleet_data_root by default)
 # ---------------------------------------------------------------------------
-def read_markers( base_dir=None ):
+def _marker_patterns( base_dir ):
     """
-    Read every self-re-spin marker under `base_dir`, skipping unreadable ones.
+    The glob patterns a fleet-wide marker sweep has to cover.
+
+    WHY THIS EXISTS RATHER THAN A SINGLE `_resolve_base_dir` (Rick's keying ruling,
+    row db56ac6d). A marker is written under the SEAT's own repo data root. A sweep
+    that globs one directory therefore sees only the seats that happen to share the
+    observer's ambient LUPIN_ROOT, and every other seat's marker is invisible — not
+    late, not malformed, ABSENT. This reader cannot be handed a repo the way the
+    boot-receipt finder can, because it takes no seat: it asks about EVERYBODY at
+    once. So the fix is not "pass it the repo", it is "sweep every repo".
+
+    🔴 EXACTLY ONE LEVEL DOWN, AND THIS IS MEASURED, NOT TIDINESS. A data root is a
+    DIRECT child of the parent, so `<parent>/*/` IS the shape of the thing. The
+    obvious alternative — a recursive `**` sweep, copied from
+    `respin_wake_check.find_misplaced_receipts` — was run against the live tree on
+    2026-09-03 and returned 82 markers where the single-root read returns 71. The
+    extra 11 live in `projects-data/lupin/self-respin-archive-pre-f7c5e349/`:
+    retired markers deliberately parked OUT of the observer's way. A recursive sweep
+    resurrects them — the observer re-classifies all 11 and the janitor, which
+    deletes any RETURNED marker past its TTL, deletes them for good.
+
+    ⇒ SO THE TWO SWEEPS DIFFER ON PURPOSE, and the difference is what each one is
+    FOR. `find_misplaced_receipts` is a DETECTOR whose whole job is to find files
+    OUTSIDE the writer's shape, so recursive is correct there and its docstring says
+    so. This is a READER of live markers, so it must match the writer's shape
+    exactly. Copying the pattern across would have been the same mistake the work
+    order for this change already made once — carrying a mechanism checked for one
+    family into another it was never checked for.
 
     Requires:
-        - base_dir is a directory path or None (None ⇒ fleet_data_root(), lazily)
+        - base_dir is a directory path or None
 
     Ensures:
-        - returns a list of parsed marker dicts (may be empty)
+        - an EXPLICIT base_dir ⇒ that one directory's pattern and nothing else.
+          Tests and explicit callers still mean what they say, so no existing caller
+          changes behaviour.
+        - None ⇒ `<parent of the ambient root>/*/<prefix>*.json` — every repo root
+          under the parent, the ambient root included, at one level and no deeper
+        - a DEGENERATE parent (the ambient root has no parent, or its parent is the
+          filesystem root) falls back to the ambient root alone — a sweep must never
+          widen toward the filesystem root
+        - never raises
+    """
+    if base_dir is not None:
+        return [ os.path.join( str( base_dir ), f"{MARKER_PREFIX}*.json" ) ]
+    ambient = os.path.normpath( _resolve_base_dir( None ) )
+    parent  = os.path.dirname( ambient )
+    if not parent or parent == ambient or parent == os.sep:
+        return [ os.path.join( ambient, f"{MARKER_PREFIX}*.json" ) ]
+    return [ os.path.join( parent, "*", f"{MARKER_PREFIX}*.json" ) ]
+
+
+def read_markers( base_dir=None ):
+    """
+    Read every self-re-spin marker the sweep covers, skipping unreadable ones.
+
+    Requires:
+        - base_dir is a directory path or None (None ⇒ every repo root under the
+          parent of fleet_data_root(), resolved lazily — see _marker_scan_roots)
+
+    Ensures:
+        - returns a list of parsed marker dicts (may be empty), ordered by path
         - a missing directory ⇒ [] (not an error — nothing has fired)
         - a malformed / unreadable marker file is skipped, never propagated
         - never raises
     """
-    base = _resolve_base_dir( base_dir )
-    results = []
-    for path in sorted( glob.glob( os.path.join( base, f"{MARKER_PREFIX}*.json" ) ) ):
-        try:
-            with open( path, "r" ) as f:
-                obj = json.load( f )
-        except ( OSError, ValueError ):
-            continue
-        if isinstance( obj, dict ):
-            results.append( obj )
-    return results
+    return [ marker for _path, marker in _read_markers_with_paths( base_dir ) ]
 
 
 def _resolve_base_dir( base_dir ):
@@ -705,21 +837,25 @@ def observe_fleet_self_respin( *, base_dir=None, now=None, fetch_pressure=None )
     if fetch_pressure is None:
         fetch_pressure = _fetch_live_pressure
 
-    markers = read_markers( base_dir )
-    if not markers:
+    pairs = _read_markers_with_paths( base_dir )
+    if not pairs:
         return []
 
-    base     = _resolve_base_dir( base_dir )
     section  = fetch_pressure() or {}
     by_id    = _pressure_by_id( section )
 
-    def _classify( m ):
+    def _classify( path, m ):
+        # The marker's OWN directory, not the observer's ambient root. self_respin_core
+        # writes the marker, the wake proof and the send stamp into ONE directory, so a
+        # marker found under a sibling repo root has its sidecars there too — reading
+        # them from the ambient root would report every cross-repo seat as unproven.
+        base = os.path.dirname( path )
         nonce, proof_at = read_wake_proof( base, m.get( "session_id" ) )
         return classify_marker(
             with_keys_sent( m, base ), by_id.get( m.get( "session_id" ) ), now=now,
             wake_proof_nonce=nonce, wake_proof_at=proof_at,
         )
-    return [ _classify( m ) for m in markers ]
+    return [ _classify( p, m ) for p, m in pairs ]
 
 
 # ---------------------------------------------------------------------------
@@ -745,9 +881,11 @@ def _read_markers_with_paths( base_dir=None ):
         - a missing directory ⇒ [] ; an unreadable/malformed file is skipped
         - never raises
     """
-    base    = _resolve_base_dir( base_dir )
+    paths = []
+    for pattern in _marker_patterns( base_dir ):
+        paths.extend( glob.glob( pattern ) )
     results = []
-    for path in sorted( glob.glob( os.path.join( base, f"{MARKER_PREFIX}*.json" ) ) ):
+    for path in sorted( set( paths ) ):
         try:
             with open( path, "r" ) as f:
                 obj = json.load( f )
@@ -800,12 +938,15 @@ def sweep_returned_markers( *, base_dir=None, now=None, fetch_pressure=None,
     if not pairs:
         return []
 
-    base     = _resolve_base_dir( base_dir )
     section  = fetch_pressure() or {}
     by_id    = _pressure_by_id( section )
 
     swept = []
     for path, marker in pairs:
+        # the marker's own root — see observe_fleet_self_respin. The janitor deletes the
+        # sidecars too, so reading them from anywhere else would leave a cross-repo
+        # seat's proof and send stamp behind after its marker was swept.
+        base = os.path.dirname( path )
         nonce, proof_at = read_wake_proof( base, marker.get( "session_id" ) )
         assessment = classify_marker(
             with_keys_sent( marker, base ), by_id.get( marker.get( "session_id" ) ), now=now,
@@ -910,14 +1051,14 @@ def collect_respin_samples( *, base_dir=None, now=None, fetch_pressure=None ):
     if fetch_pressure is None:
         fetch_pressure = _fetch_live_pressure
 
-    markers = read_markers( base_dir )
-    if not markers:
+    pairs = _read_markers_with_paths( base_dir )
+    if not pairs:
         return []
 
-    base    = _resolve_base_dir( base_dir )
     by_id   = _pressure_by_id( fetch_pressure() or {} )
 
-    def _sample( m ):
+    def _sample( path, m ):
+        base            = os.path.dirname( path )   # the marker's own root — see observe_fleet_self_respin
         record          = by_id.get( m.get( "session_id" ) )
         nonce, proof_at = read_wake_proof( base, m.get( "session_id" ) )
         # merged FIRST so the sample and the assessment describe the same marker —
@@ -929,7 +1070,7 @@ def collect_respin_samples( *, base_dir=None, now=None, fetch_pressure=None ):
         )
         return build_respin_sample( merged, record, assessment, now )
 
-    return [ _sample( m ) for m in markers ]
+    return [ _sample( p, m ) for p, m in pairs ]
 
 
 def append_respin_samples( samples, base_dir=None ):
@@ -939,6 +1080,15 @@ def append_respin_samples( samples, base_dir=None ):
     Requires:
         - samples is a list of JSON-serializable dicts (build_respin_sample shape)
         - base_dir is a directory path or None (None ⇒ fleet_data_root())
+
+    ⚠️ THIS ONE STAYS AMBIENT ON PURPOSE, and it is the one base_dir seam on this
+    module that Rick's keying ruling does NOT move (row db56ac6d). The ruling is
+    about a SEAT's data — a marker, a receipt, a hold — which belongs under the
+    seat's own repo. This file is not a seat's data: it is the OBSERVER's own
+    fleet-wide instrument log, one writer, one reader, no seat. Splitting it per
+    repo would fragment a single time series into N of them and hand its future
+    readers the very multi-root sweep this change exists to remove from the marker
+    path. The markers are read from every root; the samples are written to one.
 
     Ensures:
         - appends one JSON line per sample to <base>/RESPIN_SAMPLES_FILENAME
@@ -1012,6 +1162,69 @@ def _fetch_live_pressure():   # pragma: no cover - live HTTP boundary, exercised
         return { "personas": None }
 
 
+# ── Stale-MCP delivery (row 97c5bd94) ─────────────────────────────────────────
+# src/scripts/stale_mcp_check.py finds live cosa-voice MCP processes running code
+# older than the tree, but nothing ran it and nothing read its output. This block is
+# the reader: the observer tick runs the script, and for each STALE process tells
+# that seat's manager once. The remedy line is fixed text on purpose — a /clear
+# leaves the MCP child of the pane's claude process running, so the tempting fix
+# does nothing.
+STALE_MCP_SCRIPT_REL    = "/src/scripts/stale_mcp_check.py"
+STALE_MCP_RUN_TIMEOUT   = 30
+STALE_MCP_REMEDY        = "restart the seat; a /clear doesn't reload the MCP"
+
+
+def run_stale_mcp_check( runner=None, script_path=None, timeout=STALE_MCP_RUN_TIMEOUT ):
+    """
+    Run stale_mcp_check.py --json and return only the STALE process records.
+
+    Requires:
+        - runner( argv, timeout ) -> ( returncode, stdout ), or None for subprocess
+        - script_path is the script's path, or None for <project root>/src/scripts/...
+
+    Ensures:
+        - returns the list of records whose `stale` is True; [] when nothing is stale
+        - exit 0 and exit 1 both carry a report; exit 2 means the check produced
+          nothing trustworthy, so it RAISES rather than reporting "nothing stale"
+
+    Raises:
+        - RuntimeError on exit code 2, any other exit code, or unparseable output
+    """
+    if script_path is None:
+        import cosa.utils.util as cu
+        script_path = cu.get_project_root() + STALE_MCP_SCRIPT_REL
+    if runner is None: runner = _run_subprocess
+    code, out = runner( [ sys.executable, script_path, "--json" ], timeout )
+    if code not in ( 0, 1 ):
+        raise RuntimeError( f"stale_mcp_check exited {code}: no trustworthy report" )
+    try:
+        report = json.loads( out )
+        return [ r for r in report[ "processes" ] if r[ "stale" ] ]
+    except ( ValueError, KeyError, TypeError ) as e:
+        raise RuntimeError( f"stale_mcp_check output unreadable: {e!r}" )
+
+
+def _run_subprocess( argv, timeout ):
+    """Run argv, return ( returncode, stdout ). A timeout raises subprocess.TimeoutExpired."""
+    result = subprocess.run( argv, capture_output=True, text=True, timeout=timeout )
+    return ( result.returncode, result.stdout )
+
+
+def _default_seat_lookup( record ):   # pragma: no cover - bridge/lineage IO boundary; injected in tests
+    """
+    Map a stale-MCP record to ( seat_persona, manager_persona ) through the pane's
+    tmux session name -> the seat's bridge -> spawn lineage. ( None, None ) on any
+    miss; a seat whose manager cannot be resolved is never guessed at.
+    """
+    from lupin_cli.claude_code.hooks.lib.session_bridge import find_session_by_tmux, get_voice_persona
+    from cosa.agents.heartbeat_arbiter.manager_resolver import resolve_manager
+    bridge = find_session_by_tmux( record.get( "tmux_session" ) )
+    if not bridge or not bridge.get( "session_id" ): return ( None, None )
+    persona = get_voice_persona( bridge[ "session_id" ] )
+    seat    = persona.get( "name" ) if persona else None
+    return ( seat, resolve_manager( bridge[ "session_id" ] ).get( "manager_persona" ) )
+
+
 # ---------------------------------------------------------------------------
 # The daemon loop — the PRODUCTION caller the observer never had (row 275cb0b9,
 # GAP 2). observe_fleet_self_respin + sweep_returned_markers had NO caller outside
@@ -1022,8 +1235,11 @@ def _fetch_live_pressure():   # pragma: no cover - live HTTP boundary, exercised
 # ---------------------------------------------------------------------------
 class SelfRespinObserverLoop:
     """
-    Standing self-re-spin liveness loop. Inert unless `arbiter self respin observer
-    enabled` is True. Each tick it (a) classifies every in-flight marker against the
+    Standing self-re-spin liveness loop. The respin half is inert unless `arbiter self
+    respin observer enabled` is True. The stale-MCP half (row 97c5bd94) has its OWN gate,
+    `stale mcp check delivery enabled` (ConfigurationManager key, explicit default True,
+    no INI line yet), so it delivers with the observer flag False and switching it on
+    never switches respin advisories on. Each tick it (a) classifies every in-flight marker against the
     live pressure and fires ONE advisory per alarm marker (DEAD_NO_RETURN /
     IDENTITY_MISMATCH / MALFORMED_MARKER), and (b) sweeps confirmed-RETURNED markers
     past their TTL. The pressure read, advisory sink, clock, and marker base dir are
@@ -1038,6 +1254,9 @@ class SelfRespinObserverLoop:
         base_dir          = None,
         advisory_fn       = None,
         now_fn            = None,
+        stale_mcp_fn      = None,
+        dm_push_fn        = None,
+        seat_lookup_fn    = None,
     ):
         """
         Requires:
@@ -1050,6 +1269,12 @@ class SelfRespinObserverLoop:
             - advisory_fn( message ) -> None emits ONE operator advisory (default: a
               banner print; production injects the throttled escalation rail)
             - now_fn() -> aware datetime (default: datetime.now(utc))
+            - stale_mcp_fn() -> list of stale MCP records (see run_stale_mcp_check), or
+              None to leave the stale-MCP delivery OFF; production injects the real run
+            - dm_push_fn( recipient_persona, thread_id, body ) -> outcome dict whose
+              "outcome" is "dispatched" on success (the arbiter's DM-push hop)
+            - seat_lookup_fn( record ) -> ( seat_persona, manager_persona ), either None
+              on a miss (default: bridge + spawn lineage)
 
         Ensures:
             - no thread is started at construction (call start() explicitly)
@@ -1061,6 +1286,10 @@ class SelfRespinObserverLoop:
         self._advisory_fn       = advisory_fn if advisory_fn is not None else self._default_advisory_signal
         self._now_fn            = now_fn      if now_fn      is not None else ( lambda: datetime.datetime.now( datetime.timezone.utc ) )
         self._advised           = set()       # (session_id, verdict) advised once — flood-guard one-shot
+        self._stale_mcp_fn      = stale_mcp_fn
+        self._dm_push_fn        = dm_push_fn
+        self._seat_lookup_fn    = seat_lookup_fn if seat_lookup_fn is not None else _default_seat_lookup
+        self._stale_told        = set()       # (pid, start_ticks) already told — never repeated
         self._stop_event        = threading.Event()
         self._thread            = None
 
@@ -1068,6 +1297,12 @@ class SelfRespinObserverLoop:
 
     def _enabled( self ) -> bool:
         return self._config_mgr.get( "arbiter self respin observer enabled", default=False, return_type="boolean" )
+
+    def _stale_mcp_enabled( self ) -> bool:
+        # its OWN gate, independent of `_enabled()`: on only when a check is wired AND the key
+        # is true. An absent key reads True, which is why no INI line is needed to ship it.
+        return self._stale_mcp_fn is not None and self._config_mgr.get(
+            "stale mcp check delivery enabled", default=True, return_type="boolean" )
 
     def _tick_seconds( self ) -> int:
         # the SAME live tick the :8001 fleet-arbiter loop polls on (no separate knob).
@@ -1099,7 +1334,10 @@ class SelfRespinObserverLoop:
             { "enabled": bool, "alarms": int, "advised": int, "swept": int }
         """
         if not self._enabled():
-            return { "enabled": False, "alarms": 0, "advised": 0, "swept": 0 }
+            summary = { "enabled": False, "alarms": 0, "advised": 0, "swept": 0 }
+            if self._stale_mcp_enabled():              # the stale-MCP half runs on its own gate
+                summary[ "stale_mcp_told" ] = self.tell_stale_mcp_once()
+            return summary
 
         now     = self._now_fn()
         advised = 0
@@ -1129,7 +1367,77 @@ class SelfRespinObserverLoop:
 
         # flood-guard clear: an alarm that is gone (returned or swept) drops its marker
         self._advised &= live
-        return { "enabled": True, "alarms": alarms, "advised": advised, "swept": swept }
+        summary = { "enabled": True, "alarms": alarms, "advised": advised, "swept": swept }
+        if self._stale_mcp_enabled():
+            summary[ "stale_mcp_told" ] = self.tell_stale_mcp_once()
+        return summary
+
+    def tell_stale_mcp_once( self ) -> int:
+        """
+        Run the stale-MCP check and tell each stale seat's manager, once per process.
+
+        Ensures:
+            - nothing stale -> nothing sent, returns 0 (quiet)
+            - one DM per stale process, naming the seat and STALE_MCP_REMEDY, to that
+              seat's manager; a process is keyed by ( pid, start_ticks ) (the stat integer, not
+              the drifting start_epoch float) so a recycled
+              pid is a new process, and one already told is never told again
+            - a DM the server ANSWERED and refused (an http_status, e.g. 422) is logged with
+              its status and body, and the tell goes to the operator advisory instead, ONCE
+              per process — it is not retried every tick (a refused DM retried silently for
+              ever is how nobody got told)
+            - a DM with NO http_status (refused connection, timeout: the server never
+              answered, e.g. :7999 restarting) is logged, not advised and not marked told,
+              so the next tick retries the manager
+            - a seat whose manager cannot be resolved (or with no DM hop wired) goes to
+              the operator advisory instead, once, rather than being dropped
+            - keys of processes no longer stale are forgotten
+            - never raises: a failed check is logged and the tick moves on; a record whose
+              lookup, DM or advisory raises (or which is malformed) is logged and skipped,
+              the others are still told, and it is retried next tick
+        """
+        try:
+            stale = self._stale_mcp_fn()
+        except Exception as e:                         # a failed check must not read as "nothing stale"
+            self._log_skip( f"stale-MCP check failed (continuing): {e!r}" )
+            return 0
+        told = 0
+        live = set()
+        for rec in stale:
+            try:                                       # one bad record must not stop the others being told
+                key = ( rec[ "pid" ], rec[ "start_ticks" ] )   # NOT start_epoch: that float drifts a few ms per census run
+                live.add( key )
+                if key in self._stale_told: continue
+                seat, manager = self._seat_lookup_fn( rec )
+                body = (
+                    f"STALE MCP — cosa-voice MCP pid {rec[ 'pid' ]} "
+                    f"(seat {seat or 'unknown'}, tmux {rec.get( 'tmux_session' )} {rec.get( 'tmux_pane' )}) "
+                    f"is running code older than the tree: {STALE_MCP_REMEDY}."
+                )
+                if manager is None or self._dm_push_fn is None:
+                    self._advisory_fn( body + " No manager DM route (manager unresolved or DM push off)." )
+                else:
+                    outcome = self._dm_push_fn( manager, f"stale-mcp-{rec[ 'pid' ]}", body )
+                    if outcome.get( "outcome" ) != "dispatched":
+                        http_status = outcome.get( "http_status" )
+                        detail      = outcome.get( "detail" ) or "no detail given"
+                        if http_status is None:
+                            # the server never answered (refused, timed out: :7999 restarting), so the
+                            # tell was not really attempted. Log, do NOT mark told, retry next tick.
+                            self._log_skip( f"stale-MCP DM to {manager} for pid {rec[ 'pid' ]} got no answer, will retry ({detail})" )
+                            continue
+                        # the server ANSWERED and refused: retrying cannot help. Say why, tell the
+                        # operator instead, and stop chasing this process.
+                        reason = f"HTTP {http_status}: {detail}"
+                        self._log_skip( f"stale-MCP DM to {manager} for pid {rec[ 'pid' ]} not delivered ({reason})" )
+                        self._advisory_fn( body + f" The DM to {manager} was NOT delivered ({reason})." )
+            except Exception as e:                     # not recorded as told, so the next tick retries it
+                self._log_skip( f"stale-MCP record skipped (continuing): {e!r} record={rec!r}" )
+                continue
+            self._stale_told.add( key )
+            told += 1
+        self._stale_told &= live
+        return told
 
     def record_once( self ) -> dict:
         """
@@ -1216,10 +1524,11 @@ class SelfRespinObserverLoop:
 
     def start( self ) -> bool:
         """
-        Spawn the daemon thread — ONLY if the flag is enabled and no thread runs.
+        Spawn the daemon thread — ONLY if a flag is enabled (the observer's, or the
+        stale-MCP delivery's) and no thread runs.
         Returns True if a thread was started, else False (the no-op rollout gate).
         """
-        if not self._enabled():
+        if not ( self._enabled() or self._stale_mcp_enabled() ):
             return False
         if self._thread is not None and self._thread.is_alive():
             return False

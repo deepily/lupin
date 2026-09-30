@@ -52,3 +52,19 @@ def test_submit_timeout_returns_false():
 def test_submit_generic_exception_returns_false():
     with patch.object( mod.requests, "post", side_effect=RuntimeError( "weird" ) ):
         assert submit_notification_response( "nid", "answer" ) is False
+
+
+# --------------------------------------------------------------------------- #
+# The credential (row e20e249a): the answer door refuses an uncredentialed caller,
+# so the token a proxy holds has to reach the wire.
+# --------------------------------------------------------------------------- #
+def test_submit_sends_the_authorization_it_is_given():
+    with patch.object( mod.requests, "post", return_value=_post_resp( 200 ) ) as m:
+        assert submit_notification_response( "nid", "answer", authorization="Bearer tok" ) is True
+    assert m.call_args[ 1 ][ "headers" ] == { "Content-Type": "application/json", "Authorization": "Bearer tok" }
+
+
+def test_submit_without_authorization_sends_no_authorization_header():
+    with patch.object( mod.requests, "post", return_value=_post_resp( 200 ) ) as m:
+        submit_notification_response( "nid", "answer" )
+    assert m.call_args[ 1 ][ "headers" ] == { "Content-Type": "application/json" }

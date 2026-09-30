@@ -86,8 +86,48 @@ test( "getUserData parses valid JSON, returns null for absent, swallows corrupt 
     assert.equal( getUserData( makeStorage( { user_data: "{not json" } ) ), null );  // JSON.parse throws → catch → null
 } );
 
-test( "isAuthenticated reflects token presence", () => {
-    assert.equal( isAuthenticated( makeStorage( { lupin_access_token: "x" } ) ), true );
+/**
+ * A syntactically real JWT expiring 30 minutes from now.
+ *
+ * 🔴 THE FIXTURES HERE USED THE LITERAL STRING "x", which is not a JWT at all. That was
+ * invisible while `isAuthenticated` was a presence check — any non-empty string satisfied
+ * it. Row ef16e88d made the predicate consult `exp`, "x" is correctly refused as
+ * undecodable, and three tests here went red.
+ *
+ * ⚠️ THEY WERE NOT CATCHING A BREAK, and the distinction is worth keeping. Two of them
+ * (`computeNavState integrates…`, `mountNav injects…`) never meant to assert anything
+ * about tokens — they needed A LOGGED-IN STORAGE and reached for the shortest string that
+ * used to produce one. The FIXTURE was carrying the old contract, not the assertion.
+ * Updating it corrects the test's model of the world; it does not weaken it.
+ *
+ * The signature is junk on purpose — the client never verifies one, so demanding a real
+ * signature would measure the server instead of the nav. Construction is kept identical to
+ * the sibling guard's `jwtExpiringIn()` so the two files cannot drift into disagreeing
+ * about what a valid token looks like.
+ */
+function liveJwt(): string {
+    const b64 = ( o: object ): string =>
+        Buffer.from( JSON.stringify( o ) ).toString( "base64url" );
+    const exp = Math.floor( Date.now() / 1000 ) + 1800;
+    return [
+        b64( { alg: "HS256", typ: "JWT" } ),
+        b64( { sub: "0cf47e2d-d5a1-4cd4-addf-79810fd32b15",
+               email: "ricardo.felipe.ruiz@gmail.com",
+               roles: [ "user", "admin" ],
+               exp,
+               iat: exp - 1800 } ),
+        "notarealsignature",
+    ].join( "." );
+}
+
+test( "isAuthenticated accepts a LIVE token and refuses a stale or absent one", () => {
+    // ⚠️ RENAMED FROM "reflects token presence" — which named the defect. Presence is
+    // exactly what it must NOT reflect: a stored string the server refuses. The expiry
+    // and undecodable arms live in their own guard
+    // (the_logged_in_indicator_must_not_accept_a_token_the_server_refuses.test.ts).
+    assert.equal( isAuthenticated( makeStorage( { lupin_access_token: liveJwt() } ) ), true );
+    assert.equal( isAuthenticated( makeStorage( { lupin_access_token: "x" } ) ), false,
+        "a non-JWT string is not a session — the defect row ef16e88d fixed" );
     assert.equal( isAuthenticated( makeStorage() ), false );
 } );
 
@@ -120,7 +160,7 @@ test( "isActivePage exact-matches /app and startsWith for the rest", () => {
 // ===========================================================================
 
 test( "computeNavState integrates auth/admin/email/pathname", () => {
-    const s = computeNavState( makeStorage( { lupin_access_token: "x", user_data: ADMIN_USER } ), "/app/admin" );
+    const s = computeNavState( makeStorage( { lupin_access_token: liveJwt(), user_data: ADMIN_USER } ), "/app/admin" );
     assert.deepEqual( s, { authenticated: true, admin: true, email: "boss@lupin.ai", pathname: "/app/admin" } );
 } );
 
@@ -252,7 +292,7 @@ test( "mountNav injects the nav as body's first child, pads the body, and wires 
     const sentinel = document.createElement( "main" );
     document.body.appendChild( sentinel );
 
-    const storage = makeStorage( { lupin_access_token: "x", user_data: ADMIN_USER } );
+    const storage = makeStorage( { lupin_access_token: liveJwt(), user_data: ADMIN_USER } );
     const fakeWin = { location: { pathname: "/app/admin", href: "" } } as unknown as Window;
 
     const nav = mountNav( document, fakeWin, storage );

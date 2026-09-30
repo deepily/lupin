@@ -39,6 +39,9 @@ from visual_height_tolerance import (
     compare_pngs_content_shift_tolerant,
     compare_pngs_aa_scatter_tolerant,
 )
+# Visual-baseline render-env constants (row f0e00f01) — shared with the pin guard
+# `test_visual_timezone_pin.py`, resolved via the same `_THIS_DIR` path guard.
+from visual_baseline_env import VISUAL_BASELINE_TIMEZONE
 
 
 # ---------------------------------------------------------------------------
@@ -81,8 +84,9 @@ def browser_type_launch_args( browser_type_launch_args ):
 
 
 # ---------------------------------------------------------------------------
-# Deterministic Viewport for Visual Regression  (bug 99326963)
+# Deterministic Viewport + Timezone for Visual Regression  (bug 99326963, row f0e00f01)
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture( scope="session" )
 def browser_context_args( browser_context_args ):
@@ -108,20 +112,143 @@ def browser_context_args( browser_context_args ):
     the element), so the height pin does not clip tall panes — only the WIDTH is
     load-bearing for the size-mismatch class this fixes.
 
+    ALSO pins the context TIMEZONE (row f0e00f01, 2026-09-15). Lupin's timestamp
+    formatters fall back to the BROWSER's local zone, so an unpinned context renders
+    every `HH:MM` and every date-accordion key in whatever zone the machine running
+    Chromium happens to sit in. Measured on the host that day: an unpinned context
+    resolved to `America/New_York` and rendered a fixed epoch as `20:00`, while the
+    same epoch in a `UTC` context rendered `00:00` — a four-hour, four-character
+    delta on every timestamp-bearing baseline. The two venues disagree by exactly
+    that much: the host dev box runs EDT, while `docker/lupin/Dockerfile` sets
+    `ENV TZ=UTC` so both `lupin-rest-test` and `lupin-rest-dev` run UTC.
+
+    UTC is the pinned value because the baselines are CONTAINER-CANONICAL: the :8000
+    merge gate runs `run-e2e-ui-tests.sh` as a `TestSuiteJob` subprocess INSIDE
+    `lupin-rest-test`, so the git-tracked snapshots were captured at TZ=UTC. Pinning
+    to UTC therefore leaves the gate byte-identical and brings HOST-side runs into
+    line with it, rather than the other way round. (Same Option-2 container-canonical
+    resolution the font/FreeType fingerprint guard records — see
+    `test_render_env_fingerprint.py`.)
+
+    The pin lives HERE, in the capture harness, rather than in the `app timezone` INI
+    key, because that key CANNOT reach the render path — see the two wiring defects
+    named in `test_visual_timezone_pin.py`. A fix by INI agreement would also be a fix
+    by two files agreeing, which drifts; a context arg cannot be defeated by a config
+    section somebody forgets to update.
+
     Requires:
         - browser_context_args is the default pytest-playwright fixture
 
     Ensures:
         - Every browser context is created with viewport 1280x720
-        - Capture and compare runs share identical context dimensions
+        - Every browser context resolves its timezone to UTC, whatever the host zone
+        - Capture and compare runs share identical context dimensions AND wall-clock zone
 
     See bug 99326963 + src/rnd/v0.1.6/2026.04.10-visual-regression-cold-warm-drift.md
-    (sibling determinism fixture `browser_type_launch_args` above).
+    (sibling determinism fixture `browser_type_launch_args` above); timezone pin per
+    row f0e00f01, guarded by `test_visual_timezone_pin.py`.
     """
     return {
         **browser_context_args,
-        "viewport": { "width": 1280, "height": 720 },
+        "viewport"    : { "width": 1280, "height": 720 },
+        "timezone_id" : VISUAL_BASELINE_TIMEZONE,
     }
+
+
+# ---------------------------------------------------------------------------
+# Snap a captured element to an integer y  (rows 807a03bf, f0e00f01)
+# ---------------------------------------------------------------------------
+#
+# An element's top lands on whatever fraction the content above it adds up to,
+# and that sub-pixel offset changes how its text is anti-aliased. Content above
+# moves between runs, so the same element captures differently with identical
+# content: 1 px text-band flaps no comparator tolerance can hold.
+#
+# THE NUDGE IS A SPACER, NOT A MARGIN AND NOT A TRANSFORM. Measured in headless
+# Chromium on the fleet-status container (Chloé 🗼, 2026-09-18), starting it at
+# two fractions, .09375 and .5:
+#   - a margin-top nudge did not move it at all: its previous sibling
+#     (#fleet-size-cap-controls, margin-bottom 12px) absorbed the 0.5 px margin
+#     by margin collapsing. That is what the jobs pane's margin nudge hit on :8000.
+#   - translateY landed it on an integer, but the two captures still differed:
+#     a transform moves the painted box, not the layout position the text is
+#     rasterised at.
+#   - a spacer div of height = nudge, inserted before the element, landed both on
+#     an integer and the two captures were byte-identical.
+#
+# OPT-IN, NOT DEFAULT. A spacer moves an element only if it is in normal block
+# flow. Measured on synthetic pages, each starting at y = 10.5: a block child
+# landed on 11; a top-layer popover (position: fixed, like the persona popovers)
+# stayed at 10.5; a child of a flex row stayed at 10.5 and moved 8 px sideways,
+# by the row's gap. The landing assert would fail those tests, which are fine
+# today, so a test asks for the snap with `snap_y=True`.
+_SNAP_TO_INTEGER_Y_JS = """
+( box ) => {
+    const before = box.getBoundingClientRect().top;
+    const nudge  = Math.ceil( before ) - before;
+    if ( nudge > 0 ) {
+        const spacer = document.createElement( "div" );
+        spacer.setAttribute( "data-snapshot-snap-spacer", "" );
+        spacer.style.cssText = `display:block;height:${ nudge }px;margin:0;padding:0;border:0`;
+        box.parentElement.insertBefore( spacer, box );
+    }
+    return {
+        before         : before,
+        nudge          : nudge,
+        after          : box.getBoundingClientRect().top,
+        position       : getComputedStyle( box ).position,
+        parent_display : getComputedStyle( box.parentElement ).display,
+    };
+}
+"""
+
+
+def snap_to_integer_y( locator ):
+    """
+    Move an in-flow element down to the next integer y with a spacer, and prove it landed.
+
+    Requires:
+        - locator is a Playwright Locator matching exactly one element
+        - the element is in normal block flow (see the OPT-IN note above)
+
+    Ensures:
+        - when its top is fractional, a spacer of height = the fraction's complement
+          sits directly before it; an integer top is left alone
+        - two animation frames have run, so the capture sees the moved layout
+        - returns the measurement dict (before, nudge, after, position, parent_display)
+
+    Raises:
+        - TypeError if given something other than a Locator
+        - AssertionError, naming the measurement, if the element did not land on an integer y
+    """
+    from playwright.sync_api import Locator as _Locator
+
+    if not isinstance( locator, _Locator ):
+        raise TypeError( f"snap_y needs a Locator to move, got {type( locator ).__name__}" )
+    snapped = locator.evaluate( _SNAP_TO_INTEGER_Y_JS )
+    locator.page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
+    print( f"[snap_y] {snapped}" )
+    assert float( snapped[ "after" ] ).is_integer(), f"the element did not land on an integer y: {snapped}"
+    return snapped
+
+
+@pytest.fixture
+def assert_snapshot( assert_snapshot ):
+    """
+    The plugin's assert_snapshot, plus an opt-in `snap_y` keyword.
+
+    Requires:
+        - the pytest-playwright-visual-snapshot plugin provides assert_snapshot
+
+    Ensures:
+        - snap_y=False (the default) is a pure pass-through to the plugin fixture
+        - snap_y=True runs snap_to_integer_y on the locator before the capture
+    """
+    def _assert( img_or_page, *args, snap_y=False, **kwargs ):
+        if snap_y: snap_to_integer_y( img_or_page )
+        return assert_snapshot( img_or_page, *args, **kwargs )
+
+    return _assert
 
 
 # ---------------------------------------------------------------------------
@@ -169,7 +296,8 @@ def assert_snapshot_height_tolerant( pytestconfig, request ):
     test_file_stem = _Path( request.node.fspath ).stem
     test_name      = request.node.name.split( "[", 1 )[ 0 ]
 
-    def _assert( locator_or_bytes, *, name, max_height_delta=1 ):
+    def _assert( locator_or_bytes, *, name, max_height_delta=1, snap_y=False ):
+        if snap_y: snap_to_integer_y( locator_or_bytes )
         if isinstance( locator_or_bytes, ( _Locator, _Page ) ):
             img = locator_or_bytes.screenshot( animations="disabled", type="png" )
         else:
@@ -264,7 +392,8 @@ def assert_snapshot_content_shift_tolerant( pytestconfig, request ):
     test_name      = request.node.name.split( "[", 1 )[ 0 ]
 
     def _assert( locator_or_bytes, *, name, max_shift=1, max_height_delta=1,
-                 max_isolated_cluster=2 ):
+                 max_isolated_cluster=2, snap_y=False ):
+        if snap_y: snap_to_integer_y( locator_or_bytes )
         if isinstance( locator_or_bytes, ( _Locator, _Page ) ):
             img = locator_or_bytes.screenshot( animations="disabled", type="png" )
         else:
@@ -358,7 +487,8 @@ def assert_snapshot_structure_only( pytestconfig, request ):
     test_file_stem = _Path( request.node.fspath ).stem
     test_name      = request.node.name.split( "[", 1 )[ 0 ]
 
-    def _assert( locator_or_bytes, *, name, max_height_delta=1 ):
+    def _assert( locator_or_bytes, *, name, max_height_delta=1, snap_y=False ):
+        if snap_y: snap_to_integer_y( locator_or_bytes )
         if isinstance( locator_or_bytes, ( _Locator, _Page ) ):
             img = locator_or_bytes.screenshot( animations="disabled", type="png" )
         else:
@@ -430,7 +560,10 @@ def verify_test_environment():
     has taken effect (database points to lupin_db_test).
 
     Requires:
-        - Server running on port 7999
+        - The server at BASE_URL — port 8000 by default (line 28), NOT :7999.
+          This line said 7999 and was wrong: the fixture validates whatever
+          BASE_URL points at, and a reader who trusted it would look for the
+          Testing hot-swap on the dev server, where it has never been done.
         - Server hot-swapped to [Lupin: Testing] via /api/init
 
     Ensures:
@@ -995,3 +1128,60 @@ def get_ws_status( page, ws_type="queue" ):
         }""",
         element_id
     )
+
+
+# ==========================================================================================
+# THE PAGE-DEPENDENT HALVES OF THE SELECTOR GUARD — row `485442ea`
+# ==========================================================================================
+#
+# The STATIC half does not live here. It is a unit test
+# (`src/tests/unit/test_no_probe_names_a_dead_selector.py`) that preflights every selector at
+# a page-driving locator call site in the whole tree, because a fixture here could only ever
+# guard the selectors of the tests ACTUALLY SELECTED — a `-k` filter or a half-split would
+# silently narrow it and then report green over the smaller corpus, which is precisely the
+# defect this epic exists to end.
+#
+# What genuinely needs a page lives here, offered as an explicit fixture rather than an
+# autouse one: every test names different selectors, so an autouse guard would either assert
+# nothing or assert the wrong set.
+#
+#   guard_live_dom( selectors )      — BUILD DRIFT: the source names it, the running page
+#                                      does not. A stale bundle, a missed rebuild.
+#   guard_section_altitude( sels )   — WRONG LEVEL: it resolves, but to an inner element
+#                                      instead of its .collapsible-section wrapper. It
+#                                      screenshots cleanly and returns a confident, invented
+#                                      size difference.
+#
+# A failure in each has a different owner, which is why they are different exceptions and not
+# one "selector problem".
+
+@pytest.fixture
+def guard_live_dom( ):
+    """
+    Assert every named selector RESOLVED in the running page.
+
+    Requires:
+        - the caller passes an already-navigated page and a non-empty selector list
+    Ensures:
+        - returns a callable ( page, selectors, settle_ms=0 ) -> { selector: count }
+    Raises:
+        - LiveDomDrift naming every selector the running page did not produce
+    """
+    from .live_dom_check import assert_live_dom
+    return assert_live_dom
+
+
+@pytest.fixture
+def guard_section_altitude( ):
+    """
+    Assert every named section selector IS its section wrapper, not something inside one.
+
+    Requires:
+        - the caller passes an already-navigated page and section-level selectors
+    Ensures:
+        - returns a callable ( page, selectors, wrapper_class=... ) -> { selector: verdict }
+    Raises:
+        - WrongAltitude naming every descendant AND the wrapper each should have used
+    """
+    from .selector_altitude import assert_section_altitude
+    return assert_section_altitude

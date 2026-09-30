@@ -136,17 +136,13 @@ def test_phase6a_functional_smoke():
             page.goto( PHASE6A_PAGE_URL, wait_until="networkidle", timeout=15_000 )
             _wait_for_test_hook( page )
 
-            # Jobs-pane stays cold-HIDDEN on mount. Refreshed 2026-08-26: the
-            # original AC8a assertion required `hidden` to be lifted here, but
-            # JobsPaneRenderer stopped stripping it on 2026-07-02 (Lane 0c) —
-            # Job Queues is hidden by default for legacy parity (Q3 RULED) and
-            # visibility is now owned by the section toolbar as a persisted user
-            # choice, not by this renderer. See JobsPaneRenderer.ts ~line 192.
-            # The renderer still populates the buckets while the section is
-            # hidden, which is what the rest of this test verifies.
+            # Jobs-pane is VISIBLE after mount. Parity A-2 #1 (2026-09-16, plan
+            # §3 R1) dropped the markup's `hidden` and took `jobs-pane` out of the
+            # toolbar's cold-hidden set, reversing Lane 0c (2026-07-02), whose
+            # premise — that legacy hides Job Queues — was false.
             jobs_pane = page.locator( '[data-testid="multiplexer-jobs-pane"]' ).first
-            assert jobs_pane.evaluate( "el => el.hasAttribute('hidden')" ) is True, (
-                "jobs-pane should stay cold-hidden after mount (Lane 0c, 2026-07-02)"
+            assert jobs_pane.evaluate( "el => el.hasAttribute('hidden')" ) is False, (
+                "jobs-pane should start visible (parity A-2 #1, R1)"
             )
             assert jobs_pane.evaluate( "el => el.hasAttribute('data-phase6-pending')" ) is False, (
                 "jobs-pane still has data-phase6-pending after mount"

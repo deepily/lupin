@@ -31,6 +31,7 @@ from datetime import datetime, timezone
 
 import cosa.utils.util as cu
 from cosa.utils.dm_text import dm_word_count, WORD_COUNT_VERSION
+from cosa.agents.dm_compression.freeze import count_all_literals, segment_clauses
 from cosa.rest import dm_experiment
 
 # Import dependencies and services
@@ -1415,6 +1416,178 @@ def _id_label_bindings( text ):
     return out
 
 
+# ═══════════════════════════════════════════════════════════════════════════════════════
+# RETRACTION GUARD — row 29a986df
+# ═══════════════════════════════════════════════════════════════════════════════════════
+#
+# ⚠️ THE FAILURE THIS BOUNDS, and why none of the guards above can see it. On 2026-08-30
+# (thread 22495f05, message 497daf43) Krishna 🦚 sent a summary of his own commits. What
+# arrived read:
+#
+#     "The optimal window for operations is named as 12 AM to 9 AM at 2df3aefb."
+#
+# Commit 2df3aefb does the exact opposite — it REMOVED that window. The only surviving
+# occurrence of "12 AM – 9 AM" in the tree sits inside a correction banner reading
+# "THIS SECTION USED TO NAME 12 AM – 9 AM EDT AS OPTIMAL. THE BOX IS POWERED OFF THEN."
+#
+# So the condenser did two things: it dropped the "USED TO", and it re-attributed the
+# retracted value to the commit that killed it. Every number in the output was in the
+# input, so `_fabricated_facts` passes it. No ledger marker moved, so `_rescoped_quantities`
+# passes it. No name gained a speech act, so the attribution check passes it. The invented
+# thing is the TENSE.
+#
+# 🔴 WHY THIS ONE IS WORSE THAN AN ORDINARY LOSSY SUMMARY. A correction notice is written
+# as "this USED TO say X, and X was wrong." Strip the retraction marker and it becomes
+# "this says X" — a fluent, plausible sentence asserting precisely the thing the document
+# exists to deny. The output is not vague; it is confidently wrong in a shape
+# indistinguishable from a correct summary, and the delivered sentence instructed the
+# reader to schedule batch work into hours the host is powered off. This fleet's docs are
+# correction-heavy, so every "CORRECTED YYYY-MM-DD" banner is a candidate for the same
+# inversion on its way through a DM.
+#
+# THE RULE, and it is deliberately the narrowest one that catches the measured case: a
+# literal that the sender wrote ONLY inside a retraction scope must not appear in the
+# rewrite OUTSIDE one. Absence stays legal — dropping a retraction wholesale is a lossy
+# summary, which is the design. Asserting its retracted value as current is not.
+
+# Markers that open a retraction scope. Two sets, because the fleet writes retractions in
+# two registers and one regex cannot serve both without over-firing.
+#
+# Lower-case tier: phrases that are ONLY ever used to describe a former state. "used to",
+# "no longer" and "formerly" cannot appear in a sentence asserting a current value, so
+# admitting them costs nothing.
+_RETRACTION_MARKER = re.compile(
+    r"\b(?:used\s+to|no\s+longer|not\s+any\s?more|formerly|"
+    r"previously\s+(?:said|read|named|reported|gave)|"
+    r"supersed(?:ed|es)|retract(?:ed|ion)|retired|obsolete|"
+    r"(?:was|were|is\s+now)\s+wrong)\b", re.IGNORECASE )
+
+# SHOUTED tier, case-SENSITIVE and that is load-bearing. "CORRECTED" opening a banner is a
+# retraction; "I corrected the test at abc1234" is an ordinary work sentence, and admitting
+# the lower-case form would make every such sha a protected literal and refuse a clean
+# rewrite. A guard that fires on good text gets switched off, so the case is part of the
+# guard working — the same reasoning that puts a stop-list behind the attribution check.
+_RETRACTION_SHOUT = re.compile( r"\b(?:CORRECTED|CORRECTION|RETRACTED|SUPERSEDED|RE-MEASURED)\b" )
+
+# 🔴 THE TWO SIDES ASK DIFFERENT QUESTIONS, SO THEY GET DIFFERENT VOCABULARIES.
+#
+# Of the ORIGINAL we ask "is this a retraction?" — a claim strong enough to protect a
+# value, so the markers above are deliberately narrow. Of the REWRITE we ask "did the
+# retraction survive?" — and there the generous answer is the safe one, because admitting
+# a weaker word can only ever CLEAR a rewrite that kept some marker, never block one.
+#
+# It is not symmetry for its own sake, it is what stops a good rewrite being refused:
+# "Krishna corrected the window on 2026-08-30" preserves the retraction perfectly well in
+# lower case, and the narrow set would have called it an assertion of a retracted date.
+# Both vocabularies therefore err in the SAME direction — toward keeping the marker.
+_RETRACTION_ECHO = re.compile(
+    _RETRACTION_MARKER.pattern + r"|\b(?:correct(?:ed|ion|s)|was\s+removed|"
+    r"has\s+since|no\s+longer\s+holds|old\s+(?:window|value|figure|number))\b",
+    re.IGNORECASE )
+
+
+def _retraction_scope_start( line, echo=False ):
+    """
+    Where a retraction scope opens on one line, or None if it never does.
+
+    Scope runs from the START OF THE CLAUSE carrying the marker to the end of the
+    line, not from the marker itself. Both orders occur in real banners — "USED TO
+    NAME 12 AM – 9 AM" puts the marker first, "12 AM – 9 AM was wrong" puts it last —
+    and a scope anchored at the marker would miss the second one entirely.
+
+    Requires:
+        - line is a string
+        - echo is True when scanning a REWRITE (the generous vocabulary) and False when
+          scanning the sender's ORIGINAL (the narrow one)
+
+    Ensures:
+        - returns an index into `line`, or None when no marker is present
+        - never raises
+    """
+    if not line: return None
+
+    # 🔴 THE EARLIEST OF THE TWO, never the first regex that happens to match. An `or`
+    # here would let a lower-case marker later in the line hide a SHOUTED banner opening
+    # it, and the scope would start after the very words that declared the retraction.
+    lower = _RETRACTION_ECHO if echo else _RETRACTION_MARKER
+    hits  = [ m.start() for m in ( lower.search( line ),
+                                   _RETRACTION_SHOUT.search( line ) ) if m is not None ]
+    if not hits: return None
+    first = min( hits )
+
+    for start, end in segment_clauses( line ):
+        if start <= first < end: return start
+    # `segment_clauses` covers the line with no gaps or overlaps — its own contract — so a
+    # marker index found INSIDE the line always lands in a clause. Kept as a return rather
+    # than an assert because a guard must never be the thing that takes the send path down.
+    return 0   # pragma: no cover
+
+
+def _retraction_split( text ):
+    """
+    Literals `text` states as CURRENT, and the ones it states only as RETRACTED.
+
+    Scope is the LINE and not the whole body, deliberately. A correction banner is a
+    paragraph; the live value that replaced it is a different paragraph or a table row.
+    Marking the whole body from the first marker onward would swallow the replacement and
+    protect the very literal the document is trying to promote.
+
+    Requires:
+        - text is a string
+
+    Ensures:
+        - returns ( live, retracted_only ) as two sets of literals
+        - a literal appearing on both sides is LIVE — the sender asserts it somewhere,
+          so the rewrite is free to assert it too
+        - never raises
+    """
+    live, retracted = set(), set()
+    for line in ( text or "" ).splitlines():
+        cut = _retraction_scope_start( line )
+        head = line if cut is None else line[ :cut ]
+        tail = ""   if cut is None else line[ cut: ]
+        live.update( count_all_literals( head, "" ) )
+        retracted.update( count_all_literals( tail, "" ) )
+    return live, retracted - live
+
+
+def _retracted_assertions( original, rewritten ):
+    """
+    Retracted values the rewrite asserts as current. Empty = clean.
+
+    Requires:
+        - original and rewritten are strings
+
+    Ensures:
+        - returns the sorted literals the ORIGINAL wrote only inside a retraction scope
+          and the REWRITE writes outside one
+        - returns [] when the original retracts nothing — the overwhelmingly common case,
+          and the whole check costs one literal pass on those
+        - a rewrite that KEEPS the marker is clean, which is the behaviour we want: the
+          fix is marker preservation, not silence about the past
+        - never raises
+
+    KNOWN LIMIT, stated rather than glossed: the marker vocabulary is a closed set, so
+    this catches retractions written the way this fleet writes them, not every possible
+    one. A retraction phrased without one of these markers passes untouched.
+    """
+    try:
+        _live, retracted = _retraction_split( original )
+        if not retracted: return []
+
+        asserted = set()
+        for line in ( rewritten or "" ).splitlines():
+            cut  = _retraction_scope_start( line, echo=True )
+            head = line if cut is None else line[ :cut ]
+            asserted.update( set( count_all_literals( head, "" ) ) & retracted )
+        return sorted( asserted )
+    except Exception:
+        # Same call as its two siblings: a check that raises must not take the send path
+        # with it. An unreadable comparison means "nothing proven inverted", which leaves
+        # the tutor exactly as safe as it was before this existed.
+        return []
+
+
 def _invented_id_labels( original, rewritten ):
     """
     Type nouns the rewrite attached to an id that the sender never attached. Empty = clean.
@@ -1628,6 +1801,273 @@ def _count_attributions( text, personas ):
         return 0
 
 
+# ── SPEECH-ACT GUARD (Mr. Radio's ruling, 2026-08-30 ~19:27 EDT) ────────────────────
+#
+# Recorded in TODO.md, under the moratorium book: "A SPEECH-ACT GUARD FOR THE DM
+# CONDENSER" (Rachel, 19:33 EDT). A row WAS minted for this at 19:31 and DROPPED at
+# 19:33 under Rick's no-new-tickets order, so it is cited nowhere here — a reference
+# that resolves to a dropped row is the exact defect this guard exists to stop.
+#
+# A SECOND guard alongside the marker-based retraction check, never a replacement for it
+# — the ruling is explicit on that, and the measurement behind it is that the two cannot
+# see each other's failure.
+#
+# 🔴 WHY THE EXISTING FOUR ARE ALL BLIND TO THIS. Every one of them asks whether something
+# is PRESENT: which facts (`_fabricated_facts`), what they are bound to
+# (`_rescoped_quantities`), when they were true (`_retracted_assertions`), whether anyone
+# is named at all (`_dropped_attribution`). None asks WHO PERFORMED WHICH ACT, and a
+# substitution preserves every count those four take. Measured 2026-08-30 on the live
+# predicate: swapping one persona name for another returns "" — clean, no flag — while
+# dropping every name fires at 6-to-0. That empty string is the hole this fills, and it is
+# how a suggestion of Tiberius's reached Mr. Radio attributed to Maya.
+#
+# THE FOUR MEASURED INVERSIONS THIS IS BUILT AGAINST, all 2026-08-30:
+#   1. a recommendation ("the site-packages clause is LOAD-BEARING") arrived as its own
+#      opposite ("delete the site-packages clause — the exclusion is unnecessary")
+#   2. a suggestion by Tiberius arrived attributed to Maya
+#   3. a verdict ("mutation six is EQUIVALENT, no test") arrived as "all six KILLED"
+#   4. a gate ("push stays Rick's call") arrived as an instruction to push
+#
+# ⚠️ IT CATCHES THREE OF THOSE FOUR, NOT FOUR. #3 is a FACT flip, not an act flip: the
+# sender's verdict and the rewrite's differ in what is TRUE of the mutation, not in who
+# performed what act, and this guard measured "" on it. That case belongs to the
+# fabrication / re-scoping family and is named here so the next reader does not assume a
+# reach this does not have. Verified rather than reasoned: the pair above returns "".
+#
+# ⚠️ #1 IS THE DANGEROUS SHAPE AND THE REASON THIS IS NOT A MARKER CHECK. An inverted
+# retraction reads as odd — a reader who knows the topic feels the tense slip. An inverted
+# RECOMMENDATION reads as ordinary technical advice, carries no marker to preserve, and in
+# that case pointed at an action that makes every test pass. Nothing in the message was
+# self-contradictory, so nothing in the message could raise a flag.
+#
+# SCOPE, deliberately narrow — it fires on a CHANGED act, never on a dropped one. Dropping
+# an act wholesale is a lossy summary, which is the design; re-attributing one, or
+# reversing its polarity, or promoting an opinion into an order, is not. Absence stays
+# legal here for the same reason it does in the retraction guard.
+
+# 🔴 THIS LIST IS A JUDGEMENT CALL TOO — THE SAME SHAPE AS THE IMPERATIVE LIST BELOW, AND
+# THE FIRST CUT OF THIS GUARD DISCLOSED ONLY THE OTHER ONE. Twenty-six words somebody
+# chose; "is this word an approval" has no mechanical answer either. Named here after
+# Tiberius refuted a claim that FLIPPED was mechanical while SUBSTITUTED and COMMANDED
+# were the judgement calls — SUBSTITUTED is genuinely mechanical (a name set comparison
+# against the live voice pool), and this list never was.
+#
+# ⚠️ AND ITS FAILURE POINTS THE OTHER WAY FROM THE IMPERATIVE LIST'S. A missing imperative
+# verb under-fires, which is safe. A polarity verb appearing in a sentence the SENDER does
+# not own over-fires, which REFUSES REAL TRAFFIC. Measured 2026-08-30, all three refusing
+# before the first-person restriction below existed:
+#
+#     "the linter rejected the file"   -> "accepted"   REFUSED
+#     "CI blocked the build"           -> "approved"   REFUSED
+#     "the reviewer refused the patch" -> "approved"   REFUSED
+#
+# Every one of those is a FACT flip — what some third party did — which this guard's own
+# docstring puts in the fabrication family and out of scope. A guard that refuses a case
+# its code says it does not handle is not conservative, it is wrong. Hence
+# `_sender_act_polarities`: the act must be one the SENDER performs.
+_ACT_POLARITY = {
+    "approve"    : +1, "approved"   : +1, "approves"    : +1, "approval"  : +1,
+    "accept"     : +1, "accepted"   : +1, "accepts"     : +1,
+    "recommend"  : +1, "recommends" : +1, "recommended" : +1,
+    "endorse"    : +1, "endorsed"   : +1,
+    "refuse"     : -1, "refused"    : -1, "refuses"     : -1, "refusal"   : -1,
+    "reject"     : -1, "rejected"   : -1, "rejects"     : -1,
+    "block"      : -1, "blocked"    : -1, "blocks"      : -1,
+    "deny"       : -1, "denied"     : -1, "denies"      : -1,
+}
+
+# Bare imperatives that turn an opinion into an order. Matched only at the start of a
+# sentence, because "we should delete the clause" is a recommendation and "Delete the
+# clause" is an instruction, and the difference is the whole point of case #1.
+#
+# 🔴 THIS LIST IS A JUDGEMENT CALL, NOT A LOOKUP — AND SO IS THE POLARITY LIST ABOVE.
+#
+# ⚠️ THIS PARAGRAPH USED TO SAY COMMANDED WAS "THE ONLY ONE OF THE THREE CONDITIONS THAT
+# IS", and that FLIPPED and SUBSTITUTED were "mechanical, reproducible by anyone from the
+# code". Tiberius disproved it by measurement, 2026-08-30. COMMANDED rests on fourteen
+# verbs somebody chose; FLIPPED rests on twenty-six verbs somebody chose. Same shape.
+# ONE of the three is genuinely mechanical: SUBSTITUTED compares name sets against the
+# live voice pool, which is data rather than a judgement, and it survived his check.
+#
+# The correction is here rather than only in a commit message because this is where a
+# reader meets the list, and a wrong claim is not repaired by adding a true one beside
+# it.
+#
+# WHAT IT THEREFORE CANNOT SEE -- the false-negative shape, stated so nobody has to
+# rediscover it:
+#
+#   1. THE FIFTEENTH VERB. Any imperative not on this list passes clean and silently.
+#      "Strip the guard" is caught; "excise the guard" is not, and nothing in the output
+#      says a verb was considered and rejected. This is the same shape as the marker
+#      guard missing a name-for-name swap: a check that answers only about the members of
+#      a set it was handed.
+#   2. THE UNIMPERATIVE ORDER. "The clause should be removed" and "the clause is
+#      unnecessary and can go" are instructions in effect and imperatives in neither
+#      form. Sentence-initial matching cannot reach them.
+#   3. THE SECOND CLAUSE. "For clarity, delete the clause" buries the verb mid-sentence,
+#      where the anchor does not look.
+#
+# The list is deliberately NARROW so it under-fires rather than over-fires, because this
+# guard REFUSES and a false fire costs every sender their compression. That trade is
+# defensible; leaving it undisclosed is not. A conservative check whose conservatism is
+# not written down reads to the next person as a complete one.
+_ACT_IMPERATIVE = re.compile(
+    r"(?:^|(?<=[.!?]\s))\s*(delete|remove|drop|strip|revert|disable|push|merge|deploy|"
+    r"force|overwrite|skip|bypass)\b",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+# A first-person subject, and how far after it an act may sit. The window exists because
+# "I have approved", "I would recommend" and "we therefore reject" all put words between
+# the pronoun and the verb; three is enough for those and short enough that the pronoun of
+# one sentence cannot reach the verb of the next — which is why the scan below stops at
+# sentence-ending punctuation rather than only counting words.
+_SENDER_PRONOUN = { "i", "we" }
+_SENDER_WINDOW  = 3
+
+_ACT_NEGATOR = { "not", "never", "cannot", "won't", "wont", "don't", "dont", "didn't",
+                 "didnt", "no", "nor", "neither" }
+
+
+def _sender_act_polarities( text ):
+    """
+    The polarity of every speech act THE SENDER PERFORMS, as a set of ints.
+
+    Not every polarity word in the text — that was the first cut, and it refused real
+    traffic. "The linter rejected the file" carries a listed verb and is a report about a
+    third party, not an act by the sender; flipping it to "accepted" is a FACT flip, which
+    belongs to the fabrication family and is explicitly out of this guard's scope.
+
+    Requires:
+        - text is a string
+
+    Ensures:
+        - returns a set drawn from { +1, -1 }, empty when the sender performs no such act
+        - only counts an act with a first-person subject within three words before it
+        - SKIPS a negated occurrence entirely rather than guessing its sign: "I do not
+          approve" is a refusal, but reading it as one means parsing scope, and a guard
+          that refuses is the wrong place to guess. Dropping it is the safe direction
+          because FLIPPED only fires on a single-polarity original — one dropped act
+          makes the check quieter, never wronger.
+        - matching is word-boundaried and case-insensitive, so "disapprove" is not a match
+        - NEVER raises
+
+    Raises:
+        - nothing
+    """
+    try:
+        found  = set()
+        tokens = re.findall( r"[A-Za-z']+|[.!?;]", text or "" )
+        for i, token in enumerate( tokens ):
+            if token.lower() not in _SENDER_PRONOUN: continue
+            negated = False
+            for word in tokens[ i + 1 : i + 2 + _SENDER_WINDOW ]:
+                if word in ".!?;": break          # the pronoun's sentence ended
+                low = word.lower()
+                if low in _ACT_NEGATOR:
+                    negated = True
+                    continue
+                pol = _ACT_POLARITY.get( low )
+                if pol is not None:
+                    if not negated: found.add( pol )
+                    break
+        return found
+    except Exception:
+        return set()
+
+
+def _altered_speech_acts( original, rewritten ):
+    """
+    Why the rewrite performs a DIFFERENT act than the sender did, or "" when it does not.
+
+    Three conditions, any of which fires. Each is the narrowest form that catches its
+    measured case, and each is independent — a rewrite can flip a polarity without
+    touching attribution, and vice versa.
+
+      FLIPPED       the original performs acts of one polarity only and the rewrite
+                    performs the opposite one. Restricted to a single-polarity original
+                    because a message that both approves one thing and refuses another
+                    carries both signs already, and comparing sets there would fire on
+                    every ordinary mixed verdict.
+
+      SUBSTITUTED   the original names exactly one persona and the rewrite names exactly
+                    one, and they are different people. This is case #2 and it is the one
+                    `_dropped_attribution` structurally cannot see, because the count of
+                    named people never changes. Held to one-and-one deliberately: with two
+                    or more names on either side, which name attaches to which act is a
+                    question this cannot answer from counting, and guessing would flag
+                    every honest summary that mentions a second person.
+
+      COMMANDED     the rewrite opens a sentence with a bare imperative the original never
+                    issued. This is case #1 — an opinion promoted to an order. It compares
+                    the SET of imperative verbs, so a rewrite that keeps the sender's own
+                    "delete" is untouched and only a NEW one fires.
+
+    Requires:
+        - original and rewritten are strings
+
+    Ensures:
+        - returns "" when the rewrite performs the same acts as the original
+        - returns a short human-readable reason otherwise, naming what changed, so the
+          finding is auditable rather than a bare boolean
+        - NEVER raises: on any internal failure it returns "", so a broken check flags
+          nothing rather than blocking every DM in the fleet — the same fail-open posture
+          the other four guards take, and for the same reason
+
+    Raises:
+        - nothing
+    """
+    try:
+        orig    = _attribution_prose( original or "" )
+        rewrite = _attribution_prose( rewritten or "" )
+
+        orig_pol    = _sender_act_polarities( orig )
+        rewrite_pol = _sender_act_polarities( rewrite )
+        if len( orig_pol ) == 1 and len( rewrite_pol ) == 1 and orig_pol != rewrite_pol:
+            was, now = next( iter( orig_pol ) ), next( iter( rewrite_pol ) )
+            return f"flipped: sender's act was {was:+d}, rewrite performs {now:+d}"
+
+        personas     = _attribution_personas()
+        orig_names   = _named_personas( orig,    personas )
+        rewrite_names = _named_personas( rewrite, personas )
+        if len( orig_names ) == 1 and len( rewrite_names ) == 1 and orig_names != rewrite_names:
+            return ( f"substituted: sender named {sorted( orig_names )[ 0 ]}, "
+                     f"rewrite names {sorted( rewrite_names )[ 0 ]}" )
+
+        orig_cmds    = { m.lower() for m in _ACT_IMPERATIVE.findall( orig ) }
+        rewrite_cmds = { m.lower() for m in _ACT_IMPERATIVE.findall( rewrite ) }
+        introduced   = rewrite_cmds - orig_cmds
+        if introduced:
+            return f"commanded: rewrite issues an instruction the sender did not: {sorted( introduced )}"
+
+        return ""
+    except Exception:
+        return ""
+
+
+def _named_personas( text, personas ):
+    """
+    The set of persona names `text` mentions.
+
+    Requires:
+        - text is a string
+        - personas is a list of lowercase names
+
+    Ensures:
+        - returns a set of lowercase names, word-boundaried and case-insensitive
+        - returns an empty set rather than raising on anything
+
+    Raises:
+        - nothing
+    """
+    try:
+        return { name for name in personas
+                 if re.search( r"\b" + re.escape( name ) + r"\b", text, re.IGNORECASE ) }
+    except Exception:
+        return set()
+
+
 def _dropped_attribution( original, rewritten, min_persons=3 ):
     """
     Why a reader may not be able to attribute this rewrite, or "" when they can.
@@ -1832,6 +2272,40 @@ def _apply_dm_tutor( body_text, config=None, rewrite_fn=None ):
             meta[ "tutor_outcome" ]  = "rescope_blocked"
             meta[ "tutor_rescoped" ] = rescoped
             print( f"[dm-tutor] REFUSED a rewrite that moved a quantity across a ledger: {rescoped}" )
+            return body_text, meta
+
+        # RETRACTION CHECK — refuse a rewrite that states a retracted value as current.
+        # Sits beside the re-scoping check because it is the third member of the same
+        # family: fabrication compares WHICH facts are present, re-scoping compares WHAT
+        # THEY ARE BOUND TO, and this compares WHEN THEY WERE TRUE. None of the three can
+        # see the other two's failure. Row 29a986df.
+        retracted = _retracted_assertions( body_text, rewritten )
+        if retracted:
+            meta[ "tutor_outcome" ]   = "retraction_blocked"
+            meta[ "tutor_retracted" ] = retracted
+            print( f"[dm-tutor] REFUSED a rewrite that asserts a retracted value as current: {retracted}" )
+            return body_text, meta
+
+        # SPEECH-ACT CHECK — REFUSES, and it is the fourth member of the refusing family.
+        # The three above compare WHICH facts are present, WHAT they are bound to, and
+        # WHEN they were true. This compares WHO PERFORMED WHICH ACT, which none of them
+        # can see: measured 2026-08-30, a name-for-name swap returns "" from the
+        # attribution predicate while dropping every name fires at 6-to-0, so a
+        # substitution passes every existing check with all their counts intact.
+        #
+        # It REFUSES rather than merely recording, unlike the attribution sensor below,
+        # because the harm is different in kind. A reader who cannot attribute a rewrite
+        # knows they cannot, and asks. A reader handed an inverted recommendation has no
+        # such signal - it reads as ordinary advice, and on 2026-08-30 one pointed at
+        # deleting a live guard over ~29,000 vendored files, an action under which every
+        # test passes. Falling back to the sender's own words costs a longer DM; the other
+        # direction costs a guard nobody knows was removed. Mr. Radio's ruling,
+        # 2026-08-30; see TODO.md under the moratorium book.
+        altered = _altered_speech_acts( body_text, rewritten )
+        if altered:
+            meta[ "tutor_outcome" ]    = "speech_act_blocked"
+            meta[ "tutor_speech_act" ] = altered
+            print( f"[dm-tutor] REFUSED a rewrite that performs a different act: {altered}" )
             return body_text, meta
 
         # ATTRIBUTION CHECK — MEASURED, AND NO LONGER A REFUSAL (row 20026f56, Rick
@@ -2360,7 +2834,12 @@ def _dispatch_outbound( *, prep, body, authenticated_user_id, notification_queue
     Ensures:
         - persists the DM (direction='ai_to_ai', stamped body inline) and pushes it
         - returns the 201 result dict (message_id, thread_id, recipient_session,
-          recipient_session_hash8, recipient_persona, dispatched)
+          recipient_session_hash8, recipient_persona, dispatched,
+          delivery_confirmed)
+        - `dispatched` is HAND-OFF, not receipt: persisted + queued to the
+          recipient's listener. `delivery_confirmed` is always False and says so
+          explicitly — the recipient may buffer the message and never drain it
+          (row 298af249)
 
     Raises:
         - propagates any persist_fn / push_notification error to the caller
@@ -2400,6 +2879,32 @@ def _dispatch_outbound( *, prep, body, authenticated_user_id, notification_queue
         "recipient_session_hash8" : job_id,
         "recipient_persona"       : target_persona,
         "dispatched"              : True,
+        # 🔴 `dispatched` MEANS HANDED OFF, NOT READ — and it was being read as
+        # "they got it" (row 298af249). It goes true the moment the row is
+        # persisted and the notification is queued for the recipient's listener.
+        # Everything after that is somebody else's timeline: the listener may
+        # BUFFER the message while the session is busy, and if that session ends
+        # before a hook drains the buffer, nobody ever reads it.
+        #
+        # MEASURED 2026-08-30: 45 orphaned buffer files were holding 67 such
+        # messages, oldest last written 2026-07-02. Every one of those senders was
+        # told `dispatched: true` and every one of those messages is still on disk,
+        # unread, for a session that is never coming back.
+        #
+        # So this key states the OTHER half explicitly rather than leaving it to be
+        # inferred from a word. It is always False here because at this instant the
+        # server genuinely does not know — and a caller that wants to know must ask
+        # later, not read a send response. A flag that could only ever be False may
+        # look pointless; it is the difference between a response that overclaims
+        # and one that states its own limit, which is the whole defect.
+        #
+        # 🔴 NOTHING CONSUMES THIS YET, and nothing branches on `dispatched`
+        # either — both are claims made only to an AI caller, so this field is
+        # exactly as easy to ignore as the old one was to misread. It removes
+        # the EXCUSE, not the failure. A caller that wants delivery must still
+        # ask later; there is no verb for that yet either. Said plainly here
+        # rather than letting a reader conclude the contract is now honest.
+        "delivery_confirmed"      : False,
     }
 
 
@@ -2610,7 +3115,11 @@ def execute_dm_send(
         - 201 persists + pushes the ai_to_ai notification (body EDT-prefixed in BOTH
           the persisted row and the pushed message) and returns
           {http_status, message_id, thread_id, recipient_session,
-           recipient_session_hash8, recipient_persona, dispatched}
+           recipient_session_hash8, recipient_persona, dispatched,
+           delivery_confirmed}
+        - `dispatched: True` means HANDED OFF (persisted + queued), never read.
+          `delivery_confirmed: False` states that limit rather than leaving a
+          caller to infer it from the word "dispatched" (row 298af249)
         - `recipient_session` is the FULL resolved session id (unchanged
           contract — reusable as `recipient_session_id` on a subsequent send);
           `recipient_session_hash8` is the 8-char form actually persisted and

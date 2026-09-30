@@ -63,6 +63,8 @@ class BaseResponder( ABC ):
         Ensures:
             - Stores connection parameters
             - Initializes empty stats dict
+            - authorization_fn starts as None; the proxy's entry point wires it to its
+              listener's login (row e20e249a)
             - Subclass must add strategies after calling super().__init__()
 
         Args:
@@ -77,6 +79,12 @@ class BaseResponder( ABC ):
         self.dry_run = dry_run
         self.debug   = debug
         self.verbose = verbose
+
+        # Returns the `Bearer <jwt>` to send with each answer, or None. The answer door
+        # refuses an uncredentialed caller (row e20e249a), so the entry point wires this to
+        # the listener that already logged in, and it is read at post time so a re-login's
+        # fresh token is the one sent.
+        self.authorization_fn = None
 
         # Base stats — subclasses may extend
         self.stats = {
@@ -183,6 +191,7 @@ class BaseResponder( ABC ):
 
         Ensures:
             - Delegates to submit_notification_response()
+            - sends the token authorization_fn returns when one is wired, and None otherwise
             - Returns True on success, False on error
 
         Args:
@@ -198,7 +207,8 @@ class BaseResponder( ABC ):
             host            = self.host,
             port            = self.port,
             debug           = self.debug,
-            verbose         = self.verbose
+            verbose         = self.verbose,
+            authorization   = self.authorization_fn() if self.authorization_fn is not None else None
         )
 
     def print_stats( self ):

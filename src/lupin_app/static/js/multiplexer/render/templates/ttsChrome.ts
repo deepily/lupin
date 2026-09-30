@@ -7,7 +7,8 @@
 //   This file is verified by AC2e grep test in templates_tts_chrome.test.ts.
 //
 // Per Q-B6 + Q-B7 + Q-B8 (design `09-phase6b-interactive-widgets-design.md`):
-//   - 4 pane controls: Pause/Resume single toggle, Stop, Skip
+//   - pane controls: Pause, Play, Stop, Skip (parity A-2 #3b replaced the single
+//     Pause/Resume toggle with legacy's two dedicated buttons)
 //   - currentTrackName surfaced as `.tts-current-track` text
 //   - queueLength surfaced as `.tts-queue-length` text
 //   - `.is-playing-current` / `.is-paused-current` classes follow legacy
@@ -19,7 +20,26 @@
 //   - Resume button (`.tts-btn-resume`) present ONLY in focus mode → onResume
 //   - Clear-all button (`.tts-btn-clear-all`) disabled + hidden when N === 0,
 //     else enabled → onClearAll
-//   - the 6-state toggle/stop/skip matrix below is UNCHANGED
+//   - the 6-state control matrix below drives every transport button
+//
+// Parity A-2 #3b (2026-09-18) — separate Pause ⏸️ and Play ▶️ buttons, ported
+// from legacy `#tts-pause-btn` / `#tts-play-btn` (notifications.html:445-452)
+// and `updateTTSPausePlayButtons` (notifications.js:23010-23032): nothing
+// playing → both disabled; playing → Pause only; paused → Play only. The
+// multiplexer reads "playing" / "paused" off the audio machine, because
+// AudioStore.pause() / resume() are no-ops outside those states. A disabled
+// button carries both the `disabled` property and legacy's `.disabled` class.
+//
+// Parity A-2 #3d (2026-09-18) — the header machine is legacy updateTTSQueueSection
+// (notifications.js:22656-22716), decided ONCE by ttsHeaderMode() and read by both
+// headers (this body header + the renderer's section bar):
+//   - manual pause WITH an active item → "Paused: <active + pending>", `.paused`
+//     (:22688-22694 — checked FIRST, and only with an active item)
+//   - focus mode                      → "Paused: <pending> waiting", `.focus-mode`
+//     (:22696-22703)
+//   - otherwise                       → "🔊 Playing: <active + pending>" (:22704-22710)
+// The count is active + pending except in focus (:22713-22715). `Queued: N`
+// (`.tts-queue-length`, a multiplexer extra) stays the pending count.
 //
 // desync-fix (2026-07-02, Tiberius ruling msg 193ae189): the "🔇 Nothing in the
 // queue" empty panel is QUEUE-driven, NOT audio-idle-driven. renderTtsChrome
@@ -32,21 +52,21 @@
 //
 // State → control enable/disable matrix (drives HEADER/CONTROLS only; the
 // empty-vs-populated decision is queueEmpty, above):
-//   | state    | toggle | stop | skip |
-//   |----------|--------|------|------|
-//   | idle     |   ✗    |  ✗  |  ✗  |   (queue non-empty, nothing playing yet)
-//   | decoding |   ✗    |  ✗  |  ✗  |
-//   | playing  | "Pause"|  ✓  |  ✓  |
-//   | paused   |"Resume"|  ✓  |  ✓  |
-//   | ended    |   ✗    |  ✓  |  ✗  |
-//   | error    |   ✗    |  ✓  |  ✗  |
+//   | state    | pause | play | stop | skip |
+//   |----------|-------|------|------|------|
+//   | idle     |   ✗   |  ✗   |  ✗  |  ✗  |   (queue non-empty, nothing playing yet)
+//   | decoding |   ✗   |  ✗   |  ✗  |  ✗  |
+//   | playing  |   ✓   |  ✗   |  ✓  |  ✓  |
+//   | paused   |   ✗   |  ✓   |  ✓  |  ✓  |
+//   | ended    |   ✗   |  ✗   |  ✓  |  ✗  |
+//   | error    |   ✗   |  ✗   |  ✓  |  ✗  |
 
 import { html } from "../html";
 import type { AudioPlaybackState } from "../../shared/types";
 
 export interface TtsChromeHandlers {
-  onPause()    : void;
-  onResume()   : void;
+  onPause()    : void;   // the Pause ⏸️ button
+  onResume()   : void;   // the Play ▶️ button (resumes paused audio)
   onStop()     : void;
   onSkip()     : void;
   // WP3 — empty the whole queue (Clear-all button). OPTIONAL: the button renders
@@ -64,7 +84,11 @@ export interface TtsChromeHandlers {
 
 export interface TtsChromeOpts {
   state              : AudioPlaybackState;
-  queueLength        : number;
+  queueLength        : number;   // PENDING items (the `Queued: N` line, and the focus count)
+  // A-2 #3d — active + pending, the count legacy's header shows outside focus.
+  totalCount         : number;
+  // A-2 #3d — an item is active; legacy's Paused state requires one (:22688).
+  hasActive          : boolean;
   // desync-fix — QUEUE-driven empty gate (activeItem===null && pending empty),
   // computed by the renderer. true → the empty panel; false → the chrome (for
   // ANY audio state). Decouples the empty-vs-populated decision from audio state.
@@ -76,33 +100,61 @@ export interface TtsChromeOpts {
   focusMode?         : boolean;
 }
 
+/** The three header states of legacy updateTTSQueueSection (A-2 #3d). */
+export type TtsHeaderMode = "paused" | "focus" | "playing";
+
+/**
+ * Decide the TTS header state — the one rule both headers read.
+ *
+ * Requires:
+ *   - `state` is the audio machine's state; `focusMode` is TtsQueueStore.focusMode()
+ *   - `hasActive` is true iff TtsQueueStore.activeItem() is non-null
+ * Ensures:
+ *   - "paused" iff the audio is paused AND an item is active (checked first,
+ *     as legacy does at notifications.js:22688); else "focus" iff focused;
+ *     else "playing"
+ */
+export function ttsHeaderMode(state: AudioPlaybackState, focusMode: boolean, hasActive: boolean): TtsHeaderMode {
+  if (state === "paused" && hasActive) return "paused";
+  if (focusMode) return "focus";
+  return "playing";
+}
+
 interface ControlState {
-  toggleEnabled : boolean;
-  toggleLabel   : "Pause" | "Resume" | "—";
-  toggleAction  : "pause" | "resume" | "noop";
-  stopEnabled   : boolean;
-  skipEnabled   : boolean;
+  pauseEnabled : boolean;
+  playEnabled  : boolean;
+  stopEnabled  : boolean;
+  skipEnabled  : boolean;
 }
 
 // desync-fix: the empty panel is now QUEUE-driven (queueEmpty short-circuit), so
 // these helpers see the FULL AudioPlaybackState — `idle` is reachable here when
 // the queue is non-empty but nothing is speaking yet. idle → all three transport
-// controls disabled (matrix row idle = ✗✗✗).
+// controls disabled (matrix row idle = ✗✗✗✗).
 function deriveControlState(state: AudioPlaybackState): ControlState {
   switch (state) {
     case "idle":
-      return { toggleEnabled: false, toggleLabel: "—",      toggleAction: "noop",   stopEnabled: false, skipEnabled: false };
+      return { pauseEnabled: false, playEnabled: false, stopEnabled: false, skipEnabled: false };
     case "playing":
-      return { toggleEnabled: true,  toggleLabel: "Pause",  toggleAction: "pause",  stopEnabled: true,  skipEnabled: true  };
+      return { pauseEnabled: true,  playEnabled: false, stopEnabled: true,  skipEnabled: true  };
     case "paused":
-      return { toggleEnabled: true,  toggleLabel: "Resume", toggleAction: "resume", stopEnabled: true,  skipEnabled: true  };
+      return { pauseEnabled: false, playEnabled: true,  stopEnabled: true,  skipEnabled: true  };
     case "ended":
-      return { toggleEnabled: false, toggleLabel: "—",      toggleAction: "noop",   stopEnabled: true,  skipEnabled: false };
+      return { pauseEnabled: false, playEnabled: false, stopEnabled: true,  skipEnabled: false };
     case "error":
-      return { toggleEnabled: false, toggleLabel: "—",      toggleAction: "noop",   stopEnabled: true,  skipEnabled: false };
+      return { pauseEnabled: false, playEnabled: false, stopEnabled: true,  skipEnabled: false };
     case "decoding":
-      return { toggleEnabled: false, toggleLabel: "—",      toggleAction: "noop",   stopEnabled: false, skipEnabled: false };
+      return { pauseEnabled: false, playEnabled: false, stopEnabled: false, skipEnabled: false };
   }
+}
+
+// Apply one matrix cell to a transport button: the `disabled` property (which
+// makes it inert), legacy's `.disabled` class (notifications.js:23020-23031),
+// and the click listener only when enabled.
+function wireControl(btn: HTMLButtonElement, enabled: boolean, onClick: () => void): void {
+  btn.disabled = !enabled;
+  btn.classList.toggle("disabled", !enabled);
+  if (enabled) btn.addEventListener("click", () => onClick());
 }
 
 function rootClass(state: AudioPlaybackState): string {
@@ -135,11 +187,11 @@ function renderTtsEmpty(): HTMLElement {
  * Requires:
  *   - `opts.state` is one of the six AudioPlaybackState values
  *   - `opts.queueLength` is non-negative
- *   - `handlers.onPause / onResume / onStop / onSkip` are functions
+ *   - `handlers.onPause / onResume / onStop / onSkip` are functions (onResume = Play)
  *
  * Ensures:
  *   - Returned HTMLElement carries `.tts-chrome` (+ optional state class)
- *   - Toggle button reflects state-driven label/disabled per the matrix above
+ *   - Pause and Play are separate buttons, enabled/disabled per the matrix above
  *   - Header text follows the WP3 state machine (Playing / Paused / focus) with
  *     a `.paused` / `.focus-mode` modifier; Resume renders only in focus mode;
  *     Clear-all is disabled + hidden when the queue is empty
@@ -171,22 +223,15 @@ export function renderTtsChrome(
   const queueStr = String(opts.queueLength);
   const focus    = opts.focusMode === true;
 
-  // WP3 header state machine: focus mode → "Paused: N waiting" (queue held for an
-  // action-required response); manual pause → "Paused: N"; else "🔊 Playing: N".
-  // A `.focus-mode` / `.paused` modifier on the header carries the skin (WP7 CSS).
-  // NOTE: focus rendering rides an ACTIVE state — the idle short-circuit above
-  // still wins when nothing plays; that boundary + where `focusMode` is sourced
-  // are the §8.3 open question WP4 resolves.
-  const headerText = focus
-    ? `Paused: ${queueStr} waiting`
-    : opts.state === "paused"
-      ? `Paused: ${queueStr}`
-      : `🔊 Playing: ${queueStr}`;
-  const headerClass = focus
-    ? "tts-playing-header focus-mode"
-    : opts.state === "paused"
-      ? "tts-playing-header paused"
-      : "tts-playing-header";
+  // A-2 #3d header machine (see the file header). A `.focus-mode` / `.paused`
+  // modifier on the header carries the skin (WP7 CSS).
+  const mode       = ttsHeaderMode(opts.state, focus, opts.hasActive);
+  const headerText = mode === "paused"
+    ? `Paused: ${opts.totalCount}`
+    : mode === "focus"
+      ? `Paused: ${queueStr} waiting`
+      : `🔊 Playing: ${opts.totalCount}`;
+  const headerClass = mode === "playing" ? "tts-playing-header" : `tts-playing-header ${mode === "focus" ? "focus-mode" : "paused"}`;
 
   // Focus Resume button — present ONLY in focus mode (querySelector null
   // otherwise, mirroring the currentTrackName idiom).
@@ -200,7 +245,8 @@ export function renderTtsChrome(
     ${trackBlock}
     ${resumeBlock}
     <div class="tts-controls">
-      <button type="button" class="tts-btn tts-btn-toggle" data-action="${ctl.toggleAction}">${ctl.toggleLabel}</button>
+      <button type="button" class="tts-btn tts-btn-pause" data-testid="multiplexer-tts-pause-btn" title="Pause playback">⏸️</button>
+      <button type="button" class="tts-btn tts-btn-play" data-testid="multiplexer-tts-play-btn" title="Resume playback">▶️</button>
       <button type="button" class="tts-btn tts-btn-stop">Stop</button>
       <button type="button" class="tts-btn tts-btn-skip">Skip</button>
       <button type="button" class="tts-btn tts-btn-clear-all">Clear all</button>
@@ -209,28 +255,12 @@ export function renderTtsChrome(
   ` as DocumentFragment;
   root.appendChild(frag);
 
-  const toggle = root.querySelector<HTMLButtonElement>(".tts-btn-toggle");
-  const stop   = root.querySelector<HTMLButtonElement>(".tts-btn-stop");
-  const skip   = root.querySelector<HTMLButtonElement>(".tts-btn-skip");
-
-  // Apply enable/disable per state matrix.
-  /* c8 ignore next */ // defensive: html`` always produces toggle button.
-  if (toggle !== null) {
-    toggle.disabled = !ctl.toggleEnabled;
-    if (ctl.toggleAction === "pause")  toggle.addEventListener("click", () => handlers.onPause());
-    if (ctl.toggleAction === "resume") toggle.addEventListener("click", () => handlers.onResume());
-    // toggleAction === "noop": disabled, no listener attached.
-  }
-  /* c8 ignore next */ // defensive: html`` always produces stop button.
-  if (stop !== null) {
-    stop.disabled = !ctl.stopEnabled;
-    if (ctl.stopEnabled) stop.addEventListener("click", () => handlers.onStop());
-  }
-  /* c8 ignore next */ // defensive: html`` always produces skip button.
-  if (skip !== null) {
-    skip.disabled = !ctl.skipEnabled;
-    if (ctl.skipEnabled) skip.addEventListener("click", () => handlers.onSkip());
-  }
+  // Apply enable/disable per state matrix. The html`` above always produces all
+  // four buttons, so the non-null assertions cannot fail.
+  wireControl(root.querySelector<HTMLButtonElement>(".tts-btn-pause")!, ctl.pauseEnabled, () => handlers.onPause());
+  wireControl(root.querySelector<HTMLButtonElement>(".tts-btn-play")!,  ctl.playEnabled,  () => handlers.onResume());
+  wireControl(root.querySelector<HTMLButtonElement>(".tts-btn-stop")!,  ctl.stopEnabled,  () => handlers.onStop());
+  wireControl(root.querySelector<HTMLButtonElement>(".tts-btn-skip")!,  ctl.skipEnabled,  () => handlers.onSkip());
 
   // 70cbff3e — focus Resume (present only in focus mode) → onFocusResume (exit
   // focus + roll the queue), DISTINCT from the transport toggle's onResume. Wired

@@ -123,6 +123,7 @@ KNOWN_SUBMIT_CARD_LITERALS = {
     "agent router go to research to presentation" : "research submit card, presentation variant — phase 6",
     "agent router go to research to podcast"      : "research submit card, podcast variant — phase 6",
     "agent router go to presentation generator"   : "research submit card, direct-presentation path — phase 6",
+    "agent router go to test suite"               : "test-suite submit card (moved from the retired /api/test-suite/submit, row a3c59f2d) — phase 6 deletes it",
 }
 
 

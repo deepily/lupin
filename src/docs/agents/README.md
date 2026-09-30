@@ -22,7 +22,7 @@ respective R&D directories under `src/rnd/`.
 |-----|---------|----------|
 | [**Bug Fix Expediter Guide**](bug-fix-expediter-guide.md) | Dead-job recovery agent — diagnose → propose → fix → git → retry. Phases 1-6, INI keys, trust-to-git mapping, troubleshooting. | Operators enabling auto-recovery, devs maintaining BFE |
 | [**Test Fix Expediter Guide**](test-fix-expediter-guide.md) | Test-failure recovery agent — cluster → diagnose → propose → fix → git → rerun. Phase 0 clustering, `TestSuiteCompletionWatchdog`, 16 INI keys. | Operators running test suites, devs maintaining TFE |
-| [**Test-Suite Scheduling Guide**](test-suite-scheduling-guide.md) | `TestSuiteJob` + `/schedule-tests` skill. Suite types, monopolize mode, remediation snapshot schema v1.0, REST API. | Operators scheduling test runs, devs integrating with `/api/test-suite/submit` |
+| [**Test-Suite Scheduling Guide**](test-suite-scheduling-guide.md) | `TestSuiteJob` + `/schedule-tests` skill. Suite types, monopolize mode, remediation snapshot schema v1.0, REST API. | Operators scheduling test runs, devs integrating with `/api/v2/submit` |
 | [**Shared Fix Primitives Reference**](shared-fix-primitives-reference.md) | `src/cosa/agents/shared/` package — `PlanWriter`, `GitStrategist`, `FixExecutor`, `FIX_PROMPT_BUILDERS` registry. How to add a new expediter agent. | Developers extending the expediter pattern |
 
 ---
@@ -69,7 +69,7 @@ Historical design + execution logs live under `src/rnd/v0.1.6/`:
 
 - **BFE**: [`src/rnd/v0.1.6/2026.03.27-bug-fix-expediter/`](../../rnd/v0.1.6/2026.03.27-bug-fix-expediter/00-index.md) — 10 files, Phases 1-6 design + execution logs
 - **TFE**: [`src/rnd/v0.1.6/2026.04.10-test-fix-expediter/`](../../rnd/v0.1.6/2026.04.10-test-fix-expediter/00-index.md) — 14 design docs + 6 execution logs
-- **TestSuiteJob**: [`src/rnd/v0.1.6/2026.03.31-test-suite-agentic-job-plan.md`](../../rnd/v0.1.6/2026.03.31-test-suite-agentic-job-plan.md) — original design
+- **TestSuiteJob**: `src/rnd/v0.1.6/2026.03.31-test-suite-agentic-job-plan.md` *(REMOVED by `b113a3a7`; recover: `git show b113a3a7^:src/rnd/v0.1.6/2026.03.31-test-suite-agentic-job-plan.md`)* — original design
 - **CJ Flow packaging**: [`src/rnd/v0.1.4/2026.02.12-cj-flow-bounded-job-packaging-guide.md`](../../rnd/v0.1.4/2026.02.12-cj-flow-bounded-job-packaging-guide.md) — agentic job packaging conventions
 
 These are **frozen planning artifacts** — they explain WHY the agents are

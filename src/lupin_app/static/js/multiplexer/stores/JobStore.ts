@@ -17,6 +17,8 @@
 // Server emits 9+ JobState values which we map through STATE_TO_UI per
 // `src/cosa/rest/job_state.py:71`.
 
+import { ownLookup } from "../shared/ownLookup";
+
 import type { EventBus } from "../shared/EventBus";
 import type {
   Job,
@@ -46,7 +48,10 @@ const SERVER_STATE_TO_STATUS: Record<string, JobStatus> = {
 };
 
 function mapServerStateToStatus(state: string): JobStatus | null {
-  return SERVER_STATE_TO_STATUS[state] ?? null;
+  // 🔴 THE KEY COMES FROM THE SERVER, so this is the worst-placed member of the
+  // family: a payload carrying `state: "toString"` returned a FUNCTION where a
+  // JobStatus|null belongs, truthy, past every null check downstream.
+  return ownLookup<JobStatus | null>( SERVER_STATE_TO_STATUS, state, null );
 }
 
 // ---------------------------------------------------------------------------
@@ -93,6 +98,10 @@ export interface HydrateHistoryOptions {
   // false (default) = REPLACE the window (clear history bucket + refetch, used
   // for initial mount / window-change / retry). true = APPEND (load-more).
   append? : boolean;
+  // Row 83c3ff74 — the `user_filter` param (an admin's uid, "!self" or "*"). Omitted or
+  // undefined → no param. Read on a REPLACE only; a load-more reuses the filter of the page
+  // before it, so two pages can never come from two different filters.
+  userFilter? : string;
 }
 
 interface JobHistoryResponse {
@@ -193,6 +202,8 @@ class JobStoreImpl implements JobStore {
   private historyOffset = 0;
   private historyTotal  = 0;
   private historyDays: number | undefined = DEFAULT_HISTORY_WINDOW_DAYS;
+  // Row 83c3ff74 — the user_filter of the current window, reused on append like historyDays.
+  private historyUserFilter: string | undefined = undefined;
 
   private readonly unsubscribers: Array<() => void> = [];
 
@@ -227,12 +238,15 @@ class JobStoreImpl implements JobStore {
     //     so paging stays in the same window; offset is the tracked cursor.
     let days: number | undefined;
     let offset: number;
+    let userFilter: string | undefined;
     if (append) {
-      days   = this.historyDays;
-      offset = this.historyOffset;
+      days       = this.historyDays;
+      offset     = this.historyOffset;
+      userFilter = this.historyUserFilter;
     } else {
-      days   = "days" in opts ? opts.days : DEFAULT_HISTORY_WINDOW_DAYS;
-      offset = opts.offset ?? 0;
+      days       = "days" in opts ? opts.days : DEFAULT_HISTORY_WINDOW_DAYS;
+      offset     = opts.offset ?? 0;
+      userFilter = opts.userFilter;
     }
 
     // REPLACE clears the history bucket (+ its index entries) BEFORE the fetch:
@@ -252,6 +266,14 @@ class JobStoreImpl implements JobStore {
     if (days !== undefined) params.set("days", String(days));
     params.set("limit",  String(limit));
     params.set("offset", String(offset));
+    // Parity A-2 #10 (Phase 2 A12 Q5) — legacy's overlay model (`loadJobHistory`,
+    // notifications.js:6622): a job live in Done or Dead is left out of history BY THE
+    // SERVER, so it shows in one place and the history total counts only what history
+    // shows. Skipping it client-side below hides the card but leaves the total and the
+    // Load-More gate counting it. Sent on every page, as legacy does.
+    const liveIds = [...this.buckets.done, ...this.buckets.dead].map(j => j.id_hash);
+    if (liveIds.length > 0) params.set("exclude_ids", liveIds.join(","));
+    if (userFilter !== undefined) params.set("user_filter", userFilter);
     const resp = await api.get<JobHistoryResponse>(`/api/job-history?${params.toString()}`);
 
     // Keyed-merge dedup: skip any id already tracked in ANY bucket (replace has
@@ -274,8 +296,9 @@ class JobStoreImpl implements JobStore {
     // to the cursor when the server omits it (keeps the Load-More gate closed).
     this.historyOffset   = offset + resp.jobs.length;
     this.historyTotal    = resp.total ?? this.historyOffset;
-    this.historyDays     = days;
-    this.historyHydrated = true;
+    this.historyDays       = days;
+    this.historyUserFilter = userFilter;
+    this.historyHydrated   = true;
     this.bus.emit<StoreJobsChangedPayload>({
       type    : "store_jobs_changed",
       payload : { changeKind: "hydrated", bucket: "history" },

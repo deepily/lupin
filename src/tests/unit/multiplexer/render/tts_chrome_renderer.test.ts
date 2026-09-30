@@ -246,19 +246,19 @@ for (const [from, to, label] of TRANSITIONS) {
 // 4 control wiring tests — Pause / Resume / Stop / Skip dispatched correctly
 // ===========================================================================
 
-test("Pause/Resume toggle in playing state dispatches AudioStore.pause()", () => {
+test("Pause button in playing state dispatches AudioStore.pause()", () => {
   const { renderer, root, audio } = setupRenderer("playing", 1);   // desync-fix: seed queue → chrome renders controls
   renderer.mount(root);
-  root.querySelector<HTMLButtonElement>(".tts-btn-toggle")!.click();
+  root.querySelector<HTMLButtonElement>(".tts-btn-pause")!.click();
   assert.equal(audio.calls.pause,  1);
   assert.equal(audio.calls.resume, 0);
   renderer.unmount();
 });
 
-test("Pause/Resume toggle in paused state dispatches AudioStore.resume()", () => {
+test("Play button in paused state dispatches AudioStore.resume()", () => {
   const { renderer, root, audio } = setupRenderer("paused", 1);   // desync-fix: seed queue → chrome renders controls
   renderer.mount(root);
-  root.querySelector<HTMLButtonElement>(".tts-btn-toggle")!.click();
+  root.querySelector<HTMLButtonElement>(".tts-btn-play")!.click();
   assert.equal(audio.calls.resume, 1);
   assert.equal(audio.calls.pause,  0);
   renderer.unmount();
@@ -292,7 +292,7 @@ test("storm safety (a): 100 chunk_decoded events coalesce into ≤1 render cycle
   // RAF invocations needed to flush all queued events.
   for (let i = 0; i < 100; i++) {
     ttsQueue.setPending(pendingItems(i));
-    emitChunk(bus, { durationMs: 10, sampleRate: 24000, frameCount: 240 });
+    emitChunk(bus, { durationMs: 10, sampleRate: 24000, frameCount: 240, firstInUtterance: false });
   }
   // Even after 100 events, only ONE RAF should be pending (storm coalescing).
   assert.equal(raf.pendingCount(), 1, "100 chunk events → 1 pending RAF");
@@ -362,8 +362,8 @@ test("mixed-event storm: state_change + chunk_decoded events share the same pend
   audio.setState("playing");
   emitState(bus, { state: "playing", prev: "idle" });
   ttsQueue.setPending(pendingItems(7));
-  emitChunk(bus, { durationMs: 10, sampleRate: 24000, frameCount: 240 });
-  emitChunk(bus, { durationMs: 10, sampleRate: 24000, frameCount: 240 });
+  emitChunk(bus, { durationMs: 10, sampleRate: 24000, frameCount: 240, firstInUtterance: false });
+  emitChunk(bus, { durationMs: 10, sampleRate: 24000, frameCount: 240, firstInUtterance: false });
   // Three events of two kinds → still just ONE pending RAF (shared flag).
   assert.equal(raf.pendingCount(), 1);
   raf.flush();

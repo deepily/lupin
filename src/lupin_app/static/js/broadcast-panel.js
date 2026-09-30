@@ -36,14 +36,48 @@
     } */
 
     // ─── Auth ──────────────────────────────────────────────────────────
-    function getAccessToken() {
-        return localStorage.getItem( "lupin_access_token" ) || "";
-    }
-
-    function authHeaders( extra ) {
-        const headers = { "Authorization": "Bearer " + getAccessToken() };
-        if ( extra ) Object.assign( headers, extra );
-        return headers;
+    //
+    // 🔴 THIS PANEL USED TO CARRY ITS OWN, SECOND AUTH PATH, AND IT NEVER REFRESHED.
+    // (Row 9d3a975e, Rick 2026-09-03: "the send of the broadcast to all CC sessions is
+    // issuing a 401 when I attempt to hit send. Even when my account is authenticated
+    // and listed as logged in.") He was exactly right on both halves. It read the
+    // access token straight out of localStorage and posted it, while the access token
+    // lives 30 minutes (`jwt access token expire minutes`) and the REFRESH token lives
+    // a week — so the page keeps saying "Authenticated", truthfully, long after the
+    // token this panel sends has expired.
+    //
+    // Measured 2026-09-04, one browser, one variable — a stale access token in
+    // localStorage with the refresh token untouched:
+    //
+    //     page header                      "Authenticated"
+    //     this panel's old path             401 "Token expired"
+    //     notificationsUI.authedFetch       200, and the token silently re-minted
+    //
+    // ⇒ There is nothing to fix in the credential. The fix is to stop having a second
+    // path: `authedFetch` already exists to refresh first, and its own docstring says
+    // it is there "to eliminate the 401s that occur when a user is idle longer than the
+    // JWT TTL". This panel simply never got it.
+    //
+    // ⚠️ THE FALLBACK BELOW IS DELIBERATELY LOUD. notifications.js is a hard
+    // prerequisite of this page (it loads first, and `handleAck` is called from it), so
+    // the fallback branch should be unreachable. If it ever runs, the panel is back on
+    // the un-refreshing path and the 401 is back with it — that is worth a console
+    // error, not a silent degradation nobody can see.
+    async function authedFetch( url, extraHeaders, options ) {
+        const opts = Object.assign( { }, options || { } );
+        const ui   = window.notificationsUI;
+        if ( ui && typeof ui.authedFetch === "function" ) {
+            if ( extraHeaders ) opts.headers = Object.assign( { }, extraHeaders );
+            return ui.authedFetch( url, opts );
+        }
+        console.error( "[broadcast-panel] notificationsUI.authedFetch unavailable — " +
+                       "sending an UNREFRESHED token; expect 401 after the access-token TTL " +
+                       "(row 9d3a975e)" );
+        opts.headers = Object.assign(
+            { "Authorization": "Bearer " + ( localStorage.getItem( "lupin_access_token" ) || "" ) },
+            extraHeaders || { }
+        );
+        return fetch( url, opts );
     }
 
     // ─── Recipient chip-row ────────────────────────────────────────────
@@ -52,7 +86,7 @@
         if ( !row ) return;
         renderChips( null );   // show "loading..." state
         try {
-            const res = await fetch( ACTIVE_SESSIONS_URL, { headers: authHeaders() } );
+            const res = await authedFetch( ACTIVE_SESSIONS_URL );
             if ( !res.ok ) throw new Error( "HTTP " + res.status );
             const data = await res.json();
             recipientCache = Array.isArray( data.sessions ) ? data.sessions : [ ];
@@ -104,21 +138,36 @@
         if ( refresh ) row.appendChild( refresh );
     }
 
-    // Insert `@<persona> ` text into the broadcast textarea at the current
-    // cursor position, then refocus. Trailing space matches natural typing
-    // flow; no colon so the handler's default-scope fallback (line 64 of
-    // broadcast_handler.py) lets every session see the line ("carpet bomb"
-    // semantics ratified 2026-05-17).
+    // Insert `@<persona>` text into the broadcast textarea at the current
+    // cursor position, then refocus. No colon, so the handler's default-scope
+    // fallback (line 64 of broadcast_handler.py) lets every session see the
+    // line ("carpet bomb" semantics ratified 2026-05-17).
+    // 🔴 EXACTLY `@name`, NOTHING ELSE — row 319c57a3, Rick's ruling 2026-09-26
+    // 13:35, which OVERRULES the boundary-spacing rule ruled earlier the same
+    // day. No trailing space, no leading space, no whitespace predicate, no `:`
+    // exception. The chip inserts the mention at the caret and that is all.
+    //
+    // WHAT THAT MEANS, WRITTEN DOWN SO IT IS NOT REDISCOVERED AS A BUG: clicking
+    // a chip with the caret against a word FUSES them. `hello|world` gives
+    // `hello@mariaworld`, and that token matches no roster name, so
+    // broadcast_handler.py `_directive_mentions` reads the line as prose and
+    // delivers it to EVERYONE. That is the parser's declared bias toward
+    // delivery rather than suppression — the noisy direction, never silent
+    // loss. Measured at broadcast_handler.py:139 before the ruling. The
+    // operator types the spaces.
+    //
+    // The caret lands immediately after `@name`. It is asserted in every test
+    // case, because `value` alone cannot see a caret regression.
     function injectMentionAtCursor( token ) {
         const ta = document.getElementById( "broadcast-textarea" );
         if ( !ta ) return;
-        const insertText = "@" + token + " ";
-        const start = ta.selectionStart;
-        const end   = ta.selectionEnd;
+        const mention = "@" + token;
+        const start  = ta.selectionStart;
+        const end    = ta.selectionEnd;
         const before = ta.value.slice( 0, start );
         const after  = ta.value.slice( end );
-        ta.value = before + insertText + after;
-        const newPos = start + insertText.length;
+        ta.value = before + mention + after;
+        const newPos = start + mention.length;
         ta.setSelectionRange( newPos, newPos );
         ta.focus();
         // Fire input event so preview + send-button state update via the existing wiring.
@@ -269,9 +318,8 @@
     // ─── POST broadcast ────────────────────────────────────────────────
     async function postBroadcast( message ) {
         setStatus( "submitting…" );
-        const res = await fetch( BROADCAST_URL, {
+        const res = await authedFetch( BROADCAST_URL, { "Content-Type": "application/json" }, {
             method  : "POST",
-            headers : authHeaders( { "Content-Type": "application/json" } ),
             body    : JSON.stringify( {
                 message            : message,
                 require_ack        : true,

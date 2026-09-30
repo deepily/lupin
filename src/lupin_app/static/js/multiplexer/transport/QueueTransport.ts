@@ -433,6 +433,10 @@ const QUEUE_SUBSCRIBED_EVENTS: ReadonlyArray<string> = [
   "notification_queue_update",
   "notification_responded",
   "notification_expired",
+  // Row 27760534 (console tee). The QUEUE socket only: the audio socket must never
+  // carry console traffic (B4.9, the legacy half asserts the same split).
+  "cc_transcript_append",
+  "cc_transcript_state",
   "auth_success",
   "auth_error",
   "connect",

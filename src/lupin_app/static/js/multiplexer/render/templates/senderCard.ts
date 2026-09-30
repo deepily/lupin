@@ -22,8 +22,23 @@ import { slugifySenderId } from "./slugify";
 import type { PredictionVoteIntegration } from "./predictionVoteControls";
 import type { SenderRecord, Notification } from "../../shared/types";
 
+/**
+ * A-2 #4 — which icon set the conversation-mode button uses.
+ *
+ * Legacy keeps BOTH sets permanently (notifications.js:19192-19193); this is not a
+ * feature flag with a sunset, it is two first-class modes, and CoSA's own helper
+ * fails closed to "chorus" for the same reason.
+ */
+export type TtsInteractionMode = "solo" | "chorus";
+
 interface RenderOptions {
   appTimezone?: string;
+  /**
+   * A-2 #4 — the server's `tts_interaction_mode`. Absent ⇒ "chorus", which is legacy's
+   * own fallback (`config.tts_interaction_mode || 'chorus'`, notifications.js:901) and
+   * what the page shows until /api/config/client answers.
+   */
+  ttsInteractionMode?: TtsInteractionMode;
   // WS4/G4 (2026-06-22): injectable wall-clock for the activity-recency status
   // glyph (`.sender-status`). Defaults to Date.now() at the call site; tests
   // pass a fixed value so `senderStatusGlyph` stays deterministic.
@@ -31,6 +46,10 @@ interface RenderOptions {
   // WP14 (F8) — forwarded verbatim to renderDateAccordion → renderNotificationItem
   // (the prediction-vote orchestrator bridge). Absent in the parity harness.
   predictionVote?: PredictionVoteIntegration;
+  // S4 (2026-09-10) — true for the ONE active sender (legacy `group.isActive`,
+  // notifications.js:18759-18762). The renderer decides which card that is (it
+  // already sorts the senders); the template only paints it. Absent ⇒ inactive.
+  isActive?: boolean;
 }
 
 /**
@@ -48,14 +67,17 @@ interface RenderOptions {
  *     when sender carries a persona — NO inline `style=` interpolation
  *   - Notifications grouped by date, descending; date accordions carry their
  *     own keyed-merge IDs for re-render stability
+ *   - `opts.isActive === true` ⇒ root carries `.sender-card-active` and the
+ *     indicator reads `●` / "Active session"; otherwise `○` / "Inactive session"
  */
 export function renderSenderCard(
   sender: SenderRecord,
   notifications: ReadonlyArray<Notification>,
   opts: RenderOptions = {},
 ): HTMLElement {
+  const isActive = opts.isActive === true;
   const root = document.createElement("div");
-  root.className = "sender-card";
+  root.className = isActive ? "sender-card sender-card-active" : "sender-card";
   root.setAttribute("data-id-hash",  sender.sender_id);
   root.setAttribute("data-sender-id", sender.sender_id);
   // Worker-badge silencing (Rick 2026-06-24, gap list §6 Decision A/B): mark
@@ -67,8 +89,17 @@ export function renderSenderCard(
     root.setAttribute("data-worker", "true");
   }
 
+  // 🔴 `!= null`, NOT `!== undefined` — row 8105670f. JavaScript spells "absent"
+  // two ways and the server spells it `null`: `to_dict()` emits
+  // `"voice_persona": None` for any sender id with no session bridge. Row
+  // 275e5c57 was the proven instance of that predicate failing (fix fe71dddf);
+  // these guards read `SenderRecord.voice_persona`, which SenderStore normalises
+  // at the boundary, so a `null` cannot reach them at HEAD. They are corrected
+  // anyway, as hardening, so the trap is not armed for the next writer who adds
+  // a path into that field. The tests that cover them cast a null past the type
+  // on purpose: they are CONTRACT tests, not reproductions of a live defect.
   const persona = sender.voice_persona;
-  if (persona !== undefined) {
+  if (persona != null) {
     root.style.setProperty("--persona-color", persona.color);
     // CSS-parity 2026-06-17: the header gradient, card box-shadow ring, and
     // `.sender-message.incoming` gradient all consume `--persona-color-rgb`
@@ -103,11 +134,11 @@ export function renderSenderCard(
   // inline-flex + gap layout so icon and name lay out horizontally.
   //
   // F-Arnold-4: when sender has NO voice_persona, the badge element is
-  // omitted entirely (not rendered as empty/stub). The `if (persona !==
-  // undefined)` guard covers this — `personaBadge` stays null and the
+  // omitted entirely (not rendered as empty/stub). The `if (persona !=
+  // null)` guard covers this — `personaBadge` stays null and the
   // header template's `${personaBadge}` interpolation skips it.
   let personaBadge: DocumentFragment | null = null;
-  if (persona !== undefined) {
+  if (persona != null) {
     const badgeClass    = persona.borrowed ? "sender-persona-badge borrowed" : "sender-persona-badge";
     const popoverTarget = `persona-popover-${slugifySenderId(sender.sender_id)}`;
     personaBadge = html`<button class="${badgeClass}" type="button" popovertarget="${popoverTarget}"><span class="persona-badge-icon">${persona.icon}</span><span class="persona-badge-name">${persona.name}</span></button>` as DocumentFragment;
@@ -145,7 +176,13 @@ export function renderSenderCard(
   // SenderRecord.session_name is populated from `session_topic` control
   // notifications (SenderStore, localStorage-mirrored) — mirrors legacy
   // `${sessionName || ''}` (notifications.js refreshSessionNameDisplay). Empty
-  // string when no name has arrived. (Manual click-to-rename — R5b — deferred.)
+  // string when no name has arrived. Click-to-rename is wired in
+  // NotificationsListRenderer (S2c, 2026-09-10).
+  //
+  // S1 (2026-09-10): `.sender-session-id` (`#<hash>`) is emitted again,
+  // immediately before the 📋 copy button, as legacy does (notifications.js:
+  // 18746-18757). An earlier polish lane (V10a, ce164056) had dropped it as a
+  // redundant id; the parity P0 measured it as a divergence and restored it.
   //
   // VOICE-INPUT ROW (F5 lane, 2026-06-22 — Rick-ratified MATCH-LEGACY rebuild):
   // CC sessions ALSO emit the legacy inline `.cc-voice-input` > `.cc-voice-input-row`
@@ -164,23 +201,29 @@ export function renderSenderCard(
     /* c8 ignore next */ // `?? ""` is a noUncheckedIndexedAccess type-guard; isCCSession guarantees a '#', so split("#")[1] is always a string (possibly "" for a trailing '#') — the ?? branch is unreachable at runtime.
     const sessionHash = sender.sender_id.split("#")[1] ?? "";
     sessionBlock = html`
-      <span class="sender-session-copy copy-btn" role="button" tabindex="0" title="Copy session ID">📋</span>
+      <span class="sender-session-id">#${sessionHash}</span><span class="sender-session-copy copy-btn" role="button" tabindex="0" title="Copy session ID">📋</span>
       <button class="sender-gist-btn" type="button" title="Generate smart gist from conversation">✨</button>
       <span class="sender-session-name" role="button" tabindex="0" title="Click to rename">${sender.session_name ?? ""}</span>
     ` as DocumentFragment;
-    voiceInputRow = renderVoiceInputRow(sender, sessionHash);
+    voiceInputRow = renderVoiceInputRow(sender, sessionHash, opts.ttsInteractionMode);
   }
 
+  const indicator = activeIndicator(isActive);
   const headerFrag = html`
     <div class="sender-card-header" role="button" tabindex="0">
-      <span class="sender-active-indicator">●</span>
+      <span class="sender-active-indicator" title="${indicator.title}">${indicator.glyph}</span>
       <span class="sender-status">${statusGlyph}</span>
       <span class="sender-project-name">${sender.display_name || sender.sender_id}</span>
       ${sessionBlock}
       <span class="sender-stats-group">
         ${personaBadge}
         ${sender.unread_count > 0 && sender.is_worker !== true
-          ? html`<span class="sender-new-count">${sender.unread_count}</span>`
+          // A-2 #4 — legacy writes "N new", not a bare N (notifications.js:19924,
+          // `${group.newCount} new`). The number alone reads as an index or an id
+          // beside `(12)`, the message count immediately after it; the word is what
+          // separates "7 unread" from "the 7th". The >0 and worker guards above
+          // already matched legacy — only the wording did not.
+          ? html`<span class="sender-new-count">${sender.unread_count} new</span>`
           : null}
         <span class="sender-message-count">(${notifications.length})</span>
         <span class="sender-last-activity">${lastActivityText}</span>
@@ -232,10 +275,20 @@ export function renderSenderCard(
   const datesContainer = root.querySelector(".sender-card-dates") as HTMLElement;
   const groupedByDate = groupByDateKey(renderList, opts.appTimezone);
 
+  // C3 (2026-09-10) — each day's count comes from the FULL list, like this card's
+  // own header count above and like legacy's `dateGroup.length`
+  // (notifications.js:19295). Counting the collapsed render list read a day as
+  // (30) under a card header of (489).
+  const countByDate = new Map<string, number>();
+  for (const n of notifications) {
+    const key = formatDateKey(n.ts, opts.appTimezone);
+    countByDate.set(key, (countByDate.get(key) ?? 0) + 1);
+  }
+
   keyedListMerge({
     parent  : datesContainer,
     entries : groupedByDate.map(g => ({ idHash: g.dateKey, group: g })),
-    create  : (e) => renderDateAccordion(e.group.dateKey, e.group.items, opts),
+    create  : (e) => renderDateAccordion(e.group.dateKey, e.group.items, opts, countByDate.get(e.group.dateKey)),
   });
 
   return root;
@@ -265,13 +318,31 @@ export function renderSenderCard(
  *     conv-mode button reflecting `sender.conversation_mode_active`.
  */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line (TypeScript return-type erasure produces a fake branch in c8's source-map view; the body is always entered when called).
-function renderVoiceInputRow(sender: SenderRecord, sessionHash: string): DocumentFragment {
+function renderVoiceInputRow(
+  sender: SenderRecord, sessionHash: string, mode: TtsInteractionMode = "chorus",
+): DocumentFragment {
   const active       = sender.conversation_mode_active === true;
   const convBtnClass = active ? "sender-conversation-mode-btn is-active" : "sender-conversation-mode-btn";
-  const convIcon     = active ? "🔊" : "🤭";
-  const convTitle    = active
-    ? "Conversation mode ON — click to silence (quiet)"
-    : "Conversation mode OFF — click to enable (speakerphone)";
+  // A-2 #4 — legacy carries TWO icon sets and switches on the interaction mode
+  // (notifications.js:19192-19203). This page hardcoded the chorus pair, so a host
+  // running SOLO showed 🔊/🤭 — speakerphone iconography for a button that actually
+  // claims and releases a TTS MONOPOLY. The glyph and the tooltip both described the
+  // wrong thing, and the wrong thing is the one with the side effect on other sessions.
+  //
+  //   chorus  🔊 speakerphone / 🤭 quiet          — does this session speak aloud?
+  //   solo    📞 conversation / 🔔 notification   — does this session HOLD the line?
+  //
+  // Both sets are permanent (Rick, 2026-05-12: parallel preservation, not a flag with
+  // a sunset), so this is a lasting branch rather than a migration.
+  const isSolo       = mode === "solo";
+  const convIcon     = isSolo ? ( active ? "📞" : "🔔" ) : ( active ? "🔊" : "🤭" );
+  const convTitle    = isSolo
+    ? ( active
+      ? "Conversation mode ON — this session monopolizes TTS (click to release)"
+      : "Notification mode — no monopoly (click to claim TTS)" )
+    : ( active
+      ? "Conversation mode ON — click to silence (quiet)"
+      : "Conversation mode OFF — click to enable (speakerphone)" );
   const sttId   = `cc-session-stt-${sessionHash}`;
   const inputId = `cc-session-input-${sessionHash}`;
   const sendId  = `cc-session-send-${sessionHash}`;
@@ -285,6 +356,21 @@ function renderVoiceInputRow(sender: SenderRecord, sessionHash: string): Documen
       </div>
     </div>
   ` as DocumentFragment;
+}
+
+/**
+ * The `.sender-active-indicator` glyph and title for an active / inactive card.
+ *
+ * Exported because NotificationsListRenderer repaints a KEPT card's indicator in
+ * place (row 11793820) without re-rendering it, and the two must never disagree.
+ *
+ * Ensures:
+ *   - active ⇒ `●` / "Active session"; inactive ⇒ `○` / "Inactive session"
+ */
+export function activeIndicator(isActive: boolean): { glyph: string; title: string } {
+  return isActive
+    ? { glyph: "●", title: "Active session" }
+    : { glyph: "○", title: "Inactive session" };
 }
 
 /**

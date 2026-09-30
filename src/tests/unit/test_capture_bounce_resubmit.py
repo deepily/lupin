@@ -270,3 +270,27 @@ def test_report_counts_and_render( tmp_path ):
     assert text.count( "cheech@lupin" ) == 1
     assert "FIDELITY-LOSS" in text
     assert "deep_research" in text or "Deep Research" in text
+
+
+# ── QueueClient.submit goes through /api/v2/submit (row a3c59f2d) ─────────────
+
+def test_queue_client_submit_wraps_the_captured_payload_for_v2_and_returns_the_reply( monkeypatch ):
+    client = cbr.QueueClient( "http://x" )
+    seen   = { }
+
+    def fake_request( method, path, body=None, auth=True ):
+        seen.update( method=method, path=path, body=body )
+        return { "status": "waiting", "job_id": "ts-9", "queue_position": 4 }
+
+    monkeypatch.setattr( client, "_request", fake_request )
+    info = client.submit( { "test_types": "e2e_a,e2e_b", "scheduled_at": "T" } )
+    assert ( seen[ "method" ], seen[ "path" ] ) == ( "POST", "/api/v2/submit" )
+    assert seen[ "body" ][ "args" ][ "test_types" ] == "e2e_a,e2e_b" and seen[ "body" ][ "scheduled_at" ] == "T"
+    assert info[ "job_id" ] == "ts-9"
+
+
+def test_queue_client_submit_raises_when_v2_refuses_with_a_200( monkeypatch ):
+    client = cbr.QueueClient( "http://x" )
+    monkeypatch.setattr( client, "_request", lambda *a, **k: { "status": "failed", "error": "unknown suite" } )
+    with pytest.raises( RuntimeError, match="unknown suite" ):
+        client.submit( { "test_types": "unit" } )

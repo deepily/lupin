@@ -50,9 +50,29 @@ JOB_ARG_CONTRACTS = {
             "budget"           : "budget",
             "audience"         : "audience",
             "audience_context" : "audience_context",
+            # Rick's 2026-09-08 ask: a research run may take a document he already has as
+            # SEED CONTEXT — the agent reads it, then researches the query with it in hand.
+            # `document_path` is aliased the way the podcast contract aliases it.
+            #
+            # NO `"topic" : "source_document"` ALIAS, for the reason row 9d89afe2 records
+            # one directory down: `topic` carries a spoken subject phrase, and aliasing it
+            # onto a file argument delivers that phrase as a filename.
+            "source_document"  : "source_document",
+            "document_path"    : "source_document",
         },
         "fallback_questions" : {
             "query"            : "What topic would you like me to research?",
+            # 🔴 NO `source_document` ENTRY, AND THAT IS LOAD-BEARING (row 14c54c10).
+            # I put one here and it turned Rick's OPTIONAL argument into a mandatory
+            # interview. `expedite_flow` falls back to the fallback_questions KEYS as the
+            # missing set when a spec carries no `user_visible` list — so declaring a
+            # question here is declaring the argument askable, whatever required_user_args
+            # says. test_user_visible_none_uses_fallback_question_keys caught it by
+            # raising HumanAskInTestError: the run tried to block on a human asking
+            # "Which local document should I read first?" on a plain research request.
+            # The argument reaches the job through the v2 door's args dict, which needs no
+            # question. If a future reader wants voice resolution for it, add it to
+            # special_handlers deliberately and fix the interview semantics first.
             "budget"           : "Would you like to set a budget limit in dollars? Say a dollar amount, or 'no limit'.",
             "audience"         : "Who is the target audience? Options: beginner, intermediate, expert, or academic.",
             "audience_context" : "Any additional context about the audience? Say 'none' to skip.",
@@ -61,6 +81,22 @@ JOB_ARG_CONTRACTS = {
             "budget"           : "no limit",
             "audience"         : "academic",
             "audience_context" : "none",
+        },
+        # WHERE A source_document MAY BE LOOKED FOR when the expeditor resolves one from
+        # prose. Declared beside the argument it belongs to, per row a1420538 — an agent
+        # that does not declare its roots used to be searched with the PODCAST's config.
+        #
+        # ⚠️ `source_document` is DELIBERATELY ABSENT from `required_user_args` and from
+        # `special_handlers`. Rick ruled it OPTIONAL, and the expeditor only resolves an
+        # argument it finds in `missing` — which is computed from the required set. Adding
+        # it to either would make every research request stop and ask for a document,
+        # turning an optional argument into a mandatory interview.
+        "file_args"          : {
+            "source_document" : {
+                "kind"             : "file",
+                "search_roots"     : DEFAULT_FILE_SEARCH_ROOTS,
+                "search_paths_key" : "deep research source search paths",
+            },
         },
     },
     "agent router go to podcast generator" : {
@@ -122,6 +158,20 @@ JOB_ARG_CONTRACTS = {
             "budget"           : "budget",
             "audience"         : "audience",
             "audience_context" : "audience_context",
+            # SEED CONTEXT FOR THE RESEARCH LEG, row 5726e3c5. This command researches a
+            # query and THEN builds the artefact, so `source_document` means here exactly
+            # what it means on deep research -- the research leg reads it first.
+            #
+            # 🔴 NOT THE SAME ARGUMENT AS THE STANDALONE SIBLING'S, and the difference is
+            # Rick's Q2 ruling rather than an untidiness to fix. `podcast generator` takes
+            # `research` and `presentation generator` takes `source`: those are REQUIRED
+            # and they are THE SUBJECT -- the document IS the thing being turned into the
+            # artefact. This one is OPTIONAL and it is background for a research leg that
+            # then goes and finds other material. Four commands take a document, two
+            # meanings, two names. Renaming either pair would break live agents to make a
+            # naming chart tidier.
+            "source_document"  : "source_document",
+            "document_path"    : "source_document",
         },
         "fallback_questions" : {
             "query"            : "What topic would you like me to research and turn into a podcast?",
@@ -135,6 +185,22 @@ JOB_ARG_CONTRACTS = {
             "audience"         : "academic",
             "audience_context" : "none",
             "languages"        : "en,es-MX",
+        },
+        # WHERE A source_document MAY BE LOOKED FOR when the expeditor resolves one from
+        # prose. Declared beside the argument it belongs to, per row a1420538.
+        #
+        # ⚠️ `source_document` is DELIBERATELY ABSENT from `required_user_args`, from
+        # `fallback_questions` and from `special_handlers`. Rick ruled it OPTIONAL, and
+        # `expedite_flow` falls back to the fallback_questions KEYS as the missing set
+        # when a spec carries no `user_visible` list -- so a question here would declare
+        # the argument askable and turn an optional argument into a mandatory interview.
+        # That exact mistake was made and caught on deep research; see row 14c54c10.
+        "file_args"          : {
+            "source_document" : {
+                "kind"             : "file",
+                "search_roots"     : DEFAULT_FILE_SEARCH_ROOTS,
+                "search_paths_key" : "deep research source search paths",
+            },
         },
     },
     "agent router go to claude code" : {
@@ -226,6 +292,20 @@ JOB_ARG_CONTRACTS = {
             "theme"                   : "theme",
             "audience"                : "audience",
             "audience_context"        : "audience_context",
+            # SEED CONTEXT FOR THE RESEARCH LEG, row 5726e3c5. This command researches a
+            # query and THEN builds the artefact, so `source_document` means here exactly
+            # what it means on deep research -- the research leg reads it first.
+            #
+            # 🔴 NOT THE SAME ARGUMENT AS THE STANDALONE SIBLING'S, and the difference is
+            # Rick's Q2 ruling rather than an untidiness to fix. `podcast generator` takes
+            # `research` and `presentation generator` takes `source`: those are REQUIRED
+            # and they are THE SUBJECT -- the document IS the thing being turned into the
+            # artefact. This one is OPTIONAL and it is background for a research leg that
+            # then goes and finds other material. Four commands take a document, two
+            # meanings, two names. Renaming either pair would break live agents to make a
+            # naming chart tidier.
+            "source_document"         : "source_document",
+            "document_path"           : "source_document",
         },
         "fallback_questions" : {
             "query"                   : "What topic should I research and present? Describe the topic or question.",
@@ -239,6 +319,22 @@ JOB_ARG_CONTRACTS = {
             "theme"                   : "default",
             "audience"                : "general",
             "audience_context"        : "none",
+        },
+        # WHERE A source_document MAY BE LOOKED FOR when the expeditor resolves one from
+        # prose. Declared beside the argument it belongs to, per row a1420538.
+        #
+        # ⚠️ `source_document` is DELIBERATELY ABSENT from `required_user_args`, from
+        # `fallback_questions` and from `special_handlers`. Rick ruled it OPTIONAL, and
+        # `expedite_flow` falls back to the fallback_questions KEYS as the missing set
+        # when a spec carries no `user_visible` list -- so a question here would declare
+        # the argument askable and turn an optional argument into a mandatory interview.
+        # That exact mistake was made and caught on deep research; see row 14c54c10.
+        "file_args"          : {
+            "source_document" : {
+                "kind"             : "file",
+                "search_roots"     : DEFAULT_FILE_SEARCH_ROOTS,
+                "search_paths_key" : "deep research source search paths",
+            },
         },
     },
     "agent router go to swe team" : {
@@ -374,6 +470,35 @@ JOB_ARG_CONTRACTS = {
             "pytest_args" : "none",
             "dry_run"     : "no",
         },
+    },
+
+    # TEST SCAFFOLDING, NOT AN AGENT A PERSON ASKS FOR (rows 432511fd / a3c59f2d). The
+    # retired /api/mock-job/submit door's two modes as one command: a zero-cost MockAgenticJob,
+    # or — with `voice_command` — the RuntimeArgumentExpeditor test that builds a dry-run job
+    # of the command it matches. Reached only through /api/v2/submit by the four suites that
+    # used the door. Not speakable, not user-initiable, not in the router prompt or corpus
+    # (see INITIAL_DETECTION_EXEMPTIONS), and skipped by the voice-command keyword matcher.
+    "agent router go to mock job" : {
+        "job_prefix"         : "mock",
+        "cli_module"         : None,
+        "job_class_path"     : "cosa.agents.test_harness.mock_job.MockAgenticJob",
+        "display_name"       : "Mock Job",
+        "required_user_args" : [],
+        "system_provided"    : [ "user_id", "user_email", "session_id" ],
+        "arg_mapping"        : {
+            "iterations_min"      : "iterations_min",
+            "iterations_max"      : "iterations_max",
+            "sleep_min"           : "sleep_min",
+            "sleep_max"           : "sleep_max",
+            "failure_probability" : "failure_probability",
+            "fixed_iterations"    : "fixed_iterations",
+            "fixed_sleep"         : "fixed_sleep",
+            "description"         : "description",
+            "voice_command"       : "voice_command",
+            "force_failure_mode"  : "force_failure_mode",
+        },
+        "fallback_questions" : {},
+        "fallback_defaults"  : {},
     },
 }
 

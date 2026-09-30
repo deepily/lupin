@@ -61,8 +61,92 @@
         }
     }
 
+    /**
+     * Decode one base64url segment to a UTF-8 string, or null on malformed input.
+     *
+     * 🔴 SECOND DECODER — SEE THE BANNER NOTE BELOW. Constructed to be behaviourally
+     * identical to `decodeSegment` in multiplexer/auth/jwt.ts, line for line.
+     */
+    function decodeJwtSegment( segment ) {
+        const base64    = segment.replace( /-/g, "+" ).replace( /_/g, "/" );
+        const remainder = base64.length % 4;
+        if ( remainder === 1 ) return null;   // not a valid base64 length
+        const padded = remainder === 0 ? base64 : base64 + "=".repeat( 4 - remainder );
+        let binary;
+        try {
+            binary = atob( padded );
+        } catch ( e ) {
+            return null;                      // non-base64 characters
+        }
+        const bytes = Uint8Array.from( binary, function ( ch ) { return ch.charCodeAt( 0 ); } );
+        return new TextDecoder().decode( bytes );
+    }
+
+    /** Claims payload of a JWT, or null when it is not a well-formed three-segment JWT. */
+    function decodeJwtClaims( token ) {
+        const segments = token.split( "." );
+        if ( segments.length !== 3 ) return null;
+        const json = decodeJwtSegment( segments[ 1 ] );
+        if ( json === null ) return null;
+        let parsed;
+        try {
+            parsed = JSON.parse( json );
+        } catch ( e ) {
+            return null;
+        }
+        if ( typeof parsed !== "object" || parsed === null ) return null;
+        return parsed;
+    }
+
+    /**
+     * Access-token expiry as ms-epoch, or null if absent/malformed.
+     *
+     * 🔴 THIS IS A SECOND COPY OF `jwtExpiryMs` FROM multiplexer/auth/jwt.ts, AND THE
+     * DUPLICATION IS DELIBERATE AND APPROVED (2026-09-04). This file is loaded by 17
+     * pages as a classic `<script defer>` and is self-contained by design, so it cannot
+     * import an ES module. The alternatives were converting all 17 script tags to
+     * `type="module"`, or introducing a new global loaded ahead of the nav on all 17.
+     *
+     * ⚠️ WHAT HOLDS THE TWO TOGETHER IS NOT CARE, IT IS A TEST. Two derivations of one
+     * value that agree only by careful copying diverge the first time somebody edits
+     * one of them. `src/tests/unit/nav/the_live_nav_iife_must_not_vouch_for_a_token_the_server_refuses.test.ts`
+     * runs a 17-token corpus through BOTH decoders and fails the moment their answers
+     * differ. If you edit either copy, that guard is the thing that tells you.
+     */
+    function jwtExpiryMs( token ) {
+        const claims = decodeJwtClaims( token );
+        if ( claims === null ) return null;
+        if ( typeof claims.exp !== "number" ) return null;
+        return claims.exp * 1000;
+    }
+
+    /**
+     * Is the stored access token one the server will still accept?
+     *
+     * 🔴 THIS WAS `return !!getToken();` — A PRESENCE CHECK ON A STRING (row ef16e88d).
+     * It never decoded the token, never read `exp` and never asked the server, while
+     * driving the rendered "email + Logout" half of the bar. Measured by Maya in Rick's
+     * own browser: a syntactically valid JWT with `exp` 86,400s in the past returned
+     * TRUE here while the SAME string came back 401 from the server.
+     *
+     * ⚠️ That is why his row 9d3a975e report read as a contradiction — "a 401 even when
+     * my account is authenticated and listed as logged in". Both halves were true of one
+     * token at one instant, and the nav is the half that was lying. The access token
+     * lives 30 minutes and the refresh token a week, so localStorage legitimately holds
+     * an expired access token for hours: the ordinary case, not an edge one.
+     *
+     * ⚠️ AND A UI THAT SAYS "logged in" IS A REASSURANCE, WHICH IS THE EXPENSIVE KIND OF
+     * WRONG — it does not merely misinform, it stops the reader checking.
+     *
+     * Fails CLOSED. An undecodable token, or one carrying no `exp`, is not vouched for:
+     * the whole defect was a predicate that said yes when it did not know.
+     */
     function isAuthenticated() {
-        return !!getToken();
+        const token = getToken();
+        if ( !token ) return false;
+        const expiryMs = jwtExpiryMs( token );
+        if ( expiryMs === null ) return false;
+        return Date.now() < expiryMs;
     }
 
     function isAdmin() {

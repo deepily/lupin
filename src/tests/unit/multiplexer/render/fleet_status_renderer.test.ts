@@ -36,6 +36,9 @@ function makeStore(): FakeStore {
     showOfflineFlag: () => showOffline,
     refresh: async (): Promise<void> => { store.refreshCalls += 1; },
     toggleShowOffline: (): void => { store.toggleCalls += 1; showOffline = !showOffline; },
+    sizeCap: () => null,
+    sizeCapSaving: () => null,
+    setSizeCap: async (): Promise<void> => {},
     setComposite: (c) => { composite = c; },
     setShowOffline: (b) => { showOffline = b; },
   };

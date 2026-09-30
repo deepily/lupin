@@ -15,7 +15,7 @@ import os
 import sys
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from unittest.mock import MagicMock
 
 import pytest
@@ -29,7 +29,9 @@ if _src_path not in sys.path:
 
 from cosa.rest.postgres_models import TaskItem, TaskEvent
 from cosa.rest.routers import tasks
-from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
+from cosa.rest import task_store_rules as rules
+from cosa.rest import task_approval_settings as approval
+from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt, authenticated_account_email
 
 NOW = datetime( 2026, 6, 12, 0, 0, tzinfo=timezone.utc )
 
@@ -53,12 +55,29 @@ def make_item( **overrides ):
         correlation_key     = None,
         created_ts          = NOW,
         updated_ts          = NOW,
+        # Explicit, because a SQLAlchemy column `default` fires at INSERT and
+        # NOT at construction — an unset flag here would reach the serializer as
+        # None and serialize as null, which is neither True nor False.
+        title_trimmed       = False,
     )
     fields.update( overrides )
     return TaskItem( **fields )
 
 
-def make_event( item_id, **overrides ):
+def make_event( item_id, item_title="build the store", **overrides ):
+    """
+    A fake TaskEvent — WITH ITS ITEM ATTACHED, because production guarantees that.
+
+    🔴 THE `item` IS NOT DECORATION. `_serialize_event` puts `event.item.title` on the wire
+    (row 2c6a87f3), and both repository readers eager-load the relationship so it is always
+    there. A fake that carried only `item_id` would model an object production never hands the
+    serializer — and it would fail with an AttributeError on None rather than telling anyone
+    what was actually missing.
+
+    ⚠️ Set AFTER construction, not as a constructor field: assigning the relationship in the
+    same breath as `item_id` lets SQLAlchemy reconcile the two and overwrite the id the caller
+    asked for, which several tests here assert on.
+    """
     fields = dict(
         id           = 1,
         item_id      = item_id,
@@ -69,7 +88,9 @@ def make_event( item_id, **overrides ):
         authority    = "standing",
     )
     fields.update( overrides )
-    return TaskEvent( **fields )
+    event      = TaskEvent( **fields )
+    event.item = TaskItem( id=item_id, title=item_title )
+    return event
 
 
 @pytest.fixture
@@ -81,6 +102,28 @@ def repo( monkeypatch ):
     # from query_tasks.return_value: a fixture that computed the total from the
     # page would hard-code the very identity these tests exist to falsify.
     fake.count_tasks.return_value = 0
+    # 🔴 AND IT MUST DISCRIMINATE ON `status`, NOT ANSWER EVERY CALL THE SAME (row
+    # d254c397, 2026-09-05). The holding-area disclosure asks this same method a SECOND
+    # question — "how many `not_approved` rows match these filters?" — and a single
+    # `return_value` answers both with one number. That is this file's own documented
+    # fixture defect wearing a new hat: a fake that ignores its input cannot tell you
+    # whether the code passed the right argument, so a router that probed the WRONG
+    # status, or probed nothing at all, would look identical here.
+    #
+    # Measured when it fired: four tests that set `count_tasks.return_value = N` for the
+    # page total suddenly reported N rows "withheld" out of N shown. The rows were the
+    # SAME rows.
+    #
+    # So the holding probe reads its own knob, defaulting to ZERO — the honest default,
+    # exactly as the empty maps below are: no held row exists, so nothing is withheld and
+    # no notice fires. A test wanting a finding sets `fake.holding_count = <n>`, the same
+    # opt-in contract every other entry in this fixture uses.
+    fake.holding_count = 0
+    def _count_tasks( **kwargs ):
+        if kwargs.get( "status" ) == "not_approved":
+            return fake.holding_count
+        return fake.count_tasks.return_value
+    fake.count_tasks.side_effect = _count_tasks
     # `statuses_for_ids` must return a REAL dict for the same reason `total` must be a
     # real int (row 00a6bde2). A bare MagicMock is TRUTHY and supports no `in`, so
     # `blocker_is_terminal` would either raise or — worse — be reached only by rows that
@@ -100,6 +143,23 @@ def repo( monkeypatch ):
     # branch returns it beside `breakdown`, and a MagicMock there would serialize as
     # a non-JSON object and 500 the route rather than failing an assertion cleanly.
     fake.count_tasks_by_priority.return_value = { }
+    # `count_created_and_closed` must return REAL ints for the same reason as every entry
+    # above (the closed-vs-new ratio gate, 2026-09-01). The gate computes `created / closed`
+    # and compares it to 1.0; a bare MagicMock raises
+    # `'<' not supported between instances of 'MagicMock' and 'float'` and 500s the route —
+    # which is exactly what 22 tests in this file did the moment the gate landed.
+    #
+    # ZERO / ZERO is the honest default, not a convenient one: an idle window is ALLOWED by
+    # ruling, so the gate stays silent and these tests keep testing what they are named for.
+    # A test that wants a refusal sets this explicitly, the same contract as the empty maps
+    # above.
+    fake.count_created_and_closed.return_value = {
+        "created"      : 0,
+        "closed"       : 0,
+        "window_start" : None,
+        "window_end"   : None,
+        "project"      : None,
+    }
 
     @contextmanager
     def _fake_get_db():
@@ -131,11 +191,25 @@ def _seed_known_personas( monkeypatch ):
     )
 
 
+# 🔨 `correlation_key` BECAME MANDATORY 2026-09-08 when Rick flipped the epic-key guard
+# from warn-only to enforcing (his keypress: "Enforce now — 422 on a bad key"). Before the
+# flip a create with no epic key logged a warning and proceeded; now the door answers 422.
+#
+# ⚠️ SO IT IS HERE FOR THE DOOR, NOT FOR THE SUBJECT. Not one test in this file is ABOUT
+# correlation keys — they are about persona canonicalisation, project aliasing, roster
+# flags, title trimming and default flow. Adding the key keeps every one of those subjects
+# exactly as it was; the alternative, weakening the guard for tests, would have made the
+# suite disagree with the live door. `epic:unassigned` is the deliberate "belongs to no
+# story" answer the ruling provides, which is honest for a fixture.
+#
+# Tests that ARE about the key pass their own and are unaffected — the `cc-task:` mirror
+# lane cases below still assert their own values.
 _CREATE_BODY = {
-    "item_class" : "task",
-    "title"      : "build the store",
-    "project"    : "lupin",
-    "created_by" : "krishna 38d15e3b",
+    "item_class"      : "task",
+    "title"           : "build the store",
+    "project"         : "lupin",
+    "created_by"      : "krishna 38d15e3b",
+    "correlation_key" : "epic:unassigned",
 }
 
 
@@ -162,7 +236,7 @@ def test_create_defaults_flow_to_repository( client, repo ):
     client.post( "/api/tasks", json=_CREATE_BODY )
     kwargs = repo.create_item.call_args.kwargs
     assert kwargs[ "authority" ] == "standing" and kwargs[ "gate_class" ] == "none"
-    assert kwargs[ "priority" ] == "P2"
+    assert kwargs[ "priority" ] == "P5"   # row 0107c19e — P5 is the new creation default
     # Class-scoped owner default (policy 2, task c03d1870): an owned-work class
     # (task) created WITHOUT an owner defaults to the creator's persona parsed
     # from created_by ("krishna 38d15e3b" -> "krishna") — was None pre-policy.
@@ -182,15 +256,17 @@ def test_create_under_cap_title_guard_is_none( client, repo ):
 def test_create_over_cap_title_trimmed_overflow_to_empty_body( client, repo ):
     # Over-cap title + no body: the SERVER trims the stored title to the cap and
     # moves the overflow into body (non-destructive) BEFORE the repo write.
-    long_title = "T" * 90
+    # Derived from the cap, never a literal — a hardcoded 90 stopped being over-cap
+    # the moment the cap moved 60 -> 120, and would have gone on passing at 201.
+    long_title = "T" * ( tasks.rules.TITLE_SOFT_CAP + 30 )
     repo.create_item.return_value = make_item()
     r = client.post( "/api/tasks", json=dict( _CREATE_BODY, title=long_title ) )
     assert r.status_code == 201
     guard = r.json()[ "title_guard" ]
     assert guard[ "trimmed" ] is True and guard[ "overflow_moved_to_body" ] is True
-    assert guard[ "original_length" ] == 90
+    assert guard[ "original_length" ] == tasks.rules.TITLE_SOFT_CAP + 30
     kwargs = repo.create_item.call_args.kwargs
-    assert kwargs[ "title" ] == "T" * 60 and kwargs[ "body" ] == "T" * 30   # overflow → body
+    assert kwargs[ "title" ] == "T" * tasks.rules.TITLE_SOFT_CAP and kwargs[ "body" ] == "T" * 30   # overflow → body
 
 
 def test_create_over_cap_title_with_body_RELOCATES_overflow( client, repo ):
@@ -198,15 +274,16 @@ def test_create_over_cap_title_with_body_RELOCATES_overflow( client, repo ):
     # which is how a silent data-loss path kept a green test beside it. The
     # overflow now survives ABOVE the pre-existing body, which is preserved whole.
     repo.create_item.return_value = make_item()
-    r = client.post( "/api/tasks", json=dict( _CREATE_BODY, title="W" * 80, body="keep me" ) )
+    over_cap = "W" * ( tasks.rules.TITLE_SOFT_CAP + 20 )
+    r = client.post( "/api/tasks", json=dict( _CREATE_BODY, title=over_cap, body="keep me" ) )
     assert r.status_code == 201
     guard = r.json()[ "title_guard" ]
     assert guard[ "overflow_moved_to_body" ] is True
     kwargs = repo.create_item.call_args.kwargs
-    assert kwargs[ "title" ] == "W" * 60
-    assert kwargs[ "body" ].endswith( "keep me" )                # body never clobbered
+    assert kwargs[ "title" ] == "W" * tasks.rules.TITLE_SOFT_CAP
+    assert kwargs[ "body" ].startswith( "keep me" )              # body never clobbered, and still first
     assert "W" * 20 in kwargs[ "body" ]                          # ...and the overflow survived
-    assert kwargs[ "title" ] + "W" * 20 == "W" * 80              # round-trips to the original
+    assert kwargs[ "title" ] + "W" * 20 == over_cap              # round-trips to the original
 
 
 def test_create_rejects_bad_enums_with_all_violations( client, repo ):
@@ -245,9 +322,68 @@ def test_create_rejects_non_whitelisted_mint_status( client, repo, bad_status ):
     repo.create_item.assert_not_called()
 
 
-def test_create_blocked_mint_by_manager_succeeds( client, repo, monkeypatch ):
-    # AC2 ALLOW path: a MANAGER (is_manager_figure True) mints an already-blocked
-    # row in one call. status + blocked_by + next_chase_ts flow to the repository.
+# ── RETIRED BY RICK'S RULING OF 2026-09-08 ───────────────────────────────────
+#
+# These three used to assert his 2026-07-20 feature: a MANAGER could mint an
+# already-blocked row in one call. I asked him directly whether that should survive
+# the new create-door rule and he said NO. A blocked row is on the live board, so
+# minting one from a create bypasses the holding area exactly as a queued mint does.
+#
+# ⇒ Rewritten rather than deleted. A deleted test takes its intent with it, and the
+# next reader would find a manager guard in the router with nothing describing why
+# it no longer fires. These now assert the CURRENT rule and name the retired one.
+#
+# ⇒ CONSEQUENCE: the manager-only blocked-mint guard below the gate in
+# routers/tasks.py is now reached, where holding is on, ONLY by callers the gate
+# lets through — a P0 or the operator. Deliberately left in place, and still pinned
+# by test_the_operator_passes_the_door_but_a_blocked_mint_still_meets_the_manager_guard.
+
+def _holding_on_for_blocked( monkeypatch ):
+    """Pin the holding default ON rather than inherit it from ambient config — the
+    gate only bites when holding is on, and a test that depends on config it does
+    not set is a test that passes for reasons it cannot name."""
+    monkeypatch.setattr( tasks.approval, "default_mint_status", lambda: "not_approved" )
+
+
+def test_a_blocked_mint_is_REFUSED_at_the_holding_gate_even_for_a_manager( client, repo, monkeypatch ):
+    """
+    THE RETIREMENT, stated as a behaviour. Manager-hood no longer buys a live mint:
+    the holding gate runs first and refuses whoever is asking.
+    """
+    _holding_on_for_blocked( monkeypatch )
+    monkeypatch.setattr( tasks, "is_manager_figure", lambda sid: True )
+    r = client.post( "/api/tasks", json=_BLOCKED_BODY )
+    assert r.status_code == 403, r.text
+    assert "holding area" in r.text, (
+        f"refused, but by the wrong guard — this must be the holding gate, not the "
+        f"manager check: {r.text}"
+    )
+    repo.create_item.assert_not_called()
+
+
+def test_a_blocked_mint_by_a_NON_manager_is_refused_by_the_gate_first( client, repo, monkeypatch ):
+    """
+    Same refusal, different caller. The point is that the ANSWER no longer depends
+    on who asked — which is the whole of Rick's ruling.
+    """
+    _holding_on_for_blocked( monkeypatch )
+    monkeypatch.setattr( tasks, "is_manager_figure", lambda sid: False )
+    monkeypatch.setattr( tasks, "classify_manager_figure_denial", lambda sid: "denied" )
+    r = client.post( "/api/tasks", json=_BLOCKED_BODY )
+    assert r.status_code == 403
+    assert "holding area" in r.text
+    repo.create_item.assert_not_called()
+
+
+def test_the_blocked_route_still_works_where_there_is_NO_holding_area( client, repo, monkeypatch ):
+    """
+    🔴 THE POSITIVE CONTROL, and the reason the two above are not just "the door
+    says no to everything". On a deployment with the holding default OFF there is
+    nothing to bypass, so his 2026-07-20 manager mint still functions exactly as it
+    did — proving the refusals above come from the GATE and not from a create path
+    that has simply stopped accepting blocked rows.
+    """
+    monkeypatch.setattr( tasks.approval, "default_mint_status", lambda: "queued" )
     monkeypatch.setattr( tasks, "is_manager_figure", lambda sid: True )
     repo.create_item.return_value = make_item(
         status        = "blocked",
@@ -255,45 +391,16 @@ def test_create_blocked_mint_by_manager_succeeds( client, repo, monkeypatch ):
         next_chase_ts = NOW,
     )
     r = client.post( "/api/tasks", json=_BLOCKED_BODY )
-    assert r.status_code == 201
-    assert r.json()[ "status" ] == "blocked"
-    kwargs = repo.create_item.call_args.kwargs
-    assert kwargs[ "status" ] == "blocked"
-    assert kwargs[ "blocked_by" ] == [ { "kind": "persona", "id": "tiberius" } ]
-    assert kwargs[ "next_chase_ts" ] is not None
-
-
-def test_create_blocked_mint_by_non_manager_rejected_403( client, repo, monkeypatch ):
-    # AC2 REJECT path: a genuinely-DENIED caller (resolved, not a manager) is 403'd
-    # with the permission message — no write. bug dd3b3666: pin the message that a
-    # RESOLVED non-manager gets, distinct from the stale-bridge message below.
-    monkeypatch.setattr( tasks, "is_manager_figure", lambda sid: False )
-    monkeypatch.setattr( tasks, "classify_manager_figure_denial", lambda sid: "denied" )
-    r = client.post( "/api/tasks", json=_BLOCKED_BODY )
-    assert r.status_code == 403
-    assert "only a manager may mint" in r.json()[ "detail" ]
-    assert "manager_figure_implicit' is false" in r.json()[ "detail" ]
-    repo.create_item.assert_not_called()
-
-
-def test_create_blocked_mint_stale_bridge_rejected_403_with_restart_hint( client, repo, monkeypatch ):
-    # bug dd3b3666: a caller whose bridge is missing the manager_figure_implicit
-    # stamp (schema-vintage, not a permission fact) is 403'd, but the message names
-    # the ABSENT field and prescribes a session RESTART — NOT "you are not a manager".
-    monkeypatch.setattr( tasks, "is_manager_figure", lambda sid: False )
-    monkeypatch.setattr( tasks, "classify_manager_figure_denial",
-                         lambda sid: tasks.DENIAL_STALE_BRIDGE )
-    r = client.post( "/api/tasks", json=_BLOCKED_BODY )
-    assert r.status_code == 403
-    detail = r.json()[ "detail" ]
-    assert "manager_figure_implicit" in detail and "RESTART" in detail
-    assert "not a manager figure" not in detail          # must NOT misdiagnose as denial
-    repo.create_item.assert_not_called()
+    assert r.status_code == 201, r.text
+    assert repo.create_item.call_args.kwargs[ "status" ] == "blocked"
 
 
 def test_create_blocked_mint_unparseable_sid_rejected_403( client, repo, monkeypatch ):
     # Fail-CLOSED: a created_by with no session-id tail yields no sid → REJECTED
     # WITHOUT even consulting the predicate (short-circuit on session_id is None).
+    # Holding pinned OFF: with it on, the gate refuses first and this passes with the
+    # manager guard deleted (mutation arm, 2026-09-11).
+    monkeypatch.setattr( tasks.approval, "default_mint_status", lambda: "queued" )
     def _boom( sid ):                                          # must NOT be reached
         raise AssertionError( "is_manager_figure consulted despite unparseable sid" )
     monkeypatch.setattr( tasks, "is_manager_figure", _boom )
@@ -320,6 +427,18 @@ def test_create_queued_default_never_consults_manager_guard( client, repo, monke
     # create — even one whose created_by has NO parseable session id — must NOT
     # touch the guard, or existing queued HTTP callers regress. Prove it by making
     # is_manager_figure EXPLODE if consulted.
+    #
+    # ⚠️ AND THE DEFAULT MINT STATUS IS PINNED, because since `f3870751` the shipped
+    # INI turns the holding-area default ON and a plain create mints `not_approved`.
+    # Pinned at the INI layer rather than by stubbing `default_mint_status`, so the
+    # assertion below still travels the real router -> settings path; stubbing the
+    # getter would leave this test unable to see that path break.
+    real_ini = approval._ini_value
+    monkeypatch.setattr( approval, "_ini_value",
+        lambda key, return_type, fallback:
+            None if key == approval.INI_KEY_DEFAULT_TO_HOLDING
+                 else real_ini( key, return_type, fallback ) )
+
     def _boom( sid ):
         raise AssertionError( "manager guard consulted on the queued default path" )
     monkeypatch.setattr( tasks, "is_manager_figure", _boom )
@@ -350,6 +469,29 @@ def test_transition_422_on_malformed_uuid( client, repo ):
     r = client.post( "/api/tasks/not-a-uuid/transition", json=_transition_body() )
     assert r.status_code == 422
     repo.get_by_id_for_update.assert_not_called()
+
+
+def test_transition_rejects_a_reason_ending_in_a_captured_envelope_tag( client, repo ):
+    # Row 91ccbc26 — the guard rides EVERY transition, not just ->parked, because
+    # `reason` was measured to carry caller markup exactly as park_reason does.
+    repo.get_by_id_for_update.return_value = make_item( status="queued" )
+    r = client.post( f"/api/tasks/{uuid.uuid4()}/transition",
+                     json=_transition_body( reason="picking this up" + ( "<" + "/" + "invoke>" ) ) )
+    assert r.status_code == 422
+    assert any( "reason ends with" in e for e in r.json()[ "detail" ][ "errors" ] )
+    repo.apply_transition.assert_not_called()
+
+
+def test_transition_ACCEPTS_a_reason_quoting_the_tag_mid_sentence( client, repo ):
+    # 🔴 THE CONTROL at the endpoint: an honest reason that quotes the offending
+    # markup and keeps speaking must still transition.
+    item = make_item( status="queued" )
+    repo.get_by_id_for_update.return_value = item
+    repo.apply_transition.return_value = make_event( item.id )
+    r = client.post( f"/api/tasks/{item.id}/transition",
+                     json=_transition_body( reason="the tail was " + ( "<" + "/" + "invoke>" ) + " and I removed it" ) )
+    assert r.status_code == 200
+    repo.apply_transition.assert_called_once()
 
 
 def test_transition_rejects_done_without_receipts( client, repo ):
@@ -542,6 +684,54 @@ def test_query_count_only_still_validates_enums( client, repo ):
     repo.query_tasks.assert_not_called()
 
 
+def _classification_help( actual_keys ):
+    """
+    The failure message for the key-set guard — and it is load-bearing, not decoration
+    (Chloé 🗼's finding on 2d9c779a, row 9dbffefb).
+
+    A bare set-difference tells a reader THAT a key is unclassified and leaves them to
+    guess WHICH set to add it to. The two guesses are not equally safe: DATA is the
+    silent one. Declare a derived field as DATA and no recipe is ever demanded, so the
+    field ships wired to whatever it likes — which is the exact residual this guard
+    admits it cannot close, and a bare message walks the reader straight into it.
+
+    So the message names the choice, names the consequence of each branch, and says
+    which way the failure is silent.
+    """
+    declared = tasks.TERSE_DATA_FIELDS | tasks.TERSE_ADVISORY_FIELDS
+    unclassified = sorted( actual_keys - declared )
+    departed     = sorted( declared - actual_keys )
+
+    lines = [ "the terse projection and its declarations disagree." ]
+    if unclassified:
+        lines += [
+            "",
+            f"UNCLASSIFIED KEY(S) IN THE PROJECTION: {unclassified}",
+            "Add each to exactly ONE set in cosa/rest/routers/tasks.py, and the choice matters:",
+            "",
+            "  TERSE_DATA_FIELDS      — the value is CARRIED off the row (item.<attr>).",
+            "                           Nothing further is required.",
+            "  TERSE_ADVISORY_FIELDS  — the value is DERIVED by a predicate at serialize",
+            "                           time. You must also register a True/False recipe in",
+            "                           _ADVISORY_RECIPES, or test_every_advisory_field_has_a_recipe",
+            "                           fails immediately and tells you so.",
+            "",
+            "⚠️ IF YOU ARE UNSURE, IT IS ADVISORY. The two mistakes are not symmetric:",
+            "   calling a carried field advisory costs you one recipe you did not need;",
+            "   calling a DERIVED field data demands nothing, so it ships unguarded and",
+            "   a constant in its place stays green forever. That is the failure this",
+            "   whole guard exists to prevent, and DATA is the box it hides in.",
+        ]
+    if departed:
+        lines += [
+            "",
+            f"DECLARED BUT ABSENT FROM THE PROJECTION: {departed}",
+            "Either the key was removed — delete its declaration (and its recipe, if advisory)",
+            "— or the serializer stopped emitting it, which is the regression this catches.",
+        ]
+    return "\n".join( lines )
+
+
 def test_query_terse_returns_glance_projection_only( client, repo ):
     # §G: terse=true serializes the at-a-glance projection — EXACTLY the seven
     # glance keys, with `body` (and every other full-row field) dropped.
@@ -558,20 +748,25 @@ def test_query_terse_returns_glance_projection_only( client, repo ):
     body = r.json()
     assert body[ "count" ] == 1
     row = body[ "tasks" ][ 0 ]
-    assert set( row.keys() ) == {
-        "id", "title", "status", "blocked_by", "next_chase_ts", "priority", "park_reason_stale",
-        # `blocker_terminal` joined 2026-07-25 (row 00a6bde2) on the SAME argument
-        # park_reason_stale joined on, and a stronger one: blocked rows are excluded
-        # from the workable-now count by design, so a stranded row is invisible in
-        # exactly the way a finished row is. A flag absent from the projection a board
-        # glance reads is a flag nobody sees.
-        "blocker_terminal",
-        # `project` joined 2026-07-25 (row d23147e8) on a COST argument rather than a visibility
-        # one: without it, "which project strings exist?" costs 1,227 FULL rows, so the census
-        # that catches an orphan alias is never routine — and the next orphan gets found by
-        # accident too. A short string that makes a check habitual instead of heroic.
-        "project",
-    }
+    # BUILT FROM THE ROUTER'S OWN DECLARATIONS, not a flat literal (row 9dbffefb,
+    # 2026-08-31). Every key the projection carries is classified in one of the two
+    # sets — DATA is carried off the row, ADVISORY is derived by a predicate — so a
+    # new key cannot join without a human choosing which it is, and choosing ADVISORY
+    # immediately demands a two-value recipe in TestTerseAdvisoryFieldsAreWired below.
+    #
+    # The individual joining arguments are preserved on the declarations themselves in
+    # tasks.py; the history for each is: park_reason_stale (staleness §3.3, 2026-07-19),
+    # blocker_terminal (row 00a6bde2, 2026-07-25 — a stranded blocked row is invisible in
+    # exactly the way a finished one is), project (row d23147e8, 2026-07-25, a COST
+    # argument: the orphan-alias census costs 1,227 full rows without it), and
+    # title_trimmed (row a6cb24e8, 2026-08-31 — the trim files the tail into `body`,
+    # which THIS projection drops, and leaves no mark behind).
+    assert set( row.keys() ) == tasks.TERSE_DATA_FIELDS | tasks.TERSE_ADVISORY_FIELDS, \
+        _classification_help( set( row.keys() ) )
+    assert not ( tasks.TERSE_DATA_FIELDS & tasks.TERSE_ADVISORY_FIELDS ), \
+        "a key is in BOTH TERSE_DATA_FIELDS and TERSE_ADVISORY_FIELDS: " \
+        f"{sorted( tasks.TERSE_DATA_FIELDS & tasks.TERSE_ADVISORY_FIELDS )}. " \
+        "A key is carried OR derived, never both — pick one."
     assert "body" not in row                                  # the token win — body dropped
     # `is False`, not a truthiness check, and a type assertion beside it: the SQL
     # twin of this predicate returns NULL (not False) on its null arms when run as
@@ -586,6 +781,224 @@ def test_query_terse_returns_glance_projection_only( client, repo ):
     assert row[ "blocker_terminal" ] is False                 # an unblocked row is never stranded
     assert row[ "priority" ] == "P1" and row[ "status" ] == "queued"
     repo.query_tasks.assert_called_once()                    # rows ARE materialized (not count mode)
+
+
+def test_terse_title_trimmed_reads_the_COLUMN_not_the_title_length( client, repo ):
+    # DESCENDED FROM TIBERIUS 👑's test of the same name at c64da293, which drove the
+    # flag through the title's LENGTH because the flag WAS the length. Bug 769b3574
+    # moved it onto the row, so this fixture now has to separate two things his could
+    # not: reading the stored column, and re-deriving it from the title.
+    #
+    # THE FIXTURE IS DELIBERATELY CROSSED, and that is the whole test. Row 0 has a
+    # SHORT title and the flag True; row 1 has a title at exactly the cap and the flag
+    # False. So:
+    #     a constant False              -> dies on row 0
+    #     a constant True               -> dies on row 1
+    #     `len( title ) == cap` restored -> dies on BOTH, in opposite directions
+    #
+    # A fixture whose title length AGREES with its flag cannot tell the third case
+    # from a correct read — the values would be interchangeable, and a test over
+    # interchangeable values asserts their agreement rather than their identity. That
+    # is the blind-fixture shape this file has now been bitten by twice.
+    #
+    # Row 1's title comes from soft_guard_title's OWN no-op arm, so "exactly at the
+    # cap and NOT trimmed" is the guard's verdict rather than my arithmetic.
+    at_cap_but_untrimmed = "N" * rules.TITLE_SOFT_CAP
+    assert rules.soft_guard_title( at_cap_but_untrimmed, None )[ 2 ] is None   # the guard did not cut it
+
+    repo.query_tasks.return_value = [
+        make_item( title="short", title_trimmed=True ),
+        make_item( title=at_cap_but_untrimmed, title_trimmed=False ),
+    ]
+    r = client.get( "/api/tasks", params={ "terse": "true" } )
+    assert r.status_code == 200
+    rows = r.json()[ "tasks" ]
+    assert rows[ 0 ][ "title_trimmed" ] is True      # short title, flag set   -> not derived from length
+    assert rows[ 1 ][ "title_trimmed" ] is False     # cap-length, flag clear  -> not derived from length
+
+
+def test_terse_does_not_flag_an_over_cap_LEGACY_row( client, repo ):
+    """
+    Rachel 🕊️'s S1 projection fixture, carried onto the stored-flag branch so her
+    concern survives the deletion of the predicate it was written against.
+
+    🔴 WHAT THIS TEST DOES **NOT** PROVE, corrected after Mr Radio 🦉 caught me claiming
+    it did. I wrote that against a stored column this says "the flag is not derived from
+    the title's length AT ALL". IT DOES NOT. Measured: restore the length derivation in
+    the serializer (sha 1e6f1ce41a5a) and THIS TEST STILL PASSES — 90 != 60, so a length
+    check and a column read give the same answer on this input. A test that cannot tell
+    the two apart cannot be evidence about which one is running.
+
+    ⇒ The independence claim belongs to
+    `test_terse_title_trimmed_reads_the_COLUMN_not_the_title_length`, whose fixture is
+    CROSSED — a short title flagged True, a cap-length title flagged False — and which
+    goes RED on that same mutant. On the length question this test is strictly subsumed
+    by that one.
+
+    WHAT IT DOES PROVE, which is Rachel's actual finding and worth keeping: a legacy
+    over-cap row is not flagged. `make_item` bypasses the write path exactly as one of
+    the 333 rows already in the store does, so this pins the answer for a real input
+    class that the write path can no longer produce.
+    """
+    # OVER THE CURRENT CAP, derived — a literal 90 was over-cap at 60 and stopped
+    # being over-cap when Rick raised it to 120 (bug 6ce252e7). The fixture would
+    # have gone on passing while no longer posing the question it was written for:
+    # a length-derived answer only reports True on a title that is actually long.
+    repo.query_tasks.return_value = [ make_item( title="X" * ( tasks.rules.TITLE_SOFT_CAP + 30 ) ) ]
+    r = client.get( "/api/tasks", params={ "terse": "true" } )
+    assert r.status_code == 200
+    assert r.json()[ "tasks" ][ 0 ][ "title_trimmed" ] is False
+
+
+# ─────────────────────────────────────────────────────────────────────────────────
+# THE ADVISORY-FIELD REGISTRY (row 9dbffefb, 2026-08-31)
+#
+# WHY IT EXISTS. `title_trimmed` reached the terse projection with its key asserted
+# by the exact-set test above and its VALUE read by nothing: replacing its predicate
+# call with a bare `False` left all 471 tests green (row f3230576). An advisory field
+# wired to a constant is indistinguishable from a correct one that happens to be
+# False, so a key-presence assertion cannot tell them apart — and the fix for that is
+# a registry, not a resolution to be careful.
+#
+# HOW IT BINDS. `tasks.TERSE_ADVISORY_FIELDS` is the router's own declaration, and
+# `test_every_advisory_field_has_a_recipe` asserts this registry covers it EXACTLY.
+# So a field cannot be declared advisory without supplying a two-value recipe here,
+# and the exact-set assertion above means a key cannot reach the projection without
+# being declared as one thing or the other.
+#
+# WRITING A RECIPE — the two ways to get this wrong, both measured tonight:
+#   · the FALSE arm must be false for the RIGHT reason. `title_trimmed` over-reports
+#     by construction (length-only), so its false arm needs a title STRICTLY under
+#     the cap — a 60-char stand-in would report True and the test would pass while
+#     asserting the opposite of what it names. (Pocholo 📣 raised this; it is the
+#     same shape as his 63-char fixture whose cut portion was "ign".)
+#   · the two arms must differ ONLY in what drives the field. If they differ in
+#     something else as well, the test can pass on the other difference.
+_ADVISORY_RECIPES = { }
+
+
+def _advisory_recipe( field ):
+    """Register the True/False item pair for one advisory field."""
+    def register( fn ):
+        _ADVISORY_RECIPES[ field ] = fn
+        return fn
+    return register
+
+
+@_advisory_recipe( "title_trimmed" )
+def _recipe_title_trimmed():
+    # ⚠️ REWRITTEN AT THE 769b3574 MERGE. This recipe used to set neither arm's flag and
+    # let the TITLE decide — TRUE arm a guard-trimmed 60-char title, FALSE arm a short
+    # one — because `title_trimmed` was RE-DERIVED from length on read. It is a STORED
+    # column now, so a title alone decides nothing and the TRUE arm reported False.
+    #
+    # The arms are now the STRONGER pair the stored column makes available, and they
+    # discriminate in a way the old ones could not: both titles sit at exactly the cap,
+    # so LENGTH is held constant across the pair and only the column differs. Any
+    # regression back to a length-derived answer reports True on BOTH and dies on the
+    # FALSE arm. Under the old recipe that same regression passed.
+    trimmed, _overflow, advisory = rules.soft_guard_title( "T" * ( rules.TITLE_SOFT_CAP + 30 ), None )
+    assert advisory[ "trimmed" ] is True                    # the title still comes from
+    assert len( trimmed ) == rules.TITLE_SOFT_CAP           # the guard, not a literal
+    return (
+        make_item( title=trimmed, title_trimmed=True  ),
+        make_item( title=trimmed, title_trimmed=False ),
+        { },
+    )
+
+
+@_advisory_recipe( "park_reason_stale" )
+def _recipe_park_reason_stale():
+    # The quote is FROZEN at park time; a LATER body change is what makes it stale.
+    # Both arms are parked and differ only in which timestamp is the later one.
+    later = NOW + timedelta( hours=1 )
+    return (
+        make_item( status="parked", park_reason_captured_at=NOW,   body_changed_ts=later ),
+        make_item( status="parked", park_reason_captured_at=later, body_changed_ts=NOW   ),
+        { },
+    )
+
+
+@_advisory_recipe( "blocker_terminal" )
+def _recipe_blocker_terminal():
+    # Both arms are blocked on a real item id and differ only in that blocker's
+    # status, which is what the predicate reads.
+    done_id, live_id = uuid.uuid4(), uuid.uuid4()
+    return (
+        _blocked_item( done_id ),
+        _blocked_item( live_id ),
+        { str( done_id ): "done", str( live_id ): "queued" },
+    )
+
+
+def test_every_advisory_field_has_a_recipe():
+    """
+    The binding that makes the registry mechanical instead of a habit. Declaring a
+    field advisory in the router without registering its two arms here fails HERE,
+    at the moment of the declaration, rather than silently shipping a flag nothing
+    reads. The reverse is caught too: a recipe for a field that is no longer in the
+    projection is dead weight that would keep passing.
+    """
+    missing = sorted( set( tasks.TERSE_ADVISORY_FIELDS ) - set( _ADVISORY_RECIPES ) )
+    extra   = sorted( set( _ADVISORY_RECIPES ) - set( tasks.TERSE_ADVISORY_FIELDS ) )
+    assert set( _ADVISORY_RECIPES ) == set( tasks.TERSE_ADVISORY_FIELDS ), (
+        f"advisory fields with NO recipe: {missing}\n"
+        f"recipes for fields no longer declared advisory: {extra}\n"
+        "\n"
+        "For each missing one, register a recipe with @_advisory_recipe( <field> )\n"
+        "returning ( true_item, false_item, blocker_statuses ). The two items must differ\n"
+        "ONLY in what drives the field, and the FALSE arm must be false for the RIGHT\n"
+        "reason — see the recipe comments above for the over-report trap that makes a\n"
+        "cap-length fixture report True while the test's name says otherwise."
+    )
+
+
+@pytest.mark.parametrize( "field", sorted( tasks.TERSE_ADVISORY_FIELDS ) )
+def test_every_advisory_field_is_wired_on_the_terse_path( client, repo, field ):
+    """
+    Row 9dbffefb. Every DERIVED field in the terse projection must be shown to carry
+    its predicate's answer, not a constant — both directions, through the endpoint.
+
+    A constant False dies on the first assertion and a constant True on the second,
+    so no constant survives for any registered field. This is the generalisation of
+    the single-field test above it, which caught `title_trimmed` after a constant
+    passed 471 tests green.
+    """
+    true_item, false_item, blocker_statuses = _ADVISORY_RECIPES[ field ]()
+
+    repo.query_tasks.return_value      = [ true_item, false_item ]
+    repo.statuses_for_ids.return_value = blocker_statuses
+
+    r = client.get( "/api/tasks", params={ "terse": "true" } )
+    assert r.status_code == 200
+    rows = r.json()[ "tasks" ]
+
+    assert type( rows[ 0 ][ field ] ) is bool                 # TYPE FIRST — never None
+    assert type( rows[ 1 ][ field ] ) is bool
+    assert rows[ 0 ][ field ] is True,  f"{field}: the TRUE arm did not report True"
+    assert rows[ 1 ][ field ] is False, f"{field}: the FALSE arm did not report False"
+def test_terse_does_not_flag_an_over_cap_LEGACY_row( client, repo ):
+    """
+    Rachel 🕊️'s S1, projection half. Her fixture, landed by me.
+
+    `make_item` builds a TaskItem straight from kwargs — `soft_guard_title` appears
+    nowhere in it — so an over-cap title reaches the projection here exactly as one of
+    the 333 legacy rows in the store does. That is what makes the discriminating input
+    two lines rather than impossible.
+
+    She measured both arms in her own detached worktree at c64da293: pristine, this
+    passes; with `==` changed to `>=` (sha 7b187f8b224d) it FAILS, alongside 472 passed.
+    The mutant that survived the entire existing suite dies on the first fixture that
+    hands the predicate an input the suite could not produce.
+    """
+    # OVER THE CURRENT CAP, derived — a literal 90 was over-cap at 60 and stopped
+    # being over-cap when Rick raised it to 120 (bug 6ce252e7). The fixture would
+    # have gone on passing while no longer posing the question it was written for:
+    # a length-derived answer only reports True on a title that is actually long.
+    repo.query_tasks.return_value = [ make_item( title="X" * ( tasks.rules.TITLE_SOFT_CAP + 30 ) ) ]
+    r = client.get( "/api/tasks", params={ "terse": "true" } )
+    assert r.status_code == 200
+    assert r.json()[ "tasks" ][ 0 ][ "title_trimmed" ] is False
 
 
 def test_query_terse_serializes_nullable_next_chase_ts( client, repo ):
@@ -1230,7 +1643,10 @@ def test_patch_happy_path_returns_item_and_event( client, repo ):
     body = r.json()
     assert body[ "event" ][ "transition" ] == "patched"
     args, kwargs = repo.apply_patch.call_args.args, repo.apply_patch.call_args.kwargs
-    assert args[ 1 ] == { "title": "edited title" }              # fields passed positionally; actor/authority excluded from it
+    # fields passed positionally; actor/authority excluded from it. The
+    # `title_trimmed` key rides along on every title edit (bug 769b3574) — it is
+    # the flag being written to match the title now stored.
+    assert args[ 1 ] == { "title": "edited title", "title_trimmed": False }
     assert kwargs[ "actor" ] == "krishna a38ee857" and kwargs[ "authority" ] == "standing"
     repo.get_by_id_for_update.assert_called_once()               # N3 row-lock parity
     repo.get_by_id.assert_not_called()
@@ -1243,52 +1659,79 @@ def test_patch_happy_path_returns_item_and_event( client, repo ):
 # string was capped at 60 through create and unbounded through PATCH — two write
 # paths, two contradictory contracts, neither announced. The door widened when
 # task_edit (3ac79d1d, 2026-07-21) shipped over PATCH.
+#
+# 🔴 THE TWO DOORS DISAGREE AGAIN AS OF 2026-09-01, AND THAT IS THE RULING
+# (Rick, bug 6ce252e7: "Raise to 120 with a 422 over it."). The cap is one number
+# in one place, as 28fc1fb4 required; what differs is the ANSWER above it — a
+# create trims fail-open, an edit answers 422. The tests below assert the
+# asymmetry deliberately, so nobody re-unifies the doors and calls it a fix.
 # ---------------------------------------------------------------------------
 
-def test_patch_over_cap_title_is_guarded_by_THE_SAME_helper_as_create( client, repo ):
-    # ONE HELPER, BOTH DOORS. An over-cap PATCH title is trimmed to the cap and
-    # its overflow relocated into the body — identical treatment to create, and
-    # reported through the identical `title_guard` advisory.
+def test_patch_over_cap_title_is_REJECTED_where_create_would_trim_it( client, repo ):
+    """
+    Rick's ruling, 2026-09-01 (bug 6ce252e7). This test used to assert the opposite
+    — that an over-cap PATCH title was trimmed by the same helper create uses — and
+    it is reversed here rather than deleted, because the reversal IS the change.
+
+    An over-cap edit now answers 422 naming the ACTUAL LENGTH, and nothing is
+    written: no trim, no relocated overflow, no apply_patch at all.
+    """
     item = make_item( title="old title", body="the existing body" )
     repo.get_by_id_for_update.return_value = item
-    repo.apply_patch.return_value = make_event( item.id, transition="patched" )
-    long_title = "P" * 95
+    long_title = "P" * ( tasks.rules.TITLE_SOFT_CAP + 35 )
 
     r = client.patch( f"/api/tasks/{item.id}", json={ "title": long_title, "actor": "krishna a38ee857" } )
 
-    assert r.status_code == 200
-    guard = r.json()[ "title_guard" ]
-    assert guard == {
-        "trimmed"               : True,
-        "original_length"       : 95,
-        "cap"                   : tasks.rules.TITLE_SOFT_CAP,
-        "overflow_moved_to_body": True,
-    }
-    fields = repo.apply_patch.call_args.args[ 1 ]
-    assert fields[ "title" ] == "P" * 60
-    assert fields[ "title" ] + "P" * 35 == long_title             # round-trips EXACTLY
-    assert fields[ "body" ].endswith( "the existing body" )       # the row's body, preserved
+    assert r.status_code == 422
+    errors = r.json()[ "detail" ][ "errors" ]
+    # The NUMBER is the point: "too long" without one makes the writer count
+    # characters by hand to find out how much to cut.
+    assert any( str( len( long_title ) ) in e and str( tasks.rules.TITLE_SOFT_CAP ) in e for e in errors )
+    repo.apply_patch.assert_not_called()                          # nothing was written
 
 
-def test_patch_relocates_overflow_into_the_body_THE_PATCH_IS_WRITING( client, repo ):
+def test_patch_at_EXACTLY_the_cap_is_accepted( client, repo ):
     """
-    When one PATCH sets BOTH title and body, the overflow must land in the
-    INCOMING body — not the row's current one. Filing it into text the same call
-    is about to overwrite would be a relocation that loses the thing it saved.
+    THE BOUNDARY, both sides of it. The test above uses cap+35; a rejection at the
+    cap itself would be an off-by-one that the over-cap case cannot see, because
+    both a `>` and a `>=` reject cap+35 identically.
+    """
+    item = make_item( title="old title", body="the existing body" )
+    repo.get_by_id_for_update.return_value = item
+    repo.apply_patch.return_value = make_event( item.id, transition="patched" )
+    at_cap = "P" * tasks.rules.TITLE_SOFT_CAP
+
+    r = client.patch( f"/api/tasks/{item.id}", json={ "title": at_cap, "actor": "krishna a38ee857" } )
+
+    assert r.status_code == 200
+    fields = repo.apply_patch.call_args.args[ 1 ]
+    assert fields[ "title" ] == at_cap                            # stored whole, not cut
+    assert fields[ "title_trimmed" ] is False
+    assert "body" not in fields                                   # an edit never relocates
+
+
+def test_patch_NEVER_relocates_an_overflow_into_a_body_any_more( client, repo ):
+    """
+    The retired behaviour, asserted as absent.
+
+    This path used to relocate an over-cap title's overflow into the body the PATCH
+    was writing, and a careful test guarded WHICH body it landed in. A rejection
+    removes the whole question: an edit that cannot trim has no overflow to file.
+
+    Driven with a title well over the cap AND a body in the same call — the exact
+    input the old relocation logic existed for — and nothing is written.
     """
     item = make_item( title="old", body="about to be replaced" )
     repo.get_by_id_for_update.return_value = item
-    repo.apply_patch.return_value = make_event( item.id, transition="patched" )
 
     r = client.patch( f"/api/tasks/{item.id}", json={
-        "title": "R" * 70, "body": "the NEW body", "actor": "krishna a38ee857",
+        "title": "R" * ( tasks.rules.TITLE_SOFT_CAP + 10 ),
+        "body" : "the NEW body",
+        "actor": "krishna a38ee857",
     } )
 
-    fields = repo.apply_patch.call_args.args[ 1 ]
-    assert r.status_code == 200
-    assert "R" * 10 in fields[ "body" ]                           # overflow survived...
-    assert fields[ "body" ].endswith( "the NEW body" )            # ...above the INCOMING body
-    assert "about to be replaced" not in fields[ "body" ]         # never the stale one
+    assert r.status_code == 422
+    repo.apply_patch.assert_not_called()                          # not even the body landed
 
 
 def test_patch_under_cap_title_is_a_strict_no_op( client, repo ):
@@ -1303,7 +1746,10 @@ def test_patch_under_cap_title_is_a_strict_no_op( client, repo ):
 
     assert r.json()[ "title_guard" ] is None
     fields = repo.apply_patch.call_args.args[ 1 ]
-    assert fields == { "title": "edited title" }                  # NO body key manufactured
+    # `title_trimmed: False` is NOT a manufactured delta — it is the flag being
+    # written to match the title now stored (bug 769b3574). Every title edit writes
+    # it; a body key would still be a fabrication and is still absent.
+    assert fields == { "title": "edited title", "title_trimmed": False }
 
 
 def test_patch_without_a_title_never_touches_the_body( client, repo ):
@@ -1312,22 +1758,118 @@ def test_patch_without_a_title_never_touches_the_body( client, repo ):
     repo.get_by_id_for_update.return_value = item
     repo.apply_patch.return_value = make_event( item.id, transition="patched" )
 
-    r = client.patch( f"/api/tasks/{item.id}", json={ "priority": "P1", "actor": "krishna a38ee857" } )
+    # Vehicle field moved priority -> urgency: `priority` acquired an AUTHORIZATION
+    # gate on 2026-09-08 (the priority firewall, row b8205986), and this test's
+    # subject is not authorization. An ungated field keeps it measuring what its
+    # name says.
+    r = client.patch( f"/api/tasks/{item.id}", json={ "urgency": "low", "actor": "krishna a38ee857" } )
 
     assert r.json()[ "title_guard" ] is None
-    assert repo.apply_patch.call_args.args[ 1 ] == { "priority": "P1" }
+    assert repo.apply_patch.call_args.args[ 1 ] == { "urgency": "low" }
 
 
-def test_create_and_patch_produce_THE_SAME_title_for_the_same_input( client, repo ):
+def test_create_STORES_the_trim_verdict_rather_than_leaving_it_to_be_re_derived( client, repo ):
     """
-    THE CONTRACT-PARITY ASSERTION — the one that would have caught the split.
+    Bug 769b3574. The create path already held soft_guard_title's third return value
+    and threw it away; the flag was then re-computed at read time from the title's
+    LENGTH, against whatever the cap happened to be.
 
-    The defect was not that either path was wrong in isolation; it was that the
-    two disagreed, silently. This drives the identical over-cap title through
-    BOTH doors and requires the stored title and advisory to match. It goes red
-    the moment one path is changed without the other.
+    Both arms in one test, because a constant passes either one alone.
     """
-    long_title = "S" * 88
+    repo.create_item.return_value = make_item()
+
+    # Derived from the cap, not a literal — the cap moved 60 -> 120 on 2026-09-01
+    # and a hardcoded 90 silently became an UNDER-cap string, flipping this arm to
+    # False while still reading like an over-cap test.
+    r = client.post( "/api/tasks", json=dict( _CREATE_BODY, title="T" * ( tasks.rules.TITLE_SOFT_CAP + 30 ) ) )
+    assert r.status_code == 201
+    assert repo.create_item.call_args.kwargs[ "title_trimmed" ] is True
+
+    r = client.post( "/api/tasks", json=dict( _CREATE_BODY, title="a title well under the cap" ) )
+    assert r.status_code == 201
+    assert repo.create_item.call_args.kwargs[ "title_trimmed" ] is False
+
+
+def test_patch_CLEARS_the_flag_when_a_retitle_repairs_a_trimmed_title( client, repo ):
+    """
+    THE BUG I NEARLY BUILT, asserted so nobody else can.
+
+    A stored flag is tempting to write only when the guard fires. That is wrong: six
+    live rows were trimmed once and later REPAIRED by a shorter retitle, and their
+    titles are complete sentences now. False is the correct answer for them, and a
+    set-only flag would report True forever — getting on purpose the answer the old
+    length check got right by accident.
+
+    So the row starts flagged, takes an under-cap retitle, and must come out clear.
+    """
+    item = make_item( title="X" * 60, title_trimmed=True )
+    repo.get_by_id_for_update.return_value = item
+    repo.apply_patch.return_value = make_event( item.id, transition="patched" )
+
+    r = client.patch( f"/api/tasks/{item.id}", json={ "title": "a repaired, complete title", "actor": "pocholo 056e2aeb" } )
+
+    assert r.status_code == 200
+    assert r.json()[ "title_guard" ] is None                       # nothing was cut this time
+    assert repo.apply_patch.call_args.args[ 1 ][ "title_trimmed" ] is False
+
+
+def test_patch_CANNOT_SET_the_flag_because_an_over_cap_retitle_is_refused( client, repo ):
+    """
+    The negative control for the clearing test above, rewritten to the new door.
+
+    It used to assert the other direction — that an over-cap retitle came out
+    FLAGGED — which was the proof that clearing was not unconditional. Under the
+    2026-09-01 ruling an edit can never trim, so `title_trimmed` on this path is
+    always False, and the thing that must not be unconditional is now the ACCEPTANCE:
+    an over-cap retitle is refused and the row keeps the flag it already had.
+    """
+    item = make_item( title="a short clean title", title_trimmed=False )
+    repo.get_by_id_for_update.return_value = item
+
+    r = client.patch( f"/api/tasks/{item.id}", json={
+        "title": "Y" * ( tasks.rules.TITLE_SOFT_CAP + 1 ), "actor": "pocholo 056e2aeb",
+    } )
+
+    assert r.status_code == 422
+    repo.apply_patch.assert_not_called()
+
+
+def test_a_patch_that_does_not_touch_the_title_leaves_the_flag_alone( client, repo ):
+    """
+    Scope control. The flag describes the TITLE, so a non-title edit must not
+    write it — otherwise an unrelated edit would stamp a verdict on a field it never
+    looked at, which is the shape of bug 54924128 one column over.
+    """
+    item = make_item( title="X" * 60, title_trimmed=True )
+    repo.get_by_id_for_update.return_value = item
+    repo.apply_patch.return_value = make_event( item.id, transition="patched" )
+
+    # Vehicle field moved priority -> urgency: `priority` acquired an AUTHORIZATION
+    # gate on 2026-09-08 (the priority firewall, row b8205986), and this test's
+    # subject is not authorization. An ungated field keeps it measuring what its
+    # name says.
+    r = client.patch( f"/api/tasks/{item.id}", json={ "urgency": "low", "actor": "pocholo 056e2aeb" } )
+
+    assert r.status_code == 200
+    assert repo.apply_patch.call_args.args[ 1 ] == { "urgency": "low" }   # no title_trimmed key at all
+
+
+def test_create_TRIMS_and_patch_REJECTS_the_very_same_over_cap_title( client, repo ):
+    """
+    THE ASYMMETRY ASSERTION, and it is the exact inverse of the parity assertion it
+    replaces — recorded that way on purpose.
+
+    The old test drove one over-cap title through both doors and required identical
+    results, because bug 28fc1fb4 was the two doors disagreeing silently. Rick's
+    2026-09-01 ruling makes them disagree deliberately: create trims fail-open
+    because it is unattended and rejecting it loses the filing; edit answers 422
+    because a writer is present and is the only party who knows which half of the
+    string is the qualifier.
+
+    Both arms in ONE test, driven from ONE string, so neither door can be changed
+    without the other's behaviour being restated here.
+    """
+    long_title  = "S" * ( tasks.rules.TITLE_SOFT_CAP + 28 )
     shared_body = "a body on both paths"
 
     repo.create_item.return_value = make_item()
@@ -1335,12 +1877,22 @@ def test_create_and_patch_produce_THE_SAME_title_for_the_same_input( client, rep
 
     item = make_item( body=shared_body )
     repo.get_by_id_for_update.return_value = item
-    repo.apply_patch.return_value = make_event( item.id, transition="patched" )
     patched = client.patch( f"/api/tasks/{item.id}", json={ "title": long_title, "actor": "krishna a38ee857" } )
 
-    assert created.json()[ "title_guard" ] == patched.json()[ "title_guard" ]
-    assert repo.create_item.call_args.kwargs[ "title" ] == repo.apply_patch.call_args.args[ 1 ][ "title" ]
-    assert repo.create_item.call_args.kwargs[ "body" ]  == repo.apply_patch.call_args.args[ 1 ][ "body" ]
+    # CREATE: accepted, trimmed to the cap, overflow relocated, advisory reported.
+    assert created.status_code == 201
+    assert created.json()[ "title_guard" ][ "trimmed" ] is True
+    assert repo.create_item.call_args.kwargs[ "title" ] == long_title[ :tasks.rules.TITLE_SOFT_CAP ]
+
+    # EDIT: refused outright, naming the length. Nothing written.
+    assert patched.status_code == 422
+    assert any( str( len( long_title ) ) in e for e in patched.json()[ "detail" ][ "errors" ] )
+    repo.apply_patch.assert_not_called()
+
+    # AND THE ONE NUMBER IS STILL ONE NUMBER — the doors differ in their ANSWER
+    # above the cap, never in where the cap is. That is what 28fc1fb4 required and
+    # this ruling does not undo.
+    assert len( repo.create_item.call_args.kwargs[ "title" ] ) == tasks.rules.TITLE_SOFT_CAP
 
 
 def test_patch_empty_editable_set_rejected( client, repo ):
@@ -1397,6 +1949,98 @@ def test_patch_rejects_terminal_items( client, repo, terminal ):
     r = client.patch( f"/api/tasks/{uuid.uuid4()}", json=_PATCH_BODY )
     assert r.status_code == 422
     assert any( "terminal" in e for e in r.json()[ "detail" ][ "errors" ] )
+    repo.apply_patch.assert_not_called()
+
+
+@pytest.mark.parametrize( "terminal", [ "done", "dropped" ] )
+def test_patch_ACCEPTS_a_title_correction_prefix_on_a_terminal_row( client, repo, terminal ):
+    """
+    Rick's ruling, 2026-09-01, decision 45c4c932: "Prefix only."
+
+    The one carve-out in the closed-history wall, driven end to end through the
+    router. The row above this asserts the wall still stands for everything else;
+    this asserts the door actually opens, and BOTH are needed — a wall with no door
+    and a door with no wall are different bugs and one test cannot see both.
+
+    THE LIVE CASE it exists for: `82ec60be` reads "APPROVED 757820dd + 08fce017"
+    while its body records that approval withdrawn, and the terse projection drops
+    body, so every board glance shows the false headline.
+    """
+    old  = "APPROVED 757820dd + 08fce017 — api_keys closed"
+    item = make_item( status=terminal, title=old )
+    repo.get_by_id_for_update.return_value = item
+    repo.apply_patch.return_value = make_event( item.id, transition="patched" )
+
+    r = client.patch( f"/api/tasks/{item.id}", json={
+        "title": f"WITHDRAWN — {old}", "actor": "mr radio 0e61abe3",
+    } )
+
+    assert r.status_code == 200
+    fields = repo.apply_patch.call_args.args[ 1 ]
+    assert fields[ "title" ] == f"WITHDRAWN — {old}"
+    assert old in fields[ "title" ]                    # the original survives VERBATIM
+    assert fields[ "title_trimmed" ] is False
+
+
+@pytest.mark.parametrize( "terminal", [ "done", "dropped" ] )
+def test_patch_REFUSES_a_rewrite_dressed_as_a_prefix( client, repo, terminal ):
+    """
+    The negative control, and the one that stops the carve-out becoming a hole. A
+    marker in front of DIFFERENT text is a rewrite, and a rewrite is exactly what
+    closed history forbids.
+    """
+    item = make_item( status=terminal, title="APPROVED 757820dd + 08fce017" )
+    repo.get_by_id_for_update.return_value = item
+
+    r = client.patch( f"/api/tasks/{item.id}", json={
+        "title": "WITHDRAWN — APPROVED 757820dd", "actor": "mr radio 0e61abe3",
+    } )
+
+    assert r.status_code == 422
+    repo.apply_patch.assert_not_called()
+
+
+@pytest.mark.parametrize( "terminal", [ "done", "dropped" ] )
+def test_patch_REFUSES_a_legal_prefix_that_smuggles_another_field( client, repo, terminal ):
+    """
+    🔴 THE HOLE. A carve-out that accepts the prefix and lets a second field ride
+    along is not a carve-out — anyone willing to send a legal title could then edit
+    a closed row's priority, owner or body.
+
+    Refused WHOLE, and nothing is written.
+    """
+    old  = "APPROVED 757820dd + 08fce017"
+    item = make_item( status=terminal, title=old )
+    repo.get_by_id_for_update.return_value = item
+
+    r = client.patch( f"/api/tasks/{item.id}", json={
+        "title": f"WITHDRAWN — {old}", "priority": "P1", "actor": "mr radio 0e61abe3",
+    } )
+
+    assert r.status_code == 422
+    assert any( "priority" in e for e in r.json()[ "detail" ][ "errors" ] )
+    repo.apply_patch.assert_not_called()
+
+
+def test_patch_STILL_refuses_an_over_cap_prefix_on_a_terminal_row( client, repo ):
+    """
+    The two rulings compose rather than one exempting the other. A prefix that
+    pushes the title past the cap is refused by the SAME 422 an ordinary edit gets
+    (bug 6ce252e7) — otherwise the carve-out would be a way around the cap.
+
+    This is also why the cap had to move first: at 60 a prefix on an already-capped
+    row was arithmetically impossible.
+    """
+    old  = "X" * ( tasks.rules.TITLE_SOFT_CAP - 5 )
+    item = make_item( status="done", title=old )
+    repo.get_by_id_for_update.return_value = item
+
+    r = client.patch( f"/api/tasks/{item.id}", json={
+        "title": f"WITHDRAWN — {old}", "actor": "mr radio 0e61abe3",
+    } )
+
+    assert r.status_code == 422
+    assert any( str( tasks.rules.TITLE_SOFT_CAP ) in e for e in r.json()[ "detail" ][ "errors" ] )
     repo.apply_patch.assert_not_called()
 
 
@@ -1642,6 +2286,64 @@ def test_amend_rejects_empty_note_at_wire( client, repo ):
     repo.get_by_id_for_update.assert_not_called()
 
 
+# ---------------------------------------------------------------------------
+# Envelope-tail refusal on the amend path (row 91ccbc26, Mr. Radio 2026-08-29)
+# ---------------------------------------------------------------------------
+#
+# `note` is the THIRD carrier the differential probe measured — it stored a
+# canary verbatim exactly as park_reason did. These pin the ENDPOINT, not just
+# the predicate: the guard is only worth having if a real POST is refused and
+# apply_amendment is never reached.
+
+_INVOKE_CLOSE = "<" + "/" + "invoke>"
+
+
+def test_amend_rejects_a_note_ending_in_a_captured_envelope_tag( client, repo ):
+    repo.get_by_id_for_update.return_value = make_item()
+    r = client.post( f"/api/tasks/{uuid.uuid4()}/amend",
+                     json={ **_AMEND_BODY, "note": "the checklist is done." + _INVOKE_CLOSE } )
+    assert r.status_code == 422
+    assert any( "note ends with" in e for e in r.json()[ "detail" ][ "errors" ] )
+    repo.apply_amendment.assert_not_called()
+
+
+def test_amend_rejects_a_reason_ending_in_a_captured_envelope_tag( client, repo ):
+    # The amend payload's own `reason` rides the same transport as the note.
+    repo.get_by_id_for_update.return_value = make_item()
+    r = client.post( f"/api/tasks/{uuid.uuid4()}/amend",
+                     json={ **_AMEND_BODY, "reason": "recording the verdict" + _INVOKE_CLOSE } )
+    assert r.status_code == 422
+    assert any( "reason ends with" in e for e in r.json()[ "detail" ][ "errors" ] )
+    repo.apply_amendment.assert_not_called()
+
+
+def test_amend_ACCEPTS_a_note_that_quotes_the_tag_mid_sentence( client, repo ):
+    # 🔴 THE CONTROL, at the endpoint. Under a refusal policy a false positive
+    # blocks real work — and an amendment DOCUMENTING this defect must quote the
+    # offending tag. Row 91ccbc26's own amendments do exactly this.
+    item = make_item()
+    repo.get_by_id_for_update.return_value = item
+    repo.apply_amendment.return_value = make_event( item.id, transition="amended" )
+    r = client.post( f"/api/tasks/{item.id}/amend",
+                     json={ **_AMEND_BODY,
+                            "note": "The tail was " + _INVOKE_CLOSE + " and I stripped it by hand." } )
+    assert r.status_code == 200
+    repo.apply_amendment.assert_called_once()
+
+
+def test_amend_reports_a_blank_note_and_a_captured_tag_together( client, repo ):
+    # One round trip, every violation — the module's existing discipline.
+    repo.get_by_id_for_update.return_value = make_item()
+    r = client.post( f"/api/tasks/{uuid.uuid4()}/amend",
+                     json={ **_AMEND_BODY, "note": "   ",
+                            "reason": "see above" + _INVOKE_CLOSE } )
+    assert r.status_code == 422
+    errors = r.json()[ "detail" ][ "errors" ]
+    assert any( "note must be a non-blank string" in e for e in errors )
+    assert any( "reason ends with" in e for e in errors )
+    repo.apply_amendment.assert_not_called()
+
+
 def test_amend_reports_all_violations_together( client, repo ):
     repo.get_by_id_for_update.return_value = make_item( status="done" )
     r = client.post( f"/api/tasks/{uuid.uuid4()}/amend",
@@ -1773,8 +2475,12 @@ def test_patch_non_persona_field_not_flagged( client, repo ):
     item = make_item()
     repo.get_by_id_for_update.return_value = item
     repo.apply_patch.return_value = make_event( item.id, transition="patched" )
+    # Vehicle field moved priority -> urgency: `priority` acquired an AUTHORIZATION
+    # gate on 2026-09-08 (the priority firewall, row b8205986), and this test's
+    # subject is not authorization. An ungated field keeps it measuring what its
+    # name says.
     r = client.patch( f"/api/tasks/{item.id}",
-                      json={ "priority": "P0", "actor": "mr radio 372f9dc9" } )
+                      json={ "urgency": "low", "actor": "mr radio 372f9dc9" } )
     assert r.json()[ "persona_flag" ] is None
     assert repo.apply_patch.call_args.kwargs[ "flag_suffix" ] is None
 
@@ -2077,3 +2783,216 @@ def test_offset_paging_stops_warning_on_the_LAST_page( client, repo ):
 
     assert any( "row-cap truncation" in w for w in mid[ "warnings" ] )
     assert last[ "warnings" ] == [ ]                        # 6 + 4 == 10, nothing unshown
+
+
+# ---------------------------------------------------------------------------
+# Activity window — row 0107c19e / Rick's Finished-Tasks P0, 2026-09-07
+# ---------------------------------------------------------------------------
+#
+# `GET /api/tasks` had NO date filter of any kind before this row. The window is
+# what makes "only tasks finished in the last 24 hours" expressible at all.
+#
+# 🔴 WHY THE SIX-SEAM ARM EXISTS, AND IT IS NOT CEREMONY: threading the window
+# into `count_tasks` while leaving the breakdown un-windowed broke the
+# `count == sum( breakdown.values() )` invariant IN PRODUCTION, not merely in a
+# test. The existing parity gate caught it. These arms are the standing version
+# of that catch — a seventh seam added later without the window reddens here.
+
+_WINDOW_PARAMS = { "updated_since": "2026-09-06T00:00:00Z",
+                   "updated_until": "2026-09-07T00:00:00Z" }
+
+
+def test_the_window_reaches_every_aggregate_seam_on_the_count_path( client, repo ):
+    """count, the status breakdown, the priority breakdown — one window or none.
+
+    Reads the seams' OWN call kwargs rather than a response field: a seam that
+    silently drops the window still returns a plausible number, and only the
+    call it made can show which population it asked about.
+    """
+    repo.count_tasks.return_value             = 0
+    repo.count_tasks_by_status.return_value   = { }
+    repo.count_tasks_by_priority.return_value = { }
+
+    client.get( "/api/tasks", params={ "owner_persona": "mr radio",
+                                       "count_only"   : "true", **_WINDOW_PARAMS } )
+
+    seams = {
+        "count_tasks"             : repo.count_tasks,
+        "count_tasks_by_status"   : repo.count_tasks_by_status,
+        "count_tasks_by_priority" : repo.count_tasks_by_priority,
+    }
+    for name, seam in seams.items():
+        kwargs = seam.call_args.kwargs
+        assert kwargs.get( "updated_since" ) is not None, f"{name} lost updated_since"
+        assert kwargs.get( "updated_until" ) is not None, f"{name} lost updated_until"
+
+    # The DISCRIMINATING half: not merely "each seam got a window" but "they all
+    # got the SAME one". Three seams each inventing their own bound would satisfy
+    # every assertion above and still describe three different boards.
+    windows = { ( s.call_args.kwargs[ "updated_since" ],
+                  s.call_args.kwargs[ "updated_until" ] ) for s in seams.values() }
+    assert len( windows ) == 1, f"seams disagree about the window: {windows}"
+
+
+def test_the_window_reaches_the_page_and_total_seams_on_the_list_path( client, repo ):
+    """The row page and the `total` count must answer about one window too."""
+    client.get( "/api/tasks", params={ "owner_persona": "mr radio", **_WINDOW_PARAMS } )
+
+    page  = repo.query_tasks.call_args.kwargs
+    total = repo.count_tasks.call_args.kwargs
+    assert page[ "updated_since" ] is not None and page[ "updated_until" ] is not None
+    assert ( page[ "updated_since" ], page[ "updated_until" ] ) == \
+           ( total[ "updated_since" ], total[ "updated_until" ] ), \
+           "the page and its total describe different windows"
+
+
+def test_omitting_the_window_forwards_none_and_changes_nothing( client, repo ):
+    """THE NEGATIVE ARM. Every caller that predates this row passes no window,
+    and must be byte-identical to its behaviour before the parameters existed —
+    None, never a defaulted 'now minus something' invented at this layer."""
+    client.get( "/api/tasks", params={ "owner_persona": "mr radio" } )
+    kwargs = repo.query_tasks.call_args.kwargs
+    assert kwargs[ "updated_since" ] is None
+    assert kwargs[ "updated_until" ] is None
+
+
+def test_a_malformed_window_is_refused_rather_than_silently_ignored( client, repo ):
+    """An unparseable date must 422, not fall through to an unwindowed query.
+
+    Silently dropping it would hand back the WHOLE board wearing the caption of
+    a 24-hour view — the most dangerous shape a filter can fail in, because the
+    answer looks complete.
+    """
+    r = client.get( "/api/tasks", params={ "owner_persona": "mr radio",
+                                          "updated_since": "last-tuesday" } )
+    assert r.status_code == 422, f"expected 422, got {r.status_code}"
+
+
+# ---------------------------------------------------------------------------
+# THE CREATE DOOR — Rick's P0, row 0ef62dfd, 2026-09-08
+#
+# 🔴 WHY THESE LIVE HERE AND NOT WITH THE PREDICATE'S OWN TESTS. They already
+# existed there and they were WORTHLESS. The predicate suite tested the function
+# directly and "proved" the wiring by grepping the router's source for the call
+# name — so unwiring the gate with `if False:` left the string in place and all
+# twelve stayed green. The mutation arm caught it; nothing else would have.
+#
+# ⇒ A test that reads SOURCE TEXT cannot tell a call from a call that never fires.
+# These drive the real door through the real client, so unwiring reddens them.
+# ---------------------------------------------------------------------------
+
+def _holding_on( monkeypatch ):
+    """The gate only bites when the holding default is ON. Pin it, never assume it."""
+    monkeypatch.setattr( tasks.approval, "default_mint_status", lambda: "not_approved" )
+
+
+def test_create_with_an_EXPLICIT_queued_status_is_REFUSED_at_the_door( client, repo, monkeypatch ):
+    """
+    The exact call that put three of María's rows on Rick's live board without
+    ever generating a request he could deny.
+    """
+    _holding_on( monkeypatch )
+    r = client.post( "/api/tasks", json=dict( _CREATE_BODY, status="queued", priority="P5" ) )
+    assert r.status_code == 403, r.text
+    assert "holding area" in r.text
+    repo.create_item.assert_not_called()
+
+
+def test_a_P0_MAY_still_mint_live_at_the_door( client, repo, monkeypatch ):
+    """
+    🔴 POSITIVE CONTROL — Rick's own carve-out: "refuse a live status on create
+    except in the case of P0 tickets." Without this, a door that refused EVERY
+    create would pass the test above.
+    """
+    _holding_on( monkeypatch )
+    r = client.post( "/api/tasks", json=dict( _CREATE_BODY, status="queued", priority="P0" ) )
+
+    # 🔴 ASSERT THE ABSENCE OF *THIS* GATE'S REFUSAL, NOT THE ABSENCE OF ANY 403.
+    # A P0 create is ALREADY restricted to Rick's own account by the priority
+    # firewall (broadcast e254ec7d), so this caller gets a 403 from THAT guard —
+    # a different rule, refusing for a different reason. Asserting `status_code
+    # != 403` would make this control fail for a reason it is not about, and
+    # asserting `== 200` would make it a test of the priority firewall instead.
+    #
+    # ⇒ AND THE COLLISION IS THE GOOD NEWS: Rick's carve-out is not a hole a
+    # worker can walk through. To mint live you need P0, and to mint P0 you need
+    # his account — the exemption is double-gated, by two independent guards.
+    assert "holding area" not in r.text, (
+        f"the live-mint gate refused a P0, which is exactly what Rick's carve-out "
+        f"exempts: {r.text}"
+    )
+
+
+def test_a_create_that_NAMES_NO_status_is_untouched_by_the_gate( client, repo, monkeypatch ):
+    """
+    🔴 THE SECOND POSITIVE CONTROL, and the one that guards the whole fleet. Every
+    well-behaved caller omits `status`; if the gate ever read the post-substitution
+    value instead of the payload, an omitted status would look explicit and EVERY
+    ordinary create would start failing — precisely where the gate is switched on.
+    """
+    _holding_on( monkeypatch )
+    r = client.post( "/api/tasks", json=dict( _CREATE_BODY ) )
+    assert r.status_code != 403, r.text
+
+
+def test_with_the_holding_default_OFF_an_explicit_queued_create_is_NOT_refused( client, repo, monkeypatch ):
+    """THE DEPLOYMENT CONTROL. No holding area means nothing to bypass; refusing
+    there would break callers who never had a gate."""
+    monkeypatch.setattr( tasks.approval, "default_mint_status", lambda: "queued" )
+    r = client.post( "/api/tasks", json=dict( _CREATE_BODY, status="queued", priority="P5" ) )
+    assert r.status_code != 403, r.text
+
+
+# ── THE OPERATOR EXEMPTION (row 2d786391, 2026-09-11) ─────────────────────────
+#
+# Rick's New Ticket card (shared/task-create.js) sends status="queued" for an approved
+# ticket, and approved is its default. The door must let HIS validated login through
+# and must NOT let a typed "rick" through. Both arms drive the real router, so deleting
+# the exemption reddens the first and forging it reddens the second.
+
+_OPERATOR_MAIL = "the.operator@example.com"
+
+
+def _client_as( account_email, monkeypatch ):
+    """A client whose VALIDATED account is `account_email`, and only that one is Rick."""
+    monkeypatch.setattr( tasks.priority_firewall, "caller_is_operator",
+                         lambda email: email == _OPERATOR_MAIL )
+    app = FastAPI()
+    app.include_router( tasks.router )
+    app.dependency_overrides[ require_api_key_or_jwt ]      = lambda: "test-user"
+    app.dependency_overrides[ authenticated_account_email ] = lambda: account_email
+    return TestClient( app )
+
+
+def test_the_OPERATORS_own_New_Ticket_card_may_name_queued_at_the_door( repo, monkeypatch ):
+    _holding_on( monkeypatch )
+    r = _client_as( _OPERATOR_MAIL, monkeypatch ).post(
+        "/api/tasks", json=dict( _CREATE_BODY, status="queued", priority="P5" ) )
+    assert r.status_code == 201, r.text
+    assert repo.create_item.call_args.kwargs[ "status" ] == "queued", "his approved ticket must mint live"
+
+
+def test_typing_rick_into_created_by_does_NOT_buy_the_live_mint_exemption( repo, monkeypatch ):
+    _holding_on( monkeypatch )
+    r = _client_as( None, monkeypatch ).post(
+        "/api/tasks", json=dict( _CREATE_BODY, status="queued", priority="P5", created_by="rick 12345678" ) )
+    assert r.status_code == 403, r.text
+    assert "holding area" in r.text
+    repo.create_item.assert_not_called()
+
+
+def test_the_operator_passes_the_door_but_a_blocked_mint_still_meets_the_manager_guard( repo, monkeypatch ):
+    """
+    The exemption opens the holding gate, not the manager guard behind it. With
+    holding on, the operator is one of only two callers that reach that guard, so
+    this is the test that keeps it from going untested while it still stands.
+    """
+    _holding_on( monkeypatch )
+    monkeypatch.setattr( tasks, "is_manager_figure", lambda sid: False )
+    monkeypatch.setattr( tasks, "classify_manager_figure_denial", lambda sid: "denied" )
+    r = _client_as( _OPERATOR_MAIL, monkeypatch ).post(
+        "/api/tasks", json=dict( _BLOCKED_BODY, priority="P5" ) )
+    assert r.status_code == 403, r.text
+    assert "holding area" not in r.text, f"refused by the gate, which the operator passes: {r.text}"
+    assert "only a manager may mint" in r.text, f"refused, but not by the manager guard: {r.text}"
+    repo.create_item.assert_not_called()

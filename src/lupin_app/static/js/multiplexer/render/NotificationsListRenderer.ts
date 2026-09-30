@@ -22,6 +22,8 @@
 
 import type { EventBus } from "../shared/EventBus";
 import type {
+  ListenerErrorPayload,
+  LupinEvent,
   Notification,
   SenderRecord,
   SenderSortComparator,
@@ -34,20 +36,40 @@ import type {
 import type { PredictionVoteContext } from "../stores/PredictionVoteStore";
 import { html } from "./html";
 import { keyedListMerge } from "./dom";
-import { renderSenderCard } from "./templates/senderCard";
+import { formatDateKey } from "./time";
+import { projectFromSenderId } from "./senderProject";
+import { openSessionNameEditModal } from "./sessionNameEditModal";
+import { renderSenderCard, activeIndicator, senderStatusGlyph } from "./templates/senderCard";
+// A-2 #4 — the icon-set selector, defined beside the card that paints it.
+import type { TtsInteractionMode } from "./templates/senderCard";
+// A-2 #4 — the shared reveal helper, whose own header names TTS playback as a
+// consumer (scrollReveal.ts:6). It was built for this caller and never wired to one.
+import { scrollRevealElement } from "./scrollReveal";
+import { HISTORY_RETRY_EVENT } from "../stores/coldHistoryHydration";
 import type { PredictionVoteIntegration } from "./templates/predictionVoteControls";
+import * as debugSink from "../shared/debugSink";
 
 interface NotificationStoreLike {
   list(): ReadonlyArray<Notification>;
+  // S2d/S3 (2026-09-10) — drop a sender's (or one date's) rows after the server
+  // delete. Optional so harnesses that stub only list() keep compiling.
+  removeByIdHashes?(idHashes: ReadonlyArray<string>): void;
   // B3 (01-C): the sender section renders from the FILTERED view; `list()` stays
   // the raw total (the header count reads it). `isFilterActive()` drives the
   // filter-aware empty-state copy. Both optional so pre-B3 unit harnesses (that
   // stub only `list()`) keep compiling — the renderer falls back to `list()`.
   visibleEntries?(): ReadonlyArray<Notification>;
   isFilterActive?(): boolean;
+  // P0 5ebd2aff — cold-load hydration state drives the loading / failed empty
+  // states. Optional so harnesses that stub only list() behave as "done".
+  historyHydrationState?(): "idle" | "loading" | "done" | "failed";
+  historyHydrationError?(): string | null;
 }
 interface SenderStoreLike {
   list(): ReadonlyArray<SenderRecord>;
+  // S2b/S2c (2026-09-10) — persist a gist or a rename. Optional for the same
+  // harness reason as removeByIdHashes; the production SenderStore has it.
+  setSessionName?(senderId: string, name: string): void;
 }
 // WP14 (F8) — narrowed PredictionVoteStore surface this renderer consumes
 // (getVote for the highlight, setContext + vote for the cast). The production
@@ -91,6 +113,13 @@ interface AudioControlsLike {
 interface ProxyRatifierLike {
   acknowledgeProxy(): Promise<unknown>;
 }
+// S2b/S2d/S3 (2026-09-10) — narrow api surface for the sender-card header
+// controls: the ✨ gist POST, the × conversation DELETE, the per-date × DELETE.
+// The production ApiClient satisfies it (auth header included).
+interface SenderCardApiLike {
+  post<T>(path: string, body: unknown): Promise<T>;
+  delete<T>(path: string): Promise<T>;
+}
 
 export interface NotificationsListRendererStores {
   notifications  : NotificationStoreLike;
@@ -115,6 +144,21 @@ export interface NotificationsListRenderer {
   mount(root: HTMLElement): void;
   /** Detach: unsubscribe all listeners + clear root. */
   unmount(): void;
+  /**
+   * Adopt the app timezone once `/api/config/client` answers, and repaint.
+   *
+   * Boot is synchronous and the config fetch is not, so this renderer is always
+   * constructed BEFORE the zone is known. Passing it as a construction option
+   * alone is what left every timestamp in the browser's local zone (row
+   * 0e5bfa0e). A no-op when the value has not changed.
+   */
+  setAppTimezone(appTimezone: string | undefined): void;
+  /**
+   * A-2 #4 — adopt the server's TTS interaction mode and repaint the conversation-mode
+   * buttons. Late for the same reason the timezone is: boot is synchronous and
+   * /api/config/client is not.
+   */
+  setTtsInteractionMode(mode: TtsInteractionMode | undefined): void;
   /** Test helper — synchronously trigger a full re-render. */
   forceRenderForTesting(): void;
 }
@@ -134,6 +178,27 @@ export interface NotificationsListRendererOptions {
   // the ratify admin page renderer-side (F-Sam-BD3), defaulted to window.open.
   proxyRatifier?        : ProxyRatifierLike;
   proxyRatifyOpener?    : () => void;
+  // S2a–d / S3 (2026-09-10) — sender-card header controls. `api` absent (some
+  // harnesses) → gist / delete-all / per-date delete are inert. `getUserEmail`
+  // is read at click time for the DELETE paths (boot: AuthManager). The other
+  // three are test seams with browser defaults: globalThis.confirm,
+  // navigator.clipboard.writeText, and console.error + alert for failures.
+  api?                  : SenderCardApiLike;
+  getUserEmail?         : () => string | null;
+  confirmFn?            : (message: string) => boolean;
+  clipboardWrite?       : (text: string) => Promise<void>;
+  reportFailure?        : (message: string) => void;
+  // P0 8cb5c22e (2026-09-10) — focus mode. Asked for each card BEFORE it is
+  // inserted; true ⇒ the card goes in already carrying data-focus-hidden. Boot
+  // wires SessionStripRenderer.isCardFocusHidden (the strip decides focus).
+  // Absent (harnesses without a strip) ⇒ no card is ever hidden here.
+  isCardFocusHidden?    : (senderId: string) => boolean;
+  // Row 11793820 — test seam: the sender-card template. Tests wrap the real one to
+  // count renders per sender; production never passes it.
+  renderCard?           : typeof renderSenderCard;
+  // Row 11793820 phase 2 — test seam: told each time a card is patched in place
+  // (rows appended) instead of replaced. Production never passes it.
+  onCardPatched?        : (senderId: string) => void;
 }
 
 // Default sender sort: most-recent-activity-first. Preserves the Phase 5
@@ -143,7 +208,14 @@ const DEFAULT_SENDER_SORT: SenderSortComparator = (a, b) => b.last_active_ts - a
 class NotificationsListRendererImpl implements NotificationsListRenderer {
   private readonly bus                  : EventBus;
   private readonly stores               : NotificationsListRendererStores;
-  private readonly appTimezone          : string | undefined;
+  // NOT readonly: the zone arrives from /api/config/client after boot has already
+  // constructed this renderer. See setAppTimezone.
+  private appTimezone                   : string | undefined;
+  // A-2 #4 — same story, same fetch: the interaction mode arrives late too.
+  private ttsInteractionMode            : TtsInteractionMode | undefined;
+  // A-2 #4 — the id this renderer has already revealed for. See revealActiveTts: the
+  // reveal fires on a CHANGE of active utterance, never on every refresh.
+  private revealedTtsId                 : string | null = null;
   private readonly senderSortComparator : SenderSortComparator;
   private readonly unsubscribers        : Array<() => void> = [];
   // Map: progress_group_id → expanded?  (preserved across re-renders so the
@@ -169,6 +241,35 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
   private readonly audio                     : AudioControlsLike | undefined;
   private readonly proxyRatifier             : ProxyRatifierLike | undefined;
   private readonly proxyRatifyOpener         : () => void;
+  // S2a–d / S3 (2026-09-10) — sender-card header controls.
+  private readonly api                       : SenderCardApiLike | undefined;
+  private readonly getUserEmail              : () => string | null;
+  private readonly confirmFn                 : (message: string) => boolean;
+  private readonly clipboardWrite            : (text: string) => Promise<void>;
+  private readonly reportFailure             : (message: string) => void;
+  // Senders whose ✨ request is in flight. Re-painted after every render: a
+  // re-render replaces the card, and with it the button showing ⏳.
+  private readonly gistPending               : Set<string> = new Set();
+  // P0 8cb5c22e — see the option of the same name.
+  private readonly isCardFocusHidden         : (senderId: string) => boolean;
+  private readonly renderCard                : typeof renderSenderCard;
+  private readonly onCardPatched             : (senderId: string) => void;
+  // P0 8cb5c22e — the content signature (cardSignature) of the render each LIVE
+  // card node was built from. A card whose next render has the same signature
+  // keeps its node. Weak so a card dropped from the DOM releases its entry.
+  private cardSignatures                     : WeakMap<Element, string> = new WeakMap();
+  // Row 11793820 — the INPUTS each live card node was rendered from (see
+  // CardInputs). A card whose inputs are unchanged is not rendered at all: the
+  // signature check above still costs a full renderSenderCard plus an outerHTML,
+  // for every card, on every render. Weak for the same reason as cardSignatures.
+  private cardInputs                         : WeakMap<Element, CardInputs> = new WeakMap();
+  // Row 11793820 — one render per turn. One arrival emits store_notifications_changed
+  // AND store_senders_changed back to back, and each used to run a full render. Both
+  // now only schedule; the render runs once, in a microtask, after both have landed.
+  // `renderTrigger` is the latest event that asked, reported if the render throws.
+  private renderPending                      : boolean = false;
+  private renderTrigger                      : LupinEvent<unknown> | null = null;
+  private closeRenameModal                   : (() => void) | null = null;
 
   constructor(opts: NotificationsListRendererOptions) {
     this.bus                  = opts.eventBus;
@@ -181,6 +282,16 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     this.audio                = opts.stores.audio;
     this.proxyRatifier        = opts.proxyRatifier;
     this.proxyRatifyOpener    = opts.proxyRatifyOpener ?? defaultProxyRatifyOpener;
+    this.api                  = opts.api;
+    this.getUserEmail         = opts.getUserEmail ?? (() => null);
+    /* c8 ignore next */ // production-default fallback: globalThis.confirm is the runtime guard; tests always inject confirmFn.
+    this.confirmFn            = opts.confirmFn ?? ((m) => globalThis.confirm(m));
+    /* c8 ignore next */ // production-default fallback: the browser clipboard; tests always inject clipboardWrite.
+    this.clipboardWrite       = opts.clipboardWrite ?? ((t) => navigator.clipboard.writeText(t));
+    this.reportFailure        = opts.reportFailure ?? defaultReportFailure;
+    this.isCardFocusHidden    = opts.isCardFocusHidden ?? (() => false);
+    this.renderCard           = opts.renderCard ?? renderSenderCard;
+    this.onCardPatched        = opts.onCardPatched ?? (() => {});
     this.predictionVoteIntegration = this.predictionVoteStore === undefined
       ? undefined
       : {
@@ -218,6 +329,87 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     this.renderSenderSection();
   }
 
+  setAppTimezone(appTimezone: string | undefined): void {
+    /**
+     * Adopt the app timezone and repaint every card that already carries a clock.
+     *
+     * WHY THIS EXISTS AT ALL (row 0e5bfa0e, measured by Sam 2026-09-15). This
+     * renderer accepted `appTimezone` as a construction option and boot never
+     * passed one — no wire existed. But adding the option to boot's call would
+     * not have fixed it either: boot is SYNCHRONOUS and `/api/config/client` is
+     * not, so at construction time the zone is always still unknown. The value
+     * genuinely arrives late, so the renderer has to be able to take it late.
+     *
+     * 🔴 AND TAKING IT IS NOT ENOUGH — THE CACHES HAVE TO GO WITH IT. Three
+     * caches exist precisely to avoid re-rendering a card whose inputs have not
+     * moved, and the zone is not one of their inputs (it was `readonly`, so it
+     * could not move). Left in place they would hold the browser-local render
+     * forever and this setter would repaint nothing: `cardInputs` would report
+     * "unchanged" and skip the card, `cardSignatures` would match the stale
+     * markup, and `historyCache` would replay old fragments. Dropping all three
+     * is what makes the repaint real. They refill on the next render.
+     *
+     * Requires:
+     *     - may be called before or after mount(); an unmounted renderer simply
+     *       records the value and repaints when it next renders
+     * Ensures:
+     *     - a value equal to the current one is a no-op, so a config refetch
+     *       that changes nothing costs nothing
+     *     - otherwise the zone is adopted, all three caches are dropped, and a
+     *       render is scheduled on the existing microtask path
+     */
+    if (appTimezone === this.appTimezone) return;
+    this.appTimezone = appTimezone;
+
+    this.cardInputs     = new WeakMap();
+    this.cardSignatures = new WeakMap();
+    this.historyCache.clear();
+
+    // The trigger is only carried for error reporting if the render throws, so it
+    // names this renderer as the source rather than inventing an event type.
+    this.scheduleRender({
+      type    : "store_notifications_changed",
+      payload : undefined,
+      source  : "NotificationsListRenderer.setAppTimezone",
+    } as LupinEvent<unknown>);
+  }
+
+  setTtsInteractionMode(mode: TtsInteractionMode | undefined): void {
+    /**
+     * Adopt the server's TTS interaction mode and repaint the conversation-mode buttons.
+     *
+     * 🔴 THE CACHE DROP IS THE WHOLE METHOD, exactly as it is for setAppTimezone, and for
+     * exactly the same reason: the mode is not one of the card caches' inputs, so without
+     * dropping them `cardInputs` reports "unchanged", `cardSignatures` matches the stale
+     * markup, and this setter repaints nothing at all while returning cleanly. A host
+     * running SOLO would keep showing the chorus glyphs for the life of the page, and the
+     * only symptom would be a wrong icon — no error, no failed fetch, nothing to notice.
+     *
+     * Requires:
+     *     - may be called before or after mount(); an unmounted renderer records the value
+     *       and repaints when it next renders
+     * Ensures:
+     *     - a value equal to the current one is a no-op, so a refetch that changes nothing
+     *       costs nothing
+     *     - otherwise the mode is adopted, all three caches are dropped, and a render is
+     *       scheduled on the existing microtask path
+     */
+    if (mode === this.ttsInteractionMode) return;
+    this.ttsInteractionMode = mode;
+
+    this.cardInputs     = new WeakMap();
+    this.cardSignatures = new WeakMap();
+    this.historyCache.clear();
+
+    // Same shape as setAppTimezone's: the trigger is carried only so a throwing render
+    // names this renderer as its source rather than inventing an event type.
+    this.scheduleRender({
+      type    : "store_notifications_changed",
+      payload : undefined,
+      source  : "NotificationsListRenderer.setTtsInteractionMode",
+    } as LupinEvent<unknown>);
+  }
+
   unmount(): void {
     for (const off of this.unsubscribers) off();
     this.unsubscribers.length = 0;
@@ -231,12 +423,17 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
 
     this.expandedGroups.clear();
     this.historyCache.clear();
+    this.gistPending.clear();
+    this.renderPending = false;
+    this.renderTrigger = null;
+    if (this.closeRenameModal !== null) this.closeRenameModal();
+    this.closeRenameModal = null;
     this.root = null;
     this.senderCardsMount = null;
   }
 
   forceRenderForTesting(): void {
-    this.renderSenderSection();
+    this.renderAndAnnounce();
   }
 
   // -------------------------------------------------------------------------
@@ -247,13 +444,13 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     this.unsubscribers.push(
       this.bus.on<StoreNotificationsChangedPayload>(
         "store_notifications_changed",
-        () => this.renderSenderSection(),
+        (e) => this.scheduleRender(e),
       ),
     );
     this.unsubscribers.push(
       this.bus.on(
         "store_senders_changed",
-        () => this.renderSenderSection(),
+        (e) => this.scheduleRender(e),
       ),
     );
     // WP14 (F8) — reconcile prediction-vote highlight to authoritative store
@@ -264,7 +461,7 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     this.unsubscribers.push(
       this.bus.on<StorePredictionVoteChangedPayload>(
         "store_prediction_vote_changed",
-        () => this.renderSenderSection(),
+        (e) => this.scheduleRender(e),
       ),
     );
     // Section-toolbar collapse-all / expand-all (2026-06-23). The toolbar drives
@@ -287,6 +484,52 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     this.unsubscribers.push(
       this.bus.on("store_audio_state_change", () => this.refreshActiveTts()),
     );
+  }
+
+  // -------------------------------------------------------------------------
+  // Row 11793820 — coalesced render + the rendered announcement
+  // -------------------------------------------------------------------------
+
+  // Ask for a render at the end of this turn. A second ask before then is free.
+  // ⚠️ A MICROTASK, NOT A FRAME: it runs before the browser paints, so no frame
+  // ever shows cards the store has already moved past.
+  private scheduleRender(trigger: LupinEvent<unknown>): void {
+    this.renderTrigger = trigger;
+    if (this.renderPending) return;
+    this.renderPending = true;
+    queueMicrotask(() => this.flush());
+  }
+
+  private flush(): void {
+    if (!this.renderPending) return;   // unmounted while a flush was pending
+    // Cleared BEFORE the render, not in a `finally` after it (Mr. Radio's condition
+    // is that a render that throws must not stop every later one — this meets it by
+    // construction). After would be wrong the other way: an event raised DURING the
+    // render, e.g. by a notifications_list_rendered listener, would find the flag
+    // still set and be dropped, leaving the cards one change behind.
+    this.renderPending = false;
+    const trigger      = this.renderTrigger!;
+    this.renderTrigger = null;
+    try {
+      this.renderAndAnnounce();
+    } catch (err) {
+      // The render used to run inside the bus listener, whose wrapper turned a
+      // throw into `listener_error`. A microtask has no wrapper — an uncaught throw
+      // here would reach the page's global handler instead — so do the same here.
+      this.bus.emit<ListenerErrorPayload>({
+        type    : "listener_error",
+        payload : { originalEvent: trigger, error: err instanceof Error ? err.message : String(err) },
+        source  : "NotificationsListRenderer",
+        ts      : Date.now(),
+      });
+    }
+  }
+
+  // Render, then tell every renderer that decorates a card node that the cards
+  // are in place (see `notifications_list_rendered` in shared/types.ts).
+  private renderAndAnnounce(): void {
+    this.renderSenderSection();
+    this.bus.emit({ type: "notifications_list_rendered", payload: {}, source: "NotificationsListRenderer", ts: Date.now() });
   }
 
   // -------------------------------------------------------------------------
@@ -345,19 +588,70 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     // WP14 (F8): thread the vote integration into the card render path so
     // prediction-hint notifications mount interactive controls (senderCard →
     // dateAccordion → notificationItem).
-    const cardOpts = { appTimezone: this.appTimezone, predictionVote: this.predictionVoteIntegration };
+    const cardOpts = { appTimezone: this.appTimezone, predictionVote: this.predictionVoteIntegration,
+                       ttsInteractionMode: this.ttsInteractionMode };
+    // S4 (2026-09-10) — exactly ONE card is active: the sender with the greatest
+    // last_active_ts among the rendered cards (legacy `group.isActive` = the most
+    // recent sender). Decided here because only the renderer sees every card; a
+    // tie goes to the card sorted first. Every matched card is re-created below,
+    // so a change of active sender repaints both the old and the new card.
+    let activeId: string | null = null;
+    let activeTs = Number.NEGATIVE_INFINITY;
+    for (const e of entries) {
+      if (e.sender.last_active_ts > activeTs) {
+        activeId = e.idHash;
+        activeTs = e.sender.last_active_ts;
+      }
+    }
+    const optsFor = (idHash: string) => ({ ...cardOpts, isActive: idHash === activeId });
+    // P0 8cb5c22e (2026-09-10) — a message from one persona must not rebuild,
+    // re-show or move any OTHER card. Legacy touches only the arriving sender's
+    // card (notifications.js:18701, :25506) and flags a new card hidden at
+    // creation (:19004). So, per card, keyed by sender_id (data-id-hash):
+    //   - every card is stamped with its focus flag BEFORE it is inserted;
+    //   - a matched card KEEPS its node when cardSignature(fresh render) equals
+    //     the signature its live node was built from (string ===), and only its
+    //     volatile header is repainted in place;
+    //   - otherwise the fresh card replaces it (a real content change).
+    //
+    // Row 11793820 — and a matched card whose INPUTS are unchanged is not rendered
+    // at all: its volatile header is painted from the values directly. Only a card
+    // whose inputs moved pays for renderSenderCard and the signature comparison.
+    //
+    // Row 11793820 phase 2 — a card whose rows were only APPENDED keeps its node:
+    // the new rows (and a new day's accordion) move into it from the fresh render,
+    // and its header is swapped. Legacy adds the row to the existing card; replacing
+    // the whole card reset the date list's scroll and restarted its animations.
+    const focusBefore = captureCardFocus(this.senderCardsMount);
     keyedListMerge({
       parent  : this.senderCardsMount,
       entries,
-      create  : (e) => renderSenderCard(e.sender, e.notifications, cardOpts),
-      // On match, re-create-and-replace is the simplest correct strategy for
-      // Phase 5 (sender card chrome may have changed: persona, unread count,
-      // last_active). Phase 6 may optimize.
+      create  : (e) => this.prepareCard(this.renderCard(e.sender, e.notifications, optsFor(e.idHash)), e.idHash, this.inputsFor(e)),
       update  : (existing, e) => {
-        const fresh = renderSenderCard(e.sender, e.notifications, cardOpts);
-        existing.replaceWith(fresh);
+        const inputs = this.inputsFor(e);
+        const before = this.cardInputs.get(existing);
+        if (sameCardInputs(before, inputs)) {
+          paintVolatileState(existing as HTMLElement, e.idHash === activeId, e.sender.last_active_ts);
+          return;
+        }
+        const fresh     = this.renderCard(e.sender, e.notifications, optsFor(e.idHash));
+        const signature = cardSignature(fresh);
+        if (this.cardSignatures.get(existing) === signature) {
+          paintVolatileHeader(fresh, existing as HTMLElement);
+          this.cardInputs.set(existing, inputs);
+          return;
+        }
+        if (canPatchCard(before, inputs)) {
+          patchCard(fresh, existing as HTMLElement);
+          this.cardSignatures.set(existing, signature);
+          this.cardInputs.set(existing, inputs);
+          this.onCardPatched(e.idHash);
+          return;
+        }
+        existing.replaceWith(this.prepareCard(fresh, e.idHash, inputs, signature));
       },
     });
+    restoreCardFocus(this.senderCardsMount, focusBefore);
 
     // Re-mark expanded progress groups after the render (state preserved
     // across re-renders per F14).
@@ -369,6 +663,48 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     // B4 (01-D) — re-light the actively-spoken bubble after a keyed re-render
     // rebuilds the DOM (the active classes/glyph live on freshly-created nodes).
     this.refreshActiveTts();
+    // S2b — a ✨ request still in flight keeps its ⏳ on the fresh button.
+    for (const senderId of this.gistPending) this.paintGistButton(senderId, true);
+  }
+
+  // P0 8cb5c22e — ready a freshly rendered card for insertion: remember the
+  // signature it was built from, then stamp its focus flag. The signature is
+  // taken from the untouched render, so the flag is never part of it.
+  private prepareCard(card: HTMLElement, senderId: string, inputs: CardInputs, signature: string = cardSignature(card)): HTMLElement {
+    this.cardSignatures.set(card, signature);
+    this.cardInputs.set(card, inputs);
+    if (this.isCardFocusHidden(senderId)) card.setAttribute("data-focus-hidden", "true");
+    return card;
+  }
+
+  // Row 11793820 — everything renderSenderCard reads for one card, apart from the
+  // two volatile header parts (active flag, clock-driven status glyph) that are
+  // painted in place anyway. Built from what the TEMPLATE READS, not from which
+  // event fired (Mr. Radio's review), so no event can be missed:
+  //   - the SenderRecord, by VALUE: SenderStore mutates its records in place, so
+  //     the same object can hold new fields — identity would miss that
+  //   - the rows, by IDENTITY: NotificationStore replaces a row object on every
+  //     change (update, respond, re-normalise) and never mutates one, so one
+  //     comparison per row is exact, and serialising 50 rows × every card would
+  //     cost more than the render this skips
+  //   - the cast vote of every prediction-hint row, read from the vote store
+  // `appTimezone` and the vote integration are fixed for the renderer's life.
+  private inputsFor(e: { sender: SenderRecord; notifications: ReadonlyArray<Notification> }): CardInputs {
+    let votes = "";
+    const store = this.predictionVoteStore;
+    if (store !== undefined) {
+      for (const n of e.notifications) {
+        if (n.prediction_hint !== undefined) votes += `${n.id_hash}=${store.getVote(n.id_hash) ?? ""};`;
+      }
+    }
+    // `senderBody` blanks the three fields that render only inside the card header,
+    // which a patch swaps whole (see canPatchCard).
+    return {
+      sender        : JSON.stringify(e.sender),
+      senderBody    : JSON.stringify({ ...e.sender, unread_count: 0, last_active_ts: 0, session_name: "" }),
+      notifications : e.notifications,
+      votes,
+    };
   }
 
   // -------------------------------------------------------------------------
@@ -396,10 +732,21 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
       response_type   : notification.response_type ?? "",
     });
     void store.vote(id, dir).then((ok) => {
-      if (!ok) this.renderSenderSection();
+      if (!ok) this.rebuildAllCards();
     }).catch(() => {
-      this.renderSenderSection();
+      this.rebuildAllCards();
     });
+  }
+
+  // P0 8cb5c22e — a re-render that must UNDO an in-place change to a live card
+  // (the optimistic vote highlight). An unchanged card keeps its node, and would
+  // keep the highlight, so forget every signature first. Rare: a failed cast only.
+  private rebuildAllCards(): void {
+    this.cardSignatures = new WeakMap();
+    // Row 11793820 — a failed cast leaves the vote store as it was, so the card's
+    // inputs are unchanged too and it would be skipped, highlight and all.
+    this.cardInputs = new WeakMap();
+    this.renderAndAnnounce();
   }
 
   // -------------------------------------------------------------------------
@@ -412,12 +759,45 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     /* c8 ignore next */ // defensive: senderCardsMount post-mount is always set; renderSenderSection's null-guard would have already returned.
     if (this.senderCardsMount === null) return;
     /* c8 ignore next */ // defensive: idempotency check — empty-state is only painted from renderSenderSection's notifications.length === 0 branch which calls paintEmptyState exactly once before bailing out. Re-entry from a re-render with the same empty-state already painted is the case this guards against, but renderSenderSection's flow ensures the existing element is removed via removeEmptyState before re-paint in the non-empty branch.
-    if (this.senderCardsMount.querySelector(`[data-testid="multiplexer-empty-state"]`) !== null) return;
+    // P0 5ebd2aff — the empty state distinguishes "still loading" and "could not
+    // load" from a genuinely empty inbox. A cold-load hydration that is pending
+    // or has failed has measured nothing, so it must never read "No notifications
+    // yet." (measured 2026-09-10: that sentence sat over a 52.8 s fetch the client
+    // had abandoned at 10 s). Harnesses without the hydration surface behave as done.
+    const store     = this.stores.notifications;
+    const hydration = store.historyHydrationState ? store.historyHydrationState() : "done";
+    const state     = hydration === "loading" || hydration === "failed"
+      ? hydration
+      : (filterActive ? "filtered" : "empty");
+    const existing = this.senderCardsMount.querySelector(`[data-testid="multiplexer-empty-state"]`);
+    if (existing !== null && existing.getAttribute("data-empty-state") === state) return;
+
+    if (state === "failed") {
+      const reason  = store.historyHydrationError ? store.historyHydrationError() : null;
+      const message = `Couldn't load notification history${reason ? ` (${reason})` : ""}. Nothing was measured — this is not an empty inbox.`;
+      const frag = html`
+        <div data-testid="multiplexer-empty-state" class="notifications-empty-state" data-empty-state="failed">
+          <span class="notifications-empty-state-message">${message}</span>
+          <button type="button" class="notifications-history-retry" data-testid="multiplexer-notifications-history-retry">Retry</button>
+        </div>
+      ` as DocumentFragment;
+      this.senderCardsMount.replaceChildren(frag);
+      // Direct listener, not the delegated click handler: the button only exists
+      // while this state is painted, and replaceChildren drops it with its node.
+      const retry = this.senderCardsMount.querySelector("button.notifications-history-retry");
+      retry?.addEventListener("click", () => {
+        this.bus.emit({ type: HISTORY_RETRY_EVENT, payload: {}, source: "NotificationsListRenderer", ts: Date.now() });
+      });
+      return;
+    }
+
     // B3 (01-C): filter-aware copy — keyed on isFilterActive() so it works for
     // whatever axis the filter uses (currently the "own" default vs others/all).
-    const message = filterActive ? "No notifications match this filter." : "No notifications yet.";
+    const message = state === "loading"
+      ? "Loading notification history…"
+      : (state === "filtered" ? "No notifications match this filter." : "No notifications yet.");
     const frag = html`
-      <div data-testid="multiplexer-empty-state" class="notifications-empty-state">
+      <div data-testid="multiplexer-empty-state" class="notifications-empty-state" data-empty-state="${state}">
         ${message}
       </div>
     ` as DocumentFragment;
@@ -491,9 +871,18 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
         return;
       }
 
+      // 2a. S3 (2026-09-10) — per-date × soft delete. Checked BEFORE the date
+      //     header toggle: the button sits inside that header, and its click
+      //     must never collapse the accordion.
+      const dateDeleteBtn = target.closest(".date-delete-btn");
+      if (dateDeleteBtn !== null) {
+        void this.softDeleteDate(dateDeleteBtn);
+        return;
+      }
+
       // 2. Date-accordion header click → collapse/expand that date group
-      //    (carbon-copy of legacy toggleDateAccordion). The header carries only
-      //    spans (no interactive controls), so any click in it toggles.
+      //    (carbon-copy of legacy toggleDateAccordion). The header's one control
+      //    (the × above) has already returned, so any other click in it toggles.
       const dateHeader = target.closest(".date-accordion-header");
       if (dateHeader !== null) {
         this.toggleDateAccordion(dateHeader);
@@ -506,6 +895,14 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
       //    click on any of those is owned by its own handler, NOT a collapse.
       const senderHeader = target.closest(".sender-card-header");
       if (senderHeader !== null) {
+        // S2a–d (2026-09-10) — the header's own controls: 📋 copy, ✨ gist,
+        // click-to-rename, × delete-all. The persona badge is a native
+        // popovertarget <button> and falls through to the guard below.
+        const control = target.closest(".sender-session-copy, .sender-gist-btn, .sender-session-name, .sender-delete-btn") as HTMLElement | null;
+        if (control !== null) {
+          this.onSenderHeaderControl(control);
+          return;
+        }
         if (target.closest("button, .copy-btn, .sender-session-name") !== null) return;
         this.toggleSenderCard(senderHeader);
         return;
@@ -687,7 +1084,14 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     // SET — light exactly the bubble whose id_hash === current(). current()===null
     // (or no ttsQueue wired) leaves everything cleared.
     const activeId = this.ttsQueue?.current() ?? null;
-    if (activeId === null) return;
+    if (activeId === null) {
+      // A-2 #4 — nothing is speaking, so forget what was revealed. Without this, an
+      // utterance that plays, stops and plays again is the SAME id and would be treated
+      // as "already revealed" — silent on the replay, which is the case where an operator
+      // most expects to be shown where the sound came from.
+      this.revealedTtsId = null;
+      return;
+    }
     const bubble = this.senderCardsMount.querySelector<HTMLElement>(
       `.sender-message[data-id-hash="${cssEscape(activeId)}"]`,
     );
@@ -696,6 +1100,50 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     const paused = this.audio?.state() === "paused";
     if (paused) bubble.classList.add("is-paused-current");
     this.setPauseGlyph(bubble, paused);
+    this.revealActiveTts(activeId, bubble);
+  }
+
+  /**
+   * A-2 #4 — expand whatever hides the speaking bubble, then scroll to it.
+   *
+   * Legacy: `startTTSPlayingIndicator` calls `expandAccordionsForNotification`
+   * (notifications.js:5146 → :25478), which expands the sender card, expands the date
+   * accordion, and then `scrollIntoViewIfNeeded`s the notification. The multiplexer lit
+   * the bubble and stopped — so on a collapsed card the gold pulse played behind a closed
+   * accordion and the operator heard a notification with nothing to look at.
+   *
+   * 🔴 THE GUARD IS THE PART LEGACY GETS FOR FREE AND THIS RENDERER DOES NOT. Legacy
+   * reveals from a one-shot event — the TTS request starting, once per utterance.
+   * `refreshActiveTts` is not that: it runs on every render and every audio state change,
+   * so an unguarded reveal would re-expand a card the OPERATOR had just collapsed, and
+   * scroll the page back, for as long as the utterance played. The page would fight them.
+   *
+   * ⇒ So the reveal fires on a CHANGE of `activeId`. Same utterance, same state: nothing.
+   *
+   * The expansions persist through `viewState`, as legacy's do — its `expandSenderCard`
+   * routes through `toggleSenderCard`, which writes the same collapse state a click does.
+   */
+  private revealActiveTts(activeId: string, bubble: HTMLElement): void {
+    if (activeId === this.revealedTtsId) return;
+    this.revealedTtsId = activeId;
+
+    // Expand the date accordion first, then the card: the accordion is the inner one, and
+    // expanding outward means the element is never briefly inside an expanded parent whose
+    // own parent is still closed.
+    const accordion = bubble.closest(".date-accordion") as HTMLElement | null;
+    if (accordion !== null && accordion.getAttribute("data-collapsed") === "true") {
+      this.applyCollapsed(accordion, false, ".date-toggle");
+      const id = this.dateAccordionId(accordion);
+      if (id !== null) this.viewState?.setAccordionCollapsed(id, false);
+    }
+    const card = bubble.closest(".sender-card") as HTMLElement | null;
+    if (card !== null && card.getAttribute("data-collapsed") === "true") {
+      this.applyCollapsed(card, false, ".sender-toggle");
+      const senderId = card.dataset["senderId"];
+      if (senderId !== undefined) this.viewState?.setAccordionCollapsed(`sender::${senderId}`, false);
+    }
+
+    void scrollRevealElement(bubble);
   }
 
   // Flip a bubble's corner pause button between ⏸ (playing) and ▶ (paused),
@@ -708,6 +1156,143 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     btn.textContent    = paused ? "▶" : "⏸";
     btn.title          = paused ? "Resume this notification's playback" : "Pause this notification's playback";
     btn.setAttribute("aria-label", paused ? "Resume notification audio" : "Pause notification audio");
+  }
+
+  // -------------------------------------------------------------------------
+  // S2a–d / S3 (2026-09-10) — sender-card header controls + per-date delete.
+  // Ports of legacy copySenderSessionId / generateSessionGist / editSessionName /
+  // deleteSenderConversation / softDeleteByDate (notifications.js:1634, 18383,
+  // 18015, 20376, 19304), reached through the delegated click handler instead of
+  // inline onclick. Failures go to `reportFailure` — legacy only logged them.
+  // -------------------------------------------------------------------------
+
+  private onSenderHeaderControl(control: HTMLElement): void {
+    const card     = control.closest(".sender-card") as HTMLElement | null;
+    /* c8 ignore next 2 */ // defensive: every header control sits inside a .sender-card carrying data-sender-id, by template.
+    const senderId = card?.dataset["senderId"];
+    if (senderId === undefined) return;
+    if (control.classList.contains("sender-session-copy")) this.copySessionId(senderId, control);
+    else if (control.classList.contains("sender-gist-btn")) void this.generateGist(senderId);
+    else if (control.classList.contains("sender-session-name")) this.openRename(senderId, control.ownerDocument);
+    else void this.deleteSenderConversation(senderId);
+  }
+
+  // 📋 — copy the hex session id WITHOUT the '#', then flash ✅ for 1200 ms.
+  private copySessionId(senderId: string, btn: HTMLElement): void {
+    const hex = senderId.slice(senderId.indexOf("#") + 1);
+    void this.clipboardWrite(hex).then(() => {
+      btn.textContent = "✅";
+      setTimeout(() => { btn.textContent = "📋"; }, COPY_FLASH_MS);
+    }).catch(() => {
+      this.reportFailure("Could not copy the session ID to the clipboard.");
+    });
+  }
+
+  // ✨ — ask the server for a short gist of this sender's messages + abstracts
+  // and make it the session name. The button is disabled / `working` / ⏳ while
+  // the request is out, and back to ✨ however it ends.
+  private async generateGist(senderId: string): Promise<void> {
+    if (this.api === undefined || this.gistPending.has(senderId)) return;
+    const mine      = this.stores.notifications.list().filter(n => n.sender_id === senderId);
+    const messages  = mine.map(n => n.message).filter(Boolean);
+    const abstracts = mine.map(n => n.abstract).filter(Boolean);
+    if (messages.length === 0 && abstracts.length === 0) return;
+
+    this.gistPending.add(senderId);
+    this.paintGistButton(senderId, true);
+    try {
+      const data = await this.api.post<{ gist?: unknown } | null>("/api/notifications/generate-gist", { messages, abstracts });
+      const gist = typeof data?.gist === "string" ? data.gist.trim() : "";
+      if (gist === "") throw new Error("the server returned no gist");
+      this.stores.senders.setSessionName?.(senderId, gist);
+    } catch (err) {
+      this.reportFailure(`Could not generate a session gist: ${(err as Error).message}`);
+    } finally {
+      this.gistPending.delete(senderId);
+      this.paintGistButton(senderId, false);
+    }
+  }
+
+  private paintGistButton(senderId: string, working: boolean): void {
+    const btn = this.senderCardsMount?.querySelector<HTMLButtonElement>(
+      `.sender-card[data-sender-id="${cssEscape(senderId)}"] .sender-gist-btn`,
+    );
+    if (!btn) return;   // unmounted, or the card is gone (deleted / filtered out)
+    btn.disabled    = working;
+    btn.classList.toggle("working", working);
+    btn.textContent = working ? "⏳" : "✨";
+  }
+
+  // Click on the session name — open the Rename Session modal prefilled with the
+  // current name. Save goes through SenderStore, whose change event re-renders.
+  private openRename(senderId: string, doc: Document): void {
+    const record = this.stores.senders.list().find(s => s.sender_id === senderId);
+    this.closeRenameModal = openSessionNameEditModal({
+      doc,
+      currentName : record?.session_name ?? "",
+      onSave      : (name) => this.stores.senders.setSessionName?.(senderId, name),
+    });
+  }
+
+  // × on the sender header — confirm, DELETE the whole conversation server-side,
+  // then drop this sender's rows from the store (the card goes on re-render).
+  // Legacy removes the card EVEN WHEN the server call fails (notifications.js:
+  // 20411-20430). Mirrored, but the failure is reported rather than swallowed:
+  // the rows are gone from this view while the server may still hold them.
+  private async deleteSenderConversation(senderId: string): Promise<void> {
+    if (this.api === undefined) return;
+    const ids     = this.stores.notifications.list().filter(n => n.sender_id === senderId).map(n => n.id_hash);
+    const count   = ids.length;
+    const noun    = count === 1 ? "message" : "messages";
+    const project = projectFromSenderId(senderId);
+    if (!this.confirmFn(`Delete all ${count} ${noun} from ${project}? This cannot be undone.`)) return;
+
+    let failure: string | null = null;
+    const email = this.getUserEmail();
+    if (!email) {
+      failure = "no signed-in user email";
+    } else {
+      try {
+        await this.api.delete(`/api/notifications/conversation/${encodeURIComponent(senderId)}/${encodeURIComponent(email)}`);
+      } catch (err) {
+        failure = (err as Error).message;
+      }
+    }
+    this.stores.notifications.removeByIdHashes?.(ids);
+    if (failure !== null) {
+      this.reportFailure(`Removed ${count} ${noun} from ${project} in this view, but the server delete failed (${failure}); they may come back on reload.`);
+    }
+  }
+
+  // × on a date header — confirm, soft-delete that day server-side, and ONLY on
+  // success drop that day's rows from the store. Legacy softDeleteByDate removes
+  // nothing on failure either (notifications.js:19341-19349).
+  private async softDeleteDate(btn: Element): Promise<void> {
+    if (this.api === undefined) return;
+    const accordion = btn.closest(".date-accordion") as HTMLElement | null;
+    const card      = btn.closest(".sender-card") as HTMLElement | null;
+    /* c8 ignore next 3 */ // defensive: the × is emitted inside a .date-accordion (data-date-key) inside a .sender-card (data-sender-id), by template.
+    const dateKey   = accordion?.dataset["dateKey"];
+    const senderId  = card?.dataset["senderId"];
+    if (dateKey === undefined || senderId === undefined) return;
+    if (!this.confirmFn(`Hide all notifications from ${dateKey}?`)) return;
+
+    const email = this.getUserEmail();
+    if (!email) {
+      this.reportFailure(`Could not hide notifications from ${dateKey}: no signed-in user email.`);
+      return;
+    }
+    try {
+      await this.api.delete(`/api/notifications/date/${encodeURIComponent(senderId)}/${encodeURIComponent(email)}/${encodeURIComponent(dateKey)}`);
+    } catch (err) {
+      this.reportFailure(`Could not hide notifications from ${dateKey}: ${(err as Error).message}`);
+      return;
+    }
+    // The same date key the card grouped by, so exactly that accordion's rows go.
+    const ids = this.stores.notifications.list()
+      .filter(n => n.sender_id === senderId && formatDateKey(n.ts, this.appTimezone) === dateKey)
+      .map(n => n.id_hash);
+    this.stores.notifications.removeByIdHashes?.(ids);
   }
 
   // -------------------------------------------------------------------------
@@ -733,12 +1318,217 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
   }
 }
 
+// S2a — how long the 📋 button shows ✅ after a copy (legacy notifications.js:1652).
+const COPY_FLASH_MS = 1200;
+
+// S2d — the project label in the delete-all confirm, verbatim to legacy
+// S2a–d / S3 — default failure surface: the console for the record, and an alert
+// so the operator actually sees it. Tests inject a recording reportFailure.
+/* c8 ignore next 4 */ // production-default browser surface; never exercised under node:test.
+function defaultReportFailure(message: string): void {
+  debugSink.error(`[NotificationsListRenderer] ${message}`);
+  globalThis.alert(message);
+}
+
 // B4 (01-D) — default proxy-ratify page opener. Opens (or focuses) the single
 // ratify admin tab, verbatim to legacy notifications.js:7203. Tests inject a
 // recording opener via options.proxyRatifyOpener (mirrors ApiClient.fetcher).
 /* c8 ignore next 3 */ // production-default browser page-open; never exercised under node:test (a recording opener is injected).
 function defaultProxyRatifyOpener(): void {
   window.open("/app/admin/proxy-ratify", "lupin-proxy-ratify");
+}
+
+// P0 8cb5c22e — the sender-card header parts that change WITHOUT the card's own
+// content changing: the active dot (moves when ANOTHER sender speaks, S4) and the
+// status glyph (ages with the clock). Both spans are always emitted by
+// renderSenderCard (senderCard.ts header template).
+const ACTIVE_CLASS       = "sender-card-active";
+const INDICATOR_SELECTOR = ".sender-active-indicator";
+const STATUS_SELECTOR    = ".sender-status";
+
+// The equality key for "is this card unchanged?": the card's outerHTML with the
+// volatile header parts blanked. Taken on a FRESH, not-yet-inserted render, which
+// is blanked and then restored in place (cheaper than cloning a long card).
+function cardSignature(card: HTMLElement): string {
+  const indicator = card.querySelector(INDICATOR_SELECTOR)!;
+  const status    = card.querySelector(STATUS_SELECTOR)!;
+  const active    = card.classList.contains(ACTIVE_CLASS);
+  const dot       = indicator.textContent;
+  const title     = indicator.getAttribute("title");
+  const glyph     = status.textContent;
+  card.classList.remove(ACTIVE_CLASS);
+  indicator.textContent = "";
+  indicator.setAttribute("title", "");
+  status.textContent = "";
+  const signature = card.outerHTML;
+  card.classList.toggle(ACTIVE_CLASS, active);
+  indicator.textContent = dot;
+  indicator.setAttribute("title", title!);
+  status.textContent = glyph;
+  return signature;
+}
+
+// Copy the volatile header parts of a fresh render onto the live card it matched,
+// so a kept card still shows the right active dot and status glyph.
+function paintVolatileHeader(from: HTMLElement, to: HTMLElement): void {
+  to.classList.toggle(ACTIVE_CLASS, from.classList.contains(ACTIVE_CLASS));
+  const fromIndicator = from.querySelector(INDICATOR_SELECTOR)!;
+  const toIndicator   = to.querySelector(INDICATOR_SELECTOR)!;
+  toIndicator.textContent = fromIndicator.textContent;
+  toIndicator.setAttribute("title", fromIndicator.getAttribute("title")!);
+  to.querySelector(STATUS_SELECTOR)!.textContent = from.querySelector(STATUS_SELECTOR)!.textContent;
+}
+
+// Row 11793820 — the same three header parts, painted on a card that was NOT
+// re-rendered, from the values themselves. Uses the template's own helpers, so a
+// kept card and a fresh render of it cannot disagree (the parity test holds this).
+function paintVolatileState(to: HTMLElement, isActive: boolean, lastActiveTs: number): void {
+  const indicator = activeIndicator(isActive);
+  to.classList.toggle(ACTIVE_CLASS, isActive);
+  const toIndicator = to.querySelector(INDICATOR_SELECTOR)!;
+  toIndicator.textContent = indicator.glyph;
+  toIndicator.setAttribute("title", indicator.title);
+  to.querySelector(STATUS_SELECTOR)!.textContent = senderStatusGlyph(lastActiveTs, Date.now());
+}
+
+// Row 11793820 — what a card was rendered from. See NotificationsListRendererImpl.inputsFor.
+interface CardInputs {
+  readonly sender        : string;
+  readonly senderBody    : string;
+  readonly notifications : ReadonlyArray<Notification>;
+  readonly votes         : string;
+}
+
+// Row 11793820 phase 2 — may a card whose inputs moved be patched instead of
+// replaced? Only when nothing but the header and appended rows can differ:
+//   1. the old rows are a strict prefix of the new ones, by identity (rows were
+//      only appended — NotificationStore appends arrivals to its active list)
+//   2. no appended row belongs to a progress group (it can move the group's head)
+//   3. the old rows' cast votes are unchanged: `votes` lists `id=vote;` in row
+//      order, so with the rows a prefix, the old string must be a prefix of the new
+//      one (an appended hint row adds its own entry, rendered fresh)
+//   4. the SenderRecord moved only in unread_count, last_active_ts or session_name,
+//      which render only inside the header. Persona, worker flag, display name and
+//      conversation mode reach the card root, the badge or the voice row.
+function canPatchCard(before: CardInputs | undefined, now: CardInputs): boolean {
+  if (before === undefined) return false;
+  if (before.senderBody !== now.senderBody || !now.votes.startsWith(before.votes)) return false;
+  const old  = before.notifications;
+  const rows = now.notifications;
+  if (rows.length <= old.length) return false;
+  for (let i = 0; i < old.length; i++) {
+    if (old[i] !== rows[i]) return false;
+  }
+  for (let i = old.length; i < rows.length; i++) {
+    const gid = rows[i]!.progress_group_id;
+    if (typeof gid === "string" && gid.length > 0) return false;
+  }
+  return true;
+}
+
+// Move what changed from a fresh render into the live card, so the live card ends
+// byte-for-byte equal to the template's output without anything built by hand:
+// the header is swapped whole, each existing day gets the fresh count, and new rows
+// and new days are inserted in fresh order. Existing rows, days, their collapse
+// state, expanded progress groups, TTS classes and the voice row keep their nodes.
+function patchCard(fresh: HTMLElement, live: HTMLElement): void {
+  live.classList.toggle(ACTIVE_CLASS, fresh.classList.contains(ACTIVE_CLASS));
+  live.querySelector(":scope > .sender-card-header")!.replaceWith(fresh.querySelector(":scope > .sender-card-header")!);
+  mergeInFreshOrder(
+    live.querySelector(":scope > .sender-card-dates")!,
+    fresh.querySelector(":scope > .sender-card-dates")!,
+    (liveDay, freshDay) => {
+      liveDay.querySelector(".date-count")!.textContent = freshDay.querySelector(".date-count")!.textContent;
+      mergeInFreshOrder(
+        liveDay.querySelector(":scope > .date-accordion-messages")!,
+        freshDay.querySelector(":scope > .date-accordion-messages")!,
+      );
+    },
+  );
+}
+
+// Row 11793820 phase 2 (Mr. Radio's review) — where keyboard focus sat inside the
+// cards before a render. A render drops it in two ways: a node that is REPLACED
+// (the header a patch swaps, a card replaced whole) takes focus with it, and a node
+// that is MOVED loses it too, because insertBefore removes before it inserts. So the
+// arriving card, which moves to the top, lost focus from its reply box and header.
+interface CardFocus {
+  readonly element  : HTMLElement;
+  readonly senderId : string;
+  readonly rowId    : string | null;   // data-id-hash of the row holding focus, if any
+  readonly isHeader : boolean;
+  readonly selector : string | null;   // tag + first class, to find a replacement
+}
+
+function captureCardFocus(mount: HTMLElement): CardFocus | null {
+  const active = mount.ownerDocument.activeElement as HTMLElement | null;
+  if (active === null || active === mount || !mount.contains(active)) return null;
+  const card     = active.closest<HTMLElement>(".sender-card");
+  const senderId = card?.getAttribute("data-sender-id");
+  if (card === null || senderId === null || senderId === undefined) return null;
+  const row = active.closest<HTMLElement>("[data-id-hash]");
+  // The first class only: paintGistButton adds `working` to ✨ after a render.
+  const firstClass = active.classList.item(0);
+  return {
+    element  : active,
+    senderId,
+    rowId    : row !== null && row !== card ? row.getAttribute("data-id-hash") : null,
+    isHeader : active.matches(".sender-card-header"),
+    selector : firstClass === null ? null : `${active.tagName.toLowerCase()}.${cssEscape(firstClass)}`,
+  };
+}
+
+// Put focus back: on the same node if it is still in the page (it was moved), else
+// on its replacement in the same card — the header, or the element with the same
+// tag and first class inside the same row (or the card, for header and voice-row
+// controls). `preventScroll`, so a message arriving never scrolls the pane.
+function restoreCardFocus(mount: HTMLElement, before: CardFocus | null): void {
+  if (before === null || mount.ownerDocument.activeElement === before.element) return;
+  let target: HTMLElement | null = before.element.isConnected ? before.element : null;
+  if (target === null) {
+    const card = mount.querySelector<HTMLElement>(`.sender-card[data-sender-id="${cssEscape(before.senderId)}"]`);
+    if (card === null) return;
+    if (before.isHeader) {
+      target = card.querySelector<HTMLElement>(":scope > .sender-card-header");
+    } else if (before.selector !== null) {
+      const scope = before.rowId === null ? card : card.querySelector<HTMLElement>(`[data-id-hash="${cssEscape(before.rowId)}"]`);
+      target = scope?.querySelector<HTMLElement>(before.selector) ?? null;
+    }
+  }
+  target?.focus({ preventScroll: true });
+}
+
+// Walk the fresh container's keyed children from last to first. A child the live
+// container already has stays where it is (and is handed to `patch`); a new one
+// moves out of the fresh render to just before the child that follows it in fresh
+// order. Every live child is also in fresh (rows were only appended), so the live
+// order already agrees with fresh order.
+function mergeInFreshOrder(live: Element, fresh: Element, patch?: (liveChild: Element, freshChild: Element) => void): void {
+  const existing = new Map<string, Element>();
+  for (const child of Array.from(live.children)) existing.set(child.getAttribute("data-id-hash")!, child);
+  const freshChildren = Array.from(fresh.children);
+  let next: Element | null = null;
+  for (let i = freshChildren.length - 1; i >= 0; i--) {
+    const child = freshChildren[i]!;
+    const kept  = existing.get(child.getAttribute("data-id-hash")!);
+    if (kept === undefined) {
+      live.insertBefore(child, next);
+      next = child;
+    } else {
+      patch?.(kept, child);
+      next = kept;
+    }
+  }
+}
+
+function sameCardInputs(before: CardInputs | undefined, now: CardInputs): boolean {
+  if (before === undefined) return false;
+  if (before.sender !== now.sender || before.votes !== now.votes) return false;
+  if (before.notifications.length !== now.notifications.length) return false;
+  for (let i = 0; i < now.notifications.length; i++) {
+    if (before.notifications[i] !== now.notifications[i]) return false;
+  }
+  return true;
 }
 
 // CSS.escape polyfill for selectors in legacy / Node / older browser contexts.

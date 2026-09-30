@@ -165,12 +165,32 @@ def atomic_write_json( path, data ):
 
 # Cache to avoid repeated file reads
 _cached_session_id: Optional[str] = None
+# The source `_cached_session_id` was resolved under. Only definitive sources are
+# ever cached, so this is never SOURCE_CWD_FALLBACK — a guess is re-resolved every call.
+_cached_session_source: Optional[str] = None
 _fallback_session_id: str = uuid.uuid4().hex[:8]
 
 # Resolution source constants
+#
+# 🔴 THESE ARE NOT DECORATION — `cwd_fallback` MEANS "THIS MIGHT BE SOMEBODY ELSE".
+# Tiers 2 and 3 identify a session by its own process tree and cannot name another seat.
+# Tier 4 identifies it by working directory, and on this fleet every seat shares one
+# checkout, so the filter excludes nobody: it returns whichever colleague touched their
+# bridge last. The tier is KEPT deliberately (María's ruling, 2026-09-03) — removing it
+# turns a wrong-seat into a fail-to-resolve — so the source is how a caller tells the two
+# apart. `get_claude_session_id_with_source` / `wait_for_session_id_with_source` are the
+# doors that carry it; the bare twins remain byte-for-byte compatible for every existing
+# caller.
 SOURCE_PPID         = "ppid"
 SOURCE_GRANDPARENT  = "grandparent"
 SOURCE_CWD_FALLBACK = "cwd_fallback"
+SOURCE_ENV          = "env"                 # CLAUDE_SESSION_ID — definitive, set by the host
+SOURCE_GENERATED    = "generated_fallback"  # invented here; wrong, but nobody else's
+
+# The sources a caller may act on as ITS OWN identity. A generated fallback is wrong and
+# harmless — it names no real seat. A cwd_fallback is wrong and harmful — it names a
+# colleague, so work filed under it lands on their board.
+DEFINITIVE_SOURCES = ( SOURCE_ENV, SOURCE_PPID, SOURCE_GRANDPARENT )
 
 
 def canonical_persona_key( name ) -> str:
@@ -300,8 +320,9 @@ def clear_cached_session_id():
         - _cached_session_id is set to None
         - Next call to get_claude_session_id() will re-read from file
     """
-    global _cached_session_id
-    _cached_session_id = None
+    global _cached_session_id, _cached_session_source
+    _cached_session_id     = None
+    _cached_session_source = None
 
 
 def _find_session_file() -> Optional[ Tuple[ Path, str ] ]:
@@ -427,16 +448,43 @@ def get_claude_session_id() -> str:
     Returns:
         str: Session ID (8-char hex fallback, or full ID from Claude Code)
     """
-    global _cached_session_id
+    return get_claude_session_id_with_source()[ 0 ]
+
+
+def get_claude_session_id_with_source() -> Tuple[ str, str ]:
+    """
+    Get the Claude Code session_id AND how it was reached.
+
+    🔴 THE POINT OF THIS FUNCTION. `_find_session_file` computes a `source` and treats
+    `cwd_fallback` as untrustworthy enough to refuse the cache — then `get_claude_session_id`
+    returns a bare `str` and the distinction is gone. A guess and a certainty reached the
+    caller in the same shape, so nothing downstream could refuse one and accept the other.
+    This door keeps them apart; the bare twin above is unchanged for every existing caller.
+
+    Requires:
+        - nothing
+
+    Ensures:
+        - Always returns a ( str, str ) pair — never None, never a bare id
+        - source is one of SOURCE_ENV / SOURCE_PPID / SOURCE_GRANDPARENT /
+          SOURCE_CWD_FALLBACK / SOURCE_GENERATED — never empty
+        - Caches definitive matches only; a cwd_fallback is re-resolved every call
+        - A cached value reports the source it was cached under
+
+    Returns:
+        Tuple[ str, str ]: ( session_id, resolution_source )
+    """
+    global _cached_session_id, _cached_session_source
 
     if _cached_session_id:
-        return _cached_session_id
+        return ( _cached_session_id, _cached_session_source )
 
     # Tier 1: Environment variable (future-proof)
     env_id = os.getenv( "CLAUDE_SESSION_ID" )
     if env_id:
-        _cached_session_id = env_id
-        return env_id
+        _cached_session_id     = env_id
+        _cached_session_source = SOURCE_ENV
+        return ( env_id, SOURCE_ENV )
 
     # Tier 2: Session file from hook
     result = _find_session_file()
@@ -446,11 +494,12 @@ def get_claude_session_id() -> str:
         if file_id:
             # Only cache definitive matches — CWD fallback is a guess
             if source != SOURCE_CWD_FALLBACK:
-                _cached_session_id = file_id
-            return file_id
+                _cached_session_id     = file_id
+                _cached_session_source = source
+            return ( file_id, source )
 
     # Tier 3: Fallback
-    return _fallback_session_id
+    return ( _fallback_session_id, SOURCE_GENERATED )
 
 
 def resolve_stable_session_id( transient_id: str ) -> str:
@@ -518,13 +567,42 @@ def wait_for_session_id( timeout: float = 10.0, poll_interval: float = 0.5 ) -> 
     Returns:
         str: Real session ID if found within timeout, else fallback
     """
-    global _cached_session_id
+    return wait_for_session_id_with_source( timeout=timeout, poll_interval=poll_interval )[ 0 ]
+
+
+def wait_for_session_id_with_source( timeout: float = 10.0, poll_interval: float = 0.5 ) -> Tuple[ str, str ]:
+    """
+    Wait for the real Claude Code session_id, and report how it was reached.
+
+    This is the door the MCP server's session watcher uses. A source exposed only on the
+    non-blocking twin would leave the server exactly as blind as before, which is why both
+    doors carry it rather than one.
+
+    Requires:
+        - timeout is a positive float
+        - poll_interval is a positive float less than timeout
+
+    Ensures:
+        - Always returns a ( str, str ) pair
+        - source is never empty; SOURCE_GENERATED when the timeout expires
+        - Caches definitive matches only — a cwd_fallback is never cached
+        - Bypasses the cache on entry, exactly as the bare twin always has
+
+    Args:
+        timeout: Max seconds to wait (default 10)
+        poll_interval: Seconds between file checks (default 0.5)
+
+    Returns:
+        Tuple[ str, str ]: ( session_id, resolution_source )
+    """
+    global _cached_session_id, _cached_session_source
 
     # Always check env var first (no polling needed)
     env_id = os.getenv( "CLAUDE_SESSION_ID" )
     if env_id:
-        _cached_session_id = env_id
-        return env_id
+        _cached_session_id     = env_id
+        _cached_session_source = SOURCE_ENV
+        return ( env_id, SOURCE_ENV )
 
     # Poll for session file — bypass cache for fresh resolution
     deadline = time.monotonic() + timeout
@@ -535,11 +613,12 @@ def wait_for_session_id( timeout: float = 10.0, poll_interval: float = 0.5 ) -> 
             file_id = _read_session_file( session_file )
             if file_id:
                 if source != SOURCE_CWD_FALLBACK:
-                    _cached_session_id = file_id
-                return file_id
+                    _cached_session_id     = file_id
+                    _cached_session_source = source
+                return ( file_id, source )
         time.sleep( poll_interval )
 
-    return _fallback_session_id
+    return ( _fallback_session_id, SOURCE_GENERATED )
 
 
 def _resolve_project_from_bridge_cwd() -> Optional[str]:
@@ -557,10 +636,31 @@ def _resolve_project_from_bridge_cwd() -> Optional[str]:
     pivot duplicates the user's notification UI panes (one per
     sender_id) for what should be a single session.
 
-    Walks up from the bridge's `cwd` looking for a `.git` ancestor.
-    Returns the lowercase basename of that ancestor with the
-    `_PROJECT_ALIASES` normalization applied (matches `detect_project()`
-    semantics exactly, just sourced from the bridge instead of live cwd).
+    Walks up from the bridge's `cwd` looking for a `.git` ancestor, resolves a
+    gitlink through to its MAIN repo, and returns that basename with the
+    `_PROJECT_ALIASES` normalization applied.
+
+    🔴 THIS PARAGRAPH USED TO SAY "matches `detect_project()` semantics exactly,
+    just sourced from the bridge instead of live cwd" — AND THAT SENTENCE IS WHY
+    THE DIVERGENCE SURVIVED. It was true when written. It stopped being true the
+    day `detect_project()` grew its gitlink branch (the 2026-06-11
+    dangling-gitlink incident) and this helper did not, and nothing anywhere
+    noticed, because a claim of equivalence is exactly the kind of sentence a
+    reader trusts INSTEAD of checking. It cost Rick five duplicated focus-bar
+    rows and took an operator report to find (row 6597cea9).
+
+    ⇒ So the equivalence is no longer ASSERTED here, it is TESTED:
+    `src/tests/unit/test_a_worktree_seat_emits_one_sender_id.py`
+    ::test_it_agrees_with_detect_project_from_the_same_place drives both
+    resolvers over one real `git worktree add` and reddens when they disagree.
+    A docstring cannot notice it has gone stale; a test can.
+
+    ⚠️ AND THE EQUIVALENCE IS NOT SATISFIED BY COPYING THE LOGIC. This calls
+    `detect_project()`'s OWN helpers — `_worktree_owner_basename`, with
+    `_dangling_gitlink_owner_basename` as the fallback when live git cannot
+    answer — so a future change lands in one place rather than needing to be
+    mirrored twice. Two derivations of one value that agree only by careful
+    copying diverge the first time somebody edits one of them.
 
     Ensures:
         - Returns the project name from the bridge file's SessionStart cwd
@@ -579,11 +679,55 @@ def _resolve_project_from_bridge_cwd() -> Optional[str]:
         if not bridge_cwd:
             return None
 
-        from cosa.agents.utils.sender_id import _PROJECT_ALIASES
+        from cosa.agents.utils.sender_id import (
+            _PROJECT_ALIASES,
+            _worktree_owner_basename,
+            _dangling_gitlink_owner_basename,
+        )
 
         candidate = Path( bridge_cwd ).resolve()
         for parent in [ candidate, *candidate.parents ]:
-            if ( parent / ".git" ).exists():
+            git_entry = parent / ".git"
+            if git_entry.exists():
+                # 🔴 WORKTREE-AWARE, MIRRORING detect_project() — row 6597cea9.
+                # `.git` is a FILE in a worktree AND in a submodule, and
+                # `.exists()` is True for both, so the bare walk above stopped at
+                # the worktree root and took its DIRECTORY name. A seat in
+                # /…/lupin-wt-cc-author-maria-4 then emitted
+                # `claude.code@lupin-wt-cc-author-maria-4.deepily.ai#950b26f1`
+                # while every other emitter used `…@lupin.deepily.ai#950b26f1` —
+                # SAME session hash, two project segments, and the focus bar
+                # (keyed on sender_id, correctly) rendered one seat as two rows.
+                # Rick reported it for five workers, every one of them in a
+                # worktree.
+                #
+                # ⚠️ THE DOCSTRING ABOVE ALREADY CLAIMED THIS. It says this helper
+                # "matches detect_project() semantics exactly, just sourced from
+                # the bridge instead of live cwd" — true when written, false the
+                # day the gitlink branch was added to detect_project() (the
+                # 2026-06-11 dangling-gitlink incident) and not mirrored here. A
+                # reader trusting that sentence had no reason to look, which is
+                # why it took a report from the operator to find.
+                #
+                # ⚠️ AND IT IS NOT A CANONICALISATION GAP. ~/.lupin/config maps
+                # [lupin], [plan], [lupin-mobile] and carries no [lupin-wt-*]
+                # section, and the canonicaliser returns an unmapped name
+                # unchanged — so reaching for it would have changed nothing.
+                #
+                # The submodule/worktree disambiguation is git's own
+                # (`--git-common-dir`), inside the shared helper; a submodule
+                # still answers with its own basename, which is what keeps
+                # src/cosa resolving to "cosa".
+                if git_entry.is_file():
+                    owner = _worktree_owner_basename( parent )
+                    if owner is None:
+                        # Live git could not answer — the worktree's admin dir
+                        # was deleted while the directory survived. Parse the
+                        # gitlink's `gitdir:` target statically rather than
+                        # degrading to this directory's own name.
+                        owner = _dangling_gitlink_owner_basename( git_entry )
+                    if owner is not None:
+                        return _PROJECT_ALIASES.get( owner, owner )
                 name = parent.name.lower()
                 return _PROJECT_ALIASES.get( name, name )
         # No .git ancestor — fall back to the basename so callers always
@@ -765,9 +909,17 @@ def get_session_metadata() -> dict:
     }
 
 
-def find_session_by_id( session_id, exact=False ):
+def find_session_by_id( session_id, exact=False, check_pid=True ):
     """
     Scan ~/.claude/sessions/cc-*.json for a session_id match.
+
+    ⚠️ PID LIVENESS IS ONLY MEANINGFUL IN THE HOST'S PID NAMESPACE (`check_pid=False`,
+    row 27760534). Inside a container `/proc` holds the container's processes, so every
+    host seat's pid reads dead and EVERY bridge is skipped — measured 2026-09-28 in
+    lupin-rest-dev: pid 25333 alive on the host, absent in the container, and the console
+    roster marked every live seat unwatchable. A caller that may run in a container passes
+    `check_pid=False`; with no pid to tell a stale file from a live one, the NEWEST file
+    (by mtime) among the matches wins.
 
     Supports both full UUID and 8-char prefix matching. Skips files
     from dead PIDs to avoid returning stale sessions.
@@ -800,14 +952,19 @@ def find_session_by_id( session_id, exact=False ):
     if not session_id or not SESSION_DIR.exists():
         return None
 
-    for path in SESSION_DIR.glob( "cc-*.json" ):
+    paths = SESSION_DIR.glob( "cc-*.json" )
+    if not check_pid:
+        # Newest first, so the first match is the most recently written bridge.
+        paths = sorted( paths, key=_mtime_or_zero, reverse=True )
+
+    for path in paths:
         # Skip non-bridge files (buffers, listeners, etc.)
         if "buffer" in path.name or "listener" in path.name:
             continue
 
         # PID liveness check
         file_pid = _extract_pid_from_filename( path.name )
-        if file_pid is not None and not _is_pid_alive( file_pid ):
+        if check_pid and file_pid is not None and not _is_pid_alive( file_pid ):
             continue
 
         try:
@@ -831,6 +988,20 @@ def find_session_by_id( session_id, exact=False ):
             continue
 
     return None
+
+
+def _mtime_or_zero( path ):
+    """
+    A bridge file's mtime, for newest-first ordering.
+
+    Ensures:
+        - returns the file's st_mtime, or 0.0 when it vanished between glob and stat
+          (a racing SessionEnd delete), so the sort never raises
+    """
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
 
 
 def find_session_path_by_id( session_id, exact=False ):
@@ -872,6 +1043,33 @@ def find_session_path_by_id( session_id, exact=False ):
     if not session_id or not SESSION_DIR.exists():
         return None
 
+    hit = find_in_bridge_index( iter_live_bridges(), session_id, exact=exact )
+    return hit[ 0 ] if hit else None
+
+
+def iter_live_bridges():
+    """
+    Yield every live bridge in SESSION_DIR as ( path, data, all_ids ), lazily.
+
+    🔴 ONE SCAN, SHARED (row 41da77bb). `find_session_path_by_id` scans the whole
+    sessions directory per call, and that directory is mostly NOT bridges — measured
+    2026-09-10 at 7,475 entries, 6,866 of them cc-listener-* leftovers and 2 bridges,
+    3.92 ms per scan inside the container. senders-visible called it 2-3 times per
+    sender for 5,180 senders and blocked the dev server for ~52 s. A caller resolving
+    many ids takes ONE `build_live_bridge_index()` and matches against it instead.
+
+    ⚠️ LAZY ON PURPOSE. `find_session_path_by_id` walks this generator and stops at the
+    first match, exactly as the loop it replaced did, so a single lookup still reads
+    only the files before its hit. The skip rules below are that loop's, moved here so
+    the rule has one definition rather than two that can drift.
+
+    Ensures:
+        - skips names containing "buffer" or "listener"
+        - skips a cc-{pid}.json whose pid is dead, when host pids can be trusted
+        - skips a file that is unreadable or not JSON
+        - all_ids = session_ids, then session_id, then stable_session_id, de-duplicated
+        - yields in glob order
+    """
     trust_host_pids = _can_trust_host_pids()
 
     for path in SESSION_DIR.glob( "cc-*.json" ):
@@ -893,13 +1091,45 @@ def find_session_path_by_id( session_id, exact=False ):
                 if val and val not in all_ids:
                     all_ids.append( val )
 
-            for known_id in all_ids:
-                if known_id == session_id or ( not exact and known_id[:8] == session_id[:8] ):
-                    return path
-
         except ( json.JSONDecodeError, OSError ):
             continue
 
+        yield path, data, all_ids
+
+
+def build_live_bridge_index():
+    """
+    Snapshot every live bridge ONCE, for a caller about to resolve many ids.
+
+    Ensures:
+        - returns a list of ( path, data, all_ids ), in glob order
+        - returns [] when SESSION_DIR does not exist
+    """
+    if not SESSION_DIR.exists():
+        return []
+    return list( iter_live_bridges() )
+
+
+def find_in_bridge_index( index, session_id, exact=False ):
+    """
+    Match a session id against bridges from `iter_live_bridges` / `build_live_bridge_index`.
+
+    The same match rule `find_session_path_by_id` has always used: full-id equality, or,
+    unless `exact`, equality of the first 8 characters. The first bridge that matches wins.
+
+    Requires:
+        - index is an iterable of ( path, data, all_ids )
+
+    Ensures:
+        - returns ( path, data ) for the first matching bridge
+        - returns None when session_id is empty or nothing matches
+    """
+    if not session_id:
+        return None
+    for path, data, all_ids in index:
+        for known_id in all_ids:
+            if known_id == session_id or ( not exact and known_id[:8] == session_id[:8] ):
+                return path, data
     return None
 
 
@@ -1946,7 +2176,7 @@ def _append_stale_bridge( stale_out, path, mtime_age, pid_alive ):
 
 
 def find_active_sessions( stale_threshold_seconds: int = 43200, require_persona: bool = True,
-                          stale_out=None ):
+                          stale_out=None, unreadable_out=None ):
     """
     Scan all bridge files for live CC sessions, with an optional persona filter.
 
@@ -2023,8 +2253,20 @@ def find_active_sessions( stale_threshold_seconds: int = 43200, require_persona:
           bridges, with persona projected to `{}`.
         - session_id is the canonical id (stable_session_id preferred)
         - Never raises exceptions
-        - Skips bridge files that fail to parse or open
+        - Skips bridge files that fail to parse or open — but REPORTS them into
+          `unreadable_out` when one is supplied, because a live seat we cannot read
+          still occupies a seat (row 9c3b817a)
         - Skips bridge files whose stat() fails
+
+    **`unreadable_out`** — pass a list to receive the PATH of every LIVE bridge that
+    could not be identified: unparseable JSON, or parseable with no session id. It
+    follows the `stale_out` idiom deliberately, so a caller that needs to COUNT the
+    unreadable does not walk this directory a second time — a third enumeration over one
+    population is how two counts start disagreeing.
+
+    ⚠️ LIVENESS IS DECIDED FIRST, so a DEAD corrupt bridge appears in NEITHER the results
+    nor `unreadable_out`. That ordering is load-bearing: an unreadable ghost counted
+    against the fleet cap could never be reaped, because there is no process to reap.
 
     Returns:
         list[ tuple[ Path, str, dict ] ]: (bridge_path, session_id, persona)
@@ -2082,11 +2324,26 @@ def find_active_sessions( stale_threshold_seconds: int = 43200, require_persona:
 
             sid = data.get( "stable_session_id" ) or data.get( "session_id" )
             if not sid:
+                # Same case as the parse failure below: the file opened, the seat is
+                # live, and it cannot be identified. Reported rather than dropped.
+                if unreadable_out is not None:
+                    unreadable_out.append( path )
                 continue
 
             results.append( ( path, sid, persona if has_persona else {} ) )
 
         except ( json.JSONDecodeError, OSError ):
+            # 🔴 A LIVE SEAT WE CANNOT READ IS NOT AN ABSENT SEAT (row 9c3b817a). This
+            # branch used to drop the bridge silently, so a corrupt file made a RUNNING
+            # session vanish from every count derived here — including the fleet cap,
+            # which then permitted a spawn it should have refused.
+            #
+            # ⚠️ It is REPORTED, not returned: the tuple has no session id to carry, so
+            # inventing one would put a fictional seat into every consumer's list. The
+            # caller gets the PATH and decides what the absence is worth. Liveness is
+            # already decided above, so a DEAD corrupt bridge never reaches here.
+            if unreadable_out is not None:
+                unreadable_out.append( path )
             continue
 
     return results

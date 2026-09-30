@@ -71,14 +71,14 @@ class TestAskOpenEndedBatch:
             raise AssertionError( "no notification should be sent for invalid input" )
         monkeypatch.setattr( cv, "notify_user_sync", must_not_run )
 
-        assert cv.ask_open_ended_batch.fn( bad ) == { "error": "questions must be a non-empty list" }
+        assert cv.ask_open_ended_batch.fn.sync( bad ) == { "error": "questions must be a non-empty list" }
 
     def test_a_zero_exit_returns_the_parsed_answers( self, monkeypatch ):
         monkeypatch.setattr( cv, "_wait_for_sender_id", lambda: "claude.code@lupin.deepily.ai" )
         monkeypatch.setattr( cv, "notify_user_sync",
                              lambda request, debug: _Resp( 0, json.dumps( { "answers": { "Topic": "quantum" } } ) ) )
 
-        assert cv.ask_open_ended_batch.fn( QUESTIONS ) == { "answers": { "Topic": "quantum" } }
+        assert cv.ask_open_ended_batch.fn.sync( QUESTIONS ) == { "answers": { "Topic": "quantum" } }
 
     def test_a_timeout_is_reported_as_a_timeout_not_an_empty_answer( self, monkeypatch ):
         # exit_code 2 means the human never answered. Returning {"answers": {}}
@@ -86,7 +86,7 @@ class TestAskOpenEndedBatch:
         monkeypatch.setattr( cv, "_wait_for_sender_id", lambda: "claude.code@lupin.deepily.ai" )
         monkeypatch.setattr( cv, "notify_user_sync", lambda request, debug: _Resp( 2 ) )
 
-        got = cv.ask_open_ended_batch.fn( QUESTIONS )
+        got = cv.ask_open_ended_batch.fn.sync( QUESTIONS )
         assert got[ "timeout" ] is True
         assert "timeout" in got[ "error" ]
 
@@ -95,7 +95,7 @@ class TestAskOpenEndedBatch:
         monkeypatch.setattr( cv, "notify_user_sync", lambda request, debug: _Resp( 1 ) )
         monkeypatch.setattr( cv, "_error_dict", lambda r: { "error": f"exit {r.exit_code}" } )
 
-        assert cv.ask_open_ended_batch.fn( QUESTIONS ) == { "error": "exit 1" }
+        assert cv.ask_open_ended_batch.fn.sync( QUESTIONS ) == { "error": "exit 1" }
 
     def test_a_bad_priority_is_a_validation_error_not_a_crash( self, monkeypatch ):
         monkeypatch.setattr( cv, "_wait_for_sender_id", lambda: "claude.code@lupin.deepily.ai" )
@@ -103,7 +103,7 @@ class TestAskOpenEndedBatch:
             raise AssertionError( "must not reach the transport with an invalid request" )
         monkeypatch.setattr( cv, "notify_user_sync", must_not_run )
 
-        got = cv.ask_open_ended_batch.fn( QUESTIONS, priority="not-a-priority" )
+        got = cv.ask_open_ended_batch.fn.sync( QUESTIONS, priority="not-a-priority" )
         assert "validation error" in got[ "error" ]
 
     def test_the_request_carries_an_idempotency_key_so_a_re_post_cannot_duplicate_the_card( self, monkeypatch ):
@@ -114,7 +114,7 @@ class TestAskOpenEndedBatch:
         monkeypatch.setattr( cv, "notify_user_sync",
                              lambda request, debug: seen.update( req=request ) or _Resp( 0, None ) )
 
-        cv.ask_open_ended_batch.fn( QUESTIONS )
+        cv.ask_open_ended_batch.fn.sync( QUESTIONS )
 
         assert seen[ "req" ].idempotency_key                # stamped, non-empty
 
@@ -234,7 +234,7 @@ class TestAskMultipleChoiceRejectsNullBeforeLogging:
             raise AssertionError( "no notification should be sent for invalid input" )
         monkeypatch.setattr( cv, "notify_user_sync", must_not_run )
 
-        assert cv.ask_multiple_choice.fn( bad ) == { "error": "questions must be a non-empty list" }
+        assert cv.ask_multiple_choice.fn.sync( bad ) == { "error": "questions must be a non-empty list" }
 
     def test_an_unsized_argument_does_not_raise_out_of_the_tool( self, monkeypatch ):
         # An int has no len(). Before the fix this was a TypeError escaping an
@@ -243,5 +243,5 @@ class TestAskMultipleChoiceRejectsNullBeforeLogging:
             raise AssertionError( "must not reach the transport" )
         monkeypatch.setattr( cv, "notify_user_sync", must_not_run )
 
-        assert cv.ask_multiple_choice.fn( 42 )[ "error" ]
-        assert cv.ask_open_ended_batch.fn( 42 )[ "error" ]
+        assert cv.ask_multiple_choice.fn.sync( 42 )[ "error" ]
+        assert cv.ask_open_ended_batch.fn.sync( 42 )[ "error" ]

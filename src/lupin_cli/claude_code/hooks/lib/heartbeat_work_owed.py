@@ -8,7 +8,7 @@ If this oracle reports no owed work, the instance is genuinely done → do NOT
 poke. If work is owed and the per-session poke-cap is not exhausted → poke.
 
 Design authority (LOCKED): planning-is-prompting →
-    src/rnd/2026.06.02-stop-hook-natural-heartbeat-poker.md  §0 #3 + §4.
+    planning-is-prompting/src/rnd/2026.06.02-stop-hook-natural-heartbeat-poker.md  §0 #3 + §4.
 Lupin-side seam analysis: lupin →
     src/rnd/v0.1.8/2026.06.04-heartbeat-hook/01-spike-findings-and-stop-py-seam-analysis.md
 
@@ -161,14 +161,29 @@ HOLD_OVERRIDDEN_CLAUSE = (
 # OWED) so a reader routes to their own case on the first two words instead of
 # parsing four question-form sentences to find which one is theirs. A poke nobody
 # finishes reading is a poke that does not fire.
+#
+# 🔴 OPTION 2 NAMES THE VERB, NOT A FILENAME (row 6698d40f (a), 2026-09-16). It used to say
+# "write .heartbeat-hold-<FULL-hyphenated-session-id>.json": a filename with no directory
+# and no verb, so an agent wrote it where it stood, the repo root, and the hook never
+# honored it. Tiffany and María did exactly that all evening on 2026-09-14. The same shape
+# was taken out of workflow/fleet-pause-resume.md in July and survived here. The verb
+# picks the directory and checks the hook's own search finds the hold.
+#
+# THE ID IS THE STABLE ONE. The hook keys holds on `resolve_stable_session_id`, the
+# PRE-clear id. After a /clear, "your full session id" reads as `claude_code.session_id`,
+# which is the new one, and a hold under it is never read. `get_session_info()` hands an
+# agent both, so the poke names the field.
 POKE_REASON_TEMPLATE = (
     POKE_PROMPT_SENTINEL + " — {specifics}\n{hold_clause}Do ONE now:\n"
     "1. WORK IT — drive it. Manage a crew? Delegate, spawn if tasks > workers. Never build it yourself.\n"
-    "2. PEER-BLOCKED — DM for status, then write .heartbeat-hold-<FULL-hyphenated-session-id>.json "
-    "(NOT the 8-char form) with reason + awaiting: peer:<name>.\n"
+    "2. PEER-BLOCKED — DM for status, then declare a hold with the verb (never hand-write the JSON):\n"
+    "   python3 $LUPIN_ROOT/src/lupin_cli/claude_code/hooks/lib/heartbeat_hold_io.py write "
+    "--session-id <stable id> --persona <you> --reason <why> --awaiting peer:<name>\n"
+    "   <stable id> is claude_code.stable_session_id from get_session_info(), NOT the post-/clear id "
+    "or the 8-char form. It must print \"honored yes\".\n"
     "3. USER-BLOCKED — fire ask_yes_no / ask_multiple_choice / converse THIS turn. Not buried in a "
     "notify, not a hold. Re-ask until answered.\n"
-    "4. NOTHING OWED — prove it: hold with work_owed: false."
+    "4. NOTHING OWED — prove it: the same verb with --no-work-owed (work_owed: false)."
 )
 
 SPECIFICS_JOINER  = "\n- "
@@ -186,7 +201,26 @@ _STATUS_WORDS = { "in_progress": "in progress", "queued": "queued", "parked": "p
 # 10 queued" and "10 queued, 2 in progress" are the same facts in different
 # priority orders, and the first is the one that matches how the work is picked up.
 _STATUS_ORDER   = ( "in_progress", "queued", "parked" )
-_PRIORITY_ORDER = ( "P0", "P1", "P2", "P3" )
+
+# DERIVED, NOT RESTATED. This was a hand-written ( "P0", "P1", "P2", "P3" ) and it
+# went stale the moment the enum widened to P0-P5 (b4cdf47e, row 0107c19e, Rick's
+# broadcast e254ec7d). Counts never went missing — the `unknown` bucket below keeps
+# the parts summing to the whole — but the ORDER did, and the "start with the N Xs"
+# pointer went SILENT on any board holding only the new levels, which is every board
+# minted since P5 became the default for all creation paths.
+#
+# Do NOT replace this with ( "P0" ... "P5" ). That is the same defect with a later
+# expiry date. The server enum is the authority; this module answers to it.
+#
+# The import does NOT breach the PURE CORE constraint in this module's docstring:
+# that rule forbids FETCHING live commons/transcript/TODO state, and this is a
+# static tuple resolved at import. `hooks/lib/task_store_drain.py` imports from
+# cosa.rest at module level the same way, and `user_prompt_submit.py` puts
+# $LUPIN_ROOT/src on sys.path before importing any lupin_cli package, so cosa is
+# reachable at this point in the boot path (measured, both directions, 2026-09-07).
+from cosa.rest.task_store_rules import VALID_PRIORITIES
+
+_PRIORITY_ORDER = tuple( VALID_PRIORITIES )
 
 
 def _join_series( parts ):

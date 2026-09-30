@@ -27,6 +27,50 @@ class NotificationRepository( BaseRepository[Notification] ):
         - Response tracking
     """
 
+    # The `type` value every saved broadcast-ack row carries (row 4f320c27). Declared
+    # HERE, where the query that reads it lives, and imported by the watcher that
+    # writes it — one string, one definition, so the writer and the reader cannot
+    # disagree about what an ack row looks like.
+    #
+    # ⚠️ TWO SQL LITERALS ALSO SPELL IT and cannot import a Python name: the partial
+    # index predicate in migration 9184990becdf and the mirroring ORM `Index` in
+    # postgres_models.py. Change this and you must change both, or the index silently
+    # stops covering the query.
+    BROADCAST_ACK_TYPE = "commons_broadcast_ack"
+
+    # Types that are RECORDS, not conversations. A broadcast ack is a tally element
+    # addressed to the broadcaster: it has no message body, nobody replies to it, and
+    # reading it is what get_latest_acks_for_broadcast is for.
+    #
+    # 🔴 ONE PREDICATE, SIX QUERIES — the ROSTER reads AND the CONVERSATION reads. The
+    # first cut (b9136bcf) excluded acks from the two rosters only, and that was a
+    # defect: saving acks put a new row TYPE into a table the conversation reads also
+    # walk, so `/api/notifications/active-conversation` began answering with a seat
+    # that had merely ACKED, and the history hydration gained date buckets that existed
+    # for no other reason. Measured on a throwaway Postgres 2026-09-23 with exactly one
+    # saved ack; see src/tests/smoke/test_acks_are_not_conversations.py.
+    #
+    # NOTHING SURFACED IT, because the multiplexer's normalizeHistoryRow drops an
+    # empty-message row at RENDER: the rows were invisible while the counts, the date
+    # buckets and the active-conversation pick were all silently wrong.
+    #
+    # DELIBERATELY NOT APPLIED to count_by_sender or get_by_recipient. Both also return
+    # acks, and neither has a caller outside tests — excluding there would be churn in
+    # code nothing reads, and an enumeration of call sites is not a predicate.
+    #
+    # 🔴 THE ROSTER GROUPS BY sender_id AND FILTERS ON NOTHING ELSE, so any row saved
+    # into this table becomes a SENDER. Measured 2026-09-23 on a throwaway Postgres —
+    # one saved ack, no other notifications — and both roster queries returned it as a
+    # live sender with count=1. The multiplexer's strip and sender records hydrate from
+    # /api/notifications/senders-visible, so the seat would have appeared in the
+    # operator's focus bar purely for having acked a broadcast.
+    #
+    # This exclusion is correct INDEPENDENTLY of what sender_id an ack carries: even a
+    # perfectly attributed ack would inflate that seat's notification_count and drag its
+    # last_activity forward, which is a tally element wearing a message's clothes.
+    # Raised by Mr. Radio 🦉 on review, 2026-09-23.
+    NON_CONVERSATION_TYPES = ( BROADCAST_ACK_TYPE, )
+
     def __init__( self, session: Session ):
         """
         Initialize NotificationRepository with session.
@@ -62,7 +106,8 @@ class NotificationRepository( BaseRepository[Notification] ):
         sender_persona: Optional[str] = None,
         sender_icon: Optional[str] = None,
         reply_to: Optional[str] = None,
-        thread_id: Optional[str] = None
+        thread_id: Optional[str] = None,
+        payload: Optional[dict] = None
     ) -> Notification:
         """
         Create new notification.
@@ -79,6 +124,8 @@ class NotificationRepository( BaseRepository[Notification] ):
             - created_at set to current timestamp
             - Response fields populated if response_requested
             - Abstract stored if provided (for supplementary context)
+            - payload stored verbatim when provided, NULL otherwise — the structured
+              side-channel a broadcast ack's identity rides in (row 4f320c27)
 
         Returns:
             Created Notification instance
@@ -115,6 +162,7 @@ class NotificationRepository( BaseRepository[Notification] ):
             sender_icon        = sender_icon,
             reply_to           = reply_to,
             thread_id          = thread_id,
+            payload            = payload,
             state              = "created"
         )
 
@@ -284,6 +332,8 @@ class NotificationRepository( BaseRepository[Notification] ):
 
         Ensures:
             - Returns list of {sender_id, last_activity, notification_count}
+            - EXCLUDES NON_CONVERSATION_TYPES, so a seat never appears as a sender
+              purely for having acked a broadcast
             - Ordered by last_activity descending (most recent first)
             - Used for activity-anchored window loading
 
@@ -302,7 +352,8 @@ class NotificationRepository( BaseRepository[Notification] ):
             func.max( Notification.created_at ).label( 'last_activity' ),
             func.count( Notification.id ).label( 'notification_count' )
         ).filter(
-            Notification.recipient_id == recipient_id
+            Notification.recipient_id == recipient_id,
+            Notification.type.notin_( self.NON_CONVERSATION_TYPES )
         ).group_by(
             Notification.sender_id
         ).order_by(
@@ -356,7 +407,8 @@ class NotificationRepository( BaseRepository[Notification] ):
                 func.max( Notification.created_at )
             ).filter(
                 Notification.sender_id == sender_id,
-                Notification.recipient_id == recipient_id
+                Notification.recipient_id == recipient_id,
+                Notification.type.notin_( self.NON_CONVERSATION_TYPES )
             ).scalar()
 
             if last_activity is None:
@@ -370,6 +422,7 @@ class NotificationRepository( BaseRepository[Notification] ):
         return self.session.query( Notification ).filter(
             Notification.sender_id == sender_id,
             Notification.recipient_id == recipient_id,
+            Notification.type.notin_( self.NON_CONVERSATION_TYPES ),
             Notification.created_at >= window_start,
             Notification.created_at <= anchor
         ).order_by(
@@ -597,6 +650,75 @@ class NotificationRepository( BaseRepository[Notification] ):
             Notification.created_at.asc()
         ).limit( limit ).all()
 
+    def get_latest_acks_for_broadcast(
+        self,
+        recipient_id : uuid.UUID,
+        broadcast_id : str,
+        limit        : int = 500
+    ) -> List[Notification]:
+        """
+        The saved acks for ONE broadcast, scoped to one recipient, one row per
+        acking session with the latest ack winning (row 4f320c27 S4).
+
+        🔴 THIS READ IGNORES DELIVERY STATE, AND THAT IS THE POINT. The undelivered
+        drain answers "what did I miss while offline" and therefore skips anything
+        already delivered to a socket. An ack that landed while a browser was open
+        is marked delivered instantly, so a reload asking the undelivered inbox to
+        rebuild the tally gets NOTHING back — the recovery that looks fixed and
+        recovers nothing. This asks a different question: "which seats have acked
+        this broadcast", whose answer does not depend on whether a socket happened
+        to be open at the time. `state` and `delivered_at` are not filtered on here
+        and must not be added; the undelivered drain's own filter stays as it is.
+
+        NOT A NEW AGGREGATE (María's line, 2026-09-23). There is no ack table and no
+        ack cache — this reads the same `notifications` rows S3 writes, and it works
+        only because those acks are saved. An aggregate that did not depend on the
+        saved rows would be option C, which Rick did not choose.
+
+        WHY THE LATEST-WINS FOLD IS IN PYTHON. A seat can ack the same broadcast more
+        than once (`broadcast_handler` re-posts on a status change — pending, then
+        completed), so a raw read returns duplicates per session and a tally built on
+        it double-counts. `DISTINCT ON` would push the fold into Postgres but binds
+        this method to one dialect for a set bounded by the live fleet size, which is
+        dozens of rows. The fold below is the whole rule, visible in one place.
+
+        Requires:
+            - recipient_id: the broadcast originator's user UUID (the authorization
+              scope — an ack is readable only by the account it was addressed to)
+            - broadcast_id: the broadcast's id as written into payload['broadcast_id']
+            - limit: positive int cap on the PRE-fold row scan
+
+        Ensures:
+            - returns only rows of type 'commons_broadcast_ack' for this recipient
+              whose payload['broadcast_id'] matches, whatever their state
+            - excludes soft-deleted/archived rows (is_hidden = True)
+            - at most one row per payload['session_id'], the newest by created_at
+            - a row whose payload carries no session_id is keyed by its own id, so it
+              is returned rather than silently collapsed with every other such row
+            - ordered newest-first
+            - honors limit on the scan, so the fold can only ever shrink the result
+
+        Returns:
+            List of Notification instances, one per acking session, newest first
+        """
+        rows = self.session.query( Notification ).filter(
+            Notification.recipient_id == recipient_id,
+            Notification.type         == self.BROADCAST_ACK_TYPE,
+            Notification.is_hidden    == False,
+            Notification.payload[ "broadcast_id" ].astext == broadcast_id
+        ).order_by(
+            desc( Notification.created_at )
+        ).limit( limit ).all()
+
+        latest_per_session = { }
+        for row in rows:
+            payload    = row.payload or { }
+            session_id = payload.get( "session_id" ) or f"__no_session__{row.id}"
+            # rows arrive newest-first, so the FIRST sighting of a session is its latest
+            if session_id not in latest_per_session:
+                latest_per_session[ session_id ] = row
+        return list( latest_per_session.values() )
+
     def count_undelivered_for_recipient( self, recipient_id: uuid.UUID, max_age_hours: Optional[int] = None ) -> int:
         """
         Count the recipient's UNDELIVERED notifications (lever D — accurate "N missed").
@@ -696,28 +818,103 @@ class NotificationRepository( BaseRepository[Notification] ):
             Notification.expires_at.asc()
         ).all()
 
-    def mark_expired( self, notification_id: uuid.UUID ) -> Optional[Notification]:
+    def mark_expired(
+        self,
+        notification_id: uuid.UUID,
+        apply_default  : bool          = True,
+        expected_state : Optional[str] = None
+    ) -> Optional[Notification]:
         """
         Mark notification as expired (timeout reached).
 
         Requires:
             - notification_id: Valid notification UUID
+            - apply_default: whether to stamp response_default as the answer
+            - expected_state: the state the COMMITTED row must still be in for
+              this write to happen at all, or None to write unconditionally
 
         Ensures:
             - state set to 'expired'
-            - Can optionally apply response_default if configured
+            - when expected_state is not None, the write happens IFF the
+              committed row is still in that state; otherwise NOTHING is
+              written and None is returned
+            - applies response_default as a "timeout_default" response_value
+              when apply_default is True (the default, so every pre-existing
+              caller is unchanged) and a default is configured
+            - writes NO response_value when apply_default is False
+
+        WHY apply_default EXISTS (row bf4f65c3). On the TIMEOUT path a waiter
+        is still attached and the default is genuinely returned to it, so
+        recording it is true. The orphan SWEEPER reaches rows whose asking
+        client walked away: nobody is waiting and nothing consumes the value,
+        so stamping one would assert that an answer was supplied when none
+        ever reached anyone. The sweeper passes False.
+
+        WHY expected_state EXISTS, AND WHY IT IS A `WHERE` CLAUSE AND NOT AN
+        `if` (row bf4f65c3). Both writers of this row read it first and write
+        it second, in separate transactions. A /respond landing between another
+        caller's read and its write was overwritten: the row kept the human's
+        response_value and had its state stamped 'expired' anyway, so it
+        carried a real answer while claiming nobody ever gave one.
+
+        A RE-READ HERE WOULD NOT HAVE CLOSED IT, AND THAT IS MEASURED RATHER
+        THAN REASONED. Real Postgres 16.14, two sessions, one row: the sweeper
+        loads the candidate through get_expired_notifications(), a second
+        session commits the human's answer, and then, in the sweeper's own
+        session at the same instant —
+
+            get_by_id( ... ).state          -> 'delivered'   (the SCAN-TIME value)
+            raw SQL, same session           -> 'responded'   (the truth)
+
+        BaseRepository.get_by_id is `query().filter().first()`, and SQLAlchemy
+        serves an object already in the identity map without refreshing it. So
+        the obvious `if notification.state == expected` guard would have PASSED
+        and stamped 'expired' over the answer exactly as the unguarded code
+        does. The same run reproduces that overwrite directly: state='expired'
+        on a row still carrying {'value': 'yes', 'source': 'ui'}.
+
+        Putting the state in the WHERE clause hands the decision to Postgres,
+        which evaluates it against the COMMITTED row. The write either matches
+        or it does not, and there is no window between the two. Measured both
+        ways at the same sha — it REFUSES when a peer answered first, and it
+        WRITES when nobody did, which is what makes the refusal a guard rather
+        than a permanent no.
+
+        Receipt: src/tests/smoke/test_mark_expired_refuses_to_overwrite_a_live_answer.py
 
         Returns:
-            Updated Notification instance or None if not found
+            Updated Notification instance, or None — which means EITHER the
+            row does not exist OR expected_state was given and the row had
+            already moved on. Those are two different facts wearing one
+            return value; a caller that needs to tell them apart must ask the
+            row directly. The sweeper deliberately does not, because it treats
+            both as "not mine to close" — but it does COUNT them, so a refusal
+            is visible rather than reported as a sweep.
         """
-        notification = self.get_by_id( notification_id )
-        if not notification:
-            return None
+        if expected_state is not None:
+            # synchronize_session="fetch" so an in-session ORM object's state
+            # reflects the write. Without it a caller still holding the object
+            # would keep reading the pre-update value.
+            matched = self.session.query( Notification ).filter(
+                Notification.id    == notification_id,
+                Notification.state == expected_state
+            ).update( { "state": "expired" }, synchronize_session="fetch" )
 
-        notification.state = "expired"
+            if matched == 0:
+                return None
+
+            notification = self.get_by_id( notification_id )
+            if not notification:
+                return None
+        else:
+            notification = self.get_by_id( notification_id )
+            if not notification:
+                return None
+
+            notification.state = "expired"
 
         # If default response was configured, apply it
-        if notification.response_default:
+        if apply_default and notification.response_default:
             notification.response_value = {"value": notification.response_default, "source": "timeout_default"}
 
         self.session.flush()
@@ -860,7 +1057,8 @@ class NotificationRepository( BaseRepository[Notification] ):
                 func.max( Notification.created_at )
             ).filter(
                 Notification.sender_id == sender_id,
-                Notification.recipient_id == recipient_id
+                Notification.recipient_id == recipient_id,
+                Notification.type.notin_( self.NON_CONVERSATION_TYPES )
             ).scalar()
 
             if last_activity is None:
@@ -875,6 +1073,7 @@ class NotificationRepository( BaseRepository[Notification] ):
         query = self.session.query( Notification ).filter(
             Notification.sender_id == sender_id,
             Notification.recipient_id == recipient_id,
+            Notification.type.notin_( self.NON_CONVERSATION_TYPES ),
             Notification.created_at >= window_start,
             Notification.created_at <= anchor
         )
@@ -1003,7 +1202,8 @@ class NotificationRepository( BaseRepository[Notification] ):
         # Build query
         query = self.session.query( Notification ).filter(
             Notification.sender_id == sender_id,
-            Notification.recipient_id == recipient_id
+            Notification.recipient_id == recipient_id,
+            Notification.type.notin_( self.NON_CONVERSATION_TYPES )
         )
 
         if not include_hidden:
@@ -1048,6 +1248,8 @@ class NotificationRepository( BaseRepository[Notification] ):
 
         Ensures:
             - Returns list of {sender_id, last_activity, notification_count, new_count}
+            - EXCLUDES NON_CONVERSATION_TYPES, so a seat never appears in the operator
+              focus bar purely for having acked a broadcast
             - Excludes senders with all notifications hidden (unless include_hidden)
             - When exclude_job_ids provided, excludes notifications matching those job IDs
               AND notifications with NULL job_id (system/direct notifications are "mine")
@@ -1068,7 +1270,8 @@ class NotificationRepository( BaseRepository[Notification] ):
                 )
             ).label( 'new_count' )
         ).filter(
-            Notification.recipient_id == recipient_id
+            Notification.recipient_id == recipient_id,
+            Notification.type.notin_( self.NON_CONVERSATION_TYPES )
         )
 
         if not include_hidden:
@@ -1149,6 +1352,7 @@ class NotificationRepository( BaseRepository[Notification] ):
             Notification.sender_id
         ).filter(
             Notification.recipient_id == recipient_id,
+            Notification.type.notin_( self.NON_CONVERSATION_TYPES ),
             Notification.is_hidden == False
         ).order_by(
             desc( Notification.created_at )

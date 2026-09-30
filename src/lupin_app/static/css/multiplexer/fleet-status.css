@@ -63,7 +63,7 @@
 }
 
 .fleet-status-refresh:focus-visible {
-    outline: 2px solid rgba(108, 117, 125, 0.6);
+    outline: 2px solid rgb(108, 117, 125, 0.6);
     outline-offset: 2px;
 }
 
@@ -96,7 +96,7 @@
 }
 
 .fleet-offline-toggle-btn:focus-visible {
-    outline: 2px solid rgba(108, 117, 125, 0.6);
+    outline: 2px solid rgb(108, 117, 125, 0.6);
     outline-offset: 2px;
 }
 
@@ -173,7 +173,7 @@
 
 /* Stuck rows: red emphasis (§5) */
 .fleet-row-stuck td {
-    background: rgba(220, 53, 69, 0.06);
+    background: rgb(220, 53, 69, 0.06);
 }
 
 .fleet-col-stuck.fleet-stuck-yes {
@@ -209,6 +209,7 @@
    Status-dot + 3px row left-accent, color-keyed by the verdict word. Mirrors
    the legacy scheme (notifications.css, commit f2733cf). Color is ALWAYS
    redundant with the verdict WORD in the Liveness cell (WCAG 1.4.1). */
+/* stylelint-disable-next-line no-duplicate-selectors -- disjoint from the earlier block of this selector (width, border-collapse, font-size); this one sets the --fleet-* verdict colour tokens, kept in its own documented section (row d3d4a18c) */
 .fleet-status-table {
     --fleet-live:    #2e7d32;  /* green  — fresh signal within the live window  */
     --fleet-quiet:   #1565c0;  /* blue   — recently active, within alive window */
@@ -244,9 +245,13 @@
 /* ---- %-Window heat-tint (cell background) ----
    Breakpoints mirror fleetHeatClass: low < 50 · mid 50–79 · high ≥ 80 (bold).
    An unmeasured "—" cell carries no class → untinted. 0% tints low (green). */
-.fleet-status-table .fleet-pct-low  { background: rgba(  46, 125,  50, 0.12 ); }
-.fleet-status-table .fleet-pct-mid  { background: rgba( 245, 127,  23, 0.16 ); }
-.fleet-status-table .fleet-pct-high { background: rgba( 198,  40,  40, 0.16 ); color: #8b1a1a; font-weight: 600; }
+.fleet-status-table .fleet-pct-low  { background: rgb(  46, 125,  50, 0.12 ); }
+.fleet-status-table .fleet-pct-mid  { background: rgb( 245, 127,  23, 0.16 ); }
+.fleet-status-table .fleet-pct-high {
+    background: rgb( 198,  40,  40, 0.16 );
+    color: #8b1a1a;
+    font-weight: 600;
+}
 
 /* State-message banners (offline / empty / sign-in) — §6.4 */
 .fleet-status-message {
@@ -273,4 +278,77 @@
     background: #f8d7da;
     color: #721c24;
     border: 1px solid #f5c6cb;
+}
+
+/* ---- Fleet-size-cap dial (Parity A-2 #5, row 18d06df7) ----
+   Ported from legacy notifications.css `.fleet-size-cap-*`. The renderer mounts the
+   cluster between the section header and the table, as a `.section-content` child,
+   so the pane's collapse hides it with the table. Not in the header bar: that bar
+   toggles the section, so a range input there would collapse the pane on every drag. */
+.fleet-size-cap-controls {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px 14px;
+    margin: 0 0 12px 0;
+    padding: 8px 12px;
+    border: 1px solid #e9ecef;
+    border-left: 4px solid #5e35b1;
+    border-radius: 4px;
+    background: #fbfbfd;
+    font-size: 12px;
+    color: #495057;
+}
+
+/* The `display: flex` above beats the UA stylesheet's `[hidden] { display: none }`,
+   so without this companion the `hidden` attribute is inert, and the renderer relies
+   on it to keep an unreadable endpoint from showing a cap nobody is enforcing. */
+.fleet-size-cap-controls[hidden] {
+    display: none;
+}
+
+/* Keep the label with its own slider when the row wraps. */
+.fleet-size-cap-field {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+}
+
+.fleet-size-cap-controls label {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.fleet-size-cap-controls output {
+    min-width: 48px;
+    padding: 1px 6px;
+    border-radius: 10px;
+    background: #ede7f6;
+    color: #4527a0;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+}
+
+.fleet-size-cap-controls input[ type="range" ] {
+    width: 140px;
+    accent-color: #5e35b1;
+    vertical-align: middle;
+}
+
+/* The saving state: the handle is disabled while the PUT is in flight. Not colour
+   alone (WCAG 1.4.1): the status line also says "saving N…" in text. */
+.fleet-size-cap-controls input[ type="range" ]:disabled {
+    cursor: not-allowed;
+    opacity: 0.75;
+}
+
+.fleet-size-cap-status {
+    color: #6c757d;
+    font-size: 11px;
+    font-style: italic;
 }

@@ -30,9 +30,15 @@ from pathlib import Path
 from typing  import Any, Callable, Dict, List, Optional, Tuple
 
 from lupin_mcp.persona_normalization import persona_slug
+from lupin_mcp import fleet_size_cap
 from lupin_mcp import reap_memento
+from lupin_mcp import reap_branch
+from cosa.agents.shared import seat_teardown
 from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
 from cosa.agents.utils.sender_id import detect_project
+from cosa.utils.worktree_venv import provision_worktree_venv
+from cosa.utils.worktree_artifacts import provision_worktree_artifacts
+from cosa.utils.seat_worktree  import provision_seat_worktree, drift_disclosure
 
 
 # Default ceiling on concurrent reviewers a single manager may spawn. Overridden
@@ -139,7 +145,9 @@ def render_task_prompt(
         - template is a string (may contain {role} {section} {scope_sentence}
           {cascade_name} {parent_topic} {manager_session_id} placeholders)
         - tokens is a dict of name→value or None
-        - seed_memento is a string (prior-context blob) or None
+        - seed_memento is a string or None. 🔴 EITHER A BLOB OR A PATH — see the
+          note under Args; this line used to say "blob" while the MCP tool's said
+          "path/ref", and both described the same code (row 75b36135)
 
     Ensures:
         - Each "{name}" occurrence whose name is in tokens is replaced by str(value)
@@ -154,7 +162,38 @@ def render_task_prompt(
     Args:
         template: the task template
         tokens: placeholder substitutions
-        seed_memento: optional prior-context blob to append as a reference
+        seed_memento: optional prior context to append as a reference. It is
+            appended VERBATIM and is never read, resolved or validated here, so it
+            may be EITHER of two things and this function cannot tell them apart:
+
+              · a prior-context BLOB — the memento's content
+              · a PATH to a memento record — which is what CLAUDE.md's re-spin
+                ladder tells the fleet to pass, and what the child then opens itself
+
+            🔴 THE TWO DOCSTRINGS USED TO DISAGREE (row 75b36135, 2026-09-05). This
+            one said "blob"; the MCP `spawn_sessions` tool said "path/ref". Both
+            described the SAME code, so the split was never a behaviour difference —
+            it was one caller reading one contract and another caller reading the
+            other, with nothing able to tell them they had picked differently.
+
+            ⚠️ AND THE PATH FORM IS THE ONE THAT WAS UNGUARDED. Every test pinned the
+            blob side; ZERO passed a path-shaped value, so the contract the fleet is
+            INSTRUCTED to use was watched by nothing. Closed by
+            src/tests/unit/test_seed_memento_accepts_a_path_not_only_a_blob.py.
+
+            MEASURED, so the path half is not merely asserted: a census of 1,660
+            transcripts found 270 carrying the seed heading, 130 of them with an
+            ABSOLUTE path, and every one of those 130 children opened a memento file.
+            ⇒ a DOCUMENTATION defect, not the silent-wrong-seed failure it looked like.
+            ⚠️ Two limits kept rather than rounded off: 103 relative-path seeds and 31
+            unparsed bodies were NOT measured, so 130 is a FLOOR on that population;
+            and "opened" is not "used what it read" — the nonce arm that would answer
+            the second question has never run.
+
+            ⚠️ The heading this is appended under says "your earlier work on this",
+            which asserts CONTENT while the body may be a filename. Recorded on the row
+            as an open tidiness question, NOT a proposed change: it cost nothing
+            measurable across those 130 cases.
 
     Returns:
         str: the rendered task prompt
@@ -319,6 +358,170 @@ def _write_manifest( path: Path, records: List[ Dict[ str, Any ] ] ) -> bool:
 
 # ── Orchestration ─────────────────────────────────────────────────────────────
 
+def venv_alarm( provisioning ):
+    """
+    A one-line, top-level alarm when a spawn's seat could not be given an interpreter.
+
+    WHY A SEPARATE TOP-LEVEL FIELD rather than leaving the verdict in the nested
+    result: the reap learned this the hard way (row 3b0c5f90). Its per-seat memento
+    verdicts were honest and nested, and managers missed them, because a caller reads
+    the top of a result. A provisioning failure only discoverable by opening a
+    sub-dict is a failure that reports as success.
+
+    Requires:
+        - provisioning is the dict returned by provision_worktree_venv, or None
+
+    Ensures:
+        - returns None when the seat has a usable interpreter, or when there was
+          nothing to provision (no work_dir, no script, or the main checkout) — the
+          field appears only when it means something
+        - returns a single human-readable line naming the target and the reason
+          otherwise
+        - never raises
+
+    Returns:
+        str | None
+    """
+    if not provisioning or provisioning.get( "status" ) != "failed": return None
+    return (
+        f"the spawned seat's tree {provisioning.get( 'target' )} has no usable .venv "
+        f"(exit {provisioning.get( 'exit_code' )}): {provisioning.get( 'detail' )} "
+        f"- it will fail unit tests that a provisioned tree passes"
+    )
+
+
+def artifact_alarm( provisioning ):
+    """
+    A one-line, top-level alarm when a seat's tree did not get its borrowed artifacts.
+
+    WHY THIS IS NOT A CLAUSE INSIDE `venv_alarm` (row dde8b87a). The two answer
+    different questions and they failed independently for months: a tree can have a
+    perfectly good interpreter and still be unable to run a single `.test.ts`. Folding
+    them together would put two claims behind one field, and the whole point of this row
+    is that `INTERPRETER OK` was read as a claim about the tree when it was only ever a
+    claim about the interpreter.
+
+    ⚠️ SOURCE_ABSENT IS NOT AN ALARM. A main checkout that never ran `npm install` has
+    nothing to lend; that is the operator's business and not a provisioning failure.
+    Alarming on it would make this fire on every spawn on a fresh box, and an alarm that
+    fires always is an alarm nobody reads.
+
+    Requires:
+        - provisioning is the dict returned by provision_worktree_artifacts, or None
+
+    Ensures:
+        - returns None when there is nothing wrong, or when there was nothing to
+          provision (no work_dir, no script, or the main checkout) — the field appears
+          only when it means something, same contract as venv_alarm
+        - returns a single human-readable line naming the target, the exit code and the
+          artifacts that did not land otherwise
+        - never raises
+
+    Returns:
+        str | None
+    """
+    if not provisioning or provisioning.get( "status" ) != "failed": return None
+    artifacts = provisioning.get( "artifacts" ) or {}
+    unlanded  = sorted( rel for rel, outcome in artifacts.items() if outcome == "REFUSED" )
+    named     = ", ".join( unlanded ) if unlanded else "nothing reported"
+    return (
+        f"the spawned seat's tree {provisioning.get( 'target' )} did not get its "
+        f"borrowed artifacts ({named}, exit {provisioning.get( 'exit_code' )}) "
+        f"- a TypeScript run there will die naming a package, not a tree"
+    )
+
+
+def placement_alarm( provisioning ):
+    """
+    A one-line, top-level alarm when a spawn puts a seat in the SHARED MAIN CHECKOUT.
+
+    WHY THIS IS NOT A CLAUSE INSIDE `venv_alarm`. Exit 3 from the part-1 script carries
+    two facts at once: provisioning has nothing to do (benign, correct), and the seat is
+    standing in the tree the whole fleet shares (not benign). Folding the second into a
+    field named for the venv is the defect this closes, one level up — the only text a
+    caller ever saw was the script's own `detail`, which is a sentence about a venv, so
+    a careful operator read it as one. Measured 2026-09-02: two workers landed in the
+    main checkout and one wrote to it during a live 14-minute tier run. A separate field
+    names the right subject; `venv_alarm` stays about venvs and keeps returning None
+    here, because there is genuinely no venv problem.
+
+    Requires:
+        - provisioning is the dict returned by provision_worktree_venv, or None
+
+    Ensures:
+        - returns None unless the seat landed in the main checkout — the field appears
+          only when it means something, same contract as venv_alarm
+        - returns a single human-readable line naming the tree and saying plainly that
+          it is the shared main checkout, otherwise
+        - never raises
+
+    Returns:
+        str | None
+    """
+    if not provisioning or provisioning.get( "status" ) != "main_repo": return None
+    return (
+        f"the spawned seat landed in {provisioning.get( 'target' )}, which is the "
+        f"SHARED MAIN CHECKOUT and not an isolated worktree - anything it edits or runs "
+        f"there is visible to every other seat on this repo"
+    )
+
+
+def _alarming_seat( seat_verdicts ):
+    """
+    The ONE seat the top-level fields describe.
+
+    🔴 WHY ONE SEAT AND NOT A MIX (Rachel, reviewing 2026-09-03). The first cut of this
+    reported `venv_provisioning` from seat 0 while both alarms came from the first
+    ALARMING seat. A caller reading the pair together got a verdict about one seat and
+    an alarm about another, with nothing in the payload saying they were different
+    seats. That is a confident answer to a question nobody asked — the same defect the
+    per-seat rows exist to remove, re-created one level up in the summary.
+
+    Requires:
+        - seat_verdicts is the per-seat list built in the spawn loop
+
+    Ensures:
+        - returns the first seat with something wrong, so the summary describes the seat
+          a reader needs to look at
+        - falls back to the first seat when every seat is clean, so the shape of the
+          payload does not change on a healthy spawn
+        - returns None for an empty list
+        - never raises
+    """
+    for verdict in seat_verdicts:
+        if ( venv_alarm( verdict.get( "venv" ) )
+             or placement_alarm( verdict.get( "venv" ) )
+             or artifact_alarm( verdict.get( "artifacts" ) ) ):
+            return verdict
+    return seat_verdicts[ 0 ] if seat_verdicts else None
+
+
+def _first_alarm( seat_verdicts, key, render ):
+    """
+    The first seat verdict that has something to say, or None.
+
+    WHY FIRST AND NOT ALL (row 9d654899). These two fields exist because a caller reads
+    the TOP of a result and misses a nested dict — they are a flag, not a report. One
+    line naming one seat is enough to send a reader to `seat_worktrees`, where every
+    seat is listed. Concatenating N alarms would recreate the wall of text that made
+    the reap's nested verdicts unreadable.
+
+    Requires:
+        - seat_verdicts is a list of per-seat dicts; key names the sub-dict to render
+        - render is venv_alarm or placement_alarm
+
+    Ensures:
+        - returns the first non-None rendering, or None when every seat is clean
+        - an empty list returns None
+        - never raises
+    """
+    for verdict in seat_verdicts:
+        line = render( verdict.get( key ) )
+        if line is not None:
+            return line
+    return None
+
+
 def _resolve_project_root( project ):
     """
     Resolve a project NAME to its repository root on this host (row 697a85fe).
@@ -434,6 +637,104 @@ def _main_checkout_of( start ):
     return start
 
 
+def default_fleet_gate( requested, config_fn=None, census_fn=None ):
+    """
+    The live fleet-cap check: read the cap, count the fleet, return a refusal or None.
+
+    Requires:
+        - requested >= 1
+        - config_fn() -> a ConfigurationManager, or None
+        - census_fn() -> an iterable of (bridge_path, session_id, persona) triples
+
+    Ensures:
+        - returns None when the spawn fits under the cap
+        - otherwise returns the refusal string, naming cap, total, split and headroom
+        - NEVER raises and NEVER reaps — an unreadable fleet ALLOWS the spawn
+
+    🔨 FAIL-OPEN, AND THIS IS THE ONE PLACE TONIGHT I CHOSE OPEN OVER CLOSED. The
+    promotion gate fails CLOSED because it guards an authorisation: not knowing who is
+    asking is a reason to refuse. This guards a RESOURCE LIMIT, and the failure modes
+    are not symmetric — a broken census that refuses every spawn takes the whole fleet
+    down over a bridge-read error, while one that allows lets the cap be briefly
+    exceeded and the next spawn re-checks. Rick's own ruling points the same way: over
+    cap REAPS NOBODY, so the cap is a soft brake by design rather than a hard interlock.
+
+    ⚠️ SAID OUT LOUD BECAUSE IT CONTRADICTS THE OTHER GATE I BUILT TODAY, and a reader
+    meeting both should see that the difference is deliberate rather than an
+    inconsistency somebody missed.
+    """
+    try:
+        # 🔴 THE FRESH DISK READ APPLIES TO THE DEFAULT SOURCE ONLY, AND THAT BOUNDARY IS
+        # THE WHOLE OF IT. When nobody injects a config the cap comes from the
+        # process-lifetime ConfigurationManager singleton, which has no reload — so in
+        # the long-running MCP an operator's slider move would not bite until a bounce,
+        # and `default_disk_cap_reader` closes that.
+        #
+        # But an INJECTED `config_fn` is a caller saying "this is the configuration".
+        # Letting the real INI outvote it would make the injection a no-op: the gate's
+        # own guards hand it a cap of 3 and would silently be answered by the live file's
+        # 8. Measured — two of them went red the moment the disk read was unconditional,
+        # and the honest fix is this boundary rather than pinning the file in the tests.
+        disk_fn = None
+        if config_fn is None:
+            from cosa.config.configuration_manager import ConfigurationManager
+            config_fn = lambda: ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+            disk_fn   = fleet_size_cap.default_disk_cap_reader
+        # 🔴 THE CAP COUNTS LIVE SEATS, NOT NAMED ONES (row 9c3b817a). This used to call
+        # `find_active_voice_persona_sessions`, i.e. `require_persona=True` — the
+        # POOL-OCCUPANCY projection, which is correct for `/allocate` ("which persona
+        # names are taken") and wrong for a cap ("how many sessions exist"). Measured on
+        # five live seats: it returned ONE. It drops every bridge without a parseable
+        # `voice_persona` dict, and the common shape is not corruption — it is a seat
+        # MID-BOOT, before allocation, which every seat passes through on its way up.
+        #
+        # ⚠️ THE LIVENESS FILTER IS UNCHANGED. Only the persona-parseability filter is
+        # dropped. A dead seat must still not count, or the cap binds on ghosts nothing
+        # can reap.
+        unreadable_paths = [ ]
+        if census_fn is None:
+            from lupin_cli.claude_code.hooks.lib.session_bridge import find_active_sessions
+            census_fn = lambda: find_active_sessions( require_persona=False,
+                                                      unreadable_out=unreadable_paths )
+        # 🔴 THE COUNTING PREDICATE, NOT THE AUTHORIZATION ONE. This used to pass
+        # `is_manager_figure`, which classifies by PERSONA NAME and lets that name win
+        # over an explicit declared role — measured 2026-09-04, Cheech carried
+        # role="author" with a lineage and counted as a MANAGER while John carried the
+        # identical role and counted as a worker. `is_manager_figure` is UNCHANGED and
+        # must stay so: it gates store WRITES, where the name rule is ratified and the
+        # fail-CLOSED degrade is deliberate. A similar name is not a shared predicate.
+        cap    = fleet_size_cap.resolve_fleet_cap( config_fn(), disk_fn=disk_fn )
+        # `unreadable_paths` is filled BY the census_fn call on the line above — a live
+        # bridge that could not be identified is handed back through the scanner's own
+        # out-parameter rather than by walking the directory again. An INJECTED census_fn
+        # leaves it empty, which is right: a caller supplying its own population is
+        # stating that population in full.
+        sessions = census_fn()
+        counts   = fleet_size_cap.census( sessions, fleet_size_cap.default_counting_classifier,
+                                          unreadable=len( unreadable_paths ) )
+        return fleet_size_cap.refusal_for_spawn( requested, counts, cap )
+    except Exception as e:
+        # See the fail-open ruling above. A census that cannot be taken is not evidence
+        # the fleet is full.
+        #
+        # 🔴 IT SAYS SO OUT LOUD, AND THAT LINE IS THE WHOLE OF THIS BRANCH'S CHANGE.
+        # The behaviour is untouched: it still returns None, still allows the spawn,
+        # still reaps nobody. What it no longer does is decline SILENTLY. Two seats
+        # disagreed on 2026-09-04 about whether the cap had refused — one measured a
+        # refusal at cap 8 / total 9, another watched the count go 10 to 12 — and
+        # NEITHER account could be checked, because a gate that fails open leaves no
+        # trace at all. The gate could not say "I did not refuse."
+        #
+        # ⚠️ This does NOT establish that this branch ever fired. It is what makes the
+        # next disagreement answerable instead of unanswerable.
+        try:
+            print( f"[FLEET-CAP-GATE] DECLINED TO ANSWER, spawn ALLOWED: "
+                   f"{type( e ).__name__}: {e}", flush=True )
+        except Exception:
+            pass                  # a gate must never fail because its own logging did
+        return None
+
+
 def spawn_sessions(
     count              : int,
     task_prompt        : str,
@@ -447,6 +748,9 @@ def spawn_sessions(
     seed_memento       : Optional[ str ] = None,
     tokens             : Optional[ Dict[ str, Any ] ] = None,
     spawn_cap          : int = DEFAULT_SPAWN_CAP,
+    fleet_gate_fn      : Callable = default_fleet_gate,
+    fleet_config_fn    : Optional[ Callable ] = None,
+    fleet_census_fn    : Optional[ Callable ] = None,
     dry_run            : bool = False,
     model              : Optional[ str ] = None,
     runner             : Callable = default_runner,
@@ -516,7 +820,10 @@ def spawn_sessions(
         persona_preference: str | list — ordered persona chain transported to
             the children via COSA_VOICE_PERSONA_CHAIN (see
             src/rnd/v0.1.8/2026.06.11-multi-manager-env-var-and-persona-preference-transport-fix.md)
-        seed_memento: optional prior-context blob for author continuity
+        seed_memento: optional prior context for author continuity — a BLOB or a
+            PATH to a memento record; passed through to `render_task_prompt`
+            verbatim, which is the one place the contract is written out in full
+            (row 75b36135)
         tokens: extra template tokens
         spawn_cap: max children
         dry_run: pass --dry-run; do not persist the manifest
@@ -533,6 +840,36 @@ def spawn_sessions(
         raise ValueError( f"count must be ≥ 1 (got {count})" )
     if count > spawn_cap:
         raise ValueError( f"count {count} exceeds spawn cap {spawn_cap}" )
+
+    # ── THE FLEET-WIDE CAP, RICK'S THREE RULINGS, ENFORCED HERE ──────────────────
+    #
+    # 🔨 The module existed and NOTHING CALLED IT. `resolve_fleet_cap` shipped at
+    # `93f167e4` with zero production callers, so the dial turned and governed nothing
+    # — which is why the slider was held: an operator moving a control that changes
+    # nothing is worse than no control. This is the call site that makes it real.
+    #
+    # His rulings, applied and NOT re-derived: ONE number for the whole fleet, whoever
+    # spawns; over-cap REFUSES the new spawn and REAPS NOBODY; every session counts,
+    # managers included.
+    #
+    # ⚠️ THE SEAM IS `fleet_gate_fn` AND IT IS DELIBERATELY NOT THE THING TESTS SHOULD
+    # PATCH. On 2026-09-03 a gate shipped whose only live path could not run, because
+    # all 25 of its tests injected past the seam and the default never executed once.
+    # The default here reads config and the live bridges through `census_fn`, so a test
+    # can drive the REAL gate by supplying sessions one level lower instead of
+    # replacing the gate wholesale.
+    # ⚠️ THE SEAM IS REACHABLE FROM HERE NOW, WHICH IT WAS NOT WHEN IT SHIPPED. The
+    # comment above says a test should "drive the REAL gate by supplying sessions one
+    # level lower" — and there was no parameter to supply them through, so the only way
+    # past the gate was to replace it wholesale, which is the thing that comment warns
+    # against. `fleet_config_fn` / `fleet_census_fn` are threaded through when given, so
+    # a caller can pin the world without stubbing the policy.
+    if fleet_config_fn is not None or fleet_census_fn is not None:
+        refusal = fleet_gate_fn( count, config_fn=fleet_config_fn, census_fn=fleet_census_fn )
+    else:
+        refusal = fleet_gate_fn( count )
+    if refusal:
+        raise ValueError( refusal )
 
     # `project` NOW GENUINELY SETS THE CHILD'S WORKING DIRECTORY (row 697a85fe,
     # Rick's ruling 2026-08-19). It used to be a label read nowhere, while the
@@ -575,6 +912,54 @@ def spawn_sessions(
             f"The caller's own repo here is {detect_project()!r}."
         )
 
+    # ── Give the seat a .venv it can actually run the unit tier with (row 9b2abfb7) ──
+    #
+    # `.venv` is gitignored, so `git worktree add` never produces one, and four unit
+    # files shell out to `<PROJECT_ROOT>/.venv/bin/{python,pytest}`. A seat landing in
+    # a venv-less worktree therefore sees failures that are a property of WHERE IT IS
+    # STANDING and not of the branch. Measured on ONE tree at ONE sha (1daf5b1b) with
+    # only the symlink flipped, over the SEVEN unit files known to carry this:
+    # 35 failed without a .venv, 0 failed with one. Say the population out loud — a
+    # bare "35" invites comparison with counts taken over different file sets, and
+    # three such counts already exist for this same defect.
+    #
+    # PLACED HERE, NOT INSIDE `_resolve_project_root`, on purpose. This is the same
+    # moment in the same code path — the resolver has exactly one caller — but keeping
+    # a function named `_resolve_…` free of side effects means the unit tests that call
+    # it directly do not start shelling out to a real script. Ruled by Mr. Radio,
+    # 2026-08-31.
+    #
+    # ⚠️ FAIL OPEN. `provision_worktree_venv` never raises and never blocks: a seat
+    # without a venv is worse off, a spawn that dies because provisioning failed is
+    # worse still. It logs at WARNING on anything it could not finish. A falsy
+    # `work_dir` — an explicit project=None, which inherits the caller's own cwd — is a
+    # deliberate no-op, because this code does not know where that seat will land and
+    # must not guess.
+    #
+    # 🔴 THE RESULT IS CAPTURED AND SURFACED, NOT DISCARDED (Rio, reviewing this
+    # change). Calling this and dropping its answer would make a spawn report success
+    # while the seat it just created cannot run its own test tier — the exact shape
+    # this repo already names: a clean exit is not evidence the work happened. So the
+    # verdict rides back on the payload, and a FAILURE gets a top-level alarm on the
+    # same reasoning as the reap's `memento_alarm` (row 3b0c5f90): a caller reads the
+    # top of a result, not a nested dict, and honest-but-nested is how the reap's
+    # verdicts were missed. `venv_alarm` is None when nothing went wrong, so the line
+    # only appears when it means something.
+    #
+    # 🔴 AND ONE CALL ANSWERS TWO QUESTIONS, SO IT GETS TWO ALARMS. Exit 3 means
+    # provisioning had nothing to do AND the seat is in the shared main checkout.
+    # `placement_alarm` carries the second, because a field named for the venv is where
+    # that fact went to die — see its docstring for the 2026-09-02 receipt.
+    # ⚠️ THE BATCH-LEVEL CALL IS GONE ON PURPOSE (row 9d654899). It used to run here,
+    # once, against `work_dir` — the shared main checkout every seat was placed in.
+    # Now each seat gets its OWN tree and its OWN venv inside the loop, so a single
+    # verdict about a directory no seat stands in would be a confident answer to a
+    # question nobody asked. The top-level fields below are AGGREGATED from the seats
+    # instead, so a caller reading the top of the result still learns if ANY seat has
+    # a problem — which is the property `venv_alarm` and `placement_alarm` were added
+    # for (row 3b0c5f90: a caller reads the top of a result, not a nested dict).
+    seat_verdicts = []
+
     # The DM/collection topic and the tmux SESSION name BOTH key on the manager
     # PERSONA, but with DIFFERENT separators — and they MUST stay separate
     # (Rick one-name mandate 2026-06-22). Coupling them through a single key is
@@ -616,10 +1001,93 @@ def spawn_sessions(
 
     for _k in range( count ):
         n += 1
-        while f"{base}-{n}" in used:
-            n += 1
-        session_name = f"{base}-{n}"
-        used.add( session_name )
+        # Slot search (row 81714af0): a slot whose existing tree is OCCUPIED — a live
+        # process in it, or uncommitted work no memento claims — is skipped, and the
+        # next free index is tried. The provisioning call below sits inside this loop
+        # for that reason; it is the check that says whether a slot is really free.
+        while True:
+            while f"{base}-{n}" in used:
+                n += 1
+            session_name = f"{base}-{n}"
+            used.add( session_name )
+            if dry_run: break
+            seat_provisioning = provision_seat_worktree( work_dir, session_name )
+            if seat_provisioning[ "status" ] != "occupied": break
+
+        # ── Give THIS seat its own working tree (row 9d654899, Rick 2026-09-03) ──
+        #
+        # THE ALARM BECOMES THE FIX. Until now this path DETECTED the hazard and left
+        # the seat in it: `placement_alarm` says "you are in the shared main checkout"
+        # and nothing moves. Rick ruled per-session worktrees the default, so the
+        # detection is now provisioning. The hazard it closes is per-HUNK and every
+        # other control we have is per-FILE: `git commit -- <path>` commits that
+        # path's WORKING-TREE CONTENT, so a seat committing a file it legitimately
+        # owns still commits whatever a peer left uncommitted inside it. Fired three
+        # times, once as a completed hit (57 lines under the wrong name).
+        #
+        # 🔴 PER SEAT, NOT PER SPAWN, AND THAT IS THE WHOLE POINT. `work_dir` is
+        # resolved once above and is the same directory for every seat in the batch.
+        # Two authors of one spawn landing in one tree is EXACTLY the contention this
+        # closes — measured on this row's own crew, 2026-09-03, two authors aimed at
+        # the same two modules. So the tree is keyed on `session_name`, which is
+        # unique by construction a few lines above.
+        #
+        # ⚠️ FAIL-OPEN, AND THE FALLBACK IS TODAY'S BEHAVIOUR EXACTLY. A seat in the
+        # shared checkout is worse off; a spawn that DIES because provisioning failed
+        # is worse still — a fleet that cannot staff itself. On any failure
+        # `seat_work_dir` stays `work_dir`, the venv call runs against it as before,
+        # and `placement_alarm` fires exactly as it does today. Nothing about this
+        # change can make a spawn fail that would otherwise have succeeded.
+        #
+        # 🔴 A DRY RUN PROVISIONS NOTHING, AND THIS IS NOT TIDINESS. `dry_run` means "do
+        # not actually spawn", and creating a real worktree on disk is the loudest side
+        # effect this function has. Two unit tests already drive the REAL spawn path
+        # against the REAL main checkout with dry_run=True — without this gate, every
+        # run of the unit tier would leave a `lupin-wt-cc-<role>-<mgr>-1` tree behind on
+        # the box, forever, one per run. Found by reading what the existing tests do
+        # before this landed, not by watching the trees pile up.
+        if dry_run:
+            seat_provisioning = { "provisioned": False, "status": "dry_run", "work_dir": None,
+                                  "drift_behind": None, "exit_code": None,
+                                  "message": "dry run - no worktree provisioned" }
+        seat_work_dir     = seat_provisioning[ "work_dir" ] or work_dir
+
+        # The venv follows the seat into its own tree. Provisioning the shared
+        # checkout instead would link nothing (it owns the real .venv) and leave the
+        # new tree without an interpreter — 35 unit failures that are a property of
+        # where the seat is standing, not of its branch.
+        seat_venv = provision_worktree_venv( seat_work_dir )
+
+        # ── And the rest of the untracked tree the seat needs (row dde8b87a) ──────
+        #
+        # 🔴 `INTERPRETER OK` AND A TIER-CAPABLE TREE ARE DIFFERENT CLAIMS, and until
+        # this line the spawn path only ever made the first. Measured 2026-09-04: a
+        # freshly spawned worktree had `.venv` and no `node_modules`, so every
+        # `.test.ts` in it died with `Cannot find package 'tsx'` — a failure naming a
+        # PACKAGE rather than a tree, which is why it reads as a broken test. The seat
+        # was one report away from a false green.
+        #
+        # ⚠️ FAIL OPEN, same as the venv call above and for the same reason: a seat
+        # missing `node_modules` is worse off, a spawn that dies because provisioning
+        # failed is worse still. The verdict rides back on the payload and a failure
+        # gets a top-level alarm, because a spawn reporting success over a seat that
+        # cannot run its own tier is the exact shape this repo already names — a clean
+        # exit is not evidence the work happened.
+        # 🔴 A DRY RUN PROVISIONS NOTHING, AND THIS IS THE SAME RULING THE SEAT-WORKTREE
+        # CALL ABOVE ALREADY CARRIES — I had to learn it a second time. The venv call is
+        # not gated because it is a no-op in every tree that already has a `.venv`; THIS
+        # one creates real symlinks, so an ungated version has the unit tier writing into
+        # whatever tree it runs in. Measured 2026-09-04 on this very change:
+        # `test_the_real_spawn_path_announces_the_placement` drives the REAL spawn path
+        # with LUPIN_ROOT naming the tree under test, so one tier run silently linked
+        # `node_modules` and `src/scripts/cloud-run.env` into my own worktree — and NINE
+        # cloud-run.env failures vanished from that run's own failing set, part-way
+        # through it. A tier whose result depends on which test ran first is not a
+        # measurement.
+        seat_artifacts = ( provision_worktree_artifacts( seat_work_dir ) if not dry_run
+                           else { "provisioned": False, "status": "dry_run", "exit_code": None,
+                                  "target": seat_work_dir, "detail": "dry run - nothing borrowed",
+                                  "artifacts": {} } )
         merged       = { "role": role, "manager_session_id": manager_session_id, "index": n }
         merged.update( tokens or {} )
         rendered     = render_task_prompt( task_prompt, merged, seed_memento )
@@ -630,7 +1098,7 @@ def spawn_sessions(
         # wrapper's explicit-param → INI role key → INI default resolution).
         claude_args = [ "--model", model ] if model else None
         argv = build_spawn_argv( script_path, session_name, rendered, dry_run=dry_run,
-                                 claude_args=claude_args, work_dir=work_dir )
+                                 claude_args=claude_args, work_dir=seat_work_dir )
         env  = {
             "COSA_VOICE_SPAWNED_BY" : manager_session_id,
             "COSA_VOICE_HEADLESS"   : "1",
@@ -663,6 +1131,21 @@ def spawn_sessions(
             "status"         : "spawned" if ok else "failed",
             "dry_run"        : dry_run,
             "model"          : model,
+            # WHERE THIS SEAT ACTUALLY LANDED, on the row rather than inferred from
+            # the batch. A caller reading `spawned[i]` should not have to re-derive
+            # the cwd of the seat it is looking at, and after this change the seats
+            # in one batch no longer share one.
+            "work_dir"            : seat_work_dir,
+            "worktree_status"     : seat_provisioning[ "status" ],
+            "placement_alarm"     : placement_alarm( seat_venv ),
+            "venv_alarm"          : venv_alarm( seat_venv ),
+            "artifact_provisioning" : seat_artifacts,
+            "artifact_alarm"        : artifact_alarm( seat_artifacts ),
+            # The DISCLOSURE half of the ruling. None when the tree is level with the
+            # main checkout, so the line appears only when it means something — the
+            # row's own diagnosis was that the problem was never drift but UNSTATED
+            # drift, and `git rev-list --count` is 0.00s at any depth.
+            "drift_disclosure"    : drift_disclosure( seat_provisioning ),
             # Spawn-time stamp (row 6f8fd858). The roster's identity axis has a
             # genuinely ambiguous state — "no bridge on disk" is both a child
             # mid-boot and a child whose SessionStart died. Age does not resolve
@@ -682,6 +1165,11 @@ def spawn_sessions(
             stderr = ( getattr( result, "stderr", "" ) or "" ).strip()
             rc     = getattr( result, "returncode", None )
             row[ "reason" ] = stderr if stderr else f"spawn script exited with code {rc} and no stderr"
+        seat_verdicts.append( { "session_name" : session_name,
+                                "work_dir"     : seat_work_dir,
+                                "venv"         : seat_venv,
+                                "artifacts"    : seat_artifacts,
+                                "worktree"     : seat_provisioning } )
         spawned.append( row )
 
     if not dry_run:
@@ -700,7 +1188,30 @@ def spawn_sessions(
         "persona_preference" : persona_preference,
         "requested"          : count,
         "dry_run"            : dry_run,
-        "model"              : model
+        "model"              : model,
+        # AGGREGATED FROM THE SEATS, not from the batch. Each is the FIRST seat's
+        # non-None verdict, so the field still appears only when it means something and
+        # a caller reading the top of the result cannot miss a seat in trouble. With
+        # provisioning working, `placement_alarm` is now None on an ordinary spawn —
+        # that is the ruling landing, not the check going quiet: the seat is no longer
+        # in the shared checkout for it to complain about. `seat_worktrees` is where a
+        # caller looks to see WHERE each seat actually went.
+        # ONE SEAT DESCRIBES THEM ALL. `_alarming_seat` picks the seat a reader needs
+        # to look at — the first one with a problem, else the first one — so the verdicts
+        # and the alarms can never be about different seats. `alarming_seat` names
+        # it, because a summary that does not say WHICH seat it is about sends the
+        # reader to `seat_worktrees` to guess.
+        "venv_provisioning"  : ( _alarming_seat( seat_verdicts ) or {} ).get( "venv" ),
+        "venv_alarm"         : venv_alarm( ( _alarming_seat( seat_verdicts ) or {} ).get( "venv" ) ),
+        "placement_alarm"    : placement_alarm( ( _alarming_seat( seat_verdicts ) or {} ).get( "venv" ) ),
+        "artifact_provisioning" : ( _alarming_seat( seat_verdicts ) or {} ).get( "artifacts" ),
+        "artifact_alarm"     : artifact_alarm( ( _alarming_seat( seat_verdicts ) or {} ).get( "artifacts" ) ),
+        "alarming_seat"      : ( _alarming_seat( seat_verdicts ) or {} ).get( "session_name" ),
+        "seat_worktrees"     : [ { "session_name" : v[ "session_name" ],
+                                   "work_dir"     : v[ "work_dir" ],
+                                   "status"       : v[ "worktree" ][ "status" ],
+                                   "drift_behind" : v[ "worktree" ][ "drift_behind" ] }
+                                 for v in seat_verdicts ]
     }
 
 
@@ -1031,7 +1542,10 @@ def dismiss_sessions(
     reconcile_items_fn : Optional[ Callable ] = None,
     respin_personas    : Optional[ List[ str ] ] = None,
     memento_coord_fn   : Optional[ Callable ] = None,
-    memento_recheck_fn : Optional[ Callable ] = None
+    memento_recheck_fn : Optional[ Callable ] = None,
+    branch_probe_fn    : Optional[ Callable ] = None,
+    seat_teardown_fn   : Optional[ Callable ] = None,
+    force_kill         : bool = False
 ) -> Dict[ str, Any ]:
     """
     Reap reviewer sessions this manager spawned: kill their tmux sessions and
@@ -1057,16 +1571,23 @@ def dismiss_sessions(
           `memento_outcomes["_error"]` — never a silent success (that WAS the bug).
           DEFAULT is None (skip) so unit reaps + the write_memento=False idle-TTL
           path stay hermetic; the real coordinator is wired by the MCP wrapper.
-        - POST-KILL RE-CHECK (row f94ab580): when `memento_recheck_fn` is provided, it
-          runs ONCE AFTER the kill loop and BEFORE `memento_alarm` is composed, so a
-          seat that lands its memento during teardown is no longer guaranteed to be
-          misreported. Measured 2026-08-25: two of four alarmed seats had a complete,
-          self-named memento on disk 30s later — the coordinator's verdict is a
-          snapshot at ASK TIME, and the kill is what ends the seat's chance to write.
+        - THE SECOND LOOK, AHEAD OF THE KILL (row ee3d3c82, on top of row f94ab580):
+          when `memento_recheck_fn` is provided it runs ONCE, BEFORE the kill loop and
+          before the withhold decision below, so the verdict the kill consults is the
+          RE-CHECKED one rather than the ask-time one.
+          IT USED TO RUN AFTER THE KILL, and this contract used to say so. That was
+          right for its original job — upgrading a seat whose file landed during
+          teardown — and wrong the moment anything ACTS on the verdict: a re-check
+          after the kill measures a seat that can no longer write, so it cannot tell
+          "never wrote" from "killed before it could". Measured 2026-08-25: two of four
+          alarmed seats had a complete, self-named memento on disk 30s later, and the
+          coordinator's verdict is a snapshot at ASK TIME.
           It can only UPGRADE a seat that re-proves itself on the same predicate; an
           absent memento and another session's file stay loud. FAIL-SAFE and SURFACED
           the same way as the coordinator: a raising re-check leaves every honest
-          verdict standing and records itself in `memento_outcomes["_recheck_error"]`.
+          verdict standing and records itself in `memento_outcomes["_recheck_error"]`
+          — and a raised re-check also DISABLES the withhold below, because withholding
+          the whole fleet on a crashed instrument is the wrong direction.
         - `reason` and `write_memento` are echoed in the result; `write_memento`
           coordination is NO LONGER a no-op — see MEMENTO COORDINATION above
         - `memento_alarm` (row 3b0c5f90) is a single TOP-LEVEL line naming every seat
@@ -1074,8 +1595,42 @@ def dismiss_sessions(
           The per-seat verdicts under `memento_outcomes` were already honest and still
           got missed — they sit in a nested dict while the reap reports success around
           them, so the losing seats need a place the reader cannot walk past
-        - Returns { dismissed: [ {session_name, status} ], manager_session_id,
-                    reason, write_memento, memento_alarm, memento_outcomes, remaining,
+        - THE KILL IS CONDITIONAL (row ee3d3c82). A seat whose OWN work is not
+          provably on disk is NOT killed: it gets `status: "withheld_no_memento"` — a
+          FOURTH status alongside killed / already_gone — plus a per-entry `verdict`
+          key carrying the memento status that caused the refusal. A caller switching
+          on `status` MUST handle four values, and a withheld seat is STILL ALIVE: it
+          keeps its manifest row, its bridge, its hold and its store rows.
+          `reap_memento.seats_to_withhold` decides, and it DISCRIMINATES —
+          `unproven_present` (this seat's own file, a gate failed) proceeds.
+        - `withhold_notice` is the TOP-LEVEL companion to `memento_alarm`: one sentence
+          naming every seat NOT killed and why, or None when nothing was withheld. Same
+          reason `memento_alarm` is top-level — a verdict nobody reads is no verdict.
+        - `force_kill=True` bypasses the withhold entirely, killing every target
+          regardless of verdict. Without it the gate manufactures a class of immortal
+          seat, and a non-responsive worker must stay reapable.
+        - THE BRANCH PROBE (Cheech's design 2026-09-06, Half A): when `branch_probe_fn`
+          is provided it runs BEFORE the kill (the seat's worktree must still exist for
+          git to be asked in) and returns a per-seat `branch_outcomes` map. `branch_alarm`
+          is its TOP-LEVEL line, naming every seat reaped while carrying commits the
+          working line does not have.
+          🔴 IT NEVER WITHHOLDS A KILL, and that asymmetry with the memento gate is
+          deliberate: a memento is data only that seat can produce, while a branch is
+          already durable in git and the worktree janitor provably keeps it. Withholding
+          would manufacture an immortal seat for a condition that loses nothing — what is
+          lost is not the work, it is that anybody is looking.
+        - SEAT TEARDOWN (row 129cc96b, P3): when `seat_teardown_fn` is provided it runs
+          AFTER the kill, once per REAPED seat (never a withheld one), as
+          seat_teardown_fn( session_name, cwd ) with the cwd captured before the bridge
+          was unlinked. `seat_trees` maps each seat to its outcome and
+          `seat_tree_notice` is the TOP-LEVEL line naming every tree kept for work in it
+          (uncommitted, unmerged, data files) — None when there is none. FAIL-SAFE: a
+          raising teardown is recorded as that seat's outcome and never breaks the reap
+        - Returns { dismissed: [ {session_name, status, verdict?} ], manager_session_id,
+                    reason, write_memento, memento_alarm, withhold_notice,
+                    memento_outcomes, branch_alarm, branch_outcomes, seat_trees,
+                    seat_tree_notice, remaining,
+                    bridges_deleted, holds_cleared,
                     reconciliation, retained_owner_personas, retained_unmatched }
         - RE-SPIN RETENTION (4dfb2f3b): a persona named in `respin_personas` is
           reaped normally (tmux kill, bridge unlink, tombstone, hold-clear) but
@@ -1086,6 +1641,14 @@ def dismiss_sessions(
           persona (a stale/typo'd name protects nothing — the row reconciles as
           before, which is fail-safe, but the miss is NAMED rather than inferred
           from an absence).
+          `retained_unmatched` HAS TWO CAUSES AND ONLY NAMES ONE. It is computed
+          over the seats actually REAPED, so a seat whose kill was WITHHELD puts a
+          PERFECTLY CORRECT `respin_personas` name into this list. Nothing was
+          mis-typed and nothing failed to be protected — the seat is alive and still
+          owns its rows, which is the outcome the caller wanted. Read a slug here
+          against `dismissed`: paired with a `withheld_no_memento` entry it is a
+          withhold, not a typo, and the two want opposite responses (re-ask for a
+          memento versus fix the name).
         - reap-RECONCILE (d647b531): when `reconcile_items_fn` is provided, each
           reaped session's NON-TERMINAL store items are reconciled (close-if-
           receipt / reassign-to-live-manager / surface) and the per-session
@@ -1112,9 +1675,20 @@ def dismiss_sessions(
         memento_coord_fn: pre-kill memento coordinator (identities) -> per-seat
             outcome map; None = skip (hermetic default). The MCP wrapper wires the
             live `reap_memento.coordinate_mementos`. See MEMENTO COORDINATION above.
-        memento_recheck_fn: post-kill re-check (outcomes, identities) -> a revised
+        memento_recheck_fn: the second look (outcomes, identities) -> a revised
             outcome map; None = skip (hermetic default). The MCP wrapper wires the
-            live `reap_memento.recheck_losing_seats`. See POST-KILL RE-CHECK above.
+            live `reap_memento.recheck_losing_seats`. Runs BEFORE the kill — see
+            THE SECOND LOOK, AHEAD OF THE KILL above.
+        branch_probe_fn: pre-kill unmerged-branch probe (identities) -> per-seat
+            outcome map; None = skip (hermetic default). The MCP wrapper wires the live
+            `reap_branch.probe_seat_branches`. It NEVER withholds a kill — see THE BRANCH
+            PROBE above.
+        seat_teardown_fn: post-kill own-tree teardown ( session_name, cwd ) -> outcome
+            dict; None = skip (hermetic default). The MCP wrapper wires the live
+            `seat_teardown.retire_seat_worktree`.
+        force_kill: bypass the withhold and kill every target whatever its memento
+            verdict. The escape hatch that keeps an unresponsive seat reapable; it
+            does NOT silence `memento_alarm`, so the loss is still named.
 
     Returns:
         dict: dismissal result
@@ -1146,7 +1720,74 @@ def dismiss_sessions(
                                              f"({error.__class__.__name__}: {error}) — reap proceeded "
                                              f"WITHOUT verified mementos" ) }
 
+    # THE SECOND LOOK, MOVED AHEAD OF THE KILL (row ee3d3c82, on top of row f94ab580).
+    # It used to run AFTER the kill. That was right for its original job — upgrading a
+    # seat whose file landed during teardown — and WRONG the moment anything wants to
+    # ACT on the verdict, for a reason Mr. Radio named: a re-check after the kill is
+    # measuring a seat that can no longer write, so it cannot tell "never wrote" from
+    # "killed before it could". The kill destroys the evidence the check needs.
+    #
+    # The coordinator above judged at ASK TIME and its verdict is a SNAPSHOT, never a
+    # settled finding: row f94ab580 measured two of four alarmed seats holding complete,
+    # self-named mementos SECONDS after their 45s window expired, one of which DM'd
+    # "ready for re-spin" after it had already been killed and logged unproven. So the
+    # verdict the kill consults must be the RE-CHECKED one, not the ask-time one.
+    #
+    # This can only UPGRADE a seat that re-proves itself on the same identity-checking
+    # predicate — an absent memento stays absent, a prior holder's file stays a prior
+    # holder's file. FAIL-SAFE: a raising re-check NEVER breaks the reap and NEVER
+    # discards the honest verdicts it was given.
+    if memento_recheck_fn is not None:
+        try:
+            memento_outcomes = memento_recheck_fn( memento_outcomes, identities )
+        except Exception as error:
+            memento_outcomes = dict( memento_outcomes )
+            memento_outcomes[ "_recheck_error" ] = ( f"pre-kill memento re-check raised "
+                                                     f"({error.__class__.__name__}: {error}) — the "
+                                                     f"verdicts below are as of ASK TIME and a seat "
+                                                     f"that wrote during teardown may be misreported" )
+
+    # THE BRANCH PROBE (Cheech's design, 2026-09-06 §4 Half A) — BEFORE any kill, for the
+    # same reason the memento seams are: `_capture_reap_identity` has already read each
+    # seat's `cwd`, but the WORKTREE it names is what git must be asked in, and a reap can
+    # remove it. Ask while the tree is still there.
+    #
+    # 🔴 IT NEVER WITHHOLDS. A memento is data only this seat can produce, so the memento
+    # gate refuses the kill. A branch is ALREADY DURABLE IN GIT and the arbiter's worktree
+    # janitor provably keeps it (measured 2026-09-06: dir removed, branch kept, WIP
+    # committed). Withholding here would manufacture an immortal seat for a condition that
+    # loses nothing. What is lost is not the work — it is that anybody is looking.
+    #
+    # FAIL-SAFE, like every other seam on this path: a raising probe NEVER breaks the reap.
+    branch_outcomes: Dict[ str, Any ] = {}
+    if branch_probe_fn is not None:
+        try:
+            branch_outcomes = branch_probe_fn( identities )
+        except Exception as error:
+            branch_outcomes = { "_error": ( f"branch probe raised "
+                                            f"({error.__class__.__name__}: {error}) — the reap "
+                                            f"proceeded WITHOUT checking for unmerged work" ) }
+
+    # THE CONDITIONAL (row ee3d3c82). The verdict has always been computed, surfaced in
+    # `memento_alarm` below, and never ACTED on: the loop was `for name in targets:`,
+    # unconditional. self_respin refuses when it cannot prove a memento; this is the reap
+    # doing the same. It DISCRIMINATES — only the verdicts where the seat's OWN work is
+    # not provably on disk withhold. `unproven_present` (this seat's own file, a gate
+    # failed) is deliberately NOT one: see reap_memento.WITHHOLD_KILL / PROCEED_KILL.
+    # FAIL-SAFE: a re-check that RAISED leaves only ask-time verdicts, which row
+    # f94ab580 measured are a snapshot and not a settled finding. Withholding the
+    # whole fleet on a crashed instrument is the wrong direction — proceed, loudly.
+    _recheck_ok = "_recheck_error" not in memento_outcomes
+    withheld    = ( {} if ( force_kill or not _recheck_ok )
+                    else reap_memento.seats_to_withhold( memento_outcomes ) )
     for name in targets:
+        if name in withheld:
+            dismissed.append( {
+                "session_name" : name,
+                "status"       : "withheld_no_memento",
+                "verdict"      : withheld[ name ]
+            } )
+            continue
         result = runner( [ "tmux", "kill-session", "-t", name ] )
         ok     = getattr( result, "returncode", 1 ) == 0
         dismissed.append( {
@@ -1154,28 +1795,34 @@ def dismiss_sessions(
             "status"       : "killed" if ok else "already_gone"
         } )
 
-    # POST-KILL RE-CHECK (row f94ab580) — the ONE second look, before the alarm is
-    # composed. The coordinator above judged at ASK TIME; the kill is the moment a
-    # seat's chance to write ends, so a seat mid-write when the ask window expired
-    # was GUARANTEED to be reported as having failed. Measured on a four-seat reap:
-    # two of the four alarmed seats had a complete, self-named memento on disk
-    # seconds later, and one of them DM'd "ready for re-spin" after it was already
-    # killed and logged unproven. This can only UPGRADE a seat that re-proves itself
-    # on the same identity-checking predicate — an absent memento stays absent and a
-    # prior holder's file stays a prior holder's file. FAIL-SAFE: a raising re-check
-    # NEVER breaks the reap and NEVER discards the honest verdicts it was given.
-    if memento_recheck_fn is not None:
-        try:
-            memento_outcomes = memento_recheck_fn( memento_outcomes, identities )
-        except Exception as error:
-            memento_outcomes = dict( memento_outcomes )
-            memento_outcomes[ "_recheck_error" ] = ( f"post-kill memento re-check raised "
-                                                     f"({error.__class__.__name__}: {error}) — the "
-                                                     f"verdicts below are as of ASK TIME and a seat "
-                                                     f"that wrote during teardown may be misreported" )
+    # F3, Tiffany's finding, AUTHOR'S CALL — the belt stays and the CLAIM goes.
+    # The old comment here said "everything below must act on the seats actually
+    # KILLED", which reads as though something below consumes `targets`. NOTHING DOES:
+    # every later step derives from `reaped_names`, which is built from `dismissed`
+    # and already excludes the withheld. This narrowing is therefore DEAD TODAY, and
+    # the comment sent a reader hunting a consumer that does not exist.
+    # Kept anyway, deliberately: it is not a rule anyone has to remember, it is a
+    # mechanical narrowing that applies to any FUTURE read of `targets`. Deleting it
+    # converts a latent control into a latent hazard — the next person to reach for
+    # `targets` below would silently operate on the ASKED-FOR set, which includes
+    # seats that are still alive. One dead assignment is the cheaper side.
+    targets = [ name for name in targets if name not in withheld ]   # noqa: F841
 
-    reaped_names = { d[ "session_name" ] for d in dismissed }
+    reaped_names = { d[ "session_name" ] for d in dismissed
+                     if d[ "status" ] != "withheld_no_memento" }
     remaining    = [ r for r in records if r[ "session_name" ] not in reaped_names ]
+
+    # SEAT TEARDOWN (row 129cc96b, P3) — AFTER the kill, because the tree may only go
+    # once its seat is gone, and only for seats actually reaped. The teardown itself
+    # refuses anything that is not this seat's own `lupin-seat:` tree, and keeps (and
+    # reports) a tree holding uncommitted or unmerged work. FAIL-SAFE like every seam here.
+    seat_trees: Dict[ str, Any ] = {}
+    if seat_teardown_fn is not None:
+        for name in sorted( reaped_names ):
+            try:
+                seat_trees[ name ] = seat_teardown_fn( name, ( identities.get( name ) or {} ).get( "cwd" ) )
+            except Exception as error:
+                seat_trees[ name ] = f"{error.__class__.__name__}: {error}"
 
     if remaining:
         _write_manifest( path, remaining )
@@ -1311,6 +1958,13 @@ def dismiss_sessions(
         # dict, and the reap reports success around them either way. None when nothing
         # was lost, so the line only appears when it means something.
         "memento_alarm"      : reap_memento.memento_alarm( memento_outcomes ),
+        # TOP-LEVEL for the SAME reason memento_alarm is (row 3b0c5f90) — a manager reads
+        # the top of a result. None when every reaped seat's work is already on the line.
+        "branch_alarm"       : reap_branch.branch_alarm( branch_outcomes ),
+        "branch_outcomes"    : branch_outcomes,
+        "seat_trees"         : seat_trees,
+        "seat_tree_notice"   : seat_teardown.teardown_notice( seat_trees ),
+        "withhold_notice"    : reap_memento.withhold_notice( withheld ),
         "memento_outcomes"   : memento_outcomes,
         "remaining"          : [ r[ "session_name" ] for r in remaining ],
         "bridges_deleted"    : bridges_deleted,
@@ -1901,9 +2555,20 @@ def quick_smoke_test():
         assert over_capped and under_capped, "cap bounds must raise ValueError"
 
         # spawn 3 → manifest has 3; topic keys on PERSONA, manifest on session_id
+        #
+        # 🔴 THE SMOKE BODY STATES THE FLEET WORLD RATHER THAN READING THE OPERATOR'S
+        # DIAL. `cc session fleet size cap` is rewritten in place by the fleet-size
+        # slider and changes whenever the staffing call does — it read 9 one morning
+        # and 2 the same afternoon, and this three-seat spawn went red on the second
+        # read while the code was untouched. Injecting at `fleet_config_fn` /
+        # `fleet_census_fn` leaves the real gate running; it just stops the smoke
+        # asserting the operator's current preference (Rick's ruling 2026-09-08).
+        smoke_fleet = { "fleet_config_fn" : lambda: None,
+                        "fleet_census_fn" : lambda: [] }
         res = spawn_sessions( 3, "Review {section}", "mgr-abc", script_path="x",
                               manager_persona="Tiberius", role="reviewer",
-                              runner=runner, session_dir=sd, tokens={ "section": "A" } )
+                              runner=runner, session_dir=sd, tokens={ "section": "A" },
+                              **smoke_fleet )
         assert len( res[ "spawned" ] ) == 3
         assert res[ "collection_topic" ] == "dm-tiberius"
         assert res[ "manager_persona" ] == "Tiberius"
@@ -1951,8 +2616,10 @@ def quick_smoke_test():
         author = spawn_sessions( 1, "t", "mgr-roles", script_path="x", manager_persona="Rio",
                                  role="author", runner=runner, session_dir=sd )
         assert author[ "spawned" ][ 0 ][ "session_name" ] == "cc-author-rio-1"
-        spawn_sessions( 3, "t", "mgr-batch", script_path="x", manager_persona="Rio", runner=runner, session_dir=sd )
-        batch2 = spawn_sessions( 2, "t", "mgr-batch", script_path="x", manager_persona="Rio", runner=runner, session_dir=sd )
+        spawn_sessions( 3, "t", "mgr-batch", script_path="x", manager_persona="Rio", runner=runner,
+                        session_dir=sd, **smoke_fleet )
+        batch2 = spawn_sessions( 2, "t", "mgr-batch", script_path="x", manager_persona="Rio", runner=runner,
+                                 session_dir=sd, **smoke_fleet )
         assert [ s[ "session_name" ] for s in batch2[ "spawned" ] ] == [ "cc-reviewer-rio-4", "cc-reviewer-rio-5" ]
         print( "  ✓ role-in-name + lowest-free index across roles/batches (no collision)" )
 

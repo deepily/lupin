@@ -2,7 +2,7 @@
 """
 Step 13 of the brain-integration plan — dump the solution cache, with receipts.
 
-Plan of record: src/rnd/v0.2.0/2026.08.21-step13-cache-dump-plan.md (row 1e597a65).
+Plan of record: src/rnd/v0.2.0/2026.08.21-step13-cache-dump-plan.md (row 1e597a65). — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.21-step13-cache-dump-plan.md
 This tool is PREP: it does nothing destructive unless --apply is passed, and it
 runs only on Cheech's explicit GO after plan steps 9a + 9b have merged.
 

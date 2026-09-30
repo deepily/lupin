@@ -134,7 +134,7 @@ def build_capture_record( job_meta ):
           payload (dict or None), fidelity_loss (list[str])
         - resubmittable is True ONLY when a test-suite payload could be rebuilt
         - owner jobs (any owner_email) are ALWAYS captured — never filtered out
-        - payload, when present, is a POST /api/test-suite/submit body
+        - payload, when present, is the old-shape test-suite body (submit() re-wraps it for /api/v2/submit)
 
     Raises:
         - nothing
@@ -239,12 +239,21 @@ class QueueClient:
 
     def submit( self, payload ):
         """
-        Submit one test-suite job; return the decoded response JSON.
+        Submit one test-suite job through /api/v2/submit (the old /api/test-suite/submit is
+        retired); return the reply info dict ( status, job_id, queue_position, message ).
 
         Requires:
-            - payload is a POST /api/test-suite/submit body dict
+            - payload is the captured old-shape body dict ( test_types, optional scheduled_at )
+
+        Raises:
+            - RuntimeError carrying the server's reason when v2 accepted the request but
+              refused the submit (HTTP 200 with a status other than "waiting")
         """
-        return self._request( "POST", "/api/test-suite/submit", body=payload )
+        from cosa.agents.test_suite.v2_client import submit_body, read_reply
+        reply = self._request( "POST", "/api/v2/submit", body=submit_body( **payload ) )
+        ok, info = read_reply( 200, reply )
+        if not ok: raise RuntimeError( info[ "error" ] )
+        return info
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

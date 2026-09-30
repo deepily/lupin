@@ -10,7 +10,7 @@ schema (CHECK constraint, defaults, FK cascade), and the full item
 lifecycle with the append-only audit trail.
 
 VENUE: :8000 monopolize-mode, SCHEDULED ONLY — submit via
-POST /api/test-suite/submit (NEVER side-door). Mutates task_items/task_events
+the v2 test-suite submit (NEVER side-door). Mutates task_items/task_events
 rows in the test DB → NOT :7999-eligible.
 
 SHIP GATE (design §3.1 F2 rider, C2 pin): /api/tasks/* may only DEPLOY after

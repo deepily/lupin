@@ -275,9 +275,12 @@ class SilentConnectedUser:
         # :7999: {"answers": {header: label}} → status=responded, default_used=false.
         answers = { h: self.continue_label for h in headers }
         try:
+            # The answer door requires a credential (row e20e249a); this probe already holds
+            # the login it registered with.
             r = requests.post(
                 f"{self.base}/api/notify/response",
                 json    = { "notification_id": nid, "response_value": { "answers": answers } },
+                headers = { "Authorization": f"Bearer {self.jwt}" },
                 timeout = 15,
             )
             self.answers_posted.append( {

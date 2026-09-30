@@ -6,7 +6,8 @@ coverage gap on the endpoints the original suite did not reach: push validation
 branches + 500, push_agentic, pool-status, get_queue admin/exclude + agentic
 done/dead duration arms, get_job_interactions, send_job_message, cancel_job,
 delete_all_queue_jobs, delete_queue_job, the job-history family, retry, pause /
-resume, and the two checkpoint-resume endpoints.
+resume. (The two checkpoint-resume endpoints retired to 410 tombstones on 2026-09-29,
+row 67a2a093; their behaviour is pinned in src/tests/unit/test_v2_resume_job.py.)
 
 Boundary-isolated: every DB / job-persistence / websocket / factory collaborator
 is mocked. Zero GPU/DB/net/LLM. Run BOTH files together for measurement:
@@ -49,8 +50,6 @@ from cosa.rest.routers.queues import (
     get_job_history, get_job_history_detail,
     delete_all_job_history, delete_job_history_endpoint,
     retry_job_history, pause_job, resume_job,
-    resume_stalled_job, resume_tfe_smart,
-    ResumeFromCheckpointRequest, TFEResumeFromRequest,
 )
 from cosa.rest.job_state import JobState
 from cosa.agents.agentic_job_base import AgenticJobBase
@@ -1124,133 +1123,3 @@ class TestPauseResume( unittest.IsolatedAsyncioTestCase ):
             out = await resume_job( job_id="j", current_user=self.user, todo_queue=tq )
         self.assertEqual( out[ "status" ], "resumed" )
 
-
-class TestResumeFromCheckpoint( unittest.IsolatedAsyncioTestCase ):
-    """Coverage for POST /api/jobs/{id_hash}/resume-from-checkpoint."""
-
-    async def test_not_resumable_404( self ):
-        with patch( "cosa.rest.agentic_job_factory.resume_job", return_value=None ):
-            with self.assertRaises( HTTPException ) as ctx:
-                await resume_stalled_job( id_hash="h", request=ResumeFromCheckpointRequest(),
-                                          current_user={ "uid": "u1", "email": "e" }, todo_queue=Mock() )
-        self.assertEqual( ctx.exception.status_code, 404 )
-
-    async def test_success_with_overrides( self ):
-        job = Mock()
-        job.id_hash = "new-h"
-        job._resume_checkpoint = { "phase_ordinal": 2, "phase_name": "plan", "resume_count": 3 }
-        tq = Mock()
-        with patch( "cosa.rest.agentic_job_factory.resume_job", return_value=job ) as rj, \
-             patch( "builtins.print" ):
-            req = ResumeFromCheckpointRequest( thinking_effort="high" )
-            out = await resume_stalled_job( id_hash="h", request=req,
-                                            current_user={ "uid": "u1", "email": "e" }, todo_queue=tq )
-        tq.push.assert_called_once_with( job )
-        self.assertEqual( out[ "status" ], "resumed" )
-        self.assertEqual( out[ "resume_from_phase" ], 2 )
-        # overrides forwarded (exclude_none → only thinking_effort)
-        _, kwargs = rj.call_args
-        self.assertEqual( kwargs[ "args_overrides" ], { "thinking_effort": "high" } )
-
-
-class TestResumeTfeSmart( unittest.IsolatedAsyncioTestCase ):
-    """Coverage for POST /api/test-fix-expediter/resume-from."""
-
-    def _target( self, **kw ):
-        t = Mock()
-        t.source_type = kw.get( "source_type", "job_id" )
-        t.job_id      = kw.get( "job_id", "tfe-1" )
-        t.candidates  = kw.get( "candidates", None )
-        t.diagnostic  = kw.get( "diagnostic", "ok" )
-        t.matched_path = kw.get( "matched_path", "/p" )
-        t.confidence   = kw.get( "confidence", 0.9 )
-        return t
-
-    async def test_no_email_400( self ):
-        with self.assertRaises( HTTPException ) as ctx:
-            await resume_tfe_smart( request=TFEResumeFromRequest( resume_from="x" ),
-                                    current_user={ "uid": "u1" }, todo_queue=Mock() )
-        self.assertEqual( ctx.exception.status_code, 400 )
-
-    async def test_not_found_404( self ):
-        with patch( "cosa.agents.test_fix_expediter.resume_resolver.resolve_resume_target",
-                    return_value=self._target( source_type="not_found", job_id=None, diagnostic="no match" ) ):
-            with self.assertRaises( HTTPException ) as ctx:
-                await resume_tfe_smart( request=TFEResumeFromRequest( resume_from="x" ),
-                                        current_user={ "uid": "u1", "email": "e@x.com" }, todo_queue=Mock() )
-        self.assertEqual( ctx.exception.status_code, 404 )
-
-    async def test_ambiguous_returns_candidates( self ):
-        tgt = self._target( job_id=None, candidates=[ "a", "b" ], diagnostic="multi" )
-        with patch( "cosa.agents.test_fix_expediter.resume_resolver.resolve_resume_target", return_value=tgt ):
-            out = await resume_tfe_smart( request=TFEResumeFromRequest( resume_from="x" ),
-                                          current_user={ "uid": "u1", "email": "e@x.com" }, todo_queue=Mock() )
-        self.assertEqual( out[ "status" ], "ambiguous" )
-        self.assertEqual( out[ "candidates" ], [ "a", "b" ] )
-
-    async def test_resume_job_none_404( self ):
-        tgt = self._target()
-        with patch( "cosa.agents.test_fix_expediter.resume_resolver.resolve_resume_target", return_value=tgt ), \
-             patch( "cosa.rest.agentic_job_factory.resume_job", return_value=None ):
-            with self.assertRaises( HTTPException ) as ctx:
-                await resume_tfe_smart( request=TFEResumeFromRequest( resume_from="x" ),
-                                        current_user={ "uid": "u1", "email": "e@x.com" }, todo_queue=Mock() )
-        self.assertEqual( ctx.exception.status_code, 404 )
-
-    async def test_success_with_user_email_key( self ):
-        tgt = self._target()
-        job = Mock(); job.id_hash = "new-h"
-        job._resume_checkpoint = { "phase_ordinal": 1, "phase_name": "p", "resume_count": 1 }
-        tq = Mock()
-        with patch( "cosa.agents.test_fix_expediter.resume_resolver.resolve_resume_target", return_value=tgt ), \
-             patch( "cosa.rest.agentic_job_factory.resume_job", return_value=job ), \
-             patch( "builtins.print" ):
-            # current_user lacks "email" but has "user_email" → second .get() arm
-            out = await resume_tfe_smart(
-                request=TFEResumeFromRequest( resume_from="tfe-1", lead_model_override="claude-opus-4-7" ),
-                current_user={ "uid": "u1", "user_email": "e@x.com" }, todo_queue=tq )
-        tq.push.assert_called_once_with( job )
-        self.assertEqual( out[ "status" ], "resumed" )
-        self.assertEqual( out[ "resumed_job_id" ], "new-h" )
-
-
-def isolated_unit_test():
-    """
-    Run the supplemental queues-router coverage suite in isolation.
-
-    Ensures:
-        - All external collaborators mocked (zero DB/net/LLM/GPU)
-        - Deterministic, fast execution
-
-    Returns:
-        Tuple[bool, float, str]: (success, duration, message)
-    """
-    import cosa.utils.util as du
-
-    start_time = time.time()
-    du.print_banner( "Queues Router — Supplemental Coverage Tests", prepend_nl=True )
-
-    loader = unittest.TestLoader()
-    suite  = unittest.TestSuite()
-    for cls in (
-        TestCountInteractions, TestPushValidation, TestPushAgentic, TestPoolStatus,
-        TestGetQueueExtra, TestGetJobInteractions, TestSendJobMessage, TestCancelJob,
-        TestDeleteAllQueueJobs, TestDeleteQueueJob, TestJobHistory, TestRetryJobHistory,
-        TestPauseResume, TestResumeFromCheckpoint, TestResumeTfeSmart,
-    ):
-        suite.addTests( loader.loadTestsFromTestCase( cls ) )
-
-    runner = unittest.TextTestRunner( verbosity=2, stream=sys.stdout )
-    result = runner.run( suite )
-    duration = time.time() - start_time
-
-    success = result.wasSuccessful()
-    msg = ( f"All {result.testsRun} tests passed in {duration:.3f}s" if success
-            else f"{len( result.failures )} failures, {len( result.errors )} errors of {result.testsRun}" )
-    du.print_banner( ( "✅ " if success else "❌ " ) + msg, prepend_nl=True )
-    return success, duration, msg
-
-
-if __name__ == "__main__":
-    ok, dur, message = isolated_unit_test()
-    print( f"\n{'✅ PASS' if ok else '❌ FAIL'} queues coverage suite in {dur:.3f}s: {message}" )

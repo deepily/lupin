@@ -45,7 +45,7 @@ Time, DB access, the repo factory, the escalation sink, and the worker-hold
 oracle are all injectable so the core is unit-testable with no live server, no
 Postgres, no real clock, and no hold files.
 
-Canonical design: planning-is-prompting -> src/rnd/2026.06.16-follow-through-accountability-design.md
+Canonical design: planning-is-prompting -> planning-is-prompting/src/rnd/2026.06.16-follow-through-accountability-design.md
 Lupin build plan: src/rnd/v0.1.8/2026.06.16-follow-through-accountability-lupin-build.md
 """
 

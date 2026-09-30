@@ -78,6 +78,18 @@ export {
   type WindowDocLike,
 } from "./ReadingPaneRenderer";
 export {
+  createSessionTranscriptRenderer,
+  type SessionTranscriptRenderer,
+  type SessionTranscriptRendererOptions,
+} from "./SessionTranscriptRenderer";
+export {
+  createSenderCardConsoleButtons,
+  SENDER_CONSOLE_BUTTON_CLASS,
+  type SenderCardConsoleButtons,
+  type SenderCardConsoleButtonsOptions,
+  type SenderCardConsoleAffordance,
+} from "./SenderCardConsoleButtons";
+export {
   createCommonsActivityRenderer,
   type CommonsActivityRenderer,
   type CommonsActivityRendererOptions,
@@ -96,6 +108,15 @@ export {
   type MissedBadgeRendererOptions,
   type MissedStoreLike,
 } from "./MissedBadgeRenderer";
+// Row 8033756c — the default `listener_error` subscriber. Wired at BOOT rather
+// than inside the bus, so it also catches the producer in NotificationsListRenderer
+// that emits from a microtask, outside any bus wrapper.
+export {
+  createListenerErrorRenderer,
+  type ListenerErrorRenderer,
+  type ListenerErrorRendererOptions,
+  type ListenerErrorSink,
+} from "./ListenerErrorRenderer";
 // Lane L4 (v0.1.9) — top nav / logout bar (PORT of lupin-nav.js).
 export {
   createNavBarRenderer,
@@ -115,6 +136,90 @@ export {
   type TaskListRendererOptions,
   type TaskListStoreLike,
 } from "./TaskListRenderer";
+// Row 470b7509 — Finished Tasks, the multiplexer port of the legacy pane
+// (ba4bb92c). Reads /api/tasks/events (ruling R5), takes its OWN 60s poll.
+export {
+  createFinishedTasksRenderer,
+  FINISHED_SENTINELS,
+  type FinishedTasksRenderer,
+  type FinishedTasksRendererOptions,
+  type FinishedTasksStoreLike,
+} from "./FinishedTasksRenderer";
+// Parity B-4 — the Time Saved dashboard, ported from legacy refreshTimeSavedStats
+// (notifications.js:8608). Fetched once at mount and on 🔄; never on a timer.
+export {
+  createTimeSavedRenderer,
+  TIME_SAVED_ENDPOINT,
+  TIME_SAVED_GLOBAL_ENDPOINT,
+  TIME_SAVED_PLACEHOLDER,
+  TOP_SOLUTIONS_LOADING,
+  TOP_SOLUTIONS_EMPTY,
+  type TimeSavedRenderer,
+  type TimeSavedRendererOptions,
+  type TimeSavedStats,
+  type GlobalTimeSavedStats,
+  type TopSolution,
+} from "./TimeSavedRenderer";
+// Parity B-5 / B-5L — System Status. The Config reload is deliberately UNGATED,
+// mirroring legacy `reinitializeConfig` (notifications.js:1399), per Rick's
+// 2026-09-23 ruling that an admin gate here is a divergence.
+export {
+  createSystemStatusRenderer,
+  CONNECTION_PILLS,
+  NOT_INITIALIZED_PILL,
+  SEEDED as SYSTEM_STATUS_SEEDED,
+  HEALTH_MONITORING,
+  HEALTH_STOPPED,
+  HEALTH_CIRCUIT,
+  HEALTH_INTERVAL_MS,
+  COPY_FEEDBACK_MS,
+  type SystemStatusRenderer,
+  type SystemStatusRendererOptions,
+  type TransportStateLike,
+  type StatusPill,
+} from "./SystemStatusRenderer";
+// Parity B-6 — the Debug Information panel. The three writers live in
+// shared/debugSink.ts; this is the surface they paint into.
+export {
+  createDebugPanelRenderer,
+  DEBUG_LOG_CAP,
+  DEBUG_SEEDED_LINE,
+  DEBUG_LINE_CLASS,
+  DEBUG_SEEDED_CLASS,
+  type DebugPanelRenderer,
+  type DebugPanelRendererOptions,
+} from "./DebugPanelRenderer";
+// Parity B-7 — the Direct TTS Test pane. A cache HIT plays the blob with no POST
+// and no /ws/audio round trip (D4); a miss goes through the ordinary door.
+export {
+  createDirectTtsRenderer,
+  directTtsTestText,
+  DIRECT_TTS_PLACEHOLDER,
+  DIRECT_TTS_EMPTY_REFUSAL,
+  type DirectTtsRenderer,
+  type DirectTtsRendererOptions,
+} from "./DirectTtsRenderer";
+// Row 87812328 — the two panes carbon-copied from the legacy client. The
+// holding area takes its own poll; the epic board deliberately takes none and
+// repaints off the task list's store event.
+export {
+  createHoldingAreaRenderer,
+  HOLDING_AREA_SENTINELS,
+  HOLDING_AREA_EMPTY_MESSAGE,
+  HOLDING_AREA_COUNT_UNKNOWN,
+  type HoldingAreaRenderer,
+  type HoldingAreaRendererOptions,
+  type HoldingAreaStoreLike,
+} from "./HoldingAreaRenderer";
+export {
+  createEpicBoardRenderer,
+  EPIC_BOARD_SIGNIN_MESSAGE,
+  EPIC_BOARD_QUERY_UNAVAILABLE_MESSAGE,
+  EPIC_BOARD_UNREACHABLE_MESSAGE,
+  type EpicBoardRenderer,
+  type EpicBoardRendererOptions,
+  type EpicBoardTaskStoreLike,
+} from "./EpicBoardRenderer";
 // Section-toolbar + accordion-collapse parity (2026-06-23).
 export {
   createSectionToolbarRenderer,
@@ -131,6 +236,24 @@ export {
   type BroadcastCardApiClient,
   type BroadcastRecorderLike,
 } from "./BroadcastCardRenderer";
+// Row 4f320c27 M1 — the ack tally the broadcast card owns.
+export {
+  createBroadcastAckTallyRenderer,
+  type BroadcastAckTallyRenderer,
+  type BroadcastAckTallyRendererOptions,
+} from "./BroadcastAckTallyRenderer";
+// Parity row B-3 — Queue Filter Settings (the admin-only view-mode switch).
+export {
+  createFilterSettingsRenderer,
+  type FilterSettingsRenderer,
+  type FilterSettingsRendererOptions,
+} from "./FilterSettingsRenderer";
+// Parity A-2 #11 — the reveal both filter badges call.
+export {
+  createFilterSettingsReveal,
+  type FilterSettingsRevealOptions,
+  type RevealToolbarLike,
+} from "./filterSettingsReveal";
 export { html, raw, type Value } from "./html";
 export { renderMarkdown, renderMarkdownInline, DOMPURIFY_CONFIG } from "./markdown";
 export { formatHM, formatDateKey, formatCountdown, formatDuration } from "./time";

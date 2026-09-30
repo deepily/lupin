@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!-- Replaced at boot by the ?title= query parameter. -->
+    <title>Console</title>
+    <link rel="stylesheet" href="/static/css/lupin-base.css">
+    <!-- The SAME render rules as the multiplexer's pane console: one sheet, not a copy. -->
+    <link rel="stylesheet" href="/static/css/multiplexer/session-transcript.css">
+    <link rel="stylesheet" href="/static/css/multiplexer/console-page.css">
+    <!-- Prose blocks render as sanitised markdown (render/markdown.ts reads these globals). -->
+    <script src="/static/js/vendor/marked.min.js"></script>
+    <script src="/static/js/vendor/purify.min.js"></script>
+</head>
+<body class="console-page">
+    <!-- Row 27760534 — one seat's live CC console, full-page, in its own tab (Rick's ruling
+         2026-09-28). The seat and title come from the query string:
+         /app/console?seat=<full cc session id>&title=<url-encoded title>. -->
+    <header class="console-page-header">
+        <h1 class="console-page-title" id="console-page-title"
+            data-testid="console-page-title">Console</h1>
+    </header>
+    <div class="console-page-error" id="console-page-error" role="alert"
+         data-testid="console-page-error" hidden></div>
+    <div class="session-transcript-mount" id="session-transcript-mount"
+         data-testid="console-page-transcript"></div>
+    <!-- Manifest-driven cache-bust, the multiplexer page's pattern: resolve the content-hashed
+         bundle from the manifest (fetched no-store), and fall back to the stable console.js on
+         any manifest failure so a build/serve hiccup never blanks the page. Both are emitted by
+         src/scripts/build-console.sh. -->
+    <script type="module">
+        const DIST_BASE    = "/static/dist/console/";
+        const MANIFEST_URL = DIST_BASE + "manifest.json";
+        try {
+            const resp = await fetch( MANIFEST_URL, { cache: "no-store" } );
+            if ( !resp.ok ) throw new Error( `manifest HTTP ${ resp.status }` );
+            const manifest = await resp.json();
+            const bundle   = manifest[ "console.js" ];
+            if ( !bundle ) throw new Error( "manifest missing 'console.js' key" );
+            await import( DIST_BASE + bundle );
+        } catch ( err ) {
+            console.error( "[console] manifest-driven boot failed; falling back to stable console.js:", err );
+            await import( DIST_BASE + "console.js" );
+        }
+    </script>
+</body>
+</html>

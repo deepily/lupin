@@ -244,6 +244,125 @@ def test_claude_md_merge_pyramid_agrees_with_all_suite_components():
         )
 
 
+# ─── The numbered gate table in CLAUDE.md ────────────────────────────────────
+#
+# Rows in that table which are NOT members of ALL_SUITE_COMPONENTS. Named here, with the
+# reason, so that a NEW unexplained row fails instead of silently widening the table.
+_NON_SUITE_GATE_ROWS = {
+    "serial bridge guard": (
+        "a whole-directory contact check, not a submittable suite: it has no SUITE_SCRIPTS "
+        "entry, cannot be submitted to :7999 as a test type, and the concurrent unit run "
+        "deselects it on purpose. It is a merge gate without being a suite."
+    ),
+}
+
+
+def test_claude_md_numbered_gate_table_carries_every_suite():
+    """
+    CLAUDE.md's NUMBERED gate table must name every suite the code actually runs.
+
+    🔴 THE FAILURE THIS PREVENTS, MEASURED 2026-09-09 (row 7bc67019). Adding `typecheck`
+    to the merge pyramid touched EIGHT consumers. Seven of them reddened a test that named
+    its own fix. The eighth — this table — is a SECOND, numbered list further down the same
+    file, and nothing read it. So the marker test above reddened, the marker was fixed, and
+    the table sat one gate short with the whole suite green. Mr. Radio found it by reading
+    the diff; no instrument would have.
+
+    ⇒ A DOC THAT IS HALF MACHINE-CHECKED IS THE WORST OF BOTH: the checked half earns a
+    trust the unchecked half then spends. The marker being green said nothing whatsoever
+    about the table forty lines below it, and it read exactly as if it did.
+
+    THE CONSUMER CENSUS, verified 2026-09-09 by making the change and observing which
+    guards fired — not by reading the code and inferring:
+
+        # consumer                                   watched by
+        1 SUITE_SCRIPTS                              test_every_runnable_suite_can_write_a_stdout_log
+        2 SUITE_TIMEOUTS_SECONDS                     test_every_all_suite_component_has_explicit_timeout
+        3 ALL_SUITE_COMPONENTS                       test_all_components_order  (the source of truth)
+        4 _parse_non_pytest_stdout whitelist         nothing — but only non-pytest runners need it
+        5 _LOG_BASENAMES                             test_every_runnable_suite_can_write_a_stdout_log
+        6 run-all-tests.sh SUITES + SCRIPTS          test_run_all_tests_script_agrees_with_all_suite_components
+        7 CLAUDE.md merge-pyramid-suites marker      test_claude_md_merge_pyramid_agrees_with_all_suite_components
+        8 CLAUDE.md numbered gate table              THIS TEST  (was: nothing)
+
+    ⇒ 8 consumers, 7 watched, 1 blind. This closes the eighth.
+
+    ⚠️ #4 IS STILL NOT WATCHED FOR MEMBERSHIP and is deliberately left so: a pytest suite
+    does not belong in that tuple at all, so a general "every component is present" assertion
+    would be WRONG rather than merely absent. If a future non-pytest runner is added and
+    omitted from it, its counts silently read as zero — which `_classify_suite_status` then
+    reports as NOT EXECUTED rather than PASSED, so it fails loud rather than green. That is
+    why it is tolerable, and the reasoning is recorded rather than the gap simply left.
+
+    🔴 THIS TEST DERIVES ITS EXPECTATION — it does not hardcode a second ordered list.
+    Mr. Radio's constraint when he ruled the test in, and it is the whole point: a test that
+    pinned its own copy of the pyramid would become a NINTH consumer to drift, guarding
+    against the very failure it had just re-created one level up.
+
+    Requires:
+        - CLAUDE.md carries a `| # | gate | venue |` table under § PR MERGE REQUIREMENTS
+
+    Ensures:
+        - the table's numbering is contiguous from 1, with no gaps or repeats
+        - every ALL_SUITE_COMPONENTS member is named in at least one row
+        - the row count equals the suites plus the explicitly-named non-suite rows,
+          so BOTH a missing row and an unexplained new one fail
+    """
+    claude_md = ( Path( cu.get_project_root() ) / "CLAUDE.md" ).read_text( encoding="utf-8" )
+
+    header = claude_md.find( "| # | gate | venue |" )
+    assert header != -1, (
+        "CLAUDE.md carries no `| # | gate | venue |` table — the numbered merge pyramid "
+        "became unparseable, so this drift check cannot run. It lives under "
+        "§ PR MERGE REQUIREMENTS, beneath the merge-pyramid-suites marker."
+    )
+
+    rows = []
+    for line in claude_md[ header : ].splitlines()[ 2 : ]:   # skip header + |---| separator
+        if not line.startswith( "|" ): break
+        cells = [ c.strip() for c in line.strip( "|" ).split( "|" ) ]
+        if len( cells ) < 2 or not cells[ 0 ].isdigit(): break
+        rows.append( ( int( cells[ 0 ] ), cells[ 1 ].lower() ) )
+
+    assert rows, "the numbered gate table parsed to zero rows — check its formatting"
+
+    # 1. Contiguous numbering. Catches a renumber that skipped or repeated an index.
+    assert [ n for n, _ in rows ] == list( range( 1, len( rows ) + 1 ) ), (
+        f"the gate table's numbering is {[ n for n, _ in rows ]}, which is not 1..{len( rows )}. "
+        f"Renumber the rows — a reader following a gap will skip a gate."
+    )
+
+    # 2. Membership, DERIVED from the code's own list. This is the assertion that would
+    #    have caught 2026-09-09: typecheck was in ALL_SUITE_COMPONENTS and in no row.
+    table_text = " ".join( text for _, text in rows )
+    missing    = [ s for s in ALL_SUITE_COMPONENTS if s.lower() not in table_text ]
+    assert missing == [ ], (
+        f"these suites run in the merge pyramid but appear in NO row of CLAUDE.md's numbered "
+        f"gate table: {missing}. A gate absent from the table a human reads is a gate nobody "
+        f"runs, which is indistinguishable from a gate that passed. Add a row and renumber."
+    )
+
+    # 3. Width, so an unexplained EXTRA row fails too. Anything in the table that is not a
+    #    suite must be named in _NON_SUITE_GATE_ROWS with the reason it belongs.
+    expected_rows = len( ALL_SUITE_COMPONENTS ) + len( _NON_SUITE_GATE_ROWS )
+    assert len( rows ) == expected_rows, (
+        f"the gate table has {len( rows )} rows; {len( ALL_SUITE_COMPONENTS )} suites plus "
+        f"{len( _NON_SUITE_GATE_ROWS )} named non-suite rows makes {expected_rows}.\n"
+        f"  · a row SHORT means a suite is undocumented — add it and renumber.\n"
+        f"  · a row LONG means a gate was added that is not a submittable suite. Name it in "
+        f"_NON_SUITE_GATE_ROWS with WHY it is a gate without being a suite, rather than "
+        f"loosening this count."
+    )
+
+    for name, why in _NON_SUITE_GATE_ROWS.items():
+        assert name in table_text, (
+            f"'{name}' is listed in _NON_SUITE_GATE_ROWS as a non-suite merge gate ({why}), "
+            f"but no longer appears in the table. If it was retired, drop it from that dict "
+            f"in the same commit — a stale exemption inflates the expected row count and "
+            f"would then hide a genuinely missing suite."
+        )
+
+
 def test_typescript_has_an_explicit_timeout():
     """A suite falling back to the 600s default would be killed mid-run."""
     assert SUITE_TIMEOUTS_SECONDS[ "typescript" ] > 8 * 60, (

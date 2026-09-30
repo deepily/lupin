@@ -39,6 +39,15 @@ from cosa.rest.routers.decision_proxy import (
 DP   = "cosa.rest.routers.decision_proxy"
 UUID = "12345678-1234-5678-1234-567812345678"
 
+# The two identities ratify/delete now handle, deliberately DIFFERENT strings (row 44d8e89c).
+# `TYPED_EMAIL` is the `user_email` query parameter — the caller's claim, checked by the
+# route-level guard and then not used for anything. `AUDIT_EMAIL` is what
+# `require_query_identity_owner` resolved from the credential, and it is the only one that may
+# reach the database or the response. Passing one string for both would make every assertion
+# below satisfiable by either source.
+TYPED_EMAIL = "u@e.com"
+AUDIT_EMAIL = "resolved-from-credential@e.com"
+
 
 def _patch_fastapi_main( mock_main ):
     pkg = Mock(); pkg.main = mock_main
@@ -148,7 +157,7 @@ class TestRatify( unittest.IsolatedAsyncioTestCase ):
         p1, p2, p3 = self._patches( repo, MagicMock() )
         with p1, p2, p3:
             with self.assertRaises( HTTPException ) as ctx:
-                await ratify_decision( decision_id=UUID, approved=True, user_email="u@e.com" )
+                await ratify_decision( decision_id=UUID, approved=True, user_email=TYPED_EMAIL, audit_identity=AUDIT_EMAIL )
         self.assertEqual( ctx.exception.status_code, 404 )
 
     async def test_already_ratified_400( self ):
@@ -157,7 +166,7 @@ class TestRatify( unittest.IsolatedAsyncioTestCase ):
         p1, p2, p3 = self._patches( repo, MagicMock() )
         with p1, p2, p3:
             with self.assertRaises( HTTPException ) as ctx:
-                await ratify_decision( decision_id=UUID, approved=True, user_email="u@e.com" )
+                await ratify_decision( decision_id=UUID, approved=True, user_email=TYPED_EMAIL, audit_identity=AUDIT_EMAIL )
         self.assertEqual( ctx.exception.status_code, 400 )
 
     async def test_success_approved( self ):
@@ -170,10 +179,15 @@ class TestRatify( unittest.IsolatedAsyncioTestCase ):
         trust = MagicMock()
         p1, p2, p3 = self._patches( repo, trust )
         with p1, p2, p3:
-            resp = await ratify_decision( decision_id=UUID, approved=True, feedback="ok", user_email="u@e.com" )
+            resp = await ratify_decision( decision_id=UUID, approved=True, feedback="ok", user_email=TYPED_EMAIL, audit_identity=AUDIT_EMAIL )
         self.assertEqual( resp[ "ratification_state" ], "approved" )
         self.assertIsNotNone( resp[ "ratified_at" ] )
         trust.update_after_ratification.assert_called_once()
+        # Row 44d8e89c: the credential's identity is written, not the query string's. The two
+        # constants differ, so this cannot pass by coincidence.
+        self.assertEqual( repo.ratify.call_args.kwargs[ "ratified_by" ], AUDIT_EMAIL )
+        self.assertEqual( trust.update_after_ratification.call_args.kwargs[ "user_email" ], AUDIT_EMAIL )
+        self.assertEqual( resp[ "ratified_by" ], AUDIT_EMAIL )
 
     async def test_success_rejected_ratified_at_none( self ):
         """Ensures: rejection path + a None ratified_at serializes to None."""
@@ -184,7 +198,7 @@ class TestRatify( unittest.IsolatedAsyncioTestCase ):
         )
         p1, p2, p3 = self._patches( repo, MagicMock() )
         with p1, p2, p3:
-            resp = await ratify_decision( decision_id=UUID, approved=False, user_email="u@e.com" )
+            resp = await ratify_decision( decision_id=UUID, approved=False, user_email=TYPED_EMAIL, audit_identity=AUDIT_EMAIL )
         self.assertIsNone( resp[ "ratified_at" ] )
 
     async def test_bad_uuid_500( self ):
@@ -193,7 +207,7 @@ class TestRatify( unittest.IsolatedAsyncioTestCase ):
         p1, p2, p3 = self._patches( repo, MagicMock() )
         with p1, p2, p3:
             with self.assertRaises( HTTPException ) as ctx:
-                await ratify_decision( decision_id="not-a-uuid", approved=True, user_email="u@e.com" )
+                await ratify_decision( decision_id="not-a-uuid", approved=True, user_email=TYPED_EMAIL, audit_identity=AUDIT_EMAIL )
         self.assertEqual( ctx.exception.status_code, 500 )
 
 
@@ -209,9 +223,9 @@ class TestDelete( unittest.IsolatedAsyncioTestCase ):
         repo = MagicMock(); repo.delete_pending.return_value = True
         p1, p2 = self._patch_repo( repo )
         with p1, p2:
-            resp = await delete_decision( decision_id=UUID, user_email="u@e.com" )
+            resp = await delete_decision( decision_id=UUID, user_email=TYPED_EMAIL, audit_identity=AUDIT_EMAIL )
         self.assertEqual( resp[ "status" ], "success" )
-        self.assertEqual( resp[ "deleted_by" ], "u@e.com" )
+        self.assertEqual( resp[ "deleted_by" ], AUDIT_EMAIL )
 
     async def test_not_found_404( self ):
         """Ensures: a missing decision → 404."""
@@ -219,7 +233,7 @@ class TestDelete( unittest.IsolatedAsyncioTestCase ):
         p1, p2 = self._patch_repo( repo )
         with p1, p2:
             with self.assertRaises( HTTPException ) as ctx:
-                await delete_decision( decision_id=UUID, user_email="u@e.com" )
+                await delete_decision( decision_id=UUID, user_email=TYPED_EMAIL, audit_identity=AUDIT_EMAIL )
         self.assertEqual( ctx.exception.status_code, 404 )
 
     async def test_not_pending_value_error_400( self ):
@@ -228,7 +242,7 @@ class TestDelete( unittest.IsolatedAsyncioTestCase ):
         p1, p2 = self._patch_repo( repo )
         with p1, p2:
             with self.assertRaises( HTTPException ) as ctx:
-                await delete_decision( decision_id=UUID, user_email="u@e.com" )
+                await delete_decision( decision_id=UUID, user_email=TYPED_EMAIL, audit_identity=AUDIT_EMAIL )
         self.assertEqual( ctx.exception.status_code, 400 )
 
     async def test_generic_500( self ):
@@ -237,7 +251,7 @@ class TestDelete( unittest.IsolatedAsyncioTestCase ):
         p1, p2 = self._patch_repo( repo )
         with p1, p2:
             with self.assertRaises( HTTPException ) as ctx:
-                await delete_decision( decision_id=UUID, user_email="u@e.com" )
+                await delete_decision( decision_id=UUID, user_email=TYPED_EMAIL, audit_identity=AUDIT_EMAIL )
         self.assertEqual( ctx.exception.status_code, 500 )
 
 

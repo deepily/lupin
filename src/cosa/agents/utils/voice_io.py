@@ -750,6 +750,42 @@ def _resolve_default( questions: list, response_default: Optional[ dict ], sourc
     }
 
 
+def _is_gate_timeout( error ) -> bool:
+    """
+    Whether `error` is the dispatcher's VoiceGateTimeoutError — WITHOUT importing it.
+
+    Requires:
+        - error is any exception
+
+    Ensures:
+        - returns True only for a VoiceGateTimeoutError instance
+        - never imports cosa.agents.test_fix_expediter: importing that package runs
+          its __init__, which pulls in swe_team and REBINDS this module's
+          _cosa_interface to swe_team's cosa_interface (no present_choices). A local
+          import inside a gate therefore broke the very ask it was guarding, on the
+          first call in a fresh process (found 2026-09-11, row b6cfbf8d).
+        - is sound: an instance can only exist once its module has been imported,
+          so an absent module means this cannot be one
+    """
+    state = sys.modules.get( "cosa.agents.test_fix_expediter.state" )
+    return state is not None and isinstance( error, state.VoiceGateTimeoutError )
+
+
+def _timeout_source( timeout_error ) -> str:
+    """
+    Name the default source for a VoiceGateTimeoutError.
+
+    Requires:
+        - timeout_error is a VoiceGateTimeoutError
+
+    Ensures:
+        - returns _DEFAULT_SOURCE_ANSWER_TIMEOUT when the ask reached a human who
+          did not answer (delivered=True), else _DEFAULT_SOURCE_DISPATCH_FAILED
+        - is the ONE place present_choices() and the select_* gates decide this
+    """
+    return _DEFAULT_SOURCE_ANSWER_TIMEOUT if timeout_error.delivered else _DEFAULT_SOURCE_DISPATCH_FAILED
+
+
 async def present_choices(
     questions: list,
     timeout: int = 120,
@@ -864,10 +900,6 @@ async def present_choices(
 
         return { "answers": answers, "default_used": False, "answered": True }
 
-    # Local import (matches the dispatcher's idiom) to avoid any load-time cycle
-    # through the agents package. Row 38a0b373.
-    from cosa.agents.test_fix_expediter.state import VoiceGateTimeoutError
-
     try:
         # Pass priority ONLY when the caller set one, so agent cosa_interfaces
         # that do not accept a priority kwarg are unaffected (default-None path
@@ -877,18 +909,17 @@ async def present_choices(
             questions=questions, timeout=timeout, title=title, abstract=abstract, job_id=job_id,
             **_priority_kwargs
         )
-    except VoiceGateTimeoutError as e:
-        # The dispatcher raises this deliberately so a caller can stall and
-        # checkpoint (swallowing it into options[0] defeated that — row be8830a3).
-        # Row 38a0b373: split the fail-open source by whether the ask actually
-        # REACHED a human. delivered=True → a real silence-timeout (answer_timeout);
-        # delivered=False → the ask never got through (dispatch_failed). A log
-        # reader must be able to tell those apart — they fail open for opposite
-        # reasons.
-        source = _DEFAULT_SOURCE_ANSWER_TIMEOUT if getattr( e, "delivered", False ) else _DEFAULT_SOURCE_DISPATCH_FAILED
-        logger.warning( f"Voice present_choices timed out (delivered={getattr( e, 'delivered', False )}): {e}" )
-        return _resolve_default( questions, response_default, source )
     except Exception as e:
+        if _is_gate_timeout( e ):
+            # The dispatcher raises this deliberately so a caller can stall and
+            # checkpoint (swallowing it into options[0] defeated that — row be8830a3).
+            # Row 38a0b373: split the fail-open source by whether the ask actually
+            # REACHED a human. delivered=True → a real silence-timeout (answer_timeout);
+            # delivered=False → the ask never got through (dispatch_failed). A log
+            # reader must be able to tell those apart — they fail open for opposite
+            # reasons.
+            logger.warning( f"Voice present_choices timed out (delivered={e.delivered}): {e}" )
+            return _resolve_default( questions, response_default, _timeout_source( e ) )
         # Any OTHER failure (transport, pre-MCP validation) — the ask did not
         # reach a human, so the honest label is dispatch_failed.
         logger.warning( f"Voice present_choices failed: {e}" )
@@ -909,7 +940,8 @@ async def present_choices(
 async def select_themes(
     themes: list,
     timeout: int = 180,
-    response_default: Optional[ list ] = None
+    response_default: Optional[ list ] = None,
+    source_label: Optional[ str ] = None
 ) -> list:
     """
     Present themes for multi-select and return selected theme indices.
@@ -935,6 +967,12 @@ async def select_themes(
         response_default: Indices to use when no human can be reached. There
             is no defensible implicit answer to "which subset did they want",
             so omitting this makes an unreachable gate raise.
+        source_label: Optional name of where the themes came from (e.g. the
+            source document), prefixed to the question so the user can see it.
+
+    A voice ask that times out is "no human answered" and resolves exactly as
+    present_choices() does — to the declared default, or a raise. It used to
+    fall into the generic handler and report an urgent "selection failed".
 
     Raises:
         - VoiceGateNoDefaultError if no human answered and response_default
@@ -966,8 +1004,10 @@ async def select_themes(
             return _require_default( response_default, _DEFAULT_SOURCE_CLI_UNPARSEABLE, "Themes" )
 
     # Voice mode - use present_choices with multiSelect
+    question = "Which research themes interest you? Select all that apply."
+    if source_label: question = f"Themes drawn from {source_label}. {question}"
     questions = [ {
-        "question"    : "Which research themes interest you? Select all that apply.",
+        "question"    : question,
         "header"      : "Themes",
         "multiSelect" : True,
         "options"     : [
@@ -980,7 +1020,7 @@ async def select_themes(
     } ]
 
     try:
-        result = await _cosa_interface.present_choices( questions, timeout )
+        result = await _cosa_interface.present_choices( questions, timeout, job_id=_job_id )
         answers = result.get( "answers", {} ) if isinstance( result, dict ) else {}
 
         # An ABSENT header is not an empty selection. Defaulting the lookup to
@@ -1006,6 +1046,8 @@ async def select_themes(
         # losing the reason and defeating the fix one line later.
         raise
     except Exception as e:
+        # Nobody answered: resolve as present_choices() does, not as a failure.
+        if _is_gate_timeout( e ): return _require_default( response_default, _timeout_source( e ), "Themes" )
         error_msg = str( e )
         logger.warning( f"Voice select_themes failed: {error_msg}" )
 
@@ -1023,7 +1065,8 @@ async def select_topics(
     topics: list,
     preselected: bool = True,
     timeout: int = 180,
-    response_default: Optional[ list ] = None
+    response_default: Optional[ list ] = None,
+    source_label: Optional[ str ] = None
 ) -> list:
     """
     Present specific topics for refinement.
@@ -1048,6 +1091,11 @@ async def select_topics(
         timeout: Seconds to wait for response
         response_default: Indices to use when no human can be reached. Omitting
             it makes an unreachable gate raise rather than guess a subset.
+        source_label: Optional name of where the topics came from (e.g. the
+            source document), prefixed to the question so the user can see it.
+
+    A voice ask that times out resolves as in select_themes(): declared default,
+    or a raise — never an urgent "selection failed".
 
     Raises:
         - VoiceGateNoDefaultError if no human answered and response_default
@@ -1079,8 +1127,10 @@ async def select_topics(
             return _require_default( response_default, _DEFAULT_SOURCE_CLI_UNPARSEABLE, "Topics" )
 
     # Voice mode
+    question = "Which specific topics should I research? Deselect any you want to skip."
+    if source_label: question = f"Topics drawn from {source_label}. {question}"
     questions = [ {
-        "question"    : "Which specific topics should I research? Deselect any you want to skip.",
+        "question"    : question,
         "header"      : "Topics",
         "multiSelect" : True,
         "options"     : [
@@ -1093,7 +1143,7 @@ async def select_topics(
     } ]
 
     try:
-        result = await _cosa_interface.present_choices( questions, timeout )
+        result = await _cosa_interface.present_choices( questions, timeout, job_id=_job_id )
         answers = result.get( "answers", {} ) if isinstance( result, dict ) else {}
 
         # See select_themes: an absent header is not "deselected everything".
@@ -1115,6 +1165,8 @@ async def select_topics(
         # losing the reason and defeating the fix one line later.
         raise
     except Exception as e:
+        # Nobody answered: resolve as present_choices() does, not as a failure.
+        if _is_gate_timeout( e ): return _require_default( response_default, _timeout_source( e ), "Topics" )
         error_msg = str( e )
         logger.warning( f"Voice select_topics failed: {error_msg}" )
 

@@ -16,6 +16,7 @@ Venue: :7999 (pure unit — fake config, fake firebase modules, injected transpo
 
 import os
 import sys
+import threading
 import time
 from unittest.mock import MagicMock
 
@@ -354,19 +355,30 @@ class TestMaybeSendWakePolicy:
         assert service.maybe_send_wake( "u1" ) == "no_tokens"
         assert sent == []
 
-    def test_debounce_suppresses_second_wake( self ):
+    def test_debounce_suppresses_second_wake_NOW( self ):
+        # The window still suppresses the wake AT THE TIME — what changed in row
+        # ed76b897 is that the suppressed notify is now deferred to the window's
+        # close instead of being dropped. Nothing extra is SENT here; the send
+        # arrives when the trailing timer fires, which TestTrailingWakeDeferral
+        # drives explicitly. Cancelled so no real timer outlives the test.
         service, sent = _service( tokens=[ "tok-1" ] )
         assert service.maybe_send_wake( "u1" ) == "submitted"
-        assert service.maybe_send_wake( "u1" ) == "debounced"
+        assert service.maybe_send_wake( "u1" ) == "deferred"
+        service.shutdown()
         service._executor.shutdown( wait=True )
         assert len( sent ) == 1
 
-    def test_debounce_suppresses_second_wake_verbose_branch( self, capsys ):
-        service, _ = _service( tokens=[ "tok-1" ], debug=True, verbose=True )
+    def test_debounce_collapse_debug_branch( self, capsys ):
+        # "debounced" is now the COLLAPSE arm — a second notify inside a window
+        # whose trailing wake is already pending. Gated on debug alone (not debug
+        # AND verbose): a burst should not flood, but one flag should reveal it.
+        service, _ = _service( tokens=[ "tok-1" ], debug=True )
         service.maybe_send_wake( "u1" )
+        assert service.maybe_send_wake( "u1" ) == "deferred"
         assert service.maybe_send_wake( "u1" ) == "debounced"
+        service.shutdown()
         service._executor.shutdown( wait=True )
-        assert "Debounced" in capsys.readouterr().out
+        assert "already pending" in capsys.readouterr().out
 
     def test_debounce_is_per_user( self ):
         service, sent = _service( tokens=[ "tok-1" ] )
@@ -386,10 +398,12 @@ class TestMaybeSendWakePolicy:
 
     def test_no_token_attempt_burns_debounce_slot( self ):
         # Documented trade-off: the slot is burned at attempt time, even when
-        # the token lookup then comes up empty.
+        # the token lookup then comes up empty — so the NEXT notify lands inside
+        # a window and is deferred rather than attempted.
         service, _ = _service( tokens=[] )
         assert service.maybe_send_wake( "u1" ) == "no_tokens"
-        assert service.maybe_send_wake( "u1" ) == "debounced"
+        assert service.maybe_send_wake( "u1" ) == "deferred"
+        service.shutdown()
 
     def test_liveness_failure_returns_error_not_raise( self ):
         def boom( user_id ):
@@ -446,6 +460,270 @@ class TestSendToAll:
         service, _ = _service( debug=True )
         service._send_to_all( "u1", [ "tok-1" ], { "type": "ws_wake" } )
         assert "Wake delivered" in capsys.readouterr().out
+
+
+# ── Trailing wake: a notify inside the window is DEFERRED, never dropped ─────
+#
+# Row ed76b897. Measured live 2026-09-28: a wake at 23:30:25Z completed, and a
+# targeted notify at 23:31:02Z — 37 s later, device socket still down — logged
+# NOTIFY-QUEUE "queued" and NO [FCM-WAKE] line at all. No wake, no deferral, no
+# line saying it was skipped; the item sat unplayed until something else woke
+# the device. The debounce arm returned "debounced" and dropped it on the floor.
+#
+# The contract these tests pin: the FIRST notify inside a window schedules ONE
+# trailing wake for when the window closes; every later notify in the same
+# window collapses onto that one; the trailing wake re-runs the whole policy at
+# fire time (so a device that came back is not woken); and both the deferral and
+# the trailing outcome are logged UNGATED — the debug flag being off is exactly
+# the condition under which this went unread for a day.
+
+class _FakeTimer:
+    """
+    Timer stand-in: records its delay, fires only when the test says so.
+
+    The point is to assert the SCHEDULED DELAY — the real contract — without a
+    sleep. A test that slept would prove the timer eventually fired and say
+    nothing about whether it was set for the remaining window.
+    """
+
+    def __init__( self, delay, callback ):
+        self.delay     = delay
+        self.callback  = callback
+        self.started   = False
+        self.cancelled = False
+
+    def start( self ):
+        self.started = True
+
+    def cancel( self ):
+        self.cancelled = True
+
+    def fire( self ):
+        self.callback()
+
+
+class _TimerSpy:
+    """Timer factory recording every timer it built."""
+
+    def __init__( self ):
+        self.timers = []
+
+    def __call__( self, delay, callback ):
+        timer = _FakeTimer( delay, callback )
+        self.timers.append( timer )
+        return timer
+
+
+def _service_with_timer_spy( tokens=None, mobile_live=False, debug=False, verbose=False ):
+    """Build a service whose trailing wakes are driven by the test, not the clock."""
+    sent  = []
+    spy   = _TimerSpy()
+    live  = { "value": mobile_live }
+    service = FcmWakeService(
+        _FakeConfig(),
+        token_lookup    = lambda u: list( tokens or [] ),
+        mobile_liveness = lambda u: live[ "value" ],
+        transport       = lambda t, d: sent.append( ( t, d ) ),
+        debug           = debug,
+        verbose         = verbose,
+        timer_factory   = spy
+    )
+    return service, sent, spy, live
+
+
+def _fire_at_window_close( service, timer, user_id="u1" ):
+    """
+    Fire a fake trailing timer the way a REAL one fires: with the window elapsed.
+
+    The fake is fired by the test thread the instant it is armed, so without this
+    the clock still reads mid-window and the service correctly re-defers. Ageing
+    the recorded attempt is what makes the fake model the real firing moment — and
+    tests that DELIBERATELY fire early simply do not call this.
+    """
+    service._last_wake_at[ user_id ] = time.monotonic() - ( service.debounce_seconds + 1 )
+    timer.fire()
+
+
+class TestTrailingWakeDeferral:
+
+    def test_notify_inside_the_window_is_deferred_not_dropped( self ):
+        # THE REPRODUCTION. Pre-fix this returned "debounced" and scheduled nothing.
+        service, _sent, spy, _live = _service_with_timer_spy( tokens=[ "tok-1" ] )
+        assert service.maybe_send_wake( "u1" ) == "submitted"
+        assert service.maybe_send_wake( "u1" ) == "deferred"
+        assert len( spy.timers ) == 1
+        assert spy.timers[ 0 ].started is True
+        service._executor.shutdown( wait=True )
+
+    def test_the_trailing_wake_is_scheduled_for_the_REMAINING_window( self ):
+        # Not "some delay" — the delay must be what is left of the window, so the
+        # deferred notify lands the moment the debounce expires and not later.
+        service, _sent, spy, _live = _service_with_timer_spy( tokens=[ "tok-1" ] )
+        service.maybe_send_wake( "u1" )
+        # Age the recorded attempt so exactly 10s of the 60s window remain.
+        service._last_wake_at[ "u1" ] = time.monotonic() - ( service.debounce_seconds - 10 )
+        assert service.maybe_send_wake( "u1" ) == "deferred"
+        assert spy.timers[ 0 ].delay == pytest.approx( 10, abs=1 )
+        service._executor.shutdown( wait=True )
+
+    def test_the_trailing_wake_actually_sends_when_the_window_closes( self ):
+        service, sent, spy, _live = _service_with_timer_spy( tokens=[ "tok-1" ] )
+        service.maybe_send_wake( "u1" )
+        service.maybe_send_wake( "u1" )
+        _fire_at_window_close( service, spy.timers[ 0 ] )
+        service._executor.shutdown( wait=True )
+        assert len( sent ) == 2, "the deferred notify must produce a second wake"
+
+    def test_later_notifies_in_the_same_window_collapse_onto_the_one_pending_wake( self ):
+        # "Schedule ONE trailing wake", not one per notify — a burst inside a
+        # window must not become a burst of pushes when it closes.
+        service, _sent, spy, _live = _service_with_timer_spy( tokens=[ "tok-1" ] )
+        service.maybe_send_wake( "u1" )
+        assert service.maybe_send_wake( "u1" ) == "deferred"
+        assert service.maybe_send_wake( "u1" ) == "debounced"
+        assert service.maybe_send_wake( "u1" ) == "debounced"
+        assert len( spy.timers ) == 1
+        service._executor.shutdown( wait=True )
+
+    def test_trailing_wake_is_suppressed_when_the_device_came_back( self ):
+        # A deferred wake is a REQUEST, not a promise: the policy re-runs at fire
+        # time, and a device that reconnected during the window is not woken.
+        service, sent, spy, live = _service_with_timer_spy( tokens=[ "tok-1" ] )
+        service.maybe_send_wake( "u1" )
+        service.maybe_send_wake( "u1" )
+        live[ "value" ] = True
+        spy.timers[ 0 ].fire()
+        service._executor.shutdown( wait=True )
+        assert len( sent ) == 1, "the device is back — the trailing wake must not fire"
+
+    def test_deferral_is_logged_UNGATED( self, capsys ):
+        # The measured failure was silence: no wake AND no line saying why. debug
+        # and verbose are both off here on purpose — that is the live config.
+        service, _sent, spy, _live = _service_with_timer_spy( tokens=[ "tok-1" ] )
+        service.maybe_send_wake( "u1" )
+        capsys.readouterr()
+        service.maybe_send_wake( "u1" )
+        out = capsys.readouterr().out
+        assert "[FCM-WAKE]" in out and "DEFERRED" in out
+        service._executor.shutdown( wait=True )
+
+    def test_trailing_wake_outcome_is_logged_UNGATED( self, capsys ):
+        # Nothing returns the trailing wake's status to a caller — it fires on a
+        # timer thread — so the log line is the ONLY way anyone sees the outcome.
+        service, _sent, spy, _live = _service_with_timer_spy( tokens=[ "tok-1" ] )
+        service.maybe_send_wake( "u1" )
+        service.maybe_send_wake( "u1" )
+        capsys.readouterr()
+        _fire_at_window_close( service, spy.timers[ 0 ] )
+        out = capsys.readouterr().out
+        assert "[FCM-WAKE]" in out and "TRAILING" in out and "submitted" in out
+        service._executor.shutdown( wait=True )
+
+    def test_a_fired_trailing_wake_opens_a_fresh_window( self ):
+        service, _sent, spy, _live = _service_with_timer_spy( tokens=[ "tok-1" ] )
+        service.maybe_send_wake( "u1" )
+        service.maybe_send_wake( "u1" )
+        _fire_at_window_close( service, spy.timers[ 0 ] )
+        # The trailing wake burned the slot, so the next notify defers again —
+        # into a NEW timer, proving the pending marker was released.
+        assert service.maybe_send_wake( "u1" ) == "deferred"
+        assert len( spy.timers ) == 2
+        service._executor.shutdown( wait=True )
+
+    def test_deferral_is_per_user( self ):
+        service, _sent, spy, _live = _service_with_timer_spy( tokens=[ "tok-1" ] )
+        service.maybe_send_wake( "u1" )
+        service.maybe_send_wake( "u2" )
+        assert service.maybe_send_wake( "u1" ) == "deferred"
+        assert service.maybe_send_wake( "u2" ) == "deferred"
+        assert len( spy.timers ) == 2
+        service._executor.shutdown( wait=True )
+
+    def test_a_tokenless_user_inside_the_window_still_defers( self ):
+        # The slot is burned at ATTEMPT time (documented trade-off), so a
+        # tokenless user is inside a window too; the trailing wake then finds no
+        # tokens and says so rather than vanishing.
+        service, _sent, spy, _live = _service_with_timer_spy( tokens=[] )
+        assert service.maybe_send_wake( "u1" ) == "no_tokens"
+        assert service.maybe_send_wake( "u1" ) == "deferred"
+        service._executor.shutdown( wait=True )
+
+    def test_trailing_wake_never_raises_into_the_timer_thread( self, capsys ):
+        # The callback runs on a timer thread with nobody to catch it; an
+        # exploding collaborator must be logged, not propagated.
+        spy  = _TimerSpy()
+        live = { "value": False }
+        def boom( user_id ):
+            if live[ "value" ]: raise RuntimeError( "ws manager exploded" )
+            return False
+        service = FcmWakeService(
+            _FakeConfig(), token_lookup=lambda u: [ "tok-1" ], mobile_liveness=boom,
+            transport=lambda t, d: None, timer_factory=spy
+        )
+        service.maybe_send_wake( "u1" )
+        service.maybe_send_wake( "u1" )
+        live[ "value" ] = True
+        spy.timers[ 0 ].fire()   # must not raise
+        assert "error" in capsys.readouterr().out
+        service._executor.shutdown( wait=True )
+
+    def test_a_LATE_timer_cannot_produce_a_SECOND_wake_inside_one_window( self ):
+        # A timer thread is not a clock. Descheduled, it fires late — and by then
+        # an ordinary notify may have taken the expired slot and opened a NEW
+        # window. A trailing wake that FORCED its way past the debounce would put
+        # two wakes inside that window, defeating the one rate limit this service
+        # exists to enforce. Honouring the window instead makes that impossible.
+        service, sent, spy, _live = _service_with_timer_spy( tokens=[ "tok-1" ] )
+        service.maybe_send_wake( "u1" )                       # wake 1
+        assert service.maybe_send_wake( "u1" ) == "deferred"  # trailing armed
+        # Window expires; an ordinary notify takes the slot — wake 2, NEW window.
+        service._last_wake_at[ "u1" ] = time.monotonic() - ( service.debounce_seconds + 1 )
+        assert service.maybe_send_wake( "u1" ) == "submitted"
+        # The late timer now fires INSIDE that new window.
+        spy.timers[ 0 ].fire()
+        service._executor.shutdown( wait=True )
+        assert len( sent ) == 2, "the late trailing wake must not add a third"
+        assert len( spy.timers ) == 2, "and it must re-defer, so the notify is not lost"
+
+    def test_a_timer_that_fires_EARLY_re_defers_rather_than_forcing_a_wake( self ):
+        # The mirror case: woken early, the trailing wake must not send. It
+        # re-arms for what is genuinely left of the window. Each re-defer's delay
+        # is the true remaining time, which strictly decreases, so this converges
+        # rather than looping.
+        service, sent, spy, _live = _service_with_timer_spy( tokens=[ "tok-1" ] )
+        service.maybe_send_wake( "u1" )
+        assert service.maybe_send_wake( "u1" ) == "deferred"
+        spy.timers[ 0 ].fire()          # window still wide open
+        service._executor.shutdown( wait=True )
+        assert len( sent ) == 1, "an early fire must not send"
+        assert len( spy.timers ) == 2, "it must re-arm for the real remaining window"
+        assert spy.timers[ 1 ].delay > 0
+
+    def test_shutdown_cancels_a_pending_trailing_wake( self ):
+        service, _sent, spy, _live = _service_with_timer_spy( tokens=[ "tok-1" ] )
+        service.maybe_send_wake( "u1" )
+        service.maybe_send_wake( "u1" )
+        service.shutdown()
+        assert spy.timers[ 0 ].cancelled is True
+        assert service._pending_timers == {}
+
+    def test_shutdown_is_safe_with_nothing_pending( self ):
+        service, _sent, _spy, _live = _service_with_timer_spy( tokens=[ "tok-1" ] )
+        service.shutdown()
+        assert service._pending_timers == {}
+
+    def test_default_timer_factory_builds_a_started_daemon_timer( self ):
+        # A non-daemon timer would hold the process open for a whole window at
+        # shutdown. Covered here because the spy replaces this everywhere else.
+        from cosa.rest.fcm_wake_service import _default_timer_factory
+        fired = []
+        timer = _default_timer_factory( 30, lambda: fired.append( True ) )
+        try:
+            assert timer.daemon is True
+            assert isinstance( timer, threading.Timer )
+        finally:
+            timer.cancel()
+        assert fired == []
 
 
 if __name__ == "__main__":

@@ -157,6 +157,46 @@ test("session id corruption returns null without throwing", () => {
   assert.equal(h.corruptEvents.length, 1);
 });
 
+// Row d2b1b59a — the audio socket's id lives under its OWN key, so writing one
+// id can never overwrite the other.
+test("getAudioSessionId returns null when not set", () => {
+  const h = makeHarness();
+  assert.equal(h.storage.getAudioSessionId(), null);
+});
+
+test("setAudioSessionId/getAudioSessionId round-trip under lupin:audio_session_id", () => {
+  const h = makeHarness();
+  const before = Date.now();
+  h.storage.setAudioSessionId("wise owl");
+  const after = Date.now();
+
+  assert.equal(h.storage.getAudioSessionId(), "wise owl");
+  const raw = h.backend.getItem("lupin:audio_session_id");
+  assert.ok(raw, "audio session id row exists");
+  const parsed = JSON.parse(raw ?? "{}") as { payload: { sessionId: string; generatedAt: number } };
+  assert.equal(parsed.payload.sessionId, "wise owl");
+  assert.ok(parsed.payload.generatedAt >= before);
+  assert.ok(parsed.payload.generatedAt <= after);
+});
+
+test("the queue and audio session ids are stored independently", () => {
+  const h = makeHarness();
+  h.storage.setSessionId("calm dolphin");
+  h.storage.setAudioSessionId("wise owl");
+  assert.equal(h.storage.getSessionId(), "calm dolphin");
+  assert.equal(h.storage.getAudioSessionId(), "wise owl");
+
+  h.storage.setAudioSessionId("bold tiger");
+  assert.equal(h.storage.getSessionId(), "calm dolphin", "writing the audio id left the queue id alone");
+});
+
+test("audio session id corruption returns null without throwing", () => {
+  const h = makeHarness();
+  h.backend.setItem("lupin:audio_session_id", "not json");
+  assert.equal(h.storage.getAudioSessionId(), null);
+  assert.equal(h.corruptEvents.length, 1);
+});
+
 // ---------------------------------------------------------------------------
 // Coverage backfill — defensive guard branches
 // ---------------------------------------------------------------------------

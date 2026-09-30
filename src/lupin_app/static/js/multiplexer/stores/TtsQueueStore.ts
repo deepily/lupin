@@ -30,16 +30,72 @@
 //   - `store_audio_state_change{state:"idle"}` (AudioStore stop signal) → clear
 //     `current()` → null WITHOUT advancing (halt + de-light; pending retained).
 //     Distinct from natural-ended = advance (Cheech 01-D obligation).
+//
+// Parity A-2 #3c — a MANUAL PAUSE BLOCKS ADVANCE (legacy onTTSPlaybackComplete
+// early-return, notifications.js:22730-22736, and activateNextTTS,
+// :22290-22296). A manual pause is the audio machine's `paused` state — only an
+// operator action reaches it (the Pause button, the corner pause, the
+// action-required countdown pause). A store_audio_ended that lands while paused
+// is HELD, not applied: no advance, no focus entry, so the next item's audio is
+// not requested. Play (paused → playing) applies the held completion; Stop
+// (→ idle) or Skip (→ ended) drops it. Legacy drops it in every case, which
+// leaves its queue stuck on a finished item after resume — not ported.
+//
+// Parity A-2 #3e — the "TTS is playing" signal (TTS side of the AR→TTS
+// deferral coupling; A-2 #2d consumes it). Legacy defers an action-required
+// activation while `this.activeTTSItem` is set (notifications.js:21779-21785)
+// and activates it when the current item completes, BEFORE the queue rolls to
+// the next pending item (:22782-22786). Two reads carry that here:
+//   - isPlaying() — an item holds the TTS slot. The arrival-time read.
+//     True through a manual pause, as legacy keeps activeTTSItem while paused.
+//   - store_tts_slot_released{releasedId} — the item holding the slot left it.
+//     The release point. It fires on the A→B roll too, where current() never
+//     passes through null, so a consumer watching isPlaying() alone would wait
+//     for the whole queue to drain. Emitted from emit(), the one place every
+//     mutation passes, so no path can vacate the slot without it.
 
 import type { EventBus } from "../shared/EventBus";
+import type { StorageService } from "../shared/StorageService";
 import type {
   AudioPlaybackState,
   LupinEvent,
   StoreActionRequiredChangedPayload,
   StoreAudioStateChangePayload,
   StoreTtsQueueChangedPayload,
+  StoreTtsSlotReleasedPayload,
+  TransportReadyPayload,
+  TtsRequestFailedPayload,
   TtsQueueItem,
 } from "../shared/types";
+
+// ---------------------------------------------------------------------------
+// Parity A-1c3 — the queue survives a reload (legacy saveTTSQueueState /
+// restoreTTSQueueState, notifications.js:23045-23147, key
+// `notifications_tts_queue` at :209). Spec ruling 3: StorageService, injected
+// `| null` (src/rnd/v0.2.1/2026.09.15-operator-state-preservation-spec.md §8).
+//
+// POLARITY: the payload is `{ pending, focusModeActive, focusModeNotificationId }`.
+// `pending` holds the items still WAITING to be spoken, in order. The item that
+// was speaking at the reload is NOT saved, as in legacy, which saves `ttsQueue`
+// and never `activeTTSItem`. The key is removed when nothing waits and nothing
+// is focused (:23049-23051). Nothing about a manual pause is saved: legacy
+// resets it on restore because a reload kills the audio context (:23089-23092),
+// and here the pause lives on the audio machine, which a reload resets anyway.
+//
+// ⚠️ StorageService stores this as `lupin:ttsQueue` — a COLON. The hand-rolled
+// keys `lupin.taskList.collapsedOwners`, `lupin.epicBoard.groupState` and
+// `lupin.finishedTasks.shownStatuses` use a DOT, so a sweep over
+// `StorageService.keys()` never sees them. It is a separate key from
+// `lupin:operatorState` (A-1c2), whose whole payload is Action Required prompts.
+// ---------------------------------------------------------------------------
+export const TTS_STORAGE_KEY    = "ttsQueue";
+export const TTS_STORAGE_SCHEMA = 1;
+
+interface PersistedTtsQueue {
+  pending                 : TtsQueueItem[];
+  focusModeActive         : boolean;
+  focusModeNotificationId : string | null;
+}
 
 // ---------------------------------------------------------------------------
 // Public interface
@@ -59,6 +115,13 @@ export interface TtsQueueStore {
    * Consume-surface completion: zero new state, zero mutation, zero events.
    */
   activeItem(): TtsQueueItem | null;
+  /**
+   * Parity A-2 #3e — "TTS is playing": true while an item holds the TTS slot,
+   * including during a manual pause (legacy `!!this.activeTTSItem`,
+   * notifications.js:21779). False when nothing is active, in focus mode, and
+   * while restored items wait for the audio socket.
+   */
+  isPlaying(): boolean;
   /** The FIFO tail of items waiting to be spoken (excludes the active head). */
   pending(): ReadonlyArray<TtsQueueItem>;
   /** Number of PENDING items (excludes the active head). Named distinctly from
@@ -92,9 +155,32 @@ export interface TtsQueueStore {
   disposeForTesting(): void;
 }
 
+// Row aa13fdd7 — the fraction a store assumes when nobody injected a reader:
+// "we were not told the setting, so do not gate". Deliberately NOT a copy of the
+// slider's DEFAULT_TTS_FRACTION — a store must not import a renderer's constant,
+// and any non-zero value expresses "ungated" identically, so copying 0.25 here
+// would create a second place the slider's default lives without adding meaning.
+const UNGATED_FRACTION = 1;
+
 export interface TtsQueueStoreOptions {
   bus    : EventBus;
   nowFn ?: () => number;
+  // A-1c3 — where the queue is saved; null or absent saves and restores nothing.
+  storage         ?: StorageService | null;
+  // A-1c3 — is the Action Required prompt a restored focus waits on still owed
+  // an answer? Legacy asks `actionRequiredNotifications.has(id)` (:23105). Absent
+  // means no store to ask, and a restored focus is then treated as STALE: a
+  // held queue that nothing can release is worse than one that plays on.
+  focusItemIsLive ?: (idHash: string) => boolean;
+  // Row aa13fdd7 — the TTS preview fraction IN FORCE NOW, read at every enqueue
+  // (never cached at construction) so a slider move on either client is honoured
+  // without a reload. 0 means the user asked for silence.
+  //
+  // Absent → UNGATED_FRACTION, i.e. NOT gated. Fail-OPEN is deliberate: a caller
+  // who never wired this behaves exactly as it did before the gate existed.
+  // Fail-closed would silence every utterance in every caller that omits it, a
+  // worse failure than the one this gate closes.
+  liveFraction ?: () => number;
 }
 
 // ---------------------------------------------------------------------------
@@ -126,6 +212,20 @@ class TtsQueueStoreImpl implements TtsQueueStore {
   // audio state seen; exit rolls the queue only when NOT manually paused (mirrors
   // legacy `!isTTSPaused`, notifications.js:17336).
   private lastAudioState           : AudioPlaybackState | null = null;
+  // A-2 #3c — a store_audio_ended that arrived during a manual pause, held
+  // until the pause lifts (applied on Play, dropped on Stop / Skip).
+  private endedWhilePaused         = false;
+  // A-1c3 — restored items are waiting for the audio socket. Legacy starts the
+  // next item as soon as it restores (:23139-23143), but the speech request
+  // streams back over /ws/audio, so here the head starts on that socket's
+  // transport_ready. Until then a new arrival queues behind the restored items.
+  private restoreHeld              = false;
+  private readonly storage         : StorageService | null;
+  // Row aa13fdd7 — the live 0%-means-silent reader (see TtsQueueStoreOptions).
+  private readonly liveFraction     : () => number;
+  // A-2 #3e — the active id as of the last emit, so emit() can tell that the
+  // slot was vacated and announce store_tts_slot_released.
+  private lastEmittedActiveId      : string | null = null;
 
   private readonly unsubscribers: Array<() => void> = [];
 
@@ -133,6 +233,13 @@ class TtsQueueStoreImpl implements TtsQueueStore {
     this.bus = opts.bus;
     /* c8 ignore next */ // production-default fallback: Date.now() is the runtime clock; tests always inject a deterministic nowFn().
     this.nowFn = opts.nowFn ?? (() => Date.now());
+    this.storage = opts.storage ?? null;
+    // NO c8-ignore here, unlike the nowFn line above, and the difference is measured:
+    // callers that predate this option construct the store without a liveFraction
+    // (action_required_tts_deferral.test.ts is one), so this fallback genuinely runs
+    // and an ignore would hide a live branch rather than excuse a dead one.
+    this.liveFraction = opts.liveFraction ?? (() => UNGATED_FRACTION);
+    this.restore(opts.focusItemIsLive ?? (() => false));
     this.subscribe();
   }
 
@@ -144,6 +251,10 @@ class TtsQueueStoreImpl implements TtsQueueStore {
     return this.active;
   }
 
+  isPlaying(): boolean {
+    return this.active !== null;
+  }
+
   pending(): ReadonlyArray<TtsQueueItem> {
     return this.queue.slice();
   }
@@ -153,7 +264,29 @@ class TtsQueueStoreImpl implements TtsQueueStore {
   }
 
   enqueue(item: TtsQueueItem): void {
-    if (this.active === null) {
+    // 🔴 ROW aa13fdd7 — 0% MEANS SILENT, AND THIS IS THE ONE PLACE THAT DECIDES IT.
+    //
+    // Rick, on af01bd4b (2026-09-26): "The only thing that is an issue is that
+    // playback occurs when it is NOT enabled." The slider's own label promises it
+    // — notifications.html:491, "0% = silent; 100% = full message."
+    //
+    // The gate sits HERE, at the shared point, rather than at each producer,
+    // because this store is the single upstream of the only door that asks the
+    // server for audio (wireTtsPlayback is the sole POST to /api/get-speech* in
+    // this client). wireTtsIntent already drops arrivals at 0% before they reach
+    // this line; that stays as the belt, and this is the suspenders. What it ADDS
+    // is every OTHER automatic producer — measured 2026-09-27, the one that was
+    // live is QaStore.speak, the job-completion answer, which read no setting at
+    // all. Its own docstring notes a frame can arrive "with no submit behind it
+    // (another client's job, a cold reload)", so at 0% any client's finished job
+    // made this one talk.
+    //
+    // ⚠️ AN EXPLICIT BUTTON PRESS IS NOT AUTOMATIC SPEECH. `user_initiated` opts
+    // out (the Direct TTS pane), matching legacy, whose gate likewise lives in
+    // addToTTSQueue while its test buttons call playTTS directly and bypass it.
+    // Absent → gated, so a future automatic path is silent at 0% by default.
+    if ( this.liveFraction() === 0 && item.user_initiated !== true ) return;
+    if (this.active === null && !this.restoreHeld) {
       // Nothing speaking — the new item becomes the active head immediately
       // (legacy `activateNextTTS` auto-promote). current() === item.id_hash.
       this.active = item;
@@ -201,6 +334,7 @@ class TtsQueueStoreImpl implements TtsQueueStore {
     this.queue.length = 0;
     this.focusModeActive         = false;
     this.focusModeNotificationId = null;
+    this.restoreHeld             = false;
     this.emit();
   }
 
@@ -254,12 +388,89 @@ class TtsQueueStoreImpl implements TtsQueueStore {
         (e) => this.onActionRequiredChanged(e),
       ),
     );
+    // Row 0b384107 — the active item's speech request failed. Legacy's playTTS
+    // catch calls onTTSPlaybackComplete (notifications.js:22394-22396), so it
+    // goes through the same completion as a natural end. A failure for an item
+    // that no longer holds the slot is late and changes nothing.
+    this.unsubscribers.push(
+      this.bus.on<TtsRequestFailedPayload>("tts_request_failed", (e) => {
+        if (this.active !== null && this.active.id_hash === e.payload.idHash) this.onAudioEnded();
+      }),
+    );
+    // A-1c3 — the audio socket is authenticated: start the restored head.
+    this.unsubscribers.push(
+      this.bus.on<TransportReadyPayload>(
+        "transport_ready",
+        (e) => this.onTransportReady(e),
+      ),
+    );
+  }
+
+  private onTransportReady(e: LupinEvent<TransportReadyPayload>): void {
+    if (e.payload.transport !== "AudioTransport" || !this.restoreHeld) return;
+    this.restoreHeld = false;
+    // Nothing is active while held (enqueue appends instead), so advance()
+    // promotes the head rather than discarding one.
+    this.advance();
+  }
+
+  // -------------------------------------------------------------------------
+  // A-1c3 — save and restore (see TTS_STORAGE_KEY)
+  // -------------------------------------------------------------------------
+
+  /** Save the waiting items and the focus fields, or clear the key when neither exists. */
+  private persist(): void {
+    if (this.storage === null) return;
+    try {
+      if (this.queue.length === 0 && !this.focusModeActive) this.storage.remove(TTS_STORAGE_KEY);
+      else this.storage.setJSON<PersistedTtsQueue>(TTS_STORAGE_KEY, {
+        pending                 : this.queue.slice(),
+        focusModeActive         : this.focusModeActive,
+        focusModeNotificationId : this.focusModeNotificationId,
+      }, TTS_STORAGE_SCHEMA);
+    } catch {
+      // A full or refused storage must not stop the queue; legacy logs and carries on (:23066-23068).
+    }
+  }
+
+  /**
+   * Rebuild the queue from the last save. Runs once, in the constructor, before
+   * anything listens, so it emits nothing; a renderer's first paint reads it.
+   *
+   * Ensures:
+   *   - the waiting items return in saved order, with nothing active
+   *   - a saved focus returns only if `focusItemIsLive` says its prompt is still
+   *     owed; otherwise it is dropped and the save rewritten (legacy :23104-23115)
+   *   - unless focused, the items are held for the audio socket (restoreHeld)
+   */
+  private restore(focusItemIsLive: (idHash: string) => boolean): void {
+    if (this.storage === null) return;
+    const saved = this.storage.getJSON<PersistedTtsQueue>(TTS_STORAGE_KEY, TTS_STORAGE_SCHEMA);
+    if (saved === null || !Array.isArray(saved.pending)) return;
+    this.queue.push(...saved.pending);
+    const focusId = saved.focusModeNotificationId;
+    if (saved.focusModeActive === true && typeof focusId === "string" && focusItemIsLive(focusId)) {
+      this.focusModeActive         = true;
+      this.focusModeNotificationId = focusId;
+    }
+    this.restoreHeld = !this.focusModeActive && this.queue.length > 0;
+    this.persist();
   }
 
   private onAudioStateChange(e: LupinEvent<StoreAudioStateChangePayload>): void {
     // 70cbff3e (A4): remember the last audio state so focus-exit can respect a
     // manual pause (mirrors legacy `!isTTSPaused` gate, notifications.js:17336).
     this.lastAudioState = e.payload.state;
+    // A-2 #3c — the manual pause just lifted with a completion held. Play
+    // applies it now (advance, or focus entry for an action-required item);
+    // any other exit drops it and falls through to the ordinary handling.
+    if (this.endedWhilePaused && e.payload.state !== "paused") {
+      this.endedWhilePaused = false;
+      if (e.payload.state === "playing") {
+        this.onAudioEnded();
+        return;
+      }
+    }
     // Only the idle (stop) state de-lights. Every other playback sub-state
     // (playing / paused / decoding / ended / error) is id-blind to F0 — the
     // active id is driven by the queue + store_audio_ended, not by sub-states.
@@ -276,6 +487,19 @@ class TtsQueueStoreImpl implements TtsQueueStore {
   // -------------------------------------------------------------------------
 
   private onAudioEnded(): void {
+    // Row cd6fe6d6 — nothing holds the slot, so there is nothing to end. A
+    // server tts_error can arrive with no request in flight, and AudioStore
+    // cannot tell it from one whose request failed before any audio (neither
+    // has a source); only this store knows whether an item is speaking.
+    // Without this a stray completion promoted a waiting item: it restarted
+    // the queue after Stop, and started a restored head before the audio
+    // socket was up, which transport_ready then discarded unplayed.
+    if (this.active === null) return;
+    // A-2 #3c — manually paused: hold the completion, do not advance.
+    if (this.lastAudioState === "paused") {
+      this.endedWhilePaused = true;
+      return;
+    }
     // Natural utterance completion. Legacy onTTSPlaybackComplete (notifications.js
     // :17176-17204): capture the just-completed head; if it was an ACTIVE
     // action-required item AND is still unresolved, ENTER focus (hold the roll)
@@ -352,6 +576,10 @@ class TtsQueueStoreImpl implements TtsQueueStore {
   }
 
   private emit(): void {
+    // A-1c3 — every mutation emits, so this one call site saves them all.
+    this.persist();
+    const released           = this.lastEmittedActiveId;
+    this.lastEmittedActiveId = this.current();
     this.bus.emit<StoreTtsQueueChangedPayload>({
       type    : "store_tts_queue_changed",
       payload : {
@@ -361,6 +589,16 @@ class TtsQueueStoreImpl implements TtsQueueStore {
       source  : "TtsQueueStore",
       ts      : this.nowFn(),
     });
+    // A-2 #3e — the slot was vacated (legacy's release point, :22782-22786).
+    // After the queue event, so a consumer reading the store sees the new state.
+    if (released !== null && released !== this.lastEmittedActiveId) {
+      this.bus.emit<StoreTtsSlotReleasedPayload>({
+        type    : "store_tts_slot_released",
+        payload : { releasedId: released },
+        source  : "TtsQueueStore",
+        ts      : this.nowFn(),
+      });
+    }
   }
 }
 

@@ -371,3 +371,51 @@ def test_t7_log_silent_by_default( config_mgr, sample_personas, capsys ):
 
     out = capsys.readouterr().out
     assert "decision outcome" not in out
+
+
+# ─── The configured timeout actually reaches the client (row abe4188d) ──────
+#
+# `test_construction_reads_ini_keys` above asserts `d.timeout_seconds == 5.0` and
+# passed throughout the period the value was read from the INI and then never used.
+# That is the shape of the defect: a test on the LOADING of a setting says nothing
+# about its APPLICATION. These two ask the other question.
+
+
+def test_the_configured_timeout_is_handed_to_the_client( sample_personas ):
+    """
+    Ensures:
+        - the value loaded from `commons llm disambiguator timeout seconds` arrives
+          at the client's run() call
+
+    Pinned to 11, not the fixture's 5, so a hardcoded constant in the disambiguator
+    cannot satisfy it. Dropping `timeout=` from the client.run call reddens this.
+    """
+    mgr    = _make_config_mgr( { "commons llm disambiguator timeout seconds": 11 } )
+    client = MagicMock()
+    client.run = MagicMock( return_value=_mock_response_xml( "Rachel", 0.95 ) )
+
+    with _patch_factory( client ):
+        CommonsLlmDisambiguator( mgr ).disambiguate( sample_personas, "the R session" )
+
+    assert client.run.call_args.kwargs[ "timeout" ] == 11.0
+
+
+def test_the_default_timeout_is_handed_to_the_client_when_the_key_is_absent( sample_personas ):
+    """
+    Ensures:
+        - an unset INI key still bounds the call, at the module default
+
+        A missing key is the case where an unbounded call would be easiest to ship
+        unnoticed, because nothing in the config names the number.
+    """
+    mgr = MagicMock()
+    mgr.get = lambda key, default=None: (
+        "kaitchup/phi_4_14b" if key == "llm spec key for commons persona disambiguator" else default
+    )
+    client = MagicMock()
+    client.run = MagicMock( return_value=_mock_response_xml( "Rachel", 0.95 ) )
+
+    with _patch_factory( client ):
+        CommonsLlmDisambiguator( mgr ).disambiguate( sample_personas, "the R session" )
+
+    assert client.run.call_args.kwargs[ "timeout" ] == _DEFAULT_TIMEOUT_SECONDS

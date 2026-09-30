@@ -71,6 +71,9 @@ class _ConcreteManager( SolutionSnapshotManagerInterface ):
     def get_gists( self ):
         return super().get_gists()
 
+    def get_all_snapshots( self ):
+        return super().get_all_snapshots()
+
     def get_stats( self ):
         return super().get_stats()
 
@@ -334,7 +337,7 @@ class TestSolutionSnapshotManagerInterface( unittest.TestCase ):
         callable and drives line coverage on the abstract bodies.
 
         Ensures:
-            - All ten abstract methods return None (pass-body contract)
+            - All eleven abstract methods return None (pass-body contract)
         """
         mgr      = _ConcreteManager( {} )
         snapshot = Mock()
@@ -347,6 +350,7 @@ class TestSolutionSnapshotManagerInterface( unittest.TestCase ):
         self.assertIsNone( mgr.get_snapshots_by_question( "question?" ) )
         self.assertIsNone( mgr.get_snapshots_by_code_similarity( snapshot ) )
         self.assertIsNone( mgr.get_gists() )
+        self.assertIsNone( mgr.get_all_snapshots() )
         self.assertIsNone( mgr.get_stats() )
         self.assertIsNone( mgr.health_check() )
 

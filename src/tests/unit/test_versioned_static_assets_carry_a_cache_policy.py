@@ -1,0 +1,240 @@
+"""
+A `?v=`-tokened asset URL must be served with an explicit freshness directive.
+
+THE DEFECT, measured 2026-09-02 against the live :7999. The SPA shell is served
+`Cache-Control: no-cache` (pages.py:71) so a reload revalidates it — that half works. The
+static mount underneath it (`main.py`, `app.mount( "/static", StaticFiles(...) )`) sets NO
+cache-control at all, only `last-modified` and an ETag.
+
+⇒ SO THE WHOLE CACHE-BUSTING SCHEME RESTS ON THE HTML BEING REVALIDATED FIRST. Bump a
+`?v=` token and the new URL is a new cache key, which is the point — but the OLD url is
+also a cache key, and with no freshness directive on it a browser may serve it from
+heuristic cache indefinitely without ever asking. A tab that was already open when the
+token moved therefore keeps running the old asset, and "nothing happens and nothing
+throws" is what the operator sees. Every `?v=` bump this repo has made carries the hole.
+
+⚠️ WHAT THIS FILE ASSERTS, AND WHY IT IS NOT "THE HEADER IS PRESENT". A guard that pins
+one header on one known file is the easy half and would not have caught this: the hole was
+never about a file anyone was looking at, it was about a POLICY that was absent
+everywhere. So the load-bearing test DISCOVERS the corpus from the page — every asset the
+shell links with a `?v=` — and requires a directive on each. Add a tenth asset tomorrow
+and it is covered on the day it is linked, without anyone remembering to extend a list.
+
+⚠️ AND THE CORPUS IS PROVEN NON-EMPTY BEFORE IT IS TRUSTED. A discovery that silently
+finds nothing passes every per-item assertion in the loop, and an empty search and a clean
+result print the same thing.
+
+🔴 THE LAST CLASS HERE DRIVES THE APP `main.py` ACTUALLY BUILDS, AND IT IS NOT OPTIONAL.
+Everything above mounts `VersionedStaticFiles` itself, so all of it stays green if the
+server goes on mounting plain `StaticFiles` — a policy that is implemented and not
+installed is exactly the defect this closes, one level up. The same trap this repo already
+names: a test that enters below the layer the incident entered at cannot speak to the
+incident.
+"""
+
+import re
+from pathlib import Path
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from lupin_app.versioned_static import VersionedStaticFiles
+
+
+STATIC_DIR = Path( __file__ ).resolve().parents[ 2 ] / "lupin_app" / "static"
+SHELLS     = sorted( ( STATIC_DIR / "html" ).glob( "*.html" ) )
+
+
+def _linked_versioned_assets():
+    """
+    Every `/static/...?v=...` URL any shell links — the versioned corpus.
+
+    Ensures:
+        - returns a sorted list of (path, query) pairs, deduplicated across shells
+        - discovers from the HTML rather than from a list kept in this file
+    """
+    found = []
+    for shell in SHELLS:
+        found += re.findall( r'(?:src|href)="(/static/[^"?]+)\?(v=[^"]+)"',
+                             shell.read_text( encoding="utf-8" ) )
+    return sorted( set( found ) )
+
+
+def _every_linked_asset():
+    """
+    Every `/static/...` URL any shell links, tokened or not, with its query string.
+
+    ⚠️ THIS IS THE CORPUS THAT MATTERS AND IT IS SIX TIMES THE OTHER ONE. Measured
+    2026-09-02 in the MAIN CHECKOUT, which is the only tree where the gitignored build
+    output under `static/dist/` exists: 54 links across 7 shells, ALL 54 serving, of which
+    only 9 carry a `?v=` — and all 9 are on ONE page. The other six shells version nothing
+    at all, so they never had a busting mechanism to have a hole in; before this policy
+    they were relying on nothing.
+
+    Ensures:
+        - returns a sorted list of (path, query) pairs — query is "" when absent
+        - spans every shell, so a new page is covered the day it is added
+    """
+    found = []
+    for shell in SHELLS:
+        found += re.findall( r'(?:src|href)="(/static/[^"?]+)(\?[^"]*)?"',
+                             shell.read_text( encoding="utf-8" ) )
+    return sorted( { ( path, q or "" ) for path, q in found } )
+
+
+@pytest.fixture
+def client():
+    app = FastAPI()
+    app.mount( "/static", VersionedStaticFiles( directory=str( STATIC_DIR ) ), name="static" )
+    return TestClient( app )
+
+
+def test_the_shell_actually_links_versioned_assets():
+    """
+    THE POSITIVE CONTROL, and it is not ceremony. Every assertion below runs inside a loop
+    over this corpus, so a discovery that quietly returned nothing would make the whole
+    file pass while measuring not one byte.
+    """
+    assets = _linked_versioned_assets()
+    assert len( assets ) >= 5, f"only {len( assets )} versioned assets discovered - the regex has stopped matching the page"
+
+
+def test_every_versioned_asset_the_page_links_is_served_with_a_freshness_directive( client ):
+    """
+    THE GUARD THIS FILE EXISTS FOR. Not "the header is set on notifications.js" — that
+    would have gone green on nine other assets carrying the same hole.
+    """
+    missing = []
+    for path, query in _linked_versioned_assets():
+        r = client.get( f"{path}?{query}" )
+        assert r.status_code == 200, f"{path} is linked by the shell and does not serve"
+        if not r.headers.get( "cache-control" ): missing.append( path )
+    assert missing == [], f"linked with ?v= and served with no cache-control: {missing}"
+
+
+def test_no_asset_any_shell_links_is_served_without_a_policy( client ):
+    """
+    THE WIDE CLAIM, and the honest measure of what this change did. The versioned guard
+    above covers 9 assets on one page; this covers all 54 links across all 7 shells.
+    Measured before the fix: 53 of the 53 that serve came back with NO cache-control.
+
+    ⚠️ IT ADDS NO MUTATION-DETECTION POWER OVER THE VERSIONED GUARD, and pretending
+    otherwise would be padding. One mount serves every one of these, so no edit can make
+    one shell's assets differ from another's — anything that breaks these breaks those.
+    What it adds is REACH: the file's claim now matches the fix's actual scope, and a
+    seventh shell added tomorrow is covered on the day someone links from it.
+
+    🔴 A NON-200 IS SKIPPED, AND THE SKIP IS COUNTED AND ASSERTED ON — because an earlier
+    cut of this test skipped silently and I published a false fact out of it. It reported
+    `parity-harness.js` as a dead link on the strength of a census run IN A WORKTREE, where
+    `src/lupin_app/static/dist/` does not exist: that directory is gitignored (.gitignore
+    line 194), so it holds 75 files in the main checkout and 0 in every worktree. The file
+    serves fine — 26,015 bytes, HTTP 200. The check had no logic defect at all; it answered
+    correctly about the tree it ran in, and I reported the answer as a fact about the app.
+
+    ⇒ SO THE SKIP NOW CARRIES A CEILING RATHER THAN BEING UNBOUNDED. Some shells legitimately
+    link build output that a fresh checkout has not produced, so a hard failure would redden
+    this file for an environment difference. But an UNCOUNTED skip is how a whole corpus can
+    quietly empty out and still pass, so the count is asserted: if more than a handful go
+    missing, this is measuring a tree rather than a policy and it says so.
+    """
+    checked, skipped, missing = 0, [], []
+    for path, query in _every_linked_asset():
+        r = client.get( f"{path}{query}" )
+        if r.status_code != 200: skipped.append( path ); continue
+        checked += 1
+        if not r.headers.get( "cache-control" ): missing.append( path )
+    assert missing == [], f"linked by a shell and served with no cache-control: {missing}"
+
+    # THE POSITIVE CONTROL THE FIRST CUT LACKED. Without it every assertion above is
+    # satisfied by a corpus that served nothing at all.
+    assert checked >= 40, f"only {checked} of {len( _every_linked_asset() )} assets served - skipped: {skipped}"
+
+
+def test_the_wide_corpus_is_wider_than_the_versioned_one( client ):
+    """
+    THE POSITIVE CONTROL FOR THE WIDENING ITSELF. If the two discoveries returned the same
+    set, the test above would be the versioned one wearing a longer name — and a reader
+    would credit it with reach it did not have.
+    """
+    wide, versioned = _every_linked_asset(), _linked_versioned_assets()
+    assert len( wide ) > len( versioned ) * 2, \
+        f"the wide corpus ({len( wide )}) is not meaningfully wider than the versioned one ({len( versioned )})"
+    assert any( q == "" for _, q in wide ), "no un-tokened asset was discovered - the regex has stopped matching"
+
+
+def test_a_versioned_url_is_cacheable_because_the_token_makes_it_immutable( client ):
+    """
+    A `?v=` URL names one exact revision: bumping the token yields a DIFFERENT url, so the
+    old one can never need to change. That is what earns a long max-age, and it is the
+    property that makes the token scheme work rather than merely look like it works.
+    """
+    path, query = _linked_versioned_assets()[ 0 ]
+    cc = client.get( f"{path}?{query}" ).headers[ "cache-control" ]
+    assert "max-age=" in cc
+    assert int( re.search( r"max-age=(\d+)", cc ).group( 1 ) ) >= 86400, f"a token-pinned url got a short max-age: {cc}"
+
+
+def test_the_same_file_without_a_token_must_revalidate( client ):
+    """
+    THE OTHER HALF, and the one that makes this a policy rather than a blanket max-age.
+    An UN-tokened url has no revision in it, so caching it hard is exactly the stale-asset
+    trap one level down — the file changes underneath a url that never changes.
+    """
+    path, _ = _linked_versioned_assets()[ 0 ]
+    cc = client.get( path ).headers.get( "cache-control", "" )
+    assert "no-cache" in cc, f"an un-tokened asset url may go stale silently: {cc!r}"
+
+
+def test_the_two_policies_actually_differ_for_one_file( client ):
+    """
+    DISCRIMINATING, and it is the case a single-policy implementation passes everything
+    else on. Same file, same server, one variable — the presence of the token. If both
+    answers are equal, the code is not reading the query at all and one of the two rules
+    above is being satisfied by accident.
+    """
+    path, query = _linked_versioned_assets()[ 0 ]
+    with_token    = client.get( f"{path}?{query}" ).headers.get( "cache-control", "" )
+    without_token = client.get( path ).headers.get( "cache-control", "" )
+    assert with_token != without_token, f"the token changes nothing: both {with_token!r}"
+
+
+class TestTheServerActuallyMountsIt:
+    """
+    THROUGH-PATH. The mount under test is the one `main.py` assembles — not one this file
+    built. Precedent and fixture shape: test_retired_doors_through_the_real_app.py.
+    """
+
+    @pytest.fixture( scope="class" )
+    def real_app( self ):
+        import os, sys
+        root = os.environ.get( "LUPIN_ROOT" )
+        assert root, "LUPIN_ROOT must be set — see CLAUDE.md § PATH MANAGEMENT"
+        os.environ.setdefault( "JWT_SECRET_KEY", "test-only-never-signs-anything" )
+        src = os.path.join( root, "src" )
+        if src not in sys.path: sys.path.insert( 0, src )
+        import lupin_app.main as main_module
+        return main_module.app
+
+    def test_the_static_mount_the_server_builds_carries_the_policy( self, real_app ):
+        """
+        Asked of the assembled route table, not of the source text. A source-level check
+        would hold against the import sitting unused, which is how three assertions in the
+        neighbouring JS suite went green against strings that never ran.
+        """
+        mounts = [ r for r in real_app.routes if getattr( r, "path", None ) == "/static" ]
+        assert mounts, "the server mounts nothing at /static"
+        assert any( isinstance( getattr( m, "app", None ), VersionedStaticFiles ) for m in mounts ), \
+            "/static is mounted with plain StaticFiles - the policy is implemented but not installed"
+
+    def test_a_versioned_asset_is_cacheable_through_the_real_app( self, real_app ):
+        """
+        The end-to-end claim, one request through the server the operator talks to. Without
+        this, every assertion above is about a class nobody reaches.
+        """
+        from fastapi.testclient import TestClient
+        client      = TestClient( real_app, raise_server_exceptions=False )
+        path, query = _linked_versioned_assets()[ 0 ]
+        assert "immutable" in client.get( f"{path}?{query}" ).headers.get( "cache-control", "" )
+        assert "no-cache"  in client.get( path ).headers.get( "cache-control", "" )

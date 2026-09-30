@@ -170,15 +170,54 @@ test( "self 📋 in vertical mode also uses the tooltip (vertical unaffected)", 
 } );
 
 // ── Embedded doc-link ──────────────────────────────────────────────────────
+//
+// 🔴 ROW 47759aa3 CHANGED THE ROUTE AND NOT THE RULING. These two cases used to read
+// `defaultPrevented === false` and pin the OLD mechanism: the anchor's baked-in
+// `target="_blank"` opening a tab because the handler returned without claiming the
+// click. That attribute is no longer emitted for an in-app doc link (María's design
+// (a), 2026-09-26), so a bare return would now navigate the CURRENT tab and destroy
+// the shared pane — precisely the harm bugs 11c01fbc and 17ce50a5 bought this
+// exception to prevent. The handler therefore claims the click AND calls window.open
+// itself. Same new tab for the user; a different observable, recorded here.
 
-test( "self doc-link → native new tab (not prevented), NOT the pane (self→through)", () => {
+/** Recorded window.open calls — the new tab's actual route. */
+let tabOpens: Array<{ url?: string; target?: string; features?: string }> = [];
+let realWindowOpen: unknown = null;
+
+function captureWindowOpen(): void {
+  tabOpens = [];
+  const g = globalThis as unknown as { open: unknown };
+  realWindowOpen = g.open;
+  g.open = ( url?: string, target?: string, features?: string ): null => {
+    tabOpens.push( { url, target, features } );
+    return null;
+  };
+}
+
+function restoreWindowOpen(): void {
+  ( globalThis as unknown as { open: unknown } ).open = realWindowOpen;
+}
+
+test( "self doc-link → a new tab via explicit window.open, NOT the pane (self→through)", () => {
   const { selfAnchor } = buildDOM();
-  const ev = click( selfAnchor );
+  captureWindowOpen();
+  try {
+    const ev = click( selfAnchor );
 
-  assert.equal( ( ui._openContentPaneCalls as unknown[] ).length, 0,
-    "self doc-link must NOT route to _openContentPane" );
-  assert.equal( ev.defaultPrevented, false,
-    "self doc-link keeps default nav so target=_blank opens a new tab (vertical parity)" );
+    assert.equal( ( ui._openContentPaneCalls as unknown[] ).length, 0,
+      "self doc-link must NOT route to _openContentPane — that call clears the shared pane body" );
+    assert.equal( ev.defaultPrevented, true,
+      "claimed, because there is no target=_blank left to fall through to; an unclaimed click " +
+      "would navigate the CURRENT tab and wipe the pane" );
+    assert.equal( tabOpens.length, 1,
+      "…and exactly one new tab is opened explicitly. Without this half, the assertion above " +
+      "would be satisfied by the link silently doing nothing at all" );
+    assert.deepEqual( tabOpens[ 0 ], {
+      url      : "/app/docs?path=lupin/self.md",
+      target   : "_blank",
+      features : "noopener,noreferrer",
+    } );
+  } finally { restoreWindowOpen(); }
 } );
 
 test( "foreign doc-link → routed to the pane and prevented (foreign→blocked)", () => {
@@ -192,14 +231,21 @@ test( "foreign doc-link → routed to the pane and prevented (foreign→blocked)
   assert.equal( ev.defaultPrevented, true, "foreign doc-link default nav prevented (pane handles it)" );
 } );
 
-test( "doc-link INSIDE the tooltip → native new tab (not prevented), NOT the pane (bug 17ce50a5)", () => {
+test( "doc-link INSIDE the tooltip → a new tab via explicit window.open, NOT the pane (bug 17ce50a5)", () => {
   const { tooltipAnchor } = buildDOM();
-  const ev = click( tooltipAnchor );
+  captureWindowOpen();
+  try {
+    const ev = click( tooltipAnchor );
 
-  assert.equal( ( ui._openContentPaneCalls as unknown[] ).length, 0,
-    "tooltip doc-link must NOT route to _openContentPane — the tooltip shows self-content" );
-  assert.equal( ev.defaultPrevented, false,
-    "tooltip doc-link keeps default nav so target=_blank opens a new tab; ancestry-only self-test misses it" );
+    assert.equal( ( ui._openContentPaneCalls as unknown[] ).length, 0,
+      "tooltip doc-link must NOT route to _openContentPane — the tooltip shows self-content" );
+    assert.equal( ev.defaultPrevented, true,
+      "claimed, for the same reason as the self case. The tooltip is fixed-position and " +
+      "appended to <body>, so an ancestry test against the card alone misses it — that was the " +
+      "whole of bug 17ce50a5, and it is why this case exists separately" );
+    assert.equal( tabOpens.length, 1, "exactly one new tab, opened explicitly" );
+    assert.equal( tabOpens[ 0 ]?.target, "_blank" );
+  } finally { restoreWindowOpen(); }
 } );
 
 // ── Guard intact (control) — the real _openContentPane still blocks foreign ──

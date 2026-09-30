@@ -123,6 +123,26 @@ interface Harness {
 interface SetupExtra {
   debounceMs? : number;        // default 0 → event-driven refresh fires within flush()
   sched?      : FakeScheduler; // inject a controllable scheduler (else real globalThis timers)
+  ackTally?   : FakeAckTally;  // row 4f320c27 M1 — the ack tally the card owns
+}
+
+// A recording double for the tally. The tally's own behaviour is measured against the
+// REAL stores in broadcast_ack_tally_renderer.test.ts; what belongs HERE is the wiring
+// — that the card mounts it on the panel the template reserves, hands it the id the
+// SERVER minted, and tears it down. Recording the calls is what makes those three
+// facts assertable; a real tally would answer through rendered DOM, which would test
+// the tally twice and the wiring not at all.
+class FakeAckTally {
+  mountedOn : HTMLElement | null = null;
+  tracked   : string[] = [];
+  unmounts  = 0;
+  recipientSignals = 0;
+  mount( root: HTMLElement ): void { this.mountedOn = root; }
+  track( id: string ): void { this.tracked.push( id ); }
+  dismiss(): void {}
+  unmount(): void { this.unmounts++; this.mountedOn = null; }
+  recipientsChanged(): void { this.recipientSignals++; }
+  trackedBroadcastId(): string | null { return this.tracked.length > 0 ? this.tracked[ this.tracked.length - 1 ]! : null; }
 }
 
 async function setup(apiOpts: ApiOpts = { sessions: RECIPIENTS }, extra: SetupExtra = {}): Promise<Harness> {
@@ -136,6 +156,7 @@ async function setup(apiOpts: ApiOpts = { sessions: RECIPIENTS }, extra: SetupEx
     recipientsRefreshDebounceMs : extra.debounceMs ?? 0,
     setTimeoutFn                : extra.sched?.setTimeoutFn,
     clearTimeoutFn              : extra.sched?.clearTimeoutFn,
+    ackTally                    : extra.ackTally,
   } );
   const root = document.createElement("div");
   document.body.appendChild(root);
@@ -380,18 +401,119 @@ test("a stale (out-of-order) hydrate REJECTION does NOT paint an error over the 
 // Chip → @mention injection
 // ---------------------------------------------------------------------------
 
+// Row 319c57a3 (María 🌸, 2026-09-26): the insert is `@name` with NO trailing
+// space. These two cases asserted the old `"@Tiberius "` / `"@all "` and are
+// updated rather than supplemented — a stale assertion left beside a new one
+// is a contradiction the suite cannot resolve.
 test("clicking a recipient chip injects @persona at the caret", async () => {
   const { root } = await setup({ sessions: RECIPIENTS });
   const tib = chips(root).find((c) => c.textContent?.includes("Tiberius")) as HTMLElement;
   tib.click();
-  assert.equal(ta(root).value, "@Tiberius ");
+  assert.equal(ta(root).value, "@Tiberius");
 });
 
 test("clicking @all injects @all", async () => {
   const { root } = await setup({ sessions: RECIPIENTS });
   const all = chips(root).find((c) => c.textContent?.includes("@all")) as HTMLElement;
   all.click();
-  assert.equal(ta(root).value, "@all ");
+  assert.equal(ta(root).value, "@all");
+});
+
+// ---------------------------------------------------------------------------
+// Row 319c57a3 — the chip inserts EXACTLY `@name`. Rick's ruling 2026-09-26
+// 13:35, overruling the boundary-spacing rule ruled earlier the same day.
+//
+// No leading space, no trailing space, no whitespace predicate, no `:`
+// exception. The cases below are deliberately written to cover the positions a
+// boundary rule WOULD have treated specially — mid-word, before a colon, after
+// a space, back-to-back — so that re-introducing any of that logic reddens
+// something by name rather than passing unnoticed.
+//
+// THE CARET IS ASSERTED IN EVERY CASE. `value` alone cannot see a caret
+// regression, and the caret is what the operator's next keystroke lands on.
+// ---------------------------------------------------------------------------
+
+function seed(root: HTMLElement, text: string, caret: number): HTMLTextAreaElement {
+  const t = ta(root);
+  t.value = text;
+  t.setSelectionRange(caret, caret);
+  return t;
+}
+
+function clickChip(root: HTMLElement, label: string): void {
+  const c = chips(root).find((x) => x.textContent?.includes(label));
+  assert.notEqual(c, undefined, `precondition: a chip labelled ${label} is rendered`);
+  (c as HTMLElement).click();
+}
+
+test("insert 1: empty box → `@Tiberius`, no trailing space", async () => {
+  const { root } = await setup({ sessions: RECIPIENTS });
+  seed(root, "", 0);
+  clickChip(root, "Tiberius");
+  assert.equal(ta(root).value, "@Tiberius");
+  assert.equal(ta(root).selectionStart, "@Tiberius".length);
+});
+
+test("insert 2: caret after `hi` → `hi@Tiberius` — NO space is inserted for us", async () => {
+  const { root } = await setup({ sessions: RECIPIENTS });
+  seed(root, "hi", 2);
+  clickChip(root, "Tiberius");
+  assert.equal(ta(root).value, "hi@Tiberius");
+  assert.equal(ta(root).selectionStart, "hi@Tiberius".length);
+});
+
+test("insert 3: two clicks in a row → `@Tiberius@Krishna`, verbatim and adjacent", async () => {
+  const { root } = await setup({ sessions: RECIPIENTS });
+  seed(root, "", 0);
+  clickChip(root, "Tiberius");
+  clickChip(root, "Krishna");
+  assert.equal(ta(root).value, "@Tiberius@Krishna");
+  assert.equal(ta(root).selectionStart, "@Tiberius@Krishna".length);
+});
+
+test("insert 4: caret mid-text `hello|world` → `hello@Tiberiusworld`, fused on purpose", async () => {
+  // The operator types their own spaces. This is the position a boundary rule
+  // would have separated, and Rick ruled it does not.
+  const { root } = await setup({ sessions: RECIPIENTS });
+  seed(root, "helloworld", 5);
+  clickChip(root, "Tiberius");
+  assert.equal(ta(root).value, "hello@Tiberiusworld");
+  assert.equal(ta(root).selectionStart, "hello@Tiberius".length);
+});
+
+test("insert 5: caret before a colon → `@Tiberius:`, no special case needed", async () => {
+  const { root } = await setup({ sessions: RECIPIENTS });
+  seed(root, ":", 0);
+  clickChip(root, "Tiberius");
+  assert.equal(ta(root).value, "@Tiberius:");
+  assert.equal(ta(root).selectionStart, "@Tiberius".length);
+});
+
+test("insert 6: caret after a space the operator typed → `hi @Tiberius`, still exactly one", async () => {
+  const { root } = await setup({ sessions: RECIPIENTS });
+  seed(root, "hi ", 3);
+  clickChip(root, "Tiberius");
+  assert.equal(ta(root).value, "hi @Tiberius");
+  assert.equal(ta(root).selectionStart, "hi @Tiberius".length);
+});
+
+test("insert 7: a newline neighbour gets no space either", async () => {
+  const { root } = await setup({ sessions: RECIPIENTS });
+  seed(root, "hi\n\nbye", 4);
+  clickChip(root, "Tiberius");
+  assert.equal(ta(root).value, "hi\n\n@Tiberiusbye");
+  assert.equal(ta(root).selectionStart, "hi\n\n@Tiberius".length);
+});
+
+test("insert 8: a selection is REPLACED by the mention, nothing added around it", async () => {
+  // `before`/`after` slice at selectionStart/selectionEnd, so the selection is
+  // what the mention displaces.
+  const { root } = await setup({ sessions: RECIPIENTS });
+  const t = seed(root, "aXXXb", 0);
+  t.setSelectionRange(1, 4);
+  clickChip(root, "Tiberius");
+  assert.equal(ta(root).value, "a@Tiberiusb");
+  assert.equal(ta(root).selectionStart, "a@Tiberius".length);
 });
 
 test("a chip with no data-token attribute is a no-op", async () => {
@@ -641,4 +763,89 @@ test("unmount removes an open modal", async () => {
   assert.ok( document.getElementById("broadcast-confirm-modal-overlay") !== null );
   renderer.unmount();
   assert.ok( document.getElementById("broadcast-confirm-modal-overlay") === null );
+});
+
+// ===========================================================================
+// Row 4f320c27 M1 — the ack tally the card owns.
+//
+// 🔴 A RENDERER CAN BE COMPLETE, CORRECT, FULLY COVERED AND NEVER MOUNTED, and every
+// test that builds it stays green. BroadcastAckTallyRenderer has its own suite at
+// 100%; these tests exist because none of them would notice if nothing ever mounted
+// it. What is asserted here is the WIRING, and only the wiring.
+// ===========================================================================
+
+test("M1: the card mounts the tally onto the panel the template reserves", async () => {
+  const ackTally = new FakeAckTally();
+  const { root } = await setup({ sessions: RECIPIENTS }, { ackTally });
+  const panel = root.querySelector("#broadcast-aggregate-panel");
+  assert.notEqual(panel, null, "the template must reserve the legacy aggregate panel");
+  assert.ok(ackTally.mountedOn === panel, "and the tally must be mounted onto it, not somewhere else");
+});
+
+test("M1: a card wired with NO tally still mounts — compose-only stays a working card", async () => {
+  const { root } = await setup();
+  assert.ok(root.querySelector("#broadcast-submit-card") !== null, "the compose card still mounts");
+  assert.ok(root.querySelector("#broadcast-aggregate-panel") !== null, "the panel is reserved either way");
+});
+
+test("🔴 M1: a successful send hands the tally the id the SERVER minted", async () => {
+  // The id does not exist before the send — the server mints it — so tracking any
+  // earlier would be tracking a broadcast that does not exist yet.
+  const ackTally = new FakeAckTally();
+  const { root } = await setup({ sessions: RECIPIENTS }, { ackTally });
+  assert.deepEqual(ackTally.tracked, [], "nothing to track before a send");
+
+  typeMessage(root, "all hands");
+  sendBtn(root).click();
+  (document.querySelector('[data-testid="multiplexer-broadcast-confirm-btn"]') as HTMLButtonElement).click();
+  await flush();
+
+  assert.deepEqual(ackTally.tracked, [RESULT_OK.broadcast_id],
+    "the tally must be tracking the broadcast the server actually created");
+});
+
+test("🔴 M1: a FAILED send tracks NOTHING — there is no broadcast to tally", async () => {
+  const ackTally = new FakeAckTally();
+  const { root } = await setup({ sessions: RECIPIENTS, sendResult: new Error("nope") }, { ackTally });
+  typeMessage(root, "all hands");
+  sendBtn(root).click();
+  (document.querySelector('[data-testid="multiplexer-broadcast-confirm-btn"]') as HTMLButtonElement).click();
+  await flush();
+
+  assert.deepEqual(ackTally.tracked, [],
+    "a tally counting acks for a broadcast that was never sent would wait forever on seats that were never asked");
+});
+
+test("M1: unmounting the card unmounts the tally with it", async () => {
+  const ackTally = new FakeAckTally();
+  const { renderer } = await setup({ sessions: RECIPIENTS }, { ackTally });
+  renderer.unmount();
+  assert.equal(ackTally.unmounts, 1);
+});
+
+test("M1: unmount stays idempotent with a tally wired", async () => {
+  const ackTally = new FakeAckTally();
+  const { renderer } = await setup({ sessions: RECIPIENTS }, { ackTally });
+  renderer.unmount();
+  renderer.unmount();
+  assert.equal(ackTally.unmounts, 1, "the second unmount is a no-op, tally included");
+});
+
+test("🔴 M1: the card TELLS the tally when the recipient list lands", async () => {
+  // BroadcastStore emits no EventBus event, so this call is the ONLY way the tally can
+  // learn its denominator. Without it a restored tally reads "✅ All 0 sessions
+  // acknowledged" — María's blocker on 5b569053 — because an unloaded roster and an
+  // empty one are indistinguishable from inside the tally.
+  const ackTally = new FakeAckTally();
+  await setup({ sessions: RECIPIENTS }, { ackTally });
+  assert.ok(ackTally.recipientSignals >= 1, "the first recipient fetch must be announced");
+});
+
+test("🔴 M1: a FAILED recipient fetch is announced too", async () => {
+  // A tally waiting forever for a list that will never arrive is worse than one that
+  // reads zero and says so.
+  const ackTally = new FakeAckTally();
+  await setup({ sessions: new Error("offline") }, { ackTally });
+  assert.ok(ackTally.recipientSignals >= 1,
+    "an error is still an answer about the roster — silence here strands the tally in its loading state");
 });

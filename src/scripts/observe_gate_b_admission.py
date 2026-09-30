@@ -52,6 +52,15 @@ import time
 import urllib.error
 import urllib.request
 
+# Bootstrap: this script runs before cosa is importable.
+_lupin_root = os.environ.get( "LUPIN_ROOT" )
+if _lupin_root is None:
+    raise RuntimeError( "LUPIN_ROOT not set -- export LUPIN_ROOT=/path/to/project" )
+_src_path = os.path.join( _lupin_root, "src" )
+if _src_path not in sys.path: sys.path.insert( 0, _src_path )
+
+from cosa.agents.test_suite.v2_client import submit_body, read_reply
+
 
 BASE_URL      = "http://localhost:8000"
 TEST_CONTAINER = "lupin-rest-test"
@@ -350,17 +359,19 @@ def main():
         return _report( args, my_job_id, qualifying, n )
 
     print( "\n── submit ──" )
-    status, resp = _http( "POST", "/api/test-suite/submit", token=token, body={
-        # ⚠️ STRINGS, NOT LISTS. The endpoint's schema rejects arrays with a 422
-        # (string_type on both fields) — measured 2026-08-24 on the first fire.
-        "test_types"           : "smoke",
-        "pytest_args"          : f"{TARGET_SUITE} --auto-proxy",
-        "auto_fix_on_failure"  : False,      # a false red must not arm the TFE treadmill (bug 67473d91)
-    } )
-    if status not in ( 200, 201 ):
-        print( f"submit failed: HTTP {status} — {resp}" )
+    # Through /api/v2/submit (the old /api/test-suite/submit is retired). ⚠️ STRINGS, NOT
+    # LISTS for test_types and pytest_args -- the schema rejected arrays with a 422 when
+    # measured 2026-08-24, and the v2 factory parses the same strings.
+    status, resp = _http( "POST", "/api/v2/submit", token=token, body=submit_body(
+        "smoke",
+        pytest_args         = f"{TARGET_SUITE} --auto-proxy",
+        auto_fix_on_failure = False,     # a false red must not arm the TFE treadmill (bug 67473d91)
+    ) )
+    ok, info = read_reply( status, resp )
+    if not ok:
+        print( f"submit failed: HTTP {status} — {info[ 'error' ]}" )
         return 2
-    my_job_id = resp.get( "job_id" ) or resp.get( "id_hash" )
+    my_job_id = info[ "job_id" ]
     print( f"  job_id: {my_job_id}" )
     print( f"  full response: {json.dumps( resp )}" )
 
@@ -398,5 +409,6 @@ def _report( args, my_job_id, qualifying, n ):
     return 1
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover - unreachable under pytest: __name__ is the
+                            #   module name, never "__main__"
     sys.exit( main() )

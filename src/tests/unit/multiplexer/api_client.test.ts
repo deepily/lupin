@@ -432,3 +432,69 @@ test("bounceDevServer() raises ApiError(409) carrying the status when a bounce i
     (e: unknown) => e instanceof ApiError && e.status === 409,
   );
 });
+
+// ---------------------------------------------------------------------------
+// Parity B-2 J14 — per-call request headers.
+//
+// The four submit cards send `X-Session-ID` alongside Authorization. Before this
+// hook the options were {signal, timeoutMs, noAuth} and the header set was assembled
+// entirely inside `request`, so the alternative was a bare `fetch` in the store —
+// which would have stepped around the auth trampoline, the timeout and the 401
+// handling all at once.
+// ---------------------------------------------------------------------------
+
+test("B-2 J14: a per-call header rides alongside the auth header", async () => {
+  const { authManager } = fakeAuthManager({ accessToken: "abc123" });
+  const { fetcher, calls } = recordingFetcher(async () => jsonResponse({ ok: 1 }));
+  const api = createApiClient({
+    baseUrl          : "http://localhost:7999",
+    defaultTimeoutMs : 5000,
+    authManager,
+    fetcher,
+  });
+
+  await api.post("/api/v2/submit", { a: 1 }, { headers: { "X-Session-ID": "wise penguin" } });
+  assert.equal(calls[0]?.headers["X-Session-ID"], "wise penguin");
+  assert.equal(calls[0]?.headers["Authorization"], "Bearer abc123");
+  assert.equal(calls[0]?.headers["Content-Type"], "application/json");
+});
+
+test("🔴 B-2 J14: a caller CANNOT override Authorization or Content-Type", async () => {
+  // A caller who could replace the auth header could send a request as somebody else,
+  // and the failure would read as a permissions bug rather than a client one. The
+  // guard is ORDERING — per-call headers go in first — so there is no allow/deny list
+  // to fall out of date as headers are added.
+  const { authManager } = fakeAuthManager({ accessToken: "abc123" });
+  const { fetcher, calls } = recordingFetcher(async () => jsonResponse({ ok: 1 }));
+  const api = createApiClient({
+    baseUrl          : "http://localhost:7999",
+    defaultTimeoutMs : 5000,
+    authManager,
+    fetcher,
+  });
+
+  await api.post("/api/v2/submit", { a: 1 }, {
+    headers: { "Authorization": "Bearer SOMEBODY-ELSE", "Content-Type": "text/plain" },
+  });
+  assert.equal(calls[0]?.headers["Authorization"], "Bearer abc123");
+  assert.equal(calls[0]?.headers["Content-Type"], "application/json");
+});
+
+test("B-2 J14: omitting headers leaves the request exactly as it was", async () => {
+  // The negative control for the two above: without it, a hook that ALWAYS injected
+  // something would pass them both.
+  const { authManager } = fakeAuthManager({ accessToken: "abc123" });
+  const { fetcher, calls } = recordingFetcher(async () => jsonResponse({ ok: 1 }));
+  const api = createApiClient({
+    baseUrl          : "http://localhost:7999",
+    defaultTimeoutMs : 5000,
+    authManager,
+    fetcher,
+  });
+
+  await api.post("/api/v2/submit", { a: 1 });
+  assert.deepEqual(
+    Object.keys(calls[0]?.headers ?? {}).sort(),
+    ["Authorization", "Content-Type"],
+  );
+});

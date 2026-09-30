@@ -29,6 +29,9 @@ export type LupinEventType =
   | "storage_corrupt"
   // EventBus (Phase 2)
   | "listener_error"
+  // P0 5ebd2aff — the list pane's Retry after a failed cold-load history
+  // hydration; coldHistoryHydration.ts re-runs on it.
+  | "notifications_history_retry_requested"
   // BroadcastChannel whitelist references (Phase 2 — emitted by Phase 3+
   // transport; declared here so the static whitelist set is type-checked).
   // `notification_received` retained as a compile-time literal for the
@@ -68,11 +71,28 @@ export type LupinEventType =
   | "job_state_transition"
   | "job_removed"
   | "sys_time_update"
+  // Row 27760534 (console tee, plan §3) — server → client frames for a watched seat's
+  // transcript. SessionTranscriptStore consumes both. The verbs the client SENDS
+  // (`cc_transcript_watch` / `cc_transcript_unwatch`) are not bus events and are
+  // deliberately absent here.
+  | "cc_transcript_append"
+  | "cc_transcript_state"
   // R5 (2026-07-01) — session-name/topic control event. NotificationStore
   // intercepts a `session_topic` notification (raw notification_type), skips
   // carding it (legacy notifications.js:5862 "skip history card"), and re-emits
   // it on this bus event; SenderStore consumes it to set SenderRecord.session_name.
   | "session_topic"
+  // Row 4f320c27 M1 — a seat's acknowledgement of a user broadcast. Like
+  // `session_topic` this is CONTROL METADATA, NOT A MESSAGE: the server sends it
+  // with `message: ""` and the whole identity in `payload`, so NotificationStore
+  // intercepts it BEFORE normalize() (which rejects an empty message and drops
+  // raw-only fields) and re-emits it here. AckStore consumes it to fold a
+  // per-broadcast tally. Loosening the normalizer instead would let every
+  // genuinely-malformed message through to fix one type that should never have
+  // reached it.
+  | "commons_broadcast_ack"
+  // AckStore's own emission after folding a live ack or a hydrate.
+  | "store_broadcast_acks_changed"
   // 00c (Phase-6 TTS playback) — server end-of-utterance marker on /ws/audio
   // (`speech.py:818-822` OpenAI / `:1115-1119` ElevenLabs). AudioTransport
   // already subscribes (`AudioTransport.ts:24`) and re-emits it on the bus via
@@ -80,6 +100,13 @@ export type LupinEventType =
   // to set its stream-complete flag. Registered here (F-Krishna-B1) so the
   // subscribe is type-checked rather than an `as LupinEventType` cast.
   | "audio_streaming_complete"
+  // Row cd6fe6d6 — the server's TTS failure frame on /ws/audio (speech.py:1301
+  // on a quota, rate-limit or auth failure, then a trailing
+  // audio_streaming_complete at :1318; the debug simulation at :1179 sends it
+  // and returns with no complete frame). AudioTransport already subscribes
+  // (AudioTransport.ts:25); AudioStore reads it as the end of a failed
+  // utterance, as legacy handleTTSError does (notifications.js:4483-4504).
+  | "tts_error"
   // Phase 4 store emissions — each store emits exactly one type per state
   // mutation; renderers subscribe by store. Payloads carry a `changeKind`
   // discriminator so renderers can fast-path-decide what to repaint.
@@ -89,6 +116,13 @@ export type LupinEventType =
   | "store_audio_chunk_decoded"
   | "store_action_required_changed"
   | "store_senders_changed"
+  // Row 11793820 — a RENDERER emission, not a store one. NotificationsListRenderer
+  // coalesces its store events into one render per turn (a microtask) and emits
+  // this after that render has put the sender cards in the DOM. Renderers that
+  // decorate a card node (ConversationModePinRenderer, SenderCardRecorderRenderer)
+  // reconcile on it: with the render deferred, `store_senders_changed` reaches them
+  // BEFORE the card they decorate has been replaced. Payload: none.
+  | "notifications_list_rendered"
   // WP2 (multiplexer parity bridge, 2026-06-10) — SessionStripStore emission.
   // The CC-session strip is a distinct subsystem from SenderStore: it reduces
   // the SAME `notification_queue_update` state-update branch but captures the
@@ -129,15 +163,45 @@ export type LupinEventType =
   // WP15 (F7): MissedStore emits when the "N missed while away" count changes
   //   (auth_success surfacing OR Reset dismiss).
   | "store_missed_changed"
+  // Row 27760534: SessionTranscriptStore emits when the watched seat, its buffer, or
+  //   its stream state changes (append, repair, epoch clear, open, close).
+  | "store_session_transcript_changed"
+  // Row 27760534: SessionTranscriptRoster emits when a roster read lands, so the session
+  //   strip can add or remove each chip's console affordance.
+  | "store_session_transcript_roster_changed"
   // WP14 (F8): PredictionVoteStore emits when a vote is cast / cleared for a
   //   prediction-hint notification.
   | "store_prediction_vote_changed"
   // WP12 (F12): FleetStatusStore emits when a fleet-state poll resolves
   //   (success, unreachable, or error) or the live-only/offline toggle flips.
   | "store_fleet_status_changed"
+  // Parity A-2 #5 (row 18d06df7): FleetStatusStore emits when the fleet-size-cap
+  //   dial's numbers change: a GET resolves, or a PUT starts or finishes. Its OWN
+  //   event, not the table's: the dial reads a different endpoint, and a shared
+  //   signal would rebuild the table on every save.
+  | "store_fleet_size_cap_changed"
   // Step 4 (task-list card): TaskListStore emits when a `/api/tasks` poll
   //   resolves (success, unreachable, or 401).
   | "store_task_list_changed"
+  // Row 87812328 (holding-area card): HoldingAreaStore emits when a
+  //   `status=not_approved` poll resolves (success, unreachable, or 401).
+  //   A SEPARATE event from the task list's, deliberately: the two panes read
+  //   different endpoints and a shared signal would repaint each on the other's
+  //   fetch, so a holding-area poll would re-stamp the task list's "updated".
+  | "store_holding_area_changed"
+  // Parity A-2 #8 (row c1bb2be7): FlowRatioStore emits when the Holding Area's
+  //   flow-ratio gate changes — a tick's reads, or a settings / manager-pull /
+  //   reset write. Its OWN event: three endpoints the held-row poll never reads.
+  | "store_flow_ratio_changed"
+  // Row c9fafb9d — TaskRequestStore emits when a `/api/tasks/request-badges` poll
+  //   resolves. Its OWN event: both boards carry a badge, and neither pane's rows
+  //   changed because a count did.
+  | "store_request_badges_changed"
+  // Row 470b7509 — FinishedTasksStore. Its OWN event for the same reason the
+  // holding area has one: this pane reads /api/tasks/events, a DIFFERENT door
+  // from the task list's, so a shared signal would re-stamp one pane's
+  // "updated" label on the other pane's fetch.
+  | "store_finished_tasks_changed"
   // Section-toolbar + accordion-collapse parity (2026-06-23, Rachel): the
   // ViewStateStore emits this ONLY for the cross-renderer bulk intent
   // (collapse-all / expand-all). Per-section + per-accordion mutations persist
@@ -176,7 +240,50 @@ export type LupinEventType =
   // the cascade (F0 → P6 → 01), so F0 declares the union member + its minimal
   // payload here and 00c CONSUMES it rather than re-declaring (manager-reconciled
   // at merge). See 00b §5 F0-f + 00c §3.
-  | "store_audio_ended";
+  | "store_audio_ended"
+  // Parity A-2 #3e (row d51bc8f4) — the "TTS is playing" signal, TTS side of the
+  // AR→TTS deferral coupling. TtsQueueStore emits it when the item holding the
+  // TTS slot leaves it, for any reason: natural end (including the roll straight
+  // to the next pending item), stop, skip-by-remove, clear, or focus entry. It is
+  // the multiplexer's counterpart of legacy onTTSPlaybackComplete's release point
+  // (notifications.js:22782-22786), where a deferred action-required prompt
+  // activates. A-2 #2d (row dcaeb0fc) consumes it; the arrival-time read is
+  // TtsQueueStore.isPlaying(). Payload: StoreTtsSlotReleasedPayload.
+  | "store_tts_slot_released"
+  // Row 0b384107 — wireTtsPlayback emits this when the speech request for the
+  // active item fails. TtsQueueStore treats it as that item's completion, as
+  // legacy's playTTS catch does (notifications.js:22394-22396). Without it the
+  // failed item held the slot forever, and since A-2 #2d an arriving Action
+  // Required card waited forever behind it. Payload: TtsRequestFailedPayload.
+  | "tts_request_failed"
+  // Row 26bfde78 — wireTtsPlayback emits this the instant it asks the server for
+  // the active item's speech, BEFORE the POST resolves. AudioStore arms its stall
+  // watchdog on it. It is the only signal that exists for a request whose stream
+  // never produces a single chunk: nothing else reaches the audio layer at all,
+  // so without it a silent stream holds the slot — and, since A-2 #2d, every
+  // arriving Action Required card — forever. Payload: TtsRequestStartedPayload.
+  | "tts_request_started"
+  // Parity B-1 — the server's job-completion frame on /ws/queue. Legacy routes it
+  // to handleJobCompletion (notifications.js:2929-2933), which writes the Q&A
+  // response pane ("Job completed: …") and takes the TTT stamp. QueueTransport has
+  // subscribed to it since Phase 3 (QUEUE_SUBSCRIBED_EVENTS) and re-emits it flat;
+  // nothing consumed it until QaStore. Payload: TtsJobRequestPayload.
+  | "tts_job_request"
+  // Parity B-1 — QaStore emits this on every change a Q&A pane repaints from: the
+  // agent list landing, the status line, a submit starting or finishing, the
+  // response text, the interview question, and the metric stamps. One event, because
+  // the pane repaints from the store rather than from the change.
+  // Payload: StoreQaChangedPayload.
+  | "store_qa_changed"
+  // Parity B-1 (§6a ruling 3) — AudioStore.setTtsMode() emits this so every playback
+  // path can react to the page-wide select. The mode is NOT persisted: legacy's
+  // `#tts-mode` is markup-only (notifications.html:134-137). Payload:
+  // StoreTtsModeChangedPayload.
+  | "store_tts_mode_changed"
+  // Parity B-2 — SubmitJobsStore emits this on every change the four submit cards
+  // repaint from: a status line, an in-flight flag, the TFE candidate list, and the
+  // auto-fix default arriving from the INI. Payload: StoreSubmitJobsChangedPayload.
+  | "store_submit_jobs_changed";
 
 // ---------------------------------------------------------------------------
 // LupinEvent envelope — the canonical pub/sub shape.
@@ -232,6 +339,10 @@ export interface RefreshCompletedPayload {
 export interface RefreshFailedPayload {
   error     : string;
   willRetry : boolean;
+  // The refresh token the failed attempt last SENT (null when none was available).
+  // Lets a listener tell "storage still holds the dead token" from "another tab has
+  // since stored a live one" before it clears anything.
+  sentRefresh : string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -372,6 +483,10 @@ export interface PredictionHint {
   confidence      : number;     // 0.0–1.0; ×100 → percent for the gate + display
   predicted_value : unknown;    // echoed back on vote (opaque to the renderer)
   category        : string;     // training-signal bucket (echoed back on vote)
+  // A-2 #2m — the human-readable strategy label legacy prints under the predicted
+  // value (notifications.js:23592, `formatStrategyLabel`). Optional: the server omits
+  // it on hints that carry no strategy, and the line is then not drawn.
+  strategy?       : string;
 }
 
 export interface Notification {
@@ -385,7 +500,7 @@ export interface Notification {
   responded?      : boolean;
   // Optional fields surfaced for action-required prompts (per Pass 1 F17).
   response_type?  : "yes_no" | "multiple_choice" | "open_ended" | "open_ended_batch";
-  options?        : ReadonlyArray<string>;   // valid choices for multiple_choice; ["yes","no"] for yes_no
+  questions?      : ReadonlyArray<ActionRequiredQuestion>;   // multiple_choice / open_ended_batch, parsed from response_options.questions
   default_value?  : string;          // returned on local expiry without POST
   prediction_hint?: PredictionHint;  // WP14 (F8) — thumbs-vote training-signal source
   // Phase 5 D-B (2026-05-05) — renderer-surfaced fields.
@@ -409,7 +524,10 @@ export type NotificationChangeKind =
   | "expired"
   | "removed"
   | "hydrated"
-  | "filtered";   // B3 (01-C): setFilterMode changed the active filter — renderer re-renders from visibleEntries()
+  | "filtered"    // B3 (01-C): setFilterMode changed the active filter — renderer re-renders from visibleEntries()
+  | "hydration_state"    // P0 5ebd2aff: cold-load history moved idle/loading/done/failed — the pane re-paints its empty state
+  | "history_window"     // P0 5ebd2aff ruling 1: the picker changed the history window — coldHistoryHydration reloads
+  | "history_reset";     // P0 5ebd2aff ruling 1: loaded history dropped ahead of a window-change reload
 
 // B3 (01-C, Rick OWN-ONLY ruling 67fc18f0/a767e1ae; axis ruling Mr. Radio 2026-06-29):
 // the notification-list filter axis. The mux Notification payload carries NO
@@ -497,6 +615,38 @@ export interface SessionTopicPayload {
   session_name : string;
 }
 
+// ---------------------------------------------------------------------------
+// Row 4f320c27 M1 — broadcast acks
+// ---------------------------------------------------------------------------
+
+// 🔴 THE ONE TYPESCRIPT SPELLING OF THE ACK TYPE. The same string is spelled in
+// four places on the server (the repository constant, the migration's index
+// predicate, the ORM Index, and the guard that compares them). This is the fifth,
+// and it cannot import the Python one — so `test_broadcast_ack_type_spellings_agree.py`
+// READS THIS LINE and fails if it drifts. Do not inline the literal anywhere else.
+export const COMMONS_BROADCAST_ACK_TYPE = "commons_broadcast_ack";
+
+// The ack identity the server puts in `payload` (CommonsAckWatcher._ack_payload).
+// Every field but broadcast_id can be null: a pre-S3 row, or a seat whose bridge
+// carried no persona. The store keeps such an ack rather than dropping it —
+// an unattributed acknowledgement is still an acknowledgement.
+export interface BroadcastAckPayload {
+  broadcast_id   : string;
+  session_id    ?: string | null;
+  persona_name  ?: string | null;
+  persona_icon  ?: string | null;
+  persona_color ?: string | null;
+  status        ?: string | null;
+  body_summary  ?: string | null;
+}
+
+export type BroadcastAckChangeKind = "added" | "updated" | "hydrated" | "cleared";
+
+export interface StoreBroadcastAcksChangedPayload {
+  changeKind   : BroadcastAckChangeKind;
+  broadcast_id : string;
+}
+
 export type SenderChangeKind = "added" | "updated" | "removed" | "hydrated";
 
 export interface StoreSendersChangedPayload {
@@ -582,23 +732,69 @@ export type ActionRequiredState =
   | "expired"
   | "cancelled";
 
-// Phase 6b — widened response shape (per Pass 2 A2). Wire-side:
-//   - string                       : single answer (yes_no, single-select multiple_choice, open_ended)
-//   - ReadonlyArray<string>        : multi-select multiple_choice (multiSelect: true)
-//   - Record<string, string>       : open_ended_batch (per-question header → answer)
-// `response_value: { response: <this shape> }` on the wire.
-export type ActionRequiredResponse = string | ReadonlyArray<string> | Record<string, string>;
+// P0 5ebd2aff step 2 — one question of a multiple_choice or open_ended_batch ask, read from
+// `response_options.questions` by stores/responseQuestions.ts (the wire shape is documented there).
+export interface ActionRequiredOption {
+  label        : string;
+  description? : string;
+}
+
+export interface ActionRequiredQuestion {
+  question      : string;
+  header        : string;                                // the key this question's answer is sent under
+  multiSelect   : boolean;                               // wire `multi_select` → checkboxes, answer is string[]
+  options       : ReadonlyArray<ActionRequiredOption>;   // empty for open_ended_batch
+  defaultValue? : string;                                // open_ended_batch `default_value`, prefilled
+}
+
+// An answer, shaped as legacy sends it:
+//   - string                  : yes_no and open_ended (submitResponse, notifications.js:24015)
+//   - ActionRequiredAnswers   : multiple_choice and open_ended_batch — { answers: { <header>: value } },
+//                               value a string[] when the question is multiSelect, else a string
+//                               (notifications.js:23666, :23855, :23451)
+// On the wire a string goes bare and the object goes as its JSON string (toWireResponseValue).
+export interface ActionRequiredAnswers {
+  answers : Readonly<Record<string, string | ReadonlyArray<string>>>;
+}
+
+export type ActionRequiredResponse = string | ActionRequiredAnswers;
 
 export interface ActionRequiredItem {
   id_hash       : string;
   prompt        : string;
   response_type : "yes_no" | "multiple_choice" | "open_ended" | "open_ended_batch";
-  options       : ReadonlyArray<string>;
+  questions     : ReadonlyArray<ActionRequiredQuestion>;   // multiple_choice / open_ended_batch; [] otherwise
   default?      : string;
-  expires_at    : number;            // ms epoch
+  // 360de81b — ms epoch, or null while the card waits in the queue: its countdown starts when it
+  // reaches the active slot, as legacy's does (activateNextNotification, notifications.js:21467).
+  expires_at    : number | null;
+  timeout_seconds : number;          // the ask's full timeout; shown on a queued row
   state         : ActionRequiredState;
-  response?     : ActionRequiredResponse;   // Phase 6b — widened from string per Pass 2 A2
-  multiSelect?  : boolean;                  // Phase 6b — multiple_choice dispatch (radio if false/undefined, checkbox if true). Wire-side population is Phase 0 prereq #2 (verification pending).
+  response?     : ActionRequiredResponse;
+  // Parity A-2 #2f — the operator's ⏸️. `paused_at` is the (server-offset) ms epoch the pause
+  // began, or null/absent while the countdown runs; `total_paused_ms` accumulates every pause
+  // (legacy `pausedAt` / `totalPausedDuration`), and each resume adds its span to `expires_at`.
+  paused_at?       : number | null;
+  total_paused_ms? : number;
+  // Parity A-1c2 — the multiple_choice stepper's position, held by the store so it survives a
+  // repaint AND a reload (legacy `currentQuestionIndex` / `collectedAnswers`). Absent = question 1.
+  step?            : ActionRequiredStep;
+  // Parity A-2 #2j — the asker's `display_qualifier_widget`: the yes_no comment row opens
+  // expanded and its hint invites a comment (legacy notifications.js:23254-23257).
+  display_qualifier_widget? : boolean;
+  // Parity A-2 #2m — the card chrome legacy builds around the prompt
+  // (notifications.js:23292-23330). Every one is absent-tolerant: the server omits
+  // the field and the corresponding badge or block simply is not built.
+  sender_id?       : string;          // → the [PROJECT] badge, via projectFromSenderId
+  voice_persona?   : VoicePersona;    // → the persona badge in the timer-controls cluster
+  abstract?        : string;          // → the inline abstract block AND the 📋 indicator
+  prediction_hint? : PredictionHint;  // → the thumbs-vote hint under the controls
+}
+
+/** multiple_choice stepper position: the question on screen and every answer saved so far. */
+export interface ActionRequiredStep {
+  index   : number;
+  answers : Readonly<Record<string, string | ReadonlyArray<string>>>;
 }
 
 export type ActionRequiredChangeKind =
@@ -610,12 +806,16 @@ export type ActionRequiredChangeKind =
   | "expired"
   | "cancelled"
   | "offline-frozen"
-  | "offline-resumed";
+  | "offline-resumed"
+  | "activated"             // 360de81b — the card reached the active slot; its countdown started
+  | "removed"               // 360de81b — the card left the store (grace over, or queued and finished)
+  | "paused"                // A-2 #2f — the operator paused the active card; countdownMs is the frozen remainder
+  | "resumed";              // A-2 #2f — the operator resumed it; countdownMs is the remainder it resumes from
 
 export interface StoreActionRequiredChangedPayload {
   changeKind   : ActionRequiredChangeKind;
   id_hash      : string;
-  countdownMs? : number;                          // remaining ms; present on "tick" + "offline-frozen"
+  countdownMs? : number;                          // remaining ms; present on "tick", "offline-frozen", "paused", "resumed"
   response?    : ActionRequiredResponse;          // Phase 6b — present on "responded-pending" / "responded" (respondAndAwait path) / "failed"
   error?       : unknown;                         // Phase 6b — present on "failed"
 }
@@ -639,6 +839,19 @@ export interface StoreAudioChunkDecodedPayload {
   sampleRate : number;
   // frame count in the decoded buffer.
   frameCount : number;
+  /**
+   * Parity B-1b — is this the FIRST decoded chunk of the current utterance? The
+   * TTFA stamp is taken here, which is legacy's `isFirstChunk` branch
+   * (notifications.js, the PCM schedule path).
+   *
+   * 🔴 IT IS NOT `burstLength() === 1`, AND THAT IS MEASURED, NOT ASSUMED.
+   * `chunksInBurst` is reset by `skip()` and `stop()` ONLY — never by the natural
+   * completion path (`maybeComplete`), so it ACCUMULATES across utterances. The
+   * second utterance's first chunk therefore reads N+1, and a consumer keyed on
+   * the counter would stamp TTFA for the first utterance of a page and silently
+   * never again. AudioStore carries a dedicated per-utterance flag instead.
+   */
+  firstInUtterance : boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -658,6 +871,9 @@ export interface StoreAudioChunkDecodedPayload {
 // the value `current()` returns). The remaining fields are optional carry-
 // through context for the renderer + the Phase-6 playback engine; F0's queue
 // logic keys ONLY on `id_hash`.
+/** The two TTS doors. Mirrors `AudioStore`'s own union (stores/AudioStore.ts). */
+export type TtsMode = "instant" | "reliable";
+
 export interface TtsQueueItem {
   id_hash       : string;
   notification ?: Notification;   // the source notification (renderer context)
@@ -676,6 +892,39 @@ export interface TtsQueueItem {
   // voice. Optional + absent → omitted from the body = server default voice (Sam),
   // legacy's null-voice_id case (notifications.js:4262-4293) — unchanged.
   voice_id ?: string;
+  // Parity B-7 (María 🌸's review of cfe8a348): the mode THIS utterance must be
+  // spoken in, overriding the page-wide select for this item only.
+  //
+  // 🔴 WITHOUT IT, "Test Reliable TTS" SPEAKS IN WHATEVER THE SELECT SAYS.
+  // Legacy's `testTTS( mode )` passes the mode down to `playTTS( text, mode )`,
+  // which branches on the ARGUMENT and never consults `#tts-mode` — so its two
+  // test buttons genuinely test their two doors. The multiplexer routes every
+  // utterance through one wire that read only the page-wide mode, so pressing
+  // Test Reliable on a default page posted to the INSTANT door and reported
+  // success. The button tested the wrong thing, convincingly.
+  //
+  // Absent → the page-wide mode, which is every other caller. Same shape and
+  // same reason as `voice_id` above: a per-utterance fact rides the item rather
+  // than becoming a second place the door is chosen.
+  tts_mode ?: TtsMode;
+  // Row aa13fdd7 (Rick's ruling on af01bd4b, 2026-09-26: "the only thing that is
+  // an issue is that playback occurs when it is NOT enabled"): this utterance was
+  // asked for by a BUTTON PRESS, so the 0% slider does not silence it.
+  //
+  // 🔴 THE FLAG MARKS THE CALLER, NOT THE TEXT. TtsQueueStore.enqueue drops every
+  // item when the live fraction is 0, which is what the slider's own label
+  // promises ("0% = silent", notifications.html:491). Automatic speech — a
+  // notification arrival, a job-completion answer — is exactly what that silences.
+  // The Direct TTS pane's Speak Now / Test Instant / Test Reliable are not
+  // automatic: the user pressed a key asking to hear something, and legacy honours
+  // that too, because its gate lives in addToTTSQueue and its test buttons call
+  // playTTS directly (notifications.js:4259, :4288) and never pass through it.
+  //
+  // Absent → false → gated. A NEW automatic speech path therefore arrives silent
+  // at 0% without having to remember this flag, and only an explicit opt-out can
+  // make it speak. Same shape as voice_id / tts_mode above: a per-utterance fact
+  // rides the item rather than becoming a second place the rule is decided.
+  user_initiated ?: boolean;
 }
 
 // store_tts_queue_changed payload (F0-c). Emitted by TtsQueueStore on every
@@ -688,6 +937,51 @@ export interface StoreTtsQueueChangedPayload {
   activeNotificationId : string | null;
   pending              : ReadonlyArray<TtsQueueItem>;
 }
+
+// store_tts_slot_released payload (Parity A-2 #3e). `releasedId` is the id_hash
+// of the item that just left the TTS slot. The store has already applied the
+// change when this fires, so isPlaying() / current() read the state AFTER it.
+export interface StoreTtsSlotReleasedPayload {
+  releasedId : string;
+}
+
+// tts_request_failed payload (row 0b384107). `idHash` is the item whose speech
+// request failed; the queue ignores it unless that item still holds the slot.
+export interface TtsRequestFailedPayload {
+  idHash : string;
+}
+
+// tts_request_started payload (row 26bfde78). `idHash` is the item whose speech
+// was just requested. AudioStore does not read it — the watchdog is per-utterance
+// and TTS is strictly serial — but it is carried so a future pipelined TTS can
+// key a per-utterance token off it without changing the frame.
+export interface TtsRequestStartedPayload {
+  idHash : string;
+}
+
+// tts_job_request payload (parity B-1). The server frame minus `type`/`timestamp`,
+// as QueueTransport reconstructs it. Every field is optional because the frame is
+// built by several producers; `text` is the completion text legacy reads at
+// notifications.js:4035, and its absence is the "No text provided" case there.
+export interface TtsJobRequestPayload {
+  text?       : string;
+  id?         : string;
+  job_id?     : string;
+  sender_id?  : string;
+  [k: string] : unknown;
+}
+
+// store_qa_changed payload (parity B-1). Carries nothing: the pane reads the store.
+export type StoreQaChangedPayload = Record<string, never>;
+
+// store_tts_mode_changed payload (parity B-1, §6a ruling 3).
+export interface StoreTtsModeChangedPayload {
+  mode : "instant" | "reliable";
+}
+
+// store_submit_jobs_changed payload (parity B-2). Carries nothing: the pane reads
+// the store, as the Q&A pane does.
+export type StoreSubmitJobsChangedPayload = Record<string, never>;
 
 // store_notification_tts_intent payload (F0-d producer seam). Emitted by
 // NotificationStore on every SPOKEN new-arrival (high/urgent). `id_hash` is the
@@ -767,6 +1061,37 @@ export interface BootCompletePayload {
     // asserts the canonical 5-line console-mount order (with this 5th line
     // appended after ttsChromeRenderer).
     conversationModePinRenderer? : string;
+    // The two accordion panes (2026-09-06, Clayton 😎's F3).
+    //
+    // ⚠️ THIS TYPE IS A THIRD HAND-LIST OF THE SAME POPULATION, and it is the
+    // one nothing in the test tier watches — the guard added for F3 sweeps
+    // boot.ts's construction calls against the PAYLOAD LITERAL, and both went
+    // green while this interface still omitted these two. `tsc` caught it,
+    // which is luck of the type system rather than a check somebody designed.
+    // Adding a renderer means editing THREE places, and only two of them redden.
+    holdingAreaRenderer?         : string;
+    epicBoardRenderer?           : string;
+    // Row 470b7509 — Finished Tasks, and it walked into the trap the comment
+    // above predicts: the mount + the payload literal were both edited, both
+    // guards stayed green, and `tsc` is what named this file. That is still
+    // luck of the type system rather than a check, so this row also adds one —
+    // `the_boot_payload_type_names_every_renderer.test.ts` sweeps THIS
+    // interface against the payload literal, in both directions.
+    finishedTasksRenderer?       : string;
+    /** Parity B-4 — the Time Saved dashboard. No store and no poll. */
+    timeSavedRenderer?           : string;
+    /** Parity B-5 / B-5L — System Status, with the ungated Config reload. */
+    systemStatusRenderer?        : string;
+    /** Parity B-7 — Direct TTS Test; a cache hit plays without touching the server. */
+    directTtsRenderer?           : string;
+    // Parity B-1 — the Q&A Interface pane, the first of B-0's seven slots to be
+    // filled. Five edits, and this is the one only a test watches:
+    // `the_boot_payload_type_names_every_renderer.test.ts`.
+    qaPaneRenderer?              : string;
+    // Parity B-2 — the Submit Agentic Jobs pane, B-0's second slot filled.
+    submitJobsPaneRenderer?      : string;
+    /** Parity B-6 — the Debug Information panel; mounting it registers the debugSink. */
+    debugPanelRenderer?          : string;
     // Phase 6c Node A Step A5 (2026-05-19): literal string "mounted" emitted
     // after `personaModalRenderer.mount(root)` completes. Seventh line in
     // the canonical boot handshake (...conversationModePin → focusTray →
@@ -786,6 +1111,9 @@ export interface BootCompletePayload {
     // `readingPaneRenderer.mount(.content-shell)` completes — appended at the
     // NEW-LANE MOUNT SLOT (after the Phase 5/6 mounts, before transports start).
     readingPaneRenderer?         : string;
+    // Row 27760534 — the live CC console, mounted on #session-transcript-mount inside
+    // the reading pane.
+    sessionTranscriptRenderer?   : string;
     // Lane D (WP3, 2026-06-10): literal "mounted" emitted after the commons
     // activity renderer mounts at the NEW-LANE MOUNT SLOT. Optional per the
     // Phase 6a forward/backward-compat pattern.
@@ -795,6 +1123,7 @@ export interface BootCompletePayload {
     // (Phase 6a F12 forward/backward-compat) + runtime-unconditional (F11).
     ttsPreviewSliderRenderer?    : string;
     missedBadgeRenderer?         : string;
+    listenerErrorRenderer?       : string;
     fleetStatusRenderer?         : string;
     // Step 4 (store-canonical task mgmt, 2026-06-16): literal "mounted" emitted
     // after the task-list card mounts. Optional per the same forward/backward-
@@ -808,6 +1137,17 @@ export interface BootCompletePayload {
     // bar mounts at the NEW-LANE MOUNT SLOT. Optional per the same
     // forward/backward-compat pattern.
     navBarRenderer?             : string;
+    // Row 4f320c27 M1: literal "mounted" emitted after the broadcast ack tally is
+    // mounted. ⚠️ Boot CONSTRUCTS this one and BroadcastCardRenderer MOUNTS it, onto
+    // the panel inside the card — so it is not at a mount slot of its own. It is named
+    // here anyway: the contract is "every renderer boot reaches", and a renderer that
+    // is mounted by a delegate is exactly the kind that goes missing from a hand list.
+    // It was: this key was absent on 5b569053 and BOTH boot guards caught it.
+    broadcastAckTallyRenderer?  : string;
+    // Parity row B-3: literal "mounted" emitted after the Queue Filter Settings
+    // pane mounts at its pre-allocated slot (B-0). Optional per the same
+    // forward/backward-compat pattern.
+    filterSettingsRenderer?     : string;
   };
 }
 
@@ -856,7 +1196,16 @@ export type ReadingPaneChangeKind =
   | "layout-mode"   // toggleLayoutMode(): vertical ⇄ horizontal
   | "ratio"         // setSplitRatio(): divider moved
   | "ar-enter"      // enterActionRequiredPane(): AR widget lifted into pane @50/50
-  | "ar-exit";      // exitActionRequiredPane(): AR widget restored to home
+  | "ar-exit"       // exitActionRequiredPane(): AR widget restored to home
+  | "console-opened"  // showConsole(): the pane now shows a seat's live console (row 27760534)
+  | "console-closed"; // showReading(): back to the reading stack, untouched
+
+/**
+ * What the reading pane is SHOWING — an axis independent of `LayoutMode`, which is an
+ * orientation (plan §4, design (b)). The console is not a third `ContentPaneEntry` type: it is
+ * a subscription with a lifetime, never on the history stack, and never persisted.
+ */
+export type PaneContent = "reading" | "console";
 
 export interface StoreReadingPaneChangedPayload {
   changeKind : ReadingPaneChangeKind;
@@ -963,10 +1312,45 @@ export interface StoreFleetStatusChangedPayload {
   stampUpdated : boolean;
 }
 
+// Parity A-2 #8 — the Holding Area's flow-ratio gate. No fields: every subscriber
+// reads the store, because the readout and the controls need different parts of it.
+export type StoreFlowRatioChangedPayload = Record<string, never>;
+
+// Parity A-2 #5 — the fleet-size-cap dial. `saving` is true while a PUT is in
+// flight, so a subscriber can tell the disable from the repaint without asking.
+export interface StoreFleetSizeCapChangedPayload {
+  saving : boolean;
+}
+
 // Step 4 (task-list card) — TaskListStore. Emitted when a `/api/tasks` poll
 // resolves (success / unreachable / 401). `stampUpdated` re-stamps the
 // "updated HH:MM:SS" label; always true here (this store has no view-only
 // toggle), but the field mirrors the fleet-status payload shape for symmetry.
 export interface StoreTaskListChangedPayload {
+  stampUpdated : boolean;
+}
+
+/** Row 87812328 — emitted by HoldingAreaStore on a resolved poll. */
+export interface StoreHoldingAreaChangedPayload {
+  stampUpdated : boolean;
+}
+
+/**
+ * Row c9fafb9d — emitted by TaskRequestStore on a resolved badge poll.
+ * `known` is false when the read failed, so a badge can tell "none" from "unknown".
+ */
+export interface StoreRequestBadgesChangedPayload {
+  known : boolean;
+}
+
+/**
+ * Row 470b7509 — emitted by FinishedTasksStore on a resolved poll.
+ *
+ * `stampUpdated` mirrors the fleet-status shape. It is always true here: a
+ * pill toggle repaints from data already in hand WITHOUT going through the
+ * store, so no view-only re-render reaches this event and none may ever claim
+ * fresh data.
+ */
+export interface StoreFinishedTasksChangedPayload {
   stampUpdated : boolean;
 }

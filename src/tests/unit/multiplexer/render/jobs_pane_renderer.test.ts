@@ -1261,7 +1261,7 @@ test("Lane 0a: Jobs renders the 📝 section-header; count = 4 live buckets (his
 
   const header = root.querySelector(".section-header") as HTMLElement;
   assert.ok(header, "section-header bar present");
-  assert.ok(header.querySelector("h3")!.textContent!.includes("📝 Jobs"), "📝 Jobs title in h3");
+  assert.ok(header.querySelector("h3")!.textContent!.includes("📝 CJ Flow Jobs"), "📝 CJ Flow Jobs title in h3 (row 52142a84)");
   assert.ok( root.querySelector(".jobs-pane-header") === null, "inert static header is gone" );
 
   const count = root.querySelector(".section-header-count") as HTMLElement;
@@ -1341,7 +1341,7 @@ test("Test 32: delete-all on RUNNING bucket → DELETE /api/queue/run/all + clea
   await flushMicrotasks();
   globalThis.confirm = orig;
 
-  assert.match(seen, /running jobs \(2\)/, "count in confirm message");
+  assert.match(seen, /remove all 2 running jobs/, "count in confirm message");
   assert.match(seen, /interrupt active jobs/, "running carries the interrupt warning");
   assert.deepEqual(api.calls.filter(c => c.startsWith("DELETE ")), ["DELETE /api/queue/run/all"]);
   assert.equal(jobs.bucket("running").length, 0, "bucket cleared after 2xx");
@@ -1436,11 +1436,15 @@ test("Test 36: delete-all 5xx leaves the bucket INTACT + logs (W2)", async () =>
   renderer.mount(root);
   emitJobAdded(bus, makeJob({ id_hash: "x1", status: "done" }));
 
-  const origWarn = console.warn; let warned = false; console.warn = () => { warned = true; };
+  // B-6 — these failures now route through `debugSink.error`, which writes
+  // `console.error` as legacy's `error()` does. The severity moved warn→error
+  // on purpose: legacy has three writers and no `warn`, so a failure has
+  // nowhere else to go. Spying on the level the code actually uses.
+  const origWarn = console.error; let warned = false; console.error = () => { warned = true; };
   const restore = stubConfirm(true);
   (root.querySelector(".jobs-bucket-done .queue-delete-all-btn") as HTMLButtonElement).click();
   await flushMicrotasks();
-  restore(); console.warn = origWarn;
+  restore(); console.error = origWarn;
 
   assert.equal(warned, true, "5xx logged a warning");
   assert.equal(jobs.bucket("done").length, 1, "bucket intact on a non-404 error");
@@ -1456,11 +1460,15 @@ test("Test 37: delete-all non-ApiError (network) rejection leaves the bucket INT
   renderer.mount(root);
   emitJobAdded(bus, makeJob({ id_hash: "x1", status: "dead" }));
 
-  const origWarn = console.warn; let warned = false; console.warn = () => { warned = true; };
+  // B-6 — these failures now route through `debugSink.error`, which writes
+  // `console.error` as legacy's `error()` does. The severity moved warn→error
+  // on purpose: legacy has three writers and no `warn`, so a failure has
+  // nowhere else to go. Spying on the level the code actually uses.
+  const origWarn = console.error; let warned = false; console.error = () => { warned = true; };
   const restore = stubConfirm(true);
   (root.querySelector(".jobs-bucket-dead .queue-delete-all-btn") as HTMLButtonElement).click();
   await flushMicrotasks();
-  restore(); console.warn = origWarn;
+  restore(); console.error = origWarn;
 
   assert.equal(warned, true, "network error logged a warning");
   assert.equal(jobs.bucket("dead").length, 1, "bucket intact on a non-ApiError rejection");
@@ -1727,11 +1735,15 @@ test("Test 47: retry POST failure logs + changes nothing (W5)", async () => {
   // wrong branch.
   emitJobAdded(bus, makeJob({ id_hash: "dead-1", status: "dead", meta: { question_text: "what is 2 + 2?" } }));
 
-  const origWarn = console.warn; let warned = false; console.warn = () => { warned = true; };
+  // B-6 — these failures now route through `debugSink.error`, which writes
+  // `console.error` as legacy's `error()` does. The severity moved warn→error
+  // on purpose: legacy has three writers and no `warn`, so a failure has
+  // nowhere else to go. Spying on the level the code actually uses.
+  const origWarn = console.error; let warned = false; console.error = () => { warned = true; };
   const restore = stubConfirm(true);
   (root.querySelector('[data-bucket="dead"] .job-retry-button') as HTMLButtonElement).click();
   await flushMicrotasks();
-  restore(); console.warn = origWarn;
+  restore(); console.error = origWarn;
 
   // makeControllableApi records the bare path (makeStubApi records "POST <path> <body>").
   assert.ok(
@@ -1744,10 +1756,12 @@ test("Test 47: retry POST failure logs + changes nothing (W5)", async () => {
 });
 
 // =============================================================================
-// W6 — queues filter-badge (static hidden plan-08 seam)
+// W6 — queues filter-badge. Row 83c3ff74 wired it to the shared Mine switch; a pane given no
+// filter store (this harness) keeps it hidden. The wired behaviour is tested in
+// the_jobs_pane_follows_the_shared_mine_switch.test.ts.
 // =============================================================================
 
-test("Test 48: jobs-pane header renders a hidden static queues-filter-badge (W6 plan-08 seam)", () => {
+test("Test 48: jobs-pane header renders a hidden queues-filter-badge when given no filter store", () => {
   const bus  = createEventBusForTesting();
   const api  = makeStubApi();
   const jobs = createJobStore({ bus });
@@ -1758,7 +1772,7 @@ test("Test 48: jobs-pane header renders a hidden static queues-filter-badge (W6 
   const badge = root.querySelector('[data-testid="queues-filter-badge"]') as HTMLElement;
   assert.notEqual(badge, null, "filter badge present in the jobs-pane header");
   assert.ok(badge.classList.contains("queues-filter-badge"));
-  assert.equal(badge.hidden, true, "badge ships hidden (static seam, inert under D1)");
+  assert.equal(badge.hidden, true, "badge hidden without a filter store");
   assert.equal(badge.textContent, "👤 Mine", "default-Mine label");
   renderer.unmount(); jobs.disposeForTesting();
 });

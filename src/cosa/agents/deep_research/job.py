@@ -18,6 +18,7 @@ Example:
 """
 
 import asyncio
+import os
 import time
 from datetime import datetime
 from typing import Optional
@@ -25,6 +26,7 @@ from typing import Optional
 import cosa.utils.util as cu
 from cosa.agents.agentic_job_base import AgenticJobBase
 from cosa.agents.deep_research.cost_tracker import SessionSummary
+from cosa.agents.deep_research.seed_context import normalize_source_document, query_with_seed_context
 from cosa.rest.job_state import JobState
 
 
@@ -61,6 +63,8 @@ class DeepResearchJob( AgenticJobBase ):
         force_failure_mode: Optional[ str ] = None,
         audience: Optional[ str ] = None,
         audience_context: Optional[ str ] = None,
+        source_document: Optional[ list ] = None,
+        confirm_topics: bool = False,
         debug: bool = False,
         verbose: bool = False
     ) -> None:
@@ -88,6 +92,15 @@ class DeepResearchJob( AgenticJobBase ):
             dry_run: Simulate execution without API calls
             audience: Target audience level (beginner/general/expert/academic)
             audience_context: Custom audience description
+            source_document: Absolute paths to local documents the research reads FIRST,
+                as seed context. Already scope-validated and resolved by the v2 door
+                (cosa/rest/v2/source_document.py) — this constructor receives real paths
+                and does not re-decide whether they may be read. None or [] means the
+                run behaves exactly as it did before, which is Rick's stated requirement.
+            confirm_topics: Show the planned topics as tick-boxes before any research
+                spend, and research only the ticked ones (row b6cfbf8d). The queue's
+                factory sets it when source_document is present. Independent of
+                no_confirm, so it never turns on the clarification question.
             debug: Enable debug output
             verbose: Enable verbose output
         """
@@ -108,12 +121,32 @@ class DeepResearchJob( AgenticJobBase ):
         self.force_failure_mode = force_failure_mode
         self.audience           = audience
         self.audience_context   = audience_context
+        # NORMALIZED TO A LIST AT THE BOUNDARY so nothing downstream has to ask whether it
+        # got a string, a list or None. The door already hands over a list; a direct
+        # in-process caller might not, and one spelling here beats three checks later.
+        self.source_document = normalize_source_document( source_document )
+        self.confirm_topics  = confirm_topics
 
         # Results (populated after execution)
         self.report_path  = None
         self.abstract     = None
         self.cost_summary = None
         self.report       = None
+
+    def _query_with_seed_context( self ) -> str:
+        """The query as the RESEARCH sees it — seed documents first, then the question.
+
+        DELEGATES to `cosa.agents.deep_research.seed_context`, which is now shared with
+        `research to podcast` and `research to presentation` (row 5726e3c5). Those two
+        construct their own agent and call `run_research` themselves, so they never pass
+        through this class — three call sites, one builder, because three copies of a
+        prompt-assembly rule drift silently rather than loudly.
+
+        Ensures:
+            - with no source document, returns `self.query` UNCHANGED
+            - otherwise returns the fenced documents followed by the research question
+        """
+        return query_with_seed_context( self.query, self.source_document )
 
     @property
     def last_question_asked( self ) -> str:
@@ -296,13 +329,15 @@ class DeepResearchJob( AgenticJobBase ):
             # Run the research (with cancellation callback)
             cancel_check = lambda: self._cancel_requested
             report = await run_research(
-                query        = self.query,
+                query        = self._query_with_seed_context(),
                 config       = config,
                 cost_tracker = cost_tracker,
-                no_confirm   = self.no_confirm,
-                cancel_check = cancel_check,
-                debug        = self.debug,
-                verbose      = self.verbose
+                no_confirm     = self.no_confirm,
+                cancel_check   = cancel_check,
+                debug          = self.debug,
+                verbose        = self.verbose,
+                confirm_topics = self.confirm_topics,
+                topic_source   = ", ".join( os.path.basename( p ) for p in self.source_document ) or None
             )
 
             if report is None:

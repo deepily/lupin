@@ -9,6 +9,7 @@ import {
   renderSectionHeader,
   setSectionCollapsed,
   wireSectionCollapse,
+  headerClickShouldCollapse,
 } from "../../../../lupin_app/static/js/multiplexer/render/templates/sectionHeader";
 
 before( () => {
@@ -51,7 +52,46 @@ test( "renderSectionHeader: builds the .section-header contract (icon+title+coun
   assert.equal( handle.toggleEl.className, "toggle-button" );
   assert.equal( handle.toggleEl.textContent, "▼" );          // expanded glyph
   assert.ok( handle.actionsEl.lastElementChild === handle.toggleEl );
-  assert.equal( handle.toggleEl.getAttribute( "role" ), "button" );
+  // 🔴 A REAL <button>, NOT A SPAN WEARING role="button" (Rick's divergence #5,
+  // 2026-09-06). Measured on both clients before the change: legacy's
+  // `button.toggle-button` takes focus and the mux's `<span role="button">` —
+  // which carried no tabindex — could not, so a keyboard user could collapse
+  // legacy's sections and not the mux's. A role announces a control; it does
+  // not make one.
+  assert.equal( handle.toggleEl.tagName, "BUTTON" );
+  assert.equal( ( handle.toggleEl as HTMLButtonElement ).type, "button",
+    "type=button so it can never submit an enclosing form" );
+  assert.equal( handle.toggleEl.getAttribute( "role" ), null,
+    "no redundant role — a wrong role is what outlives a tag change" );
+  assert.equal( handle.toggleEl.getAttribute( "aria-label" ), "Collapse section" );
+} );
+
+test( "headerClickShouldCollapse: the chevron collapses; every OTHER control owns its own click", () => {
+  const refresh = document.createElement( "button" );
+  refresh.className = "my-refresh";
+  const handle = renderSectionHeader( { icon: "🔔", title: "Notifications", actions: [ refresh ] } );
+
+  // The chevron IS the collapse affordance.
+  assert.equal( headerClickShouldCollapse( handle.toggleEl, handle.toggleEl ), true );
+  // A sibling control is not — its own handler owns it.
+  assert.equal( headerClickShouldCollapse( refresh, handle.toggleEl ), false );
+  // The header background is.
+  assert.equal( headerClickShouldCollapse( handle.header, handle.toggleEl ), true );
+
+  // 🔴 IDENTITY, NOT CLASS. `.toggle-button` is also worn by broadcastCard's
+  // #broadcast-submit-toggle, so a class-keyed carve-out would hand an
+  // unrelated button's clicks to the collapse handler. A namesake belonging to
+  // ANOTHER header must not collapse THIS one.
+  const impostor = document.createElement( "button" );
+  impostor.className = "toggle-button";
+  impostor.id = "broadcast-submit-toggle";
+  assert.equal( headerClickShouldCollapse( impostor, handle.toggleEl ), false,
+    "a same-class button that is not THIS header's chevron must not collapse it" );
+
+  // A click landing on a node INSIDE the chevron still collapses.
+  const inner = document.createElement( "span" );
+  handle.toggleEl.appendChild( inner );
+  assert.equal( headerClickShouldCollapse( inner, handle.toggleEl ), true );
 } );
 
 test( "renderSectionHeader: no testid + no actions → header carries no data-testid; actions slot holds only the chevron", () => {
@@ -62,12 +102,30 @@ test( "renderSectionHeader: no testid + no actions → header carries no data-te
   assert.ok( handle.actionsEl.firstElementChild === handle.toggleEl );
 } );
 
+test( "renderSectionHeader: an empty icon renders the bare title with no leading space (CC Notifications, ruling 3)", () => {
+  const handle = renderSectionHeader( { icon: "", title: "Claude Code Notifications:" } );
+  const h3 = handle.header.querySelector( "h3" ) as HTMLElement;
+  assert.equal( h3.firstChild!.textContent, "Claude Code Notifications: " );
+} );
+
 test( "setCount: accepts a number and a preformatted string", () => {
   const handle = renderSectionHeader( { icon: "📝", title: "Jobs" } );
   handle.setCount( 7 );
   assert.equal( handle.countEl.textContent, "7" );
   handle.setCount( "12 / 4 buckets" );
   assert.equal( handle.countEl.textContent, "12 / 4 buckets" );
+} );
+
+test( "setTitle: rewrites icon + title in place, keeps the count chip, and formats an empty icon as the bare title", () => {
+  const handle = renderSectionHeader( { icon: "🔊", title: "Playing" } );
+  const h3 = handle.header.querySelector( "h3" ) as HTMLElement;
+  handle.setCount( 3 );
+  handle.setTitle( "", "Paused" );
+  assert.equal( h3.textContent, "Paused 3" );
+  assert.equal( h3.childNodes.length, 2, "still one title node + the count chip" );
+  assert.ok( h3.lastChild === handle.countEl, "the count chip stays last" );
+  handle.setTitle( "🔊", "Playing" );
+  assert.equal( h3.textContent, "🔊 Playing 3" );
 } );
 
 // ---------------------------------------------------------------------------

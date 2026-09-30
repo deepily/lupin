@@ -13,7 +13,7 @@ ADDITIVE + nullable: D1 (task_events is the fleet-allocation convergence
 target) is unaffected. Requiredness for ->dropped is enforced at the API
 layer (task_store_rules.validate_transition), not by the schema.
 
-Design: planning-is-prompting -> src/rnd/2026.06.11-unified-task-store-design.md
+Design: planning-is-prompting -> planning-is-prompting/src/rnd/2026.06.11-unified-task-store-design.md
 (v0.4.1) + lupin src/rnd/v0.1.8/2026.06.12-task-store-phase2-write-paths/01-build-plan.md.
 """
 from typing import Sequence, Union

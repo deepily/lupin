@@ -58,7 +58,7 @@ class BFETimeoutError( Exception ):
     instead re-raised past execute_fix so it propagates out of the BFE job's
     do_all() and is captured by the agentic-pool Future — where
     _on_agentic_complete transitions the job to dead and releases the pool slot
-    (Leg b). See src/rnd/v0.2.0/2026.08.13-bfe-runtime-brake-design.md.
+    (Leg b). See src/rnd/v0.2.0/2026.08.13-bfe-runtime-brake-design.md. — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.13-bfe-runtime-brake-design.md
     """
     pass
 

@@ -30,8 +30,11 @@ from cosa.memory.solution_snapshot import CODELESS_AGENT_CLASSES
 from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
 from cosa.agents.runtime_argument_expeditor.expeditor import ArgSpec
 from cosa.rest.v2.executor import Work
+from cosa.rest.v2.refusal import SubmitRefused
 from cosa.rest.salutations import parse_salutations
+import difflib
 from cosa.rest.v2.registry import resolve, resolve_agentic, canonical_command
+from cosa.rest.v2.source_document import SOURCE_DOCUMENT_ARG, validate_source_documents
 from cosa.rest.v2.trace import StageTrace
 
 from lupin_cli.notifications.notify_user_async import notify_user_async
@@ -103,6 +106,7 @@ class AskFlow:
         receptionist_factory : Callable[ ..., Any ]  = ReceptionistAgent,
         notifier          : Callable[ [ Any ], Any ] = notify_user_async,
         agentic_factory   : Optional[ Callable[ ..., Any ] ] = None,
+    scope_registry_fn : Optional[ Callable[ [ ], dict ] ] = None,
         trace_dir         : Optional[ str ]          = None,
         debug             : bool                     = False,
         verbose           : bool                     = False,
@@ -141,6 +145,14 @@ class AskFlow:
         # how to turn a command into a podcast job. Injectable because the real one
         # imports ten job classes and their whole dependency stacks.
         self.agentic_factory      = agentic_factory
+        # HOW THE DOOR LEARNS WHICH FILES A source_document MAY NAME. A CALLABLE, not the
+        # registry itself: the real one is built at FastAPI startup from the INI, so
+        # holding the dict here would freeze whatever existed when this flow was
+        # constructed and would drag a booted application into every test of this class.
+        # None means the check is unwired — the argument is then refused rather than
+        # waved through, because a scope check that silently does not run is worse than
+        # no feature at all. See _refuse_bad_source_documents.
+        self.scope_registry_fn    = scope_registry_fn
         self.notifier             = notifier
         self.trace_dir            = trace_dir
         self.debug                = debug
@@ -205,7 +217,8 @@ class AskFlow:
             if agentic is not None:
                 return self._ask_agentic( trace, agentic, command, raw_args, question, ctx, interactive )
             return self._receptionist( trace, question, ctx,
-                                       self._unresolved_route_reason( command ) )
+                                       self._unresolved_route_reason( command ),
+                                       routed_command=self._unresolved_routed_command( command ) )
 
         # 2 — cache: replay only on a tier-1 exact hit (R-C1); below perfect, run the agent.
         #
@@ -230,6 +243,13 @@ class AskFlow:
             # Refusing here falls through to routing, so the agent re-runs — which is
             # the whole observable behaviour, not a detail of it.
             if lookup.is_replay_hit and self._may_serve( trace, lookup.snapshot, "exact_hit" ):
+                # WHICH ROW WE ARE ABOUT TO REPLAY, captured HERE and not taken off the
+                # outcome (row 7e2125a7, D7). The executor binds the same value inside its
+                # own try, one line after a call that can raise, so on the earliest failure
+                # it has no id to report — and the failure Outcome is discarded at the
+                # degrade boundary below anyway. Reading it from the row we already hold
+                # cannot be skipped by any failure inside the replay.
+                replayed_id = lookup.snapshot.id_hash
                 work    = Work( "replay", lookup.snapshot, user_id, user_email, session_id, snapshotable=False )
                 outcome = self.executor.submit( work, trace )
                 # GATE 1 of 2. "waiting" means the queued executor handed the replay off —
@@ -244,14 +264,16 @@ class AskFlow:
                     # was unknown. Route-first means a real command always exists here.
                     return self._finish( trace, "replay", "exact_hit", outcome, question, ctx,
                                          command=command, cache_hit=True,
-                                         agent_label=spec.label )
+                                         agent_label=spec.label, replayed_snapshot_id=replayed_id )
                 # primary_error, like the agent path at the bottom of _run_agent. Without
                 # it the receptionist's own (absent) error is all that is emitted, so a
                 # replay that died of "Cannot execute empty code list" reached the client
                 # as error=null — 115 of 117 failures in the 2026-08-21 warm pass could
                 # not say why (bug 38815328).
                 return self._receptionist( trace, question, ctx, "replay_error",
-                                           primary_error=outcome.error )
+                                           primary_error=outcome.error,
+                                           replayed_snapshot_id=replayed_id,
+                                           routed_command=command )
 
             # 2b — the NEAR match. Above the confirmation threshold but short of exact,
             # so the flow asks the user the question the voice path asks today and
@@ -262,13 +284,17 @@ class AskFlow:
             # happened — and a 90-to-99% match would replay an answer nobody confirmed.
             near_match, near_reason = self._near_match_replay( trace, lookup, ctx, interactive )
             if near_match is not None:
+                replayed_id = near_match.id_hash          # same reason as the exact-hit site above
                 work    = Work( "replay", near_match, user_id, user_email, session_id, snapshotable=False )
                 outcome = self.executor.submit( work, trace )
                 if outcome.status in SUCCESS_STATUSES:
                     return self._finish( trace, "replay", near_reason, outcome, question, ctx,
-                                         command=command, cache_hit=True, agent_label=spec.label )
+                                         command=command, cache_hit=True, agent_label=spec.label,
+                                         replayed_snapshot_id=replayed_id )
                 return self._receptionist( trace, question, ctx, "replay_error",
-                                           primary_error=outcome.error )
+                                           primary_error=outcome.error,
+                                           replayed_snapshot_id=replayed_id,
+                                           routed_command=command )
 
         # 3 — arguments.
         if not spec.required_args:
@@ -279,7 +305,8 @@ class AskFlow:
             extraction = self.expeditor.extract( command, raw_args, question, arg_spec )
         except Exception as e:
             trace.set( "extract_error", str( e ) )
-            return self._receptionist( trace, question, ctx, "extract_error" )
+            return self._receptionist( trace, question, ctx, "extract_error",
+                                       routed_command=command )
         trace.update( args_known=sorted( extraction.final_args.keys() ), args_missing=list( extraction.missing ) )
         if extraction.missing:
             return self._needs_input( trace, command, extraction, question, ctx, interactive )
@@ -414,7 +441,8 @@ class AskFlow:
                                              scheduled_at, monopolize, parent_id_hash )
             route_reason = self._unresolved_route_reason( command )
             if route_reason == "unknown_command": trace.set( "unknown_command", command )
-            return self._receptionist( trace, question or command, ctx, route_reason )
+            return self._receptionist( trace, question or command, ctx, route_reason,
+                                       routed_command=self._unresolved_routed_command( command ) )
 
         if directives_set: trace.set( "queue_directives_ignored", ",".join( directives_set ) )
 
@@ -523,7 +551,8 @@ class AskFlow:
             extraction = self.expeditor.extract( command, raw_args, question, arg_spec )
         except Exception as e:
             trace.set( "extract_error", str( e ) )
-            return self._receptionist( trace, question, ctx, "extract_error" )
+            return self._receptionist( trace, question, ctx, "extract_error",
+                                       routed_command=command )
 
         trace.update( args_known=sorted( extraction.final_args.keys() ),
                       args_missing=list( extraction.missing ) )
@@ -571,6 +600,9 @@ class AskFlow:
             - a built job runs through the SAME path as a job handed over whole, so
               there is one spelling of "run this and report it", not two
         """
+        refusal = self._refuse_bad_source_documents( trace, command, args, ctx )
+        if refusal is not None: return refusal
+
         missing = [ arg for arg in spec.required_args if not args.get( arg ) ]
         if missing:
             return self._submit_needs_input( trace, command, missing, sorted( args ), ctx )
@@ -596,19 +628,38 @@ class AskFlow:
                 monopolize         = monopolize,
                 spawned_by_id_hash = parent_id_hash,
             )
+        except SubmitRefused as refused:
+            # A builder with a specific reportable reason to decline (the mock-job expeditor
+            # test's cancelled interview): a terminal `failed` carrying that reason and the
+            # builder's details, NOT the generic degrade below, which would lose both.
+            trace.set( "submit_refused", refused.route_reason )
+            return self._emit(
+                trace, path="agent", status="failed", route_reason=refused.route_reason,
+                answer=None, answer_raw=None, command=command, ctx=ctx,
+                error=refused.message, submit_details=refused.details,
+            )
         except Exception as e:
             trace.set( "agentic_build_error", str( e ) )
             return self._receptionist( trace, question or command, ctx, "agentic_build_error",
-                                       primary_error=str( e ) )
+                                       primary_error=str( e ), routed_command=command )
         if job is None:
             # The factory returns None for a command it does not know. The registry said
             # it was agentic, so the two tables disagree — say which command, because a
             # bare receptionist here would send the next reader hunting.
             trace.set( "agentic_build_error", f"factory returned None for {command}" )
             return self._receptionist( trace, question or command, ctx, "agentic_build_error",
-                                       primary_error=f"factory returned None for {command}" )
+                                       primary_error=f"factory returned None for {command}",
+                                       routed_command=command )
 
-        return self._submit_prebuilt( trace, job, question or command, ctx )
+        result = self._submit_prebuilt( trace, job, question or command, ctx )
+        # WHAT THE BUILDER LEARNED ABOUT THE JOB IT BUILT rides back on the result. Only a
+        # dict counts: `submit_details` is an optional attribute a builder may set (the
+        # mock-job command sets its resolved config), and a job without one has nothing to
+        # report.
+        details = job.submit_details if hasattr( job, "submit_details" ) else None
+        if isinstance( details, dict ) and result[ "path" ] == "agent":
+            result[ "submit_details" ] = details
+        return result
 
     def _submit_prebuilt( self, trace: StageTrace, job: Any, question: str, ctx: tuple ) -> dict:
         """Run a job the caller already built. No registry lookup, no argument work.
@@ -624,7 +675,15 @@ class AskFlow:
         # a new non-success status appears — it would fall through as a success here while
         # both gates above refused it.
         if outcome.status not in SUCCESS_STATUSES:
-            return self._receptionist( trace, question, ctx, "agent_error", primary_error=outcome.error )
+            # `job.routing_command`, NOT `command` — there is no `command` in this scope, and
+            # my first pass wrote one here and raised NameError on the degrade path. Caught
+            # by test_a_prebuilt_job_that_fails_degrades_to_the_receptionist, which is the
+            # same failure D7's ratified form would have had: a record-improving change that
+            # crashes the exact path it was meant to make readable. The success exit two
+            # lines below already reads `job.routing_command`; the degrade now agrees with it.
+            return self._receptionist( trace, question, ctx, "agent_error",
+                                       primary_error=outcome.error,
+                                       routed_command=job.routing_command )
         # `routing_command` is REQUIRED by the QueueableJob protocol (queue_protocol.py:61),
         # so read it. It used to be a getattr with an "" fallback, which would have turned a
         # job that violates the protocol into a row with a blank command — silently, and into
@@ -648,6 +707,130 @@ class AskFlow:
                            route_reason="args_incomplete_no_park", answer=None, answer_raw=None,
                            command=command, ctx=ctx, pending_id=None,
                            args_missing=missing, args_known=known )
+
+    def _refuse_bad_source_documents( self, trace: StageTrace, command: str, args: dict, ctx: tuple ) -> Optional[ dict ]:
+        """Validate `source_document` AT THE DOOR, or return the refusal that stops the submit.
+
+        RICK RULED THIS SHAPE ON 2026-09-08: an unresolvable, out-of-scope or missing
+        source document is refused BEFORE the job is created, not inside the agent after
+        it starts. A job already accepted and then unable to read its own input has to
+        fail somewhere far less visible, and the caller has already been told the work
+        began. So this runs on the door's thread and its refusal is the door's answer.
+
+        IT MUTATES `args` ON SUCCESS, AND THAT IS THE POINT. The caller names a document
+        the way the doc-viewer names it — `<scope>/<path>` — and the agent needs a real
+        absolute path it can open. Resolving once here means the agent never re-derives
+        it, and can never re-derive it DIFFERENTLY from what was validated, which is how
+        a check and the thing it checked drift apart.
+
+        THE UNWIRED CASE REFUSES RATHER THAN PASSES. If no scope registry was injected,
+        this cannot tell an allowed path from any other, so it says no. A scope check
+        that silently does not run would let the argument through unvalidated on exactly
+        the deployments where it was misconfigured — the failure mode is invisible and
+        the blast radius is arbitrary file read.
+
+        Requires:
+            - args is the mutable dict of arguments this submit will run with
+
+        Ensures:
+            - returns None when there is nothing to refuse — including when the argument
+              is absent, which is legal because it is optional
+            - returns a terminal refusal dict when the argument is present and bad, or
+              when a NEAR-MISS spelling of it is present (see below)
+            - on success replaces args[ SOURCE_DOCUMENT_ARG ] with the list of resolved,
+              real, absolute paths
+            - never raises
+
+        Raises:
+            - None — the door answers with a refusal, not a stack trace
+        """
+        near_miss = self._near_miss_source_document_key( args )
+        if near_miss is not None:
+            trace.set( "source_document_near_miss", near_miss )
+            return self._submit_refused(
+                trace, command, ctx, "source_document_unknown_key",
+                f"'{near_miss}' is not an argument this command takes. Did you mean "
+                f"'{SOURCE_DOCUMENT_ARG}'? Nothing was run — a misspelled argument would "
+                f"otherwise be accepted in silence and the research would read nothing."
+            )
+
+        if SOURCE_DOCUMENT_ARG not in args: return None
+        raw = args.get( SOURCE_DOCUMENT_ARG )
+        if raw is None or raw == "" or raw == [ ]: return None
+
+        if self.scope_registry_fn is None:
+            return self._submit_refused(
+                trace, command, ctx, "source_document_unwired",
+                f"'{SOURCE_DOCUMENT_ARG}' cannot be validated: no document scopes are "
+                f"configured on this server, so no path can be shown to be readable."
+            )
+
+        paths, error = validate_source_documents( raw, self.scope_registry_fn() )
+        if error is not None:
+            trace.set( "source_document_refused", error )
+            return self._submit_refused( trace, command, ctx, "source_document_invalid", error )
+
+        args[ SOURCE_DOCUMENT_ARG ] = paths
+        trace.set( "source_document_count", len( paths ) )
+        return None
+
+    @staticmethod
+    def _near_miss_source_document_key( args: dict ) -> Optional[ str ]:
+        """Return an argument key that was probably meant to be `source_document`.
+
+        THE HOLE THIS PLUGS. `/api/v2/submit` binds `args` as a FREE-FORM dict, so a key
+        no command declares is accepted without comment. Misspell `source_document` and
+        the door takes it, the job runs, and the research comes back having read nothing
+        — no error anywhere, and a report that looks like every other report. That is the
+        silent-degradation shape this fleet keeps finding, and shipping a document
+        argument on a free-form bag without this check would ship a new way to hit it.
+
+        DELIBERATELY NARROW, AND THAT IS A SCOPE DECISION RATHER THAN AN OVERSIGHT.
+        Rejecting EVERY unrecognised key on every command is the more complete rule, and
+        it is also a behaviour change for every existing caller that passes an extra key
+        today. That belongs in its own row with its own blast-radius review. This catches
+        the one shape being introduced right now.
+
+        Requires:
+            - args is the caller's argument dict
+
+        Ensures:
+            - returns None when no key resembles the canonical spelling, or when the
+              canonical spelling itself is present (an exact key is never a near miss)
+            - returns the offending key when one normalizes to the canonical form or is
+              within a close-match cutoff of it
+            - never raises
+        """
+        if SOURCE_DOCUMENT_ARG in args: return None
+
+        canonical = SOURCE_DOCUMENT_ARG.replace( "_", "" )
+        for key in args.keys():
+            if not isinstance( key, str ): continue
+            normalized = key.lower().replace( "_", "" ).replace( "-", "" ).replace( " ", "" )
+            if normalized == canonical: return key
+            if difflib.get_close_matches( normalized, [ canonical ], n=1, cutoff=0.85 ): return key
+        return None
+
+    def _submit_refused( self, trace: StageTrace, command: str, ctx: tuple,
+                         route_reason: str, message: str ) -> dict:
+        """Emit a door-level refusal — the submit shape for "no, and here is why".
+
+        SAME SHAPE AS `_submit_needs_input`, DIFFERENT REASON, and it is worth having
+        both. `needs_input` means the caller left something out and can supply it;
+        this means what the caller supplied cannot be used. Collapsing them would make a
+        bad path read as a missing argument, and a caller retrying with the same bad
+        path forever is the predictable result.
+
+        Ensures:
+            - nothing is built and nothing is queued
+            - the refusal text reaches the caller as the answer, so it is readable in the
+              same response rather than only in a log
+        """
+        trace.mark( "t_first_useful" )
+        return self._emit( trace, path="needs_input", status="needs_input",
+                           route_reason=route_reason, answer=message, answer_raw=message,
+                           command=command, ctx=ctx, pending_id=None,
+                           args_missing=[ ], args_known=[ ] )
 
     # ---------------------------------------------------------------- the second turn
     def resume( self, pending_id: str, answer: str, websocket_id: str, speak: bool=True ) -> dict:
@@ -1063,7 +1246,8 @@ class AskFlow:
         # to `!= "done"` and EVERY queued job degrades to the receptionist the moment
         # it is handed off, while the real agent still runs behind it.
         if outcome.status not in SUCCESS_STATUSES:
-            return self._receptionist( trace, question, ctx, "agent_error", primary_error=outcome.error )
+            return self._receptionist( trace, question, ctx, "agent_error",
+                                       primary_error=outcome.error, routed_command=command )
         return self._finish( trace, "agent", route_reason, outcome, question, ctx,
                              command=command, snapshotable=may_cache,
                              agent_class_name=spec.factory.__name__, agent_label=spec.label )
@@ -1100,7 +1284,44 @@ class AskFlow:
         working, and the only way to tell "guard refused it" from "cache is broken" is to
         have written down which happened.
         """
+        # AN EXACT MATCH IS EXEMPT (Rick, 2026-09-04, row fe1c0d3f). A tier-1 hit is the
+        # SAME question, verbatim or normalized, whose answer this user already received.
+        # Re-running it cannot produce a better answer — it produces the same answer, later
+        # and at cost. v1 behaved this way and never had a gate here at all
+        # (todo_fifo_queue.py: `elif best_score >= 100.0: auto-accept, no prompt`); this
+        # reproduces that BEHAVIOUR inside v2's own path, and does not revive v1's code.
+        #
+        # WHY THE EXEMPTION IS KEYED ON `why` AND NOT ON A SCORE. Every call site already
+        # names itself, and the name is the thing being ruled on: "exact_hit" is exempt,
+        # "near_match" and "failed_reexecution_fallback" are NOT. Threading a similarity
+        # float down here instead would let a 99.9 arrive as "close enough" — the float
+        # comparison R-C1 exists to forbid.
+        #
+        # 🔴 WHAT THIS DELIBERATELY DOES NOT WEAKEN. The guard still stands on every path
+        # where the served row is NOT the question that was asked: a near match is a
+        # DIFFERENT question, and the fallback after a failed re-execution is a safety net
+        # where an unconfirmed answer is most likely to be the wrong one. Rick ruled both
+        # of those stay guarded in the same breath as this exemption.
         verdict = getattr( snapshot, "answer_is_correct", None )
+
+        # 🔴 THE EXEMPTION IS FROM *UNKNOWN*, NOT FROM *NO*, AND THAT NARROWING IS NOT A
+        # DETAIL. Rick ruled "allow exact matches to run"; he did not rule "serve an answer
+        # the user told us was wrong", and those are different sentences. All 103 refusals
+        # in the corpus read `exact_hit:None` — nobody has ever recorded a False — so the
+        # exemption below clears every one of them while an explicit rejection still stands.
+        # CAUGHT HERE BY `test_9b_the_read_guard.py`'s parametrized
+        # `test_an_exact_hit_is_served_when_UNKNOWN_and_refused_when_the_user_said_NO`, which
+        # drives THIS `AskFlow` and asserts both arms — `None` served, `False` refused.
+        # ⚠️ The queue carries its OWN copy of this exemption and its OWN guard,
+        # `test_an_exact_hit_the_user_marked_WRONG_is_refused` in
+        # `test_running_fifo_queue.py`. Two exemptions, two guards: reverting one does not
+        # redden the other's test, so do not read either citation as covering both.
+        # The blanket form served a known-wrong answer forever, which is a worse defect
+        # than the one being fixed.
+        if why == "exact_hit" and verdict is not False:
+            trace.set( "replay_exact_match_exempt", True )
+            return True
+
         if verdict is True:
             return True
         trace.set( "replay_refused_unconfirmed", f"{why}:{verdict!r}" )
@@ -1135,6 +1356,30 @@ class AskFlow:
     RECEPTIONIST_COMMAND = "agent router go to receptionist"
 
     @classmethod
+    def _unresolved_routed_command( cls, command: str ) -> Optional[ str ]:
+        """The route to RECORD for a command that did not resolve (row 13e7c573).
+
+        THE ONE PLACE THE 8-vs-4 SPLIT IS NOT CLEAN. A command that failed to resolve
+        usually means no route was chosen, and recording it would assert a decision the
+        router did not make. But ONE sub-case is a genuine route: the receptionist is a
+        POSITIVE choice in the router's own command list, so `user_picked_receptionist`
+        means somebody really did select it and the receptionist really is the right
+        answer. Recording None there would throw away a real route.
+
+        DERIVED FROM `_unresolved_route_reason` RATHER THAN RE-DERIVED, deliberately: two
+        copies of "is this the deliberate pick" would drift, and a marker that disagrees
+        with the command beside it is the defect family this row belongs to.
+
+        Requires:
+            - command is the command the ROUTER or the CALLER named
+
+        Ensures:
+            - returns the command when it IS the deliberate receptionist pick
+            - returns None otherwise — `route_reason` already says which door it was
+        """
+        return command if cls._unresolved_route_reason( command ) == "user_picked_receptionist" else None
+
+    @classmethod
     def _unresolved_route_reason( cls, command: str ) -> str:
         """Why an unresolvable command is going to the receptionist.
 
@@ -1146,12 +1391,19 @@ class AskFlow:
               receptionist, i.e. somebody asked for it on purpose
             - returns "unknown_command" otherwise
 
-        🔴 READS THE INCOMING COMMAND, NEVER THE EMITTED ONE. Every degrade emits
-        command="agent router go to receptionist" because `_receptionist` rewrites it,
-        so deriving the marker from the emitted command would set it on every degrade —
-        a marker both doors can set is worse than no marker, because it looks like a
-        distinction. The degrade callers pass their own literal reason and never reach
-        this helper at all, which is what makes the marker unfakeable by construction.
+        🔴 READS THE INCOMING COMMAND, NEVER THE EMITTED ONE. The degrade callers pass
+        their own literal reason and never reach this helper at all, which is what makes
+        the marker unfakeable by construction.
+
+        ⚠️ THE ORIGINAL REASON FOR THAT IS NOW HISTORY, and the line is kept because the
+        property is still worth having. This used to read: "every degrade emits
+        command='agent router go to receptionist' because `_receptionist` rewrites it, so
+        deriving the marker from the emitted command would set it on every degrade — a
+        marker both doors can set is worse than no marker." That rewrite is GONE (row
+        13e7c573): a degrade now emits the route the router chose, or None where none was
+        chosen, so the emitted command would today be a usable discriminator. Reading the
+        incoming command remains correct and is one fewer thing to re-verify when the
+        emitted value changes again.
 
         ⚠️ THE TWO DOORS DO NOT MEAN QUITE THE SAME THING BY "PICKED" (Clayton, via
         Cheech, 2026-08-23). On `submit` the caller hands us the command, so a deliberate
@@ -1224,20 +1476,47 @@ class AskFlow:
         return True
 
     def _receptionist( self, trace: StageTrace, question: str, ctx: tuple, route_reason: str,
-                       primary_error: Optional[ str ]=None ) -> dict:
+                       primary_error: Optional[ str ]=None,
+                       replayed_snapshot_id: Optional[ str ]=None,
+                       routed_command: Optional[ str ]=None ) -> dict:
         """The else — run the receptionist inline (its failure is terminal, no recursion).
 
         primary_error carries the FAILURE THAT CAUSED THE DEGRADE. Without it the
         emitted error is the fallback's, and a live failure reports why the
         receptionist died while saying nothing about why the real agent did — which
         is a fallback that hides the fault it was reached by.
+
+        routed_command IS THE ROUTE THE ROUTER ACTUALLY CHOSE (row 13e7c573), and passing it
+        is the whole of that fix. This exit used to report `command=RECEPTIONIST_COMMAND`
+        unconditionally, overwriting the router's decision with one nobody made — and doing
+        it in well-formed fashion, so no consumer could see it. It was the ONLY exit that
+        did: replay, agent, submitted_prebuilt and needs_input all report the route.
+
+        ⚠️ IT IS None AT THE FOUR SITES WHERE NO ROUTE RESOLVED, and that is deliberate, not
+        an oversight. `router_error` (the router itself answered "unknown") and the three
+        `unknown_command` doors have a command STRING in scope whose value names nothing
+        servable; recording it would assert a route the router explicitly did not choose —
+        swapping one invented label for another. `route_reason` already says which door it
+        was, and that is the honest answer.
+
+        WHAT RAN IS NOT LOST, and needs no new field: `path` is "receptionist" here and
+        NOWHERE ELSE in this flow, so it already marks the fallback exactly. Measured on
+        eval-2026-08-21-11-37-48: 317 of 317 relabelled rows carry path="receptionist", and
+        every path="receptionist" row is one of them — 1:1 in both directions.
+
+        replayed_snapshot_id rides the same seam for the same reason (row 7e2125a7, D7).
+        This method builds a NEW Outcome from the receptionist run, so EVERY field of the
+        failed replay's outcome is discarded here — which is why the id is threaded as an
+        argument rather than read off `outcome` further down. Only the caller that ran the
+        replay still knows which row it read.
         """
         if primary_error: trace.set( "primary_agent_error", primary_error )
         work    = Work( "receptionist", self._build_agent( self.receptionist_factory, question, ctx ),
                        ctx[ 0 ], ctx[ 1 ], ctx[ 2 ], snapshotable=False )
         outcome = self.executor.submit( work, trace )
         return self._finish( trace, "receptionist", route_reason, outcome, question, ctx,
-                             command=self.RECEPTIONIST_COMMAND, primary_error=primary_error )
+                             command=routed_command, primary_error=primary_error,
+                             replayed_snapshot_id=replayed_snapshot_id )
 
     def _needs_input(
         self, trace: StageTrace, command: str, extraction: Any, question: str,
@@ -1308,16 +1587,19 @@ class AskFlow:
         self, trace: StageTrace, path: str, route_reason: str, outcome: Any, question: str, ctx: tuple,
         command: str, cache_hit: bool=False, snapshotable: bool=False, agent_class_name: str="",
         primary_error: Optional[ str ]=None, agent_label: Optional[ str ]=None,
+        replayed_snapshot_id: Optional[ str ]=None,
     ) -> dict:
         """Stamp first-useful, write back, speak, and emit the terminal result."""
         trace.mark( "t_first_useful" )
         snapshot_id = self._maybe_write_back( trace, question, command, outcome, snapshotable, agent_class_name, ctx )
-        self._speak( trace, self._spoken_line( outcome, agent_label ), outcome.job_id, ctx )
+        self._speak( trace, self._spoken_line( outcome, agent_label, path ), outcome.job_id, ctx )
         return self._emit(
             trace, path=path, status=outcome.status, route_reason=route_reason, answer=outcome.answer,
             answer_raw=outcome.answer_raw, command=command, ctx=ctx, job_id=outcome.job_id,
             snapshot_id=snapshot_id, cache_hit=cache_hit,
+            replayed_snapshot_id=replayed_snapshot_id,
             error=self._compose_error( primary_error, outcome.error ),
+            queue_position=outcome.queue_position,
         )
 
     @staticmethod
@@ -1328,7 +1610,7 @@ class AskFlow:
         return f"primary agent failed: {primary_error} | receptionist: {fallback_error}"
 
     @staticmethod
-    def _spoken_line( outcome: Any, agent_label: Optional[ str ] ) -> Optional[ str ]:
+    def _spoken_line( outcome: Any, agent_label: Optional[ str ], path: str ) -> Optional[ str ]:
         """What this exit says out loud: the answer, or v1's ack when the work was queued.
 
         A queued job has no answer yet, so `waiting` speaks the ack INSTEAD of the
@@ -1341,9 +1623,53 @@ class AskFlow:
         (todo_fifo_queue.py:217-220, spoken at :807 and :837). Reproducing that here
         would move queue-owned state into the flow, so it is left for its own
         decision rather than invented.
+
+        🔴 AND IT RETURNS None ON A QUEUED REPLAY, WHICH IS WHY IT TAKES `path`
+        (bug 588b2f15, diagnosed by María 🌸 from Rick's own probe: "I'm getting it
+        every time when it should be only replaying the cached answer").
+
+        This function used to branch on `outcome.status` alone, and a queued replay
+        looks exactly like a queued new job from here: status "waiting", a truthy
+        agent_label. So it announced "New calculator job..." for a request that
+        created no job at all — measured in the [DIAG-JR] trace, frame 11, with no
+        job behind it.
+
+        The information was one frame up the whole time: `_finish` already receives
+        `path`, and never passed it down. It does now.
+
+        ⇒ THIS IS THE SAME CASE AS THE RECEPTIONIST, not a new kind of exception:
+        somebody else is already speaking for this path, so we stay silent. On a
+        queued replay v1 speaks the cached answer itself, as
+        queue.running@lupin.deepily.ai. Without this guard the request gets TWO
+        spoken lines, which breaks the one-line-per-request guarantee the paragraph
+        above asserts — a guarantee that only ever held while v2 was the sole
+        speaker.
+
+        ⚠️ IT COVERS BOTH REPLAY BRANCHES BY CONSTRUCTION, and that answers an
+        open question on the row rather than leaving it. The exact-hit branch and
+        the near-match branch call `_finish` with the SAME literal path "replay",
+        so neither can be fixed without the other. María flagged that she had
+        driven only the exact-hit path; keying on the shared label is what makes
+        the near-match arm covered rather than assumed, and there is a test for it.
+
+        Requires:
+            - outcome carries `status` and `answer`
+            - path is the same literal `_finish` was called with
+
+        Ensures:
+            - status != "waiting" -> outcome.answer, on EVERY path including replay
+              (a replay that already has its answer in hand still speaks it)
+            - status == "waiting" and path == "replay" -> None (v1 speaks it)
+            - status == "waiting" and no agent_label -> None (the receptionist)
+            - otherwise -> the "New <agent> job..." ack
         """
         if outcome.status != "waiting":
             return outcome.answer
+        # A REPLAY CREATED NO JOB, so there is no new job to announce. Ordered ahead
+        # of the label check because a replay always HAS a label — the check below
+        # would never reach it.
+        if path == "replay":
+            return None
         if not agent_label:
             return None
         return STARTING_A_NEW_JOB.format( agent_type=agent_label )
@@ -1362,7 +1688,8 @@ class AskFlow:
                answer_raw: Optional[ str ], command: Optional[ str ], ctx: tuple, job_id: Optional[ str ]=None,
                snapshot_id: Optional[ str ]=None, pending_id: Optional[ str ]=None,
                cache_hit: bool=False, args_known: Optional[ list ]=None, args_missing: Optional[ list ]=None,
-               error: Optional[ str ]=None ) -> dict:
+               error: Optional[ str ]=None, replayed_snapshot_id: Optional[ str ]=None,
+               queue_position: Optional[ int ]=None, submit_details: Optional[ dict ]=None ) -> dict:
         """Assemble the §8 response dict and write the authoritative trace line.
 
         Stamps t_complete here — the single chokepoint every terminal exit funnels
@@ -1385,17 +1712,33 @@ class AskFlow:
         # _route_reason, which reads the INCOMING command on purpose (see its docstring).
         command = canonical_command( command )
         trace.mark( "t_complete" )
+        # WHICH ROW A REPLAY READ — its own field, never folded into `job_id` (row 7e2125a7).
+        # `job_id` already carried this value on the SUCCESS path only, because the replay
+        # Outcome's job_id IS the row's id_hash, while on the agent path the same key means
+        # a QUEUE job. One key with two meanings cannot be grouped on; and the failures —
+        # the rows that most need naming — carried neither. Measured in
+        # eval-2026-08-21-11-37-48: job_id present on 85 of 85 exact_hit rows and 0 of 126
+        # replay_error rows. `snapshot_id` is not the answer either: it is the WRITE-BACK
+        # id, so it is null by construction on a warm pass that writes nothing back.
         trace.update( path=path, status=status, route_reason=route_reason, cache_hit=cache_hit,
-                      wrote_snapshot=snapshot_id is not None )
+                      wrote_snapshot=snapshot_id is not None,
+                      replayed_snapshot_id=replayed_snapshot_id )
         trace.write()
         self._log_query( trace, ctx, snapshot_id=snapshot_id, cache_hit=cache_hit )
-        return {
+        result = {
             "path"        : path,           "status"       : status,        "route_reason" : route_reason,
             "answer"      : answer,         "answer_raw"   : answer_raw,     "command"      : command,
             "args_known"  : args_known or [], "args_missing": args_missing or [],
             "pending_id"  : pending_id,     "job_id"       : job_id,         "snapshot_id"  : snapshot_id,
             "similarity"  : trace.fields.get( "similarity" ),               "wrote_snapshot": snapshot_id is not None,
             "cache_hit"   : cache_hit,      "spoke"        : trace.has_mark( "t_tts_dispatch" ),
+            "replayed_snapshot_id" : replayed_snapshot_id,
             "timings_ms"  : trace.timings_ms(),                             "trace_id"     : trace.trace_id,
             "error"       : error,
         }
+        # ADDED ONLY WHEN THERE IS ONE (row a3c59f2d): a job was just queued and its place
+        # is known. Absent otherwise, so the result dict every other path returns keeps
+        # exactly the keys it had; `AskResponse.queue_position` defaults to null.
+        if queue_position is not None: result[ "queue_position" ] = queue_position
+        if submit_details is not None: result[ "submit_details" ] = submit_details
+        return result

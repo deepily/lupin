@@ -15,6 +15,7 @@
 
 import { raw } from "./html";
 import type { Value } from "./html";
+import { isDocLinkHref } from "./docLink";
 
 interface MarkedAPI {
   parse(input: string, opts?: { breaks?: boolean; gfm?: boolean }): string;
@@ -28,8 +29,16 @@ interface WindowGlobals {
   DOMPurify ?: DOMPurifyAPI;
 }
 
-// Canonical DOMPurify config — verbatim port from `notifications.js:12203-12247`.
-// Keep this object literal stable; `markdown.test.ts` snapshot-asserts equality.
+// The multiplexer's DOMPurify config. Originally ported from legacy `notifications.js`; the two
+// have since diverged, so read this object, not that file, for what the multiplexer allows.
+//
+// 🔴 NO `USE_PROFILES`, AND IT MUST STAY OUT (row 5ae3ce90). DOMPurify applies a profile AFTER
+// `ALLOWED_TAGS` / `ALLOWED_ATTR` and resets both lists to the whole profile, so the explicit
+// lists below were being ignored. Measured in Chromium 145 with the vendored DOMPurify 3.3.1: with
+// `USE_PROFILES: { html: true }` a sender's <form>, <input>, <button>, <style>, style= and
+// <details> all reached the bubble. Pinned in a real browser by
+// src/tests/e2e_ui/test_the_bubble_sanitizer_keeps_only_its_allowlist.py, and by the config
+// test in markdown.test.ts.
 export const DOMPURIFY_CONFIG = {
   ALLOWED_TAGS : [
     "h1", "h2", "h3", "h4", "h5", "h6",
@@ -45,13 +54,14 @@ export const DOMPURIFY_CONFIG = {
     "href", "src", "alt", "title",
     "target", "rel",
     "class", "id",
+    // marked writes a `|:-:|` column as align="…" on its th/td. Without this an aligned table renders unaligned.
+    "align",
   ],
   // `mailto:` + standard web schemes; deny `javascript:` + data: by exclusion.
   ALLOWED_URI_REGEXP : /^(?:(?:https?|mailto):|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i,
   ADD_ATTR : [ "target", "rel" ],
   RETURN_DOM_FRAGMENT     : false,
   RETURN_TRUSTED_TYPE     : false,
-  USE_PROFILES            : { html: true },
 };
 
 function ensureGlobals(): { marked: MarkedAPI; DOMPurify: DOMPurifyAPI } {
@@ -63,12 +73,32 @@ function ensureGlobals(): { marked: MarkedAPI; DOMPurify: DOMPurifyAPI } {
   return { marked: win.marked, DOMPurify: win.DOMPurify };
 }
 
+// Matches the href value inside an anchor's attribute blob, either quoting style.
+// DOMPurify has already run by the time this sees the html, so the attribute is
+// sanitized and quoted; an unquoted href is not a shape it emits.
+const HREF_ATTR_RE = /\bhref\s*=\s*(?:"([^"]*)"|'([^']*)')/i;
+
 function postProcessAnchors(html: string): string {
-  // Rewrite anchor target/rel — verbatim port from `notifications.js:12203-12247`.
-  // Every `<a href="...">` gets `target="_blank" rel="noopener noreferrer"`.
+  // Rewrite anchor target/rel — ported from `notifications.js:12203-12247`.
+  //
+  // 🔴 EVERY anchor used to get `target="_blank"`, INCLUDING in-app doc links,
+  // and that stamp is what row 47759aa3 removes. A doc link carrying `_blank`
+  // opens a new tab the instant anything fails to intercept the click first —
+  // which is exactly how the vertical-layout regression presented. An external
+  // link still gets it: leaving the site is what a new tab is FOR.
   return html.replace(
     /<a\s+(?![^>]*\btarget=)([^>]*?)>/gi,
-    '<a $1 target="_blank" rel="noopener noreferrer">',
+    ( match: string, attrs: string ): string => {
+      const href = HREF_ATTR_RE.exec(attrs);
+      // `href[1]` is the double-quoted arm, `href[2]` the single-quoted one;
+      // exactly one is defined when the regex matches at all.
+      /* c8 ignore next */ // the trailing `?? null` is unreachable: HREF_ATTR_RE's two groups are the double- and single-quoted arms of one alternation, so a match always defines exactly one. The null-match and both quoting styles ARE covered (doc_link_opens_in_app_in_every_layout.test.ts).
+      const value = href === null ? null : ( href[ 1 ] ?? href[ 2 ] ?? null );
+      // In-app doc link: leave it bare so the shared open path is the ONLY way
+      // it can resolve. No `_blank` means no silent fallback to a new tab.
+      if (isDocLinkHref(value)) return match;
+      return `<a ${attrs} target="_blank" rel="noopener noreferrer">`;
+    },
   );
 }
 

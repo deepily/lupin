@@ -2,7 +2,7 @@
 Multiplexer Phase 6b — visual regression baseline capture.
 
 Per AC11a + AC11b ratification (design doc 09):
-    - AC11a: submission via `POST /api/test-suite/submit` with
+    - AC11a: submission via `POST /api/v2/submit` with
       `--update-snapshots -k multiplexer_phase6b` returns HTTP 200 + valid
       `submission_id`. The HUMAN gate is slot-coordination ONLY (calendar);
       the AI executes the submission via the /schedule-tests skill.
@@ -16,7 +16,7 @@ e2e_ui conftest standard (`LUPIN_TEST_BASE_URL` env var; default
 `http://localhost:8000`). NO hardcoded `:8000` literal.
 
 **Venue**: `:8000` monopolize-mode (e2e_ui suite gate). Schedule via
-`POST /api/test-suite/submit` with non-overlapping `scheduled_at` slot per
+`POST /api/v2/submit` with non-overlapping `scheduled_at` slot per
 `feedback_test_server_monopolize_mode`. Side-door injection (ad-hoc curl,
 direct queue push, in-process server instantiation) is PROHIBITED.
 
@@ -29,6 +29,25 @@ from __future__ import annotations
 import time
 
 from .conftest import BASE_URL
+
+
+SPEECH_URL_GLOB = "**/api/get-speech-elevenlabs*"
+
+
+def _answer_speech_post( route, posts ):
+    """
+    Record a speech request and answer it 200 without generating audio.
+
+    Requires:
+        - route is a Playwright Route for the speech URL
+        - posts is a list the caller reads afterwards
+
+    Ensures:
+        - the request body is appended to posts
+        - the page gets a 200 and no PCM ever streams back on /ws/audio
+    """
+    posts.append( route.request.post_data )
+    route.fulfill( status=200, content_type="application/json", body="{}" )
 
 
 # ---------------------------------------------------------------------------
@@ -73,7 +92,9 @@ _INJECT_ACTION_REQUIRED_FIXTURES_JS = """
         ts     : 1778702400000,
     });
 
-    // Prompt 2: multiple_choice (single-select).
+    // Prompt 2: multiple_choice (single-select). response_options in the REAL shape the server
+    // sends (convert_questions_for_api) — P0 5ebd2aff step 2 changed this card's rendering, so the
+    // golden baseline for it must be re-captured deliberately after the build.
     bus.emit({
         type    : 'notification_queue_update',
         payload : {
@@ -82,7 +103,14 @@ _INJECT_ACTION_REQUIRED_FIXTURES_JS = """
                 message             : 'Pick a database backend.',
                 response_requested  : true,
                 response_type       : 'multiple_choice',
-                response_options    : [ 'PostgreSQL', 'SQLite', 'MongoDB' ],
+                response_options    : { questions: [ {
+                    question     : 'Which database backend?',
+                    header       : 'Database',
+                    multi_select : false,
+                    options      : [ { label: 'PostgreSQL', description: 'Relational, already deployed' },
+                                     { label: 'SQLite',     description: 'File-backed, no server' },
+                                     { label: 'MongoDB',    description: 'Document store' } ],
+                } ] },
                 response_default    : 'PostgreSQL',
                 timeout_seconds     : 300,
                 sender_id           : 'phase6b-visual',
@@ -124,6 +152,15 @@ _INJECT_ACTION_REQUIRED_FIXTURES_JS = """
 # rendered text every second.
 _STABILIZE_COUNTDOWN_JS = """
 () => {
+    // Row f0e00f01: stop the store's 1 Hz countdown FIRST. A pin alone lasts until
+    // the next tick, which rewrites the text ("5m 0s" -> "⏱ 04:59") and, since
+    // 59b662d5, the progress bar's width. MEASURED on :7999: pinned captures 1 s
+    // apart differed by ~920 px; with the timers stopped, 0 px across 2 s.
+    // disposeForTesting clears each prompt's interval and leaves the DOM alone.
+    window.__multiplexerTestHook.stores.actionRequired.disposeForTesting();
+    document.querySelectorAll( '.action-required-progress-fill' ).forEach( el => {
+        el.style.width = '100%';
+    } );
     const PIN = '5m 0s';
     document.querySelectorAll( '.action-required-countdown' ).forEach( el => {
         el.textContent = PIN;
@@ -179,8 +216,10 @@ def test_multiplexer_phase6b_action_required_visual(
     Ensures:
         - `/app/multiplexer` loads under authenticated session
         - boot.ts test hook is reachable
-        - 3 action_required fixtures inject + render as interactive widgets
-        - Snapshot of `#action-required-section` matches baseline
+        - 3 action_required fixtures inject; the first renders as the interactive widget and the
+          other two as queued #N rows (360de81b — one card at a time)
+        - Snapshot of `#action-required-section` matches baseline (⚠️ changed by 360de81b;
+          the baseline image needs a deliberate re-capture)
     """
     page = logged_in_page
 
@@ -194,12 +233,11 @@ def test_multiplexer_phase6b_action_required_visual(
 
     page.evaluate( _INJECT_ACTION_REQUIRED_FIXTURES_JS )
 
-    for id_hash in [
-        "phase6b_visual_yes_no",
-        "phase6b_visual_mc",
-        "phase6b_visual_open",
-    ]:
-        page.wait_for_selector( f'.action-required-widget[data-id-hash="{id_hash}"]', timeout=2000 )
+    # 360de81b — one card at a time: the first prompt is the active widget, the other two are
+    # queued rows. ⚠️ This changes the captured image; the baseline needs a deliberate re-capture.
+    page.wait_for_selector( '.action-required-widget[data-id-hash="phase6b_visual_yes_no"]', timeout=2000 )
+    for id_hash in [ "phase6b_visual_mc", "phase6b_visual_open" ]:
+        page.wait_for_selector( f'.action-required-minimized[data-id-hash="{id_hash}"]', timeout=2000 )
 
     # Stabilize the live 1Hz countdown text before screenshot.
     page.evaluate( _STABILIZE_COUNTDOWN_JS )
@@ -369,6 +407,17 @@ def test_multiplexer_phase6b_tts_chrome_focus_visual(
         timeout=15000,
     )
 
+    # Row f0e00f01, 2026-09-16: answer the speech POST here, before the injection.
+    # The injected AR item becomes the active head, and wireTtsPlayback POSTs its text
+    # to /api/get-speech-elevenlabs. Since 0206270b gave /ws/audio its own session id
+    # the PCM really comes back, about 250 ms AFTER the synthetic store_audio_ended —
+    # so the pane flips to `playing` after the time pin: Pause/Stop/Skip enable, the
+    # `.is-playing-current` frame adds 18 px, and the re-render overwrites 01:45.
+    # MEASURED on :7999: live 261.5 px with the pin lost; stubbed 243.5 px, pin held.
+    # The stub also stops every run spending an ElevenLabs call.
+    speech_posts = []
+    page.route( SPEECH_URL_GLOB, lambda route: _answer_speech_post( route, speech_posts ) )
+
     # Drive focus mode (AR active → audio ends unresolved → ENTER, 1 held pending).
     page.evaluate( _INJECT_TTS_FOCUS_JS )
 
@@ -398,6 +447,16 @@ def test_multiplexer_phase6b_tts_chrome_focus_visual(
     # test_multiplexer_task_editing.py:316-318. Pure load barrier — comparator untouched.
     page.evaluate( "() => document.fonts.ready" )
     page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
+
+    # The stub must have been reached, or a renamed URL would let real audio back in
+    # while this test still reads as protected.
+    assert speech_posts, "the speech POST never reached the stub — the pane may be capturing live audio"
+    state = page.locator( '#tts-pane [data-testid="multiplexer-tts-chrome"]' ).get_attribute( "data-state" )
+    # `idle`, not merely "not playing": with live audio the pane reads `playing` for
+    # the stream and `ended` after it (measured on :7999 at 0.4 s and 3 s), and both
+    # repaint the card after the time pin.
+    assert state == "idle", f"audio reached the pane (data-state={state!r}); the snapshot would not be the held focus state"
+
     pane = page.locator( '#tts-pane' )
     assert_snapshot_height_tolerant( pane, name="multiplexer_phase6b_tts_chrome_focus.png" )
 

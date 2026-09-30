@@ -31,6 +31,7 @@ from lupin_cli.claude_code.hooks.register_session import (
     _persona_slugs,
     _resolve_memento_path,
     _resolve_repo_root,
+    _memento_body_after_header,
     _truncate_visibly,
     _written_at_of,
 )
@@ -40,14 +41,14 @@ SID_FRESH  = "ffffffff-1111-2222-3333-444444444444"
 
 
 def _write_memento( root, persona, sid8, *, amendments=(), written_at="2026-08-15T20:11:52-04:00",
-                    header=True, body="## 1. Who I am\nheld state\n" ):
+                    header=True, body="## 1. Who I am\nheld state\n", title=True ):
     """Write a memento record shaped like the real ones."""
     path  = os.path.join( root, f".claude-memento-{persona}-{sid8}.md" )
     lines = []
     if header:
         stamp = f" written_at={written_at}" if written_at else ""
         lines.append( f"<!-- memento-record: persona={persona} session_id={sid8}{stamp} slot=root -->\n" )
-    lines.append( f"# Memento — {persona}\n" )
+    if title: lines.append( f"# Memento — {persona}\n" )
     lines.append( body )
     for text in amendments:
         lines.append( f"\n<!-- memento-amendment: by={persona} session_id={sid8} -->\n" )
@@ -123,17 +124,37 @@ def test_never_returns_another_personas_record( repo ):
 # ---------------------------------------------------------------------------
 # The io slot — the third cause of a blank rehydrate
 # ---------------------------------------------------------------------------
-def _write_io_memento( root, persona, sid8, *, amendments=(), written_at="2026-08-15T19:12:47-04:00" ):
-    """A record in the io slot: `io/mementos/<persona>-<sid8>.md`, no filename prefix."""
+def _write_io_memento( root, persona, sid8, *, amendments=(), written_at="2026-08-15T19:12:47-04:00",
+                       prose="# Memento — {persona}\nheld state\n" ):
+    """A record in the io slot: `io/mementos/<persona>-<sid8>.md`, no filename prefix.
+
+    `prose=""` writes a record whose whole content is the header comment — the only
+    shape that is GENUINELY stateless, and the shape the near-blank warning describes.
+    """
     slot = os.path.join( root, "io", "mementos" )
     os.makedirs( slot, exist_ok=True )
     path = os.path.join( slot, f"{persona}-{sid8}.md" )
     body = [ f"<!-- memento-record: persona={persona} session_id={sid8} written_at={written_at} slot=io -->\n",
-             f"# Memento — {persona}\nheld state\n" ]
+             prose.format( persona=persona ) ]
     for text in amendments:
         body.append( f"\n<!-- memento-amendment: by={persona} session_id={sid8} -->\n{text}\n" )
     with open( path, "w", encoding="utf-8" ) as fh:
         fh.write( "".join( body ) )
+    return path
+
+
+def _write_io_memento_body( root, persona, sid8, *, body, amendments=(),
+                            written_at="2026-09-09T11:13:00-04:00" ):
+    """Like `_write_io_memento`, but the BODY is the variable under test."""
+    slot = os.path.join( root, "io", "mementos" )
+    os.makedirs( slot, exist_ok=True )
+    path  = os.path.join( slot, f"{persona}-{sid8}.md" )
+    parts = [ f"<!-- memento-record: persona={persona} session_id={sid8} written_at={written_at} slot=io -->\n" ]
+    if body: parts.append( body )
+    for text in amendments:
+        parts.append( f"\n<!-- memento-amendment: by={persona} session_id={sid8} -->\n{text}\n" )
+    with open( path, "w", encoding="utf-8" ) as fh:
+        fh.write( "".join( parts ) )
     return path
 
 
@@ -390,7 +411,16 @@ def test_block_says_so_when_there_is_no_amendment( repo ):
     soft version was a hazard. This keeps the original intent (the seat is told
     the record is thin) against the current, louder text.
     """
-    _write_memento( repo, "cheech", "80c17315" )
+    # 🔴 FIXTURE REPOINTED 2026-09-05 (Krishna 🦚) — EVERY ASSERTION BELOW IS UNTOUCHED.
+    # This used to write a record carrying prose ("held state") and assert it was
+    # flagged as carrying NONE. That asserted a result only the old predicate could
+    # produce: the branch tested `has an amendment tail` while its message said
+    # `carries no state`, and those are different questions. Measured over
+    # io/mementos/ — 656 records, 517 with no tail, 516 of them carrying real prose
+    # (smallest 1,315 bytes) — the warning fired on 517 and was right about none.
+    # Rachel 🕊️'s intent is PRESERVED, not weakened: a genuinely thin record is still
+    # flagged and still must not read as success. `prose=""` is now that record.
+    _write_memento( repo, "cheech", "80c17315", body="", title=False )
     block = _build_memento_block( SID_CHEECH, "Cheech", repo )
     assert "NO amendment block"      in block
     assert "Read the full record"    in block
@@ -486,7 +516,14 @@ def test_non_markdown_files_are_not_candidates( repo ):
 
 
 def test_candidate_whose_mtime_vanishes_still_lists( repo, monkeypatch ):
-    """A file deleted between listdir and stat must not take the hook down."""
+    """
+    A file deleted between listdir and stat must not take the hook down.
+
+    The sentinel changed with row f99bed95 — both ranking tiers now carry a float
+    instead of a string, so the unreadable-mtime floor is -inf rather than "".
+    Asserting the PROPERTY as well as the literal: the point was never the value,
+    it is that such a record ranks LAST and is still never dropped.
+    """
     _write_memento( repo, "cheech", "80c17315", written_at=None )
 
     import lupin_cli.claude_code.hooks.register_session as rs
@@ -496,7 +533,14 @@ def test_candidate_whose_mtime_vanishes_still_lists( repo, monkeypatch ):
 
     rows = _memento_candidates( repo )
     assert len( rows ) == 1
-    assert rows[0][2] == ( 0, "" )
+    assert rows[0][2] == ( 0, float( "-inf" ) )
+
+    # …and it loses to any record that still has a key, rather than merely
+    # carrying a sentinel nobody checks the consequence of.
+    dated = _write_memento( repo, "cheech", "aaaaaaaa", written_at="2026-08-15T20:11:52-04:00" )
+    rows  = _memento_candidates( repo )
+    assert rows[0][0] == dated
+    assert rows[-1][2] == ( 0, float( "-inf" ) )
 
 
 def test_unreadable_header_is_treated_as_absent( repo, monkeypatch ):
@@ -627,7 +671,16 @@ def test_a_record_with_no_amendment_is_flagged_not_congratulated( repo ):
     missing. A near-blank rehydrate wearing a green banner is worse than a red
     one, because nobody goes looking.
     """
-    _write_io_memento( repo, "tiffany", "74225471" )   # no amendments
+    # 🔴 FIXTURE REPOINTED 2026-09-05 (Krishna 🦚) — EVERY ASSERTION BELOW IS UNTOUCHED.
+    # This used to write a record carrying prose ("held state") and assert it was
+    # flagged as carrying NONE. That asserted a result only the old predicate could
+    # produce: the branch tested `has an amendment tail` while its message said
+    # `carries no state`, and those are different questions. Measured over
+    # io/mementos/ — 656 records, 517 with no tail, 516 of them carrying real prose
+    # (smallest 1,315 bytes) — the warning fired on 517 and was right about none.
+    # Rachel 🕊️'s intent is PRESERVED, not weakened: a genuinely thin record is still
+    # flagged and still must not read as success. `prose=""` is now that record.
+    _write_io_memento( repo, "tiffany", "74225471", prose="" )   # no amendments, no prose
     block = _build_memento_block( SID_FRESH, "Tiffany", repo )
 
     assert "CARRIES NO STATE"    in block
@@ -661,3 +714,154 @@ def test_an_undated_record_says_so_rather_than_omitting_it( repo ):
     assert path  # written to the root slot, no written_at stamp
     block = _build_memento_block( SID_CHEECH, "Cheech", repo )
     assert "UNDATED" in block
+
+
+# ---------------------------------------------------------------------------
+# Row 508449b7 — a record written WHOLE is not a record carrying no state
+#
+# The delivery half of the memento problem, filed by Tiberius 👑 and measured
+# twice on two instruments. `_build_memento_block` branched two ways: amendment
+# tail, or "CARRIES NO STATE". That was true of records BORN thin and amended
+# later — the only shape when Rachel wrote the warning in August. It stopped
+# being true when `memento_io.py write` began writing records WHOLE, with all
+# the state in the body and no amendment marker anywhere.
+#
+# MEASURED on the live corpus at the time of the fix (io/mementos, records
+# matching `-<sid8>.md`, n=385):
+#     143  amendment tail   -> content block   (unchanged)
+#     242  whole body       -> content block   <- these were told "no state"
+#       0  genuinely blank  -> the warning
+#
+# ⚠️ THAT ZERO IS WHY THE SYNTHETIC ARM BELOW MATTERS — and the reasoning has to
+# be stated precisely, because my first version of it was wrong and Mr. Radio
+# caught it. I wrote "a branch with no REACHABLE example". Unreachable and
+# unexercised are different claims:
+#
+#   UNEXERCISED  the system can produce this input; today's corpus happens not to
+#                contain one. Worth a synthetic — you are testing a real shape.
+#   UNREACHABLE  the system cannot produce this input at all. A synthetic here is
+#                coverage theatre: it proves a branch runs, not that it matters.
+#
+# This branch is UNEXERCISED, and NOT by the route I first claimed. I told him an
+# empty `memento_io.py write` would produce a header-only record. It would not —
+# `cmd_write` has ALWAYS refused an empty body ("nothing to record"), and that
+# refusal is narrated in memento_io.py's own header as the irony that its
+# post-game gate accepted a zero-byte file while its input guard did not.
+#
+# ⇒ So the shape this branch defends against is a CORRUPTED or TRUNCATED record —
+# an interrupted write, a partial copy, a hand-made stub, or a record written
+# before that input guard existed. The reader takes whatever is on disk from any
+# writer, so it must survive input no current writer emits. That is a real
+# failure mode, which is why the arm stays; it is simply not the one I named.
+#
+# ⇒ Without it, zero live records exercise Rachel's warning, and deleting it by
+# accident would be invisible to a green suite.
+# ---------------------------------------------------------------------------
+
+_REAL_BODY = (
+    "## 1. WHO I AM\n"
+    "Manager seat, skeleton crew, mid-flight on the findability P0.\n\n"
+    "## 2. WHAT IS OWED\n"
+    "- 732151f2 P0 built and reviewed, commit blocked on a shared file\n"
+    "- 507183ff P2 taken after the owner answered\n\n"
+    "## 3. MISTAKES\n"
+    "Cited a whole-repo coverage aggregate as evidence for 58 new tests.\n"
+    "It reads the same whether I added them or not.\n"
+)
+
+
+def test_a_record_written_whole_is_delivered_not_dismissed( repo ):
+    """
+    The defect, stated as behaviour: a record with real state and no amendment
+    marker must arrive as CONTENT, not as a near-blank warning.
+
+    A seat told its full memento is blank does not open it — which is the same
+    failure Rachel's warning exists to prevent, reached from the other side.
+    """
+    _write_io_memento_body( repo, "maria", "31297e6d", body=_REAL_BODY )
+    block = _build_memento_block( SID_FRESH, "María", repo )
+
+    assert "YOU HAVE A MEMENTO"  in block
+    assert "CARRIES NO STATE" not in block, "a full record must not be announced as stateless"
+    assert "WHO I AM"            in block, "the body itself must reach the seat, not just its path"
+    assert "coverage aggregate"  in block, "the whole body travels, not a summary of it"
+
+
+def test_the_near_blank_warning_still_fires_on_a_record_that_really_is_blank( repo ):
+    """
+    RACHEL'S CONTROL, KEPT. The fix for one misleading banner must not
+    reintroduce the other: a record with nothing in it must still say so.
+
+    ⚠️ SYNTHETIC ON PURPOSE, and see the section header for the distinction that
+    justifies it: this branch is UNEXERCISED by the live corpus (0 of 385), not
+    unreachable. `cmd_write` refuses an empty body, so no current writer emits
+    this shape — but the reader consumes whatever is on disk, including truncated
+    and partially-copied records, so it must not mis-describe one. Without this
+    test the warning could be deleted and no suite would notice.
+    """
+    _write_io_memento_body( repo, "tiffany", "74225471", body="" )
+    block = _build_memento_block( SID_FRESH, "Tiffany", repo )
+
+    assert "CARRIES NO STATE"     in block
+    assert "NEAR-BLANK RETURN"    in block
+    assert "YOU HAVE A MEMENTO" not in block
+    assert "the store is the authority" in block
+
+
+def test_an_amendment_tail_still_wins_over_the_body( repo ):
+    """
+    PRECEDENCE, unchanged. The tail is what was written and NOT yet acted on;
+    the body is what the seat already knew when it wrote the record. When both
+    exist the tail is the newer, more urgent half and must lead.
+    """
+    _write_io_memento_body( repo, "rachel", "9eb9253c", body=_REAL_BODY,
+                            amendments=[ "HELD MERGE, UNPUSHED — the thing I had not acted on" ] )
+    block = _build_memento_block( SID_FRESH, "Rachel", repo )
+
+    assert "HELD MERGE, UNPUSHED" in block
+    assert "amendments"           in block, "the tail branch's own wording must be the one used"
+    assert "written WHOLE"    not in block, "the whole-body wording belongs to the other branch"
+
+
+@pytest.mark.parametrize( "size,expect_content", [
+    ( 199, False ),
+    ( 200, True  ),
+    ( 4000, True ),
+] )
+def test_the_presence_floor_separates_nothing_from_something( repo, size, expect_content ):
+    """
+    The floor is a PRESENCE check, not a quality judgement, and not a split
+    fitted to today's corpus.
+
+    It sits at 200 bytes — an order of magnitude below the smallest real record
+    Tiberius measured (1,433 bytes) — so every genuine record clears it by a
+    wide margin and only an empty one falls through. A threshold tuned to land
+    between two observed clusters would quietly misfile the next shape of record.
+    """
+    _write_io_memento_body( repo, "sam", "aaaaaaaa", body="x" * size )
+    block = _build_memento_block( SID_FRESH, "Sam", repo )
+
+    assert ( "YOU HAVE A MEMENTO" in block ) is expect_content
+    assert ( "CARRIES NO STATE"   in block ) is not expect_content
+
+
+def test_the_body_extractor_drops_the_header_and_the_tail_but_keeps_the_middle( ):
+    """
+    A unit control on the extractor itself, so a failure above can be told apart
+    from a failure in the thing the branch is asking.
+    """
+    content = (
+        "<!-- memento-record: persona=sam session_id=aaaaaaaa slot=io -->\n"
+        + _REAL_BODY
+        + "\n<!-- memento-amendment: by=sam session_id=aaaaaaaa -->\nappended later\n"
+    )
+    body = _memento_body_after_header( content )
+
+    assert body is not None
+    assert "memento-record"  not in body, "the header line must be stripped"
+    assert "appended later"  not in body, "the amendment tail belongs to the other branch"
+    assert "WHO I AM"            in body
+    # Positive control: the extractor really can return nothing, so the assertions
+    # above are not passing merely because it returns everything it is given.
+    assert _memento_body_after_header( "" ) is None
+    assert _memento_body_after_header( None ) is None

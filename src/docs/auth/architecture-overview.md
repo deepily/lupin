@@ -226,6 +226,7 @@ def get_failed_attempts_count( email: str ) -> int
 **Event Types**:
 - `login_success`, `login_failure`
 - `register`, `logout`
+- `user_self_register` (anonymous `POST /auth/register` created an account; email, resulting roles, source IP), `user_self_register_refused` (403 for asking for a non-`user` role; `success=False`, refused roles in `details`, no user created). Admin-created users log `admin_user_create`
 - `password_changed`, `password_reset_requested`, `password_reset_completed`
 - `email_verification_requested`, `email_verified`
 

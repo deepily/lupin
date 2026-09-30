@@ -151,11 +151,14 @@ def test_lifespan_starts_and_stops_turn_age_watchdog_loop():
 
 class _FakeCfg:
     """Fake ConfigurationManager for assemble_app's enable-gate branches."""
-    def __init__( self, enabled, context_enabled=True, observer_enabled=False ):
-        self._enabled          = enabled
-        self._context_enabled  = context_enabled
-        self._observer_enabled = observer_enabled
+    def __init__( self, enabled, context_enabled=True, observer_enabled=False, stale_mcp_enabled=True ):
+        self._enabled           = enabled
+        self._context_enabled   = context_enabled
+        self._observer_enabled  = observer_enabled
+        self._stale_mcp_enabled = stale_mcp_enabled           # real default is True (row 97c5bd94)
     def get( self, key, default=None, return_type="string" ):
+        if key == "stale mcp check delivery enabled":
+            return self._stale_mcp_enabled
         if key == "arbiter health watch enabled":
             return self._enabled                              # bool (boolean return_type)
         if key == "arbiter self respin observer enabled":
@@ -214,8 +217,10 @@ def test_assemble_app_wires_turn_age_watchdog_in_both_paths():
 
 
 def test_assemble_app_self_respin_observer_gated_off_by_default( capsys ):
-    """Default (flag false) → observer loop None + a disabled log; import is skipped."""
-    app = assemble_app( _FakeCfg( enabled=True ), _FakeGateway() )
+    """Both flags false → observer loop None + a disabled log; import is skipped.
+    (The stale-MCP flag defaults TRUE, so it must be switched off here — with the observer
+    flag false and the stale flag at its default, the loop IS built, for stale delivery.)"""
+    app = assemble_app( _FakeCfg( enabled=True, stale_mcp_enabled=False ), _FakeGateway() )
     assert app.state.self_respin_observer_loop is None
     assert "self_respin_observer_disabled" in capsys.readouterr().out
 
@@ -381,7 +386,7 @@ def test_assemble_app_no_roster_env_yields_empty_declared( monkeypatch ):
 # days while /health returned {"status":"ok"} on every poll. The process was fine;
 # only the thread was gone. Liveness is now read from the Thread object itself,
 # because the "did we start it" intention was true the whole time it was dead.
-# Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
+# Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
 
 class _ThreadedFakeLoop:
     """A loop whose `_thread` liveness we control, mimicking the real loops' attr."""

@@ -32,6 +32,18 @@ Installation (global — one registration for all repos):
     install-cosa-voice.sh   # registers at user scope via claude mcp add --scope user
 """
 
+if __name__ == "__main__":
+    # 🔴 STDOUT IS THE JSON-RPC CHANNEL, SO IT IS RESERVED BEFORE ANYTHING CAN PRINT
+    # (row e4dc53a9). A stray print with no newline once landed in front of an answer
+    # frame and Claude Code dropped the frame: Rick's answer reached the server and
+    # never reached the seat. Every print from here on goes to stderr. It runs ahead
+    # of the imports below because they print too, and only here, never on import,
+    # because it rewires fd 1 for the whole process.
+    from lupin_mcp.jsonrpc_stdout import reserve_stdout_for_jsonrpc
+    reserve_stdout_for_jsonrpc()
+
+import anyio
+import functools
 import logging
 import os
 import re
@@ -81,6 +93,8 @@ from cosa.utils.notification_utils import (
 from cosa.agents.utils.sender_id import detect_project as _detect_project_shared
 from lupin_cli.claude_code.hooks.lib.session_bridge import (
     get_claude_session_id, wait_for_session_id, get_session_metadata as _get_cc_metadata,
+    get_claude_session_id_with_source, wait_for_session_id_with_source,
+    SOURCE_CWD_FALLBACK, DEFINITIVE_SOURCES,
     clear_cached_session_id, _find_session_file, _read_session_file,
     get_speakerphone, set_speakerphone
 )
@@ -383,7 +397,12 @@ signal.signal( signal.SIGTERM, _handle_sigterm )
 
 PROJECT           = _get_project()
 CANONICAL_PROJECT = _resolve_canonical_project( PROJECT )  # Config-mapped identity for sender_id
-SESSION_ID        = get_claude_session_id()[:8]  # 8-char hex from session bridge (env > file > fallback)
+_boot_session_id, SESSION_ID_SOURCE = get_claude_session_id_with_source()
+SESSION_ID        = _boot_session_id[ :8 ]  # 8-char hex from session bridge (env > file > fallback)
+# ⚠️ SESSION_ID_SOURCE TRAVELS WITH SESSION_ID AND MUST BE UPDATED WHEREVER IT IS.
+# It is the whole of the fix: a `cwd_fallback` id is a live colleague's, adopted because
+# we share a checkout with them, and nothing else on this box can tell that from a real
+# match. Every reassignment of SESSION_ID below sets this in the same statement.
 SENDER_ID         = _get_sender_id( CANONICAL_PROJECT, SESSION_ID )
 SERVER_URL        = _get_server_url()
 
@@ -484,7 +503,7 @@ def _watch_bridge_for_changes( stop_event=None, poll_interval=2.0, max_iteration
           must never end the watch
         - does not raise
     """
-    global SESSION_ID, SENDER_ID
+    global SESSION_ID, SENDER_ID, SESSION_ID_SOURCE
 
     last_mtime      = 0.0
     last_session_id = SESSION_ID
@@ -510,7 +529,7 @@ def _watch_bridge_for_changes( stop_event=None, poll_interval=2.0, max_iteration
             if result is None:
                 continue
 
-            bridge_path, _source = result
+            bridge_path, resolution_source = result
 
             # Check if file was modified
             try:
@@ -530,10 +549,11 @@ def _watch_bridge_for_changes( stop_event=None, poll_interval=2.0, max_iteration
 
             new_suffix = file_id[:8]
             if new_suffix != last_session_id:
-                old_sender      = SENDER_ID
-                SESSION_ID      = new_suffix
-                SENDER_ID       = _get_sender_id( CANONICAL_PROJECT, SESSION_ID )
-                last_session_id = new_suffix
+                old_sender        = SENDER_ID
+                SESSION_ID        = new_suffix
+                SESSION_ID_SOURCE = resolution_source
+                SENDER_ID         = _get_sender_id( CANONICAL_PROJECT, SESSION_ID )
+                last_session_id   = new_suffix
                 logger.info(
                     f"Session ID changed: {old_sender} -> {SENDER_ID} "
                     f"(context clear detected)"
@@ -562,18 +582,29 @@ def _session_watcher_thread():
         - sets `_session_failed` when resolution raised
         - RETURNS once resolution is done — it no longer watches
     """
-    global SESSION_ID, SENDER_ID, _session_failed
+    global SESSION_ID, SENDER_ID, SESSION_ID_SOURCE, _session_failed
 
     # ── Phase 1: Initial resolution ─────────────────────────────────────
     try:
-        real_id    = wait_for_session_id( timeout=10.0, poll_interval=1.0 )
-        new_suffix = real_id[:8]
+        real_id, resolution_source = wait_for_session_id_with_source( timeout=10.0, poll_interval=1.0 )
+        new_suffix        = real_id[:8]
+        SESSION_ID_SOURCE = resolution_source
 
         if new_suffix != SESSION_ID:
             old_sender = SENDER_ID
             SESSION_ID = new_suffix
             SENDER_ID  = _get_sender_id( CANONICAL_PROJECT, SESSION_ID )
             logger.info( f"Session ID upgraded: {old_sender} -> {SENDER_ID}" )
+
+        # ⚠️ A BORROWED IDENTITY IS NOT A FAILURE AND MUST NOT BE ALERTED AS ONE — it is a
+        # colleague's, adopted because we share their checkout. Log it loudly; the refusal
+        # at the write verbs is what actually stops it reaching anyone's board.
+        if resolution_source == SOURCE_CWD_FALLBACK:
+            logger.warning(
+                f"Session identity was GUESSED from the working directory, not this "
+                f"process tree — sender_id={SENDER_ID} may name another seat. "
+                f"Identity-bearing writes will be refused."
+            )
 
         # Verify we got a real session ID, not the fallback
         meta = _get_cc_metadata()
@@ -647,6 +678,89 @@ class SessionIdUnavailable( RuntimeError ):
     """
 
 
+# ── The retry budget, and the words the operator actually reads ───────────────
+#
+# 🔴 BOTH OF THESE ARE Rick's P0 OF 2026-09-03 (store row f6a43e37), and the
+# SECOND one is the half he actually experienced. Ten alerts reached him in
+# fourteen minutes saying "MCP server failed … Restart Claude Code to fix".
+# Measured against Claude Code's own per-session logs
+# (~/.cache/claude-cli-nodejs/<project>/mcp-logs-cosa-voice/): every managed
+# cosa-voice server in every project connected successfully across that whole
+# window, with zero errors, disconnects or restarts.
+#
+# So the alarm was TRUE — something really could not resolve a session identity
+# — and its LABEL was FALSE. It named a component that had not failed and
+# prescribed a restart that could not have fixed anything. Noise is ignorable;
+# a false instruction is acted on, which is why the words are a defect and not
+# a presentation detail.
+#
+# ⚠️ THE FIX IS NOT SUPPRESSION. A process that genuinely has no session bridge
+# must still alert, because sending traffic under a wrong identity is worse than
+# a loud alarm. What changed is that resolution is RETRIED first, every attempt
+# is LOGGED, and the operator is told ONCE, in words that name the mechanism.
+#
+# Worst case added latency on the failing path only: SESSION_RESOLVE_ATTEMPTS
+# waits of at most SESSION_RESOLVE_ATTEMPT_SECONDS, plus linear backoff between
+# them. The succeeding path is unchanged — the Event is already set by import-time
+# phase 1, so `wait` returns instantly and no retry is ever entered.
+SESSION_RESOLVE_ATTEMPTS         = 3
+SESSION_RESOLVE_ATTEMPT_SECONDS  = 3.0
+SESSION_RESOLVE_BACKOFF_SECONDS  = 1.0
+
+# NO ACTION IS PRESCRIBED, DELIBERATELY. There is nothing the operator can do
+# about another process's identity resolution, and inventing an instruction is
+# exactly what made the old text harmful. It says what failed, what was NOT done
+# as a result, and where to look if it persists.
+_SESSION_IDENTITY_ALERT_TEXT = (
+    "cosa-voice could not resolve a Claude Code session identity for one process, "
+    f"after {SESSION_RESOLVE_ATTEMPTS} attempts. Nothing was sent under a wrong "
+    "identity. No action is needed if a session was starting or clearing just then. "
+    "If this repeats, the session bridge directory is where to look — the MCP "
+    "servers themselves are unaffected."
+)
+
+
+def _reattempt_session_resolution( timeout ):
+    """
+    Re-run phase-1 resolution IN THE CALLER'S THREAD, once.
+
+    ⚠️ RE-RUNS RESOLUTION RATHER THAN RE-WAITING ON THE EVENT, and the distinction
+    is the whole reason this exists. `_session_ready` is set in a `finally` on every
+    path, success or failure, so once a resolution has failed the Event is set
+    FOREVER and waiting on it again returns instantly with the same bad answer.
+    A retry that only waited would be a no-op wearing a loop's clothing.
+
+    Requires:
+        - `timeout` is the per-attempt budget in seconds
+
+    Ensures:
+        - returns True and leaves SESSION_ID / SENDER_ID naming the resolved seat
+        - returns False on any failure, having logged it, and never raises
+        - clears `_session_failed` only on success, so a later caller sees the truth
+    """
+    global SESSION_ID, SENDER_ID, SESSION_ID_SOURCE, _session_failed
+
+    try:
+        real_id, resolution_source = wait_for_session_id_with_source( timeout=timeout, poll_interval=1.0 )
+    except Exception as e:
+        logger.warning( f"Session identity resolution attempt failed: {e}" )
+        return False
+
+    if not real_id:
+        logger.warning( "Session identity resolution attempt returned nothing" )
+        return False
+
+    suffix            = real_id[ :8 ]
+    SESSION_ID_SOURCE = resolution_source
+    if suffix != SESSION_ID:
+        SESSION_ID = suffix
+        SENDER_ID  = _get_sender_id( CANONICAL_PROJECT, SESSION_ID )
+
+    _session_failed = False
+    _session_ready.set()
+    return True
+
+
 def _die_no_session_id():
     """
     Send error notification, then hard-exit ON THE SERVER or raise off it.
@@ -678,8 +792,7 @@ def _die_no_session_id():
 
     try:
         request = AsyncNotificationRequest(
-            message           = "MCP server failed: Claude Code session ID not found. "
-                                "No session bridge file detected. Restart Claude Code to fix.",
+            message           = _SESSION_IDENTITY_ALERT_TEXT,
             notification_type = NotificationType.ALERT,
             priority          = NotificationPriority( "high" ),
             sender_id         = error_sender
@@ -715,6 +828,94 @@ def _die_no_session_id():
     os._exit( 1 )
 
 
+def _refuse_borrowed_identity( verb: str, source: Optional[ str ] = None ) -> Optional[ dict ]:
+    """
+    Refuse an identity-bearing write when this seat's identity was GUESSED.
+
+    🔴 WHY THIS EXISTS. `session_bridge` tier 4 resolves a session by matching the recorded
+    working directory of every live bridge. On this fleet every seat shares one checkout, so
+    that filter excludes nobody and the tier returns whichever colleague touched their bridge
+    most recently. The process does not fail — it succeeds AS SOMEBODY ELSE, and a row written
+    then lands on their board under their name with nothing anywhere saying otherwise.
+
+    The tier is kept on purpose (María's ruling, 2026-09-03): deleting it turns a wrong-seat
+    into a fail-to-resolve, and a false "your session is broken" is what cost Rick an
+    afternoon. So the tier still answers, and THIS is what stops the answer being acted on.
+
+    ⚠️ SCOPE IS DELIBERATELY NARROW — WRITES THAT CARRY AN IDENTITY, NOTHING ELSE. `notify`
+    and the `commons_read` family are untouched: a notification from the wrong pane is noise,
+    while a task row or a DM from the wrong seat is a durable misattribution. Refusing the
+    alert path would also silence the very warning that says the identity is borrowed.
+
+    ⚠️ AND `generated_fallback` IS ALLOWED THROUGH, WHICH LOOKS WRONG UNTIL YOU NAME THE
+    DIFFERENCE. An invented id belongs to no one, so a write under it is orphaned and
+    visibly odd. A borrowed id belongs to a real colleague. Only the second one files your
+    work under somebody else's name, and only the second one is refused here.
+
+    Requires:
+        - verb is the caller's tool name, used verbatim in the refusal text
+
+    Ensures:
+        - Returns None for every definitive source, and for the generated fallback
+        - Returns an error dict ONLY for SOURCE_CWD_FALLBACK
+        - Never raises; never writes anything
+
+    Args:
+        verb:   name of the calling tool, e.g. "task_create"
+        source: resolution source to judge; defaults to this process's live SESSION_ID_SOURCE
+
+    Returns:
+        dict or None: an error dict the verb should return unchanged, or None to proceed
+    """
+    effective = SESSION_ID_SOURCE if source is None else source
+    if effective != SOURCE_CWD_FALLBACK:
+        return None
+
+    return {
+        "status" : "error",
+        "reason" : "borrowed_identity",
+        "detail" : (
+            f"{verb} refused: this process's session identity was GUESSED from the working "
+            f"directory, not resolved from its own process tree. It currently reads as "
+            f"'{SENDER_ID}', which on a shared checkout is most likely a colleague's seat. "
+            f"Writing would file this work under their name. Set CLAUDE_SESSION_ID, or run "
+            f"from a process whose parent is the Claude Code session you mean."
+        ),
+        "resolution_source" : effective,
+        "sender_id"         : SENDER_ID,
+    }
+
+
+def _session_info_payload( cc_meta: dict ) -> dict:
+    """
+    Build the `claude_code` block of `get_session_info`, carrying HOW the id was resolved.
+
+    `get_session_metadata` has computed `resolution_source` all along and this boundary
+    dropped it, reporting only the coarse "session_file" — which is true of a definitive
+    PPID match and of a borrowed guess alike. A field computed and then discarded at the
+    boundary is the same defect the bare accessors had, one layer up.
+
+    Requires:
+        - cc_meta is the dict returned by session_bridge.get_session_metadata()
+
+    Ensures:
+        - Always returns the four keys, never raises on a missing one
+        - resolution_source is "unknown" rather than absent when the metadata lacks it
+
+    Args:
+        cc_meta: session bridge metadata
+
+    Returns:
+        dict: the claude_code block
+    """
+    return {
+        "session_id"        : cc_meta.get( "session_id", "" ),
+        "stable_session_id" : cc_meta.get( "stable_session_id", "" ),
+        "source"            : cc_meta.get( "source", "unknown" ),
+        "resolution_source" : cc_meta.get( "resolution_source", "unknown" ),
+    }
+
+
 def _wait_for_sender_id( timeout: float = 12.0 ) -> str:
     """
     Block until the session ID is resolved, then return SENDER_ID.
@@ -736,11 +937,23 @@ def _wait_for_sender_id( timeout: float = 12.0 ) -> str:
         - SessionIdUnavailable (via _die_no_session_id) when resolution failed and
           this process is not the MCP server
     """
-    if not _session_ready.wait( timeout=timeout ):
-        _die_no_session_id()
+    if _session_ready.wait( timeout=timeout ) and not _session_failed:
+        return SENDER_ID
 
-    if _session_failed:
-        _die_no_session_id()
+    # ⚠️ UNRESOLVED IS NOT YET AN EMERGENCY. Retry before telling a human, and
+    # LOG every attempt — a change that stopped alerting and also stopped logging
+    # would hide the process that genuinely has no bridge rather than fix it.
+    for attempt in range( 1, SESSION_RESOLVE_ATTEMPTS + 1 ):
+        logger.warning(
+            f"Session identity unresolved — retry {attempt}/{SESSION_RESOLVE_ATTEMPTS}"
+        )
+        if _reattempt_session_resolution( SESSION_RESOLVE_ATTEMPT_SECONDS ):
+            logger.info( f"Session identity resolved on retry {attempt}" )
+            return SENDER_ID
+        time.sleep( SESSION_RESOLVE_BACKOFF_SECONDS * attempt )
+
+    # Every attempt failed. NOW it is the operator's business — once.
+    _die_no_session_id()
 
     return SENDER_ID
 
@@ -1333,7 +1546,71 @@ def _with_idempotency_key( request ):
     return request
 
 
+def _offloaded_tool( fn ):
+    """
+    Register a BLOCKING sync handler as an ASYNC tool that runs off the event loop.
+
+    THE DEFECT THIS CLOSES (row 97ff4426, Rick's ruling 2026-09-05). FastMCP calls
+    a sync tool INLINE on the event loop — `func_metadata.py:92-95` is literally
+    `if fn_is_async: await fn(...) else: fn(...)`, with no `anyio.to_thread`
+    anywhere on the tool path. cosa-voice is registered STDIO, so a session has ONE
+    subprocess serving every verb. While a human-waiting ask is in flight — up to
+    `timeout_seconds + 10`, i.e. 610s at the fleet's 600 — that subprocess services
+    NOTHING: not a second tool call, not a read of stdin, not a keepalive. From the
+    caller's side the wait looks unbounded while every bound inside the ask still
+    holds.
+
+    🔴 `async def` ALONE IS A MEASURED NO-OP, AND THAT IS THE TRAP THIS HELPER
+    EXISTS TO REMOVE. Heartbeats counted during a 1s call, real `Tool.run`
+    dispatch, one variable:
+
+        def  (the old shape)                ->   0
+        async def, body still blocking      ->   0     <- IDENTICAL TO THE DEFECT
+        async def + to_thread (this helper) ->  19
+
+    An `async def` that calls a blocking function still owns the loop, and every
+    test passes either way. So the offload is the fix and the keyword is not; the
+    two are welded together here so a future edit cannot keep one and drop the
+    other.
+
+    SCOPE — the five handlers that block pending a HUMAN, and deliberately not the
+    other 25, which block for milliseconds on an HTTP call. Harm scales with
+    DURATION, and 30 handlers of blast radius against a defect that bites on five
+    is the trade Rick declined.
+
+    ⚠️ THE WAIT IS UNCHANGED. Same duration, same answer, same blocking for the
+    caller — a purposely-blocking call must keep blocking. The ONLY thing that
+    changes is that OTHER calls in the session stop sitting unread.
+
+    Requires:
+        - fn is a synchronous callable (never a coroutine function)
+
+    Ensures:
+        - returns a coroutine function whose __doc__, __name__ and signature are
+          fn's, so FastMCP's schema and tool description are byte-identical to
+          what the un-wrapped handler produced
+        - awaiting it runs fn in a worker thread and returns fn's return value
+        - exceptions raised by fn propagate to the awaiting caller unchanged
+        - the wrapper carries `.sync`, the original callable, for the IN-PROCESS
+          callers that must not spin an event loop to ask a question
+
+    ⚠️ Cancellation is UNCHANGED, not improved: `to_thread.run_sync` defaults to
+    non-cancellable, exactly as an inline sync call was. A client that walks away
+    still leaves the ask running to its own timeout.
+    """
+    @functools.wraps( fn )
+    async def _async( *args, **kwargs ):
+        return await anyio.to_thread.run_sync( functools.partial( fn, *args, **kwargs ) )
+
+    # Explicit escape hatch, not an attribute-fishing fallback: an in-process caller
+    # already on a thread (self_respin_core._default_ask) needs the sync callable and
+    # must fail loudly if this helper ever stops providing it.
+    _async.sync = fn
+    return _async
+
+
 @mcp.tool
+@_offloaded_tool
 def converse(
     message: str,
     response_type: str = "open_ended",
@@ -1443,7 +1720,135 @@ def strip_fenced_code_blocks( text: str ) -> str:
     return re.sub( r"```[^\n`]*\n.*?\n```\s*", "", text, flags=re.DOTALL )
 
 
+# ── The return-side witness (row 03355649) ────────────────────────────────────
+# THE DEFECT THIS ANSWERS. A notify() delivered its message and then never
+# returned; the harness reported "timed out after 660s" for work that had
+# succeeded 30 seconds in. Measured across the fleet's hook log: 12,420 notify
+# calls, 1,717 of them (13.8%) with a PreToolUse and no PostToolUse ever, against
+# 0.27% for get_session_info and 2.60% for task_query. Of 414 such calls since
+# 2026-08-20, 411 have a notifications row inside a 125s window — 239 already
+# `delivered` — versus 15.8% for a shuffled-session control. So the message lands
+# and the CALL is what goes missing.
+#
+# WHAT COULD NOT BE ANSWERED WITHOUT THIS. Every wait inside the handler is
+# bounded — `_wait_for_sender_id` caps at 12s, and notify_user_async's worst case
+# is 24s at the default request timeout and 267s at the model's maximum allowed
+# value of 30 — so the handler cannot itself produce 660s. That says where the
+# hang ISN'T. It cannot say whether the handler RETURNED and the response was
+# lost downstream, because nothing recorded the return. `ask_yes_no` already logs
+# `mcp_ask_yes_no` on its way out; notify logged nothing at all.
+#
+# THE DISCRIMINATOR. Two events sharing a `call_id`. Next occurrence:
+#   entry, no return   → the handler is where it hangs
+#   entry AND return, but no PostToolUse → the handler finished and the response
+#                                          was lost above it
+# One grep of hook-events.jsonl answers a question that has cost two sessions a
+# database lookup each. The log write is best-effort and swallows its own errors,
+# so an instrument can never break the path it measures.
 def _notify_impl(
+    message: str,
+    notification_type: str = "progress",
+    priority: str = "medium",
+    abstract: Optional[ str ] = None,
+    job_id: Optional[ str ] = None,
+    suppress_ding: bool = False,
+    progress_group_id: Optional[ str ] = None,
+    session_name: Optional[ str ] = None,
+    _internal_call: bool = False
+) -> str:
+    """
+    Time `_notify_send` and record BOTH ends of the call.
+
+    Ensures:
+        - returns exactly what `_notify_send` returns, unchanged
+        - an exception propagates unchanged, with a return event recorded first
+        - the entry event carries the payload SIZE (never the payload), so row
+          03355649's untested payload-size hypothesis becomes answerable from the
+          log instead of needing a live reproduction
+        - logging never raises and never changes the outcome
+    """
+    call_id = _uuid.uuid4().hex[ :12 ]
+    _log_notify_event( "entry", call_id, None, None,
+                       payload_bytes=_payload_bytes( message, abstract ) )
+    started = time.monotonic()
+    try:
+        result = _notify_send(
+            message=message, notification_type=notification_type, priority=priority,
+            abstract=abstract, job_id=job_id, suppress_ding=suppress_ding,
+            progress_group_id=progress_group_id, session_name=session_name,
+            _internal_call=_internal_call )
+    except BaseException as e:
+        _log_notify_event( "raised", call_id, _elapsed_ms( started ), type( e ).__name__ )
+        raise
+    _log_notify_event( "return", call_id, _elapsed_ms( started ), result )
+    return result
+
+
+def _elapsed_ms( started ):
+    """Ensures: whole milliseconds since the `time.monotonic()` reading `started`."""
+    return int( ( time.monotonic() - started ) * 1000 )
+
+
+def _payload_bytes( message, abstract ):
+    """
+    The size of what this call is carrying — LENGTH ONLY, never the content.
+
+    WHY IT IS HERE (row 03355649). The row's own hypothesis: "WHETHER it
+    correlates with payload size. This call carried a long `abstract` (a table
+    plus several paragraphs). That is a hypothesis with one data point behind it
+    and no negative control." Nothing in the hook log records a payload or a
+    size, so the hypothesis could not be tested retrospectively against the 1,717
+    calls already on record. Stamping the size makes it answerable going forward
+    with a grep instead of a reproduction.
+
+    SIZE, NOT CONTENT, DELIBERATELY. hook-events.jsonl is already 66 MB and every
+    session in the fleet writes to it. Logging message bodies to answer a sizing
+    question would cost more than the question is worth, and would put user-facing
+    announcement text into a debug log nobody scoped for it.
+
+    Requires:
+        - message / abstract are strings or None
+
+    Ensures:
+        - returns the combined UTF-8 byte length of message and abstract
+        - a None or non-string part counts as zero rather than raising
+        - never raises
+    """
+    # No try/except here on purpose: `isinstance( part, str )` already guarantees
+    # `.encode( "utf-8" )` succeeds, so a belt would be an unreachable branch
+    # needing a pragma to explain itself. Fewer branches beats a justified one.
+    total = 0
+    for part in ( message, abstract ):
+        if isinstance( part, str ): total += len( part.encode( "utf-8" ) )
+    return total
+
+
+def _log_notify_event( phase, call_id, elapsed_ms, outcome, payload_bytes=None ):
+    """
+    Append one `mcp_notify` line to hook-events.jsonl.
+
+    Ensures:
+        - writes { phase, call_id, elapsed_ms, outcome, payload_bytes }; each
+          optional field is omitted when it does not apply — elapsed_ms and
+          outcome are absent on the ENTRY event, where neither exists yet, and
+          payload_bytes is absent on the RETURN event, where it would be a
+          duplicate of the entry that shares its call_id
+        - `outcome` is truncated to 120 chars — the status string is a label, and
+          an instrument must not become the thing that bloats the log it writes to
+        - NEVER raises. An instrument that can break the path it measures is worse
+          than no instrument.
+    """
+    try:
+        extra = { "phase": phase, "call_id": call_id }
+        if elapsed_ms   is not None: extra[ "elapsed_ms" ]    = elapsed_ms
+        if outcome      is not None: extra[ "outcome" ]       = str( outcome )[ :120 ]
+        if payload_bytes is not None: extra[ "payload_bytes" ] = payload_bytes
+        log_to_stream( "mcp_notify", {}, extra=extra )
+    except Exception:
+        pass
+
+
+def _notify_send(
     message: str,
     notification_type: str = "progress",
     priority: str = "medium",
@@ -1676,6 +2081,7 @@ def _error_dict( response ) -> dict:
 
 
 @mcp.tool
+@_offloaded_tool
 def ask_yes_no(
     question: str,
     default: str = "no",
@@ -1802,6 +2208,7 @@ def ask_yes_no(
 
 
 @mcp.tool
+@_offloaded_tool
 def ask_multiple_choice(
     questions: list,
     timeout_seconds: int = 120,
@@ -1896,7 +2303,14 @@ def ask_multiple_choice(
              "options": [{"label": "Auth"}, {"label": "Caching"}]}
         ])
 
-        # With timeout default — useful for unattended / AFK contexts
+        # With timeout default. ⚠️ IT COVERS A TIMEOUT, NOT AN ABSENT USER.
+        # An offline user gets a 503 from the FIRST ask whether or not you passed
+        # a default, because the offline path is decided server-side against a
+        # `response_default` this verb does not send — ask_yes_no plumbs it, this
+        # one does not. So do NOT reach for this pattern to leave a walkthrough
+        # running with nobody at the desk; it will stop on the first question.
+        # A unit test guards this wording — it forbids the retired term outright,
+        # so state what IS true here rather than negating the old claim.
         result = ask_multiple_choice(
             questions=[{
                 "question":    "Which database should we use?",
@@ -2153,6 +2567,7 @@ def _parse_multiple_choice_response( response_value: Optional[ str ] ) -> dict:
 
 
 @mcp.tool
+@_offloaded_tool
 def ask_open_ended_batch(
     questions: list,
     timeout_seconds: int = 300,
@@ -2374,11 +2789,7 @@ def get_session_info() -> dict:
     # Include CC session bridge metadata when available
     try:
         cc_meta = _get_cc_metadata()
-        info[ "claude_code" ] = {
-            "session_id"        : cc_meta.get( "session_id", "" ),
-            "stable_session_id" : cc_meta.get( "stable_session_id", "" ),
-            "source"            : cc_meta.get( "source", "unknown" )
-        }
+        info[ "claude_code" ] = _session_info_payload( cc_meta )
         # Read speakerphone_on from the same bridge metadata
         info[ "speakerphone_on" ] = bool( cc_meta.get( "speakerphone_on", False ) )
         # voice_persona stamped into the bridge by register_session.py Phase 4.5;
@@ -2400,13 +2811,31 @@ def self_respin( memento_path: str, memento_nonce: str, delay_seconds: int = 20,
     context — for the price of one memento write instead of a whole successor's
     context. IRREVERSIBLE; every guard lives INSIDE this verb.
 
-    BEFORE CALLING: write your memento to disk THIS cycle, then stamp this cycle's
-    nonce into it by CALLING self_respin_core.stamp_nonce_into( path, nonce_uuid, ts ) —
-    do NOT hand-roll the read-append-write. That one call reads the file whole and
-    lands the new text through a temp file + atomic rename, so the memento is never
-    momentarily truncated; the hand-rolled version is what emptied a 105-line memento
-    down to its nonce line on 2026-08-25 (row 4cf9f9fd). Pass that same nonce_uuid as
-    `memento_nonce`. The verb confirms that exact nonce, a fresh timestamp, AND a body
+    BEFORE CALLING: generate this cycle's nonce uuid FIRST, then write your memento
+    with the nonce already in it — ONE call, no separate stamping step:
+
+        python3 $PLANNING_IS_PROMPTING_ROOT/workflow/scripts/memento_io.py write \
+            --slot root --persona <you> --session-id <from get_session_info()> \
+            --self-respin-nonce <uuid>
+
+    Pass that same uuid as `memento_nonce`. Do NOT stamp it afterwards by hand or via
+    self_respin_core.stamp_nonce_into, which is RETIRED and now refuses.
+
+    ALREADY WROTE YOUR ROOT MEMENTO THIS SESSION? Then `write` refuses it as immutable
+    (exit 3) and the above is closed to you — which is the USUAL case on a second
+    self-respin, since the seat keeps its session id. Use `amend` instead, with the
+    nonce line as the LAST line of the amendment body you pipe in (there is no flag for
+    it; it is ordinary content, and amend appends). amend re-syncs record, mirror and
+    pointer in the same call, so it is safe on the point that matters here — but the
+    nonce then shares the AMENDMENT's timestamp, not the whole body's, so it proves the
+    amendment is fresh rather than the whole file. Two reasons, and the second is why appending was
+    not simply repaired (row c9f4d613): an append reaches the RECORD alone and leaves
+    the durable MIRROR one line short of it, so a restore yields a memento this verb
+    then refuses; and a fresh nonce appended to an hour-old body proves the STAMP is
+    fresh, never the body. Pre-stamping shares the body's own written_at, so the
+    freshness gate below is about what you actually clear into. cmd_write lands record
+    + mirror + pointer together and exits 5 if record and mirror disagree, so the
+    truncation this guard was born from (row 4cf9f9fd) stays unwritable. The verb confirms that exact nonce, a fresh timestamp, AND a body
     that still has substance once the nonce line is removed — a stale, partial, or
     nonce-only memento aborts the clear, so you never clear into nothing.
 
@@ -2436,6 +2865,9 @@ def self_respin( memento_path: str, memento_nonce: str, delay_seconds: int = 20,
         - makes NO task-store calls (the observer owns done-state; this seat is
           cleared before it could mark its own row)
     """
+    refusal = _refuse_borrowed_identity( "self_respin" )
+    if refusal is not None: return refusal
+
     from dataclasses import asdict
     from lupin_mcp.self_respin_core import self_respin_from_bridge, _live_own_pressure, resolve_own_identity
 
@@ -2866,7 +3298,17 @@ def spawn_sessions(
             anything free", exhaustion without `*` is a LOUD fail (child
             stays persona-less; never silently re-allocated). Sibling spawns
             walk the same chain and take successive unclaimed elements.
-        seed_memento: path/ref to a prior memento; restores author continuity
+        seed_memento: prior context that restores author continuity — EITHER a
+            PATH to a memento record (what CLAUDE.md's re-spin ladder prescribes, and
+            what the child opens itself) OR the memento CONTENT as a blob. Appended
+            verbatim to the child's task prompt; never read or resolved here.
+            🔴 This line used to say "path/ref" while `render_task_prompt`'s said
+            "blob" — one parameter, two contracts, same code (row 75b36135). The full
+            statement, with the 130-transcript measurement and its two limits, lives
+            on `render_task_prompt` in session_spawner.py.
+            ⚠️ It has a SECOND job that is not about content at all: `seed_memento`
+            being truthy is what arms the re-spin wake watch below. Deliberate (row
+            b0570b67), recorded here so the coupling is not a surprise.
         dry_run: build + print the spawn commands without launching
         model: explicit model id to pin each child to (e.g. "claude-opus-5").
             Resolution: this explicit param → the INI role key
@@ -2930,7 +3372,52 @@ def spawn_sessions(
     return result
 
 
-def _arm_respin_wake_watch( spawn_result, manager_persona, fired_at ):   # pragma: no cover - thin live-boundary glue; arm_watches_for_spawn is covered directly
+def _data_root_of_spawn_record( record ):
+    """
+    The data root belonging to the SEAT a spawn record describes.
+
+    Rick ruled 2026-09-03: a seat's data is keyed on the seat's OWN repo, everywhere.
+    The boot-receipt writer already does this — register_session calls
+    `fleet_data_root( repo_root )` with the spawned seat's root. The wake READER did
+    not: it fell through to `fleet_data_root()` with no argument, which resolves the
+    FIRING MANAGER's ambient LUPIN_ROOT. The two agree whenever manager and worker
+    share a repo, which is nearly always, so the disagreement only surfaces on a
+    cross-repo spawn — and then the finder globs a directory the receipt was never
+    written to and reports DEAD_NO_WAKE for a seat that came back fine.
+
+    ⚠️ THIS LIVES HERE, NOT IN THE ARBITER MODULE, AND THAT IS DELIBERATE.
+    `_resolve_project_root` lives in session_spawner, whose import transitively pulls
+    requests / urllib3 / certifi / charset_normalizer / idna / websockets. The :8001
+    arbiter runs on a deliberately light venv where a missing import kills a worker
+    thread while /health still answers 200. This process already has all of it.
+
+    Requires:
+        - record is one entry from spawn_sessions' `spawned` list, or any mapping
+
+    Ensures:
+        - returns the seat's data root as a string, or None when the record names no
+          project, the name resolves to no repo on this host, or anything raises
+        - None is the CALLER'S signal to keep the ambient default — never an error,
+          because a resolver that cannot answer must not cost the watch
+        - a worktree root collapses to its parent checkout's data root, because
+          `fleet_data_root` does that itself (measured: a lupin worktree and the
+          lupin checkout both resolve to projects-data/lupin)
+    """
+    try:
+        project = ( record or {} ).get( "project" )
+        if not project:
+            return None
+        from lupin_mcp.session_spawner import _resolve_project_root
+        from lupin_cli.claude_code.hooks.lib.heartbeat_hold import fleet_data_root
+        repo_root = _resolve_project_root( project )
+        if not repo_root:
+            return None
+        return str( fleet_data_root( repo_root ) )
+    except Exception:
+        return None
+
+
+def _arm_respin_wake_watch( spawn_result, manager_persona, fired_at ):
     """Start the post-re-spin wake watches, shouting at the firing manager by DM.
 
     `fired_at` is passed in rather than read here: it must be stamped BEFORE the
@@ -2940,8 +3427,9 @@ def _arm_respin_wake_watch( spawn_result, manager_persona, fired_at ):   # pragm
         from cosa.agents.heartbeat_arbiter.respin_wake_check import arm_watches_for_spawn
         arm_watches_for_spawn(
             spawn_result,
-            alert_fn  = lambda message: _dm_send_fn( recipient=manager_persona, body=message ),
-            fired_at  = fired_at,
+            alert_fn     = lambda message: _dm_send_fn( recipient=manager_persona, body=message ),
+            fired_at     = fired_at,
+            base_dir_for = _data_root_of_spawn_record,
         )
     except Exception as e:
         logger.warning( f"[spawn] re-spin wake watch not armed: {e}" )
@@ -2962,15 +3450,25 @@ def dismiss_sessions( session_names: Optional[ List[ str ] ] = None, reason: str
     DM the still-alive child to write it and WAIT (bounded) for it to appear, so its
     specialization survives a future re-spawn (pass that path back as `seed_memento`).
     The result's `memento_outcomes` carries an EXPLICIT per-seat verdict (verified /
-    written / prior_holder_present / unparseable_present / timeout_no_memento / skipped)
+    written / prior_holder_present / unproven_present / unparseable_present /
+    timeout_no_memento / skipped)
     — a seat that produced no PROVABLE memento fails VISIBLY, never as a silent success
-    (row 0a36d83d — the flag used to be a no-op). The verdict splits three recovery
-    actions apart: `unparseable_present` (a file IS on disk and it may well be this
-    seat's — OPEN AND READ it, RECOVERABLE), `prior_holder_present` (the file at the
-    slot parsed fine and names ANOTHER session — this seat's memento is NOT there, so
-    do not read it expecting their context; hunt for one written to the wrong place,
-    usually the repo root, or accept it was never written), and `timeout_no_memento`
-    (nothing readable on disk at all — ABSENT, unrecoverable). Before the middle one
+    (row 0a36d83d — the flag used to be a no-op). The verdict splits FOUR recovery
+    actions apart, and the split exists so a manager can tell them apart WITHOUT
+    opening the file: `unproven_present` (THIS seat's own memento is at the slot — the
+    header parses and names this session — but a gate failed, and the reason names
+    which; the writer is fine, so a small staleness means it was still writing when the
+    window closed), `unparseable_present` (a file is on disk but carries NO parseable
+    memento-record header, so nothing attests to who wrote it or when — a WRITER
+    bypassed memento_io; OPEN AND READ it, RECOVERABLE), `prior_holder_present` (the
+    file at the slot parsed fine and names ANOTHER session — this seat's memento is NOT
+    there, so do not read it expecting their context; hunt for one written to the wrong
+    place, usually the repo root, or accept it was never written), and
+    `timeout_no_memento` (nothing readable on disk at all — ABSENT, unrecoverable).
+    The first two were ONE verdict until row 48b5f19e: measured on a live reap
+    2026-08-29, a seat 45 seconds past the poll deadline with a perfect memento and a
+    seat that hand-wrote a header-less slot drew the same string, and both read as
+    failures when only one was. Before the middle one
     existed, a race and a lost memento returned the SAME verdict ten minutes apart
     (row 3b0c5f90), which forced a manual check on every reap.
 
@@ -3016,9 +3514,12 @@ def dismiss_sessions( session_names: Optional[ List[ str ] ] = None, reason: str
         dict: { dismissed:[{session_name, status}], remaining, memento_alarm,
                 memento_outcomes, retained_owner_personas, retained_unmatched, ... }
     """
+    refusal = _refuse_borrowed_identity( "dismiss_sessions" )
+    if refusal is not None: return refusal
+
     import functools
     import cosa.utils.util as cu
-    from lupin_mcp import session_spawner, reap_memento
+    from lupin_mcp import session_spawner, reap_memento, reap_branch
     _wait_for_sender_id()
     sid, _ = session_spawner.resolve_manager_identity( _get_cc_metadata(), fallback_session_id=SESSION_ID )
     cfg    = session_spawner.resolve_spawn_config( _spawn_config_mgr() )
@@ -3053,6 +3554,28 @@ def dismiss_sessions( session_names: Optional[ List[ str ] ] = None, reason: str
         reap_memento.recheck_losing_seats,
         window_seconds    = cfg[ "reap_memento_window_seconds" ],
         min_bytes         = cfg[ "reap_memento_min_bytes" ] )
+    # THE BRANCH PROBE (Cheech's design 2026-09-06, Half A) → wire the LIVE probe so a
+    # reap that walks away from unmerged commits SAYS SO. Without this line the module is
+    # IMPLEMENTED BUT NOT INSTALLED: `reap_branch` stays at 100% with its own suite green
+    # while every production reap silently orphans branches, which is the exact defect
+    # CLAUDE.md names under that heading.
+    #
+    # 🔴 IT DOES NOT WITHHOLD. The memento seams above refuse a kill they cannot prove;
+    # this one never does. A branch is already durable in git and the worktree janitor
+    # provably preserves it, so withholding would buy an immortal seat and save nothing.
+    #
+    # partial, not a closure, for the same reason the memento seams are: the wrapper stays
+    # covered when the inner dismiss_sessions is stubbed, and probe_seat_branches has its
+    # own direct unit tests.
+    # NO target_branch is passed, deliberately. `reap_branch.DEFAULT_TARGET_BRANCH` reads
+    # $CONTEXT_TICK_TARGET_BRANCH — the SAME variable the context-pressure tick already
+    # resolves the working line from. A second INI key here would be a second definition
+    # of one value, and two derivations of one fact coincide until the day they do not.
+    branch_probe = functools.partial( reap_branch.probe_seat_branches )
+    # SEAT TEARDOWN (row 129cc96b, P3) → wire the LIVE teardown so a reaped seat's own
+    # tree and merged branch go with it, instead of waiting hours for the janitor. It
+    # keeps and reports any tree holding uncommitted or unmerged work.
+    from cosa.agents.shared import seat_teardown
     # LIVE reap path → wire the real reap-RECONCILE producer (d647b531) so a reaped
     # worker's non-terminal store items are auto-reconciled (close-if-receipt /
     # reassign-to-live-manager / surface) instead of orphaning. session_spawner
@@ -3062,7 +3585,8 @@ def dismiss_sessions( session_names: Optional[ List[ str ] ] = None, reason: str
         sid, session_names=session_names, reason=reason, write_memento=wm,
         reconcile_items_fn=session_spawner._default_reconcile_store_items,
         respin_personas=respin_personas, memento_coord_fn=memento_coord,
-        memento_recheck_fn=memento_recheck )
+        memento_recheck_fn=memento_recheck, branch_probe_fn=branch_probe,
+        seat_teardown_fn=seat_teardown.retire_seat_worktree )
 
 
 @mcp.tool
@@ -3468,6 +3992,7 @@ def commons_who(
 
 
 @mcp.tool
+@_offloaded_tool
 def commons_ask_sync(
     topic            : str,
     body             : str,
@@ -3798,6 +4323,9 @@ def _dm_send_fn(
     They are deliberately NOT the same value; comparing one to the other will
     not match. (`dm_list`'s `session_id` filter accepts either — it normalizes.)
     """
+    refusal = _refuse_borrowed_identity( "dm_send" )
+    if refusal is not None: return refusal
+
     persona = _commons_persona_fields()
     return _dm_send_impl(
         recipient            = recipient,
@@ -4183,7 +4711,7 @@ def dm_list(
 # — a session cannot impersonate. Day-to-day practice: planning-is-prompting
 # workflow/task-store-discipline.md.
 
-from lupin_mcp.task_store_tools import task_create_impl, task_transition_impl, task_correlate_impl, task_query_impl, task_reassign_impl, task_amend_impl, task_edit_impl, task_get_impl
+from lupin_mcp.task_store_tools import task_create_impl, task_transition_impl, task_correlate_impl, task_query_impl, task_reassign_impl, task_amend_impl, task_request_impl, task_edit_impl, task_get_impl, task_promotion_status_impl
 
 
 def _task_store_identity() -> str:
@@ -4210,7 +4738,13 @@ def task_create(
     gate_class          : str              = "none",
     priority            : str              = "P2",
     urgency             : str              = "normal",
-    status              : str              = "queued",
+    # None means THE CALLER DID NOT ASK, which is a different thing from asking for
+    # "queued" — and until 2026-09-04 this door could not say it. The route mints a
+    # new ticket into the holding area only when `status` is absent from the request
+    # body, so a "queued" default here made every fleet-created row look like a
+    # deliberate queued mint and the holding-area flag unreachable. See the comment
+    # on the payload build in task_store_tools.task_create_impl.
+    status              : Optional[ str ]  = None,
     blocked_by          : Optional[ list ] = None,
     next_chase_ts       : Optional[ str ]  = None,
     source_qid          : Optional[ str ]  = None,
@@ -4275,6 +4809,31 @@ def task_create(
     Managers-first write practice (design F4) is enforced socially + by the
     audit trail, not by tool gating.
 
+    FILING A P0 THAT RICK ORDERED (row d2b1b59a)
+    --------------------------------------------
+    No seat sets P0 directly. A MANAGER relaying Rick's instruction files a
+    PETITION, and it must do so HERE, at create:
+      1. Call with `priority="P0"` AND `authority="user_direct"`. Any other
+         authority, or a worker seat, gets a flat 403 — a worker escalates
+         through its manager. Raising an EXISTING row to P0 through task_edit
+         is also a 403: the petition exists only at create.
+      2. The create answers 201 and carries a `petition` field:
+         {ticket_id, minted_at: "P1", requesting: "P0", answer_by, resolves_by,
+          deadlines, check_with: "task_promotion_status"}. The row is REAL and
+         yours, but it mints at P1 in the holding area (`not_approved`), whatever
+         status you sent. The ratio gate still judges it at P1 and can refuse a 422.
+      3. Rick is asked in the background. `answer_by` is when his answer window
+         closes: the promotion ask timeout (120s by default).
+         `resolves_by` is NOT his window: it is the STALL deadline (ask timeout +
+         notification grace + apply margin, 480s by default), after which an
+         unresolved ticket is an orphan. Relay `answer_by`, never `resolves_by`,
+         as his deadline.
+      4. A TIMEOUT IS NOT A GRANT. An unanswered ask is refused, and the row
+         stays at P1 in holding. Never report the P0 as landed from the 201 —
+         check `task_promotion_status(ticket_id)`: pending | approved | refused
+         | superseded | stalled. One approval both raises the row to P0 and
+         admits it to `queued`; a refusal means ask again when Rick is back.
+
     Examples:
         # Assign work to ANOTHER persona (cross-persona — harness can't):
         task_create(item_class="task", title="Review the wrapper build",
@@ -4285,6 +4844,12 @@ def task_create(
         task_create(item_class="decision", title="Deploy window for MCP restart",
                     project="lupin", body="Options: ... Recommendation: ...",
                     gate_class="operator")
+
+        # A P0 Rick ordered (MANAGER seat; mints P1 + a petition, see above):
+        task_create(item_class="bug", title="Prod login is down",
+                    project="lupin", owner_persona="tiffany",
+                    priority="P0", authority="user_direct")
+        #   → then task_promotion_status(ticket_id=<petition.ticket_id>)
 
         # Your OWN work stub → DON'T use this; use the harness instead:
         #   TaskCreate(subject="Draft the docstring", description="...")
@@ -4301,27 +4866,36 @@ def task_create(
         urgency: urgent | normal | low (default "normal") — operator-gate TIME-
             sensitivity (NOT priority/importance); the arbiter routes a gate by it
             (urgent→interrupt, normal→digest, low→queue)
-        status: queued (default) | blocked. Pass "blocked" to MINT an already-
-            blocked row in ONE call (Rick 2026-07-20). MANAGER-ONLY server-side —
-            a non-manager blocked mint is a 403. Otherwise whitelisted to
-            queued|blocked (done/dropped/parked/claimed/in_progress/review are NOT
-            mintable — transition after create).
+        status: OMIT IT. Left unset, the row lands in the holding area
+            (not_approved) where the holding default is on, and waits for Rick.
+            Naming "queued" or "blocked" puts a row straight on the live board, so
+            the server REFUSES it 403 unless the row is P0 or the caller is Rick
+            himself (Rick 2026-09-08; row 2d786391). The 2026-07-20 one-call
+            blocked mint survives only on those two paths, and is still
+            MANAGER-ONLY there. Where the holding default is off, queued|blocked
+            mint as before. done/dropped/parked/claimed/in_progress/review are
+            never mintable — transition after create.
         blocked_by: typed refs [{kind: item|persona|user, id}] — REQUIRED (>=1)
             for a blocked mint; ignored for queued
         next_chase_ts: ISO-8601 chase time — REQUIRED for a blocked mint whose
             blocked_by names a {kind:persona} ref (I3 — a peer is chaseable)
         source_qid: Originating commons question_id, when DM-born
         correlation_key: Upsert key for hook-mirrored items
-        authority: standing | user_direct | manager_relay (default "standing")
+        authority: standing | user_direct | manager_relay (default "standing").
+            "user_direct" with priority="P0" files a petition (see above)
 
     Returns:
-        The serialized item dict (server 201 body) verbatim, or an error dict:
-        {"status": "error", "reason": "server_unreachable"|"missing_auth_header", ...}
+        The serialized item dict (server 201 body) verbatim — carrying a
+        `petition` field when the create filed one — or an error dict:
+        {"status": "error", "reason": "server_unreachable"|"server_read_timeout"|"missing_auth_header", ...}
         or {"status": "error", "http_status": 422, "errors": [...server's words...]}.
 
     `created_by` is NOT a parameter — it is stamped from the session bridge
     ("<persona> <session id>"), the same identity lane as commons_post.
     """
+    refusal = _refuse_borrowed_identity( "task_create" )
+    if refusal is not None: return refusal
+
     return task_create_impl(
         api_base_url        = _get_server_url(),
         api_key             = _mcp_outbound_api_key(),
@@ -4354,13 +4928,37 @@ def task_transition(
     reason        : Optional[ str ]  = None,
     authority     : str              = "standing",
     park_reason   : Optional[ str ]  = None,
+    asynchronous  : Optional[ bool ] = True,
 ) -> dict:
     """
     **[SELF-DISCLOSURE]** Apply one state change to a task-store item.
 
     The receipts discipline is enforced SERVER-side and surfaces verbatim:
-    `->done` REQUIRES receipt_refs (key-whitelisted: commit/qid/test_run/
-    doc_path/log_line — if you can't cite a receipt, the work isn't done);
+    `->done` REQUIRES receipt_refs — if you can't cite a receipt, the work isn't
+    done. The whitelist is SEVEN keys, and `task_store_rules.RECEIPT_KEY_WHITELIST`
+    is the authority; this list is a courtesy that can drift from it:
+        commit · test_run · qid · doc_path · log_line · operator_attestation ·
+        manager_attestation
+    🔴 BUT ONLY FOUR OF THEM CLOSE A ROW (`CLOSING_RECEIPT_KEYS`). A WORKER seat
+    can mint exactly one of them, and a MANAGER seat two:
+        commit               ✅ a sha you produced
+        test_run             ❌ harness only — `ts-<8 hex>`, a TestSuiteJob id;
+                                nothing you generate yourself will fullmatch
+        operator_attestation ❌ the OPERATOR's word, and the router — not this
+                                tool — decides whether you may assert it
+        manager_attestation  ✅ MANAGER seats only (Rick, 2026-09-10, row
+                                adaf7698). The value is a placeholder: the server
+                                REPLACES it with the manager identity it resolved,
+                                and your text is not stored anywhere (row 8639d1ad).
+                                Put your evidence in `reason`, which IS kept.
+                                It closes decision rows and held
+                                (`not_approved`) rows, never a `parked` one.
+                                A worker seat gets a 403
+    ⇒ So a WORKER whose work produces no commit has no closing receipt it can
+    supply, and should ask its manager to close the row. Do not route around
+    that by naming an unrelated sha (row b4281428). `operator_attestation` was ABSENT from this list until
+    2026-09-09, which meant the one key representing Rick's own word was
+    invisible to every seat that read only this description;
     `->blocked` REQUIRES BOTH >=1 typed blocked_by ref ({kind: item|persona|user,
     id}) AND next_chase_ts; done/dropped are terminal. This tool does NOT
     pre-check any of that — a 422 carries the server's errors unedited.
@@ -4407,14 +5005,59 @@ def task_transition(
             for ->dropped once the Phase-2 write-path lands (C12 pull-forward);
             give one on every ->dropped regardless (task-store-discipline.md §4)
         authority: standing | user_direct | manager_relay (default "standing")
+        asynchronous: DEFAULTS TO True — this verb is the one caller that opts
+            into the 202 promotion path, so you do not have to remember to. It
+            changes NOTHING except a promotion out of `not_approved`: pass False
+            to demand today's synchronous path, None to omit the field entirely.
+            It is the second of two gates and fails CLOSED behind the operator's
+            INI flag, and it MUST be a real boolean — the wire field is
+            StrictBool, so the string "true" is a deliberate 422.
 
     Returns:
         { item, event } (server 200 body) verbatim, or an error dict — a 422
         carries the server's detail.errors list VERBATIM under "errors"; a 404
         carries "task {id} not found" verbatim under "detail".
 
+        ⚠️ ON A PROMOTION, ONE MORE SHAPE IS POSSIBLE and it is not an error: if
+        the 25s poll budget runs out before Rick answers, you get the 202 body
+        back — `status: "awaiting_human_approval"` plus a `ticket_id` and
+        `check_with: "task_promotion_status"`. That is a DETERMINATE "still
+        waiting", not a failure, and the request already succeeded. Do NOT retry
+        the transition: the server rejects the retry 422 as a no-op and that 422
+        is a success signal wearing a rejection's clothes (row 96cf5cec).
+
     `actor` is NOT a parameter — bridge-stamped like task_create's created_by.
     """
+    refusal = _refuse_borrowed_identity( "task_transition" )
+    if refusal is not None: return refusal
+
+    # 🔴 THIS VERB IS THE ONE CALLER THAT OPTS IN, AND IT IS WHY THE DEFAULT IS `True`
+    # RATHER THAN `None` (row 8ed76594). Both gates were built, both were verified open,
+    # and for a day nobody walked through: the single `asynchronous=True` anywhere in the
+    # tree was a docstring. A capability every caller must REMEMBER to ask for is a
+    # capability nobody uses, so the door opts in by default and a caller opts OUT.
+    #
+    # ⚠️ THE SEAM IS THIS VERB AND DELIBERATELY NOT `task_transition_impl`'s OWN DEFAULT.
+    # `session_spawner.py` calls that impl too (a `->done` close during spawn); moving the
+    # default down one layer would opt IT in as well, and "one caller" was the condition
+    # this shipped under. The impl keeps its omit-unless-set contract, so every other
+    # caller of it still sends a byte-identical request.
+    #
+    # Three states, on purpose: True opts in · False asks for today's synchronous path
+    # explicitly · None OMITS the field, which is what `session_spawner` sends.
+    #
+    # ⚠️ IT IS ONLY THE SECOND OF TWO GATES — the operator's INI flag must also be on and
+    # it fails CLOSED, so a `True` at a server that has not enabled it simply gets today's
+    # behaviour. And the fork is reachable ONLY on a promotion out of `not_approved`
+    # (`routers/tasks.py`, under enforcement-active + that status pair), so on every other
+    # transition this field is one JSON key the handler never consults.
+    #
+    # On a 202 this still WAITS, for a 25s budget, and then answers
+    # `awaiting_human_approval` with a ticket id you bring to `task_promotion_status`.
+    # What changes is not whether you wait: it is that the wait holds no threadpool
+    # worker, no pooled connection and no row lock ON THE SERVER, and that giving up
+    # leaves you a DETERMINATE answer instead of today's indeterminate 10s read timeout
+    # followed by a retry the server rejects 422 as a no-op (row 96cf5cec).
     return task_transition_impl(
         api_base_url  = _get_server_url(),
         api_key       = _mcp_outbound_api_key(),
@@ -4427,6 +5070,7 @@ def task_transition(
         reason        = reason,
         authority     = authority,
         park_reason   = park_reason,
+        asynchronous  = asynchronous,
     )
 
 
@@ -4456,7 +5100,8 @@ def task_query(
 
     TOKEN-EFFICIENCY (goal #1): pass terse=True for any "see my list" / board
     glance. It returns the at-a-glance projection (id / title / status /
-    blocked_by / next_chase_ts / priority / park_reason_stale — `body` and the
+    blocked_by / next_chase_ts / priority / park_reason_stale / request_state /
+    request_move — `body` and the
     other full-row fields
     dropped), a fraction of the full-row token weight. Reach for the full shape
     (terse=False) ONLY when you actually need a row's body/audit context.
@@ -4470,6 +5115,26 @@ def task_query(
     `unscoped_audit=True` for a DELIBERATE full-store audit. Terminal (done/
     dropped) rows are excluded by default; pass `include_terminal=True` to
     include them on an un-status'd query.
+
+    🔴 AND SO ARE `not_approved` ROWS — THE HOLDING AREA IS EXCLUDED BY THE SAME
+    DEFAULT, AND THE FLAG THAT REVEALS IT IS NAMED FOR THE OTHER END OF THE
+    LIFECYCLE (row d254c397, 2026-09-05). `not_approved` is not terminal and not
+    abandoned: it is work awaiting an approver. Nothing in the paragraph above
+    predicted its exclusion, and that omission has cost real work — a seat re-minted
+    a duplicate of its own 50-minute-old row because the original was held and
+    invisible to every query it ran, INCLUDING the un-status'd catch-all, which is
+    the one you reach for precisely when you want everything you own.
+
+    ⇒ **The un-status'd query now DECLARES what it withheld**: when held rows match
+    your filters, `warnings[]` carries a HOLDING AREA notice with the count and the
+    query that reveals them. An absent notice means nothing was withheld.
+    ⇒ To see them directly: `status="not_approved"` with your usual filters — cheap
+    and exact. `include_terminal=True` also works and drags in the whole completed
+    history, which is why it is the wrong reach.
+
+    ⚠️ SESSION-START HYGIENE IS TWO PASSES AND NEEDS A THIRD. The prescribed
+    `in_progress` then `queued` passes cannot see held rows, so a seat proving
+    "nothing owed" from them has proved nothing about its holding area.
 
     PARKED ROWS (2026-07-19): a `parked` row is one a human deliberately ruled
     not-now, carrying a `park_reason` quoting the row's own decisive sentence.
@@ -4535,7 +5200,8 @@ def task_query(
 
     Args:
         owner_persona: Filter by who owes the work
-        status: Filter by status (queued | in_progress | blocked | done | dropped)
+        status: Filter by status (not_approved | queued | claimed | in_progress |
+            blocked | parked | review | done | dropped | wont_fix)
         gate_class: Filter by gate (none | operator)
         urgency: Filter by operator-gate urgency tier (urgent | normal | low)
         accountable_manager: Filter by chasing manager
@@ -4629,13 +5295,69 @@ def task_get( task_id: str ) -> dict:
         The full serialized item (200 body) verbatim on success, or an error
         dict — a 404 carries "task {id} not found" verbatim under "detail"; a
         malformed UUID carries the server's 422 detail verbatim; auth/transport
-        failures carry the shared missing_auth_header / server_unreachable
+        failures carry the shared missing_auth_header / server_unreachable /
+        server_read_timeout
         contract. NEVER an empty success, NEVER None.
     """
     return task_get_impl(
         api_base_url = _get_server_url(),
         api_key      = _mcp_outbound_api_key(),
         task_id      = task_id,
+    )
+
+
+@mcp.tool
+def task_promotion_status( ticket_id: str ) -> dict:
+    """
+    **[READ — always allowed, no user permission needed]** How did that promotion go?
+
+    🔴 THE VERB A CALLER COMES BACK WITH. When a promotion out of the holding area runs
+    ASYNCHRONOUSLY, the door answers immediately with a ticket instead of holding the
+    request open while Rick thinks — and `task_transition` then waits a budget for the
+    answer. If the budget runs out you get `awaiting_human_approval` plus a `ticket_id`,
+    and THIS is what you come back with. So does a caller whose process died: the ticket
+    is persisted, and the answer is waiting whenever you ask.
+
+    ⚠️ IT EXISTS BECAUSE A 202 WITHOUT IT WOULD BE THE SAME DEFECT WITH THE WAITING MOVED
+    SOMEWHERE NOBODY LOOKS. That is María 🌸's binding condition on the ruling that made
+    the promotion ask asynchronous, and it is the reason this is not optional polish.
+
+    WHAT THE STATES MEAN, and two of them are easy to collapse and must not be:
+        pending     the ask is out; Rick has not answered and the deadline has not passed
+        approved    it went through — `response_body` is the { item, event } a synchronous
+                    call would have returned, and `approval_source` says whether it was
+                    his keypress or a timed-out default
+        refused     Rick said no, OR the ask never reached him — `refusal` says which
+        superseded  🔴 HE APPROVED IT AND THE WORLD MOVED. The transition was no longer
+                    legal when the answer landed. NOT a refusal: nobody said no, so read
+                    `refusal` for what the row had become and go look at what else touched
+                    it
+        stalled     the ask died without an answer — usually a server bounce mid-ask. A
+                    human was already told by an urgent notification; nothing was promoted
+
+    TWO DEADLINES, AND ONLY ONE IS RICK'S (row dbe42964):
+        answer_by    when his ANSWER WINDOW closes — the ask timeout (120s by default).
+                     Null on a ticket minted before the field existed.
+        resolves_by  the STALL deadline — ask timeout + notification grace + apply margin
+                     (480s by default). Still `pending` after it means the ask died.
+    The `deadlines` field repeats this, so a relay never reports the wrong one.
+
+    Example:
+        task_promotion_status( ticket_id="4288dd53-6779-460a-88bd-a7365fb734b2" )
+
+    Args:
+        ticket_id: the id handed back in the 202, and repeated in every
+            `awaiting_human_approval` answer.
+
+    Returns:
+        The ticket verbatim on success. A 404 carries "promotion ticket {id} not found"
+        verbatim — NEVER an empty success, because a missing ticket and an unresolved one
+        are different facts and only one of them means "keep waiting".
+    """
+    return task_promotion_status_impl(
+        api_base_url = _get_server_url(),
+        api_key      = _mcp_outbound_api_key(),
+        ticket_id    = ticket_id,
     )
 
 
@@ -4672,6 +5394,9 @@ def task_correlate(
 
     `actor` is NOT a parameter — bridge-stamped like task_transition's actor.
     """
+    refusal = _refuse_borrowed_identity( "task_correlate" )
+    if refusal is not None: return refusal
+
     return task_correlate_impl(
         api_base_url    = _get_server_url(),
         api_key         = _mcp_outbound_api_key(),
@@ -4734,6 +5459,9 @@ def task_reassign(
     (anti-impersonation; the manager-relay handoff is auditable to the real
     session that issued it).
     """
+    refusal = _refuse_borrowed_identity( "task_reassign" )
+    if refusal is not None: return refusal
+
     if not ( reason and reason.strip() ):
         return { "status": "error", "reason": "empty_reason",
                  "detail": "task_reassign requires a non-empty reason (the manager's justification for the handoff)" }
@@ -4804,6 +5532,9 @@ def task_amend(
     `actor` is NOT a parameter — bridge-stamped like task_transition's actor
     (anti-impersonation; the amendment is auditable to the real session).
     """
+    refusal = _refuse_borrowed_identity( "task_amend" )
+    if refusal is not None: return refusal
+
     return task_amend_impl(
         api_base_url = _get_server_url(),
         api_key      = _mcp_outbound_api_key(),
@@ -4812,6 +5543,80 @@ def task_amend(
         note         = note,
         reason       = reason,
         authority    = authority,
+    )
+
+
+@mcp.tool
+def task_request(
+    task_id          : str,
+    move             : str,
+    reason           : str,
+    deletion_task_id : Optional[ str ] = None,
+) -> dict:
+    """
+    **[MANAGER — directed at Rick]** Ask Rick to promote or demote ONE task-store row.
+
+    Rick alone promotes and demotes (his ruling, 2026-09-08): "Only thing managers can do
+    is request And there's requests default to no". This is that request. It files a
+    question on the row and NEVER moves it — the row stays exactly where it is until Rick
+    answers from his board.
+
+    ⚠️ WHAT HAPPENS NEXT, so you do not wait for the wrong thing:
+      · the request waits on Rick's board with NO expiry — silence changes nothing, and
+        NO ANSWER MEANS NO: nothing moves until he approves
+      · if he APPROVES, the move is performed for you (admit -> queued; demote -> the
+        holding area); you do not transition the row yourself
+      · if he DENIES, the row stays put and you may file a fresh request
+      · if the row moves another way first, the request is withdrawn, not denied
+
+    ⚔️ THE SWORD OF DAMOCLES (row ab8c5728) — AN ADMIT COSTS ONE OF YOUR OWN TICKETS.
+    While Rick's `sword_of_damocles_active` switch is on, an admit must name
+    `deletion_task_id`: a live ticket YOU own. When he approves, the row is admitted and
+    that ticket is dropped in the same step; if he denies, neither moves. Ownership is
+    checked against your session's persona, not a name you type. A demote pays nothing.
+
+    Refused by the server, with its words verbatim:
+      · 403 — you are not a manager (a worker asks its manager to file this), or the
+        deletion ticket is not yours, or your persona could not be read
+      · 409 — the row cannot make that move from where it is (admit is only for a row in
+        the holding area; demote only for a live, unfinished row), or a request is
+        already pending on it (one at a time — Rick's no-batches rule), or the deletion
+        ticket is already finished or already pledged on another pending admit
+      · 422 — `move` is not "admit" or "demote", `reason` is blank, an admit named no
+        deletion ticket while the switch is on, a demote named one, or the ticket does
+        not exist or is the row itself
+
+    Example:
+        task_request(task_id="<uuid>", move="admit",
+                     reason="fix merged at 36a0a403; the row is ready to work",
+                     deletion_task_id="<uuid of a live ticket you own>")
+
+    Args:
+        task_id: The row's UUID — one row per call, never a batch
+        move: "admit" (promote out of the holding area) or "demote" (off the live board)
+        reason: Why the row should move. Rick reads it to decide — make it the one
+            sentence he needs
+        deletion_task_id: admit only — the UUID of a live ticket you own, dropped when
+            Rick approves. Required while the Sword of Damocles switch is on
+
+    Returns:
+        The row (server 200 body) with request_state "pending", or an error dict carrying
+        the server's detail verbatim.
+
+    `actor` is NOT a parameter — bridge-stamped, so the server's manager check reads your
+    real session, not a name you typed.
+    """
+    refusal = _refuse_borrowed_identity( "task_request" )
+    if refusal is not None: return refusal
+
+    return task_request_impl(
+        api_base_url = _get_server_url(),
+        api_key      = _mcp_outbound_api_key(),
+        actor        = _task_store_identity(),
+        task_id          = task_id,
+        move             = move,
+        reason           = reason,
+        deletion_task_id = deletion_task_id,
     )
 
 
@@ -4844,7 +5649,9 @@ def task_edit(
         status · blocked_by · next_chase_ts · park_reason ·
         park_reason_captured_at · receipt_refs · correlation_key
 
-    A bad enum (`priority` not P0–P3, `gate_class` not none/manager/operator,
+    A bad enum (`priority` not P0–P5 — WIDENED from P0–P3 on 2026-09-07, see
+    VALID_PRIORITIES in task_store_rules.py, the single decider — `gate_class` not
+    none/manager/operator,
     `urgency` not urgent/normal/low) or empty `title` → 422 from the server, no
     row mutation. Terminal (done/dropped) items are rejected server-side.
 
@@ -4875,6 +5682,9 @@ def task_edit(
     `actor` is NOT a parameter — bridge-stamped like task_transition's actor
     (anti-impersonation; stamped LAST, so an `updates` "actor" key cannot shadow it).
     """
+    refusal = _refuse_borrowed_identity( "task_edit" )
+    if refusal is not None: return refusal
+
     if not isinstance( updates, dict ) or not updates:
         return { "status": "error", "reason": "empty_updates",
                  "detail": "task_edit requires a non-empty `updates` dict of {field: value} (the fields to overwrite)" }

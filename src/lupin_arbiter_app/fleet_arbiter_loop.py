@@ -209,7 +209,7 @@ def _derive_container_host_prefix( container_paths, host_root ):
     (/var/external-projects → <host projects parent>). It self-calibrates: move the
     projects tree, or re-mount it elsewhere, and the mapping follows with no edit
     here. The docker-compose bind-mount this reconstructs is the ground truth
-    (`/mnt/DATA01/…/projects:/var/external-projects:ro`).
+    (`/mnt/DATA01/…/projects:/var/external-projects`, writable since row b84bbf1c).
 
     The anchor is matched on the trailing component but is NOT trusted on that
     basis: every translated path is independently confirmed to be a real directory
@@ -432,6 +432,53 @@ def _default_hold_roots():
                                 cu.get_project_root() )
 
 
+def janitor_repo_roots( config_mgr, host_root=None ):
+    """
+    P2 (row 129cc96b): the repos the worktree janitor sweeps, read from the INI.
+
+    `arbiter worktree janitor repos` names repos by their `external repo <name>` entry,
+    so the list of fleet repos lives in one registry. Those paths are container-side, so
+    each is translated to the host with the SAME anchor the hold sweep derives — the
+    arbiter runs on the host, and an untranslated path names nothing there.
+
+    Requires:
+        - config_mgr exposes .get( key, default=, return_type= )
+        - host_root is this project's host path, or None (→ cu.get_project_root())
+
+    Ensures:
+        - returns { "roots": [ host path, ... ], "unresolved": [ name, ... ] }
+        - roots follow the configured order, deduped on realpath
+        - a name with no path entry, or whose translation is not a real directory, is
+          listed in unresolved and never guessed at
+        - a blank or absent key yields roots == [ host_root ] — the pre-P2 behaviour
+        - never raises
+    """
+    if host_root is None:
+        import cosa.utils.util as cu
+        host_root = cu.get_project_root()
+    try:
+        names = config_mgr.get( "arbiter worktree janitor repos", default=[ ], return_type="list-string" ) or [ ]
+    except Exception:
+        names = [ ]
+    names = [ n.strip() for n in names if n and n.strip() ]
+    if not names:
+        return { "roots": [ str( host_root ) ], "unresolved": [ ] }
+
+    prefix_pair = _derive_container_host_prefix( _registry_container_paths( config_mgr ), host_root )
+    roots, unresolved, seen = [ ], [ ], set()
+    for name in names:
+        raw  = config_mgr.get( f"external repo {name} path", default=None )
+        host = _translate_container_root( str( raw ).strip(), prefix_pair ) if raw else None
+        if host is None:
+            unresolved.append( name )
+            continue
+        identity = os.path.realpath( host )
+        if identity not in seen:
+            seen.add( identity )
+            roots.append( host )
+    return { "roots": roots, "unresolved": unresolved }
+
+
 def _default_live_session_ids( find_fn=None ):
     """
     The AUTHORITATIVE live-session set for the hold sweep — the belt-and-suspenders
@@ -562,6 +609,177 @@ def make_warmup_notify_fn(
     return notify_fn
 
 
+# ── worktree janitor (row 033538f6) ──────────────────────────────────────────
+
+def make_refusal_notify_fn(
+    gateway        : Any,
+    *,
+    live_notify_fn : Optional[ Callable ] = None,
+    log_fn         : Optional[ Callable ] = None,
+    topic          : str                  = ESCALATION_TOPIC,
+) -> Callable[ [ str, str ], list ]:
+    """
+    The janitor's refusal notify: the escalation channel's shape, plus an abstract.
+
+    make_escalation_notify_fn carries a message only, and a refusal notice without its
+    per-tree blockers tells the operator that something is wrong but not what. So this
+    posts message + abstract to the durable topic, and hands the abstract to the live push
+    as the card's detail.
+
+    Ensures:
+        - returns notify( message, abstract ) -> [ outcome dicts ], the same outcome
+          vocabulary as make_escalation_notify_fn (durable posted | post_error; live
+          outcome | http_error | disabled)
+        - never raises; every failure is an outcome value AND a log line
+    """
+    log_fn = log_fn if log_fn is not None else _default_log_fn
+
+    def notify( message: str, abstract: str ) -> list:
+        results = [ ]
+        try:
+            gateway.post( topic, f"{message}\n\n{abstract}" )
+            results.append( { "channel": "durable", "outcome": "posted" } )
+        except Exception as e:
+            log_fn( "worktree_refusal_post_error", error=str( e ) )
+            results.append( { "channel": "durable", "outcome": "post_error", "detail": str( e )[ :160 ] } )
+        if live_notify_fn is not None:
+            try:
+                results.append( live_notify_fn( message, abstract=abstract ) )
+            except Exception as e:
+                log_fn( "worktree_refusal_live_notify_error", error=str( e ) )
+                results.append( { "channel": "live", "outcome": "http_error", "detail": str( e )[ :160 ] } )
+        else:
+            results.append( { "channel": "live", "outcome": "disabled" } )
+        return results
+
+    return notify
+
+
+def make_worktree_janitor_fn(
+    *,
+    sandbox_root   : str,
+    age_hours      : float,
+    ledger_path    : str,
+    notify_fn      : Callable[ [ str, str ], list ],
+    log_fn         : Callable,
+    reconcile_fn   : Optional[ Callable ] = None,
+    report_fn      : Optional[ Callable ] = None,
+    repo_roots     : Optional[ list ]     = None,
+    straggler_fn   : Optional[ Callable[ [ dict ], dict ] ] = None,
+    branch_sweep_fn : Optional[ Callable ] = None,
+) -> Callable[ [ ], dict ]:
+    """
+    The per-poll janitor the :8001 job calls: reconcile the worktree lane of every fleet
+    repo, then report refusals.
+
+    ⚠️ UNTIL 2026-09-14 THIS WAS NEVER WIRED ON :8001. Only the dead in-process
+    `cosa.rest.arbiter_bootstrap` passed `worktree_janitor_fn`; this factory did not, so
+    the job's seam stayed None and `worktrees_swept` read 0 on every one of 2,521 polls
+    journaled since 2026-08-01, while the INI had said `enabled = True` since July.
+
+    Ensures:
+        - returns janitor() -> one reconcile result per poll: the swept / skipped /
+          errors / branches_deleted / branches_kept lists of every repo concatenated,
+          plus `repos` ([ {root, swept} ]) and `refusals` (report_refusals' summary)
+        - repo_roots None or empty → ONE reconcile at the reconciler's own default root
+          (the pre-P2 behaviour)
+        - P2 (row 129cc96b): one repo raising is recorded in errors and the others are
+          still swept
+        - P1: a poll that deleted or kept a branch logs `worktree_janitor_branches`
+          naming both lists — the report of every unmerged branch the janitor kept
+        - a reporting failure never discards the reconcile result, and is logged
+        - straggler_fn (row 747199ef, Rick's ruling 2026-09-29), when given, is called
+          with the merged reconcile result after the refusal report; its summary lands in
+          `stragglers`, and a failure is logged as `worktree_straggler_error`. None → inert
+        - branch_sweep_fn (Rick, 2026-09-29, broadcast 766066df), when given, runs once
+          per repo AFTER that repo's reconcile, as branch_sweep_fn( project_root=root );
+          its deletions join `branches_deleted` / `branches_kept` (so the existing
+          `worktree_janitor_branches` log reports them) and its error lands in `errors`.
+          None → inert
+        - never raises past the job's own swallow-safe seam (which also guards it)
+    """
+    if reconcile_fn is None:
+        from cosa.agents.shared.worktree_reaper import reconcile_worktrees as reconcile_fn
+    if report_fn is None:
+        from cosa.agents.shared.worktree_refusal_ledger import report_refusals as report_fn
+    roots = list( repo_roots ) if repo_roots else [ None ]
+
+    def janitor() -> dict:
+        result = { "swept": [ ], "skipped": [ ], "errors": [ ], "branches_deleted": [ ],
+                   "branches_kept": [ ], "repos": [ ] }
+        for root in roots:
+            try:
+                one = reconcile_fn( project_root=root, sandbox_root=sandbox_root, age_threshold_hours=age_hours )
+            except Exception as e:
+                result[ "errors" ].append( f"{root}: janitor raised: {e}" )
+                continue
+            for key in ( "swept", "skipped", "errors", "branches_deleted", "branches_kept" ):
+                result[ key ].extend( one.get( key ) or [ ] )
+            result[ "repos" ].append( { "root": root, "swept": len( one.get( "swept" ) or [ ] ) } )
+            if branch_sweep_fn is not None:
+                try:
+                    bs = branch_sweep_fn( project_root=root )
+                    result[ "branches_deleted" ].extend( bs.get( "deleted" ) or [ ] )
+                    result[ "branches_kept" ].extend( bs.get( "kept" ) or [ ] )
+                    if bs.get( "error" ): result[ "errors" ].append( f"{root}: {bs[ 'error' ]}" )
+                except Exception as e:
+                    result[ "errors" ].append( f"{root}: branch sweep raised: {e}" )
+        if result[ "branches_deleted" ] or result[ "branches_kept" ]:
+            log_fn( "worktree_janitor_branches",
+                    deleted = [ o.get( "branch" ) for o in result[ "branches_deleted" ] ],
+                    kept    = [ { "branch": o.get( "branch" ), "reason": o.get( "kept_reason" ),
+                                  "commits_ahead": o.get( "commits_ahead" ) }
+                                for o in result[ "branches_kept" ] ] )
+        try:
+            result[ "refusals" ] = report_fn( result, ledger_path, notify_fn, log_fn )
+        except Exception as e:
+            log_fn( "worktree_refusal_report_error", error=str( e ) )
+        if straggler_fn is not None:
+            try:
+                result[ "stragglers" ] = straggler_fn( result )
+            except Exception as e:
+                log_fn( "worktree_straggler_error", error=str( e ) )
+        return result
+
+    return janitor
+
+
+def _default_branch_sweep_fn( project_root=None ) -> dict:
+    """The real per-repo merged-branch sweep (worktree_reaper.sweep_merged_branches)."""
+    from cosa.agents.shared.worktree_reaper import sweep_merged_branches
+    return sweep_merged_branches( project_root=project_root )
+
+
+def make_straggler_fn( *, ledger_path: str, janitor_idle_hours: float, log_fn: Callable,
+                       store=None ) -> Callable[ [ dict ], dict ]:
+    """
+    The real straggler step: refused set → one store row per tree refused over a day.
+
+    Requires:
+        - ledger_path is the refusal ledger; the sidecar lives beside it as stragglers.json
+        - store is None (→ RepositoryStragglerStore, direct repository writes) or injected
+
+    Ensures:
+        - returns fn( reconcile_result ) -> sync_straggler_tickets' summary, judged on the
+          same refused set the ledger records (refused_set with the ledger as `previous`)
+        - a first sighting is backdated from the tree's idle age minus janitor_idle_hours
+    """
+    from cosa.agents.shared.worktree_refusal_ledger import refused_set, load_ledger
+    from cosa.agents.shared.worktree_reaper import _newest_mtime_age_hours
+    from cosa.agents.shared import worktree_straggler_tickets as st
+    store      = store if store is not None else st.RepositoryStragglerStore()
+    state_path = os.path.join( os.path.dirname( ledger_path ), "stragglers.json" )
+
+    def straggler( result: dict ) -> dict:
+        refused = refused_set( result, load_ledger( ledger_path ) )
+        return st.sync_straggler_tickets(
+            refused, state_path, store, log_fn,
+            idle_hours_fn  = lambda p: _newest_mtime_age_hours( p, time.time() ),
+            janitor_idle_h = janitor_idle_hours )
+
+    return straggler
+
+
 # ── eng#7 follow-through watcher factory (build-plan §3b) ───────────────────
 
 def make_follow_through_watcher_factory(
@@ -634,7 +852,7 @@ def make_follow_through_watcher_factory(
         # job every cycle (run() -> self._job_factory()), so a live config flip is
         # picked up on the next tick without a service restart — the behavior the
         # watcher's own per-sweep flag read already provided.
-        # Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
+        # Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
         if not config_mgr.get( "follow through escalation enabled", default=False, return_type="boolean" ):
             log_fn( "follow_through_watcher_inert", reason="follow through escalation enabled = false (no DB import)" )
             return None
@@ -740,6 +958,15 @@ def build_fleet_arbiter_job_factory(
     # merge; Rick flips `arbiter orphan bridge sweep enabled`=True to activate.
     orphan_bridge_sweep_enabled       : bool = False,
     orphan_bridge_sweep_debounce_polls : int = 2,   # N consecutive dead polls before a reap (safety debounce)
+    # row 033538f6: the worktree janitor. Default OFF here so an unconfigured factory stays
+    # inert; app.py passes the INI's `arbiter worktree janitor enabled`.
+    worktree_janitor_enabled    : bool           = False,
+    worktree_janitor_age_hours  : float          = 6.0,
+    worktree_sandbox_root       : str            = ".claude/worktrees",
+    worktree_refusal_ledger_path : Optional[ str ] = None,
+    # row 129cc96b P2: janitor_repo_roots( cfg ) — { roots, unresolved }. None → this
+    # project only.
+    worktree_janitor_repos      : Optional[ dict ] = None,
 ) -> Callable[ [ ], ArbiterConsumerJob ]:
     """
     Build the recycle factory: each call returns a FRESH ArbiterConsumerJob wired
@@ -783,6 +1010,28 @@ def build_fleet_arbiter_job_factory(
     bridge_mtimes_fn = bridge_mtimes_fn if bridge_mtimes_fn is not None else _default_manager_bridge_mtimes
     escalation_notify = make_escalation_notify_fn( gateway, live_notify_fn=live_notify_fn, log_fn=log_fn )
 
+    # row 033538f6: built ONCE, outside the recycle factory — it holds no per-job state
+    # (the refused set lives in the ledger file, so it survives a recycle and a bounce).
+    worktree_janitor_fn = None
+    if worktree_janitor_enabled:
+        import cosa.utils.util as cu
+        ledger_path = worktree_refusal_ledger_path or os.path.join(
+            cu.get_project_root(), "io", "worktree-janitor", "refused.json" )
+        repos = worktree_janitor_repos or { }
+        if repos.get( "unresolved" ):
+            log_fn( "worktree_janitor_repo_unresolved", names=repos[ "unresolved" ] )
+        worktree_janitor_fn = make_worktree_janitor_fn(
+            sandbox_root = worktree_sandbox_root,
+            age_hours    = worktree_janitor_age_hours,
+            ledger_path  = ledger_path,
+            notify_fn    = make_refusal_notify_fn( gateway, live_notify_fn=live_notify_fn, log_fn=log_fn ),
+            log_fn       = log_fn,
+            repo_roots   = repos.get( "roots" ),
+            straggler_fn = make_straggler_fn( ledger_path=ledger_path,
+                                              janitor_idle_hours=worktree_janitor_age_hours, log_fn=log_fn ),
+            branch_sweep_fn = _default_branch_sweep_fn,
+        )
+
     def factory() -> ArbiterConsumerJob:
         job_start     = clock.now()
         warmup_notify = make_warmup_notify_fn( escalation_notify, job_start, start_period_seconds, clock, log_fn )
@@ -801,6 +1050,7 @@ def build_fleet_arbiter_job_factory(
         return ArbiterConsumerJob(
             commons                    = gateway,
             bridge_sweep_fn            = bridge_sweep_fn,                           # ee59d5ed orphan-bridge janitor (default-off flag)
+            worktree_janitor_fn        = worktree_janitor_fn,                       # row 033538f6: never wired on :8001 before
             owed_work_fn               = owed_work_fn,                              # L1 store-aware seam
             known_owners_fn            = known_owners_fn,                           # 262c59f6 (A) known-persona fail-safe seam
             hold_reader_fn             = hold_reader_fn,                            # 6929f4ac outward-twin backstop
@@ -959,7 +1209,7 @@ class FleetArbiterLoop:
             # reported. Retrying keeps a transient/self-healing fault self-healing,
             # and makes a persistent one LOUD (one log line per cycle) instead of
             # silent-once-at-boot.
-            # Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
+            # Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
             try:
                 job = self._job_factory()
             except Exception as e:

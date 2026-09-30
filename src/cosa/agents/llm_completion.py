@@ -1,5 +1,6 @@
 import os
 import asyncio
+import time
 from typing import Optional, Any, AsyncGenerator
 
 import requests
@@ -68,7 +69,7 @@ class LlmCompletion:
         self.verbose = verbose
         self.generation_args = generation_args
 
-    def _clamped_max_tokens( self, prompt: str, requested: int ) -> int:
+    def _clamped_max_tokens( self, prompt: str, requested: int, timeout: Optional[ float ]=None ) -> int:
         """
         Shrink the completion budget so prompt + completion fits the model's window.
 
@@ -81,6 +82,8 @@ class LlmCompletion:
         Requires:
             - prompt is the exact string being sent
             - requested is the caller's desired max_tokens
+            - timeout is None (the probe keeps its own 20s default) or the seconds
+              this probe may take before the caller's deadline runs out
 
         Ensures:
             - returns `requested` when it already fits
@@ -95,8 +98,13 @@ class LlmCompletion:
         """
         from cosa.agents.model_window import count_tokens, clamp_max_tokens
 
+        # The probe carries its own 20s default, which is larger than the whole budget a
+        # timed caller may have. Row abe4188d: the tokenize probe and the completion are
+        # two HTTP calls to the same host, so a bound that skips this one is not a bound.
+        probe_timeout = { } if timeout is None else { "timeout": timeout }
+
         try:
-            prompt_tokens, window = count_tokens( self.base_url, self.model_name, prompt )
+            prompt_tokens, window = count_tokens( self.base_url, self.model_name, prompt, **probe_timeout )
         except RuntimeError as e:
             if self.debug: print( f"[CLAMP] could not size the prompt, sending unclamped: {e}" )
             return requested
@@ -106,7 +114,30 @@ class LlmCompletion:
             print( f"[CLAMP] prompt={prompt_tokens} window={window} max_tokens {requested} -> {clamped}" )
         return clamped
 
-    def run( self, prompt: str, stream: bool=False, **kwargs: Any ) -> str:
+    def _remaining( self, deadline: Optional[ float ] ) -> Optional[ float ]:
+        """
+        Seconds left before `deadline`, or None when the call is unbounded.
+
+        Requires:
+            - deadline is None, or a reading taken from the same time.monotonic() clock
+
+        Ensures:
+            - returns None when deadline is None — an unbounded call, today's behaviour
+            - returns the strictly-positive seconds remaining otherwise
+
+        Raises:
+            - TimeoutError when the deadline has already passed. The builtin, not
+              requests.exceptions.Timeout: a caller should not have to import the
+              transport library to catch a timeout from this client.
+        """
+        if deadline is None: return None
+
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError( f"deadline exhausted before reaching {self.base_url}" )
+        return remaining
+
+    def run( self, prompt: str, stream: bool=False, timeout: Optional[ float ]=None, **kwargs: Any ) -> str:
         """
         Send a prompt to the LLM and get a completion response.
         
@@ -123,19 +154,35 @@ class LlmCompletion:
             - Measures performance metrics
             - Processes and returns the response text
             - Provides debug information if enabled
+            - Returns within `timeout` seconds of entry when one is given, counting
+              BOTH HTTP calls this method can make
             
         Raises:
             - May raise HTTP exceptions for API errors
+            - TimeoutError (the builtin) when `timeout` is given and elapses. A caller
+              should not have to import requests to catch a timeout from this client,
+              and requests.exceptions.Timeout is NOT a subclass of the builtin —
+              measured, not assumed — so an `except TimeoutError` upstream would miss
+              it if it were allowed to propagate as-is.
             
         Args:
             prompt: The text prompt to send to the LLM
             stream: Whether to stream the response
+            timeout: Seconds this whole call may take, or None for unbounded. The
+                     streaming path is bounded too, by aiohttp's own ClientTimeout,
+                     which needs no translation because its timeouts already ARE the
+                     builtin.
             **generation_args: Additional arguments for generation
             
         Returns:
             String response from the LLM
         """
         
+        # One deadline for the whole call, not a bound per HTTP request. run() can make
+        # two — the tokenize probe inside _clamped_max_tokens, then the completion — so a
+        # per-request bound would let `timeout=5` take 25 seconds and still look honoured.
+        deadline = None if timeout is None else time.monotonic() + timeout
+
         headers = {
             'Content-Type' : 'application/json',
             # 'Authorization': f'Bearer {api_key}',
@@ -146,7 +193,7 @@ class LlmCompletion:
             "model"      : self.model_name,
             "prompt"     : prompt,
             # override the object's generation arguments if they're present in this method's kwargs
-            "max_tokens" : self._clamped_max_tokens( prompt, kwargs.get( "max_tokens", self.generation_args.get( "max_tokens", 64 ) ) ),
+            "max_tokens" : self._clamped_max_tokens( prompt, kwargs.get( "max_tokens", self.generation_args.get( "max_tokens", 64 ) ), self._remaining( deadline ) ),
             "temperature": kwargs.get( "temperature", self.generation_args.get( "temperature", 0.25 ) ),
             "top_p"      : kwargs.get( "top_p", self.generation_args.get( "top_p", 1.0 ) ),
             "stop"       : kwargs.get( "stop", self.generation_args.get( "stop", None ) ),
@@ -160,7 +207,10 @@ class LlmCompletion:
         
         # Non-streaming request
         if self.debug: timer = Stopwatch( msg="Requesting completion..." )
-        response = requests.post( self.base_url, headers=headers, data=json.dumps( data ) )
+        try:
+            response = requests.post( self.base_url, headers=headers, data=json.dumps( data ), timeout=self._remaining( deadline ) )
+        except requests.exceptions.Timeout as e:
+            raise TimeoutError( f"no answer from {self.base_url} within {timeout}s: {type( e ).__name__}" ) from e
         if self.debug: timer.print( msg="Done!", use_millis=True )
         
         if response.status_code == 200:
@@ -193,7 +243,7 @@ class LlmCompletion:
         # The actual streaming implementation is in run_stream
         return prompt
         
-    async def _stream_async(self, prompt: str, **generation_args: Any) -> AsyncGenerator[str, None]:
+    async def _stream_async(self, prompt: str, timeout: Optional[ float ]=None, **generation_args: Any) -> AsyncGenerator[str, None]:
         """
         Stream a completion response asynchronously.
         
@@ -214,6 +264,10 @@ class LlmCompletion:
         Raises:
             - Exception if API returns non-200 status
             - aiohttp exceptions for network errors
+            - TimeoutError (the builtin) when `timeout` is given and elapses. No
+              translation is needed on this path, unlike the requests one: aiohttp's
+              own timeouts already ARE the builtin — measured, asyncio.TimeoutError
+              IS TimeoutError on this runtime, and ServerTimeoutError inherits it.
             
         Yields:
             Chunks of the response text
@@ -232,7 +286,9 @@ class LlmCompletion:
             "stream"     : True,
         }
         
-        async with aiohttp.ClientSession() as session:
+        # ClientTimeout( total=None ) is aiohttp's own unbounded default, so an
+        # untimed caller keeps today's behaviour exactly.
+        async with aiohttp.ClientSession( timeout=aiohttp.ClientTimeout( total=timeout ) ) as session:
             async with session.post(self.base_url, headers=headers, json=data) as response:
                 if response.status != 200:
                     error_text = await response.text()
@@ -257,7 +313,7 @@ class LlmCompletion:
                             # Skip invalid JSON lines
                             continue
     
-    def run_stream(self, prompt: str, **generation_args: Any) -> 'CompletionStreamingContext':
+    def run_stream(self, prompt: str, timeout: Optional[ float ]=None, **generation_args: Any) -> 'CompletionStreamingContext':
         """
         Stream a completion response with a context manager interface.
         
@@ -279,7 +335,7 @@ class LlmCompletion:
             A context manager for streaming the response
         """
         # Return a simple context manager that yields a stream_text method
-        return CompletionStreamingContext(self, prompt, **generation_args)
+        return CompletionStreamingContext(self, prompt, timeout=timeout, **generation_args)
 
 
 class CompletionStreamingContext:
@@ -290,7 +346,7 @@ class CompletionStreamingContext:
     compatible with the async with statement.
     """
     
-    def __init__(self, client: 'LlmCompletion', prompt: str, **generation_args: Any) -> None:
+    def __init__(self, client: 'LlmCompletion', prompt: str, timeout: Optional[ float ]=None, **generation_args: Any) -> None:
         """
         Initialize the streaming context.
         
@@ -305,8 +361,9 @@ class CompletionStreamingContext:
         Raises:
             - None
         """
-        self.client = client
-        self.prompt = prompt
+        self.client          = client
+        self.prompt          = prompt
+        self.timeout         = timeout
         self.generation_args = generation_args
         
     async def __aenter__(self) -> 'CompletionStreamingContext':
@@ -357,7 +414,7 @@ class CompletionStreamingContext:
         Yields:
             Chunks of the response text
         """
-        async for chunk in self.client._stream_async(self.prompt, **self.generation_args):
+        async for chunk in self.client._stream_async(self.prompt, timeout=self.timeout, **self.generation_args):
             yield chunk
 
 

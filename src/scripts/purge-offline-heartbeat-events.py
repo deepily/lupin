@@ -53,6 +53,13 @@ def main():
     parser.add_argument( "--state-url", default="http://localhost:8001/state" )
     parser.add_argument( "--events-dir", default=os.path.expanduser( "~/.claude/heartbeat-events" ) )
     parser.add_argument( "--timeout", type=int, default=5 )
+    # INJECTABLE ON PURPOSE (Mr Radio's ruling, 2026-08-30). This used to be built
+    # inline as /tmp/lupin-heartbeat-purge-<ts> with nothing able to redirect it, so
+    # an end-to-end --apply test could only be written by writing into /tmp — the one
+    # directory this fleet's doctrine tells every seat to stay out of. The default is
+    # unchanged, so no caller has to do anything differently.
+    parser.add_argument( "--archive-dir", default=None,
+                         help="Where to archive event files (default: a timestamped dir under /tmp)." )
     args = parser.parse_args()
 
     offline, live = fetch_offline_and_live( args.state_url, args.timeout )
@@ -65,7 +72,7 @@ def main():
         print( f"  {str( s.get( 'persona' ) ):14} {s.get( 'session_id' )}  [{verdict}]" )
 
     ts      = datetime.datetime.now().strftime( "%Y.%m.%d-at-%H%M%S" )
-    archive = f"/tmp/lupin-heartbeat-purge-{ts}"
+    archive = args.archive_dir or f"/tmp/lupin-heartbeat-purge-{ts}"
 
     moved, nofile = [ ], [ ]
     for s in offline:

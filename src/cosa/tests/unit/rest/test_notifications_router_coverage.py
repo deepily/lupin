@@ -68,7 +68,7 @@ def _seed_idempotency_cache( n ):
     N._idempotency_cache.clear()
     now = time.time()
     for i in range( n ):
-        N._idempotency_cache[ f"seed-{i}" ] = ( { "status": "seed" }, now )
+        N._idempotency_cache[ f"seed-{i}" ] = ( { "status": "seed" }, now, None )
 
 
 def _wait_for_stub( result=None, exc=None ):
@@ -324,9 +324,9 @@ class TestNotifyUser( unittest.IsolatedAsyncioTestCase ):
     async def test_idempotency_hit_returns_cached_and_evicts_expired( self ):
         # Seed an expired entry (evicted) + a fresh entry for our key (hit).
         N._idempotency_cache.clear()
-        N._idempotency_cache[ "stale" ] = ( { "status": "old" }, time.time() - 999 )
+        N._idempotency_cache[ "stale" ] = ( { "status": "old" }, time.time() - 999, None )
         cached = { "status": "from-cache" }
-        N._idempotency_cache[ "key-hit" ] = ( cached, time.time() )
+        N._idempotency_cache[ "key-hit" ] = ( cached, time.time(), None )
         ws = _ws_manager( is_connected=True, connection_count=1 )
         with patch( "cosa.rest.user_service.get_user_by_email", return_value={ "id": UID_STR } ), \
              _patch_fastapi_main( self._user_main() ), patch( "builtins.print" ):
@@ -334,13 +334,145 @@ class TestNotifyUser( unittest.IsolatedAsyncioTestCase ):
         self.assertEqual( out[ "status" ], "from-cache" )
         self.assertNotIn( "stale", N._idempotency_cache )   # evicted
 
+    async def test_offline_verdict_is_reevaluated_on_retry_under_same_key( self ):
+        """
+        A cached `user_not_available` must NOT be replayed to a retry.
+
+        notify_user_async retries a non-progress notification specifically to catch
+        the 5-10s WebSocket auth window (calculate_retry_intervals). Caching the
+        offline verdict froze that window shut: measured on :7999 2026-09-01
+        14:54:37-42, four POSTs under one idempotency key where attempt 1 checked
+        connectivity and attempts 2-4 logged "Idempotency hit" and re-checked
+        nothing.
+
+        Requires:
+            - attempt 1 runs with the user OFFLINE and caches its verdict
+            - attempt 2 reuses the same idempotency_key with the user CONNECTED
+
+        Ensures:
+            - attempt 1 returns user_not_available
+            - attempt 2 returns queued — connectivity is re-read, not replayed
+        """
+        N._idempotency_cache.clear()
+        mock_db = Mock(); repo = Mock()
+        repo.create_notification.return_value = Mock( id=uuid.uuid4() )
+        with patch( "cosa.rest.user_service.get_user_by_email", return_value={ "id": UID_STR } ), \
+             patch.object( N, "get_db", _ctx_db( mock_db ) ), \
+             patch.object( N, "NotificationRepository", return_value=repo ), \
+             _patch_fastapi_main( self._user_main() ), patch( "builtins.print" ):
+            offline = await self._call(
+                Mock(), _ws_manager( is_connected=False, connection_count=0, listener_delivered=False ),
+                idempotency_key="retry-key" )
+            self.assertEqual( offline[ "status" ], "user_not_available" )
+
+            nq = Mock(); nq.push_notification.return_value = Mock()
+            online = await self._call(
+                nq, _ws_manager( is_connected=True, connection_count=1 ),
+                idempotency_key="retry-key" )
+
+        self.assertEqual( online[ "status" ], "queued" )
+
+    async def test_reevaluated_retry_reuses_the_first_row_and_mints_no_second( self ):
+        """
+        The re-evaluation must not become a second forensic row.
+
+        Guards the obvious over-correction — dropping the cache write for
+        user_not_available outright — which would re-persist on every retry
+        (4 rows per ask at the measured retry count) and hand the live frame a
+        fresh uuid4, breaking the multiplexer's cold-load dedupe by id.
+
+        Requires:
+            - two calls under one idempotency_key, offline then connected
+
+        Ensures:
+            - create_notification is called exactly ONCE across both attempts
+            - the delivered frame carries the FIRST attempt's DB id
+        """
+        N._idempotency_cache.clear()
+        first_id = uuid.uuid4()
+        mock_db  = Mock(); repo = Mock()
+        repo.create_notification.return_value = Mock( id=first_id )
+        nq = Mock(); nq.push_notification.return_value = Mock()
+        with patch( "cosa.rest.user_service.get_user_by_email", return_value={ "id": UID_STR } ), \
+             patch.object( N, "get_db", _ctx_db( mock_db ) ), \
+             patch.object( N, "NotificationRepository", return_value=repo ), \
+             _patch_fastapi_main( self._user_main() ), patch( "builtins.print" ):
+            await self._call(
+                Mock(), _ws_manager( is_connected=False, connection_count=0, listener_delivered=False ),
+                idempotency_key="reuse-key" )
+            await self._call(
+                nq, _ws_manager( is_connected=True, connection_count=1 ),
+                idempotency_key="reuse-key" )
+
+        self.assertEqual( repo.create_notification.call_count, 1 )
+        self.assertEqual( nq.push_notification.call_args.kwargs[ "id" ], str( first_id ) )
+
+    async def test_reevaluated_retry_stamps_the_original_row_delivered( self ):
+        """
+        A retry that DELIVERS must stamp the row the offline attempt minted.
+
+        `_persist_notification_sync` applies the 'delivered' state itself when
+        is_connected — but only when it runs, and a re-evaluated retry forces
+        persist off to avoid a duplicate forensic row. Without this, attempt 1's
+        row stays marked undelivered forever while attempt 2 actually delivered.
+        Raised by Mr Radio in review.
+
+        Requires:
+            - attempt 1 offline (mints the row, no stamp), attempt 2 connected
+
+        Ensures:
+            - _update_notification_state_sync is called with the FIRST row's id
+              and the state "delivered"
+        """
+        N._idempotency_cache.clear()
+        first_id = uuid.uuid4()
+        mock_db  = Mock(); repo = Mock()
+        repo.create_notification.return_value = Mock( id=first_id )
+        nq = Mock(); nq.push_notification.return_value = Mock()
+        stamp = Mock()
+        with patch( "cosa.rest.user_service.get_user_by_email", return_value={ "id": UID_STR } ), \
+             patch.object( N, "get_db", _ctx_db( mock_db ) ), \
+             patch.object( N, "NotificationRepository", return_value=repo ), \
+             patch.object( N, "_update_notification_state_sync", stamp ), \
+             _patch_fastapi_main( self._user_main() ), patch( "builtins.print" ):
+            await self._call(
+                Mock(), _ws_manager( is_connected=False, connection_count=0, listener_delivered=False ),
+                idempotency_key="stamp-key" )
+            self.assertFalse( stamp.called )   # offline attempt stamps nothing
+            await self._call(
+                nq, _ws_manager( is_connected=True, connection_count=1 ),
+                idempotency_key="stamp-key" )
+
+        stamp.assert_called_once_with( str( first_id ), "delivered" )
+
+    async def test_caller_supplied_persist_false_is_not_stamped( self ):
+        """
+        Guards the over-correction: stamping must key on the REUSED id, not on
+        `persist` being false. A caller-supplied persist=false (arbiter
+        re-announce, bug e1bbe011) has no row of its own to stamp.
+
+        Ensures:
+            - a first-attempt persist=false delivery calls no state stamp
+        """
+        N._idempotency_cache.clear()
+        nq = Mock(); nq.push_notification.return_value = Mock()
+        stamp = Mock()
+        with patch( "cosa.rest.user_service.get_user_by_email", return_value={ "id": UID_STR } ), \
+             patch.object( N, "_update_notification_state_sync", stamp ), \
+             _patch_fastapi_main( self._user_main() ), patch( "builtins.print" ):
+            out = await self._call(
+                nq, _ws_manager( is_connected=True, connection_count=1 ),
+                idempotency_key="no-stamp-key", persist=False )
+        self.assertEqual( out[ "status" ], "queued" )
+        self.assertFalse( stamp.called )
+
     async def test_idempotency_all_expired_evicted_to_empty( self ):
         # Seed ONLY expired entries so the eviction while-loop pops every one and
         # exits on the empty-cache condition (516->523 false arm) before the miss.
         N._idempotency_cache.clear()
         old = time.time() - 999
         for i in range( 3 ):
-            N._idempotency_cache[ f"old-{i}" ] = ( { "status": "old" }, old )
+            N._idempotency_cache[ f"old-{i}" ] = ( { "status": "old" }, old, None )
         nq = Mock(); nq.push_notification.return_value = Mock()
         ws = _ws_manager( is_connected=True, connection_count=1 )
         with patch( "cosa.rest.user_service.get_user_by_email", return_value={ "id": UID_STR } ), \
@@ -725,18 +857,18 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
 
     async def test_missing_notification_id_422( self ):
         with self.assertRaises( HTTPException ) as ctx:
-            await submit_notification_response( request_body={ "response_value": "yes" }, ws_manager=_ws_manager() )
+            await submit_notification_response( authenticated_user_id="test-user", request_body={ "response_value": "yes" }, ws_manager=_ws_manager() )
         self.assertEqual( ctx.exception.status_code, 422 )
 
     async def test_missing_response_value_422( self ):
         with self.assertRaises( HTTPException ) as ctx:
-            await submit_notification_response( request_body={ "notification_id": UID_STR }, ws_manager=_ws_manager() )
+            await submit_notification_response( authenticated_user_id="test-user", request_body={ "notification_id": UID_STR }, ws_manager=_ws_manager() )
         self.assertEqual( ctx.exception.status_code, 422 )
 
     async def test_empty_string_response_400( self ):
         with patch( "builtins.print" ):
             with self.assertRaises( HTTPException ) as ctx:
-                await submit_notification_response(
+                await submit_notification_response( authenticated_user_id="test-user",
                     request_body={ "notification_id": UID_STR, "response_value": "  <b></b> " },
                     ws_manager=_ws_manager() )
         self.assertEqual( ctx.exception.status_code, 400 )
@@ -747,7 +879,7 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
              patch.object( N, "NotificationRepository", return_value=repo ), \
              _patch_fastapi_main( self._main_cfg() ), patch( "builtins.print" ):
             with self.assertRaises( HTTPException ) as ctx:
-                await submit_notification_response(
+                await submit_notification_response( authenticated_user_id="test-user",
                     request_body={ "notification_id": UID_STR, "response_value": "yes" },
                     ws_manager=_ws_manager() )
         self.assertEqual( ctx.exception.status_code, 404 )
@@ -759,7 +891,7 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
              patch.object( N, "NotificationRepository", return_value=repo ), \
              _patch_fastapi_main( self._main_cfg() ), patch( "builtins.print" ):
             with self.assertRaises( HTTPException ) as ctx:
-                await submit_notification_response(
+                await submit_notification_response( authenticated_user_id="test-user",
                     request_body={ "notification_id": UID_STR, "response_value": "yes" },
                     ws_manager=_ws_manager() )
         self.assertEqual( ctx.exception.status_code, 400 )
@@ -772,7 +904,7 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
              patch.object( N, "NotificationRepository", return_value=repo ), \
              _patch_fastapi_main( self._main_cfg( grace=300 ) ), patch( "builtins.print" ):
             with self.assertRaises( HTTPException ) as ctx:
-                await submit_notification_response(
+                await submit_notification_response( authenticated_user_id="test-user",
                     request_body={ "notification_id": UID_STR, "response_value": "yes" },
                     ws_manager=_ws_manager() )
         self.assertEqual( ctx.exception.status_code, 400 )
@@ -788,7 +920,7 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
              patch.object( N, "get_formatted_time_display", return_value="12:00 EST" ), \
              patch.object( N, "get_formatted_date_display", return_value="2026-06-01" ), \
              _patch_fastapi_main( self._main_cfg() ), patch( "builtins.print" ):
-            out = await submit_notification_response(
+            out = await submit_notification_response( authenticated_user_id="test-user",
                 request_body={ "notification_id": UID_STR, "response_value": "yes" },
                 ws_manager=_ws_manager() )
         self.assertEqual( out[ "status" ], "success" )
@@ -801,7 +933,7 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
              patch.object( N, "NotificationRepository", return_value=repo ), \
              _patch_fastapi_main( self._main_cfg() ), patch( "builtins.print" ):
             with self.assertRaises( HTTPException ) as ctx:
-                await submit_notification_response(
+                await submit_notification_response( authenticated_user_id="test-user",
                     request_body={ "notification_id": UID_STR, "response_value": "yes" },
                     ws_manager=_ws_manager() )
         self.assertEqual( ctx.exception.status_code, 500 )
@@ -823,7 +955,7 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
                  patch.object( N, "get_formatted_time_display", return_value="12:00 EST" ), \
                  patch.object( N, "get_formatted_date_display", return_value="2026-06-01" ), \
                  _patch_fastapi_main( self._main_cfg() ), patch( "builtins.print" ):
-                out = await submit_notification_response(
+                out = await submit_notification_response( authenticated_user_id="test-user",
                     request_body={ "notification_id": UID_STR, "response_value": { "value": "blue" } },
                     ws_manager=ws )
             self.assertEqual( out[ "status" ], "success" )
@@ -854,7 +986,7 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
                  patch.object( N, "get_formatted_time_display", return_value="12:00 EST" ), \
                  patch.object( N, "get_formatted_date_display", return_value="2026-06-01" ), \
                  _patch_fastapi_main( self._main_cfg() ), patch( "builtins.print" ):
-                out = await submit_notification_response(
+                out = await submit_notification_response( authenticated_user_id="test-user",
                     request_body={ "notification_id": UID_STR, "response_value": "yes" },
                     ws_manager=_ws_manager() )
             self.assertEqual( out[ "status" ], "success" )
@@ -879,7 +1011,7 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
                  patch.object( N, "get_formatted_time_display", return_value="12:00 EST" ), \
                  patch.object( N, "get_formatted_date_display", return_value="2026-06-01" ), \
                  _patch_fastapi_main( self._main_cfg() ), patch( "builtins.print" ):
-                out = await submit_notification_response(
+                out = await submit_notification_response( authenticated_user_id="test-user",
                     request_body={ "notification_id": UID_STR, "response_value": "yes" }, ws_manager=_ws_manager() )
             self.assertEqual( out[ "status" ], "success" )   # outcome-recording error swallowed
         finally:
@@ -895,17 +1027,22 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
              patch.object( N, "get_formatted_time_display", return_value="12:00 EST" ), \
              patch.object( N, "get_formatted_date_display", return_value="2026-06-01" ), \
              _patch_fastapi_main( self._main_cfg() ), patch( "builtins.print" ):
-            out = await submit_notification_response(
+            out = await submit_notification_response( authenticated_user_id="test-user",
                 request_body={ "notification_id": UID_STR, "response_value": "yes" }, ws_manager=ws )
         self.assertEqual( out[ "status" ], "success" )
 
     async def test_outer_exception_500( self ):
-        # Malformed (non-UUID) notification_id → uuid.UUID raises inside try → 500
-        with patch.object( N, "get_db", _ctx_db( Mock() ) ), \
-             patch.object( N, "NotificationRepository", return_value=Mock() ), \
+        # A GENUINE server failure inside the try still answers 500.
+        #
+        # ⚠️ RE-AIMED 2026-09-10 (Rio, row e20e249a). This used to send a malformed id and
+        # expect 500, and it was red on the working branch at e4c49fd2: row 96cf5cec made a
+        # malformed id a deliberate 422, pinned by
+        # test_notify_response_malformed_id_is_a_client_error.py. What this test is FOR is the
+        # blanket handler, so it now breaks the one thing a malformed id no longer reaches.
+        with patch.object( N, "_submit_response_sync", side_effect=RuntimeError( "db down" ) ), \
              _patch_fastapi_main( self._main_cfg() ), patch( "builtins.print" ):
             with self.assertRaises( HTTPException ) as ctx:
-                await submit_notification_response(
+                await submit_notification_response( authenticated_user_id="test-user",
                     request_body={ "notification_id": "not-a-uuid", "response_value": "yes" },
                     ws_manager=_ws_manager() )
         self.assertEqual( ctx.exception.status_code, 500 )
@@ -936,7 +1073,7 @@ class TestLateAnswerHandback( unittest.IsolatedAsyncioTestCase ):
              patch.object( N, "get_formatted_date_display", return_value="2026-06-01" ), \
              _patch_fastapi_main( Mock( config_mgr=Mock( get=Mock( return_value=300 ) ) ) ), \
              patch( "builtins.print" ):
-            return await submit_notification_response(
+            return await submit_notification_response( authenticated_user_id="test-user",
                 request_body={ "notification_id": UID_STR, "response_value": "yes" }, ws_manager=ws )
 
     # NOTE: test_cv4_emit_routes_on_asker_hash8_when_no_job_id and
@@ -1539,7 +1676,8 @@ class TestAskReattachGenerator( unittest.IsolatedAsyncioTestCase ):
             frames = await self._drain( N._ask_reattach_generator( "orig-nid", 5 ) )
         self.assertEqual( frames[ 0 ][ "status" ], "ack" )
         self.assertEqual( frames[ 0 ][ "notification_id" ], "orig-nid" )   # re-attach to ORIGINAL
-        self.assertEqual( frames[ 1 ], { "status": "responded", "response": "yes", "default_used": False } )
+        # `answered_by` is None: this row was stored without the door's stamp (row e20e249a).
+        self.assertEqual( frames[ 1 ], { "status": "responded", "response": "yes", "default_used": False, "answered_by": None } )
 
     async def test_manufactured_default_streams_expired_default( self ):
         row = { "responded_at": None, "response_value": "no", "state": "expired" }

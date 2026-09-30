@@ -40,7 +40,45 @@ from cosa.agents.test_suite.job import ALL_SUITE_COMPONENTS, SUITE_TIMEOUTS_SECO
 # e2e entry pins Tiffany's F1 review finding (2400s was only 1.19x).
 _OBSERVED_RUNTIMES_SECONDS = {
     "unit" : 185,
-    "e2e"  : 2020.6,
+    # 2026-09-11 (row 1657a852): 2020.6 -> 3038.1. The old figure dated from 2026-06-12 and went
+    # stale in lockstep with the budget it guards — by 09-10 the suite took longer than its own
+    # 3000s cap and a full run was killed at ~87%, while this guard still passed, because it was
+    # comparing the new budget against a three-month-old runtime. A guard that vouches for a
+    # budget it has never measured against is worse than no guard: it reads as a check.
+    # 2026-09-11, SAME DAY, CORRECTED 3038.1 -> 2992.7 — one MEASURED run replacing two added ones.
+    # 3038.1 was the sum of two halves (ts-6979205f 1549.0s + ts-0dee4535 1491.1s, less one ~2.0s
+    # overhead copy) and it was overstated by ~50s: the halves were a partition over FILES, not
+    # over EXECUTIONS. The four src/tests/parity_oracle files are named EXPLICITLY on the runner's
+    # command line, and an explicitly-named path SURVIVES --ignore, so half A's --ignore on them was
+    # inert and their 25 tests ran in BOTH halves.
+    # 🔴 THE UNIT IS JOB DURATION, NOT JUnit testsuite@time. They differ (2992.7 vs 2990.0 on this
+    # run) and only one of them is the right comparand: the budget is enforced at job.py:1485 against
+    # `time.monotonic() - start_time` wrapped around the runner subprocess, so the guard's `budget >=
+    # 1.4 x observed` is only apples-to-apples if observed is that same clock. Putting testsuite@time
+    # here would understate the thing being capped by the per-run overhead every time.
+    # 2992.7s is ts-cf9f5f85, a single uninterrupted full run through /api/v2/submit.
+    # JUnit e2e-junit-20260912-002204.xml, 830 distinct tests, 5 locator-timeout reds costing 118.5s.
+    # HALVES AND WHOLE AGREE TO WITHIN NOISE — not exactly, and the distinction matters. Corrected
+    # halves 3038.1 - 50.0 = 2988.1s vs 2992.7s measured: +4.6s, 0.15%. That is INSIDE the whole-suite
+    # run-to-run band, which is 2.05% (+/-61s at this size) measured over five full runs inside ~2
+    # days on 08-21/08-22, where suite growth cannot explain the spread. So the honest claim is
+    # "indistinguishable at this precision", NOT "equal": +4.6s is a difference this instrument cannot
+    # resolve, and a real state-accumulation penalty smaller than ~60s would hide inside it.
+    # ⚠️ There are no repeated FULL runs from 2026-09-11, so that band is August's box, not tonight's.
+    # What IS settled is that no LARGE once-vs-twice effect exists — that was an open assumption under
+    # the 5000s budget, and a bound is what it now has.
+    # The BUDGET is unaffected: 1.4 x (2992.7 + 485 growth) = 4868.8, still 5000.
+    "e2e"  : 2992.7,
+    # The halves (row 2818dad7). MEASURED 2026-09-15 on :8000, one job running e2e_a then e2e_b
+    # through /api/v2/submit (ts-2aa41f55): 1467.0s and 1452.0s. Both are the job's own
+    # `time.monotonic() - start_time` around each runner subprocess, the clock the budget is
+    # enforced on, as printed in the report's per-suite Duration row. They replace a 1549.0s
+    # placeholder, the slower half of the 09-11 hand split, which also ran the parity oracle
+    # files twice. Together 2919.0s against 2992.7s for the whole suite (ts-cf9f5f85, 09-12).
+    # The same run's failing set was 19 ids, identical to the whole-suite run of 09-11 21:11,
+    # so the split moved no test's outcome. Budget 2500s is 1.70x the slower half.
+    "e2e_a" : 1467.0,
+    "e2e_b" : 1452.0,
 }
 _MIN_TIMEOUT_MARGIN = 1.4
 
@@ -122,6 +160,25 @@ class TestCleanTestDbTruncatesNewTables:
         for table in ( "task_items", "task_events", "fcm_tokens" ):
             assert table in truncate.group( 0 ), \
                 f"clean_test_db TRUNCATE list missing {table}"
+
+    def test_every_table_with_a_foreign_key_to_task_items_is_truncated_with_it( self ):
+        """
+        Postgres refuses to TRUNCATE a table another table references unless both are
+        named. task_promotion_tickets gained an FK to task_items and was never added,
+        so clean_test_db errored at SETUP for every test that used it — 15 errors in
+        one :8000 run on 2026-09-11 (María, row 2d786391). Derived from the models,
+        not a hand list, so the next such table reddens this instead of the suite.
+        """
+        from cosa.rest.postgres_models import Base
+        referencing = sorted(
+            table.name for table in Base.metadata.tables.values()
+            if table.name != "task_items"
+            and any( fk.column.table.name == "task_items" for fk in table.foreign_keys )
+        )
+        assert referencing, "found no table referencing task_items — the scan is blind"
+        truncate = re.search( r"TRUNCATE TABLE[\s\S]*?\)", _read( "src/tests/integration/conftest.py" ) ).group( 0 )
+        missing  = [ name for name in referencing if name not in truncate ]
+        assert not missing, f"clean_test_db TRUNCATE names task_items but not its dependents: {missing}"
 
 
 class TestCleanTestDbTruncatesRefreshTokens:

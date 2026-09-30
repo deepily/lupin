@@ -97,6 +97,10 @@ class RecipientResolutionError( BaseModel ):
     - `candidate_alternatives`     — currently-active sessions the AI could
                                      try instead (sourced from commons_who()
                                      output at the moment of failure)
+    - `session_id_only_candidates` — active sessions with NO persona (released or never
+                                     named); addressable by `recipient_session_id` only,
+                                     kept out of `candidate_alternatives` so a nameless
+                                     row is not mistaken for corruption (row 4b2dd847)
     - `suggested_next_action`      — one-sentence guidance string
     """
     error                       : str       = Field( ..., min_length=1 )
@@ -104,6 +108,7 @@ class RecipientResolutionError( BaseModel ):
     supplied_session_id         : Optional[ str ] = Field( default=None )
     resolution_chain_attempted  : List[ str ]              = Field( default_factory=list )
     candidate_alternatives      : List[ Dict[ str, str ] ] = Field( default_factory=list )
+    session_id_only_candidates  : List[ Dict[ str, str ] ] = Field( default_factory=list )
     suggested_next_action       : str       = Field( ..., min_length=1 )
 
 
@@ -204,6 +209,57 @@ def _bridge_last_activity_epoch( bridge: Dict[ str, Any ] ) -> Optional[ float ]
     return None
 
 
+def _sender_id_for_bridge( session_id, bridge ) -> Optional[ str ]:
+    """
+    The notification sender_id for a session, derived from its bridge.
+
+    Requires:
+        - session_id is a string (a full session uuid, or already an 8-hex hash)
+        - bridge is a dict (foreign data — any key may be missing or wrong-typed)
+
+    Ensures:
+        - Returns the bridge's OWN `sender_id`, written by the SessionStart hook
+          on the host, verbatim — this function does NOT derive it
+        - Returns None when the bridge carries no `sender_id`, or one that is not
+          a non-empty string. NONE, never a sentinel: `"unknown"` has no "#", so
+          `sessionHashOf` returns null on the phone, the hash-merge never fires,
+          and every unidentified seat collapses onto ONE bogus rail row — a fresh
+          duplicate-shaped defect in the exact surface this exists to fix. Null is
+          already the shape under test there (focus_chat_bloc.dart:444, pinned by
+          focus_live_seat_roster_test.dart:81), so it needs no client change
+        - Never raises
+
+    🔴 IT USED TO DERIVE THIS, AND THAT WAS THE BUG (row 2184bebb, added 82b163b9,
+    fixed 2026-09-22). It called `detect_project_for_path( bridge["cwd"] )` — a
+    `.git` walk over a HOST path, executed INSIDE the lupin-rest container, where
+    that path does not exist. Verified with docker exec, not inferred: neither the
+    worktree nor its `.git` is visible from in there. The walk found nothing and
+    fell back to the cwd BASENAME, so every worktree seat was served as
+    `claude.code@seat-cc-author-<name>.deepily.ai#<hash>` while the same seat's
+    notifications said `claude.code@lupin.deepily.ai#<hash>`. Two identities for
+    one seat; three of us appeared TWICE on Rick's focus rail. Main-checkout seats
+    looked correct only by accident, their basename being "lupin".
+
+    ⚠️ DO NOT REINSTATE A FALLBACK. Inferring the project from the path segment
+    before `/.claude/worktrees/` was considered and BANNED by Mr. Radio's ruling
+    (2026-09-19), including as a silent last resort: the session is the only party
+    that KNOWS its identity, an inference that reads today's layout breaks the day
+    someone nests a worktree or renames a repo, and a wrong identity that looks
+    like a right one is the defect itself, not a mitigation of it. A bridge with
+    no `sender_id` is a seat the server cannot address, and saying so is the
+    correct answer.
+
+    Args:
+        session_id: The session's id, as the roster reports it
+        bridge: The session's bridge dict
+
+    Returns:
+        str or None: The sender_id, or None when it cannot be derived honestly
+    """
+    sender_id = bridge.get( "sender_id" )
+    return sender_id if isinstance( sender_id, str ) and sender_id else None
+
+
 def project_session_response(
     session_id   : str,
     persona      : Dict[ str, Any ],
@@ -213,8 +269,20 @@ def project_session_response(
     Build the response dict for one session per AC2 + T8.
 
     **NEVER includes the bridge Path or any filesystem-derived field.**
-    Only these fields are exposed: session_id, persona_name, persona_icon,
-    persona_color, last_seen_iso, speakerphone_on.
+    Only these fields are exposed: session_id, sender_id, persona_name,
+    persona_icon, persona_color, last_seen_iso, speakerphone_on.
+
+    `sender_id` (added 2026-09-17, Tiffany's ask for the phone's focus rail):
+    the notification routing key, `claude.code@<project>.deepily.ai#<hash8>`.
+    A client cannot rebuild it from `session_id` alone — the project segment
+    varies per seat (@lupin, @lupin-mobile, @plan) — and the rail keys on the
+    full id, so seeding the rail from this roster needs the id served here.
+    Derived, never read from the bridge: no bridge writes a `sender_id` field.
+    The project comes from the bridge's `cwd` snapshot through
+    `detect_project_for_path`, which is the SAME walk every other emitter uses
+    (row 6597cea9: a second copy of that walk is how one seat became two rows).
+    It is None when the bridge has no usable `cwd`, rather than a guess — the
+    consumer can then fall back instead of routing to a wrong id.
     """
     # 2026-05-13 fix: same projection mismatch as `_bridge_last_activity_epoch`.
     # Fall back to `idle_detection.last_interaction_at` so the API returns a real
@@ -230,6 +298,7 @@ def project_session_response(
     )
     return {
         "session_id"      : session_id,
+        "sender_id"       : _sender_id_for_bridge( session_id, bridge ),
         "persona_name"    : persona.get( "name" ),
         "persona_icon"    : persona.get( "icon" ),
         "persona_color"   : persona.get( "color" ),
@@ -854,13 +923,19 @@ def _resolve_dm_recipient(
         mtime_fn                         = mtime_fn,
     )
 
-    candidate_alternatives = [
-        {
+    def _project( s ):
+        return {
             "persona"      : str( s.get( "persona_name" ) or "" ),
             "session_id"   : str( s.get( "session_id" ) or "" ),
             "active_since" : str( s.get( "last_seen_iso" ) or "" ),
         }
-        for s in active_sessions
+
+    # Named sessions are the persona candidates. A persona-null session (released, or
+    # never named) cannot be addressed by name, so it goes in its own labelled bucket.
+    candidate_alternatives     = [ _project( s ) for s in active_sessions if s.get( "persona_name" ) ]
+    session_id_only_candidates = [
+        { **_project( s ), "note": "active, no persona, addressable by session id only" }
+        for s in active_sessions if not s.get( "persona_name" )
     ]
 
     if recipient_session_id is not None:
@@ -883,6 +958,7 @@ def _resolve_dm_recipient(
                 supplied_session_id        = recipient_session_id,
                 resolution_chain_attempted = [ "session_id_direct", "session_id_prefix" ],
                 candidate_alternatives     = candidate_alternatives,
+            session_id_only_candidates = session_id_only_candidates,
                 suggested_next_action      = "The supplied recipient_session_id is a prefix of more than one active session; supply the full session id (call commons_who() to list them).",
             )
             return { "http_status": 422, "detail": err.model_dump() }
@@ -892,6 +968,7 @@ def _resolve_dm_recipient(
             supplied_session_id        = recipient_session_id,
             resolution_chain_attempted = [ "session_id_direct", "session_id_prefix" ],
             candidate_alternatives     = candidate_alternatives,
+            session_id_only_candidates = session_id_only_candidates,
             suggested_next_action      = "Call commons_who() to enumerate currently-active sessions; the supplied recipient_session_id is not present (or owned by a different user).",
         )
         return { "http_status": 422, "detail": err.model_dump() }
@@ -914,6 +991,7 @@ def _resolve_dm_recipient(
                 supplied_session_id        = None,
                 resolution_chain_attempted = [ "exact", "case_insensitive", "punct_tolerant" ],
                 candidate_alternatives     = candidate_alternatives,
+            session_id_only_candidates = session_id_only_candidates,
                 suggested_next_action      = "No active session matched the persona. Call commons_who() to list active personas, or supply recipient_session_id directly.",
             )
             return { "http_status": 422, "detail": err.model_dump() }
@@ -925,6 +1003,7 @@ def _resolve_dm_recipient(
                 supplied_session_id        = None,
                 resolution_chain_attempted = [ "exact", "case_insensitive", "punct_tolerant" ],
                 candidate_alternatives     = candidate_alternatives,
+            session_id_only_candidates = session_id_only_candidates,
                 suggested_next_action      = "Internal: persona matched but session lookup failed. Retry shortly.",
             )
             return { "http_status": 422, "detail": err.model_dump() }
@@ -940,6 +1019,7 @@ def _resolve_dm_recipient(
         supplied_session_id        = None,
         resolution_chain_attempted = [ ],
         candidate_alternatives     = candidate_alternatives,
+        session_id_only_candidates = session_id_only_candidates,
         suggested_next_action      = "Supply either recipient_session_id or recipient_persona on the request body.",
     )
     return { "http_status": 422, "detail": err.model_dump() }

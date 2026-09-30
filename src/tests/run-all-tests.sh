@@ -62,10 +62,44 @@ done
 # cosa/agents/test_suite/job.py — test_typescript_suite_gate.py asserts they
 # match, because a suite present in one list and absent from the other runs or
 # skips depending on which door you came through.
-SUITES=( "unit" "cosa" "typescript" "smoke" "websocket" "integration" "e2e" )
+#
+# "typecheck" joined 2026-09-09 (row 7bc67019, Rick: "Yes, blocking gate", answered on a
+# direct ask). IT IS FIRST BY DESIGN: ~3s of static analysis (measured 3.00s wall) against
+# the ~25min TypeScript tier, so a type-red branch fails in seconds instead of after the
+# pyramid has spent half an hour reaching the same verdict.
+# "stylelint" joined 2026-09-18 (row d3d4a18c, Rick's ruling 21:06), SECOND for the same
+# reason: 1.5s of static analysis over every tracked .css file (measured).
+SUITES=( "typecheck" "stylelint" "unit" "cosa" "coverage" "typescript" "smoke" "websocket" "integration" "e2e_a" "e2e_b" )
 declare -A SCRIPTS=(
+    # The three tsc projects as a blocking gate (row 7bc67019). Prints
+    # "Total Tests: / Passed: / Failed:" whose unit is PROJECTS, not tests.
+    [typecheck]="src/tests/run-typecheck-gate.sh"
+    # Every git-tracked .css file under stylelint (row d3d4a18c). Prints
+    # "Total Tests: / Passed: / Failed:" whose unit is FILES, not tests.
+    [stylelint]="src/tests/run-stylelint-gate.sh"
     [unit]="src/tests/run-unit-tests.sh"
     [cosa]="src/tests/run-cosa-tests.sh"
+    # The Python coverage gate (row e2099400, 2026-08-29). Placed straight after the two
+    # tiers that feed it: they append to ONE data file (set up below) and this step renders
+    # it, checks pyproject's fail_under, and checks that the FRAME still measures everything
+    # it claims. Before this existed, nothing in the build asked for coverage at all — so
+    # fail_under was enforced only when a human typed --cov by hand.
+    #
+    # 🔴 ITS EXIT CODES ARE A CONTRACT AND THIS RUNNER FLATTENS THEM TO pass/fail.
+    # Documented HERE, at a call site, because a code is a contract while a message
+    # drifts — and the summary below prints "coverage FAILED" for four different
+    # causes that want four different responses:
+    #   0  measured, at or above the floor
+    #   1  floor or frame BREACH — a real coverage failure. Fix the coverage.
+    #   2  INCONCLUSIVE — a tier did not run, so the denominator is short. NOT a
+    #      coverage failure; no number is owed and none should be quoted.
+    #   3  no interpreter beside the resolved pytest — an environment fault.
+    #   4  REFUSED — the tree MOVED while the run was measuring it (row 73ebccb1).
+    #      The number is unfalsifiable, not wrong. Re-run on a still tree.
+    #   6  refused/contended — a peer tier held the box (tier-measured contract).
+    # ⇒ Only 1 means "coverage is too low". Reading 2/3/4/6 as a coverage breach
+    # sends someone to write tests for a run that never measured anything.
+    [coverage]="src/tests/run-coverage-gate.sh"
     [typescript]="src/tests/run-typescript-tests.sh"
     [smoke]="src/tests/run-smoke-tests.sh"
     [websocket]="src/scripts/run-websocket-smoke-tests.sh"
@@ -81,11 +115,17 @@ declare -A SCRIPTS=(
     #
     # THE KEY CANNOT BE RENAMED TO MATCH. `e2e` is an API-facing `test_types` value —
     # ALL_SUITE_COMPONENTS in cosa/agents/test_suite/job.py:128, which callers submit
-    # to /api/test-suite/submit — and test_typescript_suite_gate.py:189 parses the
+    # to /api/v2/submit — and test_typescript_suite_gate.py:189 parses the
     # SUITES=(...) line above and asserts the two lists are identical. So the label
     # stays and this note is what stops it lying. It cost two sessions an hour on
     # 2026-08-23 (rows 673f14e8 / 990934d9) before anyone read the allowlist.
     [e2e]="src/scripts/run-e2e-ui-tests.sh"
+    # SINCE 2026-09-14 (row 2818dad7) the pyramid runs e2e as two halves, e2e_a then e2e_b,
+    # which together sweep the same files as [e2e] above. The partition is in
+    # src/tests/e2e_ui/partition/, and test_e2e_halves_partition.py keeps it exact.
+    # [e2e] stays mapped for a deliberate whole-suite run.
+    [e2e_a]="src/scripts/run-e2e-ui-tests-half-a.sh"
+    [e2e_b]="src/scripts/run-e2e-ui-tests-half-b.sh"
 )
 
 declare -A EXIT_CODES
@@ -103,6 +143,19 @@ echo "Lupin run-all-tests.sh" | tee -a "$COMBINED_LOG"
 echo "Started: $(date '+%Y-%m-%d %H:%M:%S %Z')" | tee -a "$COMBINED_LOG"
 echo "Mode: $([ $FAIL_FAST -eq 1 ] && echo 'fail-fast' || echo 'continue-on-failure')" | tee -a "$COMBINED_LOG"
 echo "==================================================================" | tee -a "$COMBINED_LOG"
+
+# ── Coverage: ONE isolated data file for the whole pyramid (row e2099400) ────────
+# LUPIN_COVERAGE makes the unit and cosa tiers append instead of measuring nothing. It is
+# OFF everywhere else, so an ad-hoc scoped run never emits a partial tier-wide number —
+# a scoped run reporting a tier figure is this row's own recurring defect.
+# COVERAGE_FILE is isolated per invocation because the repo-root default is shared by every
+# session and pytest-cov ERASES it at startup: measured 2026-08-26, a twenty-minute
+# measurement and a nine-second one shared one file, the short one won, and the run
+# reported 96.59% "green" with ~28,000 statements silently outside the denominator.
+export COVERAGE_FILE="${COVERAGE_FILE:-/tmp/lupin-coverage-$$.data}"
+export LUPIN_COVERAGE=1
+rm -f "$COVERAGE_FILE"
+echo "Coverage: enabled for unit+cosa; data file $COVERAGE_FILE" | tee -a "$COMBINED_LOG"
 
 for suite in "${SUITES[@]}"; do
     echo "" | tee -a "$COMBINED_LOG"

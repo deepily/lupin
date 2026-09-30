@@ -124,7 +124,7 @@ class TestAskYesNoIntegration:
     """Integration tests for ask_yes_no() with mocked notification backend.
 
     Note: @mcp.tool wraps ask_yes_no into a FastMCP FunctionTool object.
-    We call ask_yes_no.fn() to invoke the underlying function directly.
+    We call ask_yes_no.fn.sync() to invoke the underlying function directly.
     """
 
     def _mock_response( self, exit_code=0, response_value="yes", default_used=False ):
@@ -152,7 +152,7 @@ class TestAskYesNoIntegration:
         mock_notify.return_value = self._mock_response( exit_code=0, response_value="yes" )
 
         from lupin_mcp.cosa_voice_mcp import ask_yes_no
-        result = ask_yes_no.fn( "Proceed?" )
+        result = ask_yes_no.fn.sync( "Proceed?" )
         assert result == "yes"
 
     @patch( "lupin_mcp.cosa_voice_mcp.NotificationRequest" )
@@ -164,7 +164,7 @@ class TestAskYesNoIntegration:
         mock_notify.return_value = self._mock_response( exit_code=0, response_value="no" )
 
         from lupin_mcp.cosa_voice_mcp import ask_yes_no
-        result = ask_yes_no.fn( "Proceed?" )
+        result = ask_yes_no.fn.sync( "Proceed?" )
         assert result == "no"
 
     @patch( "lupin_mcp.cosa_voice_mcp.NotificationRequest" )
@@ -178,7 +178,7 @@ class TestAskYesNoIntegration:
         )
 
         from lupin_mcp.cosa_voice_mcp import ask_yes_no
-        result = ask_yes_no.fn( "Proceed?" )
+        result = ask_yes_no.fn.sync( "Proceed?" )
         assert result.startswith( "yes\n" )
         assert "IMPORTANT" in result
         assert "fix tests" in result
@@ -194,7 +194,7 @@ class TestAskYesNoIntegration:
         )
 
         from lupin_mcp.cosa_voice_mcp import ask_yes_no
-        result = ask_yes_no.fn( "Delete files?" )
+        result = ask_yes_no.fn.sync( "Delete files?" )
         assert result.startswith( "no\n" )
         assert "IMPORTANT" in result
         assert "what time?" in result
@@ -213,7 +213,7 @@ class TestAskYesNoIntegration:
         mock_notify.return_value = self._mock_response( exit_code=1, response_value=None )
 
         from lupin_mcp.cosa_voice_mcp import ask_yes_no
-        result = ask_yes_no.fn( "Proceed?", default="no" )
+        result = ask_yes_no.fn.sync( "Proceed?", default="no" )
         assert result == "[default used] no"
         assert result != "no"
 
@@ -230,6 +230,6 @@ class TestAskYesNoIntegration:
         mock_notify.return_value = self._mock_response( exit_code=0, response_value="" )
 
         from lupin_mcp.cosa_voice_mcp import ask_yes_no
-        result = ask_yes_no.fn( "Proceed?", default="yes" )
+        result = ask_yes_no.fn.sync( "Proceed?", default="yes" )
         assert result == "[default used] yes"
         assert result != "yes"

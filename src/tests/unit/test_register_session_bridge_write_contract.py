@@ -241,6 +241,129 @@ class TestPhase2SurvivesAFailedBridgeWrite:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# 2b. The bridge carries the seat's OWN sender_id — row 2184bebb, Option B
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestPhase2WritesTheSenderId:
+    """
+    THE HOST COMPUTES THE IDENTITY; THE SERVER MUST NOT RE-DERIVE IT.
+
+    Row 2184bebb. `routers/commons.py::_sender_id_for_bridge` used to walk
+    `detect_project_for_path( bridge["cwd"] )` — a HOST path — from INSIDE the
+    lupin-rest container, where that path does not exist. Tiffany verified with
+    docker exec, not inference: neither the worktree nor its `.git` is visible in
+    there. The walk found nothing, fell back to the cwd BASENAME, and
+    /api/commons/active-sessions served every worktree seat as
+    `claude.code@seat-cc-author-<name>.deepily.ai#<hash>` while the same seat's own
+    notifications — computed on the host — said `claude.code@lupin.deepily.ai#<hash>`.
+    Krishna, Rio and Rachel each appeared TWICE on Rick's focus rail.
+
+    🔴 THESE TESTS LIVE HERE, DRIVING THE REAL HOOK, FOR ONE REASON. The server-side
+    tests that covered this ran the walk against paths they had just created under
+    `tmp_path` — paths that EXIST — so they passed while production was wrong. A
+    path-walk exercised where the path exists cannot see its only failure mode. On
+    the host the walk is correct, which is precisely why the computation belongs
+    here, and why its guard belongs here too.
+
+    Row 6597cea9's requirement is inherited verbatim: a seat in a worktree must emit
+    the MAIN repo's project, or one seat renders as two rows.
+    """
+
+    @staticmethod
+    def _drive_with_cwd( monkeypatch, tmp_path, session_id, cwd ):
+        """Run the REAL main() with $HOME, the bridge seam, and the payload cwd set."""
+        home = tmp_path / "home"
+        seam = tmp_path / "seam"
+        ( home / ".claude" / "sessions" ).mkdir( parents=True )
+        seam.mkdir()
+        monkeypatch.setenv( "HOME", str( home ) )
+        monkeypatch.setenv( "LUPIN_HOOK_SESSIONS_DIR", str( seam ) )
+
+        import importlib
+        module = importlib.import_module( HOOK_MODULE )
+        monkeypatch.setattr( module, "read_hook_input",
+                             lambda: { "session_id": session_id, "cwd": str( cwd ),
+                                       "transcript_path": "/x" } )
+        monkeypatch.setattr( module, "emit_json", lambda *a, **k: None )
+
+        buffer = io.StringIO()
+        with redirect_stderr( buffer ):
+            try:
+                module.main()
+            except SystemExit:
+                pass
+        bridges = list( seam.glob( "cc-*.json" ) )
+        assert len( bridges ) == 1, (
+            f"Phase 2 was not reached; bridges: { [ b.name for b in bridges ] }"
+        )
+        return json.loads( bridges[ 0 ].read_text() ), buffer.getvalue()
+
+    def test_the_bridge_carries_a_sender_id_resolved_to_the_main_repo( self, monkeypatch, tmp_path ):
+        """
+        A WORKTREE cwd must yield the MAIN repo's project (row 6597cea9), written into
+        the bridge so the server never has to guess.
+
+        The repo is built with a real `.git`, and the seat's cwd is a worktree UNDER it
+        — the shape that produced `@seat-cc-author-<name>` from the container. Here,
+        on the host, the walk reaches the repo and the answer is the repo's name.
+        """
+        repo     = tmp_path / "lupin"
+        worktree = repo / ".claude" / "worktrees" / "seat-cc-author-rio-1"
+        ( repo / ".git" ).mkdir( parents=True )
+        worktree.mkdir( parents=True )
+
+        bridge, _ = self._drive_with_cwd( monkeypatch, tmp_path, "abcd1234-wt", worktree )
+
+        assert bridge[ "sender_id" ] == "claude.code@lupin.deepily.ai#abcd1234", bridge
+        # The defect, pinned by name: never the worktree's own basename.
+        assert "seat-cc-author-rio-1" not in bridge[ "sender_id" ]
+
+    def test_a_main_checkout_seat_gets_the_same_project( self, monkeypatch, tmp_path ):
+        """
+        🔴 NEGATIVE CONTROL FOR THE TEST ABOVE, and it is not redundant with it.
+
+        A main-checkout seat's basename IS the repo name, so the OLD broken code
+        produced the right answer here BY ACCIDENT — which is exactly why the bug hid
+        for so long. Both cwds must now reach the same id by the same route, so this
+        pins that the worktree case agrees with the case that was never visibly wrong.
+        """
+        repo = tmp_path / "lupin"
+        ( repo / ".git" ).mkdir( parents=True )
+
+        bridge, _ = self._drive_with_cwd( monkeypatch, tmp_path, "abcd1234-main", repo )
+
+        assert bridge[ "sender_id" ] == "claude.code@lupin.deepily.ai#abcd1234", bridge
+
+    def test_an_unresolvable_cwd_leaves_the_key_absent_and_says_so( self, monkeypatch, tmp_path ):
+        """
+        No guess, no sentinel, and a witness on stderr.
+
+        Option A — infer the project from the path segment before `/.claude/worktrees/`
+        — was BANNED by Mr. Radio's ruling (2026-09-19) including as a silent fallback:
+        "a wrong identity that looks like a right one" is the defect, not a mitigation.
+        So when the computation cannot be made the key is ABSENT, the server answers
+        null, and the phone skips the seat rather than rendering a guess.
+        """
+        import importlib
+        module = importlib.import_module( HOOK_MODULE )
+
+        def _boom( *a, **k ):
+            raise RuntimeError( "detect exploded" )
+
+        import cosa.agents.utils.sender_id as sender_id_mod
+        monkeypatch.setattr( sender_id_mod, "detect_project_for_path", _boom )
+
+        repo = tmp_path / "lupin"
+        ( repo / ".git" ).mkdir( parents=True )
+        bridge, stderr = self._drive_with_cwd( monkeypatch, tmp_path, "abcd1234-bad", repo )
+
+        assert "sender_id" not in bridge, bridge
+        assert "sender_id" in stderr.lower(), (
+            f"the failure was silent; stderr was: { stderr!r }"
+        )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # 3. The row's open item: is this the only dead handler?
 # ══════════════════════════════════════════════════════════════════════════════
 

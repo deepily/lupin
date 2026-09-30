@@ -13,15 +13,18 @@ Driven via the boot test hook + a real doc-link click (document-level
 delegation). Does NOT assert the doc CONTENT renders (cross-origin/auth timing);
 the iframe element + src + geometry are the smoke surface.
 
-Venue: :8000 (scheduled monopolize-mode via /api/test-suite/submit). Submit via:
+Venue: :8000 (scheduled monopolize-mode via /api/v2/submit). Submit via:
 
-    POST /api/test-suite/submit
+    POST /api/v2/submit
     {
-        "test_types"         : "e2e_ui",
+        "test_types"         : "e2e_b",
         "pytest_args"        : "-k test_multiplexer_doc_viewer_iframe_embedding",
         "scheduled_at"       : "<slot>",
         "auto_fix_on_failure": false
     }
+
+`e2e_b` is this file's half (src/tests/e2e_ui/partition/half-b.txt). `e2e_ui` is the
+directory name, not a suite key: submitting it runs nothing (row 4e8f348e).
 """
 
 from __future__ import annotations

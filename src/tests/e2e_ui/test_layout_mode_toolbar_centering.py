@@ -13,11 +13,11 @@ parked at ~33% (half the 0.667 default split) — skewed wildly left.
 Fix: `_updateToolbarPosition` is now pane-aware (50% when closed, ratio/2
 when open) and is re-invoked when the pane opens/closes.
 
-Venue: :8000 (scheduled monopolize-mode via /api/test-suite/submit).
+Venue: :8000 (scheduled monopolize-mode via /api/v2/submit).
 
 Submit via:
 
-    POST /api/test-suite/submit
+    POST /api/v2/submit
     {
         "test_types"         : "e2e",
         "pytest_args"        : "-k test_layout_mode_toolbar_centering",

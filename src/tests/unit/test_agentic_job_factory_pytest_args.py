@@ -14,10 +14,9 @@ Tier: :7999-eligible unit (no server, no persistent state).
 """
 
 import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
 
 from cosa.rest.agentic_job_factory import create_agentic_job
+from cosa.rest.v2.refusal import SubmitRefused
 
 
 _COMMAND = "agent router go to test suite"
@@ -72,29 +71,20 @@ class TestPytestArgsQuoteAwareSplit:
     def test_unbalanced_quote_raises_loud_valueerror( self ):
         """Malformed quoting must fail at submit — the silent alternative is
         exactly the zero-test run this fix removes."""
-        with pytest.raises( ValueError ) as exc_info:
+        with pytest.raises( SubmitRefused ) as exc_info:   # a ValueError inside the builder, refused loudly
             _make_job( '-k "popover_open or' )
         assert "pytest_args" in str( exc_info.value )
 
 
-class TestSubmitEndpointMapsValueErrorTo400:
-    """Router-level: the loud ValueError surfaces as HTTP 400, not 500."""
+class TestSubmitEndpointRefusesMalformedQuoting:
+    """v2-door level: the loud ValueError becomes a refusal naming pytest_args, and nothing queues.
+    (The old /api/test-suite/submit mapped it to HTTP 400; that door is retired and v2
+    reports status `failed` with the cause in `error`.)"""
 
-    @pytest.fixture
-    def client( self ):
-        from cosa.rest.auth import get_current_user
-        from cosa.rest.routers import test_suite as test_suite_router
-
-        app = FastAPI()
-        app.include_router( test_suite_router.router )
-        app.dependency_overrides[ get_current_user ] = lambda: { "uid": "uid-1", "email": "test@lupin" }
-        app.dependency_overrides[ test_suite_router.get_todo_queue ] = lambda: object()
-        return TestClient( app )
-
-    def test_unbalanced_quotes_return_400_with_context( self, client ):
-        response = client.post(
-            "/api/test-suite/submit",
-            json={ "test_types": "integration", "dry_run": True, "pytest_args": '-k "auth or' },
-        )
-        assert response.status_code == 400
-        assert "pytest_args" in response.json()[ "detail" ]
+    def test_unbalanced_quotes_are_refused_with_context( self, tmp_path ):
+        from tests.helpers.v2_submit_harness import Queue, make_client, submit_test_suite
+        queue = Queue()
+        body  = submit_test_suite( make_client( queue, tmp_path ), test_types="integration",
+                                   dry_run=True, pytest_args='-k "auth or' ).json()
+        assert queue.pushed == [] and body[ "status" ] == "failed", body
+        assert "pytest_args" in body[ "error" ]

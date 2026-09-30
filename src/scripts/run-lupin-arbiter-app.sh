@@ -39,7 +39,7 @@ fi
 # in place failed with `PermissionError: RECORD`, and a hand-chown was silently
 # reverted by the next deploy. A runtime dependency has no business living in a tree
 # that git and the deploy chown out from under it.
-# Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
+# Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
 if [[ -n "${LUPIN_ARBITER_VENV:-}" ]]; then
   PYBIN="${LUPIN_ARBITER_VENV}/bin/python"
 elif [[ -x "${HOME}/.venvs/lupin-arbiter/bin/python" ]]; then

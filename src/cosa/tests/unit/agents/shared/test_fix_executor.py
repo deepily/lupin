@@ -216,7 +216,7 @@ class TestExecuteFix( _ExecBase ):
 
 # ===========================================================================
 # Runtime brake — Leg (a): asyncio.wait_for wrapper around the SDK awaits
-# (design src/rnd/v0.2.0/2026.08.13-bfe-runtime-brake-design.md)
+# (design src/rnd/v0.2.0/2026.08.13-bfe-runtime-brake-design.md) — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.13-bfe-runtime-brake-design.md
 # ===========================================================================
 class TestRuntimeBrake( _ExecBase ):
     """

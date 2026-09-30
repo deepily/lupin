@@ -1,0 +1,65 @@
+{
+  "bytes": 30985,
+  "census": {
+    "block_kinds": {
+      "text": 1,
+      "thinking": 2,
+      "tool_result": 1,
+      "tool_use": 1
+    },
+    "record_count": 7,
+    "record_types": {
+      "assistant": 4,
+      "attachment": 2,
+      "user": 1
+    },
+    "thinking_empty": 1,
+    "thinking_len_max": 298,
+    "thinking_len_min": 0,
+    "thinking_nonempty": 1
+  },
+  "generated_by": "src/tests/fixtures/cc_transcript/capture_thinking_fixture.py",
+  "kind": "verbatim contiguous record window, redacted",
+  "plan": "src/rnd/v0.2.1/2026.09.27-console-tee-live-stream-plan.md",
+  "redaction": {
+    "rule": "imported verbatim from capture_transcript_fixture.redact_node \u2014 every string leaf not reached through a structural key is substituted a-z->x, A-Z->X, 0-9->7; length, whitespace, newlines, punctuation and non-ASCII preserved"
+  },
+  "row": "27760534",
+  "ruled_by": "Mr. Radio, 2026-09-27: capture, don't invent",
+  "selection_rule": "smallest contiguous window covering a NON-EMPTY thinking block, an EMPTY thinking block, a text block, a tool_use block and a tool_result block",
+  "sha256": "f9fc9757d4cb33c2ce9a914ece649e5d854ece1445fe64e8505772d3a29272f2",
+  "source_basename": "4f7c604a-5707-4502-9885-c9750d8b3ade.jsonl",
+  "source_census": {
+    "block_kinds": {
+      "text": 196,
+      "thinking": 170,
+      "tool_result": 257,
+      "tool_use": 257
+    },
+    "record_count": 2898,
+    "record_types": {
+      "ai-title": 121,
+      "assistant": 621,
+      "atis-latch": 122,
+      "attachment": 1088,
+      "cost-state": 1,
+      "file-history-delta": 6,
+      "file-history-snapshot": 84,
+      "last-prompt": 121,
+      "mode": 122,
+      "queue-operation": 70,
+      "system": 183,
+      "user": 359
+    },
+    "thinking_empty": 143,
+    "thinking_len_max": 396,
+    "thinking_len_min": 0,
+    "thinking_nonempty": 27
+  },
+  "source_unparseable_lines": 0,
+  "why": "primary.jsonl's five thinking blocks are all zero-length, so no assertion over rendered text can tell a client that renders an empty thinking block from one that drops it. This window carries BOTH arms plus the three other block kinds, so the fold, the drop and the two render paths are all discriminable.",
+  "window": {
+    "end_record_index": 2413,
+    "start_record_index": 2407
+  }
+}

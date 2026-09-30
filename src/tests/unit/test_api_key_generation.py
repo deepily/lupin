@@ -4,7 +4,7 @@ Unit tests for API key generation and service account creation.
 Tests the security and correctness of API key generation functions
 from create_service_account.py script.
 
-Design reference: src/rnd/2025.11.10-phase-2.5-notification-authentication.md
+Design reference: src/rnd/v0.1.0/2025.11.10-phase-2.5-notification-authentication.md
 Section: API Key Security Requirements (lines 83-151)
 """
 

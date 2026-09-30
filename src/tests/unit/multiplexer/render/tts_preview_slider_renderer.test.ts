@@ -1,7 +1,7 @@
 // Multiplexer Lane E WP13 — TtsPreviewSliderRenderer unit tests.
 // 100% lines/branches/functions per the multiplexer coverage mandate.
 
-import { test, before } from "node:test";
+import { test, before, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
@@ -10,6 +10,7 @@ import {
   clampFraction,
   resolveInitialFraction,
   DEFAULT_TTS_FRACTION,
+  LEGACY_TTS_FRACTION_KEY,
   TTS_FRACTION_STORAGE_KEY,
   TTS_FRACTION_STORAGE_SCHEMA,
 } from "../../../../lupin_app/static/js/multiplexer/render/TtsPreviewSliderRenderer";
@@ -22,6 +23,14 @@ before(() => {
   if (typeof globalThis.document === "undefined") {
     GlobalRegistrator.register();
   }
+});
+
+// These tests predate the legacy-shared key (P0 5ebd2aff) and construct without
+// `sharedStorage`, so the renderer falls back to the DOM's localStorage. A slider
+// move now mirrors into that key, so clear it or one test's move becomes the
+// next test's "stored override". Shared-key behaviour: tts_preview_fraction_shared_with_legacy.test.ts
+beforeEach(() => {
+  globalThis.localStorage?.removeItem(LEGACY_TTS_FRACTION_KEY);
 });
 
 interface StoredFraction { fraction: number; }

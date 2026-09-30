@@ -19,7 +19,7 @@ class RegisterRequest( BaseModel ):
     Requires:
         - email: Valid email address
         - password: String (will be validated for strength)
-        - roles: Optional list of roles (defaults to ["user"])
+        - roles: Optional; only ["user"] is accepted (the route is unauthenticated)
     """
     email: EmailStr = Field(
         ...,
@@ -34,7 +34,7 @@ class RegisterRequest( BaseModel ):
     )
     roles: Optional[List[str]] = Field(
         default=None,
-        description="User roles (defaults to ['user'])",
+        description="Only ['user'] is accepted here; any other role is refused with 403. Admins grant roles via /admin/users.",
         example=["user"]
     )
 

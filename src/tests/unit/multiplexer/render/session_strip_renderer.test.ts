@@ -23,6 +23,9 @@ before(() => {
 
 beforeEach(() => {
   if (globalThis.document !== undefined) document.body.replaceChildren();
+  // Row d04ff119: the renderer persists focus to localStorage by default, so a
+  // focus left by one test would be restored by the next.
+  globalThis.localStorage?.clear();
 });
 
 // ---------------------------------------------------------------------------
@@ -216,7 +219,9 @@ test("re-render updates an existing icon in place (persona change)", () => {
   store.setList([session({ sender_id: "s1", voice_persona: vp({ name: "Rio" }) })]);
   emit(bus, { changeKind: "updated", sender_id: "s1" });
   const after = iconsEl.querySelector(".cc-strip-icon");
-  assert.equal(before, after);   // DOM identity preserved
+  // Identity question, so a boolean of === — never the nodes themselves (a failing diff walks
+  // them into an OOM, row 8d043758) and never .tagName (any icon would pass).
+  assert.ok(before !== null && before === after, "re-render must update the existing icon in place, not replace it");
   assert.equal(after!.querySelector(".cc-strip-initial")!.textContent, "R");
 });
 
@@ -305,7 +310,7 @@ test("icon click enters focus: data-focused on icon, data-focus-active on toggle
   assert.equal(document.querySelector('[data-sender-id="s2"].sender-card')!.getAttribute("data-focus-hidden"), "true");
 });
 
-test("clicking the focused icon again exits focus (cards revealed, focus visuals cleared)", () => {
+test("clicking the focused icon again does nothing: still focused, other cards still hidden (row d04ff119, legacy :16554)", () => {
   const { root, iconsEl, focusToggle } = makeRoot();
   makeCards(["s1", "s2"]);
   const bus = createEventBusForTesting();
@@ -313,10 +318,14 @@ test("clicking the focused icon again exits focus (cards revealed, focus visuals
   const r = createSessionStripRenderer({ eventBus: bus, stores: { strip: store } });
   r.mount(root);
   clickIcon(iconsEl, "s1");
-  clickIcon(iconsEl, "s1");   // toggle off
+  clickIcon(iconsEl, "s1");   // no-op
+  assert.equal(focusToggle.getAttribute("data-focus-active"), "true");
+  assert.equal(focusToggle.textContent, "👁 Focus: ON");
+  assert.equal(iconsEl.querySelector('[data-sender-id="s1"]')!.getAttribute("data-focused"), "true");
+  assert.equal(document.querySelector('[data-sender-id="s2"].sender-card')!.getAttribute("data-focus-hidden"), "true");
+  // The toggle is the way out.
+  focusToggle.dispatchEvent(new Event("click", { bubbles: true }));
   assert.equal(focusToggle.getAttribute("data-focus-active"), "false");
-  assert.equal(focusToggle.textContent, "👁 Focus");
-  assert.equal(iconsEl.querySelector('[data-sender-id="s1"]')!.getAttribute("data-focused"), null);
   assert.equal(document.querySelector('[data-sender-id="s2"].sender-card')!.getAttribute("data-focus-hidden"), null);
 });
 
@@ -346,16 +355,21 @@ test("focus toggle button: enters on leftmost when nothing focused, exits when a
   assert.equal(focusToggle.getAttribute("data-focus-active"), "false");
 });
 
-test("focus toggle restores the last-focused session when it still exists", () => {
+// Row d04ff119, Mr. Radio's ruling: this test used to pin the OPPOSITE — the toggle
+// re-entering the last-focused session. Legacy's exit nulls focused_sender_id, so its
+// toggle always takes the leftmost icon; the old behaviour also disagreed with itself
+// across a reload (the saved exit carries no id).
+test("focus toggle after an exit enters the leftmost session, not the last-focused one (legacy)", () => {
   const { root, iconsEl, focusToggle } = makeRoot();
   const bus = createEventBusForTesting();
   const store = makeStore([session({ sender_id: "a", assigned_at: 1000 }), session({ sender_id: "b", assigned_at: 2000 })]);
   const r = createSessionStripRenderer({ eventBus: bus, stores: { strip: store } });
   r.mount(root);
   clickIcon(iconsEl, "b");                                            // focus b
-  focusToggle.dispatchEvent(new Event("click", { bubbles: true }));  // exit (retains b)
-  focusToggle.dispatchEvent(new Event("click", { bubbles: true }));  // re-enter → restores b, not leftmost a
-  assert.equal(iconsEl.querySelector('[data-sender-id="b"]')!.getAttribute("data-focused"), "true");
+  focusToggle.dispatchEvent(new Event("click", { bubbles: true }));  // exit (forgets b)
+  focusToggle.dispatchEvent(new Event("click", { bubbles: true }));  // re-enter → leftmost a
+  assert.equal(iconsEl.querySelector('[data-sender-id="a"]')!.getAttribute("data-focused"), "true");
+  assert.equal(iconsEl.querySelector('[data-sender-id="b"]')!.getAttribute("data-focused"), null);
 });
 
 test("focus toggle falls back to leftmost when retained focus target is gone", () => {
@@ -364,8 +378,8 @@ test("focus toggle falls back to leftmost when retained focus target is gone", (
   const store = makeStore([session({ sender_id: "a", assigned_at: 1000 }), session({ sender_id: "b", assigned_at: 2000 })]);
   const r = createSessionStripRenderer({ eventBus: bus, stores: { strip: store } });
   r.mount(root);
-  clickIcon(iconsEl, "b");                                            // focus b (retained on exit)
-  focusToggle.dispatchEvent(new Event("click", { bubbles: true }));  // exit
+  clickIcon(iconsEl, "b");                                            // focus b
+  focusToggle.dispatchEvent(new Event("click", { bubbles: true }));  // exit (forgets b)
   store.setList([session({ sender_id: "a", assigned_at: 1000 })]);   // b disappears (not via focused-reap path)
   emit(bus, { changeKind: "removed", sender_id: "b" });
   focusToggle.dispatchEvent(new Event("click", { bubbles: true }));  // re-enter → b gone → leftmost a
@@ -430,6 +444,60 @@ test("click on an icon missing data-sender-id is a no-op", () => {
   iconsEl.appendChild(orphan);
   orphan.dispatchEvent(new Event("click", { bubbles: true }));
   assert.equal(focusToggle.getAttribute("data-focus-active"), "false");
+});
+
+// Row 1a11fe96 — this is WHY applyIconStates may assert data-sender-id non-null: a repaint
+// removes any icon it did not key, before icon states are painted.
+test("a store change removes an icon that has no key, so no unkeyed icon is ever painted", () => {
+  const { root, iconsEl } = makeRoot();
+  const bus   = createEventBusForTesting();
+  const store = makeStore([session({ sender_id: "s1" })]);
+  const r = createSessionStripRenderer({ eventBus: bus, stores: { strip: store } });
+  r.mount(root);
+  const orphan = document.createElement("button");
+  orphan.className = "cc-strip-icon";   // no data-id-hash, no data-sender-id
+  iconsEl.appendChild(orphan);
+
+  emit(bus, { changeKind: "added", sender_id: "s1" });
+
+  assert.equal(orphan.isConnected, false, "the unkeyed icon survived the repaint");
+  assert.equal(iconsEl.querySelectorAll(".cc-strip-icon:not([data-sender-id])").length, 0);
+});
+
+test("with no storage option and NO localStorage at all, the strip still mounts and focuses (row 1a11fe96)", () => {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, get: () => undefined });
+  try {
+    const { root, iconsEl, focusToggle } = makeRoot();
+    makeCards(["s1", "s2"]);
+    const bus = createEventBusForTesting();
+    const r = createSessionStripRenderer({ eventBus: bus, stores: { strip: makeStore([session({ sender_id: "s1" }), session({ sender_id: "s2", assigned_at: 2000 })]) } });
+    r.mount(root);
+    clickIcon(iconsEl, "s1");
+    assert.equal(focusToggle.getAttribute("data-focus-active"), "true");
+    r.unmount();
+  } finally {
+    if (descriptor !== undefined) Object.defineProperty(globalThis, "localStorage", descriptor);
+    else delete (globalThis as { localStorage?: unknown }).localStorage;
+  }
+});
+
+test("with no storage option and a localStorage that THROWS on access, the strip still mounts and focuses (row 1a11fe96)", () => {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, get: () => { throw new Error("SecurityError"); } });
+  try {
+    const { root, iconsEl, focusToggle } = makeRoot();
+    makeCards(["s1", "s2"]);
+    const bus = createEventBusForTesting();
+    const r = createSessionStripRenderer({ eventBus: bus, stores: { strip: makeStore([session({ sender_id: "s1" }), session({ sender_id: "s2", assigned_at: 2000 })]) } });
+    r.mount(root);
+    clickIcon(iconsEl, "s1");
+    assert.equal(focusToggle.getAttribute("data-focus-active"), "true");
+    r.unmount();
+  } finally {
+    if (descriptor !== undefined) Object.defineProperty(globalThis, "localStorage", descriptor);
+    else delete (globalThis as { localStorage?: unknown }).localStorage;
+  }
 });
 
 // ===========================================================================

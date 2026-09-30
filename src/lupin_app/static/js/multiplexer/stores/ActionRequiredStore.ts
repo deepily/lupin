@@ -9,8 +9,6 @@
 //   - sys_time_update subscription → updates clockOffset (server-authoritative)
 //   - connection_state_change subscription → backoff/offline pauses interval
 //                                              + emits "offline-frozen"
-//   - respond(idHash, response) POSTs `/api/notify/response` via ApiClient
-//                                       (optimistic, fire-and-forget; Phase 5 backward-compat)
 //   - respondAndAwait(idHash, response) POSTs and awaits server confirmation
 //                                       (Phase 6b — non-optimistic path per Pass 2 A1)
 //
@@ -24,25 +22,162 @@
 // Auto-expiry on countdown reaching zero is LOCAL-ONLY per Q3 — does NOT
 // POST `default` back to the server. Server has its own expiry timer; local
 // transition is for UI hiding.
+//
+// 360de81b — ONE CARD AT A TIME, and finished cards LEAVE (legacy parity, Rick 2026-09-10):
+//   - Arrival order is queue order. The FIRST entry is the active card; the rest wait.
+//   - A card's countdown starts when it reaches the slot (activateHead), not on arrival —
+//     legacy addActionRequiredNotification :21339 defers expiresAt, activateNextNotification
+//     :21467 sets it. A queued card has expires_at === null and no interval.
+//   - A finished ACTIVE card stays for a grace period, then leaves and the next card activates:
+//     answered here 600 ms, answered elsewhere 1500 ms, expired 600 ms. A finished QUEUED card
+//     leaves at once. `failed` stays for retry.
+//   - The server's `notification_expired` expires a card whatever its countdown shows: the
+//     server's clock runs from arrival, so a queued card can expire before it is ever seen.
+//
+// Parity A-2 #2d — a card arriving while TTS plays WAITS for the current item (legacy
+// addActionRequiredNotification, notifications.js:21772-21785): it takes position 1 unstarted,
+// with no countdown, and activates when that item leaves the TTS slot (onTTSPlaybackComplete
+// :22782-22786). The TTS side is A-2 #3e — TtsQueueStore.isPlaying() and store_tts_slot_released.
+//   - Only an ARRIVAL defers, as in legacy. A card promoted after another leaves, or restored
+//     after a reload, activates at once (legacy activateNextNotification / restore :21648).
+//   - The release activates whatever the TTS queue rolls to next, as legacy does.
+//   - ⚠️ SELF-DEFER: the multiplexer queues a prompt's own speech on ARRIVAL (wireTtsIntent.ts),
+//     and NotificationStore hears the frame before this store does, so the prompt's own audio can
+//     already hold the slot when this store reads it. Legacy queues it on ACTIVATION
+//     (playActivatedNotificationTTS :23173-23209), so it never sees that case. Audio that belongs
+//     to the arriving card therefore does not count as "TTS is playing".
 
 import { setup, createActor, type ActorRefFrom } from "xstate";
 
 import type { EventBus } from "../shared/EventBus";
+import type { StorageService } from "../shared/StorageService";
 import type {
   ActionRequiredItem,
   ActionRequiredChangeKind,
   ActionRequiredResponse,
+  ActionRequiredStep,
   ConnectionStateChangePayload,
   LupinEvent,
+  PredictionHint,
   StoreActionRequiredChangedPayload,
+  VoicePersona,
 } from "../shared/types";
+import { parseResponseQuestions } from "./responseQuestions";
 
 // ---------------------------------------------------------------------------
 // Loose ApiClient surface — store only needs `post`.
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Which cards still wait on the operator (parity A-2 #2c).
+//
+// The store keeps a responded / expired / cancelled card in `list()` for its grace
+// period so the closing state can be read. Anything that counts prompts owed an
+// answer must leave those out — legacy's `updateActionRequiredCount` counts only
+// notifications that are neither responded nor expired. `submitting` and `failed`
+// are still owed: the answer has not landed.
+//
+// ⚠️ ONE PREDICATE FOR EVERY COUNTER. The reading pane's lift gate and the section
+// header both ask this question; two copies of the state list agree until one of
+// them learns a new state.
+// ---------------------------------------------------------------------------
+
+/**
+ * Takes the bare `state` so the reading pane's looser item shape can ask it too.
+ *
+ * Ensures: true exactly for `pending`, `submitting` and `failed`.
+ */
+export function isActionRequiredLive(item: { readonly state: string }): boolean {
+  return item.state === "pending" || item.state === "submitting" || item.state === "failed";
+}
+
+/**
+ * Parity A-2 #2d — a card first in line that has not started: it arrived while TTS played and
+ * waits for the current item to finish. The one predicate the store and the renderer both ask.
+ *
+ * Ensures: true exactly for a `pending` card with no expiry set.
+ */
+export function isAwaitingActivation(item: Pick<ActionRequiredItem, "state" | "expires_at">): boolean {
+  return item.state === "pending" && item.expires_at === null;
+}
+
+/** The number of cards in `items` still owed an answer. */
+export function countLiveActionRequired(items: ReadonlyArray<{ readonly state: string }>): number {
+  return items.filter(isActionRequiredLive).length;
+}
+
+/**
+ * What the ✕ answers a prompt with — parity A-2 #2g, legacy `cancelActionRequired`.
+ *
+ * Ensures:
+ *   - the prompt's own default when it has one, an empty string included (legacy tests
+ *     for undefined/null only)
+ *   - otherwise: yes_no → "no"; multiple_choice and open_ended_batch → the string
+ *     '{"cancelled":true,"answers":{}}', sent verbatim as legacy sends it; else "[cancelled]"
+ */
+export function cancelResponseFor(item: Pick<ActionRequiredItem, "default" | "response_type">): string {
+  if (item.default !== undefined) return item.default;
+  if (item.response_type === "yes_no") return "no";
+  if (item.response_type === "multiple_choice" || item.response_type === "open_ended_batch") {
+    return JSON.stringify({ cancelled: true, answers: {} });
+  }
+  return "[cancelled]";
+}
+
 export interface ActionRequiredApiClient {
   post<T>(path: string, body: unknown): Promise<T>;
+}
+
+// ---------------------------------------------------------------------------
+// The answer's wire shape (P0 5ebd2aff; found by Mr. Radio 2026-09-10).
+//
+// `/api/notify/response` wraps a plain string as {"value": ..., "source": "ui"}
+// and stores anything else exactly as sent, and every reader takes .get("value")
+// (notifications.py _extract_response_value; notify_user_sync.py). The old
+// `{ response }` wrapper was stored with no "value" key, so every answer from
+// this client read back as no answer, and a promotion ask answered here was
+// refused.
+//
+// So EVERY answer goes as a string, exactly as legacy sends it:
+//   - yes_no / open_ended: the bare answer (submitResponse, notifications.js:24015)
+//   - multiple_choice / open_ended_batch: JSON.stringify({ answers: { <header>: value } })
+//     (notifications.js:23855, :23451), which the asker parses back
+//     (cosa_voice_mcp._parse_multiple_choice_response).
+// ---------------------------------------------------------------------------
+
+export function toWireResponseValue(response: ActionRequiredResponse): string {
+  return typeof response === "string" ? response : JSON.stringify(response);
+}
+
+// 360de81b — how long a finished ACTIVE card stays before it leaves (legacy notifications.js):
+export const RESPONDED_GRACE_MS = 600;    // showConfirmation's fallback timer (:24295)
+export const CANCELLED_GRACE_MS = 1500;   // handleNotificationResponded, "responded in another session" (:24560)
+export const EXPIRED_GRACE_MS   = 600;    // same bound as an answer; legacy animates, or deletes at once (:24462)
+
+// ---------------------------------------------------------------------------
+// Parity A-1c2 — the prompts survive a reload (legacy saveActionRequiredState /
+// restoreActionRequiredState, key `notifications_action_required`). Spec rulings 2 and 3,
+// src/rnd/v0.2.1/2026.09.15-operator-state-preservation-spec.md.
+//
+// POLARITY: the payload is `{ prompts }` — every card still OWED an answer (isActionRequiredLive),
+// in queue order, so the first is the active card. A card absent from the list is finished.
+// Each saved item is `state: "pending"`, and its `expires_at` and `paused_at` are on the LOCAL
+// clock (the store's value − clockOffset): the offset is server-derived, is not saved, and is 0
+// after a reload, so a saved server-adjusted time would be compared across two clocks.
+//
+// ⚠️ StorageService stores this as `lupin:operatorState` — a COLON. The hand-rolled keys
+// `lupin.taskList.collapsedOwners`, `lupin.epicBoard.groupState` and
+// `lupin.finishedTasks.shownStatuses` use a DOT, so a sweep over `StorageService.keys()` never
+// sees them.
+// ---------------------------------------------------------------------------
+export const AR_STORAGE_KEY      = "operatorState";
+export const AR_STORAGE_SCHEMA   = 1;
+// A saved expiry that passed more than this long ago is dropped at restore. The grace is on the
+// drop side, so clock steps and timer coarseness can only keep a prompt too long, never lose one.
+export const AR_RESTORE_GRACE_MS = 5000;
+
+interface PersistedActionRequired {
+  prompts : ActionRequiredItem[];
 }
 
 // ---------------------------------------------------------------------------
@@ -100,12 +235,24 @@ interface ServerNotificationFields {
   timestamp           ?: string;
   response_requested  ?: boolean;
   response_type       ?: ActionRequiredItem["response_type"];
-  response_options    ?: ReadonlyArray<string>;
+  response_options    ?: unknown;                  // { questions: [...] } dict — read by parseResponseQuestions
   response_default    ?: string;
   timeout_seconds     ?: number;
+  display_qualifier_widget ?: boolean;             // A-2 #2j — opens the yes_no comment row
+  // A-2 #2m — the card chrome's data. `sender_id` is already read above for the
+  // [PROJECT] badge; these three are the rest of what legacy's card draws.
+  voice_persona       ?: VoicePersona;
+  abstract            ?: string;
+  prediction_hint     ?: PredictionHint;
 }
 
 interface RespondedPayload {
+  id_hash         ?: string;
+  notification_id ?: string;
+}
+
+// Same shape NotificationStore reads for this event (NotificationStore.ts ExpiredPayload).
+interface ExpiredPayload {
   id_hash         ?: string;
   notification_id ?: string;
 }
@@ -115,15 +262,9 @@ interface RespondedPayload {
 // ---------------------------------------------------------------------------
 
 export interface ActionRequiredStore {
+  /** Arrival order. The first item is the active card; the rest wait in the queue (360de81b). */
   list(): ReadonlyArray<ActionRequiredItem>;
   getById(idHash: string): ActionRequiredItem | undefined;
-  /**
-   * Optimistic respond — flips local state to "responded" before the network
-   * round-trip. Phase 5 backward-compat path. Network failure is silently
-   * swallowed (UI feedback already delivered). No-op on unknown idHash or
-   * non-pending state. Phase 6b widened the response param per Pass 2 A2.
-   */
-  respond(idHash: string, response: ActionRequiredResponse): Promise<void>;
   /**
    * Non-optimistic respond — Phase 6b per Pass 2 A1. Transitions through
    * "submitting" → "responded" | "failed". Throws on unknown idHash or
@@ -132,6 +273,31 @@ export interface ActionRequiredStore {
    * re-enable the widget for retry.
    */
   respondAndAwait(idHash: string, response: ActionRequiredResponse): Promise<void>;
+  /**
+   * The operator's ⏸️ — parity A-2 #2f, legacy `togglePause` / `pauseActionRequired` /
+   * `resumeActionRequired`.
+   *
+   * Requires:
+   *   - idHash names a card; only the ACTIVE card (first in `list()`), pending and counting
+   *     down, is acted on — anything else is a no-op that emits nothing
+   * Ensures:
+   *   - pause: the countdown stops, `paused_at` is stamped, audio that was playing is paused,
+   *     and "paused" is emitted carrying the frozen remainder
+   *   - resume: the paused span is added to `expires_at` and `total_paused_ms`, the countdown
+   *     restarts (unless the connection is down), audio THIS pause stopped is resumed, and
+   *     "resumed" is emitted carrying the remainder
+   *   - returns true when the card is now paused, false otherwise
+   */
+  togglePause(idHash: string): boolean;
+  /**
+   * Remember a multiple_choice card's stepper position — parity A-1c2.
+   *
+   * Ensures:
+   *   - the card's `step` is `step`, saved with the rest of the queue; an unknown id is ignored
+   *   - emits nothing: the position changes under the operator's hands, and a repaint would take
+   *     their focus
+   */
+  recordStep(idHash: string, step: ActionRequiredStep): void;
   /** Test/cleanup helper: stop all per-prompt intervals + actors. */
   disposeForTesting(): void;
 }
@@ -142,7 +308,34 @@ export interface ActionRequiredStoreOptions {
   // Test injection.
   setIntervalFn?   : (cb: () => void, ms: number) => unknown;
   clearIntervalFn? : (id: unknown) => void;
+  setTimeoutFn?    : (cb: () => void, ms: number) => unknown;
+  clearTimeoutFn?  : (id: unknown) => void;
   nowFn?           : () => number;
+  /**
+   * The TTS the ⏸️ pauses with the countdown (legacy `pauseTTS` / `resumeTTS`). createStores
+   * wires the AudioStore; omitted, a pause freezes the countdown only.
+   */
+  audioControl?    : ActionRequiredAudioControl;
+  /** Parity A-1c2 — where the queue survives a reload; omitted or null, nothing is saved. */
+  storage?         : StorageService | null;
+  /**
+   * Parity A-2 #2d — the TTS slot an arriving card waits on (A-2 #3e). createStores wires the
+   * TtsQueueStore; omitted, a card never waits for audio.
+   */
+  ttsSlot?         : ActionRequiredTtsSlot;
+}
+
+/** The slice of the TTS queue an arriving card reads (TtsQueueStore, A-2 #3e). */
+export interface ActionRequiredTtsSlot {
+  isPlaying(): boolean;
+  current(): string | null;
+}
+
+/** The slice of the audio pipeline a paused prompt holds. */
+export interface ActionRequiredAudioControl {
+  isPlaying(): boolean;
+  pause(): void;
+  resume(): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -158,6 +351,8 @@ interface ActorEntry {
   // Last countdown ms emitted; reused on offline-frozen emission so UI shows
   // the value the user last saw.
   lastCountdown: number;
+  // 360de81b — the pending removal after a grace period; null until the card finishes.
+  removalId   : unknown;
 }
 
 // ---------------------------------------------------------------------------
@@ -169,7 +364,14 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
   private readonly api             : ActionRequiredApiClient;
   private readonly setIntervalFn   : (cb: () => void, ms: number) => unknown;
   private readonly clearIntervalFn : (id: unknown) => void;
+  private readonly setTimeoutFn    : (cb: () => void, ms: number) => unknown;
+  private readonly clearTimeoutFn  : (id: unknown) => void;
   private readonly nowFn           : () => number;
+  private readonly audioControl    : ActionRequiredAudioControl | null;
+  private readonly storage         : StorageService | null;
+  private readonly ttsSlot         : ActionRequiredTtsSlot | null;
+  // A-2 #2f — true while audio is paused BECAUSE a prompt was paused, so resume undoes only that.
+  private audioPausedByPrompt = false;
 
   private readonly entries = new Map<string, ActorEntry>();
   // Server clock offset (serverTime - localTime); reconciled by sys_time_update.
@@ -184,9 +386,17 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
     this.setIntervalFn   = opts.setIntervalFn   ?? ((cb, ms) => globalThis.setInterval(cb, ms));
     /* c8 ignore next */ // production-default fallback: globalThis.clearInterval pairs with the setInterval default above; tests always inject the fake.
     this.clearIntervalFn = opts.clearIntervalFn ?? ((id) => globalThis.clearInterval(id as number));
+    /* c8 ignore next */ // production-default fallback: globalThis.setTimeout is the runtime browser timer for the grace period; tests always inject a fake via opts.
+    this.setTimeoutFn    = opts.setTimeoutFn    ?? ((cb, ms) => globalThis.setTimeout(cb, ms));
+    /* c8 ignore next */ // production-default fallback: globalThis.clearTimeout pairs with the setTimeout default above; tests always inject the fake.
+    this.clearTimeoutFn  = opts.clearTimeoutFn  ?? ((id) => globalThis.clearTimeout(id as number));
     /* c8 ignore next */ // production-default fallback: Date.now() is the runtime clock; tests always inject a deterministic nowFn().
     this.nowFn           = opts.nowFn           ?? (() => Date.now());
+    this.audioControl    = opts.audioControl    ?? null;
+    this.storage         = opts.storage         ?? null;
+    this.ttsSlot         = opts.ttsSlot         ?? null;
     this.subscribe();
+    this.restore();
   }
 
   list(): ReadonlyArray<ActionRequiredItem> {
@@ -195,32 +405,6 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
 
   getById(idHash: string): ActionRequiredItem | undefined {
     return this.entries.get(idHash)?.data;
-  }
-
-  async respond(idHash: string, response: ActionRequiredResponse): Promise<void> {
-    const entry = this.entries.get(idHash);
-    if (!entry) return;
-    if (entry.data.state !== "pending") return;
-
-    // Optimistic local transition — flip to responded immediately so the UI
-    // hides the prompt before the network round-trip. The server's
-    // notification_responded fanout will arrive later (idempotent —
-    // already-responded prompts are no-ops on the server-side path).
-    entry.data = { ...entry.data, state: "responded", response };
-    this.stopInterval(entry);
-    entry.actor.send({ type: "RESPOND" });
-    this.emit("responded", idHash);
-
-    try {
-      await this.api.post<unknown>("/api/notify/response", {
-        notification_id : idHash,
-        response_value  : { response },
-      });
-    } catch (_err) {
-      // Network failure: leave the local state as responded (UI feedback already
-      // delivered to user); a reconnect + server-side fanout would re-converge.
-      // No retry is wired for Phase 4; Phase 6+ may add one.
-    }
   }
 
   // Phase 6b — non-optimistic path (per Pass 2 A1). Lifecycle:
@@ -239,20 +423,28 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
     this.stopInterval(entry);
     this.emitWithDetails("responded-pending", idHash, { response });
 
+    // 360de81b: the server may expire the card while the POST is in flight. Once the card is no
+    // longer this submission's (expired, or already gone), the late result changes nothing —
+    // a failure still re-throws to the caller, but no "failed" or "responded" is emitted.
+    const stillOurs = (): boolean => this.entries.get(idHash) === entry && entry.data.state === "submitting";
     try {
       await this.api.post<unknown>("/api/notify/response", {
         notification_id : idHash,
-        response_value  : { response },
+        response_value  : toWireResponseValue(response),
       });
     } catch (err) {
-      entry.data = { ...entry.data, state: "failed" };
-      this.emitWithDetails("failed", idHash, { response, error: err });
+      if (stillOurs()) {
+        entry.data = { ...entry.data, state: "failed" };
+        this.emitWithDetails("failed", idHash, { response, error: err });
+      }
       throw err;
     }
+    if (!stillOurs()) return;
 
     entry.data = { ...entry.data, state: "responded", response };
     entry.actor.send({ type: "RESPOND" });
     this.emitWithDetails("responded", idHash, { response });
+    this.retire(entry, RESPONDED_GRACE_MS);
   }
 
   /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
@@ -260,6 +452,7 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
     for (const off of this.unsubscribers) off();
     for (const entry of this.entries.values()) {
       this.stopInterval(entry);
+      if (entry.removalId !== null) this.clearTimeoutFn(entry.removalId);
       entry.actor.stop();
     }
     this.entries.clear();
@@ -278,6 +471,9 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
       this.bus.on<RespondedPayload>("notification_responded", (e) => this.onResponded(e)),
     );
     this.unsubscribers.push(
+      this.bus.on<ExpiredPayload>("notification_expired", (e) => this.onExpired(e)),
+    );
+    this.unsubscribers.push(
       this.bus.on<{ ts?: number; serverTime?: number }>("sys_time_update", (e) => this.onSysTimeUpdate(e)),
     );
     this.unsubscribers.push(
@@ -288,6 +484,11 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
     );
     this.unsubscribers.push(
       this.bus.on<unknown>("connection_online", () => this.thawAll()),
+    );
+    // A-2 #2d — the item the waiting card deferred to has left the TTS slot. activateHead is a
+    // no-op unless the first card is still unstarted, and only an arrival leaves it that way.
+    this.unsubscribers.push(
+      this.bus.on<unknown>("store_tts_slot_released", () => this.activateHead(true)),
     );
   }
 
@@ -303,20 +504,40 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
     if (!idHash) return;
     if (this.entries.has(idHash)) return;       // dedup — server may re-emit on reconnect
 
-    const ts = n.timestamp ? Date.parse(n.timestamp) : this.nowFn();
-    if (Number.isNaN(ts)) return;
+    // 360de81b: `timestamp` no longer sets the expiry — the countdown starts at activation.
     const timeout = n.timeout_seconds ?? 30;
-    const expiresAt = ts + timeout * 1000;
 
     const item: ActionRequiredItem = {
-      id_hash       : idHash,
-      prompt        : n.message ?? "",
-      response_type : n.response_type ?? "open_ended",
-      options       : n.response_options ?? [],
-      expires_at    : expiresAt,
-      state         : "pending",
+      id_hash         : idHash,
+      prompt          : n.message ?? "",
+      response_type   : n.response_type ?? "open_ended",
+      questions       : parseResponseQuestions(n.response_options),
+      expires_at      : null,
+      timeout_seconds : timeout,
+      state           : "pending",
     };
-    if (n.response_default !== undefined) item.default = n.response_default;
+    // 🔴 `!= null` FOR EVERY OPTIONAL FIELD BELOW, NOT `!== undefined` (row 759250e4). The server builds
+    // the frame with NotificationItem.to_dict(), which spells "not supplied" as JSON null, and a stored
+    // null is outside `ActionRequiredItem` (optional, never nullable). `prediction_hint` is the one that
+    // bit: /api/notify sets it to None whenever the engine has no confident hint (cold start, below the
+    // threshold, or an engine error — all ordinary), and predictionHintBox read `predicted_value` through
+    // the null. EventBus swallowed the throw, so the store held the ask and nothing was painted. Measured
+    // on :8000, ts-2fdb5363: "conf=0.000, hint=no", frame `prediction_hint: None`.
+    if (n.response_default != null) item.default = n.response_default;
+    if (n.display_qualifier_widget === true) item.display_qualifier_widget = true;
+    // A-2 #2m — carry the chrome fields when the server sends them. Assigned
+    // conditionally, never as `undefined`, so an absent field stays absent on the
+    // item and the renderer's `=== undefined` checks mean what they say.
+    if (n.sender_id != null) item.sender_id = n.sender_id;
+    // `!= null`, not `!== undefined`: the server sends JSON `null` for a sender with no
+    // session-bridge entry, and `!== undefined` admitted it. `ActionRequiredItem` declares
+    // `voice_persona ?: VoicePersona` — optional, never NULLABLE — so a stored `null` was
+    // already outside the type every reader was written against. personaBadge() is hardened
+    // too, but this is the line that should never have let it in: keeping the store inside
+    // its own declared type is what stops the next reader inheriting the same trap.
+    if (n.voice_persona != null) item.voice_persona = n.voice_persona;
+    if (n.abstract != null) item.abstract = n.abstract;
+    if (n.prediction_hint != null) item.prediction_hint = n.prediction_hint;
 
     const actor = createActor(promptMachine);
     actor.start();
@@ -326,11 +547,205 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
       actor,
       intervalId   : null,
       frozen       : false,
-      lastCountdown: Math.max(0, expiresAt - this.nowFn()),
+      lastCountdown: timeout * 1000,
+      removalId    : null,
     };
     this.entries.set(idHash, entry);
+    // A card arriving into an empty slot activates BEFORE "added", so the one "added" carries
+    // it — one arrival stays one emission (stores_integration.test.ts pins the fanout).
+    // A-2 #2d — unless TTS is playing, in which case the first card waits for the release.
+    if (!this.ttsHoldsHead()) this.activateHead(false);
     this.emit("added", idHash);
+  }
+
+  // -------------------------------------------------------------------------
+  // 360de81b — the queue: activation, grace period, removal
+  // -------------------------------------------------------------------------
+
+  /**
+   * Start the countdown of the first card, if it is waiting. Legacy activateNextNotification :21428.
+   * `announce` emits "activated" — true when a card is PROMOTED after another leaves; false on
+   * arrival, where the caller's "added" already describes the activated card.
+   */
+  private activateHead(announce: boolean): void {
+    const head = this.entries.values().next().value;
+    if (head === undefined || head.data.expires_at !== null) return;
+    const expiresAt = this.nowFn() + this.clockOffset + head.data.timeout_seconds * 1000;
+    head.data = { ...head.data, expires_at: expiresAt };
+    if (announce) this.emit("activated", head.data.id_hash);
+    this.startInterval(head);
+  }
+
+  /**
+   * A-2 #2d — should the first card wait for TTS? Legacy asks `this.activeTTSItem` (:21779).
+   * Audio that is the first card's OWN speech does not count (the self-defer note in the header).
+   */
+  private ttsHoldsHead(): boolean {
+    if (this.ttsSlot === null || !this.ttsSlot.isPlaying()) return false;
+    const head = this.entries.values().next().value!;
+    return this.ttsSlot.current() !== head.data.id_hash;
+  }
+
+  /** A card has finished: the active card leaves after `graceMs`, a queued card leaves at once. */
+  private retire(entry: ActorEntry, graceMs: number): void {
+    if (entry.data.expires_at === null) {
+      this.removeEntry(entry);
+      return;
+    }
+    entry.removalId = this.setTimeoutFn(() => this.removeEntry(entry), graceMs);
+  }
+
+  private removeEntry(entry: ActorEntry): void {
+    this.stopInterval(entry);
+    entry.actor.stop();
+    this.entries.delete(entry.data.id_hash);
+    this.emit("removed", entry.data.id_hash);
+    this.activateHead(true);
+  }
+
+  /** Local countdown or server event: mark expired with the default read-back, then retire. */
+  private expireEntry(entry: ActorEntry): void {
+    this.stopInterval(entry);
+    const next: ActionRequiredItem = { ...entry.data, state: "expired" };
+    if (entry.data.default !== undefined) next.response = entry.data.default;
+    entry.data = next;
+    entry.actor.send({ type: "EXPIRE" });
+    this.emit("expired", entry.data.id_hash);
+    this.retire(entry, EXPIRED_GRACE_MS);
+  }
+
+  // Server timeout — legacy handleNotificationExpired :24591. Expires the card whatever its local
+  // countdown shows, including a card still waiting in the queue.
+  private onExpired(e: LupinEvent<ExpiredPayload>): void {
+    const idHash = e.payload.id_hash ?? e.payload.notification_id;
+    if (!idHash) return;
+    const entry = this.entries.get(idHash);
+    if (!entry) return;
+    const s = entry.data.state;
+    if (s !== "pending" && s !== "failed" && s !== "submitting") return;   // already finishing
+    this.expireEntry(entry);
+  }
+
+  togglePause(idHash: string): boolean {
+    const head  = this.entries.values().next().value;
+    const entry = this.entries.get(idHash);
+    if (entry === undefined || entry !== head || entry.data.state !== "pending" || entry.data.expires_at === null) {
+      return false;
+    }
+    const now = this.nowFn() + this.clockOffset;
+    const pausedAt = entry.data.paused_at ?? null;
+
+    if (pausedAt === null) {
+      this.stopInterval(entry);
+      entry.lastCountdown = Math.max(0, entry.data.expires_at - now);
+      entry.data = { ...entry.data, paused_at: now };
+      // Legacy pauses TTS only when something plays; resume undoes only what this pause did,
+      // so an operator's own earlier TTS pause is not overridden by answering a prompt.
+      if (this.audioControl !== null && this.audioControl.isPlaying()) {
+        this.audioControl.pause();
+        this.audioPausedByPrompt = true;
+      }
+      this.emitCountdown("paused", entry);
+      return true;
+    }
+
+    const span = now - pausedAt;
+    entry.data = {
+      ...entry.data,
+      paused_at       : null,
+      expires_at      : entry.data.expires_at + span,
+      total_paused_ms : (entry.data.total_paused_ms ?? 0) + span,
+    };
     this.startInterval(entry);
+    if (this.audioPausedByPrompt) {
+      this.audioPausedByPrompt = false;
+      this.audioControl!.resume();
+    }
+    this.emitCountdown("resumed", entry);
+    return false;
+  }
+
+  recordStep(idHash: string, step: ActionRequiredStep): void {
+    const entry = this.entries.get(idHash);
+    if (entry === undefined) return;
+    entry.data = { ...entry.data, step };
+    this.persist();
+  }
+
+  // -------------------------------------------------------------------------
+  // Parity A-1c2 — save and restore (see AR_STORAGE_KEY)
+  // -------------------------------------------------------------------------
+
+  /** Save every card still owed an answer, or clear the key when none is. */
+  private persist(): void {
+    if (this.storage === null) return;
+    const prompts: ActionRequiredItem[] = [];
+    for (const entry of this.entries.values()) {
+      if (!isActionRequiredLive(entry.data)) continue;
+      const expiresAt = entry.data.expires_at;
+      const saved: ActionRequiredItem = {
+        ...entry.data,
+        state      : "pending",
+        expires_at : expiresAt === null ? null : expiresAt - this.clockOffset,
+      };
+      const pausedAt = entry.data.paused_at ?? null;
+      if (pausedAt !== null) saved.paused_at = pausedAt - this.clockOffset;
+      prompts.push(saved);
+    }
+    try {
+      if (prompts.length === 0) this.storage.remove(AR_STORAGE_KEY);
+      else this.storage.setJSON<PersistedActionRequired>(AR_STORAGE_KEY, { prompts }, AR_STORAGE_SCHEMA);
+    } catch {
+      // A full or refused storage must not stop the operator answering; legacy logs and carries on.
+    }
+  }
+
+  /**
+   * Rebuild the queue from the last save. Runs once, in the constructor, before anything listens,
+   * so it emits nothing.
+   *
+   * Ensures:
+   *   - cards return in saved order as `pending`; one whose local expiry passed more than
+   *     AR_RESTORE_GRACE_MS ago is dropped; a queued card (null expiry) is never dropped
+   *   - the head counts down from its saved expiry unless it is paused; if the head was dropped
+   *     the next card activates with a fresh countdown
+   *   - the save is rewritten without the dropped cards
+   */
+  private restore(): void {
+    if (this.storage === null) return;
+    const saved = this.storage.getJSON<PersistedActionRequired>(AR_STORAGE_KEY, AR_STORAGE_SCHEMA);
+    if (saved === null || !Array.isArray(saved.prompts)) return;
+    const now = this.nowFn();
+    for (const item of saved.prompts) {
+      if (item.expires_at !== null && item.expires_at <= now - AR_RESTORE_GRACE_MS) continue;
+      const actor = createActor(promptMachine);
+      actor.start();
+      const pausedAt = item.paused_at ?? null;
+      this.entries.set(item.id_hash, {
+        data          : item,
+        actor,
+        intervalId    : null,
+        frozen        : false,
+        lastCountdown : item.expires_at === null
+          ? item.timeout_seconds * 1000
+          : Math.max(0, item.expires_at - (pausedAt ?? now)),
+        removalId     : null,
+      });
+    }
+    const head = this.entries.values().next().value;
+    if (head !== undefined && head.data.expires_at !== null) this.startInterval(head);
+    this.activateHead(false);
+    this.persist();
+  }
+
+  private emitCountdown(changeKind: ActionRequiredChangeKind, entry: ActorEntry): void {
+    this.persist();
+    this.bus.emit<StoreActionRequiredChangedPayload>({
+      type    : "store_action_required_changed",
+      payload : { changeKind, id_hash: entry.data.id_hash, countdownMs: entry.lastCountdown },
+      source  : "ActionRequiredStore",
+      ts      : this.nowFn(),
+    });
   }
 
   private startInterval(entry: ActorEntry): void {
@@ -338,6 +753,8 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
     if (entry.intervalId !== null) return;     // already running
     /* c8 ignore next */ // defensive: startInterval is only called when the entry is freshly created (frozen=false) or when thawAll has just unfrozen it; the "frozen=true" arm is unreachable from the current call sites. Belt-and-suspenders against future misuse.
     if (entry.frozen) return;                  // currently paused for offline
+    // A-2 #2f — the operator's pause outranks a reconnect: a thaw must not restart it.
+    if ((entry.data.paused_at ?? null) !== null) return;
     entry.intervalId = this.setIntervalFn(() => this.tick(entry), 1000);
   }
 
@@ -355,16 +772,12 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
       return;
     }
     /* c8 ignore stop */
-    const remaining = Math.max(0, entry.data.expires_at - (this.nowFn() + this.clockOffset));
+    // Only an activated card has an interval, so expires_at is set here.
+    const remaining = Math.max(0, entry.data.expires_at! - (this.nowFn() + this.clockOffset));
     entry.lastCountdown = remaining;
     if (remaining === 0) {
       // Auto-expire — local-only, do NOT POST default per Q3.
-      this.stopInterval(entry);
-      const next: ActionRequiredItem = { ...entry.data, state: "expired" };
-      if (entry.data.default !== undefined) next.response = entry.data.default;
-      entry.data = next;
-      entry.actor.send({ type: "EXPIRE" });
-      this.emit("expired", entry.data.id_hash);
+      this.expireEntry(entry);
       return;
     }
     this.bus.emit<StoreActionRequiredChangedPayload>({
@@ -386,11 +799,13 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
     if (!entry) return;
     // If we already responded locally, the server is just confirming — no-op.
     if (entry.data.state === "responded") return;
-    if (entry.data.state !== "pending") return;
+    // 360de81b: a failed answer answered elsewhere leaves too, or it would sit in the slot forever.
+    if (entry.data.state !== "pending" && entry.data.state !== "failed") return;
     this.stopInterval(entry);
     entry.data = { ...entry.data, state: "cancelled" };
     entry.actor.send({ type: "CANCEL" });
     this.emit("cancelled", idHash);
+    this.retire(entry, CANCELLED_GRACE_MS);
   }
 
   // -------------------------------------------------------------------------
@@ -416,9 +831,12 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
     }
   }
 
+  // 360de81b: a queued card (expires_at === null) has no countdown, so neither freeze nor thaw
+  // touches it — a thaw must never start a timer for a card still waiting.
   private freezeAll(): void {
     for (const entry of this.entries.values()) {
       if (entry.data.state !== "pending") continue;
+      if (entry.data.expires_at === null) continue;
       if (entry.frozen) continue;
       entry.frozen = true;
       this.stopInterval(entry);
@@ -459,6 +877,7 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
   // -------------------------------------------------------------------------
 
   private emit(changeKind: ActionRequiredChangeKind, idHash: string): void {
+    this.persist();
     this.bus.emit<StoreActionRequiredChangedPayload>({
       type    : "store_action_required_changed",
       payload : { changeKind, id_hash: idHash },
@@ -474,6 +893,7 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
     idHash     : string,
     details    : { response?: ActionRequiredResponse; error?: unknown },
   ): void {
+    this.persist();
     const payload: StoreActionRequiredChangedPayload = { changeKind, id_hash: idHash };
     if (details.response !== undefined) payload.response = details.response;
     if (details.error    !== undefined) payload.error    = details.error;

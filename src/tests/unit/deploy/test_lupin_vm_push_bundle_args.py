@@ -3,7 +3,7 @@
 
 TWO DEFECTS, BOTH MEASURED BEFORE THIS FILE EXISTED
 ---------------------------------------------------
-Written up in `src/rnd/v0.2.0/2026.08.24-lupin-vm-push-bundle-arg-and-dryrun-defects.md`.
+Written up in `src/rnd/v0.2.0/2026.08.24-lupin-vm-push-bundle-arg-and-dryrun-defects.md`. — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.24-lupin-vm-push-bundle-arg-and-dryrun-defects.md
 
 1. THE MODE IS A FLAG, AND THE POSITIONAL FORM FAILS SILENTLY.
    `push-bundle <branch> checkout` puts the branch in BRANCH, then sends `checkout`

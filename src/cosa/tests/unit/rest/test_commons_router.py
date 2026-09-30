@@ -42,6 +42,7 @@ from cosa.rest.routers.commons import (
     validate_broadcast_body,
     validate_broadcast_id,
     build_pseudo_sender_id,
+    _sender_id_for_bridge,
     _load_bridge_fields,
     _bridge_last_activity_epoch,
     project_session_response,
@@ -765,6 +766,65 @@ class TestRecipientResolutionErrorModel( unittest.TestCase ):
         self.assertEqual( err.resolution_chain_attempted, [ ] )
         self.assertEqual( err.candidate_alternatives, [ ] )
         self.assertIsNone( err.supplied_persona )
+
+
+class TestSenderIdForBridge( unittest.TestCase ):
+    """
+    `_sender_id_for_bridge` serves the bridge's own sender_id and NEVER derives one.
+
+    Row 2184bebb. These tests did not exist while the function derived the value — it
+    walked `detect_project_for_path( bridge["cwd"] )` over a HOST path from inside the
+    container, found no `.git`, fell back to the cwd BASENAME, and served every worktree
+    seat as `claude.code@seat-cc-author-<name>.deepily.ai#<hash>` while the same seat's
+    notifications said `claude.code@lupin.deepily.ai#<hash>`. Three of us appeared twice
+    on the focus rail. Nothing in this file could see it: before this class, the eight
+    `sender_id` matches here all belonged to `build_pseudo_sender_id` and to injected
+    `build_sender_id=` lambdas for other helpers. The function was unguarded, which is a
+    third state — not correct, not broken, just unwatched.
+    """
+
+    def test_serves_the_bridge_value_verbatim( self ):
+        bridge = { "sender_id": "claude.code@lupin.deepily.ai#abcd1234", "cwd": "/anything" }
+        self.assertEqual(
+            _sender_id_for_bridge( "abcd1234", bridge ),
+            "claude.code@lupin.deepily.ai#abcd1234",
+        )
+
+    def test_a_worktree_cwd_no_longer_manufactures_a_basename_identity( self ):
+        """
+        THE REGRESSION GUARD. This bridge is the shape that produced the duplicate rail
+        rows: a real worktree path, no sender_id. The old code answered
+        `claude.code@seat-cc-author-rio-1.deepily.ai#abcd1234` from the basename. The
+        contract now is None — a seat the server cannot address, said out loud.
+        """
+        bridge = { "cwd": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/.claude/worktrees/seat-cc-author-rio-1" }
+        result = _sender_id_for_bridge( "abcd1234", bridge )
+        self.assertIsNone( result )
+        # Pinned explicitly: not merely falsy, and never the basename in any form.
+        self.assertNotIn( "seat-cc-author-rio-1", str( result ) )
+
+    def test_absent_key_is_none( self ):
+        self.assertIsNone( _sender_id_for_bridge( "abcd1234", { } ) )
+
+    def test_empty_string_is_none_not_an_empty_sender_id( self ):
+        self.assertIsNone( _sender_id_for_bridge( "abcd1234", { "sender_id": "" } ) )
+
+    def test_non_string_is_none( self ):
+        """Foreign data: any key may be wrong-typed, and a non-string must not be served."""
+        for bad in ( 123, [ "x" ], { "a": 1 }, True, None ):
+            with self.subTest( value=bad ):
+                self.assertIsNone( _sender_id_for_bridge( "abcd1234", { "sender_id": bad } ) )
+
+    def test_never_returns_a_sentinel_string( self ):
+        """
+        "unknown" has no "#", so `sessionHashOf` returns null on the phone, the hash-merge
+        never fires, and every unidentified seat collapses onto ONE bogus rail row — a
+        fresh duplicate-shaped defect in the surface this function exists to fix. The
+        absence must be None, which the phone already skips.
+        """
+        for bridge in ( { }, { "sender_id": "" }, { "cwd": "/some/host/path" } ):
+            with self.subTest( bridge=bridge ):
+                self.assertIsNone( _sender_id_for_bridge( "abcd1234", bridge ) )
 
 
 if __name__ == "__main__":

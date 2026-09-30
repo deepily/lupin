@@ -1,0 +1,251 @@
+/* ============================================================================
+   Parity B-2 — submit-jobs-pane stylesheet.
+
+   Ported from `static/css/notifications.css` (`.job-submit-card*`, `.stt-button`)
+   and from the INLINE `style=` attributes on legacy's own markup, which no
+   stylesheet carries at all — the same two-source split the Q&A pane had. A
+   sheet built from the CSS alone would leave every control unstyled, and a grep
+   of the stylesheets would report those rules absent rather than inline.
+
+   🔴 THE `.collapsed` RULE IS LOAD-BEARING, AND THE MULTIPLEXER HAS NONE.
+   Legacy's `.section-content.collapsed` lives in notifications.css, which this
+   page does not link. The three card bodies ship carrying `.collapsed` (B9), so
+   without a rule here all three would render OPEN — a card that says it is
+   collapsed and is not. Measured before writing this: the only `.collapsed`
+   rules in sheets this page links are `jobs-pane.css` and
+   `commons-activity.css`, both scoped to their own ids.
+
+   Scope-leak protection (the convention jobs-pane and action-required set,
+   enforced by a stylelint override in .stylelintrc.json): NO global selectors.
+   Every rule below is scoped under `#submit-jobs-pane`.
+   ========================================================================= */
+
+/* ── The cards ───────────────────────────────────────────────────────────
+   notifications.css `.job-submit-card` and its header. */
+#submit-jobs-pane .job-submit-card {
+  border: 1px solid #dee2e6;
+  border-radius: 6px;
+  margin-bottom: 10px;
+  background: #fff;
+}
+
+#submit-jobs-pane .job-submit-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background-color 0.2s;
+}
+
+#submit-jobs-pane .job-submit-card-header:hover {
+  background-color: rgb(0, 0, 0, 0.03);
+}
+
+#submit-jobs-pane .job-submit-card-header h4 {
+  margin: 0;
+  font-size: 14px;
+  color: #495057;
+}
+
+#submit-jobs-pane .job-submit-card .section-content {
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+/* 🔴 THE COLLAPSE ITSELF. See the file header: nothing else on this page
+   defines it, and the three toggling cards ship with this class on. */
+#submit-jobs-pane .job-submit-card .section-content.collapsed {
+  display: none;
+}
+
+/* ── Controls ────────────────────────────────────────────────────────────
+   Legacy's inline styles, written out. The text-entry controls take the card's
+   full width; the selects and number input keep their natural size. */
+#submit-jobs-pane label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #495057;
+  cursor: pointer;
+}
+
+#submit-jobs-pane select,
+#submit-jobs-pane input[type="text"],
+#submit-jobs-pane input[type="number"],
+#submit-jobs-pane input[type="datetime-local"],
+#submit-jobs-pane textarea {
+  padding: 8px;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+#submit-jobs-pane textarea {
+  width: 100%;
+  resize: vertical;
+  font-family: monospace;
+}
+
+#submit-jobs-pane #research-topic,
+#submit-jobs-pane #test-suite-file-path,
+#submit-jobs-pane #test-suite-pytest-args {
+  width: 100%;
+}
+
+#submit-jobs-pane #research-budget {
+  width: 80px;
+}
+
+/* A hidden control must not be laid out by the flex container above, so the
+   attribute gets an explicit rule — `display:flex`/`inline-flex` otherwise beats
+   `hidden`. Applies to both conditional rows and every schedule time input. */
+#submit-jobs-pane [hidden] {
+  display: none;
+}
+
+/* ── The 🎤 ──────────────────────────────────────────────────────────────
+   notifications.css `.stt-button`. Distinct from the Q&A pane's
+   `.qa-stt-button`: legacy gives the two a different radius, font size and
+   min-width, and they are not the same class there either. */
+#submit-jobs-pane .stt-button {
+  padding: 8px 12px;
+  border: 2px solid #007bff;
+  border-radius: 8px;
+  background: #fff;
+  color: #007bff;
+  cursor: pointer;
+  font-size: 16px;
+  min-width: 70px;
+}
+
+#submit-jobs-pane .stt-button:hover:not(:disabled) {
+  background-color: #e7f3ff;
+}
+
+#submit-jobs-pane .stt-button:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgb(0, 123, 255, 0.4);
+}
+
+#submit-jobs-pane .stt-button.recording {
+  background-color: #dc3545;
+  border-color: #dc3545;
+  color: #fff;
+  animation: submit-jobs-mic-pulse 1s ease-in-out infinite;
+}
+
+#submit-jobs-pane .stt-button.processing {
+  background-color: #ffc107;
+  border-color: #ffc107;
+  color: #fff;
+  cursor: wait;
+  animation: submit-jobs-mic-pulse 1s ease-in-out infinite;
+}
+
+/* Legacy's `@keyframes pulse`, which lives in notifications.css and is therefore
+   NOT loaded by this page — the same trap the Q&A sheet documents. Prefixed
+   because a keyframe name is global whatever selector uses it, matching
+   `ar-pause-pulse` and `cc-strip-icon-pulse` in this directory. */
+@keyframes submit-jobs-mic-pulse {
+  0%,
+  100% { opacity: 1; }
+  50%  { opacity: 0.6; }
+}
+
+/* ── Submit buttons ──────────────────────────────────────────────────────
+   Legacy gives each card's button its own colour, inline. */
+#submit-jobs-pane .job-submit-card button:not(.toggle-button, .stt-button) {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 500;
+  color: #fff;
+}
+
+#submit-jobs-pane #cc-submit                { background: #007bff; }
+#submit-jobs-pane #submit-research-job      { background: #28a745; }
+#submit-jobs-pane #submit-test-suite-job    { background: #17a2b8; }
+#submit-jobs-pane #submit-tfe-resume-job {
+  background: #f0ad4e;
+  color: #000;
+}
+
+#submit-jobs-pane .job-submit-card button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* The in-button spinner. `spin` is NOT redefined: it lives in lupin-base.css,
+   which multiplexer.html links first — measured, not assumed. */
+#submit-jobs-pane .loading {
+  display: inline-block;
+  margin-left: 10px;
+}
+
+#submit-jobs-pane .spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid #f3f3f3;
+  border-top: 2px solid #fff;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+/* ── Status lines and the schedule row ───────────────────────────────────
+   The colour is written by the renderer from the store, so no colour here —
+   two writers on one property is how one of them silently loses. */
+#submit-jobs-pane .job-submit-status {
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+#submit-jobs-pane .schedule-section {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding-top: 4px;
+}
+
+/* ── The TFE disambiguation list ─────────────────────────────────────────
+   NEW SURFACE: legacy builds these rows with inline styles inside an innerHTML
+   string. The rows are clickable, so they read as clickable. */
+#submit-jobs-pane .tfe-resume-candidates {
+  width: 100%;
+  margin-top: 8px;
+}
+
+#submit-jobs-pane .tfe-resume-candidates-intro {
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 4px;
+}
+
+#submit-jobs-pane .tfe-resume-candidate {
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  padding: 8px;
+  margin-bottom: 4px;
+  cursor: pointer;
+}
+
+#submit-jobs-pane .tfe-resume-candidate:hover {
+  background-color: #f8f9fa;
+}
+
+#submit-jobs-pane .tfe-resume-candidate-stalled {
+  color: #888;
+}
+
+#submit-jobs-pane .tfe-resume-candidate-detail {
+  font-size: 11px;
+  color: #666;
+}

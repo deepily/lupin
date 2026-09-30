@@ -1,0 +1,556 @@
+"""
+memento_slot.py — prove a memento is AT THE SLOT, not merely at the path you named
+(row 8068c65e).
+
+THE DEFECT THIS CLOSES. `self_respin` verified the memento BY THE PATH THE CALLER
+HANDED IT. Its check therefore answered "does the file you named exist, and is it
+fresh?" — a question whose success criterion is supplied by the same caller whose
+mistake it is meant to catch. It is trivially true of a wrong path, so it cannot
+fail on the thing that actually goes wrong: the memento sitting somewhere no reader
+looks. Two seats hit it in one afternoon (Pocholo 📣 at `--slot root` when the reap
+reads `--slot io`; Tiberius 👑 at a bare `~/.claude/mementos/<persona>-<sid>-memento.md`
+that is neither slot nor a well-formed mirror), and on the self-respin path NOTHING
+reported it — `dismiss_sessions` runs a real memento proof and raises `memento_alarm`;
+`self_respin` ran no equivalent.
+
+WHAT A CORRECT CHECK MUST DO, and it is the whole design: DERIVE the location from
+the seat's identity and look THERE. The caller's path is then evidence to be
+CHECKED, never the criterion. Both legs below can fail; the old check could not.
+
+  LEG 1 — PLACEMENT. The caller's `memento_path` must resolve to one of exactly two
+  files, both derived from ( repo_root, persona, session_id, slot ) and neither taken
+  from the caller: the slot POINTER, or the slot RECORD for THIS persona and THIS
+  session. Anything else aborts, naming both acceptable targets so the seat can fix
+  it rather than guess.
+
+  LEG 2 — THE REAP'S OWN PROOF, run against the DERIVED pointer path. This is
+  literally `reap_memento.verify_seat_memento` — the predicate `dismiss_sessions`
+  already runs — so the two doors ask the same question and a memento that would
+  fail a reap can no longer pass a self-respin. It is deliberately NOT a
+  reimplementation: a second copy of a predicate is a second thing to drift.
+
+WHY LEG 2 IS NOT REDUNDANT WITH LEG 1 — and THE REASON HAS CHANGED, so read this one
+rather than the story you may remember. The case that originally motivated leg 2 was
+cross-persona theft: the root pointer used to be `.claude-memento.md`, PERSONA-LESS,
+one file shared by every seat in the repo. Measured 2026-08-30: Pocholo wrote
+`--slot root` at 14:41 and his record took the pointer; Mr. Radio wrote at 15:20 and
+took it back. That failure is now DEAD BY CONSTRUCTION — `slot_pointer_path` is
+persona-scoped (see its own Ensures, and the LAYOUT table below), so two personas can
+no longer contend for one pointer.
+
+LEG 2 STILL EARNS ITS PLACE, FOR A DIFFERENT REASON: A PERSONA OUTLIVES ITS SESSIONS.
+`.claude-memento-maria.md` is written by one session of María's and then followed by
+the NEXT session of María's, so a stale pointer resolves to a record whose header
+`session_id` is not the reader's. A seat's record can therefore sit correctly at its
+own derived path (leg 1 passes) while the pointer a naive reader follows names an
+EARLIER SESSION OF THE SAME PERSONA. Leg 2 catches exactly that, because the
+pointer's resolved record carries a header `session_id` and it will not be this
+seat's — the same catch as before, against a collision that is now temporal rather
+than cross-persona.
+
+⚠️ FIX THE PREMISE, KEEP THE LEG. A correct conclusion resting on a retired premise is
+how somebody deletes this check next time, having correctly observed that the reason
+its docstring gives no longer happens.
+
+LAYOUT — mirrors `planning-is-prompting → workflow/scripts/memento_io.py`, which is
+the WRITER and the single authority on where a memento goes. This module derives the
+same paths so it can look where the writer puts things; it never writes.
+
+    slot=io    POINTER  io/mementos/<persona>.md
+               RECORD   io/mementos/<persona>-<sid8>.md
+    slot=root  POINTER  .claude-memento-<persona>.md
+               RECORD   .claude-memento-<persona>-<sid8>.md
+
+BOTH POINTERS ARE PERSONA-SCOPED. The legacy shared root name `.claude-memento.md` is
+RETIRED — the writer no longer maintains it, so it can only ever be stale, and there is
+deliberately NO fallback onto it (`slot_pointer_path` raises rather than guess).
+
+WHICH SLOT BELONGS TO WHICH DOOR is settled doctrine, not a choice made here:
+`reap_memento`'s module docstring records it — a reap reads `io` (the manager reaps
+seats it SPAWNED), a self-respin reads `root` (a manager clears its OWN pane). The
+drift this module repairs is that `self_respin_core` had no concept of a slot at all,
+so the doctrine named a location and the code checked none.
+
+`~/.claude/mementos` IS a legitimate second home — as memento_io's MIRROR_HOME — but
+only at `~/.claude/mementos/<repo>/<record-path-relative-to-repo-root>`. A file at its
+bare top has no repo segment and is not a mirror; it is a stray, and this module
+refuses it as one.
+
+PURITY: every seam (clock, file read, repo-root resolution) is injected, so both legs
+are unit-provable with fakes and no repo, no git, and no live server.
+"""
+
+import os
+
+from pathlib import Path
+
+from lupin_mcp.memento_repo_root     import (
+    SLOT_IO,
+    SLOT_ROOT,
+    repo_root_owning,
+    slot_base_root,
+)
+from lupin_mcp.persona_normalization import persona_slug
+from lupin_mcp.reap_memento          import (
+    DEFAULT_MIN_BYTES,
+    DEFAULT_WINDOW_SECONDS,
+    verify_seat_memento,
+)
+
+
+# SLOT_IO / SLOT_ROOT are RE-EXPORTED from memento_repo_root, which is where the
+# slot -> base-dir rule lives. Defined in one place so the literal and the rule that
+# consumes it cannot drift apart; the names stay importable from here because every
+# existing caller reaches for them at this address.
+
+# The self-respin door's slot. Named rather than inlined so the coupling to
+# reap_memento's `io` is visible as a DELIBERATE disjointness, not a coincidence.
+SELF_RESPIN_SLOT = SLOT_ROOT
+
+# memento_io's MIRROR_HOME. Duplicated here DELIBERATELY rather than imported: memento_io
+# lives in the planning-is-prompting repo and is not importable from this one, and the
+# alternative — saying nothing — is what let a seat write here and be told only that its
+# path was "neither" of two others. Used for ONE thing: recognising the single most
+# plausible wrong destination so the abort can say WHY it is wrong (Tiberius, who wrote
+# here and had no reason to think it wrong).
+MIRROR_HOME = Path.home() / ".claude" / "mementos"
+
+
+def mirror_home_clause( memento_path ):
+    """
+    The extra sentence an abort earns when the caller's path is under the MIRROR home.
+
+    WHY THIS EXISTS AND WHY IT IS CONDITIONAL. The abort message is the only text a seat
+    in this situation actually reads — Tiberius wrote to `~/.claude/mementos/<persona>-<sid>-memento.md`
+    without consulting the docs, because that directory looks exactly like where mementos
+    go. It IS a memento directory: it is memento_io's out-of-repo MIRROR. What makes his
+    file wrong is not the directory but the missing `<repo>/<record-path>` beneath it.
+    Telling him "neither of these two paths" leaves that unsaid; telling him it is the
+    mirror closes it.
+
+    It fires ONLY for this one destination rather than being appended always, so the
+    message stays short for every other wrong path. A message that explains every case
+    is a message nobody finishes reading.
+
+    Requires:
+        - memento_path is the caller-supplied path (any type; garbage compares False)
+
+    Ensures:
+        - a leading-space sentence naming ~/.claude/mementos as the MIRROR when
+          `memento_path` is INSIDE it, and "" otherwise
+        - never raises — an unresolvable path yields ""
+    """
+    try:
+        resolved = Path( os.path.realpath( str( memento_path ) ) )
+    except ( OSError, ValueError, TypeError ):
+        return ""
+    if not resolved.is_relative_to( os.path.realpath( MIRROR_HOME ) ):
+        return ""
+    return (
+        f" NOTE: {MIRROR_HOME} is memento_io's out-of-repo MIRROR, not a slot — a mirror lives at "
+        f"<mirror_home>/<repo>/<record-path>, so a file at its bare top is neither slot nor mirror."
+    )
+
+
+
+def slot_pointer_path( repo_root, persona, slot=SELF_RESPIN_SLOT ):
+    """
+    The mutable POINTER file for a slot — what a naive reader follows.
+
+    Requires:
+        - repo_root is the seat's own repo root; persona is its persona name
+        - slot is SLOT_IO or SLOT_ROOT
+
+    🔴 THE ROOT POINTER IS PER-PERSONA NOW, AND THIS LINE BROKE EVERY SEAT'S RE-SPIN.
+    It returned the persona-LESS `.claude-memento.md` — correct until 2026-09-02, when
+    Step 3 (`planning-is-prompting@00fac2b`, Rick's authorisation) made `memento_io`'s
+    writer produce `.claude-memento-<persona-slug>.md` instead.
+
+    The two `/plan-memento` command documents were moved in that same change, which is
+    the ordering rule row `8f5dc4df` states. THIS READER WAS MISSED — it is in a
+    different repo and nobody grepped for it. The result: `verify_memento_at_slot`
+    checked a file nothing writes any more, it aged past the freshness window, and every
+    `self_respin` aborted with "memento is stale". Found by hitting it, not by review.
+
+    ⚠️ IT FAILED SAFE, WHICH IS WHY IT WAS ONLY EXPENSIVE AND NOT DESTRUCTIVE. The verb
+    refuses rather than clearing into nothing, so no memento was lost — a seat simply
+    could not re-spin. That is the guard inside `self_respin` doing its job against a
+    defect in the code that calls it.
+
+    ⚠️ AND THIS IS NOW A SECOND STATEMENT OF THE WRITER'S LAYOUT, in a repo that cannot
+    import the writer. `memento_io.py` lives in planning-is-prompting and is invoked by
+    path, not imported, so this cannot read the rule from its source. The mitigation is
+    a test that pins this against the writer's ACTUAL OUTPUT rather than against a
+    remembered string — see `test_memento_slot_root_pointer_is_per_persona.py`. A copy
+    with a test that watches it is a copy that cannot drift silently.
+
+    Ensures:
+        - slot=io   -> <repo_root>/io/mementos/<persona-slug>.md
+        - slot=root -> <repo_root>/.claude-memento-<persona-slug>.md
+        - the slug is accent/punctuation/case-proof via persona_slug
+        - NO fallback to the legacy shared name: the writer no longer maintains it, so
+          it can only ever be stale, and a fallback onto a permanently-stale file is a
+          slower version of the bug this line just caused
+
+    Raises:
+        - ValueError on an unknown slot — never a silent fallback to one of them
+    """
+    root = Path( repo_root )
+    if slot == SLOT_IO:   return root / "io" / "mementos" / f"{persona_slug( persona )}.md"
+    if slot == SLOT_ROOT: return root / f".claude-memento-{persona_slug( persona )}.md"
+    raise ValueError( f"unknown memento slot {slot!r} — expected {SLOT_IO!r} or {SLOT_ROOT!r}" )
+
+
+# ── ONE DERIVATION OF THE SHORT SESSION ID (row 2dbf9618) ──────────────────────────
+#
+# THE TWO LEGS OF `verify_memento_at_slot` USED TO NORMALISE THE SAME VALUE DIFFERENTLY.
+# LEG 1 reached `slot_record_path`, which did `( sid8 or "" )[ :8 ].lower()`. LEG 2 passed
+# `( session_id or "" )[ :8 ]` with NO `.lower()`. One value, two derivations, in adjacent
+# lines of one function — the defect class that produced the row this comment cites, one
+# layer down from where the row found it.
+#
+# ⚠️ AND IT WAS LATENT, NOT LIVE — SAY SO RATHER THAN CLAIMING A KILL. Measured while
+# fixing it: LEG 2's callee `reap_memento.verify_seat_memento` case-folds BOTH sides itself
+# (its own comment explains why), so an uppercase id would have been folded there anyway.
+# Nothing was observed failing because of this. It is normalised here because leaving one
+# of two derivations alive underneath a fix aimed at the other is how the same bug comes
+# back wearing a different file's name — not because anybody was bitten by it.
+def short_sid( session_id ):
+    """
+    Requires:
+        - session_id is a string, or None
+    Ensures:
+        - returns the first 8 characters, lower-cased; "" for None or an empty string
+        - is the ONLY place this module shortens a session id, so no two callers can
+          disagree about case or length
+        - never raises
+    """
+    return ( session_id or "" )[ :8 ].lower()
+
+
+def slot_record_path( repo_root, persona, sid8, slot=SELF_RESPIN_SLOT ):
+    """
+    The IMMUTABLE RECORD file for a slot, for one persona and one session.
+
+    Requires:
+        - repo_root, persona as above; sid8 is the session id (only its first 8
+          characters are used, lower-cased — memento_io stamps `short_sid()`)
+        - slot is SLOT_IO or SLOT_ROOT
+
+    Ensures:
+        - slot=io   -> <repo_root>/io/mementos/<persona-slug>-<sid8>.md
+        - slot=root -> <repo_root>/.claude-memento-<persona-slug>-<sid8>.md
+
+    Raises:
+        - ValueError on an unknown slot
+    """
+    root  = Path( repo_root )
+    slug  = persona_slug( persona )
+    short = short_sid( sid8 )
+    if slot == SLOT_IO:   return root / "io" / "mementos" / f"{slug}-{short}.md"
+    if slot == SLOT_ROOT: return root / f".claude-memento-{slug}-{short}.md"
+    raise ValueError( f"unknown memento slot {slot!r} — expected {SLOT_IO!r} or {SLOT_ROOT!r}" )
+
+
+def resolve_repo_root( start=None, run_fn=None, slot=SELF_RESPIN_SLOT ):
+    """
+    The repo root that OWNS this seat's memento — the tree the writer writes to.
+
+    🔴 THIS DOCSTRING USED TO OPEN "resolved the way memento_io resolves it", AND
+    THAT SENTENCE WAS THE BUG (measured 2026-09-04). It was not resolved that way:
+    memento_io discriminates on `--git-dir` vs `--git-common-dir`, this called
+    `--show-toplevel` flat, and the two part company in exactly one case — a linked
+    worktree, where this returned the WORKTREE and the writer had already been fixed
+    to return the MAIN checkout. Receipt: 623 records in the main tree, 0 in the
+    worktree that self_respin was verifying against.
+
+    ⚠️ THE SENTENCE IS WHY THE JULY FIX NEVER ARRIVED. A claim of parity is a claim a
+    reader ACTS ON by not checking — the writer's row af0c5700 landed 2026-07-21 and
+    nobody compared the two implementations for six weeks, because this line said
+    there was nothing to compare. A wrong instruction gets caught the first time
+    somebody follows it; a wrong REASSURANCE disarms the person who would have caught
+    it. Keep the parity claim only as long as `memento_repo_root` keeps it, and it is
+    `test_the_memento_readers_resolve_the_writers_tree.py` that holds it, not prose.
+
+    Requires:
+        - start is a directory to resolve from (default: the process cwd)
+        - run_fn( argv, cwd ) -> stdout str, or None/raise when git cannot answer
+
+    🔴 AND IT WAS WRONG A SECOND TIME, FOR THE SLOT RATHER THAN THE COMMAND
+    (measured 2026-09-04, sha e387c92e). The fix above repointed this at
+    `repo_root_owning`, whose own first line calls itself "the repo root whose
+    `io/mementos/` is the canonical slot" — the **io** answer. This function's only
+    callers are `self_respin_core`, which reads the **root** slot. So a linked
+    worktree resolved to the MAIN checkout while the writer had put the root record
+    in the SEAT'S tree, and the two missed each other in the same one case as before.
+    It now takes a `slot` and delegates to `memento_repo_root.slot_base_root`, the
+    single definition both slots come from.
+
+    ⚠️ THE FIRST FIX WAS NOT WRONG — IT WAS SLOT-BLIND, and so was the guard written
+    with it: `test_the_memento_readers_resolve_the_writers_tree.py` compared every
+    reader against ONE transcription of the writer, `find_repo_root`, which is the io
+    rule. Every case it posed was an io case, so it certified the collapse as
+    universally correct and could not see a root record. A guard that never varies the
+    variable cannot fail on it.
+
+    Requires:
+        - slot is SLOT_IO or SLOT_ROOT (default: SELF_RESPIN_SLOT, i.e. `root`)
+
+    Ensures:
+        - slot == SLOT_ROOT -> a linked worktree resolves to ITSELF, matching the
+          writer's `find_seat_root`; every other shape is that tree's own
+          `--show-toplevel`, unchanged
+        - slot == SLOT_IO   -> a linked worktree collapses to the MAIN checkout,
+          matching the writer's `find_repo_root`, unchanged from the first fix
+        - returns None when git is unavailable, errors, or answers blank — the caller
+          REFUSES rather than guessing a root (reap_memento.seat_repo_root records why:
+          a guessed root does not fail to find a memento, it finds the WRONG one)
+        - never raises
+    """
+    cwd  = start if start is not None else os.getcwd()
+    root = slot_base_root( cwd, slot, run_fn=run_fn )
+    return str( root ) if root is not None else None
+
+
+def acceptable_slot_targets( repo_root, persona, sid8, slot=SELF_RESPIN_SLOT ):
+    """
+    Ensures: the two paths a seat's memento may legitimately BE for this slot —
+             ( pointer_path, record_path ). Both are DERIVED from identity; neither
+             is ever taken from the caller. That is the whole point of the check.
+    """
+    return (
+        slot_pointer_path( repo_root, persona, slot ),
+        slot_record_path( repo_root, persona, sid8, slot ),
+    )
+
+
+def _same_file( a, b ):
+    """
+    Ensures: True iff `a` and `b` name the same location after symlink + `..`
+             resolution — so a relative path, a `./` prefix, or a symlinked repo
+             root does not read as a wrong placement.
+             A path that cannot be resolved compares False rather than raising.
+    """
+    try:
+        return os.path.realpath( str( a ) ) == os.path.realpath( str( b ) )
+    except ( OSError, ValueError, TypeError ):
+        return False
+
+
+def stray_record_clause( repo_root, persona, session_id, slot=SELF_RESPIN_SLOT ):
+    """
+    Name the records this persona HAS on disk under some OTHER session id (row 2dbf9618).
+
+    Requires:
+        - repo_root, persona, slot as elsewhere in this module
+        - session_id is the seat's own id — its records are EXCLUDED from the result
+    Ensures:
+        - returns "" when nothing else of this persona's is present, so the ordinary
+          refusal is not padded with an empty finding
+        - otherwise returns a sentence naming up to three such files and the one thing
+          that most often explains them
+        - never raises: an unreadable directory yields ""
+
+    🔴 WHY THIS EXISTS, AND WHY IT MEASURES RATHER THAN HINTS. The refusal it decorates
+    told María her own memento — written ninety seconds earlier — was A PRIOR HOLDER'S.
+    That verdict was TRUE about the file it read and useless about her situation, because
+    the file she wanted was sitting in the same directory under a name derived from her
+    seat's TRANSIENT id. The refusal named one candidate id and she had two.
+
+    ⚠️ This does NOT assert that a stray record is the caller's. It reports what is on
+    disk and names the most common cause. A record left by a genuinely prior holder looks
+    identical from here, and saying otherwise would be inventing a fact from a filename —
+    which is the shape of the defect this whole row is about.
+    """
+    try:
+        probe = slot_record_path( repo_root, persona, "0" * 8, slot )
+        mine  = slot_record_path( repo_root, persona, session_id, slot ).name
+        stem  = probe.name[ : -len( "00000000.md" ) ]          # "<slug>-" for either slot
+        found = sorted( f.name for f in probe.parent.glob( f"{stem}*.md" ) if f.name != mine )
+    except ( OSError, ValueError ):
+        return ""
+
+    if not found:
+        return ""
+
+    shown = ", ".join( found[ :3 ] ) + ( f" (+{len( found ) - 3} more)" if len( found ) > 3 else "" )
+    return (
+        f" THIS PERSONA HAS {len( found )} OTHER RECORD(S) HERE: {shown}. If one of those is "
+        f"yours, it was most likely stamped with this seat's TRANSIENT id — "
+        f"`get_session_info().claude_code.session_id`, which changes at every /clear — "
+        f"instead of its stable id, `claude_code.stable_session_id`. Re-write it with "
+        f"`$PLANNING_IS_PROMPTING_ROOT/workflow/scripts/memento_io.py write --slot {slot}` "
+        f"with NO --session-id at all; that resolves the "
+        f"stable id from the bridge and is the only spelling the two cannot disagree about."
+    )
+
+
+def verify_memento_at_slot(
+    memento_path,
+    *,
+    repo_root,
+    persona,
+    session_id,
+    now,
+    read_text_fn,
+    slot           = SELF_RESPIN_SLOT,
+    window_seconds = DEFAULT_WINDOW_SECONDS,
+    min_bytes      = DEFAULT_MIN_BYTES,
+):
+    """
+    Prove this seat's memento is AT ITS SLOT — both legs, in order.
+
+    Requires:
+        - memento_path is the path the CALLER claims to have written + stamped
+        - repo_root is the seat's own repo root (None ⇒ refuse, never guess)
+        - persona, session_id identify the seat; now is an AWARE datetime
+        - read_text_fn( path ) -> file text, or None when unreadable
+        - slot is SLOT_IO or SLOT_ROOT
+
+    Ensures:
+        - ( False, reason ) when repo_root is missing/blank — refuses rather than
+          resolving a slot against a guessed root
+        - LEG 1 ( False, reason ) when memento_path resolves to neither the slot
+          pointer nor THIS persona+session's slot record; the reason names both
+          acceptable targets
+        - LEG 2 ( False, reason ) when the DERIVED pointer fails
+          reap_memento.verify_seat_memento — the same predicate dismiss_sessions
+          runs (byte floor, parseable header, header session_id == this seat,
+          aware + non-future + in-window written_at, pointer `current:` resolved)
+        - ( True, reason ) only when BOTH legs pass
+        - reads nothing but what read_text_fn returns; writes nothing; never raises
+          on an unknown slot reaching it through `slot` (that is a ValueError from
+          the path helpers, which is a programming error, not a seat's mistake)
+    """
+    if not repo_root or not str( repo_root ).strip():
+        return False, (
+            "cannot resolve this seat's repo root — refusing to check a memento slot against a "
+            "guessed root (a guessed root finds the WRONG memento, it does not fail to find one)"
+        )
+
+    pointer_path, record_path = acceptable_slot_targets( repo_root, persona, session_id, slot )
+
+    # LEG 1 — PLACEMENT. Derived targets vs the caller's claim.
+    if not ( _same_file( memento_path, pointer_path ) or _same_file( memento_path, record_path ) ):
+        return False, (
+            f"memento is not at this seat's {slot!r} slot: {memento_path} is neither "
+            f"{pointer_path} (the slot pointer) nor {record_path} (this session's record). "
+            f"Write it with `python3 $PLANNING_IS_PROMPTING_ROOT/workflow/scripts/memento_io.py write "
+            f"--slot {slot}`, which lands the record, the "
+            f"mirror AND the pointer in one operation."
+            + mirror_home_clause( memento_path )
+            + stray_record_clause( repo_root, persona, session_id, slot )
+        )
+
+    # LEG 2 — the reap's own proof, against the DERIVED pointer (never the caller's path).
+    ok, reason = verify_seat_memento(
+        str( pointer_path ),
+        short_sid( session_id ),   # row 2dbf9618 — the SAME derivation LEG 1 uses
+        now,
+        read_text_fn   = read_text_fn,
+        window_seconds = window_seconds,
+        min_bytes      = min_bytes,
+    )
+    if not ok:
+        return False, (
+            f"the {slot!r} slot pointer {pointer_path} fails the reap's memento proof: {reason}"
+            + stray_record_clause( repo_root, persona, session_id, slot )
+        )
+
+    return True, f"memento is at the {slot!r} slot and clears the reap's memento proof"
+
+
+def verify_memento_at_any_readable_slot(
+    memento_path,
+    *,
+    repo_root,
+    persona,
+    session_id,
+    now,
+    read_text_fn,
+    primary_slot      = SELF_RESPIN_SLOT,
+    fallback_slot     = SLOT_IO,
+    window_seconds    = DEFAULT_WINDOW_SECONDS,
+    min_bytes         = DEFAULT_MIN_BYTES,
+    verify_at_slot_fn = None,
+):
+    """
+    Prove this seat's memento is at EITHER readable slot — primary first (row e1e2c545).
+
+    THE DEFECT THIS CLOSES, and it is the MIRROR of the one `8068c65e` closed for the
+    reap. That row's finding was that "a parameter whose legal values are not all
+    readable is the tool's defect, not the seat's", and it gave the reap a root-record
+    fallback behind its io primary. `self_respin` never got the matching treatment, so
+    it read `root` alone. Measured 2026-09-26 with a positive control: a seat holding a
+    complete, fresh, session-matched memento at the `io` slot — the slot the reap
+    documents as ITS primary — could not self-respin at all. It had to write a SECOND
+    copy at `root` first, which is redundant work the tool was in a position to spare it.
+
+    ⚠️ WHAT WAS *NOT* WRONG, because an earlier cut of this row's plan said it was. The
+    refusal a real seat receives is already actionable: leg 1 of `verify_memento_at_slot`
+    names both acceptable root targets AND the exact `memento_io.py` command. The bare
+    "no memento at slot" reading that suggested otherwise came from a probe passing the
+    ROOT path as the caller's claim, which is not what a seat that wrote `io` passes. So
+    this is not a fix for a confusing message; it is a fix for redundant work.
+
+    WHY THIS DOES NOT CALL `reap_memento.verify_seat_memento_at_any_readable_slot`,
+    which is the obvious candidate and is the wrong shape for this door. That helper is
+    io-PRIMARY and its fallback reads the root RECORD, never the root POINTER — a rule
+    its own negative control enforces, because the root pointer used to be persona-less
+    and following it on a batch reap resolved every seat to whichever wrote last. This
+    door's primary is the root POINTER (persona-scoped since `slot_pointer_path` became
+    per-persona, so that collision is dead here). Calling that helper would invert the
+    primary and skip the pointer. Reuse is therefore of the PREDICATE — both legs of
+    `verify_memento_at_slot`, which itself runs `reap_memento.verify_seat_memento` — and
+    nothing is copied: the ordering logic below is the only new code, and the proof is
+    the same proof `dismiss_sessions` runs.
+
+    🔴 THE FRESHNESS WINDOW APPLIES AT BOTH SLOTS, and that is the property that keeps
+    this from reopening the row it closes. A fallback that skipped the window would undo
+    `8068c65e`: the original harm was an 88-minute-stale root record seeding a successor
+    with work already finished. Both legs run the same predicate with the same
+    `window_seconds`, so a stale memento is refused wherever it sits — never rescued by
+    the fallback. There is a test whose whole job is to fail if that stops being true.
+
+    Requires:
+        - memento_path is the path the CALLER claims to have written + stamped
+        - repo_root is the seat's own repo root; persona / session_id identify it
+        - now is an AWARE datetime; read_text_fn( path ) -> text or None
+        - primary_slot / fallback_slot are SLOT_IO or SLOT_ROOT and differ
+
+    Ensures:
+        - returns ( ok, reason ) — a 2-tuple, matching what `_default_verify_slot`'s
+          caller unpacks
+        - the primary slot is tried first and its success reason is returned unchanged
+        - a FALLBACK hit says so out loud, naming BOTH the slot that answered and the
+          slot the seat should have written to, and carrying both underlying reasons —
+          the reap's own rule, because a silent rescue teaches the fleet nothing and the
+          next seat repeats it
+        - on a total miss the PRIMARY's reason is returned, not the fallback's: the
+          primary is this door's documented destination, so its reason is the actionable
+          one (again mirroring the reap, which reports its io primary on a total miss)
+        - a stale, incomplete or foreign-session memento is refused at BOTH slots
+        - reads nothing but what read_text_fn returns; writes nothing
+    """
+    verify_at_slot_fn = verify_at_slot_fn if verify_at_slot_fn is not None else verify_memento_at_slot
+
+    def _at( slot ):
+        return verify_at_slot_fn(
+            memento_path, repo_root=repo_root, persona=persona, session_id=session_id,
+            now=now, read_text_fn=read_text_fn, slot=slot,
+            window_seconds=window_seconds, min_bytes=min_bytes,
+        )
+
+    ok, primary_reason = _at( primary_slot )
+    if ok:
+        return True, primary_reason
+
+    fallback_ok, fallback_reason = _at( fallback_slot )
+    if fallback_ok:
+        return True, (
+            f"found at the {fallback_slot!r} slot, not this door's {primary_slot!r} slot "
+            f"({primary_reason}) — usable, but write it with `--slot {primary_slot}` next time "
+            f"so this door finds it first: {fallback_reason}"
+        )
+
+    return False, primary_reason

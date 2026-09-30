@@ -149,6 +149,32 @@ def _get_all_prediction_logs( session_factory ):
 # TestPredictionEngineE2E — full cycle tests
 # ===========================================================================
 
+def _assert_reset_ok( response ):
+    """
+    Fail loudly when the prediction-engine reset did not actually happen.
+
+    Requires:
+        - response is the requests.Response from POST /api/prediction-engine/reset
+
+    Ensures:
+        - returns None on a 200 whose payload reports success
+        - raises AssertionError otherwise, naming the status and body
+
+    🔴 WHY THIS EXISTS. These six calls discarded their response. While the endpoint was an
+    unauthenticated GET that did not matter much — it essentially always worked. Once it
+    required a credential (row 2d6f2221), a bad or expired token would return 401 and the
+    table would simply not be cleared, silently, and the test would go on to run against
+    contaminated state. That is the failure this endpoint exists to prevent, arriving through
+    the door that was added to secure it. A call whose result nobody reads cannot tell a
+    no-op from a success.
+    """
+    assert response.status_code == 200, (
+        f"prediction-engine reset failed: {response.status_code} {response.text[ :200 ]}"
+    )
+    body = response.json()
+    assert body.get( "status" ) == "success", f"prediction-engine reset reported: {body}"
+
+
 class TestPredictionEngineE2E:
     """
     E2E tests for the predict-respond-record cycle.
@@ -174,7 +200,7 @@ class TestPredictionEngineE2E:
         self._get_db = get_db
 
     @pytest.fixture( autouse=True )
-    def clean_lancedb( self ):
+    def clean_lancedb( self, reset_auth_headers ):
         """
         Drop test LanceDB table and reset server-side PredictionEngine before each test.
 
@@ -189,12 +215,14 @@ class TestPredictionEngineE2E:
             (running as user) cannot drop the table due to permission denied.
         """
         # Server-side: drop test table + reset PredictionEngine singleton
-        requests.get( f"{BASE_URL}/api/prediction-engine/reset", params={ "drop_table": "true" } )
+        _assert_reset_ok( requests.post( f"{BASE_URL}/api/prediction-engine/reset",
+                       params={ "drop_table": "true" }, headers=reset_auth_headers ) )
 
         yield
 
         # Post-test cleanup: drop table + reset again
-        requests.get( f"{BASE_URL}/api/prediction-engine/reset", params={ "drop_table": "true" } )
+        _assert_reset_ok( requests.post( f"{BASE_URL}/api/prediction-engine/reset",
+                       params={ "drop_table": "true" }, headers=reset_auth_headers ) )
 
     def _send_and_respond( self, message, response_type, response_value,
                            timeout_seconds=10, response_options=None,
@@ -564,7 +592,7 @@ class TestPredictionEngineWarm:
         self._get_db = get_db
 
     @pytest.fixture( autouse=True )
-    def setup_prediction_engine( self ):
+    def setup_prediction_engine( self, reset_auth_headers ):
         """
         Reset server-side PredictionEngine singleton and clean test LanceDB table.
 
@@ -574,12 +602,14 @@ class TestPredictionEngineWarm:
             - No cross-test contamination from prior decisions
         """
         # Server-side: drop test table + reset PredictionEngine singleton
-        requests.get( f"{BASE_URL}/api/prediction-engine/reset", params={ "drop_table": "true" } )
+        _assert_reset_ok( requests.post( f"{BASE_URL}/api/prediction-engine/reset",
+                       params={ "drop_table": "true" }, headers=reset_auth_headers ) )
 
         yield
 
         # Post-test cleanup
-        requests.get( f"{BASE_URL}/api/prediction-engine/reset", params={ "drop_table": "true" } )
+        _assert_reset_ok( requests.post( f"{BASE_URL}/api/prediction-engine/reset",
+                       params={ "drop_table": "true" }, headers=reset_auth_headers ) )
 
     def _generate_embedding_http( self, text ):
         """

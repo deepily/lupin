@@ -223,3 +223,326 @@ def test_quiet_when_coverage_was_never_requested( tmp_path ):
     assert proc.returncode == 1, "this case needs a red run to be meaningful"
     assert BLOCK_HEADLINE not in proc.stderr, \
         f"fired on a run that never asked for coverage.\n--- stderr ---\n{proc.stderr}"
+
+
+# ---------------------------------------------------------------------------
+# It stays quiet when the table was suppressed ON PURPOSE
+#
+# This is the shape the repo's own tiers use. `coverage_opt_in_flags()` emits
+# `--cov --cov-report= --cov-fail-under=0 --cov-append` for every tier (row e2099400),
+# because the tiers APPEND to one data file and run-coverage-gate.sh renders the number
+# once, afterwards. Before this section existed the block fired on that sanctioned
+# invocation the moment a tier had any red, and told the reader the run "measured
+# nothing" while the whole frame had in fact been measured. Two seats hit it and read
+# it as a defect in their own run, which is the cost of a warning that cannot tell
+# "measured nothing" from "was told not to print".
+# ---------------------------------------------------------------------------
+
+TIER_FLAGS = ( "--cov", "--cov-report=", "--cov-fail-under=0", "--cov-append" )
+
+
+def _child_measured_files( suite_dir ):
+    """
+    Read the child's OWN coverage data back and return how many files it measured.
+
+    Requires:
+        - suite_dir is the directory _run used, so `.coverage-child` sits inside it
+
+    Ensures:
+        - returns an int, 0 when the file is absent or holds no measurement
+        - counts only files with at least one EXECUTED line, the same rule as the wrapper's
+          `_cov_measured_files` — under the tier flags `measured_files()` lists the whole
+          frame even when nothing ran, so counting it would make every `> 0` precondition
+          below pass vacuously (review RB-1)
+        - reads the CHILD's data file, never the parent's — see _run's note on why
+          these children are given their own COVERAGE_FILE
+    """
+    import coverage
+
+    path = os.path.join( suite_dir, ".coverage-child" )
+    if not os.path.exists( path ):
+        return 0
+    data = coverage.CoverageData( path )
+    data.read()
+    return sum( 1 for f in data.measured_files() if data.lines( f ) )
+
+
+def _child_listed_files( suite_dir ):
+    """
+    Return how many files the child's data file LISTS, executed or not.
+
+    Requires:
+        - suite_dir is the directory _run used
+
+    Ensures:
+        - returns `len( measured_files() )`, which under the tier flags includes every
+          unexecuted file in the frame; used only to prove a test really has that shape
+    """
+    import coverage
+
+    data = coverage.CoverageData( os.path.join( suite_dir, ".coverage-child" ) )
+    data.read()
+    return len( list( data.measured_files() ) )
+
+
+def _suite_that_imports_nothing_from_the_frame( tmp_path ):
+    """
+    Write a one-test red suite that touches no module under pyproject's coverage `source`.
+
+    Ensures:
+        - returns the directory path as a str
+        - under the tier flags, the child's data file lists the frame's files but executes
+          none of them — the RB-1 shape
+    """
+    d = tmp_path / "suite"
+    d.mkdir()
+    ( d / "test_probe.py" ).write_text( "def test_forced_red():\n    assert False, 'deliberate red'\n" )
+    return str( d )
+
+
+def test_a_deliberately_suppressed_table_is_not_reported_as_blindness( tmp_path ):
+    """
+    The repo's own tier flags against a red run. No table is printed, and that is correct
+    — `--cov-report=` asked for none. The block must not fire.
+
+    ⚠️ THE MEASUREMENT PRECONDITION IS ASSERTED FIRST, AND IT IS THE WHOLE TEST. Silence
+    alone would pass vacuously if the run had genuinely measured nothing — that is exactly
+    the case the block SHOULD fire on. What makes this a false positive rather than a
+    judgement call is that the data file is non-empty: the run measured, it simply did not
+    render.
+    """
+    suite = _suite( tmp_path, red=True )
+    proc  = _run( suite, *TIER_FLAGS )
+
+    assert proc.returncode == 1, f"this case needs a red run to be meaningful; got {proc.returncode}"
+    assert "coverage: platform" not in proc.stdout, \
+        "this case depends on NO table being printed; one appeared, so it is testing nothing"
+
+    measured = _child_measured_files( suite )
+    assert measured > 0, (
+        "the run measured nothing, so silence here would be WRONG rather than a false "
+        f"positive — this test would pass for the opposite reason. measured={measured}"
+    )
+
+    assert BLOCK_HEADLINE not in proc.stderr, (
+        f"fired on the repo's own tier flags, which suppress the table on purpose and "
+        f"measured {measured} files.\n--- stderr ---\n{proc.stderr}"
+    )
+
+
+def test_the_suppressed_run_still_says_not_to_cite_a_number_from_it( tmp_path ):
+    """
+    Quiet is not the same as saying nothing. You still cannot cite coverage from a run that
+    rendered none, so the note has to survive — it is the alarm and the false "measured
+    nothing" claim that go, not the guidance. Pinned separately from the silence above
+    because dropping the note entirely would still pass that test.
+    """
+    proc = _run( _suite( tmp_path, red=True ), *TIER_FLAGS )
+
+    assert "run-coverage-gate.sh" in proc.stderr, (
+        "the note must name the step that actually renders the number, or the reader is "
+        f"left knowing only that this run did not.\n--- stderr ---\n{proc.stderr}"
+    )
+
+
+def test_suppression_alone_does_not_excuse_the_other_blind_shapes( tmp_path ):
+    """
+    The narrowing is on `--cov-report=` ONLY. `--no-cov-on-fail` is a different cause with a
+    different remedy, and a run carrying BOTH is still genuinely blind — pytest-cov drops the
+    data, so there is nothing for the gate to render later.
+
+    This is the case that keeps the fix from becoming a blanket mute.
+
+    ⚠️ THE OBVIOUS DISCRIMINATOR DOES NOT WORK, AND THIS TEST IS WHERE THAT WAS MEASURED.
+    A first cut asserted `_child_measured_files( suite ) == 0` here, on the assumption that
+    `--no-cov-on-fail` discards the data as well as the report. It does not. Measured directly
+    afterwards, with the figure rather than the word: this flag combination against a red suite
+    wrote **249,856 bytes / 704 measured files**. So a data-file check cannot separate this case
+    from an ordinary suppressed-table run — the file is non-empty either way, and only the FLAG
+    separates them. That is why the wrapper branches on the flag and why the precedence between
+    the two flags had to be made explicit.
+
+    ⚠️ The failing assertion above showed only that the count was NOT ZERO; it never printed one.
+    Reporting that as "measured" was an inference dressed as a reading, and review caught it.
+    """
+    suite = _suite( tmp_path, red=True )
+    proc  = _run( suite, *TIER_FLAGS, "--no-cov-on-fail" )
+
+    assert proc.returncode == 1, "this case needs a red run to be meaningful"
+    assert BLOCK_HEADLINE in proc.stderr, (
+        f"went quiet on a genuinely blind run just because --cov-report= was present.\n"
+        f"--- stderr ---\n{proc.stderr}"
+    )
+    assert "--no-cov-on-fail was passed" in proc.stderr, (
+        "the block fired but did not name the flag as the cause — the named-cause branch is "
+        f"the most actionable thing in here and it must survive the narrowing.\n{proc.stderr}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Chloé 🗼's review of the first cut (row da5868df) — three findings, three pins.
+#
+# F1: the note claimed "Measurement still happened" WITHOUT LOOKING, which is the
+#     exact charge this file levels at the old block, pointing the other way. A
+#     false alarm gets investigated; a false reassurance does not.
+# F2: the same false join survived on the branch that was deliberately KEPT.
+# F3: the exact-match judgement was a judgement no test defended — her mutation
+#     widening it to the prefix form SURVIVED all 79 tests.
+# ---------------------------------------------------------------------------
+
+def test_a_suppressed_table_over_an_empty_data_file_is_not_called_measurement( tmp_path ):
+    """
+    F1. `--cov` scoped to code the run never imports measures NOTHING, and the suppressed-table
+    note must not reassure over it.
+
+    ⚠️ THE POINT IS THE DIRECTION OF THE ERROR. The old block's failure was loud and false; this
+    one would be quiet and false, and quiet is worse because nobody goes and checks it. The data
+    file DOES discriminate here — 0 against 704 — which is exactly why the check belongs on this
+    branch even though it is unavailable one branch over (see the --no-cov-on-fail test below).
+    """
+    suite = _suite( tmp_path, red=True )
+    proc  = _run( suite, "--cov=cosa.agents.deep_research.deep_research_job",
+                  "--cov-report=", "--cov-fail-under=0" )
+
+    assert _child_measured_files( suite ) == 0, (
+        "this case needs a genuinely dead scope; something was measured, so it is testing "
+        "the opposite of what it claims"
+    )
+    assert "Measurement did happen" not in proc.stderr, (
+        f"claimed measurement over an EMPTY data file — the false-reassurance shape.\n{proc.stderr}"
+    )
+    assert "0 files measured" in proc.stderr, (
+        f"went quiet instead of naming the empty data file.\n--- stderr ---\n{proc.stderr}"
+    )
+
+
+def test_the_no_cov_on_fail_block_says_the_report_was_dropped_not_that_nothing_was_measured( tmp_path ):
+    """
+    F2. `--no-cov-on-fail` drops the REPORT and still WRITES the data. The first cut measured
+    that, wrote it into a docstring, and left the block's prose saying the opposite.
+
+    Pinned separately from the block firing at all, because the block firing is correct here —
+    what was wrong was what it SAID once it fired.
+    """
+    suite = _suite( tmp_path, red=True )
+    proc  = _run( suite, *TIER_FLAGS, "--no-cov-on-fail" )
+
+    measured = _child_measured_files( suite )
+    assert measured > 0, (
+        f"this case assumes --no-cov-on-fail still writes data; it wrote {measured}, so the "
+        "assertion below would be testing something else"
+    )
+    assert "BUT THE DATA SURVIVED" in proc.stderr, (
+        f"the block still implies nothing was measured while {measured} files sit in "
+        f"COVERAGE_FILE.\n--- stderr ---\n{proc.stderr}"
+    )
+    # CHLOE's RESIDUAL, and the reason the assertion above was not enough. It is satisfied by
+    # an ADDITION: the block could print "measured nothing you can cite" AND "BUT THE DATA
+    # SURVIVED" and pass, which is exactly what it did -- the false sentence in the headline,
+    # the true one fifteen lines below. A correction that only appends leaves the wrong claim
+    # standing for every reader who stops at the summary. Pin the ABSENCE too.
+    assert "measured nothing you can cite" not in proc.stderr, (
+        f"the headline still says nothing was measured while {measured} files sit in "
+        f"COVERAGE_FILE. A later correction does not unsay it.\n--- stderr ---\n{proc.stderr}"
+    )
+    assert "do NOT re-run" in proc.stderr, (
+        "the remedy still says re-run, which under the tier architecture buys a number that is "
+        f"already on disk at the price of a full tier.\n--- stderr ---\n{proc.stderr}"
+    )
+
+
+def test_a_real_terminal_report_is_not_mistaken_for_a_suppressed_one( tmp_path ):
+    """
+    F3, and this is Chloé's mutation arm rather than mine. My pass widened the predicate to
+    `--cov-report` (no `=`), which the tests killed. Hers widened it to the PREFIX form a
+    well-meaning editor would actually write — `case "$a" in --cov-report=*)` — and it
+    SURVIVED all 79 tests.
+
+    The harm the survival hid: `--cov-report=term` REQUESTS a terminal report, and under the
+    prefix form it would be told no table was asked for. Exact match is the right judgement;
+    it simply had no test defending it, which is a different problem from being wrong.
+
+    ⚠️ Two harnesses aimed at one file found different arms. That — not a matching sha — is
+    the argument for a second harness.
+
+    🔴 IT TOOK TWO WRONG PINS TO REACH THIS ONE, AND THE REASON IS THE USEFUL PART.
+    Measured, with a suite that DOES import the measured module:
+
+        --cov-report=''      -> 0 table markers   (the guard proceeds)
+        --cov-report=term    -> 2
+        --cov-report=html    -> 1
+        --cov-report=xml     -> 1
+
+    Every NON-EMPTY report form prints coverage's `coverage: platform` header whenever there
+    is data, so `_cov_table_present` returns early and the predicate is never consulted. My
+    first pin used `term` and my second used `html`; both were unreachable, and her mutation
+    survived tests written specifically to catch it.
+
+    ⇒ On a run WITH data the prefix mutation is an EQUIVALENT mutant — unreachable, not
+    merely untested. The one reachable case needs BOTH a non-empty report form AND a scope
+    that measures nothing, because then there is no table to return early on. That is the
+    case below, and it is where exact-versus-prefix finally changes the output.
+
+    ⇒ A test aimed at the right BEHAVIOUR still misses if its input never reaches the code.
+    """
+    proc = _run( _suite( tmp_path, red=True ),
+                 "--cov=cosa.agents.deep_research.deep_research_job",
+                 f"--cov-report=html:{tmp_path}/htmlcov", "--cov-fail-under=0" )
+
+    assert "coverage: platform" not in proc.stdout, (
+        "this case needs a report that prints NO terminal table; one appeared, so the guard "
+        "returns early and the predicate under test is never reached"
+    )
+    assert "asked for none" not in proc.stderr, (
+        "treated an html report as a request for NO report. Exact match on '--cov-report=' is "
+        f"what keeps these apart.\n--- stderr ---\n{proc.stderr}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Review RB-1 on 638f6408 — the count the wrapper reports must be EXECUTED files.
+#
+# Under the tier flags, pyproject's directory `source` list makes coverage enter every
+# unexecuted file in the frame with an empty line set. `measured_files()` therefore lists
+# the whole frame (735 files, measured) even when a run executed nothing, and a count
+# built on it can never reach zero — so the "measured nothing" warning could never fire
+# on the one invocation shape the repo actually uses. The F1 test above missed this
+# because it used a narrow `--cov=<module>`, which does no source walk.
+# ---------------------------------------------------------------------------
+
+def test_tier_flags_over_a_run_that_executed_nothing_report_zero_measured( tmp_path ):
+    """
+    RB-1, the suppressed-table note. The tier flags, a red suite that imports nothing
+    from the frame: the note must name the empty measurement, not claim hundreds of files.
+    """
+    suite = _suite_that_imports_nothing_from_the_frame( tmp_path )
+    proc  = _run( suite, *TIER_FLAGS )
+
+    assert proc.returncode == 1, f"this case needs a red run to be meaningful; got {proc.returncode}\n{proc.stderr}"
+    assert _child_listed_files( suite ) > 0, (
+        "the data file lists no files, so this run did not reproduce the tier's source walk "
+        "and the assertions below would not reach the RB-1 shape"
+    )
+    assert _child_measured_files( suite ) == 0, "a frame file executed, so this is not a run that measured nothing"
+    assert "Measurement did happen" not in proc.stderr, (
+        f"counted listed-but-unexecuted files as measurement.\n--- stderr ---\n{proc.stderr}"
+    )
+    assert "0 files measured" in proc.stderr, (
+        f"did not name the empty measurement.\n--- stderr ---\n{proc.stderr}"
+    )
+
+
+def test_tier_flags_with_no_cov_on_fail_over_a_run_that_executed_nothing_do_not_say_data_survived( tmp_path ):
+    """
+    RB-1, the full block. The same counter decides its headline, so the same listed-only
+    data file must not produce "BUT THE DATA SURVIVED" when nothing was executed.
+    """
+    suite = _suite_that_imports_nothing_from_the_frame( tmp_path )
+    proc  = _run( suite, *TIER_FLAGS, "--no-cov-on-fail" )
+
+    assert proc.returncode == 1, f"this case needs a red run to be meaningful; got {proc.returncode}\n{proc.stderr}"
+    assert _child_listed_files( suite ) > 0, "the data file lists no files, so the RB-1 shape was not reproduced"
+    assert BLOCK_HEADLINE in proc.stderr, f"the block did not fire at all.\n--- stderr ---\n{proc.stderr}"
+    assert "BUT THE DATA SURVIVED" not in proc.stderr, (
+        f"claimed surviving data over a run that executed nothing.\n--- stderr ---\n{proc.stderr}"
+    )

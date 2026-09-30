@@ -5,7 +5,8 @@
 //      "adjective_animal" form mirroring `notifications.js:2134`).
 //   2. Construct AuthManager + ApiClient + transports via the Phase 2/3
 //      factories (no globals beyond the shared singletons EventBus + storage).
-//   3. Start QueueTransport + AudioTransport with the resolved session ID.
+//   3. Start QueueTransport + AudioTransport, each on its OWN session ID
+//      (transportSessionIds.ts — a shared id made the tab deaf to notifications).
 //   4. Attach DOM lifecycle listeners and emit the 5-event Lifecycle Emission
 //      Contract per design § "boot.ts Lifecycle Event Emission Contract".
 //
@@ -26,14 +27,20 @@
 import { eventBus } from "./shared/EventBus";
 import { storage } from "./shared/StorageService";
 import { createAuthManager } from "./auth/AuthManager";
-import { redirectToLoginIfUnauthenticated, logout } from "./auth/authGuard";
+import { redirectToLoginIfUnauthenticated, bounceToLoginOnDeadSession, logout } from "./auth/authGuard";
 import { createApiClient } from "./api/ApiClient";
 import { createTransports } from "./transport";
-import { createStores, DEFAULT_HISTORY_WINDOW_HOURS } from "./stores";
-import type { ServerSenderHydrationRecord, SchedulableAudioContext } from "./stores";
+import { createStores } from "./stores";
+import type { SchedulableAudioContext } from "./stores";
 import { createStripReconnectRehydrator } from "./stores/StripReconnectRehydrator";
+import { createSessionTranscriptStore } from "./stores/SessionTranscriptStore";
+import { createSessionTranscriptRoster } from "./stores/SessionTranscriptRoster";
+import { createColdHistoryHydration } from "./stores/coldHistoryHydration";
+import { effectiveHoursForQuery } from "./stores/historyWindow";
 import { wireNotificationTtsIntent } from "./wireTtsIntent";
 import { wireTtsPlayback } from "./wireTtsPlayback";
+import { wireQaMetrics } from "./wireQaMetrics";
+import { resolveTransportSessionIds } from "./shared/transportSessionIds";
 import {
   createNotificationsListRenderer,
   createNotificationsHeaderRenderer,
@@ -45,19 +52,47 @@ import {
   createSenderCardRecorderRenderer,
   createSessionStripRenderer,
   createReadingPaneRenderer,
+  createSessionTranscriptRenderer,
+  createSenderCardConsoleButtons,
   createCommonsActivityRenderer,
   createBroadcastCardRenderer,
+  createBroadcastAckTallyRenderer,
+  createFilterSettingsRenderer,
+  createFilterSettingsReveal,
   configureMetaDisplayCap,
   // Lane E full-parity quartet renderers.
   createTtsPreviewSliderRenderer,
   createMissedBadgeRenderer,
+  createListenerErrorRenderer,
   createFleetStatusRenderer,
   createTaskListRenderer,
+  createFinishedTasksRenderer,
+  createTimeSavedRenderer,
+  createSystemStatusRenderer,
+  createDebugPanelRenderer,
+  createDirectTtsRenderer,
+  createHoldingAreaRenderer,
+  createEpicBoardRenderer,
   createSectionToolbarRenderer,
   createNavBarRenderer,
   type TtsPreviewSliderRenderer,
 } from "./render";
-import { DEFAULT_TTS_FRACTION } from "./render/TtsPreviewSliderRenderer";
+import {
+  DEFAULT_TTS_FRACTION,
+  TTS_FRACTION_STORAGE_KEY,
+  TTS_FRACTION_STORAGE_SCHEMA,
+  resolveLiveFraction,
+  type SharedFractionStorage,
+} from "./render/TtsPreviewSliderRenderer";
+import { log as debugLog, error as debugError } from "./shared/debugSink";
+import { createDirectTtsPlayer } from "./audio/directTtsPlayback";
+import { TtsAudioCache } from "./audio/TtsAudioCache";
+import { apiPostTicket } from "./render/newTicketCard";
+import { createAbstractTooltip } from "./render/abstractTooltip";
+import { recordingManager } from "./audio/recordingManager";
+import { createQaPaneRenderer } from "./render/QaPaneRenderer";
+import { createSubmitJobsPaneRenderer } from "./render/SubmitJobsPaneRenderer";
+import { createActionRequiredMic } from "./render/actionRequiredMic";
 import type { BootCompletePayload, LifecyclePayload, SenderSortComparator } from "./shared/types";
 
 // Phase 6c Node D Step D5 — boot-injected sender sort comparator. Hoists any
@@ -145,12 +180,15 @@ function bootMultiplexer(): void {
   // and AuthManager refreshes it). `window.location` satisfies RedirectTarget.
   if (redirectToLoginIfUnauthenticated(storage, window.location)) return;
 
-  // Session ID: read or generate via StorageService (DC2).
-  let sessionId = storage.getSessionId();
-  if (sessionId === null) {
-    sessionId = generateSessionId();
-    storage.setSessionId(sessionId);
-  }
+  // ...and a token that is present but whose session is dead bounces on its first
+  // failed refresh, instead of leaving an empty inbox. Subscribed BEFORE AuthManager
+  // exists so no refresh can fail unheard.
+  bounceToLoginOnDeadSession(eventBus, storage, window.location);
+
+  // Session IDs: read or generate via StorageService (DC2), ONE PER SOCKET. The
+  // server keeps one socket + one subscription list per id, so a shared id let
+  // the audio socket overwrite the queue's subscriptions (row d2b1b59a).
+  const { queueSessionId, audioSessionId } = resolveTransportSessionIds(storage, generateSessionId);
 
   // AuthManager: production singleton wired to shared storage + bus.
   const authManager = createAuthManager({
@@ -198,8 +236,8 @@ function bootMultiplexer(): void {
   // Per D-D ratification 2026-05-04 PM (Option B):
   //   1. createTransports(...) — factory only; transports NOT started yet
   //   2. createStores(eventBus, storage, api) — stores subscribe via constructors
-  //   3. transports.queue.start(sessionId) — queue connects + handshakes
-  //   4. transports.audio.start(sessionId, audioStore.binaryHandler) — audio
+  //   3. transports.queue.start(queueSessionId) — queue connects + handshakes
+  //   4. transports.audio.start(audioSessionId, audioStore.binaryHandler) — audio
   //      connects with the production handler bound at start-time (never
   //      reaches the Phase 3 default debug logger; zero race window)
   // ---------------------------------------------------------------------
@@ -207,14 +245,46 @@ function bootMultiplexer(): void {
   const baseUrl    = buildWebSocketBaseUrl();
   const transports = createTransports(authManager, eventBus, baseUrl);
 
+  // Row aa13fdd7 — ONE reader for the live TTS fraction, declared here because
+  // BOTH consumers below need it: TtsQueueStore's 0%-means-silent gate (via
+  // createStores) and wireNotificationTtsIntent's preview cut. Two copies of this
+  // expression would be two places deciding one rule, and they agree only until
+  // someone edits one.
+  //
+  // `window.localStorage` throws in a private window with site data blocked, so the
+  // handle is resolved once behind try/catch; resolveLiveFraction treats null as
+  // "no shared key" and falls through to the slider.
+  let sharedTtsStorage: SharedFractionStorage | null = null;
+  try { sharedTtsStorage = window.localStorage; } catch { sharedTtsStorage = null; }
+  // Read at CALL time, never captured: `ttsPreviewSliderRenderer` is still null here
+  // (it mounts later, boot.ts:798) and the user can move the slider at any moment
+  // after that. The legacy page's shared key wins inside resolveLiveFraction, which
+  // is what lets a change made on the legacy client silence this one without a reload.
+  const readLiveTtsFraction = (): number => resolveLiveFraction(
+    sharedTtsStorage,
+    ttsPreviewSliderRenderer === null ? null : ttsPreviewSliderRenderer.getFraction(),
+    storage.getJSON<{ fraction: number }>(TTS_FRACTION_STORAGE_KEY, TTS_FRACTION_STORAGE_SCHEMA)?.fraction,
+    DEFAULT_TTS_FRACTION,
+  );
+
   const stores = createStores({
     eventBus,
     storage,
+    // Row aa13fdd7 — 0% means silent, gated inside TtsQueueStore.enqueue so every
+    // automatic producer is covered by one check rather than each remembering.
+    ttsLiveFraction     : readLiveTtsFraction,
     api                 : apiClient,
     // Phase 2 — the TaskList edit audit `actor` derives from the authenticated
     // user's identity (Q1). AuthManager is constructed above; its email claim is
     // stable across refresh, so reading it lazily per-edit is correct.
     actorProvider       : () => authManager.getCurrentUserEmail(),
+    // Parity B-1 — the `websocket_id` every v2 door is handed. Legacy sends its
+    // queueSessionId on the working ask paths (notifications.js:3165, :3174, :6953);
+    // §6a ruling 13 makes that the multiplexer's contract too.
+    qaSessionId         : () => queueSessionId,
+    // B-3 F3 — the admin gate on the view-mode switch. Read per-call, not captured:
+    // the token (and so the roles claim) can be refreshed after the stores are built.
+    isAdmin             : () => authManager.isCurrentUserAdmin(),
     audioContextFactory : (): SchedulableAudioContext => {
       // Production AudioContext factory. Browser autoplay policy may throw
       // if no user gesture preceded — AudioStore catches and emits
@@ -236,7 +306,63 @@ function bootMultiplexer(): void {
   // start, so a high/urgent frame arriving immediately after transport.start()
   // is captured (F13 ordering invariant). Page-lifetime subscription (like the
   // stores themselves); the returned unsubscriber is unused in boot.
-  wireNotificationTtsIntent(eventBus, stores.ttsQueue, () => Date.now());
+  //
+  // P0 (Rick's broadcast a090b845, 2026-09-10): the TTS preview slider governs what
+  // is SPOKEN. Until this wiring nothing on the speech path read it, so every
+  // notification played in full even with the slider at 0%. The settings are read
+  // at each arrival: the fraction from the legacy page's shared key first (so a
+  // change there applies without a reload), then this page's slider. The feature
+  // flag and minimum length come from /api/config/client, the endpoint legacy uses,
+  // with legacy's defaults (disabled, 100 chars) until it answers. A slider at 0
+  // skips speech regardless of the flag, as in legacy.
+  //
+  // The SAME fetch carries the app timezone (row 0e5bfa0e). Until 2026-09-17 no
+  // wire existed for it at all: `createNotificationsListRenderer` accepts an
+  // `appTimezone` option and this file never passed one, so every mux timestamp
+  // rendered in the BROWSER's local zone regardless of the INI. It cannot be a
+  // construction option either — boot is synchronous and this fetch is not, so
+  // the renderer always exists before the answer arrives. It is handed over when
+  // it lands, and `setAppTimezone` drops the render caches so the cards actually
+  // repaint. On a failed fetch nothing is handed over and the behaviour is
+  // exactly today's: browser-local.
+  const ttsPreviewConfig = { enabled: false, minChars: 100 };
+  // Parity B-2 J20 — the SAME fetch now also resolves the test-suite card's auto-fix
+  // box. §6 item 14 called for exactly this: the seam already existed and read only
+  // the TTS keys, while `test_fix_expediter_auto_fix_enabled` has been in this
+  // endpoint's payload all along (system.py). The box paints UNCHECKED until the
+  // answer lands — legacy's markup default — because a box that painted itself
+  // checked beforehand would be claiming a setting nobody had read yet. On a failed
+  // fetch it stays unchecked, which is that same default rather than a guess.
+  // Parity A-2 #4 — the SAME fetch also resolves which conversation-mode icon set the
+  // sender cards paint. `tts_interaction_mode` has been in this endpoint's payload all
+  // along (system.py:855) and legacy reads it from here (notifications.js:901); this seam
+  // simply never asked for it, so a host running SOLO showed the chorus glyphs.
+  //
+  // An unrecognised value falls back to "chorus", which is legacy's own
+  // `config.tts_interaction_mode || 'chorus'` and CoSA's fail-closed default. The cards
+  // paint chorus until the answer lands, for the same reason the auto-fix box paints
+  // unchecked: showing solo iconography before anyone has read the setting would claim a
+  // monopoly mode nobody has confirmed.
+  apiClient.get<{
+    tts_preview_enabled?                 : boolean;
+    tts_preview_min_chars?               : number;
+    app_timezone?                        : string;
+    test_fix_expediter_auto_fix_enabled? : boolean;
+    tts_interaction_mode?                : string;
+  }>("/api/config/client")
+    .then((c) => {
+      ttsPreviewConfig.enabled  = !!c.tts_preview_enabled;
+      ttsPreviewConfig.minChars = c.tts_preview_min_chars || 100;
+      if (c.app_timezone) renderer.setAppTimezone(c.app_timezone);
+      stores.submitJobs.setAutoFixDefault(!!c.test_fix_expediter_auto_fix_enabled);
+      renderer.setTtsInteractionMode(c.tts_interaction_mode === "solo" ? "solo" : "chorus");
+    })
+    .catch(() => { /* keep legacy's defaults: disabled, 100 chars, browser-local zone, chorus icons */ });
+  wireNotificationTtsIntent(eventBus, stores.ttsQueue, () => Date.now(), () => ({
+    fraction : readLiveTtsFraction(),
+    enabled  : ttsPreviewConfig.enabled,
+    minChars : ttsPreviewConfig.minChars,
+  }));
 
   // 4f14d38f — TTS playback request-initiation. When TtsQueueStore's active item
   // rolls to a NEW notification, POST its text to /api/get-speech-elevenlabs with
@@ -244,7 +370,18 @@ function bootMultiplexer(): void {
   // back over this session's /ws/audio → AudioStore plays → store_audio_ended →
   // TtsQueueStore.advance(). Registered before transports start so an item queued
   // immediately after connect still triggers a request. Page-lifetime subscription.
-  wireTtsPlayback(eventBus, stores.ttsQueue, apiClient, sessionId);
+  // Parity B-1 — the door is picked from AudioStore.ttsMode(), which the Q&A pane's
+  // #tts-mode select writes (§6a ruling 3). Passed as the store itself so the mode is
+  // read per request, never captured at wire time.
+  // Parity B-1b — `stores.qa` is handed in as the request observer: the TTFA clock
+  // starts inside this wire, immediately before the POST, which is where legacy
+  // stamps it ("Start timing BEFORE the fetch for accurate TTFA measurement").
+  wireTtsPlayback(eventBus, stores.ttsQueue, apiClient, audioSessionId, stores.audio, stores.qa);
+
+  // Parity B-1b — the other half of the same metric: the first decoded chunk of each
+  // utterance stamps TTFA and RTT together, as legacy's isFirstChunk branch does.
+  // Page-lifetime subscription, registered before transports start.
+  wireQaMetrics(eventBus, stores.qa);
 
   // =====================================================================
   // boot.ts MOUNT-SLOT CONVENTION (Lane A deliverable — multiplexer parity)
@@ -277,6 +414,50 @@ function bootMultiplexer(): void {
   // new slot goes ABOVE `attachLifecycleListeners()` / `transports.*.start`.
   // =====================================================================
 
+  // Lane B WP2 — CC-session strip renderer. CONSTRUCTED here (mounted later, in
+  // its original slot below) because the notifications-list renderer asks it,
+  // for every card it inserts, whether that card is focus-hidden (P0 8cb5c22e).
+  // Construction subscribes to nothing and touches no DOM.
+  // Row d04ff119: the notification store lets the strip count unread arrivals
+  // from sessions hidden by focus. Storage is left to its localStorage default.
+  // Row 27760534 — the live CC console. The transcript store and the roster subscribe to
+  // `auth_success` in their constructors, so both are built here, well before the queue
+  // transport starts. The store is the queue socket's FIRST caller of `send()` from outside
+  // transport/ (plan §4, Tiberius B4). The renderer is constructed now so the sender-card
+  // console button can call it, and mounted beside the reading pane below.
+  const sessionTranscriptStore = createSessionTranscriptStore({
+    bus  : eventBus,
+    api  : apiClient,
+    send : (envelope) => transports.queue.send(envelope),
+  });
+  const sessionTranscriptRoster = createSessionTranscriptRoster({
+    bus     : eventBus,
+    api     : apiClient,
+    isAdmin : () => authManager.isCurrentUserAdmin(),
+  });
+  const sessionTranscriptRenderer = createSessionTranscriptRenderer({
+    eventBus,
+    stores : { transcript: sessionTranscriptStore, readingPane: stores.readingPane },
+  });
+  // Rick's placement ruling, 2026-09-28: the console button sits in each sender card's
+  // title bar, left of the persona chip — not on the strip chip. Mounted beside the card
+  // recorder below, on the same #sender-cards-container. And it TOGGLES, like a document's
+  // abstract indicator (Rick, 2026-09-28): toggleSeat decides open / switch / close, and
+  // showingSeat is what paints the button pressed.
+  const senderCardConsoleButtons = createSenderCardConsoleButtons({
+    eventBus,
+    affordance : {
+      resolve : (senderId, personaName) => sessionTranscriptRoster.resolve({ senderId, personaName }),
+      open    : (ccSessionId, title) => { sessionTranscriptRenderer.toggleSeat(ccSessionId, title); },
+      showing : () => sessionTranscriptRenderer.showingSeat(),
+    },
+  });
+
+  const sessionStripRenderer = createSessionStripRenderer({
+    eventBus,
+    stores : { strip: stores.sessionStrip, notifications: stores.notifications },
+  });
+
   // Phase 5 — notifications-list renderer mounts BEFORE transports start
   // (per F13 ordering invariant): subscribe to store_*_changed events first
   // so any frame arriving immediately after transport.start() is captured by
@@ -298,10 +479,40 @@ function bootMultiplexer(): void {
     // Phase 6c Node D Step D5 — inject the conversation-mode-aware sort
     // BEFORE first render so the initial paint already respects pin priority.
     senderSortComparator : phase6cSenderSort,
+    // S2a–d / S3 (2026-09-10) — sender-card header controls (📋 · ✨ · rename ·
+    // × delete-all) and the per-date × delete. The email is read at click time.
+    api                  : apiClient,
+    getUserEmail         : () => authManager.getCurrentUserEmail(),
+    // P0 8cb5c22e — a card goes in already focus-hidden (legacy flags at creation,
+    // notifications.js:19004), so a message from another persona never flashes
+    // every card visible. The strip decides; this renderer only asks.
+    isCardFocusHidden    : (senderId) => sessionStripRenderer.isCardFocusHidden(senderId),
   });
   const mountEl = document.getElementById("notifications-pane");
   if (mountEl === null) throw new Error("multiplexer: #notifications-pane not found");
   renderer.mount(mountEl);
+
+  // Parity A-2 #11 — ONE reveal for BOTH filter badges (the notifications header's and
+  // the jobs pane's). Legacy gives them a single handler, showAndScrollToFilterPanel
+  // (notifications.js:6364-6384); two copies here would be two places for it to drift.
+  //
+  // showSection persists the visibility, clears `.section-hidden` + `hidden`, and
+  // re-lights the ⚙️ button — and it is documented as deliberately NOT scrolling, so
+  // the scroll is the caller's, through the A-0 shared helper. That split is why this
+  // thunk exists rather than a bare showSection reference at each badge.
+  //
+  // ⚠️ THE BODY LIVES IN `render/filterSettingsReveal.ts`, NOT HERE, AND THAT IS THE
+  // POINT. It was an inline arrow on this spot, where no test could reach it — boot runs
+  // at import and exports nothing — so emptying its body killed nothing (María 🌸's
+  // surviving mutant, 2026-09-23). Extracted, the real function is driven by real tests.
+  // What remains on this line is the WIRING, which the boot source pin guards.
+  //
+  // `toolbar` is a thunk because `sectionToolbarRenderer` is constructed ~45 lines BELOW
+  // this one (A-2 #2b put it there for its own reason). Deferring the read to call time
+  // states that explicitly rather than leaning on "a click happens later".
+  const revealFilterSettings = createFilterSettingsReveal({
+    toolbar : () => sectionToolbarRenderer,
+  });
 
   // B3 (01-C) — notifications section-header (count · history-dropdown · clear-all).
   // Mounts ABOVE the notifications-list pane. Owns the clear-all orchestration
@@ -309,8 +520,12 @@ function bootMultiplexer(): void {
   // → store.removeByIdHashes(successes)); reuses the generic ApiClient.delete<T>.
   const notificationsHeaderRenderer = createNotificationsHeaderRenderer({
     eventBus,
-    store : stores.notifications,
-    api   : apiClient,
+    store   : stores.notifications,
+    api     : apiClient,
+    // Row 98305d96 — legacy shows its filter badge and switch to admins only.
+    isAdmin : () => authManager.isCurrentUserAdmin(),
+    // Parity A-2 #11 — the badge reveals Queue Filter Settings.
+    revealFilterSettings,
   });
   const notificationsHeaderMountEl = document.getElementById("notifications-header-mount");
   if (notificationsHeaderMountEl === null) throw new Error("multiplexer: #notifications-header-mount not found");
@@ -332,7 +547,15 @@ function bootMultiplexer(): void {
     api         : apiClient,
     // W5 — the WS/session id sent as `websocket_id` in the per-job retry POST so
     // the server routes the re-queued job's events back to this client.
-    websocketId : sessionId,
+    websocketId : queueSessionId,
+    // Row 83c3ff74 — legacy's single Mine / Not Mine / All Users control: the jobs pane reads and
+    // sets the SAME mode as the notifications header, and an admin's "Mine" names their uid.
+    filterStore         : stores.notifications,
+    isAdmin             : () => authManager.isCurrentUserAdmin(),
+    getCurrentUserId    : () => authManager.getCurrentUserId(),
+    getCurrentUserEmail : () => authManager.getCurrentUserEmail(),
+    // Parity A-2 #11 — the same reveal the notifications badge uses.
+    revealFilterSettings,
   });
   const jobsMountEl = document.getElementById("jobs-pane");
   if (jobsMountEl === null) throw new Error("multiplexer: #jobs-pane not found");
@@ -342,9 +565,19 @@ function bootMultiplexer(): void {
   // ordering. Claims `dataset.phase6bOwner="true"` on the mount surface so
   // Phase 5's NotificationsListRenderer short-circuits its read-only path
   // (Pass 2 A3).
+  //
+  // Parity A-2 #2b: an arriving prompt reveals the section through the toolbar
+  // (un-hide, save, re-light ⚠️), so the toolbar renderer is CONSTRUCTED here,
+  // ahead of its mount further down. showSection works before that mount.
+  const sectionToolbarRenderer = createSectionToolbarRenderer({
+    stores : { viewState: stores.viewState },
+  });
   const actionRequiredRenderer = createActionRequiredRenderer({
     eventBus,
-    stores : { actionRequired: stores.actionRequired },
+    stores        : { actionRequired: stores.actionRequired },
+    revealSection : () => sectionToolbarRenderer.showSection("action-required-section"),
+    // A-2 #2j/#2k/#2l — the card 🎤s upload with the operator's token, as every other mic does.
+    getAuthToken  : () => cachedAccessToken,
   });
   const actionRequiredMountEl = document.getElementById("action-required-section");
   if (actionRequiredMountEl === null) throw new Error("multiplexer: #action-required-section not found");
@@ -421,6 +654,33 @@ function bootMultiplexer(): void {
   const recorderMountEl = document.getElementById("sender-cards-container");
   if (recorderMountEl === null) throw new Error("multiplexer: #sender-cards-container not found");
   senderCardRecorderRenderer.mount(recorderMountEl);
+  senderCardConsoleButtons.mount(recorderMountEl);
+
+  // Parity B-1 — the Q&A Interface pane, into B-0's `#qa-pane` slot. The mic reuses
+  // the shared card-mic handler: legacy drives its Q&A 🎤 through the SAME
+  // recordingManager as every card mic (notifications.js:4007-4009 delegates to
+  // handleSTTButtonClick), so the 30 s cap and the Esc cancel are inherited rather
+  // than written a second time.
+  const qaPaneRenderer = createQaPaneRenderer({
+    eventBus   : eventBus,
+    stores     : { qa: stores.qa, audio: stores.audio },
+    micHandler : createActionRequiredMic(recordingManager, () => cachedAccessToken),
+  });
+  const qaPaneMountEl = document.getElementById("qa-pane");
+  if (qaPaneMountEl === null) throw new Error("multiplexer: #qa-pane not found");
+  qaPaneRenderer.mount(qaPaneMountEl);
+
+  // Parity B-2 — the Submit Agentic Jobs pane, into B-0's `#submit-jobs-pane` slot.
+  // The CC and Research cards reuse the shared card mic, as legacy drives both of
+  // theirs through the same recordingManager.
+  const submitJobsPaneRenderer = createSubmitJobsPaneRenderer({
+    eventBus   : eventBus,
+    stores     : { submitJobs: stores.submitJobs },
+    micHandler : createActionRequiredMic(recordingManager, () => cachedAccessToken),
+  });
+  const submitJobsMountEl = document.getElementById("submit-jobs-pane");
+  if (submitJobsMountEl === null) throw new Error("multiplexer: #submit-jobs-pane not found");
+  submitJobsPaneRenderer.mount(submitJobsMountEl);
 
   // ===================== NEW-LANE MOUNT SLOT =====================
   // Parity lanes append their 8-line mount handshake HERE (see the MOUNT-SLOT
@@ -453,10 +713,7 @@ function bootMultiplexer(): void {
   // child controls as descendants of root — it cannot mount on
   // #cc-session-strip itself (querySelector can't match the root element).
   // Store-action + addEventListener delegation only (no inline onclick).
-  const sessionStripRenderer = createSessionStripRenderer({
-    eventBus,
-    stores : { strip: stores.sessionStrip },
-  });
+  // Constructed earlier, above the notifications-list renderer (P0 8cb5c22e).
   const sessionStripMountEl = document.querySelector<HTMLElement>("main.container");
   if (sessionStripMountEl === null) throw new Error("multiplexer: <main.container> not found");
   sessionStripRenderer.mount(sessionStripMountEl);
@@ -474,25 +731,28 @@ function bootMultiplexer(): void {
   // sender records (persona/unread/activity), and the notification history
   // (the card-gap fix: cold load previously rendered ZERO sender cards because
   // nothing ever fetched history). One fetch; per-sender conversation-by-date
-  // calls ride inside hydrateHistory. Window = classic's virgin 48h rolling
-  // default, silently (2026-06-11 design ruling, amended post-review — no
-  // selector; see DEFAULT_HISTORY_WINDOW_HOURS).
+  // calls ride inside hydrateHistory. Window = the history-window picker's
+  // choice, shared with legacy under its raw localStorage key; 48h when nothing
+  // is stored. The 2026-06-11 ruling ran 48h silently with no selector; Rick's
+  // 2026-09-10 ruling 1 (P0 5ebd2aff) restored the legacy selector — historyWindow.ts.
   // Design: src/rnd/v0.1.8/2026.06.11-mux-cold-load-notification-hydration-design.md
-  const hydrationEmail = authManager.getCurrentUserEmail();
-  if (hydrationEmail !== null && hydrationEmail !== "") {
-    apiClient
-      .get<ServerSenderHydrationRecord[]>(`/api/notifications/senders-visible/${encodeURIComponent(hydrationEmail)}`)
-      .then(records => {
-        stores.sessionStrip.hydrate(records);
-        stores.senders.hydrate(records);
-        return stores.notifications.hydrateHistory(apiClient, {
-          userEmail      : hydrationEmail,
-          effectiveHours : DEFAULT_HISTORY_WINDOW_HOURS,
-          senders        : records,
-        });
-      })
-      .catch(() => { /* best-effort cold-reload hydration; live events still populate */ });
-  }
+  //
+  // P0 5ebd2aff (2026-09-10) — the fetch → three-consumer fan-out moved into
+  // coldHistoryHydration.ts so it (a) waits for the real endpoint instead of the
+  // 10 s ApiClient default (senders-visible measured 52.8 s for Rick, 5,179
+  // senders) and (b) tells the list pane loading / failed instead of swallowing
+  // the abort into "No notifications yet." The pane's Retry re-runs it.
+  const coldHistoryHydration = createColdHistoryHydration({
+    bus               : eventBus,
+    api               : apiClient,
+    stores            : { sessionStrip: stores.sessionStrip, senders: stores.senders, notifications: stores.notifications },
+    getEmail          : () => authManager.getCurrentUserEmail(),
+    getEffectiveHours : () => effectiveHoursForQuery(stores.notifications.historyWindow(), new Date()),
+    // Row 98305d96 — legacy's admin "Not Mine": only an admin in mode "others" asks the
+    // server to drop notifications from their own jobs. Everyone else sends nothing extra.
+    getExcludeOwnJobs : () => authManager.isCurrentUserAdmin() && stores.notifications.filterMode() === "others",
+  });
+  void coldHistoryHydration.run();
   // v0.1.9 focus-bar eager re-hydrate (option 2) — the cold hydrate above runs
   // ONCE at boot; after a long silent window the host prune reaps stale sessions
   // and the strip only lazily refills (~15-20min) as sessions re-announce a
@@ -511,27 +771,70 @@ function bootMultiplexer(): void {
   // `.content-shell` root (contains .left-column + #content-pane* + splitter +
   // #layout-mode-toggle). Reads the readingPane store (gesture/AR-driven) and
   // the actionRequired store (count only, for the WP5 lift/drain).
+  // Row 27760534 — consoleSeat lets bust-out pop the console out to its own /app/console tab.
   const readingPaneRenderer = createReadingPaneRenderer({
     eventBus,
-    stores : { readingPane: stores.readingPane, actionRequired: stores.actionRequired },
+    stores      : { readingPane: stores.readingPane, actionRequired: stores.actionRequired },
+    consoleSeat : () => sessionTranscriptRenderer.showingSeat(),
   });
   const readingPaneMountEl = document.querySelector<HTMLElement>(".content-shell");
   if (readingPaneMountEl === null) throw new Error("multiplexer: .content-shell not found");
   readingPaneRenderer.mount(readingPaneMountEl);
+
+  // Row 27760534 — the console's host inside the reading pane (constructed above).
+  const sessionTranscriptMountEl = document.getElementById("session-transcript-mount");
+  if (sessionTranscriptMountEl === null) throw new Error("multiplexer: #session-transcript-mount not found");
+  sessionTranscriptRenderer.mount(sessionTranscriptMountEl);
+  // Row fff605be — the 📋 indicator in VERTICAL layout. The Reading Pane owns
+  // horizontal; this floating tooltip (legacy parity) owns vertical.
+  createAbstractTooltip({ getLayoutMode: () => stores.readingPane.getLayoutMode() }).mount();
   // Lane C (v0.1.9) — broadcast-to-all-CC compose card. Recipient auto-refresh
   // rides the existing store_session_strip_changed event (no new EventBus event).
   // B1 (01-A): mounted FIRST so its rendered subtree hosts the re-nested commons
   // "Recent Activity" chrome (broadcastCard.ts) BEFORE CommonsActivityRenderer
   // mounts onto it.
+  // Row 4f320c27 M1 — the ack tally. Built HERE rather than inside the card because
+  // it needs `storage` (to remember which broadcast it is tallying across a reload)
+  // and `apiClient` (to replay the persisted acks), and because boot owns the live
+  // subscription's lifetime: `stores.acks.start()` below is what folds arriving acks.
+  const broadcastAckTallyRenderer = createBroadcastAckTallyRenderer({
+    eventBus,
+    ackStore       : stores.acks,
+    broadcastStore : stores.broadcast,
+    storage,
+    api            : apiClient,
+  });
   const broadcastCardRenderer = createBroadcastCardRenderer({
     eventBus,
     store        : stores.broadcast,
     api          : apiClient,
     getAuthToken : () => cachedAccessToken,
+    ackTally     : broadcastAckTallyRenderer,
   });
   const broadcastCardMountEl = document.getElementById("broadcast-card-mount");
   if (broadcastCardMountEl === null) throw new Error("multiplexer: #broadcast-card-mount not found");
   broadcastCardRenderer.mount(broadcastCardMountEl);
+  // The live fold. Without this the tally only ever shows what a hydrate replayed,
+  // so acks arriving while the page is open would be invisible until a reload.
+  stores.acks.start();
+  // Parity row B-3 — Queue Filter Settings, into the slot B-0 pre-allocated. The pane
+  // gates itself on ONE axis: `mount()` sets `style.display` from `isAdmin` and
+  // `reveal()` refuses for a non-admin, so mounting it unconditionally shows nothing
+  // to a non-admin — and shows it to an admin on a cold start, which a second copy of
+  // the gate in DEFAULT_HIDDEN_SECTION_IDS used to prevent (row cec9dd43).
+  //
+  // `isAdmin` is answerable HERE, synchronously: boot halts at the login bounce above
+  // when no token is stored, and isCurrentUserAdmin reads the roles claim off that
+  // stored token. No later role-arrival reconcile is owed.
+  const filterSettingsRenderer = createFilterSettingsRenderer({
+    eventBus,
+    store     : stores.notifications,
+    viewState : stores.viewState,
+    isAdmin   : () => authManager.isCurrentUserAdmin(),
+  });
+  const filterSettingsMountEl = document.getElementById("filter-settings-pane");
+  if (filterSettingsMountEl === null) throw new Error("multiplexer: #filter-settings-pane not found");
+  filterSettingsRenderer.mount(filterSettingsMountEl);
   // Lane D WP3 — commons "Recent Activity" panel. Carries `api` (third field,
   // Tiberius-approved — JobsPaneRenderer precedent) for REST hydrate
   // (/api/commons/broadcast-history) + the persona-pool filter dropdown. The
@@ -545,6 +848,9 @@ function bootMultiplexer(): void {
     eventBus,
     stores : { commons: stores.commons },
     api    : apiClient,
+    // Legacy remembers this panel across a reload (notifications.html:1529) and
+    // the multiplexer did not. Same opt-in convention as Finished Tasks.
+    viewState : stores.viewState,
   });
   const commonsActivityMountEl = broadcastCardMountEl.querySelector<HTMLElement>("#commons-activity-pane");
   if (commonsActivityMountEl === null) throw new Error("multiplexer: #commons-activity-pane not found inside rendered broadcast card");
@@ -556,9 +862,29 @@ function bootMultiplexer(): void {
     storage,
     iniDefaultFraction : DEFAULT_TTS_FRACTION,   // refined by the config-fetch seed when it resolves
   });
-  const ttsPreviewSliderMountEl = document.getElementById("tts-preview-slider-mount");
-  if (ttsPreviewSliderMountEl === null) throw new Error("multiplexer: #tts-preview-slider-mount not found");
+  // Rick's 2026-09-10 ruling 3 (P0 5ebd2aff): the slider's slot is PRODUCED by
+  // NotificationsHeaderRenderer inside the header bar (legacy placement), so it is
+  // found by a post-mount querySelector on the header mount — the commons-activity
+  // precedent above — not by a page-load getElementById.
+  const ttsPreviewSliderMountEl = notificationsHeaderMountEl.querySelector<HTMLElement>("#tts-preview-slider-mount");
+  if (ttsPreviewSliderMountEl === null) throw new Error("multiplexer: #tts-preview-slider-mount not found inside the rendered notifications header");
   ttsPreviewSliderRenderer.mount(ttsPreviewSliderMountEl);
+
+  // Row 8033756c — the default `listener_error` subscriber, and the ONLY one.
+  //
+  // 🔴 MOUNTED EARLY, ON PURPOSE. Every renderer below this line is a bus
+  // listener; a throw from any of them is re-emitted as `listener_error` and,
+  // before this wire existed, arrived nowhere at all. Mounting it after them
+  // would leave the whole boot sequence unwatched by exactly the control meant
+  // to watch it — the window in which a first-paint failure is silent.
+  //
+  // It is at BOOT and not inside EventBus deliberately: NotificationsListRenderer
+  // emits the same `listener_error` from a microtask catch, outside any bus
+  // wrapper, so an in-bus console.error would miss it. See the renderer header.
+  const listenerErrorRenderer = createListenerErrorRenderer({ eventBus });
+  const listenerErrorMountEl = document.getElementById("listener-error-mount");
+  if (listenerErrorMountEl === null) throw new Error("multiplexer: #listener-error-mount not found");
+  listenerErrorRenderer.mount(listenerErrorMountEl);
 
   // Lane E WP15 — missed-while-away badge + Reset.
   const missedBadgeRenderer = createMissedBadgeRenderer({
@@ -581,6 +907,25 @@ function bootMultiplexer(): void {
   fleetStatusRenderer.mount(fleetStatusMountEl);
   stores.fleetStatus.startPolling();
 
+  // Row 470b7509 — Finished Tasks. A THIRD autonomous poller, and its own door:
+  // /api/tasks/events, not /api/tasks (ruling R5 — no terminal-timestamp column
+  // exists, so /api/tasks cannot answer "what finished in the last 24 hours").
+  // Mounted BEFORE the task list purely to match the DOM order the user sees;
+  // the two are independent.
+  const finishedTasksRenderer = createFinishedTasksRenderer({
+    eventBus,
+    store : stores.finishedTasks,
+    // Parity A-2 #6 — the ONE section whose collapse survives a reload, matching
+    // legacy's `LUPIN_ACCORDION_PERSIST_KEYS['finished-tasks-section']`. The
+    // other seven accordions in this client stay session-only; do not widen
+    // this by handing `stores.viewState` to them too.
+    viewState : stores.viewState,
+  });
+  const finishedTasksMountEl = document.getElementById("finished-tasks-pane");
+  if (finishedTasksMountEl === null) throw new Error("multiplexer: #finished-tasks-pane not found");
+  finishedTasksRenderer.mount(finishedTasksMountEl);
+  stores.finishedTasks.startPolling();
+
   // Step 4 (store-canonical task mgmt) — read-only Task-List card. Same
   // autonomous-timer pattern as fleet-status: startPolling() AFTER mount, OFF
   // the WS transports; it polls /api/tasks on its own 60s timer.
@@ -588,12 +933,100 @@ function bootMultiplexer(): void {
     eventBus,
     // Phase 2 — the fleet store supplies the owner-reassignment roster (active
     // personas, Sam included — Q5) from the SAME source the fleet-status card uses.
-    stores : { taskList: stores.taskList, fleet: stores.fleetStatus },
+    stores : {
+      taskList : stores.taskList,
+      fleet    : stores.fleetStatus,
+      // A-2 #7 — read ONLY for the Holding Area's header count, so the server's
+      // held-row note is dropped when it repeats what that pane already says.
+      holdingArea : stores.holdingArea,
+    },
+    // Parity A-2 #0 — the row mic's dictation upload.
+    getAuthToken : () => cachedAccessToken,
+    // The recorder, passed EXPLICITLY (row ab1f06e7). The row mic falls back to this same
+    // singleton when none is given, but the New Ticket card's Title and Details mics are
+    // offered only when one IS given — so leaving it out kept the row mics working and
+    // the card mic-less, and nothing on screen said why. Rick, ~22:01 2026-09-18: yes to
+    // the multiplexer card getting the classic page's mics.
+    recorder     : recordingManager,
+    // Rick's findability P0 (row 732151f2) — the "find ticket by id" box.
+    // 🔴 apiClient.get on /api/tasks/<ref>, which applies NO board-visibility
+    // filter and therefore finds HOLDING-AREA rows. Do NOT "simplify" this onto
+    // the board query (/api/tasks?id_prefix=): measured 2026-09-09, that path
+    // could see 1 of the 23 held rows, because it chains _apply_owed_filter
+    // after the prefix match.
+    lookupFetch : (path) => apiClient.get<import("./render/taskListModel").TaskItem>(path),
+    // Rick's New Ticket card (row c9895403) — the "＋ New" button beside Find. The POST
+    // carries his login token, which is what lets the server honour P0 and skip the
+    // ratio gate for him; a seat's API key gets neither.
+    postTicket  : apiPostTicket((path, body) => apiClient.post<unknown>(path, body)),
+    // Row c9fafb9d — the demote-request badge and each row's Approve/Deny.
+    requestStore : stores.taskRequests,
   });
   const taskListMountEl = document.getElementById("task-list-pane");
   if (taskListMountEl === null) throw new Error("multiplexer: #task-list-pane not found");
   taskListRenderer.mount(taskListMountEl);
   stores.taskList.startPolling();
+
+  // Row 87812328 — Holding Area. Its OWN 60s poll, because not_approved rows
+  // are invisible to the task list's query; it is a second FETCH, not a second
+  // view of one composite. Same autonomous-timer pattern: startPolling() AFTER
+  // mount, off the WS transports.
+  const holdingAreaRenderer = createHoldingAreaRenderer({
+    eventBus,
+    store : stores.holdingArea,
+    // Parity A-2 #0 — the row mic's dictation upload.
+    getAuthToken : () => cachedAccessToken,
+    // No lookupFetch: the holding area carries no search box (Rick, row 700f0e1d,
+    // 2026-09-11). The task list's box reaches held rows already.
+    // Row c9fafb9d — the promote-request badge and each row's Approve/Deny.
+    requestStore : stores.taskRequests,
+    // Parity A-2 #8 — the flow-ratio readout and the operator cluster.
+    flowRatio    : stores.flowRatio,
+  });
+  const holdingAreaMountEl = document.getElementById("holding-area-pane");
+  if (holdingAreaMountEl === null) throw new Error("multiplexer: #holding-area-pane not found");
+  holdingAreaRenderer.mount(holdingAreaMountEl);
+  stores.holdingArea.startPolling();
+  stores.flowRatio.startPolling();
+  // Row c9fafb9d — AFTER both panes mount, so the first badge poll has badges to paint.
+  stores.taskRequests.startPolling();
+
+  // Row 87812328 — Epic Board. 🔴 NO startPolling() AND NO STORE OF ITS OWN:
+  // it reads the TASK LIST's composite and repaints off store_task_list_changed.
+  // That is deliberate and is the mechanism by which the two panes cannot show
+  // different clocks — the legacy client's own words, "no second fetch, no
+  // second timer". Adding a timer here would reintroduce exactly the drift the
+  // shared composite exists to prevent.
+  // The titles/stories are a memoized ONE-SHOT, not a poll — a hand-edited file
+  // is not live state. It is fired-and-forgotten rather than awaited: the board
+  // renders correctly without it (de-slugged names, no story rows), so blocking
+  // boot on it would trade a complete pane for a slower one. The titles appear
+  // on the task list's next tick, which is the only clock this pane has.
+  // 🔴 CAPTURED, NOT DISCARDED — see the repaint below. Still not awaited, so
+  // boot is not blocked; the difference is that its arrival now REACHES the pane.
+  const epicStoriesLoaded = stores.epicStories.load();
+
+  const epicBoardRenderer = createEpicBoardRenderer({
+    eventBus,
+    store     : stores.taskList,
+    storiesFn : () => stores.epicStories.stories(),
+    // Parity A-2 #9 — the row mic's dictation upload, as on the other two panes.
+    getAuthToken : () => cachedAccessToken,
+  });
+  const epicBoardMountEl = document.getElementById("epic-board-pane");
+  if (epicBoardMountEl === null) throw new Error("multiplexer: #epic-board-pane not found");
+  epicBoardRenderer.mount(epicBoardMountEl);
+
+  // 🔴 REPAINT WHEN THE ONE-SHOT LANDS. The comment above used to say the titles
+  // "appear on the task list's next tick, which is the only clock this pane has",
+  // and that was true — but the tick is a POLL INTERVAL away, and until it comes
+  // the pane shows de-slugged epic names and NO story rows while the data has
+  // already arrived. Measured 2026-09-06 on the live page: /api/epic-stories was
+  // served at 0.09s, the task list did not tick again for the next 15s, and the
+  // board still read `alpha` (de-slugged) with zero story rows the whole time —
+  // where legacy showed the story immediately. Boot is still not blocked; the
+  // load simply now has a consumer.
+  void epicStoriesLoaded.then( () => epicBoardRenderer.repaint() );
 
   // Section-toolbar + accordion-collapse parity (2026-06-23, Rachel 🕊️) —
   // carbon-copy of the legacy floating #section-toolbar: per-section visibility
@@ -601,10 +1034,8 @@ function bootMultiplexer(): void {
   // collapse-all/expand-all fan out to NotificationsListRenderer's accordions
   // via store_view_state_changed. Per-accordion header-click toggle is wired in
   // NotificationsListRenderer (above). The layout-mode ⇆ stays in
-  // #reading-pane-toolbar (mux-N/A here — see design doc 06).
-  const sectionToolbarRenderer = createSectionToolbarRenderer({
-    stores : { viewState: stores.viewState },
-  });
+  // #reading-pane-toolbar (mux-N/A here — see design doc 06). Constructed
+  // above, before the action-required renderer that reveals through it.
   const sectionToolbarMountEl = document.getElementById("section-toolbar-mount");
   if (sectionToolbarMountEl === null) throw new Error("multiplexer: #section-toolbar-mount not found");
   sectionToolbarRenderer.mount(sectionToolbarMountEl);
@@ -615,13 +1046,156 @@ function bootMultiplexer(): void {
   // is now mounted by the notification-item render path for any prediction-hint
   // notification clearing the confidence gate — no standalone mount here.
 
+  // ---------------------------------------------------------------------
+  // Phase B pre-allocation (register item 7, row f0e00f01, 2026-09-17).
+  //
+  // The seven Phase B panes are declared in multiplexer.html and carry their
+  // SECTION_TOGGLES entries, but no renderer exists for them yet. These are the
+  // FIRST TWO LINES of the mount handshake — resolve the element, throw if the
+  // markup is gone — with the third line (`.mount()`) owed by whichever lane
+  // builds the renderer.
+  //
+  // 🔴 WHY THIS IS HERE AT ALL, SAID PLAINLY SO NOBODY LATER READS IT AS DEAD
+  // CODE AND DELETES IT. boot_mounts_every_pane_the_page_declares.test.ts
+  // asserts every pane the page declares is resolved by boot, and the two
+  // hand-list guards assert the markup and SECTION_TOGGLES match each other.
+  // The three face different directions, so markup-alone, toggles-alone and
+  // markup+toggles are ALL red — measured 2026-09-17, three arms. There is no
+  // green intermediate; pre-allocation lands in all three files or not at all.
+  // Mr. Radio 🦉 ruled this shape over widening the guard's exception list.
+  //
+  // These bind nothing on purpose. A `const` nobody reads is what a later
+  // reader deletes; a bare presence check earns its line — it fails the boot
+  // loudly the moment a pane is removed from the markup without its toggle and
+  // its lane, which is exactly the drift the three guards exist to catch.
+  if (document.getElementById("qa-pane") === null) throw new Error("multiplexer: #qa-pane not found");
+  if (document.getElementById("submit-jobs-pane") === null) throw new Error("multiplexer: #submit-jobs-pane not found");
+  if (document.getElementById("filter-settings-pane") === null) throw new Error("multiplexer: #filter-settings-pane not found");
+  // Parity B-4 — Time Saved. No store and no poll: it fetches once here and then
+  // only when the operator presses 🔄 (T1), so there is nothing to start after
+  // the mount and nothing to stop on unload.
+  const timeSavedMountEl = document.getElementById("time-saved-pane");
+  if (timeSavedMountEl === null) throw new Error("multiplexer: #time-saved-pane not found");
+  createTimeSavedRenderer({ api: apiClient }).mount(timeSavedMountEl);
+  // Parity B-5 / B-5L — System Status. Reads the two transports' own state (as
+  // legacy reads `channel.state`), follows socket events live, and carries the
+  // Config reload. 🔴 The reload button is NOT admin-gated: legacy's
+  // `reinitializeConfig` has no admin check and Rick ruled a gate a divergence
+  // (2026-09-23). Nothing HERE secures `/api/init` — but the SERVER now does: it
+  // has required the admin role since 2026-09-23 (row `977eaaf2`), so an ungated
+  // button is harmless. A non-admin press is refused at the server with a 403.
+  const systemStatusMountEl = document.getElementById("system-status-pane");
+  if (systemStatusMountEl === null) throw new Error("multiplexer: #system-status-pane not found");
+  const systemStatusRenderer = createSystemStatusRenderer({
+    eventBus,
+    auth       : authManager,
+    transports : { queue: transports.queue, audio: transports.audio },
+    sessionIds : { queue: queueSessionId, audio: audioSessionId },
+    reinitConfig : () => apiClient.get<{ status?: string; message?: string }>("/api/init"),
+  });
+  systemStatusRenderer.mount(systemStatusMountEl);
+  // Parity B-6 — the Debug panel. Mounted LAST of the three, because mounting it
+  // registers the debugSink, and every `debugSink` call before this point has
+  // reached the console only — which is legacy's own behaviour, since its panel
+  // is markup that exists before the writers do. No store, no poll, no timer.
+  const debugPaneMountEl = document.getElementById("debug-pane");
+  if (debugPaneMountEl === null) throw new Error("multiplexer: #debug-pane not found");
+  const debugPanelRenderer = createDebugPanelRenderer({});
+  debugPanelRenderer.mount(debugPaneMountEl);
+  // Parity B-7 — Direct TTS Test. The cache-first play is the point (D4): a hit
+  // plays the blob HERE, with no POST and no /ws/audio round trip; a miss is an
+  // ordinary request through the same door wireTtsPlayback uses.
+  //
+  // 🔴 `haltAll` IS TWO CALLS, NOT FOUR, AND THAT IS MEASURED RATHER THAN
+  // TRIMMED. Legacy's stopAudio (notifications.js:5067) tears down four paths
+  // because legacy HAS four. Here:
+  //   - the Web Audio sources, scheduling and flags  -> stores.audio.stop()
+  //   - legacy's `currentAudio` blob element          -> directTtsPlayer.stop()
+  //   - legacy's `currentSequentialAudio`             -> NOTHING TO STOP.
+  //     SequentialAudioManager has zero consumers in this client; the only hits
+  //     outside its own file are three comments citing it as an idiom. Wiring it
+  //     here would be giving a dormant module new duties, which is exactly what
+  //     Mr. Radio ruled against for TtsAudioCache on the same day.
+  //   - the pulsing card indicator                    -> stores.ttsQueue.clear().
+  //     NOT a separate call: clear() nulls the active item and emits, and
+  //     NotificationsListRenderer re-runs refreshActiveTts on
+  //     store_tts_queue_changed (NotificationsListRenderer.ts:429), which strips
+  //     every lit bubble when current() is null. Calling the renderer directly
+  //     would hand this pane a reference it does not need and a second way to
+  //     express one fact.
+  //   clear() also stops wireTtsPlayback re-requesting, because its null arm
+  //   resets the last-requested guard.
+  const directTtsMountEl = document.getElementById("direct-tts-pane");
+  if (directTtsMountEl === null) throw new Error("multiplexer: #direct-tts-pane not found");
+  const directTtsPlayer = createDirectTtsPlayer();
+  const directTtsCache  = new TtsAudioCache();
+  void directTtsCache.initialize();
+  const directTtsRenderer = createDirectTtsRenderer({
+    audio    : stores.audio,
+    cache    : directTtsCache,
+    playBlob : (blob) => directTtsPlayer.play(blob),
+    // The cache-MISS path. B-7 owns no door of its own: it enqueues onto the same
+    // TtsQueueStore every other utterance uses, so wireTtsPlayback picks the mode
+    // and posts. One door, one place the mode is read.
+    speak    : async (text, mode) => {
+      // 🔴 THE MODE RIDES THE ITEM. wireTtsPlayback otherwise reads only the
+      // page-wide select, so "Test Reliable TTS" posted to the instant door on
+      // any default page and reported success (María's review of cfe8a348).
+      stores.ttsQueue.enqueue({
+        id_hash  : `direct-tts-${Date.now()}`,
+        ttsText  : text,
+        tts_mode : mode,
+        // Row aa13fdd7 — the 0% slider silences AUTOMATIC speech; this pane is a
+        // button the user pressed asking to hear something, so it opts out. Legacy
+        // draws the same line: its gate is inside addToTTSQueue, and Speak Now /
+        // Test TTS call playTTS directly (notifications.js:4259, :4288), bypassing it.
+        // Without this flag the pane's three buttons would go dead at 0% — a control
+        // that reports success and makes no sound — and the two clients would diverge.
+        user_initiated : true,
+      } as Parameters<typeof stores.ttsQueue.enqueue>[0]);
+    },
+    haltAll  : () => {
+      // 🔴 STOP IS NOT CLEAR-ALL, AND THIS CALLED BOTH (María's review of
+      // cfe8a348). `ttsQueue.clear()` empties the whole speech queue, so
+      // pressing Stop on a TTS TEST silently discarded every notification
+      // waiting to be spoken — work that had nothing to do with this pane.
+      //
+      // The multiplexer's own transport already settles the distinction:
+      // TtsChromeRenderer wires `onStop` to `stores.audio.stop()` and
+      // `onClearAll` to `stores.ttsQueue.clear()` — two buttons, two verbs.
+      // This pane's Stop is the first, plus the blob element B-7 introduced.
+      // `stores.audio.stop()` is called by the renderer itself.
+      //
+      // ⚠️ ONE MEASURED DIFFERENCE FROM LEGACY, STATED RATHER THAN CLOSED:
+      // legacy's `stopAudio` also calls `stopTTSPlayingIndicator`, and this
+      // does not, because the multiplexer's own Stop does not either — the lit
+      // bubble follows `ttsQueue.current()`, which Stop deliberately leaves
+      // alone. Matching legacy here would mean diverging from this client's own
+      // settled Stop and handing this pane a renderer reference. Reported to
+      // Mr. Radio 🦉 rather than decided here.
+      directTtsPlayer.stop();
+    },
+    // 🔴 THE DEBUG SINK, NOW THAT B-6 IS IN. D2 refuses an empty input into
+    // legacy's `this.error`, which writes the debug panel AND the console. While
+    // B-6 was unmerged this passed bare `console` calls carrying legacy's
+    // prefixes by hand; `debugSink` owns those prefixes, so handing it the
+    // writers removes the hand-copy rather than adding a layer over it.
+    //
+    // ⚠️ THE PANEL IS MOUNTED ABOVE THIS LINE, so a refusal typed before the
+    // Debug pane exists would still reach the console and drop for the panel —
+    // legacy's behaviour, since its `addDebugMessage` no-ops without `#debug-log`.
+    logFn    : debugLog,
+    errorFn  : debugError,
+  });
+  directTtsRenderer.mount(directTtsMountEl);
+
   attachLifecycleListeners();
 
   // Per Pass 2 A8: transports start AFTER every renderer mount so the audio
   // chunk_decoded subscription in TtsChromeRenderer is wired before the first
   // audio frame arrives. AC9b smoke test asserts this invariant.
-  transports.queue.start(sessionId);
-  transports.audio.start(sessionId, stores.audio.binaryHandler);
+  transports.queue.start(queueSessionId);
+  transports.audio.start(audioSessionId, stores.audio.binaryHandler);
 
   // Per D-C ratification 2026-05-04 PM (Option B): emit boot_complete on
   // EventBus + mirror to console.log so AC9's Playwright check can verify the
@@ -644,17 +1218,40 @@ function bootMultiplexer(): void {
       senderCardRecorderRenderer  : "mounted",
       sessionStripRenderer        : "mounted",
       readingPaneRenderer         : "mounted",
+      sessionTranscriptRenderer   : "mounted",
       commonsActivityRenderer     : "mounted",
       // Lane E full-parity quartet (WP13/WP15/WP12 renderers; WP14 has no
       // standalone renderer — its store rides createStores()).
       ttsPreviewSliderRenderer    : "mounted",
       missedBadgeRenderer         : "mounted",
+      listenerErrorRenderer       : "mounted",
       fleetStatusRenderer         : "mounted",
       taskListRenderer            : "mounted",
+      // The two accordion panes (2026-09-06, Clayton 😎's F3). Both were mounted
+      // ~30 lines above and named nowhere here, so unmounting either left AC9's
+      // wiring assertion green — a renderer complete, correct and absent from
+      // the contract that claims it is installed.
+      finishedTasksRenderer       : "mounted",
+      timeSavedRenderer           : "mounted",
+      systemStatusRenderer        : "mounted",
+      directTtsRenderer           : "mounted",
+      // Parity B-1 — the Q&A Interface pane, the first of B-0's seven pre-allocated
+      // slots to be filled.
+      qaPaneRenderer              : "mounted",
+      submitJobsPaneRenderer      : "mounted",
+      debugPanelRenderer          : "mounted",
+      holdingAreaRenderer         : "mounted",
+      epicBoardRenderer           : "mounted",
       // Section-toolbar + accordion-collapse parity (2026-06-23).
       sectionToolbarRenderer      : "mounted",
       // Lane L4 (v0.1.9) — top nav / logout bar.
       navBarRenderer              : "mounted",
+      // Row 4f320c27 M1 — mounted by BroadcastCardRenderer onto the panel inside the
+      // card, not at a mount slot of its own. Named here because the contract is every
+      // renderer boot reaches, and a delegate-mounted one is the easiest to omit.
+      broadcastAckTallyRenderer   : "mounted",
+      // Parity row B-3 — Queue Filter Settings.
+      filterSettingsRenderer      : "mounted",
     },
   };
   eventBus.emit<BootCompletePayload>({
@@ -676,13 +1273,51 @@ function bootMultiplexer(): void {
   console.log("[multiplexer] senderCardRecorderRenderer:mounted");
   console.log("[multiplexer] sessionStripRenderer:mounted");
   console.log("[multiplexer] readingPaneRenderer:mounted");
+  console.log("[multiplexer] sessionTranscriptRenderer:mounted");
   console.log("[multiplexer] commonsActivityRenderer:mounted");
   console.log("[multiplexer] ttsPreviewSliderRenderer:mounted");
+  console.log("[multiplexer] listenerErrorRenderer:mounted");
   console.log("[multiplexer] missedBadgeRenderer:mounted");
   console.log("[multiplexer] fleetStatusRenderer:mounted");
+  // Finished Tasks mounts between fleetStatus and taskList, so its handshake sits there too.
+  console.log("[multiplexer] finishedTasksRenderer:mounted");
   console.log("[multiplexer] taskListRenderer:mounted");
+  // The two accordion panes. Mounted at :610 and :633 — AFTER taskList and BEFORE
+  // sectionToolbar — so the handshake is emitted in that same order, which is what the
+  // phase6c smoke test asserts (an ORDERED equality, not a set).
+  console.log("[multiplexer] holdingAreaRenderer:mounted");
+  console.log("[multiplexer] epicBoardRenderer:mounted");
   console.log("[multiplexer] sectionToolbarRenderer:mounted");
+  // Parity B-4 — Time Saved mounts LAST of all the panes, in the pre-allocated
+  // slot block below the toolbar, so its handshake sits after the toolbar's.
+  // (navBarRenderer's line stays last despite mounting early; that predates this.)
+  console.log("[multiplexer] timeSavedRenderer:mounted");
+  // Parity B-5 — System Status mounts last, in the pre-allocated slot block
+  // below the toolbar, so its handshake sits after the toolbar's.
+  console.log("[multiplexer] systemStatusRenderer:mounted");
+  console.log("[multiplexer] debugPanelRenderer:mounted");
+  // Parity B-7 — Direct TTS, the last of the pre-allocated slot block.
+  console.log("[multiplexer] directTtsRenderer:mounted");
   console.log("[multiplexer] navBarRenderer:mounted");
+  // Parity B-1 — the Q&A pane mounts at :547, BEFORE the broadcast tally below it, so
+  // it is ordered before it here. Placed by its mount line rather than by which branch
+  // landed first: B-1 and Maya's B-5 both appended to this block independently and the
+  // rebase put them on the same line, which is a question about ORDER, not about who won.
+  console.log("[multiplexer] qaPaneRenderer:mounted");
+  // Parity B-2 — Submit Agentic Jobs mounts at :578, after the Q&A pane above it and
+  // before the broadcast tally below. Ordered by mount line, as B-1 was.
+  console.log("[multiplexer] submitJobsPaneRenderer:mounted");
+  // Row 4f320c27 M1 — LAST, because the handshake is an ORDERED sequence in mount order
+  // and the tally is mounted by BroadcastCardRenderer at the card's mount (:648), after
+  // navBar (:548). A fourth hand list of the same population: the payload literal, the
+  // payload INTERFACE, this block, and the toolbar. Adding the renderer without this
+  // line reddened "the AC9 console handshake names every renderer the payload claims is
+  // mounted" — the third guard to catch this one omission.
+  console.log("[multiplexer] broadcastAckTallyRenderer:mounted");
+  // Parity row B-3 — mounted right after the broadcast card and after the tally's live
+  // fold, so it lands LAST in the ORDERED handshake. The tally is delegate-mounted
+  // during the card's own mount, which is why it precedes this line.
+  console.log("[multiplexer] filterSettingsRenderer:mounted");
   console.log("[multiplexer] boot_complete", JSON.stringify(bootCompletePayload));
 
   // Phase 5 D-E test hook (per `92-phase5-review-findings.md` D-E): expose
@@ -699,7 +1334,7 @@ function bootMultiplexer(): void {
 
   // Phase 3 boot signal — preserves the Phase 1 console-line invariant for
   // Playwright smoke test continuity, and tags the resolved session.
-  console.log("hello multiplexer", { sessionId });
+  console.log("hello multiplexer", { sessionId: queueSessionId, audioSessionId });
 }
 
 bootMultiplexer();

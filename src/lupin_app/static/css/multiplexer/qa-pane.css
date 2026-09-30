@@ -1,0 +1,259 @@
+/* ============================================================================
+   Parity B-1 — qa-pane stylesheet.
+
+   Legacy's Q&A card gets its look from TWO places, and porting only one of them
+   leaves a pane that renders but looks broken:
+
+   1. Rules in `static/css/notifications.css`, which the multiplexer does NOT
+      link — `#response-text`, `.loading`, `.spinner`, `@keyframes spin`,
+      `.qa-metrics` and its three coloured stamps, `.qa-stt-button` and its
+      recording / processing / disabled states.
+   2. INLINE `style=` attributes on the markup itself
+      (`notifications.html` § Q&A Section) — the whole mode-selector row, the
+      badge, the status line and the input row's flex layout. Those are not in
+      any stylesheet at all, so a grep of the CSS would have reported them
+      absent rather than inline. They are written out as rules here.
+
+   Class names are legacy's verbatim, per the Q-C convention every other
+   multiplexer pane sheet follows, so an operator moving between the two pages
+   reads the same surface.
+
+   THE TWO KEYFRAMES, AND THEY GO OPPOSITE WAYS. An earlier cut of this comment
+   had BOTH of them backwards, so they are recorded here as measured:
+
+   - `spin` is ALREADY DEFINED, in `lupin-base.css`, which multiplexer.html links
+     first. The spinner below references it and defines nothing — a second copy
+     would be two rules for one animation.
+   - `pulse` is NOT defined in ANY sheet this page links. Legacy's lives in
+     `notifications.css`, which the multiplexer does not load, so porting
+     `.qa-stt-button.recording` verbatim would have given the mic a named
+     animation that does not exist — a button that silently does not pulse. It is
+     defined below as `qa-mic-pulse`, prefixed because a keyframe name is global
+     whatever selector uses it; that is the convention `ar-pause-pulse` and
+     `cc-strip-icon-pulse` already set in this directory.
+
+   Scope-leak protection (the convention the jobs-pane and action-required
+   sheets set, enforced by a stylelint override in .stylelintrc.json):
+   - NO global selectors (*, html, body, :root). Every rule below is scoped
+     under `#qa-pane`.
+   ========================================================================= */
+
+/* ── The agent-mode row ──────────────────────────────────────────────────
+   notifications.html: the `.mode-selector-container` div's inline style. */
+#qa-pane .mode-selector-container {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  background: #f8f9fa;
+  border-radius: 4px;
+}
+
+#qa-pane .mode-selector-container label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #495057;
+}
+
+#qa-pane .agent-mode-select {
+  padding: 6px 12px;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  font-size: 13px;
+  min-width: 150px;
+}
+
+/* The sticky VOICE mode badge. Hidden by the `hidden` attribute rather than by
+   a class, so no `display:none` rule is needed — but `display:flex` on the row
+   would otherwise beat `hidden`, which is why the attribute gets an explicit
+   rule of its own. */
+#qa-pane .mode-badge {
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: bold;
+  text-transform: uppercase;
+  background: #0d6efd;
+  color: #fff;
+  cursor: pointer;
+}
+
+#qa-pane .mode-badge[hidden] {
+  display: none;
+}
+
+/* `margin-left: auto` is what pushes the status line to the far right of the
+   flex row — it is layout, not decoration, and it was inline in legacy. */
+#qa-pane #mode-status {
+  font-size: 12px;
+  color: #6c757d;
+  margin-left: auto;
+}
+
+/* ── The input row ───────────────────────────────────────────────────────
+   notifications.html: the `.form-group` div's inline style. The text input
+   takes the remaining width; everything else sits at its natural size. */
+#qa-pane .qa-form-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+#qa-pane #qa-input {
+  flex: 1;
+  line-height: 1;
+}
+
+#qa-pane #tts-mode {
+  width: auto;
+  padding: 8px;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+#qa-pane #submit-qa {
+  white-space: nowrap;
+}
+
+/* ── The 🎤 ──────────────────────────────────────────────────────────────
+   notifications.css `.qa-stt-button` and its three states. */
+#qa-pane .qa-stt-button {
+  padding: 8px 16px;
+  border: 2px solid #007bff;
+  border-radius: 4px;
+  background-color: #fff;
+  color: #007bff;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  transition: all 0.2s;
+  white-space: nowrap;
+  min-width: 60px;
+  text-align: center;
+}
+
+#qa-pane .qa-stt-button:hover:not(:disabled) {
+  background-color: #f0f8ff;
+  border-color: #0056b3;
+}
+
+#qa-pane .qa-stt-button.recording {
+  background-color: #dc3545;
+  border-color: #dc3545;
+  color: #fff;
+  animation: qa-mic-pulse 1s ease-in-out infinite;
+}
+
+#qa-pane .qa-stt-button.processing {
+  background-color: #ffc107;
+  border-color: #ffc107;
+  color: #fff;
+  cursor: wait;
+  animation: qa-mic-pulse 1s ease-in-out infinite;
+}
+
+/* Legacy notifications.css `@keyframes pulse`, verbatim in its stops. */
+@keyframes qa-mic-pulse {
+  0%,
+  100% { opacity: 1; }
+  50%  { opacity: 0.6; }
+}
+
+#qa-pane .qa-stt-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* ── The submit spinner ──────────────────────────────────────────────────
+   notifications.css `.loading` / `.spinner`. The `spin` keyframe is NOT redefined
+   here — it lives in `lupin-base.css`, linked first by multiplexer.html. */
+#qa-pane .loading {
+  display: inline-block;
+  margin-left: 10px;
+  color: #007bff;
+}
+
+#qa-pane .loading[hidden] {
+  display: none;
+}
+
+#qa-pane .spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid #f3f3f3;
+  border-top: 2px solid #007bff;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+/* ── The metrics strip ───────────────────────────────────────────────────
+   notifications.css `.qa-metrics`. The three stamps keep legacy's colours:
+   green for text, blue for audio, purple for the round trip. */
+#qa-pane .qa-metrics {
+  display: flex;
+  gap: 16px;
+  margin: 8px 0;
+  padding: 6px 12px;
+  background: #f8f9fa;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: monospace;
+}
+
+#qa-pane .qa-metrics[hidden] {
+  display: none;
+}
+
+#qa-pane .qa-metrics .metric {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+#qa-pane .qa-metrics .metric-label {
+  color: #6c757d;
+  font-weight: 500;
+}
+
+#qa-pane .qa-metrics #metric-ttt  { color: #28a745; }
+#qa-pane .qa-metrics #metric-ttfa { color: #007bff; }
+#qa-pane .qa-metrics #metric-rtt  { color: #6f42c1; }
+
+/* ── The inline argument interview ───────────────────────────────────────
+   NEW SURFACE: legacy's `#qa-arg-interview` has no rule in any stylesheet —
+   it renders as bare block content there. Given a border and spacing here so
+   the question reads as a question rather than as loose text under the answer,
+   which is the failure the module's own `clearArgQuestion` comment describes
+   ("a stray bordered gap … reads as a rendering bug"). */
+#qa-pane .qa-arg-interview {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  padding: 8px 12px;
+  border: 1px solid #0d6efd;
+  border-radius: 4px;
+  background: #f8f9ff;
+}
+
+#qa-pane .qa-arg-interview[hidden] {
+  display: none;
+}
+
+#qa-pane .qa-arg-input {
+  flex: 1;
+}
+
+/* ── The response pane ───────────────────────────────────────────────────
+   notifications.css `#response-text`. `pre-wrap` is load-bearing: the raw-JSON
+   fallback is pretty-printed with newlines and collapses to one line without it. */
+#qa-pane #response-text {
+  font-family: monospace;
+  font-size: 13px;
+  color: #6c757d;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}

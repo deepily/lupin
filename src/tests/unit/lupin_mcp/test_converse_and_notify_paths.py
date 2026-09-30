@@ -38,41 +38,41 @@ class TestConverseOutcomes:
 
     def test_an_answer_is_returned_bare( self, monkeypatch ):
         monkeypatch.setattr( cv, "notify_user_sync", lambda request, debug: _Resp( 0, "yes please" ) )
-        assert cv.converse.fn( "Ship it?" ) == "yes please"
+        assert cv.converse.fn.sync( "Ship it?" ) == "yes please"
 
     def test_a_default_used_answer_is_marked_so_the_caller_knows_nobody_typed_it( self, monkeypatch ):
         # Without the marker an auto-filled default is indistinguishable from a
         # human's answer, which is the whole reason the marker exists.
         monkeypatch.setattr( cv, "notify_user_sync",
                              lambda request, debug: _Resp( 0, "yes", default_used=True ) )
-        got = cv.converse.fn( "Ship it?" )
+        got = cv.converse.fn.sync( "Ship it?" )
         assert got.startswith( cv.DEFAULT_USED_MARKER )
         assert got.endswith( "yes" )
 
     def test_an_empty_answer_does_not_become_the_string_none( self, monkeypatch ):
         monkeypatch.setattr( cv, "notify_user_sync", lambda request, debug: _Resp( 0, None ) )
-        assert cv.converse.fn( "Ship it?" ) == ""
+        assert cv.converse.fn.sync( "Ship it?" ) == ""
 
     def test_a_timeout_with_a_default_returns_the_default_and_says_so( self, monkeypatch ):
         monkeypatch.setattr( cv, "notify_user_sync", lambda request, debug: _Resp( 2 ) )
-        got = cv.converse.fn( "Ship it?", response_default="no" )
+        got = cv.converse.fn.sync( "Ship it?", response_default="no" )
         assert "timeout - using default" in got
         assert got.endswith( "no" )
 
     def test_a_timeout_with_no_default_says_nothing_came_back( self, monkeypatch ):
         monkeypatch.setattr( cv, "notify_user_sync", lambda request, debug: _Resp( 2 ) )
-        assert cv.converse.fn( "Ship it?" ) == "[timeout - no response received]"
+        assert cv.converse.fn.sync( "Ship it?" ) == "[timeout - no response received]"
 
     def test_any_other_exit_code_reports_the_status( self, monkeypatch ):
         monkeypatch.setattr( cv, "notify_user_sync",
                              lambda request, debug: _Resp( 1, status="transport_error" ) )
-        assert cv.converse.fn( "Ship it?" ) == "[error: transport_error]"
+        assert cv.converse.fn.sync( "Ship it?" ) == "[error: transport_error]"
 
     def test_a_bad_priority_is_caught_before_the_transport( self, monkeypatch ):
         def must_not_run( **k ):
             raise AssertionError( "an invalid request must never reach the transport" )
         monkeypatch.setattr( cv, "notify_user_sync", must_not_run )
-        assert "validation error" in cv.converse.fn( "Ship it?", priority="nope" )
+        assert "validation error" in cv.converse.fn.sync( "Ship it?", priority="nope" )
 
 
 # ── the multiple-choice response parser ───────────────────────────────────────

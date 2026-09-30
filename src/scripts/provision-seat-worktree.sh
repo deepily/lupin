@@ -1,0 +1,258 @@
+#!/usr/bin/env bash
+#
+# Give a spawned SEAT its own private worktree, so two seats can never be mid-edit in
+# one working tree.
+#
+# THE DEFECT THIS CLOSES (row 9d654899, ruled by Rick 2026-09-03: "Adopt, with drift
+# disclosure"). `git commit -- <path>` commits that path's WORKING-TREE CONTENT, so a
+# seat that legitimately claims a file still commits whatever a peer left uncommitted
+# inside it. Every control the fleet has is per-FILE and the hazard is per-HUNK:
+#
+#   · the session manifest says the file is yours — and it IS yours
+#   · the commit scope guard checks the PATH against your section — and it passes
+#   · a pathspec cannot help — you named exactly the file you meant
+#
+# It has fired three times: a completed HIT (57 of one seat's uncommitted lines landed
+# in a peer's commit, under his name, with every control saying yes), and two near
+# misses — one caught by reading a diff, and one on 2026-09-03 at 19:11 where a peer's
+# uncommitted file sat in the shared checkout during a merge. The commit log dates that
+# third window at ONE MINUTE (the peer committed at 19:12), which is why "just look
+# before you commit" is a habit rather than a control.
+#
+# ⚠️ WHY PROVISIONING AND NOT AN ALARM. `session_spawner` already DETECTS this — it
+# returns `placement_alarm` when a seat lands in the shared main checkout. An alarm
+# tells a seat it is standing somewhere unsafe and leaves it there. Under the ruling the
+# default itself is wrong, so the detection becomes the fix. This is deliberately the
+# same shape as `link-worktree-venv.sh`, which the spawn path already calls.
+#
+# ⚠️ WHAT THIS DOES NOT DO: it never removes a worktree. Seat teardown does at reap or
+# exit (`seat_teardown.retire_seat_worktree`, row 129cc96b P3), and the arbiter's worktree
+# janitor is the backstop (`worktree_reaper.reconcile_worktrees`).
+#
+# 🔴 WHERE THE TREE GOES, AND WHY IT IS LOCKED (Rick, 2026-09-14, row 033538f6). This
+# used to build `<projects>/<repo>-wt-<seat>` NEXT TO the main checkout, where the janitor
+# never looks and nothing ever removed it: 227 of them had piled up by 2026-09-14, 45 from
+# this script. Seat trees now live in the sanctioned lane, `<main>/.claude/worktrees/
+# seat-<seat>` — gitignored, out of sight, and swept by the janitor. The janitor drains
+# any tree there idle past its threshold, and a LIVE seat can easily sit idle that long,
+# so the tree is locked with reason `lupin-seat:<seat>`. The janitor sweeps a seat-locked
+# tree only once that seat is provably gone. Plan:
+# planning-is-prompting/src/rnd/2026.09.14-worktree-location-rule.md
+#
+# Usage:
+#   provision-seat-worktree.sh <main-repo-root> <seat-name>
+#   provision-seat-worktree.sh --check <path>     # report, change nothing
+#
+# Machine-readable output — the caller parses these keys, one per line, never the prose:
+#   WORKTREE=<absolute path>
+#   DRIFT_BEHIND=<commits this tree is behind the main checkout's HEAD>
+#   STATUS=created|reused|already_seat_tree|occupied
+#   OCCUPIED_REASON=<why>   (only with STATUS=occupied: the tree was NOT reused)
+#
+# Exit codes:
+#   0  the seat has a private worktree (created or already there)
+#   2  bad arguments, missing directory, or not a git repository
+#   4  the target already exists and is NOT a worktree — not ours to touch
+#   5  git worktree add failed
+#   6  created it but it does not verify — never report success on an unverified tree
+
+set -euo pipefail
+
+if [[ "${1:-}" == "--check" ]]; then
+    TARGET="${2:-$PWD}"
+    if [[ ! -d "$TARGET" ]]; then
+        echo "ERROR: not a directory: $TARGET" >&2
+        exit 2
+    fi
+    # No pipe into a short-circuiting reader — see the SIGPIPE note in
+    # link-worktree-venv.sh; this box has a 129-entry worktree list.
+    if ! LIST="$( git -C "$TARGET" worktree list --porcelain 2>/dev/null )"; then LIST=""; fi
+    MAIN=""
+    while IFS= read -r line; do
+        if [[ "$line" == "worktree "* ]]; then MAIN="${line#worktree }"; break; fi
+    done <<< "$LIST"
+    if [[ -z "$MAIN" ]]; then
+        echo "ERROR: $TARGET is not inside a git repository" >&2
+        exit 2
+    fi
+    if [[ "$( cd "$TARGET" && pwd -P )" == "$( cd "$MAIN" && pwd -P )" ]]; then
+        echo "SHARED: $TARGET is the MAIN checkout — a peer's uncommitted work can be here" >&2
+        exit 1
+    fi
+    echo "PRIVATE: $TARGET is its own worktree"
+    exit 0
+fi
+
+MAIN_ROOT="${1:-}"
+SEAT_NAME="${2:-}"
+
+if [[ -z "$MAIN_ROOT" || -z "$SEAT_NAME" ]]; then
+    echo "ERROR: usage: provision-seat-worktree.sh <main-repo-root> <seat-name>" >&2
+    exit 2
+fi
+if [[ ! -d "$MAIN_ROOT" ]]; then
+    echo "ERROR: not a directory: $MAIN_ROOT" >&2
+    exit 2
+fi
+
+if ! LIST="$( git -C "$MAIN_ROOT" worktree list --porcelain 2>/dev/null )"; then LIST=""; fi
+MAIN=""
+while IFS= read -r line; do
+    if [[ "$line" == "worktree "* ]]; then MAIN="${line#worktree }"; break; fi
+done <<< "$LIST"
+if [[ -z "$MAIN" ]]; then
+    echo "ERROR: $MAIN_ROOT is not inside a git repository" >&2
+    exit 2
+fi
+
+# ⚠️ RESOLVE THE MAIN CHECKOUT RATHER THAN TRUSTING THE ARGUMENT. A manager standing in
+# its own worktree hands us that worktree; nesting a worktree inside one is not what the
+# ruling asks for, and `git worktree list` already names the primary tree for us.
+MAIN="$( cd "$MAIN" && pwd -P )"
+
+# Sanitize the seat name into a path segment. A seat name reaches us from a spawn
+# record; it is not a path and must never be able to become one.
+SLUG="$( printf '%s' "$SEAT_NAME" | tr -c 'A-Za-z0-9._-' '-' | sed 's/^-*//; s/-*$//' )"
+if [[ -z "$SLUG" ]]; then
+    echo "ERROR: seat name sanitizes to nothing: $SEAT_NAME" >&2
+    exit 2
+fi
+
+SEAT_LANE="$MAIN/.claude/worktrees"
+TARGET="$SEAT_LANE/seat-${SLUG}"
+LOCK_REASON="lupin-seat:${SEAT_NAME}"
+
+# Lock the seat's tree so the janitor leaves it alone while the seat lives. Idempotent:
+# git refuses to lock a tree that is already locked, and that is not a failure here.
+lock_seat_tree() {
+    git -C "$MAIN" worktree lock --reason "$LOCK_REASON" "$TARGET" >/dev/null 2>&1 || true
+}
+
+# 🔴 THE SHORT-CIRCUIT ASKS "AM I THIS SEAT'S OWN TREE", NOT "AM I SOMEWHERE OTHER THAN
+# THE MAIN CHECKOUT" — and it is computed AFTER `TARGET` for exactly that reason.
+#
+# This block used to sit above, testing `MAIN_ROOT != MAIN`, and it had a hole Rachel
+# measured on 2026-09-03: a manager standing in its OWN worktree hands us that worktree
+# (`_resolve_project_root` returns it deliberately — row 1cf6c918, because sending its
+# workers to the main checkout would quietly undo the manager's own isolation). The old
+# test passed, the seat name was IGNORED, and every seat of the batch plus the manager
+# shared one working tree with every alarm silent. Measured: two different seat names,
+# same tree, `STATUS=main_repo_ok` both times.
+#
+# ⚠️ `main_repo_ok` IS A STATUS THIS SCRIPT NO LONGER EMITS — it belongs to the code
+# that measurement was taken against, and is named here only so the receipt stays
+# readable. Today's statuses are the three above: created | reused |
+# already_seat_tree. Marked because a reader who greps for it finds one hit, in a
+# comment, and cannot tell a historical record from a live contract.
+#
+# ⚠️ IT IS A HOLE, NOT A REGRESSION — today's code puts them in the same place. But it
+# means the fix does not fire in a configuration the row's own hazard lives in, which is
+# worse than it sounds: a silent pass reads as protection.
+#
+# ⇒ It is the same shape as the blind assertion in this change's own test suite:
+# "not the main checkout" is not "private to me", exactly as git listing the main
+# checkout as a worktree makes "appears in `git worktree list`" no proof of isolation.
+if [[ "$( cd "$MAIN_ROOT" && pwd -P )" == "$TARGET" ]]; then
+    echo "STATUS=already_seat_tree"
+    echo "WORKTREE=$TARGET"
+    echo "DRIFT_BEHIND=$( git -C "$MAIN_ROOT" rev-list --count HEAD.."$( git -C "$MAIN" rev-parse HEAD )" 2>/dev/null || echo 0 )"
+    echo "Already this seat's own worktree — nothing to provision."
+    exit 0
+fi
+
+# Idempotent: a registered worktree at that path is REUSED, never recreated. A seat that
+# is re-spun under the same name comes back to its own tree with its work still in it.
+IS_REGISTERED=0
+while IFS= read -r line; do
+    if [[ "$line" == "worktree "* ]]; then
+        if [[ "${line#worktree }" == "$TARGET" ]]; then IS_REGISTERED=1; break; fi
+    fi
+done <<< "$LIST"
+
+# 🔴 A REUSED TREE MUST NOT BE ONE SOMEONE IS STANDING IN (row 81714af0, measured
+# 2026-09-29): the tree is keyed on the seat NAME, not on who uses it now, so a manager
+# who had adopted a reaped worker's tree was handed it back out to a NEW worker, with the
+# manager's uncommitted edits still in it. Two sessions in one tree is the shared-index
+# hazard this script exists to prevent. Reuse is refused when either
+#   (a) a live process has its cwd inside the tree — read from /proc/<pid>/cwd, never
+#       from a PID remembered earlier, or
+#   (b) the tree has uncommitted changes and no memento in its root claims them. A memento
+#       claims only if it is NEWER than the newest uncommitted change (a re-spin writes
+#       one last; an adopter's later edit outdates an old one, whoever it names).
+# The caller picks the next free slot; nothing here deletes or touches the tree.
+occupied_reason() {
+    local tree="$1" pid cwd path m claimed rel
+    for pid_dir in /proc/[0-9]*; do
+        pid="${pid_dir#/proc/}"
+        cwd="$( readlink "$pid_dir/cwd" 2>/dev/null || true )"
+        if [[ "$cwd" == "$tree" || "$cwd" == "$tree"/* ]]; then
+            echo "a live process (pid $pid) has its cwd inside the tree"
+            return 0
+        fi
+    done
+    # Uncommitted paths, mementos excluded (a memento is the claim, not the change).
+    local dirty=()
+    while IFS= read -r rel; do
+        [[ -n "$rel" ]] && dirty+=( "$tree/$rel" )
+    done < <( git -C "$tree" status --porcelain 2>/dev/null | cut -c4- | grep -v '^\.claude-memento-' || true )
+    [[ ${#dirty[@]} -eq 0 ]] && return 1
+
+    # A memento claims the dirty tree only if it is NEWER than every uncommitted change:
+    # an old memento says nothing about an edit made after it was written. NAMING THE SEAT
+    # IS NOT A CLAIM — a reaped worker's memento names its seat, and would go on claiming
+    # the tree after a manager edits in it. Compared by mtime, `-nt`, which is sub-second.
+    claimed=0
+    for m in "$tree"/.claude-memento-*.md; do
+        [[ -f "$m" ]] || continue
+        local newer=1
+        for path in "${dirty[@]}"; do
+            [[ -e "$path" ]] || continue
+            if [[ ! "$m" -nt "$path" ]]; then newer=0; break; fi
+        done
+        if [[ $newer -eq 1 ]]; then claimed=1; break; fi
+    done
+    if [[ $claimed -eq 0 ]]; then
+        echo "the tree has uncommitted changes and no memento claims them (none is newer than the newest change)"
+        return 0
+    fi
+    return 1
+}
+
+if [[ $IS_REGISTERED -eq 1 && -d "$TARGET" ]]; then
+    if OCCUPIED="$( occupied_reason "$TARGET" )"; then
+        echo "STATUS=occupied"
+        echo "WORKTREE=$TARGET"
+        echo "OCCUPIED_REASON=$OCCUPIED"
+        echo "Not reusing $TARGET for seat $SEAT_NAME: $OCCUPIED"
+        exit 0
+    fi
+    lock_seat_tree
+    echo "STATUS=reused"
+    echo "WORKTREE=$TARGET"
+    echo "DRIFT_BEHIND=$( git -C "$TARGET" rev-list --count HEAD.."$( git -C "$MAIN" rev-parse HEAD )" 2>/dev/null || echo 0 )"
+    echo "Reusing the existing worktree for seat $SEAT_NAME"
+    exit 0
+fi
+
+if [[ -e "$TARGET" ]]; then
+    echo "ERROR: $TARGET exists and is not a registered worktree — not mine to touch" >&2
+    exit 4
+fi
+
+mkdir -p "$SEAT_LANE"
+if ! git -C "$MAIN" worktree add --detach "$TARGET" HEAD >/dev/null 2>&1; then
+    echo "ERROR: git worktree add failed for $TARGET" >&2
+    exit 5
+fi
+
+# Verify rather than assume — a directory that exists is not a working tree.
+if [[ ! -d "$TARGET" ]] || ! git -C "$TARGET" rev-parse --git-dir >/dev/null 2>&1; then
+    echo "ERROR: created $TARGET but it is not a usable worktree" >&2
+    exit 6
+fi
+lock_seat_tree
+
+echo "STATUS=created"
+echo "WORKTREE=$TARGET"
+echo "DRIFT_BEHIND=$( git -C "$TARGET" rev-list --count HEAD.."$( git -C "$MAIN" rev-parse HEAD )" 2>/dev/null || echo 0 )"
+echo "Created a private worktree for seat $SEAT_NAME at $TARGET"

@@ -80,8 +80,12 @@ class CommonsLlmDisambiguator:
         - `disambiguate(active_personas, ambiguous_reference, context=None)`
           returns the canonical persona name from `active_personas`, OR None
           on no-match / whitelist-miss / confidence-below-floor / parse-error
-          / input validation error / fallback NotImplementedError.
-        - NEVER raises publicly. Internal errors caught, debug-logged, return None.
+          / input validation error / fallback NotImplementedError / LLM timeout.
+        - The LLM call is bounded by `commons llm disambiguator timeout seconds`.
+        - NEVER raises publicly for the exception types it names. ⚠️ A transport
+          error that is NOT a timeout — a refused connection, say — still escapes;
+          measured gap, not a fixed one (row abe4188d). It fails FAST, so it is not
+          the hang that row describes.
     """
 
     def __init__(
@@ -145,9 +149,14 @@ class CommonsLlmDisambiguator:
         prompt      = f"{_SYSTEM_PROMPT}\n\n{request_xml}"
 
         # 2. Invoke PHI-4 (lazy client construction)
+        #    `timeout` is passed explicitly, not left to the client's **kwargs: this
+        #    value was read from the INI at construction and then never used, so an
+        #    unroutable base_url blocked the caller for about two minutes instead of
+        #    the configured seconds (row abe4188d). The client raises the BUILTIN
+        #    TimeoutError, which is what the except clause below already names.
         try:
             client       = self._get_client()
-            response_xml = client.run( prompt )
+            response_xml = client.run( prompt, timeout=self.timeout_seconds )
             response     = PersonaDisambiguationResponse.from_xml( response_xml )
         except ( TimeoutError, XMLParsingError, ValidationError, ValueError ) as e:
             if self.debug: print( f"[commons_llm_disambiguator] PHI-4 failed: {e!r} — routing to Haiku fallback" )

@@ -52,6 +52,40 @@ EXIT_INTERRUPTED   = 2   # collection error inside a test module
 EXIT_USAGE_ERROR   = 4   # conftest failed to import — no hooks fire, no junit written
 EXIT_NO_TESTS      = 5   # nothing collected at all
 
+# 🔴 EXIT 4 IS NOT ONLY PYTEST'S — AND diagnose() IS APPLIED TO SUITES THAT ARE NOT PYTEST.
+# `run-coverage-gate.sh` exits 4 for "REFUSED — the tree MOVED while this run was measuring
+# it" (row 73ebccb1), and TestSuiteJob calls diagnose( exit_code, stdout ) for EVERY suite
+# with no gate on suite type — including `coverage`, which is a shell report-and-check
+# wrapper, not a pytest run.
+#
+# 🔴 IT IS LIVE IN THE MODE PEOPLE ACTUALLY RUN. MEASURED 2026-09-05 ON TWO REAL EXIT-4
+# RUNS — and the first cut of this comment called it "safe today", which was true only of
+# the narrower mode and is corrected here rather than quietly reworded:
+#
+#   PYRAMID mode  (no tier stdout, 'conftest' x0)
+#     diagnose( 4, the gate's real exit-4 output )     -> None                    safe
+#   --run-tiers   (tier stdout included, 'conftest' x6, 226,776 chars)
+#     diagnose( 4, the gate's real exit-4 output )     -> "unrecognised
+#                                                          import-time failure"   🔴 WRONG
+#     …and the last-400-line TAIL misdiagnoses too ('conftest' x2), so log-tailing
+#     does not save a caller either.
+#   positive control
+#     diagnose( 4, a real conftest ImportError )       -> diagnosed correctly
+#
+# ⇒ A TREE-MOVED REFUSAL IS REPORTED AS AN IMPORT FAILURE, CONFIDENTLY, TODAY. The
+# protection was never the code — it was `"conftest" in output.lower()` happening to be
+# false, and under --run-tiers the tiers put that word in the stream themselves. A MESSAGE
+# match standing in for a CODE contract: a code is a contract, a message drifts.
+#
+# ⚠️ AND IT POINTS AT INNOCENT CODE. The reader is not merely unhelped — they are sent to
+# hunt a conftest import error that does not exist, while the real cause (someone edited
+# the tree mid-run) goes unreported.
+#
+# NOT FIXED HERE, deliberately: making diagnose() suite-aware, or having the caller skip it
+# for the non-pytest suites it already enumerates, is a design change with its own blast
+# radius and is not this row's scope. Recorded so the next person meets it as a known,
+# measured hazard instead of as a mystery.
+
 
 def _find_uncommitted_python( project_root: Optional[ str ] = None ) -> List[ str ]:
     """

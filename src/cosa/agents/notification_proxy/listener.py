@@ -102,6 +102,16 @@ class WebSocketListener:
         """Whether the WebSocket is currently connected and authenticated."""
         return self._connected
 
+    @property
+    def authorization( self ):
+        """
+        The `Bearer <jwt>` this listener logged in with, or None before its first login.
+
+        Row e20e249a: the answer door requires a credential, and the responder borrows this
+        one so every answer the proxy posts carries the login it already holds.
+        """
+        return self._token
+
     async def run( self ):
         """
         Start the listener with automatic reconnection.

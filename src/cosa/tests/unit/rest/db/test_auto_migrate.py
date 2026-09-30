@@ -148,7 +148,14 @@ class TestRunMigrationsToHead( unittest.TestCase ):
 # ---------------------------------------------------------------------------
 # Live integration tests — real throwaway DB (skipped if Postgres unreachable)
 # ---------------------------------------------------------------------------
-_PG = dict( host="localhost", port=5432, user="lupin_dev", password="dev_password" )
+# The password is read from the ENVIRONMENT, never hardcoded (row baac2474). It used to be a
+# literal, and that same literal configured the live container while sitting in a PUBLIC repo.
+#
+# ⚠️ A PLACEHOLDER HERE WOULD BE A MASK, NOT A SCRUB. These are real connections: a fake value
+# makes _pg_reachable() fail and turns every live test below into a PERMANENT SKIP that reads
+# like "Postgres is down". Unset DB_PASSWORD and they skip honestly; set it and they run.
+_PG = dict( host="localhost", port=5432, user="lupin_dev",
+            password=os.environ.get( "DB_PASSWORD", "" ) )
 
 
 def _pg_reachable():
@@ -225,7 +232,7 @@ class TestAutoMigrateLive( unittest.TestCase ):
         self._sql = sql
         with self._admin.cursor() as cur:
             cur.execute( sql.SQL( "CREATE DATABASE {}" ).format( sql.Identifier( self.dbname ) ) )
-        self.url = f"postgresql+psycopg2://lupin_dev:dev_password@localhost:5432/{self.dbname}"
+        self.url = f"postgresql+psycopg2://lupin_dev:{_PG[ 'password' ]}@localhost:5432/{self.dbname}"
 
     def tearDown( self ):
         with self._admin.cursor() as cur:
@@ -307,7 +314,7 @@ class TestAutoMigrateLive( unittest.TestCase ):
         # Task (a): with NO DATABASE_URL and NO injected url, env.py must fall
         # through to cosa.rest.db.database.get_database_url() — the app builder —
         # to find the right database. We point the builder at this throwaway DB
-        # via DB_NAME (development branch: localhost:5432, lupin_dev/dev_password).
+        # via DB_NAME (development branch: localhost:5432, lupin_dev/$DB_PASSWORD).
         from alembic import command
 
         # First bring the DB to head normally (empty -> create_all + stamp head).
@@ -318,7 +325,7 @@ class TestAutoMigrateLive( unittest.TestCase ):
             "DB_HOST"     : "localhost",
             "DB_PORT"     : "5432",
             "DB_USER"     : "lupin_dev",
-            "DB_PASSWORD" : "dev_password",
+            "DB_PASSWORD" : _PG[ "password" ],
         }
         # build_alembic_config(database_url=None) => NO injected_db_url attribute,
         # so env.py's OWN resolution (DATABASE_URL -> injected -> builder) runs.

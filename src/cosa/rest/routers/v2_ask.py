@@ -17,16 +17,33 @@ app.dependency_overrides — no real stack is touched on :7999.
 
 from __future__ import annotations
 
-from typing import Any, Optional
+import asyncio
+import json
+import os
+import time
+import re
+from typing import Any, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+import torch
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from cosa.config.configuration_manager import ConfigurationManager
-from cosa.rest.auth import get_current_user
+from cosa.rest.auth import get_current_user, identity_or_401
+from cosa.rest.routers import speech
+from cosa.rest.v2.request_context import set_bearer_token, reset_bearer_token
 
 router = APIRouter( tags=[ "v2-ask" ] )
+
+# The ask tasks /api/v2/ask-audio has started and not yet settled. A strong reference is
+# defence in depth, not what keeps an ask alive across a disconnect — that is creating the
+# task before the StreamingResponse exists (see ask_audio). Deliberately NOT
+# speech.get_active_tasks: that dict's one consumer, websocket.py, cancels by bare
+# session_id when the audio WebSocket drops, which would kill exactly the ask this door
+# promises survives a disconnect.
+_INFLIGHT_ASKS: set = set()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -98,6 +115,7 @@ class AskResponse( BaseModel ):
     pending_id     : Optional[ str ]     = Field( None, description="Parked-request id when interactive + needs_input" )
     job_id         : Optional[ str ]     = Field( None, description="Executor job id (replay id_hash, etc.)" )
     snapshot_id    : Optional[ str ]     = Field( None, description="Written-back snapshot id, or null" )
+    replayed_snapshot_id : Optional[ str ] = Field( None, description="id_hash of the cached row this request REPLAYED (set on both the served and the failed replay); null when nothing was replayed. Distinct from `snapshot_id`, which is the WRITE-BACK id and is null on a warm pass by construction, and from `job_id`, which means a queue job on the agent path" )
     similarity     : Optional[ float ]   = Field( None, description="Best cache-candidate similarity" )
     wrote_snapshot : bool                = Field( False, description="Whether a snapshot was written back" )
     cache_hit      : bool                = Field( False, description="Whether this was a tier-1 exact replay" )
@@ -105,6 +123,8 @@ class AskResponse( BaseModel ):
     timings_ms     : dict                = Field( default_factory=dict, description="Per-stage millisecond offsets" )
     trace_id       : str                 = Field( ..., description="The request's trace id" )
     error          : Optional[ str ]     = Field( None, description="Degradation error string, when a stage failed" )
+    queue_position : Optional[ int ]     = Field( None, description="The todo queue's size right after this request's job was queued — a snapshot taken at submit time, not kept current; null when nothing was queued (replay, inline agent, needs_input, failure)" )
+    submit_details : Optional[ dict ]    = Field( None, description="What the command's builder learned about the job it built or declined to build — set only by commands that report it (agent router go to mock job: its resolved `config`, and for a cancelled expeditor test the notification status). Null otherwise" )
 
 
 class AgentOption( BaseModel ):
@@ -224,6 +244,32 @@ def build_ask_flow( config_mgr: Any, todo_queue: Any=None ) -> tuple:
     confirmation_threshold = config_mgr.get( "similarity threshold confirmation", default=90.0, return_type="float"   )
     confirmation_enabled   = config_mgr.get( "similarity confirmation enabled",   default=True, return_type="boolean" )
 
+    def _source_document_scopes() -> dict:
+        """The scopes a `source_document` may name — Rick's Q1 ruling, 2026-09-08.
+
+        THE DOC-VIEWER'S REGISTRY PLUS THE TWO BUILT-INS, and deliberately not a second
+        allowlist: the set of files a research job may READ is then the same set a human
+        may BROWSE at /api/docs/file and /api/io/file. Two allowlists that disagree about
+        which files are reachable is the failure this avoids, and it is the reason this
+        resolves through build_scope_registry rather than listing directories here.
+
+        `docs` and `io` are added by hand because build_scope_registry SKIPS them by name
+        (_RESERVED_SCOPE_NAMES) — they are built-ins served from the project root rather
+        than entries in the `external repos` INI block, so the registry that describes
+        external repos legitimately does not carry them.
+
+        Called per request rather than cached: the registry is cheap to rebuild and a
+        cached copy would freeze whatever was mounted when the flow was constructed.
+        """
+        import cosa.utils.util as cu
+        from cosa.rest.routers._scope_registry import ScopeConfig, build_scope_registry
+
+        project_root = cu.get_project_root()
+        scopes       = dict( build_scope_registry( config_mgr ) )
+        scopes[ "io" ]   = ScopeConfig( name="io",   root=os.path.join( project_root, "io" ),   allowed_prefixes=( ) )
+        scopes[ "docs" ] = ScopeConfig( name="docs", root=os.path.join( project_root, "src" ),  allowed_prefixes=( ) )
+        return scopes
+
     flow = AskFlow(
         cache             = V2Cache(),
         router            = RouterClient( config_mgr ),
@@ -239,6 +285,7 @@ def build_ask_flow( config_mgr: Any, todo_queue: Any=None ) -> tuple:
         similarity_floor  = similarity_floor,
         writeback_enabled = writeback_enabled,
         trace_dir         = trace_dir,
+        scope_registry_fn = _source_document_scopes,
     )
     return flow, enabled
 
@@ -376,12 +423,7 @@ async def v2_ask(
           failure — AskFlow degrades each to the receptionist.
         - user_id / user_email come from the token, never the client body.
     """
-    user_id    = current_user.get( "uid" )
-    user_email = current_user.get( "email" )
-    if not user_id:
-        raise HTTPException( status_code=401, detail="User id not found in authentication token." )
-    if not user_email:
-        raise HTTPException( status_code=401, detail="User email not found in authentication token." )
+    user_id, user_email = identity_or_401( current_user )
 
     session_id = request.websocket_id or f"api-{user_id[ :8 ]}"
     # flow.ask() is SYNCHRONOUS and takes as long as the agent takes — measured at
@@ -403,9 +445,202 @@ async def v2_ask(
     return AskResponse( **result )
 
 
+def _ndjson( obj: dict ) -> str:
+    """
+    One NDJSON line: a compact JSON object and its newline.
+
+    Ensures:
+        - no space after ':' or ',' and exactly one trailing "\\n", so the body is
+          byte-comparable with the committed contract fixture
+    """
+    return json.dumps( obj, separators=( ",", ":" ) ) + "\n"
+
+
+def _stream_headers() -> dict:
+    """
+    Headers for a streamed NDJSON reply.
+
+    Ensures:
+        - exactly Cache-Control: no-cache and X-Accel-Buffering: no — not the SSE set,
+          which would also claim text/event-stream, keep-alive and a wildcard CORS origin
+    """
+    return { "Cache-Control": "no-cache", "X-Accel-Buffering": "no" }
+
+
+@router.post( "/api/v2/ask-audio" )
+async def ask_audio(
+    file             : UploadFile       = File( ... ),
+    websocket_id     : Optional[ str ]  = None,
+    speak            : bool             = True,
+    interactive      : bool             = True,
+    current_user     : dict             = Depends( get_current_user ),
+    flow             : Any              = Depends( get_ask_flow ),
+    provider         : Any              = Depends( speech.get_speech_provider ),
+    whisper_pipeline : Any              = Depends( speech.get_whisper_pipeline ),
+    config_mgr       : Any              = Depends( speech.get_config_manager ),
+) -> StreamingResponse:
+    """
+    Transcribe a spoken question and ask it, in one request with a two-part reply.
+
+    Requires:
+        - an authenticated user carrying uid + email
+        - file is audio the transcriber reads; websocket_id, when given, is a QUERY parameter
+
+    Ensures:
+        - a non-200 means nothing was asked: 401 identity, 503 flow disabled or GPU OOM,
+          500 any other failure reading, saving or transcribing the audio, 422 empty speech
+        - a 200 body is NDJSON: a transcript line, then exactly one ask or error line
+        - the ask is started BEFORE the response exists, so a client that disconnects after
+          line 1 does not cancel it; its answer still reaches the session's WebSocket
+        - the uploaded audio is removed on every path
+
+    Raises:
+        - HTTPException 401 / 422 / 500 / 503 as above
+    """
+    user_id, user_email = identity_or_401( current_user )
+    session_id = websocket_id or f"api-{user_id[ :8 ]}"
+    temp_path  = None
+    try:
+        # The read and the save are inside the try, as in both existing audio doors: a full
+        # disk or a bad upload dir must come back as the shaped 500 below, not a bare one.
+        content   = await file.read()
+        suffix    = speech.audio_suffix_from_filename( file.filename, fallback=".wav" )
+        temp_path = speech.save_audio_upload( content, user_id, suffix, speech.resolve_stt_upload_dir( config_mgr ) )
+        # Before the stream opens, so a failure is a real HTTP status.
+        started = time.perf_counter()
+        text    = ( await run_in_threadpool( lambda: provider.transcribe( temp_path, whisper_pipeline=whisper_pipeline ) ) ).strip()
+        stt_ms  = round( ( time.perf_counter() - started ) * 1000, 1 )
+        if not text: raise HTTPException( status_code=422, detail="No speech was recognised, so nothing was asked." )
+        # Inside the try too, as both existing doors keep their io-row insert (J-A2): a database
+        # failure here is the shaped 500, never a bare one.
+        await run_in_threadpool( lambda: speech.insert_stt_io_row(
+            input_type="stt_wav_ask", input=text, output_raw=text, output_final=text ) )
+    except torch.cuda.OutOfMemoryError:
+        # The same status, message and header both existing audio doors send.
+        print( "[ERROR] ask-audio transcription failed: CUDA out of memory (after retry)" )
+        raise HTTPException( status_code=503, detail="Server GPU memory temporarily unavailable. Please retry in a few seconds.", headers={ "Retry-After": "5" } )
+    except HTTPException:
+        # A refusal raised on purpose above (the 422). HTTPException is an Exception, so without
+        # this clause the generic handler below would turn it into a 500 — the MP3 door's precedent.
+        raise
+    except Exception as e:
+        # One fixed message and no exception text, following the MP3 door's correction:
+        # naming every failure "transcription failed" once sent a config fault to the model
+        # server for debugging. Everything before the ask is one thing to the client.
+        print( f"[ERROR] ask-audio failed before the ask: {e}" )
+        raise HTTPException( status_code=500, detail="Could not accept the audio. Nothing was asked." )
+    finally:
+        # A bare call, as the WAV door's: remove_audio_upload does nothing for None.
+        speech.remove_audio_upload( temp_path )
+
+    # START THE ASK HERE, before the StreamingResponse exists. Starlette cancels the
+    # response's scope on disconnect, and anyio checks for cancellation before its worker
+    # thread starts, so an ask created inside lines() could be killed after a 200 and a
+    # transcript had already gone out. A plain task created now is outside that scope.
+    ask_task = asyncio.create_task(
+        run_in_threadpool( lambda: flow.ask( question=text, user_id=user_id, user_email=user_email,
+                                             session_id=session_id, websocket_id=session_id,
+                                             speak=speak, interactive=interactive ) ) )
+    _INFLIGHT_ASKS.add( ask_task )
+
+    def _release( task ):
+        # Drop the reference, and retrieve the exception so an ask that fails after the
+        # client left is not reported as "Task exception was never retrieved".
+        _INFLIGHT_ASKS.discard( task )
+        # Two lines, not one: on one line coverage cannot tell the cancelled arm from the other
+        # (both end on this line), so a 100%-branch gate would pass with that arm never run.
+        if not task.cancelled():
+            task.exception()
+    ask_task.add_done_callback( _release )
+
+    trace = { "stt_ms": stt_ms, "upload_bytes": len( content ) }
+
+    async def lines():
+        yield _ndjson( { "type": "transcript", "transcription": text, "trace": trace } )
+        try:
+            result = await asyncio.shield( ask_task )
+            # The full AskResponse body /api/v2/ask returns: every field, in model order.
+            yield _ndjson( { "type": "ask", "result": AskResponse( **result ).model_dump( mode="json" ) } )
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            yield _ndjson( { "type": "error", "stage": "ask", "detail": str( e ) } )
+
+    return StreamingResponse( lines(), media_type="application/x-ndjson", headers=_stream_headers() )
+
+
+class TranscribeTrace( BaseModel ):
+    stt_ms       : float
+    upload_bytes : int
+
+
+class TranscribeResponse( BaseModel ):
+    """The transcript line of /api/v2/ask-audio, without its `type` and without an ask."""
+    transcription : str
+    trace         : TranscribeTrace
+
+
+@router.post( "/api/v2/transcribe", response_model=TranscribeResponse )
+async def transcribe(
+    file             : UploadFile = File( ... ),
+    current_user     : dict       = Depends( get_current_user ),
+    provider         : Any        = Depends( speech.get_speech_provider ),
+    whisper_pipeline : Any        = Depends( speech.get_whisper_pipeline ),
+    config_mgr       : Any        = Depends( speech.get_config_manager ),
+) -> TranscribeResponse:
+    """
+    Transcribe spoken audio and return the words, asking nothing (row fcebf532).
+
+    For a client that must show the transcript before deciding to send it — the phone's Quick
+    Ask review and its focus-mode voice reply. It is /api/v2/ask-audio with the ask removed, so
+    it takes no flow dependency and is not behind the `v2 flow enabled` gate.
+
+    Requires:
+        - an authenticated user carrying uid + email
+        - file is audio the transcriber reads; its extension (.ogg, .wav, …) picks the decoder
+
+    Ensures:
+        - 200 body is { transcription, trace: { stt_ms, upload_bytes } }, the transcript stripped
+        - 401 identity; 422 a missing file part, an empty upload, or no speech recognised;
+          503 with Retry-After on GPU OOM; 500 with one fixed detail for any other failure
+          reading, saving, transcribing or logging — never the exception text
+        - the uploaded audio is removed on every path, and one io row is written on success
+
+    Raises:
+        - HTTPException 401 / 422 / 500 / 503 as above
+    """
+    user_id, _ = identity_or_401( current_user )
+    temp_path  = None
+    try:
+        content = await file.read()
+        # Checked before anything is written: an empty part is the client's mistake, not ours.
+        if not content: raise HTTPException( status_code=422, detail="The audio upload was empty, so nothing was transcribed." )
+        suffix    = speech.audio_suffix_from_filename( file.filename, fallback=".wav" )
+        temp_path = speech.save_audio_upload( content, user_id, suffix, speech.resolve_stt_upload_dir( config_mgr ) )
+        started   = time.perf_counter()
+        text      = ( await run_in_threadpool( lambda: provider.transcribe( temp_path, whisper_pipeline=whisper_pipeline ) ) ).strip()
+        stt_ms    = round( ( time.perf_counter() - started ) * 1000, 1 )
+        if not text: raise HTTPException( status_code=422, detail="No speech was recognised." )
+        await run_in_threadpool( lambda: speech.insert_stt_io_row(
+            input_type="stt_transcribe", input=text, output_raw=text, output_final=text ) )
+    except torch.cuda.OutOfMemoryError:
+        print( "[ERROR] transcribe failed: CUDA out of memory (after retry)" )
+        raise HTTPException( status_code=503, detail="Server GPU memory temporarily unavailable. Please retry in a few seconds.", headers={ "Retry-After": "5" } )
+    except HTTPException:
+        raise
+    except Exception as e:
+        print( f"[ERROR] transcribe failed: {e}" )
+        raise HTTPException( status_code=500, detail="Could not transcribe the audio." )
+    finally:
+        speech.remove_audio_upload( temp_path )
+
+    return TranscribeResponse( transcription=text, trace=TranscribeTrace( stt_ms=stt_ms, upload_bytes=len( content ) ) )
+
+
 @router.post( "/api/v2/submit", response_model=AskResponse )
 async def v2_submit(
     request      : SubmitRequest,
+    http_request : Request,
     current_user : dict = Depends( get_current_user ),
     flow         : Any  = Depends( get_ask_flow ),
 ) -> AskResponse:
@@ -430,33 +665,36 @@ async def v2_submit(
           agentic path, which is the only path that builds one; on the other paths the
           flow records that they were dropped rather than discarding them in silence.
     """
-    user_id    = current_user.get( "uid" )
-    user_email = current_user.get( "email" )
-    if not user_id:
-        raise HTTPException( status_code=401, detail="User id not found in authentication token." )
-    if not user_email:
-        raise HTTPException( status_code=401, detail="User email not found in authentication token." )
+    user_id, user_email = identity_or_401( current_user )
 
     session_id = request.websocket_id or f"api-{user_id[ :8 ]}"
     # Same reason as /api/v2/ask: submit skips the head (no routing, no cache read)
     # but still RUNS THE AGENT, so it holds the caller for the agent's full span.
     # On the loop that starves /health with workers=1 (row 1c36199e); off it, it
     # holds a worker thread instead.
-    result = await run_in_threadpool(
-        lambda: flow.submit(
-            command        = request.command,
-            args           = request.args,
-            question       = request.question,
-            user_id        = user_id,
-            user_email     = user_email,
-            session_id     = session_id,
-            websocket_id   = request.websocket_id or session_id,
-            speak          = request.speak,
-            scheduled_at   = request.scheduled_at,
-            monopolize     = request.monopolize,
-            parent_id_hash = request.parent_id_hash,
+    # The caller's JWT travels to the job builder through a ContextVar, not through
+    # flow.submit(): the mock-job expeditor test has to authenticate its notifications AS the
+    # caller, and no other command needs it (see cosa.rest.v2.request_context).
+    auth_header = http_request.headers.get( "Authorization", "" )
+    reset       = set_bearer_token( auth_header[ 7: ] if auth_header.startswith( "Bearer " ) else None )
+    try:
+        result = await run_in_threadpool(
+            lambda: flow.submit(
+                command        = request.command,
+                args           = request.args,
+                question       = request.question,
+                user_id        = user_id,
+                user_email     = user_email,
+                session_id     = session_id,
+                websocket_id   = request.websocket_id or session_id,
+                speak          = request.speak,
+                scheduled_at   = request.scheduled_at,
+                monopolize     = request.monopolize,
+                parent_id_hash = request.parent_id_hash,
+            )
         )
-    )
+    finally:
+        reset_bearer_token( reset )
     return AskResponse( **result )
 
 
@@ -479,12 +717,7 @@ async def v2_resume(
         - resume runs OFF the event loop, in a worker thread. It used to run on
           the loop itself; that is what made /health time out during a call.
     """
-    user_id    = current_user.get( "uid" )
-    user_email = current_user.get( "email" )
-    if not user_id:
-        raise HTTPException( status_code=401, detail="User id not found in authentication token." )
-    if not user_email:
-        raise HTTPException( status_code=401, detail="User email not found in authentication token." )
+    user_id, user_email = identity_or_401( current_user )
 
     session_id = request.websocket_id or f"api-{user_id[ :8 ]}"
     # Same shape as v2_ask above, and the same reason. resume is the SECOND turn of
@@ -499,3 +732,132 @@ async def v2_resume(
         )
     )
     return AskResponse( **result )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POST /api/v2/resume-job — resume a STALLED JOB from its checkpoint (row 67a2a093)
+#
+# NOT `/api/v2/resume`, which answers a parked QUESTION (flow.resume). This is the verb
+# that replaces the two v1 resume doors, `/api/jobs/{id_hash}/resume-from-checkpoint` and
+# `/api/test-fix-expediter/resume-from`: an HTTP `SubmitRequest` can say command and args
+# but never "resume job X", so `submit` could not absorb them (Rick, 2026-09-28: "Build v2
+# resume, then retire").
+#
+# ONE BODY FOR BOTH KINDS. `resume_from` is door 7's free-form input (a `tfe-` id, a plan
+# path, a description) OR door 6's bare job id_hash, which used to sit in the URL. The
+# response keeps the two doors' field names on purpose (`resumed_job_id`, `original_job_id`,
+# `resume_from_phase`, `phase_name`, `resume_count`, `source_type`), so the three call
+# sites change their URL and nothing else.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# A job id_hash as the factory mints them: `<prefix>-<8 hex>` with an optional `::<owner>`.
+_JOB_ID_HASH = re.compile( r"^[a-z]+-[0-9a-f]{8}(::\S+)?$" )
+
+
+class ResumeJobRequest( BaseModel ):
+    """Request body for POST /api/v2/resume-job."""
+    resume_from           : str                = Field( ..., min_length=1, max_length=2000,
+                                                        description="A stalled job's id_hash, or (TFE) a job id, a plan document path, or a description of the job" )
+    lead_model_override   : Optional[ str ]    = Field( None, description="Per-resume lead model; the INI default applies when absent" )
+    worker_model_override : Optional[ str ]    = Field( None, description="Per-resume worker model; the INI default applies when absent" )
+    thinking_effort       : Optional[ Literal[ "low", "medium", "high", "xhigh", "max" ] ] = Field( None, description="Extended-thinking level for this resume" )
+
+
+class ResumeJobResponse( BaseModel ):
+    """The result of one resume-job request."""
+    status            : str                  = Field( ..., description="resumed | ambiguous" )
+    resumed_job_id    : Optional[ str ]      = Field( None, description="The NEW job's id_hash (resumed only)" )
+    original_job_id   : Optional[ str ]      = Field( None, description="The stalled job that was resumed (resumed only)" )
+    resume_from_phase : Optional[ int ]      = Field( None, description="Phase ordinal the new job resumes from" )
+    phase_name        : Optional[ str ]      = Field( None, description="Phase name the new job resumes from" )
+    resume_count      : Optional[ int ]      = Field( None, description="How many times this lineage has been resumed" )
+    queue_position    : Optional[ int ]      = Field( None, description="Todo-queue size right after the new job was pushed; null when nothing was pushed" )
+    source_type       : Optional[ str ]      = Field( None, description="How resume_from was resolved: job_id | plan_path | fuzzy | direct" )
+    matched_path      : Optional[ str ]      = Field( None, description="The plan path that matched, when source_type is plan_path" )
+    confidence        : Optional[ float ]    = Field( None, description="Resolver confidence" )
+    candidates        : Optional[ list ]     = Field( None, description="Possible matches, when status is ambiguous" )
+    diagnostic        : Optional[ str ]      = Field( None, description="Why the resolver answered as it did" )
+
+
+def get_todo_queue():
+    """The live todo queue, from the main module — the same dependency the v1 doors used."""
+    import lupin_app.main as main_module
+    return main_module.jobs_todo_queue
+
+
+@router.post( "/api/v2/resume-job", response_model=ResumeJobResponse )
+async def v2_resume_job(
+    request      : ResumeJobRequest,
+    current_user : dict = Depends( get_current_user ),
+    todo_queue   : Any  = Depends( get_todo_queue ),
+) -> ResumeJobResponse:
+    """
+    Resume a stalled job from its saved checkpoint and queue the new job.
+
+    Requires:
+        - an authenticated user (get_current_user) carrying uid + email.
+        - request.resume_from names a stalled job with a checkpoint, by id_hash,
+          `tfe-` id, plan document path, or description.
+
+    Ensures:
+        - a job-id-shaped resume_from that is not a `tfe-` id goes straight to the
+          factory (the old `/api/jobs/{id_hash}/resume-from-checkpoint` behaviour);
+          everything else goes through the TFE resolver (the old
+          `/api/test-fix-expediter/resume-from` behaviour, including its `ambiguous`
+          answer with candidates and NO job pushed).
+        - returns status='resumed' with the new job id and its resume phase, and
+          queue_position = the todo queue's size right after the push.
+        - the model / thinking-effort overrides reach the reconstructed job; None
+          overrides are ignored.
+
+    Raises:
+        - HTTPException 404 when the target is unknown, not stalled, has no checkpoint,
+          or cannot be reconstructed.
+    """
+    from cosa.agents.test_fix_expediter.resume_resolver import resolve_resume_target
+    from cosa.rest.agentic_job_factory import resume_job
+
+    _, user_email = identity_or_401( current_user )
+
+    text      = request.resume_from.strip()
+    overrides = { k: v for k, v in {
+        "lead_model_override"   : request.lead_model_override,
+        "worker_model_override" : request.worker_model_override,
+        "thinking_effort"       : request.thinking_effort,
+    }.items() if v is not None }
+
+    source_type = "direct"
+    extra       = {}
+    if _JOB_ID_HASH.match( text ) and not text.startswith( "tfe-" ):
+        target_id = text
+    else:
+        target = resolve_resume_target( text, user_email )
+        if target.source_type == "not_found":
+            raise HTTPException( status_code=404, detail=target.diagnostic )
+        if target.job_id is None and target.candidates:
+            return ResumeJobResponse( status="ambiguous", candidates=target.candidates, diagnostic=target.diagnostic )
+        target_id   = target.job_id
+        source_type = target.source_type
+        extra       = { "matched_path": target.matched_path, "confidence": target.confidence, "diagnostic": target.diagnostic }
+
+    job = await run_in_threadpool( lambda: resume_job( target_id, config_mgr=None, args_overrides=overrides or None ) )
+    if job is None:
+        raise HTTPException(
+            status_code = 404,
+            detail      = f"Job {target_id} not found, not stalled, has no checkpoint, or cannot be resumed"
+        )
+
+    todo_queue.push( job )
+    checkpoint = job._resume_checkpoint
+
+    return ResumeJobResponse(
+        status            = "resumed",
+        resumed_job_id    = job.id_hash,
+        original_job_id   = target_id,
+        resume_from_phase = checkpoint.get( "phase_ordinal" ),
+        phase_name        = checkpoint.get( "phase_name" ),
+        resume_count      = checkpoint.get( "resume_count", 1 ),
+        queue_position    = todo_queue.size(),
+        source_type       = source_type,
+        **extra
+    )

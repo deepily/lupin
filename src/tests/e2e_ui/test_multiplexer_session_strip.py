@@ -270,13 +270,14 @@ def test_hide_inactive_toggle_filters_only_inactive_icons( page ):
         "reactivation must not silently flip the user's toggle"
 
 
-def test_focus_click_sets_attribute_contract_and_second_click_exits( page ):
+def test_focus_click_sets_attribute_contract_and_only_the_toggle_exits( page ):
     """
     Ensures:
         - Clicking icon A enters focus: toggle data-focus-active="true",
           icon A data-focused="true", card B data-focus-hidden="true",
           card A NOT hidden
-        - Clicking icon A again exits: all three attribute surfaces clear
+        - Clicking icon A again does nothing (row d04ff119, legacy parity)
+        - Clicking the toggle exits: all three attribute surfaces clear
     """
     _open( page )
     # Cards must exist for the focus-hidden pass to have a surface to stamp.
@@ -299,9 +300,137 @@ def test_focus_click_sets_attribute_contract_and_second_click_exits( page ):
     assert page.locator( card_a ).get_attribute( "data-focus-hidden" ) is None, \
         "focused card must stay visible"
 
-    # Second click on the focused icon exits focus and clears every surface.
+    # Row d04ff119: a second click on the focused icon does nothing (legacy); the
+    # toggle is the only way out. Until 09-11 this test expected the click to exit.
     _icon( page, SENDER_A ).click()
+    page.wait_for_timeout( 300 )   # give an (incorrect) exit time to render
+    assert page.locator( '#cc-strip-toggle[data-focus-active="true"]' ).count() == 1, \
+        "clicking the focused icon must not exit focus"
+    assert _icon( page, SENDER_A ).get_attribute( "data-focused" ) == "true"
+
+    page.locator( "#cc-strip-toggle" ).click()
     page.wait_for_selector( '#cc-strip-toggle[data-focus-active="false"]', timeout=2_000 )
     assert _icon( page, SENDER_A ).get_attribute( "data-focused" ) is None
     assert page.locator( card_b ).get_attribute( "data-focus-hidden" ) is None, \
         "exiting focus must reveal all cards"
+
+
+# Emit a task message with its own id_hash, so repeated arrivals from one sender are
+# distinct rows (the _EMIT_MESSAGE_JS id is per sender, so a second one is a duplicate).
+_EMIT_ARRIVAL_JS = """
+( args ) => {
+    const hook = window.__multiplexerTestHook;
+    if ( !hook || !hook.eventBus ) throw new Error( "multiplexer test hook missing" );
+    hook.eventBus.emit({
+        type    : 'notification_queue_update',
+        payload : { notification: {
+            id_hash   : args.id_hash,
+            message   : args.message,
+            sender_id : args.sender_id,
+            timestamp : args.ts,
+            type      : 'task',
+        } },
+        source : 'e2e-session-strip',
+        ts     : Date.now(),
+    });
+    return true;
+}
+"""
+
+# What the browser actually paints for an icon: the ::after count and display, and the
+# icon's own animation. Unit tests read attributes; this reads computed style, which is
+# the only thing that shows whether a stylesheet the page links draws them.
+_PAINTED_BADGE_JS = """
+( sel ) => {
+    const icon = document.querySelector( sel );
+    if ( !icon ) return null;
+    const after = getComputedStyle( icon, '::after' );
+    return {
+        unread         : icon.getAttribute( 'data-unread' ),
+        count_attr     : icon.getAttribute( 'data-unread-count' ),
+        after_content  : after.content,
+        after_display  : after.display,
+        animation_name : getComputedStyle( icon ).animationName,
+    };
+}
+"""
+
+MANAGER = { "name": "Tiberius", "icon": "👑", "color": "#3F51B5" }
+
+
+def _arrive( page, sender_id: str, n: int ):
+    page.evaluate( _EMIT_ARRIVAL_JS, {
+        "id_hash"   : f"unread-{ sender_id }-{ n }",
+        "message"   : f"arrival { n } from { sender_id }",
+        "sender_id" : sender_id,
+        "ts"        : f"2026-06-11T18:1{ n }:00.000Z",
+    } )
+
+
+def _painted( page, sender_id: str ):
+    return page.evaluate( _PAINTED_BADGE_JS, f'#cc-strip-icons .cc-strip-icon[data-sender-id="{sender_id}"]' )
+
+
+def _focus_on_a_with_b_hidden( page, b_extra: dict | None = None ):
+    _open( page )
+    _assign( page, SENDER_A, name="Cheech" )
+    page.evaluate( _EMIT_STATE_UPDATE_JS, {
+        "type"      : "voice_persona_assigned",
+        "sender_id" : SENDER_B,
+        "ts"        : "2026-06-11T18:00:30.000Z",
+        "extra"     : dict( { "voice_persona": {
+            "name"        : "Rachel",
+            "voice_id"    : f"vid_{SENDER_B}",
+            "icon"        : "🌿",
+            "color"       : "#B39DDB",
+            "borrowed"    : False,
+            "assigned_at" : "2026-06-11T18:00:30.000Z",
+        } }, **( b_extra or {} ) ),
+    } )
+    page.wait_for_selector( f'#cc-strip-icons .cc-strip-icon[data-sender-id="{SENDER_B}"]', timeout=3_000 )
+    _icon( page, SENDER_A ).click()
+    page.wait_for_selector( '#cc-strip-toggle[data-focus-active="true"]', timeout=2_000 )
+
+
+def test_hidden_session_arrivals_paint_a_pulsing_count( page ):
+    """
+    Ensures:
+        - With focus on A, two messages from B paint B's badge: the computed
+          ::after content is "2" and the icon's computed animation-name is
+          cc-strip-icon-pulse (row d04ff119; the rules must come from a sheet
+          multiplexer.html links, which is what failed in Chrome on 09-11)
+        - Before any arrival B paints no badge (the control: computed style is
+          not "2" by accident)
+    """
+    _focus_on_a_with_b_hidden( page )
+    before = _painted( page, SENDER_B )
+    assert before[ "unread" ] is None and before[ "animation_name" ] != "cc-strip-icon-pulse", before
+
+    _arrive( page, SENDER_B, 1 )
+    _arrive( page, SENDER_B, 2 )
+    page.wait_for_selector( f'#cc-strip-icons .cc-strip-icon[data-sender-id="{SENDER_B}"][data-unread-count="2"]', timeout=3_000 )
+
+    after = _painted( page, SENDER_B )
+    assert after[ "after_content" ] == '"2"', f"the count is set but not drawn: { after }"
+    assert after[ "after_display" ] != "none", after
+    assert after[ "animation_name" ] == "cc-strip-icon-pulse", f"the icon does not pulse: { after }"
+    assert _painted( page, SENDER_A )[ "unread" ] is None, "the focused session never counts its own messages"
+
+
+def test_a_workers_badge_pulses_without_drawing_an_empty_circle( page ):
+    """
+    Ensures:
+        - A managed worker (manager_persona on its assignment) hidden by focus
+          pulses on arrival but carries no count attribute, and its ::after
+          computes to display none, so no empty red circle is drawn
+    """
+    _focus_on_a_with_b_hidden( page, b_extra={ "payload": { "manager_persona": MANAGER } } )
+    page.wait_for_selector( f'#cc-strip-icons .cc-strip-icon[data-sender-id="{SENDER_B}"][data-has-manager="true"]', timeout=3_000 )
+
+    _arrive( page, SENDER_B, 1 )
+    page.wait_for_selector( f'#cc-strip-icons .cc-strip-icon[data-sender-id="{SENDER_B}"][data-unread="true"]', timeout=3_000 )
+
+    painted = _painted( page, SENDER_B )
+    assert painted[ "count_attr" ] is None, painted
+    assert painted[ "after_display" ] == "none", f"a worker's empty circle is drawn: { painted }"
+    assert painted[ "animation_name" ] == "cc-strip-icon-pulse", painted

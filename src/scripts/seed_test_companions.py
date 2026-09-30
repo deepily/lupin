@@ -24,7 +24,7 @@ Environment variables:
     DB_HOST           - PostgreSQL hostname (default: lupin-postgres)
     DB_PORT           - PostgreSQL port (default: 5432)
     DB_USER           - PostgreSQL user (default: lupin_dev)
-    DB_PASSWORD       - PostgreSQL password (default: dev_password)
+    DB_PASSWORD       - PostgreSQL password (REQUIRED, no default)
     LUPIN_DEV_EMAIL   - Human admin email to seed (default: ricardo.felipe.ruiz@gmail.com)
 
 Created: 2026-04-12 Session 248e740e (dual-container architecture)
@@ -43,7 +43,7 @@ import psycopg2
 DB_HOST     = os.environ.get( "DB_HOST", "lupin-postgres" )
 DB_PORT     = os.environ.get( "DB_PORT", "5432" )
 DB_USER     = os.environ.get( "DB_USER", "lupin_dev" )
-DB_PASSWORD = os.environ.get( "DB_PASSWORD", "dev_password" )
+DB_PASSWORD = os.environ.get( "DB_PASSWORD", "" )
 
 DEV_DB      = "lupin_db_dev"
 TEST_DB     = "lupin_db_test"

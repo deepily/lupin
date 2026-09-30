@@ -49,6 +49,30 @@ SERVICES = {
 # An absence NOT listed here fails. An entry listed here that is actually
 # PRESENT also fails (stale exemption).
 KNOWN_DIVERGENT_MOUNTS = {
+    # ── the repo root itself (row 1661ece3, 2026-09-23) ──────────────────
+    # dev + test bind the WHOLE checkout at /var/lupin, because a hand list of
+    # root files had gone 127 files short and CLAUDE.md was one of them — two
+    # merge-gate tests read it. Scoped, like the b5b6d252 entries below, to WHO
+    # RUNS THE MERGE PYRAMID rather than to "cloud legs are different": if a
+    # cloud leg ever runs it, these three entries must go.
+    #
+    # The cloud leg additionally must not take this mount. On the VM the host
+    # project dir is also the docker data-root, which is why cloud-gpu binds
+    # four explicit children of /var/external-projects instead of the parent
+    # (runbook §7c). A whole-root bind is that same exposure, one directory in.
+    "/var/lupin": {
+        "cloud-gpu" : "2026-09-23 — the cloud leg does not run the merge pyramid, and on "
+                      "the VM a whole-root bind is the same exposure /var/external-projects "
+                      "is already split up to avoid (runbook §7c).",
+    },
+    "/var/lupin/.env": {
+        "cloud-gpu" : "2026-09-23 — a /dev/null mask over the file the /var/lupin bind would "
+                      "otherwise carry in. No bind, nothing to mask.",
+    },
+    "/var/lupin/.venv": {
+        "cloud-gpu" : "2026-09-23 — an empty tmpfs masking the host developer venv the "
+                      "/var/lupin bind would otherwise carry in. No bind, nothing to mask.",
+    },
     "/var/lupin/.git": {
         "cloud-gpu" : "2026-07-26 — same.",
     },
@@ -61,6 +85,38 @@ KNOWN_DIVERGENT_MOUNTS = {
     "/var/lupin/dm-corpus": {
         "cloud-gpu" : "2026-08-13 — same.",
     },
+    # ── flow-ratio: THE EXEMPTION THAT USED TO LIVE HERE WAS REMOVED 2026-09-26 ──
+    #
+    # 🔴 IT WAS NOT AN OVERSIGHT AND IT WAS NOT UNARGUED. It read: "a HOST BOUNDARY, not
+    # an oversight… the mount source is /mnt/DATA01 on THIS box; lupin-rest-cloud-gpu runs
+    # on the GCP VM and cannot reach it," and it cited flow_ratio_settings' own docstring —
+    # "SCOPE OF CONSISTENT: one box, one data root… A second host does not." It then named
+    # its own consequence out loud: cloud-gpu "falls through to the INI, so that server runs
+    # the CONFIGURED DEFAULT and ignores any operator override. Defensible and probably
+    # correct."
+    #
+    # ⇒ ALL OF THAT IS TRUE OF THE FLOW-RATIO SLIDER, AND THE DIRECTORY HOLDS A SECOND FILE.
+    # `LUPIN_FLOW_RATIO_DIR` names the directory that `task_approval_settings.override_path()`
+    # reads too — `task-approval-settings.json`. So the fall-through the exemption accepted
+    # for a per-box tuning knob ALSO applied to the task-approval overrides, and one of those
+    # keys is not a tuning knob: `manager_pull_disabled`'s INI fallback
+    # (FALLBACK_MANAGER_PULL_DISABLED) is the CLOSED side.
+    #
+    # MEASURED 2026-09-26 in the running container on lupin-host-test (row fbd1b273):
+    # `manager_pull_disabled` read True there and False on dev, so `refusal_for_pull` refused
+    # every transition into `in_progress` by anyone who was neither an approver-by-account nor
+    # the row's own owner — i.e. a MANAGER could not pull a row it did not own. Not a stale
+    # threshold; a classification losing its access, silently.
+    #
+    # ⇒ The right correction is NOT a narrower exemption. The mount source was never required
+    # to be the same PATH on both hosts — only to exist and be writable on each — so
+    # cloud-gpu now carries its own source under the VM's own data root
+    # (/mnt/lupin-data/projects-data/lupin/flow-ratio). The host boundary is real and is
+    # respected by giving each host its own directory, not by leaving one host without one.
+    #
+    # THE LESSON, for the next exemption written in this file: an exemption's blast radius is
+    # the KEY it excuses, not the feature its author had in mind. This one was reasoned about
+    # one of the two files behind the variable, and it silently governed both.
     # ── repo-root deploy artifacts the UNIT SUITE asserts about (bug b5b6d252) ──
     # Mounted read-only into dev + test because 19 unit tests read them and were
     # failing in-container with FileNotFoundError while passing on the host.
@@ -174,13 +230,40 @@ KNOWN_DIVERGENT_MOUNTS = {
     # lack this" would equally have masked cloud-gpu losing all four explicit binds,
     # i.e. the exact 2026-05-12 regression. An exemption must not be wider than the
     # divergence it excuses.
+
+    # ── FCM wake-ups, Route A (row 9b366409, 0b87dbaa6; Rick's go, 2026-09-28) ─
+    # Dev only, by design: the credential is RICK'S OWN daily gcloud ADC login, read
+    # from his home. The test server has no business sending phone wake-ups under his
+    # identity, and the VM has no such login at all. Route B (a service account,
+    # bbf299f3) is the path that could reach the other legs; until then they send none.
+    # GOOGLE_CLOUD_PROJECT below is this mount's partner and carries the same scope.
+    "/home/rruiz/.config/gcloud": {
+        "dev-test"  : "2026-09-28 — Rick's personal gcloud ADC login powers dev's FCM wake-ups only (row 9b366409).",
+        "cloud-gpu" : "2026-09-28 — same; the VM has no gcloud user login to mount.",
+    },
 }
 
 # ── KNOWN_DIVERGENT_ENV ───────────────────────────────────────────────────
 KNOWN_DIVERGENT_ENV = {
+    "GOOGLE_CLOUD_PROJECT": {
+        "dev-test"  : "2026-09-28 — the partner of dev's /home/rruiz/.config/gcloud mount: ADC from "
+                      "USER credentials needs an explicit project (row 9b366409).",
+        "cloud-gpu" : "2026-09-28 — same.",
+    },
     "LUPIN_DM_CORPUS_DIR": {
         "cloud-gpu" : "2026-08-13 — same.",
     },
+    # LUPIN_FLOW_RATIO_DIR's exemption was REMOVED 2026-09-26 with its mount partner — see
+    # the /var/lupin/flow-ratio comment in KNOWN_DIVERGENT_MOUNTS above for why the original
+    # argument was sound about the flow-ratio slider and silently wrong about the
+    # task-approval overrides that share the directory (row fbd1b273).
+    #
+    # ⚠️ The old entry's warning still stands and is now enforced elsewhere rather than
+    # honoured by omission: the env var WITHOUT the mount is worse than neither, because it
+    # names a path nothing mounts and the write lands in container-local scratch and vanishes
+    # at the next bounce. `test_flow_ratio_mount_invariants.py` asserts target==value for
+    # every rest service in every tracked compose file, which is the check that makes setting
+    # one without the other fail loudly instead of being excused.
     "LUPIN_SERVER_PORT": {
         "cloud-gpu" : "2026-08-13 — same.",
     },
@@ -214,10 +297,6 @@ KNOWN_DIVERGENT_ENV = {
         "dev-dev"  : "2026-07-26 — see DB_NAME.",
         "dev-test" : "2026-07-26 — same.",
     },
-    "DB_PASSWORD": {
-        "dev-dev"  : "2026-07-26 — see DB_NAME.",
-        "dev-test" : "2026-07-26 — same.",
-    },
     "CLOUD_SQL_CONNECTION_NAME": {
         "dev-dev"  : "2026-07-26 — no Cloud SQL on dev.",
         "dev-test" : "2026-07-26 — same.",
@@ -230,12 +309,24 @@ KNOWN_DIVERGENT_ENV = {
         "dev-dev"  : "2026-07-26 — dev uses the host's OAuth login via the credentials bind.",
         "dev-test" : "2026-07-26 — same.",
     },
+    # The dev-dev exemption here was REMOVED 2026-09-04, and which of the two ways matters.
+    # It was not a waiver being withdrawn — it was an UNCLASSIFIED entry recording an OPEN
+    # QUESTION: "set on lupin-rest-test but NOT lupin-rest-dev … not yet determined whether
+    # dev-dev needs it." THE QUESTION IS NOW ANSWERED, by somebody setting the variable:
+    # LUPIN_DEV_EMAIL is present in BOTH services in docker-compose.yml. The asymmetry it
+    # described no longer exists, so the entry documented a world that is gone.
+    #
+    # ⚠️ THAT IS THE ONLY REASON IT WAS SAFE TO DELETE. An UNCLASSIFIED entry is a question,
+    # and deleting a question DISCARDS it rather than resolving it. What separates this
+    # deletion from a bad one is that the answer was read out of docker-compose.yml, not
+    # assumed from the guard going red.
     "LUPIN_DEV_EMAIL": {
-        "dev-dev"  : "2026-07-26 UNCLASSIFIED — set on lupin-rest-test but NOT lupin-rest-dev, "
-                     "an asymmetry between two services in the SAME file. notify() reads this "
-                     "for target-user resolution (401 without it). Not yet determined whether "
-                     "dev-dev needs it. Records an open question, not a ruling.",
-        "cloud-gpu" : "2026-07-26 UNCLASSIFIED — see above.",
+        "cloud-gpu" : "2026-07-26 UNCLASSIFIED — absent on cloud-gpu while both dev services "
+                      "set it. notify() reads this for target-user resolution (401 without "
+                      "it). Whether cloud-gpu needs it has NOT been determined. Records an "
+                      "open question, not a ruling. (Made self-contained 2026-09-04: this "
+                      "read 'see above' and pointed at the dev-dev entry deleted that day — "
+                      "a cross-reference outlives the text it points at.)",
     },
     "LUPIN_MODEL_SERVER_API_KEY_FILE": {
         "cloud-gpu": "2026-07-26 UNCLASSIFIED — present in the other THREE services, absent "

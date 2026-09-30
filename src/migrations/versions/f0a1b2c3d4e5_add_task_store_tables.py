@@ -5,7 +5,7 @@ Revises: e9f0a1b2c3d4
 Create Date: 2026-06-11
 
 Unified task store, Phase 1 (design: planning-is-prompting ->
-src/rnd/2026.06.11-unified-task-store-design.md v0.4, Rick-ruled F1=Postgres):
+planning-is-prompting/src/rnd/2026.06.11-unified-task-store-design.md v0.4, Rick-ruled F1=Postgres):
 
     task_items  — one row per obligation; correlation_key indexed (C1, poured
                   Phase 1); typed blocked_by JSONB refs; CHECK enforcing

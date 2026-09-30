@@ -105,7 +105,7 @@ class CompletionClient( LlmClientInterface ):
             **generation_args 
         )
     
-    async def _stream_async( self, prompt: str, **generation_args: Any ) -> str:
+    async def _stream_async( self, prompt: str, timeout: Optional[ float ] = None, **generation_args: Any ) -> str:
         """
         Internal method to handle async streaming for completion models.
         
@@ -125,7 +125,7 @@ class CompletionClient( LlmClientInterface ):
         
         # Note: LlmCompletion may not have the same streaming interface as Agent
         # This would need to be adapted based on the actual LlmCompletion implementation
-        async with self.model.run_stream( prompt, **generation_args ) as result:
+        async with self.model.run_stream( prompt, timeout=timeout, **generation_args ) as result:
             counter = 0
             async for chunk in result.stream_text( delta=True ):
                 if self.debug and self.verbose:
@@ -138,7 +138,7 @@ class CompletionClient( LlmClientInterface ):
             print()
         return "".join( output )
     
-    async def run_async( self, prompt: str, stream: bool = False, **kwargs: Any ) -> str:
+    async def run_async( self, prompt: str, stream: bool = False, timeout: Optional[ float ] = None, **kwargs: Any ) -> str:
         """
         Async version to send a prompt to the completion model and get the response.
         
@@ -153,6 +153,20 @@ class CompletionClient( LlmClientInterface ):
             - Measures performance metrics (duration, tokens/sec)
             - Handles both streaming and non-streaming modes
             - Displays performance metrics if verbose
+            - Honours `timeout` on both the streaming and non-streaming paths
+
+        Raises:
+            - TimeoutError (the builtin) when `timeout` is given and elapses
+
+        Args:
+            timeout: Seconds the underlying call may take, or None for unbounded.
+                     Named explicitly rather than left to **kwargs, because
+                     run_async rebuilds the generation arguments by hand and
+                     anything arriving in kwargs that is not on that list is
+                     dropped without a word — which is how the configured
+                     `commons llm disambiguator timeout seconds` came to be read
+                     from the INI and never applied (row abe4188d).
+                     Both branches honour it — streaming via aiohttp's ClientTimeout.
             
         Returns:
             - String response from the LLM
@@ -173,7 +187,7 @@ class CompletionClient( LlmClientInterface ):
             start_time = time.perf_counter()
             # Note: LlmCompletion might not have async support yet
             # This may need to be adapted based on the actual implementation
-            response = self.model.run( prompt, **updated_gen_args )
+            response = self.model.run( prompt, timeout=timeout, **updated_gen_args )
             duration = time.perf_counter() - start_time
             
             # Clean the response to remove extraneous backticks
@@ -188,7 +202,7 @@ class CompletionClient( LlmClientInterface ):
         if self.debug and self.verbose: print( f"🔄 Streaming from completion model: {self.model_name}\n" )
         start_time = time.perf_counter()
         
-        output = await self._stream_async( prompt, **updated_gen_args )
+        output = await self._stream_async( prompt, timeout=timeout, **updated_gen_args )
         
         # Clean the response to remove extraneous backticks
         cleaned_output = clean_llm_response( output )
@@ -200,7 +214,7 @@ class CompletionClient( LlmClientInterface ):
             self._print_metadata( prompt_tokens, completion_tokens, duration, client_type="Completion" )
         return cleaned_output
     
-    def run( self, prompt: str, stream: bool = False, **kwargs: Any ) -> str:
+    def run( self, prompt: str, stream: bool = False, timeout: Optional[ float ] = None, **kwargs: Any ) -> str:
         """
         Send a prompt to the completion model and get the response.
         
@@ -212,6 +226,10 @@ class CompletionClient( LlmClientInterface ):
         Ensures:
             - Works in both sync and async contexts
             - Returns string response from the model
+            - Honours `timeout` on both the streaming and non-streaming paths
+
+        Raises:
+            - TimeoutError (the builtin) when `timeout` is given and elapses
             
         Returns:
             - String response from the LLM
@@ -221,7 +239,7 @@ class CompletionClient( LlmClientInterface ):
             new_loop = asyncio.new_event_loop()
             asyncio.set_event_loop( new_loop )
             try:
-                return new_loop.run_until_complete( self.run_async( prompt, stream, **kwargs ) )
+                return new_loop.run_until_complete( self.run_async( prompt, stream, timeout=timeout, **kwargs ) )
             finally:
                 new_loop.close()
         

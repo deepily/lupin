@@ -55,6 +55,11 @@ HOOKS_ROOT = Path( _src_path ) / "lupin_cli" / "claude_code" / "hooks"
 class _FakeProc:
     pid = 424242
 
+    def poll( self ):
+        """None = still running. The spawn hook's liveness check is proc.poll(),
+        not os.kill( pid, 0 ) — signal-0 cannot see a child that already exited."""
+        return None
+
 
 def _capture_popen( captured ):
     """Popen stand-in that records (cmd, kwargs) and returns a fake process."""
@@ -352,7 +357,6 @@ def test_spawn_listener_locked_spawns_fully_detached( monkeypatch, tmp_path ):
     monkeypatch.setattr( register_session.os.path, "expanduser",
                          lambda p: str( tmp_path ) )
     monkeypatch.setattr( register_session.time, "sleep", lambda s: None )
-    monkeypatch.setattr( register_session.os, "kill", lambda pid, sig: None )
     monkeypatch.setattr( register_session, "_record_listener_pid",
                          lambda *a, **kw: None )
 

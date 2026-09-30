@@ -190,6 +190,53 @@ class TestConfigUnitConversions:
         assert data["token_refresh_dedup_window_ms"] == expected_ms
 
 
+class TestClientConfigTimezoneKey:
+    """
+    Row 0e5bfa0e — the timezone key the CLIENT reads must be the key the SERVER emits.
+
+    This payload used to carry the INI key's own spelling, "app timezone", space and
+    all, while notifications.js has always read `config.app_timezone`. The mismatch
+    was silent in the worst way: `this.appTimezone` came back undefined on every
+    SUCCESSFUL fetch, so every timestamp fell to the browser's local zone — and the
+    `= 'America/New_York'` fallback beside it only runs when the fetch FAILS. A
+    working server therefore looked broken, and a broken one looked correct.
+
+    The two assertions are a pair on purpose. Asserting only that `app_timezone`
+    exists would still pass if the old spelling were emitted alongside it, and two
+    spellings of one value on one wire is the state that produced this bug.
+    """
+
+    def test_client_config_emits_app_timezone_with_an_underscore( self, authenticated_client ):
+        """
+        Ensures:
+            - the payload carries `app_timezone`, the spelling the client reads
+            - the value is a non-empty string, not None and not blank
+        """
+        data = authenticated_client.get( "/api/config/client" ).json()
+
+        assert "app_timezone" in data, (
+            "the client reads config.app_timezone; without this key every timestamp "
+            "renders in the browser's local zone"
+        )
+        assert isinstance( data[ "app_timezone" ], str ) and data[ "app_timezone" ].strip(), \
+            f"app_timezone must be a non-empty string, got { data[ 'app_timezone' ]!r }"
+
+    def test_client_config_no_longer_emits_the_spaced_ini_spelling( self, authenticated_client ):
+        """
+        Ensures:
+            - "app timezone" is absent from the wire, so the two spellings cannot
+              drift apart again with each half believing it owns the value
+
+        The INI key keeps its space — this is about the PAYLOAD only.
+        """
+        data = authenticated_client.get( "/api/config/client" ).json()
+
+        assert "app timezone" not in data, (
+            "the spaced INI spelling is back on the wire; nothing reads it, and its "
+            "presence is what hid the mismatch for as long as it did"
+        )
+
+
 if __name__ == "__main__":
     import sys
     sys.path.insert( 0, '../..' )

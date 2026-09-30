@@ -1,0 +1,276 @@
+4525	C	errorText	TTS error modal text (TTS envelope)
+4526	C	errorCode	TTS error modal code (TTS envelope)
+6748	B	questionSafe	history retry button: the operator's own question, escaped for ' and " only, inside a JS string in onclick
+6748	E	job.id_hash	job id_hash
+6753	E	job.id_hash	server id / slug
+6758	E	deleteBtn	HTML fragment whose own interpolations are swept separately, or a class-name helper
+7125	E	ts	number, count, width or formatted date
+7126	E	this.renderMarkdownInline( notification.message )	marked + DOMPurify, or escapeHtml when either is missing
+7339	E	timestamp	number, count, width or formatted date
+7410	E	cost.toFixed( 4 )	number, count, width or formatted date
+7412	E	duration	formatted timestamp / duration
+7414	E	tokens.toLocaleString()	number, count, width or formatted date
+7498	C	( job.agent_type || '' ).replace( 'Agent', '' )	job agent_type (server set)
+7560	E	schedDate.toISOString()	number, count, width or formatted date
+7560	E	schedDateStr	number, count, width or formatted date
+7560	E	schedTimeStr	number, count, width or formatted date
+7651	E	jobId	server id / slug
+7651	E	jobId	server id / slug
+7660	E	idKey	server id / slug
+7660	E	deleteAction	HTML fragment whose own interpolations are swept separately, or a class-name helper
+7666	E	idKey	server id / slug
+7666	E	jobId	server id / slug
+7672	E	idKey	server id / slug
+7672	E	jobId	server id / slug
+7672	E	statusClass	HTML fragment whose own interpolations are swept separately, or a class-name helper
+7673	E	idKey	server id / slug
+7674	E	cancelBtnHtml	HTML fragment whose own interpolations are swept separately, or a class-name helper
+7675	E	completionBadge	HTML fragment whose own interpolations are swept separately, or a class-name helper
+7675	E	scheduledBadge	HTML fragment whose own interpolations are swept separately, or a class-name helper
+7676	E	jobIdDisplay	server id / slug
+7676	E	jobId	server id / slug
+7676	E	jobId	server id / slug
+7679	E	timestamp	formatted timestamp / duration
+7682	E	idKey	server id / slug
+7685	E	jobId	server id / slug
+7694	E	this.renderAbstractSection( job.abstract )	marked + DOMPurify, or escapeHtml when either is missing
+7697	C	this.renderReportLinkSection( job.report_path, job.agent_type, job.yaml_path, job.remediat	report link section: server paths; yamlPath escaped with escapeHtml inside a JS string in an onclick (wrong context)
+7723	E	isStalled && this.isResumableWithOverrides( job ) ? this.renderResumeOverrideControls( job	HTML fragment whose own interpolations are swept separately, or a class-name helper
+7726	E	jobId	server id / slug
+7727	E	jobId	server id / slug
+7733	E	job.cost_summary ? this.renderCostSummaryContent( job.cost_summary, job.duration_seconds )	formatted timestamp / duration
+7739	C	job.agent_type || 'Unknown'	job agent_type (server set)
+7740	E	timestamp	formatted timestamp / duration
+7743	E	idKey	server id / slug
+7744	E	idKey	server id / slug
+7748	E	idKey	server id / slug
+7750	E	idKey	server id / slug
+7752	E	idKey	server id / slug
+7755	E	idKey	server id / slug
+7759	E	idKey	server id / slug
+7762	E	idKey	server id / slug
+7767	E	idKey	server id / slug
+7768	E	idKey	server id / slug
+7772	E	idKey	server id / slug
+8055	E	jobId	server id / slug
+8058	E	jobId	server id / slug
+8060	E	sel( 'claude-opus-4-7', modelPref )	HTML fragment whose own interpolations are swept separately, or a class-name helper
+8061	E	sel( 'claude-sonnet-4-6', modelPref )	HTML fragment whose own interpolations are swept separately, or a class-name helper
+8062	E	sel( 'claude-haiku-4-5-20251001', modelPref )	HTML fragment whose own interpolations are swept separately, or a class-name helper
+8067	E	jobId	server id / slug
+8069	E	sel( '', effortPref )	HTML fragment whose own interpolations are swept separately, or a class-name helper
+8070	E	sel( 'low', effortPref )	HTML fragment whose own interpolations are swept separately, or a class-name helper
+8071	E	sel( 'medium', effortPref )	HTML fragment whose own interpolations are swept separately, or a class-name helper
+8072	E	sel( 'high', effortPref )	HTML fragment whose own interpolations are swept separately, or a class-name helper
+8073	E	sel( 'xhigh', effortPref )	HTML fragment whose own interpolations are swept separately, or a class-name helper
+8074	E	sel( 'max', effortPref )	HTML fragment whose own interpolations are swept separately, or a class-name helper
+8238	E	reason ? ' — ' + reason : ''	escaped upstream, literal, or a schema field name
+8247	E	html	HTML fragment whose own interpolations are swept separately, or a class-name helper
+8323	E	timestamp	number, count, width or formatted date
+8324	E	this.renderMarkdownInline( message )	marked + DOMPurify, or escapeHtml when either is missing
+8523	E	timestamp	number, count, width or formatted date
+8524	E	this.renderMarkdownInline( interaction.message )	marked + DOMPurify, or escapeHtml when either is missing
+8543	E	timestamp	number, count, width or formatted date
+8544	E	responseStr	formatResponseValue: every return path goes through escapeHtml
+8556	D	interaction.priority || 'medium'	interaction priority (enum validated at the notify door), literal fallback
+8558	E	typeIcon	type icon lookup with literal fallback
+8558	C	interaction.type	interaction type (server enum)
+8559	E	timestamp	number, count, width or formatted date
+8563	E	responseHtml	HTML fragment whose own interpolations are swept separately, or a class-name helper
+8679	E	idx + 1	number, count, width or formatted date
+8681	C	sol.replays	top solutions stats (server computed)
+8681	C	sol.time_saved_formatted	top solutions stats (server computed)
+8949	E	body	HTML fragment whose own interpolations are swept separately, or a class-name helper
+9071	E	verdictClass	HTML fragment whose own interpolations are swept separately, or a class-name helper
+9078	E	pctClass ? " " + pctClass : ""	escaped upstream, literal, or a schema field name
+10184	E	f	ROW_SCHEMA field name (page constant)
+10188	E	heads	HTML fragment whose own interpolations are swept separately, or a class-name helper
+10223	E	this._escapeTaskAttr( task.park_reason )	_escapeTaskAttr (& " < >)
+10231	E	this._escapeTaskAttr( task.body )	_escapeTaskAttr (& " < >)
+10231	E	this._escapeTaskAttr( this._taskIdLabel( task ) )	_escapeTaskAttr (& " < >)
+10332	E	f	ROW_SCHEMA field name (page constant)
+10332	E	parts[ f ].cls	row field part built with escapeHtml/_escapeTaskAttr in _rowFieldParts
+10332	E	parts[ f ].html	row field part built with escapeHtml/_escapeTaskAttr in _rowFieldParts
+10337	E	f	ROW_SCHEMA field name (page constant)
+10339	E	parts[ f ].html	HTML fragment whose own interpolations are swept separately, or a class-name helper
+10341	E	fields	HTML fragment whose own interpolations are swept separately, or a class-name helper
+10341	E	modifier	escaped upstream, literal, or a schema field name
+10344	E	discLine( "line2", "fields" )	HTML fragment whose own interpolations are swept separately, or a class-name helper
+10344	E	discLine( "line3", "actions" )	HTML fragment whose own interpolations are swept separately, or a class-name helper
+10347	E	this._taskStatusClass( task.status )	HTML fragment whose own interpolations are swept separately, or a class-name helper
+10347	E	rowClass	HTML fragment whose own interpolations are swept separately, or a class-name helper
+10348	E	cells	HTML fragment whose own interpolations are swept separately, or a class-name helper
+10349	E	this._disclosureToggle( task )	HTML fragment whose own interpolations are swept separately, or a class-name helper
+10351	E	this._taskStatusClass( task.status )	HTML fragment whose own interpolations are swept separately, or a class-name helper
+10351	E	idAttr	_escapeTaskAttr (& " < >)
+10351	E	width	number, count, width or formatted date
+10351	E	disclosed	HTML fragment whose own interpolations are swept separately, or a class-name helper
+10352	E	idAttr	_escapeTaskAttr (& " < >)
+10352	E	width	number, count, width or formatted date
+10398	E	id	_escapeTaskAttr (& " < >)
+10529	E	label	option(): literal verb value/label
+10529	E	value	option(): literal verb value/label
+10530	E	label	option(): literal verb value/label, reason is a literal or deadReason (status via _escapeTaskAttr)
+10530	E	value	option(): literal verb value/label, reason is a literal or deadReason (status via _escapeTaskAttr)
+10530	E	why	option(): literal verb value/label, reason is a literal or deadReason (status via _escapeTaskAttr)
+10558	E	id	_escapeTaskAttr (& " < >)
+10559	E	options	HTML fragment whose own interpolations are swept separately, or a class-name helper
+10561	E	id	_escapeTaskAttr (& " < >)
+10564	E	id	_escapeTaskAttr (& " < >)
+10566	E	id	_escapeTaskAttr (& " < >)
+10631	E	this._escapeTaskAttr( v )	_escapeTaskAttr (& " < >)
+10634	E	id	_escapeTaskAttr (& " < >)
+10638	E	id	_escapeTaskAttr (& " < >)
+10901	E	id	_escapeTaskAttr (& " < >)
+10904	E	this._escapeTaskAttr( chip.move )	_escapeTaskAttr (& " < >)
+10904	E	id	_escapeTaskAttr (& " < >)
+10904	E	ts	_escapeTaskAttr (& " < >)
+10908	E	id	_escapeTaskAttr (& " < >)
+10909	E	id	_escapeTaskAttr (& " < >)
+12001	E	idSlug	server id / slug
+12002	E	this._rowWidth()	number, count, width or formatted date
+12002	E	chevron	HTML fragment whose own interpolations are swept separately, or a class-name helper
+12006	E	rows	HTML fragment whose own interpolations are swept separately, or a class-name helper
+12006	E	ownerAttr	_escapeTaskAttr (& " < >)
+12006	E	idSlug	server id / slug
+12006	E	groupHeaderHtml	HTML fragment whose own interpolations are swept separately, or a class-name helper
+12009	E	body	HTML fragment whose own interpolations are swept separately, or a class-name helper
+12009	E	headerRow	HTML fragment whose own interpolations are swept separately, or a class-name helper
+12316	E	warnings.map( w => this._escapeTaskAttr( String( w ) ) ).join( " · " )	_escapeTaskAttr (& " < >)
+12330	E	detail	HTML fragment whose own interpolations are swept separately, or a class-name helper
+12716	E	glyph	escaped upstream, literal, or a schema field name
+12725	E	cells	HTML fragment whose own interpolations are swept separately, or a class-name helper
+13897	E	key	_escapeTaskAttr (& " < >)
+13900	E	tasks.length	number, count, width or formatted date
+13901	E	key	_escapeTaskAttr (& " < >)
+13903	E	key	_escapeTaskAttr (& " < >)
+13905	E	key	_escapeTaskAttr (& " < >)
+13907	E	key	_escapeTaskAttr (& " < >)
+13910	E	this._taskTableHeaderRow()	HTML fragment whose own interpolations are swept separately, or a class-name helper
+13911	E	rows	HTML fragment whose own interpolations are swept separately, or a class-name helper
+14712	E	extraClass ? " " + extraClass + "-header" : ""	escaped upstream, literal, or a schema field name
+14712	E	idSlug	server id / slug
+14713	E	this._rowWidth()	number, count, width or formatted date
+14713	E	chevron	HTML fragment whose own interpolations are swept separately, or a class-name helper
+14713	E	headerLabel	HTML fragment whose own interpolations are swept separately, or a class-name helper
+14713	E	tasks.length	number, count, width or formatted date
+14719	E	this._rowWidth()	number, count, width or formatted date
+14723	E	extraClass ? " " + extraClass : ""	escaped upstream, literal, or a schema field name
+14723	E	rows	HTML fragment whose own interpolations are swept separately, or a class-name helper
+14723	E	idSlug	server id / slug
+14723	E	epicAttr	_escapeTaskAttr (& " < >)
+14723	E	groupHeaderHtml	HTML fragment whose own interpolations are swept separately, or a class-name helper
+14788	E	sections.join( "" )	HTML fragment whose own interpolations are swept separately, or a class-name helper
+14788	E	headerRow	HTML fragment whose own interpolations are swept separately, or a class-name helper
+15591	E	jobMetadata.job_id	server id / slug
+15594	E	jobMetadata.job_id	server id / slug
+15972	C	persona.color || '#888'	persona colour (INI)
+15973	C	label	persona label (INI)
+15974	C	persona.icon || '🎙️'	persona icon (INI)
+15975	C	label	persona label (INI)
+18570	D	sessionId	derived from sender_id, which the notify door validates against a strict pattern
+19063	D	sessionId	derived from sender_id, which the notify door validates against a strict pattern
+19067	D	escapedSenderId	derived from sender_id, which the notify door validates against a strict pattern
+19070	D	sessionId	derived from sender_id, which the notify door validates against a strict pattern
+19071	A	sessionName || ''	sender card: session_name (<=64 chars, no pattern) or words of the first message
+19116	D	sessionId	derived from sender_id, which the notify door validates against a strict pattern
+19116	D	senderId	sender_id (pattern-validated) / date key
+19119	D	sessionId	derived from sender_id, which the notify door validates against a strict pattern
+19120	D	sessionId	derived from sender_id, which the notify door validates against a strict pattern
+19121	E	conversationModeIcon	escaped upstream, literal, or a schema field name
+19121	E	conversationModeTitle	escaped upstream, literal, or a schema field name
+19123	D	sessionId	derived from sender_id, which the notify door validates against a strict pattern
+19126	D	sessionId	derived from sender_id, which the notify door validates against a strict pattern
+19129	D	sessionId	derived from sender_id, which the notify door validates against a strict pattern
+19135	D	escapedSenderId	derived from sender_id, which the notify door validates against a strict pattern
+19137	E	statusIndicator	HTML fragment whose own interpolations are swept separately, or a class-name helper
+19138	D	projectName	derived from sender_id, which the notify door validates against a strict pattern
+19141	E	personaBadge	HTML fragment whose own interpolations are swept separately, or a class-name helper
+19146	D	escapedSenderId	derived from sender_id, which the notify door validates against a strict pattern
+19150	D	senderId.replace( /[@.#]/g, '-' )	derived from sender_id, which the notify door validates against a strict pattern
+19230	D	escapedSenderId	derived from sender_id, which the notify door validates against a strict pattern
+19230	D	dateString	sender_id (pattern-validated) / date key
+19231	D	dateString	sender_id (pattern-validated) / date key
+19233	D	escapedSenderId	derived from sender_id, which the notify door validates against a strict pattern
+19233	D	dateString	sender_id (pattern-validated) / date key
+19236	D	senderId.replace( /[@.#]/g, '-' )	derived from sender_id, which the notify door validates against a strict pattern
+19236	D	dateString	sender_id (pattern-validated) / date key
+19404	E	timeStr	number, count, width or formatted date
+19405	E	this.renderMarkdownInline( cleanMessage )	marked + DOMPurify, or escapeHtml when either is missing
+19416	E	timeStr	number, count, width or formatted date
+19417	E	this.renderMarkdownInline( cleanMessage )	marked + DOMPurify, or escapeHtml when either is missing
+19739	E	time	number, count, width or formatted date
+19740	E	this.renderMarkdownInline( displayMessage )	marked + DOMPurify, or escapeHtml when either is missing
+20063	E	currentOption.label	createHistoryWindowDropdown: WINDOW_OPTIONS page constant
+20067	E	this.WINDOW_OPTIONS.map( opt => ` <div class="dropdown-item ${opt.hours === this.historyWi	createHistoryWindowDropdown: WINDOW_OPTIONS page constant
+20069	E	JSON.stringify( opt.hours ).replace( /"/g, '&quot;' )	createHistoryWindowDropdown: WINDOW_OPTIONS page constant
+20070	E	opt.label	createHistoryWindowDropdown: WINDOW_OPTIONS page constant
+20191	A	prefix	notification list: [PREFIX] split of the sender message
+20191	A	remainingMessage	notification list: [PREFIX] split of the sender message
+20228	E	time	number, count, width or formatted date
+20229	D	type.toUpperCase()	notification type upper-cased (enum validated at the notify door)
+20230	D	priority	notification priority (enum validated at the notify door)
+20231	A	displayMessage	notification list: displayed message
+20231	A	message	notification list: message inside title=""
+20232	E	notificationId	HTML fragment whose own interpolations are swept separately, or a class-name helper
+20246	E	notificationId	HTML fragment whose own interpolations are swept separately, or a class-name helper
+20251	E	notificationId	HTML fragment whose own interpolations are swept separately, or a class-name helper
+21755	E	queuePosition	number, count, width or formatted date
+21756	E	typeIcon	escaped upstream, literal, or a schema field name
+21757	A	truncatedMessage	minimized action-required card: truncated notification.message
+21758	E	personaBadge	HTML fragment whose own interpolations are swept separately, or a class-name helper
+21759	E	timeoutDisplay	number, count, width or formatted date
+22533	E	totalCount	number, count, width or formatted date
+22542	E	this.ttsQueue.length	number, count, width or formatted date
+22549	E	totalCount	number, count, width or formatted date
+23085	E	notification.id	server id / slug
+23088	E	notification.id	server id / slug
+23091	E	notification.id	server id / slug
+23095	E	notification.id	server id / slug
+23098	E	notification.id	server id / slug
+23100	E	notification.id	server id / slug
+23103	E	notification.id	server id / slug
+23117	E	notification.id	server id / slug
+23120	A	notification.response_default || ''	open-ended input value: response_default
+23120	E	notification.id	notification.id
+23121	E	notification.id	server id / slug
+23143	D	project	derived from sender_id, which the notify door validates against a strict pattern
+23162	E	notification.id	server id / slug
+23165	A	notification.title || notification.message	action-required title: notification.title || message
+23168	E	personaBadge	HTML fragment whose own interpolations are swept separately, or a class-name helper
+23169	E	notification.id	server id / slug
+23172	E	notification.id	server id / slug
+23177	E	predictionHintSection	HTML fragment whose own interpolations are swept separately, or a class-name helper
+23179	E	notification.id	server id / slug
+23181	E	responseUI	HTML fragment whose own interpolations are swept separately, or a class-name helper
+23386	E	i + 1	batch question counter (numbers)
+23386	E	total	batch question counter (numbers)
+23400	E	questionsHTML	HTML fragment whose own interpolations are swept separately, or a class-name helper
+23491	A	predictedText	prediction hint: 'header: value' — header comes from the sender's response_options
+23492	C	strategy	prediction strategy label, raw strategy on fallback (server computed)
+23493	E	voteControls	HTML fragment whose own interpolations are swept separately, or a class-name helper
+23517	E	id	server id / slug
+23520	E	id	server id / slug
+23758	D	project	derived from sender_id, which the notify door validates against a strict pattern
+23778	E	questionId	questionId template
+23778	A	opt.label	multiple-choice option label (value attribute)
+23779	E	idx	number, count, width or formatted date
+23781	A	opt.label	multiple-choice option label (text)
+23782	A	opt.description || ''	multiple-choice option description
+23810	E	questionId	HTML fragment whose own interpolations are swept separately, or a class-name helper
+23816	E	notification.id	server id / slug
+23818	E	notification.id	server id / slug
+23819	B	otherText	multiple-choice 'Other' input value: the operator's saved custom answer
+23833	E	notification.id	server id / slug
+23841	E	notification.id	server id / slug
+23847	E	notification.id	server id / slug
+23856	E	questionIndex	number, count, width or formatted date
+23856	E	notification.id	server id / slug
+23859	E	questionIndex + 1	number, count, width or formatted date
+23859	E	totalQuestions	number, count, width or formatted date
+23861	A	question.question	multiple-choice question text
+23864	E	optionsHTML	number, count, width or formatted date
+23866	E	actionsHTML	HTML fragment whose own interpolations are swept separately, or a class-name helper
+24562	B	response	responded badge: the operator's own response
+24682	A	defaultValue	expired badge: response_default the sender declared
+24762	B	response	responded-elsewhere badge: the operator's own response from another device

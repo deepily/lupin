@@ -12,15 +12,18 @@ The decision logic is unit-covered in `reading_pane_store.test.ts`
 (`isAbstractShown`) + `reading_pane_renderer.test.ts` (the document-level click
 delegation); THIS verifies the real click → DOM behavior end to end.
 
-Venue: :8000 (scheduled monopolize-mode via /api/test-suite/submit). Submit via:
+Venue: :8000 (scheduled monopolize-mode via /api/v2/submit). Submit via:
 
-    POST /api/test-suite/submit
+    POST /api/v2/submit
     {
-        "test_types"         : "e2e_ui",
+        "test_types"         : "e2e_a",
         "pytest_args"        : "-k test_multiplexer_abstract_indicator_toggle",
         "scheduled_at"       : "<slot>",
         "auto_fix_on_failure": false
     }
+
+`e2e_a` is this file's half (src/tests/e2e_ui/partition/half-a.txt). `e2e_ui` is the
+directory name, not a suite key: submitting it runs nothing (row 4e8f348e).
 """
 
 from __future__ import annotations

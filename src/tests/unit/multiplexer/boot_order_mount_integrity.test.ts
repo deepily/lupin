@@ -44,17 +44,20 @@ function makeEmptyStores() {
 // Faithful reproduction of the multiplexer.html accordion layout (the parts that
 // matter for mount adjacency). Mirrors the real nesting: #action-required-section
 // is a STANDALONE sibling (Lane 0c extraction); #notifications-header-mount lives
-// in .notifications-header-region; #sender-cards-container is the ONLY child of
-// #notifications-pane; the remaining accordion panes are dedicated + empty.
+// in .notifications-header-region; #notifications-pane holds the broadcast card
+// mount and the CC-session strip before #sender-cards-container (Rick's
+// 2026-09-10 ruling 4, legacy order); the remaining accordion panes are
+// dedicated + empty.
 function buildMultiplexerLayout(): HTMLElement {
   const app = document.createElement("div");
   app.innerHTML = `
     <div id="action-required-section" data-testid="multiplexer-action-required-section"></div>
     <div class="notifications-header-region">
       <div id="notifications-header-mount"></div>
-      <div id="tts-preview-slider-mount"></div>
     </div>
     <section id="notifications-pane" class="notifications-pane">
+      <div id="broadcast-card-mount"></div>
+      <div id="cc-session-strip" hidden><div id="cc-strip-icons"></div></div>
       <div id="sender-cards-container" data-testid="multiplexer-sender-cards"></div>
     </section>
     <section id="fleet-status-pane"></section>
@@ -70,6 +73,9 @@ function buildMultiplexerLayout(): HTMLElement {
 const CRITICAL_STATIC_IDS = [
   "action-required-section",
   "notifications-header-mount",
+  "broadcast-card-mount",     // ruling 4 — now inside #notifications-pane
+  "cc-session-strip",         // ruling 4 — now inside #notifications-pane
+  "cc-strip-icons",
   "sender-cards-container",
   "fleet-status-pane",
   "task-list-pane",

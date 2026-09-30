@@ -73,6 +73,12 @@ class Outcome:
     code         : Optional[ list ] = None
     code_example : Optional[ str ]  = None
     code_returns : Optional[ str ]  = None
+    # WHERE THE QUEUED JOB SITS, right after the push: the todo queue's size at that moment
+    # (row a3c59f2d, Rick 2026-09-29 — door 18 retires once v2 reports this). It is the
+    # same number `/api/test-suite/submit` returned as `queue_position`, and like it a
+    # SNAPSHOT: it is not kept current as the queue moves. None on every path that queued
+    # nothing (inline, replay, failure).
+    queue_position : Optional[ int ] = None
 
 
 @runtime_checkable
@@ -112,7 +118,11 @@ class InlineExecutor:
     def _replay( self, work: Work, trace: StageTrace ) -> Outcome:
         """Replay a cached snapshot on a per-user copy, formatting the answer."""
         try:
-            snap   = work.job.for_current_user( work.user_id, work.session_id )
+            # work.user_email is passed, not merely carried: without it the replay copy
+            # keeps the STORED (empty) address and `_notify` returns before TTS, which is
+            # the missing-spoken-answer half of row `0e7c9214`.
+            snap   = work.job.for_current_user( work.user_id, work.session_id,
+                                                user_email=work.user_email )
             job_id = snap.id_hash
             trace.mark( "t_replay_code" )
             snap.run_code()
@@ -173,7 +183,8 @@ class QueuedExecutor:
     Ensures:
         - the job's id_hash is the SCOPED id BEFORE the push, which is v1's
           order: a filtering read must never see an unscoped row.
-        - returns Outcome( status="waiting", job_id=<scoped id> ) with no answer.
+        - returns Outcome( status="waiting", job_id=<scoped id>, queue_position=<the todo
+          queue's size right after the push> ) with no answer.
         - a queue that refuses the push is captured as Outcome(status="failed"),
           the same contract InlineExecutor keeps — the flow degrades to the
           receptionist rather than letting a 500 out of the request.
@@ -194,12 +205,33 @@ class QueuedExecutor:
         try:
             trace.mark( "t_enqueue" )
             job         = work.job
+            # Address the job to whoever is asking NOW (row `0e7c9214`). A snapshot
+            # loaded from storage carries whoever asked FIRST, and this pushed it
+            # verbatim — so the completion frame went to an old-format user_id nobody
+            # holds a session under, and the EMPTY stored email made `_notify` return
+            # before TTS. Both symptoms Rick reported, one omission.
+            #
+            # `Work` has always carried both fields; until now neither was READ in this
+            # module, which is what an unused dataclass field usually means.
+            #
+            # Falsy means "no requester context", never "blank it out" — an erased
+            # identity is as undeliverable as a stale one.
+            if work.user_id:    job.user_id    = work.user_id
+            if work.user_email: job.user_email = work.user_email
             job.id_hash = self.todo_queue.user_job_tracker.register_scoped_job(
                 job.id_hash, work.user_id, work.session_id
             )
             self.todo_queue.push( job )
+            # READ THE POSITION AFTER THE PUSH, IN ITS OWN GUARD. The push has succeeded, so
+            # the job IS queued; a size() that raises must not reach the `except` below and
+            # report a queued job as failed (the flow would then degrade to the receptionist
+            # while the job ran on unseen). A position that cannot be read is just None.
+            try:
+                queue_position = self.todo_queue.size()
+            except Exception:
+                queue_position = None
             if self.debug: print( f"[v2] queued [{work.kind}] as [{job.id_hash}]" )
-            return Outcome( status="waiting", job_id=job.id_hash )
+            return Outcome( status="waiting", job_id=job.id_hash, queue_position=queue_position )
         except Exception as e:
             return Outcome( status="failed", error=str( e ) )
 

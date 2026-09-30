@@ -14,8 +14,47 @@
 import type { EventBus } from "../shared/EventBus";
 import type { StoreTaskListChangedPayload } from "../shared/types";
 import type { TaskItem, TaskListComposite } from "../render/taskListModel";
-import { deriveTaskActor } from "../render/taskListModel";
+import { deriveTaskActor, isOpenStatus } from "../render/taskListModel";
+import type { TransitionExtras } from "../render/taskVerbs";
 import { TASK_LIST_QUERY } from "../../shared/task-list-query.js";
+import { AWAITING_HUMAN_APPROVAL } from "./HoldingAreaStore";
+
+/**
+ * Raised when the transition door answers "Rick has not been asked yet".
+ *
+ * 🔴 A REJECTION RATHER THAN A NEW RESULT TYPE, AND THAT IS THE POINT. `done` already
+ * rejects on a non-2xx and the renderer already rolls back the optimistic row when it
+ * does. Routing the 202 down that SAME path reuses a rollback that is written, wired and
+ * tested; returning a third state instead would leave every existing caller free to
+ * ignore it, which is how the defect got here.
+ *
+ * `pending` is what keeps "not answered yet" from reading as "the server refused" — a
+ * different wrong answer rather than a fix.
+ */
+export class AwaitingHumanApprovalError extends Error {
+  readonly pending  = true as const;
+  readonly ticketId : string;
+  constructor( ticketId: string ) {
+    super( "Waiting on Rick — he has not been asked yet." );
+    this.name     = "AwaitingHumanApprovalError";
+    this.ticketId = ticketId;
+  }
+}
+
+/**
+ * Whether a transition answer is the 202 awaiting-approval body.
+ *
+ * ⚠️ THE `status` FIELD, NEVER A SUBSTRING SEARCH — a row whose own reason text mentions
+ * the marker is an ordinary success, and a payload-wide match would roll back a
+ * transition that actually happened. The marker itself is imported from HoldingAreaStore
+ * so the two browser stores cannot drift; that copy is pinned to the server's literal by
+ * `src/tests/unit/test_the_browser_202_marker_matches_the_server.py`.
+ */
+function awaitingApproval( body: unknown ): boolean {
+  return typeof body === "object"
+    && body !== null
+    && ( body as { status?: unknown } ).status === AWAITING_HUMAN_APPROVAL;
+}
 
 // Narrowed ApiClient surface. The production ApiClient.get throws ApiError
 // (carrying `.status`) on non-2xx; refresh() maps that to the display-only
@@ -31,7 +70,7 @@ export interface TaskListApiClient {
 }
 
 // The descriptive fields the PATCH endpoint accepts from the card (D2/D3 scope):
-// priority (P0–P3) and owner_persona (reassignment; null clears the owner).
+// priority (P0–P5) and owner_persona (reassignment; null clears the owner).
 // Title/body/accountable_manager/gate_class are PATCH-able server-side but out
 // of the per-row editing scope, so they are not surfaced here.
 export interface TaskPatchFields {
@@ -39,7 +78,7 @@ export interface TaskPatchFields {
   owner_persona? : string | null;
 }
 
-// The optimistic-mutation handle returned by patchTask/dropTask — mirrors the
+// The optimistic-mutation handle returned by patchTask/transitionTask — mirrors the
 // `{ restoreState }` rollback contract of JobStore.delete, plus a `done` promise
 // the renderer awaits to drive the JobsPaneRenderer-style success / 404-as-
 // success / rollback-on-error flow. `done` resolves on a 2xx and rejects with
@@ -71,6 +110,19 @@ export interface TaskListStore {
   composite(): TaskListComposite | null;
   /** Fetch → cache → emit (stampUpdated=true). Debounced via an in-flight guard. */
   refresh(): Promise<void>;
+  /**
+   * The read a caller needs AFTER it has written (row c9fafb9d, Tiffany L1).
+   *
+   * 🔴 `refresh()` SKIPS A COLLISION — it returns at once, having fetched nothing — so a
+   * write that lands while a poll is in flight got no read of its own, and a poll whose fetch
+   * began before the write cannot see it. This waits out the poll in flight, then takes a
+   * fresh one: the first read that can observe the write. The holding area's store has the
+   * same verb for the same reason.
+   *
+   * Ensures: resolves only after a fetch that BEGAN after this call has ended — including when
+   * several writers call it against the same poll.
+   */
+  refreshAfterWrite(): Promise<void>;
   /** Start the 60s poll: one immediate refresh, then the interval. Idempotent. */
   startPolling(): void;
   /** Stop the poll + clear the interval handle. Idempotent. */
@@ -88,12 +140,24 @@ export interface TaskListStore {
    */
   patchTask( id: string, fields: TaskPatchFields ): TaskMutation;
   /**
-   * Phase 2 — optimistically DROP a task (D3 — `transition`→`dropped`, preserving
-   * the append-only audit trail) with a non-blank `reason` (server requires it).
-   * The cached row is removed from the open view + emitted; `restoreState`
-   * re-inserts it. Same no-op semantics as patchTask on a miss.
+   * Optimistically TRANSITION a task to `toStatus` (preserving the append-only
+   * audit trail), carrying whatever extra body fields that verb requires —
+   * `reason` / `park_reason` / `next_chase_ts`, built by `taskVerbs.transitionExtras`.
+   *
+   * 🔴 THE ROW LEAVES THE OPEN VIEW ONLY WHEN THE VERB REALLY CLOSES IT. Drop and
+   * won't-fix end the row, so removing it optimistically is what the operator
+   * expects to see. Park, demote and approve do NOT: those rows stay owed under a
+   * different status, and removing them would tell the operator their work had
+   * vanished. For those the cached row's status is updated in place instead.
+   *
+   * Same no-op semantics as patchTask on a miss (no cached composite / unknown id).
    */
-  dropTask( id: string, reason: string ): TaskMutation;
+  // `string | null` because UN-PARK SENDS AN EXPLICIT null CHASE and is the only verb
+  // that does. Rick ruled un-park clears the chase date; `transitionExtras` therefore
+  // emits `next_chase_ts: null`, and an OMITTED key would leave the old chase standing
+  // — "send nothing" and "send null" are different requests. Narrowing this back to
+  // `Record<string, string>` silently reverses that ruling rather than fixing a type.
+  transitionTask( id: string, toStatus: string, extras: TransitionExtras ): TaskMutation;
   /** Test/cleanup helper. */
   disposeForTesting(): void;
 }
@@ -127,6 +191,7 @@ class TaskListStoreImpl implements TaskListStore {
 
   private lastComposite : TaskListComposite | null = null;
   private inFlight      = false;
+  private inFlightRun   : Promise<void> | null = null;
   private pollHandle    : number | null = null;
 
   constructor( opts: TaskListStoreOptions ) {
@@ -151,12 +216,28 @@ class TaskListStoreImpl implements TaskListStore {
   async refresh(): Promise<void> {
     if ( this.inFlight ) return;   // debounce: a manual tick landing on a poll can't double-fetch
     this.inFlight = true;
-    try {
-      this.lastComposite = await this.fetchState();
-      this.emitChanged();
-    } finally {
-      this.inFlight = false;
-    }
+    const run = ( async () => {
+      try {
+        this.lastComposite = await this.fetchState();
+        this.emitChanged();
+      } finally {
+        this.inFlight    = false;
+        this.inFlightRun = null;
+      }
+    } )();
+    this.inFlightRun = run;
+    return run;
+  }
+
+  async refreshAfterWrite(): Promise<void> {
+    if ( this.inFlightRun !== null ) await this.inFlightRun;
+    // 🔴 A RUN IN FLIGHT NOW BEGAN AFTER THIS CALL — JOIN IT, DO NOT CALL refresh(). Two
+    // writers landing on one poll both wait it out; the first starts the fresh read, and the
+    // second's refresh() would SKIP that read and resolve before it ends (Mr. Radio, measured
+    // at fcf2b6bc). Every run that can be in flight here started after the one this call
+    // waited for, so it can see this write.
+    if ( this.inFlightRun !== null ) return this.inFlightRun;
+    return this.refresh();
   }
 
   startPolling(): void {
@@ -192,23 +273,46 @@ class TaskListStoreImpl implements TaskListStore {
     tasks[ idx ] = { ...tasks[ idx ], ...fields };   // optimistic clone-and-merge
     this.emitChanged( false );               // repaint now; NOT a fetch → no re-stamp
 
+    // 🔴 ENCODE THE ID — and it is invisible in a test that uses a uuid-shaped one.
+    // A raw `${id}` and an encoded one are byte-identical until the id carries / ? or #,
+    // at which point the request silently lands on a DIFFERENT route. This store shipped
+    // without it while HoldingAreaStore and the legacy card both had it; the guard that
+    // found it drives all three with `a/b?c#d`.
+    // src/tests/unit/notifications_js/both_clients_issue_the_same_request_for_every_control.test.ts
     const body = { ...fields, actor: this.actor(), authority: "user_direct" };
-    const done = this.api.patch<unknown>( `/api/tasks/${id}`, body ).then( () => undefined );
+    const done = this.api.patch<unknown>( `/api/tasks/${ encodeURIComponent( id ) }`, body ).then( () => undefined );
     return { restoreState: this.makeRestorer( snapshot ), done };
   }
 
-  dropTask( id: string, reason: string ): TaskMutation {
+  transitionTask( id: string, toStatus: string, extras: TransitionExtras ): TaskMutation {
     const tasks = this.openTasksOrNull();
     if ( tasks === null ) return NOOP_MUTATION();
     const idx = tasks.findIndex( ( t ) => t.id === id );
     if ( idx < 0 ) return NOOP_MUTATION();
 
     const snapshot = tasks.slice();
-    tasks.splice( idx, 1 );                   // optimistic removal from the open view
+    if ( isOpenStatus( toStatus ) ) {
+      // Still owed, under a new status — update in place. Removing it would tell
+      // the operator their parked/demoted/approved row had disappeared.
+      tasks[ idx ] = { ...tasks[ idx ], status: toStatus };
+    } else {
+      tasks.splice( idx, 1 );                 // closed for good — leaves the open view
+    }
     this.emitChanged( false );
 
-    const body = { to_status: "dropped", reason, actor: this.actor(), authority: "user_direct" };
-    const done = this.api.post<unknown>( `/api/tasks/${id}/transition`, body ).then( () => undefined );
+    const body = { to_status: toStatus, ...extras, actor: this.actor(), authority: "user_direct" };
+    // 🔴 A 202 IS NOT AN APPROVAL, AND THIS IS THE SITE THAT LEAVES A FALSE FACT ON SCREEN.
+    // The optimistic row above is already painted with the new status; `done` resolving is
+    // what tells the renderer to keep it. `ApiClient` throws only on `!ok`, so an
+    // awaiting-approval 202 used to resolve here and the row stayed APPROVED for a
+    // promotion Rick has not been asked about. Rejecting sends it down the rollback path
+    // the renderer already has.
+    const done = this.api.post<unknown>( `/api/tasks/${ encodeURIComponent( id ) }/transition`, body ).then( ( answer ) => {
+      if ( awaitingApproval( answer ) ) {
+        throw new AwaitingHumanApprovalError( String( ( answer as { ticket_id?: unknown } ).ticket_id ?? "" ) );
+      }
+      return undefined;
+    } );
     return { restoreState: this.makeRestorer( snapshot ), done };
   }
 
@@ -220,7 +324,11 @@ class TaskListStoreImpl implements TaskListStore {
     try {
       return await this.api.get<TaskListComposite>( this.endpoint );
     } catch ( err ) {
-      const status = ( err as { status?: number } ).status;
+      // ⚠️ `?.` — A REJECTION IS NOT ALWAYS AN OBJECT. Reading `.status` off `null` or
+      // `undefined` threw a TypeError out of refresh(), so refreshAfterWrite() rejected and a
+      // row write's `done` with it: the controller rolled back an edit the server had stored.
+      // Every failed read is the unreachable sentinel, which the pane reports as stale.
+      const status = ( err as { status?: number } | null | undefined )?.status;
       if ( status === 401 ) return { status: "auth_required" };
       return { status: "unreachable", tasks: null };
     }

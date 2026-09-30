@@ -564,3 +564,42 @@ def test_variable_indirection_is_the_named_residual():
         "variable indirection is now caught — good, but the module docstring "
         "still calls it a residual. Update the docstring and this test together."
     )
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# THE EMPTY-ENV-ASSIGNMENT BYPASS (found 2026-08-31, fixed the same day)
+# ═════════════════════════════════════════════════════════════════════════════
+
+def test_an_empty_env_assignment_does_not_bypass_the_guard():
+    """
+    `GIT_DIR= git stash pop` was ALLOWED. A word boundary cannot sit between the
+    `=` of an empty assignment and the space after it — both are non-word
+    characters — so the prefix group failed, the match fell back to zero prefixes,
+    and the anchored program never matched. Bypass #23, in a guard whose whole
+    value is that a miss lets through a command that had to be refused.
+
+    Found by a merge_head_guard test asserting the falsy spellings of its own
+    hatch, which is the kind of place these keep turning up: a test aimed at one
+    thing measuring the matcher underneath it.
+    """
+    for command in ( "FOO= git stash pop", "GIT_DIR= git stash pop", "EDITOR= git stash drop" ):
+        assert stash_deny_reason( "Bash", { "command": command }, enabled=True ) is not None, \
+            f"the empty assignment bypassed the guard: {command!r}"
+
+
+def test_the_empty_assignment_fix_did_not_buy_a_false_deny():
+    """
+    THE CONTROL FOR THE FIX. Dropping the boundary outright would let the greedy
+    value backtrack INTO the program name, so a `git` that is part of an
+    assignment's VALUE would be read as a command — a false allow traded for a
+    false deny. The lookahead pins the value to a real token end instead.
+    """
+    assert stash_deny_reason( "Bash", { "command": "FOO=bargit stash pop" }, enabled=True ) is None, \
+        "matched a `git` that is part of an env value, not a command"
+
+
+def test_the_read_only_verbs_survive_the_empty_assignment_fix():
+    """A widened matcher must not start refusing the two allowed subcommands."""
+    for command in ( "FOO= git stash list", "GIT_DIR= git stash show" ):
+        assert stash_deny_reason( "Bash", { "command": command }, enabled=True ) is None, \
+            f"a read-only verb was refused: {command!r}"

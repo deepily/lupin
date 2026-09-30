@@ -1,0 +1,8 @@
+arm=RBASE start_sha=8bfb1eac34df810c6d2876dd33889c31557f46d7 move_to=none move_at=0s
+started_at=2026-09-05T19:30:49-04:00
+pytest_rc=1
+finished_at=2026-09-05T19:47:55-04:00
+tree_at_end=8bfb1eac34df810c6d2876dd33889c31557f46d7
+
+Enable tracemalloc to get traceback where the object was allocated.
+See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.[0m [[0m[1m[34mpy.warnings[0m][0m [36mcategory[0m=[35mPytestUnraisableExceptionWarning[0m [36mfilename[0m=[35m/mnt/DATA01/include/www.deepily.ai/projects/lupin-wt-tiberius-moveprobe/.venv/lib/python3.13/site-packages/_pytest/unraisableexception.py[0m [36mlineno[0m=[35m67[0m

@@ -7,7 +7,7 @@ Creates complete authentication schema in test database:
 - api_keys table
 - All indexes and foreign keys
 
-Design reference: src/rnd/2025.11.10-phase-2.5-notification-authentication.md
+Design reference: src/rnd/v0.1.0/2025.11.10-phase-2.5-notification-authentication.md
 """
 
 import sys

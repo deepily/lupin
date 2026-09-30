@@ -7,7 +7,7 @@ initial, manager color). A worker with no manager (`manager_persona: null`) show
 none. Drives the real `handleNotificationUpdate` so the full client wiring (event →
 managerPersonaMap → _addStripIcon render) is exercised in a live browser.
 
-Venue: :8000 (scheduled monopolize-mode via /api/test-suite/submit).
+Venue: :8000 (scheduled monopolize-mode via /api/v2/submit).
 """
 
 import pytest

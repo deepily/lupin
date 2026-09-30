@@ -15,14 +15,19 @@ GPU), the auth dependency is bypassed by passing `current_user` explicitly, and
 `lupin_app.main` is patched via the dual-key helper (Gotcha 1).
 """
 
+import ast
+import inspect
 import unittest
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import Mock, MagicMock, create_autospec, patch
 from types import SimpleNamespace
 from datetime import datetime
 import asyncio
 import sys
 import time
 
+from cosa.memory.postgres_solution_manager import PostgresSolutionManager
+from cosa.memory.snapshot_manager_interface import SolutionSnapshotManagerInterface
+from cosa.rest.routers import stats as stats_module
 from cosa.rest.routers.stats import (
     router,
     get_snapshot_mgr,
@@ -30,6 +35,27 @@ from cosa.rest.routers.stats import (
     get_time_saved_stats,
     get_global_time_saved_stats,
 )
+
+
+def _snapshot_mgr_fake():
+    """
+    A snapshot manager stand-in that CANNOT invent a method.
+
+    Requires:
+        - PostgresSolutionManager is importable
+
+    Ensures:
+        - returns an autospec'd double whose attribute surface is exactly the real
+          manager's — asking it for a name the production class lacks raises
+          AttributeError instead of manufacturing a Mock
+
+    This is not a style preference. Until 2026-09-23 this file built the manager with
+    a bare MagicMock and set `mgr.get_all_snapshots.return_value = [...]`, and
+    `get_all_snapshots` existed on NO class in the tree. The endpoints 500'd on every
+    real request for months while this suite stayed green — green BECAUSE the method
+    was absent from production and present on the mock (row 8631144b).
+    """
+    return create_autospec( PostgresSolutionManager, instance=True )
 
 
 def _patch_fastapi_main( mock_main ):
@@ -129,7 +155,7 @@ class TestGetTimeSavedStats( unittest.TestCase ):
         # S3: falsy replay_stats + replay_history → exercises the `or {}` / `or []` arms
         s3 = SimpleNamespace( user_id="nobody", replay_stats=None, replay_history=None )
 
-        mgr = MagicMock()
+        mgr = _snapshot_mgr_fake()
         mgr.get_all_snapshots.return_value = [ s1, s2, s3 ]
 
         with patch( "cosa.rest.routers.stats.get_snapshot_mgr", return_value=mgr ):
@@ -181,7 +207,7 @@ class TestGetGlobalTimeSavedStats( unittest.TestCase ):
             question     = None,                                             # `or ''` arm; len 0 → not truncated
         )
 
-        mgr = MagicMock()
+        mgr = _snapshot_mgr_fake()
         mgr.get_all_snapshots.return_value = [ g1, g2, g3, g4 ]
 
         with patch( "cosa.rest.routers.stats.get_snapshot_mgr", return_value=mgr ):
@@ -200,6 +226,59 @@ class TestGetGlobalTimeSavedStats( unittest.TestCase ):
         self.assertEqual( top[ 0 ][ "question" ], "Q" * 50 + "..." )   # truncated
         self.assertEqual( top[ 1 ][ "replays" ], 3 )
         self.assertEqual( top[ 1 ][ "question" ], "" )                # None → '' → untruncated
+
+
+class TestSnapshotManagerContract( unittest.TestCase ):
+    """
+    Every name stats.py calls on the snapshot manager must exist on the real manager.
+
+    Ensures:
+        - the parse finds calls at all (positive control — a loop over nothing passes
+          every assertion inside it)
+        - the parse finds the specific call this router is built on
+        - each parsed name is a callable attribute of PostgresSolutionManager, which is
+          the only manager SolutionManagerFactory builds
+        - each parsed name is declared on SolutionSnapshotManagerInterface, so a second
+          backend is told about it rather than discovering it from a 500
+
+    No mock can satisfy this test, and that is the whole point: mocking is what hid
+    `get_all_snapshots` going missing (row 8631144b).
+    """
+
+    def _called_names( self ):
+        """Return every attribute name stats.py calls on a `snapshot_mgr` local."""
+        tree  = ast.parse( inspect.getsource( stats_module ) )
+        names = set()
+        for node in ast.walk( tree ):
+            if ( isinstance( node, ast.Call )
+                 and isinstance( node.func, ast.Attribute )
+                 and isinstance( node.func.value, ast.Name )
+                 and node.func.value.id == "snapshot_mgr" ):
+                names.add( node.func.attr )
+        return names
+
+    def test_parse_finds_the_calls_it_is_meant_to_check( self ):
+        """Ensures: the instrument returns a positive before any absence is trusted."""
+        names = self._called_names()
+        self.assertTrue( names, "parsed no snapshot_mgr calls — the guard would pass vacuously" )
+        self.assertIn( "get_all_snapshots", names )
+
+    def test_every_called_name_exists_on_the_real_manager( self ):
+        """Ensures: no name stats.py calls is missing from PostgresSolutionManager."""
+        for name in sorted( self._called_names() ):
+            with self.subTest( name=name ):
+                attr = getattr( PostgresSolutionManager, name, None )
+                self.assertIsNotNone( attr, f"stats.py calls snapshot_mgr.{name}(), which PostgresSolutionManager does not define" )
+                self.assertTrue( callable( attr ) )
+
+    def test_every_called_name_is_declared_on_the_interface( self ):
+        """Ensures: the contract every backend implements covers what stats.py needs."""
+        for name in sorted( self._called_names() ):
+            with self.subTest( name=name ):
+                self.assertTrue(
+                    hasattr( SolutionSnapshotManagerInterface, name ),
+                    f"stats.py calls snapshot_mgr.{name}(), which the manager interface does not declare"
+                )
 
 
 class TestStatsRouterRegistration( unittest.TestCase ):

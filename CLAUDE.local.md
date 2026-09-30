@@ -43,7 +43,8 @@ the user to try the software — YOU must:
      expected-next run); something RUNNING → queue behind, no bounce.
      Only KILLING a live in-flight job needs the user's word. NEVER inject
      via ad-hoc API / curl / CLI (side-door collides with scheduled runs
-     and poisons both). Submit ONLY via /api/test-suite/submit.
+     and poisons both). Submit ONLY via POST /api/v2/submit
+     (command `agent router go to test suite`; /api/test-suite/submit is retired, 410).
 
 ## Technology Warnings
 - Flask Is deprecated. DO NOT use, ever!

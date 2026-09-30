@@ -355,6 +355,7 @@ import os
 import subprocess
 
 import lupin_mcp.self_respin_core as sr
+from tests.helpers.memento_slot_seed import seed_root_slot
 
 
 def _stub_tmux( tmp_path ):
@@ -461,11 +462,11 @@ def test_scheduling_clears_a_stale_send_stamp_from_a_prior_cycle( tmp_path ):
     perform_self_respin and this goes red — that mutation survived every other test
     in this file.
     """
-    memento = tmp_path / ".claude-memento.md"
     nonce   = "stale-cycle-uuid"
-    memento.write_text(
-        "# memento\n" + _REAL_BODY + sr.build_nonce_line( nonce, _dt( 20 ) ) + "\n"
-    )
+    # A REAL slot for this seat (row 8068c65e) — placement is checked now, so a bare
+    # `.claude-memento.md` with no record behind it no longer resolves.
+    memento = seed_root_slot( tmp_path, "cheech", "sid9",
+                              nonce_uuid=nonce, nonce_ts=_dt( 20 ), written_at=_dt( 20 ) )
 
     stale = tmp_path / ".self-respin-keys-sent-sid9.marker"
     stale.write_text( "" )                      # the prior cycle's stamp
@@ -473,10 +474,11 @@ def test_scheduling_clears_a_stale_send_stamp_from_a_prior_cycle( tmp_path ):
 
     scheduled = []
     r = sr.perform_self_respin(
-        "sid9", persona="cheech", memento_path=str( memento ), memento_nonce=nonce,
+        "sid9", persona="cheech", memento_path=memento, memento_nonce=nonce,
         pre_clear_status="over_budget", pre_clear_pct=61.0,
         now=_dt( 21 ), resolve_tmux_fn=lambda sid: "cheech-mgr", ask_fn=lambda: "yes",
         schedule_fn=lambda argv: scheduled.append( argv ), base_dir=str( tmp_path ),
+        repo_root=str( tmp_path ),
     )
 
     assert r.status == "scheduled"

@@ -113,6 +113,42 @@ authenticated API. Debounced to at most one wake per user per
 `fcm wake debounce seconds` ( default 60 ). Boots DISABLED with a clear log line
 until Firebase credentials are provisioned — never blocks the notification path.
 
+**A notification enqueued INSIDE a live debounce window is deferred, never dropped**
+( row `ed76b897` ). It used to be dropped: the debounce arm returned `debounced` and
+ended there, and because its log line was gated on `debug` AND `verbose` it produced
+no output either — measured live 2026-09-28, a notify 37 s after a completed wake, the
+device socket down, logged nothing at all and sat unplayed until something else woke
+the device. Now the FIRST notify inside a window arms ONE trailing wake for the moment
+the window closes; every later notify in that window collapses onto it. The trailing
+wake re-runs the whole policy at fire time, so a device that reconnected during the
+window is not woken — a deferral is a request, not a promise. `/api/notify/next`
+serves the OLDEST unplayed item, so the backlog drains in order.
+
+**The trailing wake has no override — it honours the window like any other caller.**
+A timer thread is not a clock. Descheduled it fires LATE, and by then an ordinary
+notify may have taken the expired slot and opened a new window; a forced send would
+put two wakes inside it, defeating the one rate limit the service exists for. Woken
+EARLY it would send before the window it was waiting on had closed. Both cases
+disappear because the trailing wake simply re-enters `maybe_send_wake`: late or
+early it finds the window open and re-defers for what is genuinely left, and each
+re-defer's delay strictly decreases, so it converges rather than loops. **At most one
+wake per user per window holds even against a late timer.**
+
+`maybe_send_wake()` returns the arm it took:
+
+| status | meaning |
+|---|---|
+| `disabled` | master switch off, or Firebase credentials never resolved |
+| `mobile_ws_live` | the user has a live mobile queue-WS — no wake needed |
+| `deferred` | inside a window; **this call** armed the trailing wake ( logged UNGATED ) |
+| `debounced` | inside a window; a trailing wake was **already** pending, so this collapsed onto it |
+| `no_tokens` | no registered FCM tokens for the user |
+| `submitted` | handed to the send executor |
+
+The `deferred` line and the trailing wake's outcome line are both printed **ungated** —
+the debug flag being off is exactly the condition under which the original silence went
+unread for a day.
+
 **Source**: `src/cosa/rest/fcm_wake_service.py` ( policy + sender ),
 `src/cosa/rest/notification_fifo_queue.py` ( `_maybe_send_fcm_wake` hook ),
 `src/cosa/rest/routers/fcm.py` ( token registration ),
@@ -852,13 +888,108 @@ For the complete endpoint reference with request/response schemas, see:
 - **Interactive docs**: `/docs` (Swagger UI) or `/redoc` (ReDoc) — always current
 - **Quick reference table**: [rest-api-reference.md](rest-api-reference.md)
 
-The notification endpoints are in the `notifications` tag group, with 17 endpoints covering:
+The notification endpoints are in the `notifications` tag group — **24 routed endpoints** (counted from `notifications.router.routes` on 2026-09-23; it moves, so re-derive rather than quoting this) covering:
 - `POST /api/notify` — Core dispatch (fire-and-forget or SSE blocking)
 - `POST /api/notify/response` — User response submission
 - `GET/DELETE /api/notifications/*` — CRUD operations
 - `GET /api/notifications/conversation/*` — Conversation threading
 - `GET /api/notifications/senders*` — Sender activity queries
+- `GET /api/notifications/broadcast-acks/{broadcast_id}` — one broadcast's saved ack tally
 - `POST /api/notifications/generate-gist` — LLM session naming
+
+### 4.1 GET /api/notifications/broadcast-acks/{broadcast_id}
+
+Rebuild one broadcast's ack tally from the SAVED notification rows — which seats acked,
+with what status, and when. Added 2026-09-23 with store row `4f320c27` (parent bug
+`1c7da903`), implementing Rick's ruling that acks are saved alongside the notifications
+rather than existing only as an in-memory push.
+
+**Auth**: API key or Bearer JWT. The recipient is the authenticated account and there is
+no user id in the path, so a caller can only ever read acks addressed to itself.
+
+| parameter | in | default | meaning |
+|---|---|---|---|
+| `broadcast_id` | path | — | the broadcast's id, as written into `payload.broadcast_id` |
+| `limit` | query | 500 | rows scanned before the latest-per-session fold |
+
+**Response** `200`
+
+```json
+{
+  "status"       : "success",
+  "broadcast_id" : "11111111-aaaa-4bbb-8ccc-222222222222",
+  "ack_count"    : 2,
+  "acks": [
+    {
+      "id"            : "8f1c…",
+      "broadcast_id"  : "11111111-aaaa-4bbb-8ccc-222222222222",
+      "session_id"    : "f19a8996-2fdc-425d-82bc-0e99f3cd8db2",
+      "persona_name"  : "Mr. Radio",
+      "persona_icon"  : "🦉",
+      "persona_color" : "#FFA000",
+      "ack_status"    : "completed",
+      "body_summary"  : "⚠️ :7999 is bouncing NOW — hold notifications…",
+      "state"         : "delivered",
+      "created_at"    : "2026-09-23T21:37:31.717091+00:00"
+    }
+  ],
+  "timestamp": "2026-09-23T17:37:32-04:00"
+}
+```
+
+Other codes: `400` when the credential is not a UUID, `500` on a query fault. A broadcast
+nobody has acked is `200` with `ack_count: 0` — an answer, not an absence.
+
+🔴 **THIS READ IGNORES DELIVERY STATE, AND THAT IS THE POINT.** The undelivered drain
+(`GET /api/notifications/undelivered`) answers *what did I miss while offline* and
+therefore skips anything already delivered to a socket. An ack that lands while a browser
+is open is marked delivered instantly, so a tally rebuilt from the undelivered inbox comes
+back EMPTY for exactly the acks the user already half-saw. This endpoint asks a different
+question — *which seats have acked this broadcast* — and its answer does not depend on
+whether a socket happened to be open. Do not add a state filter here, and do not remove
+the undelivered drain's own one.
+
+**Where the rows come from**: `CommonsAckWatcher._persist_ack_row` saves each ack as a
+`commons_broadcast_ack` notification addressed to the broadcaster, with the identity in
+the new `payload` column, and marks it `delivered` immediately so it never joins the AFK
+inbox as a bodiless "missed notification".
+
+⚠️ **A saved ack is EXCLUDED from the sender rosters AND the conversation reads** —
+six queries in all, via `NotificationRepository.NON_CONVERSATION_TYPES`: the two rosters
+(`get_sender_last_activities`, `get_sender_last_activities_visible`) and the four
+conversation/history reads (`get_sender_conversation`,
+`get_sender_conversations_by_date`, `get_sender_date_summaries`,
+`get_active_conversation`). Deliberately NOT `count_by_sender` or `get_by_recipient`,
+which also return acks but have no caller outside tests. Those queries group by `sender_id` and
+filter on nothing else, so any row saved into `notifications` becomes a *sender*;
+without the exclusion a seat appears in `/api/notifications/senders-visible` — and
+therefore in the multiplexer's strip and the operator focus bar, which hydrate from it —
+purely for having acked a broadcast — and, before the conversation reads were covered
+too, `/api/notifications/active-conversation/{user_email}` would answer with a seat that
+had merely acked, while the history hydration gained date buckets that existed for no
+other reason. None of it was visible: the multiplexer's `normalizeHistoryRow` drops an
+empty-message row at render, so the rows never appeared while the counts, the buckets
+and the active-conversation pick were all silently wrong. The exclusion holds whatever
+`sender_id` an ack carries: even a perfectly attributed ack would inflate that seat's `notification_count`
+and drag its `last_activity` forward. A broadcast ack is a tally element, and
+`/api/notifications/broadcast-acks/{broadcast_id}` is where it is meant to be read.
+
+⚠️ **An ack row's `sender_id` is `claude.code@unknown.deepily.ai#<hash8>`, and the
+`unknown` is a measurement rather than a gap.** The commons store is shared across
+projects — a `lupin-mobile` or `planning-is-prompting` seat acks into the same topic —
+and a commons entry carries no project and no sender id, only `sender_session_id` plus
+persona fields. Naming a project here would file a peer project's ack under this one,
+and it would look correct in every tally because the persona and the broadcast would
+still be right. The seat's 8-char session prefix IS carried, because the entry supplies
+it and `_voice_persona_for_sender_id` matches on exactly those characters. The persist runs on the watcher's own daemon
+thread and cannot block or fail the live push; a failure prints a `[CommonsAckWatcher] ❌
+ack NOT SAVED` line regardless of the debug flag.
+
+**Not a new aggregate.** There is no ack table and no ack cache — this reads the same
+`notifications` rows the watcher writes, and it works only because those acks are saved.
+
+**Live probe** (write-only, run at the operator's discretion — it interrupts every live
+seat): `src/scripts/probe_broadcast_ack_two_sided.py`.
 
 ---
 
@@ -1252,6 +1383,7 @@ class Notification( Base ):
 | `timeout_seconds`   | `BigInteger`                  | Yes      | --                            | Response timeout in seconds          |
 | `state`             | `String( 50 )`                | No       | `"created"` / `'created'`   | State machine value (indexed)        |
 | `is_hidden`         | `Boolean`                     | No       | `False` / `'false'`         | Soft-delete flag (indexed)           |
+| `payload`           | `JSONB`                       | Yes      | --                            | Structured side-channel — the same dict the in-memory push sends as `payload=`. Its first consumer is the broadcast ack, whose whole identity (which broadcast, which seat) lives here and nowhere else. NULL on every row written before `9184990becdf`. |
 
 **Indexes**:
 
@@ -1265,12 +1397,14 @@ class Notification( Base ):
 | `ix_notifications_type`                 | `type`                          | B-tree     |
 | `ix_notifications_is_hidden`            | `is_hidden`                     | B-tree     |
 | `ix_notifications_job_id`              | `job_id`                        | B-tree     |
+| `idx_notifications_ack_broadcast`       | `recipient_id`, `(payload->>'broadcast_id')` | Partial, `WHERE type = 'commons_broadcast_ack'` |
 
 **Relationship**: `recipient: Mapped["User"]` via `back_populates="notifications"`.
 
 **Migrations**:
 - `275fb8d9c75c` - Original table creation (2025-12-30)
 - `62ec6f256d27` - Added `job_id` column (2026-01-23)
+- `9184990becdf` - Added `payload` column + the partial broadcast-ack index (2026-09-23, row `4f320c27`)
 
 ---
 
@@ -1477,6 +1611,55 @@ The notification system supports two deletion modes:
 **Design rationale**: Soft delete preserves the notification history for conversation
 reconstruction, gist generation, and usage analytics while allowing users to "clear"
 their notification inbox.
+
+---
+
+### 6.7 A blocking ask announced COMPLETE at ~120s, then FAILED at 660s — and how to get your answer back
+
+**If you are reading this at 2am because a `converse` / `ask_yes_no` /
+`ask_multiple_choice` with a long timeout was announced finished while the
+person had not answered yet, this section is the whole story.** Row
+`97ff4426`.
+
+**The symptom.** You declare `timeout_seconds=600`. At roughly 120 seconds the
+PostToolUse beacon announces the call COMPLETE. Some minutes later a second
+report says it FAILED, at around 660s — after the call had already returned and
+after its side effect had landed. Nothing about that sequence describes what
+the server or the client actually did.
+
+**The three layers, each measured separately (2026-09-06), because the obvious
+suspects are innocent and chasing them costs an evening:**
+
+| Layer | What was measured | Verdict |
+|---|---|---|
+| **Server** | 42/42 asks declaring a timeout above 120s expired at their declared value, ±0.1s | **INNOCENT** |
+| **Client** (`cosa_voice_mcp` blocking verbs) | live probe: answered at 151.4s and **returned at 151.4s with the real answer** | **INNOCENT** |
+| **PostToolUse beacon** | fires at `min( answer, ~120s )`, 24/24, regardless of the declared timeout | 🔴 **THE DEFECT** |
+
+⇒ **The verb is fine and the answer is not lost. The ANNOUNCEMENT is early.**
+The hook that emits it (`src/lupin_cli/claude_code/hooks/post_tool_use.py`)
+holds no timer and no deadline of its own — it fires when the harness invokes
+it, so the ~120s decision is the harness's, one layer above this repo, and
+**WHY it does that is unmeasured and is not a Lupin question.**
+
+**THE WORKAROUND — re-POST the same ask and you re-attach to it.** Every
+blocking verb stamps an `idempotency_key` (`cosa_voice_mcp._with_idempotency_key`).
+A second POST carrying the same key does **not** mint a second card: it
+re-attaches to the original notification's stream via
+`_ask_reattach_generator( existing_nid, timeout_seconds )` —
+`src/cosa/rest/routers/notifications.py:1247-1254`, generator defined at `:206`
+— and delivers the answer whenever the person gives it.
+
+⚠️ **There is no `/reattach` route and you must not go looking for one.**
+Verified against the live app's OpenAPI: `reattach` appears in **zero** paths,
+with `/api/notify/response` present as the positive control proving the lookup
+reaches. Re-attachment is reachable **only** through the notify POST's
+idempotency branch. That is by design, not an omission.
+
+🔴 **THIS IS A WORKAROUND A CALLER HAS TO KNOW TO MAKE, NOT A FIX.** The
+beacon still lies about when the call finished; re-POSTing is how you recover
+the answer in spite of it. Row `97ff4426` stays OPEN for that reason — closing
+it would read as "the defect is fixed", and it is not.
 
 ---
 
@@ -3153,4 +3336,4 @@ if __name__ == "__main__":
 | [`src/tests/README.md`](../tests/README.md) | Lupin 5-tier testing strategy overview |
 | [`src/tests/AUTH-TESTING-GUIDE.md`](../tests/AUTH-TESTING-GUIDE.md) | Test credential management patterns |
 | [`src/docs/proxy-admin-guide.md`](proxy-admin-guide.md) | Decision Proxy admin how-to — Trust Dashboard, Ratification page, trust feedback loop |
-| [`src/rnd/.../2026.02.27-end-to-end-trust-proxy-overview.md`](../rnd/2026.02.23-trust-proxy-preference-learning/2026.02.27-end-to-end-trust-proxy-overview.md) | End-to-end conceptual overview — 5 stages from cold start to autonomous proxy, CBR engine, trust models, component map |
+| [`src/rnd/v0.1.5/2026.02.23-trust-proxy-preference-learning/2026.02.27-end-to-end-trust-proxy-overview.md`](../rnd/v0.1.5/2026.02.23-trust-proxy-preference-learning/2026.02.27-end-to-end-trust-proxy-overview.md) | End-to-end conceptual overview — 5 stages from cold start to autonomous proxy, CBR engine, trust models, component map |

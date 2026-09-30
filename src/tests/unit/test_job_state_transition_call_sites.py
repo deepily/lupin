@@ -32,14 +32,24 @@ COSA_ROOT = Path( queue_util.__file__ ).parent
 VALID_STATE_VALUES = { s.value for s in JobState }
 
 
+# Files this scan could not parse. A file that does not parse is a file this guard did
+# not audit, and until row 5c3f3d94 that shrank the census silently — the sweep reported
+# a clean green over fewer files than the reader believed it had checked. Recorded here
+# and asserted empty by its own test, so the scan degrades LOUDLY instead of quietly.
+UNPARSEABLE = [ ]
+
+
 def _iter_emit_calls():
     """Yield (path, lineno, [literal str args]) for each emit_job_state_transition call."""
+    UNPARSEABLE.clear()
     for py_file in COSA_ROOT.rglob( "*.py" ):
         try:
             # Read bytes so ast.parse honors each file's own PEP 263 encoding
             # declaration rather than assuming utf-8.
             tree = ast.parse( py_file.read_bytes() )
-        except ( SyntaxError, ValueError, OSError ):
+        except ( SyntaxError, ValueError, OSError ) as e:
+            # Skip so ONE broken file cannot take the whole guard down — but never quietly.
+            UNPARSEABLE.append( f"{py_file}: {type( e ).__name__}: {e}" )
             continue
 
         for node in ast.walk( tree ):
@@ -70,6 +80,17 @@ class TestEmitCallSitesUseJobStates:
         """
         all_calls = list( _iter_emit_calls() )
         assert all_calls, "scanner found no emit_job_state_transition string literals — the guard is not looking at anything"
+
+    def test_the_scan_parsed_every_file_it_walked( self ):
+        """
+        A file that does not parse is a file this guard did not audit. Skipping it keeps one
+        broken file from taking the whole guard down; NOT saying so is what let a shrunken
+        census read as a clean one. Reddens if any file under the scan root fails to parse.
+        """
+        list( _iter_emit_calls() )
+        assert UNPARSEABLE == [ ], (
+            f"{len( UNPARSEABLE )} file(s) under {COSA_ROOT} did not parse, so this guard "
+            f"did not audit them:\n  " + "\n  ".join( UNPARSEABLE ) )
 
     def test_no_call_site_passes_a_container_name( self ):
         """The specific confusion: 'todo', 'run', 'done', 'dead' are containers."""

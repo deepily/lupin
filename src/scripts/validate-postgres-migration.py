@@ -22,8 +22,16 @@ import sys
 import sqlite3
 from datetime import datetime, timezone
 
-# Add src to path for imports
-sys.path.insert( 0, os.path.join( os.path.dirname( __file__ ), '..' ) )
+# Add src to path for imports.
+#
+# NORMALISED and GUARDED, both deliberately (bug bef58663). The unnormalised form
+# `os.path.join( os.path.dirname( __file__ ), '..' )` resolves to the same directory but is a
+# DIFFERENT STRING from `<root>/src`, so a `not in sys.path` check written the ordinary way
+# elsewhere cannot recognise it as already present. Without the check below, every import also
+# prepended another copy. Matches the idiom already used by create_service_account_postgres.py.
+src_path = os.path.normpath( os.path.join( os.path.dirname( os.path.abspath( __file__ ) ), '..' ) )
+if src_path not in sys.path:
+    sys.path.insert( 0, src_path )
 
 import cosa.utils.util as cu
 from cosa.rest.db.database import get_db
@@ -220,5 +228,6 @@ def run_validation():
         sys.exit( 1 )
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover - unreachable under pytest: __name__ is the
+                            #   module name, never "__main__"
     run_validation()

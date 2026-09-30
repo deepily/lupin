@@ -4,7 +4,7 @@ AC3 — the LIVE proof that park captures the POST-write `updated_ts`.
 Seat 3 (session 092d7ae6). Design: src/rnd/v0.1.9/2026.07.19-park-reason-staleness-detection.md
 Store row: 4ce27ba1. Companion unit suite: src/tests/unit/test_park_reason_staleness.py
 
-VENUE: :8000 monopolize-mode, SCHEDULED ONLY — submit via POST /api/test-suite/submit,
+VENUE: :8000 monopolize-mode, SCHEDULED ONLY — submit via the v2 test-suite submit,
 NEVER a side door. Creates, parks and amends real task_items rows ⇒ NOT :7999-eligible.
 Rides in ONE submission with seat 2's AC10 (manager ruling 2026-07-19): both claims are
 "the real write path on real Postgres", the same fixture surface, one monopolize window.

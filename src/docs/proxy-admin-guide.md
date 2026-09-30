@@ -541,8 +541,8 @@ building custom tooling.
 | Method | Endpoint | Used By | Description |
 |--------|----------|---------|-------------|
 | `GET` | `/api/proxy/pending/{user_email}` | Ratification page | Get all pending decisions for a user. Supports `?domain=` and `?category=` filters. |
-| `POST` | `/api/proxy/ratify/{decision_id}` | Ratification page | Approve or reject a decision. Query params: `?approved=true&user_email=...&feedback=...` |
-| `DELETE` | `/api/proxy/decision/{decision_id}` | Ratification page | Permanently delete a pending decision. Query param: `?user_email=...` (audit). Only pending decisions can be deleted. |
+| `POST` | `/api/proxy/ratify/{decision_id}` | Ratification page | Approve or reject a decision. Query params: `?approved=true&user_email=...&feedback=...` — `user_email` must be the caller's own (403 otherwise), and the `ratified_by` actually recorded comes from the credential, not from it. |
+| `DELETE` | `/api/proxy/decision/{decision_id}` | Ratification page | Permanently delete a pending decision. Query param: `?user_email=...`, which must be the caller's own; `deleted_by` is recorded from the credential. Only pending decisions can be deleted. |
 | `GET` | `/api/proxy/trust/{user_email}` | Dashboard | Get all trust states for a user. Supports `?domain=` filter. |
 | `GET` | `/api/proxy/decisions/{domain}/{category}` | Dashboard | Get recent decision history for a domain+category. Supports `?limit=` param. |
 | `GET` | `/api/proxy/mode` | Dashboard | Get current effective trust mode (INI config + running job). |
@@ -552,9 +552,155 @@ building custom tooling.
 
 ### Authentication
 
-All endpoints except `/api/proxy/batch-id` and `/api/proxy/acknowledge` require an
-authenticated session. The admin pages handle this automatically via the shared `auth.js`
-module.
+🔴 **This section said the opposite until 2026-09-25, and the sentence it used to carry is why
+the hole lasted.** It read: *"All endpoints except `/api/proxy/batch-id` and
+`/api/proxy/acknowledge` require an authenticated session."* That was false for five endpoints.
+Anyone checking whether this API was safe would have read it and stopped looking — which is the
+failure mode a wrong reassurance has and a wrong instruction does not.
+
+**Measured at the PATH** on 2026-09-25 (row `2d6f2221`), driving the real router through a
+TestClient with **no credential at all** — not read off the decorators:
+
+| endpoint | before | now |
+|---|---|---|
+| `GET /api/proxy/pending/{user_email}` | **200, reached the handler** | **401** without a credential, **403** if the path names another user |
+| `GET /api/proxy/trust/{user_email}` | **200, reached the handler** | same gate |
+| `GET /api/proxy/batch-id` | 200 | **401** — gated 2026-09-26 (row `44d8e89c`) |
+| `POST /api/proxy/acknowledge` | 200 | **401** — gated 2026-09-26 |
+| `GET /api/proxy/decisions/{domain}/{category}` | 200 | **401** — gated 2026-09-26 |
+| `POST /api/proxy/ratify/{decision_id}` | **reached the database** | **401** without a credential, **403** if `?user_email=` names another user |
+| `DELETE /api/proxy/decision/{decision_id}` | **reached the database** | same gate |
+| `GET` / `PUT /api/proxy/mode` | 401 | unchanged — gated |
+
+The two user-keyed routes are **owner-only, with no admin bypass** (Mr. Radio's ruling on row
+`d90baf3d`): the email in the path must be the caller's own, matched ignoring case. The admin pages
+already satisfy this — both `proxy-dashboard.js` and `proxy-ratify.js` set `userEmail` from
+`getCurrentUser()`, so they only ever ask for the signed-in user's own data, and `apiCall()` sends
+the credential by default.
+
+#### The remaining five, closed 2026-09-26 (row `44d8e89c`)
+
+Re-measured the same way — the real router, no credential — **all nine endpoints now answer 401**.
+Three things had to happen, and two of them are not "add a decorator":
+
+**`ratify` and `decision` needed a different guard.** Their `user_email` arrives in the **query**
+string, and `require_path_identity_owner` reads `request.path_params` and deliberately raises 500
+for a route that names no user in its path. `require_query_identity_owner` is its sibling in the
+same module: same 401 via `require_api_key_or_jwt`, same 403 for a caller who is not the user
+named, reading the query instead. A bare uncredentialed call to either used to answer **422** for
+the missing `user_email` — which reads like a refusal and is not one. A route-level `Depends`
+raising 401 preempts that 422, measured with a TestClient rather than assumed.
+
+**Their audit columns were recording a claim, not a fact.** `ratified_by` and `deleted_by` were
+written from the query string. The ownership check alone does not repair that: the check accepts
+the caller's bare user id and compares email without regard to case, so one person can present
+three strings that all pass. Both handlers now take the identity from the credential — which also
+keys the trust-state counter, where two spellings of one user would have split a counter and given
+a quietly wrong answer rather than a cosmetic one.
+
+**`batch-id` needed its caller fixed first.** That route was left open in row `2d6f2221` *because*
+of `swe_team/orchestrator.py`'s proxy-summary fetch, which sent no credential. It now sends its API
+key. ⚠️ The header helper returns an empty dict rather than raising when no key loads, because its
+caller must never take a SWE run down — so a misconfigured box degrades to a 401 the surrounding
+`try/except` swallows into a warning. The symptom would be a proxy notification that silently stops
+updating in place. The warning names the endpoint, which is the only thing that makes that findable.
+
+🔴 **`acknowledge` has a credential and no owner check, and that is a residue, not a finish.** Row
+`44d8e89c` ruled an owner check onto it alongside ratify and delete. `_proxy_batch_state` is a single
+process-global counter rather than a per-user record, so there is no per-user batch for an owner
+check to be about. **Any credentialed caller can still retire another user's displayed batch.**
+Making the batch per-user is a design change, not an authorization fix, and it is not done here.
+Carried forward as an open item in § 9 Known Limitations, with the measurement and with what is and
+is not watched by a test.
+
+> ⚠️ **This paragraph used to add "it takes no identity parameter in path, query or body", and that
+> was too strong in a way that pointed at the wrong remedy.** The handler signature takes none, and
+> both callers do POST body-less — but `require_api_key_or_jwt` **returns the caller's user id** on
+> both of its branches (`return user_id` for an API key, `return user_info[ "uid" ]` for a JWT), so
+> an identity IS resolved on every successful request. It is discarded because the route wires the
+> dependency as a bare `dependencies=[ Depends( … ) ]` entry, whose return value FastAPI throws
+> away. Identity is one wiring change away; the global counter is the actual obstacle. Corrected
+> 2026-09-27 after reading the dependency rather than the route. See § 9.1.
+
+The admin pages handle authentication automatically via the shared `auth.js` module.
+
+---
+
+## 9. Known Limitations
+
+Open items, each with what was measured and the date. A limitation listed here is **not** fixed —
+this section exists because the one below it spent two days documented only inside the tail of
+§ 8's "the remaining five, **closed**" subsection, where a reader checking for open problems had no
+reason to look. A finding filed under a heading that says *closed* reads as closed.
+
+### 9.1 Any credentialed caller can retire another user's proxy notification batch
+
+**Status**: open · **Route**: `POST /api/proxy/acknowledge` · **Measured 2026-09-27**, by reading
+`src/cosa/rest/routers/decision_proxy.py` and `src/cosa/rest/middleware/api_key_auth.py`.
+
+The batch a user sees in their notifications is identified by one **process-global** counter:
+
+```python
+_proxy_batch_state = {
+    "hex"        : uuid.uuid4().hex[ :8 ],   # stable per server lifetime
+    "generation" : 1,                        # monotonic batch counter
+}
+```
+
+`acknowledge_batch()` increments `generation` on that one dict. It is not keyed by user, so every
+signed-in user shares a single batch id, and the first caller to acknowledge retires it **for
+everybody**. The route is credentialed (`require_api_key_or_jwt`, so an uncredentialed call answers
+401) and performs no owner check, which row `44d8e89c` recorded as a deliberate residue rather than
+an oversight.
+
+**What this would look like to a user**: their proxy notification stops updating in place and a new
+batch begins, at a moment they did not choose, because somebody else clicked acknowledge.
+
+🟡 **LATENT TODAY — the conditional above is doing real work.** Measured by John on 2026-09-27
+~17:00 EDT and recorded on row `b6526c47`: **no user has ever had a live proxy batch**, because the
+batch has never been live for anyone — zero proxy batch ids, zero ratified rows. So nobody has been
+hit by this. Multi-account use is not the rare case, though: **68% of active hours have more than one
+distinct account authenticating**, so the defect becomes real the first time proxy batches are used
+at all. ⚠️ *Those two counts are inherited from John's report and are not re-derived here; the code
+reading above is mine.* Re-measure before treating either as current.
+
+**The open decision is Rick's**, per the row: fix now (per-user batch state keyed on the credential's
+canonical email, plus the owner check, with both callers changed), or leave it documented until proxy
+batches are switched on. Mr. Radio's recommendation on the row is to document now and fix before
+batches go live — which is what this entry is.
+
+**Two claims about this that are easy to get wrong** — both checked at the source rather than
+inferred from the route decorator:
+
+| claim | verdict |
+|---|---|
+| "The request carries no identity, so an owner check is impossible." | **False.** `require_api_key_or_jwt` returns the caller's user id on both branches — `return user_id` for an `X-API-Key`, `return user_info[ "uid" ]` for a `Bearer` JWT. An identity is resolved on every successful request. |
+| "The handler receives that identity." | **False.** The route wires the dependency as `dependencies=[ Depends( require_api_key_or_jwt ) ]`, and FastAPI discards a bare `dependencies=` entry's return value. `async def acknowledge_proxy_batch()` takes no parameters, so nothing reaches it. |
+
+⇒ **The blocker is the shared counter, not missing identity.** Wiring the identity into the handler
+is a one-line change (`user_id: str = Depends( require_api_key_or_jwt )`); it would buy nothing on
+its own, because there is still only one batch for the check to be about. The fix is to key the batch
+per user, which is a design change.
+
+**Why it has not simply been gated**: inventing a required `user_email` parameter would 400 both
+existing callers — `notifications.js` (`fetch( '/api/proxy/acknowledge', { method: 'POST', headers:
+self.getAuthHeaders() } )`, no body) and `ApiClient.acknowledgeProxy()` (no arguments) — and would
+gate a counter that is shared regardless.
+
+**What the tests do and do not watch.** The route is not untested — say which, because "untested"
+and "tested for something else" call for different work:
+
+| watched | by |
+|---|---|
+| the counter increments and the old batch id is returned | `test_acknowledge_increments` (`src/cosa/tests/unit/rest/test_decision_proxy_router.py`) |
+| an uncredentialed POST answers 401 | `test_proxy_and_reset_routes_refuse_the_uncredentialed.py` |
+| a credentialed POST answers 200, not merely "not 401" | `test_a_credential_only_route_admits_any_valid_caller`, same file |
+| **the cross-user consequence — that one user's acknowledge retires another's batch** | **nothing** |
+
+The third test's docstring states the design choice in place: *"These carry no owner check on
+purpose … there is no owner in any of them to be."* So the current behaviour is pinned as intended
+and the sharing itself is unwatched — if the batch is later made per-user, no existing test fails to
+mark the change, and if a refactor widens the sharing, none notices.
 
 ---
 

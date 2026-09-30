@@ -22,6 +22,31 @@ import pytest
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# DB_PASSWORD for the local-Docker tests (row baac2474)
+# ══════════════════════════════════════════════════════════════════════════════
+# The postgres password used to sit as a plaintext default inside database.py and a
+# dozen other files. It is gone from the tree; the value lives ONLY in the untracked,
+# gitignored .env beside docker-compose.yml — the same file compose already reads for
+# POSTGRES_PASSWORD, so nothing new has to be installed for this to work.
+#
+# A handful of tests really do connect to the local postgres (test_check_schema_at_head,
+# the pgvector fixtures, test_auto_migrate). Without this they get
+# "fe_sendauth: no password supplied" and read as a broken branch rather than a missing
+# env var. An exported DB_PASSWORD always wins; this only fills a blank.
+# MOVED to cosa/utils/dotenv_password.py (row 19c30893). This logic used to live here,
+# which meant only PYTEST could reach it — a host-run process such as the CC notification
+# listener got nothing and failed with "fe_sendauth: no password supplied" on every
+# postgres call for five days. The seeder is now a shared helper that get_database_url()
+# calls for EVERY consumer. This delegation keeps the name and the signature so
+# src/tests/unit/deploy/test_db_password_seeded_from_dotenv.py — which loads this file BY
+# PATH and reaches in for this attribute — still guards it.
+from cosa.utils.dotenv_password import seed_db_password_from_dotenv as _seed_db_password_from_dotenv
+
+
+_seed_db_password_from_dotenv()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # GUARD: a UNIT test that dials OUT (row 7c84b8b8)
 # ══════════════════════════════════════════════════════════════════════════════
 # A unit test that opens a network connection does not pass or fail on the code — it
@@ -196,6 +221,35 @@ importlib._bootstrap._find_and_load = _find_and_load_watching_reimports
 # PRODUCE AN UNATTRIBUTABLE FIGURE.
 #
 # Escape hatch for a deliberate shared-file run: LUPIN_ALLOW_SHARED_COVERAGE=1.
+# ══════════════════════════════════════════════════════════════════════════════
+# GUARD: a TEST that writes into the OPERATOR'S LIVE NOTIFICATION FEED (row ebb2c061)
+# ══════════════════════════════════════════════════════════════════════════════
+# Rick received eight "Stop — notify error" cards and read them as a stuck worker. They
+# were a unit test. `AnythingElseCardContextTest` mocks the notify transport with a
+# side_effect that raises ON PURPOSE, to stop `_ask_anything_else` once the card is built;
+# that hook catches every exception and its handler's only action is
+# `send_tts( f"Stop — notify error: {e}" )` — a THIRD transport the test never patched.
+# Four test methods, four cards, twice over two tier runs: exactly the eight he saw.
+#
+# ⚠️ THE ESCAPE IS NOT THE TEST'S FAULT, AND NEITHER EXISTING GUARD COULD CATCH IT:
+#   · `is_tts_enabled()` reads HOOK_TTS_ENABLED with a default of "true", so a test
+#     process is opt-OUT, not opt-in — nothing had to go wrong for the line to be live.
+#   · The outbound-network guard above exempts LOOPBACK_HOSTS on purpose, and the
+#     notification server IS local. That run logged "outbound connections: 0" and was,
+#     by that line, perfectly clean. A green guard line is not evidence that nothing
+#     left the process.
+#
+# THIS BELONGS IN conftest, NOT IN A RUNNER SCRIPT. The run that produced the cards was a
+# bare `python -m pytest src/tests/unit/`, not `run-unit-tests.sh` — an export in the
+# runners would have missed it exactly as it missed this. Here it covers every invocation:
+# runner, ad-hoc, IDE, CI.
+#
+# setdefault, NOT a hard set: a test that deliberately exercises the enabled path can
+# still export HOOK_TTS_ENABLED=true for itself. The default is what changes — from
+# "speak unless told otherwise" to "silent unless asked".
+os.environ.setdefault( "HOOK_TTS_ENABLED", "false" )
+
+
 def pytest_configure( config ):
     """
     Refuse a coverage run that cannot be attributed to this process.
@@ -238,10 +292,16 @@ def pytest_runtest_setup( item ):
 # They now live in `cosa.utils.tree_state`, which this file imports and which
 # `src/scripts/lib/tree-state.sh` runs directly, so both paths render the SAME line from
 # the SAME code rather than drifting apart. Design: §6b of
-# `src/rnd/v0.2.0/2026.08.26-every-green-states-its-tree.md`, written before the code.
+# `src/rnd/v0.2.0/2026.08.26-every-green-states-its-tree.md`, written before the code. — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.26-every-green-states-its-tree.md
 #
 # `_coarse_age` comes along because it has three call sites, not one: the fetch age, the
 # coverage-file age, and the module itself.
+# The import-origin verdict lives beside tree_state for the same reason tree_state left this
+# file: a diagnostic defined inline in the conftest is reachable by the pytest tiers and by
+# nothing else, and it cannot be unit-tested without importing a conftest — which has already
+# gone wrong here once, when a test imported `src/tests/unit/conftest.py` (the NEAREST one)
+# and measured the wrong module.
+from cosa.utils.import_origin import import_origin_field
 from cosa.utils.tree_state import (
     _coarse_age,
     _fetch_age,
@@ -340,7 +400,7 @@ _COVERAGE_FILE_AT_START = _coverage_file_at_start()
 #
 # ONE git call, not a second full probe. The gap is a SHA question; branch/behind/ahead/
 # fetched/dirty at start answer questions nobody asked at eight times the cost. Design:
-# `src/rnd/v0.2.0/2026.08.28-tree-state-gap-1-start-and-end-sha.md` §2.
+# `src/rnd/v0.2.0/2026.08.28-tree-state-gap-1-start-and-end-sha.md` §2. — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.28-tree-state-gap-1-start-and-end-sha.md
 _TREE_STATE_START_SHA = capture_start_sha( _git_reader( os.path.dirname( os.path.abspath( __file__ ) ) ) )
 
 
@@ -381,7 +441,34 @@ def pytest_terminal_summary( terminalreporter, exitstatus, config ):
         coverage_txt = f"{cov_path} (fresh)"
     else:
         coverage_txt = f"{cov_path} (pre-existing, {cov_age}-ago)"
-    terminalreporter.write_line( f"[test-env] network={mode_txt} coverage-file={coverage_txt}" )
+    # THIRD: which CHECKOUT this run's code was imported from. `[tree-state]` above answers
+    # for the directory you are STANDING in; this answers for the code Python actually
+    # LOADED, and on this fleet those are routinely two different trees. Measured 2026-09-01
+    # (Rio ⚡): with `LUPIN_ROOT` pinned and `PYTHONPATH` inherited, a worktree run took
+    # `lupin_app` from the worktree and `cosa` from the main repo, and two guards written for
+    # a real defect reported `6 passed` against a mutation that was never loaded.
+    #
+    # ⚠️ READ FROM `sys.modules`, NEVER IMPORTED. Importing here would CREATE the resolution
+    # this claims to observe, and would also drag `lupin_app.main` — the whole application —
+    # into every tier that never touches it. A module absent from `sys.modules` is reported
+    # as "not loaded by this run", which is the honest claim: a fact about the run.
+    #
+    # The two names are the pair that actually split. `cosa.utils.tree_state` is certain to
+    # be present (this file imports it); `lupin_app.bootstrap_helpers` is the cheap end of
+    # the application and is simply absent on tiers that do not touch it — reported, not
+    # guessed at.
+    # ⚠️ INSERTED IN THE MIDDLE, NOT APPENDED, and that is a deliberate cheap choice rather
+    # than an aesthetic one. Four existing tests assert this line ENDS WITH its coverage
+    # field — a real pin on how that field renders. Appending would have forced all four to
+    # be loosened from `endswith` to `in`, trading somebody else's strong assertions for my
+    # convenience. Placing the new field ahead of `coverage-file=` leaves every one of them
+    # untouched and true.
+    imports_txt = import_origin_field(
+        [ ( "cosa",      sys.modules.get( "cosa.utils.tree_state" ),       2 ),
+          ( "lupin_app", sys.modules.get( "lupin_app.bootstrap_helpers" ), 1 ) ],
+        os.environ.get( "LUPIN_ROOT" ) )
+    terminalreporter.write_line(
+        f"[test-env] network={mode_txt} {imports_txt} coverage-file={coverage_txt}" )
 
     if _NETWORK_MODE not in ( "count", "block" ):
         return
@@ -417,10 +504,29 @@ def pytest_terminal_summary( terminalreporter, exitstatus, config ):
         # it back from; this hook only says WHY, next to the list it applies to.
 
 
+# ZERO-ITEM BLIND SPOT (row 08f6be8e). The check below reads the items that SURVIVED
+# collection, and a module-level skip or a file with no test functions leaves NONE — so a
+# tree mismatch went unreported in exactly the runs where a reader most needs to be told
+# why nothing ran. `pytest_collect_file` sees the file regardless, so it is recorded here
+# and used only as a fallback: a run with items behaves byte-for-byte as before.
+_collected_test_files = []
+
+
+def pytest_collect_file( file_path, parent ):
+    from tests.worktree_tree_guard import is_test_file as _is_test_file
+    if _is_test_file( str( file_path ), parent.config.getini( "python_files" ) ):
+        _collected_test_files.append( str( file_path ) )
+    return None
+
+
 def pytest_collection_modifyitems( config, items ):
     from tests.worktree_tree_guard import check_paths as _worktree_check_paths
+    from tests.worktree_tree_guard import paths_to_scan as _worktree_paths_to_scan
     _drift = _worktree_check_paths(
-        [ str( item.path ) for item in items if getattr( item, "path", None ) is not None ],
+        _worktree_paths_to_scan(
+            [ str( item.path ) for item in items if getattr( item, "path", None ) is not None ],
+            _collected_test_files,
+        ),
         os.environ.get( "LUPIN_ROOT" ),
     )
     if _drift is not None:

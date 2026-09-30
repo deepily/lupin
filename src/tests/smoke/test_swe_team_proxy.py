@@ -12,7 +12,7 @@ SWE Team proxy integration test — Surface 3.
      - `REQUEST_TIMEOUT = 600` (10 min per request)
      - requires `--auto-proxy` (documented in the usage block); without it the
        scenarios block on unanswered interactive prompts
-     - posts jobs to `/api/mock-job/submit`
+     - posts jobs to `/api/v2/submit` (the mock-job command; was `/api/mock-job/submit`)
    WHY IT WAS NOT MOVED. `run-smoke-tests.sh` runs the whole `src/tests/smoke/` directory,
    so this file is executed on :7999 by the smoke merge gate regardless of what its
    docstring says. Relocating it, or excluding it from the runner the way
@@ -21,7 +21,7 @@ SWE Team proxy integration test — Surface 3.
    red list. So it stays, it stays red on :7999, and the reason is written here instead of
    being re-derived by the next reader.
 
-   HOW TO RUN IT PROPERLY: submit via `POST /api/test-suite/submit` against :8000 on a
+   HOW TO RUN IT PROPERLY: submit via `POST /api/v2/submit` against :8000 on a
    verified-idle server (`PYTHONPATH=src python3 -m cosa.rest.venue_idle --port 8000`,
    exit 0 = IDLE). Never side-door it via curl or a direct queue push.
 
@@ -66,6 +66,7 @@ import requests
 import cosa.utils.util as cu
 
 from tests.smoke.utilities.interactive_smoke_test import InteractiveSmokeTest
+from tests.helpers.mock_job_v2 import submit_body, legacy_response
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -131,7 +132,7 @@ class SweTeamProxySmokeTest( InteractiveSmokeTest ):
     BASE_URL        = "http://localhost:7999"
     DEFAULT_TIMEOUT = 120
     REQUEST_TIMEOUT = 600
-    SUBMIT_ENDPOINT = "/api/mock-job/submit"
+    SUBMIT_ENDPOINT = "/api/v2/submit"
     PROXY_PROFILE   = "swe_team"
     PROXY_STRATEGY  = "llm_script"
 
@@ -172,8 +173,9 @@ class SweTeamProxySmokeTest( InteractiveSmokeTest ):
         """
         try:
             resp = requests.post(
-                f"{self.BASE_URL}/api/mock-job/submit",
-                json={ "voice_command": scenario[ "voice_command" ] },
+                f"{self.BASE_URL}/api/v2/submit",
+                json=submit_body( { "voice_command": scenario[ "voice_command" ] },
+                                  parent_id_hash=os.environ.get( "LUPIN_TEST_MONOPOLIZE_PARENT_ID" ) ),
                 headers=headers,
                 timeout=self.REQUEST_TIMEOUT
             )
@@ -181,7 +183,7 @@ class SweTeamProxySmokeTest( InteractiveSmokeTest ):
             if resp.status_code != 200:
                 return None, f"HTTP {resp.status_code}: {resp.text[ :200 ]}"
 
-            return resp.json(), None
+            return legacy_response( resp.json() ), None
 
         except requests.exceptions.Timeout:
             return None, f"Request timed out after {self.REQUEST_TIMEOUT}s"

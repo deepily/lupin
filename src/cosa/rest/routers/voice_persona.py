@@ -90,18 +90,32 @@ def _resolve_manager_persona( worker_session_id ):
         manager_session_id = data.get( "spawned_by" )
         if not manager_session_id:
             return None
-        manager_persona = get_voice_persona( manager_session_id )
-        if not isinstance( manager_persona, dict ) or not manager_persona:
-            return None
-        name = manager_persona.get( "name" ) or ""
-        return {
-            "icon"    : manager_persona.get( "icon" ),
-            "color"   : manager_persona.get( "color" ),
-            "name"    : name,
-            "initial" : name[ :1 ].upper() if name else "",
-        }
+        return _manager_badge_for( get_voice_persona( manager_session_id ) )
     except Exception:
         return None
+
+
+def _manager_badge_for( manager_persona ):
+    """
+    Shape a manager's voice_persona into the focus-bar manager badge.
+
+    One definition shared by `_resolve_manager_persona` (one worker, reads its own
+    bridges) and senders-visible (many workers, resolved against one bridge index —
+    row 41da77bb), so the badge cannot differ by which path built it.
+
+    Ensures:
+        - returns { "icon", "color", "name", "initial" } for a non-empty persona dict
+        - returns None for anything else (None, empty, not a dict)
+    """
+    if not isinstance( manager_persona, dict ) or not manager_persona:
+        return None
+    name = manager_persona.get( "name" ) or ""
+    return {
+        "icon"    : manager_persona.get( "icon" ),
+        "color"   : manager_persona.get( "color" ),
+        "name"    : name,
+        "initial" : name[ :1 ].upper() if name else "",
+    }
 
 
 # ── Dependency injection ─────────────────────────────────────────────────────

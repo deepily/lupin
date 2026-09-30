@@ -13,8 +13,10 @@
 # ⚠️ VERB: this uses `docker restart`, which REUSES the container. That serves new
 # Python (bind-mounted) but does NOT apply docker-compose.yml / bind-mount / env
 # changes — those need `docker compose up -d --force-recreate lupin-rest-dev`,
-# which is a LONGER outage. If you changed a mount or compose value, use that
-# instead; this script's health deadline is sized with headroom for either.
+# which is a LONGER outage. Since row 92374685 the script checks for that drift itself
+# (compose_drift_probe.py: tmpfs, mounts, env) and RECREATES when it finds any, naming the
+# drifted fields; when the probe cannot answer it restarts as before. The health deadline
+# is sized with headroom for either path.
 #
 # Usage:
 #   ./src/scripts/bounce-dev-server.sh          # verbose
@@ -213,12 +215,64 @@ case "$warn_rc" in
         ;;
 esac
 
-# ── Step 2: restart ───────────────────────────────────────────────────────────
-log "Restarting container: $CONTAINER (docker restart — reuses container)"
+# ── Step 1.5: compose drift (row 92374685) ────────────────────────────────────
+# `docker restart` reuses the container, so a tmpfs, mount or env value changed in
+# docker-compose.yml never reaches it. That is how the MP3 upload answered 500 on two
+# mornings of 2026-09-15: 68ce4a7b changed the dev tmpfs, and the container had only ever
+# been restarted. compose_drift_probe.py compares the container against its compose service:
+#   0  no drift        → restart, as before
+#   10 drift           → RECREATE instead, naming the drifted fields (tmpfs / mounts only)
+#   11 env drift       → RESTART, and print the drift plus the recreate command for a person.
+#                        Compose reads ${VAR} from the caller's shell, so the "drift" may be
+#                        this caller's own export; auto-recreating would bake it in (NB-1).
+#   20 / anything else → FAIL OPEN and restart, as before. A broken probe must never block
+#                        recovery of a wedged server. (A tree with no probe at all, such as
+#                        the stub trees the script tests build, lands here too.)
+log "Checking $CONTAINER against its compose service..."
+drift_rc=0
+drift_out="$( python3 "${LUPIN_ROOT}/src/scripts/compose_drift_probe.py" "$CONTAINER" )" || drift_rc=$?
+# The probe prints its verdict for people, and on drift one RECREATE_ARG=<arg> line per
+# argument of the recreate command, built from the SAME container labels it compared (the
+# project, its directory, its config files). Recreating from $LUPIN_ROOT instead would, from
+# a worktree, compare one compose tree and recreate another under a different project name
+# (María's review of 34a2764a).
+recreate_cmd=( )
+while IFS= read -r line; do
+    case "$line" in
+        RECREATE_ARG=*) recreate_cmd+=( "${line#RECREATE_ARG=}" ) ;;
+        *)              if [ "$drift_rc" -ne 11 ]; then log "$line"; fi ;;   # 11 prints its drift unconditionally below
+    esac
+done <<< "$drift_out"
+
+# ── Step 2: restart, or recreate on drift ─────────────────────────────────────
 start_ts=$(date +%s)
-if ! docker restart "$CONTAINER" >/dev/null; then
-    echo "ERROR: docker restart failed for $CONTAINER" >&2
-    exit 1
+if [ "$drift_rc" -eq 10 ]; then
+    # Unconditional (not log()): this is a longer outage than the caller asked for, and
+    # the reason must show even under --quiet.
+    echo "⚠️  Compose drift on $CONTAINER — RECREATING (docker compose up -d --force-recreate), not restarting."
+    if [ "${#recreate_cmd[@]}" -eq 0 ] || [ "${recreate_cmd[0]}" != "docker" ]; then
+        # Drift was found but the command to fix it did not arrive intact. Restarting would
+        # leave the drift in place while looking like success, so refuse and say so.
+        echo "ERROR: the drift probe reported drift but no usable recreate command — not restarting over known drift." >&2
+        exit 1
+    fi
+    if ! "${recreate_cmd[@]}" >/dev/null; then
+        echo "ERROR: docker compose --force-recreate failed for $CONTAINER" >&2
+        exit 1
+    fi
+else
+    if [ "$drift_rc" -eq 11 ]; then
+        # Unconditional: the caller must see that the restart does NOT apply this drift.
+        echo "⚠️  Compose drift on $CONTAINER includes environment values — restarting WITHOUT applying it:"
+        printf '%s\n' "$drift_out" | grep -v '^RECREATE_ARG=' || true
+    elif [ "$drift_rc" -ne 0 ]; then
+        log "Compose drift probe could not answer (rc ${drift_rc}) — failing OPEN and restarting as before."
+    fi
+    log "Restarting container: $CONTAINER (docker restart — reuses container)"
+    if ! docker restart "$CONTAINER" >/dev/null; then
+        echo "ERROR: docker restart failed for $CONTAINER" >&2
+        exit 1
+    fi
 fi
 
 # ── Step 3: prove it is the NEW process, then prove it is healthy ─────────────

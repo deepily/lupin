@@ -40,6 +40,7 @@ _ROUTE_TABLE = {
     "/app/admin/peer-queue-watch": "html/admin/peer-queue-watch.html",
     "/app/docs"                  : "html/document-viewer.html",
     "/app/audio"                 : "html/audio-player.html",
+    "/app/console"               : "html/console.html",
 }
 
 
@@ -159,3 +160,20 @@ async def page_docs():
 @router.get( "/app/audio", include_in_schema=False )
 async def page_audio():
     return _serve_file( _ROUTE_TABLE[ "/app/audio" ] )
+
+@router.get( "/app/console", include_in_schema=False )
+async def page_console():
+    """
+    Serve the standalone live-console page (row 27760534, Rick's ruling 2026-09-28).
+
+    One seat's live CC console in its own tab. The page reads `?seat=` and `?title=`
+    client-side, so this handler takes no parameters and a reload or bookmark serves the
+    same shell; a missing or malformed seat is reported by the page itself.
+
+    Requires:
+        - html/console.html exists under the static directory
+
+    Ensures:
+        - Returns the console page shell with the no-cache revalidation header
+    """
+    return _serve_file( _ROUTE_TABLE[ "/app/console" ] )

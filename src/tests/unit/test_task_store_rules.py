@@ -615,8 +615,66 @@ def test_transition_rejects_invalid_from_status():
 
 
 def test_no_op_rejected_via_graph():
+    # Still ONE error and still the no-op branch — but row 3bf6ad1b retired the phrase
+    # "not a legal edge" HERE, because this branch is unreachable on a genuinely illegal
+    # edge and the refusal vocabulary was misreporting a satisfied intent as a rejection.
+    # The full both-arms guard lives in
+    # src/tests/unit/test_a_noop_transition_does_not_read_as_a_refusal.py.
     errors = rules.validate_transition( "in_progress", "in_progress", "standing" )
-    assert len( errors ) == 1 and "no-op transition" in errors[ 0 ] and "not a legal edge" in errors[ 0 ]
+    assert len( errors ) == 1 and "no-op transition" in errors[ 0 ]
+    assert "not a legal edge" not in errors[ 0 ], "the no-op must not borrow refusal vocabulary"
+
+
+def test_the_no_op_message_says_already_there_and_not_refused( ):
+    """
+    Row 96cf5cec item 3. The no-op error USED to end "rejected — not a legal edge",
+    which names a cause that is never the real one: whenever from == to the row is
+    ALREADY where the caller asked for it, so somebody's write LANDED. Two managers
+    read that as a failed approval on live rows (9c3b817a, bfcea79d) — one told a
+    worker it was still blocked and had to retract it.
+
+    ⚠️ THIS ASSERTS THE MESSAGE, WHICH IS THE WHOLE FEATURE. The status code does not
+    change and the edge stays refused; what changes is what a human concludes from it.
+    So the assertion is on the words, deliberately, not as a proxy for behaviour.
+    """
+    errors = rules.validate_transition( "queued", "queued", "standing" )
+    assert len( errors ) == 1
+    message = errors[ 0 ]
+
+    # It still marks the no-op — eight assertions across this suite key on that phrase,
+    # and one of them is NEGATIVE (see test_repoint_still_enforces_the_blocked_payload_
+    # invariant). Drop it and that guard passes vacuously.
+    assert "no-op transition" in message
+
+    # It says the row is already there, and says the quiet part out loud.
+    assert "ALREADY" in message and "'queued'" in message
+    assert "NOT a refusal" in message
+
+    # And it no longer names the cause that was never true.
+    assert "not a legal edge" not in message
+
+
+def test_a_genuine_illegal_edge_still_says_not_a_legal_edge( monkeypatch ):
+    """
+    THE COUNTER-ARM, AND IT IS WHY THE FIX ASKS `from == to` RATHER THAN REWORDING THE
+    WHOLE BRANCH. Today LEGAL_TRANSITIONS[ src ] is "every status except src", so this
+    branch can only ever be a no-op — a blanket reword would be correct BY COINCIDENCE.
+    Narrow the graph, as this test does, and a blanket version would call a genuine
+    illegal edge "already there": a lie in the safer-sounding direction.
+
+    So: with `queued -> review` removed from the graph, the caller is told the edge is
+    illegal, NOT that the row is already there.
+    """
+    narrowed = dict( rules.LEGAL_TRANSITIONS )
+    narrowed[ "queued" ] = tuple( d for d in narrowed[ "queued" ] if d != "review" )
+    monkeypatch.setattr( rules, "LEGAL_TRANSITIONS", narrowed )
+
+    errors = rules.validate_transition( "queued", "review", "standing" )
+
+    assert len( errors ) == 1
+    message = errors[ 0 ]
+    assert "not a legal edge" in message
+    assert "ALREADY" not in message and "no-op transition" not in message
 
 
 def test_legal_graph_covers_every_live_mirror_edge():
@@ -715,7 +773,10 @@ class TestSoftGuardTitle:
     def test_over_cap_empty_body_moves_overflow_to_body( self ):
         # Over-cap + empty body: title trimmed to cap, overflow lands in body,
         # and trimmed-title + body reconstructs the original (nothing lost).
-        title = "A" * 50 + "B" * 40                              # 90 chars, cap 60
+        # LENGTHS DERIVE FROM THE CAP, never a literal. The cap moved 60 -> 120 on
+        # 2026-09-01 and every hardcoded "90 chars, cap 60" fixture silently became
+        # an UNDER-cap string that tested nothing while still reading as over-cap.
+        title = "A" * rules.TITLE_SOFT_CAP + "B" * 30
         new_title, new_body, advisory = rules.soft_guard_title( title, None )
         assert len( new_title ) == rules.TITLE_SOFT_CAP
         assert new_title == title[ :rules.TITLE_SOFT_CAP ]
@@ -723,40 +784,42 @@ class TestSoftGuardTitle:
         assert new_title + new_body == title                    # round-trips — nothing lost
         assert advisory == {
             "trimmed"               : True,
-            "original_length"       : 90,
+            "original_length"       : rules.TITLE_SOFT_CAP + 30,
             "cap"                   : rules.TITLE_SOFT_CAP,
             "overflow_moved_to_body": True,
+            "lost_tail"             : title[ rules.TITLE_SOFT_CAP: ],
         }
 
     @pytest.mark.parametrize( "blank_body", [ None, "", "   ", "\n\t " ] )
     def test_over_cap_treats_whitespace_only_body_as_empty( self, blank_body ):
         # None AND whitespace-only bodies both count as "empty" → overflow moves.
-        title = "z" * 80
+        title = "z" * ( rules.TITLE_SOFT_CAP + 20 )
         new_title, new_body, advisory = rules.soft_guard_title( title, blank_body )
         assert new_title == title[ :rules.TITLE_SOFT_CAP ]
         assert new_body  == title[ rules.TITLE_SOFT_CAP: ]
         assert advisory[ "overflow_moved_to_body" ] is True
 
-    def test_over_cap_nonempty_body_RELOCATES_overflow_above_the_body( self ):
+    def test_over_cap_nonempty_body_RELOCATES_overflow_BELOW_the_body( self ):
         # bug 28fc1fb4. This test previously asserted the DEFECT as correct: it
         # required new_body == body and overflow_moved_to_body == False — i.e. it
         # pinned the silent discard in place and went green on every run. The
         # "ruled tradeoff" it cited forbade CLOBBERING a body; it never licensed
         # deleting the title's remainder, and prepending is not clobbering.
-        title = "Q" * 75
+        title = "Q" * ( rules.TITLE_SOFT_CAP + 15 )
         body  = "important pre-existing detail"
         new_title, new_body, advisory = rules.soft_guard_title( title, body )
 
         assert new_title == title[ :rules.TITLE_SOFT_CAP ]
         assert body in new_body                                  # still never clobbered...
-        assert new_body.endswith( body )                         # ...and still last, verbatim
+        assert new_body.startswith( body )                       # ...and now FIRST, verbatim
         assert rules.TITLE_OVERFLOW_MARKER in new_body           # findable by grep, store-wide
         assert title[ rules.TITLE_SOFT_CAP: ] in new_body        # the overflow SURVIVED
         assert advisory == {
             "trimmed"               : True,
-            "original_length"       : 75,
+            "original_length"       : rules.TITLE_SOFT_CAP + 15,
             "cap"                   : rules.TITLE_SOFT_CAP,
             "overflow_moved_to_body": True,
+            "lost_tail"             : title[ rules.TITLE_SOFT_CAP: ],
         }
 
     def test_over_cap_nonempty_body_ROUND_TRIPS_the_original_title_exactly( self ):
@@ -769,14 +832,282 @@ class TestSoftGuardTitle:
         word-wrapped the remainder would satisfy every "the overflow is in there
         somewhere" assertion and fail this one.
         """
-        title = "A standing order that will not fit: route ALL GCP calls through the Mr Radio role"
+        title = ( "A standing order that will not fit: route ALL GCP calls through the "
+                  "Mr Radio role, never through a personal account, and never silently" )
+        assert len( title ) > rules.TITLE_SOFT_CAP            # the fixture's own premise
         body  = "pre-existing body text\nwith a second line"
         new_title, new_body, _ = rules.soft_guard_title( title, body )
 
-        marker_line, overflow_line, _blank, *rest = new_body.split( "\n" )
+        *rest, marker_line, overflow_line = new_body.split( "\n" )
         assert marker_line == rules.TITLE_OVERFLOW_MARKER
         assert new_title + overflow_line == title                # EXACT reconstruction
-        assert "\n".join( rest ) == body                         # the body, verbatim, intact
+        assert "\n".join( rest ).rstrip( "\n" ) == body           # the body, verbatim, intact
+
+    def test_the_bodys_own_first_line_is_still_the_first_line( self ):
+        """
+        THE GUARANTEE THIS CHANGE EXISTS FOR (row a6cb24e8).
+
+        Prepending was permitted by the ruling — it is not clobbering — but it cost
+        the body its opening line, which is the part a reader sees first. Appending
+        satisfies the same ruling and keeps it.
+        """
+        title = "Q" * ( rules.TITLE_SOFT_CAP + 15 )
+        body  = "THE REAL OPENING LINE\nand a second line"
+        _new_title, new_body, _advisory = rules.soft_guard_title( title, body )
+
+        assert new_body.split( "\n" )[ 0 ] == "THE REAL OPENING LINE"
+
+    def test_a_second_trim_does_not_bury_the_body_under_stacked_banners( self ):
+        """
+        The compounding half, reproduced by Tiberius 👑 and Maya 🌻 independently:
+        a RETITLE that is also over the cap used to prepend a SECOND marker above
+        the first, so the body's head was corrupted once per retitle attempt and
+        both banners had to be unpicked by hand.
+
+        Appending makes repeated trims collect at the FOOT in the order they
+        happened — a readable history rather than a corrupted head.
+        """
+        body                = "THE REAL OPENING LINE"
+        _t1, after_first, _ = rules.soft_guard_title( "A" * ( rules.TITLE_SOFT_CAP + 15 ), body )
+        _t2, after_second, _ = rules.soft_guard_title( "B" * ( rules.TITLE_SOFT_CAP + 15 ), after_first )
+
+        assert after_second.split( "\n" )[ 0 ] == "THE REAL OPENING LINE"
+        assert after_second.count( rules.TITLE_OVERFLOW_MARKER ) == 2   # both kept...
+        assert after_second.index( "A" * 15 ) < after_second.index( "B" * 15 )  # ...in order
+
+    def test_the_advisory_shows_the_WORDS_that_were_cut_not_just_a_count( self ):
+        """
+        Row a6cb24e8. The advisory used to report only `original_length`, so a writer
+        had to reconstruct what was cut from a number. Seven titles lost their
+        qualifier in one night and nobody noticed — including three seats who had
+        this advisory in hand and skimmed past it.
+
+        `original_length: 106` is a fact about a string. "by design" is the claim you
+        just deleted. This asserts the advisory carries the TEXT.
+
+        Advisory ONLY: it changes nothing stored, rejects nothing, and leaves both the
+        fail-open ruling and the exact-reconstruction guarantee untouched — which is
+        why this half needed no ruling while the cap itself does.
+        """
+        # ⚠️ THE FIXTURE MOVED WITH THE CAP (Rick, 2026-09-01: 60 -> 120), and the
+        # old one is kept below as the NEGATIVE arm rather than deleted, because
+        # what it now proves is the cap raise doing its job.
+        #
+        # It was row 675e44f9's real title, verbatim, 106 chars, with the qualifier
+        # "by design" falling outside a 60-char cap. At 120 that title is not cut at
+        # all — so a test still driving it would go on passing while measuring
+        # nothing, which is the shape this whole row is about.
+        untrimmed_at_the_new_cap = ( "[LUPIN] add_synonym() hits the same empty-vector wall — "
+                                     "EmbeddingManager returns [] on API error by design" )
+        assert len( untrimmed_at_the_new_cap ) == 106
+        assert rules.soft_guard_title( untrimmed_at_the_new_cap, "a body" )[ 2 ] is None
+
+        # The POSITIVE arm: a real-shaped title long enough to be cut at 120, whose
+        # limiting words ("by design") are genuinely inside the cut portion. An
+        # earlier draft of this test used a stand-in whose whole tail was "ign" — a
+        # fixture that could not demonstrate the thing its own name claims, whatever
+        # the code did. Caught by running it, not by reading it.
+        title = ( "[LUPIN] add_synonym() hits the same empty-vector wall — EmbeddingManager "
+                  "returns an empty list on every API error, and swallows the exception by design" )
+        assert len( title ) > rules.TITLE_SOFT_CAP            # the fixture's own premise
+        assert "by design" not in title[ :rules.TITLE_SOFT_CAP ]   # ...and the qualifier IS in the tail
+        _new_title, _new_body, advisory = rules.soft_guard_title( title, "a body" )
+
+        assert advisory[ "lost_tail" ] == title[ rules.TITLE_SOFT_CAP: ]
+        assert "by design" in advisory[ "lost_tail" ]       # the QUALIFIER, in the advisory
+        assert "by design" not in _new_title                # ...and gone from the title
+        assert _new_title + advisory[ "lost_tail" ] == title   # and it still round-trips
+
+    def test_an_under_cap_title_gets_no_advisory_at_all( self ):
+        """
+        The negative control. A normal title must not acquire a `lost_tail` — or any
+        advisory — so a reader who sees the field knows something was genuinely cut.
+        """
+        assert rules.soft_guard_title( "a short title", "a body" ) == ( "a short title", "a body", None )
+
+
+class TestTerminalTitlePrefix:
+    """
+    Rick's ruling, 2026-09-01, decision 45c4c932: "Prefix only."
+
+    A closed row refuses `edit` and `transition` and accepts only `amend`, which
+    writes to `body` — and the terse projection DROPS body, so a correction filed
+    there is invisible to every routine board glance. Measured live: `82ec60be`
+    still reads "APPROVED 757820dd + 08fce017" while its own body records that the
+    08fce017 approval is WITHDRAWN.
+
+    The carve-out lets the headline be CORRECTED without letting it be REWRITTEN.
+    """
+
+    OLD = "APPROVED 757820dd + 08fce017 — api_keys closed"
+
+    @pytest.mark.parametrize( "marker", rules.TERMINAL_TITLE_PREFIXES )
+    def test_every_sanctioned_marker_is_accepted( self, marker ):
+        assert rules.validate_terminal_title_prefix( self.OLD, f"{marker} — {self.OLD}" ) == [ ]
+
+    def test_an_unsanctioned_marker_is_refused( self ):
+        # The shape is right and the word is not. Refusing here is what keeps the
+        # carve-out narrow — an open-ended prefix is a rewrite with extra steps.
+        assert rules.validate_terminal_title_prefix( self.OLD, f"REOPENED — {self.OLD}" )
+
+    def test_a_prefix_that_also_REWORDS_the_tail_is_refused( self ):
+        """
+        THE ASSERTION THE WHOLE RULING RESTS ON, and the one a lazy implementation
+        fails: the original must survive BYTE-FOR-BYTE.
+
+        A "prefix" that quietly edits the text after it is a rewrite wearing a
+        prefix, which is precisely what the immutability wall exists to stop.
+        """
+        reworded = "WITHDRAWN — APPROVED 757820dd — api_keys closed"   # 08fce017 dropped
+        assert rules.validate_terminal_title_prefix( self.OLD, reworded )
+
+    def test_a_bare_rewrite_is_refused( self ):
+        assert rules.validate_terminal_title_prefix( self.OLD, "something else entirely" )
+
+    def test_the_unchanged_title_is_refused_too( self ):
+        # A no-op is not a correction. Accepting it would let a caller "edit" a
+        # closed row to prove they can, and leave a patched event saying nothing
+        # happened.
+        assert rules.validate_terminal_title_prefix( self.OLD, self.OLD )
+
+    def test_the_refusal_SHOWS_the_string_that_would_have_worked( self ):
+        """
+        "Prefix only" without the literal format is a rule the caller has to guess
+        at. The message carries both the markers and the row's current title.
+        """
+        errors = rules.validate_terminal_title_prefix( self.OLD, "nope" )
+        assert len( errors ) == 1
+        for marker in rules.TERMINAL_TITLE_PREFIXES:
+            assert marker in errors[ 0 ]
+        assert self.OLD in errors[ 0 ]
+
+    def test_STACKING_is_permitted_and_keeps_the_history_in_order( self ):
+        """
+        A row already marked WITHDRAWN may later take SUPERSEDED in front of it.
+
+        It falls out of the byte-for-byte rule rather than needing its own clause:
+        the previous marker is part of the old title, so reproducing it verbatim is
+        exactly what a second prefix does. Corrections accumulate at the front in
+        the order they happened.
+        """
+        once  = f"WITHDRAWN — {self.OLD}"
+        twice = f"SUPERSEDED — {once}"
+        assert rules.validate_terminal_title_prefix( once, twice ) == [ ]
+        assert twice.index( "SUPERSEDED" ) < twice.index( "WITHDRAWN" )
+
+
+class TestValidateTerminalEditFields:
+    """
+    The router-facing gate: a terminal PATCH is refused unless it is a title prefix
+    and NOTHING ELSE.
+    """
+
+    OLD = "APPROVED 757820dd + 08fce017 — api_keys closed"
+
+    def test_a_lone_legal_prefix_is_accepted( self ):
+        fields = { "title": f"WITHDRAWN — {self.OLD}" }
+        assert rules.validate_terminal_edit_fields( fields, self.OLD, "done" ) == [ ]
+
+    def test_a_patch_with_no_title_is_refused_and_names_the_exception( self ):
+        errors = rules.validate_terminal_edit_fields( { "priority": "P1" }, self.OLD, "done" )
+        assert len( errors ) == 1
+        assert "terminal" in errors[ 0 ] and "dropped" not in errors[ 0 ]
+        assert "WITHDRAWN" in errors[ 0 ]          # tells the caller what IS allowed
+
+    def test_a_legal_prefix_RIDING_ALONGSIDE_another_field_is_refused_WHOLE( self ):
+        """
+        🔴 THE HOLE THIS CLOSES. A carve-out that accepts the prefix and lets a
+        second field ride along is not a carve-out — the immutability wall would be
+        openable by anyone willing to send a legal title with it.
+
+        The extra field is NAMED rather than silently dropped, because a caller who
+        cannot see what was refused will send it again.
+        """
+        fields = { "title": f"WITHDRAWN — {self.OLD}", "priority": "P1" }
+        errors = rules.validate_terminal_edit_fields( fields, self.OLD, "done" )
+        assert len( errors ) == 1
+        assert "priority" in errors[ 0 ]
+
+    def test_title_trimmed_is_NOT_counted_as_a_caller_field( self ):
+        """
+        Scope control. The router derives `title_trimmed` from the guard's own
+        verdict and TaskPatchIn forbids it at the wire, so no caller can send it —
+        counting it as an "extra field" would refuse every legal prefix.
+        """
+        fields = { "title": f"CORRECTED — {self.OLD}", "title_trimmed": False }
+        assert rules.validate_terminal_edit_fields( fields, self.OLD, "done" ) == [ ]
+
+    def test_the_status_is_echoed_so_the_caller_knows_WHICH_wall_it_hit( self ):
+        errors = rules.validate_terminal_edit_fields( { "body": "x" }, self.OLD, "dropped" )
+        assert "dropped" in errors[ 0 ]
+
+    def test_an_illegal_prefix_gets_the_PREFIX_verbs_own_message( self ):
+        # Delegation, asserted: the field gate must not re-word the prefix rule, or
+        # the two can drift into saying different things.
+        fields = { "title": "REOPENED — whatever" }
+        via_gate   = rules.validate_terminal_edit_fields( fields, self.OLD, "done" )
+        via_prefix = rules.validate_terminal_title_prefix( self.OLD, "REOPENED — whatever" )
+        assert via_gate == via_prefix
+
+
+class TestValidateEditTitleLength:
+    """
+    The EDIT door's hard cap (Rick, 2026-09-01, bug 6ce252e7: "Raise to 120 with a
+    422 over it."). Its whole reason for existing is that it does NOT agree with
+    soft_guard_title above it — same cap, opposite answer — so the tests assert the
+    disagreement rather than treating it as drift.
+    """
+
+    def test_under_cap_returns_no_errors( self ):
+        assert rules.validate_edit_title_length( "a perfectly ordinary title" ) == [ ]
+
+    def test_EXACTLY_at_cap_is_accepted( self ):
+        # The boundary, and the arm a `>=` would fail. cap+1 below is refused by both
+        # a `>` and a `>=`, so the over-cap case alone cannot see an off-by-one.
+        assert rules.validate_edit_title_length( "x" * rules.TITLE_SOFT_CAP ) == [ ]
+
+    def test_one_over_the_cap_is_refused( self ):
+        errors = rules.validate_edit_title_length( "x" * ( rules.TITLE_SOFT_CAP + 1 ) )
+        assert len( errors ) == 1
+
+    def test_the_error_names_the_ACTUAL_LENGTH_and_the_cap( self ):
+        """
+        THE NUMBERS ARE THE POINT. "title too long" makes the writer count characters
+        by hand to find out how much to cut, which is the same tax the silent trim
+        charged — paid at a different moment.
+
+        Two distinct lengths, because a single case cannot tell a real length from a
+        constant: an implementation hardcoding any one number passes one arm and dies
+        on the other.
+        """
+        for over in ( 7, 61 ):
+            title  = "x" * ( rules.TITLE_SOFT_CAP + over )
+            errors = rules.validate_edit_title_length( title )
+            assert str( len( title ) )            in errors[ 0 ]
+            assert str( rules.TITLE_SOFT_CAP )    in errors[ 0 ]
+
+    def test_an_explicit_cap_argument_overrides_the_module_default( self ):
+        # The seam the router does NOT use, kept honest: a caller-supplied cap must
+        # actually govern, or the parameter is decoration.
+        assert rules.validate_edit_title_length( "x" * 30, cap=40 ) == [ ]
+        assert len( rules.validate_edit_title_length( "x" * 30, cap=20 ) ) == 1
+
+    def test_it_REPORTS_and_never_TRIMS( self ):
+        """
+        The separation of powers between the two doors, asserted where it lives.
+
+        This verb returns strings; soft_guard_title returns a new title. Driving one
+        over-cap string through both must show exactly that difference — and it is
+        what stops a later reader from "unifying" them back into one helper.
+        """
+        title = "x" * ( rules.TITLE_SOFT_CAP + 25 )
+
+        assert rules.validate_edit_title_length( title )                 # the edit door: refuses
+        trimmed, _body, advisory = rules.soft_guard_title( title, None ) # the create door: trims
+        assert len( trimmed ) == rules.TITLE_SOFT_CAP
+        assert advisory[ "trimmed" ] is True
+
+
 
     def test_custom_cap_is_honored( self ):
         # The cap is parameterizable — proves the guard is not hard-wired to 60.
@@ -946,8 +1277,19 @@ def test_known_persona_keys_overflow_empty_key_skipped( monkeypatch ):
 # validate_create_status · validate_blocked_fields (shared) · session_id_from_created_by
 # ---------------------------------------------------------------------------
 
-def test_create_allowed_statuses_are_exactly_queued_and_blocked():
-    assert rules.CREATE_ALLOWED_STATUSES == ( "queued", "blocked" )
+def test_create_allowed_statuses_are_exactly_queued_blocked_and_not_approved():
+    """
+    🔨 `not_approved` joined the mint whitelist 2026-09-02 on Rick's P0 (row 8af64f5a):
+    a create may now mint straight into the holding area.
+
+    ⚠️ THE PIN IS THE POINT — do not relax this to a membership check. It is an
+    EXACT-EQUALITY assertion so that widening the set is a deliberate act that
+    reddens here and gets read, rather than a status quietly acquiring the right to
+    be minted. `parked` is the case it guards: parking is a human ruling EXISTING
+    work not-now and needs a reason quoting a row that already exists, so it must
+    never become mintable — and nothing but this line says so.
+    """
+    assert rules.CREATE_ALLOWED_STATUSES == ( "queued", "blocked", "not_approved" )
 
 
 def test_validate_create_status_queued_ignores_blocked_fields():
@@ -1377,14 +1719,14 @@ class TestDoneReceiptMustBeCheckable:
             { "doc_path": "lupin/src/receipt.md" }, scope_roots=scope_roots, require_checkable=True
         )
         assert errors, "arnold's close payload was ACCEPTED — the hole is open again"
-        assert "INDEPENDENTLY CHECKABLE" in errors[ 0 ]
+        assert "CARRY a close" in errors[ 0 ]
 
     def test_log_line_alone_is_also_refused( self, scope_roots ):
         """The sibling of case 1 — log_line is unverifiable for the same reason."""
         errors = rules.validate_receipt_refs(
             { "log_line": "lupin/src/receipt.md:1" }, scope_roots=scope_roots, require_checkable=True
         )
-        assert errors and "INDEPENDENTLY CHECKABLE" in errors[ 0 ]
+        assert errors and "CARRY a close" in errors[ 0 ]
 
     def test_a_path_is_still_legal_as_CONTEXT_alongside_a_commit( self, scope_roots, reachable_sha ):
         """
@@ -1495,7 +1837,7 @@ class TestDoneGateWiredIntoTransition:
             "review", "done", "standing",
             receipt_refs={ "doc_path": "lupin/src/receipt.md" }, scope_roots=scope_roots
         )
-        assert errors and "INDEPENDENTLY CHECKABLE" in errors[ 0 ]
+        assert errors and "CARRY a close" in errors[ 0 ]
 
     def test_transition_to_done_refuses_an_orphaned_commit( self, scope_roots, orphaned_sha ):
         errors = rules.validate_transition(
@@ -1577,7 +1919,7 @@ class TestQidIsContextNeverAClose:
             scope_roots=scope_roots, require_checkable=True
         )
         assert errors, "a qid alone closed a row — it attests a message was sent, not that work happened"
-        assert "INDEPENDENTLY CHECKABLE" in errors[ 0 ]
+        assert "CARRY a close" in errors[ 0 ]
 
     def test_qid_rides_alongside_a_real_receipt( self, scope_roots, reachable_sha ):
         """The other half of the ruling — context is welcome, it just cannot be the close."""

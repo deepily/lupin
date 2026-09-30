@@ -11,10 +11,15 @@ module is the guarded front door to it.
 The verb is IRREVERSIBLE (it zeroes the seat's context), so every guard lives at
 the chokepoint — INSIDE the verb, never a caller obligation (Krishna's ruling):
 
-  (a) MEMENTO VERIFY — option (b): the caller stamps a fresh {uuid, iso_ts} nonce
-      line into the memento at write time — via stamp_nonce_into(), which owns the
-      whole read-append-write so no caller writes the destructive half by hand —
-      and passes the uuid. The verb confirms that exact uuid is on disk, that its
+  (a) MEMENTO VERIFY — option (b): the caller PRE-STAMPS a fresh {uuid, iso_ts}
+      nonce line into the memento AT WRITE TIME — by passing --self-respin-nonce to
+      `memento_io.py write --slot root`, which lands record + mirror + pointer in
+      one call and sha-verifies them — and passes the uuid. It is deliberately NOT
+      appended afterwards: stamp_nonce_into() used to do that and is now RETIRED
+      (row c9f4d613), because an append reaches the record alone and leaves the
+      durable mirror one line short, and because a fresh nonce appended to an old
+      body proves only that the STAMP is fresh. Pre-stamping shares the body's own
+      written_at, so freshness is a property of what the seat clears into. The verb confirms that exact uuid is on disk, that its
       stamped ts is within the cycle window, AND that the body still has substance
       once the nonce line is removed: complete (a partial write never carries the
       nonce), fresh-THIS-cycle (an 8-day-stale body carries an old uuid), and not
@@ -48,13 +53,24 @@ done (it is cleared before it could; the observer owns done-state).
 """
 
 import datetime
+import json
+import math
 import os
+import re
 import subprocess
+import sys
 import uuid
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
-from cosa.agents.heartbeat_arbiter.self_respin_observer import build_marker_dict, _parse_iso
+from cosa.agents.heartbeat_arbiter.self_respin_observer import (
+    build_marker_dict, missing_marker_fields, _parse_iso )
+from lupin_mcp.memento_slot import (
+    SELF_RESPIN_SLOT,
+    SLOT_IO,
+    resolve_repo_root,
+    verify_memento_at_any_readable_slot,
+)
 
 
 # The literal ask_yes_no prepends on any non-answer (cosa_voice_mcp.DEFAULT_USED_MARKER).
@@ -65,6 +81,10 @@ DEFAULT_USED_MARKER          = "[default used] "
 FIRE_TOKEN_PREFIX            = ".self-respin-fire-"
 NONCE_LINE_PREFIX            = "SELF-RESPIN-NONCE:"     # caller stamps: "SELF-RESPIN-NONCE: <uuid> @ <iso_ts>"
 DEFAULT_DELAY_SECONDS        = 20
+DEFAULT_IDLE_WAIT_MAX_SECONDS = 600                     # the fire point waits up to 10 min for an idle prompt (row 698a5aaf)
+DEFAULT_IDLE_POLL_SECONDS     = 1.0
+LAST_CALL_WINDOW_MINUTES     = 60                       # row b134feb9: refuse a re-spin this close to a Last Call closing time
+LAST_CALL_CHECK_TIMEOUT_SECONDS = 15                    # the check reads the store once per in-window row; never hang the verb
 DEFAULT_CYCLE_WINDOW_SECONDS = 300                      # memento nonce ts must be within this of now
 
 # The SUBSTANCE floor (row 4cf9f9fd). Freshness is not completeness: a file whose
@@ -92,12 +112,160 @@ DEFAULT_POLL_INTERVAL_SECONDS = 0.5
 class SelfRespinResult:
     """The verb's structured outcome. `status` is the whole story:
     scheduled = a /clear is queued; declined = human said no; aborted = a guard
-    failed (memento/tmux/marker) and nothing was scheduled."""
+    failed (memento/tmux/marker) and nothing was scheduled.
+
+    `warnings` carries the SELF-DIAGNOSIS lines (row b5035039): things that are wrong
+    with the PROCESS that just scheduled the clear, not with the clear itself. They
+    never change `status` — see stale_module_warning for why the failure mode here is
+    warn-and-proceed, never refuse."""
     status             : str                 # "scheduled" | "declined" | "aborted"
     reason             : str
     marker_path        : "str | None" = None
     fire_token_path    : "str | None" = None
     expected_return_by : "str | None" = None
+    warnings           : list         = field( default_factory=list )
+
+
+# ---------------------------------------------------------------------------
+# (a) The STALE-MCP-MODULE guard (row b5035039)
+# ---------------------------------------------------------------------------
+# MEASURED 2026-09-11, two seats independently. lupin_mcp is a child of the pane's
+# claude process and loads ONLY when the seat RESTARTS — a /clear does not reload it.
+# So a seat can run pre-merge verb code for hours while the fix sits on disk. On the
+# seat this was measured on, the idle gate merged at 14:20 and the MCP had been up
+# since 12:09; self_respin reported "scheduled", the clear fired UNGATED into a
+# mid-turn pane, and nothing in the payload said so.
+#
+# WHY SELF-INTROSPECTION CANNOT WORK, stated plainly so nobody expects more of this
+# guard than it gives: a stale process runs stale core code, which contains no check.
+# This guard could not have fired on the seat that motivated it. What a running
+# process CAN see is DISK AHEAD OF MEMORY — the source file declaring a marker schema
+# newer than the one this process imported. That is what is compared below, and it is
+# what makes the guard fire on the NEXT drift rather than on the last one.
+#
+# WARN, DO NOT REFUSE. A refusal living inside possibly-stale code would strand a seat
+# that genuinely needs to re-spin, with the operator away and the remedy (a full seat
+# restart) heavier than a clear. So the guard is loud and advisory: it never changes
+# `status`, it only makes the condition impossible to miss in the returned payload.
+STALE_MODULE_BANNER = "⚠️ STALE MCP MODULE"
+
+# A SEPARATE banner, deliberately not the one above. The read-back check below is a
+# WRITE-INTEGRITY check, not a staleness check, and giving it the staleness banner is
+# how it came to be described as one — see marker_field_warning for the reason a
+# missing field cannot mean an old writer.
+MARKER_WRITE_BANNER = "⚠️ INCOMPLETE MARKER WRITE"
+
+# The remedy, in the words that were actually confused. "Restart" got collapsed into
+# "clear" in the original incident notes by the person writing them, so the negation
+# is spelled out rather than implied.
+_MCP_RESTART_REMEDY = (
+    "Remedy: RESTART YOUR MCP — exit and relaunch claude in this pane. "
+    "A /clear does NOT reload it; the same MCP process survives every clear."
+)
+
+
+def parse_marker_schema_version( source_text ):
+    """
+    Read the MARKER_SCHEMA_VERSION an observer SOURCE FILE declares.
+
+    Requires:
+        - source_text is the observer module's source, or None/"" when unreadable
+
+    Ensures:
+        - returns the int assigned to a MODULE-LEVEL `MARKER_SCHEMA_VERSION`
+        - returns None for falsy source, or source carrying no such assignment
+        - matches only at column 0, so an indented rebinding inside some function is
+          not mistaken for the module's own version
+        - does NOT match the sibling `MARKER_SCHEMA_VERSION_KEY`, whose name begins
+          with the same characters: only spaces and tabs may sit between the name and
+          the `=`, and `_KEY` is neither. Matching it would read a string constant as
+          the version and so report NO version at all
+        - never raises
+    """
+    if not source_text:
+        return None
+    match = re.search( r"^MARKER_SCHEMA_VERSION[ \t]*=[ \t]*(\d+)", source_text, re.MULTILINE )
+    return int( match.group( 1 ) ) if match else None
+
+
+def loaded_marker_schema_version():
+    """
+    Ensures:
+        - returns the MARKER_SCHEMA_VERSION of the observer module THIS PROCESS imported
+        - returns 0 when the loaded module has no such constant, i.e. it predates
+          versioning entirely — the measured seat's exact situation. The absence IS the
+          signal here, which is why this reads the attribute defensively rather than
+          importing the name (an import would raise, and a hard failure inside a verb
+          whose job is to warn would be the wrong direction)
+        - never raises
+    """
+    from cosa.agents.heartbeat_arbiter import self_respin_observer as observer_module
+    return getattr( observer_module, "MARKER_SCHEMA_VERSION", 0 )
+
+
+def _default_observer_source():
+    """Ensures: the observer module's source text as it is ON DISK NOW, or None if unreadable."""
+    from cosa.agents.heartbeat_arbiter import self_respin_observer as observer_module
+    return _default_read_text( observer_module.__file__ )
+
+
+def stale_module_warning( loaded_version, disk_source ):
+    """
+    Decide whether this process is running observer code older than the file on disk.
+
+    Requires:
+        - loaded_version is the in-memory MARKER_SCHEMA_VERSION (0 ⇒ pre-versioning)
+        - disk_source is the observer source read from disk, or None when unreadable
+
+    Ensures:
+        - returns a loud one-line warning naming BOTH versions and the restart remedy
+          when disk declares a version STRICTLY NEWER than the loaded one
+        - returns None when the versions match, when memory is AHEAD of disk (an older
+          checkout must not accuse a current process), and when disk is unreadable or
+          declares no version — an unknown is silence, never a false alarm on the go-path
+        - NEVER refuses anything; the caller keeps its own status
+        - never raises
+    """
+    disk_version = parse_marker_schema_version( disk_source )
+    if disk_version is None or disk_version <= loaded_version:
+        return None
+    return (
+        f"{STALE_MODULE_BANNER}: this MCP process loaded marker schema v{loaded_version}, "
+        f"but v{disk_version} is on disk — guards merged since your seat started, the "
+        f"self-respin idle gate among them, are NOT running in this process. Your /clear "
+        f"may fire UNGATED into a busy pane. {_MCP_RESTART_REMEDY}"
+    )
+
+
+def marker_field_warning( missing ):
+    """
+    Requires:
+        - missing is the tuple of contracted marker fields absent after read-back
+          (self_respin_observer.missing_marker_fields produces it)
+
+    Ensures:
+        - returns None when nothing is missing
+        - otherwise returns a loud one-line warning naming every missing field
+        - never raises
+
+    This is a WRITE-INTEGRITY check: it asserts the marker this process just wrote is
+    complete and well-formed. What it catches is a truncated or partial write, a disk
+    that filled mid-write, or a writer that failed to populate a field of the schema it
+    was built against — the observer the fire point reads is then acting on a marker
+    with a hole in it.
+
+    It does NOT detect a stale module, and cannot: a stale writer emits a COMPLETE
+    marker under its OWN older schema, so every field it knows about is present and a
+    field-set assertion sees nothing wrong. Staleness is visible only to the
+    disk-ahead-of-memory comparison in stale_module_warning.
+    """
+    if not missing:
+        return None
+    return (
+        f"{MARKER_WRITE_BANNER}: the marker this process just wrote is MISSING "
+        f"{', '.join( missing )} — it was written incompletely, so the fire point and "
+        f"the observer will read a marker with a hole in it. {_MCP_RESTART_REMEDY}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -143,53 +311,103 @@ def build_nonce_line( nonce_uuid, ts ):
 
 def stamp_nonce_into( path, nonce_uuid, ts ):
     """
-    Append this cycle's nonce line to an EXISTING memento without ever putting the
-    file in a truncated state — the whole operation, so no caller has to write the
-    destructive half by hand (row 4cf9f9fd).
+    RETIRED — this function now REFUSES, always. Call it and you get a ValueError
+    naming the replacement. Nothing in lupin calls it; it is kept as a loud
+    signpost so a seat following a stale instruction is told what to do instead of
+    getting an ImportError it has to go and diagnose.
 
-    The defect this exists to make unwritable: `open( p, "w" ).write( open( p ).read() + line )`
-    truncates on the OUTER open, evaluated first, so the inner read returns "" and the
-    memento becomes the nonce line alone. It then verifies, and the pane clears into it.
+    WHY IT WAS RETIRED (row c9f4d613). It appended the nonce to ONE path — the
+    record — and had no knowledge that a MIRROR exists. memento_io.cmd_write has
+    already written record, mirror and pointer and sha-verified them by the time
+    this ran, so the append left the durable copy one line short of the record,
+    every self-respin cycle, guaranteed rather than occasionally. Measured on two
+    personas at a 92-byte delta apiece: exactly the blank line plus the nonce line.
+    The mirror exists to survive `git clean` and a pruned worktree, and a restore
+    is a copy back — so restoring gave a record missing the one field
+    verify_memento_content gates on, and self_respin refused the seat that most
+    needed it.
+
+    WHAT REPLACES IT — TWO EXITS, BECAUSE THERE ARE TWO CASES. A refusal with only
+    one exit strands whoever is in the other case, and memento_io's own history
+    records three correct refusals forming a loop with no way out (:1851).
+
+    (1) NO ROOT RECORD YET THIS SESSION — PRE-STAMP, one write, nothing appended:
+
+            python3 $PLANNING_IS_PROMPTING_ROOT/workflow/scripts/memento_io.py write \\
+                --slot root --persona <you> --session-id <from get_session_info()> \\
+                --self-respin-nonce <uuid>        # <- the nonce goes in HERE
+
+        stamp_header builds the nonce line into the body using the SAME `written_at`
+        it stamps in the header, then cmd_write lands record + mirror + pointer and
+        exits 5 if the two disagree. MEASURED end-to-end: header and nonce both read
+        2026-09-04T21:45:53-04:00 — a ZERO gap, against the 14s gap the append route
+        left — and record and mirror share one sha and BOTH verify.
+
+    (2) A ROOT RECORD ALREADY EXISTS FOR THIS SESSION — AMEND, with the nonce line as
+        the LAST line of the amendment body you pipe in. There is no --self-respin-nonce
+        flag on `amend`; the line is ordinary content and lands last because cmd_amend
+        appends. This is not an alternative to (1), it is the ONLY path: records are
+        IMMUTABLE, so a second `write` refuses at :1556 with exit 3, MEASURED. It is
+        also the ordinary case rather than an edge — a self-respun seat keeps its
+        session id, so its SECOND cycle always finds its own record already there, and
+        memento_io's authors say so outright at :1981: "a seat re-spun in its own
+        session amends".
+        MEASURED: record and mirror come back sha-equal and both verify on the new uuid.
+
+    WHAT THE TWO EXITS DO AND DO NOT SHARE. Both re-sync the mirror in one call, so
+    the divergence this function caused is unreachable on either. Only (1) ties the
+    nonce's timestamp to the WHOLE body's written_at. On (2) the nonce shares the
+    AMENDMENT's stamp, so freshness proves the amendment is fresh — which is the
+    content the seat is adding this cycle — while the older material below it is
+    legitimately older. That is weaker than (1) and is not the same claim; say which
+    one a given memento was written by before quoting its freshness as proof of
+    anything about the whole file.
+
+    AND PRE-STAMPING PROVES A STRICTLY STRONGER THING, which is why appending was
+    not merely fixed in place (Mr. Radio's ruling, 2026-09-04). Appending — by this
+    function or by memento_io's own `amend` — puts a FRESH nonce on a body of ANY
+    age, so an hour-stale memento passes the freshness gate. Pre-stamping ties the
+    nonce's timestamp to the body's `written_at`: a fresh nonce now means a fresh
+    BODY, which is the thing the seat actually clears into. The 14-second gap
+    between header and nonce on the measured records is the signature of the second
+    writer, and under pre-stamping it is zero.
+
+    THE DUPLICATE-STAMP REFUSAL IS NOT LOST, IT BECOMES UNREACHABLE. This function
+    refused to stamp the same uuid twice ("stamp once per cycle"), and that guard
+    was load-bearing. Under pre-stamping there is no second stamp to refuse — one
+    write carries one nonce — and memento_io.stamp_header additionally STRIPS any
+    prior cycle's nonce from the body before writing, so a re-stamped record
+    carrying two nonce lines cannot be produced at all. The property survives; the
+    refusal that enforced it is no longer the thing enforcing it.
 
     Requires:
-        - path names an existing, non-blank memento file (utf-8)
-        - nonce_uuid is the uuid for THIS cycle; ts is an aware datetime
+        - nothing; the arguments are accepted only so a stale call site reaches the
+          refusal message rather than a TypeError
 
     Ensures:
-        - the file's prior content is preserved verbatim, with the nonce line appended
-          after one blank line and a trailing newline
-        - the write lands via a temp file in the SAME directory + os.replace, so a
-          reader either sees the whole old file or the whole new one, never a partial
-        - the temp file is removed if the write fails
-        - returns the nonce line that was stamped
+        - never writes, never reads, never touches the filesystem
+        - always raises ValueError, naming the pre-stamp flag
 
     Raises:
-        - FileNotFoundError if path does not exist — never creates a memento from nothing
-        - ValueError if the file is blank, or already carries this nonce
+        - ValueError, always
     """
-    with open( path, "r", encoding="utf-8" ) as fh:
-        existing = fh.read()
-
-    if not existing.strip():
-        raise ValueError( f"refusing to stamp a blank memento ({path}) — there is nothing to clear into" )
-
-    line = build_nonce_line( nonce_uuid, ts )
-    if f"{NONCE_LINE_PREFIX} {nonce_uuid} @ " in existing:
-        raise ValueError( f"memento already carries nonce {nonce_uuid} — stamp once per cycle" )
-
-    body = existing.rstrip( "\n" ) + "\n\n" + line + "\n"
-    tmp  = f"{path}.stamp-{os.getpid()}.tmp"
-    try:
-        with open( tmp, "w", encoding="utf-8" ) as fh:
-            fh.write( body )
-            fh.flush()
-            os.fsync( fh.fileno() )
-        os.replace( tmp, path )
-    except BaseException:
-        _best_effort_remove( tmp )
-        raise
-
-    return line
+    raise ValueError(
+        "stamp_nonce_into is RETIRED — it appended the nonce to the record alone and left "
+        "the memento's MIRROR one line short of it, every cycle (row c9f4d613). Restore "
+        "from that mirror and self_respin refuses the seat, because the missing line is the "
+        f"one it gates on. NOTHING WAS WRITTEN TO {path}.\n"
+        "  Use memento_io, which re-syncs the mirror in the same call. Two cases:\n"
+        "  (1) no root record yet this session -> PRE-STAMP it into the write:\n"
+        "      $PLANNING_IS_PROMPTING_ROOT/workflow/scripts/memento_io.py write "
+        "--slot root --persona <you> --session-id <yours> "
+        f"--self-respin-nonce {nonce_uuid}\n"
+        "  (2) a root record already exists for this session (the usual case on a SECOND "
+        "self-respin, since the seat keeps its session id) -> `write` will refuse it as "
+        "immutable. AMEND instead, putting this line last in the amendment body you pipe in:\n"
+        f"      {build_nonce_line( nonce_uuid, ts )}\n"
+        "      $PLANNING_IS_PROMPTING_ROOT/workflow/scripts/memento_io.py amend "
+        "--slot root --persona <you> --session-id <yours>"
+    )
 
 
 def verify_memento_content( content, nonce_uuid, now, *, cycle_window_seconds=DEFAULT_CYCLE_WINDOW_SECONDS ):
@@ -257,6 +475,25 @@ def verify_memento_content( content, nonce_uuid, now, *, cycle_window_seconds=DE
 # ---------------------------------------------------------------------------
 # (c) The guarded, fire-point-consuming injector argv — pure
 # ---------------------------------------------------------------------------
+# The token the WAKE TEXT carries in place of the pre-clear session id. The text is
+# composed in Python at SCHEDULE time, but the id it must quote is only knowable at
+# FIRE time — so the composer emits this sentinel and the detached chain substitutes
+# the id it captured a moment before sending the /clear. Substitution is a bash
+# parameter expansion, not a subshell: the wake is arbitrary prose and must never be
+# re-parsed by a shell.
+_PRE_CLEAR_SID_SENTINEL = "__PRE_CLEAR_SESSION_ID__"
+
+# What the chain says when the bridge could not be read at fire time. The wake must
+# still be sendable — a seat with no id to compare is told so, and told what to do
+# instead, rather than being handed an empty string that reads like a real answer.
+_PRE_CLEAR_SID_UNAVAILABLE = "(unavailable)"
+
+# Seconds to let the rehydrated session settle after the readiness gate opens, before
+# the wake is typed. See the race note in build_guarded_clear_argv's Ensures — this
+# NARROWS a race, it does not close one.
+DEFAULT_SETTLE_SECONDS = 0.75
+
+
 def build_wake_text( memento_path, wake_nonce, wake_proof_path ):
     """
     Ensures:
@@ -288,15 +525,90 @@ def build_wake_text( memento_path, wake_nonce, wake_proof_path ):
     amount of disk-side evidence can.
     """
     return (
-        f"A /clear was fired at this pane and the bridge then reported a new session, so you "
-        f"were PROBABLY just re-spun as the same seat — but only you can confirm it. Check: do you "
-        f"remember the work of this session, or is your context near-empty and this the first you "
-        f"have seen of it? IF you rehydrated, write {wake_proof_path} containing exactly this line: "
-        f"{_WAKE_PROOF_NONCE_LINE} {wake_nonce} — then read your memento at {memento_path} and resume "
-        f"your board. IF YOU DID NOT — you still hold the session in memory — write NO proof; instead "
-        f"put the evidence in {_DISPUTE_PREFIX}<your-full-session-id>.md and tell your manager the "
-        f"wake fired without a clear."
+        f"A /clear was fired at this pane. DO NOT ANSWER THIS FROM MEMORY — a seat that "
+        f"cleared and then re-read its own record is indistinguishable from a seat that "
+        f"never cleared, so introspection returns the WRONG answer and returns it "
+        f"confidently. Use the id instead: call get_session_info() and read "
+        f"claude_code.session_id. Immediately before the clear was sent, this pane was "
+        f"session {_PRE_CLEAR_SID_SENTINEL}. COMPARE THE FIELD NAMED, NOT THE FIELD WHOSE "
+        f"VALUE MATCHES: get_session_info() also returns claude_code.stable_session_id, which "
+        f"no clear ever changes — on a pane's FIRST clear it holds this exact value, so it WILL "
+        f"match and proves nothing. Only claude_code.session_id can answer this. "
+        f"IF YOURS DIFFERS, the clear landed and you are "
+        f"the rehydrated seat: write {wake_proof_path} containing exactly this line: "
+        f"{_WAKE_PROOF_NONCE_LINE} {wake_nonce} — then read your memento at {memento_path} "
+        f"and resume your board. IF YOURS IS THE SAME, no clear landed: write NO proof, put "
+        f"the evidence in {_DISPUTE_PREFIX}<your-full-session-id>.md and tell your manager. "
+        f"If the id above reads {_PRE_CLEAR_SID_UNAVAILABLE}, the bridge was unreadable when "
+        f"the wake fired — compare your transcript chain under ~/.claude/projects instead, "
+        f"and say in your answer which instrument you used."
     )
+
+
+def pane_idle_rule():
+    """
+    The idle-prompt rule the fire point waits on — the DM injector's, not a copy.
+
+    Ensures:
+        - returns ( busy_sentinels, dialog_sentinels, idle_divider, recheck_seconds )
+          read from cc_notification_listener, where the rule is defined and pinned
+        - imported lazily: that module is the listener, and only the fire point needs it
+    """
+    from lupin_cli.claude_code.hooks.lib.cc_notification_listener import (
+        BUSY_STATUS_SENTINELS, DIALOG_SENTINELS, IDLE_PROMPT_DIVIDER, PANE_PROBE_RECHECK_SECONDS,
+    )
+    return BUSY_STATUS_SENTINELS, DIALOG_SENTINELS, IDLE_PROMPT_DIVIDER, PANE_PROBE_RECHECK_SECONDS
+
+
+def _idle_wait_script( first ):
+    """
+    Bash that blocks until the target pane shows an idle prompt, reading its inputs
+    from positional args ${first}..${first+5}: busy sentinels and dialog sentinels
+    (each joined by the \\x1f unit separator), the idle divider, max WALL-CLOCK
+    seconds, seconds between polls, and the recheck gap.
+
+    Ensures:
+        - idle = a non-empty capture with no busy sentinel, no dialog sentinel, and the
+          divider present, seen on TWO captures `recheck` apart — the listener's rule
+        - the bound is wall-clock (bash SECONDS), not a poll count: captures and
+          rechecks take time, and a poll-count bound ran past the idle wait the
+          observer allows for (Mr. Radio's review)
+        - on the bound it prints a loud stderr line and exits 4, having typed nothing
+        - it runs BEFORE the fire token is consumed (Mr. Radio's review), so a timeout
+          leaves the token on disk and a reader can tell "never fired" from "fired"
+    """
+    a = [ f"${{{first + i}}}" for i in range( 6 ) ]
+    return (
+        f'_pane="$2"; _busy="{a[ 0 ]}"; _dialog="{a[ 1 ]}"; _divider="{a[ 2 ]}"\n'
+        f'_max="{a[ 3 ]}"; _poll="{a[ 4 ]}"; _recheck="{a[ 5 ]}"\n'
+        "_idle() {\n"
+        '  local c s\n'
+        '  c=$(tmux capture-pane -p -t "$_pane" 2>/dev/null) || return 1\n'
+        '  [ -n "$c" ] || return 1\n'
+        "  IFS=$'\\x1f' read -r -a _b <<< \"$_busy\"\n"
+        '  for s in "${_b[@]}"; do [ -n "$s" ] && case "$c" in *"$s"*) return 1;; esac; done\n'
+        "  IFS=$'\\x1f' read -r -a _d <<< \"$_dialog\"\n"
+        '  for s in "${_d[@]}"; do [ -n "$s" ] && case "$c" in *"$s"*) return 1;; esac; done\n'
+        '  case "$c" in *"$_divider"*) return 0;; esac\n'
+        '  return 1\n'
+        "}\n"
+        '_end=$((SECONDS + _max))\n'
+        'until _idle && sleep "$_recheck" && _idle; do\n'
+        '  if [ "$SECONDS" -ge "$_end" ]; then\n'
+        '    echo "self-respin: pane $_pane never showed an idle prompt within $_max s — /clear NOT typed, fire token left in place" >&2\n'
+        '    exit 4\n'
+        '  fi\n'
+        '  sleep "$_poll"\n'
+        'done\n'
+    )
+
+
+def _idle_wait_args( idle_wait_max_seconds, idle_poll_seconds ):
+    """The six positional args _idle_wait_script reads, in order."""
+    busy, dialog, divider, recheck = pane_idle_rule()
+    max_seconds = max( 1, math.ceil( idle_wait_max_seconds ) )    # bash SECONDS counts whole seconds
+    return [ "\x1f".join( busy ), "\x1f".join( dialog ), divider,
+             str( max_seconds ), str( idle_poll_seconds ), str( recheck ) ]
 
 
 def build_guarded_clear_argv(
@@ -304,6 +616,9 @@ def build_guarded_clear_argv(
     *, wake_text=None, bridge_path=None, keys_sent_path=None,
     ready_timeout_polls=DEFAULT_READY_TIMEOUT_POLLS,
     poll_interval_seconds=DEFAULT_POLL_INTERVAL_SECONDS,
+    settle_seconds=DEFAULT_SETTLE_SECONDS,
+    idle_wait_max_seconds=None,
+    idle_poll_seconds=DEFAULT_IDLE_POLL_SECONDS,
 ):
     """
     Build the detached Popen argv that types `text` into a pane AFTER consuming a
@@ -351,7 +666,32 @@ def build_guarded_clear_argv(
           simply leaves the observer on its old schedule-time anchor, which still alarms.
         - `text` (and the wake) are passed VERBATIM as positional args — never wrapped
           by the speakerphone rider (a wrapped "/clear" would never fire as a slash cmd)
+        - IDLE GATE (row 698a5aaf): when idle_wait_max_seconds is given, the script waits
+          after the delay — and BEFORE consuming the token — until the pane shows an idle
+          prompt, bounded; on the bound it exits 4 with the token still on disk. Keys typed
+          into a pane that is mid-turn were measured not to clear it (09-09 ×2, 09-10).
+          The new args are APPENDED after the existing ones, so every existing position
+          is unchanged. None ⇒ no gate: the script is exactly as before.
     """
+    if wake_text is None and idle_wait_max_seconds is not None:
+        bash = (
+            'sleep "$1" || exit 0\n'
+            + _idle_wait_script( 6 )
+            + 'rm "$4" || exit 1\n'
+            'tmux send-keys -t "$2" -l -- "$3" || exit 1\n'
+            'sleep 0.25\n'
+            'tmux send-keys -t "$2" Enter || exit 1\n'
+            '[ -z "$5" ] || : > "$5" || true\n'
+        )
+        return [ "bash", "-c", bash,
+                 "_",                       # $0 placeholder
+                 str( delay ),             # $1
+                 tmux_session,             # $2
+                 text,                     # $3  (verbatim "/clear" — NOT wrapped)
+                 fire_token_path,          # $4  (the one-shot, rm'd at the fire point)
+                 keys_sent_path or "",     # $5  (send stamp; mtime IS the timestamp)
+                 *_idle_wait_args( idle_wait_max_seconds, idle_poll_seconds ) ]   # $6..$11
+
     if wake_text is None:
         bash = (
             'sleep "$1" && rm "$4" && tmux send-keys -t "$2" -l -- "$3" '
@@ -401,10 +741,22 @@ def build_guarded_clear_argv(
     # the `[ -n "$s" ]` guard keeps a failed read from opening the gate, so the failure
     # direction stays mute-and-alarm rather than wake-into-the-old-context.
     _sid = 'grep -o \'^ *"session_id"[[:space:]]*:[[:space:]]*"[^"]*"\' "$6" 2>/dev/null | head -1'
+    idle_gate = _idle_wait_script( 11 ) if idle_wait_max_seconds is not None else ""
     bash = (
         'sleep "$1" || exit 0\n'
-        'rm "$4" || exit 0\n'
+        + idle_gate
+        + 'rm "$4" || exit 0\n'
         f's0=$({_sid})\n'
+        # The pre-clear session id VALUE, peeled off the matched line with two bash
+        # parameter expansions (no subshell, no eval). This is what the wake quotes so
+        # the woken seat can COMPARE rather than INTROSPECT.
+        # `q` holds a bare double quote so the two expansions below need no backslash
+        # escaping — a `\\"` inside ${...} reads as an opening quote to bash and breaks
+        # the whole script (measured: `unexpected EOF while looking for matching '\"'`).
+        'q=\'"\'\n'
+        's0t=${s0%"$q"}\n'
+        's0v=${s0t##*"$q"}\n'
+        f'[ -n "$s0v" ] || s0v="{_PRE_CLEAR_SID_UNAVAILABLE}"\n'
         'tmux send-keys -t "$2" -l -- "$3" || exit 0\n'
         'sleep 0.25\n'
         'tmux send-keys -t "$2" Enter || exit 0\n'
@@ -420,7 +772,18 @@ def build_guarded_clear_argv(
         '  fi\n'
         '  sleep "$8"\n'
         'done\n'
-        'tmux send-keys -t "$2" -l -- "$5"\n'
+        # SETTLE. The gate opens the instant the bridge reports a new session_id, which
+        # is SessionStart — the new session may not yet be accepting input. Measured
+        # 2026-09-02 on session 4bc5167d: the wake was QUEUED at 21:13:15.663, 0.165s
+        # BEFORE the clear's own local-command record at 21:13:15.828. The outcome was
+        # correct and it was a RACE, not a guarantee. This pause narrows the window; it
+        # does not close it, and a correct result from a race is exactly what stops being
+        # correct under load.
+        'sleep "${10}"\n'
+        # Substitute the fire-time id into the wake. `${5//a/b}` is a bash expansion, so
+        # the prose is never re-parsed by a shell.
+        f'w=${{5//{_PRE_CLEAR_SID_SENTINEL}/$s0v}}\n'
+        'tmux send-keys -t "$2" -l -- "$w"\n'
         'sleep 0.25\n'
         'tmux send-keys -t "$2" Enter\n'
     )
@@ -434,7 +797,10 @@ def build_guarded_clear_argv(
              bridge_path,                     # $6  (readiness oracle: mtime must change)
              str( ready_timeout_polls ),      # $7  (bounded poll count)
              str( poll_interval_seconds ),    # $8  (seconds between polls)
-             keys_sent_path or "" ]           # $9  (send stamp; mtime IS the timestamp)
+             keys_sent_path or "",            # $9  (send stamp; mtime IS the timestamp)
+             str( settle_seconds ),           # ${10} (settle after the gate — narrows the race)
+             *( _idle_wait_args( idle_wait_max_seconds, idle_poll_seconds )
+                if idle_wait_max_seconds is not None else [] ) ]   # ${11}..${16} (idle gate)
 
 
 # ---------------------------------------------------------------------------
@@ -491,6 +857,58 @@ def _write_json_atomic( path, data ):
     atomic_write_json( path, data )
 
 
+
+# ---------------------------------------------------------------------------
+# (b) The LAST-CALL guard (row b134feb9, lupin half of row 6380199b)
+# ---------------------------------------------------------------------------
+# A re-spin minutes before closing time is pointless: the fresh seat spends what is
+# left of the session rebuilding what the old one knew, only to close (measured
+# 2026-09-28, 29 minutes out). The plan half is planning-is-prompting's
+# workflow/scripts/last_call_window.py; this is the verb's side of it. It FAILS OPEN:
+# "could not look" proceeds WITH A NOTE, because an unreadable store must not freeze a
+# seat at ninety percent.
+def _default_last_call_check( within_minutes ):
+    """
+    Ask planning-is-prompting whether a Last Call close is within the window.
+
+    Requires:
+        - within_minutes is a positive number
+        - PLANNING_IS_PROMPTING_ROOT names the planning-is-prompting checkout
+
+    Ensures:
+        - returns last_call_window's --json dict: verdict, row, close_at, minutes_left, unread
+        - runs it as a subprocess, so its sys.path edits never touch this process
+        - raises on anything that is not a clean answer (unset root, timeout, exit code
+          outside 0/1/2, unparseable output); the caller reads a raise as "unknown"
+    """
+    root = os.environ.get( "PLANNING_IS_PROMPTING_ROOT" )
+    if not root: raise RuntimeError( "PLANNING_IS_PROMPTING_ROOT is not set" )
+    script = os.path.join( root, "workflow", "scripts", "last_call_window.py" )
+    done   = subprocess.run(
+        [ sys.executable, script, "check", "--within", str( within_minutes ), "--json" ],
+        capture_output=True, text=True, timeout=LAST_CALL_CHECK_TIMEOUT_SECONDS,
+    )
+    if done.returncode not in ( 0, 1, 2 ): raise RuntimeError( f"last_call_window exited {done.returncode}: {done.stderr.strip()[:200]}" )
+    return json.loads( done.stdout )
+
+
+def last_call_verdict( check_fn, within_minutes=LAST_CALL_WINDOW_MINUTES ):
+    """
+    Ensures:
+        - returns ( verdict, result ) with verdict in {"skip", "proceed", "unknown"}
+        - never raises: an exception, a non-dict answer or an unrecognised verdict is
+          "unknown", with result = {"error": <what happened>}
+    """
+    try:
+        result = check_fn( within_minutes )
+        if not isinstance( result, dict ): raise TypeError( f"check returned {type( result ).__name__}, not a dict" )
+        verdict = result.get( "verdict" )
+        if verdict not in ( "skip", "proceed", "unknown" ): raise ValueError( f"unrecognised verdict {verdict!r}" )
+    except Exception as e:
+        return "unknown", { "error": f"{type( e ).__name__}: {e}" }
+    return verdict, result
+
+
 # ---------------------------------------------------------------------------
 # The orchestrator — every guard in order, every side effect injectable
 # ---------------------------------------------------------------------------
@@ -509,13 +927,19 @@ def perform_self_respin(
     ready_timeout_polls  = DEFAULT_READY_TIMEOUT_POLLS,
     poll_interval_seconds = DEFAULT_POLL_INTERVAL_SECONDS,
     base_dir             = None,
+    repo_root            = None,
     now                  = None,
+    idle_wait_max_seconds = DEFAULT_IDLE_WAIT_MAX_SECONDS,
+    clock_fn             = None,
     resolve_tmux_fn      = None,
+    verify_slot_fn       = None,
     resolve_bridge_path_fn = None,
     ask_fn               = None,
     schedule_fn          = None,
     read_text_fn         = None,
     write_json_fn        = None,
+    observer_source_fn   = None,
+    last_call_check_fn   = None,
 ):
     """
     Run the full self-re-spin decision + (on a go) schedule the detached /clear.
@@ -527,30 +951,60 @@ def perform_self_respin(
          clear is a real over_budget reading. A failed pressure fetch degrades to
          "unknown"; forging or defaulting it turns a visible unknown into an invisible
          lie, and a non-over_budget marker can NEVER be classified RETURNED anyway.)
-      3. verify the memento (nonce + freshness)    — fail ⇒ aborted (clear into nothing averted)
-      4. fire the confirmation ask, always         — real "no"/"neither" ⇒ declined
-      5. write the persistent OBSERVER marker + read it back for durability
+      2b. refuse when a Last Call closing time is within LAST_CALL_WINDOW_MINUTES (row
+         b134feb9) — verdict "skip" ⇒ aborted, quoting row, close_at and minutes_left;
+         "proceed" ⇒ on; "unknown" (or a raising check) ⇒ on, with a note in `warnings`
+      3. prove the memento is AT THIS SEAT'S SLOT and clears the reap's own memento
+         proof                                     — fail ⇒ aborted (row 8068c65e)
+      4. verify the memento (nonce + freshness)    — fail ⇒ aborted (clear into nothing averted)
+      5. fire the confirmation ask, always         — real "no"/"neither" ⇒ declined
+      6. write the persistent OBSERVER marker + read it back for durability
          AND write the one-shot FIRE token         — read-back fail ⇒ aborted
-      6. schedule the guarded, fire-point-consuming detached /clear (+ the wake that
+      7. schedule the guarded, fire-point-consuming detached /clear (+ the wake that
          rides the SAME chain once the rehydrate bridge write proves the reset)
 
     Requires:
         - session_id, persona non-empty; memento_path points at the seat's memento
         - memento_nonce is the uuid the caller stamped into that memento this cycle
+        - repo_root is the seat's own repo root, or None to resolve it live from cwd;
+          an unresolvable root ABORTS rather than guessing one (row 8068c65e)
         - pre_clear_status is the seat's context-pressure `status` at fire time
           (recorded so the observer can prove the over_budget→within_budget return)
         - the *_fn seams are callables (or None ⇒ the live defaults)
 
     Ensures:
         - returns a SelfRespinResult; status ∈ {scheduled, declined, aborted}
-        - NO detached /clear is scheduled unless memento verify passed AND the ask
+        - NO detached /clear is scheduled unless the memento is proven to be AT the
+          seat's slot (never merely at the caller-supplied path) AND memento verify
+          passed AND the ask
           resolved to yes/default-yes AND the observer marker is durable on disk
         - the ask is ALWAYS called on the go-path — there is no kwarg that skips it
         - makes NO task-store calls (the verb never marks its own row done)
         - never raises on an injected-seam failure it can classify; a genuinely
           unexpected error propagates (the caller — the MCP tool — wraps it)
+        - the marker's fired_at is read AFTER the confirmation ask resolves (row
+          698a5aaf): the ask can hold the call for minutes, and a deadline stamped
+          before it passed one second before the /clear was even typed (measured
+          2026-09-11). `now` still dates the memento freshness check at entry.
+          clock_fn supplies that second reading; with clock_fn None an injected
+          `now` is reused (deterministic tests) and a live call re-reads the clock.
+        - the scheduled clear waits for an idle prompt, up to idle_wait_max_seconds
+          (None ⇒ no wait), and the reason tells the caller to end its turn
+        - on the SCHEDULED path only, self-diagnoses the PROCESS (row b5035039) and
+          returns any finding in `warnings`, repeated at the FRONT of `reason`: the
+          observer source on disk being newer than the module in memory, and the
+          just-written marker reading back without every contracted field. Both WARN
+          and never refuse — see stale_module_warning for why. They ride the scheduled
+          path alone because their subject is "the clear you just scheduled may be
+          ungated"; a path that scheduled nothing has no ungated clear to warn about.
+        - the reason states what an ABSENT FIRE TOKEN means, because the fire point
+          removes the token BEFORE typing: gone == fired, which the measured caller
+          read as "never scheduled" and nearly re-fired on
     """
+    live_clock      = now is None and clock_fn is None
     now             = now             if now             is not None else datetime.datetime.now( datetime.timezone.utc )
+    if clock_fn is None:
+        clock_fn = ( lambda: datetime.datetime.now( datetime.timezone.utc ) ) if live_clock else ( lambda: now )
     resolve_tmux_fn = resolve_tmux_fn if resolve_tmux_fn is not None else _default_resolve_tmux
     resolve_bridge_path_fn = resolve_bridge_path_fn if resolve_bridge_path_fn is not None else _default_resolve_bridge_path
     # The seam stays ZERO-ARG — sixteen injected doubles are `lambda: "yes"`, and
@@ -560,6 +1014,9 @@ def perform_self_respin(
     schedule_fn     = schedule_fn     if schedule_fn     is not None else _default_schedule
     read_text_fn    = read_text_fn    if read_text_fn    is not None else _default_read_text
     write_json_fn   = write_json_fn   if write_json_fn   is not None else _write_json_atomic
+    verify_slot_fn  = verify_slot_fn  if verify_slot_fn  is not None else _default_verify_slot
+    observer_source_fn = observer_source_fn if observer_source_fn is not None else _default_observer_source
+    last_call_check_fn = last_call_check_fn if last_call_check_fn is not None else _default_last_call_check
 
     # 1. resolve tmux session
     tmux_session = resolve_tmux_fn( session_id )
@@ -576,24 +1033,59 @@ def perform_self_respin(
             reason=f"pre-clear status is {pre_clear_status!r}, not a proven 'over_budget' reading — no grounds to clear",
         )
 
-    # 3. memento verify — BEFORE the ask (no point asking to clear into nothing)
+    # 2b. LAST CALL (row b134feb9) — before any file is read or any ask is fired: a clear
+    # this close to closing time is pointless, and refusing costs the caller nothing.
+    lc_verdict, lc_result = last_call_verdict( last_call_check_fn )
+    lc_warnings           = [ ]
+    if lc_verdict == "skip":
+        return SelfRespinResult(
+            status="aborted",
+            reason=(
+                f"Last Call closing time {lc_result.get( 'close_at' )} is {lc_result.get( 'minutes_left' )} min away "
+                f"(row {lc_result.get( 'row' )}, window {LAST_CALL_WINDOW_MINUTES} min) — a re-spin now is pointless; "
+                "finish the close-out on this context"
+            ),
+        )
+    if lc_verdict == "unknown":
+        why = lc_result.get( "error" ) or f"rows in the window unreadable: {', '.join( lc_result.get( 'unread' ) or [ ] )}"
+        lc_warnings.append( f"NOTE: the Last Call check could not look ({why}); proceeding without it." )
+
+    # 3. SLOT PLACEMENT + the reap's own memento proof (row 8068c65e) — BEFORE the
+    # nonce verify, because a nonce proves the file you named is fresh and says nothing
+    # about whether it is the file any reader will look at. The old check took its
+    # success criterion from the same caller whose mistake it was meant to catch, so it
+    # could not fail; this one derives the slot from the seat's identity and looks THERE,
+    # then runs the very predicate dismiss_sessions runs — closing the gap that let
+    # Tiberius's misplaced memento go unreported on this path while Pocholo's was caught
+    # on the reap path.
+    ok, reason = verify_slot_fn(
+        memento_path, repo_root=repo_root, persona=persona, session_id=session_id,
+        now=now, read_text_fn=read_text_fn,
+    )
+    if not ok:
+        return SelfRespinResult( status="aborted", reason=f"memento slot check failed: {reason}" )
+
+    # 4. memento verify — BEFORE the ask (no point asking to clear into nothing)
     ok, reason = verify_memento_content(
         read_text_fn( memento_path ), memento_nonce, now, cycle_window_seconds=cycle_window_seconds
     )
     if not ok:
         return SelfRespinResult( status="aborted", reason=f"memento verify failed: {reason}" )
 
-    # 4. confirmation ask — ALWAYS runs on this path; no skip kwarg exists
+    # 5. confirmation ask — ALWAYS runs on this path; no skip kwarg exists
     proceed, gate_reason = gate_proceed( ask_fn() )
     if not proceed:
         return SelfRespinResult( status="declined", reason=gate_reason )
 
-    # 5. resolve the wake BEFORE the marker so the marker records the wake_nonce the
+    # The clear is scheduled NOW, not when the call began — the ask above can take minutes.
+    fired_at = clock_fn()
+
+    # 6. resolve the wake BEFORE the marker so the marker records the wake_nonce the
     # seat must echo. The wake rides the SAME chain (ruling 3) behind the bridge-mtime
     # readiness gate; if the bridge can't be resolved we fall back to a plain clear
     # (still a valid re-spin — the seat is left for the observer to wake/alarm). The
     # wake TEXT (not the injector) carries the proof instruction: proof is CONSUMER-side.
-    base            = base_dir if base_dir is not None else _resolve_base_dir()
+    base            = base_dir if base_dir is not None else _resolve_base_dir( repo_root )
     bridge_path     = resolve_bridge_path_fn( session_id ) if wake_nonce else None
     do_wake         = bool( wake_nonce and bridge_path )
     wake_proof_path = os.path.join( base, f"{_WAKE_PROOF_PREFIX}{session_id}.marker" ) if do_wake else None
@@ -606,7 +1098,8 @@ def perform_self_respin(
     # persistent observer marker (durability read-back) + one-shot fire token
     marker = build_marker_dict(
         session_id=session_id, persona=persona, tmux_session=tmux_session,
-        fired_at=now, delay_seconds=delay_seconds,
+        fired_at=fired_at, delay_seconds=delay_seconds,
+        idle_wait_max_seconds=idle_wait_max_seconds or 0,
         pre_clear_status=pre_clear_status, pre_clear_pct=pre_clear_pct,
         memento_path=memento_path, memento_verified=True,
         wake_nonce=wake_nonce if do_wake else None,   # only require a proof when we actually wake
@@ -626,7 +1119,7 @@ def perform_self_respin(
             status="aborted",
             reason="observer marker did not survive read-back — refusing to clear without a durable record",
         )
-    write_json_fn( fire_token_path, { "session_id": session_id, "fired_at": now.isoformat() } )
+    write_json_fn( fire_token_path, { "session_id": session_id, "fired_at": fired_at.isoformat() } )
     # Read-back the FIRE token too (Krishna nit 2): a silent token-write failure
     # would let the verb report "scheduled" while the /clear self-cancels at the
     # fire point (rm fails → no send-keys). Catch it here and fail fast — and
@@ -639,7 +1132,7 @@ def perform_self_respin(
             reason="fire token did not survive read-back — refusing to schedule a clear that would self-cancel",
         )
 
-    # 6. schedule the guarded, fire-point-consuming detached /clear (+ the readiness-
+    # 7. schedule the guarded, fire-point-consuming detached /clear (+ the readiness-
     # gated wake built above).
     schedule_fn( build_guarded_clear_argv(
         tmux_session, fire_token_path, delay_seconds,
@@ -648,14 +1141,75 @@ def perform_self_respin(
         keys_sent_path        = keys_sent_path,
         ready_timeout_polls   = ready_timeout_polls,
         poll_interval_seconds = poll_interval_seconds,
+        idle_wait_max_seconds = idle_wait_max_seconds,
     ) )
+
+    # 8. SELF-DIAGNOSE THIS PROCESS (row b5035039). Both checks are advisory — they
+    # never touch `status` — and they answer DIFFERENT questions. The first compares the
+    # schema version on disk against the one in memory: that is the only one of the two
+    # that can see a stale module. The second re-reads the marker we just wrote and
+    # asserts the whole contracted field set — a WRITE-INTEGRITY check that catches a
+    # partial or truncated write. It cannot see staleness, because a stale writer writes
+    # a complete marker under its own older schema.
+    warnings = list( lc_warnings )
+    stale    = stale_module_warning( loaded_marker_schema_version(), observer_source_fn() )
+    if stale is not None: warnings.append( stale )
+    fields   = marker_field_warning(
+        missing_marker_fields( _read_marker_json( read_text_fn, marker_path ) ) )
+    if fields is not None: warnings.append( fields )
 
     return SelfRespinResult(
         status="scheduled",
-        reason="memento verified, gate passed, marker durable — detached /clear scheduled",
+        reason=(
+            # The warnings lead, so a caller reading only the text hits them FIRST.
+            "".join( f"{w} " for w in warnings ) +
+            "memento verified, gate passed, marker durable — detached /clear scheduled. "
+            "END YOUR TURN NOW: the clear is typed into this pane only once its prompt is idle, "
+            "so every further tool call holds it off. "
+            # Row b5035039 fix 2: the measured caller read token consumption as failure
+            # and was one step from clearing its own rehydrated successor.
+            "THE FIRE TOKEN IS MEANT TO DISAPPEAR: the fire point removes it BEFORE typing, "
+            "so a missing token means the clear FIRED, never that it was never scheduled — "
+            "do not re-fire self_respin because the token is gone"
+        ),
         marker_path=marker_path,
         fire_token_path=fire_token_path,
         expected_return_by=marker[ "expected_return_by" ],
+        warnings=warnings,
+    )
+
+
+def _default_verify_slot( memento_path, *, repo_root, persona, session_id, now, read_text_fn ):
+    """
+    The live slot check: resolve the seat's repo root when the caller did not supply
+    one, then prove the memento at EITHER readable slot, `root` first.
+
+    THE SPLIT IS UNCHANGED (row e1e2c545, Mr. Radio's ruling 2026-09-26): `root` is
+    still this door's PRIMARY, and a reap's is still `io` — reap_memento's module
+    docstring remains the authority. What changed is that each door now also READS the
+    other slot rather than refusing a memento it can plainly see. `8068c65e` gave the
+    reap exactly this, on exactly this reasoning; this is the mirror it never got.
+
+    Requires:
+        - repo_root is the seat's repo root, or None to resolve it from the process cwd
+        - persona, session_id identify the seat; now is aware; read_text_fn reads a path
+
+    Ensures:
+        - returns ( ok, reason ) with the `root` slot tried first and the `io` slot as a
+          declared fallback; a fallback hit names both slots in its reason
+        - a stale or foreign memento is still REFUSED at either slot — the fallback
+          widens WHERE the proof looks, never WHAT it demands
+        - a total miss reports the `root` reason, which is the actionable one: it names
+          both acceptable root targets and the `memento_io.py` command that writes them
+        - an unresolvable repo root reaches the verifier as None, which REFUSES there —
+          the refusal lives in one place, not two
+        - never raises
+    """
+    root = repo_root if repo_root is not None else resolve_repo_root()
+    return verify_memento_at_any_readable_slot(
+        memento_path, repo_root=root, persona=persona, session_id=session_id,
+        now=now, read_text_fn=read_text_fn,
+        primary_slot=SELF_RESPIN_SLOT, fallback_slot=SLOT_IO,
     )
 
 
@@ -667,21 +1221,64 @@ def _best_effort_remove( path ):
         pass
 
 
+def _read_marker_json( read_text_fn, path ):
+    """
+    Ensures:
+        - returns the parsed marker dict at `path`
+        - returns None when the file is absent/empty, is not JSON, or parses to
+          something that is not an object (`3` and `[]` both parse fine and have no
+          fields — 'not a marker' rather than an exception inside the verb)
+        - never raises
+    """
+    import json
+    raw = read_text_fn( path )
+    if not raw:
+        return None
+    try:
+        parsed = json.loads( raw )
+    except ValueError:
+        return None
+    return parsed if isinstance( parsed, dict ) else None
+
+
 def _readback_ok( read_text_fn, marker_path, session_id ):
     """Ensures: True iff the just-written marker reads back and names this session."""
-    import json
-    raw = read_text_fn( marker_path )
-    if not raw:
-        return False
-    try:
-        return json.loads( raw ).get( "session_id" ) == session_id
-    except ( ValueError, AttributeError ):
-        return False
+    parsed = _read_marker_json( read_text_fn, marker_path )
+    return parsed is not None and parsed.get( "session_id" ) == session_id
 
 
-def _resolve_base_dir():   # pragma: no cover - live fleet_data_root read (tests pass base_dir)
+def _resolve_base_dir( repo_root=None ):
+    """
+    The fleet data root THIS seat's marker belongs in — keyed on the seat's OWN repo.
+
+    Rick ruled 2026-09-03 (row db56ac6d) that a seat's data keys on the seat's own repo
+    everywhere. This used to call fleet_data_root() with NO argument, which resolves the
+    AMBIENT root — cu.get_project_root(), i.e. the LUPIN_ROOT env var, identical for every
+    process on this box. So every seat wrote its marker under `lupin` whatever repo it was
+    sitting in. Measured by Mr. Radio 2026-09-02 and recorded on row db56ac6d, NOT by this
+    author: 69 markers under lupin and 0 under any other root, one of them naming a
+    planning-is-prompting memento in its own payload while sitting in lupin's directory.
+    Re-derive rather than quote — a census is a fact about the day it was taken.
+
+    Requires:
+        - repo_root is the seat's own repo root, or None to resolve it live from the
+          process cwd (self_respin runs IN the seat's own process, so cwd is the seat)
+
+    Ensures:
+        - returns str( fleet_data_root( <the seat's repo root> ) ). A worktree collapses to
+          its parent checkout inside fleet_data_root, so a seat working in a worktree still
+          writes where the fleet reads.
+        - an UNRESOLVABLE root (no git, or git answers blank) degrades to fleet_data_root()'s
+          ambient default — precisely the value this function returned before the ruling, so
+          a box that cannot answer is no worse off than it is today. With the DEFAULT slot
+          gate this branch is unreachable: verify_memento_at_slot( repo_root=None ) refuses
+          — run, not read — before the base is ever computed. An injected gate could reach
+          it, which is why the fallback exists rather than an assert.
+        - never raises
+    """
     from lupin_cli.claude_code.hooks.lib.heartbeat_hold import fleet_data_root
-    return str( fleet_data_root() )
+    root = repo_root if repo_root is not None else resolve_repo_root()
+    return str( fleet_data_root( root ) )
 
 
 def self_respin_from_bridge(
@@ -777,6 +1374,45 @@ def resolve_own_identity( get_cc_meta_fn, fallback_sid ):
     return resolve_identity_from_cc_meta( cc_meta, fallback_sid )
 
 
+# ── context-pressure roster lookup ────────────────────────────────────────────
+# The roster is keyed by each seat's DISPLAY capitalisation, and the fleet mixes both
+# conventions in ONE payload — measured live 2026-08-30: `Clayton`, `Krishna`, `Rachel`,
+# `Rio`, `Tiberius`, `Tiffany` beside `chloe`, `maria`, `maya`, `mr radio`, `pocholo`.
+# Six of eleven. So neither lowercasing nor title-casing a name is safe on its own, and
+# `personas.get( "rio" )` returns None while `personas.get( "Rio" )` returns a live row.
+PRESSURE_UNKNOWN   = "unknown"      # no reading — sensor unreachable, or an empty roster
+PRESSURE_UNMATCHED = "unmatched"    # a roster we READ, in which this seat does not appear
+
+
+def lookup_persona_record( personas, persona ):
+    """
+    Find one seat's record in a context-pressure roster, tolerating capitalisation.
+
+    Requires:
+        - personas is the roster dict (anything, defensively); persona is a seat name
+
+    Ensures:
+        - returns ( record, matched_key ); matched_key is None when nothing matched, so
+          a caller can tell "not in the roster" from "matched but empty" — a record can
+          legitimately be falsy, which is why the KEY is what reports the match
+        - an EXACT key wins over a case-insensitive one, so a roster holding both
+          spellings resolves to the one actually asked for rather than to dict order
+        - matching is casefold() on stripped keys — casefold, not lower(), because it
+          folds non-ASCII pairs that lower() leaves distinct, and these are display
+          names typed by humans
+        - never raises
+    """
+    if not isinstance( personas, dict ):     return ( None, None )
+    if persona in personas:                  return ( personas[ persona ], persona )
+    if not isinstance( persona, str ):       return ( None, None )
+
+    wanted = persona.strip().casefold()
+    for key, record in personas.items():
+        if isinstance( key, str ) and key.strip().casefold() == wanted:
+            return ( record, key )
+    return ( None, None )
+
+
 def parse_own_pressure( section, persona ):
     """
     Extract ( status, consumption_pct_of_window ) for `persona` from a
@@ -789,15 +1425,46 @@ def parse_own_pressure( section, persona ):
 
     Ensures:
         - a present persona record carrying a `status` ⇒ ( status, pct )
-        - an absent persona, a missing/blank `status`, a non-dict `personas`, or a
-          non-dict `section` ⇒ ( "unknown", None ) — a missed reading is recorded
-          as unknown, NEVER a manufactured "over_budget" (Krishna condition #3). A
-          forged status would be a CLAIM that a reading happened; unknown is honest.
+        - a missing/blank `status`, a non-dict `personas`, an EMPTY roster (see the
+          decidability note at the guard), or a non-dict `section` ⇒
+          ( PRESSURE_UNKNOWN, None ) — a missed reading is
+          recorded as unknown, NEVER a manufactured "over_budget" (Krishna condition
+          #3). A forged status would be a CLAIM that a reading happened.
+        - a roster that was READ but does not contain this seat under ANY casing ⇒
+          ( PRESSURE_UNMATCHED, None ). ⚠️ THIS USED TO BE "unknown" TOO, and that
+          conflation is the defect: no-data and not-there returned the same answer, so
+          a lookup that asked the wrong KEY reported the seat as missing. Splitting
+          them is what makes a casing miss visible instead of silent.
+        - the lookup is case-insensitive (`lookup_persona_record`) because the roster
+          keys by display capitalisation and the fleet mixes conventions
         - never raises
     """
     personas = section.get( "personas" ) if isinstance( section, dict ) else None
-    record   = ( personas.get( persona ) if isinstance( personas, dict ) else None ) or {}
-    status   = record.get( "status" ) or "unknown"
+
+    # No roster at all ⇒ UNKNOWN, and for an EMPTY one this is DECIDABLE rather than
+    # merely preferable (Tiberius): THE ASKER IS ITSELF A LIVE SEAT, so a roster that
+    # omits everyone — including the caller — cannot be a true reading. A genuinely
+    # empty fleet cannot be observed by a member of it. "unmatched" is literally true
+    # of an empty roster ("we read it, you are not in it") and is still the WRONG
+    # answer, which is exactly why the reasoning is written down here.
+    if not isinstance( personas, dict ) or not personas:
+        return PRESSURE_UNKNOWN, None
+
+    record, matched_key = lookup_persona_record( personas, persona )
+
+    # A roster we READ that does not contain this seat. Distinct from "unknown" on
+    # purpose (row: Rio's roster-casing finding): a lookup miss used to be
+    # indistinguishable from a failed read, so a monitor concluded "this seat is
+    # gone" when the honest answer was "I asked the wrong key".
+    if matched_key is None:
+        return PRESSURE_UNMATCHED, None
+
+    # Matched, but the record is not usable — we found the seat and still have no
+    # reading, which is the "unknown" case rather than the "unmatched" one.
+    if not isinstance( record, dict ):
+        return PRESSURE_UNKNOWN, None
+
+    status = record.get( "status" ) or PRESSURE_UNKNOWN
     return status, record.get( "consumption_pct_of_window" )
 
 
@@ -907,7 +1574,10 @@ def _default_ask( persona ):   # pragma: no cover - live MCP ask boundary (tests
     pure functions above, so this boundary carries no untested behaviour of its own.
     """
     from lupin_mcp.cosa_voice_mcp import ask_yes_no, DEFAULT_USED_MARKER as _M   # noqa: F401
-    return ask_yes_no.fn( **confirmation_kwargs( persona ) )
+    # `.fn` is now the ASYNC offload wrapper (row 97ff4426); `.sync` is the original
+    # blocking callable. This caller is already off the event loop and must NOT
+    # spin one to ask a question.
+    return ask_yes_no.fn.sync( **confirmation_kwargs( persona ) )
 
 
 # The observer's marker + wake-proof + send-stamp names — imported by name so the two

@@ -9,6 +9,13 @@
 //   - split ratio      (left column's share, [0.30, 0.85]), persisted
 //   - history stack    (depth-capped at 10; { type, payload, title } entries)
 //   - action-required-in-pane flag + the prior split ratio it stashed
+//   - pane content     ("reading" | "console"), NOT persisted (row 27760534, plan §4)
+//
+// 🔴 THE CONSOLE IS A SECOND AXIS, NOT A HISTORY ENTRY. A live console is a subscription
+// with a lifetime, so it never joins the stack: Back is unavailable while it shows, closing
+// it returns the reading stack exactly as it was, and "one console per tab" holds by
+// construction. It is not persisted because the watched seat is not — a reload restoring
+// the axis without the seat would show an empty console (plan §4, Q5).
 //
 // Ports the legacy `notifications.js` behavior verbatim in semantics:
 //   _openContentPane / _closeContentPane / _backContentPane           → open/close/back
@@ -28,6 +35,7 @@ import type { StorageService } from "../shared/StorageService";
 import type {
   ContentPaneEntry,
   LayoutMode,
+  PaneContent,
   ReadingPaneChangeKind,
   StoreReadingPaneChangedPayload,
 } from "../shared/types";
@@ -94,6 +102,17 @@ export interface ReadingPaneStore {
    * false) when AR does not own the pane.
    */
   exitActionRequiredPane(): boolean;
+  /** What the pane shows: the reading stack, or a seat's live console. */
+  getPaneContent(): PaneContent;
+  /** The console's title, or null while the pane shows the reading stack. */
+  consoleTitle(): string | null;
+  /**
+   * Show the console. No-op (returns false) while AR owns the pane — the same guard as
+   * `open()`. The reading stack is left untouched underneath.
+   */
+  showConsole(title: string): boolean;
+  /** Leave the console for the reading stack. No-op (returns false) when not showing it. */
+  showReading(): boolean;
 }
 
 export interface ReadingPaneStoreOptions {
@@ -112,6 +131,9 @@ class ReadingPaneStoreImpl implements ReadingPaneStore {
   // Split ratio stashed by enterActionRequiredPane() so exit restores the
   // divider faithfully (the 498e98e 50/50-leak fix). Null when not lifted.
   private arPriorRatio: number | null = null;
+  // Non-null exactly while the console shows. One field, so the axis and its title
+  // cannot disagree.
+  private consoleTitleValue: string | null = null;
 
   constructor( opts: ReadingPaneStoreOptions ) {
     this.bus     = opts.bus;
@@ -161,15 +183,20 @@ class ReadingPaneStoreImpl implements ReadingPaneStore {
   }
 
   isPaneOpen(): boolean {
-    return this.history.length > 0 || this.arInPane;
+    return this.history.length > 0 || this.arInPane || this.consoleTitleValue !== null;
   }
 
   isActionRequiredInPane(): boolean { return this.arInPane; }
 
-  canGoBack(): boolean { return this.history.length > 1; }
+  // Back operates on the reading stack, which the console never joined.
+  canGoBack(): boolean { return this.consoleTitleValue === null && this.history.length > 1; }
+
+  getPaneContent(): PaneContent { return this.consoleTitleValue === null ? "reading" : "console"; }
+
+  consoleTitle(): string | null { return this.consoleTitleValue; }
 
   isAbstractShown(abstract: string): boolean {
-    if (this.arInPane) return false;
+    if (this.arInPane || this.consoleTitleValue !== null) return false;
     const current = this.currentEntry();
     return current !== null && current.type === "abstract" && current.payload === abstract;
   }
@@ -182,6 +209,8 @@ class ReadingPaneStoreImpl implements ReadingPaneStore {
     // While AR owns the pane, abstract/doc opens are suppressed (the blocking
     // response card keeps the pane — legacy `_openContentPane` AR guard).
     if (this.arInPane) return false;
+    // Opening a document leaves the console: the pane shows one thing at a time.
+    this.consoleTitleValue = null;
     this.history.push({ type, payload, title: title || "" });
     if (this.history.length > HISTORY_CAP) this.history.shift();
     this.emit("opened");
@@ -189,12 +218,28 @@ class ReadingPaneStoreImpl implements ReadingPaneStore {
   }
 
   close(): void {
-    this.history = [];
+    this.history           = [];
+    this.consoleTitleValue = null;
     this.emit("closed");
   }
 
+  showConsole(title: string): boolean {
+    if (this.arInPane) return false;
+    this.consoleTitleValue = title || "Console";
+    this.emit("console-opened");
+    return true;
+  }
+
+  showReading(): boolean {
+    if (this.consoleTitleValue === null) return false;
+    this.consoleTitleValue = null;
+    this.emit("console-closed");
+    return true;
+  }
+
   back(): boolean {
-    if (this.history.length <= 1) return false;
+    // Not only a disabled button: the console never joined the stack, so Back is refused.
+    if (this.consoleTitleValue !== null || this.history.length <= 1) return false;
     this.history.pop();
     this.emit("back");
     return true;
@@ -212,7 +257,8 @@ class ReadingPaneStoreImpl implements ReadingPaneStore {
         this.restoreArPriorRatio();
         this.arInPane = false;
       }
-      this.history = [];
+      this.history           = [];
+      this.consoleTitleValue = null;
     }
     this.emit("layout-mode");
     return next;

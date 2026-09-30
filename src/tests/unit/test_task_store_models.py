@@ -55,7 +55,11 @@ def test_item_optional_columns_nullable( items_table ):
 def test_item_server_defaults( items_table ):
     assert items_table.c.status.server_default.arg     == "queued"
     assert items_table.c.gate_class.server_default.arg == "none"
-    assert items_table.c.priority.server_default.arg   == "P2"
+    # P5 since row 0107c19e / migration 9a1c4f27bd30 (Rick's broadcast e254ec7d,
+    # 2026-09-07). Pinned HERE as well as in the value-space guard because this
+    # arm reads the DB-SIDE default, which a code edit cannot move — the two
+    # assertions watch two different halves of one change.
+    assert items_table.c.priority.server_default.arg   == "P5"
     assert items_table.c.blocked_by.server_default.arg == "[]"
 
 

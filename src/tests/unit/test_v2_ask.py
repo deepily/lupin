@@ -421,6 +421,41 @@ def test_build_ask_flow_wires_from_ini( monkeypatch ):
     assert captured[ "kwargs" ][ "confirmation_enabled" ]   is False, "the flow ignored `similarity confirmation enabled`"
 
 
+def test_source_document_scopes_are_the_registry_plus_io_and_docs_rebuilt_per_call( monkeypatch ):
+    """
+    The closure build_ask_flow hands AskFlow as scope_registry_fn (v2_ask.py `_source_document_scopes`).
+    It runs on the submit path whenever a command carries a source document, so it is reachable
+    code and gets a test, not a pragma (plan rev 14, F1).
+    """
+    import cosa.utils.util as cu
+    from cosa.rest.routers import _scope_registry
+
+    captured, calls = {}, []
+    _patch_stack( monkeypatch, captured )
+    external = _scope_registry.ScopeConfig( name="lupin", root="/repos/lupin", allowed_prefixes=( "src/rnd", ) )
+    def _registry( config_mgr ):
+        calls.append( config_mgr )
+        return { "lupin": external }
+    monkeypatch.setattr( _scope_registry, "build_scope_registry", _registry )
+    monkeypatch.setattr( cu, "get_project_root", lambda: "/proj" )
+
+    cfg = _FakeConfig( { "v2 flow enabled": True } )
+    v2_ask.build_ask_flow( cfg )
+    scopes_fn = captured[ "kwargs" ][ "scope_registry_fn" ]
+
+    first = scopes_fn()
+    assert set( first ) == { "lupin", "io", "docs" }
+    assert first[ "lupin" ] is external
+    assert ( first[ "io" ].name, first[ "io" ].root, first[ "io" ].allowed_prefixes )       == ( "io",   "/proj/io",  () )
+    assert ( first[ "docs" ].name, first[ "docs" ].root, first[ "docs" ].allowed_prefixes ) == ( "docs", "/proj/src", () )
+    assert calls == [ cfg ]
+
+    # Called per request, never cached: a second call rebuilds from the registry.
+    second = scopes_fn()
+    assert calls == [ cfg, cfg ]
+    assert second is not first
+
+
 def test_build_ask_flow_hands_the_queue_to_the_executor( monkeypatch ):
     """Step 12: `v2 executor = queued` needs the live todo queue, and build_ask_flow
     is the only place it can arrive. A build that read the name and dropped the queue

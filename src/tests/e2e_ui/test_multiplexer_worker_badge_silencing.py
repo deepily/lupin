@@ -19,7 +19,7 @@ Gap list / build plan:
   - src/rnd/v0.1.9/2026.06.24-notifications-multiplexer-focus-bar-parity-gap-list.md (§6 Decision A/B)
   - src/rnd/v0.1.9/2026.06.24-focus-bar-parity-build-plan.md (Lane A)
 
-Venue: :8000 (monopolize, scheduled via /api/test-suite/submit) — the
+Venue: :8000 (monopolize, scheduled via /api/v2/submit) — the
 `test_multiplexer_*` E2E batch. Per CLAUDE.local.md "THE USER IS NEVER A
 TESTER": every assertion is AI-run; the Tester owns scheduling this on :8000.
 
@@ -224,7 +224,8 @@ def test_root_session_card_keeps_count_and_no_data_worker( page ):
     assert s is not None, "root card must exist"
     assert s[ "data_worker" ]   is None,  "root card must NOT carry data-worker"
     assert s[ "has_new_count" ] is True,  "root card keeps its numeric count"
-    assert s[ "new_count_text" ] == "1",  "count reflects the single unread notification"
+    # A-2 #4 — legacy's wording, "N new" (notifications.js:19924), not a bare number.
+    assert s[ "new_count_text" ] == "1 new",  "count reflects the single unread notification"
 
 
 def test_reparent_worker_to_root_restores_count( page ):

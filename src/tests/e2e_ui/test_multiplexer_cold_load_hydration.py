@@ -24,7 +24,7 @@ exact one-shot-advisory shape: POST /api/notify with the page CLOSED. The 48h
 window also moots the midnight-straddle flake Rio flagged for a today-anchored
 window: a row persisted seconds before load is always in-window.
 
-Venue: :8000 (monopolize, scheduled via /api/test-suite/submit) —
+Venue: :8000 (monopolize, scheduled via /api/v2/submit) —
 `test_multiplexer_*` E2E batch. Per CLAUDE.local.md "USER IS NEVER A TESTER":
 every assertion is AI.
 
@@ -287,7 +287,9 @@ def test_cold_load_hydrates_from_stubbed_snapshot_with_zero_live_events( page ):
     assert ext is not None and cc is not None
     assert "[E2E-CARDGAP] stubbed arbiter stall warning" in ext[ "text" ]
     assert ext[ "has_badge" ]   is False, "persona-less external card must NOT render a persona badge"
-    assert ext[ "unread_text" ] == "2", "unread badge must seed from the snapshot's new_count"
+    # A-2 #4 — legacy writes "N new" (notifications.js:19924); the multiplexer used to
+    # render a bare number. The badge still seeds from the snapshot; only the wording moved.
+    assert ext[ "unread_text" ] == "2 new", "unread badge must seed from the snapshot's new_count"
     assert ext[ "message_count" ] >= 1
     assert cc[ "has_badge" ]    is True, "persona'd CC sender must render its persona badge from hydration"
     assert "stubbed cc history message" in cc[ "text" ]
@@ -318,7 +320,7 @@ def test_cold_load_hydrates_from_stubbed_snapshot_with_zero_live_events( page ):
 #
 # >>> VENUE / RUN STATUS: NOT YET RUN. Requires the :8000 test server in
 # >>> monopolize mode (live backend + real `/api/job-history` data), scheduled
-# >>> via POST /api/test-suite/submit in the `test_multiplexer_*` E2E batch.
+# >>> via POST /api/v2/submit in the `test_multiplexer_*` E2E batch.
 # >>> The reviewing manager owns that scheduled run; this spec is written,
 # >>> compile-clean, and held — it has NOT been executed here. <<<
 
@@ -440,15 +442,9 @@ def test_boot_has_zero_4xx_and_jobs_pane_hydrates( page ):
     )
 
     # --- DOM corroboration: hydrated rows actually paint --------------------
-    # Lane 0c (RATIFIED item 2aad5b7b): the Job Queues pane is COLD-HIDDEN at boot;
-    # visibility is owned by the section-toolbar. The store-level hydration
-    # assertions above are visibility-INDEPENDENT (they read the live store via the
-    # boot hook), so they already fired against the cold-hidden pane. To corroborate
-    # the RENDERED .job-card DOM we first reveal the pane through its real toolbar
-    # control (the user flow) — NOT a default-visible assumption (that predated the
-    # 0c ruling) — then assert the hydrated rows painted.
-    page.wait_for_selector( '#section-toolbar .toolbar-btn[data-section="jobs-pane"]', timeout=5_000 )
-    page.locator( '#section-toolbar .toolbar-btn[data-section="jobs-pane"]' ).click()
+    # Parity A-2 #1 (2026-09-16, plan §3 R1): the Job Queues pane starts VISIBLE,
+    # so the rendered .job-card DOM is asserted without a toolbar click. (Under
+    # Lane 0c this clicked the toggle first; that click would now HIDE the pane.)
     page.wait_for_selector( '[data-testid="multiplexer-jobs-pane"]', state="visible", timeout=10_000 )
     card_count = page.locator( "#jobs-buckets-container .job-card" ).count()
     assert card_count >= 1, (

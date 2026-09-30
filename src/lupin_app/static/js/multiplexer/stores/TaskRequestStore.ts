@@ -1,0 +1,231 @@
+/* c8 ignore next */ // tsx phantom-branch artifact on file-header line.
+// Promote/demote REQUESTS on the board — TaskRequestStore (row c9fafb9d).
+//
+// Three jobs, one door family (`/api/tasks/request-badges`, `/request-verdict`, `/events`):
+//   1. poll the two badge counts on the boards' 60s cadence,
+//   2. send Rick's verdict on one row and resolve to a result, never a throw,
+//   3. read who filed a pending request and why, once per filing.
+//
+// Design: src/rnd/2026.09.10-request-door-design.md §6. The chip's wording and the verdict
+// body live in shared/task-request.js, so this client and notifications.js cannot drift.
+//
+// ⚠️ NOTHING HERE IS A CONTROL. Every viewer can press Approve or Deny; the verdict door
+// refuses anyone but Rick's account and this store hands its words back verbatim.
+
+import type { EventBus } from "../shared/EventBus";
+import type { StoreRequestBadgesChangedPayload } from "../shared/types";
+import { holdingRefusalMessage } from "./HoldingAreaStore";
+import { readBackAfterWrite } from "../shared/afterWriteRead";
+import {
+  REQUEST_BADGES_PATH,
+  requestVerdictPath,
+  requestEventsPath,
+  requestFiledDetail,
+} from "../../shared/task-request.js";
+
+export interface TaskRequestApiClient {
+  get<T>( path: string ): Promise<T>;
+  post<T>( path: string, body: unknown ): Promise<T>;
+}
+
+/** The request-badges response: `{ task_area, holding_area }`, or null before/without one. */
+export type RequestBadgeCounts = Record<string, unknown> | null;
+
+/** Who filed a request and why, or null when the trail carries no filing. */
+export type RequestFiledDetail = { filer: string; reason: string } | null;
+
+/**
+ * A verdict's outcome. A refusal is a VALUE carrying the server's own words.
+ *
+ * 🔴 `stale` IS REQUIRED ON THE SUCCESS ARM ON PURPOSE (row 93ca4268). The POST landed
+ * and the badges/boards could not be re-read afterwards — a different fact from either
+ * `ok: false` or a plain success, and one the chip has to say out loud, because what it
+ * is showing is now behind the server. Optional, it would have been forgotten at the one
+ * call site; required, every consumer and every fake has to state what it means.
+ */
+export type RequestVerdictResult = { ok: true; stale: boolean } | { ok: false; message: string };
+
+export const TASK_REQUEST_POLL_INTERVAL_MS = 60000;   // the boards' cadence
+
+export interface TaskRequestStore {
+  /** The last badge counts, or null before the first poll or after a failed one. */
+  counts(): RequestBadgeCounts;
+  /** Fetch the counts → cache → emit. A collision joins the fetch in flight. */
+  refresh(): Promise<void>;
+  /**
+   * The read a CALLER THAT JUST WROTE takes. Joining an in-flight read is not
+   * enough after a write — see the implementation.
+   */
+  refreshAfterWrite(): Promise<void>;
+  /** One immediate refresh, then the 60s interval. Idempotent. */
+  startPolling(): void;
+  stopPolling(): void;
+  /**
+   * POST one verdict. Resolves, never rejects.
+   *
+   * Ensures:
+   *   - a 2xx refreshes the badges and runs `afterVerdict` (an approval MOVED the row,
+   *     so both boards must re-read), then resolves `{ ok: true, stale }`
+   *   - `stale` is true exactly when the verdict landed but one of those reads failed
+   *   - a failure resolves `{ ok: false, message }` with the server's own sentence and
+   *     refreshes nothing — the row did not move
+   */
+  submitVerdict( taskId: string, body: Record<string, unknown> ): Promise<RequestVerdictResult>;
+  /**
+   * The cached filing detail for one request, or `undefined` when it has not been read.
+   * Keyed by id AND request_ts, so a re-filed request is read afresh.
+   */
+  cachedDetail( taskId: string, requestTs: string ): RequestFiledDetail | undefined;
+  /**
+   * Read the filing detail once and cache it. Resolves, never rejects.
+   *
+   * ⚠️ A FAILED READ IS NOT CACHED. Caching it would pin "filer unknown" on the chip for
+   * the life of the page over what was an outage; the next paint asks again.
+   */
+  loadDetail( taskId: string, requestTs: string ): Promise<void>;
+  disposeForTesting(): void;
+}
+
+export interface TaskRequestStoreOptions {
+  bus              : EventBus;
+  api              : TaskRequestApiClient;
+  /** Re-read the boards after a verdict landed. Boot passes both panes' refreshes. */
+  afterVerdict?    : () => Promise<void>;
+  nowFn?           : () => number;
+  setIntervalFn?   : ( cb: () => void, ms: number ) => number;
+  clearIntervalFn? : ( handle: number ) => void;
+}
+
+class TaskRequestStoreImpl implements TaskRequestStore {
+  private readonly bus             : EventBus;
+  private readonly api             : TaskRequestApiClient;
+  private readonly afterVerdict    : () => Promise<void>;
+  private readonly nowFn           : () => number;
+  private readonly setIntervalFn   : ( cb: () => void, ms: number ) => number;
+  private readonly clearIntervalFn : ( handle: number ) => void;
+
+  private lastCounts : RequestBadgeCounts = null;
+  private inFlight   : Promise<void> | null = null;
+  private pollHandle : number | null = null;
+  private readonly details = new Map<string, RequestFiledDetail>();
+
+  constructor( opts: TaskRequestStoreOptions ) {
+    this.bus = opts.bus;
+    this.api = opts.api;
+    this.afterVerdict = opts.afterVerdict ?? ( async () => { /* nothing else to re-read */ } );
+    /* c8 ignore next */ // production-default fallback: Date.now() is the runtime clock; tests inject nowFn.
+    this.nowFn = opts.nowFn ?? ( () => Date.now() );
+    /* c8 ignore next */ // production-default fallback: globalThis.setInterval is the runtime scheduler; tests inject a fake.
+    this.setIntervalFn   = opts.setIntervalFn   ?? ( ( cb, ms ) => globalThis.setInterval( cb, ms ) as unknown as number );
+    /* c8 ignore next */ // production-default fallback: globalThis.clearInterval pairs with the default above.
+    this.clearIntervalFn = opts.clearIntervalFn ?? ( ( h ) => globalThis.clearInterval( h ) );
+  }
+
+  counts(): RequestBadgeCounts {
+    return this.lastCounts;
+  }
+
+  async refresh(): Promise<void> {
+    if ( this.inFlight !== null ) return this.inFlight;
+    const run = ( async () => {
+      try {
+        // ⚠️ A FAILED READ CLEARS THE COUNTS RATHER THAN KEEPING THE LAST ONES. A stale "2
+        // requests" after the store stopped answering tells Rick something is waiting that
+        // may already be answered; each pane's own sentinel reports the outage itself.
+        try {
+          this.lastCounts = await this.api.get<RequestBadgeCounts>( REQUEST_BADGES_PATH );
+        } catch {
+          this.lastCounts = null;
+        }
+        this.bus.emit<StoreRequestBadgesChangedPayload>( {
+          type    : "store_request_badges_changed",
+          payload : { known: this.lastCounts !== null },
+          source  : "TaskRequestStore",
+          ts      : this.nowFn(),
+        } );
+      } finally {
+        this.inFlight = null;
+      }
+    } )();
+    this.inFlight = run;
+    return run;
+  }
+
+  // 🔴 JOINING IS NOT ENOUGH AFTER A WRITE, AND THIS STORE HAD NO VERB FOR IT.
+  // `refresh()` above JOINS a read already in flight, which is correct for the
+  // poll — but a read whose fetch STARTED before the verdict landed cannot see
+  // it however patiently you wait. `submitVerdict` used to `await this.refresh()`
+  // and could therefore settle on counts taken BEFORE its own POST, leaving the
+  // badge one behind. Join the in-flight read so we neither race nor double-fetch
+  // beside it, then take a fresh one — the first read that can observe the write.
+  // Same shape as HoldingAreaStore/TaskListStore (Mr. Radio, measured at fcf2b6bc).
+  async refreshAfterWrite(): Promise<void> {
+    if ( this.inFlight !== null ) await this.inFlight;
+    return this.refresh();
+  }
+
+  startPolling(): void {
+    this.stopPolling();
+    void this.refresh();
+    this.pollHandle = this.setIntervalFn( () => void this.refresh(), TASK_REQUEST_POLL_INTERVAL_MS );
+  }
+
+  stopPolling(): void {
+    if ( this.pollHandle !== null ) {
+      this.clearIntervalFn( this.pollHandle );
+      this.pollHandle = null;
+    }
+  }
+
+  /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
+  disposeForTesting(): void {
+    this.stopPolling();
+  }
+  /* c8 ignore stop */
+
+  async submitVerdict( taskId: string, body: Record<string, unknown> ): Promise<RequestVerdictResult> {
+    try {
+      await this.api.post<unknown>( requestVerdictPath( taskId ), body );
+    } catch ( err ) {
+      return { ok: false, message: holdingRefusalMessage( err ) };
+    }
+    // 🔴 THE RE-READ WAITS ON A LANDED VERDICT, NEVER ON A SENT ONE. An approval moved the
+    // row between panes, and a denial took a count off a badge; both are true only now.
+    // ⚠️ `refreshAfterWrite`, NOT `refresh`: the latter would JOIN a poll whose fetch
+    // began before this POST, and settle on counts that predate the verdict.
+    //
+    // 🔴 AND NEITHER READ CAN UNMAKE THE VERDICT (row 93ca4268, HARDENING — no read can
+    // reject today, so this repairs no observed symptom). Bare `await`s here would let a
+    // rejection out of `submitVerdict` — past the `return` below, out through
+    // `requestChips.handleVerdict`'s `await`, which has only a `finally` — leaving the
+    // chip on "Sending…" over a verdict the server had recorded, and the rejection
+    // unhandled. ⚠️ The interface above has said "Resolves, never rejects" since it was
+    // written, and these two lines were the only thing that could have made that false.
+    // A reassurance that nothing enforces is worse than none: it disarms the reader who
+    // would otherwise have checked.
+    let stale = false;
+    await readBackAfterWrite(
+      async () => { await this.refreshAfterWrite(); await this.afterVerdict(); },
+      () => { stale = true; },
+    );
+    return { ok: true, stale };
+  }
+
+  cachedDetail( taskId: string, requestTs: string ): RequestFiledDetail | undefined {
+    return this.details.get( `${ taskId }@${ requestTs }` );
+  }
+
+  async loadDetail( taskId: string, requestTs: string ): Promise<void> {
+    try {
+      const body = await this.api.get<{ events?: unknown }>( requestEventsPath( taskId ) );
+      this.details.set( `${ taskId }@${ requestTs }`, requestFiledDetail( body ) );
+    } catch {
+      /* not cached on purpose — see the interface */
+    }
+  }
+}
+
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+export function createTaskRequestStore( opts: TaskRequestStoreOptions ): TaskRequestStore {
+  return new TaskRequestStoreImpl( opts );
+}

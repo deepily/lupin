@@ -6,8 +6,8 @@
 | **Doctrine home** | `lupin/src/docs/agents/implementer-watch-protocol.md` *(here)* |
 | **PIP-promotion target** | `planning-is-prompting/workflow/implementer-watch-protocol.md` *(on trigger — see below)* |
 | **Layer** | Layer-2 per-recipient doctrine for the generic Heartbeat Poker (`HeartbeatPokerJob`) |
-| **Authored by** | Task I3, per the D2 spec `src/rnd/v0.1.7/2026.05.22-heartbeat-poker-d2-watcher-protocol-spec.md` |
-| **Design doc** | `src/rnd/v0.1.7/2026.05.20-generic-heartbeat-poker-abstraction-design.md` |
+| **Authored by** | Task I3, per the D2 spec `src/rnd/v0.1.7/2026.05.22-heartbeat-poker-d2-watcher-protocol-spec.md` *(REMOVED by `b113a3a7`; recover: `git show b113a3a7^:src/rnd/v0.1.7/2026.05.22-heartbeat-poker-d2-watcher-protocol-spec.md`)* |
+| **Design doc** | `src/rnd/v0.1.7/2026.05.20-generic-heartbeat-poker-abstraction-design.md` *(REMOVED by `b113a3a7`; recover: `git show b113a3a7^:src/rnd/v0.1.7/2026.05.20-generic-heartbeat-poker-abstraction-design.md`)* |
 
 ## PIP-promotion triggers
 
@@ -159,8 +159,8 @@ behavior until the poker run ends on a clean termination signal or the hard cap.
 |---|---|
 | `plan-review-cascaded-common.md` §Observer-mode Probe Protocol | Sibling Layer-2 doctrine; structural template |
 | `src/rnd/v0.1.7/2026.05.20-...-design.md` §2 use case 3, §5 γ | Watcher role + doctrine-home ratification |
-| `src/rnd/v0.1.7/2026.05.22-heartbeat-poker-d2-watcher-protocol-spec.md` | The D2 spec this protocol body was authored from |
-| `src/rnd/v0.1.7/2026.05.22-heartbeat-poker-d1d4-class-spec.md` | The Layer-1 poker this doctrine pairs with |
+| `src/rnd/v0.1.7/2026.05.22-heartbeat-poker-d2-watcher-protocol-spec.md` *(REMOVED by `b113a3a7`; recover: `git show b113a3a7^:src/rnd/v0.1.7/2026.05.22-heartbeat-poker-d2-watcher-protocol-spec.md`)* | The D2 spec this protocol body was authored from |
+| `src/rnd/v0.1.7/2026.05.22-heartbeat-poker-d1d4-class-spec.md` *(REMOVED by `b113a3a7`; recover: `git show b113a3a7^:src/rnd/v0.1.7/2026.05.22-heartbeat-poker-d1d4-class-spec.md`)* | The Layer-1 poker this doctrine pairs with |
 | `/plan-session-checkpoint` skill | Work-organization shape for the checkpoint (§6) — not a commit mandate |
 
 ---

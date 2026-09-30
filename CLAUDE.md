@@ -1,13 +1,16 @@
-# LUPIN DEVELOPMENT GUIDE
+# Lupin development guide
 
-## COMMANDS
+> Rules only. Where a rule came from — the measurements, the reconciliations, the corrections —
+> is archived in `src/docs/doctrine/` and is not required reading.
+
+## Commands
 - Run FastAPI server: `src/scripts/run-fastapi-lupin.sh` (Runs on port 7999)
 - Docker build: `docker build -f docker/lupin/Dockerfile .`
 - Run GSM8K benchmarks: `src/scripts/run-gsm8k.sh --help`
 - Install cosa-voice MCP (global): `src/scripts/install-cosa-voice.sh` (user scope, all repos)
 - Regenerate API docs: `src/scripts/generate-api-docs.sh` (requires server on port 7999, `--offline` for saved JSON)
 
-## CLAUDE CODE SLASH COMMANDS
+## Claude Code slash commands
 - `/smoke-test-baseline [scope]` - Establish comprehensive baseline before changes
   - **scope**: `full` (Lupin + COSA) or `lupin` (Lupin-only), default: `full`
   - Creates timestamped logs and baseline report in `src/rnd/`
@@ -22,7 +25,7 @@
   - **Canonical doc**: `src/workflow/agentic-voice-workflow.md`
   - **Reference agents**: `src/cosa/agents/deep_research/`, `podcast_generator/`
 
-## CJ FLOW (COSA JOBS FLOW)
+## CJ Flow (CoSA jobs flow)
 
 CJ Flow is Lupin's unified work queue system. All jobs that implement the `QueueableJob` protocol flow through it.
 
@@ -30,7 +33,7 @@ CJ Flow is Lupin's unified work queue system. All jobs that implement the `Queue
 **Protocol**: `QueueableJob` (22 attrs + 4 methods) — see `src/cosa/rest/queue_protocol.py`
 
 **Dispatch architecture (v0.1.7+)**: `RunningFifoQueue._process_job(job)` dispatches by `isinstance`:
-- `AgenticJobBase` → `_submit_agentic_job` → `ThreadPoolExecutor` (the **agentic pool**, size = `cj flow max concurrent agentic jobs` INI key, prod default `= 1`, `[Lupin: Development]`/`[Lupin: Testing]` override to `= 3`). Consumer thread returns immediately; `Future.add_done_callback` fires `_on_agentic_complete` which calls `_transition_to_done` or `_transition_to_dead`.
+- `AgenticJobBase` → `_submit_agentic_job` → `ThreadPoolExecutor` (the **agentic pool**, size = `cj flow max concurrent agentic jobs` INI key: `[Lupin: Production]` and `[Lupin: Development]` set `= 3`, only `[Lupin: Baseline]` sets `= 1`, `[Lupin: Testing]` does not set it — read 2026-09-11 at `1e0028dd`; re-read the INI before relying on it). Consumer thread returns immediately; `Future.add_done_callback` fires `_on_agentic_complete` which calls `_transition_to_done` or `_transition_to_dead`.
 - `AgentBase` / `SolutionSnapshot` → inline fast-lane on the consumer thread (unchanged). Pool does NOT block fast-lane.
 
 **Thread safety (v0.1.7+)**: `FifoQueue` has `threading.RLock` protecting `queue_list` + `queue_dict`. Pool workers and consumer thread can mutate concurrently. All 9 `self.pop()` sites in `running_fifo_queue.py` migrated to `self.delete_by_id_hash(job.id_hash)` — head-of-queue is no longer deterministic under pool-callback concurrency.
@@ -56,11 +59,11 @@ CJ Flow is Lupin's unified work queue system. All jobs that implement the `Queue
 - `src/cosa/rest/queue_consumer.py` — Background consumer thread
 - `src/cosa/utils/api_resource_manager.py` — ApiResourceManager singleton (v0.1.7 Phase 3)
 
-**Architecture diagrams (before vs after v0.1.7)**: `src/rnd/v0.1.5/2026.02.19-approach-c-hybrid-queue-architecture.md` — ✅ Implementation Complete banner with full before/after Mermaid.
+**Architecture diagrams (before vs after v0.1.7)**: `src/rnd/v0.1.5/2026.02.19-approach-c-hybrid-queue-architecture.md` *(REMOVED by `b113a3a7`; recover: `git show b113a3a7^:src/rnd/v0.1.5/2026.02.19-approach-c-hybrid-queue-architecture.md`)* — ✅ Implementation Complete banner with full before/after Mermaid.
 
 **Packaging Guide**: `src/rnd/v0.1.4/2026.02.12-cj-flow-bounded-job-packaging-guide.md`
 
-## COST MODEL — BOUNDED CC vs FIREWALLED SDK
+## Cost model — bounded CC vs firewalled SDK
 
 Two LLM-cost paths exist in Lupin. Knowing which one a feature lands on is a design-time concern, not a runtime detail.
 
@@ -69,7 +72,7 @@ Two LLM-cost paths exist in Lupin. Knowing which one a feature lands on is a des
 | **Bounded `ClaudeCodeJob`** (CJ Flow, `task_type=BOUNDED`) | Claude Code CLI / Claude Agent SDK using Max-subscription OAuth | **Covered by Max 200 plan — zero per-token cost** |
 | **Direct Anthropic SDK** (`AsyncAnthropic( api_key=… )`) | `ANTHROPIC_API_KEY_FIREWALLED` env var | **Billed per token against the firewalled Anthropic account** |
 
-**Empirical confirmation (2026-05-12)**: A 10-job probe reported $2.0514 in SDK `cost_usd` telemetry while the Anthropic console credit balance moved **$0.00**. Forensic record: `src/rnd/v0.1.7/2026.05.12-bounded-cc-billing-empirical-confirmation.md`.
+**Empirical confirmation (2026-05-12)**: A 10-job probe reported $2.0514 in SDK `cost_usd` telemetry while the Anthropic console credit balance moved **$0.00**. Forensic record: `src/rnd/v0.1.7/2026.05.12-bounded-cc-billing-empirical-confirmation.md` *(REMOVED by `b113a3a7`; recover: `git show b113a3a7^:src/rnd/v0.1.7/2026.05.12-bounded-cc-billing-empirical-confirmation.md`)*.
 
 The "firewalled" naming is intentional defense-in-depth: the API key is stored under `ANTHROPIC_API_KEY_FIREWALLED`, **not** the bare `ANTHROPIC_API_KEY` that the Anthropic SDK auto-discovers. The CC CLI ignores the firewalled name and uses OAuth instead. Verbatim per `src/cosa/agents/deep_research/__init__.py:27`: "NEVER use ANTHROPIC_API_KEY - that is reserved for Claude Code CLI."
 
@@ -88,7 +91,7 @@ Migration candidates (tracked in TODO.md): the three ratified bounded-CC migrati
 
 **Framing**: this is a **cost-shift, not zero-cost**. The Max 200 plan is a fixed monthly bill. Migrations convert per-token metered spend into already-paid fixed cost. Never describe a migration as "free" — describe it as "covered by existing fixed cost."
 
-### When NOT to migrate
+### When not to migrate
 
 - High-frequency tiny calls (>~10 QPS) — subprocess spawn overhead dominates. Keeps: `notification_proxy/strategies/llm_fallback.py`, `decision_proxy/`.
 - Hard latency budget < ~2 seconds.
@@ -97,36 +100,28 @@ Migration candidates (tracked in TODO.md): the three ratified bounded-CC migrati
 
 ### Off-peak scheduling rule (operational)
 
-Max-plan usage has rolling-window limits. Batch bounded jobs running during Rick's interactive peak window can throttle his real Claude Code work.
+Max-plan usage has rolling-window limits, and the host is not up around the clock. Any non-interactive
+bounded job — batch generation, scheduled regression sweeps, podcast, presentation, research — must set
+`scheduled_at` inside a window the box is up for. User-clicked synchronous jobs are exempt.
 
-⚠️ **CORRECTED 2026-08-17 (Rick's ruling, row `f0b3f630`). The old window pointed at hours the box is powered OFF.** It read "Optimal: 12 AM – 9 AM EDT (Rick asleep, zero interactive use)" — true about Rick, false about the machine. Measured boot history, unbroken since Aug 5: the host is **DOWN ~10:53 PM – 7:17 AM**. Every seat that followed the rule correctly still had its job sit dead until the next boot and drain hours late — two jobs scheduled for 00:30 and 01:15 ran at ~10:07 the next morning.
+| window (EDT) | verdict |
+|---|---|
+| ~11 PM – 10 AM | ☠️ dead — the host is usually powered off. A job here does not run late, it does not run at all until boot |
+| 9 PM – 11 PM | ❌ peak — Rick's interactive window |
+| **10 AM – 1 PM** | ✅ **optimal — schedule batch work here** |
+| 1 PM – 9 PM | 🟡 acceptable |
 
-⚠️ **CORRECTED AGAIN 2026-08-20 (Rick's ruling). The 08-17 correction replaced hours the box was OFF with hours it is usually NOT UP YET — same failure, one step smaller.** It named **7:30 AM** as the start, derived from a single boot at 07:17 on Aug 6. **Measured across the 12 morning boots since Aug 4** — `08:52 · 09:27 · 07:17 · 09:14 · 09:52 · 09:56 · 09:20 · 10:52 · 09:48 · 09:03 · 09:17 · 09:43` — the **median is 09:24 and eleven of twelve are after 08:52**. A job placed at 7:30 sits dead ~1.5–2.5h on almost every day.
+Rick ruled 2026-08-31 that the boot window is a real constraint, not a record of his habit. The box also
+goes down mid-day sometimes, so "optimal" means *most likely up*, never *guaranteed up* — a long job must
+tolerate a restart.
 
-🔴 **DO NOT TRUST THIS TABLE EITHER — RE-DERIVE IT.** This rule has now been wrong twice, both times because someone generalised from too few boots. **Measure before you schedule:**
+Re-derive the window rather than trusting the table; use `journalctl --list-boots --no-pager`, not
+`last -x reboot`, whose `wtmp` rotates and can report a single boot with nothing saying so.
 
-```bash
-last -x reboot | head -20      # read the morning boot times yourself
-```
+Submit through `/api/v2/submit`, naming the command `agent router go to claude code`. `scheduled_at` is
+top-level — it tells the queue *when* to run, and is not part of the command's argument contract. The old
+`/api/claude-code/submit` door and its alias answer **410 Gone**.
 
-**The constraint is the box, not just Rick's sleep:**
-
-| Window (EDT) | Verdict | Why |
-|---|---|---|
-| ~11 PM – 9 AM | ☠️ **DEAD — never schedule here** | Host is usually powered off, and on most days is still down well past 8:52 AM. A job here does not run late — it does not run at all until boot. |
-| 9 PM – 11 PM | ❌ Peak — avoid | Rick's interactive window; competes with his real work. |
-| **10 AM – 1 PM** | ✅ **OPTIMAL — schedule batch work here** | Comfortably after the 09:24 median boot, and Rick is barely on. The only window that is reliably both up and quiet. |
-| 1 PM – 9 PM | 🟡 Acceptable | Box up, some interactive use, well below peak. |
-
-**Rule**: any non-interactive bounded job (batch generation, scheduled regression sweeps, podcast/presentation/research) MUST set `scheduled_at` inside a window the box is UP for — **prefer 10 AM – 1 PM EDT** — via `/api/v2/submit` (field defined on `SubmitRequest` at `src/cosa/rest/routers/v2_ask.py`). User-clicked synchronous bounded jobs are exempt.
-
-⚠️ **CHANGED 2026-08-21.** This line used to name `/api/claude-code/submit`. That door and its `/api/claude-code/queue/submit` alias are now tombstones answering **410 Gone** (Rick's ruling: the Claude Code job is *upgraded* to the v2 front door, not left to die on the vine). The work enters through `/api/v2/submit` naming the command `agent router go to claude code`; `scheduled_at` stays TOP-LEVEL because it tells the queue *when* to run, and `args` is checked against the command's own argument contract, which no scheduling instruction is in.
-
-⚠️ **And the box goes down mid-day too.** On 2026-08-20 it was down **14:34–18:07**. "Optimal" means *most likely up*, never *guaranteed up* — a long job should still tolerate a restart.
-
-**If a job does land in the dead window**, the catch-up is no longer silent: `job_persistence.py` emits a `[CJ-CATCHUP-LATE]` line naming `scheduled_at` vs actual and hours-late (`fef78ce3`, with a negative control at `f0b7c589` proving it stays quiet on every non-catch-up path). A late drain is now visible rather than reported as a normal run — but visible-and-late is still late.
-
-Example:
 ```json
 POST /api/v2/submit
 {
@@ -136,11 +131,10 @@ POST /api/v2/submit
 }
 ```
 
-(This example used to read `02:30` — inside the dead window. A copied example is how a bad window propagates faster than the prose that describes it.)
+A job that lands in the dead window drains late but not silently — `job_persistence.py` emits a
+`[CJ-CATCHUP-LATE]` line naming `scheduled_at`, the actual time, and the hours late.
 
-**Mandate for new design**: any proposal for a new LLM-driven feature MUST first answer "can this be a bounded CC job?" and document the answer. If "no", document which guardrail it hits.
-
-## CODE STYLE
+## Code style
 - **Imports**: Group by stdlib, third-party, local
 - **Naming**: snake_case for functions, PascalCase for classes, UPPER_SNAKE_CASE for constants
 - **File Naming**:
@@ -152,14 +146,14 @@ POST /api/v2/submit
 - **Logging**: Currently uses print() statements rather than a logging framework
 - **Types**: Dynamic typing is used (no type annotations)
 - **Documentation**: Add docstrings to new functions and classes, follow existing style
-- **XML Formatting**: Use XML tags for structured responses in agent communication
+- **XML formatting**: Use XML tags for structured responses in agent communication
 
-## CONFIGURATION
+## Configuration
 - Config files: `src/conf/lupin-app.ini` and `src/conf/lupin-app-splainer.ini`
 - Environment variables override config file settings
 - Use `ConfigurationManager` to access config values
 
-## PROJECT STRUCTURE
+## Project structure
 - `/src/lupin_app/`: FastAPI application directory
   - `/src/lupin_app/main.py`: Main FastAPI server entry point
   - `/src/cosa/rest/routers/`: API endpoint routers
@@ -191,11 +185,11 @@ POST /api/v2/submit
 > `src/scripts/run-lupin-gui.sh`, went with it: a Mac-only launcher invoking `python3.10` over SSHFS
 > in a 3.13 repo. **Recover either with `git checkout 71d5efaa -- src/lib src/scripts/run-lupin-gui.sh`.**
 
-## DEBUGGING
+## Debugging
 - Set `debug=True` and `verbose=True` parameters in class instantiations
 - Use `du.print_banner()` from `utils.py` for formatted console messages
 
-## WEBSOCKET DEVELOPMENT NOTES
+## WebSocket development notes
 - **Architecture**: Dual-session design with user-centric routing (see `/src/docs/websocket-architecture.md`)
 - **Event System**: Subscription-based filtering prevents clients from receiving unwanted events
 - **Session Management**: localStorage-based persistence across page reloads using "adjective noun" format (e.g., "wise penguin")
@@ -216,32 +210,32 @@ POST /api/v2/submit
 - **Event Debugging**: See `/src/docs/websocket-troubleshooting.md` for comprehensive debugging procedures
 - **Configuration**: All WebSocket settings in lupin-app.ini under websocket_* keys
 
-## NOTIFICATION SYSTEM
-- **API Reference**: `src/docs/notification-api.md` (comprehensive one-stop reference)
+## Notification system
+- **API reference**: `src/docs/notification-api.md` (comprehensive one-stop reference)
 - **WebSocket Events**: `src/docs/websocket-events.md` (event catalog)
 - **Agentic Voice Integration**: `src/workflow/agentic-voice-workflow.md`
 - **Decision Proxy Admin Guide**: `src/docs/proxy-admin-guide.md` (Trust Dashboard + Ratification how-to)
 - **Interactive Proxy Testing**: `src/docs/automated-interactive-testing.md` (proxy auto-answer testing guide)
 - **R&D Planning Docs**: `src/rnd/v0.1.0/2025.10.15-sse-notifications/` (historical)
 
-## STARTUP PROCEDURE
+## Startup procedure
 - The first thing you should do when you start a session is read the global Claude configuration file and follow its instructions.
-- **HISTORY FILE READING**: Read the main history file (`/mnt/DATA01/include/www.deepily.ai/projects/lupin/history.md`) which contains recent 30-day context and links to archived periods
-- **IMPLEMENTATION DOCUMENT**: Read the current implementation document referenced at the top of history.md
-- **ARCHIVE ACCESS**: If deeper historical context needed, follow links to `history/YYYY-MM-history.md` files
-- **IGNORE SUB-REPO HISTORIES**: Do NOT read these sub-repository history files as they are managed separately:
+- **History file**: Read the main history file (`/mnt/DATA01/include/www.deepily.ai/projects/lupin/history.md`) which contains recent 30-day context and links to archived periods
+- **Implementation document**: Read the current implementation document referenced at the top of history.md
+- **Archive access**: If deeper historical context needed, follow links to `history/YYYY-MM-history.md` files
+- **Ignore sub-repo histories**: do not read these sub-repository history files as they are managed separately:
   - `src/lupin-plugin-firefox/history.md` (Firefox plugin sub-repo)
-  - `src/lupin-mobile/history.md` (Mobile app sub-repo)
+  - `../lupin-mobile/history.md` (Mobile app — a SIBLING of lupin since 2026-08-30, no longer under `src/`)
   - (`src/cosa/history.md` is **no longer** a sub-repo history — CoSA folded into the mono-repo 2026-05-29; it is now a normal in-tree doc.)
 
-## PROJECT SHORT NAMES
+## Project short names
 - This repo's SHORT_PROJECT_PREFIX is [LUPIN]
 
-## REPOSITORY RELATIONS
+## Repository relations
 - There is another repo that's a part of the larger project contained in the directory `lupin-plugin-firefox`
 - This repo must be managed separately and cannot be managed by Claude
 
-## RUNNING/TESTING FASTAPI APPLICATIONS
+## Running and testing FastAPI applications
 - Please assume that there is a Fast API server instance bound to port 7999. I will start and stop it if needed. You never need to spin up another instance unless it's for a ephemeral use on port 8000.
 - **Before clicking Resume on any TFE/BFE stalled job, or before scheduling a live E2E run on `:8000`**, run `src/scripts/preflight-test-container.sh` (or `pytest src/tests/smoke/test_container_preflight.py -v`). This catches docker-compose.yml drift — cases where a `.git`, credentials, or other bind-mount change has not been applied to the running container because only `docker rm -f` + `docker compose up -d` picks up new mounts (not `docker restart`). Failure output includes the exact remedy.
 - **Server lifecycle (when does a change land? when do I bounce? which command?)**: See skill `server-lifecycle` — encodes the per-server decision matrix, the restart-vs-`--force-recreate` distinction, the queue-check courtesy, and the `:8000` monopolize-mode protocol. Auto-fires on bounce/restart/refresh/rebuild phrasing including ASR variants ("doctor" → "Docker").
@@ -249,11 +243,11 @@ POST /api/v2/submit
   - **Use the sanctioned path**: `./src/scripts/bounce-dev-server.sh` (`--quiet` for a one-liner). It posts an **ack-confirmed** warning broadcast so the fleet holds notifications *before* the server dies, restarts the container, and polls `/health`; the **all-clear is emitted by the restarted server's own startup hook**, so it covers every restart path.
   - **`restart` ≠ `--force-recreate`**: mount specs and env resolve at container **CREATE**. Changed `docker-compose.yml`, a bind mount, or an env var? Use `docker compose up -d --force-recreate <svc>` — a restart reuses the old values and your change silently does not land. (This is also why re-arming `LUPIN_RELOAD` needs a recreate.)
 
-## GIT REPOSITORY MANAGEMENT
+## Git repository management
 
 **CRITICAL**: This project contains multiple nested Git repositories that must be managed separately.
 
-### Repository Structure
+### Repository structure
 
 **Parent Repository** (Manage with /plan-session-end):
 - **Name**: Lupin (evolved from Genie-in-the-Box)
@@ -273,11 +267,11 @@ POST /api/v2/submit
    - **History**: Has own history.md (DO NOT read from Lupin context)
 
 2. **Mobile App**
-   - **Location**: `/src/lupin-mobile/`
+   - **Location**: `/mnt/DATA01/include/www.deepily.ai/projects/lupin-mobile/` — a **SIBLING** of the Lupin repo since 2026-08-30, moved out of `src/`. It is no longer nested, so it will not appear in Lupin's `git status` at all.
    - **Management**: Separate repository, managed independently
    - **History**: Has own history.md (DO NOT read from Lupin context)
 
-### How /plan-session-end Handles Nested Repos
+### How /plan-session-end handles nested repos
 
 The `/plan-session-end` workflow has been configured with nested repository awareness:
 
@@ -291,7 +285,7 @@ The `/plan-session-end` workflow has been configured with nested repository awar
 **What you'll see**:
 ```
 ⚠️ Detected changes in nested repositories:
-• /src/lupin-mobile/ (1 new file)
+• ../lupin-mobile/ (1 new file — sibling repo, detected only if explicitly scanned)
 
 These are separate Git repositories and will not be included in this commit.
 Reminder: Manage nested repositories in their own sessions/contexts.
@@ -303,7 +297,7 @@ Reminder: Manage nested repositories in their own sessions/contexts.
 - ✅ Nested repos must be managed when working directly in their contexts
 - ✅ `/plan-session-end` automatically filters nested paths from git operations
 
-### Detection Command
+### Detection command
 
 If you need to verify nested repositories:
 ```bash
@@ -311,25 +305,31 @@ If you need to verify nested repositories:
 find . -name ".git" -type d | grep -v "^./.git$"
 ```
 
-### Working in Nested Repositories
+### Working in nested repositories
 
 **When working in Firefox Plugin** (`cd src/lupin-plugin-firefox/`):
 - Manage as independent project
 - Has own git history and workflows
 
-**When working in Mobile App** (`cd src/lupin-mobile/`):
+**When working in Mobile App** (`cd ../lupin-mobile/`):
 - Manage as independent project
 - Has own git history and workflows
 
-## TESTING VENUES
+### Committing — never attach a heredoc to the `git commit` line
 
-**MANDATE**: Every automated test runs on exactly one of two servers. Pick by rubric, never by habit.
+Commit with `git commit -F <file> -- <paths>`. Write the message file first; a heredoc *there* is fine.
 
-> 🔴 **THE TWO VENUES ALSO HAVE TWO DATABASES, and a host shell silently reads the wrong one.** Neither container sets `DB_NAME`, so each falls through to its own config block: `lupin-rest-dev` → **`lupin_db_dev`**, `lupin-rest-test` → **`lupin_db_test`**. A host shell inherits the *Development* block, so `PYTHONPATH=src python3` on the host queries **dev** even when the job you are chasing ran on `:8000`.
->
-> **Measured 2026-08-28**, both directions inside a minute: host/dev returned **205 rows, zero `ts-` rows, nothing newer than the previous day**; the same query inside `lupin-rest-test` returned **4 rows, all same-day**, including the one at issue. The host answer reads exactly like *"test_suite jobs are never persisted"* — which is false, and a correct fix was one message from being retracted on it. **An empty result from the wrong box is not evidence; it is a confident answer to a question you did not ask.**
->
-> ⇒ **Go at the database container and NAME the database** — `docker exec lupin-postgres psql -U lupin_dev -d lupin_db_test -c "..."`. Better than "run it inside `lupin-rest-test`", which still depends on standing in the right place — the thing that failed. **There is no default to fall through to**, verified both ways: a wrong name gives `FATAL: database "lupin_db_typo" does not exist`, and *omitting* `-d` errors too (psql tries the username as the database). You either name the box you meant or you are told. The in-container route lacks that property — it reads *a* database successfully either way.
+Never attach a heredoc or here-string to the `git commit` invocation itself — `-F /dev/stdin <<EOF`,
+`-F - <<EOF`, `<<< 'body'`. The commit scope guard reads the tail after the `git commit` match to find
+which paths you are committing; a `<<` in that tail makes it decline, print
+`⚠️ Commit scope guard: NOT REVIEWED`, and let the commit through unexamined.
+
+The rule is about attachment, not about heredocs. If you do see `NOT REVIEWED`, either re-run in the
+reviewed shape or check the commit yourself with `git show --stat <sha>` — and say which you did.
+
+## Testing venues
+
+Every automated test runs on exactly one of two servers. Pick by rubric, never by habit.
 
 ### :7999 (dev) — AI-discretionary
 
@@ -345,34 +345,51 @@ Suites that qualify:
 - Inline `quick_smoke_test()` blocks + `py_compile` + import-chain checks
 - `src/tests/smoke/test_calculator_live_pipeline.py`
 - `src/tests/smoke/test_container_preflight.py`
+- `src/tests/smoke/test_memory_cap_binds.py` — ⚠️ it runs `systemd-run` and gets a process
+  SIGKILLed, which reads like a :8000 suite and is not one. Routed by the rubric: the scope is
+  transient (`--scope --collect`, dies with the command), so nothing persists; ~0.5s; and the only
+  process it kills is the allocator it started, inside a cgroup it owns — which is the very
+  property one of its cases asserts. It needs no monopoly and takes none.
 - `src/tests/websocket_smoke/` (run via `src/scripts/run-websocket-smoke-tests.sh`)
 
 ### :8000 (test) — monopolize mode, scheduled only
 
-Submit via `POST /api/test-suite/submit`. **Self-authorization rule (2026-06-06): a verified-IDLE `:8000` — nothing running, nothing scheduled — is bounce-then-schedule SELF-AUTHORIZED; the user is NOT a gate.** Only **killing a LIVE in-flight job** needs the user's word. **Never** inject via ad-hoc curl, direct queue push, or in-process server instantiation — side-door injection collides with in-flight scheduled runs and poisons both.
+Submit via `POST /api/v2/submit` with the command `agent router go to test suite` (`src/scripts/submit-test-suite.py` wraps it), and only that way. `/api/test-suite/submit` is retired and answers 410. A refused submit (unknown suite name, malformed or contradictory `pytest_args`) is HTTP 200 with `status: "failed"` and the cause in `error`, so read `status`, not only the HTTP code. Never inject through ad-hoc curl, a direct
+queue push, or in-process server instantiation — a side door collides with in-flight scheduled runs and
+poisons both.
 
-🔴 **HOW YOU VERIFY IDLE — one command, and its exit code (row `e6b8fe56`, 2026-08-25).** This rule already said to read the queue, and a seat that followed it was never reading `monopolize_id` — **the rule itself was not the defect** (Tiberius's caller audit, `7f935140`, `src/rnd/v0.2.0/2026.08.24-monopolize-as-idleness-caller-audit.md`). What was missing is a single reliable way to do what it asks. `pool-status` cannot be that way: **measured** against real queues, `monopolize_id` moves for exactly ONE condition — a monopolize-flagged job that has already **started** — so it answers *which job holds the slot*, an identity question, and says nothing about work that is QUEUED, running INLINE on the consumer thread (row `99b09840`), or in the shared pool. **And the queue listings cannot do it alone either**: `/api/get-queue/{q}` is **user-filtered** and the gate account is not an admin — `?user_filter=*` answers **403**, so a peer's queued job is not in your listing at all.
+Eligible if **any** of: it mutates persistent state (DB rows, shared files, LLM API spend, enqueued jobs);
+it runs over 2 minutes; it needs server monopoly.
+
+Suites that qualify:
+- `src/tests/smoke/test_proxy_integration.py` (any scenario — CRUD and expediter mutate state)
+- `src/tests/run-integration-tests.sh` (final merge gate)
+- `src/scripts/run-e2e-ui-tests.sh` (functional and visual)
+- `src/tests/run-presentation-regression.sh` (all variants)
+
+A verified-idle `:8000` is bounce-then-schedule self-authorized — the user is not a gate, and neither
+budget approval nor an idle-slot ask is required. The only user gate is **killing a live in-flight job**.
+
+**Verify idle with one command and read its exit code:**
 
 ```bash
 PYTHONPATH=src python3 -m cosa.rest.venue_idle --port 8000 ; echo "exit=$?"
 ```
 
-**The exit code is the answer: `0` IDLE · `1` BUSY · `2` UNKNOWN.** It reads the unfiltered, unauthenticated `GET /api/busy` — run depth, **todo depth**, shared-pool inflight, monopolize slot — and every lane must be empty. 🔴 **UNKNOWN IS NOT IDLE.** UNKNOWN with only `todo_queue_size` missing means that container predates this row and cannot see waiting work; the remedy is a **bounce** (a code pickup), not a `--force-recreate`. Treating a signal's absence as proof of absence is the defect itself.
+`0` idle · `1` busy · `2` unknown. It reads the unfiltered, unauthenticated `GET /api/busy` — run depth,
+todo depth, shared-pool inflight, monopolize slot — and every lane must be empty.
 
-**Placement, once you have a `0`:** empty queue → bounce (to clear static-snapshot drift, see §reference) + schedule + run now; something already SCHEDULED (queued, not yet running) → still self-authorized, but set `scheduled_at` AFTER the queued job (never jump an expected-next run); something RUNNING → queue behind it, no bounce.
+**Unknown is not idle.** If only `todo_queue_size` is missing, that container predates the field and
+cannot see waiting work; bounce it to pick up the code, not `--force-recreate`.
 
-Eligible if **any**:
-- Mutates persistent state (DB rows, shared files, LLM API spend, enqueues jobs).
-- Runtime > 2 minutes.
-- Needs server monopoly (E2E UI, integration, regression sweeps).
+Do not verify idle from `pool-status` or the queue listings. `monopolize_id` only moves for a
+monopolize-flagged job that has already started, so it names which job holds the slot and says nothing
+about queued or inline work; `/api/get-queue/{q}` is user-filtered and `?user_filter=*` answers 403 for
+this account, so a peer's queued job is not in your listing at all.
 
-Suites that qualify:
-- `src/tests/smoke/test_proxy_integration.py` (any scenario — CRUD + expediter mutate state)
-- `src/tests/run-integration-tests.sh` (final merge gate)
-- `src/scripts/run-e2e-ui-tests.sh` (functional + visual)
-- `src/tests/run-presentation-regression.sh` (all variants)
-
-The AI **self-authorizes** :8000 runs on a verified-idle server (logged, no human gate) and owns both scheduling and executing. The ONLY user-gate is **killing a live in-flight job**. Never budget approval, never tester-duty deferral, never an idle-slot ask.
+**Then place it**: empty queue → bounce, schedule, run now. Something already scheduled → still
+self-authorized, but set `scheduled_at` after it; never jump an expected-next run. Something running →
+queue behind it, no bounce.
 
 ### The `src/tests/smoke/` caveat
 
@@ -382,20 +399,20 @@ The directory name is not a venue marker. Files living in `src/tests/smoke/` can
 
 :7999 is an optimization for truly fast, truly read-only work. If you cannot prove a test meets all three :7999 criteria, schedule it on :8000.
 
-## 100% COVERAGE MANDATE
+## 100% coverage mandate
 
-**Lupin-wide hard gate.** Ratified 2026-05-06 (multiplexer-only), **scope-expanded Lupin-wide 2026-05-16** ("Everything has to pass at 100%. Full stop."). CoSA inherits it as of the 2026-05-29 mono-repo fold, on a grandfathering ramp — see the TODO.md top entry (deadline 2026-06-05).
+**A Lupin-wide hard gate.** Ratified 2026-05-06 (multiplexer-only), **scope-expanded Lupin-wide 2026-05-16** ("Everything has to pass at 100%. Full stop."). CoSA inherits it as of the 2026-05-29 mono-repo fold, on a grandfathering ramp — see the TODO.md top entry (deadline 2026-06-05).
 
 **The rule**: **100% coverage — lines AND branches AND functions** on all Lupin code. Python via `pytest --cov` (`--cov-fail-under=100`); TypeScript via `c8 --100`.
 
-- **Exceptions**: `# pragma: no cover` (Python) / `c8 ignore` (TS) ONLY for genuinely-unreachable defensive branches, and ONLY with a same-line comment giving the reason. "No time to test" is never valid — fix the test, not the gate.
+- **Exceptions**: `# pragma: no cover` (Python) / `c8 ignore` (TS) only for genuinely-unreachable defensive branches, and only with a same-line comment giving the reason. "No time to test" is never valid — fix the test, not the gate.
 - **In plan ACs**: write "100% lines/branches/functions" — never ≥90%/≥95%.
 - **Excludes**: sub-repos `lupin-mobile`, `lupin-plugin-firefox`, and external-project bind-mounts.
 - **Canonical record**: auto-memory `feedback_100pct_coverage_multiplexer.md` (directive + Lupin-wide expansion). Origin doc: `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/08-phase6a-jobs-surface-design.md` AC6.
 
-## TESTING
+## Testing
 
-Three-tier strategy (unit → integration → E2E). Venue routing (`:7999` vs `:8000`) per §TESTING VENUES above; every suite is tagged with its venue. `:8000 (scheduled)` = submit via `POST /api/test-suite/submit`; **self-authorized on a verified-idle server** (place behind any already-scheduled/running job — see §TESTING VENUES).
+Three-tier strategy (unit → integration → E2E). Venue routing (`:7999` vs `:8000`) per § Testing venues above; every suite is tagged with its venue. `:8000 (scheduled)` = submit via `POST /api/v2/submit` (command `agent router go to test suite`); **self-authorized on a verified-idle server** (place behind any already-scheduled/running job — see § Testing venues).
 
 | Suite | Venue | Command | Notes |
 |---|---|---|---|
@@ -404,97 +421,394 @@ Three-tier strategy (unit → integration → E2E). Venue routing (`:7999` vs `:
 | Smoke (inline) | :7999 | `python -m cosa.rest.<module>` | `quick_smoke_test()` blocks; non-destructive. `src/tests/smoke/` files are heterogeneous — route each by the §TESTING VENUES rubric, not the folder |
 | WebSocket smoke | :7999 | `src/scripts/run-websocket-smoke-tests.sh` | 50 tests; connection/auth/events |
 | Integration | :8000 (scheduled) | `./src/tests/run-integration-tests.sh --bg -v` | 43 tests; **FINAL merge gate**; always `--bg` |
-| E2E UI (Playwright) | :8000 (scheduled) | `./src/scripts/run-e2e-ui-tests.sh --bg -v` | ~285 functional + visual; ~17min; `-k visual` (visual only), `--update-snapshots` (rebaseline); snapshots version-controlled |
+| E2E UI (Playwright) | :8000 (scheduled) | `./src/scripts/run-e2e-ui-tests.sh --bg -v` · one half: `--half a` / `--half b` | 830 tests in 2992.7s (full run ts-cf9f5f85, 2026-09-12). The merge gate runs it as two halves, suites `e2e_a` then `e2e_b`, each with its own timeout (row 2818dad7). The files are in `src/tests/e2e_ui/partition/`, and `test_e2e_halves_partition.py` fails on a test file in neither half or both. `-k visual` (visual only), `--update-snapshots` (rebaseline); snapshots version-controlled |
 | Interactive proxy | :8000 (scheduled) | `python src/tests/smoke/test_proxy_integration.py --group all --auto-proxy --no-confirm` | 12 scenarios; mutates state, ~180s/scenario |
 | Presentation regression | :8000 (scheduled) | `./src/tests/run-presentation-regression.sh --bg` | render→Sonnet→(Opus); real LLM spend; `--include-opus` / `--all` variants |
 
 **`--bg` mandate**: integration, E2E UI, and presentation regression exceed the 10-min Bash timeout — always launch with `--bg` from Claude Code; monitor the matching `/tmp/*-latest.log`. PID-file overlap guards prevent concurrent runs.
 
-**Coverage**: `pytest --cov=cosa --cov-report=html src/tests/` (Python). See §100% COVERAGE MANDATE for the hard gate.
-
-**Docs**: `src/tests/README.md` (overview), `src/tests/integration/README.md`, `src/docs/automated-interactive-testing.md` (proxy), `src/tests/smoke/README.md`, `src/tests/AUTH-TESTING-GUIDE.md` (credentials), presentation strategy `src/rnd/v0.1.6/2026.03.14-presentation-generator/2026.04.07-e2e-testing-strategy.md`.
-
 ## PR MERGE REQUIREMENTS
 
-<!-- merge-pyramid-suites: unit cosa typescript smoke websocket e2e integration -->
-**All must pass before merging to main** (venues + commands per §TESTING above), run in this order: unit (:7999) → **cosa (:7999 — in-tree `src/cosa/tests/**`, `src/tests/run-cosa-tests.sh`; joined the pyramid 2026-08-13, row d83d025b)** → **typescript (:8000 scheduled — `src/tests/run-typescript-tests.sh`, c8 at 100%, ~8-25 min so it fails the :7999 two-minute rubric; runs inside the capped `jstest.slice` cgroup — ban lifted 2026-08-25, row 92e94cb7)** → smoke (:7999) → **serial bridge guard (`src/scripts/run-serial-bridge-guard.sh` — read the note below before reading its verdict)** → WebSocket smoke (:7999) → E2E UI + visual regression (:8000 scheduled) → **integration (:8000 scheduled — FINAL GATE)**. Each requires 100% pass. Wait for E2E to complete before launching the integration gate; PID-file guards block concurrent runs.
+<!-- merge-pyramid-suites: typecheck stylelint unit cosa coverage typescript smoke websocket integration e2e_a e2e_b -->
+All must pass before merging to main, in this order: typecheck → stylelint → unit → cosa → coverage → typescript →
+smoke → serial bridge guard → websocket smoke → e2e UI and visual regression, as two halves e2e_a then
+e2e_b → integration, which is the final gate. Each requires 100% pass. Venues and commands are in § TESTING above.
 
-The **cosa tier's count was being asserted without ever being run.** Now measured **three times across two different trees**:
+**typecheck runs FIRST and it is the cheapest thing here** — the three tsc projects, ~3s of static
+analysis (measured 3.00s wall, 2026-09-09) against the ~25min TypeScript tier. Ruled a blocking gate by
+Rick on 2026-09-09 (row `7bc67019`, answered on a direct ask). ⚠️ Its summary counts PROJECTS, not
+tests: `Failed: 1` means one tsconfig project is red, which may be one type error or four hundred.
 
-```
-@3a8ce109  8668 passed, 26 skipped  in 280.72s   EXIT=0   (Tiberius, 21:16)
-@17e78c98  8668 passed, 26 skipped  in 274.45s   EXIT=0   (Rio)
-@17e78c98  8668 passed, 26 skipped  in 274.53s   EXIT=0   (Rio)
-@b3c76d55  8671 passed, 26 skipped  in 275.56s   EXIT=0   (Tiberius, tier-wide thread probe)
-@b3c76d55  8671 passed, 26 skipped  in 276.67s   EXIT=0   (Rio, independent)
-```
+**stylelint runs SECOND, for the same reason** — every `git ls-files '*.css'` file (32), measured 1.5s wall.
+Ruled a blocking gate by Rick on 2026-09-18 21:06 (row `d3d4a18c`), after 329 errors had built up as
+"pre-existing" with no gate to stop them. ⚠️ Its summary counts FILES: `Failed: 1` is one red .css file,
+and the error count is printed on its own line. A waiver needs a same-line reason
+(`stylelint-disable-next-line <rule> -- <why>`); the config refuses one without. Tracked .html inline
+`<style>` blocks are NOT covered — that needs postcss-html, which is not installed.
 
-**FIVE runs, two seats, three shas — and the two different counts RECONCILE rather than conflict.** `git diff 17e78c98..b3c76d55 -- src/cosa/tests` is **+4 `def test_`, −1 removed = +3**, which is exactly `8668 → 8671`. Verified independently by both of us. A count that moves *and* whose movement is fully explained by the diff is stronger evidence than a count that merely repeats.
+> The heading above is SHOUTED and the HTML comment above is machine-read — neither is styling.
+> `test_bridge_dir_guard.py` looks for the exact string `## PR MERGE REQUIREMENTS`, and
+> `test_typescript_suite_gate.py` parses the `merge-pyramid-suites` marker and compares its set to
+> `ALL_SUITE_COMPONENTS` in `src/cosa/agents/test_suite/job.py`, then checks the paragraph beneath it
+> names every one. Lowercasing the heading or dropping the marker reddens the unit tier — measured
+> 2026-09-08, when a reformatting pass did both. The marker is a SET, not a sequence: the shell array
+> runs integration before e2e while the documented pyramid holds integration back as the final gate,
+> and that ordering difference is a ruling rather than drift.
 
-The figure in circulation was **8,622/0**, which is simply the count as of **08-22**. Nothing regressed — **zero failures** in both runs — and 7 commits touched `src/cosa/tests` in between, adding a net **+44** `def test_` (`402e528c` `f2be1f6d` `8cb320bb` `0dd919d2` `927076a4` `566cb971` `e38abe43`) against a measured +46; the remainder is parametrization. **Stale expectation, not regression**, proven both ways rather than inferred from the unit tier's similar drift.
+| # | gate | venue |
+|---|---|---|
+| 1 | **typecheck — `src/tests/run-typecheck-gate.sh`** — ~3s, fails a type-red branch first | :7999 |
+| 2 | **stylelint — `src/tests/run-stylelint-gate.sh`** — ~1.5s, every tracked .css file | :7999 |
+| 3 | unit — `pytest src/tests/unit/` | :7999 |
+| 4 | cosa — `src/tests/run-cosa-tests.sh` | :7999 |
+| 5 | coverage — `src/tests/run-coverage-gate.sh` | :7999 |
+| 6 | typescript — `src/tests/run-typescript-tests.sh` | :8000 scheduled |
+| 7 | smoke | :7999 |
+| 8 | serial bridge guard — `src/scripts/run-serial-bridge-guard.sh` | :7999 |
+| 9 | websocket smoke | :7999 |
+| 10 | E2E UI + visual regression, half A — `e2e_a`, `src/scripts/run-e2e-ui-tests-half-a.sh` | :8000 scheduled |
+| 11 | E2E UI + visual regression, half B — `e2e_b`, `src/scripts/run-e2e-ui-tests-half-b.sh` | :8000 scheduled |
+| 12 | **integration — the final gate** | :8000 scheduled |
 
-**Three samples across two shas, by two seats**, so 8,668 is neither a one-tree artifact nor a one-runner one; wall time is tight too — 274.45 / 274.53 / 280.72s. ⚠️ **What these samples are NOT independent of: the HARNESS** — wider than box-and-interpreter (Rio's correction to my wording). All three share the same `.venv` package set, the same `conftest`, the same runner script, the same env (`LUPIN_UNIT_NETWORK=block`, `LUPIN_ROOT`, `PYTHONPATH`), and the same OS and clock; **Rio's two additionally shared the same uncommitted working tree**, so they are not even tree-independent of each other in the untracked sense. Any one of those could agree wrongly: a defect living in the harness rather than the tree reproduces identically across all three and reads as agreement. ⚠️ **It moved within the same evening** — **8,671**, three more than 8,668, with no failure anywhere. The cause is named rather than guessed: three commits landed cosa tests in that window (`6874aec8`, `b92f663c`, `402e528c`), and the commit carrying this note touches `CLAUDE.md` only. Re-derive rather than quote on sight; that habit is what let `8,622` stand since 08-22, and the number is demonstrably a moving target even across one night — but the number itself now rests on more than one run.
+✅ **This table's numbering and membership are now guarded** by
+`test_claude_md_numbered_gate_table_carries_every_suite`: rows run 1..n, every suite in
+`ALL_SUITE_COMPONENTS` appears in a row, and the count is the suites plus the serial bridge guard.
+It did not exist when "typecheck" was added: that reddened the marker test and left this table
+silently one gate short until Mr. Radio 🦉 read the diff and caught it (2026-09-09, row `7bc67019`). **A doc that is half machine-checked is
+the worst of both: the checked half earns trust the unchecked half then spends.**
 
-**The stdout-watcher hazard cannot reach this tier, and the durable reason is the ABSENT THREAD, not a count.** Nothing in the cosa tier imports `lupin_mcp.cosa_voice_mcp`, so the daemon watcher never starts in that process and there is no polluting writer at all. Measured, not grepped, and over the WHOLE tier rather than a subdirectory (Rio's correction — my first probe covered only `unit/rest/`, 2,673 tests, which cannot speak for a tier-wide claim): a thread probe at `pytest_sessionfinish` across all of `src/cosa/tests/` — **8,671 passed** — reports `WATCHER_PRESENT: False` — **and Rio's independent run at the same sha reports the same**, so the absence is not one seat's artifact. ⚠️ **The absence is SPECIFIC to the watcher, not a claim that the tier starts no threads**: the same probe reports `['GhostJobSweeper', 'GhostJobSweeper', 'MainThread', 'io-embed_0', 'io-embed_1']`. Cosa runs daemon threads; none of them is the one that writes session events to stdout. (Every textual `cosa_voice_mcp` hit in `src/cosa/` is a path string, a path-suffix assertion, or a comment — no import.) **Corroboration, NOT the proof**: Rio's census finds 379 stdout-capturing test functions across 89 files with **zero** parsing the capture as JSON. That number is a census of today's tree and one new test moves it (Rio's correction); the missing importer is what holds. The unit tier is the exposed one — 15 files parse stdout as JSON there; see `src/rnd/v0.2.0/2026.08.24-import-time-watcher-thread-poisons-stdout-tests.md`.
+The coverage gate re-runs nothing: the unit and cosa tiers append to one isolated data file, and it renders
+that, checks `fail_under`, and checks the frame still measures every file it claims.
 
-The **serial bridge guard** step is the tier-2 whole-directory contact check (row e2ae4102) that the concurrent unit run deselects (`-m "not serial_bridge_guard"`) because a live peer's bridge write would false-accuse it. If it reports contact, a hook may be resolving its directory from a hardcoded real path instead of the seam. Dropping this line silently removes the guard — the concurrent scoped canary does not see a merge into a live seat.
+Wait for E2E to finish before launching the integration gate. What serialises them is monopolize mode on
+`:8000`, not the PID files: `/tmp/e2e-ui-tests.pid` and `/tmp/integration-tests.pid` each stop only their
+own suite.
+Integration is last because it exercises complete user workflows across API, DB and auth on a real server.
 
-> 🔴 **DO NOT WAIT FOR A "QUIESCENT BOX" — THERE IS NO SUCH STATE** (row `5a68c92c`). This line used to say "on a quiescent box", and the row-level guidance said "run it when you are the only session writing bridges." **That condition cannot be satisfied and asking peers to pause will not create it.** Measured 2026-08-24 with no suite running anywhere: **13 entries under `~/.claude/sessions` changed in 60 seconds**, and four live seats wrote bridges inside ten minutes — **including the seat running the guard**, which writes its own bridge and its own listener files while the guard executes. The precondition named a state that never exists, so a red told the reader nothing and the sanctioned response ("re-run") was indistinguishable from weakening a gate.
->
-> **How to read a red instead — real contact is DETERMINISTIC, peer noise is NOT:**
-> 1. **Re-run and compare the NAMED file.** The same filename every run = contact. A different file each run, or none, = peer noise. ⚠️ **This cuts both ways: one GREEN is also one sample.** The discriminator is determinism, not the colour of the result — on a check whose failure mode is nondeterministic, a single pass is as weak as a single fail. Run it more than once before reporting either.
-> 2. **Identify the writer.** Read the named file's `session_id` / `cc_pid` and check whether it belongs to a live seat that is not the test: `ls /proc/<cc_pid>` — if that seat is alive and is not you, it is noise, not contact.
->
-> ⚠️ **Scope note, pending a decision (do NOT "fix" this by narrowing the glob).** `fingerprint_dir` globs `*` rather than `cc-*.json` **deliberately** — row `877794ed` widened it because the narrow form MISSED real `cc-listener-*.stderr` and `.spawn-lock` writes. The cost of that correct decision, measured: the guard sha256s **6,498 entries / 154 MB twice per test**, of which **5 are Lupin bridges**; the exclusion list carries **2 names against ~4,676 `.log`/`.stderr` files**. Narrowing the glob re-opens the hazard `877794ed` found, so the scoping question is Rick's, not a drive-by. Analysis: `src/rnd/v0.2.0/2026.08.24-serial-bridge-guard-unsatisfiable-precondition.md`.
+**Reading the serial bridge guard.** It is the whole-directory contact check the concurrent unit run
+deselects, because a live peer's bridge write would false-accuse it. Do not wait for a quiescent box —
+there is no such state, and the seat running the guard writes its own bridge while it executes. Read a red
+this way instead: re-run and compare the **named file** — the same filename every run means real contact, a
+different file or none means peer noise. Then read that file's `session_id` / `cc_pid` and check
+`ls /proc/<cc_pid>`; if it belongs to a live seat that is not you, it is noise. One green is also one
+sample: the discriminator is determinism, not the colour.
 
-Integration is the final gate because it exercises complete user workflows across API + DB + auth on a real server — catching regressions unit tests miss.
+**Test counts move.** Re-derive them rather than quoting one — the cosa tier has read 8,622 · 8,668 · 8,671
+· 8,788 across a fortnight, every figure correct when taken, with tests added in between.
 
-**On failure**: do NOT merge. Fix the failing tests first, then re-run the full suite. A genuinely-flaky-not-your-code failure gets documented + a separate fix — never a merge bypass.
+**On failure**: do not merge. Fix the failing tests, then re-run the full suite. A genuinely-flaky failure
+that is not your code gets documented plus a separate fix — never a merge bypass.
 
-**Testing anti-patterns** (NEVER):
-- `curl` for pipeline/integration testing, or manual `/api/push` + poll `/api/get-queue/done` — use the automated scripts (`LivePipelineTestBase`), never bespoke curl.
-- Running :8000-bucket suites (integration, E2E UI, proxy-integration, presentation regression) against :7999 — they depend on server monopoly; the dev server is not a stand-in.
-- Side-door injecting :8000 tests via curl / direct `/api/push` / in-process instantiation / anything but `POST /api/test-suite/submit` — collides with in-flight runs and poisons both. (Submission itself is self-authorized on a verified-idle server; the prohibition is on the side-door, not on submitting.)
-- Curl is acceptable ONLY for: API-reference docs, deployment health checks, one-off debugging (never committed).
-- New agent? Add an automated smoke test (see `.claude/skills/agentic-voice-workflow/SKILL.md`).
+### 🔴 THE COVERAGE GATE HAS SIX EXIT CODES AND ONLY ONE OF THEM MEANS "COVERAGE IS TOO LOW"
 
-## TEST CREDENTIALS
+Documented here, where a caller reads it, not only in the script where it is raised
+(Mr. Radio 🦉's ruling, row `73ebccb1`, 2026-09-05): **a code is a contract and a message
+drifts**, so distinct exit codes beat distinct messages — and `run-all-tests.sh` flattens
+all six to `coverage FAILED` in its summary.
 
-**CRITICAL**: Never hardcode test credentials. Always use environment variables.
+| exit | meaning | the right response |
+|---|---|---|
+| **0** | measured, at or above the floor | — |
+| **1** | **floor or frame BREACH** | 🔴 the only one that means write more tests |
+| **2** | **INCONCLUSIVE** — a tier did not run, denominator short | no number is owed; do not quote one |
+| **3** | no interpreter beside the resolved pytest | fix the environment |
+| **4** | **REFUSED** — the tree MOVED while the run was measuring it | the number is *unfalsifiable*, not wrong. Re-run on a still tree |
+| **6** | refused/contended — a peer tier held the box | wait, then re-run |
 
-### Required Environment Variables
+⇒ **2, 3, 4 and 6 all mean "no trustworthy number was produced"**, which wants a different
+action from "coverage is too low". Reading one of them as a breach sends someone to write
+tests for a run that never measured anything.
+
+🔴 **EXIT 4 IS ALSO PYTEST'S `EXIT_USAGE_ERROR`, AND UNDER `--run-tiers` THE MISDIAGNOSIS
+IS LIVE — NOT LATENT.** `TestSuiteJob` calls `diagnose( exit_code, stdout )` with no gate on
+suite type, and `pytest_collection_diagnosis.py` defines `4` as *conftest failed to import*.
+Measured 2026-09-05 on **two real exit-4 runs**:
+
+| mode | `conftest` in output | `diagnose( 4, … )` |
+|---|---|---|
+| pyramid (no tier stdout) | 0 | `None` — safe |
+| **`--run-tiers`** | **6** | 🔴 **"unrecognised import-time failure"** |
+| its last-400-line **tail** | 2 | 🔴 also misdiagnosed — tailing does not save you |
+| positive control (real conftest ImportError) | — | diagnosed correctly |
+
+⇒ **A tree-moved REFUSAL is reported, confidently, as an import failure**, and the reader is
+sent hunting a conftest error that does not exist while the real cause — someone edited the
+tree mid-run — goes unreported. The protection was never the code; it was
+`"conftest" in output.lower()` happening to be false, and the tiers put that word in the
+stream themselves. **A message match standing in for a code contract.**
+
+⚠️ An earlier cut of this table said "safe today". That was true of pyramid mode only and is
+corrected here rather than reworded away — the mode people actually run is the broken one.
+
+### Test credentials
+
+Any smoke test hitting authenticated endpoints, any integration test that logs in, and any protocol
+verification test needs these. Test and proxy must authenticate as the same user, or they land on
+different WebSocket channels and the run fails with "Operation cancelled".
 
 ```bash
 export LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL="your@email.com"
 export LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD="yourpassword"
 ```
 
-> **Session 267 unification**: All smoke tests, proxy tests, and pipeline tests now use the
-> `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_*` prefix. This ensures test and proxy authenticate as the
-> same user (same WebSocket channel), preventing "Operation cancelled" failures.
-
-### Usage Pattern (Python)
-
 ```python
-import os
-
 email    = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" )
 password = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
 
 if not email or not password:
-    raise ValueError( "Set LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL and LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD environment variables" )
+    raise ValueError( "Set LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL and LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
 ```
 
-### When to Use
+Patterns: `src/tests/AUTH-TESTING-GUIDE.md`. For pipeline testing use the automated smoke tests, never curl.
 
-- Any smoke test that calls authenticated API endpoints
-- Integration tests that require login
-- Manual testing scripts
-- Protocol verification tests that need real user context
+## Working rules
 
-**Reference**: See `src/tests/AUTH-TESTING-GUIDE.md` for credential patterns. For pipeline testing, always use automated smoke tests — never manual curl.
+Hard-won, and stated as rules rather than argued. The measurements behind them are archived in
+`src/docs/doctrine/` for anyone tracing where one came from; you do not need them to follow the rule.
 
-## DOCUMENTATION TOUCHPOINTS
+### Reporting a measurement
+
+- Say what you measured and when. A bare figure ages without ever changing, and a reader cannot tell.
+- Name the population before you trust a result. An empty answer from the wrong population looks exactly
+  like an empty answer from the right one.
+- Prove your instrument can find something. A negative result is worth nothing until you have watched the
+  same search return a positive one.
+- A census carries a timestamp whether you write one or not. "I looked and found one" and "there can only
+  be one" print the same in a summary, and only the second closes a question. Say which you mean.
+- Read your conjunctions one at a time. For every *because*, *so*, *which means*, ask whether you measured
+  the link or only the two ends. If only the ends, state them as two facts — the reader can draw the arrow.
+- Name a gap rather than bridging it. An inferred bridge cannot be audited; a named gap is searchable, and
+  whoever holds the other half can close it.
+- Never assert a mental state from an artifact. An artifact shows you what was produced, never why.
+- Leave an unmeasured lead out of anything durable. A caveat protects the reader of the conversation; only
+  omission protects the reader of the artifact. A *measured* don't-know stays — that is a finding.
+- A wrong number gets re-derived by the next reader. A wrong mechanism sends them into innocent code, so
+  the explanation earns the deeper check.
+- Say which you corrected. "4 → 3" reads as a population shrinking even when the floor got firmer.
+- Report a partial re-derivation side by side, never as one verdict. Half-refreshed reads as refreshed.
+
+### Pointing at something
+
+- Name the content, not the coordinate. A line number, a `stash@{N}`, a PID, "the file I edited earlier" —
+  all go stale between your reading and someone else's acting, and in a fleet someone always edits.
+- Cite a heading or a symbol name over a line number; a heading survives an edit above it.
+- When you must point at a position, make the pointer self-checking: give the anchor text, say it must
+  match exactly once, and say what to do when it matches zero or twice — come back, never guess.
+- Say which space a hash indexes. Row id, content sha, git commit — same shape, three different lookups.
+- Mark a closed row as closed when you cite it, or the reader inherits a constraint that no longer exists.
+- Identify a process by a property it carries — its cwd, its `comm` — never by a handle you captured when
+  it was true. The OS recycles PIDs.
+- Send a to-be-pasted artifact bare, one per message. Text between sessions is condensed in transit, and a
+  paragraph explaining the paste is what absorbs it.
+
+### Searching
+
+- A hit is not a use. A name travels through comments, docstrings, route strings and other tests' prose;
+  the code that uses it appears once. Open the matches and read what they do.
+- Use fixed-string searches. A character class or an alternation quietly under-reports.
+- A git pathspec is not shell globstar: `src/docs/**/*.md` requires an intervening directory and silently
+  drops every file sitting directly in `src/docs/`. Count the population first — `git ls-files <pathspec> |
+  wc -l` — and sanity-check it against what you believe is there.
+- `git grep` cannot see untracked or ignored files. Say so when reporting a zero.
+- Read the program when the question is what the program does. A corpus of its outputs cannot tell a value
+  that was frozen from one regenerated to the same bytes. A corpus is right for *how many* and *how
+  widespread*; it can never answer *why*.
+- Ask what population your command walks. `src/cosa/.venv` is a vendored virtualenv inside the source tree
+  and is about 92% of any disk-derived sweep, so exclude `.venv`, `node_modules` and `site-packages`, or
+  derive the population from git.
+
+### Tests
+
+- Coverage tells you a line ran. It never tells you the test could have noticed it running wrong.
+- A fake that ignores its input answers the same however the code behaves, and every assertion written over
+  it inherits that. Replace the code under test with a constant; if the fixture still yields the same data,
+  the suite is measuring the fixture.
+- Read the data before the assertions. If two quantities can be swapped without changing the expected
+  output, the test asserts their sum, not their identity — whatever its name says.
+- Capture at least one fixture from the real producer through the real reader. A hand-written fixture is
+  better-formed than reality, exactly where a parser depends on the mess.
+- An assertion satisfiable by more than one path cannot tell you which one ran. Name the path in the
+  assertion; when you find several sufficient causes, go and eliminate one rather than reaching for
+  sharper words.
+- Trace both sides of a comparison back to their origin. If they meet, it is a tautology wearing an
+  assertion's clothes — pin one side to a literal, a committed fixture, or a count from `git ls-files`.
+- Two sides that derive one value by different routes are coinciding, not agreeing. Ask what would make
+  them differ and whether it has ever happened. You cannot fix one side of a coincidence.
+- Enter at the layer the incident entered at. A real component exercised at the wrong altitude is still
+  the wrong measurement, and it looks like a green end-to-end test.
+- Drive the assembled app, not only the class. A component can be complete, correct, fully covered and
+  never mounted, and every test that builds the component stays green.
+- Enumerate the surface, not the traffic. What got exercised is a history of somebody's clicking. State
+  how many siblings exist and how many are watched; a guard that cannot state its denominator is telling
+  you about its corpus.
+- Assert the loop found something before looping. A loop over nothing passes every assertion in it.
+- Unguarded is a third state: the code is right and no test could see it break. Prove which state you are
+  in by deleting the guard and watching a named passing test redden. A break list proves unwatched, never
+  absent.
+- A projection of a gate must ask the gate, not restate its rule. Two pieces of code deciding one rule
+  agree until they do not, and the restatement is usually off by one to begin with.
+
+### Coverage
+
+- 100% lines, branches and functions on all Lupin code — `pytest --cov --cov-fail-under=100`, `c8 --100`.
+  Exceptions only via `# pragma: no cover` / `c8 ignore` with a same-line reason. "No time to test" is
+  never valid. Write "100% lines/branches/functions" in plan ACs, never ≥90%.
+- Never scope a run whose output you will read as a list. `--cov=<path>` does not narrow the report, it
+  narrows what was ever measured, and absence from a scoped report means never-measured, not zero. Scoping
+  is fine for one file's number — per-file counts are scope-invariant.
+- `--cov=` needs a target that is both importable *and* actually imported by that run. A `.py` path always
+  measures zero. Three warnings fire and the run still exits 0, so read the table and grep for
+  `module-not-imported`.
+- Coverage goes stale from a merge, not a commit. Unmerged work moves nobody's coverage but its author's,
+  so state the sha with the list and report "done" and "landed" as separate columns.
+
+### Mutation testing
+
+- Take a green baseline first and record the failing set. The kill signal is the failing set: a named test
+  that was passing now fails. Exit codes 4 and 5 mean pytest could not run the node, and on a branch with a
+  deliberate red, `rc == 1` scores every mutant as killed.
+- Compare the assertion that fired, not just the test id. An assertion placed behind a currently-failing
+  one is carried, not exercised — put a new guard in its own test.
+- Assert the mutation applied: the anchor matched exactly once, the on-disk sha changed. End with a restore
+  control you actually read.
+- Isolate every arm. Rebuilding the sandbox per arm is strongest; `src/scripts/purge-pycache.sh` is the
+  practical choice in a working tree. A raw `find … __pycache__ -delete` re-opens the defect.
+- A surviving mutant has four explanations — a weak test, a broken harness, an equivalent mutant, or a
+  fixture that cannot discriminate. Only the first earns a new test, and the fourth is invisible to
+  re-reading the test body.
+- Put a ceiling on a kill count as well as a floor. A break aimed at one line should redden the tests that
+  reach it; near-total kill is a syntax error until proven otherwise. Compare the run count to baseline,
+  not just the failures.
+- "I repaired a fixture" is not "I proved the repair discriminates". Two arms off one mutated sha: the old
+  fixture survives, the new one is killed by the named test. Neither arm alone counts.
+- A clean pass samples the mutation space; it does not survey it. Exchange shas with another harness to
+  catch a disagreement, never to manufacture a confirmation.
+- Never mutate in a peer's live worktree, or in the shared main tree. Check the sha out into a detached
+  worktree of your own — a `cp` restore from your own backup carries the same race as `git checkout`.
+
+### Bytecode
+
+The tree uses checked-hash invalidation. Without it CPython validates a `.pyc` on the source's
+whole-second mtime plus size, so a same-size edit inside one second runs the previous arm's bytecode.
+
+- `src/scripts/purge-pycache.sh` purges **and** reconverts, and refuses before deleting if it cannot
+  reconvert. It takes only `--dry-run`. It resolves its tree from its own location, so run the copy that
+  lives in the tree you mean; `LUPIN_ROOT` is inert for it, but `PYTHON` is not.
+- `src/scripts/migrate-pyc-to-checked-hash.sh --verify` is the read-only report, and it scans
+  `$LUPIN_ROOT/src` — not where you are standing. Read its `scanned roots:` line, not its checkmark. Pin
+  both `LUPIN_ROOT` and `PYTHON`, since `PYTHON` derives from the root and many worktrees have no `.venv`.
+- Its exits: 0 clean, 1 timestamp pycs present (the real finding), 2 it never ran. Only stderr separates
+  2's causes.
+- A `0` from a tree that has never been used is vacuous, not clean. Use a new worktree once,
+  purge-and-reconvert, then verify.
+- `-f` is the whole migration — without it `compileall` converts nothing and reports success.
+- `PYTHONDONTWRITEBYTECODE` suppresses writing, never trusting. Editing a test file inside a test still
+  needs `tests.helpers.pyc_freshness`.
+
+### Worktrees
+
+- Every worktree goes under `.claude/worktrees/`, never `../`. A spawned seat's tree lands there on its own
+  (`seat-<name>`, locked while the seat lives); a hand-made one is
+  `git worktree add .claude/worktrees/<persona>-<task>`. That folder is gitignored and swept by the arbiter
+  janitor once a tree is idle. Anything next to the repo is swept by nobody — 227 had piled up by
+  2026-09-14. A reap refuses a tree holding ignored files that are not build artifacts or mirrored
+  mementos, so keep data in git or somewhere durable.
+- Pin all three, every time. `LUPIN_ROOT` is inherited from your shell and silently keeps naming the main
+  repo:
+
+  ```bash
+  cd <worktree> && LUPIN_ROOT="$PWD" PYTHONPATH="$PWD/src" .venv/bin/python -m pytest src/tests/unit/ -q
+  ```
+
+- `LUPIN_ROOT` decides which tree paths resolve against; `PYTHONPATH` decides which tree modules are
+  imported from. Pin one and not the other and your modules come from two checkouts — a tree that exists
+  nowhere on disk, pointing toward a false green.
+- A worktree is git-identical to the main tree and environment-identical to nothing. Subtract the
+  artifacts; do not chase them. `ls -L` first — the file is the coordinate and the count derives from it,
+  and every borrowed artifact is a symlink, so a bare `ls -l` reports the link's size.
+
+  | missing | unit-tier failures |
+  |---|---|
+  | `src/scripts/cloud-run.env` | 9 absent, 0 present |
+  | `.venv` | 33 |
+  | terraform provider cache | 1 |
+  | `LUPIN_ROOT` unpinned | 1 |
+
+- Provisioning runs in the Python spawn path only, so a hand-typed `git worktree add` gets nothing — run
+  `src/scripts/link-worktree-artifacts.sh` yourself there.
+- Never symlink anything under `src/conf/keys/**` or the repo-root `.env` into a worktree. A venv is a
+  build artifact; a key is a secret, and a worktree gets deleted, copied and shared.
+- A failure that passes in the main tree has two explanations — a worktree artifact, or a fix you do not
+  have yet. Name the commit to tell them apart:
+  `git log --oneline <your-sha>..<main-HEAD> -- <the failing test's path>`.
+- A red count or a coverage list about "the tree" must be run at the main line. Your own branch is blind to
+  exactly the defects its unmerged work repairs.
+- While a tier is running, that worktree is read-only — whatever your reason for touching it. A mutation
+  arm feels like measuring, not editing, and the run cannot tell the difference.
+- The tier stamp's `run-span=unmoved` compares two HEAD shas; `tracked-dirty` is one sample at the end with
+  untracked rows stripped. Neither certifies that the run measured the tree you think it did. Name a run by
+  what it measured, not by the sha you asked for.
+
+### Reading a result
+
+- A clean exit is not evidence the work happened. A tool that no-ops and a tool that succeeds print the
+  same status, so read the tool's own account: does the coverage table list the file, does the verify name
+  your tree, does the purge report a count matching what you planted.
+- A tool that cannot finish should refuse the whole operation and name what it did not do, rather than
+  half-finishing and returning a status the caller reads as success.
+- In a two-arm comparison, give each arm its own freshly built state. An arm that no-ops because the
+  previous one consumed its input is indistinguishable from an arm that failed.
+- `--bg` makes the exit code meaningless by design — the launcher exits 0 before pytest exists. Read the
+  log's summary line and its `FAILED` lines. (`run-presentation-regression.sh` is the exception: `--bg` is
+  a no-op there and its code is real.)
+- Capture an exit code immediately and re-raise it at the end. A bash command's status is its last
+  command's, so the `echo "EXIT=$?"` you added to surface the code is what replaces it:
+  `pytest … > /tmp/tier.log 2>&1; rc=$?; tail -20 /tmp/tier.log; exit $rc`.
+- A multi-file pytest invocation reports a union. Quote a per-file result from a per-file run, or quote the
+  invocation with the number.
+- Before offering a mechanism for someone else's number, ask which test produced it and whether your
+  mechanism can reach that test. A mechanism true of the file is not thereby true of the assertion.
+- Check how old the process you are testing through is. A stdio MCP server is a subprocess started when
+  your seat started, so a fix landing afterwards does not reach it — and the stale subprocess reproduces
+  an already-fixed defect on demand, forever. No peer can catch this for you.
+
+### Writing a rule or a guard
+
+- Write the predicate the enumeration is approximating. Any separator run, not four separators; not a word
+  character, not eleven characters; the repos the config registers, not the four you remembered. When the
+  fix for an enumeration defect is itself an enumeration, you have moved the defect.
+- A rule that depends on remembering is not installed. Prefer a tool that refuses.
+- Say what a check matches on, and whether your predicate is the whole key or a prefix of it. A check and
+  the thing it checks can agree on the field and disagree on the key, and both look correct.
+- Sweep for two populations when you retire a name: the passages that *use* it, and the passages that
+  *vouch for* it. A wrong instruction gets caught the first time someone follows it; a wrong reassurance
+  disarms the reader who would have caught it.
+- A row body is the plan as of its writing, not a status. Re-measure before you act on a figure in one.
+
+### Owning the work
+
+- A red you accept is a row you owe. A finding filed as a state, with no owner, reads as closed —
+  acceptance without an owner is deferral wearing acceptance's clothes.
+- Wait for the worker to say the memento is on disk, with its path and session id, before calling
+  `dismiss_sessions`. A reap reports `prior_holder_present` and proceeds, and a stale file in the slot
+  looks exactly like a fresh one.
+- A memento has two slots and the two doors read different ones: `self_respin` reads the root slot
+  (`.claude-memento-<persona>.md`), a manager's reap reads `io/`. Name the slot when you write:
+  `$PLANNING_IS_PROMPTING_ROOT/workflow/scripts/memento_io.py write --slot root|io`. Two records for
+  one session is the normal steady state, and the path prefix is not optional — that script lives in
+  planning-is-prompting, so a lupin seat handed the bare name cannot run it.
+- The root slot resolves to the seat's own tree (`find_seat_root`); the io slot and the mirror stay keyed
+  on the repo (`find_repo_root`). The repo-keyed mirror is what keeps a record in a prunable worktree
+  durable, so never make the mirror follow the seat for symmetry. When you move where a record lives,
+  also move every check that asks about its location, such as `check-ignore` and `ensure_gitignored`.
+- A spawn brief is the one document a seat cannot check on arrival, so the obligation is the writer's.
+  Give the population a claim was measured on, and mark inherited claims as inherited.
+- Declare a hold with the verb, never by hand-writing JSON:
+  `python3 -m lupin_cli.claude_code.hooks.lib.heartbeat_hold_io write --session-id <id> …`. A hand-written
+  hold lands in the repo root where no reader looks, so the session parks invisibly.
+
+
+## Documentation touchpoints
 
 When modifying code in these areas, update the corresponding documentation:
 
@@ -515,16 +829,16 @@ When modifying code in these areas, update the corresponding documentation:
 | `src/cosa/agents/shared/` (PlanWriter, GitStrategist, FixExecutor) | `src/docs/agents/shared-fix-primitives-reference.md` |
 | `src/cosa/agents/test_suite/` | `src/docs/agents/test-suite-scheduling-guide.md` |
 | `src/cosa/rest/test_suite_completion_watchdog.py` | `src/docs/agents/test-fix-expediter-guide.md` |
-| `src/lupin_arbiter_app/*` import graph (any NEW third-party import) | **Run `src/scripts/check-arbiter-venv.py` in the arbiter venv and add the package to `src/scripts/requirements-arbiter.txt`.** The standalone `:8001` arbiter runs on a deliberately LIGHT host venv, so an import the venv lacks kills a worker THREAD while the process stays `active (running)` and `/health` returns 200 — invisible for two days on 2026-08-08. Also update `src/rnd/v0.1.9/2026.07.22-arbiter-bringup-on-lupin-host-test.md` §7 and `src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md` |
+| `src/lupin_arbiter_app/*` import graph (any NEW third-party import) | **Run `src/scripts/check-arbiter-venv.py` in the arbiter venv and add the package to `src/scripts/requirements-arbiter.txt`.** The standalone `:8001` arbiter runs on a deliberately LIGHT host venv, so an import the venv lacks kills a worker THREAD while the process stays `active (running)` and `/health` returns 200 — invisible for two days on 2026-08-08. Also update `src/rnd/v0.1.9/2026.07.22-arbiter-bringup-on-lupin-host-test.md` *(REMOVED by `b113a3a7`; recover: `git show b113a3a7^:src/rnd/v0.1.9/2026.07.22-arbiter-bringup-on-lupin-host-test.md`)* §7 and `src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md` *(REMOVED by `c752ab9e`; recover: `git show c752ab9e^:src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md`)* |
 | A feature gated by an INI flag that imports a heavy/optional module | Read the flag **before** the import (pattern: `fleet_arbiter_loop.make_follow_through_watcher_factory`). A disabled feature must not impose its dependencies — that is what took the fleet loop down while `follow through escalation enabled = false` |
 | `lupin-app.ini` `bug fix expediter *` keys | `src/docs/agents/bug-fix-expediter-guide.md` INI Reference |
 | `lupin-app.ini` `test fix expediter *` keys | `src/docs/agents/test-fix-expediter-guide.md` INI Reference |
 | BFE/TFE endpoint rows | `src/docs/rest-api-reference.md` sections 17/17a/17b |
-| `routers/voice_persona.py` + `voice_persona_helpers.py` | `src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md` (architecture, allocation flow, /clear preservation, conversation-mode orthogonality) + `src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md` (host-side prune at SessionStart, mtime TTL guard, Sam-as-overflow allocation) |
+| `routers/voice_persona.py` + `voice_persona_helpers.py` | `src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md` (architecture, allocation flow, /clear preservation, conversation-mode orthogonality) + `src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md` *(REMOVED by `b113a3a7`; recover: `git show b113a3a7^:src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md`)* (host-side prune at SessionStart, mtime TTL guard, Sam-as-overflow allocation) |
 | `lupin-app.ini` `cc session voice persona *` keys | Same R&D docs — base pool reference in 2026.04.28 §3 (Voice Pool); Sam-overflow keys (`sam icon/color/profile/display name`) + `stale threshold seconds` in 2026.05.16 §Solution Design Layer 3 |
-| `lupin_cli/claude_code/hooks/lib/session_bridge.py` `prune_dead_persona_bridges` + `find_active_voice_persona_sessions` TTL guard | `src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md` (Layers 1–3: host-side prune + mtime TTL) |
-| New LLM-driven agent OR migration of an existing agent between bounded-CC and firewalled-SDK paths | `src/docs/cost-model-bounded-cc-vs-firewalled-sdk.md`, R&D doc `src/rnd/v0.1.7/2026.05.12-bounded-cc-billing-empirical-confirmation.md`, auto-memory `feedback_prefer_bounded_cc_over_anthropic_sdk.md`, and CLAUDE.md § "COST MODEL — BOUNDED CC vs FIREWALLED SDK" if guardrails or candidate list change |
-| `src/cosa/rest/routers/_scope_registry.py` + `docs_files.py` + `io_files.py` + `lupin-app.ini` `external repo *` keys + `docker-compose.yml` bind-mounts | `src/rnd/v0.1.7/2026.05.12-multi-repo-doc-viewer.md` (scopes table, mount lines, blocklist patterns). Adding a new external scope requires the four-step checklist in auto-memory `feedback_multi_repo_doc_viewer.md`. |
+| `lupin_cli/claude_code/hooks/lib/session_bridge.py` `prune_dead_persona_bridges` + `find_active_voice_persona_sessions` TTL guard | `src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md` *(REMOVED by `b113a3a7`; recover: `git show b113a3a7^:src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md`)* (Layers 1–3: host-side prune + mtime TTL) |
+| New LLM-driven agent OR migration of an existing agent between bounded-CC and firewalled-SDK paths | `src/docs/cost-model-bounded-cc-vs-firewalled-sdk.md`, R&D doc `src/rnd/v0.1.7/2026.05.12-bounded-cc-billing-empirical-confirmation.md` *(REMOVED by `b113a3a7`; recover: `git show b113a3a7^:src/rnd/v0.1.7/2026.05.12-bounded-cc-billing-empirical-confirmation.md`)*, auto-memory `feedback_prefer_bounded_cc_over_anthropic_sdk.md`, and CLAUDE.md § "COST MODEL — BOUNDED CC vs FIREWALLED SDK" if guardrails or candidate list change |
+| `src/cosa/rest/routers/_scope_registry.py` + `docs_files.py` + `io_files.py` + `lupin-app.ini` `external repo *` keys + `docker-compose.yml` bind-mounts | `src/rnd/v0.1.7/2026.05.12-multi-repo-doc-viewer.md` *(REMOVED by `b113a3a7`; recover: `git show b113a3a7^:src/rnd/v0.1.7/2026.05.12-multi-repo-doc-viewer.md`)* (scopes table, mount lines, blocklist patterns). Adding a new external scope requires the four-step checklist in auto-memory `feedback_multi_repo_doc_viewer.md`. |
 
 **Documentation index**: `src/docs/README.md` — lists all docs with verification dates.
 
@@ -546,7 +860,7 @@ python3 -m lupin_cli.claude_code.hooks.lib.heartbeat_hold_io write \
 
 **Principle**: FastAPI `/docs` and `/redoc` are the authoritative API reference. Hand-written docs cover architecture, concepts, and operations only.
 
-## HISTORY STRUCTURE NOTES
+## History structure notes
 - **Project Span**: December 2024 - Present (Lupin evolution from Genie-in-the-Box)
 - **Key Archived Periods**: 
   - 2024.12-2025.05: PEFT training, agent migrations, Flask→FastAPI transition
@@ -556,19 +870,20 @@ python3 -m lupin_cli.claude_code.hooks.lib.heartbeat_hold_io write \
 - **Current Implementation Docs**: Referenced in history.md header
 - **Archive Location**: `history/` directory with monthly organization
 
-## Doc Viewer Scope (unified path-prefix routing — 2026-05-15)
+## Doc viewer scope (unified path-prefix routing)
 
-**URL format**: `/app/docs?path=<project>/<rel>` where the first path segment names a registered project. The legacy `?scope=` query param is **RETIRED** — its presence triggers HTTP 400 with an educational pointer to this section (policy flipped from silent-ignore to aggressive-400 on 2026-05-21 per amendment to AC4b.7 of `src/rnd/v0.1.7/2026.05.15-doc-viewer-scope-unification.md`).
+**URL format**: `/app/docs?path=<project>/<rel>` where the first path segment names a registered project. The legacy `?scope=` query param is **RETIRED** — its presence triggers HTTP 400 with an educational pointer to this section (policy flipped from silent-ignore to aggressive-400 on 2026-05-21 per amendment to AC4b.7 of `src/rnd/v0.1.7/2026.05.15-doc-viewer-scope-unification.md` *(REMOVED by `b113a3a7`; recover: `git show b113a3a7^:src/rnd/v0.1.7/2026.05.15-doc-viewer-scope-unification.md`)*).
 
 - **Lupin files**: `/app/docs?path=lupin/<rel>` — e.g. `/app/docs?path=lupin/bug-fix-queue.md`, `/app/docs?path=lupin/src/rnd/foo.md`. Whitelist authority is `lupin/.docview.yml` at repo root.
 - **Other registered repos**: `cosa-voice`, `planning-is-prompting`, `lookml`, `par-pacific`, `claude-plans`, `retail-ai-location-strategy`, `lupin-mobile` — same URL shape, scope name is the project name.
 - **Source of truth**: `src/conf/lupin-app.ini` § `external repos` plus each repo's `.docview.yml` (when present).
 - **Runtime discovery**: `GET /api/docs/scopes` (admin endpoint, JWT-auth) returns the full registry; cosa-voice MCP `get_session_info()` exposes a single `project_name` string for the current session.
 - **Floor blocklist**: ~46 universal regex patterns block `.env`, `.venv`, `node_modules`, `__pycache__`, `CLAUDE.local.md`, `.ssh/`, etc. across EVERY scope — defense-in-depth; cannot be weakened by any repo's manifest.
-- **Supported file types**: text (`.md`, `.txt`, `.json`, `.yaml`/`.yml`), source code (`.py`, `.ts`/`.tsx`, `.js`/`.jsx`, `.css`, `.html`, `.sh`, `.sql`, `.toml`, `.ini`/`.cfg`, `.xml`), and images (`.png`, `.jpg`/`.jpeg`, `.gif`, `.svg`, `.webp` — added 2026-05-21). Image MIMEs serve via `FileResponse` (binary); text/code via `PlainTextResponse`. The SPA dispatches on `Content-Type.startsWith('image/')` to render inline `<img>` tags.
+- **Supported file types**: text (`.md`, `.txt`, `.json`, `.yaml`/`.yml`), source code (`.py`, `.ts`/`.tsx`, `.js`/`.jsx`, `.css`, `.html`, `.sh`, `.sql`, `.toml`, `.ini`/`.cfg`, `.xml`), images (`.png`, `.jpg`/`.jpeg`, `.gif`, `.svg`, `.webp` — added 2026-05-21), and audio/video/PDF (`.mp3`, `.wav`, `.mp4`, `.webm`, `.pdf` — added 2026-09-24, ticket 668aa0a3). Binary MIMEs serve via `FileResponse`; text/code via `PlainTextResponse`. The SPA renders images as `<img>`, audio/video as players, PDF inline, and anything else as "no preview". Every file view carries a **⬇ Download** button that saves the raw bytes (the markdown source, not the render). io audio (`.mp3`/`.wav`) hands off to the existing `/app/audio` player rather than a second one.
+- **Folder, Roots, Upload (ticket 416d4b00, 2026-09-24)**: a file view also carries **📁 Folder** (opens its parent listing; a legacy bare io path gains its `io/` prefix). Every listing opens with a closed **🗂 Roots** panel — `io/` plus every scope and allowed prefix from the live `/api/docs/scopes`, never a literal. Admins get **⬆ Upload** on a listing (button or drop), posting to `POST /api/docs/upload` — the same read guards apply to the target, a name clash answers 409 with `suggested_name` and the page offers Replace / Rename / Cancel as buttons (never a browser dialog). A read-only mount answers 403 — which is exactly what the external-repo mounts did until 2026-09-26, and this sentence used to end "while they stay `:ro`". ⚠️ **They no longer do.** The upload route landed 2026-09-24 and the mounts stayed `:ro`, so every upload into an external scope got EROFS and answered 403 for two days; Rick's probe measured errno 30 at mkstemp in `weil-nda-drafting-suite/src/rnd`. Ruling 02f3bc8f made them writable (row b84bbf1c), and `test_external_repo_mounts_are_writable.py` now fails if any bind goes back. `~/.claude/plans` stays `:ro` deliberately — it is not an upload scope.
 
 **Examples**:
-- `/app/docs?path=lupin/src/rnd/v0.1.7/2026.05.15-doc-viewer-scope-unification.md` ✅
+- `/app/docs?path=lupin/src/rnd/v0.1.7/2026.04.24-cosa-voice-nested-repo-detection-fix.md` ✅
 - `/app/docs?path=lupin/bug-fix-queue.md` ✅ (formerly 404 — fixed in this milestone)
 - `/app/docs?path=lupin/CLAUDE.local.md` → 400 (floor blocks)
 - `/app/docs?path=bug-fix-queue.md` → 400 (missing project prefix)

@@ -11,6 +11,10 @@ NEVER pre-validates (no rule duplication, no drift — spec §1).
 Failure contract (spec §4):
     - `:7999` unreachable  -> explicit error dict, never raises (callers never
       block a Stop-hook path on the store; fail-open is hook-side, not here)
+    - read timeout         -> a SEPARATE `server_read_timeout` dict carrying
+      `outcome_indeterminate: True`. The request reached the server, so the
+      write may have committed; this is NOT the unreachable case and must not
+      be reported as a failed operation (row 96cf5cec)
     - HTTP 422             -> the server's `detail.errors` list VERBATIM — the
       no-confabulation rejection text reaches the model unedited
     - HTTP 404             -> the server's `detail` string verbatim
@@ -22,7 +26,16 @@ from cosa.agents.utils.sender_id import canonicalize_project_name
 from lupin_mcp.outbound_api_key import outbound_key_failure_detail
 
 # Transport timeout for /api/tasks/* calls. Deliberately finite: a hung store
-# must surface as a `server_unreachable` error dict, never a hung tool call.
+# must surface as an error dict, never a hung tool call.
+#
+# ⚠️ IT IS SHORTER THAN THE SERVER'S OWN PROMOTION-ASK TIMEOUT AND THAT IS A KNOWN,
+# DELIBERATELY UNFIXED MISMATCH. A transition OUT OF `not_approved` blocks server-side while
+# a human is asked to approve it — INI `task approval promotion ask timeout seconds`, 120s
+# today — so this client gives up first, every time, on that one edge. Raising this number to
+# chase that one was REJECTED (Mr. Radio, 2026-09-05): it would pin two independently
+# configured values to each other by convention alone, and the day someone raises the INI it
+# silently returns. The fix here is to report the timeout HONESTLY; making the ask
+# asynchronous so no caller ever waits on a human is a separate, larger call that is Rick's.
 TASK_STORE_TIMEOUT_SECONDS = 10.0
 
 # task_edit exposes 5 of the server's 7 PATCH_EDITABLE_FIELDS: the two OWNER
@@ -54,7 +67,13 @@ def task_store_request( method, path, api_base_url, api_key, json_body=None, par
           concrete cause: absent file, or mode + owner uid when it is present
           but unreadable by this process
         - returns {"status": "error", "reason": "server_unreachable", ...}
-          on any connection/timeout/transport failure — NEVER raises
+          on a connection failure or a CONNECT timeout — the request never
+          reached the server, so it certainly did not land — NEVER raises
+        - returns {"status": "error", "reason": "server_read_timeout",
+          "outcome_indeterminate": True, ...} on a READ timeout: the request
+          WAS sent and the server may have committed it. Deliberately a
+          different `reason` from the line above, because the two are opposite
+          facts and a caller acts differently on each (row 96cf5cec)
         - HTTP 422 -> {"status": "error", "http_status": 422,
           "errors": <detail.errors verbatim>} (spec §2.2 no-confabulation rule);
           a 422 whose detail is not the rules shape (e.g. FastAPI request
@@ -76,6 +95,44 @@ def task_store_request( method, path, api_base_url, api_key, json_body=None, par
 
     try:
         resp = requests.request( method, url, headers=headers, json=json_body, params=params, timeout=timeout )
+
+    # 🔴 A READ TIMEOUT IS NOT AN UNREACHABLE SERVER, AND CALLING IT ONE INVERTS THE FACT THE
+    # CALLER NEEDS (row 96cf5cec). `requests` raises ReadTimeout only AFTER the connection was
+    # established and the request was SENT — so the server was reachable, was working, and may
+    # well have COMMITTED the write before we stopped waiting for its answer. Reporting that as
+    # `server_unreachable` told three managers an approval had failed when it had landed; one of
+    # them DM'd a worker that a live row was still blocked, and had to retract it.
+    #
+    # ⚠️ THE ORDER OF THESE TWO CLAUSES IS THE WHOLE FIX AND IT IS NOT COSMETIC. ConnectTimeout
+    # subclasses BOTH ConnectionError and Timeout; ReadTimeout subclasses Timeout alone. Catching
+    # `Timeout` here would sweep up ConnectTimeout — which genuinely never reached the server and
+    # genuinely did not land — and label it indeterminate, losing the one case we can still be
+    # certain about. Catch ReadTimeout SPECIFICALLY, and let everything else fall through.
+    except requests.exceptions.ReadTimeout as e:
+        return {
+            "status"                : "error",
+            "reason"                : "server_read_timeout",
+            "outcome_indeterminate" : True,
+            "detail"                : (
+                f"{type( e ).__name__}: {e} — THE SERVER WAS REACHED AND DID NOT ANSWER IN "
+                f"{timeout}s. THIS IS NOT A FAILED CALL: the request was sent, so the write "
+                "may have committed. Treat the outcome as UNKNOWN.\n"
+                "  · Do NOT report the operation as failed, and do NOT assume a retry is safe "
+                "on a verb that is not idempotent.\n"
+                "  · An IMMEDIATE re-read is NOT a reliable check — measured on row 88f4dfdb "
+                "(María 🌸, 2026-09-05): a read taken right after the timeout returned the "
+                "pre-write value on a write that landed anyway.\n"
+                "  · On a transition OUT OF not_approved this is the expected shape rather than "
+                "a fault: the server holds the request while it asks a human to approve the "
+                "promotion (INI `task approval promotion ask timeout seconds`, 120s today) and "
+                f"this client stops waiting at {TASK_STORE_TIMEOUT_SECONDS}s. If a retry "
+                "then answers `no-op transition 'X'->'X' — NOTHING TO DO`, that establishes "
+                "the row IS now at 'X'. It does NOT establish that YOUR call is the one that "
+                "moved it (row 3bf6ad1b) — another actor and a retry of something that never "
+                "needed doing look identical from here. Report the row's state, not authorship."
+            ),
+        }
+
     except requests.exceptions.RequestException as e:
         return {
             "status" : "error",
@@ -101,6 +158,125 @@ def task_store_request( method, path, api_base_url, api_key, json_body=None, par
     return { "status": "error", "http_status": resp.status_code, "detail": detail }
 
 
+# ── THE ASYNCHRONOUS PROMOTION'S CALLER SIDE (row 3493ae9b, design §5.4) ────────────
+#
+# 🔴 THE MARKER IS A CONTRACT AND IT IS DUPLICATED ON PURPOSE. The server emits it in the
+# 202 body (`cosa.rest.routers.tasks`); this client reads it. The two CANNOT share a
+# constant — importing `cosa.rest.*` into the MCP process would drag SQLAlchemy models and
+# the whole web stack into a subprocess that has no business hosting them, which is the
+# same reason `task_promotion_gate._default_ask` goes at `notify_user_sync` rather than at
+# the MCP verb.
+#
+# ⇒ SO IT IS PINNED BY A PARITY TEST INSTEAD, exactly as the model's CHECK literals are
+# pinned against the migration's. Two records of one fact drift; a test is what makes the
+# drift loud instead of silent.
+AWAITING_HUMAN_APPROVAL = "awaiting_human_approval"
+
+# 🔴 THIS NUMBER DECIDES WHICH BRANCH IS "NORMAL" AND IT IS NOT MEASURED. Nobody has
+# measured how long Rick takes to answer a promotion ask — that claim was made once on
+# this row, struck as unmeasured, and it has not been measured since. If he typically
+# takes 40 seconds and this budget is 25, then `awaiting_human_approval` IS the common
+# case and every caller sees it.
+#
+# ⚠️ SO DO NOT SELL THIS AS INVISIBLE TO CALLERS. What it honestly buys is that the
+# WAITING HOLDS NO SERVER RESOURCE — no threadpool worker, no pooled connection, no row
+# lock — and that a caller who gives up gets a DETERMINATE answer with a ticket id rather
+# than today's indeterminate read timeout. Whether they usually wait is unknown.
+PROMOTION_POLL_BUDGET_SECONDS   = 25.0
+PROMOTION_POLL_INTERVAL_SECONDS = 1.0
+
+
+def task_promotion_status_impl( api_base_url, api_key, ticket_id ):
+    """
+    GET /api/tasks/promotions/{ticket_id} — the outcome of an asynchronous promotion.
+
+    🔴 THE NAMED VERB IS THE FIRST HALF OF THE CONDITION THIS ROW SHIPPED UNDER. María
+    🌸's requirement: the caller must be able to OBSERVE the resolution. A caller that
+    stopped polling — or whose process died — can always come back with the ticket id it
+    was handed in the 202, and this is what it comes back WITH.
+
+    Ensures:
+        - returns the ticket body verbatim on success
+        - a 404 surfaces "promotion ticket {id} not found" verbatim, never an empty success
+    """
+    return task_store_request( "GET", f"/api/tasks/promotions/{ticket_id}",
+                               api_base_url, api_key )
+
+
+def _poll_promotion_ticket( api_base_url, api_key, accepted,
+                            budget_seconds   = PROMOTION_POLL_BUDGET_SECONDS,
+                            interval_seconds = PROMOTION_POLL_INTERVAL_SECONDS,
+                            sleep_fn         = None,
+                            clock_fn         = None ):
+    """
+    Wait, within a budget, for a 202'd promotion to resolve — then answer as today does.
+
+    🔴 THE POINT IS THE SHAPE OF THE ANSWER, NOT THE WAITING. A resolved ticket hands back
+    `response_body`, which is the EXACT `{ item, event }` a synchronous 200 carried,
+    serialized inside the transaction that wrote it. A poll that re-read the row instead
+    would get a moved `updated_ts`, an event looked up rather than handed over, and under
+    a concurrent writer an item describing a LATER state than the event beside it.
+
+    ⚠️ A REFUSAL COMES BACK IN THE SHAPE TODAY'S 403 HAS, not in a new one. A caller that
+    already handles the synchronous refusal must not have to learn a second vocabulary to
+    find out Rick said no.
+
+    ⚠️ AND `superseded` IS NOT FOLDED INTO THAT. Rick approved; the row moved underneath.
+    Reporting it as a refusal would put a decision in his mouth he did not make — the one
+    thing this whole gate forbids.
+
+    Ensures:
+        - returns { item, event } when the ticket resolved APPROVED inside the budget
+        - returns an error dict carrying the server's own words for refused / superseded
+          / stalled
+        - returns the 202 body UNCHANGED when the budget runs out — with `ticket_id` and
+          `check_with`, so the caller has a named way back
+        - never blocks longer than the budget
+    """
+    import time
+    sleep_fn  = sleep_fn  or time.sleep
+    clock_fn  = clock_fn  or time.monotonic
+    ticket_id = accepted.get( "ticket_id" )
+    started   = clock_fn()
+
+    while clock_fn() - started < budget_seconds:
+        sleep_fn( interval_seconds )
+        ticket = task_promotion_status_impl( api_base_url, api_key, ticket_id )
+
+        # A transport failure mid-poll is NOT an answer about the promotion. Keep polling
+        # — the ticket is persisted and the budget is what ends this, not one bad read.
+        if not isinstance( ticket, dict ) or ticket.get( "status" ) == "error":
+            continue
+
+        state = ticket.get( "state" )
+        if state in ( None, "pending" ):
+            continue
+
+        if state == "approved":
+            body = ticket.get( "response_body" )
+            if body is not None: return body
+            # Approved with no stored body is a server-side defect, not a caller error.
+            # Say so rather than manufacturing a { item, event } we do not have.
+            return {
+                "status" : "error",
+                "reason" : "promotion_resolved_without_a_response_body",
+                "detail" : ( f"promotion ticket {ticket_id} resolved 'approved' but stored "
+                             f"no response body, so the transition's result is unknown to "
+                             f"this caller. The row may well have moved — check it." ),
+                "ticket" : ticket,
+            }
+
+        return {
+            "status"      : "error",
+            "http_status" : 403 if state == "refused" else None,
+            "reason"      : f"promotion_{state}",
+            "detail"      : ticket.get( "refusal" ),
+            "ticket"      : ticket,
+        }
+
+    return accepted
+
+
 def task_create_impl(
     api_base_url,
     api_key,
@@ -114,7 +290,7 @@ def task_create_impl(
     gate_class          = "none",
     priority            = "P2",
     urgency             = "normal",
-    status              = "queued",
+    status              = None,
     blocked_by          = None,
     next_chase_ts       = None,
     source_qid          = None,
@@ -122,7 +298,7 @@ def task_create_impl(
     authority           = "standing",
 ):
     """
-    POST /api/tasks — create one obligation row (DEFAULT status=queued).
+    POST /api/tasks — create one obligation row (status UNSET unless named).
 
     Requires:
         - created_by is the bridge-stamped identity ("<persona> <8-hex sid>");
@@ -132,8 +308,16 @@ def task_create_impl(
     Ensures:
         - returns the serialized item dict (201 body) verbatim on success
         - returns the task_store_request error contract otherwise
-        - `status` defaults to "queued" (today's behavior); pass "blocked" to
-          MINT an already-blocked row in one call (Rick 2026-07-20). A blocked
+        - `status` defaults to None, and the key is then OMITTED from the request
+          body so the server can see it as unset and apply the holding-area
+          default. Naming a status is NOT the same as leaving it alone, and this
+          door was unable to express the second until 2026-09-04. Where the
+          holding default is on, an explicit "queued" or "blocked" is REFUSED 403
+          by the server unless the row is P0 or the caller is Rick (Rick
+          2026-09-08; row 2d786391) — it would reach the live board without a
+          request he could deny. On those two paths, or where holding is off,
+          "blocked" still MINTS an already-blocked row in one call (Rick
+          2026-07-20). A blocked
           mint carries `blocked_by` (>=1 typed ref [{kind, id}]) and
           `next_chase_ts` (ISO-8601 — REQUIRED when a {kind:persona} ref is
           present, I3). Transport only: the status whitelist, the ->blocked
@@ -160,12 +344,32 @@ def task_create_impl(
         "gate_class"          : gate_class,
         "priority"            : priority,
         "urgency"             : urgency,
-        "status"              : status,
         "blocked_by"          : blocked_by,
         "next_chase_ts"       : next_chase_ts,
         "source_qid"          : source_qid,
         "correlation_key"     : correlation_key,
     }
+    # 🔴 THE KEY IS OMITTED WHEN THE CALLER DID NOT NAME A STATUS, AND THAT OMISSION
+    # IS THE WHOLE POINT (Rio ⚡, 2026-09-04). The route decides whether a new ticket
+    # mints into the holding area by asking `"status" not in payload.model_fields_set`
+    # — Pydantic can only see a field as unset if the key is ABSENT from the JSON. This
+    # dict used to send `"status": status` unconditionally with a "queued" default, so
+    # every MCP-created row arrived carrying an explicit status, the route read it as a
+    # caller who had deliberately asked for `queued`, and the holding-area default was
+    # never consulted. The INI flag read True and changed nothing.
+    #
+    # ⚠️ THAT SENTENCE DELIBERATELY DOES NOT NAME THE RESOLVER FUNCTION. A guard in
+    # test_task_approval_gate.py pins the set of non-test files mentioning it to
+    # exactly its definition site and its one caller, by git-grepping for the NAME —
+    # so a comment that merely TALKS about it registers as a third reader and reddens
+    # that test. A hit is not a use, and the cheap side of that trade is prose.
+    #
+    # ⚠️ What was broken here is that this door could not express NOT saying anything.
+    # What an explicit status earns is the route's call: since 2026-09-08, where holding
+    # is on, only a P0 or Rick's own create may name a live one (row 2d786391).
+    #
+    # Guard: src/tests/unit/test_the_mcp_create_door_can_express_an_unset_status.py
+    if status is not None: payload[ "status" ] = status
     return task_store_request( "POST", "/api/tasks", api_base_url, api_key, json_body=payload )
 
 
@@ -181,6 +385,8 @@ def task_transition_impl(
     reason        = None,
     authority     = "standing",
     park_reason   = None,
+    asynchronous  = None,
+    poll_fn       = None,
 ):
     """
     POST /api/tasks/{task_id}/transition — one state change + one audit event.
@@ -201,6 +407,27 @@ def task_transition_impl(
           ->parked, and it MUST quote the row's OWN decisive sentence rather
           than paraphrase it (that quote is what makes a park refutable by the
           next reader instead of re-derived)
+        - `asynchronous` is OMITTED FROM THE BODY unless the caller set it, so a
+          caller that says nothing sends a byte-identical request to today's
+
+    🔴 `asynchronous` MUST BE A REAL BOOLEAN AND THE SERVER FIELD IS `StrictBool`
+    (row 3493ae9b). A plain pydantic `bool` ACCEPTS the string "true" and coerces
+    it — measured on 2.13.3 — which is exactly how a browser spreading a
+    `Record<string, string>` would opt itself into a status code it reads as
+    success. Passing "true" from here is a 422, deliberately.
+
+    ⚠️ AND IT IS ONLY THE SECOND OF TWO GATES. The operator's INI flag
+    `task approval promotion ask asynchronous` must ALSO be on, and it fails
+    CLOSED. Sending `asynchronous=True` at a server with the flag off is not an
+    error — it simply gets today's synchronous behaviour.
+
+    ⚠️ ON A 202 THIS BLOCKS FOR UP TO THE POLL BUDGET, and that is a genuinely
+    different promise from today's. Today's wait holds a threadpool worker, a
+    pooled connection and a row lock ON THE SERVER; this one holds NONE of them
+    — the server answered and let go. What it does NOT promise is that the
+    common case is invisible: nobody has measured how long Rick takes to answer,
+    that claim was struck as unmeasured on this row, and if he is slower than the
+    budget then `awaiting_human_approval` is what callers normally see.
     """
     payload = {
         "to_status"     : to_status,
@@ -212,7 +439,32 @@ def task_transition_impl(
         "reason"        : reason,
         "park_reason"   : park_reason,
     }
-    return task_store_request( "POST", f"/api/tasks/{task_id}/transition", api_base_url, api_key, json_body=payload )
+    # OMITTED unless the caller asked, so today's callers send a byte-identical body. The
+    # server's field is Optional[StrictBool] defaulting to None, so an explicit null would
+    # also be accepted — but "the request is unchanged" is a stronger claim than "the
+    # request is equivalent", and it is the one a reviewer can check by eye.
+    if asynchronous is not None:
+        payload[ "asynchronous" ] = asynchronous
+
+    result = task_store_request( "POST", f"/api/tasks/{task_id}/transition",
+                                 api_base_url, api_key, json_body=payload )
+
+    # 🔴 DETECTED ON THE SERVER'S OWN MARKER, NOT ON THE STATUS CODE, AND THE REASON IS
+    # WORTH KNOWING: `task_store_request` returns `resp.json()` for ANY 2xx and does not
+    # surface the code, so a 202 and a 200 are indistinguishable in its return value.
+    # Widening that shared helper's contract would touch every caller of it; the marker is
+    # a deliberate part of the 202 body instead, pinned to the server's spelling by a
+    # parity test.
+    #
+    # ⚠️ NO COLLISION IS POSSIBLE: a synchronous 200 body's top-level keys are exactly
+    # `item` and `event`, and this helper's own error dicts carry `status: "error"`. A
+    # task's own status lives at `item.status`, nested, never at the top level.
+    if ( isinstance( result, dict )
+         and result.get( "status" )    == AWAITING_HUMAN_APPROVAL
+         and result.get( "ticket_id" ) ):
+        return ( poll_fn or _poll_promotion_ticket )( api_base_url, api_key, result )
+
+    return result
 
 
 def task_correlate_impl(
@@ -359,6 +611,46 @@ def task_amend_impl(
     return task_store_request( "POST", f"/api/tasks/{task_id}/amend", api_base_url, api_key, json_body=payload )
 
 
+def task_request_impl(
+    api_base_url,
+    api_key,
+    actor,
+    task_id,
+    move,
+    reason,
+    deletion_task_id = None,
+):
+    """
+    POST /api/tasks/{task_id}/request — file a manager's request that Rick promote or
+    demote ONE row (row c9fafb9d, rule 3). A request ASKS and never moves: the row's
+    status is untouched, and it waits on Rick's board with no expiry. No answer means no.
+
+    deletion_task_id is the Sword of Damocles pledge (row ab8c5728): the caller's own live
+    ticket that Rick's approval of an admit drops. Sent only when given, so a call without
+    one is byte-identical to what it was before the rule existed.
+
+    Requires:
+        - actor is the bridge-stamped identity ("<persona> <8-hex sid>"); the CALLER
+          (cosa_voice_mcp) stamps it — never a tool param. The server's manager check
+          reads the session id off it, so a typed actor could not pass for a manager
+        - task_id is the item's UUID string; move is "admit" or "demote"; reason is the
+          caller's text — every one of these is the server's to validate, not ours
+
+    Ensures:
+        - returns the serialized item (200 body) verbatim on success
+        - 403 (not a manager), 404, 409 (the row cannot make that move, or a request is
+          already pending) and 422 (not a requestable move, or a blank reason) surface
+          the server's detail VERBATIM — transport only, nothing pre-checked here
+    """
+    payload = {
+        "move"   : move,
+        "reason" : reason,
+        "actor"  : actor,
+    }
+    if deletion_task_id is not None: payload[ "deletion_task_id" ] = deletion_task_id
+    return task_store_request( "POST", f"/api/tasks/{task_id}/request", api_base_url, api_key, json_body=payload )
+
+
 def task_edit_impl(
     api_base_url,
     api_key,
@@ -465,11 +757,21 @@ def task_query_impl(
           id_prefix query is never rejected by the unscoped-size guard.
         - terse=True (§G token win) requests the at-a-glance projection
           (id/title/status/blocked_by/next_chase_ts/priority/park_reason_stale
-          — body dropped);
+          /owner_persona/accountable_manager — body dropped). The two ownership
+          fields joined 2026-09-05 (row d254c397): terse is the view a board glance
+          actually reads, and without them it could not answer "is this mine" —
+          three seats asked that question of this projection in one evening and
+          took its silence for an answer;
           passed to the server as the canonical lowercase "true" (a pre-§G
           server simply ignores the unknown param and returns full rows)
         - include_terminal=True includes done/dropped rows on an un-status'd
-          query (default: terminal rows excluded — the 89->2 payload collapse);
+          query (default: terminal rows excluded — the 89->2 payload collapse).
+          ⚠️ IT ALSO GOVERNS `not_approved`, which is NOT terminal (row d254c397):
+          the server's exclusion set is BOARD_INVISIBLE_STATUSES = terminal + the
+          holding area, so this one flag hides both and its name names only one.
+          An un-status'd query now emits a HOLDING AREA notice in `warnings[]`
+          naming how many held rows it withheld; `status="not_approved"` is the
+          cheap way to see them;
           unscoped_audit=True is the deliberate-full-sweep escape past the
           unscoped-size guard. Both are forwarded ONLY when truthy, as the
           canonical lowercase "true" (mirror of terse), so a pre-guard server
@@ -570,7 +872,10 @@ def task_get_impl( api_base_url, api_key, task_id ):
           exists to kill
         - 422 (malformed UUID) → the server's detail verbatim, not a client-side
           raise
-        - api_key None / server unreachable → the shared error-dict contract
-          (missing_auth_header / server_unreachable); NEVER raises
+        - api_key None / server unreachable / server slow → the shared error-dict
+          contract (missing_auth_header / server_unreachable / server_read_timeout);
+          NEVER raises. `server_read_timeout` is listed SEPARATELY on purpose: a
+          server that answered too slowly is not an absent one, and collapsing the
+          two is the defect `4d4f3fd8` was filed for
     """
     return task_store_request( "GET", f"/api/tasks/{task_id}", api_base_url, api_key )

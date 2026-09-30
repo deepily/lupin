@@ -24,7 +24,7 @@ Asserts (per Tiberius's P3 brief):
   6. Visual snapshot of the populated panel (container only — excludes the live
      last-updated stamp so the baseline stays deterministic).
 
-Venue: :8000 (scheduled monopolize-mode via /api/test-suite/submit). Do NOT run
+Venue: :8000 (scheduled monopolize-mode via /api/v2/submit). Do NOT run
 ad-hoc against :7999. Visual baseline first-run: submit with `--update-snapshots`
 AND `auto_fix_on_failure: False` (per `feedback_baseline_capture_disable_tfe`).
 """
@@ -266,8 +266,14 @@ class TestFleetStatusVisual:
         # emoji font-race the Gate D fix closed (3c7e0aab / task_editing.py).
         page.evaluate( "() => document.fonts.ready" )
         page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
+        # snap_y: the container's top lands on whatever fraction the content above
+        # adds up to, and a sub-pixel offset changes how its text is anti-aliased:
+        # this capture flapped 1 px on text bands with identical content
+        # (ts-64224ede). A margin nudge is absorbed here by #fleet-size-cap-controls'
+        # 12 px bottom margin, and translateY still captured differently, so the
+        # fixture uses a spacer; see snap_to_integer_y in conftest.py.
         # Pass the LOCATOR (not raw bytes) so the visual plugin applies its
         # animations="disabled" + mask handling; explicit .png so the baseline is
         # named correctly (plugin only auto-appends .png when name is None). Repo
         # convention: test_multiplexer_phase6c_section_d_visual.py:161.
-        assert_snapshot( container, name="fleet-status-populated.png" )
+        assert_snapshot( container, name="fleet-status-populated.png", snap_y=True )

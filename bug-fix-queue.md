@@ -112,6 +112,72 @@
 
 (Available for any session to claim)
 
+- [ ] **Legacy Claude Code submit card sends `websocket_id: this.sessionId`, a field that is never assigned, so every CC job submitted from the legacy page loses its WebSocket routing** (filed 2026-09-16 by session `e58aaec3` Mr. Radio 🦉, found while ruling multiplexer-parity §6 item 13, row `645a7da5`.)
+  - **Evidence (source read, not run)**: `src/lupin_app/static/js/notifications.js:4186` sends `websocket_id: this.sessionId`. The class assigns only `queueSessionId` and `audioSessionId` (`:87-88`, `:2506-2507`), and `grep -n "this\.sessionId *=" notifications.js` finds no assignment. `JSON.stringify` drops an `undefined` value, so the key is absent and the server falls back to `api-<user id prefix>` (`src/cosa/rest/routers/v2_ask.py:424`).
+  - **Why it matters**: events and audio for that job are addressed to a session id no socket holds. The sibling paths in the same file (Q&A ask `:3165`/`:3174`, re-ask `:6953`) correctly send `queueSessionId`.
+  - **Not measured**: whether the job's completion still reaches the operator by some user-scoped route. A live submit on `:7999` would settle it.
+  - **Fix direction**: send `this.queueSessionId`; add a unit test that reads the posted body and fails against today's line.
+  - **Do not back-port**: the multiplexer's B-2 is ruled to send `queueSessionId` (build plan §6a item 13).
+
+- [ ] **Legacy Holding Area `⟳` refresh button is WIRED TO NOTHING — no inline handler in the markup, zero references in the script; the button is dead in the client Rick uses daily** (filed 2026-09-15 by session `145bf6c7` María 🌸, found while inventorying accordion A9 for the multiplexer-parity row `645a7da5`.)
+  - **Symptom**: clicking `⟳` in the legacy Holding Area header does nothing at all — no fetch, no spinner, no error. Nothing in the console. The operator's only way to refresh that pane is a full page reload.
+  - **Evidence (measured, not inferred)**: `grep -n "holding-area-refresh" src/lupin_app/static/html/notifications.html src/lupin_app/static/js/notifications.js` → **two hits in the markup** (`:960` the `<button class="refresh-btn" id="holding-area-refresh"`, `:961` its `data-testid`), and **zero hits in the script**. There is no `onclick=` on the element and no `addEventListener` anywhere that reaches it.
+  - **Why it matters**: the Holding Area is where a human triages what the fleet parked, and this is the legacy client — the one Rick actually uses. A painted control that dispatches nothing is worse than an absent one: it invites the click and swallows it.
+  - **Fix direction**: wire it to the same fetch the pane already runs on load, with the in-flight guard that pane's other paths use. One unit test asserting the click reaches the fetch; the negative control is that the test reddens against today's code (it will — there is no handler to hit).
+  - **Do NOT back-port**: the multiplexer does not share this defect. Cross-ref: Phase 2 runtime register A9 H-row, `src/rnd/v0.2.1/2026.09.15-multiplexer-vs-legacy-runtime-disparities.md`; build plan §4 defect 1.
+
+- [ ] **Legacy Holding Area erases a batch's own partial-failure report — the refresh on the very next line repaints the pane before the operator can read which items failed** (filed 2026-09-15 by session `145bf6c7` María 🌸, inventory A9 H9, row `645a7da5`.)
+  - **Symptom**: an operator runs a batch action over several held items; some succeed and some fail. The per-item failure report renders and is immediately wiped by the refresh that follows it in the same handler. The operator sees the pane repaint and never learns which items did not go through.
+  - **Why it matters**: a partial failure the operator cannot see is a silent data-state divergence — they will believe the whole batch landed. This is the failure mode the report exists to prevent, defeated by the line after it.
+  - **Fix direction**: hold the refresh until the report is dismissed, or render the report into a region the refresh does not own. Regression test: drive a batch with a mixed result and assert the failed ids are still readable after the refresh completes.
+  - **Do NOT back-port**: the multiplexer already avoids this. Cross-ref: runtime register A9 H9; build plan §4 defect 2.
+
+- [ ] **Legacy Holding Area can render a post-batch read that joined a fetch predating the writes — the pane shows pre-batch state as if it were the result** (filed 2026-09-15 by session `145bf6c7` María 🌸, inventory A9 H10, row `645a7da5`.)
+  - **Symptom**: after a batch completes, the pane's refresh can attach to an in-flight fetch that was issued BEFORE the writes landed. The response is stale by construction, and the pane paints it as the post-batch truth — items the operator just moved reappear as though the batch had not run.
+  - **Why it matters**: it teaches the operator to distrust the pane, or worse, to re-run a batch that already succeeded. Distinct from the defect above: that one erases a report, this one paints a wrong one.
+  - **Fix direction**: make the post-batch read a fresh fetch rather than a join onto whatever is in flight, or tag each fetch with the write generation it is allowed to answer and drop responses older than the batch. Regression test: issue a fetch, run a batch while it is in flight, and assert the pane does not render the older response.
+  - **Do NOT back-port**: the multiplexer already avoids this. Cross-ref: runtime register A9 H10; build plan §4 defect 3.
+
+- [ ] **Legacy flow-ratio controls: a refused save's message is overwritten at once — "not saved — admin only" never stays on screen** (filed 2026-09-18 by session `bd891ce7` Chloé 🗼, found while porting A9 B7/H11/H12 for Parity A-2 #8, row `c1bb2be7`; defect 1 of 8.)
+  - **Evidence (source read at `ee30e72c`)**: `saveFlowRatioSettings` writes the refusal into the status line (`notifications.js:11674-11677`), then on the next line repaints through `_paintFlowRatioSettings` (`:11679`), which overwrites the same line with "saved override" / "from config" (`:11644`).
+  - **Fix direction**: let the action's message stand until the next write; the repaint writes the source line only when no action has spoken. Test: a 403 save leaves "not saved — admin only" readable after the repaint.
+  - **Do NOT back-port**: the multiplexer's `FlowRatioStore` keeps the action message (`controlsMessage()`), fixed in A-2 #8.
+
+- [ ] **Legacy flow-ratio controls: a save that fails on the network repaints nothing, so the slider sits at a value that was never saved** (filed 2026-09-18 by session `bd891ce7` Chloé 🗼, row `c1bb2be7`; defect 2 of 8.)
+  - **Evidence (source read at `ee30e72c`)**: `saveFlowRatioSettings`' `catch` (`notifications.js:11686-11690`) only logs and sets "not saved (network)". The HTTP-refusal path above it re-reads the settings (`:11679`); this one does not, so the dragged position stays.
+  - **Fix direction**: re-read the settings after every failed write, whatever the failure. Test: a rejected fetch leaves the slider at the server's value.
+  - **Do NOT back-port**: fixed in the multiplexer, A-2 #8.
+
+- [ ] **Legacy flow-ratio controls: a refused window save never re-reads the ratio, so the header keeps saying "recounting…"** (filed 2026-09-18 by session `bd891ce7` Chloé 🗼, row `c1bb2be7`; defect 3 of 8.)
+  - **Evidence (source read at `ee30e72c`)**: dragging the window slider paints the provisional "recounting…" clause (`_bindFlowRatioControls`, `notifications.js:11866-11871`; text at `:11257`). Only the success path re-reads the ratio (`saveFlowRatioSettings` `:11684`); the refusal path returns at `:11680` and the catch at `:11689`, so the provisional clause lingers until the next 60 s tick.
+  - **Fix direction**: re-read the ratio after every write, whatever its outcome. Test: a refused window save repaints the committed clause.
+  - **Do NOT back-port**: fixed in the multiplexer, A-2 #8.
+
+- [ ] **Legacy flow-ratio controls: a failed re-read after a refused save hides the cluster for the life of the page** (filed 2026-09-18 by session `bd891ce7` Chloé 🗼, row `c1bb2be7`; defect 4 of 8.)
+  - **Evidence (source read at `ee30e72c`)**: `_paintFlowRatioSettings( null )` hides the cluster (`notifications.js:11625`). The tick's retry in `initFlowRatioControls` is guarded by `_flowRatioSettingsPainted` (`:11838`), set true by the first good paint (`:11842`) and never cleared, so once a later re-read (`saveFlowRatioSettings` `:11679`) returns null, nothing repaints short of a page reload.
+  - **Fix direction**: retry on the tick whenever the held settings are unusable, not only until the first success. Test: a null re-read after a refusal, then a good tick, shows the cluster again.
+  - **Do NOT back-port**: fixed in the multiplexer, A-2 #8.
+
+- [ ] **Legacy flow-ratio readout paints green until the settings load, whatever the ratio says** (filed 2026-09-18 by session `bd891ce7` Chloé 🗼, row `c1bb2be7`; defect 5 of 8.)
+  - **Evidence (source read at `ee30e72c`)**: `_paintFlowRatioVerdict` judges against `this._flowRatioThreshold` (`notifications.js:11547`), which is undefined until `_paintFlowRatioSettings` sets it (`:11632`). `_flowRatioIsOpen` treats a non-finite threshold as open (`:11435`), so a closed gate reads green on first paint, and stays green if the settings never load. The ratio payload carries the same `allow_below`, unused.
+  - **Fix direction**: fall back to the ratio payload's `allow_below` when the settings are not yet usable. Test: ratio above threshold, no settings → red.
+  - **Do NOT back-port**: fixed in the multiplexer (`flowRatioThreshold` in `render/flowRatioModel.ts`), A-2 #8.
+
+- [ ] **Legacy manager-pull toggle is read once, at bind time, with no retry — a failed first read leaves the box showing a state the gate may not be in** (filed 2026-09-18 by session `bd891ce7` Chloé 🗼, row `c1bb2be7`; defect 6 of 8.)
+  - **Evidence (source read at `ee30e72c`)**: `_bindFlowRatioControls` calls `fetchManagerPullDisabled()` once (`notifications.js:11890`); the bind runs once per page (`initFlowRatioControls` `:11833-11836`), and no tick reads it again.
+  - **Fix direction**: re-read on the tick until a read succeeds. Test: a failed first read, then a good tick, paints the server's state.
+  - **Do NOT back-port**: fixed in the multiplexer, A-2 #8.
+
+- [ ] **Legacy task-list banner shows a row-cap page twice — "✂️ Board truncated" and "⚠️ Server: row-cap truncation…" for the same fact** (filed 2026-09-18 by session `bd891ce7` Chloé 🗼, row `c1bb2be7`; defect 7 of 8. **LEFT in the multiplexer by Mr. Radio's ruling, 2026-09-18 22:51**.)
+  - **Evidence (source read at `ee30e72c`)**: `_renderTaskListTruncationBanner` prints its own ✂️ line (`notifications.js:12434`) and then every unrecognised server warning verbatim (`:12420`); the server's row-cap notice (`src/cosa/rest/routers/tasks.py:3420-3427`) is one of those.
+  - **Why left**: both lines show in legacy, and the server line carries the reason (how many rows, which were dropped); suppressing it is a behaviour change beyond parity.
+  - **Fix direction (if taken up)**: recognise the row-cap notice as the holding-area note already is, and fold it into the ✂️ line. Would need the same change in the multiplexer's `render/templates/truncationBanner.ts`.
+
+- [ ] **Legacy flow-ratio threshold slider stops at 200% while the server accepts a threshold up to a ratio of 1000** (filed 2026-09-18 by session `bd891ce7` Chloé 🗼, row `c1bb2be7`; defect 8 of 8. **LEFT in the multiplexer by Mr. Radio's ruling, 2026-09-18 22:51**.)
+  - **Evidence (source read at `ee30e72c`)**: the slider is `min="0" max="200"` (`src/lupin_app/static/html/notifications.html:1018`); the server clamps `allow_below` to `MAX_ALLOW_BELOW = 1000.0` (`src/cosa/rest/flow_ratio_settings.py:116`). A saved override above 2.0 paints the slider pinned at its right end.
+  - **Why left**: it matches legacy, the readout next to it prints the true percent, and widening the range goes beyond parity.
+  - **Fix direction (if taken up)**: rule the operator's real range first; then set the slider's max from it in both clients.
+
 - [ ] **🧭 STRATEGIC (Rick — resume discussion when back) — unify persona/project IDENTITY normalization fleet-wide; today ≥4 subsystems normalize the SAME identifier DIFFERENTLY and DRIFT → exact-match owed-work queries miss → "Heartbeat: idle — nothing owed" false-idle** (filed 2026-06-18 by session `5d550c64` Tiberius 👑, from Rick's voice directive during the heartbeat-false-idle P0.)
   - **Strategic ask (Rick, verbatim intent)**: stop patching these "minor annoying variations" one site at a time — rethink the GLOBAL approach. One canonical identity-normalization layer (a single shared function) called at EVERY read AND write seam, so persona/project identifiers can never drift again. Resume design discussion when Rick is back; this entry is the placeholder.
   - **Drift evidence — ≥4 inconsistent normalizers for the same persona "Mr. Radio"**: (a) MCP **write** path (`src/lupin_mcp/cosa_voice_mcp.py` / `task_create` `owner_persona` stamping) → `"mr radio"` (accent-strip + punct-strip, **space KEPT**); (b) `dm_send` recipient resolver → "accent-stripped + lowercase"; (c) stop-hook owed **read** (`stop.py::_owed_count_from_store`) → bare `.lower()` → `"mr. radio"` (NO match); (d) `follow_through_escalation_watcher.py::_norm_persona` → strips ALL non-alnum → `"mrradio"` (also NO match). One input, four outputs.

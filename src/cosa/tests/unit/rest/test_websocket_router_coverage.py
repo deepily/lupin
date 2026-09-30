@@ -73,6 +73,19 @@ def _mgr():
     m.is_user_connected      = Mock( return_value=True )
     m.get_user_connection_count = Mock( return_value=1 )
     m.update_subscriptions   = Mock( return_value=True )
+    # Row 27760534: the queue endpoint's disconnect path reaps CC transcript console tailers,
+    # and it ITERATES what this returns. A bare Mock is not iterable, so it must return a real
+    # list — an empty one, because these arms watch no console. Stating the shape here rather
+    # than making the production code tolerate a Mock: a reaper that accepted any return type
+    # would be written for this fixture's convenience, not for the server's contract.
+    m.drop_all_cc_transcript_watches = Mock( return_value=[ ] )
+    m.cc_transcript_watchers = {}
+    # Row dc446601 part 2: after auth_success the endpoint holds live frames
+    # (begin_resume) and then AWAITS replay_and_resume. A bare Mock is not awaitable, so
+    # the await raised inside the auth try and the arm reported auth_error. These arms
+    # hold no device slot, so there is nothing to hold and nothing to replay.
+    m.begin_resume           = Mock( return_value=False )
+    m.replay_and_resume      = AsyncMock( return_value=None )
     return m
 
 

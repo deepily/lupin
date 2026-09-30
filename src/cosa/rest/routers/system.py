@@ -19,6 +19,8 @@ from typing import Dict, Any, Optional
 
 # Import dependencies
 from ..auth import get_current_user, get_current_user_id
+from cosa.rest.auth_middleware import require_admin
+from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
 from ..dependencies.config import get_config_manager, get_id_generator
 from cosa.config.configuration_manager import ConfigurationManager
 from cosa.agents.two_word_id_generator import TwoWordIdGenerator
@@ -275,16 +277,35 @@ async def get_server_info( config_mgr: ConfigurationManager = Depends( get_confi
     "/api/init",
     response_class = JSONResponse,
     summary        = "Hot-reload configuration",
-    description    = "Reload configuration and optionally swap active config block and database connection at runtime."
+    description    = "Reload configuration and optionally swap active config block and database connection at runtime. ADMIN ONLY.",
+    # Declared so the gate is visible in /docs, which CLAUDE.md names as the
+    # authoritative API reference. `require_admin` reads the Authorization header
+    # as a plain dependency, so it contributes NO security block and NO 401/403 to
+    # the OpenAPI schema on its own — the spec would show this route looking exactly
+    # as public as it did before the gate. admin.py declares the same pair at the
+    # ROUTER level; system.py cannot, because most of its routes really are public.
+    responses      = {
+        401 : { "description": "Unauthorized — no bearer token" },
+        403 : { "description": "Forbidden — the admin role is required" }
+    }
 )
-async def init( config_block_id: Optional[ str ] = None ):
+async def init( config_block_id: Optional[ str ] = None, admin_user: Dict = Depends( require_admin ) ):
     """
     Refresh configuration and reload application resources without restart.
 
     Optionally accepts a config_block_id query parameter to hot-swap
     the server's configuration block and database connection at runtime.
 
+    🔴 ADMIN-ONLY SINCE 2026-09-23 (rows 977eaaf2 / f9e71d8e). This route carried
+    NO auth dependency of any kind — a bare GET, on a router declared
+    `APIRouter( tags=["system"] )` with no router-level dependencies, included by
+    `main.py:1432` with none either, behind only CORS and a security-header
+    middleware. Anyone who could reach the port could swap the active config block
+    AND the database connection underneath a running server. Verified at the PATH,
+    not just the route definition, before this gate was added.
+
     Requires:
+        - caller holds a JWT carrying the "admin" role (401 without a token, 403 without the role)
         - FastAPI application is running with initialized components
         - Configuration files exist at specified paths (lupin-app.ini)
         - LUPIN_CONFIG_MGR_CLI_ARGS environment variable is set
@@ -362,13 +383,33 @@ async def init( config_block_id: Optional[ str ] = None ):
             "timestamp" : du.get_current_datetime_iso()
         }
 
-@router.get(
+@router.post(
     "/api/prediction-engine/reset",
     response_class = JSONResponse,
     summary        = "Reset PredictionEngine singleton",
-    description    = "Destroy and re-create the PredictionEngine singleton with current config. Used by integration tests to ensure LanceDB table isolation between tests."
+    description    = "Destroy and re-create the PredictionEngine singleton with current config. Used by integration tests to ensure LanceDB table isolation between tests. Requires a credential; clears the decision rows only when drop_table is passed true.",
+    # 🔴 THREE CHANGES ON 2026-09-25 (row 2d6f2221), each closing a different half of the
+    # same hazard. MEASURED AT THE PATH before any of them: a TestClient call carrying no
+    # credential returned 200 and reached the handler.
+    #   GET -> POST      it deletes rows. A GET is reachable by a link, a prefetch or an
+    #                    <img src>, with no form and no preflight — the caller need not even
+    #                    intend the request. A destructive verb does not belong on GET.
+    #   default True -> False   the destructive behaviour was the DEFAULT. All six callers in
+    #                    the tree pass drop_table explicitly (integration fixtures), so this
+    #                    breaks none of them and stops a bare call from clearing the table.
+    #   + credential     require_api_key_or_jwt, not require_admin. The defect is "anyone who
+    #                    can reach the port", which any-valid-credential closes. This route's
+    #                    real callers are a test harness and internal server-side code — the
+    #                    two shapes that dependency's own docstring names — whereas /api/init
+    #                    took require_admin because it swaps the whole server's config block
+    #                    and DB connection. Different blast radius, different bar. Admin
+    #                    remains a one-line hardening if the operator wants it.
+    dependencies   = [ Depends( require_api_key_or_jwt ) ],
+    responses      = {
+        401 : { "description": "Unauthorized — no valid API key or bearer token" }
+    }
 )
-async def reset_prediction_engine( drop_table: bool = True ):
+async def reset_prediction_engine( drop_table: bool = False ):
     """
     Lightweight endpoint to reset the PredictionEngine singleton.
 
@@ -729,7 +770,7 @@ async def get_client_config( user_id: str = Depends( get_current_user_id ) ):
             "token_expiry_threshold_secs": 300,           # 5 mins in seconds
             "token_refresh_dedup_window_ms": 60000,       # 60 secs in milliseconds
             "websocket_heartbeat_interval_secs": 30,      # Reference value (secs)
-            "app timezone": "America/New_York"            # IANA timezone for display
+            "app_timezone": "America/New_York"            # IANA timezone for display
         }
 
     Example:
@@ -742,7 +783,7 @@ async def get_client_config( user_id: str = Depends( get_current_user_id ) ):
             "token_expiry_threshold_secs": 300,
             "token_refresh_dedup_window_ms": 60000,
             "websocket_heartbeat_interval_secs": 30,
-            "app timezone": "America/New_York"
+            "app_timezone": "America/New_York"
         }
     """
     # Note: user_id parameter required by Depends() - validates JWT token
@@ -823,8 +864,19 @@ async def get_client_config( user_id: str = Depends( get_current_user_id ) ):
         # Already in seconds (reference value for logging/debugging)
         "websocket_heartbeat_interval_secs": int( heartbeat_interval_secs ),
 
-        # IANA timezone name for client-side date/time formatting
-        "app timezone": app_timezone,
+        # IANA timezone name for client-side date/time formatting.
+        #
+        # 🔴 THE KEY IS `app_timezone`, WITH AN UNDERSCORE, AND THAT IS THE FIX FOR
+        # ROW 0e5bfa0e. This payload emitted "app timezone" — the INI key's own
+        # spelling, space and all — while notifications.js has always read
+        # `config.app_timezone`. So `this.appTimezone` was undefined on every
+        # SUCCESSFUL fetch, and every timestamp fell back to the browser's local
+        # zone. The nearby `= 'America/New_York'` in that client is the fetch-
+        # FAILURE fallback only, which is why a working server looked broken and a
+        # broken one looked right. The INI key keeps its space; only the wire
+        # changes, and it now matches every other key in this payload and the
+        # `app_timezone` that /api/arbiter/fleet-state has always emitted.
+        "app_timezone": app_timezone,
 
         # TestFixExpediter auto-fix INI default — drives initial state of the
         # "auto-fix on failure" checkbox in the test runner submission card

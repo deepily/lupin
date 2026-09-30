@@ -15,6 +15,8 @@ Usage from hook scripts:
     )
 """
 import configparser
+import contextlib
+import io
 import json
 import os
 import subprocess
@@ -583,6 +585,67 @@ def drain_and_acknowledge( session_id ):
 # self-contained <system-reminder> blocks), so a pure-DM context skips the rider.
 VOICE_LINE_PREFIX = "[Voice]: "
 
+# ── Backlog disclosure (row 298af249) ────────────────────────────────────────
+#
+# WHY THIS EXISTS, and it is a measured failure rather than a tidiness concern.
+# When a session is busy the listener BUFFERS inbound messages, and the drain is
+# uncapped at both steps — `drain_voice_buffer` returns every line and this
+# formatter turned every one of them into a flat run of blocks. A reader then
+# receives a wall with nothing in it saying it IS a wall.
+#
+# Measured 2026-08-30: a review approval reached its recipient as buffered
+# message #78 of 78 and did not register; the manager read the silence as "the
+# reviewer has not finished" and chased it by hand an hour later. The message was
+# never lost — `dispatched: true` was honest and the row was in the store the
+# whole time. What was missing was any signal that seventy-seven other messages
+# arrived with it.
+#
+# THIS IS DISCLOSURE, NOT A CAP. Dropping or truncating a backlog would convert a
+# hard-to-read delivery into a silent non-delivery, which is strictly worse and is
+# the defect one row over. Everything still gets through; the block now states its
+# own depth so a reader knows to scan rather than skim.
+#
+# 🔴 WHAT THIS DOES NOT DO, stated here so the tests below are not read as
+# proving more than they do (Mr Radio's challenge, 2026-08-30): 78 items still
+# arrive as one wall. THIS LABELS THE FLOOD, it does not end it. The reader is
+# told it is a wall before reading it, which is the whole of the improvement.
+# Ranking the run — verdicts first, or a separate high-priority block — would be
+# the real fix and is deliberately not attempted here.
+BACKLOG_HEADER_THRESHOLD = 5
+BACKLOG_HEADER_PREFIX    = "[Backlog]: "
+
+
+def format_backlog_header( count, threshold=BACKLOG_HEADER_THRESHOLD ):
+    """
+    Build the one-line header that discloses how deep a drained backlog is.
+
+    Requires:
+        - count is an int (the number of formatted messages in this drain)
+        - threshold is an int
+
+    Ensures:
+        - returns "" when count <= threshold — an ordinary handful reads fine as
+          itself, and a header on every drain would be noise that teaches the
+          reader to skip the one line that matters
+        - returns a single line naming the exact count when count > threshold
+        - the line carries no message content, so it cannot itself bury anything
+        - never raises
+
+    Args:
+        count: number of messages in this drain
+        threshold: disclose only above this depth
+
+    Returns:
+        str: the header line, or "" when at or under the threshold
+    """
+    if count <= threshold:
+        return ""
+    return (
+        f"{BACKLOG_HEADER_PREFIX}{count} messages arrived while this session was busy "
+        f"and are delivered together below. They are NOT one conversation — read to the "
+        f"end before replying; a verdict or an approval may be anywhere in the run."
+    )
+
 
 # bug d0d7f068 (Part 2 / option C): the peer-DM envelope's frame prefix as a SHARED
 # constant. build_peer_dm_reminder emits it; is_injected_peer_dm + the Stop-hook
@@ -801,6 +864,11 @@ def format_voice_context( messages ):
             ) )
         else:
             lines.append( f"{VOICE_LINE_PREFIX}{text}" )
+    # Disclose the depth BEFORE the run, never after: a header under a wall is
+    # read at the same moment as the thing it was meant to warn about.
+    header = format_backlog_header( len( lines ) )
+    if header:
+        lines.insert( 0, header )
     return "\n".join( lines )
 
 
@@ -1409,6 +1477,50 @@ def drain_voice_buffer( session_id ):
     return messages
 
 
+def peek_voice_buffer( session_id ):
+    """
+    Read the voice buffer for a CC session WITHOUT consuming it (row 8c29d8c2).
+
+    For a hook that must decide whether to drain before it drains. PermissionRequest
+    is the case: its "allow" carries no context back to the seat, so a peer DM it
+    drained and then allowed would be lost. It peeks, and drains only when a human
+    line is present.
+
+    ⚠️ A peek is not a claim on the lines it read. Another hook may drain between a
+    peek and a drain, so a caller must judge what its own drain RETURNS, never what
+    the peek saw.
+
+    Requires:
+        - session_id is a non-empty string
+
+    Ensures:
+        - Returns the buffered message dicts, parsed exactly as drain_voice_buffer
+          parses them (blank lines and malformed JSON skipped)
+        - Returns [] when no buffer exists or it cannot be read
+        - The buffer file is left exactly as found — no rename, no write, no delete
+        - Never raises
+
+    Args:
+        session_id: Claude Code session ID (full or truncated)
+
+    Returns:
+        list[dict]: Buffered message dicts, in chronological order
+    """
+    messages = []
+    try:
+        with open( get_buffer_path( session_id ) ) as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        messages.append( json.loads( line ) )
+                    except json.JSONDecodeError:
+                        pass  # Skip malformed lines, as the drain does
+    except OSError:
+        return []
+    return messages
+
+
 # ── Permission Decision Builder ──────────────────────────────────────────────
 
 def build_permission_decision( behavior, message=None, interrupt=False ):
@@ -1577,7 +1689,14 @@ def _brevity_rules():
     Returns:
         str: Brevity guidance text
     """
-    cap = cu.get_spoken_char_cap()
+    # WRAPPED TOO, and the reason is that leaving it bare made the fix
+    # ORDER-DEPENDENT (Mr Radio, 2026-08-30). On today's hook path
+    # _speakerphone_reminder_body runs first and builds the config, so this call
+    # finds it cached and prints nothing — the banner is suppressed by ACCIDENT of
+    # ordering, not by the guard. Reorder the callers and the leak comes back with
+    # nothing failing. Same masked-invariant shape as two sites agreeing for a
+    # reason neither states.
+    cap = quiet_stdout( cu.get_spoken_char_cap )
     return (
         "Brevity for TTS: re-craft the spoken `message` for speech — don't pipe "
         "terminal markdown through `notify()`. Strip headings, bullets, code "
@@ -1617,6 +1736,71 @@ def _routing_reminder():
         "open-ended goes to `ask_open_ended_batch`. AskUserQuestion renders to "
         "the terminal only — the user is listening, not watching."
     )
+
+
+# ── A HOOK'S STDOUT IS ITS RETURN CHANNEL, NOT A LOG (row 298af249) ──────────
+#
+# `ConfigurationManager.__init__` prints a banner and a section table to stdout
+# (configuration_manager.py:164). In a terminal that is useful. Inside a hook it
+# is prepended to the only channel the harness reads an answer from, and the
+# harness truncates a large payload to a ~2 KB preview, writing the rest to a
+# file nothing reads.
+#
+# MEASURED across 505 saved payloads in this project: that noise averaged 1,660
+# bytes and filled the entire preview BY ITSELF in 391 of them — so in 77% of
+# truncated turns the reader's whole budget went on our own banner before the
+# peer DM had started. End-to-end on this hook, fix off vs on: 2,997 bytes led by
+# the banner versus 791 bytes starting at `{`. The noise alone exceeded the
+# preview on a turn carrying no DM at all.
+#
+# WHERE THE FIX GOES, and the two rejected alternatives matter more than the one
+# chosen because each was TRIED and MEASURED:
+#   · NOT in ConfigurationManager — that print is correct in a terminal, and the
+#     library cannot know it is running inside a hook.
+#   · NOT a process-wide stdout swap — tried first, and it BROKE 5 existing hook
+#     tests: they patch `sys.stdout` to capture the payload, and an `emit_json`
+#     bound to a saved handle ignores the patch. A guard that defeats the tests
+#     guarding the channel is not a guard.
+#   · NOT a redirect around the imports — tried second, and it changed NOTHING
+#     (2,997 bytes either way). A stack trace put the print inside `main()`, not
+#     import: `_speakerphone_reminder_body` builds the config on every turn. The
+#     comment I had already written said "at import time" and was wrong; the
+#     trace is why this one names a function instead.
+def quiet_stdout( fn, *args, **kwargs ):
+    """
+    Call `fn` with its PYTHON-LEVEL writes to `sys.stdout` discarded.
+
+    🔴 THE NARROWER WORDING IS THE ACCURATE ONE (Tiberius 👑, reviewing this).
+    `contextlib.redirect_stdout` rebinds `sys.stdout`; it does not touch file
+    descriptor 1. So a subprocess — or anything writing to fd 1 directly — still
+    reaches the hook's channel. Not live for today's only caller, which reads an
+    int out of the config, but it is the boundary that would come back if
+    `ConfigurationManager` ever shelled out. Two further measured edges, neither
+    live here: a lazily-returned generator runs its body AFTER the redirect exits,
+    so its output escapes; and `sys.stdout` is process-global, so another thread
+    printing during the window is silently swallowed (measured: MainThread only).
+
+    Requires:
+        - fn is callable
+
+    Ensures:
+        - returns fn's return value unchanged
+        - stdout written during the call goes to a throwaway buffer; STDERR IS
+          UNTOUCHED, so real diagnostics still surface
+        - sys.stdout is restored even if fn raises, so one failure cannot leave
+          the hook's channel pointed at a discard buffer
+        - the exception itself PROPAGATES — swallowing it here would hide a real
+          config failure behind a quiet hook
+        - never suppresses anything outside the call
+
+    Args:
+        fn: the callable whose stdout noise must not reach the harness
+
+    Returns:
+        whatever fn returns
+    """
+    with contextlib.redirect_stdout( io.StringIO() ):
+        return fn( *args, **kwargs )
 
 
 def _speakerphone_reminder_body( source ):
@@ -1668,7 +1852,7 @@ def _speakerphone_reminder_body( source ):
     Returns:
         str: System-reminder body text (the slim per-turn rider)
     """
-    cap      = cu.get_spoken_char_cap()
+    cap      = quiet_stdout( cu.get_spoken_char_cap )
     words    = spoken_word_budget( cap )
     modality = "voice(distance)" if source == "voice" else "typed"
     return (

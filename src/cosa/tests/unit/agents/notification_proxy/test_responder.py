@@ -296,6 +296,29 @@ class TestSubmitResponse:
         with patch.object( rr.requests, "post", side_effect=ValueError( "weird" ) ):
             assert r._submit_response( "n1", "yes" ) is False
 
+    # ---- the credential (row e20e249a) -----------------------------------------------
+
+    def test_sends_the_token_its_listener_holds( self ):
+        r, _, _, _ = _make_responder()
+        r.authorization_fn = lambda: "Bearer tok"
+        with patch.object( rr.requests, "post", return_value=MagicMock( status_code=200 ) ) as m:
+            assert r._submit_response( "n1", "yes" ) is True
+        assert m.call_args[ 1 ][ "headers" ] == { "Content-Type": "application/json", "Authorization": "Bearer tok" }
+
+    def test_an_unwired_responder_sends_no_authorization_header( self ):
+        r, _, _, _ = _make_responder()
+        assert r.authorization_fn is None
+        with patch.object( rr.requests, "post", return_value=MagicMock( status_code=200 ) ) as m:
+            r._submit_response( "n1", "yes" )
+        assert m.call_args[ 1 ][ "headers" ] == { "Content-Type": "application/json" }
+
+    def test_a_listener_that_has_not_logged_in_yet_sends_no_authorization_header( self ):
+        r, _, _, _ = _make_responder()
+        r.authorization_fn = lambda: None
+        with patch.object( rr.requests, "post", return_value=MagicMock( status_code=200 ) ) as m:
+            r._submit_response( "n1", "yes" )
+        assert m.call_args[ 1 ][ "headers" ] == { "Content-Type": "application/json" }
+
 
 class TestPrintStats:
 

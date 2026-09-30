@@ -11,11 +11,11 @@
          this slice (monolith de-duplication is a later, separately-verified pass).
          See src/rnd/v0.1.9/2026.06.19-multiplexer-layout-parity-methodology/. -->
     <link rel="stylesheet" href="/static/css/shared/notifications-surface.css">
-    <link rel="stylesheet" href="/static/css/notifications.css?v=20260803c">
+    <link rel="stylesheet" href="/static/css/notifications.css?v=20260927a">
     <link rel="stylesheet" href="/static/css/lupin-nav.css">
-    <link rel="stylesheet" href="/static/css/broadcast-panel.css?v=20260619a">
-    <link rel="stylesheet" href="/static/css/task-list.css?v=20260803c">
-    <link rel="stylesheet" href="/static/css/epic-board.css?v=20260824a">
+    <link rel="stylesheet" href="/static/css/broadcast-panel.css?v=20260918a">
+    <link rel="stylesheet" href="/static/css/task-list.css?v=20260924a">
+    <link rel="stylesheet" href="/static/css/epic-board.css?v=20260904a">
 </head>
 <body>
     <!-- Master-detail two-pane shell (2026-05-21 — see
@@ -40,6 +40,17 @@
                 data-testid="notifications-layout-mode-toggle"
                 type="button"
                 title="Switch to horizontal layout (Reading Pane on right). Best at viewports ≥ 1200px wide.">⇆</button>
+        <!-- Row 47759aa3, Rick's ask: a GLOBAL entry point to the file viewer. Until this
+             button the only way in was to scroll back through the notification history for
+             a doc link, open it, then click Folder. NO data-section: this is not a section
+             toggle, so the delegated section handler must not claim it — same shape as the
+             layout-mode button above. It opens the roots landing in the content pane,
+             through the SAME door a doc-link click uses. -->
+        <button class="toolbar-btn"
+                id="doc-roots-toggle"
+                data-testid="notifications-doc-roots-toggle"
+                type="button"
+                title="Browse files — every root the viewer can reach">📂</button>
         <button class="toolbar-btn active" data-section="section-qa" data-testid="notifications-toolbar-qa" title="Q&A Interface">❓</button>
         <button class="toolbar-btn active" data-section="section-job-submit" data-testid="notifications-toolbar-jobs" title="Submit Agentic Jobs">📝</button>
         <button class="toolbar-btn active" data-section="action-required-section" data-testid="notifications-toolbar-action" title="Action Required">⚠️</button>
@@ -48,12 +59,24 @@
         <button class="toolbar-btn active" data-section="section-fleet-status" data-testid="fleet-status-toolbar-btn" title="Fleet Status">🛰️</button>
         <button class="toolbar-btn active" data-section="section-task-list" data-testid="task-list-toolbar-btn" title="Task List">🗒️</button>
         <button class="toolbar-btn active" data-section="section-epic-board" data-testid="epic-board-toolbar-btn" title="Epic Board">🗂️</button>
-        <!-- Task-list per-persona accordion controls (2026-06-17). DISTINCT class
-             (task-accordion-btn, NOT toolbar-btn) + NO data-section so the
-             section-visibility click dispatcher ignores them — these are actions
-             (collapse/expand every owner group), not section-visibility toggles. -->
-        <button class="task-accordion-btn" id="task-list-collapse-all" data-testid="task-list-collapse-all-btn" type="button" title="Collapse all task owners">⊟</button>
-        <button class="task-accordion-btn" id="task-list-expand-all" data-testid="task-list-expand-all-btn" type="button" title="Expand all task owners">⊞</button>
+        <!-- Holding Area toggle. Rick by voice, 2026-09-02: "we need a toggle button in the
+             Notifications Client Toolbar that hides and unhides the holding area, it needs its
+             own toggle button."
+
+             Declarative on purpose — `data-section` is all toggleSectionVisibility needs, and it
+             already persists the choice to localStorage and dims the button. Wiring a bespoke
+             handler here would be a second implementation of a mechanism that works, and it would
+             be the one that forgets to persist.
+
+             ⚠️ SITS BESIDE THE EPIC BOARD, NOT BESIDE THE TASK LIST. -->
+        <button class="toolbar-btn active" data-section="section-holding-area" data-testid="holding-area-toolbar-btn" title="Holding Area">🗃️</button>
+        <!-- The task-list collapse-all / expand-all pair (2026-06-17) was REMOVED from this
+             toolbar on 2026-09-15, on Rick's ruling: this toolbar shows and hides accordion
+             AREAS, and those two were task-list actions that never qualified. The epic board
+             keeps its equivalent pair in its own CARD header, which is where such a control
+             belongs. collapseAllTaskOwners() / expandAllTaskOwners() in notifications.js are
+             untouched and still guarded by unit tests; legacy has no visible entry point for
+             them until someone moves the pair into the task-list card header. -->
         <button class="toolbar-btn active" data-section="filter-settings-section" data-testid="notifications-toolbar-filters" title="Filter Settings (Admin)">⚙️</button>
         <button class="toolbar-btn active" data-section="section-queues" data-testid="notifications-toolbar-queues" title="Job Queues">📋</button>
         <button class="toolbar-btn active" data-section="section-time-saved" data-testid="notifications-toolbar-time" title="Time Saved">⏱️</button>
@@ -684,8 +707,157 @@
                 <button class="toggle-button" id="fleet-status-toggle">▼</button>
             </div>
             <div class="section-content" id="fleet-status-section">
+                <!-- THE FLEET-SIZE DIAL. Rick's placement, by voice 2026-09-03: "the fleet
+                     accordion header".
+
+                     ⚠️ IT LIVES IN THE SECTION CONTENT, NOT THE HEADER BAR, and that is the
+                     whole reason this comment exists. The bar's onclick is
+                     toggleSection('fleet-status-section'), so a range input up there
+                     collapses the panel on every drag. The ratio-gate controls hit exactly
+                     this and paid for it once; "header" here means the TOP OF THE SECTION,
+                     which is where this is.
+
+                     🔴 THERE IS NO `max` ATTRIBUTE HERE ON PURPOSE. The ceiling is
+                     `cc session fleet size cap maximum` (shipping 18) and it must stay
+                     tweakable, so the control reads it from GET /api/arbiter/fleet-size-cap
+                     at call time. A number written here would be a second source of truth
+                     that silently disagrees with the key the spawn path enforces — which is
+                     the exact failure the configurable-maximum ruling was made to prevent.
+
+                     🔨 IT WRITES — CORRECTED 2026-09-04. This control shipped DISABLED, and
+                     the comment here said the write needed "shared storage and a change to
+                     the resolver". The first half was reasoned rather than measured and is
+                     WRONG: `docker inspect lupin-rest-dev` reports the checkout's `src`
+                     bind-mounted at `/var/lupin/src` with `rw=true`, so the container and
+                     the host MCP process already read and write ONE file. No compose
+                     change, no env var, no recreate. The second half was right — the
+                     resolver did need to stop trusting a cached singleton, and now reads
+                     the key fresh from that file at call time.
+
+                     ⇒ Rick asked for a thermostat and the read-only version was a
+                     thermometer. It is a thermostat now: PUT /api/arbiter/fleet-size-cap
+                     persists to the configuration file and returns what it re-read from
+                     disk, and the spawn path sees the new number without a restart.
+
+                     ⚠️ IT IS NOT `disabled` AND HAS NO `value` EITHER. Both are painted
+                     from the server. A control parked at HTML defaults renders identically
+                     whether it works or not — which is why the cluster stays `hidden` until
+                     a real payload arrives. -->
+                <div class="fleet-size-cap-controls" id="fleet-size-cap-controls"
+                     data-testid="fleet-size-cap-controls" hidden>
+                    <span class="fleet-size-cap-field">
+                        <label for="fleet-size-cap">
+                            Fleet cap
+                            <output id="fleet-size-cap-value"
+                                    data-testid="fleet-size-cap-value">—</output>
+                        </label>
+                        <input type="range" id="fleet-size-cap"
+                               data-testid="fleet-size-cap"
+                               min="1" step="1"
+                               title="The fleet-wide session cap the spawn path enforces — EVERY session counts, managers included. Over cap refuses new spawns and reaps nobody. Drag and release to set it: the value is written to `cc session fleet size cap` in the configuration file and survives a restart. The slider's maximum is `cc session fleet size cap maximum`." />
+                    </span>
+                    <span id="fleet-size-cap-status"
+                          data-testid="fleet-size-cap-status"
+                          class="fleet-size-cap-status"></span>
+                </div>
                 <div id="fleet-status-container" data-testid="fleet-status-container">
                     <!-- rendered grouped table (read-only) -->
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================================================================
+             FINISHED TASKS — Rick's P0, broadcast e254ec7d, 2026-09-07.
+             Rows 7c616656 (this) / 470b7509 (multiplexer port, separate).
+             Design: src/rnd/2026.09.06-completed-work-accordion-design.md
+
+             PLACEMENT is beneath Fleet Status and above Task List, and it is
+             RAW DOM ORDER — no JS array reorders these sections, so the order
+             you read here is the order Rick sees.
+
+             🔴 IT READS THE EVENT STREAM, NOT /api/tasks. Rick's ruling R5 via
+             María, 2026-09-07 19:21, on Rachel's design §3: /api/tasks CANNOT
+             answer "which rows became terminal in the last 24 hours". There is
+             no terminal-timestamp column anywhere in the schema (verified: zero
+             hits for closed_ts|terminal_ts|completed_ts|finished_ts|done_ts,
+             against 8 for updated_ts as a positive control), so its updated_ts
+             moves on EVERY write and an amended three-day-old row reads as
+             freshly finished; and it orders by created_ts, so a row finished ten
+             minutes ago can sit below 500 rows created today. `task_events` is
+             append-only, one row per state change, and is the only honest record
+             of WHEN a row became done and WHO did it.
+             ================================================================== -->
+        <div class="collapsible-section" id="section-finished-tasks">
+            <div class="section-header" onclick="toggleSection('finished-tasks-section')">
+                <h3>✅ Finished Tasks · <span id="finished-tasks-count"
+                        data-testid="finished-tasks-count"
+                        title="Terminal rows in the selected window. Shows an em dash until the first poll returns — a 0 here would be a claim nobody has measured yet.">—</span>
+                    <span id="finished-tasks-updated" class="fleet-status-updated"
+                          data-testid="finished-tasks-updated"
+                          title="Last refreshed (HH:MM:SS, browser timezone)"></span></h3>
+                <button class="refresh-btn" id="finished-tasks-refresh"
+                        data-testid="finished-tasks-refresh-btn"
+                        onclick="event.stopPropagation(); window.notificationsUI.refreshFinishedTasks()"
+                        title="Refresh now">⟳</button>
+                <button class="toggle-button" id="finished-tasks-toggle">▼</button>
+            </div>
+
+            <!-- 🔴 EVERY CONTROL BELOW LIVES IN .section-content, NEVER IN
+                 .section-header. The header carries onclick=toggleSection(...),
+                 so a slider placed there collapses the panel on every drag.
+                 Documented at :830-834 and again at :703-708 of this file. -->
+            <div class="section-content" id="finished-tasks-section">
+
+                <div class="finished-tasks-controls" data-testid="finished-tasks-controls">
+
+                    <!-- THREE PILLS, MULTI-SELECT, DONE PRE-LIT (design §7).
+                         Positive polarity: `aria-pressed="true"` means SHOWN.
+                         A zero-count pill stays VISIBLE, dimmed and clickable —
+                         "zero is a claim, not a default". A pill that vanishes at
+                         zero silently turns "nothing was refused today" into
+                         "this feature does not exist". -->
+                    <span class="finished-tasks-pills" role="group" aria-label="Terminal statuses to show">
+                        <button type="button" class="finished-pill" id="finished-pill-done"
+                                data-testid="finished-pill-done" data-status="done"
+                                aria-pressed="true"
+                                title="Rows that reached done. The only success terminal — there is no separate 'fixed' status.">
+                            ✅ Done <span class="finished-pill-count" data-testid="finished-pill-count-done">—</span>
+                        </button>
+                        <button type="button" class="finished-pill" id="finished-pill-dropped"
+                                data-testid="finished-pill-dropped" data-status="dropped"
+                                aria-pressed="false"
+                                title="Rows closed as dropped.">
+                            🗑️ Dropped <span class="finished-pill-count" data-testid="finished-pill-count-dropped">—</span>
+                        </button>
+                        <button type="button" class="finished-pill" id="finished-pill-wont-fix"
+                                data-testid="finished-pill-wont-fix" data-status="wont_fix"
+                                aria-pressed="false"
+                                title="Rows closed as won't-fix. Terminal, and deliberately NOT part of the default view — Rick: 'won't fix IS an end state however'.">
+                            🚫 Won't-fix <span class="finished-pill-count" data-testid="finished-pill-count-wont_fix">—</span>
+                        </button>
+                    </span>
+
+                    <span class="flow-ratio-field finished-tasks-window">
+                        <label for="finished-tasks-window">
+                            Window
+                            <output id="finished-tasks-window-value"
+                                    data-testid="finished-tasks-window-value">1d</output>
+                        </label>
+                        <!-- DAYS on screen, HOURS on the wire — the same split the
+                             flow-ratio slider uses at :862-875, deliberately copied
+                             rather than reinvented. Nobody reasons about an 82-hour
+                             window. The x24 lives in the JS handlers only.
+                             Handler split, also copied: `input` = live preview and
+                             NO fetch; `change` = commit and fetch. -->
+                        <input type="range" id="finished-tasks-window"
+                               data-testid="finished-tasks-window"
+                               min="1" max="14" step="1" value="1"
+                               title="Days back from now. Defaults to the last 24 hours and steps backward one day at a time." />
+                    </span>
+                </div>
+
+                <div id="finished-tasks-container" data-testid="finished-tasks-container">
+                    <!-- rendered table (read-only) -->
                 </div>
             </div>
         </div>
@@ -696,7 +868,9 @@
              fleet-status section structure. Pure observability — NO mutating controls. -->
         <div class="collapsible-section" id="section-task-list">
             <div class="section-header" onclick="toggleSection('task-list-section')">
-                <h3>📋 Task List: <span id="task-list-count">0</span>
+                <h3>📋 Task List · <span id="task-list-count">0</span><span id="task-list-request-badge"
+                          class="task-request-badge" data-testid="task-list-request-badge"
+                          title="Managers' DEMOTE requests waiting on you (row c9fafb9d)" hidden></span>
                     <span id="task-list-updated" class="task-list-updated"
                           data-testid="task-list-updated"
                           title="Last refreshed (HH:MM:SS, browser timezone)"></span></h3>
@@ -707,8 +881,218 @@
                 <button class="toggle-button" id="task-list-toggle">▼</button>
             </div>
             <div class="section-content" id="task-list-section">
+                <!-- Find a ticket by the hash somebody handed you (Rick's P0, row
+                     732151f2). It lives in the section BODY rather than the header
+                     because the header carries an onclick toggle, and an input
+                     inside it would need event.stopPropagation on every keystroke
+                     to stop typing from collapsing the card.
+
+                     🔴 The lookup hits /api/tasks/<ref>, which applies NO
+                     board-visibility filter and therefore finds HOLDING-AREA rows.
+                     Do not repoint it at the board query (/api/tasks?id_prefix=):
+                     measured 2026-09-09, that path could see 1 of the 23 held rows,
+                     because it chains _apply_owed_filter after the prefix match. -->
+                <div class="task-lookup" data-testid="task-lookup">
+                    <!-- type="text", NOT "search" (Rick, row 700f0e1d): a search input
+                         gets the browser's own ✕, which empties the box but leaves the
+                         filter on — a control that looks like "clear" and is not. The
+                         real clear is the ✕ button below. enterkeyhint keeps the search
+                         key on a phone keyboard. -->
+                    <input type="text" id="task-lookup-input" class="task-lookup-input"
+                           data-testid="task-lookup-input"
+                           enterkeyhint="search"
+                           placeholder="Find ticket by id…"
+                           aria-label="Find a ticket by its id"
+                           onkeydown="if (event.key === 'Enter') { event.preventDefault(); window.notificationsUI.runTaskLookup(); }">
+                    <button type="button" id="task-lookup-go" class="task-lookup-go"
+                            data-testid="task-lookup-go"
+                            onclick="window.notificationsUI.runTaskLookup()"
+                            title="Look up a ticket by its id">🔎</button>
+                    <!-- Hidden until a filter is actually applied: a permanent
+                         "clear" on an unfiltered list is a control that does
+                         nothing, which teaches the operator to ignore it for the
+                         one moment it matters.
+                         BETWEEN 🔎 AND ＋ New (Rick, row 700f0e1d): it acts on the
+                         search, so it sits with the search, not after the New button. -->
+                    <button type="button" id="task-lookup-clear" class="task-lookup-clear"
+                            data-testid="task-lookup-clear"
+                            onclick="window.notificationsUI.clearTaskLookup()"
+                            title="Show the whole task list again" hidden>✕</button>
+                    <!-- Rick's New Ticket card (row c9895403): "within the task list bar
+                         right next to the find functionality". The card is built by
+                         shared/task-create.js, the same module the multiplexer uses, so
+                         the two clients cannot offer different fields. -->
+                    <button type="button" id="task-new-ticket" class="task-new-ticket"
+                            data-testid="task-new-ticket"
+                            onclick="window.notificationsUI.openNewTicketCard()"
+                            title="Create a new ticket">＋ New</button>
+                    <!-- role=status announces the answer to a screen reader without
+                         stealing focus back from the input mid-typing. -->
+                    <div id="task-lookup-result" class="task-lookup-result"
+                         data-testid="task-lookup-result" role="status"></div>
+                    <!-- Board notices (row moved here 2026-09-17, Rick via María): the
+                         truncation banner, the holding-area note and the verbatim server
+                         warning used to be CONCATENATED into #task-list-container, which
+                         every render then overwrote with `container.innerHTML = …`. They
+                         live here instead, in their own element OUTSIDE the container, so
+                         a re-render cannot wipe them. The four FULL-PANEL states
+                         (sign-in, query-unavailable, store-unreachable, empty) stay in
+                         the container on purpose: they ARE the panel's content, and
+                         hoisting them would leave an unexplained empty pane. -->
+                    <div id="task-list-notices" class="task-list-notices"
+                         data-testid="task-list-notices" role="status"></div>
+                </div>
                 <div id="task-list-container" data-testid="task-list-container">
-                    <!-- rendered owner-grouped table (read-only) -->
+                    <!-- rendered owner-grouped table, with per-row state controls -->
+                </div>
+                <!-- Drop-reason suggestions. "Overtaken by events" is a REASON and
+                     deliberately not a fourth status (design 2026.09.02, amendment 6):
+                     a status has to be legal-from somewhere, ranked, coloured and
+                     counted, and this phrase needs none of that — it needs to be easy
+                     to type. One datalist serves every row; the rows reference it by
+                     id, so it lives here rather than being re-emitted per row. -->
+                <datalist id="task-drop-reason-suggestions">
+                    <option value="Overtaken by events"></option>
+                    <option value="Duplicate of an existing row"></option>
+                    <option value="Filed against the wrong repo"></option>
+                    <option value="No longer reproducible"></option>
+                </datalist>
+            </div>
+        </div>
+
+        <!-- Holding Area — rows FILED but not yet cleared to start. Design:
+             planning-is-prompting/src/rnd/2026.09.02-ticket-approval-gate-and-wont-fix.md (Rick's P0).
+
+             Deliberately a SEPARATE pane fed by a SEPARATE query, not a filter on the
+             board above. `not_approved` is in the store's BOARD_INVISIBLE_STATUSES, so
+             the board cannot see these rows and must not — unapproved work appearing as
+             live work is the thing the gate exists to prevent. The two panes show
+             disjoint sets on purpose.
+
+             Grouped by FILER rather than owner: triage asks "what did this person file",
+             and the two fields disagree on roughly a quarter of live rows. -->
+        <div class="collapsible-section" id="section-holding-area">
+            <div class="section-header" onclick="toggleSection('holding-area-section')">
+                <h3>🗂️ Holding Area · <span id="holding-area-count">0</span><span id="holding-area-request-badge"
+                          class="task-request-badge" data-testid="holding-area-request-badge"
+                          title="Managers' PROMOTE requests waiting on you (row c9fafb9d)" hidden></span><span
+                          id="task-list-flow-ratio" class="task-list-flow-ratio"
+                          data-testid="task-list-flow-ratio"
+                          title="Rows created vs closed over the window, ACROSS EVERY PROJECT AND PRIORITY — not only rows bound for this pane. Below 1.0 means the board is draining."></span></h3>
+                <button class="refresh-btn" id="holding-area-refresh"
+                        data-testid="holding-area-refresh-btn"
+                        title="Refresh the holding area">⟳</button>
+                <button class="toggle-button" id="holding-area-toggle">▼</button>
+            </div>
+            <div class="section-content" id="holding-area-section">
+                <!-- Operator controls for the ratio gate. MOVED HERE FROM THE TASK LIST
+                     2026-09-04 on Rick's ruling: the gate runs at CREATE time, upstream of
+                     both panes (ratio_gate_advisory inside create_task — "evaluated BEFORE
+                     create_item so a refusal writes nothing at all"), so a refused ticket
+                     never lands anywhere. It sits here because this is the room a
+                     SUCCESSFULLY created row lands in, and the dial belongs beside it.
+
+                     🔴 THE PLACEMENT MUST NOT NARROW THE MEANING, which is why every label
+                     and title here says so out loud: THE GATE GOVERNS CREATION EVERYWHERE —
+                     every project, every priority — not only rows bound for this pane.
+                     Sitting in the holding-area section quietly implies otherwise, and a
+                     reader who believes it would mis-set a fleet-wide dial.
+
+                     ⚠️ AND THEY STILL LIVE INSIDE THE SECTION CONTENT, NOT THE HEADER BAR.
+                     Rick's word was "the holding area header"; the header's onclick toggles
+                     the section, so a slider up there collapses the panel on every drag.
+                     That constraint is why the task-list copy was inside the content too —
+                     "header" here means the top of the section, which is where this is.
+
+                     ⚠️ IDs and data-testids are UNCHANGED and still say `task-list-*`. They
+                     are historical, not descriptive: renaming them would break E2E locators
+                     that are not mine to move, for no behavioural gain.
+                     Reads GET /api/tasks/flow-ratio/settings, writes PATCH (admin only).
+                     The threshold moves the number the CREATE gate refuses on — it is a
+                     policy control, which is why it names its effect rather than sitting
+                     there as a bare number. -->
+                <div class="flow-ratio-controls" id="flow-ratio-controls"
+                     data-testid="flow-ratio-controls" hidden>
+                    <!-- Each label is wrapped WITH its slider so a wrap cannot separate
+                         them. As bare flex children they could, and did: at a 700px
+                         viewport the "Window" label stayed on row 1 while its slider
+                         dropped to row 2, leaving two labels adjacent and neither one
+                         next to the control it names. -->
+                    <span class="flow-ratio-field">
+                        <label for="flow-ratio-threshold">
+                            Gate opens below
+                            <output id="flow-ratio-threshold-value"
+                                    data-testid="flow-ratio-threshold-value">—</output>
+                        </label>
+                        <input type="range" id="flow-ratio-threshold"
+                               data-testid="flow-ratio-threshold"
+                               min="0" max="200" step="10"
+                               title="Percentage the create gate opens below, FLEET-WIDE — every project and every priority, not only this pane. Higher = more permissive. At 0% nothing is below the threshold, so the gate never opens and every new ticket is refused." />
+                    </span>
+
+                    <span class="flow-ratio-field">
+                        <label for="flow-ratio-window">
+                            Window
+                            <output id="flow-ratio-window-value"
+                                    data-testid="flow-ratio-window-value">—</output>
+                        </label>
+                        <!-- DAYS on screen, HOURS on the wire. The slider is in days because
+                             nobody reasons about a 82-hour window; the conversion is x24 and
+                             lives in the two JS handlers, so the API contract is unchanged. -->
+                        <input type="range" id="flow-ratio-window"
+                               data-testid="flow-ratio-window"
+                               min="1" max="14" step="1"
+                               title="Days the ratio is counted over. The SAME board can pass at 1d and fail at 7d." />
+                    </span>
+
+                    <!-- RICK'S MANAGER-PULL TOGGLE (P0 458e9947, 2026-09-06).
+                         Placed beside the GATE slider — his placement, and he corrected
+                         himself mid-sentence to say gate slider and explicitly NOT the
+                         fleet-cap one.
+
+                         🔴 IT IS A DIFFERENT DOOR FROM THE SLIDER NEXT TO IT, and that is
+                         the whole reason it exists. The threshold governs CREATING a row;
+                         this governs a manager TAKING one — `queued -> in_progress`.
+                         Measured before it was built: the two pre-existing gates key on
+                         NOT_APPROVED_STATUS and reach ZERO of 51 asks on a pull, so a
+                         toggle wired to either would have shipped, looked correct, and
+                         disabled nothing.
+
+                         CHECKED = pulling is DISABLED. The stored flag is named for what
+                         it does (`manager_pull_disabled`), not for the switch position, so
+                         an inverted read cannot ship quietly. Writes PATCH
+                         /api/tasks/manager-pull (admin only).
+
+                         🔨 CHECKED BY DEFAULT -- Rick's order, 2026-09-07 (row 1ec67228):
+                         "it must default to NO". This attribute governs exactly ONE
+                         moment: before the hydrating GET lands, or when it never does.
+                         `_hydrate` sets `.checked` from the server in BOTH directions,
+                         so this cannot pin the switch on -- but its early return on a
+                         failed fetch leaves whatever the markup shipped. That used to be
+                         UNCHECKED, i.e. the operator saw "pull is allowed" precisely when
+                         the server could not be reached to say otherwise. -->
+                    <span class="flow-ratio-field">
+                        <label for="manager-pull-toggle">
+                            <input type="checkbox" id="manager-pull-toggle"
+                                   data-testid="manager-pull-toggle" checked />
+                            Freeze manager pull
+                        </label>
+                    </span>
+
+                    <button type="button" id="flow-ratio-reset"
+                            data-testid="flow-ratio-reset"
+                            title="Drop the saved override and use the configured defaults">Reset</button>
+                    <span id="flow-ratio-controls-status"
+                          data-testid="flow-ratio-controls-status"
+                          class="flow-ratio-controls-status"></span>
+                </div>
+                <!-- NO SEARCH BOX HERE, on purpose (Rick, row 700f0e1d, 2026-09-11):
+                     the Task List's Find box already reaches held rows — it uses the
+                     visibility-free /api/tasks/<ref> — so a second box in this pane
+                     was the same control twice. It was added 2026-09-09 and removed
+                     after a day of use. -->
+                <div id="holding-area-container" data-testid="holding-area-container">
+                    <!-- rendered filer-grouped table with batch controls -->
                 </div>
             </div>
         </div>
@@ -1087,18 +1471,87 @@
          A module so the same file can be `import`ed there; it publishes
          window.LUPIN_TASK_LIST_QUERY for the classic script below, which reads
          it at call time (the poll starts well after module execution). -->
-    <script type="module" src="/static/js/shared/task-list-query.js?v=20260803c"></script>
-    <script type="module" src="/static/js/shared/agent-select.js?v=20260826a"></script>
-    <script type="module" src="/static/js/shared/arg-interview.js?v=20260826a"></script>
-    <script src="/static/js/notifications.js?v=20260828a"></script>
-    <script src="/static/js/broadcast-panel.js?v=20260619a"></script>
+    <script type="module" src="/static/js/shared/task-list-query.js?v=20260902a"></script>
+    <!-- The ONE task-verb vocabulary. A module so the TypeScript tier can `import`
+         it as the ORACLE for the per-pane control guard; it publishes
+         window.LUPIN_TASK_VERB_SPECS for the classic script below, read at call
+         time. MUST load before notifications.js or every verb lookup is null. -->
+    <!-- 🔴 TOKEN WAS 20260904a WHILE THE FILE CHANGED 2026-09-08 (commit f3634011, the
+         un-park verb). A ?v= URL is served `immutable, max-age=31536000` by
+         versioned_static.py:85, so every browser that loaded this page between those
+         dates held the PRE-UN-PARK vocabulary until 2027 — no revalidation, surviving a
+         hard reload. That is the likeliest reason Rick reported un-park missing from the
+         actions list on THIS client; row 75044ab5 blamed the stale multiplexer bundle and
+         recorded this client as fine because the SOURCE had the verb. Bumped 2026-09-09. -->
+    <script type="module" src="/static/js/shared/task-verbs.js?v=20260909a"></script>
+    <!-- The ONE ticket-reference classifier + lookup URL builder (Rick's P0, row
+         732151f2). A module so the TypeScript multiplexer can `import` the same
+         file rather than keeping a second copy of the matching rule — the drift
+         taskVerbs.ts is the standing receipt for. It publishes
+         window.LUPIN_TASK_LOOKUP_PATH for the classic script below, read at CALL
+         time so module execution order cannot matter. -->
+    <script type="module" src="/static/js/shared/task-lookup.js?v=20260909c"></script>
+    <!-- Row c9fafb9d — a manager's promote/demote REQUEST: the chip's words, the verdict body
+         and the badge text, shared with the multiplexer so the two clients cannot drift.
+         Publishes window.LUPIN_TASK_REQUEST for the classic script below, read at CALL time. -->
+    <script type="module" src="/static/js/shared/task-request.js?v=20260910a"></script>
+    <!-- Rick's New Ticket card (row c9895403) — form, validation and outcome wording
+         shared with the multiplexer. Publishes window.LUPIN_OPEN_NEW_TICKET_CARD for the
+         classic script below, read at CALL time. -->
+    <script type="module" src="/static/js/shared/task-create.js?v=20260918a"></script>
+    <script type="module" src="/static/js/shared/agent-select.js?v=20260829a"></script>
+    <script type="module" src="/static/js/shared/arg-interview.js?v=20260905a"></script>
+    <!-- 🔴 CACHE TOKENS PICKED BY THE MERGER, BY HAND, 2026-09-04 (john) — per the
+         standing ruling in 0da963f4: this value belongs to whoever merges, not to
+         either author, because two authors both bumping it is what produced that
+         ruling. Neither side of this conflict was correct to take verbatim:
+           HEAD  notifications.js 20260904a · broadcast-panel.js 20260619a
+           2c53e125  notifications.js 20260904d · broadcast-panel.js 20260904d
+         ⚠️ THE TWO FILES GET DIFFERENT TREATMENT, AND THE DIFFERENCE IS MEASURED
+         RATHER THAN ASSUMED — `git hash-object` on the MERGED tree against both
+         parents, not "this merge touched some JS so bump everything":
+           notifications.js   merged 356dec05 · served bf089ba5 · HEAD 8f389a0b
+                              ⇒ differs from BOTH parents, so the token MUST move
+                                past the served one: 20260904d -> 20260904e.
+           broadcast-panel.js merged 1e1eb585 · served 1e1eb585  (IDENTICAL)
+                              ⇒ the merge changed nothing, so the token MUST NOT
+                                move. A bump on an unchanged file is a false signal:
+                                it busts every client's cache for no new bytes, and
+                                it teaches the next reader that the token tracks
+                                merges rather than content.
+         The predecessor merger's warning still stands and is why HEAD was not taken:
+         its broadcast-panel token was 20260619a against a file last committed
+         20260904 — shipping the broadcast-401 fix behind an unmoved key, the exact
+         failure reproduced and fixed at 48d16579. -->
+    <!-- ⚠️ BUMP THIS WHENEVER notifications.js CHANGES. 20260909a → b adds the
+         ticket-lookup box (row 732151f2). A browser warm from earlier today holds
+         the previous copy behind a byte-identical URL and would hold it forever —
+         that is commit 2033c006 from this morning, and 1a958c49 before it, the
+         SAME defect twice in one day. Nothing enforces this yet; the stale-bundle
+         gate on row 75044ab5 is the fix. Until it lands, this line is the fix. -->
+    <script src="/static/js/notifications.js?v=20260929c"></script>
+    <!-- broadcast-panel.js 20260904d → 20260926a: row 319c57a3 (merged 29ae2d0ab) changed
+         its bytes — a chip click now inserts exactly `@name`. Bumped by the merger. -->
+    <script src="/static/js/broadcast-panel.js?v=20260926a"></script>
     <script>
         // Accordion sections whose open/closed state survives page reloads.
         // Design: src/rnd/v0.1.7/2026.05.21-recent-activity-filter-and-focus-bar-chronological-lock.md
         // Map: sectionId → localStorage key (notifications_* convention).
         const LUPIN_ACCORDION_PERSIST_KEYS = {
             'broadcast-submit-section'    : 'notifications_broadcast_card_open',
-            'commons-recent-activity-body': 'notifications_recent_activity_open'
+            'commons-recent-activity-body': 'notifications_recent_activity_open',
+            // 🔴 POLARITY DECLARED AT THE POINT OF DEFINITION, per design §9.
+            // This is the SECTION axis and it has its own settled convention:
+            // a BOOLEAN, isOPEN sense, one key per section, and a missing key
+            // means "use the section's HTML default".
+            //
+            // It is deliberately NOT either group-level convention in this file —
+            // `lupin.taskList.collapsedOwners` is an ARRAY of COLLAPSED keys and
+            // `lupin.epicBoard.groupState` is a MAP of key -> isEXPANDED. Same
+            // feature, inverted sense, different container type. Copying one from
+            // the other inverts a user's saved state and FAILS INVISIBLY, which is
+            // why the sense is written here rather than inferred.
+            'finished-tasks-section'      : 'notifications_finished_tasks_open'
         };
 
         function toggleSection(sectionId) {

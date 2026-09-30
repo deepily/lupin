@@ -32,16 +32,23 @@
 
 import type { EventBus } from "../shared/EventBus";
 import type {
+  Job,
   JobBucket,
   JobStatus,
+  NotificationFilterMode,
   StoreJobsChangedPayload,
+  StoreNotificationsChangedPayload,
   HydrationFailedPayload,
   LupinEvent,
 } from "../shared/types";
 import type { JobStore, JobHistoryApiClient, HydrateHistoryOptions } from "../stores/JobStore";
+import { isJobVisibleTo, jobHistoryUserFilter, type JobViewer } from "../stores/jobViewFilter";
 import { ApiError } from "../api/ApiClient";
+import { FILTER_MODES } from "./NotificationsHeaderRenderer";
 import { renderJobBucket } from "./templates/jobBucket";
+import { loadBucketExpandState, saveBucketExpandChoice, type BucketExpandStorage } from "./jobsBucketExpand";
 import { populateJobMetaIfNeeded } from "./templates/jobCard";
+import * as debugSink from "../shared/debugSink";
 import {
   renderSectionHeader,
   wireSectionCollapse,
@@ -67,6 +74,16 @@ export interface JobsPaneRenderer {
 
 export interface JobsPaneRendererStores {
   jobs : JobStore;
+}
+
+/**
+ * Row 83c3ff74 — the store that owns the shared Mine / Not Mine / All Users mode. Production
+ * passes the NotificationStore (legacy's single control, one saved key), which satisfies this
+ * structurally; setFilterMode emits store_notifications_changed{changeKind:"filtered"}.
+ */
+export interface JobsPaneFilterStoreLike {
+  filterMode(): NotificationFilterMode;
+  setFilterMode(mode: NotificationFilterMode): void;
 }
 
 /**
@@ -99,6 +116,34 @@ export interface JobsPaneRendererOptions {
    * that never exercise retry omit it (the body then carries an empty id).
    */
   websocketId? : string;
+  /**
+   * Parity A-2 #11 — clicking the filter badge reveals Queue Filter Settings and scrolls
+   * to it (legacy's showAndScrollToFilterPanel). Boot passes ONE thunk, shared with the
+   * notifications header's badge, because legacy gives both badges one handler and two
+   * copies is two places for the behaviour to drift. A test that does not care omits it.
+   *
+   * No isAdmin check rides this: the badge is already hidden for a non-admin, which is
+   * where legacy gates it (initializeFilterUI). Gating twice is what produced cec9dd43.
+   */
+  revealFilterSettings? : () => void;
+  /**
+   * Row 83c3ff74 (Rick 2026-09-10 ~17:40 EDT) — legacy's job filter. With `filterStore` the pane
+   * shows the admin-only badge + switch, asks /api/job-history for the mode's jobs, hides live
+   * jobs the mode excludes, and reloads history once per mode change. Without it (harnesses)
+   * nothing is filtered and the badge stays hidden — the pane as it was.
+   */
+  filterStore?         : JobsPaneFilterStoreLike;
+  isAdmin?             : () => boolean;
+  getCurrentUserId?    : () => string | null;
+  getCurrentUserEmail? : () => string | null;
+  /**
+   * Parity A-1c1 — where the per-bucket open/closed choice is saved (the shared legacy key,
+   * see `jobsBucketExpand.ts`). Defaults to `localStorage`.
+   *
+   * ⚠️ `null` IS AN ACCEPTED VALUE AND MEANS "NO PERSISTENCE", not "use the default": a host
+   * with no localStorage is a real state, so it is a value a test can pass.
+   */
+  storage? : BucketExpandStorage | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -131,7 +176,17 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
   private readonly api           : JobsPaneApiClient;
   private readonly appTimezone   : string | undefined;
   private readonly websocketId   : string | undefined;
+  private readonly filterStore         : JobsPaneFilterStoreLike | undefined;
+  private readonly isAdmin             : () => boolean;
+  private readonly getCurrentUserId    : () => string | null;
+  private readonly getCurrentUserEmail : () => string | null;
   private readonly unsubscribers : Array<() => void> = [];
+
+  // Row 83c3ff74 — the filter badge (legacy #queues-filter-badge) and the switch buttons.
+  private filterBadgeEl  : HTMLElement | null = null;
+  private readonly revealFilterSettings : ( () => void ) | undefined;
+  private filterSwitchEl : HTMLElement | null = null;
+  private readonly filterButtons : Map<NotificationFilterMode, HTMLButtonElement> = new Map();
 
   private mounted        : boolean = false;
   private root           : HTMLElement | null = null;
@@ -154,6 +209,20 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
   // is removed in the .finally() of the apiClient.delete promise chain.
   private readonly deleteInFlight: Set<string> = new Set();
 
+  // Parity A-1c1 (Phase 2 A12 Q7) — idHashes of job cards the operator expanded.
+  // 🔴 STATE, NOT A READING OF THE DOM: every job event rebuilds all five buckets, so a
+  // card's `.collapsed` class is gone within one event and only this set remembers it.
+  // In memory on purpose, as legacy's `expandedJobCards` is: a card open across a reload
+  // is not a preference anyone expressed. An id whose card is no longer painted is simply
+  // not found — the card is left gone, never re-created (operator-state spec §5).
+  private readonly expandedCards: Set<string> = new Set();
+
+  // Parity A-1c1 (Phase 2 A12 B9c) — the operator's per-bucket open/closed CHOICES. An
+  // absent bucket has no choice and takes the template's Q-A2 default.
+  // Loaded from storage at mount (a reload), written back on every toggle.
+  private bucketExpanded: Partial<Record<JobBucket, boolean>> = {};
+  private readonly bucketStorage: BucketExpandStorage | null;
+
   constructor(opts: JobsPaneRendererOptions) {
     // Pass 2 F4: fail fast at construction if stores.jobs is missing.
     if (!opts.stores || !opts.stores.jobs) {
@@ -164,6 +233,13 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
     this.api         = opts.api;
     this.appTimezone = opts.appTimezone;
     this.websocketId = opts.websocketId;
+    this.filterStore         = opts.filterStore;
+    this.isAdmin             = opts.isAdmin ?? ((): boolean => false);
+    this.revealFilterSettings = opts.revealFilterSettings;
+    this.getCurrentUserId    = opts.getCurrentUserId ?? ((): string | null => null);
+    this.getCurrentUserEmail = opts.getCurrentUserEmail ?? ((): string | null => null);
+    /* c8 ignore next */ // production-default fallback: the browser's localStorage; tests inject a store or null.
+    this.bucketStorage = opts.storage !== undefined ? opts.storage : (globalThis.localStorage ?? null);
   }
 
   // -------------------------------------------------------------------------
@@ -184,6 +260,7 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
     }
     this.root         = root;
     this.bucketsMount = bucketsMount;
+    this.bucketExpanded = loadBucketExpandState(this.bucketStorage);
     this.mounted      = true;
 
     // Lift the data-phase6-pending sentinel from #jobs-pane (Phase 6a design
@@ -207,24 +284,56 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
     // rule hides it on collapse.
     const header = renderSectionHeader({
       icon   : "📝",
-      title  : "Jobs",
+      title  : "CJ Flow Jobs",
       testid : "multiplexer-jobs-header",
     });
     this.header = header;
 
-    // W6 (plan 04 §W6) — queues filter badge. A STATIC, HIDDEN, default-"Mine"
-    // badge + a seam for plan-08 (Filter Settings) to later wire the live filter
-    // store. Per F-Clay-B4 the plan-08 store-driven 👤 Mine / 🌐 Others / 🔵 All
-    // states are OUT of D1 scope — NO plan-08 subscription/branch is authored here
-    // (no unreachable-branch / coverage collision). It ships inert-hidden.
-    // TODO(plan-08): subscribe to the shared filter store + reflect the active
-    // 👤 Mine / 🌐 Others / 🔵 All mode when Filter Settings (plan 08) lands.
+    // Row 83c3ff74 (Rick 2026-09-10 ~17:40 EDT) — legacy's queue-header filter badge
+    // (notifications.html:1157, #queues-filter-badge) and the same Mine / Not Mine / All Users
+    // switch the notifications header carries. Both drive ONE mode on `filterStore`. Admin-only,
+    // as legacy's initializeFilterUI shows them. Mount only READS the mode: writing it would
+    // reload the notification history too, legacy's doubled-load bug (row b670b76c).
     const filterBadge = document.createElement("span");
-    filterBadge.className   = "queues-filter-badge";
-    filterBadge.hidden      = true;
+    filterBadge.className   = "queues-filter-badge filter-mode-badge";
+    filterBadge.id          = "queues-filter-badge";
+    filterBadge.title       = "Current filter mode";
     filterBadge.textContent = "👤 Mine";
     filterBadge.setAttribute("data-testid", "queues-filter-badge");
-    header.header.appendChild(filterBadge);
+    // Parity A-2 #11 — the badge reveals Queue Filter Settings, as legacy's does
+    // (notifications.js:1840-1845 → showAndScrollToFilterPanel). stopPropagation()
+    // is load-bearing: this badge rides the jobs section header, and the shared
+    // `headerClickShouldCollapse` predicate returns TRUE for any target that is not
+    // inside a `button, a, input, select`. A <span> badge without it collapses the
+    // jobs pane on the way to revealing the filters. Legacy: "Prevent section toggle".
+    filterBadge.addEventListener("click", (e: Event): void => {
+      e.stopPropagation();
+      this.revealFilterSettings?.();
+    });
+    const filterSwitch = document.createElement("div");
+    filterSwitch.className = "notifications-filter-switch jobs-filter-switch";
+    filterSwitch.setAttribute("role", "group");
+    filterSwitch.setAttribute("aria-label", "Show jobs from whose account");
+    filterSwitch.setAttribute("data-testid", "multiplexer-jobs-filter-switch");
+    for (const { mode, icon, label } of FILTER_MODES) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "notifications-filter-btn";
+      btn.setAttribute("data-mode", mode);
+      btn.setAttribute("data-testid", `multiplexer-jobs-filter-${mode}-btn`);
+      btn.textContent = `${icon} ${label}`;
+      btn.addEventListener("click", () => this.onFilterClick(mode));
+      this.filterButtons.set(mode, btn);
+      filterSwitch.appendChild(btn);
+    }
+    const showFilter = this.viewer()?.isAdmin === true;
+    filterBadge.hidden  = !showFilter;
+    filterSwitch.hidden = !showFilter;
+    header.header.insertBefore(filterBadge, header.actionsEl);
+    header.actionsEl.insertBefore(filterSwitch, header.actionsEl.firstChild);
+    this.filterBadgeEl  = filterBadge;
+    this.filterSwitchEl = filterSwitch;
+    this.syncFilter();
 
     bucketsMount.classList.add("section-content");
     root.insertBefore(header.header, bucketsMount);
@@ -244,17 +353,33 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
   // (b) re-published as `hydration_failed { source: "jobs" }` so
   // onHydrationFailed paints the visible Retry banner. Extracted so mount()
   // and the Retry button share ONE hydrate path.
+  //
+  // Row 83c3ff74 — every REPLACE carries the shared mode's user_filter (a load-more reuses the
+  // page before it, inside JobStore). An admin in Mine with no readable uid is refused here and
+  // reported through the same banner, rather than sent with no filter — which would be every
+  // user's jobs under a badge reading "Mine".
   private hydrateWithFailureSignal(opts?: HydrateHistoryOptions): void {
-    this.stores.jobs.hydrateHistory(this.api, opts).catch((err: unknown) => {
+    const fail = (err: unknown): void => {
       const error = err instanceof Error ? err : new Error(String(err));
-      console.warn("JobsPaneRenderer: hydrateHistory rejected:", error);
+      debugSink.error("JobsPaneRenderer: hydrateHistory rejected:", error);
       this.bus.emit<HydrationFailedPayload>({
         type    : "hydration_failed",
         payload : { source: "jobs", error },
         source  : "JobsPaneRenderer",
         ts      : Date.now(),
       });
-    });
+    };
+    let withFilter = opts;
+    const viewer = this.viewer();
+    if (viewer !== null && opts?.append !== true) {
+      try {
+        withFilter = { ...opts, userFilter: jobHistoryUserFilter(viewer) };
+      } catch (err: unknown) {
+        fail(err);
+        return;
+      }
+    }
+    this.stores.jobs.hydrateHistory(this.api, withFilter).catch(fail);
   }
 
   unmount(): void {
@@ -280,8 +405,11 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
     this.changeHandler = null;
 
     if (this.bucketsMount !== null) this.bucketsMount.replaceChildren();
-    this.bucketsMount = null;
-    this.header       = null;
+    this.bucketsMount   = null;
+    this.header         = null;
+    this.filterBadgeEl  = null;
+    this.filterSwitchEl = null;
+    this.filterButtons.clear();
     this.root         = null;
     this.mounted      = false;
   }
@@ -313,6 +441,69 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
         (e) => this.onHydrationFailed(e),
       ),
     );
+    // Row 83c3ff74 — a mode change from EITHER header (legacy setFilterMode → refreshAllQueues).
+    if (this.filterStore !== undefined) {
+      this.unsubscribers.push(
+        this.bus.on<StoreNotificationsChangedPayload>(
+          "store_notifications_changed",
+          (e) => { if (e.payload.changeKind === "filtered") this.onFilterModeChanged(); },
+        ),
+      );
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Row 83c3ff74 — the shared Mine / Not Mine / All Users mode
+  // -------------------------------------------------------------------------
+
+  // Who is looking and in which mode, or null when the pane was given no filter store (no
+  // filtering at all). A non-admin is always "own": legacy's switch is admin-only.
+  private viewer(): JobViewer | null {
+    if (this.filterStore === undefined) return null;
+    const isAdmin = this.isAdmin();
+    return {
+      isAdmin,
+      mode      : isAdmin ? this.filterStore.filterMode() : "own",
+      userId    : this.getCurrentUserId(),
+      userEmail : this.getCurrentUserEmail(),
+    };
+  }
+
+  private visibleBucket(name: JobBucket): ReadonlyArray<Job> {
+    const jobs   = this.stores.jobs.bucket(name);
+    const viewer = this.viewer();
+    return viewer === null ? jobs : jobs.filter(job => isJobVisibleTo(viewer, job));
+  }
+
+  private syncFilter(): void {
+    const viewer = this.viewer();
+    if (viewer === null) return;   // no filter store: the badge keeps its hidden "👤 Mine" default
+    /* c8 ignore next */ // defensive: syncFilter runs only between mount and unmount, when the badge is set.
+    if (this.filterBadgeEl === null) return;
+    const config = FILTER_MODES.find(m => m.mode === viewer.mode) as (typeof FILTER_MODES)[number];
+    this.filterBadgeEl.textContent = `${config.icon} ${config.label}`;
+    this.filterBadgeEl.setAttribute("data-mode", config.mode);
+    for (const [mode, btn] of this.filterButtons) {
+      btn.classList.toggle("active", mode === viewer.mode);
+      btn.setAttribute("aria-pressed", String(mode === viewer.mode));
+    }
+  }
+
+  private onFilterClick(mode: NotificationFilterMode): void {
+    /* c8 ignore next */ // defensive: the buttons are visible only to an admin, which requires a filter store.
+    if (this.filterStore === undefined) return;
+    if (mode === this.filterStore.filterMode()) return;   // already showing it: nothing to reload
+    this.filterStore.setFilterMode(mode);                // → "filtered" → onFilterModeChanged
+  }
+
+  // One reload per mode change, in the window the pane is already showing; the live buckets
+  // re-render from the jobs they hold, so nothing hidden by the old mode lingers.
+  private onFilterModeChanged(): void {
+    /* c8 ignore next */ // defensive: the listener is detached in unmount() before bucketsMount is nulled.
+    if (this.bucketsMount === null) return;
+    this.syncFilter();
+    this.renderAll();
+    this.hydrateWithFailureSignal({ days: this.stores.jobs.historyWindowDays(), append: false });
   }
 
   // -------------------------------------------------------------------------
@@ -389,7 +580,7 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
     // we just snapshot them.
     const buckets = ALL_BUCKETS.map(name => ({
       name,
-      jobs : this.stores.jobs.bucket(name),
+      jobs : this.visibleBucket(name),
     }));
 
     // Replace the buckets container's children atomically. Single
@@ -406,12 +597,42 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
             historyTotalCount  : this.stores.jobs.historyTotalCount(),
           }
         : { appTimezone: this.appTimezone };
-      return renderJobBucket(b.name, b.jobs, opts);
+      return renderJobBucket(b.name, b.jobs, {
+        ...opts,
+        expanded : this.bucketExpanded[b.name],
+        onToggle : (bucket, expanded) => {
+          this.bucketExpanded[bucket] = expanded;
+          saveBucketExpandChoice(this.bucketStorage, bucket, expanded);
+        },
+      });
     });
     this.bucketsMount.replaceChildren(...fragments);
+    this.reopenExpandedCards();
 
     // Lane 0a — the header count reflects the total across the 4 live buckets.
     this.updateCount();
+  }
+
+  /**
+   * Re-open every painted card the operator had expanded (parity A-1c1, Q7).
+   *
+   * Ensures:
+   *   - a card whose idHash is in `expandedCards` loses `.collapsed` on its details and
+   *     gets its meta rendered, exactly as the operator's own click did
+   *   - matched by comparing the attribute, never by building a selector from an id
+   */
+  private reopenExpandedCards(): void {
+    if (this.expandedCards.size === 0) return;
+    /* c8 ignore next */ // defensive: only called from renderAll past its bucketsMount-null guard.
+    if (this.bucketsMount === null) return;
+    for (const card of Array.from(this.bucketsMount.querySelectorAll<HTMLElement>(".job-card"))) {
+      const idHash = card.getAttribute("data-id-hash");
+      if (idHash === null || !this.expandedCards.has(idHash)) continue;
+      const details = card.querySelector(".job-card-details") as HTMLElement;
+      details.classList.remove("collapsed");
+      /* c8 ignore next */ // defensive: this card was painted from this store in the same renderAll, so getById finds it.
+      populateJobMetaIfNeeded(card, this.stores.jobs.getById(idHash)?.meta ?? {});
+    }
   }
 
   // Lane 0a — section-header count = todo + running + done + dead (history
@@ -419,7 +640,7 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
   private updateCount(): void {
     /* c8 ignore next */ // defensive: header is set/nulled in lockstep with bucketsMount, so non-null whenever renderAll runs.
     if (this.header === null) return;
-    const total = LIVE_BUCKETS.reduce((sum, b) => sum + this.stores.jobs.bucket(b).length, 0);
+    const total = LIVE_BUCKETS.reduce((sum, b) => sum + this.visibleBucket(b).length, 0);
     this.header.setCount(total);
   }
 
@@ -492,7 +713,11 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
         populateJobMetaIfNeeded(card, job?.meta ?? {});
       }
 
-      details.classList.toggle("collapsed");
+      const nowCollapsed = details.classList.toggle("collapsed");
+      if (idHash !== null) {
+        if (nowCollapsed) this.expandedCards.delete(idHash);
+        else this.expandedCards.add(idHash);
+      }
     };
     // W3 — history time-window <select> change → REPLACE-fetch the new window
     // (clears + refetches; pagination cursors reset). Delegated on root (change
@@ -520,11 +745,35 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
     /* c8 ignore next */ // defensive: the delete-all button always carries data-bucket per the jobBucket template.
     if (bucket === null) return;
 
-    // Confirm dialog: count + the running-bucket "interrupt active jobs" warning.
-    // Empty bucket still confirms (count 0). Cancel aborts with NO fetch (W2 AC).
-    const count = this.stores.jobs.bucket(bucket).length;
-    let message = `Delete all ${bucket} jobs (${count})?`;
-    if (bucket === "running") message += " This will interrupt active jobs.";
+    // Confirm dialog in legacy's words (parity A-2 #10, `deleteAllQueueJobs`,
+    // notifications.js:6869): a live queue is named with its count, the running queue
+    // warns that it cancels and interrupts, and history names the server's total and
+    // the window. Empty bucket still confirms (count 0). Cancel aborts with NO fetch (W2 AC).
+    //
+    // Row 83c3ff74 (María's review) — the dialog must never understate what the server deletes. For an
+    // ADMIN both doors below delete EVERY user's jobs whatever the Mine switch shows
+    // (delete_all_queue_jobs → queue.clear(); delete_all_job_history → user_id=None). So an admin is
+    // told so, with the real count where the client holds it — every job in a live bucket. History
+    // has no all-users total on the client, so it names the scope and gives no number. A non-admin's
+    // delete-all removes only their own jobs, which is what they are shown. Legacy has no admin
+    // wording; this keeps its shape and adds "for every user".
+    const viewer       = this.viewer();
+    const isAdmin      = viewer !== null && viewer.isAdmin;
+    const notOnlyShown = isAdmin && viewer.mode !== "all" ? ", not only the ones shown" : "";
+    let message: string;
+    if (bucket === "history") {
+      const windowLabel = historyWindowLabel(this.stores.jobs.historyWindowDays());
+      message = isAdmin
+        ? `Delete every user's history entries from ${windowLabel}${notOnlyShown}?`
+        : `Delete all ${this.stores.jobs.historyTotalCount()} history entries from ${windowLabel}?`;
+    } else {
+      const count    = isAdmin ? this.stores.jobs.bucket(bucket).length : this.visibleBucket(bucket).length;
+      const jobs     = `job${count === 1 ? "" : "s"}`;
+      const everyone = isAdmin ? ` for every user${notOnlyShown}` : "";
+      message = bucket === "running"
+        ? `Cancel and remove all ${count} running ${jobs}${everyone}? This will interrupt active jobs.`
+        : `Remove all ${count} ${jobs} from the ${bucket} queue${everyone}?`;
+    }
     if (!globalThis.confirm(message)) return;
 
     // Endpoint per bucket: history → the persistence delete-all, windowed by the
@@ -551,7 +800,7 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
           this.applyDeleteAllSuccess(bucket, isHistory);
           return;
         }
-        console.warn("JobsPaneRenderer: delete-all failed:", err);
+        debugSink.error("JobsPaneRenderer: delete-all failed:", err);
       });
   }
 
@@ -591,7 +840,7 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
       // Say so instead of sending a request that cannot work. This is reachable for a
       // card built from a WebSocket event rather than a hydrated history row — those
       // carry event metadata, not the stored row.
-      console.warn("JobsPaneRenderer: cannot retry", idHash, "— its row carries no question text");
+      debugSink.error("JobsPaneRenderer: cannot retry", idHash, "— its row carries no question text");
       return;
     }
 
@@ -606,7 +855,7 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
         this.hydrateWithFailureSignal({ days: this.stores.jobs.historyWindowDays(), append: false });
       })
       .catch((err: unknown) => {
-        console.warn("JobsPaneRenderer: retry failed:", err);
+        debugSink.error("JobsPaneRenderer: retry failed:", err);
       });
   }
 
@@ -692,6 +941,21 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
 // ---------------------------------------------------------------------------
 // Helpers (module-private)
 // ---------------------------------------------------------------------------
+
+/**
+ * The history window as legacy's delete-all confirm words it (`deleteAllQueueJobs`,
+ * notifications.js:6869): "all time", "last 1 day", "last 30 days".
+ *
+ * Requires:
+ *   - `days` is the window in days, or undefined for all time
+ *
+ * Ensures:
+ *   - returns "all time" for undefined, else "last N day" with an "s" unless N is 1
+ */
+function historyWindowLabel(days: number | undefined): string {
+  if (days === undefined) return "all time";
+  return `last ${days} day${days === 1 ? "" : "s"}`;
+}
 
 function deriveErrorMessage(err: unknown): string {
   if (err instanceof ApiError) return `Delete failed (HTTP ${err.status})`;

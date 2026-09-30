@@ -332,13 +332,13 @@ def _verify_one_repo( script, repo_root ):
     if findings is None:
         return ( f"⚠️ memento verify ran against {repo_name} but its FINDINGS line could "
                  "not be read, so the result is unknown rather than clean. Re-run it by "
-                 f"hand: memento_io.py verify --repo {repo_root}", None )
+                 f"hand: python3 $PLANNING_IS_PROMPTING_ROOT/workflow/scripts/memento_io.py verify --repo {repo_root}", None )
     if findings == 0:
         return ( "", 0 )
     return ( f"⚠️ memento verify: {findings} finding(s) in {repo_name}'s mementos. "
              "A BARE-SLOT is a live data-loss window — the next pointer write destroys "
              "the record. Preserve first: "
-             f"memento_io.py migrate --repo {repo_root} --apply. "
+             f"python3 $PLANNING_IS_PROMPTING_ROOT/workflow/scripts/memento_io.py migrate --repo {repo_root} --apply. "
              "Nothing has been changed for you.", findings )
 
 

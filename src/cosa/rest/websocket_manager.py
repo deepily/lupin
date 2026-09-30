@@ -1,9 +1,37 @@
 from fastapi import WebSocket
+from collections import OrderedDict, deque
 from datetime import datetime
 from typing import Dict, Optional, List
 import asyncio
 import cosa.utils.util as du
 from cosa.config.configuration_manager import ConfigurationManager
+
+# Row dc446601. The close code a displaced socket receives when a NEWER connection
+# for the same ( user_id, device_id ) takes its slot.
+#
+# 4004, a NEW code, by Tiffany's ruling 2026-09-28 — after this shipped as 4001 and
+# was then briefly cut to 4003. Both were wrong and for the same reason: they were
+# already taken.
+#
+#   4001  auth failure. A supersede is not one, and the browser answers 4001 with a
+#         token refresh that means nothing here.
+#   4003  CLOSE_CODE_AUTH_SUBSCRIPTION_DENIED. Reserved server-side and never emitted
+#         — but NOT unused: it is live on the client, in QueueTransport.ts's
+#         PERMANENT_CLOSE_CODES {4001,4002,4003}, in multiplexer/shared/types.ts, and
+#         in notifications.js, which renders it "Permission denied for one or more
+#         notification streams." A reserved SERVER code can still be a spoken-for
+#         CLIENT one.
+#
+# 4004 is free in both places. It carries the property the mobile client needs — this
+# is permanent, do not reconnect — without borrowing a meaning that is already spoken
+# for. The catalogue of all four lives in routers/websocket.py; the value is defined
+# HERE because that is where it is emitted, and the router imports it (the router
+# imports this module, so the reverse would be a cycle).
+CLOSE_CODE_SUPERSEDED = 4004
+
+# The single-session-per-user policy's displacement code (pre-existing behaviour,
+# named here so the two displacement paths read alike and neither spells a literal).
+CLOSE_CODE_AUTH_SESSION_CONFLICT = 4002
 
 
 class WebSocketManager:
@@ -66,11 +94,66 @@ class WebSocketManager:
         # (`client_type` in auth_request); absent marker ⇒ "web" — existing web
         # clients and the audio WS never send it, so they can never suppress a wake.
         self.session_client_types: Dict[str, str] = {}
+        # CC transcript console watchers (row 27760534): cc_session_id (a SEAT's
+        # stable_session_id) → the set of BROWSER session_ids watching it. Note the two
+        # id spaces: the KEY is a Claude Code seat, the VALUES are browser sockets, and
+        # they are never interchangeable.
+        #
+        # 🔴 THE WATCHER SET IS THE ONLY FILTER on console traffic. Append frames go out
+        # by emit_to_session, which applies NO subscription check, so there is exactly
+        # one place a frame can be dropped — deliberately, because the other place has
+        # silently dropped everything before (see the comment in connect() about a
+        # subscription list validating to []).
+        #
+        # 🔴 AND disconnect() MUST SWEEP IT. A closed tab or a dropped socket never sends
+        # cc_transcript_unwatch, and if the entry survives, the tailer polls forever while
+        # emit_to_session early-returns into a session already gone from
+        # active_connections: a silent burn with no error anywhere.
+        self.cc_transcript_watchers: Dict[str, set] = {}
+        # Row dc446601: session_id → the ( user_id, device_key ) slot it holds. ONE
+        # live /ws/queue socket per slot; a newer connection displaces the older with
+        # CLOSE_CODE_SUPERSEDED. Only MOBILE queue-WS sessions get a slot at all
+        # (Mr. Radio's ruling 2026-09-28) — which is what lets the multiplexer, the
+        # legacy client and the console page sit side by side for one user without
+        # any of them displacing another. That is a property of the key space, not a
+        # rule anyone has to remember.
+        #
+        # 🔴 KEYED BY SESSION, AND THERE IS NO REVERSE INDEX — deliberately. A
+        # slot→session map would be a second place the truth lives, and the failure
+        # it invites is exact: the displaced socket's own late cleanup evicting its
+        # SUCCESSOR, leaving a live socket holding no slot and a device that reads
+        # as disconnected while it is not. Here a disconnect can pop only its own
+        # entry, so that failure is unreachable rather than guarded. The holder
+        # lookup scans one user's sessions, which is a handful.
+        self.session_device_slots: Dict[str, tuple] = {}
+        # Row dc446601 part 2 (María's F2): slot holders whose live frames are held —
+        # stamped and buffered, not sent — until their replay has drained.
+        self.resuming_sessions: set = set()
+        # Row dc446601 part 2: the resume buffer. slot → deque of frames already
+        # stamped with their seq, and slot → the last seq handed out.
+        #
+        # 🔴 KEYED ON THE SLOT, AND DELIBERATELY NOT SWEPT BY disconnect(). A
+        # session id dies with its socket; the slot is what survives a reconnect,
+        # so it is the only key a resume can be built on. It is also what keeps the
+        # supersede case honest — the successor inherits the buffer and the seq
+        # CONTINUES rather than restarting, so a reconnecting client is never handed
+        # a second frame 1 carrying different contents while its last_seq quietly
+        # means two things.
+        #
+        # 🔴 AND BECAUSE THEY OUTLIVE SESSIONS, THEY NEED THEIR OWN CEILING. Per-slot
+        # capping alone bounds nothing: every device that ever connected would keep a
+        # buffer forever. The OrderedDict is an LRU over slots — least recently
+        # EMITTED-TO is evicted first, because the device most likely to come back is
+        # the one whose backlog is worth keeping.
+        self.device_frame_buffers: "OrderedDict[tuple, deque]" = OrderedDict()
+        self.device_seq: Dict[tuple, int] = {}
         # Store reference to main event loop for thread-safe operations
         self.main_loop: Optional[asyncio.AbstractEventLoop] = None
         # Session management configuration
         self.config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
         self.single_session_per_user = self.config_mgr.get( "websocket enforce single session per user", default=False, return_type="boolean" )
+        self.device_buffer_size      = self.config_mgr.get( "websocket device frame buffer size", default=200, return_type="int" )
+        self.device_buffer_max_slots = self.config_mgr.get( "websocket device frame buffer max slots", default=64, return_type="int" )
         self.session_timestamps: Dict[str, datetime] = {}  # Track when sessions connected
         self.debug = self.config_mgr.get( "app debug", default=False, return_type="boolean" )
 
@@ -108,7 +191,7 @@ class WebSocketManager:
         self.main_loop = loop
         print( "[WS] Event loop reference stored for thread-safe operations" )
     
-    def connect( self, websocket: WebSocket, session_id: str, user_id: str = None, subscribed_events: List[str] = None, email: str = None, roles: list = None, client_type: str = None ):
+    def connect( self, websocket: WebSocket, session_id: str, user_id: str = None, subscribed_events: List[str] = None, email: str = None, roles: list = None, client_type: str = None, device_id: str = None ):
         """
         Add a new WebSocket connection with optional user association.
 
@@ -121,6 +204,9 @@ class WebSocketManager:
             - subscribed_events (if provided) contains valid event names or "*"
             - client_type (if provided) is the `client_type` value from the queue-WS
               auth_request (the mobile app sends "mobile"; web clients send nothing)
+            - device_id (if provided) is the `device_id` value from the same
+              auth_request — a stable per-install id. It is only consulted for a
+              MOBILE session (row dc446601)
 
         Ensures:
             - Adds connection to active_connections dictionary
@@ -129,12 +215,19 @@ class WebSocketManager:
             - Sets up event subscriptions (defaults to "*" for all events)
             - Records connection timestamp
             - Validates subscribed events against available_events
+            - Claims the ( user_id, device_key ) slot for a MOBILE session, closing
+              and FULLY deregistering whichever session held it, with
+              CLOSE_CODE_SUPERSEDED (row dc446601). A web session claims no slot and
+              so can neither displace nor be displaced
             - Records the session's client type in session_client_types — "mobile"
               iff client_type == "mobile", any other EXPLICIT value ⇒ "web"; an
               ABSENT client_type writes "web" only for an unmapped session_id and
-              never downgrades an established "mobile" entry (the audio-WS
-              connect reuses the queue-WS session id without a marker — F-S6-1,
-              Rachel R1)
+              never downgrades an established "mobile" entry (the MOBILE APP's
+              audio-WS connect reuses the queue-WS session id without a marker —
+              F-S6-1, Rachel R1). This reuse is NOT universal: the web app
+              notifications.js opens its audio socket on a SEPARATE session id,
+              so there it lands as its own "web" entry rather than meeting an
+              existing one.
 
         Raises:
             - Exception if closing old WebSocket connections fails (handled gracefully)
@@ -146,25 +239,20 @@ class WebSocketManager:
                 print( f"[WS] User {user_id} already connected with {len(existing_sessions)} session(s), closing old ones" )
                 for old_session_id in existing_sessions:
                     if old_session_id != session_id and old_session_id in self.active_connections:
-                        # Close the old WebSocket connection
-                        old_ws = self.active_connections[old_session_id]
-                        try:
-                            # Schedule close on the event loop if we have one.
-                            # Phase 5 of WS reconnect circuit-breaker milestone: use
-                            # close code 4002 (auth: session conflict) instead of the
-                            # normal-close 1000, so the displaced client recognizes
-                            # this as PERMANENT and does NOT auto-retry. Browser-side
-                            # `ws-channel.js` PERMANENT_CLOSE_CODES handles this.
-                            if self.main_loop and self.main_loop.is_running():
-                                asyncio.run_coroutine_threadsafe(
-                                    old_ws.close( code=4002, reason="session_conflict_displaced" ),
-                                    self.main_loop
-                                )
-                            print( f"[WS] Closed old session {old_session_id} for user {user_id}" )
-                        except Exception as e:
-                            print( f"[WS] Error closing old session {old_session_id}: {e}" )
-                        # Clean up the connection
-                        self.disconnect( old_session_id )
+                        # ONE close, carrying 4002, emitted by disconnect() itself.
+                        #
+                        # This used to close the socket here and THEN call disconnect(),
+                        # which closed it a second time with the default 1000 — two
+                        # closes racing, and the loser's code is the one the client
+                        # reads. 4002 is what tells the displaced client this is
+                        # PERMANENT (ws-channel.js PERMANENT_CLOSE_CODES) and not to
+                        # auto-retry; 1000 winning would turn a deliberate displacement
+                        # into a reconnect loop. Same race María caught in the row
+                        # dc446601 supersede path, found here by looking for the second
+                        # instance rather than waiting for it to be reported.
+                        print( f"[WS] Closing old session {old_session_id} for user {user_id} (single-session policy)" )
+                        self.disconnect( old_session_id, close_code=CLOSE_CODE_AUTH_SESSION_CONFLICT,
+                                         close_reason="session_conflict_displaced" )
         
         # Add the new connection
         self.active_connections[session_id] = websocket
@@ -193,6 +281,19 @@ class WebSocketManager:
         elif session_id not in self.session_client_types:
             self.session_client_types[ session_id ] = "web"
 
+        # Row dc446601: claim the device slot AFTER the marker above is pinned, and
+        # read the slot off the marker rather than off the raw argument — the wake
+        # trigger keys on that same marker, so slot and liveness cannot disagree
+        # about what "mobile" means. Two pieces of code deciding one rule agree
+        # until they do not.
+        slot = self.resolve_device_slot( user_id, self.session_client_types.get( session_id ), device_id )
+        if slot is not None:
+            incumbent = self.slot_holder( user_id, slot )
+            if incumbent is not None and incumbent != session_id:
+                print( f"[WS] Session {session_id} supersedes {incumbent} for slot {slot}" )
+                self.disconnect( incumbent, close_code=CLOSE_CODE_SUPERSEDED, close_reason="superseded" )
+            self.session_device_slots[ session_id ] = slot
+
         # Store event subscriptions
         session_type = "listener" if session_id.startswith( "cc-listener-" ) else "browser"
         if subscribed_events:
@@ -200,6 +301,35 @@ class WebSocketManager:
             valid_events = [e for e in subscribed_events if e == "*" or e in self.available_events]
             self.session_subscriptions[session_id] = valid_events
             print( f"[WS] Session {session_id} ({session_type}) subscribed to: {valid_events}" )
+
+            # An ASKING client that validates to NOTHING is stored as [] — and the send
+            # path's `.get( session_id, ["*"] )` permissive default never fires, because
+            # the key EXISTS. So every frame is dropped while auth reports success.
+            #
+            # The asymmetry is real and deliberate-looking but nobody chose it: a client
+            # asking for NOTHING gets ["*"] (everything, the else-branch below); a client
+            # asking only for names the server does not publish gets [] (nothing). Asking
+            # wrongly is punished harder than not asking.
+            #
+            # Storing [] is defensible — the client asked for nothing this server has.
+            # Storing it SILENTLY is not: the line above prints an empty list that reads
+            # like any other subscription line. Row 88347f65 spent five mechanisms and
+            # four seats in the wrong layer because a drop path logged and a success path
+            # did not. UNGATED, for the same reason as e73331c5 — the debug flag being off
+            # is exactly the condition under which this goes unread.
+            rejected = [ e for e in subscribed_events if e not in valid_events ]
+            if rejected and not valid_events:
+                print(
+                    f"[WS] ⚠️ Session {session_id} ({session_type}) validated to ZERO events — "
+                    f"EVERY frame to it will be dropped. Requested-but-unknown: {rejected}. "
+                    f"Server publishes {len( self.available_events )} events "
+                    f"(lupin-app.ini 'websocket available events')."
+                )
+            elif rejected:
+                print(
+                    f"[WS] ⚠️ Session {session_id} ({session_type}) requested "
+                    f"{len( rejected )} unknown event(s), dropped from its subscription: {rejected}"
+                )
         else:
             # Default: subscribe to all events
             self.session_subscriptions[session_id] = ["*"]
@@ -207,20 +337,26 @@ class WebSocketManager:
 
         print( f"[WS] STATE after connect: {len( self.active_connections )} active, {len( self.user_sessions )} users: {list( self.user_sessions.keys() )[ :3 ]}" )
 
-    def disconnect( self, session_id: str ):
+    def disconnect( self, session_id: str, close_code: int = 1000, close_reason: str = "Server disconnect" ):
         """
         Remove a WebSocket connection and clean up all associated data.
-        
+
         Requires:
             - session_id is a string (may or may not exist in connections)
-            
+            - close_code / close_reason are the frame this socket should receive.
+              The supersede path (row dc446601) passes CLOSE_CODE_SUPERSEDED here
+              rather than closing the socket itself and then calling in, so there
+              is exactly ONE close and its code cannot lose a race to the default
+
         Ensures:
             - Removes connection from active_connections if present
             - Cleans up session timestamp tracking
             - Removes event subscription mappings
             - Cleans up user-to-session associations
             - Removes empty user session lists
-            
+            - Releases this session's device slot, and ONLY this session's — a
+              displaced socket's late cleanup must never evict its successor
+
         Raises:
             - None (handles missing keys gracefully)
         """
@@ -238,7 +374,7 @@ class WebSocketManager:
             try:
                 if self.main_loop and self.main_loop.is_running():
                     asyncio.run_coroutine_threadsafe(
-                        ws.close( code=1000, reason="Server disconnect" ),
+                        ws.close( code=close_code, reason=close_reason ),
                         self.main_loop
                     )
             except Exception as e:
@@ -259,6 +395,19 @@ class WebSocketManager:
         # Clean up client-type marker (F-S6-1)
         self.session_client_types.pop( session_id, None )
 
+        # Release the device slot (row dc446601). Popping by SESSION id is the whole
+        # safety property: a displaced socket's endpoint coroutine wakes up long after
+        # its successor took over and runs this for its own id, and it can reach
+        # nothing but its own entry. Sweeping by SLOT would evict the successor.
+        self.session_device_slots.pop( session_id, None )
+        self.resuming_sessions.discard( session_id )
+
+        # Clean up CC transcript console watches (row 27760534). THIS IS THE ONLY RELIABLE
+        # END OF A WATCH: cc_transcript_unwatch is the polite path, and a closed tab or a
+        # dropped socket never sends it. Sweeping here is what stops the tailer polling a
+        # seat nobody is watching.
+        self.drop_all_cc_transcript_watches( session_id )
+
         # Clean up user association
         if session_id in self.session_to_user:
             user_id = self.session_to_user[session_id]
@@ -271,6 +420,107 @@ class WebSocketManager:
                     self.user_to_email.pop( user_id, None )
 
         print( f"[WS] STATE after disconnect: {len( self.active_connections )} active, {len( self.user_sessions )} users: {list( self.user_sessions.keys() )[ :3 ]}" )
+
+    # ── CC transcript console watcher registry (row 27760534) ──────────────────
+    #
+    # The registry owns the WATCHER COUNT, and therefore the tailer's lifecycle: a tailer
+    # starts when a seat gains its FIRST watcher and stops when it loses its LAST. The
+    # tailer itself has no concept of a watcher — it exposes start()/stop() and someone
+    # must call them — so these two methods are where "starts on the first, stops after
+    # the last" actually lives. (Rio caught the tailer's docstring claiming that lifecycle
+    # while no code implemented it, 2026-09-27. A claim in a docstring is not a mechanism,
+    # and it is worse than the gap, because an auditor reads the sentence and stops
+    # looking.)
+
+    def add_cc_transcript_watcher( self, cc_session_id: str, session_id: str ) -> bool:
+        """
+        Register one browser session as a watcher of one Claude Code seat.
+
+        Requires:
+            - cc_session_id is a SEAT's stable_session_id
+            - session_id is a BROWSER session id
+
+        Ensures:
+            - the watcher is recorded, idempotently — a re-watch from the same session does
+              not double-count, so a reconnect cannot make a seat look busier than it is
+            - returns True iff this was the seat's FIRST watcher, which is the caller's
+              signal to START the tailer
+        """
+        watchers = self.cc_transcript_watchers.setdefault( cc_session_id, set() )
+        was_empty = not watchers
+        watchers.add( session_id )
+        return was_empty
+
+    def remove_cc_transcript_watcher( self, cc_session_id: str, session_id: str ) -> bool:
+        """
+        Unregister one browser session from one seat.
+
+        Requires:
+            - cc_session_id and session_id are as above
+
+        Ensures:
+            - the watcher is removed if present; removing an absent one is a no-op, never
+              an error, because an unwatch can race a disconnect that already swept it
+            - an emptied seat's KEY IS DELETED, so the registry does not accumulate empty
+              sets for every seat ever watched
+            - returns True iff the seat now has NO watchers, which is the caller's signal
+              to STOP the tailer
+        """
+        watchers = self.cc_transcript_watchers.get( cc_session_id )
+        if watchers is None: return False
+
+        watchers.discard( session_id )
+        if watchers: return False
+
+        del self.cc_transcript_watchers[ cc_session_id ]
+        return True
+
+    def drop_all_cc_transcript_watches( self, session_id: str ) -> List[str]:
+        """
+        Remove one browser session from EVERY seat it was watching.
+
+        This is the disconnect path, and the only reliable end of a watch — a closed tab
+        never sends cc_transcript_unwatch.
+
+        Requires:
+            - session_id is a BROWSER session id
+
+        Ensures:
+            - the session is removed from every seat's watcher set
+            - seats left with no watchers have their keys deleted
+            - returns the seats that are now UNWATCHED, so the caller can stop their
+              tailers; an empty list means this session was watching nothing
+            - never raises, and is safe to call for a session that never watched anything
+        """
+        emptied = [ ]
+        for cc_session_id in list( self.cc_transcript_watchers.keys() ):
+            watchers = self.cc_transcript_watchers[ cc_session_id ]
+            if session_id not in watchers: continue
+            watchers.discard( session_id )
+            if not watchers:
+                del self.cc_transcript_watchers[ cc_session_id ]
+                emptied.append( cc_session_id )
+        return emptied
+
+    def cc_transcript_watchers_of( self, cc_session_id: str ) -> set:
+        """
+        The browser sessions currently watching one seat.
+
+        Ensures:
+            - returns a COPY, so a caller iterating it cannot be tripped by a concurrent
+              watch or disconnect mutating the live set underneath
+            - returns an empty set for a seat nobody is watching
+        """
+        return set( self.cc_transcript_watchers.get( cc_session_id, set() ) )
+
+    def is_watching_cc_transcript( self, cc_session_id: str, session_id: str ) -> bool:
+        """
+        Whether one browser session is watching one seat.
+
+        Ensures:
+            - returns True iff the pair is registered
+        """
+        return session_id in self.cc_transcript_watchers.get( cc_session_id, set() )
 
     def register_session_user( self, session_id: str, user_id: str ):
         """
@@ -303,6 +553,327 @@ class WebSocketManager:
             self.user_sessions[user_id].append( session_id )
         
         print( f"[WS] Registered session {session_id} for user {user_id} (pre-WebSocket)" )
+
+    # ── Device slots (row dc446601) ───────────────────────────────────────────
+
+    @staticmethod
+    def resolve_device_slot( user_id: str, client_type: str, device_id: str = None ):
+        """
+        The ( user_id, device_key ) slot a session claims, or None for no slot.
+
+        A slot is the UNIT OF SUPERSESSION, so a session only gets one when the
+        server can actually tell its device apart from another: a MOBILE session
+        that sent a real device_id. Web clients get none, and neither does a mobile
+        client that sent no device_id.
+
+        Both exclusions are MECHANISMS rather than policies to remember, and each
+        answers a specific failure:
+
+        WEB (Mr. Radio, 2026-09-28). The multiplexer, the legacy client and the
+        console page (a fresh session id per load) can all be open for one user, and
+        a console tab must not kick the multiplexer off. A web session never gets a
+        slot, so it never enters the supersession path at all — there is no arm that
+        could be reached with the wrong input.
+
+        NO DEVICE ID (Tiffany, 2026-09-28, revising the client_type fallback this
+        first shipped with). Two phones on one account are indistinguishable without
+        a device id, so they would share one slot and displace each other. The mobile
+        app IGNORES close codes today and reconnects after ANY close, so that is not
+        one bump — it is two phones knocking each other off forever. Holding NO slot
+        is strictly better than holding a wrong one: the sockets simply coexist, the
+        way web tabs do, until the app ships device_id.
+
+        Requires:
+            - client_type is the NORMALIZED marker from session_client_types
+              ("mobile" | "web"), never the raw auth_request value — callers read the
+              marker so the slot and the FCM wake trigger cannot disagree about what
+              counts as mobile
+
+        Ensures:
+            - returns None unless user_id is truthy AND client_type is exactly
+              "mobile" AND device_id is truthy
+            - otherwise returns ( user_id, device_id )
+            - a session holding no slot can neither displace nor be displaced
+
+        Raises:
+            - None
+        """
+        if not user_id or client_type != "mobile" or not device_id:
+            return None
+        return ( user_id, device_id )
+
+    def device_slot_of( self, session_id: str ):
+        """
+        The slot this session holds, or None if it holds none.
+
+        Requires:
+            - session_id is a string (may be unknown)
+
+        Ensures:
+            - returns the ( user_id, device_key ) tuple, or None
+
+        Raises:
+            - None
+        """
+        return self.session_device_slots.get( session_id )
+
+    def slot_holder( self, user_id: str, slot ):
+        """
+        The session currently holding `slot`, or None.
+
+        Scans one user's sessions rather than consulting a slot→session index, and
+        that is the design rather than a shortcut: a reverse index is a second place
+        the truth lives, and the failure it invites is the displaced socket's late
+        cleanup evicting its successor. One user's socket list is a handful.
+
+        Requires:
+            - slot is a value returned by resolve_device_slot
+
+        Ensures:
+            - returns a session_id whose recorded slot equals `slot`, else None
+            - only sessions holding a LIVE connection are considered — a
+              register_session_user pre-registration holds no socket and so cannot
+              be displaced or block a claim
+
+        Raises:
+            - None
+        """
+        for session_id in self.user_sessions.get( user_id, [] ):
+            if session_id in self.active_connections and self.session_device_slots.get( session_id ) == slot:
+                return session_id
+        return None
+
+    # ── Frame seq / resume buffer (row dc446601 part 2) ──────────────────────
+
+    def buffer_frame_for_slot( self, slot, message: dict ) -> dict:
+        """
+        Assign this slot's next seq, retain a stamped COPY, and return that copy.
+
+        Requires:
+            - slot is a value returned by resolve_device_slot (never None)
+            - message is the frame about to go on the wire
+
+        Ensures:
+            - returns a NEW dict carrying "seq"; the caller's message is not mutated.
+              emit_to_user builds ONE message and fans it out, so stamping in place
+              would give every device the last writer's number — a bug invisible with
+              one device connected, which is how it would ship
+            - the retained frame is byte-identical to the returned one, so a replay
+              cannot silently rewrite history
+            - the slot's buffer holds at most device_buffer_size frames (oldest
+              dropped) and at most device_buffer_max_slots buffers exist, the least
+              recently emitted-to being evicted
+
+        Raises:
+            - None
+        """
+        buffers = self.device_frame_buffers
+        if slot in buffers:
+            buffers.move_to_end( slot )
+        else:
+            buffers[ slot ] = deque( maxlen=self.device_buffer_size )
+            while len( buffers ) > self.device_buffer_max_slots:
+                evicted, _dropped = buffers.popitem( last=False )
+                self.device_seq.pop( evicted, None )
+
+        seq = self.device_seq.get( slot, 0 ) + 1
+        self.device_seq[ slot ] = seq
+        stamped = { **message, "seq": seq }
+        buffers[ slot ].append( stamped )
+        return stamped
+
+    def _stamp_for_session( self, session_id: str, message: dict ) -> dict:
+        """
+        Stamp and retain a frame IF this session holds a device slot, else pass it through.
+
+        Requires:
+            - message is the frame about to be sent to session_id
+
+        Ensures:
+            - a session with no slot (every web client) gets the message unchanged and
+              costs nothing: no copy, no buffer, no "seq" field that would mean nothing
+            - a slot holder gets a stamped copy, retained for resume
+
+        Raises:
+            - None
+        """
+        slot = self.session_device_slots.get( session_id )
+        if slot is None:
+            return message
+        return self.buffer_frame_for_slot( slot, message )
+
+    def frames_since( self, slot, last_seq: int ):
+        """
+        The retained frames after `last_seq`, and whether continuity is PROVEN.
+
+        Requires:
+            - last_seq is the client's highest received seq; 0 or absent means a
+              fresh client with nothing to have missed
+
+        Ensures:
+            - returns ( frames_after_last_seq, gap ) with frames in seq order
+            - gap is True exactly when the server CANNOT PROVE continuity from
+              last_seq — frames were evicted by the cap, or nothing is held for a
+              client claiming a non-zero last_seq (what a server restart looks like
+              from the client's side)
+            - gap is False for last_seq 0 against an unknown slot: a fresh client has
+              missed nothing, and reporting a gap there would send every device's
+              first-ever connection to a pointless full refetch
+
+        🔴 A PARTIAL REPLAY THAT DOES NOT ANNOUNCE ITSELF IS WORSE THAN NO REPLAY:
+        the client believes it is current and stops asking. That is why this returns
+        the flag rather than just the frames.
+
+        Raises:
+            - None
+        """
+        buffer = self.device_frame_buffers.get( slot )
+        if buffer is None:
+            return ( [], bool( last_seq ) )
+
+        # María's F1: a client AHEAD of the server means the numbering restarted under
+        # it (slot evicted by the LRU, or the process restarted and this slot has
+        # emitted since). Every held frame is new to it, and continuity is unprovable.
+        if last_seq > self.device_seq.get( slot, 0 ):
+            return ( list( buffer ), True )
+
+        if not buffer:
+            # Trimmed empty by an ack. Trimming is not eviction: a client that acked
+            # up to N and returns at N is fully current, and calling that a gap would
+            # send it to refetch exactly what it just confirmed.
+            return ( [], last_seq < self.device_seq.get( slot, 0 ) )
+
+        frames = [ frame for frame in buffer if frame[ "seq" ] > last_seq ]
+        gap    = buffer[ 0 ][ "seq" ] > last_seq + 1
+        return ( frames, gap )
+
+    def begin_resume( self, session_id: str ) -> bool:
+        """
+        Start HOLDING a slot holder's live frames until replay_and_resume drains them
+        (María's F2: a live frame sent before the replay finishes overtakes it, and a
+        client deduping on seq then discards the replayed frames as already seen).
+
+        Requires:
+            - called right after connect(), with NO await in between — that adjacency
+              is what leaves no window for a frame to go out unheld
+
+        Ensures:
+            - a slot holder is added to resuming_sessions: its frames are still stamped
+              and buffered, but not sent; returns True
+            - a session holding no slot is untouched; returns False
+
+        Raises:
+            - None
+        """
+        if session_id not in self.session_device_slots:
+            return False
+        self.resuming_sessions.add( session_id )
+        return True
+
+    async def replay_and_resume( self, session_id: str, last_seq: int, send ) -> Optional[ dict ]:
+        """
+        Replay a slot holder's backlog after `last_seq`, announce where it ends, then
+        release the frames held since connect — all in seq order.
+
+        Requires:
+            - session_id was connected by connect() and held by begin_resume(); send
+              is an async callable taking one frame
+              (the socket's send_json)
+
+        Ensures:
+            - returns None, sending nothing, for a session holding no slot
+            - otherwise sends: every retained frame after last_seq, then
+              { type: resume_complete, replayed, gap, seq }, then every frame buffered
+              meanwhile — and only then stops holding live frames. The final check for
+              held frames and the release happen with no await between them, so no
+              frame can be emitted into the gap
+            - seq is the server's CURRENT seq for the slot (María's F1), not the
+              client's last_seq: after a restart the client must re-base on it, or it
+              would discard every new frame as already seen
+            - returns the resume_complete frame it sent (the FIRST one, when a second follows)
+            - a HOLE is announced, never papered over (row c044d46f, María's follow-up a): the
+              buffer is bounded, so frames emitted while the replay is on the wire can be
+              evicted before they are sent. When the next frame's seq is not cursor + 1,
+              seqs in between are gone, and the client must not believe it is current.
+              Found during the replay proper, it turns `gap` True on the resume_complete
+              that closes it. Found after resume_complete has already gone out with
+              gap False, it is followed by a SECOND resume_complete { gap: True } — sent
+              before the frames that lie past the hole, so the client refetches rather
+              than trusting them
+            - a send failure propagates, and the session stays held; its disconnect()
+              clears the hold
+
+        Raises:
+            - whatever send raises
+        """
+        slot = self.session_device_slots.get( session_id )
+        if slot is None:
+            self.resuming_sessions.discard( session_id )
+            return None
+
+        frames, gap = self.frames_since( slot, last_seq )
+        cursor      = 0 if gap and last_seq > self.device_seq.get( slot, 0 ) else last_seq
+        replayed    = 0
+        # The FIRST batch's gap was already measured by frames_since against the client's own
+        # last_seq; only a batch read AFTER frames were sent can reveal a fresh hole.
+        while frames:
+            for frame in frames:
+                await send( frame )
+                cursor    = frame[ "seq" ]
+                replayed += 1
+            frames = [ f for f in self.device_frame_buffers.get( slot, () ) if f[ "seq" ] > cursor ]
+            if frames and frames[ 0 ][ "seq" ] > cursor + 1: gap = True
+
+        complete = { "type": "resume_complete", "replayed": replayed, "gap": gap,
+                     "seq": self.device_seq.get( slot, 0 ) }
+        await send( complete )
+        cursor = max( cursor, complete[ "seq" ] )
+
+        # Frames emitted while resume_complete was on the wire: send them, then release.
+        # A hole here is announced AFTER a resume_complete that said gap False, so it needs a
+        # second one, and it must go out BEFORE the frames past the hole.
+        hole_announced = gap
+        pending        = [ f for f in self.device_frame_buffers.get( slot, () ) if f[ "seq" ] > cursor ]
+        while pending:
+            if not hole_announced and pending[ 0 ][ "seq" ] > cursor + 1:
+                await send( { "type": "resume_complete", "replayed": replayed, "gap": True,
+                              "seq": self.device_seq.get( slot, 0 ) } )
+                hole_announced = True
+            for frame in pending:
+                await send( frame )
+                cursor = frame[ "seq" ]
+            pending = [ f for f in self.device_frame_buffers.get( slot, () ) if f[ "seq" ] > cursor ]
+        self.resuming_sessions.discard( session_id )
+        return complete
+
+    def ack_frames( self, session_id: str, seq: int ) -> int:
+        """
+        Drop this session's slot buffer up to and including `seq`.
+
+        Requires:
+            - session_id is the acking session; seq is its highest processed frame
+
+        Ensures:
+            - returns the number of frames dropped
+            - a session holding NO slot is a silent no-op, so an ack cannot reach a
+              buffer that is not its own device's
+            - an ack beyond the newest frame simply empties the buffer
+
+        Raises:
+            - None
+        """
+        slot = self.session_device_slots.get( session_id )
+        if slot is None:
+            return 0
+        buffer = self.device_frame_buffers.get( slot )
+        if buffer is None:
+            return 0
+
+        dropped = 0
+        while buffer and buffer[ 0 ][ "seq" ] <= seq:
+            buffer.popleft()
+            dropped += 1
+        return dropped
 
     def has_live_mobile_session( self, user_id: str ) -> bool:
         """
@@ -433,6 +1004,10 @@ class WebSocketManager:
             **data
         }
         
+        # Row dc446601 part 2: stamp + retain for a slot holder; pass through otherwise.
+        message = self._stamp_for_session( session_id, message )
+        if session_id in self.resuming_sessions: return    # held: replay_and_resume sends it
+
         try:
             websocket = self.active_connections[session_id]
             await websocket.send_json( message )
@@ -861,6 +1436,7 @@ class WebSocketManager:
         sent_count = 0
         disconnected = []
         orphaned     = []
+        declined     = []
 
         sessions = list( self.user_sessions[ user_id ] )
         for session_id in sessions:
@@ -871,12 +1447,21 @@ class WebSocketManager:
                 if "*" in subscriptions or event in subscriptions:
                     try:
                         websocket = self.active_connections[ session_id ]
-                        await websocket.send_json( message )
+                        # PER SESSION, not once for the fan-out: each device's seq is
+                        # its own, and `message` is shared by every session in this loop.
+                        payload = self._stamp_for_session( session_id, message )
+                        # Held while resuming (María's F2): buffered, and sent by
+                        # replay_and_resume in seq order. Still counted as delivered —
+                        # the socket is live, and a zero count here reads as "device
+                        # offline" to the wake path.
+                        if session_id not in self.resuming_sessions:
+                            await websocket.send_json( payload )
                         sent_count += 1
                     except Exception as send_err:
                         print( f"[WS] emit_to_user: send_json failed for session {session_id}: {send_err}" )
                         disconnected.append( session_id )
                 else:
+                    declined.append( session_id )
                     if self.debug: print( f"[WS] emit_to_user: session {session_id} not subscribed to {event}" )
             else:
                 print( f"[WS] emit_to_user: session {session_id} not in active_connections (orphaned, cleaning up)" )
@@ -889,6 +1474,26 @@ class WebSocketManager:
         # Clean up orphaned sessions (in user_sessions but not in active_connections)
         for session_id in orphaned:
             self.disconnect( session_id )
+
+        # A DECLINE IS ONLY LEGIBLE NEXT TO THE DELIVERIES IT SITS BESIDE.
+        # Before 2026-09-01 this method logged the drop path and said NOTHING on
+        # success, so a user whose two sockets split one-per-transport produced a
+        # stream of loud "not subscribed" lines and total silence on the frames
+        # that DID land. That reads as an outage. It cost three seats six hours on
+        # row 88347f65, chasing a subscription bug in a path that was working:
+        # every one of 749 declines was an AUDIO socket correctly refusing a QUEUE
+        # event, while the queue socket beside it received them.
+        #
+        # So a decline now reports the delivery count in the same line. Emitted
+        # only when something was BOTH delivered and declined — the case that
+        # previously looked like failure. Ungated, because the debug flag being off
+        # is exactly the condition under which the old silence was mistaken for
+        # breakage.
+        if declined and sent_count > 0:
+            print( f"[WS] emit_to_user: {event} to user {user_id} — "
+                   f"delivered={sent_count}, declined={len( declined )} "
+                   f"({', '.join( declined )}) — declines are the subscription "
+                   f"filter working, NOT a delivery failure" )
 
         if sent_count == 0:
             print( f"[WS] emit_to_user: {event} to user {user_id} — sent_count=0 (sessions={len( sessions )})" )

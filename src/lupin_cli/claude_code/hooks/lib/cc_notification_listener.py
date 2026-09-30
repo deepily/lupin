@@ -1061,7 +1061,10 @@ class CCNotificationListener( BaseWebSocketListener ):
             - Uses sender_id as target email (reply-to sender)
             - Generates gist via Gister with session-title prompt
             - Sends low-priority notification to browser user
-            - Falls back to first 5 words if Gister fails
+            - Falls back to first 5 words if Gister fails, and stamps the
+              notification's `abstract` with a DEGRADED banner naming the cause
+              so the fallback is visible ON THE CARD, not only in the log
+            - Leaves `abstract` None on the healthy path
             - Never raises exceptions (auto-response is non-fatal)
         """
         text = notification.get( "message", "" )
@@ -1074,11 +1077,14 @@ class CCNotificationListener( BaseWebSocketListener ):
             self._log( f"{self.LOG_PREFIX} No valid sender_id email — skipping gist response" )
             return
 
+        gist_failure_reason = None
+
         try:
             from cosa.memory.gister import Gister
             gister = Gister( debug=False, verbose=False )
             gist   = gister.get_gist( text )
         except Exception as e:
+            gist_failure_reason = f"{type( e ).__name__}: {e}"
             self._log( f"{self.LOG_PREFIX} Gister failed: {e}" )
             gist = None
 
@@ -1091,12 +1097,29 @@ class CCNotificationListener( BaseWebSocketListener ):
         # forwarded across the tmux pane boundary), during which the gist model was never
         # contacted and no vLLM-side error ever appeared to signal the outage. Mark the
         # degraded path explicitly so the next occurrence is greppable on sight.
+        #
+        # AND THE LOG IS NOT WHERE THE READER IS LOOKING (row 4aca76d9, 2026-09-04).
+        # The marker above did fire, correctly, for every one of these — into
+        # cc-listeners.log, which the person reading the notification card never
+        # opens. Measured on notification 9bb8eef6-2a0f-43a4-b13e-5b034e3e206a:
+        # `abstract` EMPTY, `title` EMPTY, priority low, type progress — the
+        # delivered record is byte-for-byte indistinguishable from a successful
+        # gist. So the 2026-07-27 fix made the failure greppable and left it
+        # invisible. Stamp the ABSTRACT too: that field renders on the card, so
+        # the degradation announces itself where the degradation is being read.
+        degraded_abstract = None
+
         if not gist:
             gist = " ".join( text.split()[ :5 ] )
             self._log(
                 f"{self.LOG_PREFIX} DEGRADED: gist unavailable — emitting 5-word prefix "
                 f"fallback \"{gist}\". This is NOT a model-generated gist; the Gister "
                 f"failure logged above is the cause."
+            )
+            degraded_abstract = (
+                "⚠️ DEGRADED — this is NOT a model-generated gist. It is the first "
+                "5 words of your message, verbatim, because the Gister failed.\n\n"
+                f"Cause: {gist_failure_reason or 'Gister returned an empty gist (no exception raised).'}"
             )
 
         try:
@@ -1113,6 +1136,7 @@ class CCNotificationListener( BaseWebSocketListener ):
                 priority          = NotificationPriority.LOW,
                 target_user       = target_email,
                 sender_id         = sender_id,
+                abstract          = degraded_abstract,   # None on the healthy path
                 timeout           = NOTIFY_TRANSPORT_TIMEOUT_SECONDS
             )
             notify_user_async( request=request )
@@ -1611,7 +1635,23 @@ def _resolve_credentials( args ):
         from lupin_cli.claude_code.hooks.lib.hook_credentials import get_hook_credentials
         return get_hook_credentials()
     except ( FileNotFoundError, ValueError ) as e:
-        print( f"[CC-Listener] Credential resolution failed: {e}" )
+        # 🔴 stderr, NOT stdout. This is the ONLY sys.exit that can fire before the
+        # logger exists, so it is the only failure whose destination is decided here
+        # rather than by the logging setup — and it was going to stdout.
+        #
+        # The spawning hook redirects listener STDOUT into the SHARED centralized log
+        # (~/.claude/sessions/cc-listeners.log, 130 MB) and listener STDERR into a
+        # per-session file named by session hash. A line printed here has no logger
+        # prefix and no timestamp, so on stdout it landed in the shared log
+        # UNATTRIBUTED — indistinguishable from noise, and unfindable by the hash
+        # anyone would search for. Measured 2026-09-04: 33 such lines had accumulated
+        # in that log; the one for the seat under investigation sat directly beneath
+        # the PREVIOUS session's clean shutdown banner, which is what made a startup
+        # failure read as a graceful stop.
+        #
+        # On stderr it lands in cc-listener-{hash}.stderr, which the spawn hook reads
+        # and surfaces as a named WARNING the moment poll() reports the death.
+        print( f"[CC-Listener] Credential resolution failed: {e}", file=sys.stderr )
         sys.exit( 1 )
 
 

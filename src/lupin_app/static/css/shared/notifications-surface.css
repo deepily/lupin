@@ -82,7 +82,7 @@ body {
     background-color: white;
     padding: 20px;
     border-radius: 8px;
-    box-shadow: 0 2px 4px rgba( 0, 0, 0, 0.1 );
+    box-shadow: 0 2px 4px rgb( 0, 0, 0, 0.1 );
 }
 
 /* notifications.css:111-115 — centered page title. */
@@ -96,7 +96,7 @@ h1 {
    the contract; the mux's drift-invented `#sender-cards-container { gap:8px }`
    is dropped). Only the spacing declaration is the contract here. */
 .collapsible-section {
-    margin-bottom: 30px;
+    margin-bottom: 10px;  /* half the 20px side margin — Rick, row 453e7e4d (2026-09-23) */
 }
 
 /* ============================================================================
@@ -111,12 +111,12 @@ h1 {
 
 .sender-card {
     margin-bottom: 12px;
-    border: 1px solid rgba( var( --persona-color-rgb, 222, 226, 230 ), 0.55 );
+    border: 1px solid rgb( var( --persona-color-rgb, 222, 226, 230 ), 0.55 );
     border-radius: 8px;
-    background-color: #ffffff;
+    background-color: #fff;
     box-shadow:
-        0 0 0 1px rgba( var( --persona-color-rgb, 0, 0, 0 ), 0.06 ),
-        0 2px 6px  rgba( var( --persona-color-rgb, 0, 0, 0 ), 0.12 );
+        0 0 0 1px rgb( var( --persona-color-rgb, 0, 0, 0 ), 0.06 ),
+        0 2px 6px  rgb( var( --persona-color-rgb, 0, 0, 0 ), 0.12 );
     overflow: hidden;
     transition: border-color 0.25s ease, box-shadow 0.25s ease;
 }
@@ -147,8 +147,8 @@ h1 {
     padding: 10px 15px;
     background: linear-gradient(
         to bottom,
-        rgba( var( --persona-color-rgb, 248, 249, 250 ), 0.14 ),
-        rgba( var( --persona-color-rgb, 248, 249, 250 ), 0.04 )
+        rgb( var( --persona-color-rgb, 248, 249, 250 ), 0.14 ),
+        rgb( var( --persona-color-rgb, 248, 249, 250 ), 0.04 )
     );
     border-bottom: 1px solid #e9ecef;
     cursor: pointer;
@@ -159,8 +159,8 @@ h1 {
 .sender-card-header:hover {
     background: linear-gradient(
         to bottom,
-        rgba( var( --persona-color-rgb, 233, 236, 239 ), 0.22 ),
-        rgba( var( --persona-color-rgb, 233, 236, 239 ), 0.08 )
+        rgb( var( --persona-color-rgb, 233, 236, 239 ), 0.22 ),
+        rgb( var( --persona-color-rgb, 233, 236, 239 ), 0.08 )
     );
 }
 
@@ -263,9 +263,9 @@ h1 {
     font-size: 0.8em;
     font-weight: 500;
     color: #fff;
-    text-shadow: 0 1px 1px rgba( 0, 0, 0, 0.25 );
-    border: 1px solid rgba( 255, 255, 255, 0.15 );
-    box-shadow: 0 1px 2px rgba( 0, 0, 0, 0.15 );
+    text-shadow: 0 1px 1px rgb( 0, 0, 0, 0.25 );
+    border: 1px solid rgb( 255, 255, 255, 0.15 );
+    box-shadow: 0 1px 2px rgb( 0, 0, 0, 0.15 );
     white-space: nowrap;
     user-select: none;
     line-height: 1.2;
@@ -276,13 +276,12 @@ h1 {
     cursor: pointer;
     font-family: inherit;
     appearance: none;
-    -webkit-appearance: none;
 }
 
 .persona-badge.borrowed,
 .sender-persona-badge.borrowed {
     border-style: dashed;
-    border-color: rgba( 255, 255, 255, 0.5 );
+    border-color: rgb( 255, 255, 255, 0.5 );
     opacity: 0.85;
 }
 
@@ -292,6 +291,44 @@ h1 {
     margin-left: 2px;
     font-size: 0.85em;
     opacity: 0.8;
+}
+
+/* ----------------------------------------------------------------------------
+   Row 27760534 — the live-console button in the sender card title bar,
+   immediately LEFT of the persona chip (Rick's placement ruling, 2026-09-28).
+   BOTH clients paint it, so it lives here, once: the multiplexer's
+   SenderCardConsoleButtons (the button toggles the in-pane console) and legacy
+   notifications.js ccConsolePaintSenderCard (the button opens /app/console in a
+   new tab). Painted only on a card whose seat resolves to one watchable roster
+   row, and only for an admin. A real <button>, so a click does not collapse the
+   card. aria-pressed is set by the multiplexer only; legacy never presses. --- */
+.sender-console-btn {
+    display          : inline-flex;
+    align-items      : center;
+    justify-content  : center;
+    inline-size      : 22px;
+    block-size       : 22px;
+    padding          : 0;
+    border           : 1px solid rgb(255, 255, 255, 0.35);
+    border-radius    : 4px;
+    background-color : #343a40;
+    color            : #fff;
+    font-size        : 0.75rem;
+    line-height      : 1;
+    cursor           : pointer;
+}
+
+.sender-console-btn:hover,
+.sender-console-btn:focus-visible {
+    border-color : #fff;
+}
+
+/* Pressed while THIS seat's console shows in the pane — the button toggles, like a
+   document's abstract indicator (Rick, 2026-09-28). Painted from aria-pressed, so the
+   look and the accessible state cannot disagree. */
+.sender-console-btn[aria-pressed="true"] {
+    border-color     : #fff;
+    background-color : #0d6efd;
 }
 
 /* ============================================================================
@@ -427,8 +464,8 @@ h1 {
 .sender-message.incoming {
     background: linear-gradient(
         to bottom,
-        rgba( var( --persona-color-rgb, 248, 249, 250 ), 0.10 ),
-        rgba( var( --persona-color-rgb, 248, 249, 250 ), 0.02 )
+        rgb( var( --persona-color-rgb, 248, 249, 250 ), 0.10 ),
+        rgb( var( --persona-color-rgb, 248, 249, 250 ), 0.02 )
     );
     margin-right: 40px;
     border-bottom-left-radius: 2px;
@@ -453,7 +490,7 @@ h1 {
 }
 
 .sender-message.outgoing .message-time {
-    color: rgba( 255, 255, 255, 0.8 );
+    color: rgb( 255, 255, 255, 0.8 );
 }
 
 .message-time {
@@ -465,13 +502,14 @@ h1 {
 
 .message-text {
     flex: 1;
+    /* stylelint-disable-next-line declaration-property-value-keyword-no-deprecated -- kept deliberately: the spec keeps this keyword for compatibility, and its replacement (word-break: normal + overflow-wrap: anywhere) is not pixel-neutral under a descendant that sets its own overflow-wrap (row d3d4a18c) */
     word-break: break-word;
 }
 
 .message-text code {
     font-size: 90%;
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    background: rgba( 0, 0, 0, 0.05 );
+    background: rgb( 0, 0, 0, 0.05 );
     padding: 0 3px;
     border-radius: 3px;
 }
@@ -479,10 +517,11 @@ h1 {
 .message-text pre {
     font-size: 90%;
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    background: rgba( 0, 0, 0, 0.05 );
+    background: rgb( 0, 0, 0, 0.05 );
     padding: 6px 8px;
     border-radius: 4px;
     white-space: pre-wrap;
+    /* stylelint-disable-next-line declaration-property-value-keyword-no-deprecated -- kept deliberately: the spec keeps this keyword for compatibility, and its replacement (word-break: normal + overflow-wrap: anywhere) is not pixel-neutral under a descendant that sets its own overflow-wrap (row d3d4a18c) */
     word-break: break-word;
     overflow-x: auto;
     margin: 0.3em 0;
@@ -491,6 +530,38 @@ h1 {
 .message-text pre code {
     background: none;
     padding: 0;
+}
+
+/* Markdown tables inside a bubble (row 5ae3ce90). Both clients build a bare <table> here —
+   legacy when a message contains one, the multiplexer always — and nothing styled it, so it read
+   as borderless text. Mirrors `.abstract-content table` in notifications.css, with one difference:
+   no `text-align` on the cells. CSS text-align beats the `align` attribute marked writes for a
+   `|:-:|` column, so a cell rule that set it would undo the column's alignment. Headers without
+   an align go left to match the abstract; the UA default would centre them.
+   The table is its own scroll container: a table wider than the bubble scrolls inside itself. */
+.message-text table {
+    display: block;
+    overflow-x: auto;
+    max-width: 100%;
+    border-collapse: collapse;
+    margin: 0.3em 0;
+    font-size: 90%;
+}
+
+.message-text th,
+.message-text td {
+    border: 1px solid #dee2e6;
+    padding: 3px 6px;
+    vertical-align: top;
+}
+
+.message-text th {
+    background: rgb( 0, 0, 0, 0.05 );
+    font-weight: 600;
+}
+
+.message-text th:not( [align] ) {
+    text-align: left;
 }
 
 /* In-accordion message overrides (the live styling — 30px gutters vs the
@@ -513,8 +584,8 @@ h1 {
 .date-accordion-messages .sender-message.incoming {
     background: linear-gradient(
         to bottom,
-        rgba( var( --persona-color-rgb, 248, 249, 250 ), 0.10 ),
-        rgba( var( --persona-color-rgb, 248, 249, 250 ), 0.02 )
+        rgb( var( --persona-color-rgb, 248, 249, 250 ), 0.10 ),
+        rgb( var( --persona-color-rgb, 248, 249, 250 ), 0.02 )
     );
     margin-right: 30px;
     border-bottom-left-radius: 2px;
@@ -529,7 +600,7 @@ h1 {
 }
 
 .date-accordion-messages .sender-message.outgoing .message-time {
-    color: rgba( 255, 255, 255, 0.8 );
+    color: rgb( 255, 255, 255, 0.8 );
 }
 
 /* Scrollbar styling for date accordion messages (webkit).
@@ -566,7 +637,7 @@ h1 {
 }
 
 .date-accordion-messages .sender-message.outgoing.expired-response .message-time {
-    color: rgba( 255, 255, 255, 0.7 );
+    color: rgb( 255, 255, 255, 0.7 );
 }
 
 .expired-badge {
@@ -642,7 +713,7 @@ h1 {
 .progress-group-history {
     margin-top: 4px;
     padding-left: 12px;
-    border-left: 2px solid rgba( 23, 162, 184, 0.3 );
+    border-left: 2px solid rgb( 23, 162, 184, 0.3 );
 }
 
 .progress-history-entry {
@@ -667,6 +738,7 @@ h1 {
 
 .activity-message {
     color: #212529;
+    /* stylelint-disable-next-line declaration-property-value-keyword-no-deprecated -- kept deliberately: the spec keeps this keyword for compatibility, and its replacement (word-break: normal + overflow-wrap: anywhere) is not pixel-neutral under a descendant that sets its own overflow-wrap (row d3d4a18c) */
     word-break: break-word;
 }
 
@@ -760,9 +832,9 @@ h1 {
     width: 24px;
     height: 24px;
     padding: 0;
-    border: 1px solid rgba( 25, 135, 84, 0.5 );
+    border: 1px solid rgb( 25, 135, 84, 0.5 );
     border-radius: 50%;
-    background: rgba( 25, 135, 84, 0.15 );
+    background: rgb( 25, 135, 84, 0.15 );
     color: #155724;
     cursor: pointer;
     font-size: 12px;
@@ -780,7 +852,7 @@ li.is-playing-current .notification-corner-pause-btn,
 }
 
 .notification-corner-pause-btn:hover {
-    background: rgba( 25, 135, 84, 0.3 );
+    background: rgb( 25, 135, 84, 0.3 );
     transform: scale( 1.1 );
 }
 
@@ -791,14 +863,14 @@ li.is-playing-current .notification-corner-pause-btn,
 /* Paused: subtle visual cue separate from the icon swap */
 li.is-paused-current .notification-corner-pause-btn,
 .sender-message.is-paused-current .notification-corner-pause-btn {
-    background: rgba( 255, 193, 7, 0.2 );
-    border-color: rgba( 255, 193, 7, 0.6 );
+    background: rgb( 255, 193, 7, 0.2 );
+    border-color: rgb( 255, 193, 7, 0.6 );
     color: #856404;
 }
 
 li.is-paused-current .notification-corner-pause-btn:hover,
 .sender-message.is-paused-current .notification-corner-pause-btn:hover {
-    background: rgba( 255, 193, 7, 0.35 );
+    background: rgb( 255, 193, 7, 0.35 );
 }
 
 /* Pending TTS rendering — applied 2026-05-14 by the decouple fix so high/urgent
@@ -812,7 +884,7 @@ li.is-paused-current .notification-corner-pause-btn:hover,
  * engages. The corner-pause button stays hidden (gated by .is-playing-current). */
 li.is-tts-pending {
     opacity: 0.78;
-    border-left: 3px solid rgba( 255, 193, 7, 0.55 );
+    border-left: 3px solid rgb( 255, 193, 7, 0.55 );
     transition: opacity 0.2s ease, border-left-color 0.2s ease;
 }
 
@@ -843,9 +915,9 @@ li.is-tts-pending::after {
     width: 24px;
     height: 24px;
     padding: 0;
-    border: 1px solid rgba( 220, 53, 69, 0.5 );
+    border: 1px solid rgb( 220, 53, 69, 0.5 );
     border-radius: 50%;
-    background: rgba( 220, 53, 69, 0.15 );
+    background: rgb( 220, 53, 69, 0.15 );
     color: #842029;
     cursor: pointer;
     font-size: 12px;
@@ -868,7 +940,7 @@ li.is-playing-current .notification-corner-stop-btn,
 }
 
 .notification-corner-stop-btn:hover {
-    background: rgba( 220, 53, 69, 0.30 );
+    background: rgb( 220, 53, 69, 0.30 );
     transform: scale( 1.1 );
 }
 
@@ -904,11 +976,11 @@ li.is-playing-current .notification-corner-stop-btn,
 .cc-tts-fraction-slider {
     width: 80px;
     cursor: pointer;
-    accent-color: rgba( 25, 135, 84, 0.85 );  /* matches existing is-active green */
+    accent-color: rgb( 25, 135, 84, 0.85 );  /* matches existing is-active green */
 }
 
 .cc-tts-fraction-slider:focus-visible {
-    outline: 2px solid rgba( 25, 135, 84, 0.6 );
+    outline: 2px solid rgb( 25, 135, 84, 0.6 );
     outline-offset: 2px;
 }
 
@@ -966,11 +1038,11 @@ li.is-playing-current .notification-corner-stop-btn,
 .tts-preview-slider-input {
     width: 80px;
     cursor: pointer;
-    accent-color: rgba( 25, 135, 84, 0.85 ); /* matches existing is-active green */
+    accent-color: rgb( 25, 135, 84, 0.85 ); /* matches existing is-active green */
 }
 
 .tts-preview-slider-input:focus-visible {
-    outline: 2px solid rgba( 25, 135, 84, 0.6 );
+    outline: 2px solid rgb( 25, 135, 84, 0.6 );
     outline-offset: 2px;
 }
 
@@ -1035,7 +1107,7 @@ li.is-playing-current .notification-corner-stop-btn,
 
 .toggle-button:hover {
     color: #495057;
-    background-color: rgba( 0, 0, 0, 0.05 );
+    background-color: rgb( 0, 0, 0, 0.05 );
 }
 
 .section-header-actions {
@@ -1230,8 +1302,179 @@ li.is-playing-current .notification-corner-stop-btn,
 }
 
 .tts-delete-button:hover {
-    background: rgba( 220, 53, 69, 0.15 );
+    background: rgb( 220, 53, 69, 0.15 );
     color: #dc3545;
     transform: scale( 1.1 );
 }
 
+
+/* ============================================================================
+   Abstract tooltip — the vertical-layout 📋 popover, shared by both clients.
+   MOVED from notifications.css (was :4398-4561) on 2026-09-23 so the
+   multiplexer can show abstracts in vertical layout (row fff605be); legacy
+   links this sheet too, so it keeps the same rules from one source.
+   ============================================================================ */
+/* Abstract tooltip/popup - floating container */
+.abstract-tooltip {
+    position: fixed;
+    z-index: 10001;
+    width: auto;               /* Content-driven width */
+    min-width: 200px;
+    /* Tier 1 default — prose-shaped abstracts (the ~90% case) */
+    max-width: min( 450px, calc( 100vw - 40px ) );
+    max-height: min( 400px, calc( 100vh - 100px ) );
+    padding: 0;
+    background: #fff;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgb( 0, 0, 0, 0.15 );
+    font-size: 13px;
+    line-height: 1.5;
+    color: #333;
+    resize: both;              /* Drag handle still available as manual override */
+    overflow: hidden;          /* Required for CSS resize */
+    /* Flex column so inner content can scroll within parent's max-height */
+    flex-direction: column;
+    /* Hidden by default — display: flex applied via .visible */
+    display: none;
+}
+
+.abstract-tooltip.visible {
+    display: flex;
+}
+
+/* Tier 2 — table OR code block: medium technical content */
+.abstract-tooltip:has( .abstract-tooltip-content table ),
+.abstract-tooltip:has( .abstract-tooltip-content pre ) {
+    max-width:  min( 800px, calc( 100vw - 40px ) );
+    max-height: min( 700px, calc( 100vh - 80px ) );
+}
+
+/* Tier 3 — table AND code, or multi-section markdown: heavy technical content */
+.abstract-tooltip:has( .abstract-tooltip-content table ):has( .abstract-tooltip-content pre ),
+.abstract-tooltip:has( .abstract-tooltip-content h2 ~ h2 ),
+.abstract-tooltip:has( .abstract-tooltip-content h3 ~ h3 ) {
+    max-width:  min( 1100px, calc( 100vw - 40px ) );
+    max-height: min( 850px,  calc( 100vh - 60px ) );
+}
+
+.abstract-tooltip-header {
+    font-weight: 600;
+    color: #495057;
+    padding: 10px 14px;
+    border-bottom: 1px solid #e9ecef;
+    background: #f8f9fa;
+    border-radius: 8px 8px 0 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.abstract-tooltip-close {
+    background: none;
+    border: none;
+    font-size: 18px;
+    color: #6c757d;
+    cursor: pointer;
+    padding: 0 4px;
+    line-height: 1;
+}
+
+.abstract-tooltip-close:hover {
+    color: #333;
+}
+
+.abstract-tooltip-content {
+    /* Flex item: fills remaining vertical space, scrolls when parent hits max-height */
+    flex: 1 1 auto;
+    min-height: 0;             /* required for flex children to enable overflow */
+    overflow-y: auto;
+    padding: 12px 14px;
+    font-family: inherit;
+    line-height: 1.5;
+    color: #333;
+}
+
+/* Markdown styles for tooltip abstract content */
+.abstract-tooltip-content p {
+    margin: 0 0 0.75em 0;
+}
+.abstract-tooltip-content p:last-child {
+    margin-bottom: 0;
+}
+.abstract-tooltip-content strong, .abstract-tooltip-content b {
+    font-weight: 600;
+}
+.abstract-tooltip-content em, .abstract-tooltip-content i {
+    font-style: italic;
+}
+.abstract-tooltip-content code {
+    background: #e9ecef;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+    font-size: 0.9em;
+}
+.abstract-tooltip-content pre {
+    background: #1e1e1e;
+    color: #d4d4d4;
+    padding: 10px;
+    border-radius: 4px;
+    overflow-x: auto;
+    margin: 0.75em 0;
+}
+.abstract-tooltip-content pre code {
+    background: none;
+    padding: 0;
+    color: inherit;
+}
+.abstract-tooltip-content ul, .abstract-tooltip-content ol {
+    margin: 0.5em 0;
+    padding-left: 1.5em;
+}
+.abstract-tooltip-content li {
+    margin: 0.25em 0;
+}
+.abstract-tooltip-content a {
+    color: #06c;
+    text-decoration: none;
+}
+.abstract-tooltip-content a:hover {
+    text-decoration: underline;
+}
+.abstract-tooltip-content h1, .abstract-tooltip-content h2,
+.abstract-tooltip-content h3, .abstract-tooltip-content h4 {
+    margin: 0.75em 0 0.5em 0;
+    font-weight: 600;
+}
+.abstract-tooltip-content h1 { font-size: 1.2em; }
+.abstract-tooltip-content h2 { font-size: 1.1em; }
+.abstract-tooltip-content h3 { font-size: 1.05em; }
+.abstract-tooltip-content h4 { font-size: 1em; }
+.abstract-tooltip-content blockquote {
+    margin: 0.75em 0;
+    padding: 0.5em 1em;
+    border-left: 3px solid #6c757d;
+    background: #f8f9fa;
+    color: #555;
+}
+.abstract-tooltip-content hr {
+    border: none;
+    border-top: 1px solid #dee2e6;
+    margin: 1em 0;
+}
+.abstract-tooltip-content table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 0.75em 0;
+    font-size: 0.95em;
+}
+.abstract-tooltip-content th, .abstract-tooltip-content td {
+    border: 1px solid #dee2e6;
+    padding: 6px 10px;
+    text-align: left;
+}
+.abstract-tooltip-content th {
+    background: #e9ecef;
+    font-weight: 600;
+}

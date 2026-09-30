@@ -2,10 +2,13 @@
 Multiplexer Phase 5 — visual regression baseline capture.
 
 Per AC11a + AC11b ratification (D-F 2026-05-05):
-    - AC11a: submission via `POST /api/test-suite/submit` with `--update-snapshots
+    - AC11a: submission via `POST /api/v2/submit` with `--update-snapshots
       -k multiplexer_phase5` returns HTTP 200 + valid `submission_id`
-    - AC11b: post-run state — assert PNGs exist under `__snapshots__/` AND
-      test-suite final_state === "passed"
+    - AC11b: post-run state — assert PNGs exist under the configured baseline path
+      AND test-suite final_state === "passed". ⚠️ The AC as ratified said
+      `__snapshots__/`; that directory does not exist. Baselines are at
+      `io/test-suite/visual-baselines/` per pytest.ini:92. Corrected 2026-09-15 —
+      the AC's intent (PNGs exist post-run) is unchanged, only its path.
 
 Per locked 2026-05-05 directive:
     - Feature parity, NOT pixel parity (vs `/app/notifications`)
@@ -17,16 +20,19 @@ the e2e_ui conftest standard (`LUPIN_TEST_BASE_URL` env var; default
 `http://localhost:8000`). NO hardcoded `:8000` literal in this file.
 
 **Venue**: `:8000` monopolize-mode (e2e_ui suite gate). Schedule via
-`POST /api/test-suite/submit` with non-overlapping `scheduled_at` slot per
+`POST /api/v2/submit` with non-overlapping `scheduled_at` slot per
 `feedback_test_server_monopolize_mode`. Side-door injection (ad-hoc curl,
 direct queue push, in-process server instantiation) is PROHIBITED.
 
 Submission body:
     {
-        "test_types"   : "e2e_ui",
+        "test_types"   : "e2e_a",
         "scheduled_at" : "<user-confirmed slot>",
-        "args"         : "--update-snapshots -k multiplexer_phase5"
+        "pytest_args"  : "--update-snapshots -k multiplexer_phase5"
     }
+
+`e2e_a` is this file's half (src/tests/e2e_ui/partition/half-a.txt). `e2e_ui` is the
+directory name, not a suite key: submitting it runs nothing (row 4e8f348e).
 
 The `-k multiplexer_phase5` filter ensures ONLY this file's tests run during
 the scheduled slot — NOT the full ~285 functional + 12 visual E2E sweep.
@@ -134,6 +140,13 @@ _INJECT_FIXTURES_JS = """
 # This poke does NOT affect store state — only the displayed text.
 _STABILIZE_DOM_JS = """
 () => {
+    // Row f0e00f01: stop the store's 1 Hz countdown before pinning, or the next tick
+    // rewrites both the countdown text and (since 59b662d5) the progress bar width.
+    // MEASURED on :7999: this test's pin read "⏱ 00:59" a second later.
+    window.__multiplexerTestHook.stores.actionRequired.disposeForTesting();
+    document.querySelectorAll( '.action-required-progress-fill' ).forEach( el => {
+        el.style.width = '100%';
+    } );
     // Action-required countdown — pinned to a known value.
     document.querySelectorAll( '.action-required-countdown' ).forEach( el => {
         el.textContent = '⏱ 01:00';
@@ -224,12 +237,19 @@ def test_multiplexer_phase5_notifications_pane_visual(
     # Brief settle window for any post-inject layout repaint.
     time.sleep( 0.2 )
 
-    # Capture the entire #notifications-pane element (avoids body-level
-    # layout drift from unrelated chrome).
-    pane = page.locator( '[data-testid="multiplexer-notifications-pane"]' )
-    assert_snapshot( pane, name="multiplexer_phase5_notifications_pane.png" )
+    # Capture #sender-cards-container, the list the fixtures render into. Row 75648b07:
+    # this used to capture the whole #notifications-pane, which since then also holds
+    # #broadcast-card-mount (whose content is live server state, 292px measured in Chrome
+    # on 09-11) and the session strip. The pane outgrew its 08-03 baseline (960x298 vs
+    # 960x983) while the card container still measured 297px, so the red was about the
+    # neighbours, not the cards, and a whole-pane baseline would move with live data.
+    # The broadcast card has its own test (test_multiplexer_broadcast_card.py).
+    cards = page.locator( '[data-testid="multiplexer-sender-cards"]' )
+    assert cards.locator( '[data-id-hash="phase5-visual-sender-a"]' ).count() == 1
+    assert cards.locator( '[data-id-hash="phase5-visual-sender-b"]' ).count() == 1
+    assert_snapshot( cards, name="multiplexer_phase5_sender_cards.png" )
 
-    print( "✓ multiplexer_phase5_notifications_pane: visual snapshot compared" )
+    print( "✓ multiplexer_phase5_sender_cards: visual snapshot compared" )
 
     # Broadened coverage (task c7745a76): mux commit 75a1bad3 (Lane 0a+0c) extracted
     # #action-required-section OUT of #notifications-pane into its own standalone

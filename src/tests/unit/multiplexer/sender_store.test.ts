@@ -515,3 +515,26 @@ test("R5: a fresh store over an empty backend seeds nothing (getJSON null path)"
   emitNotification(bus, { type: "task", sender_id: "fresh@x", timestamp: "2026-07-01T10:00:00Z" });
   assert.equal(store.get("fresh@x")!.session_name, undefined, "no persisted name → session_name stays unset");
 });
+
+// S2b/S2c (2026-09-10) — the card controls (✨ gist, click-to-rename) name a
+// session through setSessionName: same map, same localStorage mirror, same emit
+// as a session_topic event.
+test("S2b/S2c: setSessionName names an existing sender, emits updated, and a fresh store restores it", () => {
+  const bus     = createEventBusForTesting();
+  const backend = new InMemoryStorage();
+  const store   = createSenderStore({ bus, nowFn: () => 1_000_000, storage: createStorageServiceForTesting(bus, backend) });
+  emitNotification(bus, { type: "task", sender_id: "cc@x#abcd1234", timestamp: "2026-09-10T10:00:00Z" });
+  const events: LupinEvent<StoreSendersChangedPayload>[] = [];
+  bus.on<StoreSendersChangedPayload>("store_senders_changed", (e) => events.push(e));
+
+  store.setSessionName("cc@x#abcd1234", "Parity sweep");
+
+  assert.equal(store.get("cc@x#abcd1234")!.session_name, "Parity sweep");
+  assert.deepEqual(events.map(e => [ e.payload.changeKind, e.payload.sender_id ]), [ [ "updated", "cc@x#abcd1234" ] ]);
+  store.disposeForTesting();
+
+  const bus2   = createEventBusForTesting();
+  const store2 = createSenderStore({ bus: bus2, nowFn: () => 2_000_000, storage: createStorageServiceForTesting(bus2, backend) });
+  emitNotification(bus2, { type: "task", sender_id: "cc@x#abcd1234", timestamp: "2026-09-10T11:00:00Z" });
+  assert.equal(store2.get("cc@x#abcd1234")!.session_name, "Parity sweep", "the name survived a reload");
+});

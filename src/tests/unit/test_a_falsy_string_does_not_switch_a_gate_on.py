@@ -1,0 +1,234 @@
+#!/usr/bin/env python3
+"""
+`bool( "false" )` IS TRUE, AND THIS MODULE HAS SHIPPED THAT DEFECT TWICE.
+
+THE DEFECT. An operator hand-writes `"default_to_holding": "false"` into the override
+file. The reader coerces with `bool( raw )`. `bool( "false" )` is True, so the setting
+turns ON — the switch doing the exact opposite of what its own file says, while every
+report of it says the override was honoured.
+
+WHERE IT ACTUALLY LIVED, WHICH IS NOT WHERE THE NOTES SAID. Two live surfaces existed
+on 2026-09-08 and the file's own prose named only the one that had already been fixed:
+
+    get_enforcement_active   FIXED at e98659d2 — the string case handled since
+                             REMAINING: an unparseable value ("banana") fell through
+                             its membership test and came out False, silently, which is
+                             indistinguishable from a deliberate "off" and points
+                             toward enforcement OFF
+    default_mint_status      🔴 FULLY LIVE — `on = bool( raw )`, unmentioned anywhere,
+                             140 lines from the paragraph that said the defect was
+                             "live TODAY in get_enforcement_active directly above"
+
+⇒ Both now delegate to `_as_bool_or_none`, and a PREDICATE guards that rather than a
+sentence — see `test_one_boolean_parser_for_every_surface.py`. This file pins the
+BEHAVIOUR; that one pins the SHAPE. A behaviour test cannot see a third reader written
+next month, and a shape test cannot see a wrong answer.
+
+⚠️ THESE ASSERT THE PARSED VALUE, NOT AN HTTP STATUS. The defect is a wrong ANSWER from
+a call that succeeds; a status code cannot see it.
+"""
+import json
+import os
+import sys
+
+import pytest
+
+_src_path = os.path.join( os.environ.get( "LUPIN_ROOT", os.getcwd() ), "src" )
+if _src_path not in sys.path:
+    sys.path.insert( 0, _src_path )
+
+import cosa.rest.task_approval_settings as approval
+
+from tests.helpers.approval_settings_fixtures import SettingsHandle
+FALSY_STRINGS = [ "false", "False", "FALSE", " false ", "no", "off", "0" ]
+TRUTHY_STRINGS = [ "true", "True", " TRUE ", "yes", "on", "1" ]
+
+
+@pytest.fixture
+def override( tmp_path, monkeypatch ):
+    """
+    The override file inside tmp_path.
+
+    🔴 WITHOUT THIS THESE ARMS WRITE THE LIVE FLEET FILE, which holds Rick's standing
+    rescission. A test that flips `manager_pull_disabled` there would switch the pull
+    gate back on for the whole fleet.
+
+    🔨 IT STAMPS WHAT IT WRITES, since the stamp landed. `_read_overrides` now IGNORES
+    `STAMP_ENFORCED_KEYS` on a file whose stamp does not verify, so an unstamped fixture
+    reads back as None and every `manager_pull_disabled` arm in this file goes red —
+    sixteen of them did, and THE GUARD WAS WORKING. The fixtures predated it.
+
+    ⚠️ THE FIX IS TO STAMP THE FIXTURE, NEVER TO WEAKEN THE GUARD. The subject of these
+    arms is the BOOLEAN PARSE, not the stamp; a stamped fixture leaves that subject
+    exactly where it was and keeps the guard watching.
+
+    ⚠️ AND IT DELEGATES TO THE MODULE'S OWN `_expected_stamp` rather than recomputing
+    the HMAC here. A fixture that reimplements the scheme agrees with the code until
+    somebody changes the scheme, and then it is a second opinion nobody asked for.
+
+    ⚠️ `_expected_stamp` returns None when this process has no `JWT_SECRET_KEY`. That is
+    handled rather than asserted away: with no secret the reader's verdict is None —
+    "cannot check", not "forged" — so it honours the key and these arms measure what
+    their names say in a keyless tree too.
+    """
+    target = SettingsHandle()
+    def write( key, value ):
+        body  = { key: value }
+        stamp = approval._expected_stamp( body )
+        if stamp is not None: body[ approval.STAMP_KEY ] = stamp
+        target.write_text( json.dumps( body ) )
+        return target
+
+    return write
+
+
+# ---------------------------------------------------------------------------
+# The positive control FIRST. A row of identical answers is what a fixture that
+# never took effect looks like, and that is exactly how the first measurement of
+# this defect went wrong: injecting into `_cache` with a fabricated mtime, while
+# the live file existed, so the reader re-read from disk and discarded it every
+# time. Every value returned the same answer, which reads as "the defect is
+# everywhere" and actually meant nothing had been measured at all.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize( "key, reader, on_value, off_value", [
+    ( "default_to_holding",    lambda: approval.default_mint_status(),      "not_approved", "queued" ),
+    ( "enforcement_active",    lambda: approval.get_enforcement_active(),   True,           False    ),
+    ( "manager_pull_disabled", lambda: approval.get_manager_pull_disabled(), True,          False    ),
+] )
+def test_the_injection_MOVES_the_answer_at_all( override, key, reader, on_value, off_value ):
+    """
+    A real bool in each direction. If both rows agree, the fixture is inert and every
+    other assertion in this file is vacuous.
+    """
+    override( key, True )
+    assert reader() == on_value
+    override( key, False )
+    assert reader() == off_value
+
+
+# ── the defect itself ────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize( "falsy", FALSY_STRINGS )
+def test_a_falsy_STRING_leaves_the_holding_default_OFF( override, falsy ):
+    """
+    🔴 THE LIVE INSTANCE. Before 2026-09-08 every one of these returned "not_approved"
+    — the holding-area default turning ON because the operator wrote it off.
+    """
+    override( "default_to_holding", falsy )
+    assert approval.default_mint_status() == "queued", (
+        f'"{falsy}" in the override file turned the holding-area default ON. '
+        f'bool( "{falsy}" ) is True — parse the string, never coerce it.'
+    )
+
+
+@pytest.mark.parametrize( "falsy", FALSY_STRINGS )
+def test_a_falsy_STRING_leaves_enforcement_OFF( override, falsy ):
+    override( "enforcement_active", falsy )
+    assert approval.get_enforcement_active() is False
+
+
+@pytest.mark.parametrize( "falsy", FALSY_STRINGS )
+def test_a_falsy_STRING_leaves_the_pull_toggle_OFF( override, falsy ):
+    override( "manager_pull_disabled", falsy )
+    assert approval.get_manager_pull_disabled() is False
+
+
+@pytest.mark.parametrize( "truthy", TRUTHY_STRINGS )
+def test_a_truthy_STRING_still_turns_the_setting_ON( override, truthy ):
+    """
+    THE OTHER DIRECTION, and it is not redundant: a reader that returned False for
+    EVERYTHING would pass every arm above while being just as broken.
+    """
+    override( "default_to_holding", truthy )
+    assert approval.default_mint_status() == "not_approved"
+
+
+# ── the junk case: not a decision, so it must not make one ───────────────────
+
+@pytest.mark.parametrize( "junk", [ "banana", "", "maybe", 0, 1, [ ], { }, 1.0 ] )
+def test_an_UNPARSEABLE_value_falls_through_rather_than_deciding( override, junk, capsys ):
+    """
+    THE SECOND HALF OF THE SAME DEFECT, and the half `e98659d2` left behind.
+
+    An unrecognised word fell through the `in ( "true", ... )` membership test and came
+    out False — indistinguishable from a deliberate "off". `_as_bool_or_none` returns
+    None instead, handing the question to the caller's own fallback, and REPORTS it: a
+    setting ignored in silence is how an operator concludes the switch itself is broken.
+    """
+    override( "manager_pull_disabled", junk )
+    assert approval.get_manager_pull_disabled() is approval.FALLBACK_MANAGER_PULL_DISABLED
+    assert "not a boolean" in capsys.readouterr().out, (
+        "an unparseable setting was ignored in SILENCE — the operator has no way to "
+        "learn their edit did nothing."
+    )
+
+
+def test_the_three_fallbacks_do_NOT_point_the_same_way( override ):
+    """
+    🔴 A GUARD AGAINST A REASSURANCE THIS FILE USED TO CARRY. `_as_bool_or_none`'s note
+    said falling through "ends at FALLBACK_MANAGER_PULL_DISABLED, which is closed" —
+    written when it served ONE key. It now serves three, and they point OPPOSITE ways:
+
+        FALLBACK_MANAGER_PULL_DISABLED   True    fails CLOSED
+        FALLBACK_ENFORCEMENT_ACTIVE      False   fails OPEN
+        FALLBACK_DEFAULT_TO_HOLDING      False   fails OPEN
+
+    So "falling through is the safe direction" is true of the pull key and is NOT a
+    property of the parser. This pins the asymmetry so nobody carries the pull key's
+    reassurance across to the other two — and so that a future change to any fallback
+    is a deliberate edit here rather than a silent policy shift.
+    """
+    assert approval.FALLBACK_MANAGER_PULL_DISABLED is True
+    assert approval.FALLBACK_ENFORCEMENT_ACTIVE    is False
+    assert approval.FALLBACK_DEFAULT_TO_HOLDING    is False
+
+
+# ── the LAST layer: no override, no INI key ──────────────────────────────────
+
+@pytest.mark.parametrize( "key, reader, expected_attr", [
+    ( "enforcement_active", lambda: approval.get_enforcement_active(),
+      "FALLBACK_ENFORCEMENT_ACTIVE" ),
+    ( "manager_pull_disabled", lambda: approval.get_manager_pull_disabled(),
+      "FALLBACK_MANAGER_PULL_DISABLED" ),
+] )
+def test_with_NO_override_and_NO_config_key_the_FALLBACK_decides(
+        override, monkeypatch, key, reader, expected_attr ):
+    """
+    THE BOTTOM LAYER, and it is not reachable in this environment by accident: the
+    fleet INI sets these keys, so the fallback branch never executes unless the config
+    is stood down deliberately.
+
+    🔴 THAT IS EXACTLY WHY IT NEEDS AN ARM. The fallback is what governs a FRESH
+    INSTALL and a config that fails to load — the two cases nobody is watching. Rick's
+    rescission rests on `FALLBACK_MANAGER_PULL_DISABLED` being True: if this branch is
+    wrong, deleting the override file turns pulling back on for everybody, silently.
+    """
+    override( key, None )                                  # key present but null
+    monkeypatch.setattr( approval, "_ini_value", lambda *a, **k: None )
+    assert reader() is getattr( approval, expected_attr )
+
+
+def test_with_NO_override_and_NO_config_key_the_holding_default_FALLS_BACK(
+        override, monkeypatch ):
+    """The same bottom layer for the mint-status reader, whose return is a STATUS."""
+    override( "default_to_holding", None )
+    monkeypatch.setattr( approval, "_ini_value", lambda *a, **k: None )
+    expected = "not_approved" if approval.FALLBACK_DEFAULT_TO_HOLDING else "queued"
+    assert approval.default_mint_status() == expected
+
+
+@pytest.mark.parametrize( "ini_says, expected", [
+    ( "true", True ), ( "false", False ), ( "banana", None ),
+] )
+def test_the_CONFIG_layer_is_parsed_by_the_same_rules_as_the_override(
+        override, monkeypatch, ini_says, expected ):
+    """
+    A hand-edited INI is as reachable as a hand-edited override file, and the same
+    falsy-string trap applies. `expected=None` means "unparseable, so the fallback
+    decides" — the config layer must not coerce either.
+    """
+    override( "enforcement_active", None )
+    monkeypatch.setattr( approval, "_ini_value", lambda *a, **k: ini_says )
+    want = approval.FALLBACK_ENFORCEMENT_ACTIVE if expected is None else expected
+    assert approval.get_enforcement_active() is want

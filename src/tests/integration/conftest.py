@@ -42,6 +42,45 @@ from pathlib import Path
 BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
 
 
+def check_in_process_engine_is_test_db( in_process_db_url, server_db_url ):
+    """
+    Refuse a tier whose PYTEST PROCESS is pointed at a database the server is not.
+
+    Extracted as a pure predicate on purpose: the surrounding fixture needs a live
+    server, so an inline check could only ever be exercised by standing up one, and
+    a guard that has never been watched to fire is not a control. Both branches are
+    covered by src/tests/unit/test_integration_conftest_engine_guard.py.
+
+    Requires:
+        - in_process_db_url is the str() of this process's SQLAlchemy engine URL
+        - server_db_url is the database URL the server reported over /api/server-info
+
+    Ensures:
+        - returns None when in_process_db_url names lupin_db_test
+        - raises otherwise, naming BOTH urls and the runner that fixes it
+
+    Raises:
+        - RuntimeError if the in-process engine is not bound to lupin_db_test
+    """
+    if "lupin_db_test" in in_process_db_url: return
+
+    raise RuntimeError(
+        f"\n{'='*60}\n"
+        f"In-process engine is NOT lupin_db_test — the SERVER is configured\n"
+        f"correctly and THIS pytest process is not.\n\n"
+        f"  in-process engine : {in_process_db_url}\n"
+        f"  server database   : {server_db_url}\n\n"
+        f"An in-process fixture (e.g. txn_session) would read and write the live\n"
+        f"fleet store. Its writes roll back, but its READS see whatever the fleet\n"
+        f"has, so baseline-delta assertions fail whenever a peer touches a row the\n"
+        f"test counts.\n\n"
+        f"Cause: this process's config block is not [Lupin: Testing].\n"
+        f"Fix — run the tier through its runner, which exports it:\n"
+        f"  ./src/tests/run-integration-tests.sh -v\n"
+        f"{'='*60}\n"
+    )
+
+
 @pytest.fixture( scope="session", autouse=True )
 def verify_test_environment():
     """
@@ -95,6 +134,36 @@ def verify_test_environment():
                 )
         else:
             print( f"⚠ /api/server-info returned {info_response.status_code} — skipping config validation" )
+
+        # ── THE SERVER IS NOT THE ONLY PROCESS THAT TALKS TO A DATABASE ──────────
+        # Everything above validates the SERVER, over HTTP. But fixtures that build
+        # an in-process Session — txn_session in test_task_reassign_parity_e2e.py is
+        # the live one — use THIS process's `db_module.engine`, which resolves from
+        # this process's own config block and is untouched by the server's hot-swap.
+        #
+        # Measured 2026-09-01, one probe, two environments:
+        #   .venv/bin/python -c "from cosa.rest.db import database as db; print( db.engine.url )"
+        #     bare shell                     -> lupin_db_dev    (the live fleet store)
+        #     under run-integration-tests.sh -> lupin_db_test
+        # The runner exports config_block_id=Lupin:+Testing (line 205), which is the
+        # whole difference. So a hand-typed pytest run binds the FLEET'S LIVE STORE
+        # while every check above still passes — the server is on the test database
+        # and the test is not, both true at once.
+        #
+        # This asserts the CLASS rather than fixing one fixture (Mr. Radio's ruling,
+        # 2026-09-01): any future fixture opening its own engine is covered without
+        # a second call site to keep in sync. `clean_test_db` already carries this
+        # exact assertion for its own engine, so this extends an established pattern
+        # rather than inventing one.
+        #
+        # Deferred import: this module is imported at collection time, and importing
+        # the database module at module scope would build an engine before the env
+        # this very check is about has been read.
+        from cosa.rest.db import database as db_module
+
+        in_process_db_url = str( db_module.engine.url )
+        print( f"✓ In-process engine: {in_process_db_url}" )
+        check_in_process_engine_is_test_db( in_process_db_url, db_url )
 
         print( "\nUse automated test runner:" )
         print( "  ./src/tests/run-integration-tests.sh -v" )
@@ -166,7 +235,7 @@ def clean_test_db():
         conn.execute( text(
             "TRUNCATE TABLE auth_audit_log, failed_login_attempts, "
             "job_history, proxy_decisions, trust_states, "
-            "task_items, task_events, fcm_tokens, refresh_tokens"
+            "task_items, task_events, task_promotion_tickets, fcm_tokens, refresh_tokens"
         ) )
 
     with engine.connect() as conn:
@@ -529,6 +598,50 @@ def gcs_credentials_available():
     # Credentials valid - print success message
     print( f"\n✓ GCS credentials validated: {message}" )
     return True
+
+
+# Credential for POST /api/prediction-engine/reset (row 2d6f2221)
+
+@pytest.fixture( scope="session" )
+def reset_auth_headers():
+    """
+    Bearer headers for the prediction-engine reset endpoint.
+
+    Requires:
+        - LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL / _PASSWORD are set
+        - server reachable at BASE_URL
+
+    Ensures:
+        - returns { "Authorization": "Bearer <jwt>" } for the test account
+        - logs in ONCE per session
+
+    🔴 DELIBERATELY SESSION-SCOPED AND FIXTURE-FREE, modelled on `server_embedder`
+    above rather than on `auth_headers`. `auth_headers` depends on `create_test_user`,
+    which depends on `clean_test_db`, which TRUNCATES tables. The callers of this
+    fixture are `autouse` per-test fixtures, so taking that path would have wired a
+    database truncation into every prediction test — a much larger behaviour change
+    than adding a credential, and in a tier that does not run on :7999.
+
+    Row 2d6f2221: the endpoint was an unauthenticated GET whose destructive parameter
+    defaulted ON. It is now POST + credential + drop_table defaulting False.
+    """
+    email    = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" )
+    password = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
+    if not email or not password:
+        pytest.skip(
+            "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL and "
+            "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD must be set"
+        )
+
+    login_resp = requests.post(
+        f"{BASE_URL}/auth/login",
+        json={ "email": email, "password": password },
+        timeout=5,
+    )
+    assert login_resp.status_code == 200, (
+        f"reset_auth_headers login failed: {login_resp.status_code} {login_resp.text}"
+    )
+    return { "Authorization": f"Bearer {login_resp.json()[ 'tokens' ][ 'access_token' ]}" }
 
 
 # Server-Side Embedding Fixture (prevents test-process GPU contention)

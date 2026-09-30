@@ -29,7 +29,7 @@ CANDIDATE_CONTAINER = os.environ.get( "LUPIN_CANDIDATE_CONTAINER", "lupin-rest-d
 DSN = dict(
     dbname   = os.environ.get( "DB_NAME",     "lupin_db_dev" ),
     user     = os.environ.get( "DB_USER",     "lupin_dev" ),
-    password = os.environ.get( "DB_PASSWORD", "dev_password" ),
+    password = os.environ.get( "DB_PASSWORD", "" ),
     host     = os.environ.get( "DB_HOST",     "localhost" ),
     port     = os.environ.get( "DB_PORT",     "5432" ),
 )

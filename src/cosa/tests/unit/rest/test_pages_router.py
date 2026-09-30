@@ -119,6 +119,47 @@ class TestPagesEndpoints( unittest.TestCase ):
         self.assertTrue( _static_dir.endswith( os.path.join( "lupin_app", "static" ) ) )
 
 
+class TestConsolePage( unittest.TestCase ):
+    """
+    Unit tests for `/app/console`, the standalone live-console page (row 27760534).
+
+    Requires:
+        - The pages router registers `/app/console`
+
+    Ensures:
+        - A real GET through TestClient answers 200 text/html with the no-cache header,
+          reading the REAL console.html off disk (no FileResponse mock), with and without
+          the `?seat=` / `?title=` query the page reads client-side
+    """
+
+    def test_get_console_serves_the_page_shell( self ):
+        """
+        Ensures:
+            - GET /app/console returns 200, text/html, Cache-Control: no-cache
+            - the body is the console shell: it carries the transcript mount and loads the
+              console bundle's manifest, not the multiplexer's
+            - a query string changes nothing server-side (reload / bookmark serve the same shell)
+        """
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        app = FastAPI()
+        app.include_router( router )
+        client = TestClient( app )
+
+        bare  = client.get( "/app/console" )
+        query = client.get( "/app/console?seat=e14bd712-700e-46ce-88ea-8db62604ceb4&title=%F0%9F%A6%89%20console" )
+
+        for response in ( bare, query ):
+            self.assertEqual( response.status_code, 200 )
+            self.assertTrue( response.headers[ "content-type" ].startswith( "text/html" ) )
+            self.assertEqual( response.headers[ "cache-control" ], "no-cache" )
+            self.assertIn( 'id="session-transcript-mount"', response.text )
+            self.assertIn( "/static/dist/console/", response.text )
+            self.assertNotIn( "/static/dist/multiplexer/", response.text )
+        self.assertEqual( bare.text, query.text )
+
+
 class TestNotificationsRedirect( unittest.TestCase ):
     """
     Unit tests for the `/app/notifications` Saturday-cutover redirect.
@@ -224,6 +265,7 @@ def isolated_unit_test():
         suite  = unittest.TestSuite()
         suite.addTests( loader.loadTestsFromTestCase( TestServeFile ) )
         suite.addTests( loader.loadTestsFromTestCase( TestPagesEndpoints ) )
+        suite.addTests( loader.loadTestsFromTestCase( TestConsolePage ) )
         suite.addTests( loader.loadTestsFromTestCase( TestNotificationsRedirect ) )
         result = unittest.TextTestRunner( verbosity=2 ).run( suite )
 

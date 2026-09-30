@@ -5,6 +5,7 @@
 // logical state; this renderer owns every DOM-coupled concern:
 //
 //   - open/close/back/bust-out pane chrome                  (WP4)
+//   - console pop-out to its own page, /app/console         (row 27760534)
 //   - abstract markdown rendering + doc-link iframe embed   (WP4)
 //   - parent-owned iframe link interception                 (WP4)
 //   - abstract-indicator click → pane (+ second-click toggle-closed)  (WP4)
@@ -24,11 +25,16 @@ import type { EventBus } from "../shared/EventBus";
 import type {
   ContentPaneEntry,
   LayoutMode,
+  PaneContent,
+  ReadingPaneChangeKind,
   StoreActionRequiredChangedPayload,
   StoreReadingPaneChangedPayload,
 } from "../shared/types";
 import { html } from "./html";
 import { renderMarkdown } from "./markdown";
+import { countLiveActionRequired } from "../stores/ActionRequiredStore";
+import { normalizeDocLinkHref, isDocLinkHref, isPaneResidentAnchor, DOC_LINK_PREFIX } from "./docLink";
+import { buildConsolePageHref } from "../console/consolePageUrl";
 
 // Store surface this renderer drives (subset of ReadingPaneStore).
 export interface ReadingPaneStoreLike {
@@ -46,6 +52,9 @@ export interface ReadingPaneStoreLike {
   setSplitRatio(ratio: number): void;
   enterActionRequiredPane(): boolean;
   exitActionRequiredPane(): boolean;
+  getPaneContent(): PaneContent;
+  consoleTitle(): string | null;
+  showReading(): boolean;
 }
 
 // WP5 lift/drain reads each item's `state` — ActionRequiredStore.list() retains
@@ -88,12 +97,18 @@ export interface ReadingPaneRendererOptions {
   };
   /** Bust-out target window (defaults to the global `window`). */
   windowRef? : WindowLike;
+  /**
+   * Row 27760534 — the seat whose console the pane is showing, for the console pop-out. Without
+   * it the pane cannot name a seat, so bust-out stays disabled while the console shows.
+   */
+  consoleSeat? : () => string | null;
 }
 
-// Loopback-host prefix strip — lets doc-links resolve when the dev server is
-// reached from a remote host. Ports `notifications.js:10970`.
-const LOOPBACK_PREFIX_RE = /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?/;
-const DOC_LINK_PREFIX    = "/app/docs?path=";
+// Row 47759aa3 — the roots landing: /app/docs with NO ?path=. The doc viewer answers a
+// bare visit with the Roots panel expanded (Rick's ruling 2026-09-26, "A roots page, fully
+// open"), listing io/ plus every scope the LIVE /api/docs/scopes returns. No scope list
+// lives here, which is the whole point of bug 3d41fcba.
+export const DOC_ROOTS_HREF = "/app/docs";
 const NAV_OFFSET_PX      = 100;   // nav strip height (legacy `:11140`)
 const TITLE_MAX          = 60;
 const BUSTOUT_BASE_CSS   =
@@ -106,6 +121,7 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
   private readonly store          : ReadingPaneStoreLike;
   private readonly actionRequired : ActionRequiredCountLike;
   private readonly win            : WindowLike;
+  private readonly consoleSeat    : ( () => string | null ) | null;
   private readonly unsubscribers  : Array<() => void> = [];
 
   private mounted   : boolean = false;
@@ -121,6 +137,10 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
   private bustBtn   !: HTMLButtonElement;
   private splitter  !: HTMLElement;
   private toggleBtn !: HTMLButtonElement;
+  private rootsBtn  !: HTMLButtonElement;
+  // Row 27760534 — the console's host, shown INSTEAD of the body while the pane's content
+  // is "console". Optional: a page without it simply never shows a console.
+  private consoleMount : HTMLElement | null = null;
 
   // AR lift bookkeeping (WP5) — DOM refs live here, not in the store.
   private arSection    : HTMLElement | null = null;
@@ -129,6 +149,7 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
 
   // Bound listeners (stable refs for add/removeEventListener symmetry).
   private onToggleClick    !: () => void;
+  private onRootsClick     !: () => void;
   private onCloseClick     !: () => void;
   private onBackClick      !: () => void;
   private onBustClick      !: () => void;
@@ -145,6 +166,7 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
     this.actionRequired = opts.stores.actionRequired;
     /* c8 ignore next */ // default-arg fallback to global window; tests always inject windowRef.
     this.win            = opts.windowRef ?? ( globalThis as unknown as { window: WindowLike } ).window;
+    this.consoleSeat    = opts.consoleSeat ?? null;
   }
 
   // -------------------------------------------------------------------------
@@ -166,12 +188,18 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
     this.bustBtn    = reqId<HTMLButtonElement>("content-pane-bustout");
     this.splitter   = reqId("content-pane-splitter");
     this.toggleBtn  = reqId<HTMLButtonElement>("layout-mode-toggle");
+    this.rootsBtn   = reqId<HTMLButtonElement>("doc-roots-toggle");
+    this.consoleMount = document.getElementById("session-transcript-mount");
 
     this.root    = root;
     this.mounted = true;
 
     // Bind chrome listeners.
     this.onToggleClick  = (): void => this.handleToggleLayout();
+    // The global entry point Rick asked for. It goes through `store.open` — the SAME door
+    // a doc-link click uses — so the button and the links cannot drift into two behaviours,
+    // which is the drift this row was filed about.
+    this.onRootsClick   = (): void => { this.store.open("doc", DOC_ROOTS_HREF, "Files"); };
     this.onCloseClick   = (): void => this.handleCloseClick();
     this.onBackClick    = (): void => { this.store.back(); };
     this.onBustClick    = (): void => this.handleBustOut();
@@ -179,6 +207,7 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
     this.onDocClick     = (ev: MouseEvent): void => this.handleDocumentClick(ev);
 
     this.toggleBtn.addEventListener("click", this.onToggleClick);
+    this.rootsBtn.addEventListener("click", this.onRootsClick);
     this.closeBtn.addEventListener("click", this.onCloseClick);
     this.backBtn.addEventListener("click", this.onBackClick);
     this.bustBtn.addEventListener("click", this.onBustClick);
@@ -191,7 +220,7 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
     this.unsubscribers.push(
       this.bus.on<StoreReadingPaneChangedPayload>(
         "store_reading_pane_changed",
-        () => this.applyState(),
+        (e) => this.applyState(e.payload.changeKind),
       ),
     );
     this.unsubscribers.push(
@@ -211,6 +240,7 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
     this.unsubscribers.length = 0;
 
     this.toggleBtn.removeEventListener("click", this.onToggleClick);
+    this.rootsBtn.removeEventListener("click", this.onRootsClick);
     this.closeBtn.removeEventListener("click", this.onCloseClick);
     this.backBtn.removeEventListener("click", this.onBackClick);
     this.bustBtn.removeEventListener("click", this.onBustClick);
@@ -233,7 +263,7 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
   // Central paint — reads store state, mutates the pane DOM. Idempotent.
   // -------------------------------------------------------------------------
 
-  private applyState(): void {
+  private applyState( changeKind: ReadingPaneChangeKind | null = null ): void {
     /* c8 ignore next */ // defensive: subscriptions are detached in unmount() before mounted flips false.
     if (!this.mounted) return;
 
@@ -247,20 +277,34 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
     const anchor: ScrollAnchor | null =
       (mode === "horizontal" && willOpen !== wasOpen) ? this.captureCenterScrollAnchor() : null;
 
-    // WP5 — place the AR widget first; body content paint depends on it.
-    if (this.store.isActionRequiredInPane()) {
+    // WP5 — place the AR widget first; body content paint depends on it. AR outranks the
+    // console as it outranks a document: the response card is blocking.
+    const arInPane    = this.store.isActionRequiredInPane();
+    const showConsole = !arInPane && this.store.getPaneContent() === "console";
+    if (arInPane) {
       this.moveArIntoPane();
     } else {
       this.moveArHome();
-      this.renderEntry(this.store.currentEntry());
+      // While the console shows, the reading body is hidden but NOT repainted — and leaving
+      // the console does not repaint it either, since the stack did not move. So closing the
+      // console returns the document exactly as it was, with no iframe reload.
+      if (!showConsole && changeKind !== "console-closed") this.renderEntry(this.store.currentEntry());
     }
+    this.body.hidden = showConsole;
+    if (this.consoleMount !== null) this.consoleMount.hidden = !showConsole;
 
     this.pane.hidden = !willOpen;
     this.shell.classList.toggle("pane-open", willOpen);
-    this.titleEl.textContent = this.store.isActionRequiredInPane()
+    this.titleEl.textContent = arInPane
       ? "Action Required"
-      : (this.store.currentEntry()?.title ?? "");
+      : showConsole
+        ? (this.store.consoleTitle() as string)
+        : (this.store.currentEntry()?.title ?? "");
     this.backBtn.disabled = !this.store.canGoBack();
+    // Bust-out POPS the console out to its own page (Rick's ruling 2026-09-28) — which needs a
+    // seat to name, so a pane built without the seat reader keeps it disabled. The seat is read
+    // at click time, not here: the pane changes to "console" BEFORE the store starts watching.
+    this.bustBtn.disabled = showConsole && this.consoleSeat === null;
 
     this.applyPaneSplitRatio();
 
@@ -307,9 +351,7 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
   // responded/expired/cancelled items in `list()`, so we must filter by state —
   // a raw length would lift the pane and never drain it.
   private activeActionRequiredCount(): number {
-    return this.actionRequired.list().filter(
-      i => i.state === "pending" || i.state === "submitting" || i.state === "failed",
-    ).length;
+    return countLiveActionRequired(this.actionRequired.list());
   }
 
   private reconcileActionRequired(): void {
@@ -363,10 +405,19 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
   private handleCloseClick(): void {
     // While AR owns the pane the response card is blocking — close is inert.
     if (this.store.isActionRequiredInPane()) return;
+    // Closing the console returns to the reading stack, untouched (plan §4's "close" exit).
+    if (this.store.getPaneContent() === "console") {
+      this.store.showReading();
+      return;
+    }
     this.store.close();
   }
 
   private handleBustOut(): void {
+    if (this.store.getPaneContent() === "console") {
+      this.popOutConsole();
+      return;
+    }
     const entry = this.store.currentEntry();
     if (entry === null) return;
 
@@ -399,6 +450,18 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
     if (win !== null) this.store.close();
   }
 
+  // Row 27760534 — the console's bust-out. It opens the console's OWN page rather than a
+  // mirrored blank window: that page stands alone (reload, bookmark), and the legacy client
+  // will open the very same URL. Then the pane leaves the console exactly as its close button
+  // does, which unwatches here — so the seat is watched by one tab, the new one, not two.
+  private popOutConsole(): void {
+    // Only reachable with a reader: applyState keeps the button disabled without one.
+    const seat = ( this.consoleSeat as () => string | null )();
+    if (seat === null) return;
+    const title = this.store.consoleTitle() as string;
+    if (this.win.open(buildConsolePageHref(seat, title), "_blank") !== null) this.store.showReading();
+  }
+
   // Render markdown to an HTML string for bust-out (renderMarkdown returns a
   // RawValue carrying the sanitized HTML).
   private renderMarkdownToString( text: string ): string {
@@ -417,10 +480,23 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
   // -------------------------------------------------------------------------
 
   private handleDocumentClick( ev: MouseEvent ): void {
-    if (this.store.getLayoutMode() !== "horizontal") return;
     const target = ev.target as Element | null;
     /* c8 ignore next */ // defensive: a fired click always has a non-null Element target in DOM + happy-dom.
     if (target === null) return;
+
+    // 🔴 DOC LINKS ARE HANDLED FIRST AND IN *EVERY* LAYOUT MODE (row 47759aa3).
+    // This used to sit below a blanket `getLayoutMode() !== "horizontal"` return,
+    // so in vertical layout the click was never claimed and the anchor's
+    // `target="_blank"` opened a new tab. Measured on :7999 2026-09-26:
+    // horizontal intercepted and rendered in the pane, vertical did not.
+    // Rick's ruling 2026-09-26: a history doc link renders in the content area
+    // wherever the layout puts it — on top of the accordion, or to the right.
+    if (this.routeDocLinkClick(ev, target)) return;
+
+    // Everything below remains horizontal-only. The ruling was about doc links;
+    // widening the abstract-indicator behaviour would be a change nobody asked
+    // for, so the gate stays exactly where it was for that branch.
+    if (this.store.getLayoutMode() !== "horizontal") return;
 
     const indicator = target.closest(".abstract-indicator");
     if (indicator !== null) {
@@ -443,12 +519,42 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
       return;
     }
 
+  }
+
+  /**
+   * The ONE in-app open path for a doc link. Returns true when this click was
+   * a doc link and has been dealt with, so the caller stops.
+   *
+   * Requires:
+   *   - `target` is the clicked element
+   *
+   * Ensures:
+   *   - a doc link on a pane-resident surface opens a NEW TAB explicitly and is
+   *     reported as handled
+   *   - any other doc link is opened IN THE PANE, in every layout mode
+   *   - a non-doc-link click is left completely untouched and reports false
+   */
+  private routeDocLinkClick( ev: MouseEvent, target: Element ): boolean {
     const anchor = target.closest("a[href]");
-    if (anchor === null) return;
-    const normalized = this.normalizeDocLinkHref(anchor.getAttribute("href"));
-    if (normalized === null || !normalized.startsWith(DOC_LINK_PREFIX)) return;
+    if (anchor === null) return false;
+    const normalized = normalizeDocLinkHref(anchor.getAttribute("href"));
+    if (!isDocLinkHref(normalized)) return false;
+
+    // The pane is SHARED with the live action-required response buttons, and
+    // opening a doc calls replaceChildren — which would delete the buttons the
+    // user is mid-way through pressing. Legacy paid for this twice (11c01fbc,
+    // 17ce50a5). These links open a new tab, and now they do it EXPLICITLY:
+    // markdown.ts no longer stamps `_blank` on a doc link, so relying on the
+    // attribute would leave them navigating the current tab instead.
+    if (isPaneResidentAnchor(anchor)) {
+      ev.preventDefault();
+      this.win.open(normalized as string, "_blank", "noopener,noreferrer");
+      return true;
+    }
+
     ev.preventDefault();
-    this.store.open("doc", normalized, anchor.textContent || "Doc");
+    this.store.open("doc", normalized as string, anchor.textContent || "Doc");
+    return true;
   }
 
   private deriveIndicatorTitle( indicator: Element ): string {
@@ -610,9 +716,10 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
   // href normalization
   // -------------------------------------------------------------------------
 
+  // Delegates to the shared predicate module so this renderer and the markdown
+  // emitter cannot disagree about what a doc link is (row 47759aa3).
   private normalizeDocLinkHref( href: string | null ): string | null {
-    if (href === null || href === "") return null;
-    return href.replace(LOOPBACK_PREFIX_RE, "");
+    return normalizeDocLinkHref(href);
   }
 }
 

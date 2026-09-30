@@ -11,11 +11,11 @@ the decision logic is unit-covered in
 `src/tests/unit/notifications_js/reading_pane_scroll_anchor.test.ts`. THIS verifies
 the real click → DOM behavior end to end.
 
-Venue: :8000 (scheduled monopolize-mode via /api/test-suite/submit).
+Venue: :8000 (scheduled monopolize-mode via /api/v2/submit).
 
 Submit via:
 
-    POST /api/test-suite/submit
+    POST /api/v2/submit
     {
         "test_types"         : "e2e",
         "pytest_args"        : "-k test_abstract_indicator_toggle",

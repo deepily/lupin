@@ -593,5 +593,26 @@ class TestGetOptionalUser( unittest.IsolatedAsyncioTestCase ):
         self.assertIsNone( result )
 
 
+class TestIdentityOr401( unittest.TestCase ):
+    """F1 of the spoken-ask plan: the v2 doors' shared uid/email check."""
+
+    def test_returns_uid_and_email( self ):
+        self.assertEqual( auth.identity_or_401( { "uid": "u1", "email": "u@x.com" } ), ( "u1", "u@x.com" ) )
+
+    def test_missing_or_empty_uid_is_401_naming_the_id( self ):
+        for user in ( { "email": "u@x.com" }, { "uid": "", "email": "u@x.com" }, { } ):
+            with self.subTest( user=user ), self.assertRaises( HTTPException ) as caught:
+                auth.identity_or_401( user )
+            self.assertEqual( caught.exception.status_code, 401 )
+            self.assertEqual( caught.exception.detail, "User id not found in authentication token." )
+
+    def test_missing_or_empty_email_is_401_naming_the_email( self ):
+        for user in ( { "uid": "u1" }, { "uid": "u1", "email": None } ):
+            with self.subTest( user=user ), self.assertRaises( HTTPException ) as caught:
+                auth.identity_or_401( user )
+            self.assertEqual( caught.exception.status_code, 401 )
+            self.assertEqual( caught.exception.detail, "User email not found in authentication token." )
+
+
 if __name__ == "__main__":
     unittest.main()

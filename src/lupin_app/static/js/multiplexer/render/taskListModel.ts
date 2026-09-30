@@ -43,12 +43,17 @@ export interface TaskItem {
   // Real rows return a typed-ref ARRAY; string|null kept for defensive back-compat.
   blocked_by?          : string | TaskBlockedRef[] | null;
   next_chase_ts?       : string | null;
+  park_reason?         : string | null;
   gate_class?          : string | null;
   priority?            : string | null;
   source_qid?          : string | null;
   correlation_key?     : string | null;
   created_ts?          : string;
   updated_ts?          : string;
+  // Row c9fafb9d: a manager's promote/demote request. null on almost every row.
+  request_state?       : string | null;
+  request_move?        : string | null;
+  request_ts?          : string | null;
 }
 
 /**
@@ -60,6 +65,10 @@ export interface TaskListComposite {
   status? : string;             // "auth_required" | "unreachable" | undefined (ok)
   tasks?  : TaskItem[] | null;
   count?  : number;
+  // The query's own completeness fields, read by the truncation banner (parity A-2 #8).
+  total?    : number;
+  has_more? : boolean;
+  warnings? : unknown[];
 }
 
 export interface TaskGroup {
@@ -78,20 +87,37 @@ export interface TaskListModel {
 // ---------------------------------------------------------------------------
 
 // Terminal statuses — work no longer owed. Everything else is "open".
-const TERMINAL_STATUSES: ReadonlySet<string> = new Set( [ "done", "dropped" ] );
+const TERMINAL_STATUSES: ReadonlySet<string> = new Set( [ "done", "dropped", "wont_fix" ] );
 
 // Sort rank: most-urgent / most-active first, terminal last. Unknown → between
 // open and terminal so a typo'd status never hides above blocked work.
 const STATUS_RANK: Readonly<Record<string, number>> = {
-  blocked     : 0,
-  in_progress : 1,
-  claimed     : 2,
-  review      : 3,
-  queued      : 4,
-  done        : 6,
-  dropped     : 7,
+  blocked      : 0,
+  in_progress  : 1,
+  claimed      : 2,
+  review       : 3,
+  queued       : 4,
+  // `parked` is OPEN work a human ruled not-now, so it belongs BELOW queued and
+  // ABOVE anything terminal — it rejoins the owed set when its chase expires.
+  parked       : 5,
+  // `not_approved` has not started; it sits at the open/terminal boundary rather
+  // than among finished work, because it is explicitly NOT terminal (the server
+  // comment at task_store_rules forbids adding it to TERMINAL_STATUSES).
+  not_approved : 6,
+  done         : 8,
+  wont_fix     : 9,
+  dropped      : 10,
 };
-const UNKNOWN_STATUS_RANK = 5;
+// Unknown sits between open and terminal so a typo'd status never hides ABOVE
+// blocked work — and, since 2026-09-07, never below it either.
+//
+// 🔴 THIS IS WHAT THE `wont_fix` ROW FIXES. Before that entry existed, wont_fix
+// was absent from the table, fell through to UNKNOWN_STATUS_RANK, and therefore
+// sorted ABOVE done and dropped — a closed-as-will-not-do row rendering as more
+// urgent than a finished one. The three statuses added above were all reaching
+// this fallback; the fallback itself is unchanged and still catches genuine
+// typos.
+const UNKNOWN_STATUS_RANK = 7;
 
 /** True when the status is non-terminal (work still owed). Pure. */
 export function isOpenStatus( status: string | null | undefined ): boolean {
@@ -99,7 +125,12 @@ export function isOpenStatus( status: string | null | undefined ): boolean {
   return !TERMINAL_STATUSES.has( status );
 }
 
-function statusRank( status: string | null | undefined ): number {
+// Exported for the epic board, which sorts rows in "the same urgency order the
+// task list uses" (notifications.js:13227 groupTasksByEpic). Sharing the one
+// comparator inside the TS client is deliberate — Rick's no-code-reuse ruling
+// is about the two CLIENTS (JS vs TS), never about this client's own internals,
+// and two copies of a rank table is exactly the drift the legacy card killed.
+export function statusRank( status: string | null | undefined ): number {
   if ( !status ) return UNKNOWN_STATUS_RANK;
   const rank = STATUS_RANK[ status ];
   return rank === undefined ? UNKNOWN_STATUS_RANK : rank;
@@ -118,10 +149,14 @@ export function priorityRank( priority: string | null | undefined ): number {
 // Phase 2 — per-worker task editing helpers (pure; no DOM)
 // ---------------------------------------------------------------------------
 
-// The editable priority buckets (D2 — P0–P3 now; intra-bucket drag-reorder is
+// The editable priority buckets (D2 — P0–P5; intra-bucket drag-reorder is
 // the deferred Phase 2b). Ordered most-urgent first so the dropdown reads
 // top-to-bottom in the same urgency order the rows sort by (priorityRank).
-export const EDITABLE_PRIORITIES: ReadonlyArray<string> = [ "P0", "P1", "P2", "P3" ];
+// WIDENED to P0–P5 on 2026-09-07 (row 0107c19e, Rick's broadcast e254ec7d:
+// "the editors for the tickets will mean that you need to have a range of P0
+// through P5"). The server enum `task_store_rules.VALID_PRIORITIES` is the
+// authority; this list is the EDITOR's view of it and must not drift from it.
+export const EDITABLE_PRIORITIES: ReadonlyArray<string> = [ "P0", "P1", "P2", "P3", "P4", "P5" ];
 
 // ---------------------------------------------------------------------------
 // Labels
@@ -148,9 +183,22 @@ export function taskTitleLabel( task: TaskItem | null | undefined ): string {
 // the two cards render the row identically. Drift accepted per D5/throwaway.)
 // ---------------------------------------------------------------------------
 
-// Client title-truncation cap — IDENTICAL to the server-side store-guard cap
-// (task_store_rules.TITLE_SOFT_CAP = 60, handoff #5 / D4). Backstops LEGACY rows
-// written before the store guard.
+// Client title-truncation cap. It USED to be identical to the server-side store
+// cap (task_store_rules.TITLE_SOFT_CAP, handoff #5 / D4), and that comment stayed
+// here asserting the identity after it stopped being true — which is the exact
+// failure the row that moved the cap was about.
+//
+// 🔴 THEY DIVERGED DELIBERATELY ON 2026-09-01. Rick raised the STORE cap 60 -> 120
+// (bug 6ce252e7). This number stayed at 60 because the two caps answer different
+// questions and always did: the store cap decides what is KEPT, and losing a tail
+// there destroys a qualifier permanently. This one decides how much fits in a
+// fixed-width column, and what it cuts is recoverable in place — the row renders
+// an ellipsis and the full title rides the cell's hover tooltip.
+//
+// ⚠️ SO: DO NOT "RESYNC" THIS TO 120 to restore the old identity. A 120-char cell
+// changes the row layout, and nothing is lost at 60. Whether the column should get
+// wider now that titles may legitimately run to 120 is a UI question for Rick, and
+// it is banked rather than decided here.
 export const TASK_TITLE_TRUNCATE_LEN = 60;
 
 /**
@@ -235,11 +283,24 @@ export function groupTasksByOwner( tasks: unknown ): TaskListModel {
     }
   } );
 
+  // 🔨 PRIORITY FIRST — Rick's ruling, 2026-09-09, by voice: "obviously it's going
+  // to be priority first, but I also want to make sure that this is implemented for
+  // both clients." He reported seeing a P2 above a P0 and was right: this comparator
+  // read STATUS first, so priority was consulted only between rows already sharing a
+  // status. A blocked P2 outranked a queued P0.
+  //
+  // ⚠️ TERMINAL ROWS DO NOT REACH HERE, which is why status is safe as the SECOND
+  // key rather than needing an open/terminal split. Both renderers filter first —
+  // TaskListRenderer.ts:307 and EpicBoardRenderer.ts:236 — and the degraded path is
+  // fed from the same filtered array (:308). Rick, correcting me on exactly this:
+  // "when something gets marked as done it actually literally gets removed from the
+  // task list. It is then displayed within the finished list, by order of what's
+  // finished."
   const byUrgency = ( a: TaskItem, b: TaskItem ): number => {
-    const sr = statusRank( a.status ) - statusRank( b.status );
-    if ( sr !== 0 ) return sr;
     const pr = priorityRank( a.priority ) - priorityRank( b.priority );
     if ( pr !== 0 ) return pr;
+    const sr = statusRank( a.status ) - statusRank( b.status );
+    if ( sr !== 0 ) return sr;
     return taskTitleLabel( a ).localeCompare( taskTitleLabel( b ) );
   };
 
@@ -312,6 +373,11 @@ export function taskStatusClass( status: string | null | undefined ): string {
   if ( word === "queued" )                           return "task-status-queued";
   if ( word === "done" )                             return "task-status-done";
   if ( word === "dropped" )                          return "task-status-dropped";
+  // Added 2026-09-07 alongside the STATUS_RANK entries — all three were falling
+  // through to "unknown", so a deliberately-closed row was styled as a typo.
+  if ( word === "wont_fix" )                         return "task-status-wont-fix";
+  if ( word === "parked" )                           return "task-status-parked";
+  if ( word === "not_approved" )                     return "task-status-not-approved";
   return "task-status-unknown";
 }
 
@@ -417,4 +483,138 @@ export function activeReassignTargets( fleet: FleetComposite | null | undefined 
     seen.add( persona );
   }
   return Array.from( seen ).sort( ( a, b ) => a.localeCompare( b ) );
+}
+
+/**
+ * PARK-ACTIVE — the browser twin of the store's canonical predicate
+ * `park_is_active()` (cosa/rest/task_store_owed.py:184).
+ *
+ *     park_is_active  ==  status == "parked" AND next_chase_ts > now
+ *
+ * 🔴 THIS IS A FIFTH READER OF A CONTRACT THAT ALREADY HAS FOUR, so it mirrors
+ * the JS twin (notifications.js `_taskIsParked`) TERM FOR TERM rather than
+ * inventing a UI-local rule. Two terms are counter-intuitive and the JS docstring
+ * records that both were gotten wrong in its own first draft:
+ *
+ *   1. KEYED ON `status`, NOT on `park_reason`. `parked` is a real status;
+ *      park_reason merely accompanies it. Keying on the reason would dim rows
+ *      the store does not consider parked at all.
+ *
+ *   2. A NULL / UNPARSEABLE / PAST CHASE IS *NOT* PARKED — deliberately. The
+ *      store calls this "fail-loud-toward-owed": a malformed park is VISIBLE
+ *      work. Dimming such a row would whisper "deferred, ignore it" about a row
+ *      the store is actively counting as owed.
+ *
+ * ⚠️ NAIVE TIMESTAMPS ARE UTC — a genuine cross-language trap. Python does
+ * `replace( tzinfo=utc )` for a zone-less value, while `Date.parse( "…T14:00:00" )`
+ * resolves as LOCAL time. Left alone the twins disagree by the operator's UTC
+ * offset, silently, and only for zone-less rows. Normalized below.
+ *
+ * Requires:
+ *   - task is a row object (foreign wire data; any shape tolerated)
+ *   - now is epoch-millis, or omitted to read the clock at call time
+ *
+ * Ensures:
+ *   - status !== "parked"            → false (checked FIRST)
+ *   - parked AND chase >  now        → true
+ *   - parked AND chase === now       → false (come due — rejoined owed)
+ *   - parked AND chase <  now        → false (expired — rejoined owed)
+ *   - parked AND chase null/unparsed → false (fail-loud-toward-owed)
+ *   - Pure: no DOM, no side effects; never throws
+ */
+export function taskIsParked( task: TaskItem | null | undefined, now?: number ): boolean {
+  if ( !task || task.status !== "parked" ) return false;
+  const raw = task.next_chase_ts;
+  if ( typeof raw !== "string" || raw.trim() === "" ) return false;
+
+  // Zone-less ⇒ UTC (Python-twin parity).
+  const trimmed = raw.trim();
+  const hasZone = /(?:Z|[+-]\d{2}:?\d{2})$/.test( trimmed );
+  const chaseMs = Date.parse( hasZone ? trimmed : `${ trimmed }Z` );
+  if ( !Number.isFinite( chaseMs ) ) return false;
+
+  const nowMs = ( typeof now === "number" && Number.isFinite( now ) ) ? now : Date.now();
+  return chaseMs > nowMs;
+}
+
+/**
+ * The CLASS-NAME-SAFE slug for an item_class. Pure.
+ *
+ * 🔴 THE DISPLAYED TEXT AND THE CLASS NAME ARE DIFFERENT STRINGS. The JS card
+ * renders the raw item_class as TEXT but strips non `[A-Za-z0-9_-]` for the
+ * class attribute. Skip the strip and an item_class containing a space splits
+ * silently into TWO classes — which does not look broken, it just styles wrong.
+ *
+ * Ensures:
+ *   - returns the value with every character outside [A-Za-z0-9_-] removed
+ *   - a falsy item_class defaults to "task" BEFORE stripping
+ */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+export function taskClassSlug( itemClass: string | null | undefined ): string {
+  return String( itemClass || "task" ).replace( /[^a-zA-Z0-9_-]/g, "" );
+}
+
+/**
+ * Header text for the task-list count, split LIVE vs PARKED.
+ *
+ * Parity A-2 #7 — the twin of legacy `_formatTaskListCount`
+ * (notifications.js:11176), mirrored term for term.
+ *
+ * WHY THE HEADER SPLITS. The old header printed one number — every open row —
+ * so a board of 3 workable rows and 5 deliberately-deferred ones read as
+ * "8 tasks", and every conversation about driving the board to zero started
+ * from a figure that was 60% rows nobody intended to touch. Parked rows are
+ * approved-not-now, blocked on nothing, and self-expiring.
+ *
+ * "LIVE" IS UNCONDITIONAL; THE PARKED SPLIT IS NOT. A clean board says
+ * "Live: 3" — not "3", and not "Live: 3 · Parked: 0 · Total: 3". The label is
+ * always carried because this number sits in a header beside other chips, and a
+ * bare integer among them is a quantity the reader must identify by shape. The
+ * parked split is a disclosure and earns its space only when there is something
+ * to disclose.
+ *
+ * Requires:
+ *   - live and parked are non-negative counts (non-numeric tolerated)
+ *
+ * Ensures:
+ *   - parked > 0  → "Live: L · Parked: P · Total: L+P"
+ *   - parked <= 0 → "Live: L"
+ *   - Pure: no DOM, no side effects; never throws
+ */
+export function formatTaskListCount( live: number, parked: number ): string {
+  const l = Number.isFinite( live )   ? live   : 0;
+  const p = Number.isFinite( parked ) ? parked : 0;
+  if ( p <= 0 ) return `Live: ${ l }`;
+  return `Live: ${ l } · Parked: ${ p } · Total: ${ l + p }`;
+}
+
+/**
+ * Count a set of OPEN rows into the header's live/parked/total text.
+ *
+ * Parity A-2 #7 — the twin of legacy `_taskListCountText`
+ * (notifications.js:11894).
+ *
+ * 🔴 PARKED IS A STATUS PLUS A LIVE CLOCK, NOT A FLAG. The parked side is
+ * `taskIsParked()` — park-ACTIVE only — so a parked row whose chase time has
+ * passed counts as LIVE here, exactly as the store counts it as owed again.
+ * That means this number can move with no row changing: a park expiring at
+ * 09:00 shifts one row from the parked side to the live side on the next 60s
+ * poll. That is correct, not drift, and it is the reason this takes `now`
+ * rather than reading a cached flag off the row.
+ *
+ * Requires:
+ *   - openTasks is an array of rows ALREADY filtered to non-terminal — this
+ *     function does not re-apply the open filter
+ *   - now is epoch-millis, or omitted to read the clock at call time
+ *
+ * Ensures:
+ *   - returns formatTaskListCount( live, park-active )
+ *   - a non-array argument counts as 0 rather than throwing
+ *   - Pure: no DOM, no side effects
+ */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+export function taskListCountText( openTasks: unknown, now?: number ): string {
+  const rows   = Array.isArray( openTasks ) ? openTasks as TaskItem[] : [];
+  const parked = rows.filter( ( t ) => taskIsParked( t, now ) ).length;
+  return formatTaskListCount( rows.length - parked, parked );
 }

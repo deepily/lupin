@@ -755,6 +755,26 @@ def test_loop_config_accessors_read_the_keys():
     assert lp._enabled() is False                           # default when key absent
 
 
+@pytest.mark.parametrize( "anchor, expected", [
+    ( obs.ANCHOR_KEYS_SENT, "timed from when the keystrokes were sent" ),
+    ( obs.ANCHOR_FIRE,      "timed from when the clear was SCHEDULED" ),
+] )
+def test_loop_advisory_names_which_clock_the_verdict_rested_on( anchor, expected ):
+    """Both anchor arms of _emit_advisory (row 855e4dd0). The KEYS_SENT arm had never
+    been exercised — every alarm reaching it in the existing tests came off a stampless
+    marker — so the stronger claim's wording was the one nobody had read back. The
+    distinction is the whole point of the field: a DEAD_NO_RETURN timed from a real send
+    is evidence, one timed from the schedule may just be a seat mid-turn."""
+    advised = []
+    lp = obs.SelfRespinObserverLoop( _FakeCfg(), advisory_fn=lambda m: advised.append( m ) )
+    lp._emit_advisory( obs.SelfRespinAssessment(
+        session_id="s1", persona="cheech", verdict=obs.SelfRespinVerdict.DEAD_NO_RETURN,
+        reason="past deadline", is_alarm=True, anchor=anchor ) )
+    assert len( advised ) == 1
+    assert expected            in advised[ 0 ]
+    assert f"anchor: {anchor}" in advised[ 0 ]
+
+
 def test_loop_start_spawns_and_stop_is_idempotent( tmp_path ):
     lp = obs.SelfRespinObserverLoop(
         _FakeCfg( **{ "arbiter self respin observer enabled": True, "arbiter poll seconds": 3600 } ),

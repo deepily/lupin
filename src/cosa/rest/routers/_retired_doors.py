@@ -46,6 +46,7 @@ REMOVE_BY = "2026-12-31"
 
 V2_ASK    = "/api/v2/ask"
 V2_SUBMIT = "/api/v2/submit"
+V2_RESUME_JOB = "/api/v2/resume-job"
 
 
 # path -> the door that replaces it.
@@ -86,13 +87,14 @@ V2_SUBMIT = "/api/v2/submit"
 # at a door that answers "I do not understand" teaches a caller less than the handler it
 # replaced, which is the same mistake as pointing at a 404, one layer deeper.
 #
-# 🔴 `/api/mock-job/submit` IS NOT HERE, AND NOT BY OVERSIGHT. Its command exists nowhere:
-# there is no "mock job" entry in JOB_ARG_CONTRACTS and no branch for it in
-# `create_agentic_job` — the router builds `MockAgenticJob` itself (mock_job.py:170). So
-# `submit` cannot build one, and retiring that door would point its refusal at a door that
-# refuses back. It waits for a mock-job command, or it stays (Cheech, 2026-08-21: a
-# test-harness door with test-only callers does not justify teaching the registry a
-# mock-job command tonight).
+# `/api/mock-job/submit` WAS ABSENT FROM THIS TABLE FOR A REASON, AND THE REASON WENT AWAY
+# (rows 432511fd / a3c59f2d, 2026-09-29). Its command existed nowhere: no "mock job" entry
+# in JOB_ARG_CONTRACTS and no builder, because the router built `MockAgenticJob` itself, so
+# `submit` could not build one and a refusal would have pointed at a door that refuses back.
+# Rick ruled it retires as-is and that its behaviour is kept, so the command
+# `agent router go to mock job` now exists (both modes: the plain mock job and the
+# RuntimeArgumentExpeditor test), the four suites that called the door moved to
+# `/api/v2/submit`, and the door joined the table below.
 #
 # ── THE CLAUDE CODE PAIR: THE UPGRADE HAPPENED, AND THE TOMBSTONE IS ITS SECOND HALF ──
 #
@@ -121,11 +123,9 @@ V2_SUBMIT = "/api/v2/submit"
 # guard moved into ClaudeCodeJob's constructor in the same change, where it also covers the
 # voice path and the in-process callers.
 #
-# Also still out, each for its own stated reason: the two resume-from doors
-# (`/api/jobs/{id_hash}/resume-from-checkpoint`, `/api/test-fix-expediter/resume-from`)
-# rebuild a job from server-side state, and an HTTP `SubmitRequest` can say command and
-# args but never "resume job X"; and `/api/test-suite/submit` is how the gate rig schedules
-# a :8000 run, so it lands last, after that gate is green.
+# (The two resume-from doors joined the table on 2026-09-29, once `/api/v2/resume-job`
+# existed to name. `/api/test-suite/submit` landed last, the same day, once v2 reported
+# `queue_position` and every caller had moved -- see the table's final row.)
 RETIRED_DOORS = {
     "/api/push"                       : V2_ASK,
     "/api/job-history/{job_id}/retry" : V2_ASK,
@@ -169,6 +169,24 @@ RETIRED_DOORS = {
     # billing probe all named — which is the door that matters.
     "/api/claude-code/submit"                    : V2_SUBMIT,
     "/api/claude-code/queue/submit"              : V2_SUBMIT,
+    # ── the two checkpoint-resume doors (row 67a2a093) ──
+    # Neither could go to `submit`: they rebuild a job from server-side state, which a
+    # SubmitRequest cannot say. They retired when `/api/v2/resume-job` was built, which
+    # takes one body for both kinds.
+    "/api/jobs/{id_hash}/resume-from-checkpoint" : V2_RESUME_JOB,
+    "/api/test-fix-expediter/resume-from"        : V2_RESUME_JOB,
+    # ── the mock-job door (rows 432511fd / a3c59f2d) ──
+    # Retired as-is on Rick's ruling, with its behaviour kept: the command `agent router go
+    # to mock job` reproduces both modes and the four suites that called it moved to v2.
+    "/api/mock-job/submit"                       : V2_SUBMIT,
+    # ── the test-suite door (row a3c59f2d) — the LAST one ──
+    # Rick ruled 2026-09-29 to retire it once v2 reported `queue_position`, the one field it
+    # returned that v2 did not. Row a3c59f2d added that (AskResponse.queue_position) and moved
+    # every in-repo caller; what the door checked at submit (unknown suite name) moved into the
+    # factory's test-suite builder, and the pytest_args and timeout-budget refusals were
+    # already in TestSuiteJob.__init__. A refused submit is HTTP 200 with status "failed" on v2,
+    # not the 400 this door answered.
+    "/api/test-suite/submit"                     : V2_SUBMIT,
 }
 
 
@@ -197,6 +215,7 @@ def refusal_detail( path: str ) -> str:
     # chose, and telling someone to send a question there sends them to the wrong one of
     # two doors that both exist and both answer.
     entering = ( "Every question now enters through" if replacement == V2_ASK
+                 else "A stalled job is now resumed through" if replacement == V2_RESUME_JOB
                  else "Work whose command is already decided now enters through" )
     return (
         f"{path} is GONE. {entering} {replacement}. "

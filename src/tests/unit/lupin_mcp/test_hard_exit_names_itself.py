@@ -31,12 +31,50 @@ SRC        = os.path.join( LUPIN_ROOT, "src" )
 MARKER     = "[cosa-voice] FATAL"
 
 
-def _run( body ):
-    """Run `body` in a fresh interpreter; return (returncode, stderr)."""
+# 🔴 THE NOTIFIER IS NEUTERED IN THE CHILD, AND THIS IS RICK'S P0 (row f6a43e37).
+#
+# `_die_no_session_id` sends a HIGH-priority alert to the OPERATOR before it exits.
+# Every snippet in this file calls that function for real, in a real interpreter, so
+# until 2026-09-03 running this one file put TWO genuine alerts on Rick's screen —
+# and the whole unit tier put them there every time any seat ran it.
+#
+# MEASURED, and this is the receipt rather than a deduction: with the notifications
+# table counted either side of a single `pytest test_hard_exit_names_itself.py`, the
+# delta was EXACTLY 2. That is the ~2-second pair he was seeing all evening; five
+# pairs in fourteen minutes was five tier runs, not five failures.
+#
+# ⚠️ THE RETRY GUARD DOES NOT COVER THIS PATH, deliberately said out loud. The retry
+# added to `_wait_for_sender_id` sits in front of the alert for a caller that goes
+# through the GATE; these snippets call `_die_no_session_id` DIRECTLY, which is the
+# right thing for a test about the exit to do. Fixing the gate would have left the
+# storm running.
+#
+# The stub goes in the SHARED helper rather than in each snippet, because a rule that
+# every future snippet must remember is not a control — the next test added to this
+# file would page him again.
+_SILENCE_THE_OPERATOR = (
+    "import lupin_mcp.cosa_voice_mcp as _m\n"
+    "_m.notify_user_async = lambda *a, **k: None\n"
+)
+
+
+def _run( body, silence_operator=True ):
+    """
+    Run `body` in a fresh interpreter; return (returncode, stderr).
+
+    Requires:
+        - `body` imports what it needs; it is prefixed, not wrapped
+
+    Ensures:
+        - the child's operator alert is neutered unless a caller explicitly opts out,
+          so exercising the hard exit cannot put a real alert on a human's screen
+        - returns the child's (returncode, stderr) unchanged
+    """
     env = dict( os.environ )
     env[ "PYTHONPATH" ] = SRC + os.pathsep + env.get( "PYTHONPATH", "" )
+    prefix = _SILENCE_THE_OPERATOR if silence_operator else ""
     proc = subprocess.run(
-        [ sys.executable, "-c", body ], capture_output=True, text=True, timeout=90, env=env
+        [ sys.executable, "-c", prefix + body ], capture_output=True, text=True, timeout=90, env=env
     )
     return proc.returncode, proc.stderr
 

@@ -4,6 +4,7 @@ from logging import debug
 from fastapi import FastAPI, Request, Query, HTTPException, File, UploadFile, WebSocket, WebSocketDisconnect, Depends
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
+from lupin_app.versioned_static import VersionedStaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from datetime import datetime
@@ -48,9 +49,18 @@ if src_path not in sys.path:
 # Promote the weak "LUPIN_ROOT is set" guard above to a strong "LUPIN_ROOT is
 # valid" check — fails loud and immediate on the /app-vs-/var/lupin path drift
 # instead of cryptically later at config load. (No defensive fallback.)
-from lupin_app.bootstrap_helpers import assert_lupin_root_valid, reload_enabled as _reload_enabled
+from lupin_app.bootstrap_helpers import ( assert_lupin_root_valid, reload_enabled as _reload_enabled,
+                                          register_sigusr1_faulthandler )
 from cosa.rest.error_envelope import make_unhandled_exception_handler
 assert_lupin_root_valid( lupin_root )
+
+# Row abe4188d — arm `kill -USR1 <pid>` to dump every thread's Python stack to stderr.
+# Registered HERE, at the top of the bootstrap, because a hang that happens during
+# startup is exactly the one a later registration would miss. The default disposition
+# of SIGUSR1 is to TERMINATE, so until this runs the signal is a kill and not a probe.
+# Printed rather than assumed: the caller cannot otherwise tell an armed server from a
+# fatal one, and the last investigation lost a day to precisely that ambiguity.
+print( f"[BOOT] SIGUSR1 thread-dump handler: {register_sigusr1_faulthandler()}" )
 
 # Reduce CUDA memory fragmentation (prevents periodic OOM on Whisper inference)
 os.environ.setdefault( "PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True" )
@@ -70,7 +80,7 @@ from cosa.rest.websocket_manager import WebSocketManager
 from cosa.rest.notification_fifo_queue import NotificationFifoQueue
 
 # Import routers
-from cosa.rest.routers import system, notifications, speech, queues, jobs, websocket, websocket_admin, auth, admin, claude_code_queue, embeddings, mode, stats, deep_research, mock_job, io_files, docs_files, podcast_generator, presentation_generator, deep_research_to_podcast, deep_research_to_presentation, swe_team, bug_fix_expediter, decision_proxy, test_suite, pages, peer, speakerphone, voice_persona, multiplexer_config, commons, arbiter, tasks, fcm, dm, v2_ask
+from cosa.rest.routers import system, notifications, speech, queues, jobs, websocket, websocket_admin, auth, admin, claude_code_queue, embeddings, mode, stats, deep_research, mock_job, io_files, docs_files, podcast_generator, presentation_generator, deep_research_to_podcast, deep_research_to_presentation, swe_team, bug_fix_expediter, decision_proxy, test_suite, pages, peer, speakerphone, voice_persona, multiplexer_config, commons, arbiter, tasks, fcm, dm, v2_ask, cc_transcript
 from cosa.rest.queue_consumer import start_todo_producer_run_consumer_thread
 from cosa.rest.job_persistence import mark_interrupted_jobs, record_server_available
 
@@ -125,6 +135,7 @@ consumer_thread = None
 # WebSocket maintenance background tasks
 websocket_heartbeat_task = None
 websocket_cleanup_task = None
+notification_sweep_task = None
 
 # ============================================================================
 # DEPRECATED: Legacy emit_speech infrastructure (Session 97)
@@ -411,6 +422,77 @@ async def websocket_cleanup_loop():
             await asyncio.sleep( interval_seconds )
 
 
+async def notification_expiry_sweep_loop():
+    """
+    Background task that closes ORPHANED response-required notifications.
+
+    An orphan is a row whose asking client walked away: the SSE generator is
+    cancelled at its `await`, so the only writer of state='expired' never runs
+    and the row sits 'delivered' forever. Measured 2026-09-05: 39 such rows,
+    oldest 2026-05-11, newest that same day. Row bf4f65c3.
+
+    Requires:
+        - config_mgr initialized
+        - a reachable notifications database
+
+    Ensures:
+        - waits `notification grace period seconds` past expires_at before
+          marking anything, so it never shortens the window in which a late
+          human keypress is still honoured by /respond
+        - sweeps at most `notification expiry sweep batch limit` rows a pass
+        - a DB error is logged and retried on the next tick rather than
+          killing the loop
+        - runs the DB work OFF the event loop via asyncio.to_thread, matching
+          _mark_notification_expired_sync (lever B)
+
+    Raises:
+        asyncio.CancelledError: when cancelled during shutdown
+    """
+    from cosa.rest.notification_expiry_sweeper import sweep_once
+    from cosa.rest.db.database import get_db
+
+    interval_seconds = config_mgr.get(
+        "notification expiry sweep interval seconds", default=300, return_type="int"
+    )
+    batch_limit      = config_mgr.get(
+        "notification expiry sweep batch limit", default=200, return_type="int"
+    )
+    # The SAME key /respond reads. Deliberately not a second knob — see the
+    # sweeper module docstring: two numbers that must agree eventually will not.
+    grace_seconds    = config_mgr.get(
+        "notification grace period seconds", default=300, return_type="int"
+    )
+
+    print( f"[NOTIFY-SWEEP] Starting orphan sweep loop — every {interval_seconds}s, "
+           f"grace {grace_seconds}s, batch {batch_limit}" )
+
+    while True:
+        try:
+            result = await asyncio.to_thread(
+                sweep_once, get_db, grace_seconds, batch_limit
+            )
+            # Report the sweeper's OWN account, not an exit code. A pass that
+            # swept nothing is normal; one that scanned nothing on a box with
+            # known orphans is a finding, so both numbers are printed.
+            if result[ "swept" ]:
+                print( f"[NOTIFY-SWEEP] swept {result['swept']} orphan(s) "
+                       f"(scanned {result['scanned']}, "
+                       f"{result['skipped_in_grace']} still in grace)" )
+            elif app_debug and app_verbose:
+                print( f"[NOTIFY-SWEEP] nothing to sweep "
+                       f"(scanned {result['scanned']}, "
+                       f"{result['skipped_in_grace']} still in grace)" )
+
+            await asyncio.sleep( interval_seconds )
+
+        except asyncio.CancelledError:
+            print( "[NOTIFY-SWEEP] Sweep loop cancelled" )
+            break
+        except Exception as e:
+            print( f"[NOTIFY-SWEEP] Error in sweep loop: {e}" )
+            await asyncio.sleep( interval_seconds )
+
+
 # ─── Managed-bounce broadcasts (R4 warning + R5 all-clear) ──────────────────
 # Design of record: src/rnd/v0.1.9/2026.08.01-managed-bounce-review-tiffany.md +
 # 2026.08.01-managed-bounce-for-7999.md Rev 2. Pure/injectable logic lives in
@@ -593,7 +675,7 @@ async def lifespan( app: FastAPI ):
         None - Control returns to FastAPI after initialization
     """
     # Startup
-    global config_mgr, snapshot_mgr, jobs_todo_queue, jobs_done_queue, jobs_dead_queue, jobs_run_queue, jobs_notification_queue, ask_flow, io_tbl, id_generator, app_debug, app_verbose, app_silent, clock_task, consumer_thread, websocket_heartbeat_task, websocket_cleanup_task, fcm_wake_service
+    global config_mgr, snapshot_mgr, jobs_todo_queue, jobs_done_queue, jobs_dead_queue, jobs_run_queue, jobs_notification_queue, ask_flow, io_tbl, id_generator, app_debug, app_verbose, app_silent, clock_task, consumer_thread, websocket_heartbeat_task, websocket_cleanup_task, fcm_wake_service, notification_sweep_task
     
     # Monotonic mark for the managed-bounce all-clear uptime stamp (R5).
     _startup_monotonic = time.monotonic()
@@ -615,6 +697,13 @@ async def lifespan( app: FastAPI ):
     print( "Running database auto-migration (alembic upgrade head)..." )
     migrate_result = run_migrations_to_head( debug=app_debug )
     print( "✓ Database schema is at migration head." )
+
+    # Copy the retired approval-settings JSON file into the approval_settings table ONCE
+    # per database (row 80513825). After this the file is never read again, so a seat that
+    # rewrites it cannot change policy. FAIL-LOUD like the migration: an unreadable
+    # database here aborts boot rather than serving a store nobody has checked.
+    from cosa.rest.task_approval_settings import import_legacy_override_file
+    import_legacy_override_file()
 
     # ANNOUNCE AN APPLIED MIGRATION (row 0aae1a28 (a), Mr Radio's ruling).
     #
@@ -784,6 +873,12 @@ async def lifespan( app: FastAPI ):
         debug           = app_debug,
         verbose         = app_verbose
     )
+
+    # Row 7df08e59: the admin push-pause controller. Built HERE, at startup, so the boot-time
+    # value of `fcm wake push enabled` it restores on resume is the INI's — not whatever a
+    # later pause left in memory.
+    from cosa.rest.fcm_push_pause import init_controller as init_push_pause_controller
+    init_push_pause_controller( config_mgr )
 
     # Initialize notification queue with io_tbl logging
     jobs_notification_queue = NotificationFifoQueue( websocket_mgr=websocket_manager, emit_enabled=True, debug=app_debug, verbose=app_verbose, fcm_wake_service=fcm_wake_service )
@@ -1041,6 +1136,18 @@ async def lifespan( app: FastAPI ):
         print( "[WS-CLEANUP] Starting cleanup task..." )
         websocket_cleanup_task = asyncio.create_task( websocket_cleanup_loop() )
         print( "[WS-CLEANUP] Cleanup task started" )
+
+    # default=False, NOT True. A missing key must FAIL CLOSED: this sweeper is
+    # the first thing in the system that can refuse a real human answer (see
+    # notification_expiry_sweeper's docstring and the INI key's comment), so an
+    # absent key arming it is the one direction that costs a keypress. The code
+    # default and the shipped INI value are pinned to agree by
+    # test_the_sweeper_fails_closed_when_the_key_is_absent.py — they were
+    # written disagreeing, and only the guard stops them drifting again.
+    if config_mgr.get( "notification expiry sweep enabled", default=False, return_type="boolean" ):
+        print( "[NOTIFY-SWEEP] Starting orphan sweep task..." )
+        notification_sweep_task = asyncio.create_task( notification_expiry_sweep_loop() )
+        print( "[NOTIFY-SWEEP] Orphan sweep task started" )
     
     # Start consumer thread for producer-consumer pattern
     print( "[CONSUMER] Starting todo-producer-run-consumer thread..." )
@@ -1202,7 +1309,36 @@ async def lifespan( app: FastAPI ):
             print( "[WS-CLEANUP] Cleanup task cancelled successfully" )
         except Exception as e:
             print( f"[WS-CLEANUP] Error during cleanup task shutdown: {e}" )
+
+    if notification_sweep_task:
+        print( "[NOTIFY-SWEEP] Cancelling orphan sweep task..." )
+        notification_sweep_task.cancel()
+        try:
+            await notification_sweep_task
+        except asyncio.CancelledError:
+            print( "[NOTIFY-SWEEP] Orphan sweep task cancelled successfully" )
+        except Exception as e:
+            print( f"[NOTIFY-SWEEP] Error during sweep task shutdown: {e}" )
     
+    # Row ed76b897: cancel any pending TRAILING wake. A notify that lands inside a
+    # debounce window arms a timer for the window's close, and at shutdown that
+    # timer has nothing left to wake anyone for. The timers are daemons, so this
+    # is hygiene rather than the thing that lets the process exit.
+    # Row 7df08e59: log a push pause still active at shutdown — it is not persisted (R1.4),
+    # so this line is the only record that a restart ended it early.
+    try:
+        from cosa.rest.fcm_push_pause import get_controller as get_push_pause_controller
+        get_push_pause_controller().shutdown()
+    except Exception as e:  # pragma: no cover - best-effort boundary guard; must never block shutdown (main.py is outside cov source=["cosa"])
+        print( f"[FCM-PAUSE] Error during pause-controller shutdown (continuing): {e}" )
+
+    if fcm_wake_service is not None:
+        try:
+            fcm_wake_service.shutdown()
+            print( "[FCM-WAKE] Pending trailing wakes cancelled" )
+        except Exception as e:
+            print( f"[FCM-WAKE] Error during wake-service shutdown (continuing): {e}" )
+
     # Phase 2 (CJ Flow async multi-lane): drain agentic pool BEFORE consumer stops
     # and BEFORE HTTP socket closes. In-flight pool workers need the WebSocket
     # channel alive long enough to emit their final job_state_transition events
@@ -1369,10 +1505,17 @@ app.include_router(tasks.router)
 app.include_router(fcm.router)
 app.include_router(dm.router)   # /api/dm/* — notification-native AI↔AI DM (relocated legacy peer-DM route)
 app.include_router(v2_ask.router)   # /api/v2/ask — CJ Flow v2 unified ask endpoint (unit D)
+app.include_router(cc_transcript.router)   # /api/cc-transcript/* — the console-tee read-only stream (row 27760534)
 
 # Mount static files
 static_dir = os.path.join(os.path.dirname(__file__), "static")
-app.mount("/static", StaticFiles(directory=static_dir), name="static")
+# VersionedStaticFiles, not StaticFiles: the plain mount set NO Cache-Control at all, so
+# every `?v=` token this repo has ever bumped could still be served from a browser's
+# heuristic cache. The SPA shell revalidates (pages.py sets no-cache) but the assets it
+# links did not, which made the whole busting scheme depend on a step nothing enforced.
+# Measured 2026-09-02: 9 of the 9 assets notifications.html links with ?v= came back with
+# no cache-control. See src/lupin_app/versioned_static.py for why the policy is two rules.
+app.mount("/static", VersionedStaticFiles(directory=static_dir), name="static")
 
 async def load_stt_model():
     """

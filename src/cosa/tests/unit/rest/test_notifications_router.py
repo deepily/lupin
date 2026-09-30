@@ -538,9 +538,11 @@ class TestNotificationsRouter( unittest.TestCase ):
                 # Verify queue method called
                 mock_notification_queue.get_user_notifications.assert_called_once_with(
                     user_id=self.test_user_system_id,
-                    include_played=True
+                    include_played=True,
+                    priorities=None,
+                    oldest_first=False
                 )
-                
+
                 # Verify response format
                 self.assertEqual( result["status"], "success" )
                 self.assertEqual( result["user_id"], self.test_user_system_id )
