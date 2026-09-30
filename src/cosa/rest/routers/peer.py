@@ -54,6 +54,12 @@ from cosa.rest.auth_middleware import require_admin
 from cosa.config.configuration_manager import ConfigurationManager
 import cosa.utils.util as du
 
+# Session-level default: a peer call that forgets its own per-request timeout is still bounded (row f6ce66f1).
+_PEER_SESSION_TIMEOUT_SECONDS = 30.0
+
+# Bound on the peer /auth/login POST (row f6ce66f1).
+_PEER_LOGIN_TIMEOUT_SECONDS = 10.0
+
 
 _config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
 
@@ -123,7 +129,7 @@ async def _login_to_peer( session: aiohttp.ClientSession, host: str ) -> Dict:
     url  = f"http://{host}/auth/login"
     body = { "email": email, "password": password }
     try:
-        async with session.post( url, json=body, timeout=aiohttp.ClientTimeout( total=10.0 ) ) as resp:
+        async with session.post( url, json=body, timeout=aiohttp.ClientTimeout( total=_PEER_LOGIN_TIMEOUT_SECONDS ) ) as resp:
             if resp.status != 200:
                 preview = (await resp.text())[ :200 ]
                 raise HTTPException(
@@ -273,7 +279,7 @@ async def get_peer_queue(
 ) -> PeerQueueResponse:
     _validate_host_and_queue( host, queue_name )
 
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession( timeout=aiohttp.ClientTimeout( total=_PEER_SESSION_TIMEOUT_SECONDS ) ) as session:
         upstream = await _fetch_queue( session, host, queue_name )
 
     return PeerQueueResponse(
@@ -304,7 +310,7 @@ async def _watcher_loop(
     """
     state = _watcher_state[ user_id ]
     try:
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession( timeout=aiohttp.ClientTimeout( total=_PEER_SESSION_TIMEOUT_SECONDS ) ) as session:
             while True:
                 try:
                     run_body  = await _fetch_queue( session, host, "run"  )

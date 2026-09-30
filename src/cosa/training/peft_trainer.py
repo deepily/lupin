@@ -59,6 +59,9 @@ from cosa.utils.util_stopwatch import Stopwatch
 
 from cosa.training.xml_coordinator import XmlCoordinator
 
+# Bound on each vLLM readiness probe GET, polled in a loop (row f6ce66f1).
+_VLLM_PROBE_TIMEOUT_SECONDS = 1
+
 set_seed( 42 )
 
 @staticmethod
@@ -2026,13 +2029,13 @@ class PeftTrainer:
                         raise RuntimeError( "vLLM server process terminated unexpectedly" )
             
             try:
-                response = requests.get( server_url, timeout=1 )
+                response = requests.get( server_url, timeout=_VLLM_PROBE_TIMEOUT_SECONDS )
                 if response.status_code == 200:
                     if self.debug or self.verbose:
                         print( f"vLLM server successfully started and is responding on port {port}" )
                         # Get and print server info if in debug mode
                         try:
-                            info_response = requests.get( f"http://localhost:{port}/v1/models", timeout=1 )
+                            info_response = requests.get( f"http://localhost:{port}/v1/models", timeout=_VLLM_PROBE_TIMEOUT_SECONDS )
                             print( f"Server model info: {info_response.json()}" )
                         except Exception as e:
                             print( f"Could not fetch server info: {str( e )}" )

@@ -30,6 +30,9 @@ from cosa.agents.notification_proxy.config import (
     RECONNECT_BACKOFF_FACTOR,
 )
 
+# Bound on the /auth/login POST (row f6ce66f1: every HTTP call carries a named timeout).
+_AUTH_LOGIN_TIMEOUT_SECONDS = 30
+
 
 class WebSocketListener:
     """
@@ -190,7 +193,7 @@ class WebSocketListener:
             resp = requests.post(
                 url,
                 json    = { "email": self.email, "password": self.password },
-                timeout = 30
+                timeout = _AUTH_LOGIN_TIMEOUT_SECONDS
             )
         except requests.ConnectionError:
             print( f"[Listener] Cannot connect to {url} — is the server running?" )

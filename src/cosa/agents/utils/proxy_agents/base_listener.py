@@ -37,6 +37,9 @@ from cosa.agents.utils.proxy_agents.base_config import (
     RECONNECT_JITTER_FRACTION,
 )
 
+# Bound on the /auth/login POST (row f6ce66f1: every HTTP call carries a named timeout).
+_AUTH_LOGIN_TIMEOUT_SECONDS = 30
+
 
 class BaseWebSocketListener:
     """
@@ -264,7 +267,7 @@ class BaseWebSocketListener:
             resp = requests.post(
                 url,
                 json    = { "email": self.email, "password": self.password },
-                timeout = 30
+                timeout = _AUTH_LOGIN_TIMEOUT_SECONDS
             )
         except requests.ConnectionError:
             print( f"{self.LOG_PREFIX} Cannot connect to {url} -- is the server running?" )

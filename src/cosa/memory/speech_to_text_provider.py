@@ -28,6 +28,9 @@ from typing import Optional
 import cosa.utils.util as du
 from cosa.config.configuration_manager import ConfigurationManager
 
+# Bound on the /transcribe POST — audio upload plus model time (row f6ce66f1).
+_TRANSCRIBE_TIMEOUT_SECONDS = 120
+
 
 # Local-mode decode defaults, applied to EVERY in-process transcription (speech.py's
 # mp3 and wav doors, and v2_ask's audio door). `return_timestamps=True` keeps
@@ -329,7 +332,7 @@ class SpeechToTextProvider:
                 url,
                 files   = { "audio": ( os.path.basename( audio_path ), audio_bytes, "application/octet-stream" ) },
                 headers = { "X-API-Key": api_key },
-                timeout = 120
+                timeout = _TRANSCRIBE_TIMEOUT_SECONDS
             )
 
         try:
