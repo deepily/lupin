@@ -138,25 +138,18 @@ def test_a_NON_STRING_stamp_is_refused_rather_than_raising( override, junk ):
     assert approval.get_manager_pull_disabled() is True
 
 
-def test_the_refusal_is_PER_KEY_and_leaves_the_fail_open_keys_alone( override ):
+def test_an_unverified_file_imports_no_key_at_all( override ):
     """
-    🔴 THE DESIGN DECISION, GUARDED — and it is the opposite of the obvious one.
-
-    A blanket "ignore an unstamped file" would ALSO drop `enforcement_active`, whose
-    fallback is `False`. Refusing it would therefore turn the approval gate OFF, which is
-    a worse outcome than honouring an unverified value. So the refusal is restricted to
-    keys whose fallback points CLOSED.
-
-    ⚠️ This is not a compromise and must not be "tidied" into a blanket refusal later.
+    🔴 WAS "THE REFUSAL IS PER-KEY", RULED THE OTHER WAY 2026-09-29. The per-key design existed
+    because the READER could not drop `enforcement_active` without failing open. The import has
+    no such problem: a key it does not copy simply falls to its INI default, so refusing the
+    whole unverified file is safe for every key, and approvers / approver_accounts /
+    enforcement_active are exactly the ones a seat would forge.
     """
-    override( { "manager_pull_disabled": False, "enforcement_active": True }, stamped=False )
+    override( { "manager_pull_disabled": False, "enforcement_active": False,
+                "approvers": [ "mallory" ] }, stamped=False )
 
-    assert approval.get_manager_pull_disabled() is True,  "the enforced key was honoured unstamped"
-    assert approval.get_enforcement_active()    is True,  (
-        "an unstamped `enforcement_active` was DROPPED. It falls back to False, so "
-        "refusing it switches the approval gate off — the fail-open direction this "
-        "design exists to avoid"
-    )
+    assert set( approval._backend.rows ) == { approval.LEGACY_IMPORT_MARKER }
 
 
 def test_the_enforced_keys_all_fall_back_CLOSED_which_is_what_makes_refusing_them_safe():
@@ -200,18 +193,13 @@ def test_the_enforced_keys_all_fall_back_CLOSED_which_is_what_makes_refusing_the
 
 # ═══ THE THIRD STATE — "CANNOT CHECK" IS NOT "FORGED" ══════════════════════════
 
-def test_with_NO_SECRET_the_verdict_is_None_and_every_key_is_honoured( override, monkeypatch ):
+def test_with_NO_SECRET_the_verdict_is_None_and_the_import_refuses( override, monkeypatch ):
     """
-    🔴 THE KEYLESS DEV BOX, AND WHY THE VERDICT HAS THREE VALUES RATHER THAN TWO.
-
-    Collapsing "cannot check" into False would make a machine with no signing key read
-    every settings file as forged — the gate would refuse content that is perfectly
-    legitimate, on a box that simply has no key. Two different facts; the caller acts
-    differently on each.
-
-    ⚠️ AND IT IS NOT A HOLE. A process with no `JWT_SECRET_KEY` cannot serve: the
-    `jwt_service` module raises `ValueError` at import, so a running server always has
-    one. The state exists for tests and dev shells, not for production.
+    🔴 THE KEYLESS DEV BOX. The verdict has three values so "cannot check" is never mistaken
+    for "forged" — but since 2026-09-29 the IMPORT treats "cannot check" as "not verified":
+    the file is writable by every seat until it has been imported, so a value nobody could
+    verify is not copied. (A running server always has a secret: `jwt_service` refuses to
+    import without one.)
     """
     monkeypatch.setattr( approval, "_stamp_secret", lambda: None )
 
@@ -220,9 +208,8 @@ def test_with_NO_SECRET_the_verdict_is_None_and_every_key_is_honoured( override,
     )
 
     override( { "manager_pull_disabled": False }, stamped=False )
-    assert approval.get_manager_pull_disabled() is False, (
-        "a keyless process refused a file it was never able to check"
-    )
+    assert "manager_pull_disabled" not in approval._backend.rows
+    assert approval.get_manager_pull_disabled() is True
 
 
 def test_an_UNSERIALISABLE_body_reports_and_returns_None_rather_than_raising( capsys ):

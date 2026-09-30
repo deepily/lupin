@@ -413,10 +413,17 @@ def import_legacy_override_file():
           "already-imported" (this database has its marker; the file is not opened),
           "no-file" (marker written, nothing to copy), "unreadable" (file present but not
           a JSON object; marker written, nothing copied, reported loudly), "imported"
+        - a file whose stamp does not VERIFY imports NOTHING: every key is skipped and the
+          setting falls to its INI default. Until this first boot import runs the file is
+          still writable by every seat, so an unverified `approvers`, `approver_accounts` or
+          `enforcement_active` must not be laundered into the table (María, 2026-09-29).
+          "Cannot check" (no signing secret) counts as not verified. The safe direction for
+          enforcement_active is therefore the INI default, chosen deliberately over
+          importing an unverified value
         - only keys in WRITABLE_KEYS whose value passes that key's validator are copied; a
           bad value is reported and skipped
-        - a file whose STAMP does not verify has its STAMP_ENFORCED_KEYS skipped (the
-          rescission is never imported from a file the validated writer did not write)
+        - every imported and every skipped key is logged WITH ITS VALUE, so the boot log
+          records exactly what entered the table
         - the marker row is written in the same transaction as the values, so a second boot
           finds it and does nothing — a seat that edits the file afterwards changes nothing
         - the file is NOT renamed or deleted: `:7999` and `:8000` share the directory but
@@ -446,17 +453,21 @@ def import_legacy_override_file():
             print( f"[task-approval] legacy override file {path} unusable ({error}) — nothing imported" )
 
         if body is not None:
-            status  = "imported"
-            verdict = _stamp_is_valid( body )
+            status   = "imported"
+            verified = _stamp_is_valid( body ) is True
             for key in WRITABLE_KEYS:
                 if key not in body: continue
-                if verdict is False and key in STAMP_ENFORCED_KEYS:
-                    print( f"[task-approval] legacy override {key} skipped — the file's stamp does not verify" )
+                if not verified:
+                    print( f"[task-approval] legacy override {key}={body[ key ]!r} NOT imported — the file's "
+                           f"stamp does not verify, so {key} keeps its INI default" )
                     continue
                 try:
                     imported[ key ] = _VALIDATORS[ key ]( body[ key ] )
                 except ValueError as error:
-                    print( f"[task-approval] legacy override {key} skipped — {error}" )
+                    print( f"[task-approval] legacy override {key}={body[ key ]!r} skipped — {error}" )
+
+    for key, value in imported.items():
+        print( f"[task-approval] legacy override imported: {key}={value!r}" )
 
     marker = { LEGACY_IMPORT_MARKER: { "status": status, "keys": sorted( imported ), "source": path } }
     _backend.write( { **imported, **marker }, "legacy-file-migration" )

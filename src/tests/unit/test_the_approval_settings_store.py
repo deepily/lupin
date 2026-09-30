@@ -184,16 +184,18 @@ def test_import_copies_valid_keys_once_and_writes_the_marker( legacy_dir, capsys
     assert "default_to_holding" not in rows and "unknown_key" not in rows
     assert approval._backend.updated_by[ "approvers" ] == "legacy-file-migration"
     assert approval.LEGACY_IMPORT_MARKER in rows
-    assert "default_to_holding skipped" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "default_to_holding='banana' skipped" in out
+    assert "imported: approvers=['cheech']" in out and "imported: enforcement_active=True" in out
     assert approval.get_enforcement_active() is True             # read through the table
 
 
 def test_a_second_import_reads_nothing_even_if_the_file_changed( legacy_dir ):
     path = legacy_dir / approval.OVERRIDE_FILENAME
-    path.write_text( json.dumps( { "enforcement_active": False } ) )
+    path.write_text( stamped_json( { "enforcement_active": False } ) )
     approval.import_legacy_override_file()
 
-    path.write_text( json.dumps( { "enforcement_active": True } ) )
+    path.write_text( stamped_json( { "enforcement_active": True } ) )
     calls = approval._backend.write_calls
     assert approval.import_legacy_override_file() == { "status": "already-imported", "imported": [] }
     assert approval._backend.write_calls == calls
@@ -214,16 +216,56 @@ def test_import_of_an_unusable_file_copies_nothing( legacy_dir, capsys, content 
     assert "unusable" in capsys.readouterr().out
 
 
-def test_import_skips_the_rescission_when_the_stamp_does_not_verify( legacy_dir, monkeypatch, capsys ):
+@pytest.mark.parametrize( "stamp", [ None, "forged" ] )
+def test_an_unverified_file_imports_NOTHING_and_logs_the_values( legacy_dir, monkeypatch, capsys, stamp ):
+    """
+    Until the first boot import the file is writable by every seat, so an unstamped or forged
+    file must not put approvers, accounts, enforcement or the rescission into the table.
+    """
     monkeypatch.setenv( "JWT_SECRET_KEY", "test-secret" )
-    ( legacy_dir / approval.OVERRIDE_FILENAME ).write_text( json.dumps( {
-        "manager_pull_disabled": False, "enforcement_active": True, approval.STAMP_KEY: "forged" } ) )
+    body = { "manager_pull_disabled": False, "enforcement_active": False,
+             "approvers": [ "mallory" ], "approver_accounts": { "m@x.com": "rick" } }
+    if stamp is not None: body[ approval.STAMP_KEY ] = stamp
+    ( legacy_dir / approval.OVERRIDE_FILENAME ).write_text( json.dumps( body ) )
 
     result = approval.import_legacy_override_file()
 
-    assert result[ "imported" ] == [ "enforcement_active" ]
-    assert "manager_pull_disabled" not in approval._backend.rows
-    assert "stamp does not verify" in capsys.readouterr().out
+    assert result == { "status": "imported", "imported": [] }
+    assert set( approval._backend.rows ) == { approval.LEGACY_IMPORT_MARKER }
+    out = capsys.readouterr().out
+    assert "approvers=['mallory'] NOT imported" in out
+    assert "enforcement_active=False NOT imported" in out
+    assert "manager_pull_disabled=False NOT imported" in out
+    assert "approver_accounts={'m@x.com': 'rick'} NOT imported" in out
+    assert "mallory" not in approval.get_approvers()
+    assert approval.get_manager_pull_disabled() is True
+
+
+def test_a_validly_stamped_file_edited_afterwards_imports_nothing( legacy_dir, monkeypatch ):
+    """
+    THE TAMPER CASE: the server's own writer stamped the file, then a seat edited one value.
+    The stamp no longer matches the body, so nothing is imported. Positive control: the same
+    file unedited imports (see the import-copies test), so this is not a reader that refuses all.
+    """
+    monkeypatch.setenv( "JWT_SECRET_KEY", "test-secret" )
+    path = legacy_dir / approval.OVERRIDE_FILENAME
+    path.write_text( stamped_json( { "manager_pull_disabled": True, "approvers": [ "maria" ] } ) )
+    edited = json.loads( path.read_text() )
+    edited[ "manager_pull_disabled" ] = False                    # the seat's edit; stamp untouched
+    edited[ "approvers" ]           = [ "maria", "mallory" ]
+    path.write_text( json.dumps( edited ) )
+
+    assert approval.import_legacy_override_file()[ "imported" ] == []
+    assert set( approval._backend.rows ) == { approval.LEGACY_IMPORT_MARKER }
+    assert approval.get_manager_pull_disabled() is True
+    assert "mallory" not in approval.get_approvers()
+
+
+def test_a_file_that_cannot_be_checked_imports_nothing( legacy_dir, monkeypatch ):
+    """No signing secret means "cannot check", which is not "verified"."""
+    monkeypatch.setattr( approval, "_stamp_secret", lambda: None )
+    ( legacy_dir / approval.OVERRIDE_FILENAME ).write_text( json.dumps( { "enforcement_active": True } ) )
+    assert approval.import_legacy_override_file()[ "imported" ] == []
 
 
 def test_import_honours_a_verified_stamp( legacy_dir, monkeypatch ):
