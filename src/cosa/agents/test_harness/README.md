@@ -30,13 +30,18 @@ Simulates long-running agentic jobs (like Deep Research) without making any API 
 
 ## API Endpoint
 
-### POST /api/mock-job/submit
+### POST /api/v2/submit — `agent router go to mock job`
 
-Submit a mock job to the todo queue.
+`POST /api/mock-job/submit` was retired to 410 on 2026-09-29 (row 432511fd); the same job is
+the command `agent router go to mock job` on the v2 door. The fields below go in `args`, except
+`websocket_id`, `scheduled_at` and `monopolize`, which are top-level. The response is a v2
+`AskResponse`: `status` is `waiting`, `job_id` is `mock-…`, `queue_position` is set, and the
+`config` shown below is `submit_details.config`. Adding `voice_command` (and optionally
+`force_failure_mode`) runs the expeditor test instead.
 
 **Authentication**: Required (Bearer token)
 
-**Request Body** (all fields optional with defaults):
+**Args** (all optional with defaults):
 
 ```json
 {
@@ -88,38 +93,38 @@ TOKEN=$(curl -s -X POST "http://localhost:7999/auth/login" \
 ### 2. Submit Quick Mock Job (2 iterations, 1 second each)
 
 ```bash
-curl -X POST "http://localhost:7999/api/mock-job/submit" \
+curl -X POST "http://localhost:7999/api/v2/submit" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"fixed_iterations": 2, "fixed_sleep": 1.0}'
+  -d '{"command": "agent router go to mock job", "args": {"fixed_iterations": 2, "fixed_sleep": 1.0}}'
 ```
 
 ### 3. Submit Mock Job with Defaults (random 3-8 iterations, 1-5s sleep)
 
 ```bash
-curl -X POST "http://localhost:7999/api/mock-job/submit" \
+curl -X POST "http://localhost:7999/api/v2/submit" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{}'
+  -d '{"command": "agent router go to mock job", "args": {}}'
 ```
 
 ### 4. Submit Failing Mock Job
 
 ```bash
-curl -X POST "http://localhost:7999/api/mock-job/submit" \
+curl -X POST "http://localhost:7999/api/v2/submit" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"failure_probability": 1.0, "fixed_iterations": 3}'
+  -d '{"command": "agent router go to mock job", "args": {"failure_probability": 1.0, "fixed_iterations": 3}}'
 ```
 
 ### 5. Queue Flood Test (5 jobs)
 
 ```bash
 for i in {1..5}; do
-  curl -X POST "http://localhost:7999/api/mock-job/submit" \
+  curl -X POST "http://localhost:7999/api/v2/submit" \
     -H "Authorization: Bearer $TOKEN" \
     -H "Content-Type: application/json" \
-    -d '{"fixed_iterations": 2, "fixed_sleep": 1.5}'
+    -d '{"command": "agent router go to mock job", "args": {"fixed_iterations": 2, "fixed_sleep": 1.5}}'
   echo ""
 done
 ```

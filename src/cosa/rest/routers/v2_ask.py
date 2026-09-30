@@ -25,7 +25,7 @@ import re
 from typing import Any, Literal, Optional
 
 import torch
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -33,6 +33,7 @@ from pydantic import BaseModel, Field
 from cosa.config.configuration_manager import ConfigurationManager
 from cosa.rest.auth import get_current_user, identity_or_401
 from cosa.rest.routers import speech
+from cosa.rest.v2.request_context import set_bearer_token, reset_bearer_token
 
 router = APIRouter( tags=[ "v2-ask" ] )
 
@@ -123,6 +124,7 @@ class AskResponse( BaseModel ):
     trace_id       : str                 = Field( ..., description="The request's trace id" )
     error          : Optional[ str ]     = Field( None, description="Degradation error string, when a stage failed" )
     queue_position : Optional[ int ]     = Field( None, description="The todo queue's size right after this request's job was queued — a snapshot taken at submit time, not kept current; null when nothing was queued (replay, inline agent, needs_input, failure)" )
+    submit_details : Optional[ dict ]    = Field( None, description="What the command's builder learned about the job it built or declined to build — set only by commands that report it (agent router go to mock job: its resolved `config`, and for a cancelled expeditor test the notification status). Null otherwise" )
 
 
 class AgentOption( BaseModel ):
@@ -638,6 +640,7 @@ async def transcribe(
 @router.post( "/api/v2/submit", response_model=AskResponse )
 async def v2_submit(
     request      : SubmitRequest,
+    http_request : Request,
     current_user : dict = Depends( get_current_user ),
     flow         : Any  = Depends( get_ask_flow ),
 ) -> AskResponse:
@@ -669,21 +672,29 @@ async def v2_submit(
     # but still RUNS THE AGENT, so it holds the caller for the agent's full span.
     # On the loop that starves /health with workers=1 (row 1c36199e); off it, it
     # holds a worker thread instead.
-    result = await run_in_threadpool(
-        lambda: flow.submit(
-            command        = request.command,
-            args           = request.args,
-            question       = request.question,
-            user_id        = user_id,
-            user_email     = user_email,
-            session_id     = session_id,
-            websocket_id   = request.websocket_id or session_id,
-            speak          = request.speak,
-            scheduled_at   = request.scheduled_at,
-            monopolize     = request.monopolize,
-            parent_id_hash = request.parent_id_hash,
+    # The caller's JWT travels to the job builder through a ContextVar, not through
+    # flow.submit(): the mock-job expeditor test has to authenticate its notifications AS the
+    # caller, and no other command needs it (see cosa.rest.v2.request_context).
+    auth_header = http_request.headers.get( "Authorization", "" )
+    reset       = set_bearer_token( auth_header[ 7: ] if auth_header.startswith( "Bearer " ) else None )
+    try:
+        result = await run_in_threadpool(
+            lambda: flow.submit(
+                command        = request.command,
+                args           = request.args,
+                question       = request.question,
+                user_id        = user_id,
+                user_email     = user_email,
+                session_id     = session_id,
+                websocket_id   = request.websocket_id or session_id,
+                speak          = request.speak,
+                scheduled_at   = request.scheduled_at,
+                monopolize     = request.monopolize,
+                parent_id_hash = request.parent_id_hash,
+            )
         )
-    )
+    finally:
+        reset_bearer_token( reset )
     return AskResponse( **result )
 
 

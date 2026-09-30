@@ -63,7 +63,7 @@ agentic voice workflow's testing ladder (see `src/workflow/agentic-voice-workflo
 | Surface | What It Tests | Proxy Needed? |
 |---------|---------------|---------------|
 | Surface 1: Unit + Smoke | Individual functions, strategy logic | No |
-| **Surface 2: Mock Job Endpoint** | **Expediter arg resolution via `/api/mock-job/submit`** | **Yes** |
+| **Surface 2: Mock Job Endpoint** | **Expediter arg resolution via `/api/v2/submit` (`agent router go to mock job`)** | **Yes** |
 | **Surface 3: Live Pipeline** | **Full submit → queue → agent → result cycle** | **Yes (for interactive agents)** |
 | Surface 4: PEFT Training | LORA classifier accuracy | No |
 | Surface 5: Voice Routing | ASR → LORA → Queue | No (but proxy helps for interactive agents) |
@@ -76,7 +76,7 @@ agentic voice workflow's testing ladder (see `src/workflow/agentic-voice-workflo
 
 ```mermaid
 graph TD
-    TR["Test Runner<br/>(test_proxy_integration.py)"] -->|POST /api/push<br/>or /api/mock-job/submit| Server["Lupin Server<br/>(port 7999)"]
+    TR["Test Runner<br/>(test_proxy_integration.py)"] -->|POST /api/v2/ask<br/>or /api/v2/submit| Server["Lupin Server<br/>(port 7999)"]
     Server -->|Queue job| Queue["CJ Flow Queue<br/>(todo → running → done)"]
     Queue -->|Agent executes| Agent["Agent<br/>(Calculator, CRUD, Expediter)"]
     Agent -->|Needs user input| NQ["Notification Queue"]
@@ -589,7 +589,7 @@ Not all fields are required — they depend on the scenario group.
 }
 ```
 
-**Flow**: POST `/api/mock-job/submit` → synchronous response with config + args → arg
+**Flow**: POST `/api/v2/submit` (`agent router go to mock job`, `voice_command` in `args`) → synchronous response with `submit_details.config` + args → arg
 validation → optional job completion polling
 
 ### Idempotency Considerations
@@ -787,7 +787,7 @@ sequenceDiagram
     participant NQ as Notification Queue
     participant P as Notification Proxy
 
-    T->>S: POST /api/mock-job/submit { voice_command }
+    T->>S: POST /api/v2/submit { command: mock job, args: { voice_command } }
     S->>E: Parse voice command + detect missing args
 
     loop For each missing argument
@@ -905,7 +905,7 @@ After each test run, the proxy prints statistics:
 **Symptom**: `GET /api/mock-job/health` returns non-200 or `available: false`.
 
 **Causes**:
-1. **Missing mock job endpoint** — The `/api/mock-job/submit` router may not be registered.
+1. **Missing mock job endpoint** — The `/api/mock-job/health` router may not be registered (`/api/mock-job/submit` itself is retired — the suites submit through `/api/v2/submit`).
    Check that `mock_job.py` is imported in the FastAPI app.
 2. **LLM server down** — The expediter uses vLLM for argument extraction. If unavailable,
    the health check may report `available: false`.

@@ -6991,53 +6991,20 @@
                 "tags": [
                     "testing"
                 ],
-                "summary": "Submit mock job",
-                "description": "Submit a zero-cost mock job for queue UI testing with configurable parameters.",
+                "summary": "GONE \u2014 use /api/v2/submit",
+                "description": "GONE (410). Use /api/v2/submit. REMOVE BY 2026-12-31.",
                 "operationId": "submit_mock_job_api_mock_job_submit_post",
-                "requestBody": {
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/MockJobSubmitRequest",
-                                "default": {
-                                    "iterations_min": 3,
-                                    "iterations_max": 8,
-                                    "sleep_min": 1.0,
-                                    "sleep_max": 5.0,
-                                    "failure_probability": 0.0,
-                                    "monopolize": false
-                                }
-                            }
-                        }
-                    }
-                },
                 "responses": {
-                    "200": {
+                    "410": {
                         "description": "Successful Response",
                         "content": {
                             "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/MockJobSubmitResponse"
-                                }
-                            }
-                        }
-                    },
-                    "422": {
-                        "description": "Validation Error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/HTTPValidationError"
-                                }
+                                "schema": {}
                             }
                         }
                     }
                 },
-                "security": [
-                    {
-                        "HTTPBearerWith401": []
-                    }
-                ]
+                "deprecated": true
             }
         },
         "/api/mock-job/health": {
@@ -13244,6 +13211,19 @@
                         ],
                         "title": "Queue Position",
                         "description": "The todo queue's size right after this request's job was queued \u2014 a snapshot taken at submit time, not kept current; null when nothing was queued (replay, inline agent, needs_input, failure)"
+                    },
+                    "submit_details": {
+                        "anyOf": [
+                            {
+                                "additionalProperties": true,
+                                "type": "object"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Submit Details",
+                        "description": "What the command's builder learned about the job it built or declined to build \u2014 set only by commands that report it (agent router go to mock job: its resolved `config`, and for a cancelled expeditor test the notification status). Null otherwise"
                     }
                 },
                 "type": "object",
@@ -14187,193 +14167,6 @@
                 ],
                 "title": "ManagerPullRequest",
                 "description": "A flip of Rick's manager-pull toggle. One field, and it is REQUIRED.\n\n\ud83d\udd34 `StrictBool`, NOT `bool`. Pydantic's lenient bool accepts the STRING \"true\", and\n`bool( \"false\" )` is True \u2014 so a lenient field would let a caller sending \"false\"\nswitch the toggle ON while believing they had turned it off. That is the exact\ndefect this endpoint exists to make unreachable, and accepting it here would put it\nback one layer up. The reader still PARSES strings, deliberately, for the operator\nwho hand-edits the file; nothing should ever ARRIVE as one."
-            },
-            "MockJobSubmitRequest": {
-                "properties": {
-                    "iterations_min": {
-                        "type": "integer",
-                        "maximum": 20.0,
-                        "minimum": 1.0,
-                        "title": "Iterations Min",
-                        "description": "Minimum iterations",
-                        "default": 3
-                    },
-                    "iterations_max": {
-                        "type": "integer",
-                        "maximum": 20.0,
-                        "minimum": 1.0,
-                        "title": "Iterations Max",
-                        "description": "Maximum iterations",
-                        "default": 8
-                    },
-                    "sleep_min": {
-                        "type": "number",
-                        "maximum": 30.0,
-                        "minimum": 0.1,
-                        "title": "Sleep Min",
-                        "description": "Minimum sleep seconds",
-                        "default": 1.0
-                    },
-                    "sleep_max": {
-                        "type": "number",
-                        "maximum": 30.0,
-                        "minimum": 0.1,
-                        "title": "Sleep Max",
-                        "description": "Maximum sleep seconds",
-                        "default": 5.0
-                    },
-                    "failure_probability": {
-                        "type": "number",
-                        "maximum": 1.0,
-                        "minimum": 0.0,
-                        "title": "Failure Probability",
-                        "description": "Probability of failure (0-1)",
-                        "default": 0.0
-                    },
-                    "fixed_iterations": {
-                        "anyOf": [
-                            {
-                                "type": "integer",
-                                "maximum": 20.0,
-                                "minimum": 1.0
-                            },
-                            {
-                                "type": "null"
-                            }
-                        ],
-                        "title": "Fixed Iterations",
-                        "description": "Override random iterations"
-                    },
-                    "fixed_sleep": {
-                        "anyOf": [
-                            {
-                                "type": "number",
-                                "maximum": 30.0,
-                                "minimum": 0.1
-                            },
-                            {
-                                "type": "null"
-                            }
-                        ],
-                        "title": "Fixed Sleep",
-                        "description": "Override random sleep"
-                    },
-                    "description": {
-                        "anyOf": [
-                            {
-                                "type": "string",
-                                "maxLength": 100
-                            },
-                            {
-                                "type": "null"
-                            }
-                        ],
-                        "title": "Description",
-                        "description": "Custom description for queue display"
-                    },
-                    "websocket_id": {
-                        "anyOf": [
-                            {
-                                "type": "string"
-                            },
-                            {
-                                "type": "null"
-                            }
-                        ],
-                        "title": "Websocket Id",
-                        "description": "WebSocket session ID for notifications"
-                    },
-                    "voice_command": {
-                        "anyOf": [
-                            {
-                                "type": "string"
-                            },
-                            {
-                                "type": "null"
-                            }
-                        ],
-                        "title": "Voice Command",
-                        "description": "Test expeditor: provide a voice command to route through RuntimeArgumentExpeditor"
-                    },
-                    "force_failure_mode": {
-                        "anyOf": [
-                            {
-                                "type": "string",
-                                "enum": [
-                                    "code_bug",
-                                    "infra_timeout",
-                                    "rate_limit"
-                                ]
-                            },
-                            {
-                                "type": "null"
-                            }
-                        ],
-                        "title": "Force Failure Mode",
-                        "description": "Force the spawned dry-run job to fail with a specific error category, landing it in the dead queue so the Phase 6 auto-fix loop can be exercised. Only honored when voice_command is set (expeditor path) and dry_run is True."
-                    },
-                    "scheduled_at": {
-                        "anyOf": [
-                            {
-                                "type": "string"
-                            },
-                            {
-                                "type": "null"
-                            }
-                        ],
-                        "title": "Scheduled At",
-                        "description": "ISO datetime for deferred execution (None = immediate)"
-                    },
-                    "monopolize": {
-                        "type": "boolean",
-                        "title": "Monopolize",
-                        "description": "Run exclusively, block all other jobs until complete",
-                        "default": false
-                    }
-                },
-                "type": "object",
-                "title": "MockJobSubmitRequest",
-                "description": "Request body for submitting a mock job."
-            },
-            "MockJobSubmitResponse": {
-                "properties": {
-                    "status": {
-                        "type": "string",
-                        "title": "Status",
-                        "description": "Job status (queued)"
-                    },
-                    "job_id": {
-                        "type": "string",
-                        "title": "Job Id",
-                        "description": "Unique job identifier (mock-{uuid8})"
-                    },
-                    "queue_position": {
-                        "type": "integer",
-                        "title": "Queue Position",
-                        "description": "Position in the todo queue"
-                    },
-                    "config": {
-                        "additionalProperties": true,
-                        "type": "object",
-                        "title": "Config",
-                        "description": "Resolved job configuration"
-                    },
-                    "message": {
-                        "type": "string",
-                        "title": "Message",
-                        "description": "Human-readable confirmation message"
-                    }
-                },
-                "type": "object",
-                "required": [
-                    "status",
-                    "job_id",
-                    "queue_position",
-                    "config",
-                    "message"
-                ],
-                "title": "MockJobSubmitResponse",
-                "description": "Response body for mock job submission."
             },
             "ModeChangeResponse": {
                 "properties": {

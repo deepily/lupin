@@ -471,6 +471,35 @@ JOB_ARG_CONTRACTS = {
             "dry_run"     : "no",
         },
     },
+
+    # TEST SCAFFOLDING, NOT AN AGENT A PERSON ASKS FOR (rows 432511fd / a3c59f2d). The
+    # retired /api/mock-job/submit door's two modes as one command: a zero-cost MockAgenticJob,
+    # or — with `voice_command` — the RuntimeArgumentExpeditor test that builds a dry-run job
+    # of the command it matches. Reached only through /api/v2/submit by the four suites that
+    # used the door. Not speakable, not user-initiable, not in the router prompt or corpus
+    # (see INITIAL_DETECTION_EXEMPTIONS), and skipped by the voice-command keyword matcher.
+    "agent router go to mock job" : {
+        "job_prefix"         : "mock",
+        "cli_module"         : None,
+        "job_class_path"     : "cosa.agents.test_harness.mock_job.MockAgenticJob",
+        "display_name"       : "Mock Job",
+        "required_user_args" : [],
+        "system_provided"    : [ "user_id", "user_email", "session_id" ],
+        "arg_mapping"        : {
+            "iterations_min"      : "iterations_min",
+            "iterations_max"      : "iterations_max",
+            "sleep_min"           : "sleep_min",
+            "sleep_max"           : "sleep_max",
+            "failure_probability" : "failure_probability",
+            "fixed_iterations"    : "fixed_iterations",
+            "fixed_sleep"         : "fixed_sleep",
+            "description"         : "description",
+            "voice_command"       : "voice_command",
+            "force_failure_mode"  : "force_failure_mode",
+        },
+        "fallback_questions" : {},
+        "fallback_defaults"  : {},
+    },
 }
 
 

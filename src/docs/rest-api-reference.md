@@ -47,6 +47,7 @@ asks through the same flow, so it is not a separate way onto the queue (§6).
 | `POST /api/push-agentic` | `/api/v2/submit` |
 | `POST /api/jobs/{id_hash}/resume-from-checkpoint` | `/api/v2/resume-job` |
 | `POST /api/test-fix-expediter/resume-from` | `/api/v2/resume-job` |
+| `POST /api/mock-job/submit` | `/api/v2/submit` |
 
 The two question-shaped doors went first, when `/api/v2/ask` was the only live
 replacement. The submit-shaped ones could not follow until `/api/v2/submit` both existed
@@ -58,14 +59,26 @@ rather than `submit`: its description flow asked the user which document they me
 what languages and audience they wanted, and could answer "cancelled" — a conversation,
 which is what `ask` does and what `submit` refuses to do by design.
 
-**Still live, retiring next** — both are held for a stated reason rather than left
-over, and the reason is a blocker in each case, not a queue position. The in-repo caller
-counts were re-measured 2026-09-28.
+**Still live, retiring last** — held for a stated reason rather than left over, and the
+reason is a blocker, not a queue position. The in-repo caller count was re-measured 2026-09-29.
 
 | door | held because | in-repo callers |
 |---|---|---|
-| `/api/mock-job/submit` | its command exists nowhere — no `JOB_ARG_CONTRACTS` entry and no branch in `create_agentic_job`, so `submit` cannot build one. Retiring it would point a refusal at a door that refuses back. | **0** |
 | `/api/test-suite/submit` | it is how the gate rig schedules a `:8000` run, so it lands only once that gate is green — and CLAUDE.md names it the *only* sanctioned way to submit one, so retiring it is a policy change as much as a code change. Rick ruled 2026-09-29: retire after `/api/v2/submit` reports `queue_position` — **it does as of row a3c59f2d** (`AskResponse.queue_position`, the todo queue's size right after the push; null when nothing was queued). What remains before the 410 is moving the callers; the door is still live. | 3 |
+
+**The mock-job door retired on 2026-09-29** (row 432511fd, Rick: keep what it does). The
+earlier "0 callers" figure counted shipped code only; four test suites called it (the 12-scenario
+proxy suite, the swe-team proxy suite, the expeditor mock-job smoke and the CJ Flow
+pause/schedule e2e). So its two modes became one command, `agent router go to mock job`, on
+`POST /api/v2/submit` (test scaffolding — not speakable, not on the router prompt or card):
+**plain** (no `voice_command`) queues a zero-cost `MockAgenticJob`; **expeditor test**
+(`voice_command` given) runs the `RuntimeArgumentExpeditor` and queues a dry-run job of the
+command it matches, with optional `force_failure_mode`. Arguments go in `args`; `scheduled_at`,
+`monopolize` and `websocket_id` are top-level. The response differs from the old door's:
+`status` is `waiting` (not `queued`), and the old `config` dict is at `submit_details.config`; a
+cancelled interview is `status: failed`, `route_reason: expeditor_cancelled`. The suites share
+`src/tests/helpers/mock_job_v2.py`, which maps a v2 response back to the old shape.
+`GET /api/mock-job/health` is unchanged.
 
 **The two resume doors retired on 2026-09-29** (row 67a2a093, Rick 2026-09-28: "build v2
 resume, then retire"). They rebuild a job from server-side state, which a `SubmitRequest`
@@ -480,7 +493,7 @@ Paired splainer entries are in `src/conf/lupin-app-splainer.ini`.
 
 | Method | Path | Auth | Summary |
 |--------|------|------|---------|
-| POST | `/api/mock-job/submit` | JWT | Submit mock job for queue UI testing |
+| POST | `/api/mock-job/submit` | — | 🪦 **GONE (410)** — use `/api/v2/submit` with `"agent router go to mock job"` (args in `args`; `scheduled_at` / `monopolize` top-level; config comes back in `submit_details.config`). REMOVE BY 2026-12-31. |
 | GET | `/api/mock-job/health` | Public | Mock job subsystem health |
 
 ## 20. I/O Files (`/api/io/*`)
@@ -652,7 +665,7 @@ Six INI keys, all in `src/conf/lupin-app.ini`, **added in phase 1**. Three carry
 | `ts-` | Test Suite | `/api/test-suite/submit` |
 | `bfe-` | Bug Fix Expediter | `/api/v2/ask` with `"agent router go to bug fix expediter"` (`/api/push` is now 410) |
 | `tfe-` | Test Fix Expediter | `/api/v2/ask` with `"agent router go to test fix expediter"` (`/api/push` is now 410) |
-| `mock-` | Mock Job | `/api/mock-job/submit` |
+| `mock-` | Mock Job | `/api/v2/submit` with `"agent router go to mock job"` (`/api/mock-job/submit` is now 410) |
 
 ---
 

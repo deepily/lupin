@@ -119,6 +119,7 @@ EXPECTED_COMMANDS = frozenset( {
     "agent router go to datetime",
     "agent router go to deep research",
     "agent router go to math",
+    "agent router go to mock job",
     "agent router go to podcast generator",
     "agent router go to presentation generator",
     "agent router go to receptionist",

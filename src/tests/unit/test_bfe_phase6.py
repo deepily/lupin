@@ -538,34 +538,34 @@ class TestDryRunRepairLoopHooks:
 
 
 # =============================================================================
-# MockJobSubmitRequest force_failure_mode validation (Step 1)
+# MockJobArgs force_failure_mode validation (Step 1)
 # =============================================================================
 
 class TestMockJobForceFailureMode:
-    """Tests for the force_failure_mode field on MockJobSubmitRequest."""
+    """Tests for the force_failure_mode field on MockJobArgs (was MockJobSubmitRequest before door 14 retired)."""
 
     def test_force_failure_mode_defaults_to_none( self ):
-        from cosa.rest.routers.mock_job import MockJobSubmitRequest
+        from cosa.agents.test_harness.mock_submit import MockJobArgs as MockJobSubmitRequest
         req = MockJobSubmitRequest()
         assert req.force_failure_mode is None
 
     def test_force_failure_mode_accepts_code_bug( self ):
-        from cosa.rest.routers.mock_job import MockJobSubmitRequest
+        from cosa.agents.test_harness.mock_submit import MockJobArgs as MockJobSubmitRequest
         req = MockJobSubmitRequest( force_failure_mode="code_bug" )
         assert req.force_failure_mode == "code_bug"
 
     def test_force_failure_mode_accepts_infra_timeout( self ):
-        from cosa.rest.routers.mock_job import MockJobSubmitRequest
+        from cosa.agents.test_harness.mock_submit import MockJobArgs as MockJobSubmitRequest
         req = MockJobSubmitRequest( force_failure_mode="infra_timeout" )
         assert req.force_failure_mode == "infra_timeout"
 
     def test_force_failure_mode_accepts_rate_limit( self ):
-        from cosa.rest.routers.mock_job import MockJobSubmitRequest
+        from cosa.agents.test_harness.mock_submit import MockJobArgs as MockJobSubmitRequest
         req = MockJobSubmitRequest( force_failure_mode="rate_limit" )
         assert req.force_failure_mode == "rate_limit"
 
     def test_force_failure_mode_rejects_invalid( self ):
-        from cosa.rest.routers.mock_job import MockJobSubmitRequest
+        from cosa.agents.test_harness.mock_submit import MockJobArgs as MockJobSubmitRequest
         from pydantic import ValidationError
         with pytest.raises( ValidationError ):
             MockJobSubmitRequest( force_failure_mode="garbage" )
