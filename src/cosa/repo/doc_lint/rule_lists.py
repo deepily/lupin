@@ -64,7 +64,7 @@ ID_REF_EXTENDED_REGEX = re.compile( r"\b(?:rows?|bugs?|tasks?|ts|decision|job|pr
 BARE_SHA_REGEX        = re.compile( r"(?<![\w\-/=.])(?=[0-9a-f]*\d)(?=\d*[a-f])[0-9a-f]{8}(?![\w\-/=.])" )
 RULING_REF_REGEX      = re.compile( r"(?i:\bruling)\s+(?:#?\d+(?!\d|[-./]\d)|[A-Z]\d?=?[A-Z]?\b)" )
 AC_REF_REGEX          = re.compile( r"\bAC[-\s]?\d+(?:[.\-]\d+)*\b" )
-STEP_REF_REGEX        = re.compile( r"(?i:\b(?:step|phase|stage|item|option)s?)\s+(?:\d[\w.]*|[A-Z]\b|\([a-z]\))" )
+STEP_REF_REGEX        = re.compile( r"(?i:\b(?:step|phase|stage|item|option)s?)\s+(?:\d+(?:\.\d+)*[a-z]?\b|[A-Z]\b|\([a-z]\))" )
 # Decision or case labels such as D4, R1, S6, L2. Version labels, the P0 to P5 priorities,
 # HTML headings, S3 and hex colours are exempt.
 LABEL_REF_REGEX       = re.compile( r"(?<![#\w])(?![PV]\d\b|H[1-6]\b|S3\b)[A-Z]\d{1,2}\b" )

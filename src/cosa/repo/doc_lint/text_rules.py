@@ -208,7 +208,7 @@ def defined_labels( text ):
 
 
 STEP_DEFINITION = re.compile(
-    r"^[ \t]*(?:#{1,6}[ \t]+|[-*][ \t]+|\d+[.)][ \t]+)?\**((?i:step|phase|stage|item|option)s?[ \t]+(?:\d[\w.]*|[A-Z]\b|\([a-z]\)))\**[ \t]*(?:[:.\-\u2013\u2014)]|$)",
+    r"^[ \t]*(?:#{1,6}[ \t]+|[-*][ \t]+|\d+[.)][ \t]+)?\**((?i:step|phase|stage|item|option)s?[ \t]+(?:\d+(?:\.\d+)*[a-z]?\b|[A-Z]\b|\([a-z]\)))\**[ \t]*(?:[:.\-\u2013\u2014)]|$)",
     re.MULTILINE
 )
 

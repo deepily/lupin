@@ -206,6 +206,11 @@ def test_step_definitions_cover_headings_numbered_items_and_lettered_items():
     assert found == [ "bare reference 'step 3'", "bare reference 'Item C'" ]
 
 
+def test_a_defined_step_cited_at_the_end_of_a_sentence_is_still_the_pages_own_structure():
+    text = "## Step 3: Build\n### Step 3b: Check\nSee Step 3. Then after step 3b. Also step 4."
+    assert [ f.message for f in tr.reference_findings( text, "a.md", 1 ) ] == [ "bare reference 'step 4'" ]
+
+
 def test_cc_and_crud_are_not_emphasis_even_when_the_word_list_knows_them():
     assert mc.caps_words( "CC and CRUD here", frozenset( { "cc", "crud", "here", "and" } ) ) == []
 
