@@ -125,25 +125,33 @@ def test_the_failed_dm_advisory_is_per_process_not_per_batch( tmp_path ):
     assert len( rig.advisories ) == 2 and "pid 2" in rig.advisories[ 1 ]
 
 
-def test_a_push_with_no_status_still_falls_back_and_names_the_detail( tmp_path ):
-    rig = _Rig( tmp_path, [ _rec() ] )
-    rig.loop._dm_push_fn = lambda r, t, b: { "outcome": "push_unavailable", "detail": "refused" }   # a raised push: no status
-    assert rig.loop.tell_stale_mcp_once() == 1
-    assert "refused" in rig.advisories[ 0 ] and "None" not in rig.advisories[ 0 ]
-
-
 @pytest.mark.parametrize( "outcome", [
-    { "outcome": "push_unavailable" },                           # no status AND no detail
-    {},                                                          # not even an outcome word
+    { "outcome": "push_unavailable", "detail": "[Errno 111] Connection refused" },   # :7999 restarting
+    { "outcome": "push_unavailable" },                                                # no status AND no detail
+    {},                                                                               # not even an outcome word
 ] )
-def test_a_failed_push_with_no_status_and_no_detail_still_falls_back_once( tmp_path, outcome ):
+def test_a_push_that_got_no_answer_is_retried_next_tick_not_advised( tmp_path, outcome ):
+    """No http_status means the server never answered (refused, timed out: :7999 restarting), so
+    the tell has not failed, it has not been attempted properly. The process is NOT marked told
+    and NOT sent to the advisory; the next tick retries the manager."""
     rig = _Rig( tmp_path, [ _rec() ] )
-    rig.loop._dm_push_fn = lambda r, t, b: outcome
+    answers = [ outcome, outcome, { "outcome": "dispatched" } ]
+    rig.loop._dm_push_fn = lambda r, t, b: rig.dms.append( ( r, t, b ) ) or answers.pop( 0 )
+    assert rig.loop.tell_stale_mcp_once() == 0 and rig.loop.tell_stale_mcp_once() == 0
+    assert rig.advisories == [] and len( rig.dms ) == 2                          # retried, never advised
+    assert len( rig.logs ) == 2 and all( "got no answer, will retry" in line for line in rig.logs )
+    assert rig.loop.tell_stale_mcp_once() == 1 and len( rig.dms ) == 3           # the server is back: DM lands
+    assert rig.advisories == []                                                  # and it never reached the advisory
+    assert rig.loop.tell_stale_mcp_once() == 0 and len( rig.dms ) == 3           # now told: never repeated
+
+
+def test_a_refusal_with_a_status_but_no_detail_says_so_not_none( tmp_path ):
+    rig = _Rig( tmp_path, [ _rec() ] )
+    rig.loop._dm_push_fn = lambda r, t, b: { "outcome": "push_unavailable", "http_status": 500 }
     assert rig.loop.tell_stale_mcp_once() == 1
-    assert len( rig.advisories ) == 1 and "restart the seat" in rig.advisories[ 0 ]
-    assert "no detail given" in rig.advisories[ 0 ] and "None" not in rig.advisories[ 0 ] and "HTTP" not in rig.advisories[ 0 ]
+    assert "HTTP 500: no detail given" in rig.advisories[ 0 ] and "None" not in rig.advisories[ 0 ]
     assert len( rig.logs ) == 1 and "no detail given" in rig.logs[ 0 ]
-    assert rig.loop.tell_stale_mcp_once() == 0 and len( rig.advisories ) == 1          # once per process
+    assert rig.loop.tell_stale_mcp_once() == 0 and len( rig.advisories ) == 1     # once per process
 
 
 @pytest.mark.parametrize( "kwargs", [
