@@ -212,6 +212,21 @@ def test_gate_reports_findings_on_staged_lines_only_and_reads_the_index_not_the_
     assert gate.main( [ "--repo-root", str( repo ), "--blocking" ], io.StringIO() ) == 1
 
 
+def test_gate_lints_what_is_staged_even_when_the_disk_copy_was_cleaned_afterwards( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { "docs/p.md": "Line one is NOT fine.\n" } )
+    ( repo / "docs" / "p.md" ).write_text( "Line one is fine.\n", encoding="utf-8" )           # fixed on disk, not re-staged
+    err = io.StringIO()
+    gate.main( [ "--repo-root", str( repo ) ], err )
+    assert "docs/p.md:1: caps: ALL-CAPS word NOT" in err.getvalue()
+    bad = 'def f():\n    """\n    Return it.\n\n    This is NOT fine.\n    """\n'
+    _stage( repo, { "src/a.py": bad } )
+    ( repo / "src" / "a.py" ).write_text( bad.replace( "NOT ", "" ), encoding="utf-8" )
+    err = io.StringIO()
+    gate.main( [ "--repo-root", str( repo ) ], err )
+    assert "src/a.py:5: caps: ALL-CAPS word NOT" in err.getvalue()
+
+
 def test_gate_drops_findings_on_lines_the_commit_did_not_touch( repo, monkeypatch ):
     _no_external( monkeypatch )
     old = "line one\nThis is NOT fine.\n"

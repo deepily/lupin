@@ -86,6 +86,10 @@ def test_caps_words_at_text_edges_and_single_quoted_span():
     assert mc.caps_words( "it's 'NEVER' done NOT", WORDS ) == [ "NOT" ]
 
 
+def test_caps_words_skips_hyphenated_compounds_but_not_a_standalone_word():
+    assert mc.caps_words( "NOT-FOUND and ONLY-IF but NOT", WORDS ) == [ "NOT" ]
+
+
 def test_caps_words_reads_the_vendored_list_when_none_is_given():
     wl.configure_root( __import__( "cosa.utils.util", fromlist=[ "x" ] ).get_project_root() )
     assert mc.caps_words( "NOT a JSON value" ) == [ "NOT" ]
@@ -110,6 +114,7 @@ def test_section_reference_resolves_with_a_path_in_the_same_paragraph_even_when_
     wrapped = "Design: §3.5 of\n`src/rnd/v0.1.9/a-note.md` says so"
     assert mc.bare_section_refs( wrapped ) == []
     assert mc.bare_section_refs( "see §4.3 and §0" ) == [ "§4.3", "§0" ]
+    assert mc.bare_section_refs( "src/a.md lists it\nsee \u00a74.3 here" ) == []                   # the path is on the previous wrapped line
     assert mc.bare_section_refs( "src/a.md\n\nsee §4.3" ) == [ "§4.3" ]          # a blank line ends the paragraph
 
 

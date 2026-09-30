@@ -191,6 +191,7 @@ def test_comment_lint_flags_shouting_tics_and_dates_in_comments_but_not_strings_
     assert [ ( f.line, f.rule ) for f in comment_lint.lint_source( "a.py", source ) ] == [ ( 3, "caps" ), ( 4, "dated-banner" ), ( 4, "iso-date" ), ( 4, "tic" ) ]
     assert [ f.rule for f in comment_lint.lint_source( "a.py", "x = (\n" ) ] == [ "parse-error" ]
     assert comment_lint.lint_source( "a.py", "# NOT first line shebang\n" )[ 0 ].line == 1
+    assert comment_lint.lint_source( "a.py", "#!/usr/bin/env NOT\nx = 1\n" ) == []               # a shebang is not prose
 
 
 def test_comment_lint_main_runs_over_tracked_python_files( repo ):
