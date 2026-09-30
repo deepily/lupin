@@ -371,11 +371,7 @@ def assemble_app(
     # random lives in voice_persona_helpers, not here). Project resolved the
     # same way every other arbiter surface does (detect_project from cwd/git),
     # degrade-safe to "lupin" (this app IS the lupin fleet's arbiter).
-    try:
-        from cosa.agents.utils.sender_id import detect_project
-        _arbiter_project = detect_project()
-    except Exception:
-        _arbiter_project = "lupin"
+    _arbiter_project = resolve_arbiter_project()
     declared_managers = pick_declared_managers_from_env( _arbiter_project )
     log_fn( "declared_managers_resolved", project=_arbiter_project, managers=declared_managers )
 
@@ -660,6 +656,43 @@ def _offsets_state_path( cfg ):
     return cu.get_project_root() + rel
 
 
+def resolve_arbiter_project():
+    """
+    The project this arbiter serves, as every other arbiter surface resolves it.
+
+    Ensures:
+        - returns detect_project() (cwd/git), degrading to "lupin" if that raises — this
+          app IS the lupin fleet's arbiter
+    """
+    try:
+        from cosa.agents.utils.sender_id import detect_project
+        return detect_project()
+    except Exception:
+        return "lupin"
+
+
+def build_dm_push_fn( cfg, *, base_url, api_key, timeout ):
+    """
+    Build the arbiter's DM-push hop, or None when `arbiter outreach dm push enabled` is off.
+
+    Ensures:
+        - the hop carries THIS arbiter's project as `sender_project`: the server refuses a
+          DM without one (row 12b5a766 step 2), and before row 97c5bd94 this call passed none,
+          so every arbiter DM push was answered 422 and dropped. It lives here, out of the
+          no-cover IO boundary, precisely so a test can see what it passes.
+    """
+    from lupin_arbiter_app.arbiter_live_notify import make_dm_push_fn
+    if not cfg.get( "arbiter outreach dm push enabled", default=True, return_type="boolean" ):
+        return None
+    return make_dm_push_fn(
+        base_url          = base_url,
+        api_key           = api_key,
+        sender_session_id = "lupin-arbiter-app-8001",
+        sender_project    = resolve_arbiter_project(),
+        timeout_seconds   = timeout,
+    )
+
+
 def _build_arbiter_outreach_hops( cfg, gateway ):   # pragma: no cover - literal external IO boundary (config, env credential, urllib)
     """
     Build the best-effort outreach hops (2026.06.11 receipts design + Thread C+D):
@@ -691,7 +724,7 @@ def _build_arbiter_outreach_hops( cfg, gateway ):   # pragma: no cover - literal
     """
     from cosa.utils.config_loader import get_api_config, load_api_key
     from lupin_arbiter_app.arbiter_live_notify import (
-        make_notify_transport, make_live_notify_fn, make_dm_push_fn, make_tmux_push_fn,
+        make_notify_transport, make_live_notify_fn, make_tmux_push_fn,
         resolve_arbiter_api_key, validate_live_notify_target, _default_log_fn,
     )
 
@@ -718,14 +751,7 @@ def _build_arbiter_outreach_hops( cfg, gateway ):   # pragma: no cover - literal
     dedup_window = int( cfg.get( "arbiter live notify dedup window seconds", default=900, return_type="int" ) )
     timeout      = int( cfg.get( "arbiter live notify timeout seconds", default=30, return_type="int" ) )
 
-    dm_push_fn = None
-    if cfg.get( "arbiter outreach dm push enabled", default=True, return_type="boolean" ):
-        dm_push_fn = make_dm_push_fn(
-            base_url         = base_url,
-            api_key          = api_key,
-            sender_session_id = "lupin-arbiter-app-8001",
-            timeout_seconds  = timeout,
-        )
+    dm_push_fn = build_dm_push_fn( cfg, base_url=base_url, api_key=api_key, timeout=timeout )
 
     target_error = validate_live_notify_target( target_user )
     if target_error:

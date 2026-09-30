@@ -1381,7 +1381,9 @@ class SelfRespinObserverLoop:
             - one DM per stale process, naming the seat and STALE_MCP_REMEDY, to that
               seat's manager; a process is keyed by ( pid, start_epoch ) so a recycled
               pid is a new process, and one already told is never told again
-            - a DM that does not dispatch is NOT recorded, so the next tick retries
+            - a DM that does not dispatch is logged with its status and body, and the tell
+              goes to the operator advisory instead, ONCE per process — it is not retried
+              every tick (a refused DM retried silently for ever is how nobody got told)
             - a seat whose manager cannot be resolved (or with no DM hop wired) goes to
               the operator advisory instead, once, rather than being dropped
             - keys of processes no longer stale are forgotten
@@ -1411,7 +1413,12 @@ class SelfRespinObserverLoop:
                     self._advisory_fn( body + " No manager DM route (manager unresolved or DM push off)." )
                 else:
                     outcome = self._dm_push_fn( manager, f"stale-mcp-{rec[ 'pid' ]}", body )
-                    if outcome.get( "outcome" ) != "dispatched": continue
+                    if outcome.get( "outcome" ) != "dispatched":
+                        # the DM did not land: say why, tell the operator instead, ONCE per process
+                        status = f"HTTP {outcome[ 'http_status' ]}: " if outcome.get( "http_status" ) is not None else ""
+                        reason = f"{status}{outcome.get( 'detail' )}"
+                        self._log_skip( f"stale-MCP DM to {manager} for pid {rec[ 'pid' ]} not delivered ({reason})" )
+                        self._advisory_fn( body + f" The DM to {manager} was NOT delivered ({reason})." )
             except Exception as e:                     # not recorded as told, so the next tick retries it
                 self._log_skip( f"stale-MCP record skipped (continuing): {e!r} record={rec!r}" )
                 continue

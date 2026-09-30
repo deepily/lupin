@@ -39,7 +39,9 @@ class _Rig:
         self.stale, self.dms, self.advisories, self.logs = stale, [], [], []
         def dm_push( recipient, thread_id, body ):
             self.dms.append( ( recipient, thread_id, body ) )
-            return { "channel": "dm_push", "outcome": dm_outcome }
+            out = { "channel": "dm_push", "outcome": dm_outcome }
+            if dm_outcome != "dispatched": out.update( http_status=422, detail="{'detail': 'sender_project is REQUIRED'}" )
+            return out
         self.loop = obs.SelfRespinObserverLoop(
             _Cfg(), fetch_pressure_fn=lambda: { "personas": None }, base_dir=str( tmp_path ),
             advisory_fn=self.advisories.append,
@@ -100,11 +102,34 @@ def test_quiet_when_nothing_is_stale( tmp_path ):
     assert quiet.dms == [] and quiet.advisories == []
 
 
-def test_a_dm_that_did_not_dispatch_is_retried_next_tick( tmp_path ):
+def test_a_dm_that_did_not_dispatch_falls_back_to_the_advisory_once_per_process( tmp_path ):
+    """The bug this pins: a refused DM used to be retried silently every tick, forever, and
+    nobody was ever told. Now the failure is logged with its status and body, the operator
+    advisory carries the tell, and the process is not chased again."""
     rig = _Rig( tmp_path, [ _rec() ], dm_outcome="push_unavailable" )
-    assert rig.loop.tell_stale_mcp_once() == 0
-    assert rig.loop.tell_stale_mcp_once() == 0 and len( rig.dms ) == 2   # tried again, not marked told
-    assert rig.advisories == []
+    assert rig.loop.tell_stale_mcp_once() == 1
+    assert len( rig.advisories ) == 1 and "restart the seat" in rig.advisories[ 0 ]
+    assert "Mr. Radio" in rig.advisories[ 0 ] and "422" in rig.advisories[ 0 ]          # who it failed to reach, and why
+    assert "sender_project is REQUIRED" in rig.advisories[ 0 ]
+    assert len( rig.logs ) == 1 and "422" in rig.logs[ 0 ] and "sender_project is REQUIRED" in rig.logs[ 0 ]
+    for _ in range( 3 ):                                                                # later ticks: silence
+        assert rig.loop.tell_stale_mcp_once() == 0
+    assert len( rig.dms ) == 1 and len( rig.advisories ) == 1 and len( rig.logs ) == 1
+
+
+def test_the_failed_dm_advisory_is_per_process_not_per_batch( tmp_path ):
+    rig = _Rig( tmp_path, [ _rec( pid=1 ) ], dm_outcome="push_unavailable" )
+    rig.loop.tell_stale_mcp_once()
+    rig.stale = [ _rec( pid=1 ), _rec( pid=2 ) ]
+    assert rig.loop.tell_stale_mcp_once() == 1                                           # only the new pid
+    assert len( rig.advisories ) == 2 and "pid 2" in rig.advisories[ 1 ]
+
+
+def test_a_push_with_no_status_still_falls_back_and_names_the_detail( tmp_path ):
+    rig = _Rig( tmp_path, [ _rec() ] )
+    rig.loop._dm_push_fn = lambda r, t, b: { "outcome": "push_unavailable", "detail": "refused" }   # a raised push: no status
+    assert rig.loop.tell_stale_mcp_once() == 1
+    assert "refused" in rig.advisories[ 0 ] and "None" not in rig.advisories[ 0 ]
 
 
 @pytest.mark.parametrize( "kwargs", [
