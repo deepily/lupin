@@ -8,6 +8,17 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.09.30 - Session 9d720da8 (Mr. Radio 🦉, manager; skeleton crew until 17:00) | Test-server port: 4 missing-config defects found and fixed on lupin-host-test
+
+- **Dev**: Stop poke muted for skeleton crew (`poke_output_enabled=false`, 10:54 EDT); a one-shot systemd timer restores it at 17:00.
+- **lupin-host-test (bug `08691779`, P0)**, each read back after applying:
+  - `~/.claude/settings.json` had no `heartbeat` block, so the Stop poke was silently off. Added it (muted until 17:00) along with `task_store`.
+  - There was no `~/.claude/fleet-roster.env`, so no seat was a manager and every manager-gated store write 403'd. Created it with `WEIL_NDA_DRAFTING_SUITE="Cheech"`; Cheech's new seat `92d6e14e` came up with `manager_figure_implicit=True`.
+  - The flow-ratio override was missing, so the gate ran 24h / 1.0. Now 120h / 1.1, matching dev; enforcement paused for Cheech's batch, with an auto re-enable at 12:46 EDT.
+  - The container's git refused the bind-mounted repos ("dubious ownership", a uid mismatch), which the receipt validator misreported as "commit not found". Added `safe.directory` for all 5 mounts.
+- **Follow-up**: `31344c5f` (P0) folds all four fixes into the VM push script's preflight checks.
+- **Files**: history.md, TODO.md (branch handoff). No code changes; the test-host changes were config only.
+
 ### 2026.09.29 - Session 0174263f (Mr. Radio 🦉, manager; crew Sam 🎙️, Krishna 🦚, John 🏄🏽, Pocholo 📣, Rio ⚡) | Door 18 retired; approval settings moved into the DB; arbiter DMs delivered for the first time; two same-evening reverts
 
 - **Evening merges (after the 20:11 push)**: `2e732e4cc` + `43d8990cc` approval settings in a DB table, and an unverified legacy file imports nothing (`80513825`, test-DB check blocked on the :8000 refresh) · `170c8520c` door 18 retired to 410; a refused v2 submit answers failed / submit_refused (`a3c59f2d`, blocked the same way) · `98c4a1a6c` + `99845008f` stale-MCP check runs in the arbiter; arbiter DMs had been 422'd and dropped for lack of `sender_project` (all of them, manager_stale_poke included); now dispatched once per pid, verified live over 2 ticks (`97c5bd94`, the INI key is still owed) · `acb480a21` a null `prediction_hint` no longer blanks the Action Required card (`759250e4` closed on `ts-9729a7ab` 3/3).

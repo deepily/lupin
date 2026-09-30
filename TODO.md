@@ -1,5 +1,21 @@
 # TODO
 
+## 🔀 BRANCH HANDOFF — Mr. Radio 🦉 (`9d720da8`), v0.2.1 → `wip-v0.2.2-2026.09.30-code-wiki-and-jev-for-reuse-planning-review`
+
+Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `wip-v0.2.1-2026.08.29-cjflow-v2-followup` is **0 ahead / 0 behind origin**. Do not create the new branch until Rick's merge lands and main is pulled.
+
+**Pick up first on the new branch (P0, Rick bumped both 09-30):**
+- `31344c5f`: fold today's four hand-applied lupin-host-test fixes into the VM push script's preflight checks: the `heartbeat` + `task_store` settings blocks, `~/.claude/fleet-roster.env` manager lines, the flow-ratio override file, and container `safe.directory` for every `/var/external-projects/*` mount. The last one does **not** survive a container recreate, so make it durable in the compose env.
+- `08691779`: the test-server port bug; every finding is on the row. Still open there:
+  - The receipt validator reports a git failure ("dubious ownership") as "commit not on any branch". File it as its own bug.
+  - Cheech's unverified lead that validation-rejected creates count toward the ratio gate.
+  - Rick's call on whether holding-area (`not_approved`) creates should count toward the gate at all.
+
+**In progress, carried over:** `8c3628a4` (rebaseline 5 multiplexer visual snapshots) · `4f5301ad` (pixel comparator threshold; reverted 09-29 after a new 9-px phase6a red, repeat run owed) · `97c5bd94` (stale-MCP check in the arbiter: re-landed and verified live; the INI key is still owed).
+**Blocked on Rick:** `a3c59f2d` (retiring queue doors), `80513825` (approval-settings DB move; test-DB check waits on the :8000 refresh).
+**Timers from the 09-30 skeleton crew** (these clean themselves up; nothing to fold in): `stop-poke-restore-20260930` (dev and test, 17:00 EDT) and `ratio-gate-reenable-20260930` (test, 12:46 EDT).
+**Not mine and uncommitted in the main tree** (left alone): the phase6b `action_required` PNG baseline (dirty since 09-22) and María's three `src/rnd/v0.2.1/` docs (kill-switch design, console-tee plan, cascade handoff).
+
 ## 🖥️ TEST SERVER (lupin-host-test) — WORK FOR 2026-09-26 (Mr. Radio 🦉 `09edaa9c`, per Rick's end-of-session ask)
 
 The VM was **down** at session end (Rick, 2026-09-25 ~18:30 EDT). When it is back up, in this order:
