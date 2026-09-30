@@ -63,3 +63,12 @@ def test_resolve_applies_an_include_prefix_only_to_the_router_it_names():
     assert "GET /same/q/y -> own.f  (own.py)" in out                           # bare name in the same file
     assert not any( "c.f" in l for l in out )                                  # a receiver that is no known router yields no route
     assert len( out ) == 3
+
+
+def test_fastapi_application_routes_are_indexed_including_nested_apps( tmp_path ):
+    root = make_repo( tmp_path )
+    ( root / "pkg" / "server.py" ).write_text( "from fastapi import FastAPI\napp = FastAPI()\n\n@app.get( '/health' )\ndef health():\n    return 1\n\n\n"
+                                               "def create_app():\n    inner = FastAPI()\n\n    @inner.post( '/transcribe' )\n    def transcribe():\n        return 2\n    return inner\n", encoding="utf-8" )
+    routes = "\n".join( collect( sp.spec_for( root ) )[ "routes" ] )
+    assert "GET /health -> repo:pkg.server.health  (pkg/server.py)" in routes
+    assert "POST /transcribe -> repo:pkg.server.create_app.<locals>.transcribe  (pkg/server.py)" in routes

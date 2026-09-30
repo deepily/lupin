@@ -35,7 +35,7 @@ def test_build_publishes_one_complete_generation_with_every_file( tmp_path ):
     assert bd.current_generation( out ) == gen.resolve()
     assert sorted( p.name for p in gen.iterdir() ) == [ "header.json", "routes.md", "symbols-all.jsonl", "symbols.jsonl", "symbols.md" ]
     head = bd.read_header( gen )
-    assert head[ "pin_algorithm" ].startswith( f"py{sys.version_info.major}.{sys.version_info.minor}/ts" )
+    assert head[ "pin_algorithm" ].startswith( f"py{sys.version_info.major}.{sys.version_info.minor}.x{bd.EXTRACTOR_LOGIC}/ts" )
     assert head[ "counts" ][ "symbols" ] == len( bd.read_symbols( gen ) ) < len( bd.read_symbols( gen, all_symbols=True ) ) == head[ "counts" ][ "all" ]
     md = ( gen / "symbols.md" ).read_text( encoding="utf-8" ).splitlines()
     assert len( md ) == head[ "counts" ][ "symbols" ]
@@ -147,7 +147,7 @@ def test_a_tree_without_js_needs_no_node( tmp_path, monkeypatch ):
     def boom( *a, **k ): raise AssertionError( "node must not be looked up" )
     monkeypatch.setattr( bd, "find_node", boom ); monkeypatch.setattr( ji, "find_node", boom )
     res = bd.build( root, tmp_path / "out" )
-    assert res[ "header" ][ "missing_dependencies" ] == [] and res[ "header" ][ "pin_algorithm" ] == f"py{sys.version_info.major}.{sys.version_info.minor}"
+    assert res[ "header" ][ "missing_dependencies" ] == [] and res[ "header" ][ "pin_algorithm" ] == f"py{sys.version_info.major}.{sys.version_info.minor}.x{bd.EXTRACTOR_LOGIC}"
 
 
 def _dart_repo( tmp_path ):
@@ -188,7 +188,7 @@ def test_dart_dependency_missing_and_absent_extractor_are_recorded( tmp_path, mo
     def never( *a ): raise AssertionError( "extract_dart must not run when a tool is missing" )
     _fake_dart( monkeypatch, never, check=gone )
     res = bd.build( root, tmp_path / "o1" )
-    assert res[ "header" ][ "missing_dependencies" ] == [ "dart" ] and res[ "header" ][ "pin_algorithm" ] == f"py{sys.version_info.major}.{sys.version_info.minor}"
+    assert res[ "header" ][ "missing_dependencies" ] == [ "dart" ] and res[ "header" ][ "pin_algorithm" ] == f"py{sys.version_info.major}.{sys.version_info.minor}.x{bd.EXTRACTOR_LOGIC}"
     import cosa.repo.symindex as pkg
     monkeypatch.delattr( pkg, "dart_extractor" )
     monkeypatch.setitem( sys.modules, "cosa.repo.symindex.dart_extractor", None )          # import raises ImportError
@@ -249,4 +249,21 @@ def test_a_changed_pin_algorithm_makes_a_published_index_stale( tmp_path, monkey
 def test_environment_reports_dart_tool_states( tmp_path, monkeypatch ):
     root = _dart_repo( tmp_path ); spec = sp.spec_for( root )
     _fake_dart( monkeypatch, lambda *a: [], algo="dart1/x" )
-    assert bd.environment( spec ) == ( f"py{sys.version_info.major}.{sys.version_info.minor}/dart1/x", [] )
+    assert bd.environment( spec ) == ( f"py{sys.version_info.major}.{sys.version_info.minor}.x{bd.EXTRACTOR_LOGIC}/dart1/x", [] )
+
+
+def test_a_change_of_extractor_logic_version_is_a_pin_algorithm_change( tmp_path, monkeypatch ):
+    root = make_repo( tmp_path ); spec = sp.spec_for( root ); out = tmp_path / "out"
+    bd.build( root, out )
+    assert bd.is_fresh( spec, out ) is True
+    monkeypatch.setattr( bd, "EXTRACTOR_LOGIC", "999" )                                   # someone edited extract_python and bumped it
+    assert bd.is_fresh( spec, out ) is False
+    assert ".x999" in bd.read_header( bd.ensure( root, out ) )[ "pin_algorithm" ]
+
+
+def test_prune_removes_only_old_tmp_directories( tmp_path ):
+    old = tmp_path / ".tmp-1"; new = tmp_path / ".tmp-2"; old.mkdir(); new.mkdir()
+    ancient = time.time() - 7200
+    os.utime( old, ( ancient, ancient ) )
+    bd._prune( tmp_path, "gen-none" )
+    assert not old.exists() and new.exists()

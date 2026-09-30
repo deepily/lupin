@@ -152,14 +152,17 @@ def _page( wiki, name, pins, algo=None ):
 def _live( gen ): return { r[ "id" ]: r[ "pin" ] for r in bd.read_symbols( gen ) }
 
 
+def _algo( gen ): return bd.read_header( gen )[ "pin_algorithm" ]
+
+
 def test_every_seeded_wiki_finding_fires( tmp_path, monkeypatch ):
     monkeypatch.setenv( "LUPIN_ROOT", str( REPO_ROOT ) )
     gen  = _gen( tmp_path, "g" ); live = _live( gen )
     wiki = tmp_path / "wiki"; wiki.mkdir()
     ( wiki / "INDEX.md" ).write_text( WIKI_INDEX, encoding="utf-8" )
-    _page( wiki, "good-page", [ ( "repo:pkg.util.public_fn", live[ "repo:pkg.util.public_fn" ] ) ] )
-    _page( wiki, "stale-page", [ ( "repo:pkg.util.Widget", "0000000000" ) ] )                       # stale + unindexed
-    _page( wiki, "dangling-page", [ ( "repo:pkg.util.gone_fn", "1111111111" ) ] )
+    _page( wiki, "good-page", [ ( "repo:pkg.util.public_fn", live[ "repo:pkg.util.public_fn" ] ) ], algo=_algo( gen ) )
+    _page( wiki, "stale-page", [ ( "repo:pkg.util.Widget", "0000000000" ) ], algo=_algo( gen ) )   # stale + unindexed
+    _page( wiki, "dangling-page", [ ( "repo:pkg.util.gone_fn", "1111111111" ) ], algo=_algo( gen ) )
     kinds = { ( f[ "kind" ], f.get( "page" ), f.get( "symbol" ) ) for f in queue( wiki, gen ) }
     assert ( "stale", "stale-page", "repo:pkg.util.Widget" ) in kinds
     assert ( "unindexed", "stale-page", None ) in kinds
@@ -177,18 +180,30 @@ def test_orphans_are_counted_per_package_until_the_package_has_a_page( tmp_path,
     assert sum( f[ "count" ] for f in out ) == len( bd.read_symbols( gen ) )
 
 
-def test_pin_algorithm_change_is_one_finding_and_suppresses_stale( tmp_path, monkeypatch ):
+def test_pin_algorithm_change_is_decided_once_before_any_page_and_suppresses_stale( tmp_path, monkeypatch ):
     monkeypatch.setenv( "LUPIN_ROOT", str( REPO_ROOT ) )
     gen  = _gen( tmp_path, "g" ); wiki = tmp_path / "wiki"; wiki.mkdir()
     ( wiki / "INDEX.md" ).write_text( WIKI_INDEX, encoding="utf-8" )
+    cur  = _algo( gen )
     _page( wiki, "alg-page", [ ( "repo:pkg.util.public_fn", "0000000000" ), ( "repo:pkg.util.Widget", "0000000000" ) ], algo="py0.0" )
-    _page( wiki, "good-page", [ ( "repo:pkg.util.render_none", "0000000000" ) ], algo="py0.0" )
+    _page( wiki, "a-first-page", [ ( "repo:pkg.util.render_none", "0000000000" ) ], algo=cur )       # sorts BEFORE the mismatched page
     out = queue( wiki, gen )
-    assert [ f[ "kind" ] for f in out if f[ "kind" ] == "pin_algorithm_changed" ] == [ "pin_algorithm_changed" ]   # once, not per page
+    changed = [ f for f in out if f[ "kind" ] == "pin_algorithm_changed" ]
+    assert len( changed ) == 1 and changed[ 0 ][ "pages" ] == [ "alg-page" ] and changed[ 0 ][ "was" ] == [ "py0.0" ] and changed[ 0 ][ "now" ] == cur
+    assert not any( f[ "kind" ] == "stale" for f in out )                                          # not even for the page that sorts first
+    _page( wiki, "alg-page", [ ( "repo:pkg.util.public_fn", "0000000000" ) ], algo=cur )
+    assert any( f[ "kind" ] == "stale" for f in queue( wiki, gen ) )                                # same algorithm everywhere: stale is reported again
+
+
+def test_a_pinned_page_without_a_pin_algorithm_is_one_finding_not_one_stale_per_symbol( tmp_path, monkeypatch ):
+    monkeypatch.setenv( "LUPIN_ROOT", str( REPO_ROOT ) )
+    gen = _gen( tmp_path, "g" ); wiki = tmp_path / "wiki"; wiki.mkdir()
+    ( wiki / "INDEX.md" ).write_text( WIKI_INDEX, encoding="utf-8" )
+    _page( wiki, "good-page", [ ( "repo:pkg.util.public_fn", "0000000000" ), ( "repo:pkg.util.Widget", "0000000000" ) ] )     # no pin_algorithm line
+    out = queue( wiki, gen )
+    missing = [ f for f in out if f[ "kind" ] == "pin_algorithm_missing" ]
+    assert len( missing ) == 1 and missing[ 0 ][ "pages" ] == [ "good-page" ]
     assert not any( f[ "kind" ] == "stale" for f in out )
-    _page( wiki, "alg-page", [ ( "repo:pkg.util.public_fn", "0000000000" ) ], algo=json.loads( ( gen / "header.json" ).read_text( encoding="utf-8" ) )[ "pin_algorithm" ] )
-    ( wiki / "capabilities" / "good-page.md" ).unlink()
-    assert any( f[ "kind" ] == "stale" for f in queue( wiki, gen ) )                                # same algorithm: stale is reported again
 
 
 def test_page_without_frontmatter_pins_nothing( tmp_path, monkeypatch ):
@@ -239,7 +254,7 @@ def test_cli_lint_defaults_to_the_repo_wiki_and_a_clean_wiki_exits_0( tmp_path, 
     wiki = root / "src" / "docs" / "wiki"; ( wiki / "capabilities" ).mkdir( parents=True )
     gen  = bd.build( root, tmp_path / "out" )[ "gen_dir" ]; live = _live( gen )
     ( wiki / "INDEX.md" ).write_text( "- [[cap]]\n", encoding="utf-8" )
-    ( wiki / "capabilities" / "cap.md" ).write_text( "---\ncovers:\n  - " + f"tiny:a.a@{live[ 'tiny:a.a' ]}" + "\n---\n", encoding="utf-8" )
+    ( wiki / "capabilities" / "cap.md" ).write_text( "---\ncovers:\n  - " + f"tiny:a.a@{live[ 'tiny:a.a' ]}" + f"\npin_algorithm: {_algo( gen )}\n---\n", encoding="utf-8" )
     rc, o, e = _main( [ "lint", "--root", str( root ), "--out", str( tmp_path / "out" ) ], capsys )
     assert rc == 0 and o == ""
 

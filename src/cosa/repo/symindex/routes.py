@@ -1,7 +1,8 @@
 """
 FastAPI route extraction by AST, with router prefixes resolved.
 
-A route's path is the `prefix=` literal of the APIRouter it hangs on, plus any
+A route hangs on an APIRouter or on a FastAPI() application (also one created inside a function);
+its path is the `prefix=` literal of the APIRouter, plus any
 `include_router( x, prefix= )` literal that names that router, plus the decorator's path.
 The app's live route table is never imported, because that would import the whole server.
 """
@@ -33,7 +34,8 @@ def scan_file( tree ):
     Scan one parsed module.
 
     Ensures:
-        - returns ( routers, includes, imports ): routers maps variable name to its prefix literal,
+        - returns ( routers, includes, imports ): routers maps the variable of each APIRouter or FastAPI call
+          to its prefix literal ("" for an app),
           includes is a list of ( base, attr, prefix ) from include_router calls, and imports maps an
           imported alias to ( module name, original name ) so an include can be traced to its router
     """
@@ -45,7 +47,7 @@ def scan_file( tree ):
             for a in n.names:
                 parts = a.name.split( "." )
                 imports[ a.asname or parts[ 0 ] ] = ( parts[ -2 ] if len( parts ) > 1 else "", parts[ -1 ] )
-        if isinstance( n, ast.Assign ) and isinstance( n.value, ast.Call ) and _call_name( n.value.func ) == "APIRouter":
+        if isinstance( n, ast.Assign ) and isinstance( n.value, ast.Call ) and _call_name( n.value.func ) in ( "APIRouter", "FastAPI" ):
             for t in n.targets:
                 if isinstance( t, ast.Name ): routers[ t.id ] = _kw_prefix( n.value ) or ""
         elif isinstance( n, ast.Call ) and isinstance( n.func, ast.Attribute ) and n.func.attr == "include_router" and n.args:

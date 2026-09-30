@@ -12,6 +12,7 @@ import os
 import pathlib
 import shutil
 import sys
+import time
 
 from cosa.repo.symindex import routes as routes_mod
 from cosa.repo.symindex.errors import DependencyMissing
@@ -22,6 +23,7 @@ from cosa.repo.symindex.py_index import extract_python
 from cosa.repo.symindex.spec import is_lupin_tree, iter_files, manifest, spec_for
 
 KEEP_GENERATIONS = 3
+EXTRACTOR_LOGIC  = "1"            # bump whenever an edit to py_index, ts_extract.js or the pin rules changes any pin
 SEP              = " — "            # the em dash between signature and summary in symbols.md
 
 
@@ -55,13 +57,14 @@ def environment( spec ):
     Report the extraction tools as they are NOW, without extracting anything.
 
     Ensures:
-        - returns ( pin_algorithm, missing ): the algorithm string a build would record and the sorted
+        - returns ( pin_algorithm, missing ): the algorithm string a build would record (Python minor,
+          the extractor-logic version, then the TypeScript and Dart parser versions) and the sorted
           list of tools that are not available
         - Python is always present; JS/TS needs node and the typescript package; Dart needs the
           extractor module and its check_dependencies() to pass. A tool the tree does not use is
           never required
     """
-    algo, missing = [ f"py{sys.version_info.major}.{sys.version_info.minor}" ], []
+    algo, missing = [ f"py{sys.version_info.major}.{sys.version_info.minor}.x{EXTRACTOR_LOGIC}" ], []
     if iter_files( spec, spec.js_roots, { ".js", ".ts", ".tsx" } ):
         try:
             find_node()
@@ -129,7 +132,7 @@ def _route_files( spec, recs, py_files ):
     Ensures:
         - returns the per-file route facts for routes.resolve(): router prefixes, include_router
           prefixes, import aliases and decorated handlers
-        - only files that mention APIRouter or include_router are parsed a second time, so a module
+        - only files that mention APIRouter, FastAPI or include_router are parsed a second time, so a module
           that only includes routers (and defines no function) is still seen
     """
     import ast
@@ -142,7 +145,7 @@ def _route_files( spec, recs, py_files ):
     for p in py_files:
         rel  = p.relative_to( spec.root ).as_posix()
         text = p.read_text( encoding="utf-8", errors="replace" )
-        if "APIRouter" not in text and "include_router" not in text: continue
+        if not any( k in text for k in ( "APIRouter", "FastAPI", "include_router" ) ): continue
         try:
             routers, includes, imports = routes_mod.scan_file( ast.parse( text ) )
         except SyntaxError:
@@ -225,7 +228,13 @@ def build( root=None, out_dir=None ):
 
 
 def _prune( out, keep_name ):
-    """Ensures: removes all but the newest KEEP_GENERATIONS gen-* directories, never `keep_name`."""
+    """
+    Ensures:
+        - removes all but the newest KEEP_GENERATIONS gen-* directories, never `keep_name`
+        - removes .tmp-* directories left by a crashed build once they are over an hour old
+    """
+    for t in out.glob( ".tmp-*" ):
+        if t.is_dir() and time.time() - t.stat().st_mtime > 3600: shutil.rmtree( t, ignore_errors=True )
     gens = sorted( [ g for g in out.glob( "gen-*" ) if g.is_dir() ], key=lambda g: g.stat().st_mtime, reverse=True )
     for g in gens[ KEEP_GENERATIONS: ]:
         if g.name != keep_name: shutil.rmtree( g, ignore_errors=True )

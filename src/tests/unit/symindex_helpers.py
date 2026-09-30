@@ -150,3 +150,23 @@ def make_repo( base, name="repo" ):
     ( root / "web" / "app.ts" ).write_text( TS_SAMPLE, encoding="utf-8" )
     ( root / "web" / "lib.js" ).write_text( JS_SAMPLE, encoding="utf-8" )
     return root
+
+
+FEEDS  = 'def parse_feed( url ):\n    """Parse an RSS feed into Article objects."""\n    return url\n'
+MATHX  = 'def add( a, b ):\n    """Add two numbers."""\n    return a + b\n'
+SERVE  = 'def serve():\n    """Serve the tools."""\n    return 1\n'
+
+
+def make_lupin_repo( base, name="lupin" ):
+    """
+    Ensures:
+        - writes a minimal lupin-shaped repository (src/cosa and src/lupin_mcp, three public functions)
+          under base/name and returns its path; ids are cosa.feeds.parse_feed, cosa.mathx.add and
+          lupin_mcp.tool.serve
+    """
+    root = pathlib.Path( base ) / name
+    ( root / "src" / "cosa" ).mkdir( parents=True ); ( root / "src" / "lupin_mcp" ).mkdir( parents=True )
+    ( root / "src" / "cosa" / "feeds.py" ).write_text( FEEDS, encoding="utf-8" )
+    ( root / "src" / "cosa" / "mathx.py" ).write_text( MATHX, encoding="utf-8" )
+    ( root / "src" / "lupin_mcp" / "tool.py" ).write_text( SERVE, encoding="utf-8" )
+    return root

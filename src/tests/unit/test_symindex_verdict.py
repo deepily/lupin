@@ -72,6 +72,17 @@ def test_failed_calls_are_call_failed_never_new():
     assert _decide( [], failed=[ "u0001" ] )[ "cause" ] == "CALL_FAILED"
 
 
+def test_a_failed_id_is_accounted_for_and_not_reported_missing():
+    r = vd.decide( [ _ans( "a", _p( 0.05, 0.05, 0.9 ) ), _ans( "b", _p( 0.05, 0.05, 0.9 ) ) ], [ "a", "b", "c" ], [ "c" ], set() )
+    assert r[ "missing" ] == [] and r[ "causes" ] == [ "CALL_FAILED" ]
+    r = vd.decide( [ _ans( "a", _p( 0.05, 0.05, 0.9 ) ) ], [ "a", "c" ], [], set() )
+    assert r[ "missing" ] == [ "c" ]
+
+
+def test_an_integer_too_large_for_a_float_is_not_finite():
+    assert vd.malformed_reason( _p( 10 ** 400, 0, 0 ) ) == "not_finite"
+
+
 def test_coverage_is_set_equality_not_a_count():
     """Two expected ids never answered, two answered ids nobody asked for: the counts match, the sets do not."""
     expected = [ "a", "b", "c", "d" ]

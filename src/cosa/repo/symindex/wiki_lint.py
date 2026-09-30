@@ -7,8 +7,9 @@ Findings (one dict each):
   unindexed          a capability page missing from INDEX.md, so it can never be selected
   orphan             a public symbol in a package that has a page, which no page covers
   orphan_package     a package with no capability page: one finding with a count, not one per symbol
-  pin_algorithm_changed  the index was built with a different parser than the pages were pinned with;
-                     reported once, and stale checks are skipped because every pin would differ
+  pin_algorithm_changed  a pinned page records a different pin algorithm than the index; reported once
+  pin_algorithm_missing  a pinned page records no pin algorithm at all; reported once
+                     either of the two switches stale checks off for every page, because every pin would differ
 """
 import pathlib
 import re
@@ -36,6 +37,7 @@ def queue( wiki_dir, gen ):
     Ensures:
         - returns the list of finding dicts, each with a "kind"
         - an empty or missing wiki returns only orphan_package findings
+        - the pin-algorithm check runs once, before any page is judged, so page order cannot change the result
         - duplicate ids in the index cannot hide a finding: ids are unique by construction
     """
     wiki  = pathlib.Path( wiki_dir )
@@ -43,21 +45,25 @@ def queue( wiki_dir, gen ):
     algo  = read_header( gen )[ "pin_algorithm" ]
     toc   = wiki / "INDEX.md"
     index = set( LINK_RE.findall( toc.read_text( encoding="utf-8" ) ) ) if toc.exists() else set()
-    covered, pages_by_pkg, out, algo_changed = set(), set(), [], False
+    parsed = []
     for page in sorted( ( wiki / "capabilities" ).glob( "*.md" ) ) if ( wiki / "capabilities" ).is_dir() else []:
-        m      = FRONT_RE.match( page.read_text( encoding="utf-8" ) )
-        front  = m.group( 1 ) if m else ""
-        pins   = PIN_RE.findall( front )
-        a      = ALGO_RE.search( front )
-        if a and a.group( 1 ) != algo and not algo_changed:
-            algo_changed = True
-            out.append( { "kind": "pin_algorithm_changed", "page": page.stem, "was": a.group( 1 ), "now": algo } )
+        m     = FRONT_RE.match( page.read_text( encoding="utf-8" ) )
+        front = m.group( 1 ) if m else ""
+        a     = ALGO_RE.search( front )
+        parsed.append( ( page, PIN_RE.findall( front ), a.group( 1 ) if a else None ) )
+    pinned  = [ ( pg, al ) for pg, pins, al in parsed if pins ]
+    changed = [ pg.stem for pg, al in pinned if al is not None and al != algo ]
+    missing = [ pg.stem for pg, al in pinned if al is None ]
+    covered, pages_by_pkg, out = set(), set(), []
+    if changed: out.append( { "kind": "pin_algorithm_changed", "pages": changed, "was": sorted( { al for _, al in pinned if al is not None and al != algo } ), "now": algo } )
+    if missing: out.append( { "kind": "pin_algorithm_missing", "pages": missing, "now": algo } )
+    for page, pins, _ in parsed:
         if page.stem not in index: out.append( { "kind": "unindexed", "page": page.stem } )
         for sid, h in pins:
             covered.add( sid ); pages_by_pkg.add( _package( sid ) )
             if sid not in live:
                 out.append( { "kind": "dangling", "page": page.stem, "symbol": sid } )
-            elif live[ sid ] != h and not algo_changed:
+            elif live[ sid ] != h and not ( changed or missing ):
                 out.append( { "kind": "stale", "page": page.stem, "symbol": sid, "was": h, "now": live[ sid ] } )
     counts = {}
     for sid in sorted( set( live ) - covered ):

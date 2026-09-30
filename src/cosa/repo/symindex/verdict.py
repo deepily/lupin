@@ -28,7 +28,11 @@ def malformed_reason( probabilities, policy=POLICY ):
     if set( probabilities ) != set( ANSWERS ): return "missing_or_extra_keys"
     values = [ probabilities[ k ] for k in ANSWERS ]
     if any( isinstance( v, bool ) or not isinstance( v, ( int, float ) ) for v in values ): return "not_a_number"
-    if not all( math.isfinite( v ) for v in values ): return "not_finite"
+    try:
+        finite = all( math.isfinite( v ) for v in values )
+    except OverflowError:                                              # an int too large for a float
+        finite = False
+    if not finite: return "not_finite"
     if any( v < 0.0 or v > 1.0 for v in values ): return "out_of_range"
     if abs( sum( values ) - 1.0 ) > policy[ "sum_tolerance" ] + 1e-9: return "sum_not_one"      # slack for float addition
     return None
@@ -58,7 +62,9 @@ def decide( answers, expected_ids, failed_ids, flags, policy=POLICY ):
     Apply the decision table to one sweep.
 
     Requires:
-        - answers is a list of { "id": str, "probabilities": ... } as received from the model
+        - answers is a list of dicts { "id": str, "probabilities": <anything> }; the caller (the sweep)
+          guarantees the dict shape and the id, and puts None in `probabilities` when the model's
+          response lacked them. The probabilities themselves are validated here
         - expected_ids is the collection of every index entry id the sweep should have covered
         - failed_ids is the collection of ids whose call failed after retries
         - flags is a set drawn from CAUSES naming the pipeline problems already known
