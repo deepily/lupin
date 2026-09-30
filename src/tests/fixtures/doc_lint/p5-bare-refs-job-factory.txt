@@ -1,0 +1,6 @@
+
+    Build the job for `agent router go to deep research`.
+
+    Body moved VERBATIM from the branch it replaces (phase 5 pass A, row d2e23ecb;
+    Rick's ruling 2: pure refactor, no behaviour change).
+    

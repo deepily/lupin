@@ -1,0 +1,8 @@
+    True iff the row's `park_reason` quote is provably OLDER than the row's BODY.
+
+    `park_reason` is a FROZEN QUOTE captured at park time. Amend the row afterward
+    and the quote stays syntactically valid while it stops being true, and NOTHING
+    GOES RED. This predicate is the red: it does not stop prose going stale, it
+    makes the divergence VISIBLE (design
+    src/rnd/v0.1.9/2026.07.19-park-reason-staleness-detection.md §3.2).
+

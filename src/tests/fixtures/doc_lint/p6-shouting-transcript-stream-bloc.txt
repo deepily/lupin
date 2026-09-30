@@ -1,0 +1,12 @@
+  /// Trim to [ringBytes], oldest first.
+  ///
+  /// 🔴 THE CAP IS IN BYTES AND THE EVICTION IS BY COUNT, WHICH IS THE APP'S EXISTING IDIOM
+  /// PLUS THE ONE NEW PART. `monitoring_models.dart:141-142` already evicts with
+  /// `removeAt( 0 )` past a limit; byte accounting is what C8 adds, and it uses
+  /// [TranscriptBlock.sizeBytes] — the UTF-8 length after server truncation — so "never
+  /// exceeds its cap" means the same thing here as on the server.
+  ///
+  /// ⚠️ ONE BLOCK LARGER THAN THE WHOLE RING IS KEPT, NOT DROPPED. Evicting it would leave
+  /// an empty console showing nothing while the server had sent something, which is worse
+  /// than briefly exceeding a provisional cap. Named because it is the one case where the
+  /// buffer can be over [ringBytes].
