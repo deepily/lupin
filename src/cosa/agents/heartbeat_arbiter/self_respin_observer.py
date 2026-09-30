@@ -30,6 +30,8 @@ import datetime
 import glob
 import json
 import os
+import subprocess
+import sys
 import threading
 
 from dataclasses import dataclass
@@ -1160,6 +1162,69 @@ def _fetch_live_pressure():   # pragma: no cover - live HTTP boundary, exercised
         return { "personas": None }
 
 
+# ── Stale-MCP delivery (row 97c5bd94) ─────────────────────────────────────────
+# src/scripts/stale_mcp_check.py finds live cosa-voice MCP processes running code
+# older than the tree, but nothing ran it and nothing read its output. This block is
+# the reader: the observer tick runs the script, and for each STALE process tells
+# that seat's manager once. The remedy line is fixed text on purpose — a /clear
+# leaves the MCP child of the pane's claude process running, so the tempting fix
+# does nothing.
+STALE_MCP_SCRIPT_REL    = "/src/scripts/stale_mcp_check.py"
+STALE_MCP_RUN_TIMEOUT   = 30
+STALE_MCP_REMEDY        = "restart the seat; a /clear doesn't reload the MCP"
+
+
+def run_stale_mcp_check( runner=None, script_path=None, timeout=STALE_MCP_RUN_TIMEOUT ):
+    """
+    Run stale_mcp_check.py --json and return only the STALE process records.
+
+    Requires:
+        - runner( argv, timeout ) -> ( returncode, stdout ), or None for subprocess
+        - script_path is the script's path, or None for <project root>/src/scripts/...
+
+    Ensures:
+        - returns the list of records whose `stale` is True; [] when nothing is stale
+        - exit 0 and exit 1 both carry a report; exit 2 means the check produced
+          nothing trustworthy, so it RAISES rather than reporting "nothing stale"
+
+    Raises:
+        - RuntimeError on exit code 2, any other exit code, or unparseable output
+    """
+    if script_path is None:
+        import cosa.utils.util as cu
+        script_path = cu.get_project_root() + STALE_MCP_SCRIPT_REL
+    if runner is None: runner = _run_subprocess
+    code, out = runner( [ sys.executable, script_path, "--json" ], timeout )
+    if code not in ( 0, 1 ):
+        raise RuntimeError( f"stale_mcp_check exited {code}: no trustworthy report" )
+    try:
+        report = json.loads( out )
+        return [ r for r in report[ "processes" ] if r[ "stale" ] ]
+    except ( ValueError, KeyError, TypeError ) as e:
+        raise RuntimeError( f"stale_mcp_check output unreadable: {e!r}" )
+
+
+def _run_subprocess( argv, timeout ):
+    """Run argv, return ( returncode, stdout ). A timeout raises subprocess.TimeoutExpired."""
+    result = subprocess.run( argv, capture_output=True, text=True, timeout=timeout )
+    return ( result.returncode, result.stdout )
+
+
+def _default_seat_lookup( record ):   # pragma: no cover - bridge/lineage IO boundary; injected in tests
+    """
+    Map a stale-MCP record to ( seat_persona, manager_persona ) through the pane's
+    tmux session name -> the seat's bridge -> spawn lineage. ( None, None ) on any
+    miss; a seat whose manager cannot be resolved is never guessed at.
+    """
+    from lupin_cli.claude_code.hooks.lib.session_bridge import find_session_by_tmux, get_voice_persona
+    from cosa.agents.heartbeat_arbiter.manager_resolver import resolve_manager
+    bridge = find_session_by_tmux( record.get( "tmux_session" ) )
+    if not bridge or not bridge.get( "session_id" ): return ( None, None )
+    persona = get_voice_persona( bridge[ "session_id" ] )
+    seat    = persona.get( "name" ) if persona else None
+    return ( seat, resolve_manager( bridge[ "session_id" ] ).get( "manager_persona" ) )
+
+
 # ---------------------------------------------------------------------------
 # The daemon loop — the PRODUCTION caller the observer never had (row 275cb0b9,
 # GAP 2). observe_fleet_self_respin + sweep_returned_markers had NO caller outside
@@ -1170,8 +1235,11 @@ def _fetch_live_pressure():   # pragma: no cover - live HTTP boundary, exercised
 # ---------------------------------------------------------------------------
 class SelfRespinObserverLoop:
     """
-    Standing self-re-spin liveness loop. Inert unless `arbiter self respin observer
-    enabled` is True. Each tick it (a) classifies every in-flight marker against the
+    Standing self-re-spin liveness loop. The respin half is inert unless `arbiter self
+    respin observer enabled` is True. The stale-MCP half (row 97c5bd94) has its OWN gate,
+    `stale mcp check delivery enabled` (ConfigurationManager key, explicit default True,
+    no INI line yet), so it delivers with the observer flag False and switching it on
+    never switches respin advisories on. Each tick it (a) classifies every in-flight marker against the
     live pressure and fires ONE advisory per alarm marker (DEAD_NO_RETURN /
     IDENTITY_MISMATCH / MALFORMED_MARKER), and (b) sweeps confirmed-RETURNED markers
     past their TTL. The pressure read, advisory sink, clock, and marker base dir are
@@ -1186,6 +1254,9 @@ class SelfRespinObserverLoop:
         base_dir          = None,
         advisory_fn       = None,
         now_fn            = None,
+        stale_mcp_fn      = None,
+        dm_push_fn        = None,
+        seat_lookup_fn    = None,
     ):
         """
         Requires:
@@ -1198,6 +1269,12 @@ class SelfRespinObserverLoop:
             - advisory_fn( message ) -> None emits ONE operator advisory (default: a
               banner print; production injects the throttled escalation rail)
             - now_fn() -> aware datetime (default: datetime.now(utc))
+            - stale_mcp_fn() -> list of stale MCP records (see run_stale_mcp_check), or
+              None to leave the stale-MCP delivery OFF; production injects the real run
+            - dm_push_fn( recipient_persona, thread_id, body ) -> outcome dict whose
+              "outcome" is "dispatched" on success (the arbiter's DM-push hop)
+            - seat_lookup_fn( record ) -> ( seat_persona, manager_persona ), either None
+              on a miss (default: bridge + spawn lineage)
 
         Ensures:
             - no thread is started at construction (call start() explicitly)
@@ -1209,6 +1286,10 @@ class SelfRespinObserverLoop:
         self._advisory_fn       = advisory_fn if advisory_fn is not None else self._default_advisory_signal
         self._now_fn            = now_fn      if now_fn      is not None else ( lambda: datetime.datetime.now( datetime.timezone.utc ) )
         self._advised           = set()       # (session_id, verdict) advised once — flood-guard one-shot
+        self._stale_mcp_fn      = stale_mcp_fn
+        self._dm_push_fn        = dm_push_fn
+        self._seat_lookup_fn    = seat_lookup_fn if seat_lookup_fn is not None else _default_seat_lookup
+        self._stale_told        = set()       # (pid, start_epoch) already told — never repeated
         self._stop_event        = threading.Event()
         self._thread            = None
 
@@ -1216,6 +1297,12 @@ class SelfRespinObserverLoop:
 
     def _enabled( self ) -> bool:
         return self._config_mgr.get( "arbiter self respin observer enabled", default=False, return_type="boolean" )
+
+    def _stale_mcp_enabled( self ) -> bool:
+        # its OWN gate, independent of `_enabled()`: on only when a check is wired AND the key
+        # is true. An absent key reads True, which is why no INI line is needed to ship it.
+        return self._stale_mcp_fn is not None and self._config_mgr.get(
+            "stale mcp check delivery enabled", default=True, return_type="boolean" )
 
     def _tick_seconds( self ) -> int:
         # the SAME live tick the :8001 fleet-arbiter loop polls on (no separate knob).
@@ -1247,7 +1334,10 @@ class SelfRespinObserverLoop:
             { "enabled": bool, "alarms": int, "advised": int, "swept": int }
         """
         if not self._enabled():
-            return { "enabled": False, "alarms": 0, "advised": 0, "swept": 0 }
+            summary = { "enabled": False, "alarms": 0, "advised": 0, "swept": 0 }
+            if self._stale_mcp_enabled():              # the stale-MCP half runs on its own gate
+                summary[ "stale_mcp_told" ] = self.tell_stale_mcp_once()
+            return summary
 
         now     = self._now_fn()
         advised = 0
@@ -1277,7 +1367,58 @@ class SelfRespinObserverLoop:
 
         # flood-guard clear: an alarm that is gone (returned or swept) drops its marker
         self._advised &= live
-        return { "enabled": True, "alarms": alarms, "advised": advised, "swept": swept }
+        summary = { "enabled": True, "alarms": alarms, "advised": advised, "swept": swept }
+        if self._stale_mcp_enabled():
+            summary[ "stale_mcp_told" ] = self.tell_stale_mcp_once()
+        return summary
+
+    def tell_stale_mcp_once( self ) -> int:
+        """
+        Run the stale-MCP check and tell each stale seat's manager, once per process.
+
+        Ensures:
+            - nothing stale -> nothing sent, returns 0 (quiet)
+            - one DM per stale process, naming the seat and STALE_MCP_REMEDY, to that
+              seat's manager; a process is keyed by ( pid, start_epoch ) so a recycled
+              pid is a new process, and one already told is never told again
+            - a DM that does not dispatch is NOT recorded, so the next tick retries
+            - a seat whose manager cannot be resolved (or with no DM hop wired) goes to
+              the operator advisory instead, once, rather than being dropped
+            - keys of processes no longer stale are forgotten
+            - never raises: a failed check is logged and the tick moves on; a record whose
+              lookup, DM or advisory raises (or which is malformed) is logged and skipped,
+              the others are still told, and it is retried next tick
+        """
+        try:
+            stale = self._stale_mcp_fn()
+        except Exception as e:                         # a failed check must not read as "nothing stale"
+            self._log_skip( f"stale-MCP check failed (continuing): {e!r}" )
+            return 0
+        told = 0
+        live = set()
+        for rec in stale:
+            try:                                       # one bad record must not stop the others being told
+                key = ( rec[ "pid" ], rec[ "start_epoch" ] )
+                live.add( key )
+                if key in self._stale_told: continue
+                seat, manager = self._seat_lookup_fn( rec )
+                body = (
+                    f"STALE MCP — cosa-voice MCP pid {rec[ 'pid' ]} "
+                    f"(seat {seat or 'unknown'}, tmux {rec.get( 'tmux_session' )} {rec.get( 'tmux_pane' )}) "
+                    f"is running code older than the tree: {STALE_MCP_REMEDY}."
+                )
+                if manager is None or self._dm_push_fn is None:
+                    self._advisory_fn( body + " No manager DM route (manager unresolved or DM push off)." )
+                else:
+                    outcome = self._dm_push_fn( manager, f"stale-mcp-{rec[ 'pid' ]}", body )
+                    if outcome.get( "outcome" ) != "dispatched": continue
+            except Exception as e:                     # not recorded as told, so the next tick retries it
+                self._log_skip( f"stale-MCP record skipped (continuing): {e!r} record={rec!r}" )
+                continue
+            self._stale_told.add( key )
+            told += 1
+        self._stale_told &= live
+        return told
 
     def record_once( self ) -> dict:
         """
@@ -1364,10 +1505,11 @@ class SelfRespinObserverLoop:
 
     def start( self ) -> bool:
         """
-        Spawn the daemon thread — ONLY if the flag is enabled and no thread runs.
+        Spawn the daemon thread — ONLY if a flag is enabled (the observer's, or the
+        stale-MCP delivery's) and no thread runs.
         Returns True if a thread was started, else False (the no-op rollout gate).
         """
-        if not self._enabled():
+        if not ( self._enabled() or self._stale_mcp_enabled() ):
             return False
         if self._thread is not None and self._thread.is_alive():
             return False

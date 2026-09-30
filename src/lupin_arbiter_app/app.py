@@ -547,15 +547,22 @@ def assemble_app(
     # self respin observer enabled` (default false): start() no-ops until it flips, so
     # wiring it in is behavior-neutral. The FLAG IS READ BEFORE THE IMPORT (a disabled
     # feature must not impose its deps — the 2026-08-08 fleet-loop-down lesson).
-    if cfg.get( "arbiter self respin observer enabled", default=False, return_type="boolean" ):
-        from cosa.agents.heartbeat_arbiter.self_respin_observer import SelfRespinObserverLoop
+    # row 97c5bd94: the loop also carries the stale-MCP delivery behind its OWN flag
+    # (`stale mcp check delivery enabled`, default True), so it is built when EITHER flag is
+    # on; the respin half stays inert unless its own flag is on.
+    if ( cfg.get( "arbiter self respin observer enabled", default=False, return_type="boolean" )
+         or cfg.get( "stale mcp check delivery enabled", default=True, return_type="boolean" ) ):
+        from cosa.agents.heartbeat_arbiter.self_respin_observer import SelfRespinObserverLoop, run_stale_mcp_check
         self_respin_observer_loop = SelfRespinObserverLoop(
             cfg,
             fetch_pressure_fn = lambda: ( store.get().get( "context_pressure" ) or { "personas": None } ),
             advisory_fn       = make_escalation_notify_fn( gateway, live_notify_fn=live_notify_fn, log_fn=arbiter_log_fn ),
+            # row 97c5bd94: the observer tick also runs stale_mcp_check.py and DMs each stale seat's manager
+            stale_mcp_fn      = run_stale_mcp_check,
+            dm_push_fn        = dm_push_fn,
         )
     else:
-        log_fn( "self_respin_observer_disabled", reason="arbiter self respin observer enabled = false" )
+        log_fn( "self_respin_observer_disabled", reason="arbiter self respin observer enabled = false and stale mcp check delivery enabled = false" )
         self_respin_observer_loop = None
 
     # ── health watcher (L2): gated on the master enable ──
