@@ -1,0 +1,27 @@
+// markdownlint config for the v0.2.2 documentation standard (plan 1 Phase 1, decision D2).
+// Structure only: whitespace-style rules are off because they would flag 700+ legacy lines
+// that carry no meaning. Prose rules live in src/cosa/repo/doc_lint/.
+{
+  "config": {
+    "default": true,
+    "MD009": false,
+    "MD012": false,
+    "MD013": false,
+    "MD022": false,
+    "MD024": false,
+    "MD026": false,
+    "MD028": false,
+    "MD029": false,
+    "MD031": false,
+    "MD032": false,
+    "MD033": false,
+    "MD034": false,
+    "MD036": false,
+    "MD041": false,
+    "MD049": false,
+    "MD058": false,
+    "MD060": false
+  },
+  "noBanner": true,
+  "noProgress": true
+}

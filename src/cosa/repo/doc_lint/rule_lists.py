@@ -1,11 +1,11 @@
 """
-Frozen lists for the docstring and markdown linters (plan 1, Phase 0 step 4).
+Frozen lists for the docstring and markdown linters (documentation-standard plan).
 
 Holds the acronym allowlist, the tic list, the bare-reference predicate, the dated-banner
 and agent-imperative patterns, and the provisional thresholds. Stdlib only, so the same file
 can be vendored into lupin-mobile's tool/ directory.
 
-These lists are frozen by sha before any labelling sample is drawn (ruling B8). Changing one
+These lists are frozen by sha before any labelling sample is drawn. Changing one
 after the freeze invalidates the precision and recall measured against it.
 """
 
@@ -19,7 +19,7 @@ import re
 # it is exempt by predicate.
 CAPS_WORD_EXCEPTIONS = frozenset( [
     "ID", "IDS", "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "NULL", "MM", "DD", "RAM",
-    "REST", "KISS", "TODO", "FIFO", "ANN", "OOM", "ORM", "SHA", "CWD", "DOM", "PEFT", "LORA",
+    "REST", "KISS", "TODO", "FIFO", "ANN", "OOM", "ORM", "SHA", "CWD", "DOM", "PEFT", "LORA", "CC", "CRUD",
 ] )
 # Spans where a capitalised word is quoted, not emphasised: "ALLOW", 'KISS', `CODE`.
 QUOTED_SPAN_REGEX = re.compile( r"\"[^\"\n]*\"|(?<![\w])'[^'\n]*'(?![\w])|`[^`\n]*`" )

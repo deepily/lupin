@@ -1,7 +1,7 @@
 """
 Changed line ranges from a git diff, used to filter linter findings to touched lines.
 
-Ruff has no changed-lines mode (ruling B7), so one touched file would otherwise drag in every
+Ruff has no changed-lines mode, so one touched file would otherwise drag in every
 legacy finding in it. Each linter runs on the changed files and its findings are then kept only
 when they sit on a line the diff touched.
 """
@@ -18,7 +18,7 @@ def parse_diff_ranges( diff_text ):
     Turn a zero-context unified diff into touched line ranges per file.
 
     Requires:
-        - diff_text is the output of git diff -U0
+        - diff_text is the output of a zero-context git diff
 
     Ensures:
         - returns { path: [ ( first, last ), ... ] } with 1-based inclusive new-file lines

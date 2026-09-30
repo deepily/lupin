@@ -100,7 +100,7 @@ def prose_lines( text, markdown=False ):
         - markdown mode keeps bullet text, with the bullet marker removed, and skips headings
           and table rows
         - blank lines are skipped in both modes
-        - indices are 0-based positions in text.split( "\\n" )
+        - indices are 0-based positions in the list of lines
 
     Raises:
         - nothing
@@ -147,15 +147,15 @@ def sentence_findings( text, path, first_line, markdown=False ):
 
 def emphasis_findings( text, path, first_line, words=None ):
     """
-    Check rule 4: no ALL-CAPS words outside the allowlist, and no emphasis glyphs.
+    Check rule 4: no emphasis words in capitals, and no emphasis glyphs.
 
     Requires:
         - text is a str
         - words is a set of lowercase English words, or None for the vendored list
 
     Ensures:
-        - one Finding per emphasis CAPS word and one per emphasis glyph, at its line
-        - inline code spans and quoted spans are not searched for CAPS words
+        - one Finding per emphasis word in capitals and one per emphasis glyph, at its line
+        - inline code spans and quoted spans are not searched for capitalised words
 
     Raises:
         - nothing
@@ -198,13 +198,37 @@ def defined_labels( text ):
         - text is a str
 
     Ensures:
-        - returns the set of labels such as M1 that start a line and are followed by a dash, colon or equals sign
+        - returns the set of labels (a capital letter and a digit) that start a line and are followed by a dash, colon or equals sign
         - a label in this set is a local name, not a reference to a document the reader lacks
 
     Raises:
         - nothing
     """
     return set( re.findall( r"^[ \t]*(?:[-*][ \t]+)?\**([A-Z]\d{1,2})\**[ \t]*(?:[-:=\u2013\u2014])", text, re.MULTILINE ) )
+
+
+STEP_DEFINITION = re.compile(
+    r"^[ \t]*(?:#{1,6}[ \t]+|[-*][ \t]+|\d+[.)][ \t]+)?\**((?i:step|phase|stage|item|option)s?[ \t]+(?:\d[\w.]*|[A-Z]\b|\([a-z]\)))\**[ \t]*(?:[:.\-\u2013\u2014)]|$)",
+    re.MULTILINE
+)
+
+
+def defined_steps( text ):
+    """
+    Collect the step, phase or option labels that the text itself defines.
+
+    Requires:
+        - text is a str
+
+    Ensures:
+        - returns the lowercase labels, such as "step 1", that start a line or heading and are
+          followed by a colon, dash, period or the end of the line
+        - a reference to a label in this set is the page's own structure, not a pointer elsewhere
+
+    Raises:
+        - nothing
+    """
+    return { m.group( 1 ).lower() for m in STEP_DEFINITION.finditer( text ) }
 
 
 def reference_findings( text, path, first_line ):
@@ -217,7 +241,7 @@ def reference_findings( text, path, first_line ):
     Ensures:
         - one Finding per bare reference, at its line
         - a section mark is bare unless a path sits beside it in the same paragraph
-        - a case label that the text defines itself is not a finding
+        - a case label or step that the text defines itself is not a finding
         - a bare git sha is reported under the same rule; whether it should be is pending Rick's ruling
 
     Raises:
@@ -225,12 +249,14 @@ def reference_findings( text, path, first_line ):
     """
     findings = []
     local    = defined_labels( text )
+    steps    = defined_steps( text )
     for m in SECTION_REGEX.finditer( text ):
         if not is_section_ref_resolved( text, m ):
             findings.append( Finding( path, first_line + line_of_offset( text, m.start() ), "bare-ref", f"section reference {m.group( 0 )!r} has no path" ) )
     for regex in ( ID_REF_EXTENDED_REGEX, BARE_SHA_REGEX, RULING_REF_REGEX, AC_REF_REGEX, STEP_REF_REGEX, LABEL_REF_REGEX ):
         for m in regex.finditer( text ):
             if regex is LABEL_REF_REGEX and m.group( 0 ) in local: continue
+            if regex is STEP_REF_REGEX and m.group( 0 ).lower() in steps: continue
             findings.append( Finding( path, first_line + line_of_offset( text, m.start() ), "bare-ref", f"bare reference {m.group( 0 )!r}" ) )
     return findings
 

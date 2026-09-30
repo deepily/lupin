@@ -12,6 +12,7 @@ import sys
 
 from .changed_ranges import changed_line_ranges, filter_findings
 from .text_rules import Finding
+from .word_list import configure_root
 
 SKIP_SEGMENTS = frozenset( { "tests", ".venv", "node_modules", "site-packages", "__pycache__", "rnd" } )
 
@@ -64,7 +65,7 @@ def build_parser( description ):
         - description is a str
 
     Ensures:
-        - the parser accepts optional paths, --changed BASE, --staged, --strict, --json and --repo-root
+        - the parser accepts optional paths, --changed with a base revision, --staged, --strict, --json and --repo-root
 
     Raises:
         - nothing
@@ -99,6 +100,7 @@ def run_linter( description, suffixes, lint_source, argv, out=None ):
     out  = out if out is not None else sys.stdout
     args = build_parser( description ).parse_args( argv )
     root = args.repo_root
+    configure_root( root )
     paths = [ p for p in args.paths if p.endswith( suffixes ) ] if args.paths else tracked_files( root, suffixes )
     findings = []
     for path in paths:

@@ -10,6 +10,7 @@ import ast
 import sys
 
 from .cli import run_linter
+from .links import design_path_findings
 from .rule_lists import DOCSTRING_MAX_LINES
 from .text_rules import Finding, lint_text
 
@@ -25,7 +26,7 @@ def extract_docstrings( source ):
 
     Ensures:
         - returns [ ( kind, name, first_line, text ) ] in tree-walk order
-        - text is the raw docstring, so text.split( "\\n" )[ i ] sits on file line first_line + i
+        - text is the raw docstring, so line i of the split text sits on file line first_line + i
         - a node with no docstring adds nothing
 
     Raises:
@@ -52,6 +53,7 @@ def lint_source( path, source, root=None ):
     Ensures:
         - returns a list of Finding, sorted by line
         - a file that does not parse yields one parse-error finding
+        - with root given, a Design: path that does not exist yields a dead-design finding
         - a docstring of more than DOCSTRING_MAX_LINES lines yields one docstring-length finding
 
     Raises:
@@ -64,6 +66,7 @@ def lint_source( path, source, root=None ):
     findings = []
     for kind, name, first_line, text in docstrings:
         findings += lint_text( text, path, first_line )
+        if root is not None: findings += design_path_findings( text, path, first_line, root )
         lines = text.strip( "\n" ).count( "\n" ) + 1
         if lines > DOCSTRING_MAX_LINES:
             findings.append( Finding( path, first_line, "docstring-length", f"{kind} {name}: {lines} lines, limit {DOCSTRING_MAX_LINES}" ) )

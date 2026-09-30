@@ -142,6 +142,9 @@ dev = [
   # subprocess / two-session shapes — precisely the shape that hangs, which is
   # what a cap defends against.
   "pytest-timeout==2.4.0",
+  # Docstring layout rules for the v0.2.2 documentation standard (plan 1 Phase 1, ruling B7).
+  # Pinned exactly: the rule set below was measured against 0.12.1 and a new release can add D codes.
+  "ruff==0.12.1",
 ]
 
 # flash-attn ABI-locked declaration so uv resolver doesn't try to fetch
@@ -397,3 +400,17 @@ exclude_also = [
     "def quick_smoke_test",         # manual/CLI entrypoint convention — out of the denominator BY POLICY, even where a pytest wrapper exercises it
     "if __name__ == .__main__.:",   # inline main guards inside regular modules
 ]
+
+# ----------------------------------------------------------------------------
+# ruff: docstring layout only (v0.2.2 documentation standard, ruling B7).
+# D213 not D212: the house style puts the summary on the line after the quotes (D212 = 8,034 hits).
+# Presence rules (D1xx), D4xx section-style rules, D400/D415 and D401 are off on purpose: they are
+# style preferences the standard does not make, and each would drag thousands of legacy findings
+# into every touched file. `--changed` filters the rest to touched lines (doc_lint.changed_ranges).
+# ----------------------------------------------------------------------------
+[tool.ruff]
+target-version = "py313"
+extend-exclude = [ ".venv", "node_modules", "src/rnd", "src/cosa/.venv" ]
+
+[tool.ruff.lint]
+select = [ "D200", "D201", "D202", "D204", "D205", "D206", "D207", "D208", "D209", "D210", "D213", "D214", "D300", "D301", "D402", "D403", "D404" ]

@@ -1,5 +1,5 @@
 """
-Linter for `#` comment lines in Python: banners, CAPS shouting and emphasis glyphs.
+Linter for `#` comment lines in Python: banners, shouting and emphasis glyphs.
 
 Uses tokenize, so a `#` inside a string is not a comment. The sentence, reference and history
 rules are not applied to comments, which hold working notes rather than documentation.

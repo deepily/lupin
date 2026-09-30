@@ -1,5 +1,5 @@
 """
-Marker counting for the docstring and markdown linters (plan 1, Phase 0 step 4).
+Marker counting for the docstring and markdown linters (documentation-standard plan).
 
 Counts the spec's six marker columns, per 1,000 words, using the frozen lists in
 rule_lists. Stdlib only, so it can be vendored into lupin-mobile's tool/ directory.
@@ -145,16 +145,17 @@ def caps_words( text, words=None ):
     return found
 
 
-def count_markers( text ):
+def count_markers( text, words=None ):
     """
     Count the six marker columns in a piece of prose.
 
     Requires:
         - text is a str, already stripped of front matter and fenced code where it is markdown
+        - words is a set of lowercase English words, or None for the vendored list
 
     Ensures:
         - returns { "words": int, <each MARKER_COLUMNS name>: int }
-        - fenced and doctest blocks are blanked first; CAPS words are counted outside inline
+        - fenced and doctest blocks are blanked first; capitalised words are counted outside inline
           code spans; every other column is counted on the rest of the text
         - id_refs counts the row, bug, task and ts references only
 
@@ -166,7 +167,7 @@ def count_markers( text ):
     return {
         "words"           : len( WORD_REGEX.findall( text ) ),
         "em_dash"         : text.count( "—" ),
-        "caps_words"      : len( caps_words( prose ) ),
+        "caps_words"      : len( caps_words( prose, words ) ),
         "section_refs"    : text.count( "§" ),
         "id_refs"         : len( ID_REF_REGEX.findall( text ) ),
         "tics"            : len( TIC_REGEX.findall( text ) ),

@@ -2,15 +2,31 @@
 The English word list behind the ALL-CAPS predicate (rule 4).
 
 An ALL-CAPS token is emphasis when its lowercase form is a word. The list is the one lupin
-already vendors for the DM tutor; lupin-mobile's vendored copy of the linters passes its own
-set to the rule functions instead of calling this module.
+already vendors for the DM tutor. Entry points that run in a bare interpreter (the pre-commit
+gate) call configure_root with the working tree, so this module needs no third-party imports;
+lupin-mobile's vendored copy passes its own set to the rule functions instead.
 """
-
-import cosa.utils.util as cu
 
 WORD_LIST_REL = "/src/conf/dm-tutor-lowercase-words.txt"
 
-_cache = {}
+_state = { "root": None, "words": None }
+
+
+def configure_root( root ):
+    """
+    Point the word list at a working tree and drop any list already read.
+
+    Requires:
+        - root is a directory that holds WORD_LIST_REL
+
+    Ensures:
+        - the next default_words call reads the list under root
+
+    Raises:
+        - nothing
+    """
+    _state[ "root" ]  = str( root )
+    _state[ "words" ] = None
 
 
 def load_words( path ):
@@ -32,10 +48,10 @@ def load_words( path ):
 
 def default_words():
     """
-    Return the vendored word list, read once per process.
+    Return the word list, read once until configure_root is called again.
 
     Requires:
-        - LUPIN_ROOT names a tree that holds WORD_LIST_REL
+        - configure_root was called, or LUPIN_ROOT names a tree that holds WORD_LIST_REL
 
     Ensures:
         - returns a frozenset of lowercase words
@@ -44,6 +60,10 @@ def default_words():
     Raises:
         - OSError when the list is missing
     """
-    if "words" not in _cache:
-        _cache[ "words" ] = load_words( cu.get_project_root() + WORD_LIST_REL )
-    return _cache[ "words" ]
+    if _state[ "words" ] is None:
+        root = _state[ "root" ]
+        if root is None:
+            import cosa.utils.util as cu
+            root = cu.get_project_root()
+        _state[ "words" ] = load_words( root + WORD_LIST_REL )
+    return _state[ "words" ]
