@@ -1235,8 +1235,11 @@ def _default_seat_lookup( record ):   # pragma: no cover - bridge/lineage IO bou
 # ---------------------------------------------------------------------------
 class SelfRespinObserverLoop:
     """
-    Standing self-re-spin liveness loop. Inert unless `arbiter self respin observer
-    enabled` is True. Each tick it (a) classifies every in-flight marker against the
+    Standing self-re-spin liveness loop. The respin half is inert unless `arbiter self
+    respin observer enabled` is True. The stale-MCP half (row 97c5bd94) has its OWN gate,
+    `stale mcp check delivery enabled` (ConfigurationManager key, explicit default True,
+    no INI line yet), so it delivers with the observer flag False and switching it on
+    never switches respin advisories on. Each tick it (a) classifies every in-flight marker against the
     live pressure and fires ONE advisory per alarm marker (DEAD_NO_RETURN /
     IDENTITY_MISMATCH / MALFORMED_MARKER), and (b) sweeps confirmed-RETURNED markers
     past their TTL. The pressure read, advisory sink, clock, and marker base dir are
@@ -1295,6 +1298,12 @@ class SelfRespinObserverLoop:
     def _enabled( self ) -> bool:
         return self._config_mgr.get( "arbiter self respin observer enabled", default=False, return_type="boolean" )
 
+    def _stale_mcp_enabled( self ) -> bool:
+        # its OWN gate, independent of `_enabled()`: on only when a check is wired AND the key
+        # is true. An absent key reads True, which is why no INI line is needed to ship it.
+        return self._stale_mcp_fn is not None and self._config_mgr.get(
+            "stale mcp check delivery enabled", default=True, return_type="boolean" )
+
     def _tick_seconds( self ) -> int:
         # the SAME live tick the :8001 fleet-arbiter loop polls on (no separate knob).
         return self._config_mgr.get( "arbiter poll seconds", default=60, return_type="int" )
@@ -1325,7 +1334,10 @@ class SelfRespinObserverLoop:
             { "enabled": bool, "alarms": int, "advised": int, "swept": int }
         """
         if not self._enabled():
-            return { "enabled": False, "alarms": 0, "advised": 0, "swept": 0 }
+            summary = { "enabled": False, "alarms": 0, "advised": 0, "swept": 0 }
+            if self._stale_mcp_enabled():              # the stale-MCP half runs on its own gate
+                summary[ "stale_mcp_told" ] = self.tell_stale_mcp_once()
+            return summary
 
         now     = self._now_fn()
         advised = 0
@@ -1356,7 +1368,7 @@ class SelfRespinObserverLoop:
         # flood-guard clear: an alarm that is gone (returned or swept) drops its marker
         self._advised &= live
         summary = { "enabled": True, "alarms": alarms, "advised": advised, "swept": swept }
-        if self._stale_mcp_fn is not None:
+        if self._stale_mcp_enabled():
             summary[ "stale_mcp_told" ] = self.tell_stale_mcp_once()
         return summary
 
@@ -1487,10 +1499,11 @@ class SelfRespinObserverLoop:
 
     def start( self ) -> bool:
         """
-        Spawn the daemon thread — ONLY if the flag is enabled and no thread runs.
+        Spawn the daemon thread — ONLY if a flag is enabled (the observer's, or the
+        stale-MCP delivery's) and no thread runs.
         Returns True if a thread was started, else False (the no-op rollout gate).
         """
-        if not self._enabled():
+        if not ( self._enabled() or self._stale_mcp_enabled() ):
             return False
         if self._thread is not None and self._thread.is_alive():
             return False

@@ -22,8 +22,11 @@ import cosa.agents.heartbeat_arbiter.self_respin_observer as obs
 
 
 class _Cfg:
+    """Observer flag ON unless overridden; every other key answers the caller's default."""
+    def __init__( self, **overrides ):
+        self._o = { "arbiter self respin observer enabled": True, **overrides }
     def get( self, key, default=None, return_type=None ):
-        return True if key == "arbiter self respin observer enabled" else default
+        return self._o.get( key, default )
 
 
 def _rec( pid=4242, start=1000.5, session="cc-worker-mrradio-3", stale=True ):
@@ -129,6 +132,86 @@ def test_a_failed_check_is_logged_and_says_nothing( tmp_path ):
     assert rig.loop.tell_stale_mcp_once() == 0
     assert rig.dms == [] and rig.advisories == []
     assert len( rig.logs ) == 1 and "stale-MCP check failed" in rig.logs[ 0 ]
+
+
+# --- its OWN gate: `stale mcp check delivery enabled`, independent of the observer flag ------------
+
+OBSERVER_KEY = "arbiter self respin observer enabled"
+STALE_KEY    = "stale mcp check delivery enabled"
+
+
+def _gated_loop( tmp_path, cfg, dms ):
+    return obs.SelfRespinObserverLoop(
+        cfg, fetch_pressure_fn=lambda: { "personas": None }, base_dir=str( tmp_path ),
+        advisory_fn=lambda m: dms.append( ( "advisory", m ) ),
+        stale_mcp_fn=lambda: [ _rec() ],
+        dm_push_fn=lambda to, thread, body: dms.append( ( to, thread, body ) ) or { "outcome": "dispatched" },
+        seat_lookup_fn=lambda r: ( "Sam", "Mr. Radio" ) )
+
+
+def test_it_delivers_with_the_observer_flag_off_and_fires_no_respin_advisory( tmp_path ):
+    # a marker that WOULD alarm if the respin half ran (deadline long past, no pressure record)
+    ( tmp_path / f"{obs.MARKER_PREFIX}cheech.json" ).write_text( json.dumps( {
+        "session_id": "cheech", "persona": "cheech", "tmux_session": "cheech-mgr",
+        "fired_at": "2026-08-14T02:20:00+00:00", "expected_return_by": "2026-08-14T02:22:00+00:00",
+        "pre_clear_status": "over_budget", "pre_clear_pct": 51.4, "memento_path": "/x", "memento_verified": True,
+        "wake_nonce": "n" } ) )
+    dms  = []
+    loop = _gated_loop( tmp_path, _Cfg( **{ OBSERVER_KEY: False } ), dms )         # STALE_KEY absent -> default True
+    summary = loop.sweep_once()
+    assert summary == { "enabled": False, "alarms": 0, "advised": 0, "swept": 0, "stale_mcp_told": 1 }
+    assert [ d[ 0 ] for d in dms ] == [ "Mr. Radio" ]                              # the DM, and no respin advisory
+    # positive control: the same marker DOES alarm once the observer flag is on
+    dms2 = []
+    assert _gated_loop( tmp_path, _Cfg(), dms2 ).sweep_once()[ "alarms" ] == 1
+
+
+def test_the_stale_flag_false_stops_delivery_even_with_the_observer_on( tmp_path ):
+    dms = []
+    summary = _gated_loop( tmp_path, _Cfg( **{ STALE_KEY: False } ), dms ).sweep_once()
+    assert "stale_mcp_told" not in summary and dms == []
+
+
+def test_both_flags_off_is_the_plain_disabled_summary( tmp_path ):
+    dms = []
+    summary = _gated_loop( tmp_path, _Cfg( **{ OBSERVER_KEY: False, STALE_KEY: False } ), dms ).sweep_once()
+    assert summary == { "enabled": False, "alarms": 0, "advised": 0, "swept": 0 } and dms == []
+
+
+@pytest.mark.parametrize( "overrides, expected", [
+    ( { OBSERVER_KEY: False },                   True ),      # only the stale gate is on
+    ( { OBSERVER_KEY: True, STALE_KEY: False },  True ),      # only the observer gate is on
+    ( { OBSERVER_KEY: False, STALE_KEY: False }, False ),     # both off: the rollout no-op
+] )
+def test_start_spawns_the_daemon_when_either_gate_is_on( tmp_path, overrides, expected ):
+    loop = _gated_loop( tmp_path, _Cfg( **overrides ), [] )
+    loop._tick_seconds = lambda: 3600
+    try:
+        assert loop.start() is expected
+    finally:
+        loop.stop()
+
+
+def _assemble( monkeypatch, **flags ):
+    import lupin_arbiter_app.app as app_module
+    class Cfg:
+        def get( self, key, default=None, return_type="string" ):
+            if key in ( "arbiter health watch enabled", "arbiter context watch enabled" ): return False
+            return flags.get( key, default )
+    class GW:
+        def post( self, *a, **k ): return None
+    monkeypatch.setattr( "cosa.agents.utils.sender_id.detect_project", lambda: "lupin" )
+    return app_module.assemble_app( Cfg(), GW(), dm_push_fn=lambda *a: {}, log_fn=lambda *a, **k: None )
+
+
+def test_the_arbiter_builds_the_loop_when_only_the_stale_flag_is_on( monkeypatch ):
+    app = _assemble( monkeypatch, **{ OBSERVER_KEY: False } )                        # STALE_KEY defaults True
+    assert app.state.self_respin_observer_loop is not None
+
+
+def test_the_arbiter_builds_no_loop_when_both_flags_are_off( monkeypatch ):
+    app = _assemble( monkeypatch, **{ OBSERVER_KEY: False, STALE_KEY: False } )
+    assert app.state.self_respin_observer_loop is None
 
 
 def test_the_feature_is_off_when_no_check_is_wired( tmp_path ):
