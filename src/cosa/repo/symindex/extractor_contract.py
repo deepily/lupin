@@ -25,6 +25,10 @@ Each returned dict is one symbol record with exactly these keys:
 The builder computes `id` itself: "<file without extension, '/' as '.'>.<name>", prefixed
 "<repo>:" for every root that is not the lupin tree, with "#2", "#3" on a collision.
 
+The extractor module also defines PIN_ALGORITHM, a short string naming the parser and its version
+(for example "dart3.8.0/analyzer7.7.1"). The builder records it in the index header, and a change in
+it is reported once as "algorithm changed, re-pin" instead of as one stale finding per page.
+
 A missing external tool raises errors.DependencyMissing( what ). The builder records it in
 the index header and the caller maps it to the cause DEPENDENCY_MISSING; it is never an
 empty result.
