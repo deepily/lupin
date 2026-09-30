@@ -114,12 +114,14 @@ export function abstractBlock( abstract: string | undefined ): HTMLElement | nul
 // simply do not mount rather than mounting dead — this card is being built under a
 // parity epic whose recurring defect is a painted control with no handler.
 export function predictionHintBox(
-  item : { id_hash: string; response_type: string; prediction_hint?: PredictionHint },
+  item : { id_hash: string; response_type: string; prediction_hint?: PredictionHint | null },
   vote : PredictionVoteIntegration | undefined,
 ): HTMLElement {
   const hint = item.prediction_hint;
   const root = document.createElement( "div" );
-  if ( hint === undefined ) {
+  // `== null`: absent is both spellings (row 759250e4). The store no longer admits a null, but the ghost box
+  // is the ratified answer to "no hint" whichever way it is spelled, so this guard says so too.
+  if ( hint == null ) {
     root.className = "prediction-hint prediction-hint-cold";
     const label = document.createElement( "div" );
     label.className   = "prediction-hint-label";

@@ -516,12 +516,19 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
       timeout_seconds : timeout,
       state           : "pending",
     };
-    if (n.response_default !== undefined) item.default = n.response_default;
+    // 🔴 `!= null` FOR EVERY OPTIONAL FIELD BELOW, NOT `!== undefined` (row 759250e4). The server builds
+    // the frame with NotificationItem.to_dict(), which spells "not supplied" as JSON null, and a stored
+    // null is outside `ActionRequiredItem` (optional, never nullable). `prediction_hint` is the one that
+    // bit: /api/notify sets it to None whenever the engine has no confident hint (cold start, below the
+    // threshold, or an engine error — all ordinary), and predictionHintBox read `predicted_value` through
+    // the null. EventBus swallowed the throw, so the store held the ask and nothing was painted. Measured
+    // on :8000, ts-2fdb5363: "conf=0.000, hint=no", frame `prediction_hint: None`.
+    if (n.response_default != null) item.default = n.response_default;
     if (n.display_qualifier_widget === true) item.display_qualifier_widget = true;
     // A-2 #2m — carry the chrome fields when the server sends them. Assigned
     // conditionally, never as `undefined`, so an absent field stays absent on the
     // item and the renderer's `=== undefined` checks mean what they say.
-    if (n.sender_id !== undefined) item.sender_id = n.sender_id;
+    if (n.sender_id != null) item.sender_id = n.sender_id;
     // `!= null`, not `!== undefined`: the server sends JSON `null` for a sender with no
     // session-bridge entry, and `!== undefined` admitted it. `ActionRequiredItem` declares
     // `voice_persona ?: VoicePersona` — optional, never NULLABLE — so a stored `null` was
@@ -529,8 +536,8 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
     // too, but this is the line that should never have let it in: keeping the store inside
     // its own declared type is what stops the next reader inheriting the same trap.
     if (n.voice_persona != null) item.voice_persona = n.voice_persona;
-    if (n.abstract !== undefined) item.abstract = n.abstract;
-    if (n.prediction_hint !== undefined) item.prediction_hint = n.prediction_hint;
+    if (n.abstract != null) item.abstract = n.abstract;
+    if (n.prediction_hint != null) item.prediction_hint = n.prediction_hint;
 
     const actor = createActor(promptMachine);
     actor.start();
