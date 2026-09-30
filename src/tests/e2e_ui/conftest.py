@@ -272,8 +272,8 @@ def assert_snapshot_height_tolerant( pytestconfig, request ):
 
     Requires:
         - the pytest-playwright-visual-snapshot ini keys are set
-          (`playwright_visual_snapshots_path`, `..._threshold`,
-          `..._failures_path`) — the same config the stock fixture reads
+          (`playwright_visual_snapshots_path`, `..._failures_path`; the pixel threshold
+          is PIXEL_THRESHOLD, not the ini key — row 4f5301ad) — the same config the stock fixture reads
         - the passed object is a Playwright Locator/Page (screenshotted here) or
           raw PNG bytes
 
@@ -290,7 +290,6 @@ def assert_snapshot_height_tolerant( pytestconfig, request ):
     root_dir       = _Path( pytestconfig.rootdir )
     snapshots_path = root_dir / pytestconfig.getini( "playwright_visual_snapshots_path" )
     failures_path  = root_dir / pytestconfig.getini( "playwright_visual_snapshot_failures_path" )
-    threshold      = float( pytestconfig.getini( "playwright_visual_snapshot_threshold" ) )
     update         = bool( request.config.getoption( "--update-snapshots" ) )
 
     test_file_stem = _Path( request.node.fspath ).stem
@@ -314,7 +313,7 @@ def assert_snapshot_height_tolerant( pytestconfig, request ):
 
         result = compare_pngs_height_tolerant(
             img, baseline_file.read_bytes(),
-            threshold=threshold, max_height_delta=max_height_delta,
+            max_height_delta=max_height_delta,
         )
         if result.matched:
             return
@@ -366,7 +365,7 @@ def assert_snapshot_content_shift_tolerant( pytestconfig, request ):
 
     Requires:
         - the pytest-playwright-visual-snapshot ini keys are set
-          (`playwright_visual_snapshots_path`, `..._threshold`, `..._failures_path`)
+          (`playwright_visual_snapshots_path`, `..._failures_path`; the pixel threshold is PIXEL_THRESHOLD, not the ini key — row 4f5301ad)
         - the passed object is a Playwright Locator/Page (screenshotted here) or
           raw PNG bytes
 
@@ -385,7 +384,6 @@ def assert_snapshot_content_shift_tolerant( pytestconfig, request ):
     root_dir       = _Path( pytestconfig.rootdir )
     snapshots_path = root_dir / pytestconfig.getini( "playwright_visual_snapshots_path" )
     failures_path  = root_dir / pytestconfig.getini( "playwright_visual_snapshot_failures_path" )
-    threshold      = float( pytestconfig.getini( "playwright_visual_snapshot_threshold" ) )
     update         = bool( request.config.getoption( "--update-snapshots" ) )
 
     test_file_stem = _Path( request.node.fspath ).stem
@@ -412,14 +410,14 @@ def assert_snapshot_content_shift_tolerant( pytestconfig, request ):
 
         shift = compare_pngs_content_shift_tolerant(
             img, baseline,
-            threshold=threshold, max_shift=max_shift, max_height_delta=max_height_delta,
+            max_shift=max_shift, max_height_delta=max_height_delta,
         )
         if shift.matched:
             return
 
         scatter = compare_pngs_aa_scatter_tolerant(
             img, baseline,
-            threshold=threshold, max_height_delta=max_height_delta,
+            max_height_delta=max_height_delta,
             max_isolated_cluster=max_isolated_cluster,
         )
         if scatter.matched:
