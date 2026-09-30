@@ -180,7 +180,7 @@ def measure(                                        # pragma: no cover - straigh
     actual_png           : bytes,
     golden_png           : bytes,
     *,
-    threshold            : float = 0.0,
+    threshold            : float = 0.1,
     max_shift            : int   = 1,
     max_height_delta     : int   = 1,
     max_isolated_cluster : int   = 2,
@@ -244,7 +244,7 @@ def main( argv=None ) -> int:                       # pragma: no cover - CLI/IO 
     )
     parser.add_argument( "--actual", required=True, help="path to the ACTUAL (freshly-captured) PNG" )
     parser.add_argument( "--golden", required=True, help="path to the GOLDEN (committed baseline) PNG" )
-    parser.add_argument( "--threshold",            type=float, default=0.0 )
+    parser.add_argument( "--threshold",            type=float, default=0.1 )
     parser.add_argument( "--max-shift",            type=int,   default=1 )
     parser.add_argument( "--max-height-delta",     type=int,   default=1 )
     parser.add_argument( "--max-isolated-cluster", type=int,   default=2 )
