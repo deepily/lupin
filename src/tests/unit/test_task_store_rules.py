@@ -1894,6 +1894,99 @@ class TestReachabilityNeverRaises:
         assert errors == [ ]
 
 
+class TestGitFailureIsNotReportedAsNotFound:
+    """
+    Row 81f09303. Inside the rest container git refused a bind-mounted repo
+    ("dubious ownership") and the store answered "could not be found on any
+    branch" for a commit that WAS on a branch. A git failure and an absent object
+    must read differently. All cases run REAL git on real tmp repos — uid tricks
+    for dubious ownership are not possible unprivileged, so the failure path
+    exercised is a repo whose .git/HEAD is unreadable garbage: git exits 128
+    ("not a git repository"), the same exit class as dubious ownership.
+    """
+
+    @pytest.fixture
+    def broken_repo( self, tmp_path_factory ):
+        # Outside scope_roots' tmp_path: that dir is itself a repo, and git would
+        # walk up out of the broken one and find the sha there.
+        repo = tmp_path_factory.mktemp( "brokenrepo" ) / "broken"
+        _git( repo.parent, "init", "-q", str( repo ) )
+        ( repo / ".git" / "HEAD" ).write_text( "garbage\n" )
+        return str( repo )
+
+    def test_absent_sha_still_says_not_found( self, scope_roots ):
+        errors = rules.validate_receipt_refs(
+            { "commit": "deadbeef" }, scope_roots=scope_roots, require_checkable=True
+        )
+        assert "could not be found on any branch" in errors[ 0 ]
+        assert "git could not run" not in errors[ 0 ]
+
+    def test_git_failure_names_repo_and_stderr_and_is_not_not_found( self, broken_repo, reachable_sha ):
+        errors = rules.validate_receipt_refs(
+            { "commit": reachable_sha }, scope_roots={ "broken": broken_repo }, require_checkable=True
+        )
+        assert len( errors ) == 1
+        assert "could NOT be verified" in errors[ 0 ]
+        assert "git could not run" in errors[ 0 ]
+        assert broken_repo in errors[ 0 ] and "broken" in errors[ 0 ]
+        assert "not a git repository" in errors[ 0 ]
+        assert "never checked" in errors[ 0 ]
+        assert "could not be found on any branch" not in errors[ 0 ]
+
+    def test_failing_repo_is_not_skipped_when_another_repo_says_not_found( self, scope_roots, broken_repo ):
+        roots = dict( scope_roots )
+        roots[ "broken" ] = broken_repo
+        errors = rules.validate_receipt_refs(
+            { "commit": "deadbeef" }, scope_roots=roots, require_checkable=True
+        )
+        assert "git could not run" in errors[ 0 ] and broken_repo in errors[ 0 ]
+        assert "could not be found on any branch" not in errors[ 0 ]
+
+    def test_sha_found_elsewhere_is_accepted_despite_a_failing_repo( self, scope_roots, broken_repo, reachable_sha ):
+        roots = dict( scope_roots )
+        roots[ "broken" ] = broken_repo
+        errors = rules.validate_receipt_refs(
+            { "commit": reachable_sha }, scope_roots=roots, require_checkable=True
+        )
+        assert errors == [ ]
+
+    def test_git_failing_with_empty_stderr_still_reports_the_exit_code( self, scope_roots, reachable_sha, tmp_path, monkeypatch ):
+        fake = tmp_path / "fakebin"
+        fake.mkdir()
+        ( fake / "git" ).write_text( "#!/bin/sh\nexit 7\n" )
+        ( fake / "git" ).chmod( 0o755 )
+        monkeypatch.setenv( "PATH", f"{fake}{os.pathsep}{os.environ[ 'PATH' ]}" )
+        errors = rules.validate_receipt_refs(
+            { "commit": reachable_sha }, scope_roots=scope_roots, require_checkable=True
+        )
+        assert "git could not run" in errors[ 0 ]
+        assert "git exited 7 with no stderr" in errors[ 0 ]
+
+
+    def test_git_is_called_with_the_locale_pinned_to_C( self, scope_roots, tmp_path, monkeypatch ):
+        """
+        The not-found split matches git's English stderr, and git translates it
+        under LANG. A fake git on PATH records the locale it was launched with,
+        while the caller's own environment asks for French.
+        """
+        fake = tmp_path / "fakebin"
+        fake.mkdir()
+        seen = tmp_path / "seen.txt"
+        ( fake / "git" ).write_text(
+            f"#!/bin/sh\necho \"$LC_ALL|$LANGUAGE\" > {seen}\n"
+            "echo 'error: no such commit deadbeef' >&2\nexit 129\n"
+        )
+        ( fake / "git" ).chmod( 0o755 )
+        monkeypatch.setenv( "PATH", f"{fake}{os.pathsep}{os.environ[ 'PATH' ]}" )
+        monkeypatch.setenv( "LC_ALL", "fr_FR.UTF-8" )
+        monkeypatch.setenv( "LANGUAGE", "fr" )
+        errors = rules.validate_receipt_refs(
+            { "commit": "deadbeef" }, scope_roots=scope_roots, require_checkable=True
+        )
+        assert seen.read_text().strip() == "C|C"
+        assert "could not be found on any branch" in errors[ 0 ]
+
+
 class TestQidIsContextNeverAClose:
     """
     María's ruling, 2026-08-15: "A qid is CONTEXT and may ride ALONGSIDE a real

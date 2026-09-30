@@ -393,6 +393,11 @@ def _validate_commit_reachable( sha: str, scope_roots: Optional[dict] ) -> list:
           sha on a branch — this is the orphaned-object case: a sha left by a
           reset or rebase resolves TODAY and vanishes at the next gc, so a
           receipt pointing at one decays into a receipt pointing at nothing
+        - returns one error quoting git's first stderr line and naming the repo when
+          git FAILED to run on any scope (dubious ownership, permission denied,
+          not a repo, missing binary, timeout) and no scope had the sha — the sha
+          was never checked there, so this is never reported as "not found"
+          (row 81f09303)
         - returns one error, naming the reason, when NO registered scope is a
           usable git work tree — the store cannot check, so it REFUSES rather
           than accepting quietly. An unverifiable receipt silently accepted is
@@ -406,8 +411,9 @@ def _validate_commit_reachable( sha: str, scope_roots: Optional[dict] ) -> list:
     any repo the store serves is a sha a human can go read.
     """
     roots     = scope_roots if scope_roots is not None else _get_default_scope_roots()
-    searched  = [ ]
+    searched   = [ ]
     unsearched = [ ]
+    failures   = [ ]
 
     for scope, root in sorted( roots.items() ):
         if not root or not os.path.isdir( os.path.join( root, ".git" ) ):
@@ -419,17 +425,41 @@ def _validate_commit_reachable( sha: str, scope_roots: Optional[dict] ) -> list:
                 capture_output = True,
                 text           = True,
                 timeout        = 15,
+                # git translates its messages under LANG; the not-found split below
+                # matches the English text, so pin the locale (row 81f09303).
+                env            = { **os.environ, "LC_ALL": "C", "LANGUAGE": "C" },
             )
-        except ( OSError, subprocess.SubprocessError ):
-            unsearched.append( scope )
+        except ( OSError, subprocess.SubprocessError ) as e:
+            failures.append( ( scope, root, f"{type( e ).__name__}: {e}" ) )
             continue
 
+        # Non-zero exit splits two ways (row 81f09303). git saying the OBJECT is
+        # unknown ("no such commit" / "malformed object name") means git RAN and the
+        # sha is absent here — another scope may still have it. ANY other non-zero
+        # exit (dubious ownership, permission denied, not a repo) means git could not
+        # answer, so the sha was never checked in this repo and must not be reported
+        # as "not found".
+        if proc.returncode != 0:
+            stderr_lines = proc.stderr.strip().splitlines()
+            first_line   = stderr_lines[ 0 ] if stderr_lines else f"git exited {proc.returncode} with no stderr"
+            if "no such commit" not in proc.stderr and "malformed object name" not in proc.stderr:
+                failures.append( ( scope, root, first_line ) )
+                continue
+
         searched.append( scope )
-        # A non-zero exit means the object is unknown to THIS repo — not fatal,
-        # another scope may still have it. Empty stdout on a zero exit means the
-        # object exists but sits on no branch: the orphan case.
+        # Empty stdout on a zero exit means the object exists but sits on no
+        # branch: the orphan case.
         if proc.returncode == 0 and proc.stdout.strip():
             return [ ]
+
+    if failures:
+        detail = "; ".join( f"{scope} ({root}): {reason}" for scope, root, reason in failures )
+        return [
+            f"receipt commit '{sha}' could NOT be verified — git could not run on "
+            f"{len( failures )} repo(s), so the sha was never checked there: {detail}. "
+            f"This is a server-side git failure, not a verdict on your sha. "
+            f"Searched cleanly: {searched or 'none'} (row 81f09303)."
+        ]
 
     if not searched:
         return [
