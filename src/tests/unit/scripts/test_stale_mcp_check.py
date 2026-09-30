@@ -500,6 +500,45 @@ class TestReport:
         assert [ r[ "pid" ] for r in recs ] == [ 960 ]
         assert recs[ 0 ][ "tmux_session" ] == "s"
 
+
+class TestProcessIdentityAcrossTicks:
+    """
+    Row 97c5bd94, the defect Mr. Radio's revert exposed: a sweep that remembers "I already told
+    this process" needs an identity that is the SAME on the next tick. `start_epoch` is not: it is
+    boot_time + ticks / CLK_TCK, and boot_time = now - /proc/uptime is built from two clock reads
+    that never line up, so it drifts a few milliseconds per run (measured 2026-09-29: all 8 live
+    processes, 3 runs a second apart, each 7 ms apart). Keyed on it, every tick looked like a new
+    process and each was told again every minute.
+    """
+
+    def test_start_ticks_is_the_stat_field_and_survives_the_clock_jitter( self, world ):
+        _add_pid( world[ "proc" ], 970, 1, _mcp_argv( world[ "src" ] ), EDIT_TIME - 5 )
+        first  = _census( world, now=NOW )[ 0 ]
+        second = _census( world, now=NOW + 0.007 )[ 0 ]
+        assert first[ "start_epoch" ] != second[ "start_epoch" ]              # positive control: the float DOES drift
+        assert first[ "start_ticks" ] == second[ "start_ticks" ] == 999_500   # (10000 - 5) s * 100 ticks/s, off stat field 22
+        assert isinstance( first[ "start_ticks" ], int )
+
+    def test_the_real_check_output_tells_a_process_once_across_ticks_with_a_drifting_clock( self, world, monkeypatch, capsys ):
+        """End to end through the real census and the real JSON parser, three ticks, drifting clock."""
+        import cosa.agents.heartbeat_arbiter.self_respin_observer as obs
+        _add_pid( world[ "proc" ], 980, 1, _mcp_argv( world[ "src" ] ), EDIT_TIME - 60 )
+        monkeypatch.setattr( smc, "list_tmux_panes", _no_panes )
+        clocks = iter( [ NOW, NOW + 0.007, NOW + 0.011 ] )
+        def runner( argv, timeout ):
+            code = smc.main( [ "--json" ], proc_root=world[ "proc" ], clk_tck=CLK_TCK, now=next( clocks ) )
+            return code, capsys.readouterr().out
+        class Cfg:
+            def get( self, key, default=None, return_type=None ): return default
+        dms  = []
+        loop = obs.SelfRespinObserverLoop(
+            Cfg(), advisory_fn=lambda m: None,
+            stale_mcp_fn=lambda: obs.run_stale_mcp_check( runner=runner, script_path="/x.py" ),
+            dm_push_fn=lambda to, thread, body: dms.append( ( to, thread ) ) or { "outcome": "dispatched" },
+            seat_lookup_fn=lambda r: ( "Sam", "Mr. Radio" ) )
+        assert [ loop.tell_stale_mcp_once() for _ in range( 3 ) ] == [ 1, 0, 0 ]
+        assert dms == [ ( "Mr. Radio", "stale-mcp-980" ) ]
+
     def test_dunder_main_exits_with_the_code( self, monkeypatch ):
         monkeypatch.setattr( sys, "argv", [ SCRIPT_PATH, "--proc-root", "/definitely/not/proc" ] )
         with pytest.raises( SystemExit ) as exc:

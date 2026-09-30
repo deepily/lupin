@@ -314,8 +314,13 @@ def census( proc_root="/proc", self_pid=None, pane_lister=None, clk_tck=None, no
         - now, when given, is the current epoch time (default: time.time())
     Ensures:
         - returns one record per MCP process, sorted by pid, each carrying
-          pid, start_epoch, cwd, script, pane_pid, tmux_session, tmux_pane,
+          pid, start_epoch, start_ticks, cwd, script, pane_pid, tmux_session, tmux_pane,
           modules (each with mtime), newer_modules, unresolved, stale
+        - start_ticks is the integer from /proc/<pid>/stat field 22, exactly as the kernel
+          wrote it, and is the process's IDENTITY across runs: ( pid, start_ticks ) names one
+          process. start_epoch is DERIVED (boot_time + ticks / clk_tck, boot_time = now - uptime,
+          two clock reads that never line up) so it drifts a few milliseconds per run and must
+          never be used as a key — a sweep keyed on it re-told every process every tick
         - excludes self_pid (default: this process) and all of its ancestors, so the
           census never counts itself or the shell that launched it
         - a process that exits mid-census is skipped
@@ -362,6 +367,7 @@ def census( proc_root="/proc", self_pid=None, pane_lister=None, clk_tck=None, no
         records.append( {
             "pid"           : pid,
             "start_epoch"   : start_epoch,
+            "start_ticks"   : stat[ 1 ],
             "cwd"           : cwd,
             "script"        : script,
             "pane_pid"      : pane_pid,
