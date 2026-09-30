@@ -1385,7 +1385,9 @@ class SelfRespinObserverLoop:
             - a seat whose manager cannot be resolved (or with no DM hop wired) goes to
               the operator advisory instead, once, rather than being dropped
             - keys of processes no longer stale are forgotten
-            - never raises: a failed check is logged and the tick moves on
+            - never raises: a failed check is logged and the tick moves on; a record whose
+              lookup, DM or advisory raises (or which is malformed) is logged and skipped,
+              the others are still told, and it is retried next tick
         """
         try:
             stale = self._stale_mcp_fn()
@@ -1395,20 +1397,24 @@ class SelfRespinObserverLoop:
         told = 0
         live = set()
         for rec in stale:
-            key = ( rec[ "pid" ], rec[ "start_epoch" ] )
-            live.add( key )
-            if key in self._stale_told: continue
-            seat, manager = self._seat_lookup_fn( rec )
-            body = (
-                f"STALE MCP — cosa-voice MCP pid {rec[ 'pid' ]} "
-                f"(seat {seat or 'unknown'}, tmux {rec.get( 'tmux_session' )} {rec.get( 'tmux_pane' )}) "
-                f"is running code older than the tree: {STALE_MCP_REMEDY}."
-            )
-            if manager is None or self._dm_push_fn is None:
-                self._advisory_fn( body + " No manager DM route (manager unresolved or DM push off)." )
-            else:
-                outcome = self._dm_push_fn( manager, f"stale-mcp-{rec[ 'pid' ]}", body )
-                if outcome.get( "outcome" ) != "dispatched": continue
+            try:                                       # one bad record must not stop the others being told
+                key = ( rec[ "pid" ], rec[ "start_epoch" ] )
+                live.add( key )
+                if key in self._stale_told: continue
+                seat, manager = self._seat_lookup_fn( rec )
+                body = (
+                    f"STALE MCP — cosa-voice MCP pid {rec[ 'pid' ]} "
+                    f"(seat {seat or 'unknown'}, tmux {rec.get( 'tmux_session' )} {rec.get( 'tmux_pane' )}) "
+                    f"is running code older than the tree: {STALE_MCP_REMEDY}."
+                )
+                if manager is None or self._dm_push_fn is None:
+                    self._advisory_fn( body + " No manager DM route (manager unresolved or DM push off)." )
+                else:
+                    outcome = self._dm_push_fn( manager, f"stale-mcp-{rec[ 'pid' ]}", body )
+                    if outcome.get( "outcome" ) != "dispatched": continue
+            except Exception as e:                     # not recorded as told, so the next tick retries it
+                self._log_skip( f"stale-MCP record skipped (continuing): {e!r} record={rec!r}" )
+                continue
             self._stale_told.add( key )
             told += 1
         self._stale_told &= live

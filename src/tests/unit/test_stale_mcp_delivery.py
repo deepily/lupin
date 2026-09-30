@@ -134,6 +134,35 @@ def test_a_failed_check_is_logged_and_says_nothing( tmp_path ):
     assert len( rig.logs ) == 1 and "stale-MCP check failed" in rig.logs[ 0 ]
 
 
+def test_a_lookup_that_raises_skips_that_record_and_still_tells_the_others( tmp_path ):
+    def lookup( rec ):
+        if rec[ "pid" ] == 1: raise OSError( "bridge unreadable" )
+        return ( "Sam", "Mr. Radio" )
+    rig = _Rig( tmp_path, [ _rec( pid=1 ), _rec( pid=2 ) ], lookup=lookup )
+    assert rig.loop.tell_stale_mcp_once() == 1
+    assert [ d[ 1 ] for d in rig.dms ] == [ "stale-mcp-2" ]                     # the good record WAS told
+    assert len( rig.logs ) == 1 and "record skipped" in rig.logs[ 0 ] and "bridge unreadable" in rig.logs[ 0 ]
+    assert rig.loop.tell_stale_mcp_once() == 0 and len( rig.logs ) == 2         # pid 1 retried, pid 2 not re-told
+
+
+def test_a_dm_that_raises_skips_that_record_and_still_tells_the_others( tmp_path ):
+    rig = _Rig( tmp_path, [ _rec( pid=1 ), _rec( pid=2 ) ] )
+    calls = []
+    def dm( recipient, thread_id, body ):
+        calls.append( thread_id )
+        if thread_id == "stale-mcp-1": raise ConnectionError( "refused" )
+        return { "outcome": "dispatched" }
+    rig.loop._dm_push_fn = dm
+    assert rig.loop.tell_stale_mcp_once() == 1
+    assert calls == [ "stale-mcp-1", "stale-mcp-2" ] and "record skipped" in rig.logs[ 0 ]
+
+
+def test_a_malformed_record_is_skipped_not_fatal( tmp_path ):
+    rig = _Rig( tmp_path, [ { "stale": True }, _rec( pid=2 ) ] )                # the first has no pid
+    assert rig.loop.tell_stale_mcp_once() == 1
+    assert [ d[ 1 ] for d in rig.dms ] == [ "stale-mcp-2" ] and "record skipped" in rig.logs[ 0 ]
+
+
 # --- its OWN gate: `stale mcp check delivery enabled`, independent of the observer flag ------------
 
 OBSERVER_KEY = "arbiter self respin observer enabled"
