@@ -105,7 +105,7 @@ def test_run_ruff_warns_loudly_when_missing_and_when_ruff_itself_fails( no_tools
 
 
 def test_real_ruff_output_parses_when_ruff_is_installed( tmp_path ):
-    tool = tr.find_tool( cu.get_project_root(), [ ".venv/bin/ruff" ], "ruff", "LUPIN_RUFF" )
+    tool = tr.find_tool( cu.get_project_root(), tr.RUFF_RELATIVE, "ruff", "LUPIN_RUFF" )
     if tool is None: pytest.skip( "ruff is not installed in this environment" )
     shutil.copy( os.path.join( cu.get_project_root(), "pyproject.toml" ), tmp_path / "pyproject.toml" )
     ( tmp_path / "a.py" ).write_text( 'def f():\n    """Summary.\n    Description without a blank line.\n    """\n', encoding="utf-8" )
@@ -125,7 +125,7 @@ def test_run_ruff_with_sources_checks_each_staged_text_through_stdin( monkeypatc
 
 
 def test_real_ruff_reads_the_staged_text_not_the_disk_copy_when_installed( repo ):
-    if tr.find_tool( cu.get_project_root(), [ ".venv/bin/ruff" ], "ruff", "LUPIN_RUFF" ) is None: pytest.skip( "ruff is not installed in this environment" )
+    if tr.find_tool( cu.get_project_root(), tr.RUFF_RELATIVE, "ruff", "LUPIN_RUFF" ) is None: pytest.skip( "ruff is not installed in this environment" )
     shutil.copy( os.path.join( cu.get_project_root(), "pyproject.toml" ), repo / "pyproject.toml" )
     bad = 'def f():\n    """Summary.\n    Description without a blank line.\n    """\n'
     _stage( repo, { "src/a.py": bad } )

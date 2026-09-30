@@ -14,6 +14,7 @@ import subprocess
 
 from .text_rules import Finding
 
+RUFF_RELATIVE     = [ ".venv/bin/ruff" ]
 MARKDOWNLINT_LINE = re.compile( r"^(.+?):(\d+)(?::\d+)? (?:error|warning) (MD\d+/[\w-]+) (.*)$" )
 DART_DOC_CODES    = frozenset( { "public_member_api_docs", "slash_for_doc_comments", "dangling_library_doc_comments",
                                  "unintended_html_in_doc_comment", "comment_references" } )
@@ -77,7 +78,7 @@ def run_ruff( root, paths, runner=subprocess.run, sources=None ):
         - nothing
     """
     if not paths: return [], []
-    tool = find_tool( root, [ ".venv/bin/ruff" ], "ruff", "LUPIN_RUFF" )
+    tool = find_tool( root, RUFF_RELATIVE, "ruff", "LUPIN_RUFF" )
     if tool is None: return [], [ missing_tool_warning( "ruff", "docstring layout rules (D205, D213 and the rest)" ) ]
     jobs     = [ ( [ "--stdin-filename", p, "-" ], sources[ p ] ) for p in paths ] if sources is not None else [ ( list( paths ), None ) ]
     findings = []
