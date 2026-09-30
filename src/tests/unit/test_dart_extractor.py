@@ -229,3 +229,30 @@ def test_write_if_changed_reports_whether_it_wrote( tmp_path ):
 
 def test_the_pin_algorithm_names_the_parser_and_its_version():
     assert de.PIN_ALGORITHM == "dart-analyzer-parseString/7.7.1"
+
+
+def test_check_dependencies_passes_when_both_tools_exist_and_names_the_missing_one( monkeypatch, tmp_path ):
+    cache = tmp_path / "cache"
+    ( cache / "hosted" / "pub.dev" / f"analyzer-{de.ANALYZER_VERSION}" ).mkdir( parents=True )
+    monkeypatch.setenv( "PUB_CACHE", str( cache ) )
+    monkeypatch.setattr( de.shutil, "which", lambda name: "/on/path/dart" )
+    monkeypatch.delenv( "LUPIN_DART", raising=False )
+    assert de.check_dependencies() is None
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    monkeypatch.setenv( "PUB_CACHE", str( empty ) )
+    with pytest.raises( errors.DependencyMissing ) as analyzer_missing:
+        de.check_dependencies( tmp_path )
+    assert analyzer_missing.value.what == "analyzer"
+    monkeypatch.setattr( de.shutil, "which", lambda name: None )
+    with pytest.raises( errors.DependencyMissing ) as dart_missing:
+        de.check_dependencies()
+    assert dart_missing.value.what == "dart"
+
+
+def test_check_dependencies_falls_back_to_the_home_pub_cache( monkeypatch, tmp_path ):
+    monkeypatch.delenv( "PUB_CACHE", raising=False )
+    monkeypatch.setenv( "HOME", str( tmp_path ) )
+    monkeypatch.setenv( "LUPIN_DART", str( tmp_path ) )
+    with pytest.raises( errors.DependencyMissing, match=str( tmp_path / ".pub-cache" ) ):
+        de.check_dependencies()

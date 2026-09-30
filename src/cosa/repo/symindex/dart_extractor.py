@@ -30,10 +30,11 @@ def find_dart( root ):
     Locate the dart executable.
 
     Requires:
-        - root is the index root, a git working-tree root
+        - root is the index root, a git working-tree root, or None when it is not known
 
     Ensures:
-        - returns the first of: the LUPIN_DART override, root/flutter/bin/dart, dart on the search path
+        - returns the first of: the LUPIN_DART override, root/flutter/bin/dart (only when root
+          is given), dart on the search path
         - returns None when none exists
 
     Raises:
@@ -41,9 +42,31 @@ def find_dart( root ):
     """
     override = os.environ.get( "LUPIN_DART" )
     if override and os.path.exists( override ): return override
-    bundled = os.path.join( str( root ), "flutter", "bin", "dart" )
-    if os.path.exists( bundled ): return bundled
+    if root is not None:
+        bundled = os.path.join( str( root ), "flutter", "bin", "dart" )
+        if os.path.exists( bundled ): return bundled
     return shutil.which( "dart" )
+
+
+def check_dependencies( root=None ):
+    """
+    Say whether Dart and the analyzer package are usable, without extracting anything.
+
+    Requires:
+        - root is the index root, or None to look only at LUPIN_DART and the search path
+
+    Ensures:
+        - returns None when dart is found and the analyzer package is in the pub cache
+        - the pub cache is PUB_CACHE, else ~/.pub-cache
+
+    Raises:
+        - DependencyMissing with what "dart" when no dart executable is found
+        - DependencyMissing with what "analyzer" when the pinned analyzer is not in the pub cache
+    """
+    if find_dart( root ) is None: raise DependencyMissing( "dart", "no flutter/bin/dart under the index root, no LUPIN_DART, none on the search path" )
+    cache = os.environ.get( "PUB_CACHE" ) or os.path.join( os.path.expanduser( "~" ), ".pub-cache" )
+    if not os.path.isdir( os.path.join( cache, "hosted", "pub.dev", f"analyzer-{ANALYZER_VERSION}" ) ):
+        raise DependencyMissing( "analyzer", f"analyzer-{ANALYZER_VERSION} is not in the pub cache {cache}" )
 
 
 def _write_if_changed( path, text ):
