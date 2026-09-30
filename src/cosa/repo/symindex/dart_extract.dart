@@ -8,6 +8,7 @@ import 'dart:io';
 
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/dart/ast/token.dart';
+import 'package:analyzer/dart/analysis/results.dart';
 import 'package:analyzer/dart/analysis/utilities.dart';
 
 final List<Map<String, Object>> out = [];
@@ -89,7 +90,14 @@ void main() {
   final root = req['root'] as String;
   for ( final abs in ( req['files'] as List ).cast<String>() ) {
     final file = relPath( root, abs );
-    final result = parseString( content: File( abs ).readAsStringSync(), path: abs, throwIfDiagnostics: false );
+    final ParseStringResult result;
+    try {
+      final text = utf8.decode( File( abs ).readAsBytesSync(), allowMalformed: true );
+      result = parseString( content: text, path: abs, throwIfDiagnostics: false );
+    } on Object catch ( e ) {
+      stderr.writeln( '$file: skipped, $e' );
+      continue;
+    }
     if ( result.errors.isNotEmpty ) stderr.writeln( '$file: ${result.errors.length} parse errors' );
     final unit = result.unit;
     for ( final d in unit.declarations ) {
