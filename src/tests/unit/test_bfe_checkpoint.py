@@ -177,24 +177,15 @@ class TestBfeStalledFlow:
         assert exc.checkpoint is cp
         assert exc.phase == "proposing"
 
-    @pytest.fixture
-    def event_loop_pointer_reset( self ):
-        """
-        `do_all()` runs `asyncio.run()`, which detaches the current-loop pointer when it finishes,
-        so a later `asyncio.get_event_loop()` in this process would raise. The old test repaired
-        that by installing a brand-new loop it never closed (row 17ee2cbf: an unclosed loop the
-        garbage collector closed at session teardown). This resets the policy instead, so a later
-        caller lazily builds its own loop and this test creates none.
-        """
-        import asyncio
-        yield
-        asyncio.set_event_loop_policy( None )
-
-    def test_do_all_stalled_sentinel_sets_job_state_stalled( self, event_loop_pointer_reset ):
+    def test_do_all_stalled_sentinel_sets_job_state_stalled( self ):
         """When _execute returns __STALLED__, do_all() sets state=STALLED.
 
-        The fixture above keeps downstream `asyncio.get_event_loop()` callers working
-        without this test leaving an unclosed loop behind.
+        `do_all()` runs `asyncio.run()`, which detaches the current-loop pointer when it
+        finishes. The old version of this test repaired that by installing a brand-new loop it
+        never closed (row 17ee2cbf); a reset of the asyncio policy instead just moved the leak,
+        because pytest-asyncio then lazily built an unclosed loop at the next async test's setup
+        (measured). So the pointer is left as `asyncio.run()` leaves it, which pytest-asyncio
+        tolerates and which leaves no loop behind.
         """
         from cosa.agents.bug_fix_expediter.job import BugFixExpediterJob
         from cosa.rest.job_state import JobState
