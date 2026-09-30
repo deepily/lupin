@@ -230,7 +230,8 @@ def test_an_unverified_file_imports_NOTHING_and_logs_the_values( legacy_dir, mon
 
     result = approval.import_legacy_override_file()
 
-    assert result == { "status": "imported", "imported": [] }
+    assert result == { "status": "refused-unverified", "imported": [] }
+    assert approval._backend.rows[ approval.LEGACY_IMPORT_MARKER ][ "status" ] == "refused-unverified"
     assert set( approval._backend.rows ) == { approval.LEGACY_IMPORT_MARKER }
     out = capsys.readouterr().out
     assert "approvers=['mallory'] NOT imported" in out

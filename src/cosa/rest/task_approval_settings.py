@@ -412,7 +412,9 @@ def import_legacy_override_file():
         - returns { "status": ..., "imported": [keys] } where status is one of
           "already-imported" (this database has its marker; the file is not opened),
           "no-file" (marker written, nothing to copy), "unreadable" (file present but not
-          a JSON object; marker written, nothing copied, reported loudly), "imported"
+          a JSON object; marker written, nothing copied, reported loudly),
+          "refused-unverified" (the stamp did not verify; marker written, nothing copied),
+          "imported"
         - a file whose stamp does not VERIFY imports NOTHING: every key is skipped and the
           setting falls to its INI default. Until this first boot import runs the file is
           still writable by every seat, so an unverified `approvers`, `approver_accounts` or
@@ -453,8 +455,8 @@ def import_legacy_override_file():
             print( f"[task-approval] legacy override file {path} unusable ({error}) — nothing imported" )
 
         if body is not None:
-            status   = "imported"
             verified = _stamp_is_valid( body ) is True
+            status   = "imported" if verified else "refused-unverified"
             for key in WRITABLE_KEYS:
                 if key not in body: continue
                 if not verified:
