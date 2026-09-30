@@ -2234,7 +2234,7 @@ def patch_approval_settings(
         )
 
     try:
-        live = approval.set_overrides( **updates )
+        live = approval.set_overrides( updated_by=account_email, **updates )
     except ValueError as error:
         raise HTTPException( status_code=422, detail=str( error ) )
     except OSError as error:
@@ -2293,7 +2293,8 @@ def set_manager_pull(
           is never left believing a failed flip took
     """
     try:
-        live = approval.set_manager_pull_disabled( request_body.disabled )
+        live = approval.set_manager_pull_disabled( request_body.disabled,
+                                                   updated_by=admin_user.get( "email" ) )
     except ValueError as error:
         raise HTTPException( status_code=422, detail=str( error ) )
     except OSError as error:

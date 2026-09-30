@@ -22,6 +22,7 @@ import json
 import pytest
 
 from cosa.rest import task_approval_settings as approval
+from tests.helpers.approval_settings_fixtures import SettingsHandle
 from cosa.rest import task_promotion_gate as gate
 
 
@@ -47,13 +48,7 @@ def real_account_map( tmp_path, monkeypatch ):
         - the module's mtime cache is cleared, so no other test's file is served from cache
         - the gate's lookup is left exactly as shipped
     """
-    target = tmp_path / "task-approval-settings.json"
-    monkeypatch.setattr( approval, "override_path", lambda: str( target ) )
-    monkeypatch.setattr( approval, "_cache", {
-        "approvers": None, "enforcement_active": None,
-        "default_to_holding": None, "approver_accounts": None,
-    } )
-    monkeypatch.setattr( approval, "_cache_mtime", None )
+    target = SettingsHandle()
     target.write_text( json.dumps( {
         "approvers"         : [ "maria" ],
         "approver_accounts" : {

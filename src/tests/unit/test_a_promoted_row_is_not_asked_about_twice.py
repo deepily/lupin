@@ -61,6 +61,7 @@ if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
 from cosa.rest import task_approval_settings as approval
+from tests.helpers.approval_settings_fixtures import SettingsHandle
 from cosa.rest import task_promotion_gate as promotion_gate
 from cosa.rest.postgres_models import TaskItem, TaskEvent
 from cosa.rest.routers import tasks
@@ -187,21 +188,17 @@ def client( repo, monkeypatch ):
 @pytest.fixture
 def settings( tmp_path, monkeypatch ):
     """Point the approval module's override file inside tmp_path. The INI is never touched."""
-    target = tmp_path / "task-approval-settings.json"
-    monkeypatch.setattr( approval, "override_path", lambda: str( target ) )
+    target = SettingsHandle()
     # AND THE MAP THAT MAKES THAT LOGIN AN APPROVER. The account seam supplies WHO the
     # caller is; this supplies whether that account is an approver. Both halves, or the
     # gate sees a real login belonging to nobody and refuses — which is correct
     # behaviour and would still have stopped this file at its setup step.
     monkeypatch.setattr( approval, "get_approver_accounts", lambda: { APPROVER_EMAIL: "maria" } )
-    monkeypatch.setattr( approval, "_cache", { "approvers": None, "enforcement_active": None } )
-    monkeypatch.setattr( approval, "_cache_mtime", None )
     return target
 
 
 def _write( target, **body ):
     target.write_text( json.dumps( body ) )
-    approval._cache_mtime = None
 
 
 def _post( client, item, to_status, actor ):
@@ -223,10 +220,7 @@ def test_the_isolation_actually_isolates( settings ):
     consistent with the module reading the real fleet settings off disk — and this
     file forces enforcement ON, which is exactly the setting that must not leak.
     """
-    assert str( settings ) == approval.override_path()
-    assert "projects-data" not in approval.override_path()
-
-
+    assert type( approval._backend ).__name__ == "MemoryBackend"
 def test_promoting_a_held_row_asks_exactly_once( client, repo, settings, gate ):
     """
     THE POSITIVE CONTROL. Without it the two arms below are equally consistent with a

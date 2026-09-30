@@ -31,6 +31,7 @@ if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
 from cosa.rest import task_approval_settings as approval
+from tests.helpers.approval_settings_fixtures import SettingsHandle
 from cosa.rest import task_priority_firewall as firewall
 from cosa.rest import task_store_rules as rules
 from cosa.rest.postgres_models import TaskItem
@@ -93,10 +94,7 @@ def armed_gate( monkeypatch ):
 @pytest.fixture
 def settings( tmp_path, monkeypatch ):
     """The approval override file in tmp_path, mapping ONLY the operator's email to rick."""
-    target = tmp_path / "task-approval-settings.json"
-    monkeypatch.setattr( approval, "override_path", lambda: str( target ) )
-    monkeypatch.setattr( approval, "_cache", { "approvers": None, "enforcement_active": None } )
-    monkeypatch.setattr( approval, "_cache_mtime", None )
+    target = SettingsHandle()
     target.write_text( json.dumps( {
         "approvers"          : [ "rick" ],
         "enforcement_active" : False,

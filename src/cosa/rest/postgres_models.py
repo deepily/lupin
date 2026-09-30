@@ -22,6 +22,7 @@ from sqlalchemy import (
     func,
     text
 )
+from sqlalchemy import JSON
 from sqlalchemy.dialects.postgresql import UUID, JSONB, INET
 from sqlalchemy.orm import DeclarativeBase, relationship, Mapped, mapped_column
 from datetime import datetime
@@ -1298,6 +1299,31 @@ class ServerLifecycle( Base ):
 # ============================================================================
 # Unified Task Store Models (Phase 1)
 # ============================================================================
+
+class ApprovalSetting( Base ):
+    """
+    One approval-policy setting, stored behind the server (row 80513825).
+
+    WHY A TABLE. The settings used to live in a JSON file that every process on the host —
+    the server containers and every Claude seat — could rewrite, all running as one UID, so
+    the file could not express "someone else may not write this". A row here can be reached
+    only through the server's validated setter, which sits behind a signature-checked login.
+
+    Requires:
+        - key is one of `task_approval_settings.WRITABLE_KEYS`, or the migration marker
+          `LEGACY_IMPORT_MARKER`
+
+    Ensures:
+        - one row per key; a write replaces the value and records who wrote it and when
+    """
+    __tablename__ = "approval_settings"
+
+    key           = Column( String( 64 ), primary_key=True )
+    value         = Column( JSON().with_variant( JSONB(), "postgresql" ), nullable=False )
+    updated_by    = Column( String( 255 ), nullable=True )
+    updated_ts    = Column( DateTime( timezone=True ), nullable=False,
+                            server_default=func.now(), onupdate=func.now() )
+
 
 class TaskItem( Base ):
     """

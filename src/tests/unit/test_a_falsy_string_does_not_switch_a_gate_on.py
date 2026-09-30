@@ -39,6 +39,7 @@ if _src_path not in sys.path:
 
 import cosa.rest.task_approval_settings as approval
 
+from tests.helpers.approval_settings_fixtures import SettingsHandle
 FALSY_STRINGS = [ "false", "False", "FALSE", " false ", "no", "off", "0" ]
 TRUTHY_STRINGS = [ "true", "True", " TRUE ", "yes", "on", "1" ]
 
@@ -70,16 +71,12 @@ def override( tmp_path, monkeypatch ):
     "cannot check", not "forged" — so it honours the key and these arms measure what
     their names say in a keyless tree too.
     """
-    target = tmp_path / "task-approval-settings.json"
-    monkeypatch.setattr( approval, "override_path", lambda: str( target ) )
-    monkeypatch.setattr( approval, "_cache_mtime", None )
-
+    target = SettingsHandle()
     def write( key, value ):
         body  = { key: value }
         stamp = approval._expected_stamp( body )
         if stamp is not None: body[ approval.STAMP_KEY ] = stamp
         target.write_text( json.dumps( body ) )
-        approval._cache_mtime = None            # mtime is whole-second; force a re-read
         return target
 
     return write

@@ -20,15 +20,14 @@ if _src_path not in sys.path:
 
 import cosa.rest.task_approval_settings as approval
 
+from tests.helpers.approval_settings_fixtures import SettingsHandle
 KEY = "sword_of_damocles_active"
 
 
 @pytest.fixture
 def override( tmp_path, monkeypatch ):
     """The override file inside tmp_path, never the live fleet file."""
-    target = tmp_path / "task-approval-settings.json"
-    monkeypatch.setattr( approval, "override_path", lambda: str( target ) )
-    monkeypatch.setattr( approval, "_cache_mtime", None )
+    target = SettingsHandle()
     return target
 
 
@@ -73,10 +72,9 @@ def test_the_reader_reads_the_file_the_writer_writes( override ):
     assert approval._read_overrides()[ KEY ] is True
 
 
-def test_a_MISSING_or_CORRUPT_file_projects_the_key_as_None( override ):
+def test_an_EMPTY_or_UNREADABLE_store_projects_the_key_as_None( override ):
     assert approval._read_overrides()[ KEY ] is None
-    override.write_text( "{ not json" )
-    approval._cache_mtime = None
+    approval._backend.fail_with = ConnectionError( "db down" )
     assert approval._read_overrides()[ KEY ] is None
 
 

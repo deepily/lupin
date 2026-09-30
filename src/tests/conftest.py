@@ -359,3 +359,27 @@ def fake_model_server_client( monkeypatch ):
     )
 
     yield fake
+
+
+@pytest.fixture( autouse=True )
+def approval_settings_in_memory():
+    """
+    Give every test an EMPTY in-memory approval-settings store (row 80513825).
+
+    The real store is a database table; the unit tier has none, and a test must never read
+    or write the real one. Function-scoped so one test's seeded policy cannot leak into the
+    next. Restores the real backend and drops the read cache on the way out.
+    """
+    from tests.helpers.approval_settings_fixtures import MemoryBackend
+    import cosa.rest.task_approval_settings as approval
+
+    real                = approval._backend
+    approval._backend   = MemoryBackend()
+    approval._invalidate_cache()
+    approval._outage_logged_at = None
+    try:
+        yield approval._backend
+    finally:
+        approval._backend = real
+        approval._invalidate_cache()
+        approval._outage_logged_at = None

@@ -40,6 +40,7 @@ if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
 from cosa.rest import task_approval_settings as approval
+from tests.helpers.approval_settings_fixtures import SettingsHandle
 from cosa.rest.routers import tasks
 from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt, authenticated_account_email
 
@@ -59,14 +60,11 @@ def settings( tmp_path, monkeypatch ):
     which currently holds Rick's standing rescission (`manager_pull_disabled: true`);
     a test that flips it would switch the fleet's pull gate back on.
     """
-    target = tmp_path / "task-approval-settings.json"
-    monkeypatch.setattr( approval, "override_path", lambda: str( target ) )
-    monkeypatch.setattr( approval, "_cache_mtime", None )
+    target = SettingsHandle()
     target.write_text( json.dumps( {
         "approvers"         : [ "rick" ],
         "approver_accounts" : { OPERATOR_EMAIL: "rick" },
     } ) )
-    approval._cache_mtime = None
     return target
 
 
@@ -94,11 +92,7 @@ def test_the_arms_are_reading_the_TEMP_file_and_not_the_fleet_one( settings ):
     """
     If this fails, every other result in this file is about the live deployment.
     """
-    assert approval.override_path() == str( settings )
-    assert "projects-data" not in approval.override_path()
-    assert "/var/lupin"    not in approval.override_path()
-
-
+    assert type( approval._backend ).__name__ == "MemoryBackend"
 # ── the door refuses ─────────────────────────────────────────────────────────
 
 def test_an_API_KEY_ONLY_caller_is_REFUSED( settings ):
@@ -153,11 +147,19 @@ def test_the_OPERATOR_SUCCEEDS_and_the_setting_TAKES_EFFECT( settings ):
     assert response.status_code == 200, response.text
 
     assert json.loads( settings.read_text() )[ "enforcement_active" ] is True
-    approval._cache_mtime = None
     assert approval.get_enforcement_active() is True
 
     assert response.json()[ "enforcement_active" ][ "value" ]  is True
     assert response.json()[ "enforcement_active" ][ "source" ] == "override"
+
+
+def test_the_write_records_WHO_from_the_validated_login( settings ):
+    """
+    The audit column carries the account the door resolved from the token — not anything the
+    caller typed — and a write through the door lands in the table, not in a file.
+    """
+    assert _client( OPERATOR_EMAIL ).patch( DOOR, json={ "enforcement_active": True } ).status_code == 200
+    assert approval._backend.updated_by[ "enforcement_active" ] == OPERATOR_EMAIL
 
 
 def test_the_operator_can_write_EVERY_key_that_had_no_door( settings ):

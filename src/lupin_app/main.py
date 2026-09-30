@@ -698,6 +698,13 @@ async def lifespan( app: FastAPI ):
     migrate_result = run_migrations_to_head( debug=app_debug )
     print( "✓ Database schema is at migration head." )
 
+    # Copy the retired approval-settings JSON file into the approval_settings table ONCE
+    # per database (row 80513825). After this the file is never read again, so a seat that
+    # rewrites it cannot change policy. FAIL-LOUD like the migration: an unreadable
+    # database here aborts boot rather than serving a store nobody has checked.
+    from cosa.rest.task_approval_settings import import_legacy_override_file
+    import_legacy_override_file()
+
     # ANNOUNCE AN APPLIED MIGRATION (row 0aae1a28 (a), Mr Radio's ruling).
     #
     # On :7999 uvicorn runs with StatReload over a bind-mounted repo, so SAVING a

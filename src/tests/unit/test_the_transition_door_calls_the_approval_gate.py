@@ -39,6 +39,7 @@ if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
 from cosa.rest import task_approval_settings as approval
+from tests.helpers.approval_settings_fixtures import SettingsHandle
 from cosa.rest.postgres_models import TaskItem, TaskEvent
 from cosa.rest.routers import tasks
 from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
@@ -173,16 +174,12 @@ def settings( tmp_path, monkeypatch ):
     The INI is never touched. `_write` below is the only thing in this file that
     decides who is an approver or whether enforcement is on.
     """
-    target = tmp_path / "task-approval-settings.json"
-    monkeypatch.setattr( approval, "override_path", lambda: str( target ) )
-    monkeypatch.setattr( approval, "_cache", { "approvers": None, "enforcement_active": None } )
-    monkeypatch.setattr( approval, "_cache_mtime", None )
+    target = SettingsHandle()
     return target
 
 
 def _write( target, **body ):
     target.write_text( json.dumps( body ) )
-    approval._cache_mtime = None
 
 
 def _post( client, item, to_status, actor, **extra ):
@@ -196,10 +193,7 @@ def test_the_isolation_actually_isolates( settings ):
     The guard on every test below it, so it runs first. Without it a green file is
     also consistent with the module reading the real fleet settings.
     """
-    assert str( settings ) == approval.override_path()
-    assert "projects-data" not in approval.override_path()
-
-
+    assert type( approval._backend ).__name__ == "MemoryBackend"
 def test_a_non_approver_is_refused_AT_THE_DOOR( client, repo, settings ):
     """
     THE ONE THIS FILE EXISTS FOR. A request, not a function call: this is the layer a

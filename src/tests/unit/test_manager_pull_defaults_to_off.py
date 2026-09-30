@@ -38,6 +38,7 @@ if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
 from cosa.rest import task_approval_settings as approval
+from tests.helpers.approval_settings_fixtures import SettingsHandle
 # 🔨 Every override body this file writes is STAMPED. Since the stamp landed, an
 # unstamped file has `manager_pull_disabled` IGNORED — which is the guard working, and
 # it reddened 8 arms here whose subject is the boolean parse, not the stamp. See the
@@ -65,11 +66,7 @@ def fresh( tmp_path, monkeypatch ):
           through
         - the module's mtime cache is cleared, so a previous test cannot leak a value
     """
-    target = tmp_path / "task-approval-settings.json"
-    monkeypatch.setattr( approval, "override_path", lambda: str( target ) )
-    monkeypatch.setattr( approval, "_cache", { "approvers": None, "enforcement_active": None } )
-    monkeypatch.setattr( approval, "_cache_mtime", None )
-
+    target = SettingsHandle()
     real_ini = approval._ini_value
 
     def pinned( key, return_type, fallback ):
@@ -88,11 +85,8 @@ def test_the_isolation_actually_isolates( fresh ):
     REAL override — the one Rick's keypress set to True tonight — in which case every
     assertion below would pass while proving nothing about the default.
     """
-    assert str( fresh ) == approval.override_path()
-    assert not os.path.exists( approval.override_path() ), (
-        "the fresh-world fixture starts with an override file already present"
-    )
-    assert "projects-data" not in approval.override_path()
+    assert type( approval._backend ).__name__ == "MemoryBackend"
+    assert approval._backend.rows == {}, "the fresh-world fixture starts with a setting already stored"
     assert approval._ini_value( approval.INI_KEY_MANAGER_PULL_DISABLED, "string", None ) is None
 
 
@@ -131,11 +125,9 @@ def test_the_fresh_world_can_still_see_a_False( fresh ):
     the Trues above are readings rather than an artifact.
     """
     fresh.write_text( stamped_json( { "manager_pull_disabled": False } ) )
-    approval._cache_mtime = None
     assert approval.get_manager_pull_disabled() is False
 
     fresh.write_text( stamped_json( { "manager_pull_disabled": True } ) )
-    approval._cache_mtime = None
     assert approval.get_manager_pull_disabled() is True
 
 
@@ -148,7 +140,6 @@ def test_the_override_file_still_outranks_the_default( fresh ):
     become "NO, permanently", which is a different order than the one he gave.
     """
     fresh.write_text( stamped_json( { "manager_pull_disabled": False } ) )
-    approval._cache_mtime = None
     assert approval.get_manager_pull_disabled() is False, (
         "the shipped default is overriding the operator's own runtime flip"
     )
@@ -238,7 +229,6 @@ def test_a_junk_VALUE_in_the_override_file_still_refuses( fresh, value, why ):
     Every one of these returned False (pull ALLOWED) before `_as_bool_or_none` existed.
     """
     fresh.write_text( stamped_json( { "manager_pull_disabled": value } ) )
-    approval._cache_mtime = None
     assert approval.get_manager_pull_disabled() is True, (
         f"a junk override value ({why}) opens the pull gate"
     )
@@ -250,7 +240,6 @@ def test_a_junk_value_is_REPORTED_rather_than_swallowed( fresh, capsys ):
     broken. The corrupt-file path already prints; the junk-value path must too.
     """
     fresh.write_text( stamped_json( { "manager_pull_disabled": "banana" } ) )
-    approval._cache_mtime = None
     approval.get_manager_pull_disabled()
     out = capsys.readouterr().out
     assert "banana" in out and "not a boolean" in out, (
@@ -268,7 +257,6 @@ def test_the_operator_can_still_say_no_in_words( fresh, word ):
     recognized false word must still turn the toggle off.
     """
     fresh.write_text( stamped_json( { "manager_pull_disabled": word } ) )
-    approval._cache_mtime = None
     assert approval.get_manager_pull_disabled() is False, (
         f"the recognized false word {word!r} no longer turns the toggle off"
     )
@@ -278,49 +266,19 @@ def test_the_operator_can_still_say_no_in_words( fresh, word ):
 def test_the_recognized_true_words_are_read_as_true( fresh, word ):
     """The other half of the parse, so a stuck-at-True reader cannot pass the pair."""
     fresh.write_text( stamped_json( { "manager_pull_disabled": word } ) )
-    approval._cache_mtime = None
     assert approval.get_manager_pull_disabled() is True
 
 
 def test_case_and_whitespace_do_not_decide_the_switch( fresh ):
     """`"  FALSE  "` is a hand-edit, not a different setting."""
     fresh.write_text( stamped_json( { "manager_pull_disabled": "  FaLsE  " } ) )
-    approval._cache_mtime = None
     assert approval.get_manager_pull_disabled() is False
 
 
-def test_an_override_file_that_will_not_PARSE_still_refuses( fresh, capsys ):
-    """
-    Wholesale corruption — already safe before this row, pinned so it stays that way.
-
-    Named separately from the junk-value arms because they are different failures:
-    this one never reaches the parse at all, and it is the LOUD one.
-    """
-    fresh.write_text( "{ not json at all" )
-    approval._cache_mtime = None
-    assert approval.get_manager_pull_disabled() is True
-    assert "unusable" in capsys.readouterr().out
 
 
-def test_an_override_file_that_is_not_an_OBJECT_still_refuses( fresh ):
-    """A JSON array where a dict belongs — the shape is wrong, not the value."""
-    fresh.write_text( stamped_json( [ { "manager_pull_disabled": False } ] ) )
-    approval._cache_mtime = None
-    assert approval.get_manager_pull_disabled() is True
 
 
-def test_an_override_file_that_cannot_be_OPENED_still_refuses( fresh ):
-    """
-    The path EXISTS — so the missing-file branch is not what answers — and opening it
-    raises. A directory is the cheapest way to build that without touching permissions.
-
-    ⚠️ AND PERMISSIONS WOULD BE THE WRONG INSTRUMENT HERE ANYWAY: every process on this
-    deployment runs as one UID, so a mode change cannot express "someone else may not
-    read this". See the single-UID finding on this row.
-    """
-    fresh.mkdir()
-    approval._cache_mtime = None
-    assert approval.get_manager_pull_disabled() is True
 
 
 def test_a_junk_value_in_the_INI_still_refuses( fresh, monkeypatch ):
@@ -347,10 +305,7 @@ def test_a_config_manager_that_THROWS_still_refuses( tmp_path, monkeypatch, caps
     job is to survive a ConfigurationManager that raises. With the manager throwing,
     the reader must reach the in-code constant and refuse.
     """
-    target = tmp_path / "task-approval-settings.json"
-    monkeypatch.setattr( approval, "override_path", lambda: str( target ) )
-    monkeypatch.setattr( approval, "_cache_mtime", None )
-
+    target = SettingsHandle()
     def explode( *args, **kwargs ):
         raise RuntimeError( "config file is unreadable" )
 
@@ -372,11 +327,9 @@ def test_the_broken_world_answers_from_the_CONSTANT_and_not_from_something_stuck
     only possible if the constant is genuinely what is answering.
     """
     fresh.write_text( stamped_json( { "manager_pull_disabled": "banana" } ) )
-    approval._cache_mtime = None
     assert approval.get_manager_pull_disabled() is True
 
     monkeypatch.setattr( approval, "FALLBACK_MANAGER_PULL_DISABLED", False )
-    approval._cache_mtime = None
     assert approval.get_manager_pull_disabled() is False, (
         "the broken-config answer does not track the fallback constant — something "
         "else is returning True and every arm above is measuring it"
@@ -393,7 +346,6 @@ def test_a_broken_config_REFUSES_A_REAL_PULL_and_not_merely_a_flag_read( fresh )
     the layer an incident enters at cannot speak to the incident.
     """
     fresh.write_text( stamped_json( { "manager_pull_disabled": "banana" } ) )
-    approval._cache_mtime = None
     detail = approval.refusal_for_pull( "queued", "in_progress", "sam b29ad216" )
     assert detail is not None, "a junk override value lets a real pull through"
     assert "in_progress" in detail

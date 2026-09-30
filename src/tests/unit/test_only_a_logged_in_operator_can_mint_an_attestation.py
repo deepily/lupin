@@ -49,6 +49,7 @@ if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
 from cosa.rest import task_approval_settings as approval
+from tests.helpers.approval_settings_fixtures import SettingsHandle
 from cosa.rest import task_store_rules as rules
 from cosa.rest.postgres_models import TaskItem, TaskEvent
 from cosa.rest.routers import tasks
@@ -110,16 +111,12 @@ def settings( tmp_path, monkeypatch ):
     The approval module's override file, inside tmp_path. The fleet INI is never read.
     Without this the file would be measuring whoever happens to be an approver today.
     """
-    target = tmp_path / "task-approval-settings.json"
-    monkeypatch.setattr( approval, "override_path", lambda: str( target ) )
-    monkeypatch.setattr( approval, "_cache", { "approvers": None, "enforcement_active": None } )
-    monkeypatch.setattr( approval, "_cache_mtime", None )
+    target = SettingsHandle()
     target.write_text( json.dumps( {
         "approvers"         : [ "rick" ],
         "enforcement_active": False,
         "approver_accounts" : { OPERATOR_EMAIL: "rick" },
     } ) )
-    approval._cache_mtime = None
     return target
 
 
@@ -165,8 +162,7 @@ def _recorded_receipts( repo ):
 # ---------------------------------------------------------------------------
 
 def test_the_isolation_actually_isolates( settings ):
-    assert str( settings ) == approval.override_path()
-    assert "projects-data" not in approval.override_path()
+    assert type( approval._backend ).__name__ == "MemoryBackend"
     assert approval.approver_persona_for_account( OPERATOR_EMAIL ) == "rick"
     assert approval.approver_persona_for_account( None ) is None
 

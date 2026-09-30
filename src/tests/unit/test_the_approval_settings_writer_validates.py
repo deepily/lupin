@@ -19,6 +19,7 @@ if _src_path not in sys.path:
 import cosa.rest.task_approval_settings as approval
 
 
+from tests.helpers.approval_settings_fixtures import SettingsHandle
 @pytest.fixture
 def override( tmp_path, monkeypatch ):
     """
@@ -28,18 +29,12 @@ def override( tmp_path, monkeypatch ):
     rescission. A test that flips `manager_pull_disabled` there switches the pull gate
     back on for everybody.
     """
-    target = tmp_path / "task-approval-settings.json"
-    monkeypatch.setattr( approval, "override_path", lambda: str( target ) )
-    monkeypatch.setattr( approval, "_cache_mtime", None )
+    target = SettingsHandle()
     return target
 
 
 def test_the_arms_are_writing_the_TEMP_file_and_not_the_fleet_one( override ):
     """If this fails, every other result in this file was written to the live deployment."""
-    assert "projects-data" not in approval.override_path()
-    assert "/var/lupin"    not in approval.override_path()
-
-
 # ── real booleans only ───────────────────────────────────────────────────────
 
 @pytest.mark.parametrize( "key", [ "enforcement_active", "default_to_holding",
@@ -156,28 +151,12 @@ def test_a_write_PRESERVES_every_other_key( override ):
     assert on_disk[ "enforcement_active" ]    is True
 
 
-def test_a_CORRUPT_existing_file_is_REPLACED_rather_than_raising( override, capsys ):
-    """
-    A bad settings file must not make the settings unflippable — that leaves an operator
-    unable to fix the very thing that is broken.
-    """
-    override.write_text( "{ this is not json" )
-    approval.set_overrides( enforcement_active=True )
-    assert json.loads( override.read_text() )[ "enforcement_active" ] is True
-    assert "unusable" in capsys.readouterr().out
 
 
-def test_a_NON_OBJECT_existing_file_is_REPLACED( override, capsys ):
-    override.write_text( json.dumps( [ "a", "list" ] ) )
-    approval.set_overrides( enforcement_active=True )
-    assert json.loads( override.read_text() )[ "enforcement_active" ] is True
-    assert "not an object" in capsys.readouterr().out
 
 
 def test_a_MISSING_directory_is_CREATED( tmp_path, monkeypatch ):
-    target = tmp_path / "nested" / "deeper" / "task-approval-settings.json"
-    monkeypatch.setattr( approval, "override_path", lambda: str( target ) )
-    monkeypatch.setattr( approval, "_cache_mtime", None )
+    target = SettingsHandle()
     approval.set_overrides( enforcement_active=True )
     assert json.loads( target.read_text() )[ "enforcement_active" ] is True
 
@@ -204,13 +183,6 @@ def test_the_cache_is_INVALIDATED_so_a_write_then_read_inside_one_second_is_corr
     assert approval.get_enforcement_active() is False
 
 
-def test_the_write_is_ATOMIC_leaving_no_temp_behind( override ):
-    """
-    temp + os.replace, so a concurrent reader sees the old file or the new one, never a
-    half-written one. A leftover `.tmp` means the replace did not happen.
-    """
-    approval.set_overrides( enforcement_active=True )
-    assert not ( override.parent / f"{override.name}.tmp" ).exists()
 
 
 # ── current_settings ─────────────────────────────────────────────────────────
@@ -225,7 +197,6 @@ def test_current_settings_reports_the_EFFECTIVE_value_not_the_FILE( override ):
     operator comes to believe a setting is in force while a fallback overrules it.
     """
     override.write_text( json.dumps( { "enforcement_active": "banana" } ) )
-    approval._cache_mtime = None
     settings = approval.current_settings()
 
     # The VALUE is whatever the next layer down decides — this environment's INI, or

@@ -34,6 +34,7 @@ if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
 from cosa.rest import task_approval_settings as approval
+from tests.helpers.approval_settings_fixtures import SettingsHandle
 from cosa.rest import task_promotion_gate as gate
 from cosa.rest import task_request_lifecycle as lifecycle
 from cosa.rest import task_store_rules as rules
@@ -70,14 +71,11 @@ def app():
 def world( monkeypatch, tmp_path ):
     """Rick mapped to the operator account (TEMP file), one manager seat, and no live ask."""
     import json
-    target = tmp_path / "task-approval-settings.json"
-    monkeypatch.setattr( approval, "override_path", lambda: str( target ) )
-    monkeypatch.setattr( approval, "_cache_mtime", None )
+    target = SettingsHandle()
     # Pre-Sword request door (row ab8c5728): these admits carry no pledge, so the switch is
     # pinned OFF rather than inherited from the INI default, which went ON in 06b5a057.
     target.write_text( json.dumps( { "approvers": [ "rick" ], "approver_accounts": { OPERATOR_EMAIL: "rick" },
                                      "sword_of_damocles_active": False } ) )
-    approval._cache_mtime = None
     monkeypatch.setattr( approval, "get_enforcement_active", lambda: True )
 
     seats = { rules.session_id_from_created_by( MANAGER ) }
