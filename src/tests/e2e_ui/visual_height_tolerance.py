@@ -39,13 +39,6 @@ from PIL import Image
 from pixelmatch.contrib.PIL import pixelmatch
 
 
-# Row 4f5301ad: pixelmatch scores in YIQ, so a per-pixel threshold of 0.1 admits a uniform
-# blue shift of up to +78/255 (red +46, green +37, brightness +26) as ZERO difference.
-# The comparators therefore default to 0.0: every non-identical pixel counts, and the
-# tolerance lives in the structural rules (height delta, shift, isolated scatter) instead.
-PIXEL_THRESHOLD = 0.0
-
-
 @dataclass( frozen=True )
 class HeightTolerantResult:
     """
@@ -69,7 +62,7 @@ def compare_pngs_height_tolerant(
     actual_png       : bytes,
     baseline_png     : bytes,
     *,
-    threshold        : float = PIXEL_THRESHOLD,
+    threshold        : float = 0.1,
     max_height_delta : int   = 1,
 ) -> HeightTolerantResult:
     """
@@ -133,7 +126,7 @@ def compare_pngs_height_tolerant(
     crop_b   = img_b.crop( ( 0, 0, w_b, common_h ) )
 
     diff     = Image.new( "RGBA", ( w_a, common_h ) )
-    mismatch = pixelmatch( crop_a, crop_b, diff, threshold=threshold, includeAA=True )
+    mismatch = pixelmatch( crop_a, crop_b, diff, threshold=threshold )
 
     if mismatch == 0:
         if height_delta == 0:
@@ -317,7 +310,7 @@ def compare_pngs_aa_scatter_tolerant(
     actual_png          : bytes,
     baseline_png        : bytes,
     *,
-    threshold           : float = PIXEL_THRESHOLD,
+    threshold           : float = 0.1,
     max_height_delta    : int   = 1,
     max_isolated_cluster: int   = 2,
     erode_iterations    : int   = 1,
@@ -550,7 +543,7 @@ def compare_pngs_content_shift_tolerant(
     actual_png       : bytes,
     baseline_png     : bytes,
     *,
-    threshold        : float = PIXEL_THRESHOLD,
+    threshold        : float = 0.1,
     max_shift        : int   = 1,
     max_height_delta : int   = 1,
 ) -> ContentShiftResult:
@@ -650,7 +643,7 @@ def compare_pngs_content_shift_tolerant(
             region_b = crop_b.crop( ( ax0 - dx, ay0 - dy, ax1 - dx, ay1 - dy ) )
 
             diff     = Image.new( "RGBA", ( ax1 - ax0, ay1 - ay0 ) )
-            mismatch = pixelmatch( region_a, region_b, diff, threshold=threshold, includeAA=True )
+            mismatch = pixelmatch( region_a, region_b, diff, threshold=threshold )
 
             if best_mismatch is None or mismatch < best_mismatch:
                 best_mismatch = mismatch
