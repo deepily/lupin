@@ -282,7 +282,7 @@ kill -0 $(cat /tmp/e2e-ui-tests.pid) 2>/dev/null && echo running || echo done
    Pass it only for a deliberate, authorised rebaseline of a UI change you can
    name, and check afterwards that every baseline which moved moved for the reason
    you expected. A baseline that changes unexpectedly is a finding, not a refresh.
-4. Failures produce diff images under `io/test-suite/visual-failures/`.
+4. Failures produce diff images under `io/test-suite/visual-failures/<run_id>/` (run_id = the ts- job id, else a UTC timestamp; only visual sessions write there, and no session deletes another run's folder — row d51ffc36).
 5. `io/` is gitignored and backed up outside the repo, so baselines survive a clean
    checkout but do NOT travel with a commit.
 
