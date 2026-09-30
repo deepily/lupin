@@ -43,7 +43,14 @@ _SCRIPT_DIR = os.path.join( _REPO_ROOT, "src", "scripts" )
 # together, so the assertions could never disagree with the code — a tautology wearing
 # an assertion's clothes. These names are hand-written; if the script drops one, this
 # file reddens.
-_MUST_BE_BORROWED = ( "node_modules", "src/scripts/cloud-run.env" )
+_MUST_BE_BORROWED = ( "node_modules", "src/scripts/cloud-run.env",
+                      "src/terraform/envs/test/.terraform/providers" )
+
+# The parent of the provider cache holds tfstate and modules that a worktree run WRITES. It is
+# hand-pinned as never-borrowed in TestTheBorrowListNeverCarriesASecret and checked as a real
+# directory in the worktree below.
+_TF_PROVIDERS = "src/terraform/envs/test/.terraform/providers"
+_TF_PARENT    = "src/terraform/envs/test/.terraform"
 
 
 def _init_main_checkout( path, with_script=True ):
@@ -82,6 +89,9 @@ def _init_main_checkout( path, with_script=True ):
         # the absence of provisioning. One variable at a time.
         with open( os.path.join( script_dir, ".keep" ), "w" ) as f: f.write( "" )
 
+    tf_dir = os.path.join( path, "src", "terraform", "envs", "test" )
+    os.makedirs( tf_dir, exist_ok=True )
+    with open( os.path.join( tf_dir, "main.tf" ), "w" ) as f: f.write( "# tracked\n" )
     with open( os.path.join( path, "README.md" ), "w" ) as f:
         f.write( "# test\n" )
     run( "git", "add", "-A" )
@@ -106,6 +116,13 @@ def _init_main_checkout( path, with_script=True ):
         f.write( '{ "name": "tsx" }\n' )
     with open( os.path.join( path, "src", "scripts", "cloud-run.env" ), "w" ) as f:
         f.write( "LUPIN_GCP_PROJECT_ID=stand-in\n" )
+    # The terraform provider cache, plus the sibling state file that must NEVER be shared.
+    # `src/terraform/envs/test` is tracked (a .tf file), as in the real repo.
+    tf_dir = os.path.join( path, "src", "terraform", "envs", "test" )
+    plugin = os.path.join( path, _TF_PROVIDERS, "registry.terraform.io", "hashicorp", "random", "3.9.0", "linux_amd64" )
+    os.makedirs( plugin, exist_ok=True )
+    with open( os.path.join( plugin, "terraform-provider-random" ), "w" ) as f: f.write( "stand-in binary\n" )
+    with open( os.path.join( path, _TF_PARENT, "terraform.tfstate" ), "w" ) as f: f.write( "{}\n" )
     return path
 
 
@@ -163,6 +180,22 @@ class TestANewWorktreeCanRunAWholeTier:
         """
         async with WorktreeContext( job_id="tfe-artifacts-resolve", config_mgr=_CFG, enabled=True ) as wt:
             assert os.path.isfile( os.path.join( wt.path, "node_modules", "tsx", "package.json" ) )
+
+    @pytest.mark.asyncio
+    async def test_only_the_providers_dir_is_linked_and_its_state_neighbour_is_not_shared( self, main_checkout ):
+        """
+        Row 31344c5f follow-on. The provider cache resolves THROUGH the link, while its parent
+        `.terraform` is a REAL directory of the worktree's own — so the `terraform.tfstate`
+        beside it in the main checkout is neither visible nor writable from here.
+        """
+        async with WorktreeContext( job_id="tfe-artifacts-tf", config_mgr=_CFG, enabled=True ) as wt:
+            parent = os.path.join( wt.path, _TF_PARENT )
+            assert os.path.isdir( parent ) and not os.path.islink( parent ), ".terraform must be a real dir, not a link"
+            assert os.path.islink( os.path.join( wt.path, _TF_PROVIDERS ) )
+            assert os.path.isfile( os.path.join( wt.path, _TF_PROVIDERS, "registry.terraform.io", "hashicorp",
+                                                 "random", "3.9.0", "linux_amd64", "terraform-provider-random" ) )
+            assert not os.path.exists( os.path.join( parent, "terraform.tfstate" ) ), \
+                "the main checkout's tfstate leaked into the worktree"
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize( "main_checkout", [ False ], indirect=True )
@@ -274,6 +307,7 @@ class TestTheBorrowListNeverCarriesASecret:
         ( "src/conf/keys",          "under" ),
         ( ".env",                   "exact" ),
         ( "src/lupin_app/static/dist", "under" ),
+        ( "src/terraform/envs/test/.terraform", "exact" ),   # holds tfstate + modules a worktree run writes
         ( "src/scripts/auth_migration/migration_results.json", "exact" ),
     )
 

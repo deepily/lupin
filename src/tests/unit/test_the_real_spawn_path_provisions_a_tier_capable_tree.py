@@ -187,6 +187,8 @@ class TestTheRealSpawnPathLeavesATierCapableTree:
                 # lend — which must read as "nothing to borrow", never as a failure.
                 assert result[ "artifact_provisioning" ][ "artifacts" ][ "src/scripts/cloud-run.env" ] \
                        == "SOURCE_ABSENT"
+                assert result[ "artifact_provisioning" ][ "artifacts" ][ "src/terraform/envs/test/.terraform/providers" ] \
+                       == "SOURCE_ABSENT"
                 assert result[ "artifact_alarm" ] is None
                 assert result[ "spawned" ][ 0 ][ "artifact_alarm" ] is None
             finally:

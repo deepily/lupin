@@ -83,6 +83,20 @@ BORROW=(
     # not want. The guard offers two escapes and only one of them is honest for this file.
     # This script reads no GCP configuration; it only ever LINKS the file that carries it.
     "src/scripts/cloud-run.env"
+    # Row 31344c5f follow-on (2026-09-30): the terraform PROVIDER CACHE. gitignored
+    # (`src/terraform/**/.terraform/`), 135 MB of plain versioned provider binaries
+    # (registry.terraform.io/hashicorp/{google,random}/<ver>/linux_amd64), measured: zero
+    # symlinks inside and no file carrying the main-checkout path, so it is relocatable.
+    # Without it `test_terraform_invariants.py::test_terraform_provider_cache_is_present`
+    # is red in every worktree and the validate test beside it skips.
+    #
+    # 🔴 ONLY `providers`, NEVER THE PARENT `.terraform`. Beside it sit `terraform.tfstate`
+    # and `modules/`; a terraform run in a worktree writes both, and a linked parent would
+    # write them into the SHARED checkout. The validate test only READS this cache (it
+    # points TF_DATA_DIR at a temp dir), so the link is read-only in practice; a worktree
+    # whose lock file bumps a provider past the cache would download INTO it — the same
+    # thing the main checkout does, and loudly named by the presence test.
+    "src/terraform/envs/test/.terraform/providers"
 )
 
 TARGET="${1:-$PWD}"
