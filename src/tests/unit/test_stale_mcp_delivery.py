@@ -29,8 +29,10 @@ class _Cfg:
         return self._o.get( key, default )
 
 
-def _rec( pid=4242, start=1000.5, session="cc-worker-mrradio-3", stale=True ):
-    return { "pid": pid, "start_epoch": start, "tmux_session": session, "tmux_pane": "%7", "stale": stale }
+def _rec( pid=4242, start=1000.5, session="cc-worker-mrradio-3", stale=True, ticks=None ):
+    """`start_epoch` is the derived, DRIFTING float; `start_ticks` is /proc's integer, the identity."""
+    return { "pid": pid, "start_epoch": start, "start_ticks": int( start * 100 ) if ticks is None else ticks,
+             "tmux_session": session, "tmux_pane": "%7", "stale": stale }
 
 
 class _Rig:
@@ -78,11 +80,22 @@ def test_a_process_is_told_once_and_a_new_process_is_told_again( tmp_path ):
     assert [ d[ 1 ] for d in rig.dms ] == [ "stale-mcp-4242", "stale-mcp-5555" ]
 
 
-def test_a_recycled_pid_with_a_new_start_time_is_a_new_process( tmp_path ):
-    rig = _Rig( tmp_path, [ _rec( start=1000.5 ) ] )
+def test_a_recycled_pid_with_new_start_ticks_is_a_new_process( tmp_path ):
+    rig = _Rig( tmp_path, [ _rec( ticks=100_050 ) ] )
     rig.loop.tell_stale_mcp_once()
-    rig.stale = [ _rec( start=2000.5 ) ]                         # same pid, different process
+    rig.stale = [ _rec( ticks=200_050 ) ]                        # same pid, different process
     assert rig.loop.tell_stale_mcp_once() == 1 and len( rig.dms ) == 2
+
+
+def test_the_same_process_with_a_drifting_start_epoch_is_told_once( tmp_path ):
+    """The revert's defect: start_epoch differs by milliseconds between census runs, so keying on it
+    made every tick a new process. Same pid, same start_ticks, different start_epoch: ONE DM."""
+    rig = _Rig( tmp_path, [ _rec( start=1000.5069, ticks=100_050 ) ] )
+    assert rig.loop.tell_stale_mcp_once() == 1                                     # positive: it DID tell once
+    for drifted in ( 1000.5130, 1000.5109, 1000.5000 ):
+        rig.stale = [ _rec( start=drifted, ticks=100_050 ) ]
+        assert rig.loop.tell_stale_mcp_once() == 0
+    assert len( rig.dms ) == 1 and rig.advisories == []
 
 
 def test_a_seat_that_was_restarted_is_forgotten_and_told_again_if_stale_again( tmp_path ):

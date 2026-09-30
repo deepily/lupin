@@ -1289,7 +1289,7 @@ class SelfRespinObserverLoop:
         self._stale_mcp_fn      = stale_mcp_fn
         self._dm_push_fn        = dm_push_fn
         self._seat_lookup_fn    = seat_lookup_fn if seat_lookup_fn is not None else _default_seat_lookup
-        self._stale_told        = set()       # (pid, start_epoch) already told — never repeated
+        self._stale_told        = set()       # (pid, start_ticks) already told — never repeated
         self._stop_event        = threading.Event()
         self._thread            = None
 
@@ -1379,7 +1379,8 @@ class SelfRespinObserverLoop:
         Ensures:
             - nothing stale -> nothing sent, returns 0 (quiet)
             - one DM per stale process, naming the seat and STALE_MCP_REMEDY, to that
-              seat's manager; a process is keyed by ( pid, start_epoch ) so a recycled
+              seat's manager; a process is keyed by ( pid, start_ticks ) (the stat integer, not
+              the drifting start_epoch float) so a recycled
               pid is a new process, and one already told is never told again
             - a DM the server ANSWERED and refused (an http_status, e.g. 422) is logged with
               its status and body, and the tell goes to the operator advisory instead, ONCE
@@ -1404,7 +1405,7 @@ class SelfRespinObserverLoop:
         live = set()
         for rec in stale:
             try:                                       # one bad record must not stop the others being told
-                key = ( rec[ "pid" ], rec[ "start_epoch" ] )
+                key = ( rec[ "pid" ], rec[ "start_ticks" ] )   # NOT start_epoch: that float drifts a few ms per census run
                 live.add( key )
                 if key in self._stale_told: continue
                 seat, manager = self._seat_lookup_fn( rec )
