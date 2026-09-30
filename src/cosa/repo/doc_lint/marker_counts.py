@@ -8,10 +8,10 @@ rule_lists. Stdlib only, so it can be vendored into lupin-mobile's tool/ directo
 import re
 
 from .rule_lists import (
-    ACRONYM_ALLOWLIST, TIC_REGEX, EMPHASIS_GLYPHS, ID_REF_REGEX, RULING_REF_REGEX, AC_REF_REGEX,
-    STEP_REF_REGEX, LABEL_REF_REGEX, SECTION_REGEX, PATH_REGEX, SECTION_PATH_LOOKBACK,
-    SECTION_PATH_LOOKAHEAD
+    CAPS_WORD_EXCEPTIONS, QUOTED_SPAN_REGEX, TIC_REGEX, EMPHASIS_GLYPHS, ID_REF_REGEX, SECTION_REGEX,
+    PATH_REGEX, SECTION_PATH_LOOKBACK, SECTION_PATH_LOOKAHEAD
 )
+from .word_list import default_words
 
 MARKER_COLUMNS = ( "em_dash", "caps_words", "section_refs", "id_refs", "tics", "emphasis_glyphs" )
 
@@ -21,6 +21,40 @@ FRONTMATTER      = re.compile( r"\A---\n.*?\n---\n", re.DOTALL )
 FENCED_BLOCK     = re.compile( r"^(```|~~~).*?^\1[^\n]*$", re.DOTALL | re.MULTILINE )
 INLINE_CODE      = re.compile( r"`[^`\n]*`" )
 HTML_COMMENT     = re.compile( r"<!--.*?-->", re.DOTALL )
+DOCTEST_BLOCK    = re.compile( r"^[ \t]*>>>.*?(?=\n[ \t]*\n|\Z)", re.DOTALL | re.MULTILINE )
+
+
+def _blank( match ):
+    """
+    Replace a matched block with as many newlines as it spans.
+
+    Requires:
+        - match is a re match object
+
+    Ensures:
+        - returns a string of newlines only, so line numbers after the block do not move
+
+    Raises:
+        - nothing
+    """
+    return "\n" * match.group( 0 ).count( "\n" )
+
+
+def blank_code( text ):
+    """
+    Blank the fenced code blocks and doctest blocks in a docstring or page.
+
+    Requires:
+        - text is a str
+
+    Ensures:
+        - returns text with each such block reduced to its newlines, so line numbers hold
+        - prose outside the blocks is untouched
+
+    Raises:
+        - nothing
+    """
+    return DOCTEST_BLOCK.sub( _blank, FENCED_BLOCK.sub( _blank, text ) )
 
 
 def strip_markdown( text ):
@@ -44,24 +78,25 @@ def strip_markdown( text ):
 
 def is_section_ref_resolved( text, match ):
     """
-    Say whether a section mark has a path beside it on the same line.
+    Say whether a section mark has a path beside it in the same paragraph.
 
     Requires:
         - match is a SECTION_REGEX match over text
 
     Ensures:
         - True when a path occurs within SECTION_PATH_LOOKBACK characters before the mark or
-          SECTION_PATH_LOOKAHEAD characters after it, inside the same line
+          SECTION_PATH_LOOKAHEAD characters after it, without crossing a blank line
+        - a hard-wrapped line break does not separate the mark from its path
         - False otherwise, which makes the section mark a bare reference
 
     Raises:
         - nothing
     """
-    line_start = text.rfind( "\n", 0, match.start() ) + 1
-    line_end   = text.find( "\n", match.end() )
-    if line_end == -1: line_end = len( text )
-    before = text[ max( line_start, match.start() - SECTION_PATH_LOOKBACK ) : match.start() ]
-    after  = text[ match.end() : min( line_end, match.end() + SECTION_PATH_LOOKAHEAD ) ]
+    para_start = text.rfind( "\n\n", 0, match.start() ) + 1
+    para_end   = text.find( "\n\n", match.end() )
+    if para_end == -1: para_end = len( text )
+    before = text[ max( para_start, match.start() - SECTION_PATH_LOOKBACK ) : match.start() ]
+    after  = text[ match.end() : min( para_end, match.end() + SECTION_PATH_LOOKAHEAD ) ]
     return PATH_REGEX.search( before ) is not None or PATH_REGEX.search( after ) is not None
 
 
@@ -81,30 +116,32 @@ def bare_section_refs( text ):
     return [ m.group( 0 ) for m in SECTION_REGEX.finditer( text ) if not is_section_ref_resolved( text, m ) ]
 
 
-def caps_words( text ):
+def caps_words( text, words=None ):
     """
-    List the ALL-CAPS words in text that are emphasis rather than acronyms or identifiers.
+    List the ALL-CAPS words in text that are emphasis.
 
     Requires:
-        - text is a str, with inline code already removed if identifiers should not count
+        - text is a str
+        - words is a set of lowercase English words; None means the vendored list
 
     Ensures:
-        - words on the acronym allowlist are skipped
-        - words containing a digit are skipped here, since label references are counted by
-          the bare-reference rule
-        - identifiers with an underscore never match, because CAPS_REGEX stops at one
+        - a word counts only when its lowercase form is in words and it is not in
+          CAPS_WORD_EXCEPTIONS
+        - words inside quotes or backticks, with a digit, next to an underscore or hyphen, are skipped
 
     Raises:
-        - nothing
+        - OSError when words is None and the vendored list is missing
     """
+    words = default_words() if words is None else words
+    text  = QUOTED_SPAN_REGEX.sub( lambda m: " " * len( m.group( 0 ) ), text )
     found = []
     for m in CAPS_REGEX.finditer( text ):
-        word = m.group( 0 )
+        word   = m.group( 0 )
         before = text[ m.start() - 1 ] if m.start() > 0 else ""
         after  = text[ m.end() ] if m.end() < len( text ) else ""
-        if before == "_" or after == "_": continue
-        if word in ACRONYM_ALLOWLIST or any( c.isdigit() for c in word ): continue
-        found.append( word )
+        if before in ( "_", "-" ) or after in ( "_", "-" ): continue
+        if any( c.isdigit() for c in word ) or word in CAPS_WORD_EXCEPTIONS: continue
+        if word.lower() in words: found.append( word )
     return found
 
 
@@ -117,13 +154,14 @@ def count_markers( text ):
 
     Ensures:
         - returns { "words": int, <each MARKER_COLUMNS name>: int }
-        - CAPS words are counted outside inline code spans; every other column is counted on
-          the full text
+        - fenced and doctest blocks are blanked first; CAPS words are counted outside inline
+          code spans; every other column is counted on the rest of the text
         - id_refs counts the row, bug, task and ts references only
 
     Raises:
         - nothing
     """
+    text  = blank_code( text )
     prose = INLINE_CODE.sub( " ", text )
     return {
         "words"           : len( WORD_REGEX.findall( text ) ),

@@ -11,29 +11,18 @@ after the freeze invalidates the precision and recall measured against it.
 
 import re
 
-# Rule 4: ALL-CAPS words are banned outside this set. A token that contains an underscore
-# (LUPIN_ROOT, JOB_ARG_CONTRACTS) is an identifier, not emphasis, and is exempt by predicate.
-ACRONYM_ALLOWLIST = frozenset( [
-    # data formats and protocols
-    "JSON", "JSONL", "JSONB", "XML", "YAML", "CSV", "HTML", "CSS", "SVG", "PNG", "MP3", "MP4",
-    "WAV", "ASCII", "UTF", "CDATA", "SQL", "DDL", "ORM", "CRUD", "REST", "API", "HTTP", "HTTPS",
-    "URL", "URI", "JWT", "SSE", "WS", "SMTP", "TLS", "SSH", "IP", "IANA", "POSIX", "FIFO",
-    "UUID", "SHA", "ISO", "EOF", "ID", "IDS", "INI", "IO", "OS",
-    # http verbs and git refs
-    "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "WIP", "PR", "NULL",
-    # systems and hardware
-    "DB", "PG", "KV", "GPU", "CPU", "VRAM", "RAM", "CUDA", "OOM", "PID", "PPID", "CWD",
-    "SIGTERM", "SIGKILL", "DOM", "GCS", "GCP", "HNSW", "FK", "TTL", "HWM", "PCM", "ADC",
-    "TPM", "KB", "MB", "GB", "USD", "UTC", "EDT", "EST",
-    # date and time placeholders
-    "YYYY", "MM", "DD", "HH",
-    # project and domain names
-    "LLM", "AI", "MCP", "CLI", "SDK", "UI", "UX", "TTS", "DM", "CC", "CJ", "COSA", "LUPIN",
-    "TFE", "BFE", "SWE", "PEFT", "LORA", "ANN", "FCM", "JS", "README", "TODO", "E2E",
-    "PYTHONPATH", "DATA01", "S3",
-    # priority labels
-    "P0", "P1", "P2", "P3", "P4", "P5",
+# Rule 4: an ALL-CAPS word is emphasis when its lowercase form is an English word (measured
+# against the vendored word list, see word_list.py). Acronyms such as JSON or LLM are not words,
+# so they need no list. This set holds only the dictionary words that are also conventional
+# acronyms, HTTP verbs or git refs, which the word-list test would wrongly flag. A token with an
+# underscore (LUPIN_ROOT), a digit, a hyphen neighbour (D6-STRICT) or a quote or backtick around
+# it is exempt by predicate.
+CAPS_WORD_EXCEPTIONS = frozenset( [
+    "ID", "IDS", "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "NULL", "MM", "DD", "RAM",
+    "REST", "KISS", "TODO", "FIFO", "ANN", "OOM", "ORM", "SHA", "CWD", "DOM", "PEFT", "LORA",
 ] )
+# Spans where a capitalised word is quoted, not emphasised: "ALLOW", 'KISS', `CODE`.
+QUOTED_SPAN_REGEX = re.compile( r"\"[^\"\n]*\"|(?<![\w])'[^'\n]*'(?![\w])|`[^`\n]*`" )
 
 # Rule 5: phrases that add tone and no constraint. Matched case-insensitively on word
 # boundaries. "rather than", "silently", "verbatim" and "the defect" were measured and left
@@ -65,26 +54,34 @@ TIC_REGEX = re.compile( r"\b(?:" + "|".join( TIC_PHRASES ) + r")\b", re.IGNORECA
 EMPHASIS_GLYPHS = ( "⚠", "\U0001f534", "⇒" )
 
 # Rule 6: a reference with no path. Section marks are handled separately, because a section
-# mark that follows a path on the same line is resolved (see is_section_ref_resolved).
-ID_REF_REGEX     = re.compile( r"\b(?:row|bug|task|ts)[\s\-:`'\"#]*(?=[0-9a-f]*\d)[0-9a-f]{8}\b", re.IGNORECASE )
-RULING_REF_REGEX = re.compile( r"\bruling\s+(?:#?\d+|[A-Z]\d?=?[A-Z]?\b)", re.IGNORECASE )
-AC_REF_REGEX     = re.compile( r"\bAC[-\s]?\d+(?:[.\-]\d+)*\b" )
-STEP_REF_REGEX   = re.compile( r"\bstep\s+\d+[a-z]\b", re.IGNORECASE )
-# Decision or case labels such as D4, R1, S6, L2. Version labels (V1) and the P0 to P5
-# priorities are exempt.
-LABEL_REF_REGEX  = re.compile( r"\b(?![PV]\d\b)[A-Z]\d{1,2}\b" )
-SECTION_REGEX    = re.compile( "§\\s*[\\w.#]+" )
-PATH_REGEX       = re.compile( r"(?:[\w.\-]+/)+[\w.\-]+\.\w{1,5}|\b[\w\-]+\.(?:md|py|dart|ts|js|ini|ya?ml|json|sh|sql|tsv)\b" )
-# How far around a section mark a path counts as its target.
+# mark that follows a path in the same paragraph is resolved (see is_section_ref_resolved).
+# ID_REF_REGEX is the spec's own definition and feeds the baseline column; the wider
+# ID_REF_EXTENDED_REGEX and BARE_SHA_REGEX feed the rule.
+ID_REF_REGEX          = re.compile( r"\b(?:row|bug|task|ts)[\s\-:`'\"#]*(?=[0-9a-f]*\d)[0-9a-f]{8}\b", re.IGNORECASE )
+ID_REF_EXTENDED_REGEX = re.compile( r"\b(?:rows?|bugs?|tasks?|ts|decision|job|pr|ticket)[\s\-:`'\"#]*(?=[0-9a-f]*\d)[0-9a-f]{8}\b", re.IGNORECASE )
+# A standalone 8-hex token with a digit and a letter, not part of a path, filename or longer word.
+# Whether a git sha counts as a reference that must resolve is Rick's call (Tiberius, L2).
+BARE_SHA_REGEX        = re.compile( r"(?<![\w\-/=.])(?=[0-9a-f]*\d)(?=\d*[a-f])[0-9a-f]{8}(?![\w\-/=.])" )
+RULING_REF_REGEX      = re.compile( r"(?i:\bruling)\s+(?:#?\d+(?!\d|[-./]\d)|[A-Z]\d?=?[A-Z]?\b)" )
+AC_REF_REGEX          = re.compile( r"\bAC[-\s]?\d+(?:[.\-]\d+)*\b" )
+STEP_REF_REGEX        = re.compile( r"(?i:\b(?:step|phase|stage|item|option)s?)\s+(?:\d[\w.]*|[A-Z]\b|\([a-z]\))" )
+# Decision or case labels such as D4, R1, S6, L2. Version labels, the P0 to P5 priorities,
+# HTML headings, S3 and hex colours are exempt.
+LABEL_REF_REGEX       = re.compile( r"(?<![#\w])(?![PV]\d\b|H[1-6]\b|S3\b)[A-Z]\d{1,2}\b" )
+SECTION_REGEX         = re.compile( "\u00a7\\s*[\\w.#]+" )
+PATH_REGEX            = re.compile( r"(?:[\w.\-]+/)+[\w.\-]+\.\w{1,5}|\b[\w\-]+\.(?:md|py|dart|ts|js|ini|ya?ml|json|sh|sql|tsv)\b" )
+# How far around a section mark a path counts as its target, within the same paragraph.
 SECTION_PATH_LOOKBACK  = 120
 SECTION_PATH_LOOKAHEAD = 60
 
-# Rule 7: dated banners and corrections that belong in history.
+# Rule 7: dated banners and corrections belong in history. An ISO date in prose is the
+# predicate; the verb pattern and the banner-line pattern are kept as subsets that name the cause.
+ISO_DATE_REGEX     = re.compile( r"\b20\d\d-\d\d-\d\d\b" )
 DATED_BANNER_REGEX = re.compile(
     r"\b(?:added|updated|fixed|measured|ruled|corrected|changed|landed|retired|re-measured)"
     r"\s+(?:on\s+)?20\d\d[-./]\d\d[-./]\d\d"
     r"|\b(?:FORENSIC UPDATE|UPDATE|CORRECTION|RETRACTED)\b[^\n]{0,60}20\d\d[-./]\d\d[-./]\d\d"
-    r"|^\s*(?:⚠️?\s*)?(?:FORENSIC UPDATE|UPDATE|CORRECTION|RETRACTED)\b",
+    r"|^\s*(?:\u26a0\ufe0f?\s*)?(?:FORENSIC UPDATE|UPDATE|CORRECTION|RETRACTED)\b",
     re.IGNORECASE | re.MULTILINE
 )
 
@@ -92,7 +89,6 @@ DATED_BANNER_REGEX = re.compile(
 AGENT_IMPERATIVE_REGEX = re.compile(
     r"\bignore (?:all |any )?(?:previous|prior|above) instructions\b"
     r"|\byou (?:must|should|need to|are to|will)\b"
-    r"|\b(?:always|never) (?:call|use|run|invoke|send)\b"
     r"|\bdisregard\b"
     r"|\bas an? (?:ai|llm|assistant)\b"
     r"|\bnote to (?:the )?(?:model|agent|assistant|claude)\b",
