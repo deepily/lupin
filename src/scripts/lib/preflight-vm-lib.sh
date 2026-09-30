@@ -1087,3 +1087,73 @@ pfv_env_file_supplies() {
     [ -n "$value" ] || return 1
     return 0
 }
+
+# ── pfv_heartbeat_settings_status ────────────────────────────────────────────
+# Row 31344c5f (2026-09-30). The Stop-hook poke is OFF unless settings.json carries a
+# `heartbeat` block: the loader's default is enabled=False (heartbeat_settings.py),
+# so a VM with no block drops every poke silently — measured on lupin-host-test.
+#
+# Requires:
+#   - $1 = path to the CC user's settings.json
+#   - python3 on PATH
+# Ensures:
+#   - prints OK and returns 0 when heartbeat.enabled, heartbeat.owed_source_from_store
+#     and task_store.enabled are all literally true
+#   - otherwise prints the missing/false keys, comma-separated, and returns 1
+#   - prints UNREADABLE (return 2) for a missing file, UNPARSEABLE (return 3) for bad JSON
+pfv_heartbeat_settings_status() {
+    local file="$1"
+    [ -r "$file" ] || { printf 'UNREADABLE'; return 2; }
+    python3 - "$file" <<'PY'
+import sys, json
+try:
+    d = json.load( open( sys.argv[1] ) )
+except Exception:
+    print( "UNPARSEABLE", end="" ); raise SystemExit( 3 )
+hb = d.get( "heartbeat" ) if isinstance( d, dict ) else None
+ts = d.get( "task_store" ) if isinstance( d, dict ) else None
+hb = hb if isinstance( hb, dict ) else {}
+ts = ts if isinstance( ts, dict ) else {}
+want = [
+    ( "heartbeat.enabled",                hb.get( "enabled" ) ),
+    ( "heartbeat.owed_source_from_store", hb.get( "owed_source_from_store" ) ),
+    ( "task_store.enabled",               ts.get( "enabled" ) ),
+]
+bad = [ k for k, v in want if v is not True ]
+if bad:
+    print( ",".join( bad ), end="" ); raise SystemExit( 1 )
+print( "OK", end="" )
+PY
+}
+
+# ── pfv_roster_project_key ───────────────────────────────────────────────────
+# Requires: $1 = a repo directory name (e.g. weil-nda-drafting-suite)
+# Ensures:  prints the roster key suffix: upper-case, every non-alphanumeric run -> _
+#           (WEIL_NDA_DRAFTING_SUITE), matching fleet-roster.env.template's spelling
+pfv_roster_project_key() {
+    printf '%s' "$1" | tr '[:lower:]' '[:upper:]' | sed -E 's/[^A-Z0-9]+/_/g'
+}
+
+# ── pfv_roster_declares ──────────────────────────────────────────────────────
+# Requires: $1 = fleet-roster.env path, $2 = key suffix, or "" to ask "any manager line?"
+# Ensures:
+#   - returns 0 when an uncommented COSA_VOICE_MANAGERS__<suffix>= line has a non-empty value
+#     (with $2 empty: when ANY COSA_VOICE_MANAGERS__* line does)
+#   - returns 1 when none does; 3 when the file is missing/unreadable
+pfv_roster_declares() {
+    local file="$1" key="$2" pat
+    [ -r "$file" ] || return 3
+    if [ -n "$key" ]; then pat="^[[:space:]]*(export[[:space:]]+)?COSA_VOICE_MANAGERS__${key}=[\"']?[^\"'[:space:]]"
+    else                   pat="^[[:space:]]*(export[[:space:]]+)?COSA_VOICE_MANAGERS__[A-Z0-9_]+=[\"']?[^\"'[:space:]]"
+    fi
+    grep -Eq "$pat" "$file"
+}
+
+# ── pfv_cc_project_dirname ───────────────────────────────────────────────────
+# Requires: $1 = an absolute host path
+# Ensures:  prints the directory name Claude Code uses under ~/.claude/projects for a
+#           session run in that path (every non-alphanumeric char -> '-'). Lets the
+#           preflight DERIVE "projects actually worked on this VM" from live state.
+pfv_cc_project_dirname() {
+    printf '%s' "$1" | sed -E 's/[^A-Za-z0-9]/-/g'
+}

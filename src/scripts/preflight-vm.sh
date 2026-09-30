@@ -63,6 +63,7 @@ COMPOSE_FILE="${PREFLIGHT_VM_COMPOSE:-$REPO_ROOT/docker-compose.cloud-gpu.yml}"
 # imminent recreate, so it needs the real path, not just a basename for a remedy line.
 ENV_FILE="${PREFLIGHT_VM_ENVFILE:-$REPO_ROOT/cloud-gpu.env}"
 VM_PREFIX="${PREFLIGHT_VM_PREFIX:-/mnt/lupin-data}"
+FLEET_ROSTER="${PREFLIGHT_VM_FLEET_ROSTER:-$HOME/.claude/fleet-roster.env}"
 APP_URL="${PREFLIGHT_VM_APP_URL:-http://localhost:7999}"
 ARBITER_URL="${PREFLIGHT_VM_ARBITER_URL:-http://localhost:8001}"
 
@@ -301,6 +302,35 @@ for d in "$REPO_ROOT" "${PLANNING_IS_PROMPTING_ROOT:-}"; do
                       "sudo git config --global --add safe.directory $d"
     fi
 done
+# A8 — the Stop-hook poke is silently OFF without a heartbeat block (row 31344c5f).
+#      heartbeat_settings.py defaults enabled=False, so a VM whose settings.json lacks
+#      the block never pokes a stalled seat — and nothing says so. Applied by hand on
+#      lupin-host-test 2026-09-30; this is the assertion that keeps it there.
+CC_SETTINGS="${PREFLIGHT_VM_CC_SETTINGS:-$HOME/.claude/settings.json}"
+if command -v python3 >/dev/null 2>&1; then
+    hb_out="$( pfv_heartbeat_settings_status "$CC_SETTINGS" )"; hb_rc=$?
+    case $hb_rc in
+        0) report pass BLOCK "settings.json heartbeat.enabled + owed_source_from_store + task_store.enabled all true" ;;
+        1) report fail BLOCK "settings.json not wired for the Stop poke / task store — not true: $hb_out" \
+                      "python3 -c \"import json,os;p=os.path.expanduser('$CC_SETTINGS');d=json.load(open(p));d.setdefault('heartbeat',{}).update(enabled=True,owed_source_from_store=True);d.setdefault('task_store',{})['enabled']=True;json.dump(d,open(p,'w'),indent=2)\"   # back the file up first" ;;
+        *) report unknown BLOCK "cannot read the heartbeat block: $hb_out ($CC_SETTINGS)" "python3 -m json.tool $CC_SETTINGS" ;;
+    esac
+else
+    report unknown BLOCK "python3 missing — cannot assert the heartbeat settings block" "install python3"
+fi
+
+# A9 — without ~/.claude/fleet-roster.env no seat on this VM is a manager, so every
+#      manager-gated store write 403s (start-cc-with-tmux.sh derives the persona chain
+#      from it). Row 31344c5f. Needs at least one line; per-project coverage is checked
+#      in layer C, where the external-project mounts are known.
+pfv_roster_declares "$FLEET_ROSTER" ""; ros_rc=$?
+case $ros_rc in
+    0) report pass BLOCK "fleet-roster.env declares at least one COSA_VOICE_MANAGERS__ line" ;;
+    1) report fail BLOCK "$FLEET_ROSTER has no COSA_VOICE_MANAGERS__<PROJECT> line — no seat here is a manager; manager-gated store writes will 403" \
+                  "printf 'COSA_VOICE_MANAGERS__<PROJECT>=\"<Persona>\"\n' >> $FLEET_ROSTER   # template: src/conf/fleet-roster.env.template" ;;
+    *) report fail BLOCK "$FLEET_ROSTER is missing — no seat here is a manager; manager-gated store writes will 403" \
+                  "cp $REPO_ROOT/src/conf/fleet-roster.env.template $FLEET_ROSTER   # then set COSA_VOICE_MANAGERS__<PROJECT>=\"<Persona>\"" ;;
+esac
 else note_skip A; fi
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -884,6 +914,68 @@ PY
     else
         report fail BLOCK "Cloud SQL socket /cloudsql/$conn/.s.PGSQL.5432 is absent or not a socket (the proxy may still report 'healthy' — bug 70794d58)" \
                       "sudo docker compose -f $COMPOSE_FILE --env-file $REPO_ROOT/cloud-gpu.env restart cloud-sql-proxy && ... up -d --no-deps --force-recreate $CONTAINER"
+    fi
+    # C9 — the flow-ratio override file exists (row 31344c5f). WARN, not block: the
+    #      VALUES are the operator's call, so this only reports whether an override is
+    #      in force and what it says. Absent ⇒ the shipped defaults (24h / 1.0) apply
+    #      instead of dev's 120h / 1.1. The dir comes from the container's own env.
+    fr_dir="$( docker exec "$CONTAINER" sh -c 'printf %s "${LUPIN_FLOW_RATIO_DIR:-}"' 2>/dev/null || printf '' )"
+    if [ -z "$fr_dir" ]; then
+        report fail WARN "LUPIN_FLOW_RATIO_DIR is unset in $CONTAINER — flow-ratio overrides cannot be read from anywhere" \
+                      "add LUPIN_FLOW_RATIO_DIR: /var/lupin/flow-ratio to the compose environment, then up -d --no-deps --force-recreate $CONTAINER"
+    else
+        fr_body="$( docker exec "$CONTAINER" cat "$fr_dir/flow-ratio-settings.json" 2>/dev/null )"; fr_rc=$?
+        if [ $fr_rc -eq 0 ] && [ -n "$fr_body" ]; then
+            report pass WARN "flow-ratio override present at $fr_dir/flow-ratio-settings.json: $( printf '%s' "$fr_body" | tr -d '\n' | tr -s ' ' )"
+        else
+            report fail WARN "no flow-ratio override at $fr_dir/flow-ratio-settings.json — shipped defaults (24h / 1.0) apply, not dev's 120h / 1.1" \
+                          "docker exec -w /var/lupin $CONTAINER python -c \"import cosa.rest.flow_ratio_settings as f; f.set_overrides( window_hours=<H>, allow_below=<R> )\"   # values are the operator's call"
+        fi
+    fi
+
+    # C10 — git inside the container must trust every external-project mount. The
+    #       container runs as uid 1001 while the host owner differs, so git answers
+    #       "dubious ownership" and receipt commits read as "not found" (row 31344c5f).
+    #       Population = the LIVE mount table, never a hand list.
+    unsafe_mounts=""; ext_seen=0
+    while IFS= read -r m; do
+        [ -n "$m" ] || continue
+        case "$m" in /var/external-projects/*) ;; *) continue ;; esac
+        [ -n "$( docker exec "$CONTAINER" sh -c "ls -A '$m/.git' 2>/dev/null | head -1" 2>/dev/null )" ] || continue
+        ext_seen=$(( ext_seen + 1 ))
+        docker exec "$CONTAINER" git -C "$m" rev-parse HEAD >/dev/null 2>&1 || unsafe_mounts="$unsafe_mounts $m"
+    done <<< "$running_mounts"
+    if [ "$ext_seen" -eq 0 ]; then
+        report unknown WARN "no git-backed /var/external-projects mount found to test safe.directory against" \
+                      "check the external-project binds in $COMPOSE_FILE"
+    elif [ -z "$unsafe_mounts" ]; then
+        report pass BLOCK "git rev-parse HEAD succeeds inside $CONTAINER for all $ext_seen external-project mounts"
+    else
+        report fail BLOCK "git refuses these mounts inside $CONTAINER (dubious ownership):$unsafe_mounts" \
+                      "durable: add GIT_CONFIG_COUNT / GIT_CONFIG_KEY_n=safe.directory / GIT_CONFIG_VALUE_n=<mount> per mount to the lupin-rest environment in $COMPOSE_FILE, then up -d --no-deps --force-recreate $CONTAINER   # a RESTART will NOT re-read env"
+    fi
+
+    # C11 — every project actually WORKED on this VM has a roster line. "Worked" is
+    #       derived, not listed: an external mount whose host path has a Claude Code
+    #       project dir under ~/.claude/projects. WARN: a missing line leaves that
+    #       project without a declared manager (A9 blocks the no-line-at-all case).
+    CC_PROJECTS_DIR="${PREFLIGHT_VM_CC_PROJECTS:-$HOME/.claude/projects}"
+    no_roster=""; worked=0
+    while IFS=$'\t' read -r src dst; do
+        case "$dst" in /var/external-projects/*) ;; *) continue ;; esac
+        [ -d "$CC_PROJECTS_DIR/$( pfv_cc_project_dirname "$src" )" ] || continue
+        worked=$(( worked + 1 ))
+        key="$( pfv_roster_project_key "$( basename "$dst" )" )"
+        pfv_roster_declares "$FLEET_ROSTER" "$key" || no_roster="$no_roster COSA_VOICE_MANAGERS__$key"
+    done < <( docker inspect "$CONTAINER" --format '{{range .Mounts}}{{.Source}}{{"\t"}}{{.Destination}}{{"\n"}}{{end}}' 2>/dev/null )
+    if [ "$worked" -eq 0 ]; then
+        report unknown WARN "no worked-on external project found under $CC_PROJECTS_DIR — per-project roster coverage not assessed" \
+                      "run a Claude Code session in a project, or check $CC_PROJECTS_DIR"
+    elif [ -z "$no_roster" ]; then
+        report pass WARN "every worked-on project ($worked) has a COSA_VOICE_MANAGERS__ line in $FLEET_ROSTER"
+    else
+        report fail WARN "worked-on project(s) with no roster line:$no_roster" \
+                      "echo '<KEY>=\"<Persona>\"' >> $FLEET_ROSTER   # one per key listed"
     fi
 fi
 else note_skip C; fi
