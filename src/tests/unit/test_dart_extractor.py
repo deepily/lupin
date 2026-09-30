@@ -1,6 +1,8 @@
 """
-The Dart extractor: real parses of fixture files through the real Dart analyzer, plus the
-failure paths through a fake process runner.
+The Dart extractor, tested with real parses and with fake-runner failure paths.
+
+Real parses run fixture files through the real Dart analyzer; the failure paths use a fake
+process runner.
 
 The extractor contract and DependencyMissing come from the symbol-index package when it is
 present; until that package lands in this tree the tests register minimal stand-ins that
