@@ -61,7 +61,7 @@ for ( const abs of req.files ) {
         } else if ( ts.isClassDeclaration( st ) && st.name ) {
             emit( rel, st.name.text, "class", "", st, sf );
             for ( const m of st.members ) {
-                if ( ( ts.isMethodDeclaration( m ) || ts.isConstructorDeclaration( m ) ) && !isPrivate( m ) ) {
+                if ( ( ts.isMethodDeclaration( m ) || ts.isConstructorDeclaration( m ) || ts.isGetAccessorDeclaration( m ) || ts.isSetAccessorDeclaration( m ) ) && !isPrivate( m ) ) {
                     const mname = ts.isConstructorDeclaration( m ) ? "constructor" : m.name.getText( sf );
                     emit( rel, st.name.text + "." + mname, "method", params( m, sf ), m, sf );
                 }

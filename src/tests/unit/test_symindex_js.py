@@ -35,6 +35,7 @@ def test_typescript_fixtures_class_methods_typed_arrows_generics( tmp_path ):
     assert by[ "Box.get" ][ "kind" ] == "method" and by[ "Box.get" ][ "sig" ] == "(k: string): T | undefined"   # class method
     assert by[ "Box.put" ][ "sig" ] == "(k: string, v: T): Promise<void>"
     assert by[ "Box.constructor" ][ "kind" ] == "method"
+    assert sorted( r[ "sig" ] for r in recs if r[ "name" ] == "Box.size" ) == [ "(): number", "(n: number)" ]      # get and set accessors are indexed too
     assert by[ "mul" ][ "sig" ] == ": ( a: number, b: number ) => number".replace( "( a: number, b: number )", "( a: number, b: number )" ) \
            or by[ "mul" ][ "sig" ].startswith( ": " )                            # typed arrow: the declared type is the signature
     assert by[ "mul" ][ "doc" ] == "Typed arrow."

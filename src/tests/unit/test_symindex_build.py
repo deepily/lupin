@@ -274,3 +274,15 @@ def test_the_tree_root_is_passed_to_check_dependencies_so_a_bundled_sdk_counts( 
     _fake_dart( monkeypatch, lambda *a: [], check=lambda r: seen.append( r ) )
     bd.environment( sp.spec_for( root ) )
     assert seen == [ root.resolve() ]
+
+
+def test_the_extractor_logic_version_follows_code_not_comments():
+    py = 'def f( a ):\n    """doc"""\n    return a + 1\n'
+    js = "// c\nfunction g() { return 1; }\n"
+    base = bd.logic_version( py, js )
+    assert len( base ) == 6
+    assert bd.logic_version( py.replace( "doc", "a new docstring" ).replace( "a + 1", "a  +  1" ), "/* x */\n" + js + "// more\n" ) == base
+    assert bd.logic_version( py.replace( "a + 1", "a + 2" ), js ) != base                         # a code edit to the Python extractor
+    assert bd.logic_version( py, js.replace( "return 1", "return 2" ) ) != base                     # a code edit to the JS extractor
+    assert bd.EXTRACTOR_LOGIC == bd.logic_version( pathlib.Path( bd.__file__ ).with_name( "py_index.py" ).read_text( encoding="utf-8" ),
+                                                   pathlib.Path( bd.__file__ ).with_name( "ts_extract.js" ).read_text( encoding="utf-8" ) )

@@ -115,6 +115,8 @@ export class Box<T> {
     #secret(): void {}
     constructor( public v: number ) {}
     async put( k: string, v: T ): Promise<void> {}
+    get size(): number { return 1; }
+    set size( n: number ) {}
 }
 
 /** Typed arrow. */

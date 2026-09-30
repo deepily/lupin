@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import shutil
 import sys
 import time
@@ -23,13 +24,33 @@ from cosa.repo.symindex.py_index import extract_python
 from cosa.repo.symindex.spec import is_lupin_tree, iter_files, manifest, spec_for
 
 KEEP_GENERATIONS = 3
-EXTRACTOR_LOGIC  = "1"            # bump whenever an edit to py_index, ts_extract.js or the pin rules changes any pin
+
+
+def logic_version( py_source, js_source ):
+    """
+    Identify the extractor logic that decides pins.
+
+    Ensures:
+        - returns 6 hex characters over the Python extractor's AST with docstrings removed and the
+          JS extractor with comments removed, so editing a comment never changes it and editing code does
+        - an edit to py_index.py or ts_extract.js that could change a pin therefore changes the
+          pin algorithm by itself; nobody has to remember to bump a constant
+    """
+    import ast
+    from cosa.repo.symindex.py_index import strip_docs
+    code = re.sub( r"/\*.*?\*/|//[^\n]*", "", js_source, flags=re.S )
+    return _hash_text( ast.dump( strip_docs( ast.parse( py_source ) ) ) + "\0" + " ".join( code.split() ) )[ :6 ]
+
 SEP              = " — "            # the em dash between signature and summary in symbols.md
 
 
 def _hash_text( text ):
     """Ensures: returns the first 10 hex characters of sha1( text )."""
     return hashlib.sha1( text.encode( "utf-8" ) ).hexdigest()[ :10 ]
+
+
+EXTRACTOR_LOGIC = logic_version( ( pathlib.Path( __file__ ).with_name( "py_index.py" ) ).read_text( encoding="utf-8" ),
+                                 ( pathlib.Path( __file__ ).with_name( "ts_extract.js" ) ).read_text( encoding="utf-8" ) )
 
 
 def _assign_ids( spec, records ):
