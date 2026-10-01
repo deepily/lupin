@@ -333,7 +333,7 @@ def lint_text( text, path, first_line=1, structure=True, markdown=False, words=N
         - first_line is the 1-based file line of the first line of text
         - markdown is True when text is a markdown page
         - words is the English word set for rule 4, or None for the vendored list
-        - agent_rule is False for a registered tool description, which is addressed to a model by design
+        - agent_rule is False for a registered tool description, which is meant for a model
 
     Ensures:
         - returns a list of Finding sorted by line, then rule
