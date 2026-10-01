@@ -1,0 +1,72 @@
+{
+  "models": {
+    "extractor": "claude-sonnet-5-5",
+    "judge": "claude-sonnet-5-5",
+    "escalation": "claude-opus-5-5",
+    "writer": "tracked-docstrings"
+  },
+  "prompt_versions": {
+    "extractor": "extractor-a3bde07306",
+    "judge": "judge-c6dc7c2165"
+  },
+  "lists": [
+    {
+      "slot": 0,
+      "positives": 3,
+      "misses": 0,
+      "upper_bound": 0.6315968501359612,
+      "unseeded": 3,
+      "false_alarms": 0,
+      "false_alarm_rate": 0.0
+    },
+    {
+      "slot": 1,
+      "positives": 3,
+      "misses": 0,
+      "upper_bound": 0.6315968501359612,
+      "unseeded": 3,
+      "false_alarms": 0,
+      "false_alarm_rate": 0.0
+    }
+  ],
+  "agreement_all": {
+    "same": 89,
+    "claims": 91,
+    "rate": 0.978021978021978,
+    "interval": [
+      0.9228546072453983,
+      0.9973271885733758
+    ]
+  },
+  "agreement_seeded": {
+    "same": 4,
+    "claims": 6,
+    "rate": 0.6666666666666666,
+    "interval": [
+      0.22277809550351216,
+      0.9567281317072583
+    ]
+  },
+  "escalations": 2,
+  "discarded_claims": 5,
+  "longest_quote": 0.18305084745762712,
+  "mean_uncovered": 0.13640802642405694,
+  "identical_list_pairs": 4,
+  "pairs": 6,
+  "miss_criterion_met": false,
+  "false_alarm_ok": true,
+  "agreement_ok": false,
+  "judge_unanswered": null,
+  "default_gate_pass": false,
+  "pairs_sha": "74fb9fe99bce6ae4611f6eafb542fa8fa81afaf15e9c97727482138007948246",
+  "claude_cli": "/home/rruiz/.local/bin/claude",
+  "claude_cli_version": "2.1.287 (Claude Code)",
+  "call_profile": "hermetic-1|{\"args\": [\"disable-slash-commands\", \"settings\", \"strict-mcp-config\"], \"setting_sources\": [], \"settings\": {\"autoMemoryEnabled\": false, \"claudeMdExcludes\": [\"**/CLAUDE.md\", \"**/CLAUDE.local.md\", \"~/.claude/CLAUDE.md\"], \"disableAllHooks\": true}, \"tools\": []}",
+  "call_residual_context": [
+    "environment and working-directory block",
+    "model name",
+    "token budget",
+    "account email header",
+    "current date"
+  ]
+}
