@@ -277,7 +277,7 @@ class BetweenSuiteResetError( RuntimeError ):
     The shared test database could not be reset between two suites.
 
     Raised so the sweep stops: the next suite would otherwise run on the earlier suite's rows
-    and report on someone else's data (bug 07dde530).
+    and report on someone else's data.
     """
 
 
@@ -289,8 +289,8 @@ def tables_with_fk_into( metadata, listed ) -> List[ str ]:
         - metadata is a SQLAlchemy MetaData; listed is an iterable of table names
 
     Ensures:
-        - returns the sorted names of tables that Postgres would refuse to leave out of a
-          TRUNCATE of the listed tables
+        - returns the sorted names of tables that Postgres refuses to leave out of a truncate of
+          the listed tables
         - an empty list means the truncate set is closed under foreign keys
     """
     listed  = set( listed )
