@@ -1411,6 +1411,11 @@ app = FastAPI(
 SERVER_STARTED_AT = datetime.now().isoformat( timespec="seconds" )
 app.add_exception_handler( Exception, make_unhandled_exception_handler( SERVER_STARTED_AT ) )
 
+# Doc-upload size guard: refuse an oversized /api/docs/upload before its body is spooled to disk.
+# Added BEFORE CORS so CORS wraps it and a browser can read the 413 (later add = outer).
+from cosa.rest.upload_size_guard import UploadSizeGuard
+app.add_middleware( UploadSizeGuard )
+
 # Add CORS middleware to allow Flutter web app to access API endpoints
 app.add_middleware(
     CORSMiddleware,
