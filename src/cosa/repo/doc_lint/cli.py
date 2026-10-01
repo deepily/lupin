@@ -81,18 +81,20 @@ def build_parser( description ):
     return parser
 
 
-def run_linter( description, suffixes, lint_source, argv, out=None ):
+def run_linter( description, suffixes, lint_source, argv, out=None, footer=None ):
     """
     Run one linter over the chosen files and print its findings.
 
     Requires:
         - lint_source( path, source, root ) returns a list of Finding; root is the repo working tree
         - suffixes is a tuple of file suffixes
+        - footer is a callable returning one extra report line, or None
 
     Ensures:
         - returns 0, or 1 when --strict is given and findings remain
         - --changed and --staged keep only findings on touched lines
         - a file that cannot be read as UTF-8 is reported as one finding, not skipped
+        - the text report ends with the footer line; --json output carries no footer
 
     Raises:
         - RuntimeError from git when a diff or listing fails
@@ -118,6 +120,7 @@ def run_linter( description, suffixes, lint_source, argv, out=None ):
     else:
         for f in findings: out.write( f"{f.path}:{f.line}: {f.rule}: {f.message}\n" )
         out.write( f"{len( findings )} findings in {len( paths )} files\n" )
+        if footer is not None: out.write( footer() )
     return 1 if args.strict and findings else 0
 
 

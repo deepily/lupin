@@ -312,3 +312,38 @@ def test_lint_text_combines_every_rule_sorted_and_respects_the_structure_flag():
 
 def test_lint_text_ignores_code_blocks_inside_a_docstring():
     assert tr.lint_text( ">>> x = NOT NEVER\n\nclean", "a.py", 1, structure=False, words=WORDS ) == []
+
+
+# ---- the calendar-date predicate (row e786f5e5) ----------------------------------------------
+
+@pytest.mark.parametrize( "text, expected", [
+    ( "> **Last Updated**: 2026.09.28", [ "2026.09.28" ] ),                        # banner line, dotted, from src/docs
+    ( "Date: 2026-03-20", [ "2026-03-20" ] ),                                      # banner line, hyphenated
+    ( "ended 2026.03.20.", [ "2026.03.20" ] ),                                     # sentence-final dot
+    ( "see 2026.09.30-foo.md and src/rnd/2026.09.30/x.md", [] ),                   # file and directory names
+    ( "see 2026-09-30-foo.md", [] ),                                               # hyphenated file name
+    ( "mixed 2026-03.20 and 2026.13.20 and 2026.03.32", [] ),                      # mixed separator, bad month, bad day
+    ( "version 1.2026.03.20 and 2026.03.20x", [] ),                                # touching a dot or a word
+    ( "pre-2026-06-05 and post-2026-05-16", [ "2026-06-05", "2026-05-16" ] ),      # a leading hyphen is prose, still a date
+    ( "x2026.03.20 and 12026.03.20", [] ),                                         # a word character before
+    ( "src/2026.03.20 and 2026.03.20/x", [] ),                                     # a slash before or after
+    ( "2026-03-20-plan and 2026.03.20-plan", [] ),                                 # a trailing hyphen
+    ( "2026-03-20.md and 2026.03.20.md", [] ),                                     # a file extension
+    ( "2026.00.20 and 2026.03.00", [] ),                                           # month 00, day 00
+] )
+def test_calendar_date_predicate_takes_either_separator_and_refuses_file_names_and_non_dates( text, expected ):
+    assert [ m.group( 0 ) for m in rl.ISO_DATE_REGEX.finditer( text ) ] == expected
+
+
+def test_history_rule_reports_dotted_and_hyphenated_banners_but_not_a_backticked_file_name():
+    text  = "Last Updated: 2025.10.04\nDate: 2026-03-20\nsee `2026.09.30-foo.md` and 2026.09.30-bar.md\n"
+    found = tr.history_findings( text, "a.md", 1 )
+    assert [ ( f.line, f.rule ) for f in found ] == [ ( 1, "iso-date" ), ( 2, "iso-date" ) ]
+
+
+def test_history_rule_skips_the_agent_imperative_check_only_when_told_to():
+    text = "you must obey"
+    assert [ f.rule for f in tr.history_findings( text, "a.py", 1 ) ] == [ "agent-imperative" ]
+    assert tr.history_findings( text, "a.py", 1, agent_rule=False ) == []
+    assert [ f.rule for f in tr.lint_text( text, "a.py", 1, words=WORDS ) if f.rule == "agent-imperative" ] == [ "agent-imperative" ]
+    assert [ f.rule for f in tr.lint_text( text, "a.py", 1, words=WORDS, agent_rule=False ) if f.rule == "agent-imperative" ] == []

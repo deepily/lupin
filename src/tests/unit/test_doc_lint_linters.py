@@ -324,3 +324,90 @@ def test_md_page_rates_and_main( repo ):
     out = io.StringIO()
     assert md_lint.main( [ "--repo-root", str( repo ) ], out ) == 0
     assert "docs/p.md:1: caps" in out.getvalue()
+
+
+# ---- registered tool descriptions are exempt from the injection rule -------------------------
+
+# The enable_speakerphone docstring in src/lupin_mcp/cosa_voice_mcp.py says "you should call".
+TOOL_SOURCE = '''import functools
+
+@mcp.tool
+def enable_speakerphone():
+    """
+    Enter conversation mode.
+
+    When conversation mode is on, after every turn you should call notify. See 2026.09.28.
+    """
+
+@server.tool( name="x" )
+async def with_call():
+    """
+    Do x.
+
+    You must call this first.
+    """
+
+@tool
+def bare():
+    """
+    Do y.
+
+    You must call this first.
+    """
+
+@_offloaded_tool
+def wrapper_only():
+    """
+    Do z.
+
+    You must call this first.
+    """
+
+class Tool:
+    """
+    A class.
+
+    You must not call this.
+    """
+
+def plain():
+    """
+    Do w.
+
+    You must call this first.
+    """
+
+@helpers.my_tool
+def lookalike():
+    """
+    Do v.
+
+    You must call this first.
+    """
+'''
+
+
+def test_registered_tool_docstrings_skip_only_the_injection_rule_and_are_counted():
+    stats    = {}
+    findings = docstring_lint.lint_source( "a.py", TOOL_SOURCE, None, stats )
+    imperative = sorted( f.line for f in findings if f.rule == "agent-imperative" )
+    assert stats == { "exempted": 3 }
+    assert imperative == [ 32, 39, 46, 54 ]                                    # wrapper_only, class Tool, plain, lookalike: all still fire
+    assert [ f.rule for f in findings if f.line == 8 ] == [ "iso-date" ]  # the tool docstring keeps every other rule
+
+
+def test_is_tool_registered_is_decided_by_the_decorator_and_not_by_the_name():
+    import ast
+    nodes = { n.name: n for n in ast.walk( ast.parse( TOOL_SOURCE ) ) if hasattr( n, "name" ) }
+    assert [ docstring_lint.is_tool_registered( nodes[ k ] ) for k in ( "enable_speakerphone", "with_call", "bare", "wrapper_only", "Tool", "plain", "lookalike" ) ] == [ True, True, True, False, False, False, False ]
+    assert docstring_lint.is_tool_registered( ast.parse( "x = 1" ) ) is False
+
+
+def test_docstring_lint_main_prints_how_many_tool_docstrings_were_exempted( repo ):
+    _commit( repo, { "src/a.py": TOOL_SOURCE } )
+    out = io.StringIO()
+    docstring_lint.main( [ "--repo-root", str( repo ) ], out )
+    assert out.getvalue().rstrip( "\n" ).endswith( "3 tool docstrings exempted from the agent-imperative rule" )
+    out = io.StringIO()
+    docstring_lint.main( [ "--repo-root", str( repo ), "--json" ], out )
+    assert "exempted" not in out.getvalue()
