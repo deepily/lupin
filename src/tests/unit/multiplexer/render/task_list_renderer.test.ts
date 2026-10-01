@@ -857,7 +857,7 @@ test("a date input appears for EXACTLY the two verbs that need one, labelled for
   for (const [verb, label] of EXPECT) {
     changeSelect(root, ".task-verb-select", verb);
     const date = root.querySelector<HTMLInputElement>(".task-chase-input");
-    if (label === null) { assert.equal(date, null, `${verb}: an unwanted date box`); withoutDate += 1; }
+    if (label === null) { assert.ok(date === null, `${verb}: an unwanted date box`); withoutDate += 1; }
     else {
       assert.ok(date, `${verb}: no date box`);
       assert.equal(date!.type, "date");

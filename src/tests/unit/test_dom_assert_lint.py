@@ -511,5 +511,87 @@ class TestItSeesANodeReachedThroughAName:
         assert { v.line for v in scan_text( text ) } == self.REAL_SITES[ path ]
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# 7. A node reached through a call carrying a TYPE ARGUMENT — row f2d3df2b, 2026-09-30
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestItSeesThroughTypeArguments:
+    """
+    `root.querySelector<HTMLElement>( … )` is the same call, returning the same node, as
+    `root.querySelector( … )` — but the terminal pattern spelled the call without the `<…>` and
+    the guard reported 0 over a tree holding 7 live hazards (`action_required_renderer.test.ts`
+    741 and six more). The predicate is "a call"; a type argument is not part of what is called.
+    """
+
+    @pytest.mark.parametrize( "src", [
+        "assert.equal( root.querySelector<HTMLElement>('.x'), null );",
+        "assert.notEqual( root.querySelector<HTMLInputElement>( '.x' ), null, \"present\" );",
+        "assert.equal( null, root.querySelector<HTMLElement>('.x') );",
+        "assert.equal( host.querySelectorAll<HTMLElement>('.x'), expected );",
+        "assert.equal( root.querySelector<Map<string, Array<number>>>('.x'), null );",
+        "assert.equal( root.querySelector<HTMLElement>('.x')!, null );",
+        "assert.equal( root.querySelector<HTMLElement>('.x') as HTMLElement, null );",
+        # through a one-hop name whose binding carries a type argument
+        "const input = h.root.querySelector<HTMLInputElement>( '.x' )!;\nassert.equal( document.activeElement, input );",
+        "const q = () => root.querySelector<HTMLElement>( '.x' );\nassert.equal( q<HTMLElement>(), null );",
+    ] )
+    def test_a_generic_dom_call_is_flagged( self, src ):
+        assert scan_text( src ), "a type argument hid a DOM node from the guard: %s" % src
+
+    @pytest.mark.parametrize( "src", [
+        "assert.equal( root.querySelector<HTMLElement>('.x')!.textContent, 'a' );",
+        "assert.ok( root.querySelector<HTMLElement>('.x') === null, 'absent' );",
+        "assert.ok( root.querySelector<HTMLElement>('.x') !== null );",
+        "assert.equal( root.querySelectorAll<HTMLElement>('.x').length, 2 );",
+        # an ordinary comparison must not be read as a type argument list
+        "assert.equal( a < b, c > ( d ) );",
+        "assert.equal( items.length, 3 );",
+    ] )
+    def test_the_controls_stay_unflagged( self, src ):
+        assert not scan_text( src ), "false positive on: %s" % src
+
+    def test_stripping_leaves_a_comparison_alone( self ):
+        from tests.dom_assert_lint import _strip_type_arguments
+        assert _strip_type_arguments( "a < b && c > ( d )" ) == "a < b && c > ( d )"
+        assert _strip_type_arguments( "q<Map<A, B>>( x )" ) == "q( x )"
+        assert _strip_type_arguments( "q<A" ) == "q<A", "an unclosed `<` must survive, not raise"
+
+
+class TestTheBooleanFormReportsInsteadOfDying:
+    """
+    The remedy the lint recommends, shown to DISCRIMINATE: the SAME present element, the SAME
+    failing absence check, written as a boolean. It must come back as an ordinary test failure
+    with the message in it, not a signal. (The element form is the measured SIGKILL — 2.1 GB RSS
+    inside a 2 GB cap in under two seconds — and is NOT re-run here, because proving it kills is
+    what the cap exists for and this tier has none.)
+    """
+
+    def test_a_failing_boolean_absence_check_fails_readably_and_is_not_killed( self ):
+        import shutil, subprocess, tempfile
+        node = shutil.which( "node" )
+        if node is None or not ( ROOT / "node_modules" / "@happy-dom" ).is_dir():
+            pytest.skip( "node or @happy-dom is not installed in this tree" )
+        scratch = Path( tempfile.mkdtemp( dir=ROOT, prefix=".tmp-absent-" ) )
+        try:
+            ( scratch / "arm.test.mjs" ).write_text(
+                'import { GlobalRegistrator } from "@happy-dom/global-registrator";\n'
+                'import test from "node:test";\n'
+                'GlobalRegistrator.register();\n'
+                'const assert = ( await import( "node:assert/strict" ) ).default;\n'
+                'test( "present element", () => {\n'
+                '  const el = document.createElement( "div" ); document.body.appendChild( el );\n'
+                '  assert.ok( el === null, "the widget was removed" );\n'
+                '} );\n',
+                encoding="utf-8",
+            )
+            done = subprocess.run( [ node, "--test", str( scratch / "arm.test.mjs" ) ],
+                                   capture_output=True, text=True, timeout=120, cwd=ROOT )
+        finally:
+            shutil.rmtree( scratch, ignore_errors=True )
+        assert "SIGKILL" not in done.stdout and done.returncode == 1, (
+            "the boolean form did not fail cleanly: rc=%s\n%s" % ( done.returncode, done.stdout[ -800: ] ) )
+        assert "the widget was removed" in done.stdout, "the failure did not carry its message:\n%s" % done.stdout[ -800: ]
+
+
 def test_every_test_this_file_declares_is_actually_collected( request ):
     assert_every_declared_test_is_collected( request, __file__ )
