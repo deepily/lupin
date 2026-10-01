@@ -13,7 +13,7 @@ import json
 import re
 from collections import namedtuple
 
-from . import model_transport
+from . import claim_extractor, model_transport
 
 PROMPT_VERSION = "judge-v1"
 VERDICTS       = ( "present", "absent", "uncertain" )
@@ -175,3 +175,20 @@ def unlabelled_drops( report ):
         - a row is unlabelled unless its label is "history" or "restored"
     """
     return [ row for row in report if row[ "label" ] not in ( "history", "restored" ) ]
+
+
+def history_destinations_missing( report, destination_text ):
+    """
+    Return the history-labelled rows whose quote is absent from the text they say it moved to.
+
+    Requires:
+        - report is a list of history_report rows
+        - destination_text is the text of the document the author says holds the history
+
+    Ensures:
+        - only rows labelled "history" are checked; a restored or unlabelled row is not
+        - a row passes when its quote occurs in destination_text under the extractor's
+          normalization, so a history label cannot be used to drop a claim silently
+    """
+    return [ row for row in report
+             if row[ "label" ] == "history" and claim_extractor.locate_quote( row[ "quote" ], destination_text ) is None ]

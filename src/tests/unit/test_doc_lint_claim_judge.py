@@ -167,3 +167,15 @@ def test_history_report_lists_only_dropped_claims_and_waits_for_labels():
     assert cj.unlabelled_drops( report ) == []
     report[ 0 ][ "label" ] = "later"
     assert len( cj.unlabelled_drops( report ) ) == 1
+
+
+def test_history_destination_check_needs_the_quote_in_the_destination_text():
+    rows = [
+        { "claim": "a", "quote": "Raises ValueError when the id is blank.", "reason": None, "label": "history" },
+        { "claim": "b", "quote": "Returns None when the row is parked.", "reason": None, "label": "history" },
+        { "claim": "c", "quote": "Never mentioned anywhere else.", "reason": None, "label": "restored" },
+        { "claim": "d", "quote": "Also never mentioned anywhere.", "reason": None, "label": None },
+    ]
+    moved = cj.history_destinations_missing( rows, "History: Raises ValueError when the\n id is blank." )
+    assert [ r[ "claim" ] for r in moved ] == [ "b" ]
+    assert cj.history_destinations_missing( rows, "" ) == [ rows[ 0 ], rows[ 1 ] ]
