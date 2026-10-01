@@ -209,7 +209,7 @@ async def judge_item( item, config, query_fn=None ):
 
 
 def _item_key( item, config ):
-    """Return the ledger key for one docstring: its text, signature, the prompt version and the model."""
+    """Return the ledger key: the docstring text and signature, the prompt version and the model."""
     return "|".join( [ "prose", harness_runner.text_hash( item[ "text" ] ), harness_runner.text_hash( item[ "signature" ] ),
                        PROMPT_VERSION, config.judge_model ] )
 

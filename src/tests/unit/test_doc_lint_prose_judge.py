@@ -305,7 +305,7 @@ def test_the_discard_count_adds_up_over_a_sweep():
 
 def test_a_finding_with_an_extra_key_is_refused():
     with pytest.raises( pj.ProseParseError ):
-        pj.parse_findings( '{"findings": [{"sentence": "a b c d", "rule": "R4", "reason": "x", "extra": 1}]}' )
+        pj.parse_findings( '{"findings": [{"sentence": "a b c d", "rule": "R4", "reason": "x", "extra": "y"}]}' )
 
 
 def test_a_one_word_or_two_word_quote_never_points_at_a_line():
