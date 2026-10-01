@@ -112,6 +112,12 @@ def test_retry_on_429_then_success_waits_with_doubling_backoff():
     assert sleeps == [ jev_transport.BACKOFF_SECONDS, jev_transport.BACKOFF_SECONDS * 2 ]
 
 
+def test_backoff_keeps_doubling_through_the_third_wait():
+    sleeps = []
+    ask( scripted_post( [ 429, 429, 429, 200 ] ), sleeps )
+    assert sleeps == [ 1.0, 2.0, 4.0 ]
+
+
 def test_retries_are_bounded_and_the_last_failure_does_not_sleep():
     sleeps, calls = [], []
     with pytest.raises( jev_transport.JevCallError, match="still answered a retry status" ):
