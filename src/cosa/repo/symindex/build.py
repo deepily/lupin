@@ -26,20 +26,23 @@ from cosa.repo.symindex.spec import is_lupin_tree, iter_files, manifest, spec_fo
 KEEP_GENERATIONS = 3
 
 
-def logic_version( py_source, js_source ):
+def logic_version( py_source, js_source, dart_source ):
     """
     Identify the extractor logic that decides pins.
 
     Ensures:
-        - returns 6 hex characters over the Python extractor's AST with docstrings removed and the
-          JS extractor with comments removed, so editing a comment never changes it and editing code does
-        - an edit to py_index.py or ts_extract.js that could change a pin therefore changes the
-          pin algorithm by itself; nobody has to remember to bump a constant
+        - returns 6 hex characters over the Python extractor's AST with docstrings removed, the
+          JS extractor with comments removed and the Dart extractor with whole-line comments removed,
+          so editing a comment never changes it and editing code does
+        - an edit to py_index.py, ts_extract.js or dart_extract.dart that could change a record
+          (a pin, or the public flag) therefore changes the pin algorithm by itself, and an index
+          built before the edit is stale; nobody has to remember to bump a constant
     """
     import ast
     from cosa.repo.symindex.py_index import strip_docs
     code = re.sub( r"/\*.*?\*/|//[^\n]*", "", js_source, flags=re.S )
-    return _hash_text( ast.dump( strip_docs( ast.parse( py_source ) ) ) + "\0" + " ".join( code.split() ) )[ :6 ]
+    dart = "\n".join( line for line in dart_source.split( "\n" ) if not line.lstrip().startswith( "//" ) )
+    return _hash_text( ast.dump( strip_docs( ast.parse( py_source ) ) ) + "\0" + " ".join( code.split() ) + "\0" + " ".join( dart.split() ) )[ :6 ]
 
 SEP              = " — "            # the em dash between signature and summary in symbols.md
 
@@ -50,7 +53,8 @@ def _hash_text( text ):
 
 
 EXTRACTOR_LOGIC = logic_version( ( pathlib.Path( __file__ ).with_name( "py_index.py" ) ).read_text( encoding="utf-8" ),
-                                 ( pathlib.Path( __file__ ).with_name( "ts_extract.js" ) ).read_text( encoding="utf-8" ) )
+                                 ( pathlib.Path( __file__ ).with_name( "ts_extract.js" ) ).read_text( encoding="utf-8" ),
+                                 ( pathlib.Path( __file__ ).with_name( "dart_extract.dart" ) ).read_text( encoding="utf-8" ) )
 
 
 def _assign_ids( spec, records ):

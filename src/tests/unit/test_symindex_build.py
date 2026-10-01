@@ -289,13 +289,30 @@ def test_the_tree_root_is_passed_to_check_dependencies_so_a_bundled_sdk_counts( 
     assert seen == [ root.resolve() ]
 
 
+def _extractor_sources():
+    here = pathlib.Path( bd.__file__ )
+    return tuple( here.with_name( n ).read_text( encoding="utf-8" ) for n in ( "py_index.py", "ts_extract.js", "dart_extract.dart" ) )
+
+
 def test_the_extractor_logic_version_follows_code_not_comments():
     py = 'def f( a ):\n    """doc"""\n    return a + 1\n'
     js = "// c\nfunction g() { return 1; }\n"
-    base = bd.logic_version( py, js )
+    dart = "// c\nint g() { return 1; }\n"
+    base = bd.logic_version( py, js, dart )
     assert len( base ) == 6
-    assert bd.logic_version( py.replace( "doc", "a new docstring" ).replace( "a + 1", "a  +  1" ), "/* x */\n" + js + "// more\n" ) == base
-    assert bd.logic_version( py.replace( "a + 1", "a + 2" ), js ) != base                         # a code edit to the Python extractor
-    assert bd.logic_version( py, js.replace( "return 1", "return 2" ) ) != base                     # a code edit to the JS extractor
-    assert bd.EXTRACTOR_LOGIC == bd.logic_version( pathlib.Path( bd.__file__ ).with_name( "py_index.py" ).read_text( encoding="utf-8" ),
-                                                   pathlib.Path( bd.__file__ ).with_name( "ts_extract.js" ).read_text( encoding="utf-8" ) )
+    assert bd.logic_version( py.replace( "doc", "a new docstring" ).replace( "a + 1", "a  +  1" ), "/* x */\n" + js + "// more\n", "  // x\n" + dart + "/// more\n" ) == base
+    assert bd.logic_version( py.replace( "a + 1", "a + 2" ), js, dart ) != base                   # a code edit to the Python extractor
+    assert bd.logic_version( py, js.replace( "return 1", "return 2" ), dart ) != base               # a code edit to the JS extractor
+    assert bd.logic_version( py, js, dart.replace( "return 1", "return 2" ) ) != base               # a code edit to the Dart extractor
+    assert bd.EXTRACTOR_LOGIC == bd.logic_version( *_extractor_sources() )                         # the module constant is computed from all three real files
+
+
+def test_editing_the_dart_extractor_source_makes_a_built_index_stale( tmp_path, monkeypatch ):
+    py, js, dart = _extractor_sources()
+    root = make_repo( tmp_path ); spec = sp.spec_for( root ); out = tmp_path / "out"
+    bd.build( root, out )
+    assert bd.is_fresh( spec, out ) is True                                                         # control: the constant still matches the built index
+    monkeypatch.setattr( bd, "EXTRACTOR_LOGIC", bd.logic_version( py, js, dart + "// a comment\n" ) )
+    assert bd.is_fresh( spec, out ) is True                                                         # a comment edit leaves it fresh
+    monkeypatch.setattr( bd, "EXTRACTOR_LOGIC", bd.logic_version( py, js, dart.replace( "!n.startsWith( '_' )", "n.isNotEmpty", 1 ) ) )
+    assert bd.is_fresh( spec, out ) is False                                                        # a code edit to dart_extract.dart makes it stale
