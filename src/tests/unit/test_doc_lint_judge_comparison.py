@@ -75,6 +75,27 @@ def test_key_rows_keep_the_three_grouping_fields_and_refuse_a_malformed_key( tmp
         with pytest.raises( ValueError, match=text ): jc.key_rows( str( path ) )
 
 
+def test_a_key_whose_kind_and_seeded_positive_disagree_is_refused_so_a_group_never_mixes_error_types( tmp_path ):
+    _, keys_path = write_set( tmp_path )
+    rows = [ json.loads( l ) for l in open( keys_path ) ]
+    for kind, seeded in ( ( "paraphrase", True ), ( "relocate", True ), ( "delete", False ), ( "weaken", False ) ):
+        path = tmp_path / "mixed.jsonl"
+        path.write_text( json.dumps( { **rows[ 0 ], "kind": kind, "seeded_positive": seeded } ) + "\n" )
+        with pytest.raises( ValueError, match="error type is undefined" ): jc.key_rows( str( path ) )
+    for kind, seeded in ( ( "paraphrase", False ), ( "relocate", False ), ( "delete", True ), ( "weaken", True ) ):
+        path = tmp_path / "ok.jsonl"
+        path.write_text( json.dumps( { **rows[ 0 ], "kind": kind, "seeded_positive": seeded } ) + "\n" )
+        assert jc.key_rows( str( path ) )[ rows[ 0 ][ "id" ] ][ "kind" ] == kind
+
+
+def test_a_group_that_mixes_seeded_and_unseeded_pairs_is_refused_whatever_order_they_arrive_in():
+    keys  = { "a": { "kind": "delete", "seeded_positive": True, "injection": False }, "b": { "kind": "delete", "seeded_positive": True, "injection": False } }
+    empty = { "claims": [], "runs": [] }
+    seeded, unseeded = { "id": "a", "seed_span": [ 0, 3 ], "lists": [ empty ] }, { "id": "b", "seed_span": None, "lists": [ empty ] }
+    for order in ( [ seeded, unseeded ], [ unseeded, seeded ] ):
+        with pytest.raises( ValueError, match="mixes pairs" ): jc.group_rows( order, keys, 1 )
+
+
 def test_an_injection_pair_is_in_its_kind_row_and_in_the_injection_row_that_follows_seeded_positive():
     assert jc.groups_of( { "kind": "delete", "seeded_positive": True, "injection": False } ) == [ "delete" ]
     assert jc.groups_of( { "kind": "delete", "seeded_positive": True, "injection": True } ) == [ "delete", "injection (removed claim)" ]
@@ -283,6 +304,8 @@ MUTANTS = [
     ( '"injection (removed claim)" if key[ "seeded_positive" ] else "injection (kept claim)"', '"injection (kept claim)" if key[ "seeded_positive" ] else "injection (removed claim)"', "test_an_injection_pair_is_in_its_kind_row_and_in_the_injection_row_that_follows_seeded_positive" ),
     ( 'if key[ "injection" ]: names.append(', 'if False: names.append(', "test_an_injection_pair_is_in_its_kind_row_and_in_the_injection_row_that_follows_seeded_positive" ),
     ( "worst    = max( range( slots ), key=lambda s: ( per_list[ s ], -s ) )", "worst    = min( range( slots ), key=lambda s: ( per_list[ s ], -s ) )", "test_the_worse_extractor_list_is_the_one_reported_and_a_tie_names_the_lower_slot" ),
+    ( 'if row[ "seeded_positive" ] != ( row[ "kind" ] in REMOVING_KINDS ):', "if False:", "test_a_key_whose_kind_and_seeded_positive_disagree_is_refused_so_a_group_never_mixes_error_types" ),
+    ( 'if any( ( r[ "seed_span" ] is not None ) != seeded for r in group ): raise', "if False: raise", "test_a_group_that_mixes_seeded_and_unseeded_pairs_is_refused_whatever_order_they_arrive_in" ),
     ( "if not group: continue", "pass", "test_a_group_chart_is_left_out_when_the_keys_have_no_pair_of_its_kinds" ),
     ( "bound    = harness_report.upper_bound( wrong, len( group ) ) if seeded else harness_report.interval( wrong, len( group ) )[ 1 ]", "bound    = harness_report.upper_bound( wrong, len( group ) )", "test_a_removed_claim_group_reports_the_one_sided_upper_bound_and_a_kept_claim_group_the_interval_upper_end" ),
     ( 'if stage == "extract": out[ "extract" ] += 1', 'if stage == "extract": out[ "extract" ] += 2', "test_call_counts_split_extractor_calls_from_each_judges_calls" ),

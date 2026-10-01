@@ -16,6 +16,7 @@ import sys
 from . import harness_report, harness_runner, jev_judge, jev_transport, labelled_pairs
 
 KINDS         = ( "delete", "weaken", "relocate", "paraphrase" )
+REMOVING_KINDS = ( "delete", "weaken" )
 GROUPS        = KINDS + ( "injection (removed claim)", "injection (kept claim)" )
 KEY_FIELDS    = ( "kind", "seeded_positive", "injection" )
 
@@ -56,6 +57,8 @@ def key_rows( keys_path ):
 
     Raises:
         - ValueError when a row lacks a field, names an unknown kind, or holds a non-bool flag
+        - ValueError when the kind and seeded_positive disagree: delete and weaken remove a claim, relocate
+          and paraphrase keep every claim, and a row that says otherwise would mix the two error types
     """
     out = {}
     for row in labelled_pairs._read_jsonl( keys_path ):
@@ -64,6 +67,8 @@ def key_rows( keys_path ):
         if row[ "kind" ] not in KINDS: raise ValueError( f"key {row[ 'id' ]}: unknown kind {row[ 'kind' ]!r}" )
         if not isinstance( row[ "seeded_positive" ], bool ) or not isinstance( row[ "injection" ], bool ):
             raise ValueError( f"key {row[ 'id' ]}: seeded_positive and injection must be true or false" )
+        if row[ "seeded_positive" ] != ( row[ "kind" ] in REMOVING_KINDS ):
+            raise ValueError( f"key {row[ 'id' ]}: kind {row[ 'kind' ]!r} with seeded_positive {row[ 'seeded_positive' ]} cannot be grouped, because its error type is undefined" )
         out[ row[ "id" ] ] = { f: row[ f ] for f in KEY_FIELDS }
     return out
 
@@ -116,7 +121,7 @@ def group_rows( results, keys, slots ):
         - an injection pair is counted in its kind's row and in its injection row
 
     Raises:
-        - ValueError when a result has no key
+        - ValueError when a result has no key, or when a group mixes seeded and unseeded pairs
     """
     members = { name: [] for name in GROUPS }
     for r in results:
@@ -127,6 +132,7 @@ def group_rows( results, keys, slots ):
         group = members[ name ]
         if not group: continue
         seeded   = group[ 0 ][ "seed_span" ] is not None
+        if any( ( r[ "seed_span" ] is not None ) != seeded for r in group ): raise ValueError( f"group {name!r} mixes pairs with and without a seeded removal" )
         per_list = [ sum( 1 for r in group if wrong_on( r, s ) ) for s in range( slots ) ]
         worst    = max( range( slots ), key=lambda s: ( per_list[ s ], -s ) )
         wrong    = per_list[ worst ]
