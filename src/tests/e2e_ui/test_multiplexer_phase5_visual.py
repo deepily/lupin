@@ -266,6 +266,23 @@ def test_multiplexer_phase5_notifications_pane_visual(
     # _STABILIZE_DOM_JS above; the AR widget was waited-for at
     # `[data-testid="multiplexer-action-required"]`, so the section is rendered.
     ar_section = page.locator( '[data-testid="multiplexer-action-required-section"]' )
+    # DIAGNOSTIC (row 8c3628a4, 2026-09-30): the 2 px at (869,103) and (929,103) sit on the left and right
+    # edges of the countdown pill. Print what could move them: every running animation/transition under
+    # the section, and the pill's exact (fractional) box. Printed, never asserted; shown when the test fails.
+    print( "[phase5-diag]", page.evaluate( """() => {
+        const sec = document.querySelector( '[data-testid="multiplexer-action-required-section"]' );
+        const pill = sec.querySelector( '.action-required-countdown' );
+        const r = pill.getBoundingClientRect();
+        const s = sec.getBoundingClientRect();
+        return {
+            dpr       : window.devicePixelRatio,
+            pill_box  : [ r.x - s.x, r.y - s.y, r.width, r.height ],
+            pill_text : pill.textContent,
+            animations: sec.getAnimations( { subtree: true } ).map( a => ( {
+                type : a.constructor.name, name : a.animationName || a.transitionProperty || null,
+                state: a.playState, target: a.effect && a.effect.target ? ( a.effect.target.className || a.effect.target.tagName ) : null } ) ),
+        };
+    }""" ) )
     # Height-tolerant (max 1px) for the same reason as sender_cards above, and for a second one: the
     # stock assert_snapshot raises ValueError on a size difference BEFORE it saves any PNG, so the
     # +45 rows this card gained from the Action Required parity chrome (289 vs the 244-row baseline,
