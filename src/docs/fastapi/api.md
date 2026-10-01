@@ -4670,7 +4670,8 @@ Ensures:
 
 Raises:
     - HTTPException 404 when the target is unknown, not stalled, has no checkpoint,
-      or cannot be reconstructed.
+      or cannot be reconstructed — and, on the direct path, when the caller does not own
+      the job and is not an admin (the same text, so a refusal never reveals existence).
 
 
 
@@ -6162,4 +6163,4 @@ Request model for admin password reset.
 | reason |  | Optional reason for audit trail |
 
 ---
-_Auto-generated on 2026.09.29 19:39:46 by `src/scripts/generate-api-docs.sh`_
+_Auto-generated on 2026.10.01 12:48:48 by `src/scripts/generate-api-docs.sh`_
