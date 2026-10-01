@@ -24,7 +24,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 import cosa.utils.util as cu
 from cosa.rest.auth import get_current_user
 from cosa.rest.routers._dir_listing import list_directory
-from cosa.rest.routers._scope_registry import _is_secrets_path
+from cosa.rest.routers._scope_registry import _is_secrets_path, landed_relative_path, landed_within_roots
 
 router = APIRouter( tags=[ "io-files" ] )
 
@@ -129,11 +129,20 @@ async def get_io_file(
     # normpath collapses `..` textually and never follows a symlink, so a link planted
     # inside io/ with an innocent name was judged by the name the caller typed while
     # open() read wherever it pointed. Resolve, then judge where it LANDS.
-    full_path = os.path.realpath( os.path.join( io_base, decoded_path ) )
+    joined    = os.path.join( io_base, decoded_path )
+    full_path = os.path.realpath( joined )
 
-    # Security: ensure the REAL path is within io/. `!= base and not startswith(base + sep)`
-    # rather than a bare startswith, which also admits a sibling such as `io-archive/`.
-    if full_path != io_base and not full_path.startswith( io_base + os.sep ):
+    # Security: ensure the REAL path lands inside io/, judged by DIRECTORY IDENTITY rather than
+    # by spelling (rows cc39cee6, 5dd6baaa). A prefix test refuses a live file reached through a
+    # second mount spelling of io/ — the container mounts the repo at two prefixes — while a
+    # sibling such as `io-archive/` shares a name prefix and no identity, so it stays refused.
+    if not landed_within_roots( full_path, [ io_base ] ):
+        # A link whose target is gone is a missing file, not an escape attempt.
+        if os.path.islink( joined ) and not os.path.exists( joined ):
+            raise HTTPException(
+                status_code = 404,
+                detail      = f"File not found: {decoded_path}"
+            )
         raise HTTPException(
             status_code = 400,
             detail      = "Invalid path: must be within io/ directory"
@@ -150,9 +159,7 @@ async def get_io_file(
     # Re-judge on the LANDED path. The check above saw the path as TYPED; a symlink
     # inside io/ can land on a name the blocklist would refuse. `_is_secrets_path`
     # documents POSIX separators, so normalize rather than assume os.sep is "/".
-    landed_rel = os.path.relpath( full_path, io_base ).replace( os.sep, "/" )
-    if landed_rel == ".":
-        landed_rel = ""
+    landed_rel = landed_relative_path( full_path, io_base ).replace( os.sep, "/" )
     if _is_secrets_path( landed_rel ):
         raise HTTPException(
             status_code = 400,
@@ -162,9 +169,7 @@ async def get_io_file(
     # Directory branch (polymorphic response) — must come before isfile check
     if os.path.isdir( full_path ):
         # Compute relative-to-io path (the path callers expect for io scope)
-        rel_to_io = os.path.relpath( full_path, io_base )
-        if rel_to_io == ".":
-            rel_to_io = ""  # at io root
+        rel_to_io = landed_relative_path( full_path, io_base )   # "" at the io root; never a `../..` form
         listing = list_directory(
             abs_dir          = full_path,
             rel_dir          = rel_to_io,
