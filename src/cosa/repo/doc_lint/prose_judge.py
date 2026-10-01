@@ -229,6 +229,8 @@ async def judge_prose( items, config, ledger=None, query_fn=None ):
           neither a silent clean nor an abort
         - with a ledger, a finished item is not judged again, and an unjudged item is not
           stored, so a rerun retries it
+        - the ledger holds no path and no absolute line: a replay rebuilds each finding from the
+          item in hand, so an identical docstring in another file gets its own path and line
         - returns ProseResult( findings, discarded, unjudged ): findings sorted by path, line and
           rule, the total of discarded quotes, and the number of unjudged items
 
@@ -242,7 +244,7 @@ async def judge_prose( items, config, ledger=None, query_fn=None ):
         key    = _item_key( item, config )
         stored = ledger.get( key ) if ledger is not None else None
         if stored is not None:
-            findings  += [ Finding( *row ) for row in stored[ "findings" ] ]
+            findings  += [ Finding( item[ "path" ], item[ "first_line" ] + offset, rule, f"{item[ 'name' ]}: {reason}" ) for offset, rule, reason in stored[ "findings" ] ]
             discarded += stored[ "discarded" ]
             continue
         for attempt in ( 1, 2 ):
@@ -253,7 +255,7 @@ async def judge_prose( items, config, ledger=None, query_fn=None ):
                 continue
             findings  += found
             discarded += dropped
-            if ledger is not None: ledger.put( key, { "findings": [ list( f ) for f in found ], "discarded": dropped } )
+            if ledger is not None: ledger.put( key, { "findings": [ [ f.line - item[ "first_line" ], f.rule, f.message.split( ": ", 1 )[ 1 ] ] for f in found ], "discarded": dropped } )
             break
         else:
             unjudged += 1

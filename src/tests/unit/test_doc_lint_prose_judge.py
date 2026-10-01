@@ -313,3 +313,38 @@ def test_a_one_word_or_two_word_quote_never_points_at_a_line():
     assert pj.locate_line( "id", item ) is None and pj.locate_line( "the row", item ) is None
     assert pj.locate_line( "Returns the id of the row.", item ) == 1
     assert pj.locate_line( "a b c", item ) is None
+
+
+def test_an_identical_docstring_in_another_file_gets_its_own_path_and_line_on_a_replay(tmp_path):
+    from cosa.repo.doc_lint import harness_runner as hn
+    ledger = hn.Ledger( str( tmp_path / "l" ) )
+    first  = run( pj.judge_prose( [ dict( LOOKUP, path="a.py", first_line=3 ) ], CONFIG, ledger=ledger, query_fn=FakeModel() ) )
+    model  = FakeModel()
+    second = run( pj.judge_prose( [ dict( LOOKUP, path="b.py", first_line=40, name="other" ) ], CONFIG, ledger=ledger, query_fn=model ) )
+    assert model.calls == []
+    assert [ ( f.path, f.line, f.rule ) for f in first.findings ] == [ ( "a.py", 6, "prose-restates-signature" ), ( "a.py", 7, "prose-rhetoric" ),
+                                                                        ( "a.py", 8, "prose-emphasis" ), ( "a.py", 8, "prose-two-ideas" ) ]
+    assert [ ( f.path, f.line, f.rule ) for f in second.findings ] == [ ( "b.py", 43, "prose-restates-signature" ), ( "b.py", 44, "prose-rhetoric" ),
+                                                                         ( "b.py", 45, "prose-emphasis" ), ( "b.py", 45, "prose-two-ideas" ) ]
+    assert all( f.message.startswith( "other: " ) for f in second.findings ) and all( f.message.startswith( "lookup: " ) for f in first.findings )
+
+
+def test_a_replay_reports_the_same_discard_count(tmp_path):
+    from cosa.repo.doc_lint import harness_runner as hn
+    ledger = hn.Ledger( str( tmp_path / "l" ) )
+    first  = run( pj.judge_prose( [ LOOKUP ], CONFIG, ledger=ledger, query_fn=FakeModel( invent=True ) ) )
+    again  = run( pj.judge_prose( [ LOOKUP ], CONFIG, ledger=ledger, query_fn=FakeModel() ) )
+    assert first.discarded == again.discarded == 1 and again.findings == first.findings
+
+
+def test_an_unjudged_multi_line_docstring_is_reported_on_its_first_line():
+    assert LOOKUP[ "first_line" ] != LOOKUP[ "last_line" ]
+    result = run( pj.judge_prose( [ LOOKUP ], CONFIG, query_fn=Flaky( fail=9 ) ) )
+    assert [ ( f.rule, f.line ) for f in result.findings ] == [ ( "prose-unjudged", LOOKUP[ "first_line" ] ) ]
+
+
+def test_a_quote_must_clear_the_word_minimum_and_the_character_minimum_on_its_own():
+    item = { "first_line": 1, "text": "The a b c marker is here. Supercalifragilistic stays one word." }
+    assert pj.locate_line( "a b c", item ) is None
+    assert pj.locate_line( "Supercalifragilistic", item ) is None
+    assert pj.locate_line( "marker is here.", item ) == 1
