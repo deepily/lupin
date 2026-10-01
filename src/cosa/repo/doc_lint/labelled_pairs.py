@@ -2,9 +2,9 @@
 Loader for the labelled before/after set, in the shape the judge harness reads.
 
 The labelled set keeps each pair in one file and its key in another. A pair names its design
-document linked_doc and its key holds the seeded span as text; the harness wants design and a
-( start, end ) span in the old text. This module joins the two, and it refuses any path that
-names the gate split or a gate key, so an implementer's run cannot open them by accident.
+document linked_doc, and its key holds the seeded span as text. The harness wants design and a
+( start, end ) span in the old text. This module joins the two. It refuses any path that names
+the gate split or a gate key, so an implementer's run cannot open them by accident.
 """
 
 import json
