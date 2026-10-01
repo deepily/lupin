@@ -58,4 +58,14 @@ else
     echo "[pre-commit-chain] SKIPPED rnd-guard — not found at $rnd_guard" >&2
 fi
 
+# ---- gate 3: documentation standard, WARN MODE (docstrings and markdown on staged lines) ----
+# Prints findings to stderr and never blocks. The chain stops the commit on ANY non-zero gate
+# exit, so this gate is wrapped: a crash, a missing tool or an import error is reported loudly
+# and then allowed. It does not read PLANNING_IS_PROMPTING_ROOT, so it runs in every worktree.
+doc_lint_rc=0
+LUPIN_ROOT="$repo_root" PYTHONPATH="$repo_root/src" python3 -m cosa.repo.doc_lint.gate --repo-root "$repo_root" || doc_lint_rc=$?
+if [ "$doc_lint_rc" -ne 0 ]; then
+    echo "[pre-commit-chain] doc-lint gate exited $doc_lint_rc, commit allowed (warn mode)" >&2
+fi
+
 exit 0
