@@ -304,6 +304,38 @@ def test_guards_and_changed_items_edges():
     assert cd.changed_items( [ "x" ], [] ) == []
 
 
+def test_stand_in_score_is_a_mean_over_the_old_items_so_one_match_of_four_names_nothing():
+    assert cd.stand_in( [ "a b", "c d", "e f", "g h" ], { "Output": [ "a b" ] }, set() ) == ( None, [] )
+    assert cd.stand_in( [ "a b", "c d" ], { "Output": [ "a b" ] }, set() ) == ( "Output", [ "a b" ] )
+
+
+def test_likely_lost_comes_back_in_old_order_not_in_score_order():
+    before = [ "x y z w", "q r", "m n" ]
+    after  = [ "x y", "m n" ]
+    assert cd.likely_lost( before, after, 2 ) == [ "x y z w", "q r" ], "the half-kept item scores above the gone one but sits first in the old text"
+
+
+def test_a_line_at_the_bullet_indent_that_is_not_a_bullet_ends_the_section_and_is_not_a_continuation():
+    assert cd.parse_sections( "S\n\nEnsures:\n    - a\n    stray line\n    - b\n" ) == { "Ensures": [ "a" ] }
+    assert cd.parse_sections( "S\n\nEnsures:\n    - a\n      more of a\n    - b\n" ) == { "Ensures": [ "a more of a", "b" ] }
+
+
+def test_parse_sections_cleans_indentation_first_so_a_tab_bullet_under_a_spaced_heading_still_counts():
+    assert cd.parse_sections( "S\n    Ensures:\n\t- a\n" ) == { "Ensures": [ "a" ] }
+
+
+def test_check_diff_lists_files_in_path_order_whatever_order_git_names_them():
+    one     = 'def f():\n    """\n    Ensures:\n        - a\n    """\n'
+    module  = cd
+    saved   = module.changed_files, module._show
+    module.changed_files = lambda root, base, head: [ "b.py", "a.py" ]
+    module._show         = lambda root, rev, path: one if rev == "base" else 'def f():\n    """x"""\n'
+    try:
+        assert list( module.check_diff( ".", "base", "head" ) ) == [ "a.py", "b.py" ]
+    finally:
+        module.changed_files, module._show = saved
+
+
 def _git( root, *args ):
     res = subprocess.run( [ "git", "-C", str( root ), "-c", "user.email=t@t", "-c", "user.name=t", *args ], capture_output=True, text=True )
     assert res.returncode == 0, res.stderr
@@ -406,6 +438,11 @@ MUTANTS = [
     ( "if overlap( old, best ) < MATCH_MIN: continue", "pass", "test_an_old_item_whose_closest_new_item_belongs_to_a_neighbour_is_lost_not_changed" ),
     ( "OPERATOR_REGEX.findall( item )", "[]", "test_guards_and_changed_items_edges" ),
     ( "found += [ f\"CHANGED: {where}: {old!r} -> {new!r}\" for old, new in r[ \"changed\" ] ]", "pass", "test_a_weakened_clause_with_the_count_held_is_reported_as_changed_not_matched" ),
+    ( "for old in before ) / len( before )", "for old in before )", "test_stand_in_score_is_a_mean_over_the_old_items_so_one_match_of_four_names_nothing" ),
+    ( "return [ before[ i ] for i in sorted( i for _, i in scored[ :count ] ) ]", "return [ before[ i ] for _, i in scored[ :count ] ]", "test_likely_lost_comes_back_in_old_order_not_in_score_order" ),
+    ( "elif name is not None and bullet_indent is not None and indent > bullet_indent:", "elif name is not None and bullet_indent is not None and indent >= bullet_indent:", "test_a_line_at_the_bullet_indent_that_is_not_a_bullet_ends_the_section_and_is_not_a_continuation" ),
+    ( "inspect.cleandoc( docstring ).split( \"\\n\" )", "docstring.split( \"\\n\" )", "test_parse_sections_cleans_indentation_first_so_a_tab_bullet_under_a_spaced_heading_still_counts" ),
+    ( "for path in sorted( p for p in changed_files( root, base, head ) if p.endswith( \".py\" ) ):", "for path in [ p for p in changed_files( root, base, head ) if p.endswith( \".py\" ) ]:", "test_check_diff_lists_files_in_path_order_whatever_order_git_names_them" ),
     ( "-overlap( new, old ), i, j )", "0.0, i, j )", "test_swapped_items_with_tied_forward_overlap_are_not_reported_as_changed" ),
     ( "if i in claimed or j in taken or -score < STAND_IN_MIN: continue", "if i in claimed or -score < STAND_IN_MIN: continue", "test_old_items_claim_their_best_new_item_first_so_a_tie_cannot_steal_it" ),
     ( "if i in claimed or j in taken or -score < STAND_IN_MIN: continue", "if i in claimed or j in taken or -score < 2: continue", "test_a_weakened_clause_with_the_count_held_is_reported_as_changed_not_matched" ),

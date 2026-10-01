@@ -4,6 +4,14 @@ Contract diff: Requires, Ensures and Raises item counts before and after a chang
 Counts the items of every Python function and class under each heading, flags a heading that
 vanished, and names the items most likely lost. A rewrite may reword a clause but may not lose one
 unnoticed. Reworded items are matched by word overlap, not by exact text. Stdlib only.
+
+Known limits (the count and the guard words are the signal, word overlap is not):
+    - an item swapped for another under an unchanged count is not a finding: an exception type
+      ("ValueError" to "TypeError"), a number ("at most 3" to "at most 30") or the whole clause
+    - only a dropped guard word or comparison operator is reported, as a changed finding
+    - an item made only of stopwords and guard words, such as "the is never", has no content word to
+      match on, so weakening it can go unreported
+    - a split item plus a dropped item keeps the count equal and shows no finding
 """
 
 import argparse
