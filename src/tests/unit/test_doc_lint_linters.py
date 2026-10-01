@@ -301,9 +301,9 @@ def test_md_lint_blanks_code_and_frontmatter_keeps_line_numbers_and_checks_prose
 
 
 def test_md_lint_template_caps_by_page_kind():
-    capability = "\n".join( [ "line" ] * 41 )
+    capability = "\n".join( [ "Line." ] * 41 )
     assert [ f.rule for f in md_lint.lint_source( "src/docs/wiki/capabilities/x.md", capability ) ] == [ "capability-length" ]
-    assert md_lint.lint_source( "src/docs/wiki/capabilities/x.md", "\n".join( [ "line" ] * 40 ) ) == []
+    assert md_lint.lint_source( "src/docs/wiki/capabilities/x.md", "\n".join( [ "Line." ] * 40 ) ) == []
     reference = " ".join( [ "word" ] * 1501 )
     assert [ f.rule for f in md_lint.lint_source( "src/docs/ref.md", reference ) if f.rule == "reference-length" ] == [ "reference-length" ]
     assert [ f.rule for f in md_lint.lint_source( "src/docs/fastapi/api.md", reference ) if f.rule == "reference-length" ] == []

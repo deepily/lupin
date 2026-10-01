@@ -21,6 +21,7 @@ Finding = namedtuple( "Finding", [ "path", "line", "rule", "message" ] )
 
 CONTRACT_HEADER = re.compile( r"^\s*(?:Requires|Ensures|Raises|Args|Arguments|Returns|Yields)\s*:\s*$" )
 BULLET_LINE     = re.compile( r"^\s*(?:[-*+]|\d+[.)])\s" )
+FIELD_HEADER    = re.compile( r"^\s*(?:Attributes|Parameters|Params|Examples?)\s*:\s*$" )
 SENTENCE_SPLIT  = re.compile( r"(?<=[.!?])\s+(?=[A-Z0-9`\"'(])" )
 
 
@@ -42,24 +43,30 @@ def line_of_offset( text, offset ):
 
 def summary_findings( text, path, first_line ):
     """
-    Check rule 1: the first line is at most SUMMARY_MAX_CHARS characters.
+    Check rule 1: the summary, the first paragraph with its wrapped lines joined, is short.
 
     Requires:
         - text is a str holding one docstring or doc block
         - first_line is the 1-based file line of the first line of text
 
     Ensures:
-        - returns one Finding when the first non-empty line is too long, else an empty list
+        - returns one Finding when the first paragraph, joined with single spaces, is longer than
+          SUMMARY_MAX_CHARS, else an empty list
+        - a summary wrapped over several lines is judged as one sentence, not line by line
+        - the finding sits on the first line of that paragraph
         - the blank line after the summary is left to ruff's D205, not checked here
 
     Raises:
         - nothing
     """
-    for i, raw in enumerate( text.split( "\n" ) ):
-        if not raw.strip(): continue
-        if len( raw.strip() ) > SUMMARY_MAX_CHARS:
-            return [ Finding( path, first_line + i, "summary-length", f"summary is {len( raw.strip() )} characters, limit {SUMMARY_MAX_CHARS}" ) ]
-        return []
+    lines = text.split( "\n" )
+    start = next( ( i for i, raw in enumerate( lines ) if raw.strip() ), None )
+    if start is None: return []
+    end = start
+    while end < len( lines ) and lines[ end ].strip(): end += 1
+    joined = " ".join( raw.strip() for raw in lines[ start : end ] )
+    if len( joined ) > SUMMARY_MAX_CHARS:
+        return [ Finding( path, first_line + start, "summary-length", f"summary is {len( joined )} characters, limit {SUMMARY_MAX_CHARS}" ) ]
     return []
 
 
@@ -89,35 +96,37 @@ def preface_findings( text, path, first_line ):
 
 def prose_lines( text, markdown=False ):
     """
-    Yield ( index, line ) for the prose lines of a docstring or page.
+    Yield ( index, line, starts_paragraph ) for the prose lines of a docstring or page.
 
     Requires:
         - text is a str
         - markdown is True for a markdown page, False for a docstring
 
     Ensures:
-        - docstring mode skips lines inside a contract section and bullet lines
+        - docstring mode skips lines inside a contract or field section (Attributes, Parameters,
+          Params, Example) and bullet lines
         - markdown mode keeps bullet text, with the bullet marker removed, and skips headings
           and table rows
         - blank lines are skipped in both modes
         - indices are 0-based positions in the list of lines
+        - starts_paragraph is True for a markdown bullet line, which begins a new paragraph
 
     Raises:
         - nothing
     """
     in_contract = False
     for i, raw in enumerate( text.split( "\n" ) ):
-        if not markdown and CONTRACT_HEADER.match( raw ):
+        if not markdown and ( CONTRACT_HEADER.match( raw ) or FIELD_HEADER.match( raw ) ):
             in_contract = True
             continue
         if not raw.strip():
             continue
         if markdown:
             if raw.lstrip().startswith( ( "#", "|" ) ): continue
-            yield i, BULLET_LINE.sub( "", raw, count=1 )
+            yield i, BULLET_LINE.sub( "", raw, count=1 ), BULLET_LINE.match( raw ) is not None
             continue
         if in_contract or BULLET_LINE.match( raw ): continue
-        yield i, raw
+        yield i, raw, False
 
 
 def sentence_findings( text, path, first_line, markdown=False ):
@@ -129,19 +138,35 @@ def sentence_findings( text, path, first_line, markdown=False ):
         - markdown selects the markdown reading of prose_lines
 
     Ensures:
-        - each over-long sentence in a prose line yields one Finding at its line
-        - a sentence that wraps across lines is judged per line, so a long wrapped sentence is
-          reported only when a single line alone is over the limit
+        - consecutive prose lines are joined into one paragraph before sentences are split, so a
+          sentence wrapped over several lines is judged whole
+        - in markdown each bullet starts a new paragraph
+        - each over-long sentence yields one Finding at the line where it starts
 
     Raises:
         - nothing
     """
+    paragraphs = []
+    for i, raw, starts in prose_lines( text, markdown ):
+        if paragraphs and not starts and i == paragraphs[ -1 ][ 1 ][ -1 ][ 0 ] + 1: paragraphs[ -1 ][ 1 ].append( ( i, raw.strip() ) )
+        else: paragraphs.append( ( i, [ ( i, raw.strip() ) ] ) )
     findings = []
-    for i, raw in prose_lines( text, markdown ):
-        for sentence in SENTENCE_SPLIT.split( raw.strip() ):
-            words = len( sentence.split() )
+    for _, lines in paragraphs:
+        joined  = " ".join( t for _, t in lines )
+        starts  = []
+        offset  = 0
+        for index, t in lines:
+            starts.append( ( offset, index ) )
+            offset += len( t ) + 1
+        pos = 0
+        for m in list( SENTENCE_SPLIT.finditer( joined ) ) + [ None ]:
+            end      = len( joined ) if m is None else m.start()
+            sentence = joined[ pos : end ]
+            words    = len( sentence.split() )
             if words > SENTENCE_MAX_WORDS:
-                findings.append( Finding( path, first_line + i, "sentence-length", f"sentence of {words} words, limit {SENTENCE_MAX_WORDS}" ) )
+                line = max( idx for off, idx in starts if off <= pos )
+                findings.append( Finding( path, first_line + line, "sentence-length", f"sentence of {words} words, limit {SENTENCE_MAX_WORDS}" ) )
+            if m is not None: pos = m.end()
     return findings
 
 

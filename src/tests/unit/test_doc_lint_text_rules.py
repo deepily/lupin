@@ -163,7 +163,8 @@ def test_summary_rule_flags_a_long_first_line_only_and_only_once():
     long_line = "x" * 91
     assert [ f.rule for f in tr.summary_findings( f"\n{long_line}\nbody is also {long_line}", "a.py", 10 ) ] == [ "summary-length" ]
     assert tr.summary_findings( f"\n{long_line}", "a.py", 10 )[ 0 ].line == 11
-    assert tr.summary_findings( "short\n" + long_line, "a.py", 1 ) == []
+    assert tr.summary_findings( "short\n\n" + long_line, "a.py", 1 ) == []             # a later paragraph is not the summary
+    assert len( tr.summary_findings( "short\n" + long_line, "a.py", 1 ) ) == 1         # a wrapped second line joins the summary
     assert tr.summary_findings( "\n\n", "a.py", 1 ) == []
 
 
@@ -181,6 +182,55 @@ def test_sentence_rule_skips_contract_sections_bullets_and_reports_each_long_sen
     assert [ ( f.line, f.rule ) for f in found ] == [ ( 5, "sentence-length" ) ]
     md = tr.sentence_findings( f"# {long_sentence}\n| {long_sentence} |\n- {long_sentence}\nplain", "a.md", 1, markdown=True )
     assert [ f.line for f in md ] == [ 3 ]                   # the bullet counts in markdown; heading and table do not
+
+
+def test_a_summary_wrapped_over_two_lines_is_judged_as_one_sentence():
+    wrapped = "\n" + " ".join( [ "word" ] * 10 ) + "\n" + " ".join( [ "more" ] * 12 ) + "\n\nBody."
+    found   = tr.summary_findings( wrapped, "a.py", 10 )
+    assert [ ( f.line, f.rule ) for f in found ] == [ ( 11, "summary-length" ) ] and "characters" in found[ 0 ].message
+    assert tr.summary_findings( "\nShort first line\ncontinues here.\n\nBody " + "x" * 200, "a.py", 1 ) == []
+
+
+def test_a_sentence_wrapped_over_hard_lines_is_judged_whole_and_reported_where_it_starts():
+    wrapped = "Intro.\nWord " + " ".join( [ "word" ] * 8 ) + "\n" + "\n".join( [ " ".join( [ "word" ] * 9 ) ] * 2 ) + ".\nNext short one."
+    found   = tr.sentence_findings( wrapped, "a.py", 1 )
+    assert [ ( f.line, f.message ) for f in found ] == [ ( 2, "sentence of 27 words, limit 25" ) ]   # starts on line 2, not at the paragraph head
+    assert tr.sentence_findings( "\n".join( [ " ".join( [ "w" ] * 9 ) ] * 2 ) + ".", "a.py", 1 ) == []
+
+
+def test_wrapped_lines_join_only_within_a_paragraph_and_markdown_bullets_stay_separate():
+    long_half = " ".join( [ "word" ] * 14 )
+    assert tr.sentence_findings( f"{long_half}\n\n{long_half}", "a.py", 1 ) == []                       # a blank line ends the paragraph
+    assert tr.sentence_findings( f"- {long_half}\n- {long_half}", "a.md", 1, markdown=True ) == []        # each bullet is its own paragraph
+    assert len( tr.sentence_findings( f"{long_half}\n{long_half}", "a.md", 1, markdown=True ) ) == 1
+    assert tr.sentence_findings( f"{long_half}\nRequires:\n  - {long_half}", "a.py", 1 ) == []             # contract lines are not joined in
+
+
+def test_summary_cap_is_exact_across_a_wrap_and_joins_with_one_space():
+    assert tr.summary_findings( "a" * 45 + "\n" + "b" * 44, "a.py", 1 ) == []                    # 45 + 1 space + 44 = 90, at the cap
+    assert len( tr.summary_findings( "a" * 45 + "\n" + "b" * 45, "a.py", 1 ) ) == 1             # 91, one over: the join adds a space
+
+
+def test_a_wrapped_sentence_is_reported_at_the_line_it_starts_even_when_lines_are_one_character():
+    wrapped = "One.\nA\n" + "\n".join( [ "b" ] * 25 )
+    assert [ f.line for f in tr.sentence_findings( wrapped, "a.py", 1 ) ] == [ 2 ]
+
+
+REAL_WRAPPED_SUMMARY  = "\n    Mark phases up to phase_ordinal as completed so phase methods can skip a long stretch of\n    work that has already been done on resume and so on.\n\n    Requires:\n        - phase_ordinal >= 0\n    "
+REAL_WRAPPED_SENTENCE = "\n    Rewrites one frozen DM body into a shorter one, preserving its placeholders.\n\n    Shaped after `MathAgent`, the minimal canonical `AgentBase` form, with a\n    bounded retry loop borrowed from `DmQualityJudge`, because the base class\n    does not have one and a transient vLLM hiccup should not cost a message its\n    compression.\n    "
+REAL_FIELD_LIST      = "\n    Result of a CBR prediction.\n\n    Attributes:\n        verdict: Predicted decision value (majority vote) or None if no cases\n        confidence: Combined confidence score (0.0-1.0) = max_similarity * consistency\n        similar_cases: List of retrieved similar case dicts\n        case_count: Number of cases used in prediction\n    "
+
+
+def test_hard_wrapped_docstrings_drawn_from_the_population_are_caught():
+    assert [ ( f.line, f.rule ) for f in tr.summary_findings( REAL_WRAPPED_SUMMARY, "a.py", 1 ) ] == [ ( 2, "summary-length" ) ]   # first line alone is under the cap
+    assert max( len( raw.strip() ) for raw in REAL_WRAPPED_SUMMARY.split( "\n" )[ :3 ] ) <= tr.SUMMARY_MAX_CHARS
+    found = tr.sentence_findings( REAL_WRAPPED_SENTENCE, "a.py", 1 )
+    assert [ ( f.line, f.rule ) for f in found ] == [ ( 4, "sentence-length" ) ]                                                  # starts on the "Shaped" line
+
+
+def test_field_sections_are_not_joined_into_one_sentence():
+    assert tr.sentence_findings( REAL_FIELD_LIST, "a.py", 1 ) == []
+    assert [ f.rule for f in tr.sentence_findings( REAL_FIELD_LIST.replace( "Attributes:", "Details:" ), "a.py", 1 ) ] == [ "sentence-length" ]   # the header is what exempts it
 
 
 def test_emphasis_rule_reports_caps_words_and_glyphs_at_their_lines():
