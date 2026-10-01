@@ -26,11 +26,11 @@ class JevConfigError( Exception ):
 
 
 class JevCallError( Exception ):
-    """One Jev call gave no usable answer: retries ran out, the server failed, or the body is malformed."""
+    """One Jev call gave no usable answer: retries ran out, the server failed, or the body is bad."""
 
 
 def _post( url, headers, body, timeout ):
-    """Send one POST with urllib and return ( status, text ); an error status is returned, not raised."""
+    """Send one POST with urllib and return ( status, text ); an error status is returned."""
     request = urllib.request.Request( url, data=body, headers=headers, method="POST" )
     try:
         with urllib.request.urlopen( request, timeout=timeout ) as response:
