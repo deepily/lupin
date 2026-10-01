@@ -65,21 +65,29 @@ def ledger_key( stage, pair, prompt_version, model_id, slot ):
     return "|".join( [ stage, text_hash( pair[ "old" ] ), text_hash( new_side ), prompt_version, model_id, str( slot ) ] )
 
 
+class LedgerBindingError( ValueError ):
+    """A ledger was written under a different Claude Code binary than the run now asking to resume it."""
+
+
 class Ledger:
     """
     An append-only file of finished model calls, one JSON object per line.
 
     Requires:
         - path is writable
+        - binding is None, or a string naming the Claude Code binary and version the calls run under
 
     Ensures:
+        - a binding is written as the file's first record, and a ledger holding calls or a binding
+          that differs from this one is refused (LedgerBindingError), so a resume never mixes binaries
         - every put is on disk before it returns, so a kill loses at most the call in flight
         - a torn last line from a kill during a write is ignored on load
     """
 
-    def __init__( self, path ):
-        self.path    = path
-        self.entries = {}
+    def __init__( self, path, binding=None ):
+        self.path     = path
+        self.entries  = {}
+        self.recorded = None
         if os.path.exists( path ):
             with open( path, encoding="utf-8" ) as f:
                 for line in f:
@@ -87,7 +95,16 @@ class Ledger:
                         record = json.loads( line )
                     except ValueError:
                         continue
-                    self.entries[ record[ "key" ] ] = record[ "value" ]
+                    if "binding" in record:
+                        self.recorded = record[ "binding" ]
+                    else:
+                        self.entries[ record[ "key" ] ] = record[ "value" ]
+        if binding is not None:
+            if ( self.entries or self.recorded is not None ) and self.recorded != binding:
+                raise LedgerBindingError( f"ledger {path} was written under {self.recorded!r} and this run is {binding!r}: use a new ledger" )
+            if self.recorded is None:
+                self._append( { "binding": binding } )
+                self.recorded = binding
 
     def _ends_with_newline( self ):
         """Say whether the ledger file's last byte is a newline."""
@@ -99,14 +116,18 @@ class Ledger:
         """Return the stored value for key, or None when that call has not finished."""
         return self.entries.get( key )
 
-    def put( self, key, value ):
-        """Store a finished call durably before returning."""
+    def _append( self, record ):
+        """Append one record to the file and force it to disk."""
         torn = os.path.exists( self.path ) and os.path.getsize( self.path ) > 0 and not self._ends_with_newline()
         with open( self.path, "a", encoding="utf-8" ) as f:
             if torn: f.write( "\n" )
-            f.write( json.dumps( { "key": key, "value": value } ) + "\n" )
+            f.write( json.dumps( record ) + "\n" )
             f.flush()
             os.fsync( f.fileno() )
+
+    def put( self, key, value ):
+        """Store a finished call durably before returning."""
+        self._append( { "key": key, "value": value } )
         self.entries[ key ] = value
 
 

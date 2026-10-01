@@ -14,7 +14,7 @@ import subprocess
 import pytest
 from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock
 
-from cosa.repo.doc_lint import claim_extractor, claim_judge, harness_cli, jev_judge, model_transport as mt, prose_judge, reader_rig
+from cosa.repo.doc_lint import claim_extractor, claim_judge, harness_cli, harness_runner, jev_judge, model_transport as mt, prose_judge, reader_rig
 
 FIXTURE = pathlib.Path( __file__ ).parent / "fixtures" / "doc_lint" / "hermetic-probe.json"
 
@@ -100,10 +100,10 @@ def test_the_profile_carries_every_option_with_its_value():
 def test_an_error_result_keeps_only_the_first_300_characters_of_the_apis_text():
     async def query( prompt, options ):
         yield ResultMessage( subtype="success", duration_ms=1, duration_api_ms=1, is_error=True, num_turns=1, session_id="s",
-                             result="A" * 300 + "TAILMARK" )
+                             result="A" * 300 + "B" + "TAILMARK" )
     with pytest.raises( mt.ModelCallError ) as caught:
         asyncio.run( mt.complete( "claude-x", "sys", "user", query_fn=query ) )
-    assert "A" * 300 in str( caught.value ) and "TAILMARK" not in str( caught.value )
+    assert "A" * 300 in str( caught.value ) and "A" * 300 + "B" not in str( caught.value )
 
 
 @pytest.mark.parametrize( "module", [ claim_extractor, claim_judge, jev_judge, prose_judge, reader_rig ] )
@@ -180,3 +180,64 @@ def test_the_captured_probe_shows_the_operators_instructions_visible_before_and_
     assert new.startswith( "NONE" )
     for leaked in ( "BREVITY", "cosa-voice", "notify", "CLAUDE.md", "persona" ):
         assert leaked not in new
+
+
+# ---- the ledger is bound to the binary that made its calls ----------------------------------
+
+def test_a_ledger_records_its_binary_first_and_resumes_under_the_same_one( tmp_path ):
+    path = str( tmp_path / "l.jsonl" )
+    first = harness_runner.Ledger( path, binding="claude_cli=/a|version=1" )
+    first.put( "k", { "v": 1 } )
+    lines = [ json.loads( line ) for line in open( path ) ]
+    assert lines[ 0 ] == { "binding": "claude_cli=/a|version=1" } and lines[ 1 ][ "key" ] == "k"
+    again = harness_runner.Ledger( path, binding="claude_cli=/a|version=1" )
+    assert again.get( "k" ) == { "v": 1 } and again.entries == { "k": { "v": 1 } }
+    assert len( open( path ).readlines() ) == 2
+
+
+def test_a_ledger_refuses_a_resume_under_another_binary( tmp_path ):
+    path = str( tmp_path / "l.jsonl" )
+    harness_runner.Ledger( path, binding="claude_cli=/a|version=1" ).put( "k", 1 )
+    with pytest.raises( harness_runner.LedgerBindingError, match="use a new ledger" ):
+        harness_runner.Ledger( path, binding="claude_cli=/a|version=2" )
+
+
+def test_a_ledger_holding_only_a_binding_still_refuses_another_binary( tmp_path ):
+    path = str( tmp_path / "l.jsonl" )
+    harness_runner.Ledger( path, binding="one" )
+    with pytest.raises( harness_runner.LedgerBindingError ):
+        harness_runner.Ledger( path, binding="two" )
+    assert len( open( path ).readlines() ) == 1
+
+
+def test_a_ledger_with_calls_and_no_binding_is_refused_when_a_binding_is_asked_for( tmp_path ):
+    path = str( tmp_path / "l.jsonl" )
+    harness_runner.Ledger( path ).put( "k", 1 )
+    with pytest.raises( harness_runner.LedgerBindingError, match="None" ):
+        harness_runner.Ledger( path, binding="one" )
+
+
+def test_a_ledger_without_a_binding_asks_nothing_and_writes_no_header( tmp_path ):
+    path = str( tmp_path / "l.jsonl" )
+    harness_runner.Ledger( path ).put( "k", 1 )
+    assert harness_runner.Ledger( path ).get( "k" ) == 1
+    assert len( open( path ).readlines() ) == 1
+
+
+def test_the_cli_refuses_to_resume_a_ledger_under_a_different_binary_version( tmp_path ):
+    from tests.unit.test_doc_lint_jev import cli_args, cli_claude_query
+    def fake( version ):
+        binary = tmp_path / f"claude-{version}"
+        binary.write_text( f"#!/bin/sh\necho '{version} (Fake Code)'\n" )
+        binary.chmod( 0o755 )
+        return str( binary )
+    one = fake( "1.0.0" )
+    assert harness_cli.main( cli_args( tmp_path, "--claude-cli-path", one ), query_fn=cli_claude_query() ) == 0
+    ( tmp_path / "r.json" ).unlink()
+    calls = []
+    async def forbidden( prompt, options ):
+        calls.append( 1 )
+        yield None
+    ( tmp_path / "claude-1.0.0" ).write_text( "#!/bin/sh\necho '2.0.0 (Fake Code)'\n" )
+    assert harness_cli.main( cli_args( tmp_path, "--claude-cli-path", one ), query_fn=forbidden ) == 2
+    assert calls == [] and not ( tmp_path / "r.json" ).exists()

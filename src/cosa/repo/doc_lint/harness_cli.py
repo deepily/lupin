@@ -114,8 +114,9 @@ def main( argv, query_fn=None ):
         print( f"REFUSED: {e}", file=sys.stderr )
         return 2
     try:
-        results = asyncio.run( harness_runner.run_all( pairs, config, harness_runner.Ledger( args.ledger ), query_fn=query_fn, judge_backend=backend ) )
-    except jev_transport.JevConfigError as e:
+        binding = f"claude_cli={args.claude_cli_path}|version={model_transport.cli_version( args.claude_cli_path )}"
+        results = asyncio.run( harness_runner.run_all( pairs, config, harness_runner.Ledger( args.ledger, binding=binding ), query_fn=query_fn, judge_backend=backend ) )
+    except ( jev_transport.JevConfigError, harness_runner.LedgerBindingError ) as e:
         print( f"REFUSED: {e}", file=sys.stderr )
         return 2
     report  = harness_report.build_report( results, config, judge_prompt_version=judge_version, jev_run=backend is not None )
