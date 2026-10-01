@@ -8,6 +8,17 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.10.01 - Session cf6ff92a (Mr. Radio 🦉, manager; no crew, Rick ruled "no workers yet") | Test-VM fixes proven on a recreate and documented
+
+- **Proven on lupin-host-test (row `72781b05`)**: resumed the suspended VM, deployed `a7f2af593` with a recreate; preflight pre 51 passed / 0 blocking, post 64 / 0. The 3 Google repos answer "dubious ownership" with the compose `GIT_CONFIG_*` off and resolve with it on. VM left running (Rick).
+- **Commits**: `4d0fa1281` `src/docs/vm-new-host-checklist.md` + README line · `32e5fde8a` API docs regenerated after `64905b079` (2 reds reported by Cheech, now 9 passed). Not pushed.
+- **Rulings**: preflight stays check-only (Rick); ratio check C9 stays a warning (my call).
+- **Open on `72781b05`**: `lupin-vm.sh vm-start` cannot wake a suspended VM; the script needs `LUPIN_GCP_PROJECT_ID` exported; no roster line for weil-parallel-search on the VM.
+- **Waiting on Rick**: the TypeSafe plugin install (the permission classifier refused it; two commands for him to run). Board unstaffed: `3a2f726b` P0, `a3c59f2d`, `80513825`, `c4a81acc`, `8a99f2ee`.
+- **Files**: history.md, src/docs/vm-new-host-checklist.md, src/docs/README.md, src/docs/fastapi/api.json, src/docs/fastapi/api.md
+
+#### Checkpoint | 2026.10.01 15:10 | Test-VM follow-up closed out; history written
+
 ### 2026.09.30 (evening) - Session 9d720da8 (Mr. Radio 🦉, manager; crew Maya 🌻, Chloé 🗼, Krishna 🦚, Sam 🎙️) | 17 rows closed on merges; doc viewer race closed; resume-job ownership; every job builder refuses bad input
 
 - **Merged after 17:00, each on a clean full unit tier** (or named artifact reds re-run green): `54a011650` (`d51ffc36`) · `ea80264e1` (`876d183e`) · `f905e7aa3` comparator kept (`4f5301ad`) · `4c5214b64` container init, zombies 48→0 (`3c86391e`) · `f7eedfc17` MCP validation-alert throttle (`d49d713c`, after the 20:00 63-ping flood) · `5e7f02c0c` diag strip (`8c3628a4`, closed on `ts-a4cc8586`) · `f1fee2067` DOM-absence assert lint + frame-buffer LRU (`f2d3df2b`, `15111f96`) · `8f2093a9b` tier stamp sees a bundle rebuild (`105ff244`) · `9470e93d5` upload size cap before spooling (`4d2eb22f`) · `8df8690d2` scope paths judged by where they land (5 rows) · `41b854a56` (`8a578dd0`) · `12f610fc0` terse rows carry `item_class` (`7e1d72d0`) · `418a05c0e` preflight-vm venue scrubs every override var (`5ad93b8c`) · `64905b079` resume-job only resumes the caller's own job (`a758bd0f`) · `c8bd4ebf9` every job builder refuses bad input, no receptionist degrade (`a4014235`) · `04146b299` doc viewer judges the opened fd, not the string (`39b3035b`).
