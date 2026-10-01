@@ -324,6 +324,12 @@ def test_lint_text_ignores_code_blocks_inside_a_docstring():
     ( "see 2026-09-30-foo.md", [] ),                                               # hyphenated file name
     ( "mixed 2026-03.20 and 2026.13.20 and 2026.03.32", [] ),                      # mixed separator, bad month, bad day
     ( "version 1.2026.03.20 and 2026.03.20x", [] ),                                # touching a dot or a word
+    ( "pre-2026-06-05 and post-2026-05-16", [ "2026-06-05", "2026-05-16" ] ),      # a leading hyphen is prose, still a date
+    ( "x2026.03.20 and 12026.03.20", [] ),                                         # a word character before
+    ( "src/2026.03.20 and 2026.03.20/x", [] ),                                     # a slash before or after
+    ( "2026-03-20-plan and 2026.03.20-plan", [] ),                                 # a trailing hyphen
+    ( "2026-03-20.md and 2026.03.20.md", [] ),                                     # a file extension
+    ( "2026.00.20 and 2026.03.00", [] ),                                           # month 00, day 00
 ] )
 def test_calendar_date_predicate_takes_either_separator_and_refuses_file_names_and_non_dates( text, expected ):
     assert [ m.group( 0 ) for m in rl.ISO_DATE_REGEX.finditer( text ) ] == expected
