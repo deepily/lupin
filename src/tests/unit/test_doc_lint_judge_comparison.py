@@ -145,6 +145,7 @@ def test_a_result_without_a_key_is_refused( run ):
 def test_call_counts_split_extractor_calls_from_each_judges_calls( run ):
     counts = jc.call_counts( run[ "ledger" ], { "haiku": f"{HAIKU}+{ESC}", "sonnet": f"{SONNET}+{ESC}", "jev": "jev-m@0.1-0.9+esc-m" } )
     assert counts == { "extract": 12, "judge": { "haiku": 36, "sonnet": 36, "jev": 0 } }, "6 pairs x 2 lists extracted once and shared; 6 x 2 x 3 judge runs each"
+    assert jc.call_counts( run[ "ledger" ], { "bare": SONNET } )[ "judge" ] == { "bare": 0 }, "the key carries the whole judge+escalation string, so a bare judge id matches nothing"
 
 
 def test_rebuild_makes_no_model_call_and_a_missing_row_raises_instead_of_calling_one( run ):
@@ -308,6 +309,7 @@ MUTANTS = [
     ( 'if any( ( r[ "seed_span" ] is not None ) != seeded for r in group ): raise', "if False: raise", "test_a_group_that_mixes_seeded_and_unseeded_pairs_is_refused_whatever_order_they_arrive_in" ),
     ( "if not group: continue", "pass", "test_a_group_chart_is_left_out_when_the_keys_have_no_pair_of_its_kinds" ),
     ( "bound    = harness_report.upper_bound( wrong, len( group ) ) if seeded else harness_report.interval( wrong, len( group ) )[ 1 ]", "bound    = harness_report.upper_bound( wrong, len( group ) )", "test_a_removed_claim_group_reports_the_one_sided_upper_bound_and_a_kept_claim_group_the_interval_upper_end" ),
+    ( 'if stage == "judge" and model == field:', 'if stage == "judge" and model.startswith( field ):', "test_call_counts_split_extractor_calls_from_each_judges_calls" ),
     ( 'if stage == "extract": out[ "extract" ] += 1', 'if stage == "extract": out[ "extract" ] += 2', "test_call_counts_split_extractor_calls_from_each_judges_calls" ),
     ( "if caused_by_missing_row( e ): raise LedgerIncomplete(", "if True: raise LedgerIncomplete(", "test_a_missing_row_is_found_anywhere_in_an_error_chain_and_other_errors_pass_through" ),
     ( "error = error.__cause__ or error.__context__", "error = error.__cause__", "test_a_missing_row_is_found_anywhere_in_an_error_chain_and_other_errors_pass_through" ),

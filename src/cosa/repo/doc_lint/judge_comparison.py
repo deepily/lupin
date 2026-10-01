@@ -151,15 +151,15 @@ def call_counts( ledger, models ):
 
     Ensures:
         - returns { "extract": n, "judge": { name: n } }, read from the stage and model fields of each key
-        - a Claude judge key carries "<judge>+<escalation>" and a Jev key its key_id, so a judge is counted
-          when its field starts with the model string given
+        - a Claude judge key carries "<judge>+<escalation>" and a Jev key its key_id, each whole, so a judge
+          is counted when its model field equals the string given
     """
     out = { "extract": 0, "judge": { name: 0 for name in models } }
     for key in ledger.entries:
         stage, _, _, _, model = key.split( "|" )[ : 5 ]
         if stage == "extract": out[ "extract" ] += 1
         for name, field in models.items():
-            if stage == "judge" and model.startswith( field ): out[ "judge" ][ name ] += 1
+            if stage == "judge" and model == field: out[ "judge" ][ name ] += 1
     return out
 
 
