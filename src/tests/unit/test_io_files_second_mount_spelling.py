@@ -31,9 +31,13 @@ def project( tmp_path, monkeypatch ):
     root   = tmp_path / "proj"
     mirror = tmp_path / "var" / "io-mirror"
     evil   = tmp_path / "var" / "io-mirror-evil"
+    odd    = tmp_path / "var" / ".credentials-mirror"      # a second spelling whose OWN NAME matches a floor pattern
     ( root / "io" ).mkdir( parents=True )
     ( mirror / "subdir" ).mkdir( parents=True )
     evil.mkdir( parents=True )
+    odd.mkdir( parents=True )
+    ( odd / "z.md" ).write_text( "# fine, but its mount is named like a credential\n" )
+    os.symlink( odd / "z.md", root / "io" / "z.md" )
     ( mirror / "x.md" ).write_text( ORDINARY )
     ( mirror / ".env" ).write_text( "canary-5dd6baaa-never-served\n" )
     ( mirror / "subdir" / "inner.md" ).write_text( "# inner\n" )
@@ -49,7 +53,7 @@ def project( tmp_path, monkeypatch ):
     real_stat = os.stat
     io_dir    = str( root / "io" )
     monkeypatch.setattr( scope_registry, "_stat",
-                         lambda path, *a, **k: real_stat( io_dir if os.fspath( path ) == str( mirror ) else path, *a, **k ) )
+                         lambda path, *a, **k: real_stat( io_dir if os.fspath( path ) in ( str( mirror ), str( odd ) ) else path, *a, **k ) )
     monkeypatch.setattr( io_files.cu, "get_project_root", lambda: str( root ) )
     return root
 
@@ -69,6 +73,13 @@ class TestTheSecondSpellingServes:
     def test_a_link_into_the_second_spelling_of_io_is_served( self, project ):
         response = _get( "x.md" )
         assert response.status_code == 200 and ORDINARY.strip() in response.body.decode()
+
+    def test_a_mount_whose_own_NAME_matches_a_floor_pattern_does_not_taint_the_file( self, project ):
+        # The blocklist re-judge must see the path RELATIVE TO io/ (`z.md`). The old relpath form is
+        # `../../var/.credentials-mirror/z.md`, whose `.credentials-mirror` segment matches `^\\.credentials`
+        # and would refuse a clean file. This is the case the first fixture could not tell apart.
+        response = _get( "z.md" )
+        assert response.status_code == 200
 
     def test_a_directory_link_is_listed_by_its_landed_relative_path( self, project, monkeypatch ):
         seen = {}
