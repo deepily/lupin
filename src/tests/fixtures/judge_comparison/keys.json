@@ -1,0 +1,41 @@
+{
+ "provenance": "Real run, 2026-10-01 ~18:50 EDT, by Maya. Harness at fa4aad932 (hermetic profile), Claude Code 2.1.287 via --claude-cli-path, extractor claude-sonnet-5-5, judge claude-sonnet-5-5, escalation claude-opus-5-5, writer label tracked-docstrings. 6 tracked src/cosa docstrings (the pairs in contract_diff/writer_pairs.json): w0-w2 have their first Ensures item deleted by hand from the OLD text (seeded removals, seed_span is that item); w3-w5 are the real Sonnet rewrite, untouched. Kinds are assigned by hand; none of this is labelled-set data. 49 ledger lines in 146 s. No Jev call.",
+ "keys": [
+  {
+   "id": "w0-get_timestamp-removed",
+   "kind": "delete",
+   "seeded_positive": true,
+   "injection": false
+  },
+  {
+   "id": "w1-literal_violations-removed",
+   "kind": "delete",
+   "seeded_positive": true,
+   "injection": false
+  },
+  {
+   "id": "w2-_update_lora_env-removed",
+   "kind": "delete",
+   "seeded_positive": true,
+   "injection": false
+  },
+  {
+   "id": "w3-prepare_scratch-writer",
+   "kind": "paraphrase",
+   "seeded_positive": false,
+   "injection": false
+  },
+  {
+   "id": "w4-heartbeat_check-writer",
+   "kind": "paraphrase",
+   "seeded_positive": false,
+   "injection": false
+  },
+  {
+   "id": "w5-_is_match-writer",
+   "kind": "paraphrase",
+   "seeded_positive": false,
+   "injection": false
+  }
+ ]
+}

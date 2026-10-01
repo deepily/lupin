@@ -191,3 +191,37 @@ def rates_per_thousand( counts ):
     """
     words = counts[ "words" ]
     return { c : ( round( counts[ c ] * 1000.0 / words, 1 ) if words else 0.0 ) for c in MARKER_COLUMNS }
+
+
+def add_counts( total, counts ):
+    """
+    Add one count_markers result into a running total.
+
+    Requires:
+        - total and counts are dicts with the "words" key and every MARKER_COLUMNS key
+
+    Ensures:
+        - total is updated in place and returned
+        - the sum of rates is never taken; rates are computed once, from the summed counts
+
+    Raises:
+        - nothing
+    """
+    for key in ( "words", *MARKER_COLUMNS ): total[ key ] += counts[ key ]
+    return total
+
+
+def empty_counts():
+    """
+    Return a zeroed count_markers result.
+
+    Requires:
+        - nothing
+
+    Ensures:
+        - returns { "words": 0, <each MARKER_COLUMNS name>: 0 }
+
+    Raises:
+        - nothing
+    """
+    return { key : 0 for key in ( "words", *MARKER_COLUMNS ) }
