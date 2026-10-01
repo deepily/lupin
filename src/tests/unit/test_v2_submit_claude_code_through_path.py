@@ -250,7 +250,10 @@ def test_an_unknown_task_type_is_refused_and_queues_nothing( client, queue ):
     assert queue.pushed == [ ], (
         f"a job with task_type=BOUNDEDD was queued: {getattr( queue.pushed[ 0 ], 'task_type', None )!r}"
     )
-    assert body[ "path" ] == "receptionist", body
+    # Row a4014235: this used to assert path == "receptionist", which pinned the defect (a
+    # refused submit degraded to a queued receptionist job reported as "waiting"). The refusal
+    # is now a terminal `failed`, the same shape the test-suite and mock-job doors answer.
+    assert body[ "status" ] == "failed" and body[ "route_reason" ] == "submit_refused", body
     assert "BOUNDEDD" in ( body[ "error" ] or "" ), body[ "error" ]
 
 
