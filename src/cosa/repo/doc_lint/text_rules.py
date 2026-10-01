@@ -298,7 +298,7 @@ def reference_findings( text, path, first_line ):
     return findings
 
 
-def history_findings( text, path, first_line ):
+def history_findings( text, path, first_line, agent_rule=True ):
     """
     Check rule 7 and the agent-imperative rule: current state only, nothing addressed to a model.
 
@@ -306,8 +306,9 @@ def history_findings( text, path, first_line ):
         - text is a str
 
     Ensures:
-        - one Finding per dated banner, per ISO date outside quotes and code, and per imperative
+        - one Finding per dated banner, per calendar date outside quotes and code, and per imperative
           aimed at a model, at its line
+        - agent_rule=False skips the imperative check, for text that is meant to address a model
 
     Raises:
         - nothing
@@ -318,12 +319,12 @@ def history_findings( text, path, first_line ):
     unquoted = QUOTED_SPAN_REGEX.sub( lambda q: " " * len( q.group( 0 ) ), text )
     for m in ISO_DATE_REGEX.finditer( unquoted ):
         findings.append( Finding( path, first_line + line_of_offset( text, m.start() ), "iso-date", f"date {m.group( 0 )} in prose belongs in history" ) )
-    for m in AGENT_IMPERATIVE_REGEX.finditer( text ):
+    for m in ( AGENT_IMPERATIVE_REGEX.finditer( text ) if agent_rule else () ):
         findings.append( Finding( path, first_line + line_of_offset( text, m.start() ), "agent-imperative", f"text addressed to a model: {m.group( 0 )!r}" ) )
     return findings
 
 
-def lint_text( text, path, first_line=1, structure=True, markdown=False, words=None ):
+def lint_text( text, path, first_line=1, structure=True, markdown=False, words=None, agent_rule=True ):
     """
     Run every text rule over one docstring, doc block or page.
 
@@ -332,6 +333,7 @@ def lint_text( text, path, first_line=1, structure=True, markdown=False, words=N
         - first_line is the 1-based file line of the first line of text
         - markdown is True when text is a markdown page
         - words is the English word set for rule 4, or None for the vendored list
+        - agent_rule is False for a registered tool description, which is addressed to a model on purpose
 
     Ensures:
         - returns a list of Finding sorted by line, then rule
@@ -350,5 +352,5 @@ def lint_text( text, path, first_line=1, structure=True, markdown=False, words=N
     findings += emphasis_findings( text, path, first_line, words )
     findings += rhetoric_findings( text, path, first_line )
     findings += reference_findings( text, path, first_line )
-    findings += history_findings( text, path, first_line )
+    findings += history_findings( text, path, first_line, agent_rule )
     return sorted( findings, key=lambda f: ( f.line, f.rule, f.message ) )

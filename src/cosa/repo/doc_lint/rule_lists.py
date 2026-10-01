@@ -77,7 +77,13 @@ SECTION_PATH_LOOKAHEAD = 60
 
 # Rule 7: dated banners and corrections belong in history. An ISO date in prose is the
 # predicate; the verb pattern and the banner-line pattern are kept as subsets that name the cause.
-ISO_DATE_REGEX     = re.compile( r"\b20\d\d-\d\d-\d\d\b" )
+# A calendar date is year, month 01-12, day 01-31, joined by the SAME separator, hyphen or dot
+# (YYYY.MM.DD is the repo's own form). It is a date only as a free-standing token: a date that
+# touches a word character, a path separator, a hyphen or a dot-and-word is part of a file or
+# directory name such as 2026.09.30-foo.md, and does not fire.
+ISO_DATE_REGEX     = re.compile(
+    r"(?<![\w/.\-])(?:19|20)\d\d([-.])(?:0[1-9]|1[0-2])\1(?:0[1-9]|[12]\d|3[01])(?![\w/\-]|\.\w)"
+)
 DATED_BANNER_REGEX = re.compile(
     r"\b(?:added|updated|fixed|measured|ruled|corrected|changed|landed|retired|re-measured)"
     r"\s+(?:on\s+)?20\d\d[-./]\d\d[-./]\d\d"
