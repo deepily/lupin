@@ -21,6 +21,7 @@ already imports `cosa.utils.secret_redaction`, so the precedent and the cost are
 
 Venue: :7999-eligible — read-only git, no network, no mutation.
 """
+import hashlib
 import os
 import re
 import subprocess
@@ -115,6 +116,14 @@ def _fetch_age( git ):
 
 START_SHA_UNKNOWN = "UNKNOWN"
 
+# Row 105ff244. src/lupin_app/static/dist/ is GITIGNORED (0 tracked files), so every HEAD
+# comparison in this module is blind to a bundle rebuild inside a run: measured 2026-09-28,
+# dist/multiplexer/{accordion-harness,parity-harness,boot.19ea80639a1e}.js were rewritten at
+# 18:34:51 inside ts-e09fb548's e2e_b window and two results became unfalsifiable.
+BUNDLE_REL     = os.path.join( "src", "lupin_app", "static", "dist" )
+BUNDLE_NONE    = "none"
+BUNDLE_UNKNOWN = "UNKNOWN"
+
 
 def capture_start_sha( git ):
     """
@@ -199,7 +208,83 @@ def _run_span( start_sha, end_sha ):
     return f" run-span={start_sha}..{end_sha} ⚠️ TREE MOVED MID-RUN"
 
 
-def tree_state_line( git, start_sha=None ):
+def bundle_hash( root ):
+    """
+    A 12-hex digest of the CONTENT of every .js file under <root>/src/lupin_app/static/dist/.
+
+    Requires:
+        - root is a directory path (the tree whose served bundle is being named)
+
+    Ensures:
+        - hashes file CONTENT, never mtime: the same bytes rewritten is "unmoved", new bytes
+          under an old mtime is "moved". The digest covers (relative path, content sha256) in
+          sorted order, so a new boot.<hash>.js appearing or a harness changing both move it
+        - .map files are not served to the page and are left out
+        - returns BUNDLE_NONE when there is no dist/ directory (a worktree that never built)
+          and BUNDLE_UNKNOWN when it cannot be read, including a file vanishing mid-walk.
+          NEVER None, for the reason `capture_start_sha` gives
+    """
+    dist = os.path.join( root, BUNDLE_REL )
+    if not os.path.isdir( dist ): return BUNDLE_NONE
+    digest = hashlib.sha256()
+    try:
+        for dirpath, dirs, files in os.walk( dist ):
+            dirs.sort()
+            for name in sorted( files ):
+                if not name.endswith( ".js" ): continue
+                full = os.path.join( dirpath, name )
+                with open( full, "rb" ) as handle:
+                    content = hashlib.sha256( handle.read() ).hexdigest()
+                digest.update( f"{os.path.relpath( full, dist )}\0{content}\n".encode() )
+    except OSError:
+        return BUNDLE_UNKNOWN
+    return digest.hexdigest()[ :12 ]
+
+
+def capture_start_bundle( git ):
+    """
+    The served-bundle hash a run is ABOUT to start on, for `tree_state_line( start_bundle= )`.
+
+    Ensures:
+        - returns bundle_hash of the tree `git` reads, or BUNDLE_UNKNOWN when that tree's root
+          cannot be read. NEVER None (None means "no start was captured"; see `capture_start_sha`)
+    """
+    root = git( "rev-parse", "--show-toplevel" )
+    return bundle_hash( root ) if root else BUNDLE_UNKNOWN
+
+
+def _bundle_where( git, root ):
+    """`main` when root is the repository's first worktree, `seat` for any other, `?` when unknowable."""
+    listing = git( "worktree", "list", "--porcelain" )
+    first   = next( ( l.split( " ", 1 )[ 1 ].strip() for l in ( listing or "" ).splitlines() if l.startswith( "worktree " ) ), None )
+    if not first: return "?"
+    return "main" if os.path.realpath( first ) == os.path.realpath( root ) else "seat"
+
+
+def _bundle_span( git, root, start_bundle ):
+    """
+    The `bundle=` / `bundle-span=` suffix, or "" when no start was captured.
+
+    Ensures:
+        - "" ONLY when start_bundle is None, for the reason `_run_span` gives: the node runners
+          emit before their run, so there is no span to describe
+        - names WHICH ROOT was hashed (`@main` or `@seat`): a seat's dist/ and the main tree's
+          are different directories and the :8000 container serves the main one
+        - a moved hash prints `bundle-span=<start>..<end> ⚠️ BUNDLE REBUILT MID-RUN`, one token
+          beside `run-span`, so no reader can miss it
+        - states `unmoved` rather than saying nothing
+        - an unreadable start prints UNKNOWN: a failed probe must not read as a point-in-time report
+    """
+    if start_bundle is None: return ""
+    end   = bundle_hash( root ) if root and root != "?" else BUNDLE_UNKNOWN
+    where = _bundle_where( git, root ) if root and root != "?" else "?"
+    head  = f" bundle={end}@{where}"
+    if start_bundle == BUNDLE_UNKNOWN: return f"{head} bundle-span=UNKNOWN — the start hash could not be read"
+    if start_bundle == end:            return f"{head} bundle-span=unmoved"
+    return f"{head} bundle-span={start_bundle}..{end} ⚠️ BUNDLE REBUILT MID-RUN"
+
+
+def tree_state_line( git, start_sha=None, start_bundle=None ):
     """
     One line naming the tree a run was earned on.
 
@@ -209,6 +294,8 @@ def tree_state_line( git, start_sha=None ):
           hostile git can be exercised rather than hoped about.
         - start_sha is the sha captured BEFORE the run by `capture_start_sha`, or None
           when the caller took no start reading.
+        - start_bundle is the served-bundle hash captured BEFORE the run by
+          `capture_start_bundle`, or None when the caller took no start reading (row 105ff244).
 
     Ensures:
         - returns a single line, always: an UNKNOWN line when the sha cannot be read,
@@ -271,7 +358,7 @@ def tree_state_line( git, start_sha=None ):
           escaped both the reader and this function until Rio measured it.
     """
     try:
-        return _tree_state_line( git, start_sha )
+        return _tree_state_line( git, start_sha, start_bundle )
     except Exception:
         # TOTAL BY CONSTRUCTION, not by the caller's net. The caller does wrap this,
         # but that wrapper carries `pragma: no cover` — so before this, the only thing
@@ -366,7 +453,7 @@ def _dirty_paths( tracked ):
     return ",".join( shown )
 
 
-def _tree_state_line( git, start_sha=None ):
+def _tree_state_line( git, start_sha=None, start_bundle=None ):
     """The body of `tree_state_line`; see it for the contract."""
     sha = git( "rev-parse", "--short", "HEAD" )
     if not sha:
@@ -376,6 +463,7 @@ def _tree_state_line( git, start_sha=None ):
     branch = git( "rev-parse", "--abbrev-ref", "HEAD" ) or "?"
     if branch == "HEAD": branch = "detached"
     root = git( "rev-parse", "--show-toplevel" ) or "?"
+    span = _bundle_span( git, root, start_bundle ) + span          # beside run-span; a moved hash is a token a reader cannot miss
 
     ref = git( "rev-parse", "--abbrev-ref", "@{upstream}" ) or _primary_branch( git )
     dirty = git( "status", "--porcelain" )
