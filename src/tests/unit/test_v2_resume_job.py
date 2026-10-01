@@ -26,7 +26,18 @@ from cosa.rest.routers.v2_ask import ( ResumeJobRequest, get_todo_queue, v2_resu
 
 RESOLVER = "cosa.agents.test_fix_expediter.resume_resolver.resolve_resume_target"
 FACTORY  = "cosa.rest.agentic_job_factory.resume_job"
+OWNER    = "cosa.rest.routers.v2_ask._job_owner_id"
+REAL_JOB_OWNER_ID = v2_ask._job_owner_id    # captured before the autouse fixture below replaces it
 USER     = { "uid": "u1", "email": "u1@test.com" }
+ADMIN    = { "uid": "a1", "email": "a1@test.com", "roles": [ "admin" ] }
+
+
+@pytest.fixture( autouse=True )
+def _the_caller_owns_the_job_unless_a_test_says_otherwise():
+    """Row a758bd0f: the direct path asks job_history who owns the job. Tests about OTHER things get the
+    caller as owner; the ownership tests below patch `_job_owner_id` themselves, which overrides this."""
+    with patch( OWNER, return_value=USER[ "uid" ] ):
+        yield
 
 
 def _job( id_hash="tfe-new00001::u1@test.com", ordinal=3, name="proposing", count=1 ):
@@ -160,6 +171,74 @@ async def test_a_direct_job_that_is_not_resumable_is_a_404():
             await _call( "dr-1a2b3c4d", queue=queue )
     assert caught.value.status_code == 404
     queue.push.assert_not_called()
+
+
+# ── ownership of a direct resume (row a758bd0f) ──────────────────────────────
+
+STRANGER = { "uid": "u2", "email": "u2@test.com" }
+NOT_RESUMABLE = "Job bfe-1a2b3c4d::u1@test.com not found, not stalled, has no checkpoint, or cannot be resumed"
+
+
+@pytest.mark.asyncio
+async def test_a_stranger_cannot_resume_another_users_job_by_id_hash():
+    """MEASURED red before the fix (DID NOT RAISE): the factory rebuilds the job under the ORIGINAL
+    owner's identity for any authenticated caller who knows the id_hash."""
+    queue = _queue()
+    with patch( OWNER, return_value="u1" ), patch( FACTORY, return_value=_job() ) as factory:
+        with pytest.raises( HTTPException ) as caught:
+            await _call( "bfe-1a2b3c4d::u1@test.com", queue=queue, user=STRANGER )
+    assert caught.value.status_code == 404 and caught.value.detail == NOT_RESUMABLE
+    factory.assert_not_called()
+    queue.push.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_the_owner_resumes_their_own_job():
+    queue = _queue()
+    with patch( OWNER, return_value="u1" ), patch( FACTORY, return_value=_job() ) as factory:
+        out = await _call( "bfe-1a2b3c4d::u1@test.com", queue=queue, user=USER )
+    assert out.status == "resumed"
+    factory.assert_called_once()
+    queue.push.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_an_admin_resumes_a_job_they_do_not_own_and_the_owner_is_never_looked_up():
+    queue = _queue()
+    with patch( OWNER, return_value="u1" ) as owner, patch( FACTORY, return_value=_job() ):
+        out = await _call( "bfe-1a2b3c4d::u1@test.com", queue=queue, user=ADMIN )
+    assert out.status == "resumed"
+    owner.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_job_with_no_history_row_is_refused_with_the_same_404_as_a_stranger():
+    """No owner row means no owner to compare: refuse, with the text a non-owner gets, so the answer
+    does not reveal which ids exist."""
+    with patch( OWNER, return_value=None ), patch( FACTORY, return_value=_job() ) as factory:
+        with pytest.raises( HTTPException ) as caught:
+            await _call( "bfe-1a2b3c4d::u1@test.com", user=USER )
+    assert caught.value.status_code == 404 and caught.value.detail == NOT_RESUMABLE
+    factory.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_the_owner_is_compared_as_a_string_so_a_uuid_object_matches_its_text():
+    import uuid
+    uid = str( uuid.uuid4() )
+    with patch( OWNER, return_value=uuid.UUID( uid ) ), patch( FACTORY, return_value=_job() ):
+        out = await _call( "bfe-1a2b3c4d::x", user={ "uid": uid, "email": "o@test.com" } )
+    assert out.status == "resumed"
+
+
+def test_the_owner_comes_from_the_history_row_never_from_the_id_string():
+    _job_owner_id = REAL_JOB_OWNER_ID
+    seam = "cosa.rest.job_persistence.get_original_args_for_job"
+    with patch( seam, return_value={ "user_id": "row-owner", "user_email": "x@test.com" } ) as lookup:
+        assert _job_owner_id( "bfe-1a2b3c4d::someone-else@test.com" ) == "row-owner"
+    lookup.assert_called_once_with( "bfe-1a2b3c4d::someone-else@test.com" )
+    with patch( seam, return_value=None ):
+        assert _job_owner_id( "bfe-1a2b3c4d" ) is None
 
 
 @pytest.mark.asyncio
