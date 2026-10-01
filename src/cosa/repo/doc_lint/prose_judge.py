@@ -17,7 +17,7 @@ import re
 import sys
 from collections import namedtuple
 
-from . import changed_ranges, claim_extractor, model_transport
+from . import changed_ranges, claim_extractor, harness_runner, model_transport
 from .text_rules import Finding
 
 RULES = {
@@ -28,6 +28,7 @@ RULES = {
 }
 
 ProseConfig = namedtuple( "ProseConfig", [ "judge_model", "writer_model" ] )
+ProseResult = namedtuple( "ProseResult", [ "findings", "discarded", "unjudged" ] )
 
 SYSTEM_PROMPT = (
     "You review one docstring against four style rules and quote the sentences that break them.\n"
@@ -79,8 +80,8 @@ def items_from_source( path, source ):
 
     Ensures:
         - returns [ { path, name, first_line, last_line, signature, text } ]
-        - signature is "def name(args) -> ret" for a function, "class name" for a class, and ""
-          for a module
+        - signature is "def name(args) -> ret" for a function, "async def ..." for a coroutine,
+          "class name" for a class, and "" for a module
         - first_line and last_line are 1-based file lines of the docstring
 
     Raises:
@@ -95,7 +96,8 @@ def items_from_source( path, source ):
         elif isinstance( node, ast.ClassDef ): name, signature = node.name, f"class {node.name}"
         else:
             returns   = f" -> {ast.unparse( node.returns )}" if node.returns is not None else ""
-            name, signature = node.name, f"def {node.name}({ast.unparse( node.args )}){returns}"
+            keyword   = "async def" if isinstance( node, ast.AsyncFunctionDef ) else "def"
+            name, signature = node.name, f"{keyword} {node.name}({ast.unparse( node.args )}){returns}"
         doc = body[ 0 ].value
         items.append( { "path": path, "name": name, "first_line": doc.lineno, "last_line": doc.end_lineno,
                         "signature": signature, "text": doc.value } )
@@ -163,9 +165,12 @@ def locate_line( sentence, item ):
 
     Ensures:
         - matching ignores whitespace runs, backticks and asterisks, like the claim extractor
+        - a sentence under the extractor's minimum words or characters is not located, so a
+          finding points at a sentence and never at a single word
         - the line is first_line plus the newlines before the sentence in the raw docstring
     """
     wanted, _ = claim_extractor.normalize( sentence )
+    if len( wanted.split() ) < claim_extractor.MIN_QUOTE_WORDS or len( wanted ) < claim_extractor.MIN_QUOTE_CHARS: return None
     haystack, offsets = claim_extractor.normalize( item[ "text" ] )
     position = haystack.find( wanted ) if wanted else -1
     if position < 0: return None
@@ -180,8 +185,9 @@ async def judge_item( item, config, query_fn=None ):
         - item comes from items_from_source; config passes check_judge
 
     Ensures:
-        - returns a Finding for each quoted sentence that really occurs in the docstring, on the
-          line where it starts; a quote that is not in the text is dropped
+        - returns ( findings, discarded ): a Finding for each quoted sentence that really occurs
+          in the docstring, on the line where it starts, and the count of quotes that did not
+          occur or were too short, so a model that stops quoting correctly shows up
         - the docstring and signature are wrapped in tags with a random suffix absent from both
 
     Raises:
@@ -193,28 +199,66 @@ async def judge_item( item, config, query_fn=None ):
     suffix = model_transport.new_suffix( item[ "text" ], item[ "signature" ] )
     prompt = model_transport.wrap( "signature", suffix, item[ "signature" ] or "(module)" ) + "\n" + model_transport.wrap( "docstring", suffix, item[ "text" ] )
     raw    = await model_transport.complete( config.judge_model, SYSTEM_PROMPT, prompt, query_fn=query_fn )
-    findings = []
+    findings  = []
+    discarded = 0
     for sentence, rule, reason in parse_findings( raw ):
         line = locate_line( sentence, item )
-        if line is not None: findings.append( Finding( item[ "path" ], line, RULES[ rule ], f"{item[ 'name' ]}: {reason}" ) )
-    return findings
+        if line is None: discarded += 1
+        else:            findings.append( Finding( item[ "path" ], line, RULES[ rule ], f"{item[ 'name' ]}: {reason}" ) )
+    return findings, discarded
 
 
-async def judge_prose( items, config, query_fn=None ):
+def _item_key( item, config ):
+    """Return the ledger key for one docstring: its text, signature, the prompt version and the model."""
+    return "|".join( [ "prose", harness_runner.text_hash( item[ "text" ] ), harness_runner.text_hash( item[ "signature" ] ),
+                       PROMPT_VERSION, config.judge_model ] )
+
+
+async def judge_prose( items, config, ledger=None, query_fn=None ):
     """
     Judge a list of docstrings, one call each, and return all findings in file order.
 
     Requires:
         - items are the changed docstrings; config passes check_judge
+        - ledger, when given, is a harness_runner.Ledger
 
     Ensures:
-        - returns Findings sorted by path, line and rule
-        - an empty list makes no model call
+        - a bad config raises even when items is empty
+        - one bad reply or one failed call never aborts the sweep: the item is tried twice, and
+          if it still fails it becomes a "prose-unjudged" finding on its first line, so it is
+          neither a silent clean nor an abort
+        - with a ledger, a finished item is not judged again, and an unjudged item is not
+          stored, so a rerun retries it
+        - returns ProseResult( findings, discarded, unjudged ): findings sorted by path, line and
+          rule, the total of discarded quotes, and the number of unjudged items
+
+    Raises:
+        - ValueError if config fails check_judge
     """
     check_judge( config )
     findings = []
-    for item in items: findings += await judge_item( item, config, query_fn=query_fn )
-    return sorted( findings, key=lambda f: ( f.path, f.line, f.rule ) )
+    discarded = unjudged = 0
+    for item in items:
+        key    = _item_key( item, config )
+        stored = ledger.get( key ) if ledger is not None else None
+        if stored is not None:
+            findings  += [ Finding( *row ) for row in stored[ "findings" ] ]
+            discarded += stored[ "discarded" ]
+            continue
+        for attempt in ( 1, 2 ):
+            try:
+                found, dropped = await judge_item( item, config, query_fn=query_fn )
+            except ( ProseParseError, model_transport.ModelCallError ) as e:
+                failure = e
+                continue
+            findings  += found
+            discarded += dropped
+            if ledger is not None: ledger.put( key, { "findings": [ list( f ) for f in found ], "discarded": dropped } )
+            break
+        else:
+            unjudged += 1
+            findings.append( Finding( item[ "path" ], item[ "first_line" ], "prose-unjudged", f"{item[ 'name' ]}: not judged after two tries: {failure}" ) )
+    return ProseResult( sorted( findings, key=lambda f: ( f.path, f.line, f.rule ) ), discarded, unjudged )
 
 
 PROMPT_VERSION = model_transport.prompt_version( "prose", inspect.getsource( sys.modules[ __name__ ] ) )
