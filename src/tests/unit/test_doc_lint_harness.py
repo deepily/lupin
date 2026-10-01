@@ -468,3 +468,13 @@ def test_the_report_names_the_sha_of_the_pairs_file(tmp_path):
     ( tmp_path / "pairs.json" ).write_text( body )
     cli.main( cli_args( tmp_path ), query_fn=FakeModel() )
     assert json.loads( ( tmp_path / "out.json" ).read_text() )[ "pairs_sha" ] == hashlib.sha256( body.encode() ).hexdigest()
+
+
+def test_seeded_claim_agreement_alone_can_block_the_gate_when_overall_agreement_is_fine():
+    wobbly = synthetic( 60, unseeded=100 )
+    for r in wobbly[ :5 ]:
+        for lst in r[ "lists" ]:
+            lst[ "runs" ] = [ lst[ "runs" ][ 0 ], [ { "verdict": "present", "escalated": False } ], lst[ "runs" ][ 2 ] ]
+    report = hr.build_report( wobbly, CONFIG )
+    assert report[ "agreement_all" ][ "rate" ] >= 0.95 > report[ "agreement_seeded" ][ "rate" ]
+    assert report[ "agreement_ok" ] is False

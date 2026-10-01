@@ -272,3 +272,11 @@ def test_a_repeated_id_is_refused_even_when_the_rest_cover_the_range():
 def test_a_label_outside_history_and_restored_leaves_the_row_unlabelled():
     row = { "claim": "a", "quote": "q", "reason": None, "label": "dropped" }
     assert cj.unlabelled_drops( [ row ] ) == [ row ]
+
+
+def test_the_history_gate_stays_shut_when_only_a_restored_claim_is_still_missing():
+    rows = [ dict( history_rows()[ 0 ], label="history" ),
+             dict( history_rows()[ 2 ], claim="raises valueerror when blank", label="restored" ) ]
+    result = asyncio.run( cj.close_history_gate( rows, OLD_DOC, NEW_DOC, "Raises ValueError when the id is blank.", None, "first", "second", query_fn=make_query() ) )
+    assert result[ "unlabelled" ] == [] and result[ "destination_missing" ] == []
+    assert len( result[ "restored_failed" ] ) == 1 and result[ "ok" ] is False
