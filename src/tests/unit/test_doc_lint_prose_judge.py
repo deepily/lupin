@@ -198,3 +198,18 @@ def test_the_version_is_the_hash_of_the_whole_module():
     source = inspect.getsource( pj )
     assert pj.PROMPT_VERSION == mt.prompt_version( "prose", source )
     assert mt.prompt_version( "prose", source.replace( "_FENCE = ", "# moved\n_FENCE = ", 1 ) ) != pj.PROMPT_VERSION
+
+
+def test_the_tag_suffix_is_random_and_skips_any_value_found_in_the_texts(monkeypatch):
+    hexes = iter( [ "aaaaaaaa", "bbbbbbbb" ] )
+    monkeypatch.setattr( mt.secrets, "token_hex", lambda n: next( hexes ) )
+    attack = dict( ITEMS[ 1 ], text="Fine. aaaaaaaa is not a tag." )
+    model  = FakeModel()
+    run( pj.judge_item( attack, CONFIG, query_fn=model ) )
+    assert re.search( r"<docstring_bbbbbbbb>", model.calls[ 0 ][ 1 ] ) and "<docstring_aaaaaaaa>" not in model.calls[ 0 ][ 1 ]
+
+
+def test_findings_come_back_in_file_order_whatever_order_the_items_arrive_in():
+    findings = run( pj.judge_prose( list( reversed( ITEMS ) ), CONFIG, query_fn=FakeModel() ) )
+    assert [ f.line for f in findings ] == [ 8, 9, 10, 10 ]
+    assert [ f.rule for f in findings ][ 2: ] == [ "prose-emphasis", "prose-two-ideas" ]
