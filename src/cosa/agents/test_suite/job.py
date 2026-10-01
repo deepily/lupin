@@ -744,8 +744,8 @@ class TestSuiteJob( AgenticJobBase ):
 
         Ensures:
             - a failed between-suites reset stops the sweep: the suite that did not run gets a
-              FAILED entry (errors=1, the reset error as its reason), the suites already run keep
-              their entries, and the normal summary and report still run, verdict FAILED
+              failure entry (errors=1, the reset error as its reason), the suites already run keep
+              their entries, and the normal summary and report still run with a failing verdict
 
         Returns:
             str: Conversational summary of all suite results
@@ -824,10 +824,10 @@ class TestSuiteJob( AgenticJobBase ):
                     try:
                         self._reset_state_between_suites( seam_prev, suite_type )
                     except BetweenSuiteResetError as reset_err:
-                        # Record the suite that did NOT run as FAILED and stop, then fall through to
+                        # Record the suite that did not run as a failure and stop, then fall through to
                         # the normal summary: the finished suites keep their report and the verdict
-                        # is FAILED. A bare break would summarise only the suites that ran and
-                        # read PASSED (bug 07dde530, Tiberius B1).
+                        # is a failure. A bare break would summarise only the suites that ran and
+                        # read as a pass (bug 07dde530, Tiberius B1).
                         self.suite_results[ suite_type ] = {
                             "passed"    : 0,
                             "failed"    : 0,

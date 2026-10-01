@@ -1109,11 +1109,33 @@ class TestSweepResetsBetweenSuites:
         assert job.suite_results[ "e2e" ][ "exit_code" ] == 1
         assert "e2e did not run" in job.suite_results[ "e2e" ][ "error" ]
         assert "boom" in job.suite_results[ "e2e" ][ "error" ]
+        assert "report_path" in job.artifacts
+        assert any( "between-suites reset failed after integration" in str( c ) for c in mock_voice_io.notify.call_args_list )
+
+    @_stub_preflight
+    @patch( "cosa.agents.test_suite.job.cu.get_project_root" )
+    @patch( "cosa.agents.test_suite.voice_io" )
+    def test_a_failed_reset_makes_the_overall_verdict_failed_not_passed( self, mock_voice_io, mock_root, job, tmp_path ):
+        """Kept in its own test so a missing verdict is caught by this assertion alone: one suite
+        passed, the next never ran, and the summary must not read as a pass."""
+        from cosa.agents.test_suite.job import BetweenSuiteResetError
+        mock_root.return_value    = str( tmp_path )
+        mock_voice_io.reconfigure = MagicMock()
+        mock_voice_io.set_job_id  = MagicMock()
+        mock_voice_io.clear_job_id = MagicMock()
+        mock_voice_io.notify      = AsyncMock()
+
+        def _reset( prev, nxt ):
+            raise BetweenSuiteResetError( "boom" )
+
+        with patch.object( TestSuiteJob, "_run_suite", side_effect=lambda s, r: dict( self._CANNED ) ), \
+             patch.object( TestSuiteJob, "_reset_state_between_suites", side_effect=_reset, create=True ):
+            asyncio.run( job._execute() )
+
         assert job.overall_status == "FAILED"
         assert job.cost_summary[ "all_passed" ] is False
         assert job.cost_summary[ "suites_run" ] == 2
-        assert "report_path" in job.artifacts
-        assert any( "between-suites reset failed after integration" in str( c ) for c in mock_voice_io.notify.call_args_list )
+        assert job.cost_summary[ "total_errors" ] == 1
 
     @_stub_preflight
     @patch( "cosa.agents.test_suite.job.cu.get_project_root" )
