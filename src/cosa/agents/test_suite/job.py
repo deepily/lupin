@@ -272,6 +272,35 @@ def _expand_all( test_types: List[ str ] ) -> List[ str ]:
                 expanded.append( c )
     return expanded
 
+class BetweenSuiteResetError( RuntimeError ):
+    """
+    The shared test database could not be reset between two suites.
+
+    Raised so the sweep stops: the next suite would otherwise run on the earlier suite's rows
+    and report on someone else's data.
+    """
+
+
+def tables_with_fk_into( metadata, listed ) -> List[ str ]:
+    """
+    Return the tables outside `listed` that hold a foreign key into a table in `listed`.
+
+    Requires:
+        - metadata is a SQLAlchemy MetaData; listed is an iterable of table names
+
+    Ensures:
+        - returns the sorted names of tables that Postgres refuses to leave out of a truncate of
+          the listed tables
+        - an empty list means the truncate set is closed under foreign keys
+    """
+    listed  = set( listed )
+    missing = set()
+    for table in metadata.tables.values():
+        if table.name in listed: continue
+        if any( fk.column.table.name in listed for fk in table.foreign_keys ): missing.add( table.name )
+    return sorted( missing )
+
+
 class _StdoutReaderCrash:
     """
     Queue marker meaning THE STDOUT READER THREAD DIED — not end of output.
@@ -713,6 +742,11 @@ class TestSuiteJob( AgenticJobBase ):
         Runs each suite sequentially, always completing all suites regardless
         of individual failures. Reports progress via voice_io notifications.
 
+        Ensures:
+            - a failed between-suites reset stops the sweep: the suite that did not run gets a
+              failure entry (errors=1, the reset error as its reason), the suites already run keep
+              their entries, and the normal summary and report still run with a failing verdict
+
         Returns:
             str: Conversational summary of all suite results
         """
@@ -787,7 +821,29 @@ class TestSuiteJob( AgenticJobBase ):
                 # :8000 DB. Fires iff this suite opens a seam.
                 seam_prev = reset_predecessor.get( suite_type )
                 if seam_prev is not None:
-                    self._reset_state_between_suites( seam_prev, suite_type )
+                    try:
+                        self._reset_state_between_suites( seam_prev, suite_type )
+                    except BetweenSuiteResetError as reset_err:
+                        # Record the suite that did not run as a failure and stop, then fall through to
+                        # the normal summary: the finished suites keep their report and the verdict
+                        # is a failure. A bare break would summarise only the suites that ran and
+                        # read as a pass (bug 07dde530, Tiberius B1).
+                        self.suite_results[ suite_type ] = {
+                            "passed"    : 0,
+                            "failed"    : 0,
+                            "skipped"   : 0,
+                            "errors"    : 1,
+                            "exit_code" : 1,
+                            "log_path"  : None,
+                            "duration"  : 0.0,
+                            "error"     : f"{suite_type} did not run: {reset_err}",
+                        }
+                        await voice_io.notify(
+                            f"{suite_type} did not run: the between-suites reset failed after {seam_prev}.",
+                            priority="high",
+                            queue_name="run"
+                        )
+                        break
 
                 await voice_io.notify(
                     f"Starting {suite_type} tests...",
@@ -1161,11 +1217,15 @@ class TestSuiteJob( AgenticJobBase ):
     # Residue tables cleared at the between-suites seam (bug 8bd20375). Superset
     # of the per-test clean_test_db TRUNCATE list PLUS refresh_tokens — the
     # residue whose duplicate-jti survival across the e2e→integration seam
-    # produced the "Token already exists" flood.
+    # produced the "Token already exists" flood. Postgres refuses a TRUNCATE of a
+    # table another table references unless that table is in the statement too,
+    # so this set must be closed under foreign keys (bug 07dde530: it was not
+    # once task_promotion_tickets was added). tables_with_fk_into() and its unit
+    # test enforce that.
     _BETWEEN_SUITE_TRUNCATE_TABLES = (
         "auth_audit_log", "failed_login_attempts", "job_history",
         "proxy_decisions", "trust_states", "task_items", "task_events",
-        "fcm_tokens", "refresh_tokens",
+        "fcm_tokens", "refresh_tokens", "task_promotion_tickets",
     )
 
     @staticmethod
@@ -1276,8 +1336,12 @@ class TestSuiteJob( AgenticJobBase ):
             - on lupin_db_test: non-protected users deleted + residue TRUNCATEd
               (incl. refresh_tokens); protected companion rows survive
             - on any other DB: no destructive op; logs the skip
-            - never raises — a reset failure logs loudly but does NOT abort the
-              sweep (per-test clean_test_db is the finer-grained backstop)
+            - a reset failure raises BetweenSuiteResetError and stops the sweep: a
+              suite on an unreset database reports on the previous suite's rows
+              (bug 07dde530; before it, the failure was logged and the sweep went on)
+
+        Raises:
+            - BetweenSuiteResetError if the delete or the truncate fails
         """
         from cosa.rest.db import database as db_module
         from sqlalchemy import text
@@ -1298,10 +1362,11 @@ class TestSuiteJob( AgenticJobBase ):
                    f"non-protected users + residue cleared on lupin_db_test ({table_list})" )
 
         except Exception as reset_err:
-            # Non-fatal: the per-test clean_test_db remains the backstop. A reset
-            # hiccup must never vaporize the rest of the sweep.
-            print( f"[TestSuiteJob] ⚠️ between-suites reset FAILED ({prev_suite}->{next_suite}), "
-                   f"non-fatal: {reset_err}" )
+            print( f"[TestSuiteJob] between-suites reset FAILED ({prev_suite}->{next_suite}): {reset_err}" )
+            raise BetweenSuiteResetError(
+                f"between-suites reset failed ({prev_suite}->{next_suite}); stopping the sweep so "
+                f"{next_suite} does not run on {prev_suite}'s rows: {reset_err}"
+            ) from reset_err
 
     def _attest_tier_run( self, suite_type: str, result: Dict, started_at: str ) -> None:
         """

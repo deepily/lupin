@@ -148,9 +148,13 @@ test container, so bouncing it would self-kill the job. The reset is therefore
 an **in-process** truncate against the hot-swapped test engine, guarded by the
 same `lupin_db_test`-only safety assert as `clean_test_db`: on any non-test DB
 (e.g. a multi-suite run submitted to the `:7999` dev server) it is a logged
-**NO-OP**, never a destructive op on dev data. A reset failure is non-fatal —
-the per-test `clean_test_db` (which also TRUNCATEs `refresh_tokens`) is the
-finer-grained backstop.
+**NO-OP**, never a destructive op on dev data. A reset failure is **fatal**: it
+raises `BetweenSuiteResetError` and the sweep stops before the next suite, because
+a suite on an unreset database reports on the previous suite's rows. The truncate
+set must also be closed under foreign keys, since Postgres refuses to truncate a
+table another table references unless that table is in the same statement; the
+unit test `test_the_truncate_set_is_closed_under_foreign_keys` fails when a table
+with a foreign key into the set is missing from it (bug 07dde530).
 
 > The concurrent-fleet-writer class — other agentic jobs writing
 > `lupin_db_test` *during* a suite (not at the seam) — is a **separate** bug
