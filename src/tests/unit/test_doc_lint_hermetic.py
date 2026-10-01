@@ -86,6 +86,22 @@ def test_the_profile_names_the_options_it_stands_for():
         assert word in mt.CALL_PROFILE
 
 
+def test_the_profile_carries_every_option_with_its_value():
+    label, body = mt.CALL_PROFILE.split( "|", 1 )
+    profile     = json.loads( body )
+    assert label == "hermetic-1"
+    assert profile == { "settings": mt.ISOLATION_SETTINGS, "args": sorted( mt.ISOLATION_ARGS ), "setting_sources": [], "tools": [] }
+
+
+def test_an_error_result_keeps_only_the_first_300_characters_of_the_apis_text():
+    async def query( prompt, options ):
+        yield ResultMessage( subtype="success", duration_ms=1, duration_api_ms=1, is_error=True, num_turns=1, session_id="s",
+                             result="A" * 300 + "TAILMARK" )
+    with pytest.raises( mt.ModelCallError ) as caught:
+        asyncio.run( mt.complete( "claude-x", "sys", "user", query_fn=query ) )
+    assert "A" * 300 in str( caught.value ) and "TAILMARK" not in str( caught.value )
+
+
 @pytest.mark.parametrize( "module", [ claim_extractor, claim_judge, jev_judge, prose_judge, reader_rig ] )
 def test_every_prompt_version_comes_from_prompt_version_so_it_carries_the_profile( module ):
     source = pathlib.Path( module.__file__ ).read_text()
@@ -108,6 +124,7 @@ def test_cli_version_reads_the_first_line_and_never_raises():
     assert mt.cli_version( None ) is None
     assert mt.cli_version( "/x/claude", run_fn=lambda *a, **k: _Done( 0, "2.1.287 (Claude Code)\nmore\n" ) ) == "2.1.287 (Claude Code)"
     assert mt.cli_version( "/x/claude", run_fn=lambda *a, **k: _Done( 1, "" ) ) == "unreadable"
+    assert mt.cli_version( "/x/claude", run_fn=lambda *a, **k: _Done( 2, "usage: claude [options]\n" ) ) == "unreadable"
     assert mt.cli_version( "/x/claude", run_fn=lambda *a, **k: _Done( 0, "  \n" ) ) == "unreadable"
     def missing( *a, **k ): raise FileNotFoundError( "gone" )
     def hangs( *a, **k ): raise subprocess.TimeoutExpired( "claude", 30 )
