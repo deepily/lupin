@@ -76,3 +76,5 @@ def test_the_loader_refuses_a_gate_path_before_opening_anything( tmp_path ):
     dev_pairs, dev_keys = write_set( tmp_path, PAIRS, KEYS, split="dev" )
     with pytest.raises( ValueError, match="gate split" ):
         labelled_pairs.load_pairs( dev_pairs, str( tmp_path / "gate-keys.jsonl" ) )
+    with pytest.raises( ValueError, match="gate split" ):
+        labelled_pairs.load_pairs( pairs, dev_keys )
