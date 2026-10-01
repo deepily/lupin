@@ -27,6 +27,7 @@ def parse_args( argv ):
     parser.add_argument( "--extractor-lists", type=int, default=2 )
     parser.add_argument( "--judge-runs", type=int, default=3 )
     parser.add_argument( "--gate", action="store_true", help="a gate run: refuse unless --frozen-versions matches" )
+    parser.add_argument( "--frozen-pairs-sha", help="sha256 of the pairs file registered before the gate run" )
     parser.add_argument( "--frozen-versions", help="extractor and judge prompt versions registered before the gate run, comma separated" )
     return parser.parse_args( argv )
 
@@ -45,6 +46,8 @@ def main( argv, query_fn=None ):
         - returns 3 and runs nothing when --gate is set and --frozen-versions is missing or is not
           the extractor and judge versions in this code, so a gate run cannot use prompts
           that changed after they were registered
+        - returns 3 and runs nothing when --gate is set and --frozen-pairs-sha is missing or is
+          not the sha256 of the pairs file, so the gate file cannot change after registration
         - the report carries the sha256 of the pairs file
     """
     args   = parse_args( argv )
@@ -60,10 +63,14 @@ def main( argv, query_fn=None ):
         print( f"REFUSED: gate run needs --frozen-versions {current}, got {args.frozen_versions}", file=sys.stderr )
         return 3
     with open( args.pairs, "rb" ) as f: raw = f.read()
+    pairs_sha = hashlib.sha256( raw ).hexdigest()
+    if args.gate and args.frozen_pairs_sha != pairs_sha:
+        print( f"REFUSED: gate run needs --frozen-pairs-sha {pairs_sha}, got {args.frozen_pairs_sha}", file=sys.stderr )
+        return 3
     pairs = json.loads( raw )
     results = asyncio.run( harness_runner.run_all( pairs, config, harness_runner.Ledger( args.ledger ), query_fn=query_fn ) )
     report  = harness_report.build_report( results, config )
-    report[ "pairs_sha" ] = hashlib.sha256( raw ).hexdigest()
+    report[ "pairs_sha" ] = pairs_sha
     with open( args.out, "w", encoding="utf-8" ) as f: json.dump( report, f, indent=2 )
     print( f"report written to {args.out}: default_gate_pass={report[ 'default_gate_pass' ]}" )
     return 0

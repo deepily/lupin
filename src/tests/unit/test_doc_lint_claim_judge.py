@@ -280,3 +280,53 @@ def test_the_history_gate_stays_shut_when_only_a_restored_claim_is_still_missing
     result = asyncio.run( cj.close_history_gate( rows, OLD_DOC, NEW_DOC, "Raises ValueError when the id is blank.", None, "first", "second", query_fn=make_query() ) )
     assert result[ "unlabelled" ] == [] and result[ "destination_missing" ] == []
     assert len( result[ "restored_failed" ] ) == 1 and result[ "ok" ] is False
+
+
+def test_a_long_history_quote_is_found_in_a_long_destination():
+    long_quote = " ".join( [ "detail" ] * 60 )
+    row = { "claim": "x", "quote": long_quote, "start": 0, "end": 5, "reason": None, "label": "history" }
+    destination = "Intro paragraph here. " + long_quote + ". Closing paragraph here. " + " ".join( [ "filler" ] * 200 )
+    assert cj.history_destinations_missing( [ row ], destination, "unrelated old text.", "unrelated new text." ) == []
+
+
+@pytest.mark.parametrize( "old, new, stand_in, which", [
+    ( "Alpha beta gamma delta one.", "Epsilon zeta eta theta two.", "Alpha beta gamma delta one.", "old" ),
+    ( "Alpha beta gamma delta one.", "Epsilon zeta eta theta two.", "Epsilon zeta eta theta two.", "new" ),
+] )
+def test_each_of_the_old_and_the_new_text_is_refused_as_a_destination_on_its_own( old, new, stand_in, which ):
+    with pytest.raises( ValueError, match=f"whole {which} text" ):
+        cj.history_destinations_missing( history_rows(), stand_in, old, new )
+
+
+def test_a_sibling_directory_that_shares_the_root_name_as_a_prefix_is_outside(tmp_path):
+    root = tmp_path / "history"
+    evil = tmp_path / "history-evil"
+    root.mkdir()
+    evil.mkdir()
+    ( evil / "why.md" ).write_text( "A real document about something else." )
+    with pytest.raises( ValueError, match="outside the allowed" ):
+        cj.load_destination( str( evil / "why.md" ), [ str( root ) ], OLD_DOC, NEW_DOC )
+
+
+def test_a_symlink_inside_the_root_that_points_outside_is_refused(tmp_path):
+    root = tmp_path / "history"
+    root.mkdir()
+    outside = tmp_path / "elsewhere.md"
+    outside.write_text( "A real document about something else." )
+    ( root / "link.md" ).symlink_to( outside )
+    with pytest.raises( ValueError, match="outside the allowed" ):
+        cj.load_destination( str( root / "link.md" ), [ str( root ) ], OLD_DOC, NEW_DOC )
+
+
+def test_the_history_gate_stays_shut_when_only_a_row_is_unlabelled():
+    rows = [ dict( history_rows()[ 0 ], label="history" ), dict( history_rows()[ 3 ], label=None ) ]
+    result = asyncio.run( cj.close_history_gate( rows, OLD_DOC, NEW_DOC, "Raises ValueError when the id is blank.", None, "first", "second", query_fn=make_query() ) )
+    assert len( result[ "unlabelled" ] ) == 1 and result[ "destination_missing" ] == [] and result[ "restored_failed" ] == []
+    assert result[ "ok" ] is False
+
+
+def test_the_history_gate_stays_shut_when_only_a_destination_is_missing():
+    rows = [ dict( history_rows()[ 0 ], label="history" ) ]
+    result = asyncio.run( cj.close_history_gate( rows, OLD_DOC, NEW_DOC, "Nothing useful here at all.", None, "first", "second", query_fn=make_query() ) )
+    assert result[ "unlabelled" ] == [] and len( result[ "destination_missing" ] ) == 1 and result[ "restored_failed" ] == []
+    assert result[ "ok" ] is False

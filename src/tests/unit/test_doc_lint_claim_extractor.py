@@ -357,3 +357,17 @@ def test_a_destination_search_is_unbounded_but_still_needs_a_real_quote():
     assert ce.locate_quote( "Raises ValueError when the id is blank.", short ) is None
     assert ce.locate_quote( "Raises ValueError when the id is blank.", short, bounded=False ) == ( 0, 39 )
     assert ce.locate_quote( "blank", short, bounded=False ) is None
+
+
+def test_a_two_line_docstring_quoted_whole_does_not_verify():
+    text = "Returns the id for any known row\nraises ValueError when blank"
+    assert ce.locate_quote( text, text ) is None
+    assert ce.locate_quote( "raises ValueError when blank", text ) is not None
+
+
+def test_the_length_cap_is_lifted_for_a_destination_search():
+    long_quote = " ".join( [ "detail" ] * 60 )
+    destination = "Intro paragraph here. " + long_quote + ". Closing paragraph here. " + " ".join( [ "filler" ] * 200 )
+    assert len( long_quote ) > ce.MAX_QUOTE_CHARS
+    assert ce.locate_quote( long_quote, destination ) is None
+    assert ce.locate_quote( long_quote, destination, bounded=False ) is not None

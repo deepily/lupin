@@ -446,18 +446,21 @@ def test_the_submit_prompt_keeps_every_argument_a_single_shell_word():
     assert shlex.split( tail ) == [ "python", "--pairs", "my pairs; rm -rf x.json", "--out", "it's.json" ]
 
 
-def cli_gate_args( tmp_path, versions ):
-    return cli_args( tmp_path ) + [ "--gate" ] + ( [ "--frozen-versions", versions ] if versions is not None else [] )
+def cli_gate_args( tmp_path, versions, pairs_sha="default" ):
+    import hashlib
+    sha = hashlib.sha256( ( tmp_path / "pairs.json" ).read_bytes() ).hexdigest() if pairs_sha == "default" else pairs_sha
+    return cli_args( tmp_path ) + [ "--gate" ] + ( [ "--frozen-versions", versions ] if versions is not None else [] ) + ( [ "--frozen-pairs-sha", sha ] if sha is not None else [] )
 
 
-def test_a_gate_run_needs_the_registered_prompt_versions(tmp_path, capsys):
+def test_a_gate_run_needs_the_registered_prompt_versions_and_pairs_file(tmp_path, capsys):
     from cosa.repo.doc_lint import harness_cli as cli
     ( tmp_path / "pairs.json" ).write_text( json.dumps( [ pair( "seeded", L1 + "\n" + L3, seeded=L2 ) ] ) )
-    for bad in ( None, "extractor-old,judge-old" ):
-        model = FakeModel()
-        assert cli.main( cli_gate_args( tmp_path, bad ), query_fn=model ) == 3
-        assert model.calls == [] and "REFUSED: gate run needs --frozen-versions" in capsys.readouterr().err
     good = f"{ce.PROMPT_VERSION},{cj.PROMPT_VERSION}"
+    for versions, sha, message in ( ( None, "default", "--frozen-versions" ), ( "extractor-old,judge-old", "default", "--frozen-versions" ),
+                                    ( good, None, "--frozen-pairs-sha" ), ( good, "0" * 64, "--frozen-pairs-sha" ) ):
+        model = FakeModel()
+        assert cli.main( cli_gate_args( tmp_path, versions, sha ), query_fn=model ) == 3
+        assert model.calls == [] and f"REFUSED: gate run needs {message}" in capsys.readouterr().err
     assert cli.main( cli_gate_args( tmp_path, good ), query_fn=FakeModel() ) == 0
 
 
