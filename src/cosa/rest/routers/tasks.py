@@ -465,12 +465,12 @@ TERSE_DATA_FIELDS = frozenset( {
     # this" from a second full-row query into something you can see.
     "owner_persona", "accountable_manager",
 
-    # Row 7e1d72d0 (item B), 2026-09-30. A TERSE ROW COULD NOT SAY WHAT KIND OF THING IT IS: a task, a
-    # bug, a decision, a gate and a review request all read as a title, a status and a priority, and
-    # the projection a seat is told to prefer for token economy is the one that dropped the field.
-    # It cost a second full query more than once, which is the same cost argument as `project`
-    # and `owner_persona`. The wire name is `item_class` at every layer (`class` is reserved).
-    # One short enum string (task|decision|review_request|bug|gate), carried straight off the column.
+    # Row 7e1d72d0 (item B). A terse row could not say what kind of thing it is: a task, a bug, a
+    # decision, a gate and a review request all read as a title, a status and a priority, and the
+    # projection a seat is told to prefer for token economy was the one that dropped the field.
+    # It cost a second full query more than once, the same cost argument as `project` and
+    # `owner_persona`. The wire name is `item_class` at every layer, because `class` is reserved.
+    # One short enum string (task, decision, review_request, bug, gate) carried off the column.
     "item_class",
 } )
 
