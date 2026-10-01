@@ -167,7 +167,7 @@ def _fake_dart( monkeypatch, extract, algo="dart9.9/fake", check=lambda root: No
 
 def test_dart_records_are_validated_hashed_namespaced_and_algorithm_recorded( tmp_path, monkeypatch ):
     root  = _dart_repo( tmp_path ); seen = {}
-    def fake( r, files, data_root ):
+    def fake( r, files, data_root, unparsed=None ):
         seen.update( root=r, files=[ f.name for f in files ], data_root=data_root )
         return [ { "lang": "dart", "file": "lib/core/x.dart", "name": "Foo", "kind": "class", "sig": "", "doc": "A Foo.", "pin_text": "class Foo { }", "line": 1, "public": True },
                  { "lang": "dart", "file": "lib/core/x.dart", "name": "Foo.bar", "kind": "method", "sig": "()", "doc": "", "pin": "abcdef0123", "line": 1, "public": True },
@@ -179,7 +179,20 @@ def test_dart_records_are_validated_hashed_namespaced_and_algorithm_recorded( tm
     assert [ s[ "id" ] for s in syms ] == [ "mobile:lib.core.x.Foo", "mobile:lib.core.x.Foo.bar" ]
     assert syms[ 0 ][ "pin" ] == bd._hash_text( "class Foo { }" ) and syms[ 1 ][ "pin" ] == "abcdef0123"
     assert "pin_text" not in syms[ 0 ] and len( all_ ) == 3
-    assert res[ "header" ][ "pin_algorithm" ].endswith( "/dart9.9/fake" )
+    assert res[ "header" ][ "pin_algorithm" ].endswith( "/dart9.9/fake" ) and res[ "header" ][ "unparsed" ] == []
+
+
+def test_a_dart_file_the_extractor_skips_is_listed_in_the_header_unparsed( tmp_path, monkeypatch ):
+    root = _dart_repo( tmp_path ); ( root / "lib" / "core" / "bad.dart" ).write_text( "class {{{\n", encoding="utf-8" )
+    def fake( r, files, data_root, unparsed=None ):
+        names = sorted( f.name for f in files )
+        for f in files:
+            if f.name == "bad.dart": unparsed.append( f.relative_to( r ).as_posix() )
+        return [ { "lang": "dart", "file": "lib/core/x.dart", "name": "Foo", "kind": "class", "sig": "", "doc": "A Foo.", "pin_text": "c", "line": 1, "public": True } ] if names else []
+    _fake_dart( monkeypatch, fake )
+    res = bd.build( root, tmp_path / "out" )
+    assert res[ "header" ][ "unparsed" ] == [ "lib/core/bad.dart" ]
+    assert [ s[ "id" ] for s in bd.read_symbols( res[ "gen_dir" ] ) ] == [ "mobile:lib.core.x.Foo" ]          # the good file is still indexed
 
 
 def test_dart_dependency_missing_and_absent_extractor_are_recorded( tmp_path, monkeypatch ):
@@ -197,7 +210,7 @@ def test_dart_dependency_missing_and_absent_extractor_are_recorded( tmp_path, mo
 
 def test_a_bad_dart_record_fails_loudly( tmp_path, monkeypatch ):
     root = _dart_repo( tmp_path )
-    _fake_dart( monkeypatch, lambda r, f, d: [ { "lang": "dart" } ] )
+    _fake_dart( monkeypatch, lambda r, f, d, unparsed=None: [ { "lang": "dart" } ] )
     with pytest.raises( ValueError, match="missing key" ): bd.build( root, tmp_path / "out" )
 
 
@@ -248,7 +261,7 @@ def test_a_changed_pin_algorithm_makes_a_published_index_stale( tmp_path, monkey
 
 def test_environment_reports_dart_tool_states( tmp_path, monkeypatch ):
     root = _dart_repo( tmp_path ); spec = sp.spec_for( root )
-    _fake_dart( monkeypatch, lambda *a: [], algo="dart1/x" )
+    _fake_dart( monkeypatch, lambda *a, **k: [], algo="dart1/x" )
     assert bd.environment( spec ) == ( f"py{sys.version_info.major}.{sys.version_info.minor}.x{bd.EXTRACTOR_LOGIC}/dart1/x", [] )
 
 

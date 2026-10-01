@@ -113,7 +113,7 @@ def collect( spec ):
         - all_symbols holds every definition; symbols holds the public ones; ids match in both
         - a missing tool (node, typescript, the Dart extractor) is listed in `missing`,
           its symbols are absent, and the rest of the index is still built
-        - a Python file that does not parse is listed in `unparsed` and skipped
+        - a Python or Dart file that does not parse is listed in `unparsed` and skipped
     """
     recs, unparsed = [], []
     algo, missing  = environment( spec )
@@ -131,8 +131,10 @@ def collect( spec ):
     if dart_files and not any( m in missing for m in ( "dart", "analyzer", "dart_extractor" ) ):
         from cosa.repo.symindex import dart_extractor
         from cosa.repo.symindex.paths import data_dir
-        for r in dart_extractor.extract_dart( spec.root, dart_files, data_dir( spec.root ) ):
+        dart_unparsed = []
+        for r in dart_extractor.extract_dart( spec.root, dart_files, data_dir( spec.root ), unparsed=dart_unparsed ):
             validate_record( r ); recs.append( r )
+        unparsed.extend( dart_unparsed )
     for r in recs:
         if "pin" not in r: r[ "pin" ] = _hash_text( r[ "pin_text" ] )
         r.pop( "pin_text", None )
