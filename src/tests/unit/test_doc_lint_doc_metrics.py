@@ -218,6 +218,28 @@ def test_a_non_ascii_file_name_is_listed( repo ):
     assert "pkg/\u00e9.py" in dm.package_files( repo, "pkg", "HEAD" )
 
 
+def test_a_repo_with_no_word_list_is_measured_with_the_lupin_trees_list( repo, tmp_path, monkeypatch ):
+    other = tmp_path / "other-root"
+    other.mkdir()
+    _git( other, "init", "-q" )
+    ( other / "lib" ).mkdir()
+    ( other / "lib" / "a.dart" ).write_text( "/// Very NEVER simple.\nclass A {}\n", encoding="utf-8" )
+    _git( other, "add", "-A" )
+    _git( other, "commit", "-qm", "base" )
+    ( other / "lib" / "a.dart" ).write_text( "/// Simple.\nclass A {}\n", encoding="utf-8" )
+    assert not ( other / "src" ).exists(), "precondition: the measured repo has no word list"
+    monkeypatch.setenv( "LUPIN_ROOT", str( repo ) )
+    word_list._state[ "root" ] = None
+    word_list._state[ "words" ] = None
+    out = io.StringIO()
+    rc  = dm.main( [ "lib", "--base", "HEAD", "--repo-root", str( other ), "--format", "json", "--strict" ], out=out )
+    data = json.loads( out.getvalue() )
+    assert rc == 0 and data[ "lib" ][ "improved" ] is True and data[ "lib" ][ "before" ][ "counts" ][ "caps_words" ] == 1
+    out = io.StringIO()
+    dm.main( [ "lib", "--base", "HEAD", "--repo-root", str( other ), "--format", "json", "--words-root", str( repo ) ], out=out )
+    assert json.loads( out.getvalue() )[ "lib" ][ "before" ][ "counts" ][ "caps_words" ] == 1
+
+
 # ---- mutation check: each mutant of the module must redden its named test ----
 
 MUTANTS = [
@@ -233,6 +255,7 @@ MUTANTS = [
     ( "\"removed\"  : sorted( set( before[ \"paths\" ] ) - set( after[ \"paths\" ] ) ),", "\"removed\"  : [],", "test_a_deleted_tracked_file_and_an_untracked_new_file_are_reported_not_fatal" ),
     ( "\"-z\", rev, \"--\", package ).split( \"\\0\" )", "rev, \"--\", package ).split( \"\\0\" )", "test_a_non_ascii_file_name_is_listed" ),
     ( "rows.append( \"Fewer tokens also happen when documentation is deleted; read this table beside contract_diff and the claim judge.\" )", "pass", "test_table_has_a_row_per_package_with_arrows" ),
+    ( "configure_root( args.words_root or cu.get_project_root() )", "configure_root( args.repo_root )", "test_a_repo_with_no_word_list_is_measured_with_the_lupin_trees_list" ),
     ( "return 1 if args.strict and not all( r[ \"improved\" ] for r in report.values() ) else 0", "return 0", "test_cli_table_json_and_strict" ),
 ]
 
@@ -248,11 +271,18 @@ def _mutant_module( old, new ):
 
 
 @pytest.mark.parametrize( "old,new,named_test", MUTANTS )
-def test_each_mutant_reddens_its_named_test( monkeypatch, repo, old, new, named_test ):
-    this = globals()
-    code = this[ named_test ].__code__
-    kwargs = { "repo": repo } if "repo" in code.co_varnames[ : code.co_argcount ] else {}
-    this[ named_test ]( **kwargs )
+def test_each_mutant_reddens_its_named_test( monkeypatch, repo, tmp_path_factory, old, new, named_test ):
+    this  = globals()
+    names = this[ named_test ].__code__.co_varnames[ : this[ named_test ].__code__.co_argcount ]
+
+    def kwargs():
+        found = {}
+        if "repo" in names: found[ "repo" ] = repo
+        if "tmp_path" in names: found[ "tmp_path" ] = tmp_path_factory.mktemp( "arm" )
+        if "monkeypatch" in names: found[ "monkeypatch" ] = monkeypatch
+        return found
+
+    this[ named_test ]( **kwargs() )
     monkeypatch.setitem( this, "dm", _mutant_module( old, new ) )
     with pytest.raises( Exception ):  # a crash reddens the test as surely as a failed assert
-        this[ named_test ]( **kwargs )
+        this[ named_test ]( **kwargs() )

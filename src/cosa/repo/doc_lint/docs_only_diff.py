@@ -354,17 +354,20 @@ def path_difference( path, modes, old_source, new_source ):
     return file_difference( path, old_source, new_source )
 
 
-def check_diff( root, base, head=None ):
+def check_diff( root, base, head=None, paths=None ):
     """
     Check every changed file between base and head.
 
     Requires:
         - root is a git working tree; base is a revision
         - head is a revision, or None for the working tree
+        - paths is a list of repo-relative prefixes, or None for every changed file
 
     Ensures:
         - returns [ ( path, None or failure string ) ] sorted by path, one entry per changed
           file that is not markdown
+        - with paths given, only files under one of those prefixes are checked; a prefix matches whole
+          directory names, so "lib/a" does not match "lib/ab"
         - a path that is not .py or .dart is a failure, never a silent skip
         - renames count as a delete plus an add, so a moved file fails
 
@@ -374,6 +377,7 @@ def check_diff( root, base, head=None ):
     results = []
     for path, modes in sorted( changed_files( root, base, head ).items() ):
         if path.endswith( DOC_SUFFIX ): continue
+        if paths is not None and not any( path == p or path.startswith( p.rstrip( "/" ) + "/" ) for p in paths ): continue
         results.append( ( path, path_difference( path, modes, _show( root, base, path ), _show( root, head, path ) ) ) )
     return results
 
@@ -397,8 +401,9 @@ def main( argv=None, out=None ):
     parser.add_argument( "--base", required=True, help="revision to compare from" )
     parser.add_argument( "--head", help="revision to compare to; default is the working tree" )
     parser.add_argument( "--repo-root", default=".", help="git working tree to read" )
+    parser.add_argument( "--paths", nargs="+", help="check only files under these repo-relative directories or files" )
     args    = parser.parse_args( argv )
-    results = check_diff( args.repo_root, args.base, args.head )
+    results = check_diff( args.repo_root, args.base, args.head, args.paths )
     for path, failure in results: out.write( f"PASS {path}\n" if failure is None else f"FAIL {path}: {failure}\n" )
     failed = sum( 1 for _, failure in results if failure is not None )
     out.write( f"{len( results ) - failed} passed, {failed} failed (docs-only means no AST change besides docstrings)\n" )

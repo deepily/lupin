@@ -16,6 +16,8 @@ import os
 import subprocess
 import sys
 
+import cosa.utils.util as cu
+
 from .cli import in_scope
 from .dartdoc_lint import doc_blocks
 from .docstring_lint import extract_docstrings
@@ -221,6 +223,8 @@ def main( argv=None, out=None ):
 
     Ensures:
         - prints the markdown table, or JSON with --format json
+        - the English word list is read from --words-root, or from the lupin tree when that is absent, so a
+          repo without the list, such as lupin-mobile, can be measured
         - returns 1 when --strict is given and any package is not improved, otherwise 0
 
     Raises:
@@ -234,8 +238,9 @@ def main( argv=None, out=None ):
     parser.add_argument( "--format", choices=( "table", "json" ), default="table" )
     parser.add_argument( "--strict", action="store_true", help="exit 1 when any package is not improved" )
     parser.add_argument( "--repo-root", default=".", help="git working tree to read" )
+    parser.add_argument( "--words-root", help="tree that holds src/conf/dm-tutor-lowercase-words.txt; default is the lupin tree, never the repo being measured" )
     args = parser.parse_args( argv )
-    configure_root( args.repo_root )
+    configure_root( args.words_root or cu.get_project_root() )
     report = build_report( args.repo_root, args.packages, args.base, args.head )
     if args.format == "json":
         json.dump( report, out, indent=2 )

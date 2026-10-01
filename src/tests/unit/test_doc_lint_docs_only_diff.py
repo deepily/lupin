@@ -292,12 +292,32 @@ def test_cli_untracked_new_code_file_fails( repo ):
     assert rc == 1 and "FAIL fresh.py: file added" in text
 
 
+def test_paths_limits_the_check_to_whole_directory_names( repo ):
+    ( repo / "lib" ).mkdir()
+    ( repo / "lib" / "ab" ).mkdir()
+    ( repo / "lib" / "a" ).mkdir()
+    for d in ( "a", "ab" ): ( repo / "lib" / d / "x.py" ).write_text( "x = 1\n", encoding="utf-8" )
+    _git( repo, "add", "-A" )
+    _git( repo, "commit", "-qm", "libs" )
+    ( repo / "lib" / "a" / "x.py" ).write_text( "x = 2\n", encoding="utf-8" )
+    ( repo / "lib" / "ab" / "x.py" ).write_text( "x = 3\n", encoding="utf-8" )
+    ( repo / "conf.ini" ).write_text( "k\n", encoding="utf-8" )
+    out = io.StringIO()
+    rc  = dod.main( [ "--base", "HEAD", "--repo-root", str( repo ), "--paths", "lib/a" ], out=out )
+    text = out.getvalue()
+    assert rc == 1 and "FAIL lib/a/x.py" in text and "lib/ab" not in text and "conf.ini" not in text
+    assert [ p for p, _ in dod.check_diff( repo, "HEAD", None, [ "lib/a/x.py", "lib/ab/" ] ) ] == [ "lib/a/x.py", "lib/ab/x.py" ]
+    assert dod.check_diff( repo, "HEAD", None, [ "nothing" ] ) == []
+
+
 # ---- mutation check: each mutant of the module must redden the named test ----
 
 MUTANTS = [
     ( "node.body = body[ 1 : ] or [ ast.Pass() ]", "node.body = body", "test_python_docs_only_change_passes" ),
     ( "    if type( old ) is not type( new ) or repr( old ) != repr( new ): return f\"{path}: {old!r} became {new!r}\"\n", "", "test_python_one_token_code_change_fails_and_names_the_node" ),
     ( "type( old ) is not type( new ) or repr( old ) != repr( new )", "old != new", "test_python_constant_type_change_is_code" ),
+    ( "if paths is not None and not any( path == p or path.startswith( p.rstrip( \"/\" ) + \"/\" ) for p in paths ): continue", "pass", "test_paths_limits_the_check_to_whole_directory_names" ),
+    ( "path == p or path.startswith( p.rstrip( \"/\" ) + \"/\" )", "path.startswith( p )", "test_paths_limits_the_check_to_whole_directory_names" ),
     ( "return [ c for c in comments if PY_DIRECTIVE.match( c ) ]", "return []", "test_python_directive_comments_are_code" ),
     ( "if directives is not None and DART_DIRECTIVE.match( source[ i : end ] ):", "if False:", "test_dart_line_directive_comments_are_code" ),
     ( "if directives is not None and DART_DIRECTIVE.match( source[ start : i ] ):", "if False:", "test_dart_block_directive_comments_are_code" ),
