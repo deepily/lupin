@@ -5116,8 +5116,8 @@ def task_query(
     server (422), never silently empty.
 
     TOKEN-EFFICIENCY (goal #1): pass terse=True for any "see my list" / board
-    glance. It returns the at-a-glance projection (id / title / status /
-    blocked_by / next_chase_ts / priority / park_reason_stale / request_state /
+    glance. It returns the at-a-glance projection (id / title / item_class /
+    status / blocked_by / next_chase_ts / priority / park_reason_stale / request_state /
     request_move — `body` and the
     other full-row fields
     dropped), a fraction of the full-row token weight. Reach for the full shape

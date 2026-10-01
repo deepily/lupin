@@ -756,7 +756,7 @@ def task_query_impl(
           id lookup into a search surface. It counts as a SCOPING filter, so an
           id_prefix query is never rejected by the unscoped-size guard.
         - terse=True (§G token win) requests the at-a-glance projection
-          (id/title/status/blocked_by/next_chase_ts/priority/park_reason_stale
+          (id/title/item_class/status/blocked_by/next_chase_ts/priority/park_reason_stale
           /owner_persona/accountable_manager — body dropped). The two ownership
           fields joined 2026-09-05 (row d254c397): terse is the view a board glance
           actually reads, and without them it could not answer "is this mine" —
