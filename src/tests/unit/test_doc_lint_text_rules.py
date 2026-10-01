@@ -233,6 +233,16 @@ def test_field_sections_are_not_joined_into_one_sentence():
     assert [ f.rule for f in tr.sentence_findings( REAL_FIELD_LIST.replace( "Attributes:", "Details:" ), "a.py", 1 ) ] == [ "sentence-length" ]   # the header is what exempts it
 
 
+def test_a_field_section_ends_at_the_first_line_not_indented_under_its_header():
+    after = "    Intro.\n\n    Example:\n        run_the_thing( with_args )\n\n" + "\n".join( [ "    " + " ".join( [ "word" ] * 9 ) ] * 3 ) + ".\n"
+    assert [ ( f.line, f.rule ) for f in tr.sentence_findings( after, "a.py", 1 ) ] == [ ( 6, "sentence-length" ) ]   # prose after the section is read
+    inside = "    Intro.\n\n    Example:\n        " + "\n        ".join( [ " ".join( [ "word" ] * 9 ) ] * 3 ) + ".\n"
+    assert tr.sentence_findings( inside, "a.py", 1 ) == []                                                          # indented lines belong to the section
+    reset = "    Example:\n        code()\n\n    " + " ".join( [ "word" ] * 12 ) + "\n        " + " ".join( [ "more" ] * 14 ) + ".\n"
+    assert [ f.line for f in tr.sentence_findings( reset, "a.py", 1 ) ] == [ 4 ]                                    # a deeper continuation line is prose again once the section has ended
+    assert tr.sentence_findings( after, "a.md", 1, markdown=True ) != []                                            # markdown is untouched
+
+
 def test_emphasis_rule_reports_caps_words_and_glyphs_at_their_lines():
     found = tr.emphasis_findings( "ok\nThis is NOT fine ⚠️\nAnd `NEVER` here", "a.py", 7, WORDS )
     assert [ ( f.line, f.rule ) for f in found ] == [ ( 8, "caps" ), ( 8, "glyph" ) ]
