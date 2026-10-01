@@ -8,6 +8,13 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.09.30 (evening) - Session 9d720da8 (Mr. Radio 🦉, manager; crew Maya 🌻, Chloé 🗼, Krishna 🦚, Sam 🎙️) | 17 rows closed on merges; doc viewer race closed; resume-job ownership; every job builder refuses bad input
+
+- **Merged after 17:00, each on a clean full unit tier** (or named artifact reds re-run green): `54a011650` (`d51ffc36`) · `ea80264e1` (`876d183e`) · `f905e7aa3` comparator kept (`4f5301ad`) · `4c5214b64` container init, zombies 48→0 (`3c86391e`) · `f7eedfc17` MCP validation-alert throttle (`d49d713c`, after the 20:00 63-ping flood) · `5e7f02c0c` diag strip (`8c3628a4`, closed on `ts-a4cc8586`) · `f1fee2067` DOM-absence assert lint + frame-buffer LRU (`f2d3df2b`, `15111f96`) · `8f2093a9b` tier stamp sees a bundle rebuild (`105ff244`) · `9470e93d5` upload size cap before spooling (`4d2eb22f`) · `8df8690d2` scope paths judged by where they land (5 rows) · `41b854a56` (`8a578dd0`) · `12f610fc0` terse rows carry `item_class` (`7e1d72d0`) · `418a05c0e` preflight-vm venue scrubs every override var (`5ad93b8c`) · `64905b079` resume-job only resumes the caller's own job (`a758bd0f`) · `c8bd4ebf9` every job builder refuses bad input, no receptionist degrade (`a4014235`) · `04146b299` doc viewer judges the opened fd, not the string (`39b3035b`).
+- **Rulings / ops**: P0 `08691779` closed (`e569fd1e0`; test-host ratio 24h/2.0); `88c4eb2c` Rick ruled "keep mux design"; self-respin at 21:42 (50.9%), wake proof written.
+- **Held for tomorrow (re-owned to me)**: `1f4b30ce` io door race (P3), `1af41dc9` purge-pycache flake, `5aedbad2`, `8796333b`, `2af2c387`, `0c695d2a`, `27300d00`.
+- **Files**: history.md; code via reviewed merges only.
+
 ### 2026.09.30 - Session 9867024c (Cheech 🌿, manager; crew Rachel 🕊️, Rio ⚡, Tiberius 👑, Pocholo 📣) | v0.2.2 code wiki + reuse review: W-B symindex, W-C reuse tools, Phase 1 linters merged; not pushed
 
 - **Merged, all with Tiberius PASS (row `9babe43d`)**: `e0309132f` W-B symindex + W-C four reuse tools vs fake Jev · `57655ad7c` Phase 1 doc linters, Dart extractor, docstring fixtures · `e476d814f` Phase 0 docstring census + W-C STDIO integration tests · `cafbcf496` + `06b65ebe7` Dart unparsed-file reporting, field-section fix · `d2d24b994` plan diagrams inlined (E1) · `bf7d1ae39` a member of a private Dart owner is not public (277 records flip) · `f07a87f23` the Dart extractor is now part of the index freshness key. Working-branch head `f07a87f23`, **not pushed**.
