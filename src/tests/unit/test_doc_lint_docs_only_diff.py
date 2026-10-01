@@ -217,11 +217,95 @@ def test_python_added_named_node_is_named_with_its_name():
     assert "added FunctionDef(g) line 5" in found
 
 
+def test_python_constant_type_change_is_code():
+    for old, new in ( ( "x = 1", "x = True" ), ( "x = 0", "x = False" ), ( "t = 1", "t = 1.0" ), ( "z = 0.0", "z = -0.0" ) ):
+        found = dod.python_difference( old + "\n", new + "\n" )
+        assert found is not None and "became" in found, ( old, new )
+    assert dod.python_difference( "x = 1\n", "x = 1\n" ) is None
+
+
+PY_DIRECTIVES = [
+    "x = 1  # pragma: no cover -- why\n",
+    "x = f()  # type: ignore\n",
+    "# -*- coding: latin-1 -*-\nx = 1\n",
+    "#!/usr/bin/env python3\nx = 1\n",
+    "x = f()  # noqa: E501\n",
+]
+
+
+@pytest.mark.parametrize( "source", PY_DIRECTIVES )
+def test_python_each_directive_kind_is_code( source ):
+    without = "\n".join( line.split( "#" )[ 0 ].rstrip() for line in source.split( "\n" ) if line.split( "#" )[ 0 ].strip() ) + "\n"
+    assert dod.python_difference( source, without ) is not None
+
+
+def test_python_directive_comments_are_code():
+    assert "directive comment removed" in dod.python_difference( "x = 1  # pragma: no cover\n", "x = 1\n" )
+    assert "directive comment added" in dod.python_difference( "x = 1\n", "x = 1  # type: ignore\n" )
+    assert "became" in dod.python_difference( "x = 1  # noqa: E501\n", "x = 1  # noqa: E999\n" )
+    assert dod.python_difference( "x = 1  # old words\n", "x = 1  # entirely new words\n" ) is None
+    assert dod.python_directives( 'x = "# noqa"\n' ) == []
+    assert "removed: '# noqa: b'" in dod.python_difference( "x = 1  # noqa: a\ny = 2  # noqa: b\n", "x = 1  # noqa: a\ny = 2\n" )
+
+
+def test_dart_line_directive_comments_are_code():
+    assert "directive comment removed" in dod.dart_difference( "// @dart=2.9\nclass A {}\n", "class A {}\n" )
+    assert "directive comment removed" in dod.dart_difference( "a(); // coverage:ignore-line\n", "a();\n" )
+    assert "directive comment added" in dod.dart_difference( "a();\n", "a(); // ignore: unused_element\n" )
+    assert "became" in dod.dart_difference( "// ignore_for_file: a\n", "// ignore_for_file: b\n" )
+    assert dod.dart_difference( "a(); // old words\n", "a(); // new words\n" ) is None
+    assert dod.dart_difference( "a(); // ignore\n", "a();\n" ) is None
+
+
+def test_dart_block_directive_comments_are_code():
+    assert "directive comment removed" in dod.dart_difference( "/* ignore: x */ a();\n", "a();\n" )
+    assert dod.dart_difference( "/* plain */ a();\n", "a();\n" ) is None
+
+
+def test_cli_markdown_changes_are_ignored_and_other_types_are_unchecked( repo ):
+    ( repo / "notes.md" ).write_text( "changed\n", encoding="utf-8" )
+    ( repo / "conf.ini" ).write_text( "[a]\nk = 2\n", encoding="utf-8" )
+    _git( repo, "add", "conf.ini" )
+    rc, text = _run( repo )
+    assert rc == 1
+    assert "FAIL conf.ini: file type not checked" in text and "notes.md" not in text
+
+
+def test_cli_mode_only_change_fails( repo ):
+    ( repo / "a.py" ).chmod( 0o755 )
+    rc, text = _run( repo )
+    assert rc == 1 and "FAIL a.py: mode changed 100644 -> 100755" in text
+
+
+def test_cli_non_ascii_path_is_checked( repo ):
+    ( repo / "\u00e9.py" ).write_text( "x = 1\n", encoding="utf-8" )
+    _git( repo, "add", "-A" )
+    _git( repo, "commit", "-qm", "accent" )
+    ( repo / "\u00e9.py" ).write_text( "x = 2\n", encoding="utf-8" )
+    rc, text = _run( repo )
+    assert rc == 1 and "FAIL \u00e9.py" in text and "1 became 2" in text
+
+
+def test_cli_untracked_new_code_file_fails( repo ):
+    ( repo / "fresh.py" ).write_text( "x = 1\n", encoding="utf-8" )
+    rc, text = _run( repo )
+    assert rc == 1 and "FAIL fresh.py: file added" in text
+
+
 # ---- mutation check: each mutant of the module must redden the named test ----
 
 MUTANTS = [
     ( "node.body = body[ 1 : ] or [ ast.Pass() ]", "node.body = body", "test_python_docs_only_change_passes" ),
-    ( "    if old != new: return f\"{path}: {old!r} became {new!r}\"\n", "", "test_python_one_token_code_change_fails_and_names_the_node" ),
+    ( "    if type( old ) is not type( new ) or repr( old ) != repr( new ): return f\"{path}: {old!r} became {new!r}\"\n", "", "test_python_one_token_code_change_fails_and_names_the_node" ),
+    ( "type( old ) is not type( new ) or repr( old ) != repr( new )", "old != new", "test_python_constant_type_change_is_code" ),
+    ( "return [ c for c in comments if PY_DIRECTIVE.match( c ) ]", "return []", "test_python_directive_comments_are_code" ),
+    ( "if directives is not None and DART_DIRECTIVE.match( source[ i : end ] ):", "if False:", "test_dart_line_directive_comments_are_code" ),
+    ( "if directives is not None and DART_DIRECTIVE.match( source[ start : i ] ):", "if False:", "test_dart_block_directive_comments_are_code" ),
+    ( "        if path.endswith( DOC_SUFFIX ): continue\n", "", "test_cli_markdown_changes_are_ignored_and_other_types_are_unchecked" ),
+    ( "if not path.endswith( SUFFIXES ): return \"file type not checked, only .py and .dart are compared\"", "if False: return None", "test_cli_markdown_changes_are_ignored_and_other_types_are_unchecked" ),
+    ( "if \"000000\" not in modes and old_mode != new_mode:", "if False:", "test_cli_mode_only_change_fails" ),
+    ( "\"diff\", \"--raw\", \"-z\",", "\"diff\", \"--name-status\",", "test_cli_non_ascii_path_is_checked" ),
+    ( "    if head is None:\n        for path in", "    if False:\n        for path in", "test_cli_untracked_new_code_file_fails" ),
     ( "elif source.startswith( \"//\", i ):", "elif False:", "test_dart_docs_only_change_passes" ),
     ( "    if len( old ) != len( new ):\n        longer = old if len( old ) > len( new ) else new\n        line, text", "    if False:\n        longer = old if len( old ) > len( new ) else new\n        line, text", "test_dart_added_and_removed_tokens_are_named" ),
     ( "if old_source is None: return \"file added\"", "if False: return \"file added\"", "test_file_difference_added_deleted_and_dispatch" ),
@@ -239,9 +323,11 @@ def _mutant_module( old, new ):
 
 
 @pytest.mark.parametrize( "old,new,named_test", MUTANTS )
-def test_each_mutant_reddens_its_named_test( monkeypatch, old, new, named_test ):
+def test_each_mutant_reddens_its_named_test( monkeypatch, repo, old, new, named_test ):
     this = globals()
-    this[ named_test ]()
+    code = this[ named_test ].__code__
+    kwargs = { "repo": repo } if "repo" in code.co_varnames[ : code.co_argcount ] else {}
+    this[ named_test ]( **kwargs )
     monkeypatch.setitem( this, "dod", _mutant_module( old, new ) )
     with pytest.raises( Exception ):  # a crash reddens the test as surely as a failed assert
-        this[ named_test ]()
+        this[ named_test ]( **kwargs )
