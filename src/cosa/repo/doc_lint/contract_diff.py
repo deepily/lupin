@@ -17,6 +17,9 @@ from .docs_only_diff import _show, changed_files
 
 SECTIONS      = ( "Requires", "Ensures", "Raises" )
 STAND_IN_MIN  = 0.3
+MATCH_MIN     = 0.5
+GUARD_WORDS   = frozenset( "not no never none nothing nor only always must should may might cannot without unless except all any every each at least most more less fewer than before after".split() )
+OPERATOR_REGEX = re.compile( r">=|<=|==|!=|>|<" )
 STOPWORDS     = frozenset( "a an the is are was be been being of to in on for with and or if it its this that as at by from when then so into than also only".split() )
 WORD_REGEX    = re.compile( r"[a-z0-9_]+" )
 HEADER_REGEX  = re.compile( r"^\s*([A-Za-z][A-Za-z ]{0,30}):\s*$" )
@@ -58,6 +61,51 @@ def overlap( old_item, new_item ):
     """
     old = tokens( old_item )
     return len( old & tokens( new_item ) ) / len( old ) if old else 1.0
+
+
+def guards( item ):
+    """
+    List the words and operators that limit how far a clause reaches.
+
+    Requires:
+        - item is a str
+
+    Ensures:
+        - returns a sorted list of the negations, quantifiers, limits and comparison operators in the item,
+          counting repeats, from GUARD_WORDS and OPERATOR_REGEX
+        - dropping a "never" or turning ">=" into ">" changes the list; rewording around them does not
+
+    Raises:
+        - nothing
+    """
+    words = [ w for w in WORD_REGEX.findall( item.lower() ) if w in GUARD_WORDS ]
+    return sorted( words + OPERATOR_REGEX.findall( item ) )
+
+
+def changed_items( before, after ):
+    """
+    Find old items whose closest new item says the same thing with a different reach.
+
+    Requires:
+        - before and after are lists of item text
+
+    Ensures:
+        - returns [ ( old, new ) ] for each old item whose best-overlapping new item reaches MATCH_MIN overlap
+          while a guard word or operator of the old item is missing from every new item that shares at least
+          STAND_IN_MIN of its words, so an item the writer split in two keeps its "never" in either half
+        - a guard that is only added is not reported
+        - an old item with no new item that close is not paired, since that is a loss and not a change
+
+    Raises:
+        - nothing
+    """
+    pairs = []
+    for old in before:
+        best = max( after, key=lambda new: overlap( old, new ), default=None )
+        if best is None or overlap( old, best ) < MATCH_MIN: continue
+        kept = { g for new in after if overlap( old, new ) >= STAND_IN_MIN for g in guards( new ) }
+        if set( guards( old ) ) - kept: pairs.append( ( old, best ) )
+    return pairs
 
 
 def likely_lost( before, after, count ):
@@ -185,10 +233,12 @@ def diff_contracts( old_source, new_source ):
     Ensures:
         - returns one row per definition that existed before and per contract heading (Requires, Ensures,
           Raises) that had items before or has items after: { function, section, before, after,
-          heading_missing, stand_in, lost }
+          heading_missing, stand_in, lost, changed }
         - heading_missing is True when the old text had the heading with items and the new text has no such
           heading; a different heading is never accepted as a synonym, but when one carries the old items
           it is named in stand_in and its item count is the row's after
+        - changed lists ( old, new ) pairs that match by words but differ in a guard word or comparison operator,
+          such as a dropped "never" or ">=" turned into ">", at or above MATCH_MIN overlap
         - lost lists the old items most likely to be gone, as many as the count fell, chosen by word overlap
           so a reworded item is not reported; a removed definition loses them all
         - a definition that only exists after has no row, since nothing was lost
@@ -215,7 +265,8 @@ def diff_contracts( old_source, new_source ):
                 "after"           : len( after ),
                 "heading_missing" : missing,
                 "stand_in"        : heading,
-                "lost"            : likely_lost( before, after, len( before ) - len( after ) )
+                "lost"            : likely_lost( before, after, len( before ) - len( after ) ),
+                "changed"         : changed_items( before, after )
             } )
     return rows
 
@@ -231,7 +282,8 @@ def findings( results ):
         - returns one string for each heading that disappeared, and one for each row whose item count fell,
           naming the items most likely lost
         - a renamed heading with every item kept is exactly one finding; with one item dropped as well, two
-        - items reworded under an unchanged count are not findings
+        - a clause weakened under an unchanged count, as a `CHANGED` finding naming both versions
+        - items reworded under an unchanged count, with the same guard words, are not findings
 
     Raises:
         - nothing
@@ -243,6 +295,7 @@ def findings( results ):
             if r[ "heading_missing" ]:
                 now = f" (items now under {r[ 'stand_in' ]})" if r[ "stand_in" ] else ""
                 found.append( f"HEADING MISSING: {where}{now}" )
+            found += [ f"CHANGED: {where}: {old!r} -> {new!r}" for old, new in r[ "changed" ] ]
             if r[ "after" ] < r[ "before" ]:
                 found.append( f"COUNT FELL {r[ 'before' ]} -> {r[ 'after' ]}: {where}: {'; '.join( r[ 'lost' ] )}" )
     return found
@@ -294,6 +347,7 @@ def render_table( results ):
             finding = "-"
             if r[ "heading_missing" ]: finding = "HEADING MISSING" + ( f" (now {r[ 'stand_in' ]})" if r[ "stand_in" ] else "" )
             if r[ "after" ] < r[ "before" ]: finding = ( finding + ", COUNT FELL" ) if finding != "-" else "COUNT FELL"
+            if r[ "changed" ]: finding = ( finding + ", CHANGED" ) if finding != "-" else "CHANGED"
             lost = "; ".join( r[ "lost" ] ) if r[ "lost" ] else "-"
             lines.append( f"| {path} | {r[ 'function' ]} | {r[ 'section' ]} | {r[ 'before' ]} | {r[ 'after' ]} | {finding} | {lost} |" )
     return "\n".join( lines ) + "\n"

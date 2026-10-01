@@ -204,7 +204,7 @@ def test_a_removed_definition_drops_everything_and_a_new_one_has_no_row():
 def test_a_section_that_only_exists_after_is_a_row_with_nothing_dropped():
     old = 'def f():\n    """Plain."""\n'
     new = 'def f():\n    """\n    Raises:\n        - ValueError\n    """\n'
-    assert cd.diff_contracts( old, new ) == [ { "function": "f", "section": "Raises", "before": 0, "after": 1, "heading_missing": False, "stand_in": None, "lost": [] } ]
+    assert cd.diff_contracts( old, new ) == [ { "function": "f", "section": "Raises", "before": 0, "after": 1, "heading_missing": False, "stand_in": None, "lost": [], "changed": [] } ]
 
 
 def test_a_reworded_item_with_the_count_held_is_not_lost_and_not_a_finding():
@@ -242,6 +242,31 @@ def test_likely_lost_picks_the_lowest_overlap_in_old_order_and_zero_picks_nothin
     assert cd.likely_lost( before, after, 2 ) == [ "never mutates x", "raises on empty" ]
     assert cd.likely_lost( before, after, 0 ) == [] and cd.likely_lost( before, [], 3 ) == before
     assert cd.likely_lost( before, after, -1 ) == [], "a count that rose loses nothing"
+
+
+def _ensures( *items ):
+    return 'def f():\n    """\n    Ensures:\n' + "".join( f"        - {i}\n" for i in items ) + '    """\n'
+
+
+def test_a_weakened_clause_with_the_count_held_is_reported_as_changed_not_matched():
+    rows = cd.diff_contracts( _ensures( "never mutates x", "returns n >= 3 items" ), _ensures( "mutates x", "returns n > 3 items" ) )
+    assert rows[ 0 ][ "lost" ] == [] and rows[ 0 ][ "changed" ] == [ ( "never mutates x", "mutates x" ), ( "returns n >= 3 items", "returns n > 3 items" ) ]
+    assert _findings( rows ) == [ "CHANGED: f.py f Ensures: 'never mutates x' -> 'mutates x'", "CHANGED: f.py f Ensures: 'returns n >= 3 items' -> 'returns n > 3 items'" ]
+
+
+def test_rewording_that_keeps_the_guard_words_is_not_changed_and_a_loss_is_not_a_change():
+    assert cd.diff_contracts( _ensures( "never mutates x" ), _ensures( "x is never mutated, ever" ) )[ 0 ][ "changed" ] == []
+    assert cd.diff_contracts( _ensures( "never mutates x", "b" ), _ensures( "unrelated words here" ) )[ 0 ][ "changed" ] == []
+
+
+def test_an_item_split_in_two_keeps_its_guard_in_either_half_and_an_added_guard_is_not_reported():
+    assert cd.changed_items( [ "returns the list, and never mutates x" ], [ "returns the list", "never mutates x" ] ) == []
+    assert cd.changed_items( [ "mutates x" ], [ "never mutates x" ] ) == []
+
+
+def test_guards_and_changed_items_edges():
+    assert cd.guards( "never n >= 3 and not >" ) == [ ">", ">=", "never", "not" ]
+    assert cd.changed_items( [ "x" ], [] ) == []
 
 
 def _git( root, *args ):
@@ -310,7 +335,7 @@ def test_cli_json_and_head_revision( repo ):
     rc  = cd.main( [ "--base", "HEAD~1", "--head", "HEAD", "--repo-root", str( repo ), "--json" ], out=out )
     data = json.loads( out.getvalue() )
     assert rc == 0 and sorted( data ) == [ "a.py", "é.py" ]
-    assert { "function": "f", "section": "Ensures", "before": 2, "after": 2, "heading_missing": True, "stand_in": "Output", "lost": [] } in data[ "a.py" ]
+    assert { "function": "f", "section": "Ensures", "before": 2, "after": 2, "heading_missing": True, "stand_in": "Output", "lost": [], "changed": [] } in data[ "a.py" ]
 
 
 def test_main_defaults_to_stdout( repo, capsys ):
@@ -341,6 +366,11 @@ MUTANTS = [
     ( "(?:[-*\\u2022]|\\d+[.)])", "(?:[-])", "test_parse_sections_reads_flush_star_numbered_and_continued_items" ),
     ( "elif name is not None and bullet and len( bullet.group( 1 ) ) >= header_indent:", "elif name is not None and bullet and len( bullet.group( 1 ) ) > header_indent:", "test_parse_sections_reads_flush_star_numbered_and_continued_items" ),
     ( "sections[ name ][ -1 ] += \" \" + line", "pass", "test_parse_sections_reads_flush_star_numbered_and_continued_items" ),
+    ( "if set( guards( old ) ) - kept: pairs.append", "if False: pairs.append", "test_a_weakened_clause_with_the_count_held_is_reported_as_changed_not_matched" ),
+    ( "if best is None or overlap( old, best ) < MATCH_MIN: continue", "if best is None: continue", "test_rewording_that_keeps_the_guard_words_is_not_changed_and_a_loss_is_not_a_change" ),
+    ( "if overlap( old, new ) >= STAND_IN_MIN for g in guards( new ) }", "if overlap( old, new ) >= 2 for g in guards( new ) }", "test_an_item_split_in_two_keeps_its_guard_in_either_half_and_an_added_guard_is_not_reported" ),
+    ( "OPERATOR_REGEX.findall( item )", "[]", "test_guards_and_changed_items_edges" ),
+    ( "found += [ f\"CHANGED: {where}: {old!r} -> {new!r}\" for old, new in r[ \"changed\" ] ]", "pass", "test_a_weakened_clause_with_the_count_held_is_reported_as_changed_not_matched" ),
     ( "return 1 if args.strict and findings( results ) else 0", "return 0", "test_cli_strict_exits_one_on_a_missing_heading_and_zero_when_clean" ),
     ( "if p.endswith( \".py\" ) ):", "if p.endswith( \".py\" ) and p.isascii() ):", "test_cli_reads_a_non_ascii_path" ),
 ]
