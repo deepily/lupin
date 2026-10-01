@@ -23,7 +23,7 @@ Default `<out>`: `src/docs/index` for the lupin tree (gitignored); otherwise
 
 Python: a class or function whose name does not start with `_`, at module level or under module-level
 `if`/`try`/`with`/`for`/`while`/`match` blocks, plus the public methods of public classes and
-`__init__`. `__all__` is ignored. Overloads and property setters repeat a name, so ids get `#2`, `#3`.
+`__init__`, including public classes nested in classes. `__all__` is ignored. The index counts **entries**, one per definition: overloads, property getters and setters and redefinitions repeat a name, and each repeat is its own entry whose id gets `#2`, `#3`. A count of entries is therefore not a count of unique names.
 `diff --all` adds private names, dunders and helpers nested in functions (`f.<locals>.g`).
 TS/JS: every top-level function, class, public method and function-valued `const`; `private`,
 `protected` and `#private` members are left out. Ids are `<module path>.<qualified name>`, prefixed

@@ -554,3 +554,20 @@ def test_the_install_script_closure_names_exactly_what_the_probe_allows():
     text = ( REPO_ROOT / "src" / "scripts" / "install-cosa-voice.sh" ).read_text( encoding="utf-8" )
     line = next( l for l in text.splitlines() if l.startswith( "CC_VENV_REQS=" ) )
     for pkg in ( "fastmcp", "regex", "pytz" ): assert pkg in line
+
+
+# --- NAME_RE sites: a name that merely STARTS valid must be refused (fullmatch, never match) ----------------------------------
+
+def test_a_session_id_that_starts_valid_cannot_escape_the_call_log_directory( tmp_path ):
+    c = rt.ReuseContext( "/x", tmp_path / "data" )
+    with pytest.raises( ValueError, match="bad session id" ): rt.append_call_log( c, "x/../../escaped", {} )
+    assert not list( tmp_path.rglob( "*.jsonl" ) ) and not ( tmp_path / "data" ).exists()          # nothing written, inside or outside call-log
+
+
+def test_a_capability_name_that_starts_valid_is_bad_name( env ):
+    out = rt.read_capability_impl( [ "ok/../x" ], ctx_for( env, None ) )
+    assert out[ "pages" ] == { "ok/../x": { "error": "BAD_NAME" } }
+
+
+def test_a_receipt_id_that_starts_valid_is_receipt_missing( env ):
+    assert rt.replay_impl( "ab/../x", ctx_for( env, None ) )[ "error" ] == "RECEIPT_MISSING"
