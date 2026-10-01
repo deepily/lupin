@@ -24,11 +24,13 @@ import contextlib
 import errno
 import os
 import re
+import stat
 import uuid
 from urllib.parse import quote, unquote
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
+from starlette.background import BackgroundTask
 
 import cosa.utils.util as cu
 from cosa.config.cache_registry import register_invalidator
@@ -44,6 +46,7 @@ from cosa.rest.routers._scope_registry import (
     _is_whitelisted_in_scope,
     build_scope_registry,
     landed_relative_path,
+    landed_within_roots,
     resolve_in_scope,
 )
 
@@ -321,6 +324,7 @@ async def get_docs_file(
         rel_path,
         scope            = project_name,
         parent_validator = lambda p, _cfg=scope_cfg: _is_whitelisted_in_scope( _cfg, p ),
+        scope_cfg        = scope_cfg,
     )
 
 
@@ -371,7 +375,103 @@ async def get_scopes( current_user: dict = Depends( get_current_user ) ):
     return JSONResponse( content={ "scopes": scopes_payload } )
 
 
-def _serve( full_path: str, rel_path: str, scope: str, parent_validator ) -> JSONResponse | PlainTextResponse | FileResponse:
+# ---------------------------------------------------------------------------
+# Judge the object that was OPENED, not the string that was checked (row 39b3035b)
+# ---------------------------------------------------------------------------
+# `_resolve_scoped` judges a path STRING; the file is opened a moment later by that same string.
+# A peer able to swap a directory component for a symlink in between redirects the read, or the
+# upload's write, to somewhere the judgement never saw. A name-based O_NOFOLLOW would refuse the
+# legitimate in-scope symlinks (the `*-latest.log` links), so instead the file or folder is OPENED
+# FIRST and the open descriptor is what gets judged: `/proc/self/fd/N` names where that exact
+# inode lives, and every later read or write goes through the descriptor, which a swap cannot move.
+#
+# ⚠️ LINUX ONLY: `/proc/self/fd` is a Linux interface. The server runs in a Linux container and on
+# a Linux host, so this is fine; on another OS the readlink raises and the request is refused.
+#
+# ⚠️ STATED, NOT FIXED: the name judged is the one `readlink` reports at that instant. A rename of
+# the pinned file or folder AFTER that read changes only its name, never its bytes or its location
+# in the tree; the content check (credential_verdict, the PEM scan) always runs on the pinned inode.
+# The directory LISTING branch of `_serve` is not covered by this row.
+
+_PROC_FD = "/proc/self/fd"
+
+
+def _landed_path_of_fd( fd: int ) -> str:
+    """Where the inode behind `fd` lives right now; 404 if it has been unlinked."""
+    landed = os.readlink( f"{_PROC_FD}/{fd}" )
+    if landed.endswith( " (deleted)" ):
+        raise HTTPException( status_code=404, detail="Path not found" )
+    return landed
+
+
+def _judge_landed( scope_cfg: ScopeConfig, landed: str ) -> str:
+    """
+    Apply the viewer's guards to the path an opened descriptor LANDED on.
+
+    Requires:
+        - landed is an absolute path read from /proc for an open descriptor
+
+    Ensures:
+        - returns the scope-relative landed path when it is inside the scope root's directory
+          (identity, so a second mount prefix counts) and passes the secrets blocklist and the whitelist
+        - raises HTTPException 400 otherwise
+    """
+    if not landed_within_roots( landed, [ os.path.realpath( scope_cfg.root ) ] ):
+        raise HTTPException( status_code=400, detail=f"Path escapes scope root (scope={scope_cfg.name!r})" )
+    from cosa.rest.routers._scope_registry import _is_secrets_path_for_scope
+    landed_rel = landed_relative_path( landed, scope_cfg.root )
+    if _is_secrets_path_for_scope( scope_cfg, landed_rel ):
+        raise HTTPException( status_code=400, detail="Path matches secrets blocklist" )
+    if not _is_whitelisted_in_scope( scope_cfg, landed_rel ):
+        raise HTTPException( status_code=400, detail=f"Path not in scope whitelist: {landed_rel}" )
+    return landed_rel
+
+
+def _open_judged_file( full_path: str, scope_cfg: ScopeConfig ) -> int:
+    """
+    Open `full_path`, then judge the opened file; return the descriptor (the caller closes it).
+
+    Ensures:
+        - the descriptor is a regular file that landed inside the scope and passed the guards
+        - on any refusal the descriptor is closed before the exception leaves
+        - 404 when the path is gone or is not a regular file
+    """
+    try:
+        fd = os.open( full_path, os.O_RDONLY | os.O_CLOEXEC | os.O_NONBLOCK )
+    except OSError:
+        raise HTTPException( status_code=404, detail="Path not found" )
+    try:
+        if not stat.S_ISREG( os.fstat( fd ).st_mode ):
+            raise HTTPException( status_code=404, detail="Path not found" )
+        _judge_landed( scope_cfg, _landed_path_of_fd( fd ) )
+    except BaseException:
+        os.close( fd )
+        raise
+    return fd
+
+
+def _pin_directory( full_dir: str, scope_cfg: ScopeConfig ) -> int:
+    """
+    Open `full_dir` as a directory descriptor and judge where THAT landed; the caller closes it.
+
+    Ensures:
+        - the descriptor is a directory inside the scope that passes the hidden-folder write gate,
+          the secrets blocklist and the whitelist, judged on its landed path
+        - on any refusal the descriptor is closed before the exception leaves
+    """
+    try:
+        fd = os.open( full_dir, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC )
+    except OSError:
+        raise HTTPException( status_code=404, detail="Folder not found" )
+    try:
+        _refuse_hidden_folder( _judge_landed( scope_cfg, _landed_path_of_fd( fd ) ) )
+    except BaseException:
+        os.close( fd )
+        raise
+    return fd
+
+
+def _serve( full_path: str, rel_path: str, scope: str, parent_validator, scope_cfg: ScopeConfig ) -> JSONResponse | PlainTextResponse | FileResponse:
     """
     Common file/directory dispatch — shared by legacy `docs` branch and registry branch.
 
@@ -427,8 +527,12 @@ def _serve( full_path: str, rel_path: str, scope: str, parent_validator ) -> JSO
     # CONTENT check below, which can only read text. So a binary is guarded by the
     # whitelist and the NAME blocklist only — key material saved as .pdf/.mp3/.mp4
     # would be served. Judged low risk: nothing writes keys under media extensions.
+    # Row 39b3035b: open first, judge the OPENED file, serve through the descriptor. The response's
+    # own background task closes it once the bytes have been sent.
+    fd     = _open_judged_file( full_path, scope_cfg )
+    pinned = f"{_PROC_FD}/{fd}"
     if media_type.startswith( BINARY_MEDIA_PREFIXES ):
-        return FileResponse( path=full_path, media_type=media_type )
+        return FileResponse( path=pinned, media_type=media_type, background=BackgroundTask( os.close, fd ) )
 
     # 🔴 LAST LINE OF DEFENCE (bug afdc938f). The whitelist said yes and the NAME
     # blocklist said yes; the BYTES get the final word. This family has been patched
@@ -447,35 +551,37 @@ def _serve( full_path: str, rel_path: str, scope: str, parent_validator ) -> JSO
     # at the file; "this file could not be read" sends you to look at the disk, the
     # permissions, or the bind-mount. Reporting the second as the first sent people
     # hunting for key material that was never there.
-    from cosa.rest.routers._scope_registry import credential_verdict
-    verdict = credential_verdict( full_path )
-    if verdict == "credential":
-        raise HTTPException(
-            status_code = 400,
-            detail      = ( "Refused: this file's CONTENT is credential material (service-account "
-                            "key, OAuth token, or private key). The doc viewer never serves key "
-                            "material, whatever the file is named." )
-        )
-    if verdict == "unreadable":
-        raise HTTPException(
-            status_code = 500,
-            detail      = ( "Error reading file: it could not be read or decoded, so the doc viewer "
-                            "cannot rule out credential material and refuses to serve it. This is "
-                            "NOT a finding about the file's content — check that the file exists, is "
-                            "readable, is valid UTF-8, and that any bind-mount it lives on is up." )
-        )
-
-    # Text branch: utf-8 read + PlainTextResponse (existing behavior preserved).
     try:
-        with open( full_path, "r", encoding="utf-8" ) as f:
-            content = f.read()
-        return PlainTextResponse( content=content, media_type=media_type )
-    except Exception as e:
-        raise HTTPException(
-            status_code = 500,
-            detail      = f"Error reading file: {str( e )}"
-        )
+        from cosa.rest.routers._scope_registry import credential_verdict
+        verdict = credential_verdict( pinned )
+        if verdict == "credential":
+            raise HTTPException(
+                status_code = 400,
+                detail      = ( "Refused: this file's CONTENT is credential material (service-account "
+                                "key, OAuth token, or private key). The doc viewer never serves key "
+                                "material, whatever the file is named." )
+            )
+        if verdict == "unreadable":
+            raise HTTPException(
+                status_code = 500,
+                detail      = ( "Error reading file: it could not be read or decoded, so the doc viewer "
+                                "cannot rule out credential material and refuses to serve it. This is "
+                                "NOT a finding about the file's content — check that the file exists, is "
+                                "readable, is valid UTF-8, and that any bind-mount it lives on is up." )
+            )
 
+        # Text branch: utf-8 read + PlainTextResponse (existing behavior preserved).
+        try:
+            with open( pinned, "r", encoding="utf-8" ) as f:
+                content = f.read()
+            return PlainTextResponse( content=content, media_type=media_type )
+        except Exception as e:
+            raise HTTPException(
+                status_code = 500,
+                detail      = f"Error reading file: {str( e )}"
+            )
+    finally:
+        os.close( fd )
 
 # ---------------------------------------------------------------------------
 # Upload (ticket 416d4b00, Rick's rulings 2026-09-24)
@@ -669,132 +775,141 @@ async def upload_docs_file(
     if not os.path.isdir( full_dir ):
         raise HTTPException( status_code=404, detail=f"Folder not found: {dir}" )
 
-    _refuse_hidden_folder( rel_dir )
-    name = _safe_upload_name( file.filename )
-
-    def _rel( n ):
-        return f"{rel_dir}/{n}" if rel_dir else n
-
-    def _conflict( n, what ):
-        return HTTPException(
-            status_code = 409,
-            detail      = {
-                "error"          : "exists",
-                "message"        : f"{what} named {n} already exists in {dir}",
-                "suggested_name" : _next_free_name( full_dir, n ),
-            },
-        )
-
-    # The FILE's own path must pass the gate too — a folder that may be browsed can still
-    # hold names the blocklist refuses (`.env`, `credentials.json`, …).
-    _resolve_scoped( f"{project_name}/{_rel( name )}", _upload_registry() )
-
-    # A folder is never replaced by a file, whatever the mode.
-    if os.path.isdir( os.path.join( full_dir, name ) ):
-        raise _conflict( name, "A folder" )
-    # Fast answer for the common clash. It is NOT the guard — placement below is.
-    if on_conflict == "refuse" and os.path.lexists( os.path.join( full_dir, name ) ):
-        raise _conflict( name, "A file" )
-
-    temp     = os.path.join( full_dir, f".upload-{uuid.uuid4().hex}.part" )
-    size     = 0
-    replaced = False
-    with _step( "create the staged file", dir ):
-        staged = open( temp, "wb" )
+    # Row 39b3035b: PIN the folder before anything is written. The path string was judged above;
+    # the directory descriptor opened here is what is judged AGAIN (where it really landed), and every
+    # later stat, stage, link and replace goes through it, so a component swapped for a symlink after
+    # this line cannot move the write. `full_dir` becomes the descriptor's /proc path (Linux only).
+    dir_fd   = _pin_directory( full_dir, scope_cfg )
+    full_dir = f"{_PROC_FD}/{dir_fd}"
     try:
-        with staged as out:
-            while True:
-                chunk = await file.read( _UPLOAD_CHUNK )
-                if not chunk:
-                    break
-                size += len( chunk )
-                if size > UPLOAD_MAX_BYTES:
-                    raise HTTPException( status_code=413, detail=f"File exceeds the {UPLOAD_MAX_BYTES // ( 1024 * 1024 )} MB upload cap" )
-                with _step( "write the uploaded bytes", dir ):
-                    out.write( chunk )
+        _refuse_hidden_folder( rel_dir )
+        name = _safe_upload_name( file.filename )
 
-        refused = "Refused: this file's CONTENT is credential material. The doc viewer never stores or serves key material."
-        # Every upload, binary or text, is searched END TO END for a PEM private key —
-        # the viewer's text check reads a bounded window, and a key after 8 KB of padding,
-        # or inside a .pdf or .svg, would otherwise be stored.
-        with _step( "scan the staged file for key material", dir ):
-            carries_key = _file_carries_pem_key( temp )
-        if carries_key:
-            raise HTTPException( status_code=400, detail=refused )
+        def _rel( n ):
+            return f"{rel_dir}/{n}" if rel_dir else n
 
-        # Text types (markdown, code, JSON, YAML, and SVG, which is XML) also get the same
-        # JSON-credential CONTENT check the viewer runs before serving.
-        media = MEDIA_TYPES[ os.path.splitext( name )[ 1 ].lower() ]
-        if media == "image/svg+xml" or not media.startswith( BINARY_MEDIA_PREFIXES ):
-            from cosa.rest.routers._scope_registry import credential_verdict
-            with _step( "scan the staged file for credential material", dir ):
-                verdict = credential_verdict( temp )
-            if verdict == "credential":
+        def _conflict( n, what ):
+            return HTTPException(
+                status_code = 409,
+                detail      = {
+                    "error"          : "exists",
+                    "message"        : f"{what} named {n} already exists in {dir}",
+                    "suggested_name" : _next_free_name( full_dir, n ),
+                },
+            )
+
+        # The FILE's own path must pass the gate too — a folder that may be browsed can still
+        # hold names the blocklist refuses (`.env`, `credentials.json`, …).
+        _resolve_scoped( f"{project_name}/{_rel( name )}", _upload_registry() )
+
+        # A folder is never replaced by a file, whatever the mode.
+        if os.path.isdir( os.path.join( full_dir, name ) ):
+            raise _conflict( name, "A folder" )
+        # Fast answer for the common clash. It is NOT the guard — placement below is.
+        if on_conflict == "refuse" and os.path.lexists( os.path.join( full_dir, name ) ):
+            raise _conflict( name, "A file" )
+
+        temp     = os.path.join( full_dir, f".upload-{uuid.uuid4().hex}.part" )
+        size     = 0
+        replaced = False
+        with _step( "create the staged file", dir ):
+            staged = open( temp, "wb" )
+        try:
+            with staged as out:
+                while True:
+                    chunk = await file.read( _UPLOAD_CHUNK )
+                    if not chunk:
+                        break
+                    size += len( chunk )
+                    if size > UPLOAD_MAX_BYTES:
+                        raise HTTPException( status_code=413, detail=f"File exceeds the {UPLOAD_MAX_BYTES // ( 1024 * 1024 )} MB upload cap" )
+                    with _step( "write the uploaded bytes", dir ):
+                        out.write( chunk )
+
+            refused = "Refused: this file's CONTENT is credential material. The doc viewer never stores or serves key material."
+            # Every upload, binary or text, is searched END TO END for a PEM private key —
+            # the viewer's text check reads a bounded window, and a key after 8 KB of padding,
+            # or inside a .pdf or .svg, would otherwise be stored.
+            with _step( "scan the staged file for key material", dir ):
+                carries_key = _file_carries_pem_key( temp )
+            if carries_key:
                 raise HTTPException( status_code=400, detail=refused )
-            if verdict == "unreadable":
-                raise HTTPException( status_code=400, detail="Refused: a text file must be valid UTF-8 so its content can be checked for credential material." )
 
-        # PLACEMENT IS THE GUARD. os.link fails with EEXIST if the name is taken at that
-        # instant, so two concurrent uploads of one name can never both win; os.replace
-        # (which overwrites silently) is used ONLY when the caller asked to replace.
-        target = os.path.join( full_dir, name )
-        if on_conflict == "replace":
-            if os.path.isdir( target ):
-                raise _conflict( name, "A folder" )
-            mode = 0o644
-            if os.path.exists( target ):
-                mode     = os.stat( target ).st_mode & 0o777   # keep an executable bit
-                replaced = True
-            with _step( "chmod the staged file", dir ):
-                os.chmod( temp, mode )
-            with _step( "move the staged file into place", dir ):
-                os.replace( temp, target )
-        else:
-            with _step( "chmod the staged file", dir ):
-                os.chmod( temp, 0o644 )
-            requested = name   # rename always counts up from what was asked for, never from a -N
-            while True:
+            # Text types (markdown, code, JSON, YAML, and SVG, which is XML) also get the same
+            # JSON-credential CONTENT check the viewer runs before serving.
+            media = MEDIA_TYPES[ os.path.splitext( name )[ 1 ].lower() ]
+            if media == "image/svg+xml" or not media.startswith( BINARY_MEDIA_PREFIXES ):
+                from cosa.rest.routers._scope_registry import credential_verdict
+                with _step( "scan the staged file for credential material", dir ):
+                    verdict = credential_verdict( temp )
+                if verdict == "credential":
+                    raise HTTPException( status_code=400, detail=refused )
+                if verdict == "unreadable":
+                    raise HTTPException( status_code=400, detail="Refused: a text file must be valid UTF-8 so its content can be checked for credential material." )
+
+            # PLACEMENT IS THE GUARD. os.link fails with EEXIST if the name is taken at that
+            # instant, so two concurrent uploads of one name can never both win; os.replace
+            # (which overwrites silently) is used ONLY when the caller asked to replace.
+            target = os.path.join( full_dir, name )
+            if on_conflict == "replace":
+                if os.path.isdir( target ):
+                    raise _conflict( name, "A folder" )
+                mode = 0o644
+                if os.path.exists( target ):
+                    mode     = os.stat( target ).st_mode & 0o777   # keep an executable bit
+                    replaced = True
+                with _step( "chmod the staged file", dir ):
+                    os.chmod( temp, mode )
+                with _step( "move the staged file into place", dir ):
+                    os.replace( temp, target )
+            else:
+                with _step( "chmod the staged file", dir ):
+                    os.chmod( temp, 0o644 )
+                requested = name   # rename always counts up from what was asked for, never from a -N
+                while True:
+                    try:
+                        os.link( temp, target )
+                        break
+                    except FileExistsError:
+                        if on_conflict == "refuse":
+                            raise _conflict( name, "A file" )
+                        name = _next_free_name( full_dir, requested )
+                        _resolve_scoped( f"{project_name}/{_rel( name )}", _upload_registry() )
+                        target = os.path.join( full_dir, name )
+                    except OSError as e:
+                        raise _upload_failure( "link the staged file into place", dir, e )
+        finally:
+            # ⚠️ GUARDED, AND THAT IS NOT TIDINESS (row b84bbf1c). An unguarded cleanup that
+            # raises from a `finally` REPLACES the in-flight exception, so on a mount that
+            # denies unlink the real 400/403/409 was discarded and the caller was handed a
+            # 500 naming the cleanup. The failure destroyed its own diagnosis. Cleanup is
+            # best-effort by definition — it can never be worth more than the error it hides.
+            for leftover in ( temp, ):
                 try:
-                    os.link( temp, target )
-                    break
-                except FileExistsError:
-                    if on_conflict == "refuse":
-                        raise _conflict( name, "A file" )
-                    name = _next_free_name( full_dir, requested )
-                    _resolve_scoped( f"{project_name}/{_rel( name )}", _upload_registry() )
-                    target = os.path.join( full_dir, name )
+                    os.remove( leftover )
+                except FileNotFoundError:
+                    pass                                            # already gone: the normal path
                 except OSError as e:
-                    raise _upload_failure( "link the staged file into place", dir, e )
-    finally:
-        # ⚠️ GUARDED, AND THAT IS NOT TIDINESS (row b84bbf1c). An unguarded cleanup that
-        # raises from a `finally` REPLACES the in-flight exception, so on a mount that
-        # denies unlink the real 400/403/409 was discarded and the caller was handed a
-        # 500 naming the cleanup. The failure destroyed its own diagnosis. Cleanup is
-        # best-effort by definition — it can never be worth more than the error it hides.
-        for leftover in ( temp, ):
-            try:
-                os.remove( leftover )
-            except FileNotFoundError:
-                pass                                            # already gone: the normal path
-            except OSError as e:
-                # ⚠️ NO PRAGMA HERE, AND THAT IS DELIBERATE (Rachel's finding 2 on e311f7ac8).
-                # This carried `# pragma: no cover - reported, never raised`, and the claim was
-                # FALSE: `test_a_refused_step_is_reported_even_when_the_cleanup_also_fails`
-                # denies os.remove and drives exactly this branch. I wrote the pragma and the
-                # test that disproves it in the SAME commit — and the pragma is what stopped
-                # the coverage report from showing me so.
-                print( f"[DOCS-UPLOAD] cleanup could not remove {leftover}: "
-                       f"{errno.errorcode.get( e.errno, e.errno )}" )
+                    # ⚠️ NO PRAGMA HERE, AND THAT IS DELIBERATE (Rachel's finding 2 on e311f7ac8).
+                    # This carried `# pragma: no cover - reported, never raised`, and the claim was
+                    # FALSE: `test_a_refused_step_is_reported_even_when_the_cleanup_also_fails`
+                    # denies os.remove and drives exactly this branch. I wrote the pragma and the
+                    # test that disproves it in the SAME commit — and the pragma is what stopped
+                    # the coverage report from showing me so.
+                    print( f"[DOCS-UPLOAD] cleanup could not remove {leftover}: "
+                           f"{errno.errorcode.get( e.errno, e.errno )}" )
 
-    public_path = f"{project_name}/{_rel( name )}"
-    print( f"[DOCS-UPLOAD] user={admin_user.get( 'email' )} path={public_path} bytes={size} mode={on_conflict}{' (replaced)' if replaced else ''}" )
-    return {
-        "path"     : public_path,
-        "name"     : name,
-        "size"     : size,
-        "replaced" : replaced,
-        "view_url" : "/app/docs?path=" + quote( public_path, safe="/" ),
-    }
+        public_path = f"{project_name}/{_rel( name )}"
+        print( f"[DOCS-UPLOAD] user={admin_user.get( 'email' )} path={public_path} bytes={size} mode={on_conflict}{' (replaced)' if replaced else ''}" )
+        return {
+            "path"     : public_path,
+            "name"     : name,
+            "size"     : size,
+            "replaced" : replaced,
+            "view_url" : "/app/docs?path=" + quote( public_path, safe="/" ),
+        }
+    finally:
+        os.close( dir_fd )
 
 
 @router.get(
