@@ -169,20 +169,6 @@ def split_scope( path: str ) -> tuple:
     return ( scope, relative.strip(), None )
 
 
-def is_dangling_link( root: str, relative_path: str ) -> bool:
-    """
-    True when `relative_path` under `root` is a symlink whose target does not exist.
-
-    Requires:
-        - root is an absolute filesystem path; relative_path has no leading slash
-
-    Ensures:
-        - never raises; False for a missing path that is not a link at all
-    """
-    joined = os.path.join( os.path.realpath( root ), relative_path )
-    return os.path.islink( joined ) and not os.path.exists( joined )
-
-
 def resolve_within_root( root: str, relative_path: str ) -> tuple:
     """
     Resolve `relative_path` under `root`, following symlinks, and refuse any escape.
@@ -216,10 +202,8 @@ def resolve_within_root( root: str, relative_path: str ) -> tuple:
     # repo is mounted at two prefixes in the container, so a prefix test refused live in-scope
     # files reached through the other spelling. Same predicate as the doc-viewer door.
     if not landed_within_roots( candidate, [ real_root ] ):
-        # A link whose target is gone is a missing file, not an escape; say what the caller
-        # would be told for any other absent file, and still never name the landing place.
-        if is_dangling_link( root, relative_path ):
-            return ( None, f"'{relative_path}' does not exist." )
+        # A link landing outside answers the same whether or not its target exists (row 9b80ef75):
+        # a second answer would let whoever planted the link probe which outside paths exist.
         return ( None, f"'{relative_path}' resolves outside its scope." )
 
     return ( candidate, None )
@@ -271,8 +255,6 @@ def validate_source_documents( raw, scopes: dict ) -> tuple:
 
         absolute, resolve_error = resolve_within_root( scope_cfg.root, relative )
         if resolve_error is not None:
-            # A dangling link reads exactly like any other absent file, scope prefix included.
-            if is_dangling_link( scope_cfg.root, relative ): return ( [ ], f"'{path}' does not exist." )
             return ( [ ], resolve_error )
 
         if not os.path.exists( absolute ):

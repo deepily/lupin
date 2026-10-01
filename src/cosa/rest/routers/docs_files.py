@@ -42,7 +42,6 @@ from cosa.rest.routers._scope_registry import (
     ScopeConfig,
     _is_secrets_path,
     _is_whitelisted_in_scope,
-    ScopeLinkDanglingError,
     build_scope_registry,
     landed_relative_path,
     resolve_in_scope,
@@ -226,9 +225,6 @@ def _resolve_scoped( path: str, registry: dict ) -> tuple:
 
     try:
         full_path = resolve_in_scope( scope_cfg, rel_path )
-    except ScopeLinkDanglingError as e:
-        # A link whose target is gone is a missing file, not an escape attempt.
-        raise HTTPException( status_code=404, detail=str( e ) )
     except ValueError as e:
         raise HTTPException( status_code=400, detail=str( e ) )
 

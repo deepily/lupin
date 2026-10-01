@@ -105,8 +105,15 @@ class TestRefusals:
         exc = _refused( "env.md" )
         assert exc.status_code == 400 and "blocklist" in exc.detail.lower()
 
-    def test_a_dangling_link_is_a_404_like_any_missing_file( self, project ):
-        exc = _refused( "dangling.md" )
+    def test_a_dangling_outside_link_answers_exactly_what_an_existing_outside_link_answers( self, project ):
+        # row 9b80ef75 (a): a different answer lets whoever planted a link probe whether an outside path exists
+        dangling = _refused( "dangling.md" )
+        existing = _refused( "etc.md" )
+        assert dangling.status_code == existing.status_code == 400
+        assert dangling.detail == existing.detail
+
+    def test_a_dangling_link_that_would_land_inside_io_is_a_plain_404( self, project ):
+        os.symlink( project / "io" / "ghost.md", project / "io" / "inner-dangling.md" )
+        exc     = _refused( "inner-dangling.md" )
         missing = _refused( "never-existed.md" )
         assert exc.status_code == 404 == missing.status_code
-        assert exc.detail.replace( "dangling.md", "X" ) == missing.detail.replace( "never-existed.md", "X" )

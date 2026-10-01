@@ -356,7 +356,7 @@ def _validate_scoped_path( value: str, scope_roots: Optional[dict] ) -> list:
     Ensures:
         - returns [] when the path names an existing file inside a registered
           scope root
-        - returns one error string otherwise (unknown scope, escape, missing)
+        - returns one error string otherwise (unknown scope, escape, blocklisted, missing)
     """
     roots = scope_roots if scope_roots is not None else _get_default_scope_roots()
 
@@ -370,14 +370,17 @@ def _validate_scoped_path( value: str, scope_roots: Optional[dict] ) -> list:
     # Resolve where the path LANDS, by the same predicate the doc-viewer door uses (row cc39cee6).
     # `normpath` never follows a symlink, so containment judged the typed name while `isfile`
     # followed the link to a different file.
-    from cosa.rest.routers._scope_registry import ScopeConfig, ScopeLinkDanglingError, resolve_in_scope
+    from cosa.rest.routers._scope_registry import ScopeConfig, _is_secrets_path, landed_relative_path, resolve_in_scope
     cfg = ScopeConfig( name=scope, root=roots[ scope ].rstrip( os.sep ), allowed_prefixes=() )
     try:
         full = resolve_in_scope( cfg, rel )
-    except ScopeLinkDanglingError:
-        return [ f"receipt path '{value}' does not exist in scope '{scope}'" ]
     except ValueError:
         return [ f"receipt path '{value}' escapes its scope root" ]
+
+    # The floor blocklist judges where the path LANDED and runs BEFORE the existence check, so a
+    # receipt naming a credential file answers the same whether or not the file exists (row 9b80ef75).
+    if _is_secrets_path( landed_relative_path( full, cfg.root ) ):
+        return [ f"receipt path '{value}' is blocklisted and cannot be a receipt" ]
 
     if not os.path.isfile( full ):
         return [ f"receipt path '{value}' does not exist in scope '{scope}'" ]

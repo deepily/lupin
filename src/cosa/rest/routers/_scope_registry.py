@@ -865,10 +865,6 @@ def _is_secrets_path_for_scope( scope_cfg: ScopeConfig, relative_path: str ) -> 
     return False
 
 
-class ScopeLinkDanglingError( FileNotFoundError ):
-    """A symlink inside a scope whose target does not exist — a missing file, not an escape."""
-
-
 # Indirection so a test can give two directories one identity, which an unprivileged process
 # cannot build with real bind mounts. Production never rebinds it.
 _stat = os.stat
@@ -947,11 +943,13 @@ def resolve_in_scope( scope_cfg: ScopeConfig, decoded_path: str ) -> str:
         - returns the REAL absolute path — symlinks followed — which lands inside the scope
           root's DIRECTORY (identity, so a second mount prefix of the same directory counts)
         - raises ValueError if the real path escapes the scope root
-        - raises ScopeLinkDanglingError (a FileNotFoundError) when the path is a symlink
-          whose target does not exist — a missing file, not an escape
+        - a link planted in the scope that lands OUTSIDE it answers the same ValueError whether or
+          not its target exists (row 9b80ef75): two answers would let whoever planted the link
+          probe which outside paths exist. A link whose missing target lies INSIDE the scope
+          passes here and is an ordinary missing file for the caller.
 
     Raises:
-        - ValueError, ScopeLinkDanglingError
+        - ValueError
 
     `realpath`, not `normpath` (row 9ab0bddb). normpath collapses `..` textually and
     never follows a symlink, so a link planted inside the root was judged by the name
@@ -963,8 +961,6 @@ def resolve_in_scope( scope_cfg: ScopeConfig, decoded_path: str ) -> str:
     full_path = os.path.realpath( joined )
 
     if not landed_within_roots( full_path, [ root ] ):
-        if os.path.islink( joined ) and not os.path.exists( joined ):
-            raise ScopeLinkDanglingError( f"Dangling symlink in scope {scope_cfg.name!r}: {decoded_path!r}" )
         raise ValueError( f"Path escapes scope root: {decoded_path!r} (scope={scope_cfg.name!r})" )
     return full_path
 

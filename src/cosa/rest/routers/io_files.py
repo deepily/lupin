@@ -137,12 +137,8 @@ async def get_io_file(
     # second mount spelling of io/ — the container mounts the repo at two prefixes — while a
     # sibling such as `io-archive/` shares a name prefix and no identity, so it stays refused.
     if not landed_within_roots( full_path, [ io_base ] ):
-        # A link whose target is gone is a missing file, not an escape attempt.
-        if os.path.islink( joined ) and not os.path.exists( joined ):
-            raise HTTPException(
-                status_code = 404,
-                detail      = f"File not found: {decoded_path}"
-            )
+        # A link landing outside answers 400 whether or not its target exists (row 9b80ef75):
+        # a second answer would let whoever planted the link probe which outside paths exist.
         raise HTTPException(
             status_code = 400,
             detail      = "Invalid path: must be within io/ directory"

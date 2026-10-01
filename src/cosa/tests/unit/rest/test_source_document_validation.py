@@ -240,12 +240,21 @@ class TestALinkIntoASecondSpellingOfTheRoot( unittest.TestCase ):
         _, error = validate_source_documents( "lupin/io/etc.md", self.scopes )
         self.assertIn( "outside its scope", error )
 
-    def test_a_dangling_link_says_the_file_does_not_exist_like_any_missing_file( self ):
+    def test_a_dangling_outside_link_reads_exactly_like_an_existing_outside_link( self ):
+        # row 9b80ef75 (a): "does not exist" for one and "resolves outside" for the other lets
+        # whoever planted the link probe which outside paths exist
         _, dangling = validate_source_documents( "lupin/io/dangling.md", self.scopes )
+        _, existing = validate_source_documents( "lupin/io/etc.md", self.scopes )
+        self.assertIn( "outside its scope", dangling )
+        self.assertEqual( dangling.replace( "dangling.md", "X" ), existing.replace( "etc.md", "X" ) )
+        self.assertEqual( resolve_within_root( self.root, "io/dangling.md" ), ( None, "'io/dangling.md' resolves outside its scope." ) )
+
+    def test_a_dangling_link_that_would_land_inside_says_the_file_does_not_exist( self ):
+        os.symlink( os.path.join( self.root, "io", "ghost.md" ), os.path.join( self.root, "io", "inner-dangling.md" ) )
+        _, dangling = validate_source_documents( "lupin/io/inner-dangling.md", self.scopes )
         _, missing  = validate_source_documents( "lupin/io/never-existed.md", self.scopes )
         self.assertIn( "does not exist", dangling )
-        self.assertEqual( dangling.replace( "dangling.md", "X" ), missing.replace( "never-existed.md", "X" ) )
-        self.assertEqual( resolve_within_root( self.root, "io/dangling.md" ), ( None, "'io/dangling.md' does not exist." ) )
+        self.assertEqual( dangling.replace( "inner-dangling.md", "X" ), missing.replace( "never-existed.md", "X" ) )
 
     def test_the_blocklist_is_judged_on_the_LANDED_relative_path( self ):
         # typed `io/env.md` is clean; it lands on `<mirror>/.env.md`, whose relative form is `.env.md`
