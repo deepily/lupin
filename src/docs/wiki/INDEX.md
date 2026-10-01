@@ -1,8 +1,8 @@
-# Capability index (DRAFT for Rick's slug approval)
+# Capability index (draft for Rick's slug approval)
 
 One line per capability: `[[slug]]`, what it covers, the packages it spans. A rewritten `Design:` line points at `wiki/capabilities/<slug>.md`. The pages do not exist yet; they are written after the package sweep.
 
-Drafted 2026-10-01 from the symbol index built at lupin `a7f2af593` (7,240 public symbols, 227 routes) and `python -m cosa.repo.symindex dups`. Package names are dotted import paths under `src/`.
+Drafted from the symbol index built at lupin `a7f2af593` (7,240 public symbols, 227 routes) and `python -m cosa.repo.symindex dups`. Package names are dotted import paths under `src/`.
 
 ## Job queue and agents
 
@@ -49,4 +49,4 @@ Drafted 2026-10-01 from the symbol index built at lupin `a7f2af593` (7,240 publi
 
 ## Web client
 
-- [[web-client]] — the browser pages, queue UI, notifications UI and their JavaScript and TypeScript modules (2,052 indexed symbols). `src.lupin_app.static` (JS and TypeScript docs are out of scope for plan 1, per D14; the slug exists so the symbols have a home)
+- [[web-client]] — the browser pages, queue UI, notifications UI and their JavaScript and TypeScript modules (2,052 indexed symbols). `src.lupin_app.static` (JS and TypeScript docs are out of scope for plan 1, per Rick's JS and TypeScript ruling; the slug exists so the symbols have a home)
