@@ -26,7 +26,7 @@ class JevConfigError( Exception ):
 
 
 class JevCallError( Exception ):
-    """One Jev call gave no usable answer: retries ran out, the server failed, or the body is bad."""
+    """A Jev call gave no usable answer: retries ran out, the server failed, or the body is bad."""
 
 
 def _post( url, headers, body, timeout ):
