@@ -32,6 +32,7 @@ from pydantic import BaseModel, Field
 
 from cosa.config.configuration_manager import ConfigurationManager
 from cosa.rest.auth import get_current_user, identity_or_401
+from cosa.rest.auth_middleware import is_admin
 from cosa.rest.routers import speech
 from cosa.rest.v2.request_context import set_bearer_token, reset_bearer_token
 
@@ -779,6 +780,28 @@ class ResumeJobResponse( BaseModel ):
     diagnostic        : Optional[ str ]      = Field( None, description="Why the resolver answered as it did" )
 
 
+def _job_owner_id( id_hash: str ):
+    """
+    The user id that owns `id_hash`, read from its job_history row (row a758bd0f).
+
+    Requires:
+        - id_hash is a job id_hash string
+
+    Ensures:
+        - returns the row's user_id, or None when no row exists
+        - the owner is NEVER parsed out of the id string: its suffix is a user_id for ordinary
+          queue jobs and an email for `tfe-` ids, so a parse would lock out real owners
+    """
+    from cosa.rest.job_persistence import get_original_args_for_job
+    info = get_original_args_for_job( id_hash )
+    return None if info is None else info[ "user_id" ]
+
+
+def _not_resumable_detail( target_id: str ) -> str:
+    """The one 404 text for every reason a direct resume is refused, so a refusal never says which."""
+    return f"Job {target_id} not found, not stalled, has no checkpoint, or cannot be resumed"
+
+
 def get_todo_queue():
     """The live todo queue, from the main module — the same dependency the v1 doors used."""
     import lupin_app.main as main_module
@@ -812,12 +835,13 @@ async def v2_resume_job(
 
     Raises:
         - HTTPException 404 when the target is unknown, not stalled, has no checkpoint,
-          or cannot be reconstructed.
+          or cannot be reconstructed — and, on the direct path, when the caller does not own
+          the job and is not an admin (the same text, so a refusal never reveals existence).
     """
     from cosa.agents.test_fix_expediter.resume_resolver import resolve_resume_target
     from cosa.rest.agentic_job_factory import resume_job
 
-    _, user_email = identity_or_401( current_user )
+    user_id, user_email = identity_or_401( current_user )
 
     text      = request.resume_from.strip()
     overrides = { k: v for k, v in {
@@ -830,6 +854,13 @@ async def v2_resume_job(
     extra       = {}
     if _JOB_ID_HASH.match( text ) and not text.startswith( "tfe-" ):
         target_id = text
+        # Ownership (row a758bd0f): the factory rebuilds the job under the ORIGINAL owner's identity, so
+        # the caller must be that owner or an admin. A non-owner, an unknown id and a row with no owner all
+        # get the 404 below, which therefore cannot be used to find out which ids exist.
+        if not is_admin( current_user ):
+            owner = await run_in_threadpool( lambda: _job_owner_id( target_id ) )
+            if owner is None or str( owner ) != str( user_id ):
+                raise HTTPException( status_code=404, detail=_not_resumable_detail( target_id ) )
     else:
         target = resolve_resume_target( text, user_email )
         if target.source_type == "not_found":
@@ -842,10 +873,7 @@ async def v2_resume_job(
 
     job = await run_in_threadpool( lambda: resume_job( target_id, config_mgr=None, args_overrides=overrides or None ) )
     if job is None:
-        raise HTTPException(
-            status_code = 404,
-            detail      = f"Job {target_id} not found, not stalled, has no checkpoint, or cannot be resumed"
-        )
+        raise HTTPException( status_code=404, detail=_not_resumable_detail( target_id ) )
 
     todo_queue.push( job )
     checkpoint = job._resume_checkpoint

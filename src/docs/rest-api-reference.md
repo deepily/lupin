@@ -90,7 +90,10 @@ cannot say, so they needed a verb of their own: `POST /api/v2/resume-job`, one b
 both kinds — `{ "resume_from": "<job id_hash | tfe id | plan path | description>",
 "lead_model_override"?, "worker_model_override"?, "thinking_effort"? }`. A job-id-shaped
 `resume_from` (not `tfe-`) goes straight to the factory, as door 6 did; anything else goes
-through the TFE resolver, as door 7 did, including its `ambiguous` answer.
+through the TFE resolver, as door 7 did, including its `ambiguous` answer. **The direct path
+checks ownership (row a758bd0f):** the caller must own the job — judged by the owner on the
+`job_history` row, never by the id string's suffix — or be an admin. A non-owner, an unknown id
+and a row with no owner all get the same 404, so the answer does not reveal which ids exist.
 
 **The Claude Code pair retired on 2026-08-21, and the upgrade is what made it possible.**
 `/api/claude-code/submit` and its alias `/api/claude-code/queue/submit` (one handler) both
