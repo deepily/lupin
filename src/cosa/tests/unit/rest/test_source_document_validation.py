@@ -19,6 +19,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 
 from cosa.rest.v2.source_document import (
     SOURCE_DOCUMENT_ARG,
@@ -322,6 +323,20 @@ class TestValidateSourceDocuments( unittest.TestCase ):
         paths, error = validate_source_documents( "io/deep-research/absent.md", self.scopes )
         self.assertEqual( paths, [ ] )
         self.assertIn( "does not exist", error )
+
+    def test_an_UNREADABLE_file_is_refused_with_its_own_message( self ):
+        """Row 8a578dd0. A seam on `os.access`, not chmod: root ignores mode bits, so a chmod 000 file
+        would still read as readable in a root-run tier. The seam answers False for THIS file only."""
+        real_access = os.access
+        target      = os.path.realpath( self.doc )
+        def deny_the_target( path, mode, *args, **kwargs ):
+            return False if os.fspath( path ) == target else real_access( path, mode, *args, **kwargs )
+        with mock.patch.object( os, "access", side_effect=deny_the_target ):
+            paths, error = validate_source_documents( "io/deep-research/notes.md", self.scopes )
+            _, sibling   = validate_source_documents( "io/deep-research/second.txt", self.scopes )
+        self.assertEqual( paths, [ ] )
+        self.assertEqual( error, "'io/deep-research/notes.md' exists but cannot be read." )
+        self.assertIsNone( sibling )     # the seam is selective: a readable neighbour is still accepted
 
     def test_a_DIRECTORY_is_refused_with_an_instruction( self ):
         paths, error = validate_source_documents( "io/deep-research", self.scopes )
