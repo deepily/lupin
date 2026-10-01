@@ -3,7 +3,7 @@ preflight-vm.sh asserts the four lupin-host-test fixes hand-applied 2026-09-30 �
 
   A8   settings.json heartbeat + task_store block      (Stop poke silently off without it)
   A9   fleet-roster.env has a COSA_VOICE_MANAGERS__ line (no manager ⇒ store writes 403)
-  C9   flow-ratio override file present                 (WARN — values are the operator's call)
+  C9   flow-ratio override present AND holding 24h / 2.0 (WARN — values ruled 2026-09-30, row 08691779)
   C10  git rev-parse HEAD works in every external mount (dubious-ownership trap)
   C11  every worked-on project has a roster line        (WARN)
 
@@ -140,7 +140,7 @@ def venue( tmp_path ):
     ( home / ".claude" / "projects" / "-mnt-lupin-data-google-weil-nda-drafting-suite" ).mkdir()
     ( home / ".claude" / "projects" / "-mnt-lupin-data-lupin" ).mkdir()
     msrc = tmp_path / "mounts.tsv"; msrc.write_text( "".join( f"{s}\t{t}\n" for s, t in MOUNTS ) )
-    fr = tmp_path / "frs.json"; fr.write_text( '{"window_hours": 120, "allow_below": 1.1}' )
+    fr = tmp_path / "frs.json"; fr.write_text( '{"window_hours": 24, "allow_below": 2.0}' )
     env = { **os.environ, "HOME": str( home ), "PATH": f"{bindir}:{os.environ['PATH']}",
             "PREFLIGHT_VM_CONTAINER": "fake-rest", "FAKE_CONTAINER": "fake-rest",
             "FAKE_MOUNTS_SRC": str( msrc ), "FAKE_FR_DIR": "/var/lupin/flow-ratio", "FAKE_FR_FILE": str( fr ),
@@ -164,7 +164,7 @@ def test_good_venue_passes_all_five( venue ):
     assert "[OK]" in _line( out, "settings.json heartbeat.enabled" )
     assert "[OK]" in _line( out, "fleet-roster.env declares at least one" )
     assert "[OK]" in _line( out, "flow-ratio override present" )
-    assert "120" in _line( out, "flow-ratio override present" )
+    assert "ruled 24h / 2.0" in _line( out, "flow-ratio override present" )
     assert "[OK]" in _line( out, "git rev-parse HEAD succeeds" )
     assert "all 3 external-project mounts" in _line( out, "git rev-parse HEAD succeeds" )
     assert "[OK]" in _line( out, "every worked-on project (2)" )
@@ -192,6 +192,42 @@ def test_A9_absent_roster_fails( venue ):
 def test_A9_roster_without_manager_line_fails( venue ):
     ( venue[ "home" ] / ".claude" / "fleet-roster.env" ).write_text( "# nothing\n" )
     assert "[FAIL]" in _line( _run( venue ), "has no COSA_VOICE_MANAGERS__<PROJECT> line" )
+
+
+@pytest.mark.parametrize( "body", [
+    '{"window_hours": 120, "allow_below": 1.1}',     # dev's old values
+    '{"window_hours": 24, "allow_below": 1.0}',      # the shipped default
+    '{"window_hours": 24, "allow_below": 2.5}',
+    '{"window_hours": 48, "allow_below": 2.0}',
+    '{"window_hours": 24}',                          # a key absent
+    '{"allow_below": 2.0}',
+    '{"window_hours": "24", "allow_below": 2.0}',    # a string is not the number
+    '{"window_hours": true, "allow_below": 2.0}',    # nor is a boolean (True == 1 in python)
+] )
+def test_C9_any_value_but_24h_2_0_warns_and_names_what_it_found( venue, body ):
+    venue[ "fr" ].write_text( body )
+    line = _line( _run( venue ), "NOT the ruled 24h / 2.0" )
+    assert "[WARN]" in line
+    assert "[OK]" not in line
+
+
+@pytest.mark.parametrize( "body,rc,out", [
+    ( '{"window_hours": 24, "allow_below": 2.0}',   0, "OK" ),
+    ( '{"window_hours": 24.0, "allow_below": 2}',   0, "OK" ),                       # same numbers, other spelling
+    ( '{"window_hours": 120, "allow_below": 1.1}',  1, "window_hours=120, allow_below=1.1" ),
+    ( '{"window_hours": 24}',                       1, "window_hours=24, allow_below=absent" ),
+    ( '{"window_hours": true, "allow_below": 2.0}', 1, "window_hours=True, allow_below=2.0" ),
+    ( '[]',                                         3, "UNPARSEABLE" ),
+    ( '{not json',                                  3, "UNPARSEABLE" ),
+] )
+def test_flow_ratio_status_is_exactly_24h_2_0( body, rc, out ):
+    r = _lib( f"pfv_flow_ratio_status '{body}'" )
+    assert ( r.returncode, r.stdout ) == ( rc, out )
+
+
+def test_C9_unparseable_override_warns_instead_of_passing( venue ):
+    venue[ "fr" ].write_text( "{not json" )
+    assert "[WARN]" in _line( _run( venue ), "NOT the ruled 24h / 2.0" )
 
 
 def test_C9_missing_flow_ratio_file_warns( venue ):

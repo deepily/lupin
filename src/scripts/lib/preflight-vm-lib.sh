@@ -1126,6 +1126,41 @@ print( "OK", end="" )
 PY
 }
 
+# ── pfv_flow_ratio_status ────────────────────────────────────────────────────
+# The test host's closed-vs-new ratio gate values, as RULED 2026-09-30 ~19:58 EDT (row 08691779,
+# Mr. Radio's call, Rick delegated it): window 24h, allow_below 2.0. A near-empty store needs the
+# headroom. They live here, once, so the check and its tests read one pair.
+PFV_FLOW_RATIO_WINDOW_HOURS=24
+PFV_FLOW_RATIO_ALLOW_BELOW=2.0
+
+# Requires:
+#   - $1 = the text of flow-ratio-settings.json
+#   - python3 on PATH
+# Ensures:
+#   - prints OK and returns 0 only when window_hours == 24 and allow_below == 2.0 (numbers, never
+#     booleans or strings)
+#   - otherwise prints what it found ("window_hours=120, allow_below=1.1"; an absent key reads
+#     as "absent") and returns 1
+#   - prints UNPARSEABLE (return 3) for text that is not a JSON object
+pfv_flow_ratio_status() {
+    python3 - "$1" "$PFV_FLOW_RATIO_WINDOW_HOURS" "$PFV_FLOW_RATIO_ALLOW_BELOW" <<'PY'
+import sys, json
+try:
+    d = json.loads( sys.argv[1] )
+except Exception:
+    d = None
+if not isinstance( d, dict ):
+    print( "UNPARSEABLE", end="" ); raise SystemExit( 3 )
+want = { "window_hours": float( sys.argv[2] ), "allow_below": float( sys.argv[3] ) }
+def num( v ):
+    return float( v ) if isinstance( v, ( int, float ) ) and not isinstance( v, bool ) else None
+found = { k: d.get( k, "absent" ) for k in want }
+if all( num( found[ k ] ) == want[ k ] for k in want ):
+    print( "OK", end="" ); raise SystemExit( 0 )
+print( ", ".join( f"{k}={found[ k ]}" for k in want ), end="" ); raise SystemExit( 1 )
+PY
+}
+
 # ── pfv_roster_project_key ───────────────────────────────────────────────────
 # Requires: $1 = a repo directory name (e.g. weil-nda-drafting-suite)
 # Ensures:  prints the roster key suffix: upper-case, every non-alphanumeric run -> _

@@ -918,7 +918,7 @@ PY
     # C9 — the flow-ratio override file exists (row 31344c5f). WARN, not block: the
     #      VALUES are the operator's call, so this only reports whether an override is
     #      in force and what it says. Absent ⇒ the shipped defaults (24h / 1.0) apply
-    #      instead of dev's 120h / 1.1. The dir comes from the container's own env.
+    #      instead of the ruled 24h / 2.0. The dir comes from the container's own env.
     fr_dir="$( docker exec "$CONTAINER" sh -c 'printf %s "${LUPIN_FLOW_RATIO_DIR:-}"' 2>/dev/null || printf '' )"
     if [ -z "$fr_dir" ]; then
         report fail WARN "LUPIN_FLOW_RATIO_DIR is unset in $CONTAINER — flow-ratio overrides cannot be read from anywhere" \
@@ -926,9 +926,16 @@ PY
     else
         fr_body="$( docker exec "$CONTAINER" cat "$fr_dir/flow-ratio-settings.json" 2>/dev/null )"; fr_rc=$?
         if [ $fr_rc -eq 0 ] && [ -n "$fr_body" ]; then
-            report pass WARN "flow-ratio override present at $fr_dir/flow-ratio-settings.json: $( printf '%s' "$fr_body" | tr -d '\n' | tr -s ' ' )"
+            fr_found="$( printf '%s' "$fr_body" | tr -d '\n' | tr -s ' ' )"
+            fr_why="$( pfv_flow_ratio_status "$fr_body" )"; fr_status=$?
+            if [ $fr_status -eq 0 ]; then
+                report pass WARN "flow-ratio override present at $fr_dir/flow-ratio-settings.json and holds the ruled ${PFV_FLOW_RATIO_WINDOW_HOURS}h / ${PFV_FLOW_RATIO_ALLOW_BELOW}: $fr_found"
+            else
+                report fail WARN "flow-ratio override at $fr_dir/flow-ratio-settings.json is NOT the ruled ${PFV_FLOW_RATIO_WINDOW_HOURS}h / ${PFV_FLOW_RATIO_ALLOW_BELOW} (found: $fr_why)" \
+                              "docker exec -w /var/lupin $CONTAINER python -c \"import cosa.rest.flow_ratio_settings as f; f.set_overrides( window_hours=${PFV_FLOW_RATIO_WINDOW_HOURS}, allow_below=${PFV_FLOW_RATIO_ALLOW_BELOW} )\"   # ruled 2026-09-30 (row 08691779)"
+            fi
         else
-            report fail WARN "no flow-ratio override at $fr_dir/flow-ratio-settings.json — shipped defaults (24h / 1.0) apply, not dev's 120h / 1.1" \
+            report fail WARN "no flow-ratio override at $fr_dir/flow-ratio-settings.json — shipped defaults (24h / 1.0) apply, not the ruled 24h / 2.0" \
                           "docker exec -w /var/lupin $CONTAINER python -c \"import cosa.rest.flow_ratio_settings as f; f.set_overrides( window_hours=<H>, allow_below=<R> )\"   # values are the operator's call"
         fi
     fi
