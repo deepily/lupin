@@ -22,6 +22,7 @@ from tests.helpers.doc_lint_mutant_plugin import SENTINEL
 LINTERS  = "src/tests/unit/test_doc_lint_linters.py::"
 TEXT     = "src/tests/unit/test_doc_lint_text_rules.py::"
 TOOLS    = "src/tests/unit/test_doc_lint_tools_and_gate.py::"
+PROSE    = "src/tests/unit/test_doc_lint_prose_judge.py::"
 
 # ( rule, module, anchor, expression inside the anchor that names the rule, killing test, failure fragment )
 RULES = [
@@ -49,6 +50,9 @@ RULES = [
     ( "dated-banner", "text_rules", '"dated-banner"', '"dated-banner"', TEXT + "test_history_rule_reports_banners_iso_dates_and_model_addressed_text_but_not_quoted_dates", "'iso-date' != 'dated-banner'" ),
     ( "iso-date", "text_rules", '"iso-date"', '"iso-date"', TEXT + "test_history_rule_reports_banners_iso_dates_and_model_addressed_text_but_not_quoted_dates", "first extra item: 'iso-date'" ),
     ( "agent-imperative", "text_rules", '"agent-imperative"', '"agent-imperative"', TEXT + "test_history_rule_reports_banners_iso_dates_and_model_addressed_text_but_not_quoted_dates", "'dated-banner' != 'agent-imperative'" ),
+    ( "prose rule (fresh judgement)", "prose_judge", 'Finding( item[ "path" ], line, RULES[ rule ]', 'RULES[ rule ]', PROSE + "test_findings_follow_the_text_and_land_on_the_right_lines", "_mutant_disabled_rule" ),
+    ( "prose rule (ledger replay)", "prose_judge", 'Finding( item[ "path" ], item[ "first_line" ] + offset, rule,', 'rule', PROSE + "test_an_identical_docstring_in_another_file_gets_its_own_path_and_line_on_a_replay", "_mutant_disabled_rule" ),
+    ( "prose-unjudged", "prose_judge", 'item[ "first_line" ], "prose-unjudged"', '"prose-unjudged"', PROSE + "test_an_item_that_fails_twice_becomes_an_unjudged_finding_not_a_clean_pass_or_an_abort", "StopIteration" ),
 ]
 
 
