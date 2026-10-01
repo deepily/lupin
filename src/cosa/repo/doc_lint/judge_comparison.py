@@ -13,7 +13,7 @@ import json
 import math
 import sys
 
-from . import harness_report, harness_runner, jev_judge, jev_transport, labelled_pairs
+from . import claim_judge, harness_report, harness_runner, jev_judge, jev_transport, labelled_pairs
 
 KINDS         = ( "delete", "weaken", "relocate", "paraphrase" )
 REMOVING_KINDS = ( "delete", "weaken" )
@@ -23,6 +23,39 @@ KEY_FIELDS    = ( "kind", "seeded_positive", "injection" )
 
 class LedgerIncomplete( RuntimeError ):
     """A model or Jev call was needed, so the ledger lacks a row this judge would read."""
+
+
+class ReportMismatch( ValueError ):
+    """The harness report's unanswered count cannot be squared with the passes the ledger lacks."""
+
+
+class MissingRowProbe:
+    """
+    Stands in for a judge back end over a finished ledger and counts the passes it lacks.
+
+    Requires:
+        - real is the back end the run used, with its key_id and prompt_version
+
+    Ensures:
+        - carries the real back end's key_id and prompt_version, so the runner looks up the same ledger keys
+        - judge is called only for a pass with no ledger row; it records that pass's claim count and answers
+          every claim uncertain with no noul, so nothing is invented and no call is made
+        - complete is False, so the runner would never ledger what it returns
+    """
+
+    def __init__( self, real ):
+        self.key_id         = real.key_id
+        self.prompt_version = real.prompt_version
+        self.missing        = []
+
+    async def judge( self, claims, new_text, design_text, query_fn=None ):
+        """Record one missing pass and return an unanswered Judgement per claim."""
+        self.missing.append( len( claims ) )
+        return [ claim_judge.Judgement( c, "uncertain", False, "no ledger row for this pass", None ) for c in claims ]
+
+    def complete( self, judged ):
+        """Never complete: a probe's answers are not kept."""
+        return False
 
 
 def caused_by_missing_row( error ):
@@ -186,23 +219,80 @@ def rebuild( pairs, config, ledger, backend=None ):
     Rebuild one judge's results from a finished ledger, with no model call.
 
     Requires:
-        - pairs are harness pairs; ledger holds every call config would make
+        - pairs are harness pairs; ledger holds every call config would make, except that a back-end judge
+          (Jev) may lack the passes in which the back end gave no answer, which the harness never ledgers
 
     Ensures:
-        - returns ( results, report ), the report being harness_report.build_report's
+        - returns ( results, report, missing ), the report being harness_report.build_report's
+        - missing lists the claim count of each pass a back-end judge lacks; it is empty for the Claude judge
+        - a missing pass of a back-end judge is answered unanswered by a MissingRowProbe, so it counts in the
+          report's judge_unanswered and the figures are not to be used while missing is not empty
         - a missing ledger row raises LedgerIncomplete instead of calling a model, however the transport wraps the refusal
         - any other error is raised as it is
     """
+    probe = MissingRowProbe( backend ) if backend else None
     try:
-        results = asyncio.run( harness_runner.run_all( pairs, config, ledger, query_fn=refuse_model_call, judge_backend=backend ) )
+        results = asyncio.run( harness_runner.run_all( pairs, config, ledger, query_fn=refuse_model_call, judge_backend=probe ) )
     except Exception as e:
         if caused_by_missing_row( e ): raise LedgerIncomplete( "the ledger is incomplete for this judge: a call it would make has no finished row" ) from e
         raise
     report  = harness_report.build_report( results, config, judge_prompt_version=backend.prompt_version if backend else None, jev_run=backend is not None )
-    return results, report
+    return results, report, probe.missing if probe else []
 
 
-def build_comparison( split, pairs, keys, ledger, judges, elapsed=None ):
+def check_report_binds( name, report, pairs_sha, judge_version, judge_model, binding ):
+    """
+    Refuse a harness report that does not belong to the run the ledger and pairs came from.
+
+    Requires:
+        - report is a harness report JSON; pairs_sha is the sha256 of the pairs file in hand
+        - judge_version and judge_model are the Jev back end's prompt version and model id; binding is the
+          ledger's recorded Claude Code binding, or None for an unbound ledger
+
+    Ensures:
+        - returns None when the report's pairs sha, judge prompt version and judge model equal these, and, for a
+          bound ledger, its Claude Code path and version equal the binding
+        - the thresholds are not in the report, so a report from a run at other thresholds is not caught here;
+          the ledger keys carry them, and a run at other thresholds would have no rows to rebuild from
+
+    Raises:
+        - ReportMismatch naming the field and both values when one differs
+    """
+    seen = { "pairs_sha": report.get( "pairs_sha" ), "judge prompt version": report[ "prompt_versions" ][ "judge" ], "judge model": report[ "models" ][ "judge" ] }
+    want = { "pairs_sha": pairs_sha, "judge prompt version": judge_version, "judge model": judge_model }
+    if binding is not None:
+        seen[ "claude binary" ] = f"claude_cli={report.get( 'claude_cli' )}|version={report.get( 'claude_cli_version' )}"
+        want[ "claude binary" ] = binding
+    for field in want:
+        if seen[ field ] != want[ field ]: raise ReportMismatch( f"{name}: the harness report is not from this run: {field} is {seen[ field ]!r} in the report and {want[ field ]!r} here" )
+
+
+def check_unanswered( name, missing, reported ):
+    """
+    Square the passes a ledger lacks with the unanswered count the same run reported.
+
+    Requires:
+        - missing is rebuild's list of claim counts; reported is the run's judge_unanswered
+
+    Ensures:
+        - returns None when the missing passes number at most the unanswered claims, which number at most
+          the claims in those passes: every missing pass holds at least one unanswered claim and no more
+          than all its claims, and so no pass is missing exactly when no claim went unanswered
+        - it is a bound, not an equality, so it cannot catch a reported count that is wrong by less than the slack
+          between the passes and the claims in them
+        - equality with the claims in the missing passes is not required: a pass is dropped from the ledger
+          when any of its claims went unanswered, so it can also hold answered ones
+
+    Raises:
+        - ReportMismatch naming both numbers when they cannot both be true
+    """
+    held = sum( missing )
+    if len( missing ) <= reported <= held: return None
+    raise ReportMismatch( f"{name}: the ledger lacks {len( missing )} judge passes holding {held} claims, but the harness report says {reported} claims went unanswered "
+                          f"(expected zero for both, or passes <= unanswered <= claims in those passes)" )
+
+
+def build_comparison( split, pairs, keys, ledger, judges, elapsed=None, reports=None ):
     """
     Build the comparison for one split: a figure set per judge, and the shared counts.
 
@@ -210,6 +300,7 @@ def build_comparison( split, pairs, keys, ledger, judges, elapsed=None ):
         - split is "dev" or "gate"; pairs, keys and ledger describe one finished run
         - judges is { name: ( HarnessConfig, backend or None ) }
         - elapsed is { name: seconds } or None
+        - reports is { name: the harness report JSON of that judge's run } or None
 
     Ensures:
         - returns { split, pairs, config, judges, calls }; config holds each judge's extractor lists and judge runs;
@@ -217,7 +308,13 @@ def build_comparison( split, pairs, keys, ledger, judges, elapsed=None ):
         - a judge whose ledger is incomplete is { "incomplete": reason } and never a partial figure set
         - a judge whose ledger holds more or fewer calls than its configuration makes is incomplete too, so a run
           made with more lists or runs is not rebuilt from a subset and passed off as whole
+        - a back-end judge (Jev) whose ledger lacks passes is incomplete, and the reason states how many (pair, list,
+          run) passes and how many claims, because the harness does not ledger a pass in which a claim got no answer
+        - when reports gives that judge's run, its judge_unanswered must square with those passes (check_unanswered)
         - calls is call_counts over this split's pairs; a judge's seconds are copied from elapsed, else None
+
+    Raises:
+        - ReportMismatch when a report's unanswered count cannot be squared with the ledger's missing passes
     """
     out = { "split": split, "pairs": len( pairs ), "config": {}, "judges": {}, "calls": None }
     models = {}
@@ -225,9 +322,14 @@ def build_comparison( split, pairs, keys, ledger, judges, elapsed=None ):
         models[ name ] = backend.key_id if backend else config.judge_model + "+" + config.escalation_model
         out[ "config" ][ name ] = { "extractor_lists": config.extractor_lists, "judge_runs": config.judge_runs }
         try:
-            results, report = rebuild( pairs, config, ledger, backend )
+            results, report, missing = rebuild( pairs, config, ledger, backend )
         except LedgerIncomplete as e:
             out[ "judges" ][ name ] = { "incomplete": str( e ) }
+            continue
+        if reports and name in reports: check_unanswered( name, missing, reports[ name ][ "judge_unanswered" ] )
+        if missing:
+            out[ "judges" ][ name ] = { "incomplete": f"{len( missing )} judge passes (pair, list, run) holding {sum( missing )} claims have no ledger row, because the harness does not ledger a pass "
+                                                      f"in which a claim got no answer from the judge", "missing_passes": len( missing ), "missing_claims": sum( missing ) }
             continue
         slots = config.extractor_lists
         out[ "judges" ][ name ] = {
@@ -352,6 +454,7 @@ def parse_args( argv ):
     parser.add_argument( "--t-lo", type=float, required=True )
     parser.add_argument( "--t-hi", type=float, required=True )
     parser.add_argument( "--elapsed", help="JSON file { judge name: seconds }, written by whoever launched the run" )
+    parser.add_argument( "--jev-report", help="the Jev run's harness report JSON: its judge_unanswered must square with the passes the ledger lacks" )
     parser.add_argument( "--frozen-pairs-sha", help="gate only: sha256 of the pairs file registered before the gate run" )
     parser.add_argument( "--extractor-lists", type=int, default=2, help="extractor lists per pair in the run being rebuilt" )
     parser.add_argument( "--claude-judge-runs", type=int, default=3, help="judge passes per list for Haiku and Sonnet" )
@@ -373,6 +476,8 @@ def main( argv ):
         - returns 2 when a model id is refused or a gate path is named without --split gate
         - returns 2 when the ledgers do not all record the same Claude Code binary and version, naming each; an
           unbound ledger among bound ones is a mix too
+        - returns 4 and writes nothing when --jev-report is not from this run (pairs sha, judge version, judge model or Claude
+          binary differ), or its judge_unanswered cannot be squared with the passes the ledger lacks, naming both
         - returns 3 when --split gate has no --frozen-pairs-sha, or it is not the sha256 of the pairs file
         - the one binding is written into the JSON as claude_cli_binding, or null when no ledger records one
         - a judge whose ledger lacks a row is written as incomplete, never as a partial figure set
@@ -412,7 +517,15 @@ def main( argv ):
     elapsed = None
     if args.elapsed:
         with open( args.elapsed, encoding="utf-8" ) as f: elapsed = json.load( f )
-    comparison = build_comparison( args.split, pairs, keys, ledger, judges, elapsed )
+    reports = None
+    if args.jev_report:
+        with open( args.jev_report, encoding="utf-8" ) as f: reports = { "jev": json.load( f ) }
+    try:
+        if reports: check_report_binds( "jev", reports[ "jev" ], sha, judges[ "jev" ][ 1 ].prompt_version, args.jev_model, ledger.recorded )
+        comparison = build_comparison( args.split, pairs, keys, ledger, judges, elapsed, reports )
+    except ReportMismatch as e:
+        print( f"REFUSED: {e}", file=sys.stderr )
+        return 4
     comparison[ "pairs_sha" ] = sha
     comparison[ "claude_cli_binding" ] = ledger.recorded
     with open( args.out_json, "w", encoding="utf-8" ) as f: json.dump( comparison, f, indent=1 )
