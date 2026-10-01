@@ -19,14 +19,15 @@
    "Several shards were SIGKILLed by a cgroup cap (rc=137); every killed shard's files were re-run per-file to completion, in both arms.",
    "Source-text readers that assert code (not prose) are unaffected by a docs-only rewrite and are not listed as dependents; scan.py found 443 candidate functions in 428 files that read source and assert a phrase, scan2.py found 52 with a literal that lives only in a docstring/comment of a resolved target, and the mutation arm confirmed which of those actually break (the others assert code text that also appears in executable tokens, or assert absence)."
   ],
-  "tools": "/mnt/DATA01/include/www.deepily.ai/projects-data/lupin/v022-census/ (scan.py, scan2.py, strip.py, perfile.sh)"
+  "tools": "/mnt/DATA01/include/www.deepily.ai/projects-data/lupin/v022-census/ (scan.py, scan2.py, strip.py, perfile.sh)",
+  "population_326": "scan.py and scan2.py ran over ALL 1,914 test files by git ls-files. On the 326 files outside src/tests/unit and src/cosa/tests (e2e_ui 116, smoke 97, integration 59, cosa 10, parity_oracle 9, websocket_smoke 7, parity_oracle_fullpage 6, lupin_smoke 4, manual 4, e2e 3, ws_channel_browser 3, and 8 singletons) the scan returned 64 files that read something and assert a substring, 0 with a literal that lives only in a docstring/comment of a resolved target, and 0 with a __doc__/getdoc/get_docstring call. They were NOT executed under either mutation arm: the population is CHECKED STATICALLY, UNVERIFIED BY MUTATION."
  },
  "counts": {
   "prose_dependent_test_files": 12,
   "prose_dependent_red_tests": 36,
-  "phase4_dependent_files": 7,
-  "runtime_consumer_sites": 9,
-  "phase4_note": "4 unit files + 3 cosa rest files (hidden behind a reporter crash)"
+  "phase4_dependent_files": 5,
+  "runtime_consumer_sites": 10,
+  "phase4_dependent_files_note": "5 files red when the Phase 4 pages are blanked: test_rest_api_reference_marks_retired_doors_gone, test_system_init_requires_admin (cosa rest), test_websocket_manager_doc_signature_parity, test_typescript_suite_gate, test_bridge_dir_guard"
  },
  "prose_dependent_tests": [
   {
@@ -50,7 +51,14 @@
    ],
    "kind": "docstring-text",
    "disposition": "retire-with-reason",
-   "rationale": "Pins the PER REQUEST caveat in prose only; its behavioural twin (same git_sha on repeated calls) sits 3 tests above. Retire, proved by falsify.py: move the capture into the getter and name the twin that reddens."
+   "rationale": "Pins the PER REQUEST caveat in prose only; its behavioural twin (same git_sha on repeated calls) sits 3 tests above. Retire, proved by falsify.py: move the capture into the getter and name the twin that reddens.",
+   "falsify_proof": {
+    "tool": "src/scripts/falsify.py",
+    "run_at": "d40ed5cf4 in a throwaway detached worktree (removed)",
+    "mutation": "cosa/rest/code_identity.py get_code_identity: `return dict( _FROZEN_IDENTITY )` -> `return dict( capture_code_identity() )` (recompute per call)",
+    "result": "4 failed, 15 passed; REDDENED by name: test_the_identity_is_frozen_at_import_not_recomputed_per_call, test_imported_at_does_not_move_between_calls, test_both_health_endpoints_serve_the_frozen_identity, test_the_endpoint_serves_an_identity_that_does_NOT_move_between_requests",
+    "reading": "the retired test (test_the_module_docstring_warns_that_a_PER_REQUEST_read_reproduces_the_bug) is NOT among the reddened tests: the behaviour it describes is caught by four behavioural tests without it, so retiring it loses no guard"
+   }
   },
   {
    "file": "src/tests/unit/dm_compression/test_corpus_synth.py",
@@ -177,13 +185,124 @@
  ],
  "phase4_page_readers": [
   {
-   "file": "src/cosa/tests/unit/rest/test_system_init_requires_admin.py + test_websocket_router.py + test_websocket_router_coverage.py",
-   "red_tests": [
-    "INTERNALERROR (pytest reporter crash while a test fails) when src/docs/rest-api-reference.md is blanked; failing test hidden by the crash"
-   ],
+   "file": "src/tests/unit/test_rest_api_reference_marks_retired_doors_gone.py",
    "reads": "src/docs/rest-api-reference.md",
+   "mode": "asserts-content",
+   "red_when_pages_blanked": "17 tests",
    "disposition": "keep-and-update",
-   "rationale": "Found by bisecting 45 blanked pages. Name the failing test(s) before Phase 4 touches rest-api-reference.md (run the three files with that page blanked and the secret-redaction plugin off)."
+   "rationale": "Retired doors must be marked 410/Gone; re-anchor on route paths when the page becomes capability pages."
+  },
+  {
+   "file": "src/cosa/tests/unit/rest/test_system_init_requires_admin.py",
+   "reads": "src/docs/rest-api-reference.md",
+   "mode": "asserts-content (the /api/init row's Auth column is not Public)",
+   "red_when_pages_blanked": "1 test: TestInitGateIsVisibleAndDocumented::test_the_reference_table_agrees_with_the_route (its failure also crashes the pytest reporter with INTERNALERROR, which hides the name; found by running the file with -v and bisecting the 45 pages)",
+   "disposition": "keep-and-update",
+   "rationale": "Seed list in plan 1 section 7 missed this file; keep the /api/init row in a table with an Auth column or move the assertion to the page's new home."
+  },
+  {
+   "file": "src/tests/unit/test_websocket_manager_doc_signature_parity.py",
+   "reads": "src/docs/websocket-architecture.md (+ .claude/skills/websocket-development/references/websocket-architecture.md as a second path match)",
+   "mode": "asserts-content (emit_to_user etc. signatures)",
+   "red_when_pages_blanked": "2 tests",
+   "disposition": "keep-and-update",
+   "rationale": "Doc signatures must keep matching code."
+  },
+  {
+   "file": "src/tests/unit/test_ws_audio_session_id_is_not_shared_by_every_client.py",
+   "reads": "src/docs/websocket-architecture.md, src/docs/websocket-troubleshooting.md",
+   "mode": "asserts-absence (docs must not claim every client shares one session id)",
+   "red_when_pages_blanked": "0 (absence assertions pass on a blank page)",
+   "disposition": "keep",
+   "rationale": "A rewrite must not reintroduce the false claim; not in the plan's seed list."
+  },
+  {
+   "file": "src/tests/unit/test_typescript_suite_gate.py",
+   "reads": "CLAUDE.md",
+   "mode": "parses-marker (merge-pyramid-suites) + numbered gate table",
+   "red_when_pages_blanked": "2 tests",
+   "disposition": "keep",
+   "rationale": "The template keeps the marker, paragraph and table verbatim (plan 1 section 7)."
+  },
+  {
+   "file": "src/tests/unit/test_bridge_dir_guard.py",
+   "reads": "CLAUDE.md",
+   "mode": "asserts-heading ('## PR MERGE REQUIREMENTS')",
+   "red_when_pages_blanked": "1 test",
+   "disposition": "keep",
+   "rationale": "Heading stays verbatim."
+  },
+  {
+   "file": "src/tests/unit/deploy/test_merge_gate_root_files_present_in_venue.py",
+   "reads": "CLAUDE.md (and other repo-root files)",
+   "mode": "existence-in-venue",
+   "red_when_pages_blanked": "0",
+   "disposition": "keep",
+   "rationale": "Needs the file to exist, not its content."
+  },
+  {
+   "file": "src/tests/unit/test_the_instruction_files_fit_the_harness_budget.py",
+   "reads": "CLAUDE.md, src/cosa/CLAUDE.md",
+   "mode": "size budget (150k chars minus global headroom)",
+   "red_when_pages_blanked": "0 (a smaller file passes)",
+   "disposition": "keep",
+   "rationale": "Rewrite must not grow past the budget."
+  },
+  {
+   "file": "src/tests/unit/test_no_bare_pisp_invocation.py",
+   "reads": "CLAUDE.md, CLAUDE.local.md, .claude/**, src/docs/**",
+   "mode": "scans-corpus-for-absence (no bare planning-is-prompting command)",
+   "red_when_pages_blanked": "0",
+   "disposition": "keep",
+   "rationale": "A rewritten page that adds a bare command reddens it."
+  },
+  {
+   "file": "src/tests/unit/test_dead_rnd_citation_corpus_includes_the_index.py",
+   "reads": "CLAUDE.md (corpus membership) and src/docs pages",
+   "mode": "scans-corpus (asserts the search can see the files)",
+   "red_when_pages_blanked": "0",
+   "disposition": "keep",
+   "rationale": "Guards the corpus, not the count."
+  },
+  {
+   "file": "src/tests/unit/test_commit_scope_guard.py",
+   "reads": "none: 'CLAUDE.md' is a string in a parametrised auto-include list",
+   "mode": "mention-only",
+   "red_when_pages_blanked": "0",
+   "disposition": "keep",
+   "rationale": "The plan's seed list says it opens CLAUDE.md; it does not (checked by reading the file)."
+  },
+  {
+   "file": "src/tests/unit/test_loc_analysis_count.py",
+   "reads": "none: CLAUDE.md and src/docs/websocket.md are path strings classified by count.py",
+   "mode": "mention-only",
+   "red_when_pages_blanked": "0",
+   "disposition": "keep",
+   "rationale": "Seed list says it opens CLAUDE.md; it passes strings to a classifier."
+  },
+  {
+   "file": "src/tests/unit/test_dm_tutor_fabricated_path.py",
+   "reads": "none: 'CLAUDE.md' is an invented-path specimen",
+   "mode": "mention-only",
+   "red_when_pages_blanked": "0",
+   "disposition": "keep",
+   "rationale": "Not a reader."
+  },
+  {
+   "file": "src/cosa/tests/unit/rest/test_docs_files_router.py",
+   "reads": "none: fixtures in a temp tree",
+   "mode": "mention-only",
+   "red_when_pages_blanked": "0",
+   "disposition": "keep",
+   "rationale": "Seed list says it asserts page content; its README.md/src/a.md strings are fixture rows."
+  },
+  {
+   "file": "src/tests/unit/test_cc_transcript_registry_and_docs.py",
+   "reads": "src/docs/fastapi/ (generated api.md/api.json), not a Phase 4 page",
+   "mode": "asserts-content on generated docs",
+   "red_when_pages_blanked": "not blanked (generated files are out of Phase 4 scope)",
+   "disposition": "keep",
+   "rationale": "Outside Phase 4's page set; stays green so long as generate-api-docs.sh output is unchanged."
   }
  ],
  "runtime_consumers": [
@@ -222,8 +341,16 @@
   {
    "site": "FastAPI route docstrings",
    "use": "become OpenAPI descriptions in src/docs/fastapi/api.json (generated); not asserted by any unit test found"
+  },
+  {
+   "site": "src/tests/fixtures/cc_transcript/capture_transcript_fixture.py:370",
+   "use": "argparse description=__doc__ (a fixture-capture script under src/tests; not stripped by the arm and not exercised by a unit test)"
   }
  ],
  "dart": "lupin-mobile Dart tests (lane_vocabulary_test, single_dispatcher_test, focus_app_wiring_test) belong to Tiffany's track, row b707f92f; not censused here.",
- "d15_note": "keep-and-update needs no mutation proof; every retire-with-reason or convert needs a falsify.py run naming the test that reddens (not yet run: dispositions are proposals for the sweep PRs)."
+ "d15_note": "keep-and-update needs no mutation proof; every retire-with-reason or convert needs a falsify.py run naming the test that reddens (not yet run: dispositions are proposals for the sweep PRs).",
+ "phase4_method_note": "Static by path (scan3.py: any test file naming an in-scope .md or sweeping the dirs), then outcome by a blank-pages mutation run (45 pages -> one line) over the 1,588 executed files. Cross-checked against plan 1 section 7's seed list: 7 CLAUDE.md openers (bridge_dir_guard, typescript_suite_gate, merge_gate_root_files, harness_budget, commit_scope_guard, loc_analysis_count, no_bare_pisp) of which 5 read and 2 only mention the name, and 4 content assertions (rest_api_reference, ws_manager_doc_signature_parity, cc_transcript_registry_and_docs, docs_files_router) of which 2 read in-scope pages, 1 reads generated docs and 1 is mention-only; added by the scan: test_system_init_requires_admin (hidden red), test_ws_audio_session_id, test_dead_rnd_citation. Also 24 test files match only the basename README.md (fixture noise, not read from the repo) and 11 sweep a directory (spawn/bridge tests; none read in-scope pages).",
+ "findings": [
+  "src/cosa/tests/unit/rest/test_websocket_router.py crashes pytest with INTERNALERROR when run ALONE at d40ed5cf4 (142 INTERNALERROR lines, unmodified tree); it passes when run together with test_websocket_router_coverage.py (11 passed, 3 runs). Order-dependent, pre-existing, independent of any page or docstring change. Earlier arm results that listed it were this flake, not a dependency."
+ ]
 }
