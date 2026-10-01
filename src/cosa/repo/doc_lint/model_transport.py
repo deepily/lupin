@@ -8,6 +8,7 @@ temperature setting, so callers get determinism from strict parsing and repeat-r
 
 import asyncio
 import hashlib
+import os
 import secrets
 
 from claude_agent_sdk import ClaudeAgentOptions, AssistantMessage, ResultMessage, TextBlock, query as sdk_query
@@ -20,8 +21,33 @@ NO_TOOLS        = []
 TIMEOUT_SECONDS = 600
 
 
+CLI_PATH = None
+
+
 class ModelCallError( Exception ):
     """A model call returned nothing usable or raised."""
+
+
+def configure( cli_path=None ):
+    """
+    Choose the Claude Code binary every later call runs, for this process.
+
+    The SDK ships its own binary, and a newer model id can need a newer binary than the one it
+    ships. Run config, not a default: the harness command line sets it once.
+
+    Requires:
+        - cli_path is None (the SDK's own binary) or the path of an executable file
+
+    Ensures:
+        - later calls to complete pass cli_path to the SDK; None restores the SDK's own choice
+
+    Raises:
+        - ValueError if cli_path is given and is not an executable file
+    """
+    global CLI_PATH
+    if cli_path is not None and not ( os.path.isfile( cli_path ) and os.access( cli_path, os.X_OK ) ):
+        raise ValueError( f"cli path {cli_path!r} is not an executable file" )
+    CLI_PATH = cli_path
 
 
 def prompt_version( name, *parts ):
@@ -83,6 +109,7 @@ async def complete( model, system_prompt, user_prompt, query_fn=None, timeout_se
         tools           = NO_TOOLS,
         permission_mode = PERMISSION_MODE,
         max_turns       = MAX_TURNS,
+        cli_path        = CLI_PATH,
     )
     parts = []
 
