@@ -13,7 +13,7 @@ import hashlib
 import json
 import sys
 
-from . import claim_extractor, claim_judge, harness_report, harness_runner, jev_judge, jev_transport, labelled_pairs
+from . import claim_extractor, claim_judge, harness_report, harness_runner, jev_judge, jev_transport, labelled_pairs, model_transport
 
 
 def parse_args( argv ):
@@ -29,6 +29,7 @@ def parse_args( argv ):
     parser.add_argument( "--t-lo", type=float, help="jev only: noul at or below this is absent" )
     parser.add_argument( "--t-hi", type=float, help="jev only: noul at or above this is present" )
     parser.add_argument( "--allow-design-text", action="store_true", help="labelled set only; real Design: documents need Rick's approval" )
+    parser.add_argument( "--claude-cli-path", help="run this Claude Code binary instead of the SDK's bundled one (newer model ids can need a newer binary)" )
     parser.add_argument( "--extractor-lists", type=int, default=2 )
     parser.add_argument( "--judge-runs", type=int, help="judge passes over each claim list: 3 for the Claude judge, 1 for Jev, whose answers are deterministic" )
     parser.add_argument( "--gate", action="store_true", help="the one door onto the gate split: refuse unless versions, thresholds and the pairs sha are frozen; run by a seat other than the implementer" )
@@ -53,6 +54,7 @@ def main( argv, query_fn=None ):
         - returns 3 and runs nothing when --gate is set and --frozen-versions is missing or is not
           the extractor and judge versions in this code, so a gate run cannot use prompts
           that changed after they were registered
+        - returns 2 when --claude-cli-path is not an executable file; the report records the path used, or None for the SDK's own
         - returns 2 and opens nothing when a pairs or keys path names the gate split and --gate is not set
         - returns 3 and runs nothing when --gate is set with the Jev back end and --frozen-thresholds
           is missing or is not the --t-lo and --t-hi given
@@ -70,6 +72,11 @@ def main( argv, query_fn=None ):
         return 2
     try:
         harness_runner.check_models( config )
+    except ValueError as e:
+        print( f"REFUSED: {e}", file=sys.stderr )
+        return 2
+    try:
+        model_transport.configure( args.claude_cli_path )
     except ValueError as e:
         print( f"REFUSED: {e}", file=sys.stderr )
         return 2
@@ -107,12 +114,17 @@ def main( argv, query_fn=None ):
         print( f"REFUSED: {e}", file=sys.stderr )
         return 2
     try:
-        results = asyncio.run( harness_runner.run_all( pairs, config, harness_runner.Ledger( args.ledger ), query_fn=query_fn, judge_backend=backend ) )
-    except jev_transport.JevConfigError as e:
+        binding = f"claude_cli={args.claude_cli_path}|version={model_transport.cli_version( args.claude_cli_path )}"
+        results = asyncio.run( harness_runner.run_all( pairs, config, harness_runner.Ledger( args.ledger, binding=binding ), query_fn=query_fn, judge_backend=backend ) )
+    except ( jev_transport.JevConfigError, harness_runner.LedgerBindingError ) as e:
         print( f"REFUSED: {e}", file=sys.stderr )
         return 2
     report  = harness_report.build_report( results, config, judge_prompt_version=judge_version, jev_run=backend is not None )
     report[ "pairs_sha" ] = pairs_sha
+    report[ "claude_cli" ]         = args.claude_cli_path
+    report[ "claude_cli_version" ] = model_transport.cli_version( args.claude_cli_path )
+    report[ "call_profile" ]       = model_transport.CALL_PROFILE
+    report[ "call_residual_context" ] = model_transport.RESIDUAL_CONTEXT
     with open( args.out, "w", encoding="utf-8" ) as f: json.dump( report, f, indent=2 )
     print( f"report written to {args.out}: default_gate_pass={report[ 'default_gate_pass' ]}" )
     return 0

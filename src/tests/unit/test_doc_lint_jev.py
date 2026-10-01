@@ -741,3 +741,75 @@ def test_a_claude_backend_report_has_no_unanswered_count( tmp_path ):
     args[ args.index( "--judge-model" ) + 1 ] = "claude-j"
     assert harness_cli.main( args, query_fn=query ) == 0
     assert json.loads( ( tmp_path / "r.json" ).read_text() )[ "judge_unanswered" ] is None
+
+
+# ---- the Claude Code binary is run config ------------------------------------------------
+
+import os
+import stat
+
+from cosa.repo.doc_lint import model_transport
+
+
+@pytest.fixture( autouse=True )
+def reset_cli_path():
+    model_transport.configure( None )
+    yield
+    model_transport.configure( None )
+
+
+def fake_binary( tmp_path, mode=0o755 ):
+    path = tmp_path / "claude"
+    path.write_text( "#!/bin/sh\n" )
+    path.chmod( mode )
+    return str( path )
+
+
+def seen_cli_path():
+    seen = []
+    async def query( prompt, options ):
+        seen.append( options.cli_path )
+        yield AssistantMessage( content=[ TextBlock( "ok" ) ], model="m" )
+    asyncio.run( model_transport.complete( "claude-x", "sys", "user", query_fn=query ) )
+    return seen[ 0 ]
+
+
+def test_by_default_the_sdk_chooses_its_own_binary():
+    assert seen_cli_path() is None
+
+
+def test_a_configured_binary_reaches_the_sdk_and_none_restores_the_default( tmp_path ):
+    path = fake_binary( tmp_path )
+    model_transport.configure( path )
+    assert seen_cli_path() == path
+    model_transport.configure( None )
+    assert seen_cli_path() is None
+
+
+@pytest.mark.parametrize( "make", [ lambda p: str( p / "missing" ), lambda p: str( p ), lambda p: fake_binary( p, mode=0o644 ) ] )
+def test_a_path_that_is_not_an_executable_file_is_refused( tmp_path, make ):
+    with pytest.raises( ValueError, match="not an executable file" ):
+        model_transport.configure( make( tmp_path ) )
+    assert seen_cli_path() is None
+
+
+def test_the_cli_flag_sets_the_binary_and_the_report_records_it( tmp_path, monkeypatch ):
+    monkeypatch.setenv( jev_transport.KEY_VARIABLE, KEY )
+    monkeypatch.setattr( jev_transport, "_post", lambda url, headers, body, timeout: ( 200, reply( haystack_noul( body ) ) ) )
+    path = fake_binary( tmp_path )
+    seen = []
+    inner = extractor_and_escalation_query()
+    async def query( prompt, options ):
+        seen.append( options.cli_path )
+        async for message in inner( prompt, options ): yield message
+    args = cli_args( tmp_path, "--judge-backend", "jev", "--t-lo", "0.3", "--t-hi", "0.8", "--claude-cli-path", path )
+    assert harness_cli.main( args, query_fn=query ) == 0
+    assert set( seen ) == { path }
+    assert json.loads( ( tmp_path / "r.json" ).read_text() )[ "claude_cli" ] == path
+
+
+def test_the_cli_refuses_a_missing_binary_and_records_none_by_default( tmp_path, capsys ):
+    assert harness_cli.main( cli_args( tmp_path, "--claude-cli-path", str( tmp_path / "nope" ) ) ) == 2
+    assert "not an executable file" in capsys.readouterr().err
+    assert harness_cli.main( cli_args( tmp_path ), query_fn=cli_claude_query() ) == 0
+    assert json.loads( ( tmp_path / "r.json" ).read_text() )[ "claude_cli" ] is None
