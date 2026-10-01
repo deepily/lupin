@@ -669,6 +669,9 @@ def test_a_gate_path_without_the_gate_flag_is_refused_before_it_is_opened( tmp_p
     link.symlink_to( pairs )
     assert harness_cli.main( gate_args( tmp_path, link, keys ) ) == 2
     assert harness_cli.main( [ "--pairs", str( pairs ), *gate_args( tmp_path, pairs, keys )[ 2: ] ] ) == 2
+    dev_pairs = tmp_path / "dev" / "pairs.jsonl"
+    assert harness_cli.main( gate_args( tmp_path, dev_pairs, keys ) ) == 2
+    assert "gate split" in capsys.readouterr().err
 
 
 def test_the_gate_door_opens_only_with_frozen_versions_thresholds_and_pairs_sha( tmp_path, monkeypatch, capsys ):
@@ -688,16 +691,43 @@ def test_the_gate_door_opens_only_with_frozen_versions_thresholds_and_pairs_sha(
     assert json.loads( ( tmp_path / "r.json" ).read_text() )[ "pairs" ] == 1
 
 
-def test_jev_defaults_to_one_judge_run_and_the_claude_judge_to_three( tmp_path, monkeypatch ):
+def runs_args( tmp_path, *extra ):
+    """Command line with no --judge-runs, so the default applies."""
+    args = cli_args( tmp_path, *extra )
+    i = args.index( "--judge-runs" )
+    return args[ :i ] + args[ i + 2: ]
+
+
+def cli_claude_query():
+    async def query( prompt, options ):
+        if options.model == "ext":
+            text = json.dumps( { "claims": [ { "claim": "returns none when parked", "quote": "returns none when parked" } ] } )
+        else:
+            text = json.dumps( { "verdicts": [ { "id": 1, "verdict": "present" } ] } )
+        yield AssistantMessage( content=[ TextBlock( text ) ], model=options.model )
+    return query
+
+
+def test_jev_defaults_to_one_judge_run( tmp_path, monkeypatch ):
     monkeypatch.setenv( jev_transport.KEY_VARIABLE, KEY )
     monkeypatch.setattr( jev_transport, "_post", lambda url, headers, body, timeout: ( 200, reply( haystack_noul( body ) ) ) )
-    code = harness_cli.main( cli_args( tmp_path, "--judge-backend", "jev", "--t-lo", "0.3", "--t-hi", "0.8" )[ : -4 ] + [ "--judge-backend", "jev", "--t-lo", "0.3", "--t-hi", "0.8" ], query_fn=extractor_and_escalation_query() )
+    code = harness_cli.main( runs_args( tmp_path, "--judge-backend", "jev", "--t-lo", "0.3", "--t-hi", "0.8" ), query_fn=extractor_and_escalation_query() )
     assert code == 0 and ( tmp_path / "l.jsonl" ).read_text().count( "judge|" ) == 1
+
+
+def test_the_claude_judge_defaults_to_three_runs_and_an_explicit_count_wins( tmp_path ):
+    assert harness_cli.main( runs_args( tmp_path ), query_fn=cli_claude_query() ) == 0
+    assert ( tmp_path / "l.jsonl" ).read_text().count( "judge|" ) == 3
+    other = tmp_path / "two"
+    other.mkdir()
+    assert harness_cli.main( cli_args( other )[ : -1 ] + [ "2" ], query_fn=cli_claude_query() ) == 0
+    assert ( other / "l.jsonl" ).read_text().count( "judge|" ) == 2
 
 
 def test_thresholds_with_the_claude_backend_are_refused_not_ignored( tmp_path, capsys ):
     assert harness_cli.main( cli_args( tmp_path, "--t-lo", "0.3" ) ) == 2
     assert "only apply to --judge-backend jev" in capsys.readouterr().err
+    assert harness_cli.main( cli_args( tmp_path, "--t-hi", "0.8" ) ) == 2
 
 
 def test_a_claude_backend_report_has_no_unanswered_count( tmp_path ):
