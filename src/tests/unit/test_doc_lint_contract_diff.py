@@ -269,6 +269,19 @@ def test_an_item_split_in_two_keeps_its_guard_in_either_half_and_an_added_guard_
     assert cd.changed_items( [ "mutates x" ], [ "never mutates x" ] ) == []
 
 
+def test_an_old_item_whose_closest_new_item_belongs_to_a_neighbour_is_lost_not_changed():
+    assert cd.changed_items( [ "never mutates x", "mutates x rows" ], [ "mutates x rows" ] ) == []
+    assert cd.changed_items( [ "never mutates x" ], [ "x elsewhere" ] ) == [], "a weak match is a loss, not a change"
+
+
+def test_a_neighbouring_item_with_its_own_never_cannot_vouch_for_a_weakened_one():
+    before = [ "never mutates x", "never deletes the x rows" ]
+    after  = [ "mutates x", "never deletes the x rows" ]
+    assert cd.changed_items( before, after ) == [ ( "never mutates x", "mutates x" ) ]
+    rows = cd.diff_contracts( _ensures( *before ), _ensures( *after ) )
+    assert _findings( rows ) == [ "CHANGED: f.py f Ensures: 'never mutates x' -> 'mutates x'" ]
+
+
 def test_guards_and_changed_items_edges():
     assert cd.guards( "never n >= 3 and not >" ) == [ ">", ">=", "never", "not" ]
     assert cd.changed_items( [ "x" ], [] ) == []
@@ -372,9 +385,11 @@ MUTANTS = [
     ( "(?:[-*\\u2022]|\\d+[.)])", "(?:[-])", "test_parse_sections_reads_flush_star_numbered_and_continued_items" ),
     ( "elif name is not None and bullet and len( bullet.group( 1 ) ) >= header_indent:", "elif name is not None and bullet and len( bullet.group( 1 ) ) > header_indent:", "test_parse_sections_reads_flush_star_numbered_and_continued_items" ),
     ( "sections[ name ][ -1 ] += \" \" + line", "pass", "test_parse_sections_reads_flush_star_numbered_and_continued_items" ),
-    ( "if set( guards( old ) ) - kept: pairs.append", "if False: pairs.append", "test_a_weakened_clause_with_the_count_held_is_reported_as_changed_not_matched" ),
-    ( "if best is None or overlap( old, best ) < MATCH_MIN: continue", "if best is None: continue", "test_rewording_that_keeps_the_guard_words_is_not_changed_and_a_loss_is_not_a_change" ),
-    ( "if overlap( old, new ) >= STAND_IN_MIN for g in guards( new ) }", "if overlap( old, new ) >= 2 for g in guards( new ) }", "test_an_item_split_in_two_keeps_its_guard_in_either_half_and_an_added_guard_is_not_reported" ),
+    ( "if set( guards( old ) ) - { g for new in group for g in guards( new ) }: pairs.append", "if False: pairs.append", "test_a_weakened_clause_with_the_count_held_is_reported_as_changed_not_matched" ),
+    ( "if overlap( old, best ) < MATCH_MIN: continue", "pass", "test_an_old_item_whose_closest_new_item_belongs_to_a_neighbour_is_lost_not_changed" ),
+    ( "if scores and max( scores ) >= STAND_IN_MIN: assigned[ scores.index( max( scores ) ) ].append( new )", "if scores: [ assigned[ k ].append( new ) for k in range( len( scores ) ) if scores[ k ] >= STAND_IN_MIN ]", "test_a_neighbouring_item_with_its_own_never_cannot_vouch_for_a_weakened_one" ),
+    ( "if scores and max( scores ) >= STAND_IN_MIN:", "if scores and max( scores ) >= 2:", "test_a_weakened_clause_with_the_count_held_is_reported_as_changed_not_matched" ),
+    ( "if not group: continue", "if not group: group = after", "test_an_old_item_whose_closest_new_item_belongs_to_a_neighbour_is_lost_not_changed" ),
     ( "OPERATOR_REGEX.findall( item )", "[]", "test_guards_and_changed_items_edges" ),
     ( "found += [ f\"CHANGED: {where}: {old!r} -> {new!r}\" for old, new in r[ \"changed\" ] ]", "pass", "test_a_weakened_clause_with_the_count_held_is_reported_as_changed_not_matched" ),
     ( "return 1 if args.strict and findings( results ) else 0", "return 0", "test_cli_strict_exits_one_on_a_missing_heading_and_zero_when_clean" ),

@@ -91,20 +91,28 @@ def changed_items( before, after ):
 
     Ensures:
         - returns [ ( old, new ) ] for each old item whose best-overlapping new item reaches MATCH_MIN overlap
-          while a guard word or operator of the old item is missing from every new item that shares at least
-          STAND_IN_MIN of its words, so an item the writer split in two keeps its "never" in either half
+          while a guard word or operator of the old item is missing from the new items assigned to it
+        - each new item is assigned to the one old item it overlaps most, and only if that overlap is at
+          least STAND_IN_MIN, so it vouches for one old item and a neighbour's "never" cannot cover for it
+        - an item the writer split in two keeps its "never" in either half, since both halves are assigned
+          to the same old item
         - a guard that is only added is not reported
         - an old item with no new item that close is not paired, since that is a loss and not a change
 
     Raises:
         - nothing
     """
+    assigned = { i : [] for i in range( len( before ) ) }
+    for new in after:
+        scores = [ overlap( old, new ) for old in before ]
+        if scores and max( scores ) >= STAND_IN_MIN: assigned[ scores.index( max( scores ) ) ].append( new )
     pairs = []
-    for old in before:
-        best = max( after, key=lambda new: overlap( old, new ), default=None )
-        if best is None or overlap( old, best ) < MATCH_MIN: continue
-        kept = { g for new in after if overlap( old, new ) >= STAND_IN_MIN for g in guards( new ) }
-        if set( guards( old ) ) - kept: pairs.append( ( old, best ) )
+    for i, old in enumerate( before ):
+        group = assigned[ i ]
+        if not group: continue
+        best = max( group, key=lambda new: overlap( old, new ) )
+        if overlap( old, best ) < MATCH_MIN: continue
+        if set( guards( old ) ) - { g for new in group for g in guards( new ) }: pairs.append( ( old, best ) )
     return pairs
 
 
