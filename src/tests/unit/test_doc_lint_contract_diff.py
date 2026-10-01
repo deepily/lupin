@@ -267,11 +267,19 @@ def test_rewording_that_keeps_the_guard_words_is_not_changed_and_a_loss_is_not_a
 def test_an_item_split_in_two_keeps_its_guard_in_either_half_and_an_added_guard_is_not_reported():
     assert cd.changed_items( [ "returns the list, and never mutates x" ], [ "returns the list", "never mutates x" ] ) == []
     assert cd.changed_items( [ "mutates x" ], [ "never mutates x" ] ) == []
+    assert cd.changed_items( [ "never mutates the list rows or x" ], [ "mutates the list rows", "never touches x" ] ) == [], "the guard sits in the leftover half"
 
 
 def test_an_old_item_whose_closest_new_item_belongs_to_a_neighbour_is_lost_not_changed():
     assert cd.changed_items( [ "never mutates x", "mutates x rows" ], [ "mutates x rows" ] ) == []
     assert cd.changed_items( [ "never mutates x" ], [ "x elsewhere" ] ) == [], "a weak match is a loss, not a change"
+
+
+def test_old_items_claim_their_best_new_item_first_so_a_tie_cannot_steal_it():
+    before = [ "returns None when the queue is empty and closed", "never returns None when the queue is empty" ]
+    after  = [ "returns None when the queue is empty", "returns None when the queue is empty and closed" ]
+    assert cd.changed_items( before, after ) == [ ( "never returns None when the queue is empty", "returns None when the queue is empty" ) ]
+    assert cd.changed_items( before[ : : -1 ], after[ : : -1 ] ) == [ ( "never returns None when the queue is empty", "returns None when the queue is empty" ) ]
 
 
 def test_a_neighbouring_item_with_its_own_never_cannot_vouch_for_a_weakened_one():
@@ -385,13 +393,14 @@ MUTANTS = [
     ( "(?:[-*\\u2022]|\\d+[.)])", "(?:[-])", "test_parse_sections_reads_flush_star_numbered_and_continued_items" ),
     ( "elif name is not None and bullet and len( bullet.group( 1 ) ) >= header_indent:", "elif name is not None and bullet and len( bullet.group( 1 ) ) > header_indent:", "test_parse_sections_reads_flush_star_numbered_and_continued_items" ),
     ( "sections[ name ][ -1 ] += \" \" + line", "pass", "test_parse_sections_reads_flush_star_numbered_and_continued_items" ),
-    ( "if set( guards( old ) ) - { g for new in group for g in guards( new ) }: pairs.append", "if False: pairs.append", "test_a_weakened_clause_with_the_count_held_is_reported_as_changed_not_matched" ),
+    ( "if set( guards( old ) ) - { g for new in group[ i ] for g in guards( new ) }: pairs.append", "if False: pairs.append", "test_a_weakened_clause_with_the_count_held_is_reported_as_changed_not_matched" ),
     ( "if overlap( old, best ) < MATCH_MIN: continue", "pass", "test_an_old_item_whose_closest_new_item_belongs_to_a_neighbour_is_lost_not_changed" ),
-    ( "if scores and max( scores ) >= STAND_IN_MIN: assigned[ scores.index( max( scores ) ) ].append( new )", "if scores: [ assigned[ k ].append( new ) for k in range( len( scores ) ) if scores[ k ] >= STAND_IN_MIN ]", "test_a_neighbouring_item_with_its_own_never_cannot_vouch_for_a_weakened_one" ),
-    ( "if scores and max( scores ) >= STAND_IN_MIN:", "if scores and max( scores ) >= 2:", "test_a_weakened_clause_with_the_count_held_is_reported_as_changed_not_matched" ),
-    ( "if not group: continue", "if not group: group = after", "test_an_old_item_whose_closest_new_item_belongs_to_a_neighbour_is_lost_not_changed" ),
     ( "OPERATOR_REGEX.findall( item )", "[]", "test_guards_and_changed_items_edges" ),
     ( "found += [ f\"CHANGED: {where}: {old!r} -> {new!r}\" for old, new in r[ \"changed\" ] ]", "pass", "test_a_weakened_clause_with_the_count_held_is_reported_as_changed_not_matched" ),
+    ( "if i in claimed or j in taken or -score < STAND_IN_MIN: continue", "if i in claimed or -score < STAND_IN_MIN: continue", "test_old_items_claim_their_best_new_item_first_so_a_tie_cannot_steal_it" ),
+    ( "if i in claimed or j in taken or -score < STAND_IN_MIN: continue", "if i in claimed or j in taken or -score < 2: continue", "test_a_weakened_clause_with_the_count_held_is_reported_as_changed_not_matched" ),
+    ( "if j not in taken and -score >= STAND_IN_MIN and i in claimed:", "if False:", "test_an_item_split_in_two_keeps_its_guard_in_either_half_and_an_added_guard_is_not_reported" ),
+    ( "if i not in claimed: continue", "pass", "test_an_old_item_whose_closest_new_item_belongs_to_a_neighbour_is_lost_not_changed" ),
     ( "return 1 if args.strict and findings( results ) else 0", "return 0", "test_cli_strict_exits_one_on_a_missing_heading_and_zero_when_clean" ),
     ( "if p.endswith( \".py\" ) ):", "if p.endswith( \".py\" ) and p.isascii() ):", "test_cli_reads_a_non_ascii_path" ),
 ]

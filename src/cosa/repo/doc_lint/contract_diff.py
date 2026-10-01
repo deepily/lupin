@@ -92,27 +92,34 @@ def changed_items( before, after ):
     Ensures:
         - returns [ ( old, new ) ] for each old item whose best-overlapping new item reaches MATCH_MIN overlap
           while a guard word or operator of the old item is missing from the new items assigned to it
-        - each new item is assigned to the one old item it overlaps most, and only if that overlap is at
-          least STAND_IN_MIN, so it vouches for one old item and a neighbour's "never" cannot cover for it
-        - an item the writer split in two keeps its "never" in either half, since both halves are assigned
-          to the same old item
+        - old and new items are matched one to one, best overlap first, ties going to the lower old and new
+          index, so every old item claims its closest new item before any leftover is placed
+        - a new item left over joins the old item it overlaps most, if that is at least STAND_IN_MIN, so an
+          item the writer split in two keeps its "never" in either half
+        - a new item therefore vouches for one old item only, and a neighbour's "never" cannot cover for it
         - a guard that is only added is not reported
         - an old item with no new item that close is not paired, since that is a loss and not a change
 
     Raises:
         - nothing
     """
-    assigned = { i : [] for i in range( len( before ) ) }
-    for new in after:
-        scores = [ overlap( old, new ) for old in before ]
-        if scores and max( scores ) >= STAND_IN_MIN: assigned[ scores.index( max( scores ) ) ].append( new )
+    ranked = sorted( ( -overlap( old, new ), i, j ) for i, old in enumerate( before ) for j, new in enumerate( after ) )
+    claimed, taken, group = {}, set(), { i : [] for i in range( len( before ) ) }
+    for score, i, j in ranked:
+        if i in claimed or j in taken or -score < STAND_IN_MIN: continue
+        claimed[ i ] = j
+        taken.add( j )
+        group[ i ].append( after[ j ] )
+    for score, i, j in ranked:
+        if j not in taken and -score >= STAND_IN_MIN and i in claimed:
+            taken.add( j )
+            group[ i ].append( after[ j ] )
     pairs = []
     for i, old in enumerate( before ):
-        group = assigned[ i ]
-        if not group: continue
-        best = max( group, key=lambda new: overlap( old, new ) )
+        if i not in claimed: continue
+        best = after[ claimed[ i ] ]
         if overlap( old, best ) < MATCH_MIN: continue
-        if set( guards( old ) ) - { g for new in group for g in guards( new ) }: pairs.append( ( old, best ) )
+        if set( guards( old ) ) - { g for new in group[ i ] for g in guards( new ) }: pairs.append( ( old, best ) )
     return pairs
 
 
