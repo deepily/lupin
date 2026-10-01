@@ -18,12 +18,17 @@ def refuse_gate_path( path ):
     Requires:
         - path is a str or path-like
 
+    Ensures:
+        - both the path as written and the real path it resolves to are checked, so a symlink
+          named after a dev file cannot lead to a gate file
+
     Raises:
-        - ValueError if any component of the path is "gate" or starts with "gate-"
+        - ValueError if any component of either is "gate" or starts with "gate-"
     """
-    for part in os.path.normpath( os.fspath( path ) ).split( os.sep ):
-        if part == "gate" or part.startswith( "gate-" ):
-            raise ValueError( f"{path} names the gate split; only the dev split may be opened here" )
+    for candidate in ( os.path.normpath( os.fspath( path ) ), os.path.realpath( os.fspath( path ) ) ):
+        for part in candidate.split( os.sep ):
+            if part == "gate" or part.startswith( "gate-" ):
+                raise ValueError( f"{path} names the gate split; only the dev split may be opened here" )
 
 
 def _read_jsonl( path ):
@@ -32,13 +37,16 @@ def _read_jsonl( path ):
         return [ json.loads( line ) for line in f if line.strip() ]
 
 
-def load_pairs( pairs_path, keys_path ):
+def load_pairs( pairs_path, keys_path, gate=False ):
     """
     Join a pairs file and its keys file into harness pairs.
 
     Requires:
         - pairs_path and keys_path name JSON Lines files whose ids match one to one
-        - neither path names the gate split
+        - neither path names the gate split, unless gate is True
+        - gate is True only for the sanctioned gate run: the caller has already checked that the
+          thresholds, the prompt versions and the sha of the pairs file are the frozen ones, and the
+          run is made by a seat other than the implementer
 
     Ensures:
         - returns one { id, old, new, design, seed_span } per pair, in file order
@@ -47,21 +55,29 @@ def load_pairs( pairs_path, keys_path ):
           seeded positive, otherwise None; a relocated claim is not a seeded removal
 
     Raises:
-        - ValueError for a gate path, ids that do not match, or a seeded span that is not in the old text
+        - ValueError for a gate path without gate=True, a repeated id in either file, ids that do not
+          match, or a seeded span that is absent from the old text or occurs there more than once
     """
-    refuse_gate_path( pairs_path )
-    refuse_gate_path( keys_path )
-    pairs = _read_jsonl( pairs_path )
-    keys  = { key[ "id" ]: key for key in _read_jsonl( keys_path ) }
-    if sorted( keys ) != sorted( pair[ "id" ] for pair in pairs ):
+    if not gate:
+        refuse_gate_path( pairs_path )
+        refuse_gate_path( keys_path )
+    pairs   = _read_jsonl( pairs_path )
+    key_rows = _read_jsonl( keys_path )
+    pair_ids = [ pair[ "id" ] for pair in pairs ]
+    key_ids  = [ key[ "id" ] for key in key_rows ]
+    if len( set( pair_ids ) ) != len( pair_ids ) or len( set( key_ids ) ) != len( key_ids ):
+        raise ValueError( "an id is repeated in the pairs file or the keys file" )
+    if sorted( key_ids ) != sorted( pair_ids ):
         raise ValueError( "pair ids and key ids do not match one to one" )
+    keys = { key[ "id" ]: key for key in key_rows }
     out = []
     for pair in pairs:
         key  = keys[ pair[ "id" ] ]
         span = None
         if key[ "seeded_positive" ]:
+            found = pair[ "old" ].count( key[ "x_span_in_old" ] )
+            if found != 1: raise ValueError( f"pair {pair[ 'id' ]}: the seeded span is not in the old text exactly once ({found} times)" )
             start = pair[ "old" ].find( key[ "x_span_in_old" ] )
-            if start < 0: raise ValueError( f"pair {pair[ 'id' ]}: the seeded span is not in the old text" )
             span = ( start, start + len( key[ "x_span_in_old" ] ) )
         out.append( { "id": pair[ "id" ], "old": pair[ "old" ], "new": pair[ "new" ],
                       "design": pair[ "linked_doc" ] or None, "seed_span": span } )

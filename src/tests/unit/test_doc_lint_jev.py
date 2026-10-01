@@ -122,7 +122,7 @@ def test_retries_are_bounded_and_the_last_failure_does_not_sleep():
     sleeps, calls = [], []
     with pytest.raises( jev_transport.JevCallError, match="still answered a retry status" ):
         ask( scripted_post( [ 429 ] * 10, calls ), sleeps )
-    assert len( calls ) == jev_transport.MAX_ATTEMPTS
+    assert len( calls ) == jev_transport.MAX_ATTEMPTS == 4
     assert len( sleeps ) == jev_transport.MAX_ATTEMPTS - 1
 
 
@@ -156,6 +156,8 @@ def test_a_network_error_is_a_call_error_that_does_not_carry_the_key():
     ( reply( -0.1 ),                                             "0 to 1" ),
     ( reply( "0.9" ),                                            "0 to 1" ),
     ( reply( True ),                                             "0 to 1" ),
+    ( '{"model": "jev-1.13.0", "answers": {"claim_stated": {"type": "noul", "noul": NaN}}}', "0 to 1" ),
+    ( '{"model": "jev-1.13.0", "answers": {"claim_stated": {"type": "noul", "noul": Infinity}}}', "0 to 1" ),
     ( reply( 0.9, model="jev-2.0.0" ),                           "asked for model" ),
 ] )
 def test_an_unusable_body_is_a_call_error( text, match ):
@@ -636,3 +638,76 @@ def test_the_cli_refuses_a_gate_path_and_a_file_that_is_not_json( tmp_path, caps
     not_json.write_text( "this is not json" )
     assert harness_cli.main( [ "--pairs", str( not_json ), *base ] ) == 2
     assert "REFUSED" in capsys.readouterr().err
+
+
+# ---- the gate door, gate paths and the Jev defaults on the command line --------------------
+
+import hashlib
+
+
+def gate_set( tmp_path ):
+    ( tmp_path / "gate" ).mkdir()
+    pair = { "id": "g0", "old": PAIR[ "old" ], "new": PAIR[ "new" ], "linked_doc": "" }
+    key  = { "id": "g0", "seeded_positive": False, "x_span_in_old": "" }
+    ( tmp_path / "gate" / "pairs.jsonl" ).write_text( json.dumps( pair ) + "\n" )
+    ( tmp_path / "gate" / "keys.jsonl" ).write_text( json.dumps( key ) + "\n" )
+    return tmp_path / "gate" / "pairs.jsonl", tmp_path / "gate" / "keys.jsonl"
+
+
+def gate_args( tmp_path, pairs, keys, *extra ):
+    return [ "--pairs", str( pairs ), "--keys", str( keys ), "--ledger", str( tmp_path / "l.jsonl" ), "--out", str( tmp_path / "r.json" ),
+             "--extractor-model", "ext", "--judge-model", MODEL, "--escalation-model", "opus-x", "--writer-model", "writer",
+             "--extractor-lists", "1", "--judge-backend", "jev", "--t-lo", "0.3", "--t-hi", "0.8", *extra ]
+
+
+def test_a_gate_path_without_the_gate_flag_is_refused_before_it_is_opened( tmp_path, capsys ):
+    missing = tmp_path / "gate" / "nope.jsonl"
+    assert harness_cli.main( gate_args( tmp_path, missing, tmp_path / "keys" / "dev-keys.jsonl" ) ) == 2
+    assert "gate split" in capsys.readouterr().err
+    pairs, keys = gate_set( tmp_path )
+    link = tmp_path / "p.jsonl"
+    link.symlink_to( pairs )
+    assert harness_cli.main( gate_args( tmp_path, link, keys ) ) == 2
+    assert harness_cli.main( [ "--pairs", str( pairs ), *gate_args( tmp_path, pairs, keys )[ 2: ] ] ) == 2
+
+
+def test_the_gate_door_opens_only_with_frozen_versions_thresholds_and_pairs_sha( tmp_path, monkeypatch, capsys ):
+    monkeypatch.setenv( jev_transport.KEY_VARIABLE, KEY )
+    monkeypatch.setattr( jev_transport, "_post", lambda url, headers, body, timeout: ( 200, reply( haystack_noul( body ) ) ) )
+    pairs, keys = gate_set( tmp_path )
+    versions    = f"{harness_cli.claim_extractor.PROMPT_VERSION},{jev_judge.PROMPT_VERSION}"
+    sha         = hashlib.sha256( pairs.read_bytes() ).hexdigest()
+    base        = gate_args( tmp_path, pairs, keys, "--gate" )
+    query       = extractor_and_escalation_query()
+    assert harness_cli.main( base + [ "--frozen-versions", versions, "--frozen-pairs-sha", sha ], query_fn=query ) == 3
+    assert "frozen-thresholds" in capsys.readouterr().err
+    assert harness_cli.main( base + [ "--frozen-versions", versions, "--frozen-pairs-sha", sha, "--frozen-thresholds", "0.3,0.9" ], query_fn=query ) == 3
+    assert harness_cli.main( base + [ "--frozen-thresholds", "0.3,0.8", "--frozen-pairs-sha", sha ], query_fn=query ) == 3
+    assert harness_cli.main( base + [ "--frozen-thresholds", "0.3,0.8", "--frozen-versions", versions, "--frozen-pairs-sha", "0" * 64 ], query_fn=query ) == 3
+    assert harness_cli.main( base + [ "--frozen-thresholds", "0.3,0.8", "--frozen-versions", versions, "--frozen-pairs-sha", sha ], query_fn=query ) == 0
+    assert json.loads( ( tmp_path / "r.json" ).read_text() )[ "pairs" ] == 1
+
+
+def test_jev_defaults_to_one_judge_run_and_the_claude_judge_to_three( tmp_path, monkeypatch ):
+    monkeypatch.setenv( jev_transport.KEY_VARIABLE, KEY )
+    monkeypatch.setattr( jev_transport, "_post", lambda url, headers, body, timeout: ( 200, reply( haystack_noul( body ) ) ) )
+    code = harness_cli.main( cli_args( tmp_path, "--judge-backend", "jev", "--t-lo", "0.3", "--t-hi", "0.8" )[ : -4 ] + [ "--judge-backend", "jev", "--t-lo", "0.3", "--t-hi", "0.8" ], query_fn=extractor_and_escalation_query() )
+    assert code == 0 and ( tmp_path / "l.jsonl" ).read_text().count( "judge|" ) == 1
+
+
+def test_thresholds_with_the_claude_backend_are_refused_not_ignored( tmp_path, capsys ):
+    assert harness_cli.main( cli_args( tmp_path, "--t-lo", "0.3" ) ) == 2
+    assert "only apply to --judge-backend jev" in capsys.readouterr().err
+
+
+def test_a_claude_backend_report_has_no_unanswered_count( tmp_path ):
+    async def query( prompt, options ):
+        if options.model == "ext":
+            text = json.dumps( { "claims": [ { "claim": "returns none when parked", "quote": "returns none when parked" } ] } )
+        else:
+            text = json.dumps( { "verdicts": [ { "id": 1, "verdict": "present" } ] } )
+        yield AssistantMessage( content=[ TextBlock( text ) ], model=options.model )
+    args = [ a for a in cli_args( tmp_path ) ]
+    args[ args.index( "--judge-model" ) + 1 ] = "claude-j"
+    assert harness_cli.main( args, query_fn=query ) == 0
+    assert json.loads( ( tmp_path / "r.json" ).read_text() )[ "judge_unanswered" ] is None

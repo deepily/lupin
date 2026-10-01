@@ -78,3 +78,46 @@ def test_the_loader_refuses_a_gate_path_before_opening_anything( tmp_path ):
         labelled_pairs.load_pairs( dev_pairs, str( tmp_path / "gate-keys.jsonl" ) )
     with pytest.raises( ValueError, match="gate split" ):
         labelled_pairs.load_pairs( pairs, dev_keys )
+
+
+def test_a_symlink_named_like_a_dev_file_that_points_into_the_gate_split_is_refused( tmp_path ):
+    pairs, keys = write_set( tmp_path, PAIRS, KEYS, split="gate" )
+    link = tmp_path / "p.jsonl"
+    link.symlink_to( pairs )
+    with pytest.raises( ValueError, match="gate split" ):
+        labelled_pairs.refuse_gate_path( link )
+    with pytest.raises( ValueError, match="gate split" ):
+        labelled_pairs.load_pairs( str( link ), write_set( tmp_path, PAIRS, KEYS, split="dev" )[ 1 ] )
+    key_link = tmp_path / "k.jsonl"
+    key_link.symlink_to( tmp_path / "gate" / "keys.jsonl" )
+    with pytest.raises( ValueError, match="gate split" ):
+        labelled_pairs.load_pairs( write_set( tmp_path, PAIRS, KEYS, split="dev" )[ 0 ], str( key_link ) )
+
+
+def test_the_gate_flag_is_the_one_door_that_opens_a_gate_path( tmp_path ):
+    pairs, keys = write_set( tmp_path, PAIRS, KEYS, split="gate" )
+    with pytest.raises( ValueError, match="gate split" ):
+        labelled_pairs.load_pairs( pairs, keys )
+    assert [ p[ "id" ] for p in labelled_pairs.load_pairs( pairs, keys, gate=True ) ] == [ "p0", "p1", "p2" ]
+
+
+def test_a_repeated_id_in_either_file_is_refused_with_a_clear_message( tmp_path ):
+    with pytest.raises( ValueError, match="repeated" ):
+        labelled_pairs.load_pairs( *write_set( tmp_path, PAIRS + [ PAIRS[ 0 ] ], KEYS + [ KEYS[ 0 ] ] ) )
+    with pytest.raises( ValueError, match="repeated" ):
+        labelled_pairs.load_pairs( *write_set( tmp_path, PAIRS, KEYS + [ KEYS[ 0 ] ] ) )
+    with pytest.raises( ValueError, match="repeated" ):
+        labelled_pairs.load_pairs( *write_set( tmp_path, PAIRS + [ PAIRS[ 0 ] ], KEYS ) )
+
+
+def test_equal_counts_with_different_ids_are_refused_not_a_key_error( tmp_path ):
+    keys = [ dict( KEYS[ 0 ], id="zz" ) ] + KEYS[ 1: ]
+    with pytest.raises( ValueError, match="do not match" ):
+        labelled_pairs.load_pairs( *write_set( tmp_path, PAIRS, keys ) )
+
+
+def test_a_span_that_occurs_twice_in_the_old_text_is_refused_as_ambiguous( tmp_path ):
+    pairs = [ dict( PAIRS[ 0 ], old="Same line. Same line. Other." ) ] + PAIRS[ 1: ]
+    keys  = [ dict( KEYS[ 0 ], x_span_in_old="Same line." ) ] + KEYS[ 1: ]
+    with pytest.raises( ValueError, match="exactly once \\(2 times\\)" ):
+        labelled_pairs.load_pairs( *write_set( tmp_path, pairs, keys ) )
