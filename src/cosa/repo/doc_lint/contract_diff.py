@@ -112,7 +112,7 @@ def parse_sections( docstring ):
 
     Ensures:
         - returns { heading: [ item text, ... ] } for each heading line ("Word:") that is followed by items
-        - an item starts with "-", "*" or a number and a full stop; bullets may sit flush with the heading
+        - an item starts with "-", "*" or a number and a period; bullets may sit flush with the heading
         - an indented continuation line joins the item above it with a single space
         - a section ends at a blank line, at the next heading, or at a line that is neither an item nor
           a continuation
@@ -281,7 +281,7 @@ def render_table( results ):
 
     Ensures:
         - returns a str with a header row and one line per row
-        - the finding column reads HEADING MISSING (with the heading that took the items), COUNT FELL or "-"
+        - the finding column reads `HEADING MISSING` (with the heading that took the items), `COUNT FELL` or "-"
         - the lost column lists the items most likely gone, as many as the count fell
         - the count columns are the signal; the lost column is the best guess at which items they were
 
