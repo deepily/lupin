@@ -1,75 +1,173 @@
 """
 Contract diff: Requires, Ensures and Raises item counts before and after a change.
 
-Counts the items of every Python function and lists each one that was dropped. A rewrite may reword
-a clause but may not lose one unnoticed. Every loss is made visible so a merge can declare it. Stdlib only.
+Counts the items of every Python function and class under each heading, flags a heading that
+vanished, and names the items most likely lost. A rewrite may reword a clause but may not lose one
+unnoticed. Reworded items are matched by word overlap, not by exact text. Stdlib only.
 """
 
 import argparse
 import ast
 import inspect
 import json
+import re
 import sys
 
-from .docs_only_diff import _git, _show
+from .docs_only_diff import _show, changed_files
 
-SECTIONS = ( "Requires", "Ensures", "Raises" )
+SECTIONS      = ( "Requires", "Ensures", "Raises" )
+STAND_IN_MIN  = 0.3
+STOPWORDS     = frozenset( "a an the is are was be been being of to in on for with and or if it its this that as at by from when then so into than also only".split() )
+WORD_REGEX    = re.compile( r"[a-z0-9_]+" )
+HEADER_REGEX  = re.compile( r"^\s*([A-Za-z][A-Za-z ]{0,30}):\s*$" )
+BULLET_REGEX  = re.compile( r"^(\s*)(?:[-*\u2022]|\d+[.)])\s+(.*)$" )
 
 
-def parse_contract( docstring ):
+def tokens( item ):
     """
-    Read the Requires, Ensures and Raises items out of one docstring.
+    Reduce an item to the set of words that carry its meaning.
 
     Requires:
-        - docstring is a str, or None for a function without one
+        - item is a str
 
     Ensures:
-        - returns { section: [ item text, ... ] } with all three section keys present
-        - an item is a line starting with "- "; its indented continuation lines join it with single spaces
-        - a section ends at a blank line, at the next section header, or at the first line back at header indent
+        - returns lowercase words and numbers without the words in STOPWORDS
+        - a trailing "s" is dropped from words longer than three letters, so "returns" and "return" agree
+        - case, punctuation and word order do not matter
 
     Raises:
         - nothing
     """
-    contract = { name : [] for name in SECTIONS }
-    if not docstring: return contract
-    current, indent = None, 0
-    for raw in inspect.cleandoc( docstring ).split( "\n" ):
-        line  = raw.strip()
-        depth = len( raw ) - len( raw.lstrip() )
-        if line.rstrip( ":" ) in SECTIONS and line.endswith( ":" ):
-            current, indent = line[ :-1 ], depth
-        elif not line or ( current is not None and depth <= indent ):
-            current = None
-        elif current is not None and line.startswith( "- " ):
-            contract[ current ].append( line[ 2: ].strip() )
-        elif current is not None and contract[ current ]:
-            contract[ current ][ -1 ] += " " + line
-    return contract
+    words = ( w[ :-1 ] if len( w ) > 3 and w.endswith( "s" ) else w for w in WORD_REGEX.findall( item.lower() ) )
+    return { w for w in words if w not in STOPWORDS }
 
 
-def function_contracts( source ):
+def overlap( old_item, new_item ):
     """
-    Map each function's qualified name to its parsed contract.
+    Say how much of an old item's meaning a new item still carries.
+
+    Requires:
+        - both are str
+
+    Ensures:
+        - returns a float from 0.0 to 1.0: the share of the old item's words that the new item has
+        - an old item with no words scores 1.0 against anything, since there is nothing to lose
+
+    Raises:
+        - nothing
+    """
+    old = tokens( old_item )
+    return len( old & tokens( new_item ) ) / len( old ) if old else 1.0
+
+
+def likely_lost( before, after, count ):
+    """
+    Pick the old items most likely to be the ones that were lost.
+
+    Requires:
+        - before and after are lists of item text; count is how many items to pick
+
+    Ensures:
+        - returns up to count old items, in their old order, whose best overlap with any new item is lowest
+        - an item kept verbatim or reworded scores high and is picked last
+
+    Raises:
+        - nothing
+    """
+    if count <= 0: return []
+    scored = sorted( ( max( ( overlap( item, new ) for new in after ), default=0.0 ), i ) for i, item in enumerate( before ) )
+    return [ before[ i ] for i in sorted( i for _, i in scored[ :count ] ) ]
+
+
+def stand_in( before, new_sections, own_headings ):
+    """
+    Find the new heading that now holds a vanished heading's items.
+
+    Requires:
+        - before is the old item list; new_sections is { heading: items } after the change
+        - own_headings is the set of headings that already matched their own old section
+
+    Ensures:
+        - returns ( heading, items ) for the other new heading whose items overlap the old items most, or
+          ( None, [] ) when none reaches STAND_IN_MIN
+        - nothing is accepted as a synonym by name; only the words in the items decide
+
+    Raises:
+        - nothing
+    """
+    best, best_score = ( None, [] ), STAND_IN_MIN
+    for heading, items in new_sections.items():
+        if heading in own_headings: continue
+        score = sum( max( ( overlap( old, new ) for new in items ), default=0.0 ) for old in before ) / len( before )
+        if score >= best_score: best, best_score = ( heading, items ), score
+    return best
+
+
+def parse_sections( docstring ):
+    """
+    Read every section of bulleted items out of one docstring.
+
+    Requires:
+        - docstring is a str, or None for a definition without one
+
+    Ensures:
+        - returns { heading: [ item text, ... ] } for each heading line ("Word:") that is followed by items
+        - an item starts with "-", "*" or a number and a full stop; bullets may sit flush with the heading
+        - an indented continuation line joins the item above it with a single space
+        - a section ends at a blank line, at the next heading, or at a line that is neither an item nor
+          a continuation
+
+    Raises:
+        - nothing
+    """
+    sections = {}
+    if not docstring: return sections
+    name, header_indent, bullet_indent = None, 0, None
+    for raw in inspect.cleandoc( docstring ).split( "\n" ):
+        line   = raw.strip()
+        indent = len( raw ) - len( raw.lstrip() )
+        header = HEADER_REGEX.match( raw )
+        bullet = BULLET_REGEX.match( raw )
+        if not line:
+            name = None
+        elif header and not bullet:
+            name, header_indent, bullet_indent = header.group( 1 ), indent, None
+        elif name is not None and bullet and len( bullet.group( 1 ) ) >= header_indent:
+            sections.setdefault( name, [] ).append( bullet.group( 2 ).strip() )
+            bullet_indent = len( bullet.group( 1 ) )
+        elif name is not None and bullet_indent is not None and indent > bullet_indent:
+            sections[ name ][ -1 ] += " " + line
+        else:
+            name = None
+    return sections
+
+
+def definition_sections( source ):
+    """
+    Map each function and class to its parsed sections.
 
     Requires:
         - source is Python text that parses
 
     Ensures:
-        - returns { "Class.method": contract } for every def, nested ones included
-        - a function with no docstring maps to an empty contract
+        - returns { name: sections } for every def and class, nested ones included
+        - a class is named "K (class)" so it cannot collide with a function of the same name
+        - a second definition of the same name, such as a property setter, is named "name#2", "name#3" and so on
+        - a definition with no docstring maps to an empty dict
 
     Raises:
         - SyntaxError when source does not parse
     """
-    found = {}
+    found, seen = {}, {}
 
     def walk( node, prefix ):
         for child in ast.iter_child_nodes( node ):
             if isinstance( child, ( ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef ) ):
-                name = prefix + child.name
-                if not isinstance( child, ast.ClassDef ): found[ name ] = parse_contract( ast.get_docstring( child, clean=False ) )
-                walk( child, name + "." )
+                base = prefix + child.name + ( " (class)" if isinstance( child, ast.ClassDef ) else "" )
+                seen[ base ] = seen.get( base, 0 ) + 1
+                name = base if seen[ base ] == 1 else f"{base}#{seen[ base ]}"
+                found[ name ] = parse_sections( ast.get_docstring( child, clean=False ) )
+                walk( child, prefix + child.name + "." )
             else:
                 walk( child, prefix )
 
@@ -85,29 +183,69 @@ def diff_contracts( old_source, new_source ):
         - both sources are str or None (None means the file is absent on that side)
 
     Ensures:
-        - returns one row per function that existed before: { function, section, before, after, dropped }
-          for each section that had items before or has items after
-        - dropped lists the old items whose text is absent after, in old order; a removed function drops them all
-        - a function that only exists after has no row, since nothing was lost
+        - returns one row per definition that existed before and per contract heading (Requires, Ensures,
+          Raises) that had items before or has items after: { function, section, before, after,
+          heading_missing, stand_in, lost }
+        - heading_missing is True when the old text had the heading with items and the new text has no such
+          heading; a different heading is never accepted as a synonym, but when one carries the old items
+          it is named in stand_in and its item count is the row's after
+        - lost lists the old items most likely to be gone, as many as the count fell, chosen by word overlap
+          so a reworded item is not reported; a removed definition loses them all
+        - a definition that only exists after has no row, since nothing was lost
 
     Raises:
         - SyntaxError when a present side does not parse
     """
-    old = function_contracts( old_source ) if old_source is not None else {}
-    new = function_contracts( new_source ) if new_source is not None else {}
+    old = definition_sections( old_source ) if old_source is not None else {}
+    new = definition_sections( new_source ) if new_source is not None else {}
     rows = []
     for name in sorted( old ):
+        new_sections = new.get( name, {} )
+        own          = { s for s in SECTIONS if s in new_sections and old[ name ].get( s ) }
         for section in SECTIONS:
-            before, after = old[ name ][ section ], new.get( name, { section : [] } )[ section ]
+            before, after = old[ name ].get( section, [] ), new_sections.get( section, [] )
             if not before and not after: continue
+            missing  = bool( before ) and section not in new_sections
+            heading  = None
+            if missing: heading, after = stand_in( before, new_sections, own )
             rows.append( {
-                "function" : name,
-                "section"  : section,
-                "before"   : len( before ),
-                "after"    : len( after ),
-                "dropped"  : [ item for item in before if item not in after ]
+                "function"        : name,
+                "section"         : section,
+                "before"          : len( before ),
+                "after"           : len( after ),
+                "heading_missing" : missing,
+                "stand_in"        : heading,
+                "lost"            : likely_lost( before, after, len( before ) - len( after ) )
             } )
     return rows
+
+
+def findings( results ):
+    """
+    List the failing findings in a check_diff result.
+
+    Requires:
+        - results is the dict check_diff returns
+
+    Ensures:
+        - returns one string for each heading that disappeared, and one for each row whose item count fell,
+          naming the items most likely lost
+        - a renamed heading with every item kept is exactly one finding; with one item dropped as well, two
+        - items reworded under an unchanged count are not findings
+
+    Raises:
+        - nothing
+    """
+    found = []
+    for path, rows in results.items():
+        for r in rows:
+            where = f"{path} {r[ 'function' ]} {r[ 'section' ]}"
+            if r[ "heading_missing" ]:
+                now = f" (items now under {r[ 'stand_in' ]})" if r[ "stand_in" ] else ""
+                found.append( f"HEADING MISSING: {where}{now}" )
+            if r[ "after" ] < r[ "before" ]:
+                found.append( f"COUNT FELL {r[ 'before' ]} -> {r[ 'after' ]}: {where}: {'; '.join( r[ 'lost' ] )}" )
+    return found
 
 
 def check_diff( root, base, head=None ):
@@ -120,15 +258,15 @@ def check_diff( root, base, head=None ):
 
     Ensures:
         - returns { path: rows } sorted by path, for each changed .py file that has at least one row
+        - paths are read with -z, so a non-ASCII name is not lost
+        - a rename counts as a delete plus an add, so the old path shows every contract as dropped
 
     Raises:
-        - RuntimeError from git when the diff fails
+        - RuntimeError from git when a command fails
         - SyntaxError when a changed file does not parse
     """
-    args  = [ "diff", "--name-only", "--no-renames", base ] + ( [ head ] if head else [] )
-    names = sorted( p for p in _git( root, *args ).split( "\n" ) if p.endswith( ".py" ) )
     found = {}
-    for path in names:
+    for path in sorted( p for p in changed_files( root, base, head ) if p.endswith( ".py" ) ):
         rows = diff_contracts( _show( root, base, path ), _show( root, head, path ) )
         if rows: found[ path ] = rows
     return found
@@ -136,23 +274,28 @@ def check_diff( root, base, head=None ):
 
 def render_table( results ):
     """
-    Render the results as a markdown table, one row per function and section.
+    Render the results as a markdown table, one row per definition and section.
 
     Requires:
         - results is the dict check_diff returns
 
     Ensures:
-        - returns a str with a header row and one line per row; a dropped cell lists each item
-        - a row with nothing dropped shows "-" in the dropped cell
+        - returns a str with a header row and one line per row
+        - the finding column reads HEADING MISSING (with the heading that took the items), COUNT FELL or "-"
+        - the lost column lists the items most likely gone, as many as the count fell
+        - the count columns are the signal; the lost column is the best guess at which items they were
 
     Raises:
         - nothing
     """
-    lines = [ "| file | function | section | before | after | dropped |", "| --- | --- | --- | --- | --- | --- |" ]
+    lines = [ "| file | function | section | before | after | finding | likely lost |", "| --- | --- | --- | --- | --- | --- | --- |" ]
     for path, rows in results.items():
         for r in rows:
-            dropped = "; ".join( r[ "dropped" ] ) if r[ "dropped" ] else "-"
-            lines.append( f"| {path} | {r[ 'function' ]} | {r[ 'section' ]} | {r[ 'before' ]} | {r[ 'after' ]} | {dropped} |" )
+            finding = "-"
+            if r[ "heading_missing" ]: finding = "HEADING MISSING" + ( f" (now {r[ 'stand_in' ]})" if r[ "stand_in" ] else "" )
+            if r[ "after" ] < r[ "before" ]: finding = ( finding + ", COUNT FELL" ) if finding != "-" else "COUNT FELL"
+            lost = "; ".join( r[ "lost" ] ) if r[ "lost" ] else "-"
+            lines.append( f"| {path} | {r[ 'function' ]} | {r[ 'section' ]} | {r[ 'before' ]} | {r[ 'after' ]} | {finding} | {lost} |" )
     return "\n".join( lines ) + "\n"
 
 
@@ -164,11 +307,11 @@ def main( argv=None, out=None ):
         - argv is a list of arguments, or None for sys.argv
 
     Ensures:
-        - returns 1 when --strict is given and any item was dropped, otherwise 0
+        - returns 1 when --strict is given and findings() is not empty, otherwise 0
         - the report is printed either way
 
     Raises:
-        - RuntimeError from git when the diff fails
+        - RuntimeError from git when a command fails
     """
     out    = out if out is not None else sys.stdout
     parser = argparse.ArgumentParser( description="List the contract clauses a change dropped" )
@@ -176,7 +319,7 @@ def main( argv=None, out=None ):
     parser.add_argument( "--head", help="revision to compare to; default is the working tree" )
     parser.add_argument( "--repo-root", default=".", help="git working tree to read" )
     parser.add_argument( "--json", action="store_true", help="print rows as JSON" )
-    parser.add_argument( "--strict", action="store_true", help="exit 1 when any item was dropped" )
+    parser.add_argument( "--strict", action="store_true", help="exit 1 on a missing heading or a fallen item count" )
     args    = parser.parse_args( argv )
     results = check_diff( args.repo_root, args.base, args.head )
     if args.json:
@@ -184,8 +327,7 @@ def main( argv=None, out=None ):
         out.write( "\n" )
     else:
         out.write( render_table( results ) )
-    dropped = sum( len( r[ "dropped" ] ) for rows in results.values() for r in rows )
-    return 1 if args.strict and dropped else 0
+    return 1 if args.strict and findings( results ) else 0
 
 
 if __name__ == "__main__": sys.exit( main() )  # pragma: no cover -- script entry, main() is tested

@@ -1,45 +1,168 @@
 """
-contract_diff: every dropped Requires, Ensures or Raises item must be listed.
+contract_diff: a missing heading and a fallen item count must be findings, in real-shaped input.
 
-Covers the docstring parser, the per-function diff, the git-driven CLI, and a mutation check
-that each key line of the module is guarded by a named test.
+The six writer pairs in src/tests/fixtures/contract_diff/writer_pairs.json are tracked docstrings and
+the verbatim output of a Sonnet rewrite (see the provenance field there). That writer kept all three
+headings, so the renamed-heading cases below are derived from its real output by renaming one heading,
+and the dropped-item cases by deleting one item; both derivations are done in the test, in plain sight.
 """
 
 import io
 import json
+import os
 import subprocess
 
 import pytest
 
+import cosa.utils.util as cu
 from cosa.repo.doc_lint import contract_diff as cd
 
-OLD = '''
-def f( x ):
+with open( os.path.join( cu.get_project_root(), "src", "tests", "fixtures", "contract_diff", "writer_pairs.json" ), encoding="utf-8" ) as handle:
+    PAIRS = json.load( handle )[ "pairs" ]
+
+
+def _source( function, docstring ):
+    return f"def {function}():\n    {docstring!r}\n"
+
+
+def _rows( pair, new=None ):
+    return cd.diff_contracts( _source( pair[ "function" ], pair[ "old" ] ), _source( pair[ "function" ], pair[ "new" ] if new is None else new ) )
+
+
+def _findings( rows ):
+    return cd.findings( { "f.py": rows } )
+
+
+def _drop_first_ensures_item( text ):
+    out, seen, inside = [], False, False
+    for line in text.split( "\n" ):
+        if line.strip() == "Ensures:": inside = True
+        elif inside and line.strip().startswith( "- " ) and not seen:
+            seen = True
+            continue
+        out.append( line )
+    return "\n".join( out )
+
+
+def test_the_fixture_is_six_real_pairs_each_with_all_three_headings():
+    assert len( PAIRS ) == 6
+    for pair in PAIRS:
+        for side in ( "old", "new" ):
+            assert all( f"{h}:" in pair[ side ] for h in cd.SECTIONS ), ( pair[ "function" ], side )
+
+
+@pytest.mark.parametrize( "pair", PAIRS, ids=lambda p: p[ "function" ] )
+def test_real_writer_output_that_kept_its_headings_and_items_has_no_findings( pair ):
+    rows = _rows( pair )
+    assert rows and not any( r[ "heading_missing" ] for r in rows ) and all( r[ "lost" ] == [] for r in rows )
+    assert _findings( rows ) == []
+
+
+@pytest.mark.parametrize( "pair", PAIRS[ :3 ], ids=lambda p: p[ "function" ] )
+def test_a_renamed_heading_with_every_item_kept_is_exactly_one_finding( pair ):
+    renamed = pair[ "new" ].replace( "Ensures:", "Output:" )
+    found   = _findings( _rows( pair, renamed ) )
+    assert len( found ) == 1 and found[ 0 ].startswith( "HEADING MISSING" ) and "Ensures" in found[ 0 ] and "now under Output" in found[ 0 ], found
+
+
+# ( pair, index of the old Ensures item that corresponds to the first Ensures item of the new text, which the test deletes )
+HAND_DROPS = [ ( 0, 0 ), ( 2, 0 ), ( 4, 3 ) ]
+
+
+@pytest.mark.parametrize( "index,old_item", HAND_DROPS )
+def test_a_renamed_heading_plus_one_dropped_item_is_two_findings_and_names_the_item( index, old_item ):
+    pair    = PAIRS[ index ]
+    renamed = _drop_first_ensures_item( pair[ "new" ] ).replace( "Ensures:", "Behaviour:" )
+    found   = _findings( _rows( pair, renamed ) )
+    assert len( found ) == 2, found
+    assert found[ 0 ].startswith( "HEADING MISSING" ) and found[ 1 ].startswith( "COUNT FELL" )
+    assert cd.parse_sections( pair[ "old" ] )[ "Ensures" ][ old_item ] in found[ 1 ], found
+
+
+@pytest.mark.parametrize( "index,old_item", HAND_DROPS )
+def test_a_dropped_item_under_an_unchanged_heading_is_a_count_finding_that_names_it( index, old_item ):
+    pair  = PAIRS[ index ]
+    found = _findings( _rows( pair, _drop_first_ensures_item( pair[ "new" ] ) ) )
+    assert len( found ) == 1 and found[ 0 ].startswith( "COUNT FELL" ), found
+    assert cd.parse_sections( pair[ "old" ] )[ "Ensures" ][ old_item ] in found[ 0 ], found
+
+
+def test_a_split_item_that_hides_a_dropped_one_is_the_known_blind_spot_of_a_count():
+    pair  = PAIRS[ 3 ]
+    old_n = len( cd.parse_sections( pair[ "old" ] )[ "Ensures" ] )
+    new_n = len( cd.parse_sections( pair[ "new" ] )[ "Ensures" ] )
+    assert new_n == old_n + 1, "precondition: the writer split one item in two"
+    assert _findings( _rows( pair, _drop_first_ensures_item( pair[ "new" ] ) ) ) == []
+
+
+def test_tokens_and_overlap_ignore_case_punctuation_order_stopwords_and_a_plural_s():
+    assert cd.tokens( "Returns `the` Formatted-string." ) == { "return", "formatted", "string" }
+    assert cd.tokens( "string formatted returns" ) == cd.tokens( "Returns a formatted string" )
+    assert cd.overlap( "returns formatted string", "gives back a formatted string" ) == pytest.approx( 2 / 3 )
+    assert cd.overlap( "returns x", "completely different" ) == 0.0
+    assert cd.overlap( "the a", "anything" ) == 1.0
+
+
+DOC = '''
+Do f.
+
+Requires:
+- flush bullet
+* star bullet
+1. numbered
+2) numbered paren
+    - nested deeper stays in the section
+
+Ensures:
+    - first line
+      continues here
+    - second
+
+Notes:
+    - not a contract section
+
+Raises:
+    - ValueError
+'''
+
+
+def test_parse_sections_reads_flush_star_numbered_and_continued_items():
+    s = cd.parse_sections( DOC )
+    assert s[ "Requires" ] == [ "flush bullet", "star bullet", "numbered", "numbered paren", "nested deeper stays in the section" ]
+    assert s[ "Ensures" ] == [ "first line continues here", "second" ]
+    assert s[ "Notes" ] == [ "not a contract section" ] and s[ "Raises" ] == [ "ValueError" ]
+
+
+def test_parse_sections_edges():
+    assert cd.parse_sections( None ) == {}
+    assert cd.parse_sections( "Just prose.\n\nMore with - dash." ) == {}
+    assert cd.parse_sections( "Requires:\n    - a\nTrailing prose\n    - not an item\n" ) == { "Requires": [ "a" ] }
+    assert cd.parse_sections( "Args:\n    x: not a bullet\n\nEnsures:\n    - b\n" ) == { "Ensures": [ "b" ] }
+    assert cd.parse_sections( "Requires:\n    - a\n\n    - after a blank line is no longer the section\n" ) == { "Requires": [ "a" ] }
+
+
+CLASS_SRC = '''
+class K:
     """
-    Do f.
+    Class doc.
 
     Requires:
-        - x is an int
-        - x is positive,
-          and fits in a byte
-
-    Ensures:
-        - returns x
-        - never mutates x
-
-    Raises:
-        - ValueError when x is negative
+        - a
     """
-    return x
 
-
-class K:
-    def m( self ):
+    @property
+    def p( self ):
         """
-        Method.
-
         Ensures:
-            - returns None
+            - getter one
+            - getter two
+        """
+
+    @p.setter
+    def p( self, v ):
+        """
+        Ensures:
+            - setter one
         """
 
     async def a( self ):
@@ -47,100 +170,78 @@ class K:
         Raises:
             - nothing
         """
-
 
 def undocumented():
     pass
-
-
-def gone():
-    """
-    Requires:
-        - old clause
-    """
-'''
-
-NEW = '''
-def f( x ):
-    """
-    Do f better.
-
-    Requires:
-        - x is an int
-        - x is positive, and fits in a byte
-
-    Ensures:
-        - returns x
-
-    Raises:
-        - ValueError when x is negative
-        - TypeError when x is not an int
-    """
-    return x
-
-
-class K:
-    def m( self ):
-        """Method with no sections."""
-
-    async def a( self ):
-        """
-        Raises:
-            - nothing
-        """
-
-
-def brand_new():
-    """
-    Ensures:
-        - fresh
-    """
 '''
 
 
-def test_parse_joins_continuations_and_ends_sections():
-    c = cd.parse_contract( OLD.split( '"""' )[ 1 ] )
-    assert c[ "Requires" ] == [ "x is an int", "x is positive, and fits in a byte" ]
-    assert c[ "Ensures" ] == [ "returns x", "never mutates x" ]
-    assert c[ "Raises" ] == [ "ValueError when x is negative" ]
+def test_definition_sections_track_classes_and_same_name_defs():
+    found = cd.definition_sections( CLASS_SRC )
+    assert set( found ) == { "K (class)", "K.p", "K.p#2", "K.a", "undocumented" }
+    assert found[ "K (class)" ] == { "Requires": [ "a" ] }
+    assert found[ "K.p" ][ "Ensures" ] == [ "getter one", "getter two" ] and found[ "K.p#2" ][ "Ensures" ] == [ "setter one" ]
+    assert found[ "undocumented" ] == {}
 
 
-def test_parse_none_and_prose_only_docstrings_are_empty():
-    assert cd.parse_contract( None ) == { "Requires": [], "Ensures": [], "Raises": [] }
-    assert cd.parse_contract( "Just prose.\n\nMore prose with - dash." )[ "Requires" ] == []
+def test_a_class_that_loses_its_contract_and_a_getter_that_loses_an_item_are_seen():
+    new = CLASS_SRC.replace( "    Requires:\n        - a\n", "" ).replace( "            - getter two\n", "" )
+    rows = {  ( r[ "function" ], r[ "section" ] ) : r for r in cd.diff_contracts( CLASS_SRC, new ) }
+    assert rows[ ( "K (class)", "Requires" ) ][ "heading_missing" ] is True and rows[ ( "K (class)", "Requires" ) ][ "lost" ] == [ "a" ]
+    assert rows[ ( "K.p", "Ensures" ) ][ "lost" ] == [ "getter two" ] and rows[ ( "K.p", "Ensures" ) ][ "after" ] == 1
+    assert rows[ ( "K.p#2", "Ensures" ) ][ "lost" ] == []
 
 
-def test_parse_section_ends_at_dedent_without_blank_line():
-    c = cd.parse_contract( "Summary.\n\nRequires:\n    - a\nTrailing prose\n    - not an item\n" )
-    assert c[ "Requires" ] == [ "a" ]
+def test_a_removed_definition_drops_everything_and_a_new_one_has_no_row():
+    old = 'def f():\n    """\n    Ensures:\n        - x\n    """\n'
+    new = 'def g():\n    """\n    Ensures:\n        - y\n    """\n'
+    rows = cd.diff_contracts( old, new )
+    assert [ ( r[ "function" ], r[ "heading_missing" ], r[ "lost" ], r[ "after" ] ) for r in rows ] == [ ( "f", True, [ "x" ], 0 ) ]
+    assert cd.diff_contracts( None, new ) == []
+    assert cd.diff_contracts( old, None )[ 0 ][ "after" ] == 0
 
 
-def test_function_contracts_qualify_methods_and_cover_async_and_undocumented():
-    found = cd.function_contracts( OLD )
-    assert set( found ) == { "f", "K.m", "K.a", "undocumented", "gone" }
-    assert found[ "undocumented" ] == { "Requires": [], "Ensures": [], "Raises": [] }
-    assert found[ "K.m" ][ "Ensures" ] == [ "returns None" ]
+def test_a_section_that_only_exists_after_is_a_row_with_nothing_dropped():
+    old = 'def f():\n    """Plain."""\n'
+    new = 'def f():\n    """\n    Raises:\n        - ValueError\n    """\n'
+    assert cd.diff_contracts( old, new ) == [ { "function": "f", "section": "Raises", "before": 0, "after": 1, "heading_missing": False, "stand_in": None, "lost": [] } ]
 
 
-def test_diff_lists_every_drop_and_ignores_additions_and_new_functions():
-    rows = {  ( r[ "function" ], r[ "section" ] ) : r for r in cd.diff_contracts( OLD, NEW ) }
-    assert rows[ ( "f", "Requires" ) ][ "dropped" ] == []
-    assert rows[ ( "f", "Ensures" ) ] == { "function": "f", "section": "Ensures", "before": 2, "after": 1, "dropped": [ "never mutates x" ] }
-    assert rows[ ( "f", "Raises" ) ][ "before" ] == 1 and rows[ ( "f", "Raises" ) ][ "after" ] == 2
-    assert rows[ ( "K.m", "Ensures" ) ][ "dropped" ] == [ "returns None" ]
-    assert rows[ ( "gone", "Requires" ) ][ "dropped" ] == [ "old clause" ] and rows[ ( "gone", "Requires" ) ][ "after" ] == 0
-    assert not any( fn == "brand_new" for fn, _ in rows )
-    assert ( "undocumented", "Requires" ) not in rows
+def test_a_reworded_item_with_the_count_held_is_not_lost_and_not_a_finding():
+    old = 'def f():\n    """\n    Ensures:\n        - returns 1\n    """\n'
+    new = 'def f():\n    """\n    Ensures:\n        - gives back one\n    """\n'
+    rows = cd.diff_contracts( old, new )
+    assert rows[ 0 ][ "lost" ] == [] and _findings( rows ) == []
 
 
-def test_diff_with_absent_sides():
-    assert cd.diff_contracts( None, NEW ) == []
-    assert all( r[ "after" ] == 0 for r in cd.diff_contracts( OLD, None ) )
+def test_findings_name_the_count_and_the_lost_items():
+    old = 'def f():\n    """\n    Ensures:\n        - a\n        - b\n    """\n'
+    new = 'def f():\n    """\n    Ensures:\n        - a\n    """\n'
+    assert _findings( cd.diff_contracts( old, new ) ) == [ "COUNT FELL 2 -> 1: f.py f Ensures: b" ]
 
 
-def test_reword_counts_as_a_drop_by_text():
-    rows = cd.diff_contracts( 'def f():\n    """\n    Ensures:\n        - returns 1\n    """\n', 'def f():\n    """\n    Ensures:\n        - returns one\n    """\n' )
-    assert rows[ 0 ][ "before" ] == rows[ 0 ][ "after" ] == 1 and rows[ 0 ][ "dropped" ] == [ "returns 1" ]
+def test_a_vanished_heading_whose_items_are_now_under_another_name_names_it():
+    old = 'def f():\n    """\n    Ensures:\n        - returns the total\n        - never mutates x\n    """\n'
+    new = 'def f():\n    """\n    Output:\n        - Gives back the total.\n        - x is never mutated.\n    """\n'
+    rows = cd.diff_contracts( old, new )
+    assert [ ( r[ "heading_missing" ], r[ "stand_in" ], r[ "after" ], r[ "lost" ] ) for r in rows ] == [ ( True, "Output", 2, [] ) ]
+    assert _findings( rows ) == [ "HEADING MISSING: f.py f Ensures (items now under Output)" ]
+
+
+def test_a_stand_in_must_hold_enough_of_the_old_words_and_never_a_heading_that_already_matched():
+    old = 'def f():\n    """\n    Requires:\n        - x is positive\n\n    Ensures:\n        - returns x when x is positive\n    """\n'
+    new = 'def f():\n    """\n    Requires:\n        - x is positive\n\n    Notes:\n        - unrelated remark about logging\n    """\n'
+    rows = { r[ "section" ] : r for r in cd.diff_contracts( old, new ) }
+    assert rows[ "Ensures" ][ "stand_in" ] is None and rows[ "Ensures" ][ "after" ] == 0 and rows[ "Ensures" ][ "lost" ] == [ "returns x when x is positive" ]
+    assert rows[ "Requires" ][ "heading_missing" ] is False
+
+
+def test_likely_lost_picks_the_lowest_overlap_in_old_order_and_zero_picks_nothing():
+    before = [ "returns the total", "never mutates x", "raises on empty" ]
+    after  = [ "Gives back the total." ]
+    assert cd.likely_lost( before, after, 2 ) == [ "never mutates x", "raises on empty" ]
+    assert cd.likely_lost( before, after, 0 ) == [] and cd.likely_lost( before, [], 3 ) == before
+    assert cd.likely_lost( before, after, -1 ) == [], "a count that rose loses nothing"
 
 
 def _git( root, *args ):
@@ -149,15 +250,21 @@ def _git( root, *args ):
     return res.stdout.strip()
 
 
+OLD_FILE = 'def f():\n    """\n    Ensures:\n        - a\n        - b\n    """\n'
+NEW_FILE = 'def f():\n    """\n    Output:\n        - a\n        - b\n    """\n'
+
+
 @pytest.fixture
 def repo( tmp_path ):
     _git( tmp_path, "init", "-q" )
-    ( tmp_path / "a.py" ).write_text( OLD, encoding="utf-8" )
+    ( tmp_path / "a.py" ).write_text( OLD_FILE, encoding="utf-8" )
+    ( tmp_path / "é.py" ).write_text( OLD_FILE, encoding="utf-8" )
     ( tmp_path / "same.py" ).write_text( "x = 1\n", encoding="utf-8" )
     ( tmp_path / "b.dart" ).write_text( "a\n", encoding="utf-8" )
     _git( tmp_path, "add", "." )
     _git( tmp_path, "commit", "-qm", "base" )
-    ( tmp_path / "a.py" ).write_text( NEW, encoding="utf-8" )
+    ( tmp_path / "a.py" ).write_text( NEW_FILE, encoding="utf-8" )
+    ( tmp_path / "é.py" ).write_text( NEW_FILE, encoding="utf-8" )
     ( tmp_path / "same.py" ).write_text( "x = 2\n", encoding="utf-8" )
     ( tmp_path / "b.dart" ).write_text( "b\n", encoding="utf-8" )
     return tmp_path
@@ -169,22 +276,31 @@ def _run( root, *extra ):
     return rc, out.getvalue()
 
 
-def test_cli_table_lists_drops_and_skips_files_without_contracts( repo ):
+def test_cli_table_shows_the_finding_column_and_skips_files_without_contracts( repo ):
     rc, text = _run( repo )
     assert rc == 0
-    assert text.startswith( "| file | function | section | before | after | dropped |" )
-    assert "| a.py | f | Ensures | 2 | 1 | never mutates x |" in text
-    assert "| a.py | f | Requires | 2 | 2 | - |" in text
+    assert text.startswith( "| file | function | section | before | after | finding | likely lost |" )
+    assert "| a.py | f | Ensures | 2 | 2 | HEADING MISSING (now Output) | - |" in text
     assert "same.py" not in text and "b.dart" not in text
 
 
-def test_cli_strict_exits_one_when_anything_dropped( repo ):
+def test_cli_reads_a_non_ascii_path( repo ):
+    assert "| é.py | f | Ensures | 2 | 2 | HEADING MISSING (now Output) | - |" in _run( repo )[ 1 ]
+
+
+def test_cli_strict_exits_one_on_a_missing_heading_and_zero_when_clean( repo ):
     assert _run( repo, "--strict" )[ 0 ] == 1
-
-
-def test_cli_strict_exits_zero_when_nothing_dropped( repo ):
-    ( repo / "a.py" ).write_text( OLD.replace( "Do f.", "Do f again." ), encoding="utf-8" )
+    ( repo / "a.py" ).write_text( OLD_FILE.replace( "- a", "- a." ), encoding="utf-8" )
+    ( repo / "é.py" ).write_text( OLD_FILE, encoding="utf-8" )
     assert _run( repo, "--strict" )[ 0 ] == 0
+
+
+def test_cli_a_rename_with_a_rewrite_shows_the_old_path_losing_everything( repo ):
+    _git( repo, "mv", "a.py", "renamed.py" )
+    ( repo / "renamed.py" ).write_text( "x = 1\n", encoding="utf-8" )
+    _git( repo, "add", "-A" )
+    rc, text = _run( repo, "--strict" )
+    assert rc == 1 and "| a.py | f | Ensures | 2 | 0 | HEADING MISSING, COUNT FELL | a; b |" in text
 
 
 def test_cli_json_and_head_revision( repo ):
@@ -193,8 +309,8 @@ def test_cli_json_and_head_revision( repo ):
     out = io.StringIO()
     rc  = cd.main( [ "--base", "HEAD~1", "--head", "HEAD", "--repo-root", str( repo ), "--json" ], out=out )
     data = json.loads( out.getvalue() )
-    assert rc == 0 and list( data ) == [ "a.py" ]
-    assert { "function": "f", "section": "Ensures", "before": 2, "after": 1, "dropped": [ "never mutates x" ] } in data[ "a.py" ]
+    assert rc == 0 and sorted( data ) == [ "a.py", "é.py" ]
+    assert { "function": "f", "section": "Ensures", "before": 2, "after": 2, "heading_missing": True, "stand_in": "Output", "lost": [] } in data[ "a.py" ]
 
 
 def test_main_defaults_to_stdout( repo, capsys ):
@@ -210,12 +326,23 @@ def test_cli_bad_revision_raises( repo ):
 # ---- mutation check: each mutant of the module must redden its named test ----
 
 MUTANTS = [
-    ( "if not before and not after: continue", "if False: continue", "test_diff_lists_every_drop_and_ignores_additions_and_new_functions" ),
-    ( "[ item for item in before if item not in after ]", "[]", "test_diff_lists_every_drop_and_ignores_additions_and_new_functions" ),
-    ( "contract[ current ][ -1 ] += \" \" + line", "pass", "test_parse_joins_continuations_and_ends_sections" ),
-    ( "elif not line or ( current is not None and depth <= indent ):", "elif not line:", "test_parse_section_ends_at_dedent_without_blank_line" ),
-    ( "if not isinstance( child, ast.ClassDef ): found[ name ]", "if True: found[ name ]", "test_function_contracts_qualify_methods_and_cover_async_and_undocumented" ),
-    ( "return 1 if args.strict and dropped else 0", "return 0", "test_cli_strict_exits_one_when_anything_dropped" ),
+    ( "missing  = bool( before ) and section not in new_sections", "missing  = False", "test_a_renamed_heading_with_every_item_kept_is_exactly_one_finding" ),
+    ( "if missing: heading, after = stand_in( before, new_sections, own )", "if missing: heading, after = None, []", "test_a_renamed_heading_with_every_item_kept_is_exactly_one_finding" ),
+    ( "if heading in own_headings: continue", "pass", "test_a_stand_in_must_hold_enough_of_the_old_words_and_never_a_heading_that_already_matched" ),
+    ( "best, best_score = ( None, [] ), STAND_IN_MIN", "best, best_score = ( None, [] ), 0.0", "test_a_stand_in_must_hold_enough_of_the_old_words_and_never_a_heading_that_already_matched" ),
+    ( "scored = sorted( ( max( ( overlap( item, new ) for new in after ), default=0.0 ), i ) for i, item in enumerate( before ) )", "scored = sorted( ( 0.0, i ) for i, item in enumerate( before ) )", "test_likely_lost_picks_the_lowest_overlap_in_old_order_and_zero_picks_nothing" ),
+    ( "if count <= 0: return []", "", "test_likely_lost_picks_the_lowest_overlap_in_old_order_and_zero_picks_nothing" ),
+    ( "if r[ \"after\" ] < r[ \"before\" ]:\n                found.append", "if False:\n                found.append", "test_a_renamed_heading_plus_one_dropped_item_is_two_findings_and_names_the_item" ),
+    ( "if r[ \"heading_missing\" ]:\n                now", "if False:\n                now", "test_a_renamed_heading_with_every_item_kept_is_exactly_one_finding" ),
+    ( "words = ( w[ :-1 ] if len( w ) > 3 and w.endswith( \"s\" ) else w for w in WORD_REGEX.findall( item.lower() ) )", "words = WORD_REGEX.findall( item.lower() )", "test_tokens_and_overlap_ignore_case_punctuation_order_stopwords_and_a_plural_s" ),
+    ( "return { w for w in words if w not in STOPWORDS }", "return set( words )", "test_tokens_and_overlap_ignore_case_punctuation_order_stopwords_and_a_plural_s" ),
+    ( "( \" (class)\" if isinstance( child, ast.ClassDef ) else \"\" )", "\"\"", "test_definition_sections_track_classes_and_same_name_defs" ),
+    ( "name = base if seen[ base ] == 1 else f\"{base}#{seen[ base ]}\"", "name = base", "test_definition_sections_track_classes_and_same_name_defs" ),
+    ( "(?:[-*\\u2022]|\\d+[.)])", "(?:[-])", "test_parse_sections_reads_flush_star_numbered_and_continued_items" ),
+    ( "elif name is not None and bullet and len( bullet.group( 1 ) ) >= header_indent:", "elif name is not None and bullet and len( bullet.group( 1 ) ) > header_indent:", "test_parse_sections_reads_flush_star_numbered_and_continued_items" ),
+    ( "sections[ name ][ -1 ] += \" \" + line", "pass", "test_parse_sections_reads_flush_star_numbered_and_continued_items" ),
+    ( "return 1 if args.strict and findings( results ) else 0", "return 0", "test_cli_strict_exits_one_on_a_missing_heading_and_zero_when_clean" ),
+    ( "if p.endswith( \".py\" ) ):", "if p.endswith( \".py\" ) and p.isascii() ):", "test_cli_reads_a_non_ascii_path" ),
 ]
 
 
@@ -231,9 +358,14 @@ def _mutant_module( old, new ):
 
 @pytest.mark.parametrize( "old,new,named_test", MUTANTS )
 def test_each_mutant_reddens_its_named_test( monkeypatch, repo, old, new, named_test ):
-    this = globals()
-    kwargs = { "repo": repo } if "repo" in this[ named_test ].__code__.co_varnames[ : this[ named_test ].__code__.co_argcount ] else {}
-    this[ named_test ]( **kwargs )
+    this   = globals()
+    func   = this[ named_test ]
+    names  = func.__code__.co_varnames[ : func.__code__.co_argcount ]
+    kwargs = {}
+    if "repo" in names: kwargs[ "repo" ] = repo
+    if "pair" in names: kwargs[ "pair" ] = PAIRS[ 0 ]
+    if "index" in names: kwargs[ "index" ], kwargs[ "old_item" ] = HAND_DROPS[ 0 ]
+    func( **kwargs )
     monkeypatch.setitem( this, "cd", _mutant_module( old, new ) )
     with pytest.raises( Exception ):  # a crash reddens the test as surely as a failed assert
-        this[ named_test ]( **kwargs )
+        func( **kwargs )
