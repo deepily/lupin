@@ -13,7 +13,7 @@ import hashlib
 import json
 import sys
 
-from . import claim_extractor, claim_judge, harness_report, harness_runner
+from . import claim_extractor, claim_judge, harness_report, harness_runner, jev_judge
 
 
 def parse_args( argv ):
@@ -24,6 +24,9 @@ def parse_args( argv ):
     parser.add_argument( "--out", required=True, help="where to write the report JSON" )
     for name in ( "extractor", "judge", "escalation", "writer" ):
         parser.add_argument( f"--{name}-model", required=True )
+    parser.add_argument( "--judge-backend", choices=( "claude", "jev" ), default="claude", help="jev: --judge-model is the pinned Jev id" )
+    parser.add_argument( "--t-lo", type=float, help="jev only: noul at or below this is absent" )
+    parser.add_argument( "--t-hi", type=float, help="jev only: noul at or above this is present" )
     parser.add_argument( "--extractor-lists", type=int, default=2 )
     parser.add_argument( "--judge-runs", type=int, default=3 )
     parser.add_argument( "--gate", action="store_true", help="a gate run: refuse unless --frozen-versions matches" )
@@ -58,7 +61,16 @@ def main( argv, query_fn=None ):
     except ValueError as e:
         print( f"REFUSED: {e}", file=sys.stderr )
         return 2
-    current = f"{claim_extractor.PROMPT_VERSION},{claim_judge.PROMPT_VERSION}"
+    backend = None
+    judge_version = claim_judge.PROMPT_VERSION
+    if args.judge_backend == "jev":
+        try:
+            backend = jev_judge.JevBackend( args.judge_model, args.t_lo, args.t_hi, args.escalation_model )
+        except ValueError as e:
+            print( f"REFUSED: {e}", file=sys.stderr )
+            return 2
+        judge_version = backend.prompt_version
+    current = f"{claim_extractor.PROMPT_VERSION},{judge_version}"
     if args.gate and args.frozen_versions != current:
         print( f"REFUSED: gate run needs --frozen-versions {current}, got {args.frozen_versions}", file=sys.stderr )
         return 3
@@ -68,8 +80,8 @@ def main( argv, query_fn=None ):
         print( f"REFUSED: gate run needs --frozen-pairs-sha {pairs_sha}, got {args.frozen_pairs_sha}", file=sys.stderr )
         return 3
     pairs = json.loads( raw )
-    results = asyncio.run( harness_runner.run_all( pairs, config, harness_runner.Ledger( args.ledger ), query_fn=query_fn ) )
-    report  = harness_report.build_report( results, config )
+    results = asyncio.run( harness_runner.run_all( pairs, config, harness_runner.Ledger( args.ledger ), query_fn=query_fn, judge_backend=backend ) )
+    report  = harness_report.build_report( results, config, judge_prompt_version=judge_version )
     report[ "pairs_sha" ] = pairs_sha
     with open( args.out, "w", encoding="utf-8" ) as f: json.dump( report, f, indent=2 )
     print( f"report written to {args.out}: default_gate_pass={report[ 'default_gate_pass' ]}" )

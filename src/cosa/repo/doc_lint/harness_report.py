@@ -91,12 +91,13 @@ def flagged( claim_list ):
     return bool( claim_list[ "claims" ] ) and any( final_absent( claim_list[ "runs" ] ) )
 
 
-def build_report( results, config ):
+def build_report( results, config, judge_prompt_version=None ):
     """
     Turn runner results into the exit-gate figures.
 
     Requires:
         - results come from run_all with the same config
+        - judge_prompt_version, when given, is the judge back end's version (a Jev run), recorded in place of the Claude judge's
         - a result with a seed_span is a seeded-removal pair; the others are unseeded
 
     Ensures:
@@ -156,7 +157,7 @@ def build_report( results, config ):
     return {
         "models"            : { "extractor": config.extractor_model, "judge": config.judge_model,
                                 "escalation": config.escalation_model, "writer": config.writer_model },
-        "prompt_versions"   : { "extractor": claim_extractor.PROMPT_VERSION, "judge": claim_judge.PROMPT_VERSION },
+        "prompt_versions"   : { "extractor": claim_extractor.PROMPT_VERSION, "judge": claim_judge.PROMPT_VERSION if judge_prompt_version is None else judge_prompt_version },
         "lists"             : lists,
         "agreement_all"     : { "same": all_same, "claims": all_total, "rate": all_same / all_total if all_total else None,
                                 "interval": interval( all_same, all_total ) },
