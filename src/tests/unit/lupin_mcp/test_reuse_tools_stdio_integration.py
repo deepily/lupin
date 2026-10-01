@@ -24,6 +24,7 @@ import re
 import shutil
 import sys
 import textwrap
+import time
 
 import pytest
 
@@ -192,3 +193,51 @@ def test_when_the_call_log_middleware_import_raises_the_server_says_so_and_still
         check = client.call_tool( "check_exists", { "need": "something to look up" } )
     assert voice[ "project" ] == "lupin" and check[ "tool" ] == "check_exists", "both families still answer without the middleware"
     assert "reuse call-log middleware not mounted" in client.stderr_text, "the failure is reported on stderr, not silent"
+
+
+class OverlappingClient( WireClient ):
+    """A client that can have two calls in flight and keeps every response it reads, whichever call it answers."""
+
+    def __init__( self, *a, **k ):
+        super().__init__( *a, **k )
+        self.seen = {}
+
+    def send_call( self, name, arguments ):
+        """Ensures: sends tools/call without waiting; returns the request id."""
+        req_id = self._allocate_id()
+        self._send( { "jsonrpc": "2.0", "id": req_id, "method": "tools/call", "params": { "name": name, "arguments": arguments } } )
+        return req_id
+
+    def wait_for( self, req_id ):
+        """Ensures: returns ( response, seconds waited ), keeping other responses that arrive first in self.seen."""
+        t0 = time.monotonic()
+        while req_id not in self.seen:
+            line = self.proc.stdout.readline()
+            if not line: raise RuntimeError( "server closed stdout while a call was pending" )
+            try: msg = json.loads( line.decode( "utf-8" ) )
+            except json.JSONDecodeError: continue
+            if "id" in msg: self.seen[ msg[ "id" ] ] = msg
+        return self.seen[ req_id ], time.monotonic() - t0
+
+
+def test_a_slow_reuse_call_does_not_starve_a_voice_tool( tmp_path ):
+    """
+    The heartbeat-shaped test for the reuse tools (plan 2 section 5): a seat has ONE STDIO process, so
+    a reuse call that blocks the event loop silences every other verb. A fresh index directory forces
+    check_exists into a real index build (seconds), and a voice tool called while it runs must answer
+    before it finishes, not after.
+    """
+    env = server_env( tmp_path / "data", tmp_path / "out" )
+    with OverlappingClient( env=env, cwd=str( REPO ), timeout_seconds=180.0 ) as client:
+        client.initialize()
+        slow = client.send_call( "check_exists", { "need": "a need that makes the server build its index first" } )
+        time.sleep( 1.0 )                                                     # let the server start the build
+        fast = client.send_call( "get_session_info", {} )
+        fast_resp, fast_wait = client.wait_for( fast )
+        slow_done_when_fast_answered = slow in client.seen
+        slow_resp, slow_wait = client.wait_for( slow )
+    assert fast_resp[ "result" ][ "isError" ] is False, "the voice tool answered normally"
+    assert not slow_done_when_fast_answered, "positive control: the reuse call was still in flight when the voice tool answered"
+    assert fast_wait < 5.0, f"the voice tool waited {fast_wait:.1f}s behind a running reuse call: the event loop was blocked"
+    assert slow_wait + fast_wait > 3.0, "the reuse call must have been slow enough to prove anything"
+    assert slow_resp[ "result" ][ "isError" ] is False
