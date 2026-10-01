@@ -15,6 +15,7 @@ Venue: :7999-eligible. No SSH, no network, no real docker.
 """
 import json
 import os
+import re
 import stat
 import subprocess
 
@@ -129,6 +130,24 @@ esac
 '''
 
 
+def _override_variables():
+    """
+    Every environment variable the scripts honor as an OVERRIDE of a path under $HOME, read from their source.
+
+    🔴 WHY THIS IS DERIVED AND NOT LISTED (row 5ad93b8c, 2026-09-30). The venue pinned HOME and two of the
+    eleven override variables; the other nine fell through from `os.environ`. `preflight-vm.sh` reads
+    `${PREFLIGHT_VM_FLEET_ROSTER:-$HOME/.claude/fleet-roster.env}`, so one ambient `PREFLIGHT_VM_FLEET_ROSTER`
+    pointing at a real roster makes test_A9_absent_roster_fails read the real file, find a manager line, and
+    miss the `[FAIL]` it expects (measured: 4 tests in this file flip, A9 among them). Isolating HOME alone
+    was never the isolation. Deriving the names from the scripts means a new override is scrubbed on arrival.
+    """
+    names = set()
+    for path in ( SCRIPT, LIB ):
+        with open( path, encoding="utf-8" ) as handle:
+            names.update( re.findall( r"\b(PREFLIGHT_VM_[A-Z0-9_]+|LUPIN_HOST_SESSIONS_DIR)\b", handle.read() ) )
+    return names
+
+
 @pytest.fixture
 def venue( tmp_path ):
     """A fully-good fake venue; each test plants ONE defect into it."""
@@ -141,11 +160,34 @@ def venue( tmp_path ):
     ( home / ".claude" / "projects" / "-mnt-lupin-data-lupin" ).mkdir()
     msrc = tmp_path / "mounts.tsv"; msrc.write_text( "".join( f"{s}\t{t}\n" for s, t in MOUNTS ) )
     fr = tmp_path / "frs.json"; fr.write_text( '{"window_hours": 24, "allow_below": 2.0}' )
-    env = { **os.environ, "HOME": str( home ), "PATH": f"{bindir}:{os.environ['PATH']}",
+    ambient = { k: v for k, v in os.environ.items() if k not in _override_variables() }
+    env = { **ambient, "HOME": str( home ), "PATH": f"{bindir}:{os.environ['PATH']}",
             "PREFLIGHT_VM_CONTAINER": "fake-rest", "FAKE_CONTAINER": "fake-rest",
             "FAKE_MOUNTS_SRC": str( msrc ), "FAKE_FR_DIR": "/var/lupin/flow-ratio", "FAKE_FR_FILE": str( fr ),
             "FAKE_UNSAFE": "", "PREFLIGHT_VM_COMPOSE": COMPOSE, "LUPIN_ROOT": ROOT }
     return { "home": home, "env": env, "fr": fr, "msrc": msrc }
+
+
+def test_the_override_variables_are_found_at_all():
+    # A scrub list derived by a regex over the scripts is only worth anything if the regex finds them:
+    # an empty set scrubs nothing and every test below stays green over a leaking venue.
+    found = _override_variables()
+    assert { "PREFLIGHT_VM_FLEET_ROSTER", "PREFLIGHT_VM_CC_SETTINGS", "PREFLIGHT_VM_CC_PROJECTS",
+             "LUPIN_HOST_SESSIONS_DIR" } <= found, sorted( found )
+    assert len( found ) >= 9, sorted( found )
+
+
+def test_an_ambient_roster_override_cannot_hide_a_missing_roster( request, monkeypatch, tmp_path ):
+    # The leak, planted BEFORE the venue is built: a real roster named by the ambient environment. With
+    # the override reaching the script, it reads that file, finds a manager line and prints no
+    # `[FAIL]`, which is exactly how test_A9_absent_roster_fails could be red in a full tier and green alone.
+    real = tmp_path / "somebody-elses-roster.env"
+    real.write_text( 'COSA_VOICE_MANAGERS__LUPIN="Real"\n' )
+    monkeypatch.setenv( "PREFLIGHT_VM_FLEET_ROSTER", str( real ) )
+    venue = request.getfixturevalue( "venue" )
+    assert "PREFLIGHT_VM_FLEET_ROSTER" not in venue[ "env" ]
+    ( venue[ "home" ] / ".claude" / "fleet-roster.env" ).unlink()
+    assert "[FAIL]" in _line( _run( venue ), "fleet-roster.env is missing" )
 
 
 def _run( venue ):
