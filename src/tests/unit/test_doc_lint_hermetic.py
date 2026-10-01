@@ -241,3 +241,14 @@ def test_the_cli_refuses_to_resume_a_ledger_under_a_different_binary_version( tm
     ( tmp_path / "claude-1.0.0" ).write_text( "#!/bin/sh\necho '2.0.0 (Fake Code)'\n" )
     assert harness_cli.main( cli_args( tmp_path, "--claude-cli-path", one ), query_fn=forbidden ) == 2
     assert calls == [] and not ( tmp_path / "r.json" ).exists()
+
+
+def test_the_cli_refuses_to_resume_a_ledger_when_the_binary_path_changes_under_the_same_version( tmp_path ):
+    from tests.unit.test_doc_lint_jev import cli_args, cli_claude_query
+    def fake( name ):
+        binary = tmp_path / name
+        binary.write_text( "#!/bin/sh\necho '1.0.0 (Fake Code)'\n" )
+        binary.chmod( 0o755 )
+        return str( binary )
+    assert harness_cli.main( cli_args( tmp_path, "--claude-cli-path", fake( "claude-a" ) ), query_fn=cli_claude_query() ) == 0
+    assert harness_cli.main( cli_args( tmp_path, "--claude-cli-path", fake( "claude-b" ) ), query_fn=cli_claude_query() ) == 2
