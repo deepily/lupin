@@ -128,22 +128,39 @@ def test_report_improved_requires_fewer_tokens_and_no_rate_above( repo ):
     assert report[ "other" ][ "improved" ] is False
 
 
+def _side( tokens, unparsed=0, **counts ):
+    full = { c : 0 for c in mc.MARKER_COLUMNS }
+    full.update( counts )
+    return { "tokens": tokens, "unparsed": unparsed, "counts": { "words": tokens, **full } }
+
+
 def test_compare_rejects_a_rate_that_rose_even_when_tokens_fell():
-    low  = { "tokens": 10, "rates": { c : 0.0 for c in mc.MARKER_COLUMNS } }
-    high = { "tokens": 5, "rates": { **low[ "rates" ], "tics": 0.1 } }
-    assert dm.compare( { "tokens": 20, "rates": low[ "rates" ] }, high ) is False
-    assert dm.compare( { "tokens": 20, "rates": low[ "rates" ] }, low ) is True
-    assert dm.compare( low, low ) is False
+    assert dm.compare( _side( 20 ), _side( 5, tics=1 ) ) is False
+    assert dm.compare( _side( 20 ), _side( 10 ) ) is True
+    assert dm.compare( _side( 10 ), _side( 10 ) ) is False
+
+
+def test_compare_is_exact_where_the_one_decimal_display_would_hide_a_rise():
+    before, after = _side( 10000, tics=100 ), _side( 9990, tics=100 )
+    assert mc.rates_per_thousand( before[ "counts" ] )[ "tics" ] == mc.rates_per_thousand( after[ "counts" ] )[ "tics" ] == 10.0
+    assert dm.compare( before, after ) is False
+    assert dm.compare( before, _side( 9990, tics=99 ) ) is True
+
+
+def test_compare_refuses_a_package_where_more_files_stopped_parsing():
+    assert dm.compare( _side( 1000 ), _side( 500, unparsed=3 ) ) is False
+    assert dm.compare( _side( 1000, unparsed=3 ), _side( 500, unparsed=3 ) ) is True
+    assert dm.compare( _side( 1000, unparsed=3 ), _side( 500, unparsed=2 ) ) is True
 
 
 def test_table_has_a_row_per_package_with_arrows( repo ):
     word_list.configure_root( repo )
     table = dm.render_table( dm.build_report( repo, [ "pkg", "other" ], "HEAD" ) )
     lines = table.strip().split( "\n" )
-    assert lines[ 0 ] == "| package | tokens | em_dash | caps_words | section_refs | id_refs | tics | emphasis_glyphs | improved |"
-    assert len( lines ) == 4 and lines[ 2 ].startswith( "| pkg | " ) and lines[ 2 ].endswith( " | yes |" )
+    assert lines[ 0 ] == "| package | files | unparsed | tokens | em_dash | caps_words | section_refs | id_refs | tics | emphasis_glyphs | improved |"
+    assert len( lines ) == 6 and lines[ 2 ].startswith( "| pkg | 3 -> 3 (+0/-0) | 1 -> 1 | " ) and lines[ 2 ].endswith( " | yes |" )
     assert lines[ 3 ].startswith( "| other | " ) and lines[ 3 ].endswith( " | no |" )
-    assert " -> " in lines[ 2 ]
+    assert lines[ 5 ].startswith( "Fewer tokens also happen when documentation is deleted" )
 
 
 def _run( repo, *extra ):
@@ -179,15 +196,38 @@ def test_bad_revision_raises( repo ):
         dm.main( [ "pkg", "--base", "nope", "--repo-root", str( repo ) ], out=io.StringIO() )
 
 
+def test_a_deleted_tracked_file_and_an_untracked_new_file_are_reported_not_fatal( repo ):
+    word_list.configure_root( repo )
+    ( repo / "pkg" / "b.dart" ).unlink()
+    ( repo / "pkg" / "fresh.py" ).write_text( '"""Fresh."""\n', encoding="utf-8" )
+    report = dm.build_report( repo, [ "pkg" ], "HEAD" )
+    assert report[ "pkg" ][ "added" ] == [ "pkg/fresh.py" ] and report[ "pkg" ][ "removed" ] == [ "pkg/b.dart" ]
+    assert report[ "pkg" ][ "after" ][ "files" ] == 3
+    assert "(+1/-1)" in dm.render_table( report )
+
+
+def test_a_non_ascii_file_name_is_listed( repo ):
+    word_list.configure_root( repo )
+    ( repo / "pkg" / "\u00e9.py" ).write_text( '"""Doc."""\n', encoding="utf-8" )
+    assert "pkg/\u00e9.py" in dm.package_files( repo, "pkg" )
+    _commit_head( repo )
+    assert "pkg/\u00e9.py" in dm.package_files( repo, "pkg", "HEAD" )
+
+
 # ---- mutation check: each mutant of the module must redden its named test ----
 
 MUTANTS = [
-    ( "return after[ \"tokens\" ] < before[ \"tokens\" ] and", "return True or", "test_compare_rejects_a_rate_that_rose_even_when_tokens_fell" ),
-    ( "after[ \"tokens\" ] < before[ \"tokens\" ]", "after[ \"tokens\" ] <= before[ \"tokens\" ]", "test_compare_rejects_a_rate_that_rose_even_when_tokens_fell" ),
+    ( "if after[ \"tokens\" ] >= before[ \"tokens\" ] or after[ \"unparsed\" ] > before[ \"unparsed\" ]: return False", "if after[ \"tokens\" ] >= before[ \"tokens\" ]: return False", "test_compare_refuses_a_package_where_more_files_stopped_parsing" ),
+    ( "if after[ \"tokens\" ] >= before[ \"tokens\" ] or", "if after[ \"tokens\" ] > before[ \"tokens\" ] or", "test_compare_rejects_a_rate_that_rose_even_when_tokens_fell" ),
+    ( "after[ \"counts\" ][ c ] * before[ \"tokens\" ] <= before[ \"counts\" ][ c ] * after[ \"tokens\" ]", "after[ \"rates\" ][ c ] <= before[ \"rates\" ][ c ]", "test_compare_is_exact_where_the_one_decimal_display_would_hide_a_rise" ),
     ( "if texts is None:\n            unparsed += 1\n            continue", "if texts is None:\n            continue", "test_package_metrics_before_counts_every_marker_by_hand" ),
-    ( "and in_scope( p )", "", "test_package_files_come_from_git_and_skip_tests_and_other_suffixes" ),
-    ( "p.endswith( SUFFIXES ) and", "", "test_package_files_come_from_git_and_skip_tests_and_other_suffixes" ),
+    ( "p.endswith( SUFFIXES ) and in_scope( p )", "p.endswith( SUFFIXES )", "test_package_files_come_from_git_and_skip_tests_and_other_suffixes" ),
     ( "if rev is None:\n        with open", "if False:\n        with open", "test_package_metrics_working_tree_reads_the_edited_files" ),
+    ( "names  = [ n for n in names if os.path.exists( f\"{root}/{n}\" ) ]", "names  = names", "test_a_deleted_tracked_file_and_an_untracked_new_file_are_reported_not_fatal" ),
+    ( "names += _git( root, \"ls-files\", \"--others\", \"--exclude-standard\", \"-z\", \"--\", package ).split( \"\\0\" )", "pass", "test_a_deleted_tracked_file_and_an_untracked_new_file_are_reported_not_fatal" ),
+    ( "\"removed\"  : sorted( set( before[ \"paths\" ] ) - set( after[ \"paths\" ] ) ),", "\"removed\"  : [],", "test_a_deleted_tracked_file_and_an_untracked_new_file_are_reported_not_fatal" ),
+    ( "\"-z\", rev, \"--\", package ).split( \"\\0\" )", "rev, \"--\", package ).split( \"\\0\" )", "test_a_non_ascii_file_name_is_listed" ),
+    ( "rows.append( \"Fewer tokens also happen when documentation is deleted; read this table beside contract_diff and the claim judge.\" )", "pass", "test_table_has_a_row_per_package_with_arrows" ),
     ( "return 1 if args.strict and not all( r[ \"improved\" ] for r in report.values() ) else 0", "return 0", "test_cli_table_json_and_strict" ),
 ]
 

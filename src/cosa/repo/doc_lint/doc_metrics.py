@@ -4,10 +4,15 @@ Documentation metrics per package: tokens and marker rates, before and after a c
 A package is a directory prefix. Its text is every Python docstring and every Dart doc block
 under it. Counting is done by marker_counts, so this tool and the linters cannot disagree.
 Tokens are the words marker_counts counts. Output is JSON or a markdown table.
+
+Improved means tokens fell, no file stopped parsing, and no marker rate rose, compared exactly
+and not on the rounded display values. Deleting documentation lowers tokens too, so a package
+reads as improved only for as long as contract_diff and the claim judge also pass.
 """
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 
@@ -49,12 +54,19 @@ def package_files( root, package, rev=None ):
     Ensures:
         - returns sorted repo-relative paths that cli.in_scope accepts
         - the population comes from git, never from a disk walk
+        - with rev None it is the tracked files still on disk plus untracked files git does not ignore, so
+          a file the rewrite added or deleted is counted as it stands
 
     Raises:
         - RuntimeError from git when the listing fails
     """
-    args = [ "ls-tree", "-r", "--name-only", rev, "--", package ] if rev else [ "ls-files", "--", package ]
-    return sorted( p for p in _git( root, *args ).split( "\n" ) if p.endswith( SUFFIXES ) and in_scope( p ) )
+    if rev:
+        names = _git( root, "ls-tree", "-r", "--name-only", "-z", rev, "--", package ).split( "\0" )
+    else:
+        names  = _git( root, "ls-files", "-z", "--", package ).split( "\0" )
+        names += _git( root, "ls-files", "--others", "--exclude-standard", "-z", "--", package ).split( "\0" )
+        names  = [ n for n in names if os.path.exists( f"{root}/{n}" ) ]
+    return sorted( { p for p in names if p.endswith( SUFFIXES ) and in_scope( p ) } )
 
 
 def _read( root, rev, path ):
@@ -104,7 +116,7 @@ def package_metrics( root, package, rev=None ):
         - root is a git working tree whose word list configure_root can find
 
     Ensures:
-        - returns { files, unparsed, tokens, counts, rates }; counts holds the summed raw markers
+        - returns { files, paths, unparsed, tokens, counts, rates }; counts holds the summed raw markers
         - rates are per 1,000 tokens, computed from the summed counts
 
     Raises:
@@ -117,7 +129,7 @@ def package_metrics( root, package, rev=None ):
             unparsed += 1
             continue
         for text in texts: add_counts( total, count_markers( text ) )
-    return { "files": len( paths ), "unparsed": unparsed, "tokens": total[ "words" ], "counts": total, "rates": rates_per_thousand( total ) }
+    return { "files": len( paths ), "paths": paths, "unparsed": unparsed, "tokens": total[ "words" ], "counts": total, "rates": rates_per_thousand( total ) }
 
 
 def compare( before, after ):
@@ -128,13 +140,17 @@ def compare( before, after ):
         - both are package_metrics results
 
     Ensures:
-        - returns True when every marker rate is at or below its before value and tokens are lower
+        - returns True when tokens are lower, no more files fail to parse, and every marker rate is at or
+          below its before value
+        - rates are compared as exact fractions of the raw counts, so a rise too small to show in the
+          one-decimal display still counts
         - a package with no tokens before cannot get lower, so it is never improved
 
     Raises:
         - nothing
     """
-    return after[ "tokens" ] < before[ "tokens" ] and all( after[ "rates" ][ c ] <= before[ "rates" ][ c ] for c in MARKER_COLUMNS )
+    if after[ "tokens" ] >= before[ "tokens" ] or after[ "unparsed" ] > before[ "unparsed" ]: return False
+    return all( after[ "counts" ][ c ] * before[ "tokens" ] <= before[ "counts" ][ c ] * after[ "tokens" ] for c in MARKER_COLUMNS )
 
 
 def build_report( root, packages, base, head=None ):
@@ -146,7 +162,8 @@ def build_report( root, packages, base, head=None ):
         - head is a revision, or None for the working tree
 
     Ensures:
-        - returns { package: { before, after, improved } }
+        - returns { package: { before, after, added, removed, improved } }
+        - added and removed list the files that are in only one of the two populations
 
     Raises:
         - RuntimeError from git when a listing or read fails
@@ -154,7 +171,13 @@ def build_report( root, packages, base, head=None ):
     report = {}
     for package in packages:
         before, after = package_metrics( root, package, base ), package_metrics( root, package, head )
-        report[ package ] = { "before" : before, "after" : after, "improved" : compare( before, after ) }
+        report[ package ] = {
+            "before"   : before,
+            "after"    : after,
+            "added"    : sorted( set( after[ "paths" ] ) - set( before[ "paths" ] ) ),
+            "removed"  : sorted( set( before[ "paths" ] ) - set( after[ "paths" ] ) ),
+            "improved" : compare( before, after )
+        }
     return report
 
 
@@ -166,17 +189,24 @@ def render_table( report ):
         - report is the dict build_report returns
 
     Ensures:
-        - returns a str with tokens and each marker rate as "before -> after", and an improved column
+        - returns a str with files, files that fail to parse, tokens and each marker rate as "before -> after",
+          an improved column, and a closing note that fewer tokens can mean deleted documentation
 
     Raises:
         - nothing
     """
-    head = [ "package", "tokens", *MARKER_COLUMNS, "improved" ]
+    head = [ "package", "files", "unparsed", "tokens", *MARKER_COLUMNS, "improved" ]
     rows = [ "| " + " | ".join( head ) + " |", "| " + " | ".join( "---" for _ in head ) + " |" ]
     for package, r in report.items():
-        cells = [ f"{r[ 'before' ][ 'tokens' ]} -> {r[ 'after' ][ 'tokens' ]}" ]
+        cells = [
+            f"{r[ 'before' ][ 'files' ]} -> {r[ 'after' ][ 'files' ]} (+{len( r[ 'added' ] )}/-{len( r[ 'removed' ] )})",
+            f"{r[ 'before' ][ 'unparsed' ]} -> {r[ 'after' ][ 'unparsed' ]}",
+            f"{r[ 'before' ][ 'tokens' ]} -> {r[ 'after' ][ 'tokens' ]}"
+        ]
         cells += [ f"{r[ 'before' ][ 'rates' ][ c ]} -> {r[ 'after' ][ 'rates' ][ c ]}" for c in MARKER_COLUMNS ]
         rows.append( "| " + " | ".join( [ package, *cells, "yes" if r[ "improved" ] else "no" ] ) + " |" )
+    rows.append( "" )
+    rows.append( "Fewer tokens also happen when documentation is deleted; read this table beside contract_diff and the claim judge." )
     return "\n".join( rows ) + "\n"
 
 
