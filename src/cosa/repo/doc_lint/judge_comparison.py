@@ -371,7 +371,10 @@ def main( argv ):
     Ensures:
         - returns 0 after writing both files, printing one line per judge
         - returns 2 when a model id is refused or a gate path is named without --split gate
+        - returns 2 when the ledgers do not all record the same Claude Code binary and version, naming each; an
+          unbound ledger among bound ones is a mix too
         - returns 3 when --split gate has no --frozen-pairs-sha, or it is not the sha256 of the pairs file
+        - the one binding is written into the JSON as claude_cli_binding, or null when no ledger records one
         - a judge whose ledger lacks a row is written as incomplete, never as a partial figure set
         - makes no model call and writes only the two output files and a merged ledger copy in memory
     """
@@ -387,8 +390,13 @@ def main( argv ):
     except ValueError as e:
         print( f"REFUSED: {e}", file=sys.stderr )
         return 2
-    ledger = harness_runner.Ledger( args.ledger[ 0 ] )
-    for path in args.ledger[ 1 : ]: ledger.entries.update( harness_runner.Ledger( path ).entries )
+    ledgers  = [ harness_runner.Ledger( path ) for path in args.ledger ]
+    bindings = { l.recorded for l in ledgers }
+    if len( bindings ) > 1:
+        print( "REFUSED: the ledgers were written under different Claude Code binaries: " + "; ".join( f"{path} = {l.recorded!r}" for path, l in zip( args.ledger, ledgers ) ), file=sys.stderr )
+        return 2
+    ledger = ledgers[ 0 ]
+    for other in ledgers[ 1 : ]: ledger.entries.update( other.entries )
     ext, esc, wri = args.extractor_model, args.escalation_model, args.writer_model
     judges = {
         "haiku" : ( harness_runner.HarnessConfig( ext, args.haiku_model,  esc, wri, args.extractor_lists, args.claude_judge_runs ), None ),
@@ -406,6 +414,7 @@ def main( argv ):
         with open( args.elapsed, encoding="utf-8" ) as f: elapsed = json.load( f )
     comparison = build_comparison( args.split, pairs, keys, ledger, judges, elapsed )
     comparison[ "pairs_sha" ] = sha
+    comparison[ "claude_cli_binding" ] = ledger.recorded
     with open( args.out_json, "w", encoding="utf-8" ) as f: json.dump( comparison, f, indent=1 )
     with open( args.out_md, "w", encoding="utf-8" ) as f: f.write( render_markdown( comparison ) )
     for n, j in comparison[ "judges" ].items(): print( f"{n}: {'incomplete' if 'incomplete' in j else 'ok'}" )

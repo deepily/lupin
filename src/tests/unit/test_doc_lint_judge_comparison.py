@@ -9,9 +9,11 @@ fixed by its text, whatever the code under test does.
 
 import asyncio
 import json
+import os
 
 import pytest
 
+import cosa.utils.util as cu
 from cosa.repo.doc_lint import harness_report as hr
 from cosa.repo.doc_lint import harness_runner as hn
 from cosa.repo.doc_lint import jev_judge
@@ -294,6 +296,29 @@ def test_a_group_chart_is_left_out_when_the_keys_have_no_pair_of_its_kinds( run 
     assert "False-pass rate by pair type" in text and "False-alarm rate by pair type" not in text
 
 
+# ---- a ledger written by a real model ----------------------------------------------------------
+
+FIXTURES = os.path.join( cu.get_project_root(), "src", "tests", "fixtures", "judge_comparison" )
+
+
+def test_a_ledger_from_a_real_run_rebuilds_to_the_figures_the_harness_reported_and_to_pinned_literals():
+    pairs  = json.load( open( os.path.join( FIXTURES, "pairs.json" ) ) )
+    keys   = json.load( open( os.path.join( FIXTURES, "keys.json" ) ) )[ "keys" ]
+    report = json.load( open( os.path.join( FIXTURES, "harness-report.json" ) ) )
+    ledger = hn.Ledger( os.path.join( FIXTURES, "ledger.jsonl" ) )
+    for p in pairs: p[ "seed_span" ] = tuple( p[ "seed_span" ] ) if p.get( "seed_span" ) else None
+    config = hn.HarnessConfig( "claude-sonnet-5-5", "claude-sonnet-5-5", "claude-opus-5-5", "tracked-docstrings", 2, 3 )
+    out    = jc.build_comparison( "dev", [ dict( p, design=None ) for p in pairs ], { k[ "id" ]: { f: k[ f ] for f in jc.KEY_FIELDS } for k in keys }, ledger, { "sonnet": ( config, None ) } )
+    judge  = out[ "judges" ][ "sonnet" ]
+    assert "incomplete" not in judge, judge
+    assert judge[ "headline" ][ "lists" ] == report[ "lists" ] and judge[ "headline" ][ "escalations" ] == report[ "escalations" ] == 2
+    assert [ ( l[ "positives" ], l[ "misses" ], l[ "unseeded" ], l[ "false_alarms" ] ) for l in judge[ "headline" ][ "lists" ] ] == [ ( 3, 0, 3, 0 ), ( 3, 0, 3, 0 ) ]
+    assert out[ "calls" ] == { "extract": 12, "judge": { "sonnet": 36 } }, "49 ledger lines: one binding record, 12 extractor calls, 36 judge calls"
+    groups = { g[ "group" ]: ( g[ "n" ], g[ "wrong" ] ) for g in judge[ "groups" ] }
+    assert groups == { "delete": ( 3, 0 ), "paraphrase": ( 3, 0 ) }
+    assert "| sonnet | 3 | 0 | 0.0% | 63.2% | 3 | 0 | 0.0% | 70.8% | 97.8% | 66.7% |" in jc.render_markdown( out ), "the real judge agreed with itself on 97.8% of claims and only 66.7% of the seeded ones"
+
+
 # ---- the command line ------------------------------------------------------------------------
 
 def argv( run, out_dir, *extra, split="dev" ):
@@ -324,6 +349,48 @@ def test_the_command_line_merges_ledgers_in_the_order_given( run, tmp_path ):
     args.insert( args.index( "--ledger" ) + 2, str( rest ) )
     assert jc.main( args ) == 0
     assert "incomplete" not in json.loads( ( tmp_path / "c.json" ).read_text() )[ "judges" ][ "haiku" ]
+
+
+def _bound_copy( run, tmp_path, name, binding ):
+    """Copy the run's ledger into a file that records the given binding (or none)."""
+    path = tmp_path / name
+    if binding is not None: hn.Ledger( str( path ), binding=binding )
+    with open( path, "a", encoding="utf-8" ) as out: out.write( ( run[ "tmp" ] / "ledger.jsonl" ).read_text() )
+    return str( path )
+
+
+def test_ledgers_bound_to_the_same_binary_merge_and_the_binding_is_written_to_the_json( run, tmp_path ):
+    one = _bound_copy( run, tmp_path, "a.jsonl", "claude_cli=/x|version=1.0" )
+    two = _bound_copy( run, tmp_path, "b.jsonl", "claude_cli=/x|version=1.0" )
+    args = argv( run, tmp_path )
+    i    = args.index( "--ledger" )
+    args[ i + 1 : i + 2 ] = [ one, two ]
+    assert jc.main( args ) == 0
+    assert json.loads( ( tmp_path / "c.json" ).read_text() )[ "claude_cli_binding" ] == "claude_cli=/x|version=1.0"
+
+
+def test_ledgers_bound_to_different_binaries_are_refused_and_both_are_named( run, tmp_path, capsys ):
+    one = _bound_copy( run, tmp_path, "a.jsonl", "claude_cli=/x|version=1.0" )
+    two = _bound_copy( run, tmp_path, "b.jsonl", "claude_cli=/y|version=2.0" )
+    args = argv( run, tmp_path )
+    i    = args.index( "--ledger" )
+    args[ i + 1 : i + 2 ] = [ one, two ]
+    assert jc.main( args ) == 2
+    err = capsys.readouterr().err
+    assert "different Claude Code binaries" in err and "version=1.0" in err and "version=2.0" in err
+    assert not ( tmp_path / "c.json" ).exists()
+
+
+def test_an_unbound_ledger_among_bound_ones_is_a_mix_and_all_unbound_is_not( run, tmp_path ):
+    bound   = _bound_copy( run, tmp_path, "a.jsonl", "claude_cli=/x|version=1.0" )
+    unbound = _bound_copy( run, tmp_path, "b.jsonl", None )
+    args    = argv( run, tmp_path )
+    i       = args.index( "--ledger" )
+    args[ i + 1 : i + 2 ] = [ bound, unbound ]
+    assert jc.main( args ) == 2
+    args[ i + 1 : i + 3 ] = [ unbound, _bound_copy( run, tmp_path, "c.jsonl", None ) ]
+    assert jc.main( args ) == 0
+    assert json.loads( ( tmp_path / "c.json" ).read_text() )[ "claude_cli_binding" ] is None
 
 
 def test_the_command_line_refuses_a_gate_split_without_the_frozen_sha_or_with_a_wrong_one( run, tmp_path, capsys ):
@@ -376,13 +443,16 @@ MUTANTS = [
     ( "if a[ \"unseeded\" ]:  alarms[ n ] =", "alarms[ n ] =", "test_a_judge_with_no_unseeded_pairs_shows_n_a_for_false_alarms_and_gets_no_alarm_chart_point" ),
     ( 'f"    x-axis [{\', \'.join( f\'\\"{g}\\"\' for g in groups )}]"', 'f"    x-axis [{\', \'.join( g.replace( \' \', \'_\' ) for g in groups )}]"', "test_every_chart_number_is_a_number_from_the_comparison" ),
     ( 'if stage == "judge" and model == field:', 'if stage == "judge" and model.startswith( field ):', "test_call_counts_split_extractor_calls_from_each_judges_calls" ),
+    ( "if len( bindings ) > 1:", "if False:", "test_ledgers_bound_to_different_binaries_are_refused_and_both_are_named" ),
+    ( "bindings = { l.recorded for l in ledgers }", "bindings = { ledgers[ 0 ].recorded }", "test_an_unbound_ledger_among_bound_ones_is_a_mix_and_all_unbound_is_not" ),
+    ( 'comparison[ "claude_cli_binding" ] = ledger.recorded', 'comparison[ "claude_cli_binding" ] = None', "test_ledgers_bound_to_the_same_binary_merge_and_the_binding_is_written_to_the_json" ),
     ( 'if stage == "extract": out[ "extract" ] += 1', 'if stage == "extract": out[ "extract" ] += 2', "test_call_counts_split_extractor_calls_from_each_judges_calls" ),
     ( "if caused_by_missing_row( e ): raise LedgerIncomplete(", "if True: raise LedgerIncomplete(", "test_a_missing_row_is_found_anywhere_in_an_error_chain_and_other_errors_pass_through" ),
     ( "error = error.__cause__ or error.__context__", "error = error.__cause__", "test_a_missing_row_is_found_anywhere_in_an_error_chain_and_other_errors_pass_through" ),
     ( "pct( alarms[ n ][ 1 ] if n in alarms else None )", "pct( alarms[ n ][ 0 ] if n in alarms else None )", "test_the_markdown_carries_each_figure_from_the_comparison_dict" ),
     ( "return max( 0.05, math.ceil( max( values + [ 0.0 ] ) / 0.05 ) * 0.05 )", "return max( 0.05, math.floor( max( values + [ 0.0 ] ) / 0.05 ) * 0.05 )", "test_formatting_helpers" ),
     ( "if gate and args.frozen_pairs_sha != sha:", "if False:", "test_the_command_line_refuses_a_gate_split_without_the_frozen_sha_or_with_a_wrong_one" ),
-    ( "for path in args.ledger[ 1 : ]: ledger.entries.update(", "for path in []: ledger.entries.update(", "test_the_command_line_merges_ledgers_in_the_order_given" ),
+    ( "for other in ledgers[ 1 : ]: ledger.entries.update( other.entries )", "for other in []: ledger.entries.update( other.entries )", "test_the_command_line_merges_ledgers_in_the_order_given" ),
     ( "except LedgerIncomplete as e:", "except ZeroDivisionError as e:", "test_build_comparison_marks_an_incomplete_judge_and_never_gives_it_figures" ),
 ]
 
