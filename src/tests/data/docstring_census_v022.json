@@ -1,0 +1,229 @@
+{
+ "schema": "v022-docstring-census/1",
+ "authorized_by": "task:be85e010-d0e2-4791-ab83-f2abe7a3e881",
+ "baseline_sha": "d40ed5cf4dd790efd241da153992586341402b15",
+ "measured": "2026-09-30",
+ "owner": "Pocholo (Tester, Cheech's v0.2.2 crew)",
+ "method": {
+  "population": "git ls-files at the baseline sha: 1,914 test_*.py/*_test.py files; 1,588 (src/tests/unit + src/cosa/tests) executed under mutation, 326 (e2e_ui, smoke, integration, parity_oracle, websocket_smoke, lupin_smoke, manual, ...) need a live server and were checked statically only",
+  "arm_prose": "In a throwaway detached worktree every docstring became '' and every non-pragma comment was removed in 800 of 820 tracked non-test, non-src/rnd .py files (the other 20 had neither); line numbers preserved, stripped AST equal modulo docstrings (checked per file, 0 skipped). Unit+cosa tier run sharded in both arms; a test is prose-dependent iff red when stripped and green in a per-file run of the unstripped tree.",
+  "arm_phase4": "Same 1,588 files with the 45 Phase 4 pages blanked to one line (src/docs/*.md minus fastapi/api.*, both CLAUDE.md, README.md, src/cosa/README.md, src/workflow/agentic-voice-workflow.md), compared with unstripped per-file runs.",
+  "arm_claude_dir": "294 files mentioning .claude/skills/commands run with all 67 tracked .claude/** files blanked: 0 dependents (one serial-gate red, test_sessions_dir_seam, is peer-bridge noise and is red unrelated to .claude).",
+  "ruled_out_as_artifacts": [
+   "test_gate_reachability_census",
+   "test_runner_collection_diagnosis",
+   "test_no_shadowing_bytecode: red in the sharded stripped run, green in 3 serial stripped runs of the same files (concurrency/mtime races)"
+  ],
+  "caveats": [
+   "The strip simulates a docs-only rewrite; it cannot see tests that only pass because wording survives a paraphrase.",
+   "Several shards were SIGKILLed by a cgroup cap (rc=137); every killed shard's files were re-run per-file to completion, in both arms.",
+   "Source-text readers that assert code (not prose) are unaffected by a docs-only rewrite and are not listed as dependents; scan.py found 443 candidate functions in 428 files that read source and assert a phrase, scan2.py found 52 with a literal that lives only in a docstring/comment of a resolved target, and the mutation arm confirmed which of those actually break (the others assert code text that also appears in executable tokens, or assert absence)."
+  ],
+  "tools": "/mnt/DATA01/include/www.deepily.ai/projects-data/lupin/v022-census/ (scan.py, scan2.py, strip.py, perfile.sh)"
+ },
+ "counts": {
+  "prose_dependent_test_files": 12,
+  "prose_dependent_red_tests": 36,
+  "phase4_dependent_files": 7,
+  "runtime_consumer_sites": 9,
+  "phase4_note": "4 unit files + 3 cosa rest files (hidden behind a reporter crash)"
+ },
+ "prose_dependent_tests": [
+  {
+   "file": "src/tests/unit/deploy/test_apply_claude_permissions.py",
+   "red_tests": [
+    "test_main_dry_run_flag_propagates",
+    "test_main_merges_via_explicit_flags",
+    "test_main_returns_2_on_a_malformed_target",
+    "test_main_returns_2_on_a_missing_source",
+    "test_main_returns_2_on_a_non_portable_source",
+    "test_main_verify_flag_propagates"
+   ],
+   "kind": "runtime-consumer",
+   "disposition": "keep-and-update",
+   "rationale": "Script builds argparse description from __doc__.split('\\n')[1] (src/scripts/apply_claude_permissions.py:260); blank docstring raises IndexError. Tests assert behaviour and stay; the script gets a literal description= before its docstring is rewritten."
+  },
+  {
+   "file": "src/tests/unit/deploy/test_code_identity.py",
+   "red_tests": [
+    "test_the_module_docstring_warns_that_a_PER_REQUEST_read_reproduces_the_bug"
+   ],
+   "kind": "docstring-text",
+   "disposition": "retire-with-reason",
+   "rationale": "Pins the PER REQUEST caveat in prose only; its behavioural twin (same git_sha on repeated calls) sits 3 tests above. Retire, proved by falsify.py: move the capture into the getter and name the twin that reddens."
+  },
+  {
+   "file": "src/tests/unit/dm_compression/test_corpus_synth.py",
+   "red_tests": [
+    "test_the_module_says_what_it_does_not_cover"
+   ],
+   "kind": "docstring-text",
+   "disposition": "keep-and-update",
+   "rationale": "Holds a disclosure ('WHAT THIS DOES NOT COVER', 'combinations nobody designed', 'never as') in the module docstring; no behaviour to convert. Re-anchor on one neutral heading phrase when the rewrite moves the disclosure."
+  },
+  {
+   "file": "src/tests/unit/lupin_mcp/test_task_create_describes_the_p0_petition.py",
+   "red_tests": [
+    "test_it_gives_ricks_window_and_the_stall_deadline_as_different_numbers",
+    "test_it_names_every_key_the_real_door_returns",
+    "test_it_names_every_ticket_state",
+    "test_it_names_the_call_that_files_the_petition",
+    "test_it_names_the_holding_priority_and_status",
+    "test_it_says_a_P0_edit_on_an_existing_row_is_refused",
+    "test_it_says_a_timeout_is_not_a_grant",
+    "test_the_example_files_a_petition",
+    "test_the_registered_description_is_the_docstring"
+   ],
+   "kind": "mcp-tool-description",
+   "disposition": "keep-and-update",
+   "rationale": "MCP tool docstring is the description every agent reads (a prompt). D15: reviewed as a prompt, OUTSIDE the sweep; the sweep must skip cosa_voice_mcp tool docstrings. Tests already assert agent-visible behaviour."
+  },
+  {
+   "file": "src/tests/unit/lupin_mcp/test_the_promotion_descriptions_name_both_deadlines.py",
+   "red_tests": [
+    "test_the_create_description_lists_answer_by_in_the_petition_field",
+    "test_the_create_description_says_answer_by_is_the_window_to_relay",
+    "test_the_poll_description_gives_the_window_and_the_stall_as_different_numbers",
+    "test_the_poll_description_names_every_deadline_key_the_poll_returns"
+   ],
+   "kind": "mcp-tool-description",
+   "disposition": "keep-and-update",
+   "rationale": "Same as the P0 petition file: asserts the registered tool description names both deadlines. Outside the sweep (D15)."
+  },
+  {
+   "file": "src/tests/unit/test_cc_memory_watch_deploy_parity.py",
+   "red_tests": [
+    "TestDeployedWatcherMatchesRepo::test_deployed_copy_is_byte_identical_to_the_tracked_file"
+   ],
+   "kind": "deployed-copy-byte-identity",
+   "disposition": "keep-and-update",
+   "rationale": "Asserts ~/.local/lib/lupin-cc-memory-watch/cc_memory_watch.py is byte-identical to the tracked file. ANY docs edit to src/cosa/utils/cc_memory_watch.py reddens it until install-cc-memory-watch.sh redeploys. Not a wording test: schedule the redeploy in the sweep step for that file."
+  },
+  {
+   "file": "src/tests/unit/test_cosa_voice_mcp_default.py",
+   "red_tests": [
+    "TestTheDocstringDoesNotAdvertiseAfkSafety::test_ask_multiple_choice_never_calls_itself_unattended_or_afk_safe",
+    "TestTheDocstringDoesNotAdvertiseAfkSafety::test_ask_yes_no_is_NOT_held_to_this",
+    "TestTheDocstringDoesNotAdvertiseAfkSafety::test_it_still_says_what_a_default_DOES_cover"
+   ],
+   "kind": "mcp-tool-description",
+   "disposition": "keep-and-update",
+   "rationale": "Asserts the ask_multiple_choice description never advertises AFK safety; reads tool.description. Outside the sweep (D15)."
+  },
+  {
+   "file": "src/tests/unit/test_cosa_voice_mcp_dm_style_contract.py",
+   "red_tests": [
+    "TestDmStyleContractAlwaysOn::test_mechanics_only_docstring_is_preserved_verbatim"
+   ],
+   "kind": "mcp-tool-description",
+   "disposition": "keep-and-update",
+   "rationale": "Asserts _dm_send_fn.__doc__ keeps 'PREFERRED' and '~204 tokens'; cosa_voice_mcp.py:4355 also mutates __doc__ at import. Outside the sweep (D15)."
+  },
+  {
+   "file": "src/tests/unit/test_delivery_collision_scan.py",
+   "red_tests": [
+    "test_exit_codes_are_three_distinct_answers[clean-0]",
+    "test_exit_codes_are_three_distinct_answers[collision-1]",
+    "test_exit_codes_are_three_distinct_answers[vacuous-2]",
+    "test_main_actually_prints_the_not_examined_line",
+    "test_the_scan_states_its_own_denominator"
+   ],
+   "kind": "runtime-consumer",
+   "disposition": "keep-and-update",
+   "rationale": "scripts/delivery-collision-scan.py:414 passes __doc__.splitlines()[1] to argparse and prints the denominator line from the docstring; tests assert that output. Move the strings into code literals first."
+  },
+  {
+   "file": "src/tests/unit/test_e2e_junit_diff.py",
+   "red_tests": [
+    "test_main_returns_2_on_a_bad_invocation_without_reading_a_file[no_args]",
+    "test_main_returns_2_on_a_bad_invocation_without_reading_a_file[one_arg]",
+    "test_main_returns_2_on_a_bad_invocation_without_reading_a_file[three_args]"
+   ],
+   "kind": "runtime-consumer",
+   "disposition": "keep-and-update",
+   "rationale": "scripts/e2e_junit_diff.py:137 prints __doc__ as the usage text on a bad invocation; tests assert the exit code 2 path. Replace with a USAGE literal."
+  },
+  {
+   "file": "src/tests/unit/test_park_reason_staleness.py",
+   "red_tests": [
+    "test_the_blind_spot_is_disclosed_where_readers_meet_the_flag"
+   ],
+   "kind": "docstring-text",
+   "disposition": "keep-and-update",
+   "rationale": "D15's named case: inspect.getdoc(park_reason_is_stale) must contain aa543525, OUTSIDE, CONTENT CONTRADICTION, chase; rules 4 and 6 ban three of the four. Re-anchor on the row path/slug; prove with falsify.py by deleting the aperture caveat."
+  },
+  {
+   "file": "src/tests/unit/test_the_reap_withholds_a_kill_it_cannot_prove.py",
+   "red_tests": [
+    "test_the_contract_names_the_withheld_cause_so_a_reader_can_separate_them"
+   ],
+   "kind": "docstring-text",
+   "disposition": "keep-and-update",
+   "rationale": "dismiss_sessions.__doc__ must contain 'HAS TWO CAUSES AND ONLY NAMES ONE' and withheld_no_memento. Keep the slug anchor, drop the capitalised sentence."
+  }
+ ],
+ "doc_readers_green_under_strip": [
+  {
+   "file": "src/tests/unit/lupin_mcp/test_the_human_waiting_asks_do_not_starve_the_loop.py",
+   "why": "reads impl.__doc__ but compares tool.description == impl.__doc__ (both sides move together); green under strip",
+   "disposition": "keep-and-update",
+   "note": "MCP tool description: outside the sweep (D15)"
+  },
+  {
+   "file": "src/tests/unit/test_coverage_contention.py",
+   "why": "__doc__ read is invariant under strip (green)",
+   "disposition": "keep"
+  }
+ ],
+ "phase4_page_readers": [
+  {
+   "file": "src/cosa/tests/unit/rest/test_system_init_requires_admin.py + test_websocket_router.py + test_websocket_router_coverage.py",
+   "red_tests": [
+    "INTERNALERROR (pytest reporter crash while a test fails) when src/docs/rest-api-reference.md is blanked; failing test hidden by the crash"
+   ],
+   "reads": "src/docs/rest-api-reference.md",
+   "disposition": "keep-and-update",
+   "rationale": "Found by bisecting 45 blanked pages. Name the failing test(s) before Phase 4 touches rest-api-reference.md (run the three files with that page blanked and the secret-redaction plugin off)."
+  }
+ ],
+ "runtime_consumers": [
+  {
+   "site": "src/scripts/apply_claude_permissions.py:260",
+   "use": "argparse description=__doc__.split('\\n')[1]"
+  },
+  {
+   "site": "src/scripts/delivery-collision-scan.py:414",
+   "use": "argparse description=__doc__.splitlines()[1]"
+  },
+  {
+   "site": "src/scripts/delivery_latency.py:139",
+   "use": "argparse description=__doc__ (green under strip; text lost from --help)"
+  },
+  {
+   "site": "src/scripts/e2e_junit_diff.py:137",
+   "use": "print(__doc__) as usage"
+  },
+  {
+   "site": "src/rnd/v0.2.0/2026.08.04-dm-verbosity-reduction/compare_arms.py:154",
+   "use": "print(__doc__) (src/rnd; outside the sweep)"
+  },
+  {
+   "site": "src/cosa/rest/routers/jobs.py:388-403",
+   "use": "reads delete_snapshot.__doc__, get_answer.__doc__ and module __doc__ (debug path)"
+  },
+  {
+   "site": "src/lupin_mcp/cosa_voice_mcp.py:4355",
+   "use": "_dm_send_fn.__doc__ += _DM_SEND_STYLE_ADDENDUM (mutates the tool description at import)"
+  },
+  {
+   "site": "src/lupin_mcp/cosa_voice_mcp.py (all @mcp.tool functions)",
+   "use": "FastMCP derives each tool description from the docstring; prompts, outside the sweep (D15)"
+  },
+  {
+   "site": "FastAPI route docstrings",
+   "use": "become OpenAPI descriptions in src/docs/fastapi/api.json (generated); not asserted by any unit test found"
+  }
+ ],
+ "dart": "lupin-mobile Dart tests (lane_vocabulary_test, single_dispatcher_test, focus_app_wiring_test) belong to Tiffany's track, row b707f92f; not censused here.",
+ "d15_note": "keep-and-update needs no mutation proof; every retire-with-reason or convert needs a falsify.py run naming the test that reddens (not yet run: dispositions are proposals for the sweep PRs)."
+}
