@@ -13,21 +13,27 @@ import hashlib
 import json
 import sys
 
-from . import claim_extractor, claim_judge, harness_report, harness_runner
+from . import claim_extractor, claim_judge, harness_report, harness_runner, jev_judge, jev_transport, labelled_pairs
 
 
 def parse_args( argv ):
     """Parse the command line; every model id is required and none has a default."""
     parser = argparse.ArgumentParser( description="Run the claim-preservation judge harness." )
-    parser.add_argument( "--pairs", required=True, help="JSON list of { id, old, new, design?, seed_span? }" )
+    parser.add_argument( "--pairs", required=True, help="JSON list of { id, old, new, design?, seed_span? }, or a labelled-set JSON Lines file when --keys is given" )
+    parser.add_argument( "--keys", help="labelled-set keys file: --pairs is then read as the labelled set's pairs file (dev split only)" )
     parser.add_argument( "--ledger", required=True, help="append-only ledger file; reuse it to resume" )
     parser.add_argument( "--out", required=True, help="where to write the report JSON" )
     for name in ( "extractor", "judge", "escalation", "writer" ):
         parser.add_argument( f"--{name}-model", required=True )
+    parser.add_argument( "--judge-backend", choices=( "claude", "jev" ), default="claude", help="jev: --judge-model is the pinned Jev id" )
+    parser.add_argument( "--t-lo", type=float, help="jev only: noul at or below this is absent" )
+    parser.add_argument( "--t-hi", type=float, help="jev only: noul at or above this is present" )
+    parser.add_argument( "--allow-design-text", action="store_true", help="labelled set only; real Design: documents need Rick's approval" )
     parser.add_argument( "--extractor-lists", type=int, default=2 )
-    parser.add_argument( "--judge-runs", type=int, default=3 )
-    parser.add_argument( "--gate", action="store_true", help="a gate run: refuse unless --frozen-versions matches" )
+    parser.add_argument( "--judge-runs", type=int, help="judge passes over each claim list: 3 for the Claude judge, 1 for Jev, whose answers are deterministic" )
+    parser.add_argument( "--gate", action="store_true", help="the one door onto the gate split: refuse unless versions, thresholds and the pairs sha are frozen; run by a seat other than the implementer" )
     parser.add_argument( "--frozen-pairs-sha", help="sha256 of the pairs file registered before the gate run" )
+    parser.add_argument( "--frozen-thresholds", help="jev gate run: t_lo,t_hi registered before the gate run, as written on the command line" )
     parser.add_argument( "--frozen-versions", help="extractor and judge prompt versions registered before the gate run, comma separated" )
     return parser.parse_args( argv )
 
@@ -42,34 +48,70 @@ def main( argv, query_fn=None ):
 
     Ensures:
         - returns 0 after writing the report, printing one summary line
-        - returns 2 and prints the reason when the model configuration is refused
+        - returns 2 and prints the reason when the model configuration is refused, or when the Jev
+          back end refuses to run: no key, a refused request, or a design document without --allow-design-text
         - returns 3 and runs nothing when --gate is set and --frozen-versions is missing or is not
           the extractor and judge versions in this code, so a gate run cannot use prompts
           that changed after they were registered
+        - returns 2 and opens nothing when a pairs or keys path names the gate split and --gate is not set
+        - returns 3 and runs nothing when --gate is set with the Jev back end and --frozen-thresholds
+          is missing or is not the --t-lo and --t-hi given
+        - returns 2 when --t-lo or --t-hi is given with the Claude back end, where they would be ignored
         - returns 3 and runs nothing when --gate is set and --frozen-pairs-sha is missing or is
           not the sha256 of the pairs file, so the gate file cannot change after registration
         - the report carries the sha256 of the pairs file
     """
     args   = parse_args( argv )
+    runs   = args.judge_runs if args.judge_runs is not None else ( 1 if args.judge_backend == "jev" else 3 )
     config = harness_runner.HarnessConfig( args.extractor_model, args.judge_model, args.escalation_model,
-                                           args.writer_model, args.extractor_lists, args.judge_runs )
+                                           args.writer_model, args.extractor_lists, runs )
+    if args.judge_backend == "claude" and ( args.t_lo is not None or args.t_hi is not None ):
+        print( "REFUSED: --t-lo and --t-hi only apply to --judge-backend jev", file=sys.stderr )
+        return 2
     try:
         harness_runner.check_models( config )
     except ValueError as e:
         print( f"REFUSED: {e}", file=sys.stderr )
         return 2
-    current = f"{claim_extractor.PROMPT_VERSION},{claim_judge.PROMPT_VERSION}"
+    backend = None
+    judge_version = claim_judge.PROMPT_VERSION
+    if args.judge_backend == "jev":
+        try:
+            backend = jev_judge.JevBackend( args.judge_model, args.t_lo, args.t_hi, args.escalation_model, allow_design_text=args.allow_design_text )
+        except ValueError as e:
+            print( f"REFUSED: {e}", file=sys.stderr )
+            return 2
+        judge_version = backend.prompt_version
+    current = f"{claim_extractor.PROMPT_VERSION},{judge_version}"
     if args.gate and args.frozen_versions != current:
         print( f"REFUSED: gate run needs --frozen-versions {current}, got {args.frozen_versions}", file=sys.stderr )
         return 3
+    if args.gate and args.judge_backend == "jev" and args.frozen_thresholds != f"{args.t_lo},{args.t_hi}":
+        print( f"REFUSED: gate run needs --frozen-thresholds {args.t_lo},{args.t_hi}, got {args.frozen_thresholds}", file=sys.stderr )
+        return 3
+    if not args.gate:
+        try:
+            for path in ( args.pairs, args.keys ):
+                if path is not None: labelled_pairs.refuse_gate_path( path )
+        except ValueError as e:
+            print( f"REFUSED: {e}", file=sys.stderr )
+            return 2
     with open( args.pairs, "rb" ) as f: raw = f.read()
     pairs_sha = hashlib.sha256( raw ).hexdigest()
     if args.gate and args.frozen_pairs_sha != pairs_sha:
         print( f"REFUSED: gate run needs --frozen-pairs-sha {pairs_sha}, got {args.frozen_pairs_sha}", file=sys.stderr )
         return 3
-    pairs = json.loads( raw )
-    results = asyncio.run( harness_runner.run_all( pairs, config, harness_runner.Ledger( args.ledger ), query_fn=query_fn ) )
-    report  = harness_report.build_report( results, config )
+    try:
+        pairs = json.loads( raw ) if args.keys is None else labelled_pairs.load_pairs( args.pairs, args.keys, gate=args.gate )
+    except ValueError as e:
+        print( f"REFUSED: {e}", file=sys.stderr )
+        return 2
+    try:
+        results = asyncio.run( harness_runner.run_all( pairs, config, harness_runner.Ledger( args.ledger ), query_fn=query_fn, judge_backend=backend ) )
+    except jev_transport.JevConfigError as e:
+        print( f"REFUSED: {e}", file=sys.stderr )
+        return 2
+    report  = harness_report.build_report( results, config, judge_prompt_version=judge_version, jev_run=backend is not None )
     report[ "pairs_sha" ] = pairs_sha
     with open( args.out, "w", encoding="utf-8" ) as f: json.dump( report, f, indent=2 )
     print( f"report written to {args.out}: default_gate_pass={report[ 'default_gate_pass' ]}" )

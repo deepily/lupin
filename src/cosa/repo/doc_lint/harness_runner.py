@@ -110,15 +110,22 @@ class Ledger:
         self.entries[ key ] = value
 
 
-async def run_pair( pair, config, ledger, query_fn=None ):
+async def run_pair( pair, config, ledger, query_fn=None, judge_backend=None ):
     """
     Run the extractor and judge over one pair, skipping every call the ledger already holds.
 
     Requires:
         - pair has "id", "old", "new"; optionally "design" and "seed_span" ( start, end ) in old
         - config passes check_models
+        - judge_backend, when given, has .prompt_version, .key_id (names the model and every setting
+          that changes a verdict, such as thresholds), .complete( judged ) and an async .judge( claims,
+          new, design, query_fn ) returning Judgements; without one the Claude judge runs
 
     Ensures:
+        - the judge ledger key carries the backend's key_id and prompt version, so a Jev run can
+          never resume a Claude verdict or a run with other thresholds
+        - a backend's verdicts are ledgered only when its .complete( judged ) is True, so a run in
+          which the backend failed to answer is asked again on resume instead of replayed
         - returns { "id", "seed_span", "lists" }; each list holds its claims, the count of
           discarded claims, the uncovered fraction of the old text, and one verdict row per
           judge run
@@ -143,21 +150,26 @@ async def run_pair( pair, config, ledger, query_fn=None ):
         claims = [ claim_extractor.Claim( **c ) for c in frozen[ "claims" ] ]
         runs   = []
         for run in range( config.judge_runs ):
-            jkey = ledger_key( "judge", pair, claim_judge.PROMPT_VERSION, config.judge_model + "+" + config.escalation_model,
-                               f"{slot}.{run}.{text_hash( json.dumps( frozen[ 'claims' ], sort_keys=True ) )}" )
+            version = claim_judge.PROMPT_VERSION if judge_backend is None else judge_backend.prompt_version
+            model   = config.judge_model + "+" + config.escalation_model if judge_backend is None else judge_backend.key_id
+            jkey    = ledger_key( "judge", pair, version, model,
+                                  f"{slot}.{run}.{text_hash( json.dumps( frozen[ 'claims' ], sort_keys=True ) )}" )
             rows = ledger.get( jkey )
             if rows is None:
-                judged = await claim_judge.judge_claims( claims, pair[ "new" ], pair.get( "design" ),
-                                                         config.judge_model, config.escalation_model, query_fn=query_fn )
-                rows   = [ { "verdict": j.verdict, "escalated": j.escalated, "reason": j.reason } for j in judged ]
-                ledger.put( jkey, rows )
+                if judge_backend is None:
+                    judged = await claim_judge.judge_claims( claims, pair[ "new" ], pair.get( "design" ),
+                                                             config.judge_model, config.escalation_model, query_fn=query_fn )
+                else:
+                    judged = await judge_backend.judge( claims, pair[ "new" ], pair.get( "design" ), query_fn )
+                rows   = [ { "verdict": j.verdict, "escalated": j.escalated, "reason": j.reason, "noul": j.noul } for j in judged ]
+                if judge_backend is None or judge_backend.complete( judged ): ledger.put( jkey, rows )
             runs.append( rows )
         lists.append( { "claims": frozen[ "claims" ], "discarded": frozen[ "discarded" ],
                         "uncovered": frozen[ "uncovered" ], "longest_quote": frozen[ "longest_quote" ], "runs": runs } )
     return { "id": pair[ "id" ], "seed_span": pair.get( "seed_span" ), "lists": lists }
 
 
-async def run_all( pairs, config, ledger, query_fn=None ):
+async def run_all( pairs, config, ledger, query_fn=None, judge_backend=None ):
     """
     Run every pair in order and return their results.
 
@@ -167,4 +179,4 @@ async def run_all( pairs, config, ledger, query_fn=None ):
     Ensures:
         - results are in the order of pairs; pairs run one at a time, so the ledger has a single writer
     """
-    return [ await run_pair( pair, config, ledger, query_fn=query_fn ) for pair in pairs ]
+    return [ await run_pair( pair, config, ledger, query_fn=query_fn, judge_backend=judge_backend ) for pair in pairs ]

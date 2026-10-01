@@ -20,7 +20,7 @@ from . import claim_extractor, model_transport
 
 VERDICTS       = ( "present", "absent", "uncertain" )
 
-Judgement = namedtuple( "Judgement", [ "claim", "verdict", "escalated", "reason" ] )
+Judgement = namedtuple( "Judgement", [ "claim", "verdict", "escalated", "reason", "noul" ], defaults=( None, ) )
 
 SYSTEM_PROMPT = (
     "You check whether documentation still states a fact. You are given numbered claims, a NEW "
@@ -135,6 +135,26 @@ async def judge_claims( claims, new_text, design_text, judge_model, escalation_m
         first = await _ask( claims, new_text, design_text, judge_model, query_fn )
     except JudgeParseError:
         first = [ "uncertain" ] * len( claims )
+    return await finish_judgements( claims, first, new_text, design_text, escalation_model, query_fn=query_fn )
+
+
+async def finish_judgements( claims, first, new_text, design_text, escalation_model, first_reasons=None, query_fn=None ):
+    """
+    Turn a first-pass verdict per claim into final judgements: escalate the uncertain, fail closed.
+
+    Requires:
+        - first holds one verdict word per claim, in claim order, from any first-pass judge
+        - first_reasons, when given, maps a claim index to why its first pass was uncertain; that
+          reason is kept if the claim still fails closed
+
+    Ensures:
+        - only the claims whose first verdict is uncertain go to the escalation model
+        - the result is one Judgement per claim, verdict present or absent only
+        - a claim that stays uncertain, or whose escalation reply cannot be parsed, is absent with a reason
+
+    Raises:
+        - model_transport.ModelCallError if the escalation call itself fails
+    """
     pending = [ i for i, verdict in enumerate( first ) if verdict == "uncertain" ]
     second  = {}
     reasons = {}
@@ -151,7 +171,8 @@ async def judge_claims( claims, new_text, design_text, judge_model, escalation_m
         elif second.get( i ) in ( "present", "absent" ):
             results.append( Judgement( claim, second[ i ], True, None ) )
         else:
-            results.append( Judgement( claim, "absent", True, reasons.get( i, "still uncertain after escalation" ) ) )
+            fallback = ( first_reasons or {} ).get( i, "still uncertain after escalation" )
+            results.append( Judgement( claim, "absent", True, reasons.get( i, fallback ) ) )
     return results
 
 
