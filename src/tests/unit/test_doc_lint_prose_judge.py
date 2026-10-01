@@ -210,6 +210,12 @@ def test_the_tag_suffix_is_random_and_skips_any_value_found_in_the_texts(monkeyp
 
 
 def test_findings_come_back_in_file_order_whatever_order_the_items_arrive_in():
-    findings = run( pj.judge_prose( list( reversed( ITEMS ) ), CONFIG, query_fn=FakeModel() ) )
-    assert [ f.line for f in findings ] == [ 8, 9, 10, 10 ]
-    assert [ f.rule for f in findings ][ 2: ] == [ "prose-emphasis", "prose-two-ideas" ]
+    lookup = next( i for i in ITEMS if i[ "name" ] == "lookup" )
+    late   = dict( lookup, path="b.py", first_line=50 )
+    early  = dict( lookup, path="b.py", first_line=5 )
+    other  = dict( lookup, path="a.py", first_line=90 )
+    findings = run( pj.judge_prose( [ late, early, other ], CONFIG, query_fn=FakeModel() ) )
+    assert [ ( f.path, f.line ) for f in findings ] == [ ( "a.py", 93 ), ( "a.py", 94 ), ( "a.py", 95 ), ( "a.py", 95 ),
+                                                      ( "b.py", 8 ), ( "b.py", 9 ), ( "b.py", 10 ), ( "b.py", 10 ),
+                                                      ( "b.py", 53 ), ( "b.py", 54 ), ( "b.py", 55 ), ( "b.py", 55 ) ]
+    assert [ f.rule for f in findings ][ 2: 4 ] == [ "prose-emphasis", "prose-two-ideas" ]
