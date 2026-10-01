@@ -123,6 +123,7 @@ START_SHA_UNKNOWN = "UNKNOWN"
 BUNDLE_REL     = os.path.join( "src", "lupin_app", "static", "dist" )
 BUNDLE_NONE    = "none"
 BUNDLE_UNKNOWN = "UNKNOWN"
+BUNDLE_SERVED_SUFFIXES = ( ".js", ".json" )
 
 
 def capture_start_sha( git ):
@@ -210,7 +211,7 @@ def _run_span( start_sha, end_sha ):
 
 def bundle_hash( root ):
     """
-    A 12-hex digest of the CONTENT of every .js file under <root>/src/lupin_app/static/dist/.
+    A 12-hex digest of the CONTENT of every served .js and manifest.json under <root>/src/lupin_app/static/dist/.
 
     Requires:
         - root is a directory path (the tree whose served bundle is being named)
@@ -219,7 +220,11 @@ def bundle_hash( root ):
         - hashes file CONTENT, never mtime: the same bytes rewritten is "unmoved", new bytes
           under an old mtime is "moved". The digest covers (relative path, content sha256) in
           sorted order, so a new boot.<hash>.js appearing or a harness changing both move it
-        - .map files are not served to the page and are left out
+        - the served set is .js plus the three manifest.json files (nav, console, multiplexer):
+          the manifest is the POINTER naming which boot.<hash>.js a page loads, so a rebuild
+          moves it even when an old boot file is still on disk. Measured 2026-09-30 on the main
+          tree: 146 .js, 3 .json, 5 .map and nothing else. .map files are never requested by the
+          page and are left out
         - returns BUNDLE_NONE when there is no dist/ directory (a worktree that never built)
           and BUNDLE_UNKNOWN when it cannot be read, including a file vanishing mid-walk.
           NEVER None, for the reason `capture_start_sha` gives
@@ -231,7 +236,7 @@ def bundle_hash( root ):
         for dirpath, dirs, files in os.walk( dist ):
             dirs.sort()
             for name in sorted( files ):
-                if not name.endswith( ".js" ): continue
+                if not name.endswith( BUNDLE_SERVED_SUFFIXES ): continue
                 full = os.path.join( dirpath, name )
                 with open( full, "rb" ) as handle:
                     content = hashlib.sha256( handle.read() ).hexdigest()

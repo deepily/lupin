@@ -82,6 +82,14 @@ def test_it_hashes_content_not_mtime( tmp_path ):
     assert ts.bundle_hash( tmp_path ) != before
 
 
+def test_a_manifest_change_moves_the_hash_even_when_no_js_changed( tmp_path ):
+    # manifest.json is the pointer naming which boot.<hash>.js a page loads: a rebuild repoints it
+    base   = _dist( tmp_path, { "multiplexer/boot.aaaaaaaaaaaa.js": b"boot", "multiplexer/manifest.json": b'{"boot":"boot.aaaaaaaaaaaa.js"}' } )
+    before = ts.bundle_hash( tmp_path )
+    with open( os.path.join( base, "multiplexer/manifest.json" ), "wb" ) as f: f.write( b'{"boot":"boot.bbbbbbbbbbbb.js"}' )
+    assert ts.bundle_hash( tmp_path ) != before
+
+
 def test_source_maps_are_not_part_of_the_served_bundle( tmp_path ):
     base   = _dist( tmp_path, { "boot.aaaaaaaaaaaa.js": b"boot", "boot.aaaaaaaaaaaa.js.map": b"map" } )
     before = ts.bundle_hash( tmp_path )
