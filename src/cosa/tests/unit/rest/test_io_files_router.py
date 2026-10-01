@@ -17,6 +17,7 @@ filesystem access; the auth dependency is bypassed by passing current_user.
 """
 
 import unittest
+import os
 from unittest.mock import patch, MagicMock, mock_open
 import asyncio
 import time
@@ -44,6 +45,17 @@ class TestGetIoFile( unittest.TestCase ):
         p1.start(); self.addCleanup( p1.stop )
         p2 = patch( "cosa.rest.routers.io_files._is_secrets_path", return_value=False )
         self.mock_secrets = p2.start(); self.addCleanup( p2.stop )
+        # This file mocks the FILESYSTEM (/proj does not exist), and the door now judges where a path
+        # lands by directory identity, which needs a real directory to stat. Stub both predicates with
+        # their string-spelling equivalents so these cases keep exercising the branches they were
+        # written for; the identity semantics are tested against real directories in
+        # src/tests/unit/test_io_files_second_mount_spelling.py.
+        p3 = patch( "cosa.rest.routers.io_files.landed_within_roots",
+                    side_effect=lambda real, roots: any( real == r or real.startswith( r + os.sep ) for r in roots ) )
+        p3.start(); self.addCleanup( p3.stop )
+        p4 = patch( "cosa.rest.routers.io_files.landed_relative_path",
+                    side_effect=lambda real, root: "" if os.path.relpath( real, root ) == "." else os.path.relpath( real, root ) )
+        p4.start(); self.addCleanup( p4.stop )
 
     def _call( self, path, download=False ):
         return asyncio.run( get_io_file( path=path, download=download, current_user=self.user ) )

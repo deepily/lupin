@@ -63,7 +63,9 @@ from typing import Optional
 # The doc-viewer's OWN per-scope guards, imported rather than reimplemented. If these two
 # ever change — a new secret filename, a tightened manifest — this door changes with them,
 # which is the whole reason the browse set and the read set can be said to agree.
-from cosa.rest.routers._scope_registry import _is_secrets_path_for_scope, _is_whitelisted_in_scope
+from cosa.rest.routers._scope_registry import (
+    _is_secrets_path_for_scope, _is_whitelisted_in_scope, landed_relative_path, landed_within_roots,
+)
 
 
 # The argument's one spelling. Every reader imports this rather than typing the string,
@@ -193,9 +195,15 @@ def resolve_within_root( root: str, relative_path: str ) -> tuple:
         - None
     """
     real_root = os.path.realpath( root )
-    candidate = os.path.realpath( os.path.join( real_root, relative_path ) )
+    joined    = os.path.join( real_root, relative_path )
+    candidate = os.path.realpath( joined )
 
-    if candidate != real_root and not candidate.startswith( real_root + os.sep ):
+    # Where it LANDS, by directory identity rather than spelling (rows cc39cee6, ae634018): the
+    # repo is mounted at two prefixes in the container, so a prefix test refused live in-scope
+    # files reached through the other spelling. Same predicate as the doc-viewer door.
+    if not landed_within_roots( candidate, [ real_root ] ):
+        # A link landing outside answers the same whether or not its target exists (row 9b80ef75):
+        # a second answer would let whoever planted the link probe which outside paths exist.
         return ( None, f"'{relative_path}' resolves outside its scope." )
 
     return ( candidate, None )
@@ -246,7 +254,8 @@ def validate_source_documents( raw, scopes: dict ) -> tuple:
             return ( [ ], f"'{path}' names scope '{scope}', which is not readable. Available scopes: {known}." )
 
         absolute, resolve_error = resolve_within_root( scope_cfg.root, relative )
-        if resolve_error is not None: return ( [ ], resolve_error )
+        if resolve_error is not None:
+            return ( [ ], resolve_error )
 
         if not os.path.exists( absolute ):
             return ( [ ], f"'{path}' does not exist." )
@@ -278,7 +287,7 @@ def validate_source_documents( raw, scopes: dict ) -> tuple:
         # So the relative path is re-derived FROM THE RESOLVED ABSOLUTE and both are
         # tested. Keeping the typed check too costs nothing and refuses a path that is
         # dirty as written even if it resolves somewhere clean.
-        resolved_relative = os.path.relpath( absolute, os.path.realpath( scope_cfg.root ) )
+        resolved_relative = landed_relative_path( absolute, scope_cfg.root )   # identity-aware, never a `../..` form
         for candidate in ( relative, resolved_relative ):
             if _is_secrets_path_for_scope( scope_cfg, candidate ):
                 return ( [ ], f"'{path}' is a credential-bearing path and is never readable." )
