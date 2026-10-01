@@ -137,6 +137,27 @@ _STABILIZE_LAST_ACTIVITY_JS = """
 # Snapshot 1 — baseline (no conv-mode active)
 # ---------------------------------------------------------------------------
 
+
+def _print_layout_diag( page ):
+    """
+    DIAGNOSTIC (row 8c3628a4, 2026-09-30): print, never assert. ts-e4d4cddd reddened all three section_d
+    snapshots with the FIRST card identical and the whole second card blurred (no whole-pixel shift
+    fits), the signature of a fractional vertical offset. This prints the container's and each card's
+    exact y and height so the next failing run shows whether the first card's height is fractional.
+    """
+    print( "[sectiond-diag]", page.evaluate( """() => {
+        const c = document.querySelector( '#sender-cards-container' ).getBoundingClientRect();
+        return {
+            dpr   : window.devicePixelRatio,
+            top   : c.y,
+            height: c.height,
+            cards : [ ...document.querySelectorAll( '#sender-cards-container .sender-card' ) ].map( e => {
+                const r = e.getBoundingClientRect();
+                return { id: e.dataset.senderId, y: r.y - c.y, h: r.height };
+            } ),
+        };
+    }""" ) )
+
 def test_multiplexer_phase6c_section_d_baseline_visual(
     request, clean_test_db, assert_snapshot_content_shift_tolerant, logged_in_page,
 ):
@@ -164,6 +185,7 @@ def test_multiplexer_phase6c_section_d_baseline_visual(
     page.evaluate( "() => document.fonts.ready" )
     page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
     container = page.locator( '#sender-cards-container' )
+    _print_layout_diag( page )
     assert_snapshot_content_shift_tolerant( container, name="multiplexer_phase6c_section_d_baseline.png" )
     print( "✓ multiplexer_phase6c_section_d_baseline: visual snapshot compared" )
 
@@ -207,6 +229,7 @@ def test_multiplexer_phase6c_section_d_pinned_visual(
     page.evaluate( "() => document.fonts.ready" )
     page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
     container = page.locator( '#sender-cards-container' )
+    _print_layout_diag( page )
     assert_snapshot_content_shift_tolerant( container, name="multiplexer_phase6c_section_d_pinned.png" )
     print( "✓ multiplexer_phase6c_section_d_pinned: visual snapshot compared" )
 
@@ -265,5 +288,6 @@ def test_multiplexer_phase6c_section_d_pin_moved_visual(
     page.evaluate( "() => document.fonts.ready" )
     page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
     container = page.locator( '#sender-cards-container' )
+    _print_layout_diag( page )
     assert_snapshot_content_shift_tolerant( container, name="multiplexer_phase6c_section_d_pin_moved.png" )
     print( "✓ multiplexer_phase6c_section_d_pin_moved: visual snapshot compared" )
