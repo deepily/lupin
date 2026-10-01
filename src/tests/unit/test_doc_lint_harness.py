@@ -238,10 +238,10 @@ def synthetic( n, missed=0, unseeded=0, alarmed=0, flip_second_list_misses=False
     out  = []
     for i in range( n ):
         second = calm if flip_second_list_misses and i == 0 else ( calm if i < missed else flag )
-        out.append( { "id": i, "seed_span": [ 2, 5 ], "lists": [ calm if i < missed else flag, second ] } )
+        out.append( { "id": i, "seed_span": [ 2, 5 ], "lists": [ dict( calm if i < missed else flag ), dict( second ) ] } )
     for i in range( unseeded ):
         pick = flag if i < alarmed else calm
-        out.append( { "id": f"u{i}", "seed_span": None, "lists": [ pick, pick ] } )
+        out.append( { "id": f"u{i}", "seed_span": None, "lists": [ dict( pick ), dict( pick ) ] } )
     return out
 
 
