@@ -145,7 +145,7 @@ def prepare_scratch( dart, data_root, runner=subprocess.run ):
     raise DependencyMissing( f"analyzer {ANALYZER_VERSION} for dart", res.stderr.strip()[ :200 ] )
 
 
-def extract_dart( root, files, data_root, runner=subprocess.run, warnings=None ):
+def extract_dart( root, files, data_root, runner=subprocess.run, warnings=None, unparsed=None ):
     """
     Return one record per Dart declaration in files.
 
@@ -154,12 +154,15 @@ def extract_dart( root, files, data_root, runner=subprocess.run, warnings=None )
         - files are absolute .dart paths taken from the index spec; this function never globs
         - data_root is the repo's own data directory
         - warnings is a list to append to, or None to print to stderr
+        - unparsed is a list to append to, or None
 
     Ensures:
         - returns [] for no files, without looking for dart
         - each record has lang "dart" and passes validate_record
         - a file with parse errors yields no records, and one warning naming the file and its
           error count, because error recovery can put a declaration in the wrong scope
+        - each such file's root-relative path is also appended to unparsed, so the index header can
+          list it and a reader of the header sees what was skipped, not only a reader of stderr
         - typedefs, top-level variables and constants are not indexed; the contract has no kind for them
 
     Raises:
@@ -177,6 +180,7 @@ def extract_dart( root, files, data_root, runner=subprocess.run, warnings=None )
     records = parsed[ "records" ]
     for name, count in sorted( parsed[ "parse_errors" ].items() ):
         message = f"{name}: {count} parse errors, file skipped"
+        if unparsed is not None: unparsed.append( name )
         if warnings is None: print( f"[symindex] WARNING: {message}", file=sys.stderr )
         else: warnings.append( message )
     for rec in records:
