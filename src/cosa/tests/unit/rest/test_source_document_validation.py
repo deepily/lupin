@@ -177,6 +177,88 @@ class TestResolveWithinRoot( unittest.TestCase ):
         self.assertTrue( absolute.startswith( os.path.realpath( self.root ) + os.sep ) )
 
 
+class TestALinkIntoASecondSpellingOfTheRoot( unittest.TestCase ):
+    """
+    Row ae634018: in the container the repo is mounted at two prefixes, one host directory, and a
+    link under the scope root may point at the OTHER spelling. `_scope_registry._stat` is the seam
+    that gives a real directory the root's identity, which an unprivileged test cannot do with a
+    real bind mount. Everything else is real.
+    """
+
+    def setUp( self ):
+        import cosa.rest.routers._scope_registry as scope_registry
+        self.scope_registry = scope_registry
+        self.tmp    = tempfile.mkdtemp()
+        self.root   = os.path.join( self.tmp, "ext", "lupin" )
+        self.mirror = os.path.join( self.tmp, "var", "lupin" )
+        self.evil   = os.path.join( self.tmp, "var", "lupin-evil" )
+        for directory in ( os.path.join( self.root, "io" ), os.path.join( self.mirror, "io" ), os.path.join( self.evil, "io" ) ):
+            os.makedirs( directory )
+        for path, text in ( ( os.path.join( self.mirror, "io", "x.md" ), "# via the mirror\n" ),
+                            ( os.path.join( self.mirror, ".env.md" ), "SECRET=1\n" ),
+                            ( os.path.join( self.evil, "io", "y.md" ), "# not yours\n" ) ):
+            with open( path, "w" ) as handle: handle.write( text )
+        os.symlink( os.path.join( self.mirror, "io", "x.md" ), os.path.join( self.root, "io", "x.md" ) )
+        os.symlink( os.path.join( self.mirror, ".env.md" ), os.path.join( self.root, "io", "env.md" ) )
+        os.symlink( os.path.join( self.evil, "io", "y.md" ), os.path.join( self.root, "io", "evil.md" ) )
+        os.symlink( os.path.join( self.tmp, "gone.md" ), os.path.join( self.root, "io", "dangling.md" ) )
+        os.symlink( "/etc/passwd", os.path.join( self.root, "io", "etc.md" ) )
+        self.real_stat = os.stat
+        mirror, root, real_stat = self.mirror, self.root, self.real_stat
+        self.scope_registry._stat = lambda path, *a, **k: real_stat( root if os.fspath( path ) == mirror else path, *a, **k )
+        self.scopes = { "lupin": _Scope( "lupin", self.root ) }
+
+    def tearDown( self ):
+        self.scope_registry._stat = self.real_stat
+        shutil.rmtree( self.tmp, ignore_errors=True )
+
+    def test_a_link_into_the_second_spelling_is_accepted( self ):
+        paths, error = validate_source_documents( "lupin/io/x.md", self.scopes )
+        self.assertIsNone( error )
+        self.assertEqual( paths, [ os.path.realpath( os.path.join( self.mirror, "io", "x.md" ) ) ] )
+
+    def test_the_relative_form_is_io_x_not_a_dotdot_path( self ):
+        from cosa.rest.routers._scope_registry import landed_relative_path
+        self.assertEqual( landed_relative_path( os.path.realpath( os.path.join( self.mirror, "io", "x.md" ) ), self.root ),
+                          os.path.join( "io", "x.md" ) )
+
+    def test_a_whitelist_judges_the_landed_path_as_io_x_not_as_a_dotdot_form( self ):
+        # With a `io/` whitelist the landed form `io/x.md` passes; the old relpath form
+        # `../../var/lupin/io/x.md` is outside every prefix and would refuse a live file.
+        scopes = { "lupin": _Scope( "lupin", self.root, allowed_prefixes=( "io/", ) ) }
+        paths, error = validate_source_documents( "lupin/io/x.md", scopes )
+        self.assertIsNone( error )
+        self.assertEqual( len( paths ), 1 )
+
+    def test_the_sibling_sharing_a_name_prefix_is_REFUSED( self ):
+        paths, error = validate_source_documents( "lupin/io/evil.md", self.scopes )
+        self.assertEqual( paths, [ ] )
+        self.assertIn( "outside its scope", error )
+        self.assertNotIn( self.evil, error )
+
+    def test_a_link_to_etc_is_REFUSED( self ):
+        _, error = validate_source_documents( "lupin/io/etc.md", self.scopes )
+        self.assertIn( "outside its scope", error )
+
+    def test_a_dangling_link_says_the_file_does_not_exist_like_any_missing_file( self ):
+        _, dangling = validate_source_documents( "lupin/io/dangling.md", self.scopes )
+        _, missing  = validate_source_documents( "lupin/io/never-existed.md", self.scopes )
+        self.assertIn( "does not exist", dangling )
+        self.assertEqual( dangling.replace( "dangling.md", "X" ), missing.replace( "never-existed.md", "X" ) )
+        self.assertEqual( resolve_within_root( self.root, "io/dangling.md" ), ( None, "'io/dangling.md' does not exist." ) )
+
+    def test_the_blocklist_is_judged_on_the_LANDED_relative_path( self ):
+        # typed `io/env.md` is clean; it lands on `<mirror>/.env.md`, whose relative form is `.env.md`
+        paths, error = validate_source_documents( "lupin/io/env.md", self.scopes )
+        self.assertEqual( paths, [ ] )
+        self.assertIn( "credential-bearing", error )
+
+    def test_resolve_within_root_gives_the_same_answers( self ):
+        absolute, error = resolve_within_root( self.root, "io/x.md" )
+        self.assertIsNone( error )
+        self.assertIsNone( resolve_within_root( self.root, "io/evil.md" )[ 0 ] )
+
+
 class TestValidateSourceDocuments( unittest.TestCase ):
     """The whole refusal surface, against a real tree."""
 
