@@ -124,6 +124,7 @@ def main( argv, query_fn=None ):
     report[ "claude_cli" ]         = args.claude_cli_path
     report[ "claude_cli_version" ] = model_transport.cli_version( args.claude_cli_path )
     report[ "call_profile" ]       = model_transport.CALL_PROFILE
+    report[ "call_residual_context" ] = model_transport.RESIDUAL_CONTEXT
     with open( args.out, "w", encoding="utf-8" ) as f: json.dump( report, f, indent=2 )
     print( f"report written to {args.out}: default_gate_pass={report[ 'default_gate_pass' ]}" )
     return 0

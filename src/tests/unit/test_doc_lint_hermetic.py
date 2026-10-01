@@ -151,6 +151,7 @@ def test_the_report_records_the_profile_and_the_binary_version( tmp_path ):
     assert harness_cli.main( cli_args( tmp_path, "--claude-cli-path", str( binary ) ), query_fn=cli_claude_query() ) == 0
     report = json.loads( ( tmp_path / "r.json" ).read_text() )
     assert report[ "claude_cli_version" ] == "9.9.9 (Fake Code)" and report[ "call_profile" ] == mt.CALL_PROFILE
+    assert report[ "call_residual_context" ] == mt.RESIDUAL_CONTEXT and "current date" in report[ "call_residual_context" ]
     other = tmp_path / "again"
     other.mkdir()
     assert harness_cli.main( cli_args( other ), query_fn=cli_claude_query() ) == 0

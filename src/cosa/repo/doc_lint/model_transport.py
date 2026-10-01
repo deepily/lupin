@@ -51,6 +51,11 @@ PORTABLE_SETTINGS  = dict( ISOLATION_SETTINGS, claudeMdExcludes=[ "~/.claude/CLA
 CALL_PROFILE       = "hermetic-1|" + json.dumps( { "settings": PORTABLE_SETTINGS, "args": sorted( ISOLATION_ARGS ), "setting_sources": SETTING_SOURCES, "tools": NO_TOOLS }, sort_keys=True )
 
 
+# What the probe still saw after the profile (11 context blocks before, 5 after). The
+# report states these, because "hermetic" here means no operator instructions, not an empty context.
+RESIDUAL_CONTEXT = [ "environment and working-directory block", "model name", "token budget", "account email header", "current date" ]
+
+
 class ModelCallError( Exception ):
     """A model call returned nothing usable or raised."""
 
