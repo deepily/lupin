@@ -1,5 +1,5 @@
 """
-The one door the judge harness uses to reach Jev, TypeSafe's yes/no model (row 46309646).
+The one door the judge harness uses to reach Jev, TypeSafe's yes/no model.
 
 One POST to /v1/systemone asks one noul question and gets back the probability of yes. The
 key is read from the environment variable JEV_API_TOASTER and goes nowhere else: it is not
@@ -26,11 +26,11 @@ class JevConfigError( Exception ):
 
 
 class JevCallError( Exception ):
-    """One Jev call produced no usable answer: retries ran out, the server failed, or the body is malformed."""
+    """One Jev call gave no usable answer: retries ran out, the server failed, or the body is malformed."""
 
 
 def _post( url, headers, body, timeout ):
-    """Send one POST with urllib and return ( status, text ); an HTTP error status is returned, not raised."""
+    """Send one POST with urllib and return ( status, text ); an error status is returned, not raised."""
     request = urllib.request.Request( url, data=body, headers=headers, method="POST" )
     try:
         with urllib.request.urlopen( request, timeout=timeout ) as response:

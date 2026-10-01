@@ -148,7 +148,7 @@ async def finish_judgements( claims, first, new_text, design_text, escalation_mo
           reason is kept if the claim still fails closed
 
     Ensures:
-        - exactly the claims whose first verdict is uncertain go to the escalation model
+        - only the claims whose first verdict is uncertain go to the escalation model
         - the result is one Judgement per claim, verdict present or absent only
         - a claim that stays uncertain, or whose escalation reply cannot be parsed, is absent with a reason
 

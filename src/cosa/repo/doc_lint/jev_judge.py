@@ -1,11 +1,11 @@
 """
-A Jev back end for the claim judge (row 46309646, feeds decision D3).
+A Jev back end for the claim judge.
 
-Where claim_judge asks Claude for a word per claim, this asks Jev one yes/no question per claim
-and turns the probability into present, absent or uncertain with two thresholds. Uncertain
-claims then take exactly the path the Claude judge's uncertain claims take: they go to the
-escalation model, and a claim still uncertain fails closed to absent. Only the new docstring,
-the linked design document and one claim sentence are sent to TypeSafe.
+Where claim_judge asks Claude for a word per claim, this asks Jev one yes/no question per claim.
+Two thresholds turn the probability into present, absent or uncertain. Uncertain claims take the
+same path as the Claude judge's: they go to the escalation model, and a claim still uncertain
+fails closed to absent. Only the new docstring, the linked design document and one claim
+sentence are sent to TypeSafe.
 """
 
 import inspect
@@ -53,7 +53,7 @@ def verdict_for( noul, t_lo, t_hi ):
 
 
 def build_state( new_text, design_text ):
-    """Return the state sent to Jev: the new docstring, plus the design document only when there is one."""
+    """Return the state sent to Jev: the new docstring, plus the design document when there is one."""
     state = { "new_text": new_text }
     if design_text is not None: state[ "design_doc" ] = design_text
     return state
@@ -62,7 +62,7 @@ def build_state( new_text, design_text ):
 async def judge_claims_jev( claims, new_text, design_text, jev_model, t_lo, t_hi, escalation_model,
                             query_fn=None, post_fn=None, sleep_fn=None, environ=None ):
     """
-    Judge every claim with Jev, escalate the uncertain ones, and fail closed on whatever is left.
+    Judge every claim with Jev, escalate the uncertain ones, and fail closed on the rest.
 
     Requires:
         - claims is a list of extractor Claims; new_text is a str; design_text is a str or None
