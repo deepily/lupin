@@ -5,6 +5,7 @@ Tests job creation, configuration, pytest output parsing, state transitions,
 dry run mode, and voice_io integration.
 """
 
+import asyncio
 import os
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
@@ -1058,6 +1059,87 @@ class TestSweepResetsBetweenSuites:
     @_stub_preflight
     @patch( "cosa.agents.test_suite.job.cu.get_project_root" )
     @patch( "cosa.agents.test_suite.voice_io" )
+    def test_a_failed_reset_stops_the_sweep_before_the_next_suite( self, mock_voice_io, mock_root, job, tmp_path ):
+        """The reset at the seam raises, so the second suite never runs on the first suite's rows."""
+        from cosa.agents.test_suite.job import BetweenSuiteResetError
+        mock_root.return_value    = str( tmp_path )
+        mock_voice_io.reconfigure = MagicMock()
+        mock_voice_io.set_job_id  = MagicMock()
+        mock_voice_io.clear_job_id = MagicMock()
+        mock_voice_io.notify      = AsyncMock()
+
+        order = [ ]
+        def _run( suite_type, project_root ):
+            order.append( f"run:{suite_type}" )
+            return dict( self._CANNED )
+        def _reset( prev, nxt ):
+            order.append( f"reset:{prev}->{nxt}" )
+            raise BetweenSuiteResetError( "boom" )
+
+        with patch.object( TestSuiteJob, "_run_suite", side_effect=_run ), \
+             patch.object( TestSuiteJob, "_reset_state_between_suites", side_effect=_reset, create=True ):
+            asyncio.run( job._execute() )
+
+        assert order == [ "run:integration", "reset:integration->e2e" ]
+
+    @_stub_preflight
+    @patch( "cosa.agents.test_suite.job.cu.get_project_root" )
+    @patch( "cosa.agents.test_suite.voice_io" )
+    def test_a_failed_reset_still_reports_the_finished_suite_and_the_verdict_is_failed( self, mock_voice_io, mock_root, job, tmp_path ):
+        """The first suite passed, the reset at the seam raised: the job still writes its summary and
+        report, the finished suite keeps its entry, the suite that did not run is recorded as FAILED
+        with the reset as its reason, and the verdict is FAILED rather than PASSED (Tiberius B1)."""
+        from cosa.agents.test_suite.job import BetweenSuiteResetError
+        mock_root.return_value    = str( tmp_path )
+        mock_voice_io.reconfigure = MagicMock()
+        mock_voice_io.set_job_id  = MagicMock()
+        mock_voice_io.clear_job_id = MagicMock()
+        mock_voice_io.notify      = AsyncMock()
+
+        def _reset( prev, nxt ):
+            raise BetweenSuiteResetError( "boom" )
+
+        with patch.object( TestSuiteJob, "_run_suite", side_effect=lambda s, r: dict( self._CANNED ) ), \
+             patch.object( TestSuiteJob, "_reset_state_between_suites", side_effect=_reset, create=True ):
+            asyncio.run( job._execute() )
+
+        assert list( job.suite_results ) == [ "integration", "e2e" ]
+        assert job.suite_results[ "integration" ][ "passed" ] == 1
+        assert job.suite_results[ "e2e" ][ "errors" ] == 1
+        assert job.suite_results[ "e2e" ][ "exit_code" ] == 1
+        assert "e2e did not run" in job.suite_results[ "e2e" ][ "error" ]
+        assert "boom" in job.suite_results[ "e2e" ][ "error" ]
+        assert "report_path" in job.artifacts
+        assert any( "between-suites reset failed after integration" in str( c ) for c in mock_voice_io.notify.call_args_list )
+
+    @_stub_preflight
+    @patch( "cosa.agents.test_suite.job.cu.get_project_root" )
+    @patch( "cosa.agents.test_suite.voice_io" )
+    def test_a_failed_reset_makes_the_overall_verdict_failed_not_passed( self, mock_voice_io, mock_root, job, tmp_path ):
+        """Kept in its own test so a missing verdict is caught by this assertion alone: one suite
+        passed, the next never ran, and the summary must not read as a pass."""
+        from cosa.agents.test_suite.job import BetweenSuiteResetError
+        mock_root.return_value    = str( tmp_path )
+        mock_voice_io.reconfigure = MagicMock()
+        mock_voice_io.set_job_id  = MagicMock()
+        mock_voice_io.clear_job_id = MagicMock()
+        mock_voice_io.notify      = AsyncMock()
+
+        def _reset( prev, nxt ):
+            raise BetweenSuiteResetError( "boom" )
+
+        with patch.object( TestSuiteJob, "_run_suite", side_effect=lambda s, r: dict( self._CANNED ) ), \
+             patch.object( TestSuiteJob, "_reset_state_between_suites", side_effect=_reset, create=True ):
+            asyncio.run( job._execute() )
+
+        assert job.overall_status == "FAILED"
+        assert job.cost_summary[ "all_passed" ] is False
+        assert job.cost_summary[ "suites_run" ] == 2
+        assert job.cost_summary[ "total_errors" ] == 1
+
+    @_stub_preflight
+    @patch( "cosa.agents.test_suite.job.cu.get_project_root" )
+    @patch( "cosa.agents.test_suite.voice_io" )
     def test_single_suite_never_resets( self, mock_voice_io, mock_root, single_suite_job, tmp_path ):
         """A single-suite run has no gap → the reset must never fire."""
         mock_root.return_value    = str( tmp_path )
@@ -1111,15 +1193,72 @@ class TestResetStateBetweenSuitesBody:
         engine.begin.assert_not_called()
         assert executed == [ ]
 
-    def test_reset_failure_is_non_fatal( self, job ):
-        """A DB error during the reset is swallowed (logged) — it must never
-        abort the surrounding sweep; the per-test clean_test_db is the backstop."""
+    def test_reset_failure_is_fatal( self, job ):
+        """A DB error during the reset raises BetweenSuiteResetError naming both suites and the
+        cause: a suite on an unreset database reports on someone else's rows (bug 07dde530)."""
+        from cosa.agents.test_suite.job import BetweenSuiteResetError
         engine = MagicMock()
         engine.url = "postgresql://u@h/lupin_db_test"
         engine.begin.side_effect = RuntimeError( "connection refused" )
         with patch( "cosa.rest.db.database.engine", engine ):
-            # Must not raise
+            with pytest.raises( BetweenSuiteResetError, match=r"e2e->integration.*connection refused" ) as caught:
+                job._reset_state_between_suites( "e2e", "integration" )
+        assert isinstance( caught.value.__cause__, RuntimeError )
+        assert "so integration does not run on e2e's rows" in str( caught.value )
+
+    def test_a_foreign_key_refusal_from_the_truncate_is_fatal_too( self, job ):
+        """The 2026-10-01 failure: the TRUNCATE statement itself is refused."""
+        from cosa.agents.test_suite.job import BetweenSuiteResetError
+        engine, executed = self._mock_engine( "postgresql://u@h/lupin_db_test" )
+        conn = engine.begin.return_value.__enter__.return_value
+        def refuse( statement ):
+            if "TRUNCATE" in str( statement ): raise RuntimeError( "cannot truncate a table referenced in a foreign key constraint" )
+        conn.execute.side_effect = refuse
+        with patch( "cosa.rest.db.database.engine", engine ):
+            with pytest.raises( BetweenSuiteResetError, match="foreign key" ):
+                job._reset_state_between_suites( "e2e", "integration" )
+
+    def test_the_truncate_statement_names_task_promotion_tickets_with_task_items( self, job ):
+        """task_promotion_tickets holds a foreign key into task_items, so it has to be in the same statement."""
+        engine, executed = self._mock_engine( "postgresql://u@h/lupin_db_test" )
+        with patch( "cosa.rest.db.database.engine", engine ):
             job._reset_state_between_suites( "e2e", "integration" )
+        truncate = next( sql for sql in executed if "TRUNCATE" in sql )
+        assert "task_promotion_tickets" in truncate and "task_items" in truncate
+
+
+class TestTruncateSetIsClosedUnderForeignKeys:
+    """Postgres refuses to TRUNCATE a table that another table references unless the referencing
+    table is in the same statement. The between-suites list must therefore be closed under foreign
+    keys, and the next foreign key added to a listed table has to fail this test (bug 07dde530)."""
+
+    def test_the_truncate_set_is_closed_under_foreign_keys( self ):
+        from cosa.agents.test_suite.job import tables_with_fk_into
+        from cosa.rest import postgres_models
+        listed = TestSuiteJob._BETWEEN_SUITE_TRUNCATE_TABLES
+        assert len( postgres_models.Base.metadata.tables ) > 10
+        assert set( listed ) <= set( postgres_models.Base.metadata.tables )
+        assert tables_with_fk_into( postgres_models.Base.metadata, listed ) == []
+
+    def test_a_referencing_table_outside_the_list_is_found( self ):
+        from sqlalchemy import Column, ForeignKey, Integer, MetaData, Table
+        from cosa.agents.test_suite.job import tables_with_fk_into
+        metadata = MetaData()
+        Table( "parent", metadata, Column( "id", Integer, primary_key=True ) )
+        Table( "listed_child", metadata, Column( "id", Integer, primary_key=True ), Column( "p", Integer, ForeignKey( "parent.id" ) ) )
+        Table( "late_child", metadata, Column( "id", Integer, primary_key=True ), Column( "p", Integer, ForeignKey( "parent.id" ) ) )
+        Table( "other_child", metadata, Column( "id", Integer, primary_key=True ), Column( "p", Integer, ForeignKey( "unrelated.id" ) ) )
+        Table( "unrelated", metadata, Column( "id", Integer, primary_key=True ) )
+        Table( "a_late_child", metadata, Column( "id", Integer, primary_key=True ), Column( "p", Integer, ForeignKey( "parent.id" ) ) )
+        assert tables_with_fk_into( metadata, [ "parent", "listed_child" ] ) == [ "a_late_child", "late_child" ]
+        assert tables_with_fk_into( metadata, [ "parent", "listed_child", "late_child", "a_late_child" ] ) == []
+
+    def test_the_real_metadata_would_flag_the_table_that_broke_the_reset( self ):
+        """Without task_promotion_tickets the real schema is not closed: the 2026-10-01 failure."""
+        from cosa.agents.test_suite.job import tables_with_fk_into
+        from cosa.rest import postgres_models
+        without = [ t for t in TestSuiteJob._BETWEEN_SUITE_TRUNCATE_TABLES if t != "task_promotion_tickets" ]
+        assert tables_with_fk_into( postgres_models.Base.metadata, without ) == [ "task_promotion_tickets" ]
 
 
 class TestPreflightAssertExclusiveTestDb:

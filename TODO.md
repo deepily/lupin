@@ -16,6 +16,36 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 **Timers from the 09-30 skeleton crew** (these clean themselves up; nothing to fold in): `stop-poke-restore-20260930` (dev and test, 17:00 EDT) and `ratio-gate-reenable-20260930` (test, 12:46 EDT).
 **Not mine and uncommitted in the main tree** (left alone): the phase6b `action_required` PNG baseline (dirty since 09-22) and María's three `src/rnd/v0.2.1/` docs (kill-switch design, console-tee plan, cascade handoff).
 
+## 📚 DECISIONS LOG 2026-10-01 (Mr. Radio 🦉 `cf6ff92a`, no crew) — test-VM follow-up and the spin-down
+
+- **VM preflight stays check-only** (Rick, card, ~14:00 EDT). No provisioning verb; a new host stops with a named failure and a paste-ready fix. Row `72781b05`.
+- **Flow-ratio check C9 stays a warning** (Mr. Radio's call under Rick's 09-30 "set this as you see fit"). A block would stop every deploy after a slider move.
+- **lupin-host-test is left running** (Rick, same card).
+- **Mr. Radio spun down** (Rick, ~15:25 EDT): the fleet's focus is the docs rewrite and the code wiki, and none of his five board rows is that work. No push, no backup. He comes back after that work.
+- **Deferred to his return**: archive `history.md` (18.3k tokens, past the 17k warning) and the TODO.md horizon archive (this file is about 596 KB); the memento sweep (not run: the live-seat list for Cheech's crew was not read, and the dry run would have trashed their records).
+
+## 📚 DECISIONS LOG 2026-09-30 — Rick's docs-rewrite walkthrough, plan 1 (John 🏄🏽 `abb3ab0e`, tester seat, Cheech's v0.2.2 crew; row `5e2915d0`)
+
+Source: plan 1 `src/rnd/v0.2.2/2026.09.30-lupin-af-documentation-rewrite-plan/2026.09.30-docs-rewrite-implementation-plan.md`. Rulings are in its Rulings block (R.1 to R.6) and in §14 (the D rows). Each entry below names its plan section; search by fixed string (`D7 —`, `R.5b —`).
+
+- **D1 — the roadmap.** Rick supplied the lost roadmap; its order replaces the reconstruction in §2. Plan §14 D1, Rulings R.1.
+- **D2 — linters live as a hybrid inside cosa.** ruff docstring rules, markdownlint and the Dart analyzer for structure; `src/cosa/repo/doc_lint/` for rules 3 to 7 and the length caps only. Plan §14 D2, §4; R.6 B7 adds D213-for-D212 and `--changed` line-range filtering.
+- **D3 — judge and triage model: deferred** until Rick's Jev evaluation (`2026.09.30-jev-claim-judge-problem-statement.md`). Plan §14 D3, §5, R.5. OPEN as of 2026-10-01; Cheech's ruling on row `e982851a` builds the model ids as required config with no code default.
+- **D4 — decision records live in `src/docs/decisions/`** in each repo. Plan §14 D4, §9.
+- **D5 — R&D triage results go in one ledger file per repo** (`src/docs/rnd-ledger.tsv` in lupin). Plan §14 D5, §9.
+- **D6 — superseded by R.4:** R&D access is deny by default, enforced on a dedicated archive folder. Plan §14 D6, Rulings R.4, §9.
+- **D7 — history lives in the `Design:` doc when one exists, else the commit message;** a script checks the destination text is present before a package approval. Plan §14 D7, §8.
+- **D8 — Dart contracts: zero `public_member_api_docs` gaps per swept directory;** Sonnet writes, Rick may switch to Haiku at the last minute. Plan §14 D8, §10a, R.2.
+- **D10 — sign-off model is the spec's:** Rick approves spec and pilot, then the adversarial reviewer approves each package (recorded as an amendment on the package's row). Plan §14 D10, §8.
+- **D11 — leave the source spec as is;** §1 of the plan carries the corrections. Plan §14 D11, §1.
+- **D12 — source specs get `authorized_by:` frontmatter.** Done 2026-09-30 on both specs. Plan §14 D12, R.5.
+- **D13 — Rick archives `deepily/cosa` by hand;** María's row `4dd922cc`, verified via the public GitHub API (`gh api repos/deepily/cosa --jq .archived`). Plan §14 D13, §3.
+- **D14 — JavaScript and TypeScript docs are out of scope for now;** revisit after Phase 7. Plan §14 D14.
+- **D15 — each test that asserts docstring or source text gets one disposition** (keep-and-update, convert to behaviour, retire with reason) with a `falsify.py` mutation proof; MCP tool docstrings are reviewed as prompts, outside the sweep. Plan §14 D15, §1.1, §3.
+- **D16 — sweep merges ride a daily train:** each package passes its unit tier, then one train (about 11 packages) a day merges under the full pyramid; no rule change. Plan §14 D16, §8, R.2.
+- **R.5b — mobile track rulings (Rick, 2026-09-30 ~21:50).** The `dart format` check is dropped from mobile's gates (house style fails 536 of 539 files); AC-S1.10's `lane_vocabulary_test.dart` is converted to assert behaviour or a `src/docs/decisions/` record; Clayton's Dart standard (lupin-mobile `0fe024e`, `src/docs/docstring-standard.md`) approved as drafted. Plan Rulings R.5b, §10a.
+- **D9 (not on the ask list, recorded for completeness) — resolved 2026-09-30 by lupin-mobile PR #3;** no decision needed. Plan §14 D9.
+
 ## 🖥️ TEST SERVER (lupin-host-test) — WORK FOR 2026-09-26 (Mr. Radio 🦉 `09edaa9c`, per Rick's end-of-session ask)
 
 The VM was **down** at session end (Rick, 2026-09-25 ~18:30 EDT). When it is back up, in this order:
