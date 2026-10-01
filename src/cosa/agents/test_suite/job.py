@@ -742,6 +742,11 @@ class TestSuiteJob( AgenticJobBase ):
         Runs each suite sequentially, always completing all suites regardless
         of individual failures. Reports progress via voice_io notifications.
 
+        Ensures:
+            - a failed between-suites reset stops the sweep: the suite that did not run gets a
+              FAILED entry (errors=1, the reset error as its reason), the suites already run keep
+              their entries, and the normal summary and report still run, verdict FAILED
+
         Returns:
             str: Conversational summary of all suite results
         """
@@ -816,7 +821,29 @@ class TestSuiteJob( AgenticJobBase ):
                 # :8000 DB. Fires iff this suite opens a seam.
                 seam_prev = reset_predecessor.get( suite_type )
                 if seam_prev is not None:
-                    self._reset_state_between_suites( seam_prev, suite_type )
+                    try:
+                        self._reset_state_between_suites( seam_prev, suite_type )
+                    except BetweenSuiteResetError as reset_err:
+                        # Record the suite that did NOT run as FAILED and stop, then fall through to
+                        # the normal summary: the finished suites keep their report and the verdict
+                        # is FAILED. A bare break would summarise only the suites that ran and
+                        # read PASSED (bug 07dde530, Tiberius B1).
+                        self.suite_results[ suite_type ] = {
+                            "passed"    : 0,
+                            "failed"    : 0,
+                            "skipped"   : 0,
+                            "errors"    : 1,
+                            "exit_code" : 1,
+                            "log_path"  : None,
+                            "duration"  : 0.0,
+                            "error"     : f"{suite_type} did not run: {reset_err}",
+                        }
+                        await voice_io.notify(
+                            f"{suite_type} did not run: the between-suites reset failed after {seam_prev}.",
+                            priority="high",
+                            queue_name="run"
+                        )
+                        break
 
                 await voice_io.notify(
                     f"Starting {suite_type} tests...",

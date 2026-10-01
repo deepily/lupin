@@ -1078,10 +1078,42 @@ class TestSweepResetsBetweenSuites:
 
         with patch.object( TestSuiteJob, "_run_suite", side_effect=_run ), \
              patch.object( TestSuiteJob, "_reset_state_between_suites", side_effect=_reset, create=True ):
-            with pytest.raises( BetweenSuiteResetError ):
-                asyncio.run( job._execute() )
+            asyncio.run( job._execute() )
 
         assert order == [ "run:integration", "reset:integration->e2e" ]
+
+    @_stub_preflight
+    @patch( "cosa.agents.test_suite.job.cu.get_project_root" )
+    @patch( "cosa.agents.test_suite.voice_io" )
+    def test_a_failed_reset_still_reports_the_finished_suite_and_the_verdict_is_failed( self, mock_voice_io, mock_root, job, tmp_path ):
+        """The first suite passed, the reset at the seam raised: the job still writes its summary and
+        report, the finished suite keeps its entry, the suite that did not run is recorded as FAILED
+        with the reset as its reason, and the verdict is FAILED rather than PASSED (Tiberius B1)."""
+        from cosa.agents.test_suite.job import BetweenSuiteResetError
+        mock_root.return_value    = str( tmp_path )
+        mock_voice_io.reconfigure = MagicMock()
+        mock_voice_io.set_job_id  = MagicMock()
+        mock_voice_io.clear_job_id = MagicMock()
+        mock_voice_io.notify      = AsyncMock()
+
+        def _reset( prev, nxt ):
+            raise BetweenSuiteResetError( "boom" )
+
+        with patch.object( TestSuiteJob, "_run_suite", side_effect=lambda s, r: dict( self._CANNED ) ), \
+             patch.object( TestSuiteJob, "_reset_state_between_suites", side_effect=_reset, create=True ):
+            asyncio.run( job._execute() )
+
+        assert list( job.suite_results ) == [ "integration", "e2e" ]
+        assert job.suite_results[ "integration" ][ "passed" ] == 1
+        assert job.suite_results[ "e2e" ][ "errors" ] == 1
+        assert job.suite_results[ "e2e" ][ "exit_code" ] == 1
+        assert "e2e did not run" in job.suite_results[ "e2e" ][ "error" ]
+        assert "boom" in job.suite_results[ "e2e" ][ "error" ]
+        assert job.overall_status == "FAILED"
+        assert job.cost_summary[ "all_passed" ] is False
+        assert job.cost_summary[ "suites_run" ] == 2
+        assert "report_path" in job.artifacts
+        assert any( "between-suites reset failed after integration" in str( c ) for c in mock_voice_io.notify.call_args_list )
 
     @_stub_preflight
     @patch( "cosa.agents.test_suite.job.cu.get_project_root" )
@@ -1150,6 +1182,7 @@ class TestResetStateBetweenSuitesBody:
             with pytest.raises( BetweenSuiteResetError, match=r"e2e->integration.*connection refused" ) as caught:
                 job._reset_state_between_suites( "e2e", "integration" )
         assert isinstance( caught.value.__cause__, RuntimeError )
+        assert "so integration does not run on e2e's rows" in str( caught.value )
 
     def test_a_foreign_key_refusal_from_the_truncate_is_fatal_too( self, job ):
         """The 2026-10-01 failure: the TRUNCATE statement itself is refused."""
@@ -1194,8 +1227,9 @@ class TestTruncateSetIsClosedUnderForeignKeys:
         Table( "late_child", metadata, Column( "id", Integer, primary_key=True ), Column( "p", Integer, ForeignKey( "parent.id" ) ) )
         Table( "other_child", metadata, Column( "id", Integer, primary_key=True ), Column( "p", Integer, ForeignKey( "unrelated.id" ) ) )
         Table( "unrelated", metadata, Column( "id", Integer, primary_key=True ) )
-        assert tables_with_fk_into( metadata, [ "parent", "listed_child" ] ) == [ "late_child" ]
-        assert tables_with_fk_into( metadata, [ "parent", "listed_child", "late_child" ] ) == []
+        Table( "a_late_child", metadata, Column( "id", Integer, primary_key=True ), Column( "p", Integer, ForeignKey( "parent.id" ) ) )
+        assert tables_with_fk_into( metadata, [ "parent", "listed_child" ] ) == [ "a_late_child", "late_child" ]
+        assert tables_with_fk_into( metadata, [ "parent", "listed_child", "late_child", "a_late_child" ] ) == []
 
     def test_the_real_metadata_would_flag_the_table_that_broke_the_reset( self ):
         """Without task_promotion_tickets the real schema is not closed: the 2026-10-01 failure."""
