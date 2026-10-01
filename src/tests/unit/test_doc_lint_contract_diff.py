@@ -244,6 +244,11 @@ def test_likely_lost_picks_the_lowest_overlap_in_old_order_and_zero_picks_nothin
     assert cd.likely_lost( before, after, -1 ) == [], "a count that rose loses nothing"
 
 
+def test_likely_lost_returns_old_order_even_when_the_scores_run_the_other_way():
+    before = [ "never mutates x", "raises on empty", "returns the total" ]
+    assert cd.likely_lost( before, [ "gives back the total x" ], 2 ) == [ "never mutates x", "raises on empty" ]
+
+
 def _ensures( *items ):
     return 'def f():\n    """\n    Ensures:\n' + "".join( f"        - {i}\n" for i in items ) + '    """\n'
 
@@ -355,6 +360,7 @@ MUTANTS = [
     ( "if missing: heading, after = stand_in( before, new_sections, own )", "if missing: heading, after = None, []", "test_a_renamed_heading_with_every_item_kept_is_exactly_one_finding" ),
     ( "if heading in own_headings: continue", "pass", "test_a_stand_in_must_hold_enough_of_the_old_words_and_never_a_heading_that_already_matched" ),
     ( "best, best_score = ( None, [] ), STAND_IN_MIN", "best, best_score = ( None, [] ), 0.0", "test_a_stand_in_must_hold_enough_of_the_old_words_and_never_a_heading_that_already_matched" ),
+    ( "return [ before[ i ] for i in sorted( i for _, i in scored[ :count ] ) ]", "return [ before[ i ] for _, i in scored[ :count ] ]", "test_likely_lost_returns_old_order_even_when_the_scores_run_the_other_way" ),
     ( "scored = sorted( ( max( ( overlap( item, new ) for new in after ), default=0.0 ), i ) for i, item in enumerate( before ) )", "scored = sorted( ( 0.0, i ) for i, item in enumerate( before ) )", "test_likely_lost_picks_the_lowest_overlap_in_old_order_and_zero_picks_nothing" ),
     ( "if count <= 0: return []", "", "test_likely_lost_picks_the_lowest_overlap_in_old_order_and_zero_picks_nothing" ),
     ( "if r[ \"after\" ] < r[ \"before\" ]:\n                found.append", "if False:\n                found.append", "test_a_renamed_heading_plus_one_dropped_item_is_two_findings_and_names_the_item" ),

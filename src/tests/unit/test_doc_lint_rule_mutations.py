@@ -27,9 +27,9 @@ TOOLS    = "src/tests/unit/test_doc_lint_tools_and_gate.py::"
 RULES = [
     ( "parse-error (docstring)", "docstring_lint", '"parse-error", f"does not parse', '"parse-error"', LINTERS + "test_docstring_lint_reports_rules_at_file_lines_and_the_length_cap_and_parse_errors", "['parse-error']" ),
     ( "docstring-length", "docstring_lint", '"docstring-length", f"{kind}', '"docstring-length"', LINTERS + "test_docstring_lint_reports_rules_at_file_lines_and_the_length_cap_and_parse_errors", "['docstring-length']" ),
-    ( "ruff", "tool_runners", "f\"ruff:{item[ 'code' ]}\"", "f\"ruff:{item[ 'code' ]}\"", TOOLS + "test_run_ruff_parses_findings_with_the_rule_as_ruff_code", "" ),
-    ( "markdownlint", "tool_runners", 'f"markdownlint:{m.group( 3 )}"', 'f"markdownlint:{m.group( 3 )}"', TOOLS + "test_run_markdownlint_parses_lines_with_and_without_columns", "" ),
-    ( "dart analyze", "tool_runners", 'f"dart:{parts[ 2 ].lower()}"', 'f"dart:{parts[ 2 ].lower()}"', TOOLS + "test_run_dart_analyze_keeps_documentation_diagnostics_and_ignores_the_rest", "" ),
+    ( "ruff", "tool_runners", "f\"ruff:{item[ 'code' ]}\"", "f\"ruff:{item[ 'code' ]}\"", TOOLS + "test_run_ruff_parses_findings_with_the_rule_as_ruff_code", "ruff:D205" ),
+    ( "markdownlint", "tool_runners", 'f"markdownlint:{m.group( 3 )}"', 'f"markdownlint:{m.group( 3 )}"', TOOLS + "test_run_markdownlint_parses_lines_with_and_without_columns", "markdownlint:MD040" ),
+    ( "dart analyze", "tool_runners", 'f"dart:{parts[ 2 ].lower()}"', 'f"dart:{parts[ 2 ].lower()}"', TOOLS + "test_run_dart_analyze_keeps_documentation_diagnostics_and_ignores_the_rest", "dart:public_member_api_docs" ),
     ( "dead-link", "links", '"dead-link"', '"dead-link"', LINTERS + "test_markdown_links_resolve_relative_to_the_page_and_skip_external_and_anchor_links", "link target" ),
     ( "dead-design", "links", '"dead-design"', '"dead-design"', LINTERS + "test_docstring_lint_checks_design_paths_only_when_a_root_is_given", "dead-design" ),
     ( "dartdoc-length", "dartdoc_lint", '"dartdoc-length"', '"dartdoc-length"', LINTERS + "test_dartdoc_lint_reports_rules_at_file_lines_and_the_block_length_cap", "dartdoc-length" ),
@@ -43,12 +43,12 @@ RULES = [
     ( "sentence-length", "text_rules", '"sentence-length"', '"sentence-length"', TEXT + "test_sentence_rule_skips_contract_sections_bullets_and_reports_each_long_sentence", "sentence-length" ),
     ( "caps", "text_rules", '"caps", f"ALL', '"caps"', TEXT + "test_emphasis_rule_reports_caps_words_and_glyphs_at_their_lines", "caps" ),
     ( "glyph", "text_rules", '"glyph"', '"glyph"', TEXT + "test_emphasis_rule_reports_caps_words_and_glyphs_at_their_lines", "glyph" ),
-    ( "tic", "text_rules", '"tic"', '"tic"', TEXT + "test_rhetoric_rule_reports_each_tic", "" ),
-    ( "bare-ref (section)", "text_rules", '"bare-ref", f"section reference', '"bare-ref"', TEXT + "test_reference_rule_reports_bare_references_and_spares_paths_and_local_definitions", "" ),
-    ( "bare-ref (id and step)", "text_rules", '"bare-ref", f"bare reference', '"bare-ref"', TEXT + "test_step_definitions_cover_headings_numbered_items_and_lettered_items", "" ),
-    ( "dated-banner", "text_rules", '"dated-banner"', '"dated-banner"', TEXT + "test_history_rule_reports_banners_iso_dates_and_model_addressed_text_but_not_quoted_dates", "" ),
-    ( "iso-date", "text_rules", '"iso-date"', '"iso-date"', TEXT + "test_history_rule_reports_banners_iso_dates_and_model_addressed_text_but_not_quoted_dates", "" ),
-    ( "agent-imperative", "text_rules", '"agent-imperative"', '"agent-imperative"', TEXT + "test_history_rule_reports_banners_iso_dates_and_model_addressed_text_but_not_quoted_dates", "" ),
+    ( "tic", "text_rules", '"tic"', '"tic"', TEXT + "test_rhetoric_rule_reports_each_tic", "tic phrase 'Deliberately'" ),
+    ( "bare-ref (section)", "text_rules", '"bare-ref", f"section reference', '"bare-ref"', TEXT + "test_reference_rule_reports_bare_references_and_spares_paths_and_local_definitions", "= any(" ),
+    ( "bare-ref (id and step)", "text_rules", '"bare-ref", f"bare reference', '"bare-ref"', TEXT + "test_step_definitions_cover_headings_numbered_items_and_lettered_items", "bare reference 'step 3'" ),
+    ( "dated-banner", "text_rules", '"dated-banner"', '"dated-banner"', TEXT + "test_history_rule_reports_banners_iso_dates_and_model_addressed_text_but_not_quoted_dates", "'iso-date' != 'dated-banner'" ),
+    ( "iso-date", "text_rules", '"iso-date"', '"iso-date"', TEXT + "test_history_rule_reports_banners_iso_dates_and_model_addressed_text_but_not_quoted_dates", "first extra item: 'iso-date'" ),
+    ( "agent-imperative", "text_rules", '"agent-imperative"', '"agent-imperative"', TEXT + "test_history_rule_reports_banners_iso_dates_and_model_addressed_text_but_not_quoted_dates", "'dated-banner' != 'agent-imperative'" ),
 ]
 
 
@@ -70,7 +70,7 @@ def _run( node, mutant ):
     root = cu.get_project_root()
     env  = dict( os.environ, DOC_LINT_MUTANT=json.dumps( mutant ), LUPIN_ROOT=root, PYTHONPATH=f"{root}/src" )
     env.pop( "COVERAGE_PROCESS_START", None )
-    cmd  = [ sys.executable, "-m", "pytest", node, "-q", "--tb=line", "-rf", "--no-cov", "-p", "no:cacheprovider", "-p", "tests.helpers.doc_lint_mutant_plugin" ]
+    cmd  = [ sys.executable, "-m", "pytest", node, "-q", "-vv", "--tb=short", "-rf", "--no-cov", "-p", "no:cacheprovider", "-p", "tests.helpers.doc_lint_mutant_plugin" ]
     res  = subprocess.run( cmd, cwd=root, env=env, capture_output=True, text=True )
     return res.returncode, res.stdout + res.stderr
 
@@ -90,9 +90,18 @@ def test_every_finding_site_in_the_package_has_a_mutation_row():
     sites   = []
     for name in sorted( os.listdir( package ) ):
         if not name.endswith( ".py" ): continue
-        for line in open( os.path.join( package, name ), encoding="utf-8" ):
-            if "Finding( " in line and "namedtuple" not in line: sites.append( ( name[ :-3 ], line.strip() ) )
+        text = open( os.path.join( package, name ), encoding="utf-8" ).read()
+        for m in re.finditer( r"Finding\(", text ):
+            line_start = text.rfind( "\n", 0, m.start() ) + 1
+            if text[ line_start : m.start() ].lstrip().startswith( ( "def ", "class ", "#" ) ) or "namedtuple" in text[ line_start : m.start() + 40 ]: continue
+            sites.append( ( name[ :-3 ], text[ m.start() : m.start() + 400 ] ) )
     assert len( sites ) >= 20, sites
-    for module, line in sites:
-        assert any( row[ 1 ] == module and row[ 2 ] in line for row in RULES ), f"no mutation row for the Finding site in {module}: {line}"
+    for module, window in sites:
+        assert any( row[ 1 ] == module and row[ 2 ] in window for row in RULES ), f"no mutation row for the Finding site in {module}: {window[ :120 ]}"
     assert len( { r[ 0 ] for r in RULES } ) == len( RULES )
+
+
+def test_the_census_sees_a_finding_call_split_over_several_lines():
+    window = "Finding(\n    path, 1,\n    \"parse-error\", f\"x\" )"
+    assert not any( row[ 2 ] in window for row in RULES if row[ 1 ] == "no_such_module" )
+    assert re.search( r"Finding\(", window )
