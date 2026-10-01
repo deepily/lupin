@@ -8,6 +8,14 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.09.30 - Session 9867024c (Cheech 🌿, manager; crew Rachel 🕊️, Rio ⚡, Tiberius 👑, Pocholo 📣) | v0.2.2 code wiki + reuse review: W-B symindex, W-C reuse tools, Phase 1 linters merged; not pushed
+
+- **Merged, all with Tiberius PASS (row `9babe43d`)**: `e0309132f` W-B symindex + W-C four reuse tools vs fake Jev · `57655ad7c` Phase 1 doc linters, Dart extractor, docstring fixtures · `e476d814f` Phase 0 docstring census + W-C STDIO integration tests · `cafbcf496` + `06b65ebe7` Dart unparsed-file reporting, field-section fix · `d2d24b994` plan diagrams inlined (E1) · `bf7d1ae39` a member of a private Dart owner is not public (277 records flip) · `f07a87f23` the Dart extractor is now part of the index freshness key. Working-branch head `f07a87f23`, **not pushed**.
+- **Gates at `06b65ebe7`**: typecheck 3/3, stylelint 41/41, unit 27,670 passed, cosa 8,988 passed, 0 failed (run without coverage). No full tier yet on `f07a87f23`.
+- **Rick's rulings**: Dart exit gate via an independent tree-sitter count (`9d449081`); E1 = delete the prototypes, inline the diagrams. That count found the private-owner index bug.
+- **Owed (row `ca204c66`)**: coverage gate (blocked by a contention-guard false positive on live seats, bug `488403da`), a full tier at `f07a87f23`, the :8000 pyramid, the push, the post-game. The blind Dart gate `7a963ebf` is blocked until lupin-mobile has 30+ new Dart files.
+- **Files**: history.md; code via reviewed merges; 4 untracked prototypes + 3 .mmd deleted from `src/rnd/v0.2.2/`.
+
 ### 2026.09.30 - Session 9d720da8 (Mr. Radio 🦉, manager; skeleton crew until 17:00) | Test-server port: 4 missing-config defects found and fixed on lupin-host-test
 
 - **Dev**: Stop poke muted for skeleton crew (`poke_output_enabled=false`, 10:54 EDT); a one-shot systemd timer restores it at 17:00.
