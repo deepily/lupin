@@ -157,6 +157,11 @@ services:
     # Prior to that: 1.1.1-pgvector-candidate (v0.2.0 pgvector swap, gate d93a1edb).
     image: lupin:1.1.3-testtoolchain-candidate
     container_name: lupin-rest-dev
+    # Row 3c86391e (2026-09-30): the server is PID 1 here, so without an init the Playwright
+    # chrome and pytest orphans of a finished test-suite job reparent to it and sit as
+    # zombies forever (48 measured on lupin-rest-test). `init: true` puts Docker's tini at
+    # PID 1 to reap them. Lands only on `up -d --force-recreate`, never on `restart`.
+    init: true
     restart: unless-stopped
     user: "1001:1001"
     ports:
@@ -442,6 +447,11 @@ services:
     # rollback is this line set back to lupin:1.1.3-testtoolchain-candidate plus a force-recreate.
     image: lupin:1.1.4-pptx-candidate
     container_name: lupin-rest-test
+    # Row 3c86391e (2026-09-30): the server is PID 1 here, so without an init the Playwright
+    # chrome and pytest orphans of a finished test-suite job reparent to it and sit as
+    # zombies forever (48 measured on lupin-rest-test). `init: true` puts Docker's tini at
+    # PID 1 to reap them. Lands only on `up -d --force-recreate`, never on `restart`.
+    init: true
     restart: unless-stopped
     user: "1001:1001"
     command: ["/bin/bash", "/var/lupin/src/scripts/run-fastapi-lupin-test.sh"]
