@@ -59,6 +59,7 @@ from pydantic import ValidationError
 from fastmcp import FastMCP
 
 from lupin_mcp.persona_normalization import persona_slug
+from lupin_mcp import validation_alert_throttle
 
 # Import from lupin_cli.notifications (the notification library)
 from lupin_cli.notifications.notification_models import (
@@ -270,20 +271,31 @@ def _get_sender_id( project: str, session_id: str = None ) -> str:
 ERROR_SENDER_ID = "claude.code@errors.deepily.ai"
 
 
-def _send_validation_error( detail: str ) -> None:
+def _send_validation_error( detail: str, project: str ) -> None:
     """
-    Send urgent notification about a validation failure.
+    Send urgent notification about a validation failure, at most once per project per cooldown.
 
     Requires:
         - Lupin FastAPI server is running (for notification delivery)
+        - project is the project name the failure belongs to
 
     Ensures:
-        - Sends urgent-priority notification from ERROR_SENDER_ID
-        - Logs critical message regardless of notification success
+        - Logs critical message regardless of notification success or suppression
+        - Sends urgent-priority notification from ERROR_SENDER_ID unless this project already had
+          one DELIVERED within `validation_alert_throttle.COOLDOWN_SECONDS`; a suppressed repeat
+          logs a warning line instead of notifying
+        - Records the send only after delivery succeeded, so an undelivered alert is retried by
+          the next start; a missing or corrupt throttle file means send (fail open)
         - Never raises (all exceptions caught)
     """
     msg = f"COSA-VOICE MCP VALIDATION FAILED\n\n{detail}"
     logger.critical( msg )
+    if validation_alert_throttle.is_suppressed( project ):
+        logger.warning(
+            f"MCP validation alert for project '{project}' not re-sent: one was already delivered "
+            f"within the last {validation_alert_throttle.COOLDOWN_SECONDS // 3600}h"
+        )
+        return
     try:
         request = AsyncNotificationRequest(
             message           = msg,
@@ -291,7 +303,9 @@ def _send_validation_error( detail: str ) -> None:
             priority          = NotificationPriority( "urgent" ),
             sender_id         = ERROR_SENDER_ID
         )
-        notify_user_async( request=request, debug=False )
+        response = notify_user_async( request=request, debug=False )
+        if response.success:
+            validation_alert_throttle.record_sent( project )
     except Exception as e:
         logger.warning( f"Could not send validation error notification: {e}" )
 
@@ -336,7 +350,8 @@ def _validate_repo_account( project: str ) -> None:
             f"   email = {expected_email}\n"
             f"   password = <the password you set in the admin UI>\n\n"
             f"Once the account exists, the CC Notification Listener can authenticate\n"
-            f"via WebSocket and auto-start receiving hook events for this repo."
+            f"via WebSocket and auto-start receiving hook events for this repo.",
+            project
         )
         return
 
@@ -355,7 +370,8 @@ def _validate_repo_account( project: str ) -> None:
                 f"To fix:\n"
                 f"1. Open the Admin UI: {SERVER_URL}/app/admin/users\n"
                 f"2. Verify or create the user account: {expected_email}\n"
-                f"3. Check that the password in ~/.lupin/config [{project}] matches"
+                f"3. Check that the password in ~/.lupin/config [{project}] matches",
+                project
             )
             return
     except ( requests.ConnectionError, requests.Timeout ) as e:
@@ -366,7 +382,8 @@ def _validate_repo_account( project: str ) -> None:
         _ACCOUNT_VALIDATED = False
         _send_validation_error(
             f"Cannot reach Lupin server at {SERVER_URL} ({type( e ).__name__}).\n"
-            f"Ensure FastAPI is running: src/scripts/run-fastapi-lupin.sh"
+            f"Ensure FastAPI is running: src/scripts/run-fastapi-lupin.sh",
+            project
         )
         return
     except Exception as e:
