@@ -1,9 +1,8 @@
 """
-Contract diff: counts the Requires, Ensures and Raises items of every Python function before
-and after a change, and lists each item that was dropped.
+Contract diff: Requires, Ensures and Raises item counts before and after a change.
 
-A docstring rewrite may reword a clause, but it may not lose one unnoticed. This tool makes
-every loss visible so a merge can declare it. Stdlib only.
+Counts the items of every Python function and lists each one that was dropped. A rewrite may reword
+a clause but may not lose one unnoticed. Every loss is made visible so a merge can declare it. Stdlib only.
 """
 
 import argparse
