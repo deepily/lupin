@@ -120,7 +120,9 @@ def main( argv, query_fn=None ):
         return 2
     report  = harness_report.build_report( results, config, judge_prompt_version=judge_version, jev_run=backend is not None )
     report[ "pairs_sha" ] = pairs_sha
-    report[ "claude_cli" ] = args.claude_cli_path
+    report[ "claude_cli" ]         = args.claude_cli_path
+    report[ "claude_cli_version" ] = model_transport.cli_version( args.claude_cli_path )
+    report[ "call_profile" ]       = model_transport.CALL_PROFILE
     with open( args.out, "w", encoding="utf-8" ) as f: json.dump( report, f, indent=2 )
     print( f"report written to {args.out}: default_gate_pass={report[ 'default_gate_pass' ]}" )
     return 0
