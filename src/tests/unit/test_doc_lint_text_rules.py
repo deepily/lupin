@@ -243,6 +243,13 @@ def test_a_field_section_ends_at_the_first_line_not_indented_under_its_header():
     assert tr.sentence_findings( after, "a.md", 1, markdown=True ) != []                                            # markdown is untouched
 
 
+def test_a_markdown_page_has_no_field_sections_so_prose_under_an_example_line_is_still_judged():
+    page = "Example:\n  " + "\n  ".join( [ " ".join( [ "word" ] * 9 ) ] * 3 ) + ".\n"                # prose indented under an Example: line
+    assert tr.sentence_findings( page, "a.py", 1 ) == []                                                          # control: in a docstring the header exempts it
+    assert [ ( f.line, f.rule ) for f in tr.sentence_findings( page, "a.md", 1, markdown=True ) ] == [ ( 1, "sentence-length" ) ]                  # the sentence starts at the Example: line, which a page reads as prose
+    assert [ i for i, _, _ in tr.prose_lines( page, markdown=True ) ] == [ 0, 1, 2, 3 ]                           # the header line is prose too
+
+
 def test_emphasis_rule_reports_caps_words_and_glyphs_at_their_lines():
     found = tr.emphasis_findings( "ok\nThis is NOT fine ⚠️\nAnd `NEVER` here", "a.py", 7, WORDS )
     assert [ ( f.line, f.rule ) for f in found ] == [ ( 8, "caps" ), ( 8, "glyph" ) ]
