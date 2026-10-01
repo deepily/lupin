@@ -20,6 +20,7 @@ import os
 import pathlib
 import re
 import uuid
+import zlib
 
 from cosa.repo.symindex import build as sx_build
 from cosa.repo.symindex import verdict as vd
@@ -31,7 +32,8 @@ JEV_MODEL    = "jev-1.13.0"                     # pinned: a moving alias would b
 RETRIES      = 2
 WORKERS      = 32
 KEY_FILE     = "src/conf/keys/typesafe-api-key"
-NAME_RE      = re.compile( r"^[\w\-]+$" )
+NAME_RE      = re.compile( r"[\w\-]+" )
+SYMBOL_FIELDS = ( "id", "sig", "doc", "file" )
 
 PROMPT_TEMPLATE = {
     "instructions": ( "A developer plans to write new code for NEED. Judge only from CANDIDATE's signature and "
@@ -181,7 +183,7 @@ def append_call_log( ctx, session_id, record ):
     Raises:
         - ValueError on a session id that is not letters, digits, _ or -
     """
-    if not NAME_RE.match( session_id ): raise ValueError( f"bad session id {session_id!r}" )
+    if not NAME_RE.fullmatch( session_id ): raise ValueError( f"bad session id {session_id!r}" )
     path = ctx.data / "call-log" / f"{session_id}.jsonl"
     path.parent.mkdir( parents=True, exist_ok=True )
     fd = os.open( path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644 )
@@ -327,14 +329,23 @@ def save_snapshot( ctx, sha_, gen, l0 ):
 def load_snapshot( ctx, sha_ ):
     """
     Ensures:
-        - returns ( entries, l0 ) of the frozen index
+        - returns ( entries, l0 ) of the frozen index; every entry has string id, sig, doc and file
     Raises:
         - ReuseError SNAPSHOT_MISSING when absent
+        - ReuseError SNAPSHOT_CORRUPT when the file is not gzip, is truncated, is not JSON of the stored
+          shape, or holds an entry without its fields
     """
     p = ctx.data / "snapshots" / f"{sha_}.json.gz"
     if not p.exists(): raise ReuseError( "SNAPSHOT_MISSING", sha_ )
-    snap = json.loads( gzip.decompress( p.read_bytes() ).decode( "utf-8" ) )
-    return [ json.loads( l ) for l in snap[ "symbols_jsonl" ].splitlines() if l ], snap[ "l0" ]
+    try:
+        snap    = json.loads( gzip.decompress( p.read_bytes() ).decode( "utf-8" ) )
+        entries = [ json.loads( l ) for l in snap[ "symbols_jsonl" ].splitlines() if l ]
+        l0      = snap[ "l0" ]
+        ok      = isinstance( l0, list ) and all( isinstance( e, dict ) and all( isinstance( e.get( k ), str ) for k in SYMBOL_FIELDS ) for e in entries )
+    except ( OSError, EOFError, zlib.error, ValueError, TypeError, KeyError, AttributeError ) as e:     # gzip raises OSError/EOFError/zlib.error; the rest is shape
+        raise ReuseError( "SNAPSHOT_CORRUPT", f"{sha_}: {type( e ).__name__}: {e}" ) from e
+    if not ok: raise ReuseError( "SNAPSHOT_CORRUPT", f"{sha_}: wrong shape" )
+    return entries, l0
 
 
 def store_receipt( ctx, receipt ):
@@ -348,23 +359,38 @@ def store_receipt( ctx, receipt ):
     return json.loads( p.read_text( encoding="utf-8" ) )
 
 
+RECEIPT_TYPES = { "id": str, "tool": str, "tool_version": str, "query": ( str, list ), "index_sha": str, "model": str,
+                  "policy": dict, "prompt_template_hash": str, "causes": list }
+SWEEP_TYPES   = { "prompt_template": dict, "flags": list, "verdict": str, "shortlist": list }
+
+
+def _receipt_shape_ok( r ):
+    """Ensures: returns True when r is a dict whose fields (and, for a sweep receipt, its sweep fields) have the stored types."""
+    if not isinstance( r, dict ): return False
+    want = dict( RECEIPT_TYPES )
+    if r.get( "tool" ) != "read_capability": want.update( SWEEP_TYPES )
+    return all( isinstance( r.get( k ), t ) for k, t in want.items() ) and all( isinstance( s, dict ) and isinstance( s.get( "id" ), str ) for s in r.get( "shortlist", [] ) )
+
+
 def load_receipt( ctx, rid ):
     """
     Ensures:
         - returns the stored receipt dict
     Raises:
-        - ReuseError RECEIPT_MISSING, RECEIPT_CORRUPT (unreadable or missing fields) or
-          RECEIPT_ID_MISMATCH (the id recomputed from the stored inputs differs from the file name)
+        - ReuseError RECEIPT_MISSING, RECEIPT_CORRUPT (unreadable, missing fields, or fields of the wrong
+          type) or RECEIPT_ID_MISMATCH (the id recomputed from the stored inputs differs from the file name)
     """
-    if not NAME_RE.match( rid ): raise ReuseError( "RECEIPT_MISSING", rid )
+    if not NAME_RE.fullmatch( rid ): raise ReuseError( "RECEIPT_MISSING", rid )
     p = ctx.data / "receipts" / f"{rid}.json"
     if not p.exists(): raise ReuseError( "RECEIPT_MISSING", rid )
     try:
         r = json.loads( p.read_text( encoding="utf-8" ) )
-        again = receipt_id( r[ "tool" ], r[ "query" ], r[ "index_sha" ], r[ "model" ], r[ "policy" ], r[ "prompt_template_hash" ], r[ "causes" ] )
+        ok = _receipt_shape_ok( r )
+        again = receipt_id( r[ "tool" ], r[ "query" ], r[ "index_sha" ], r[ "model" ], r[ "policy" ], r[ "prompt_template_hash" ], r[ "causes" ] ) if ok else None
     except ( ValueError, KeyError, TypeError, OSError ) as e:
         raise ReuseError( "RECEIPT_CORRUPT", f"{rid}: {e}" ) from e
-    if r.get( "tool_version" ) != TOOL_VERSION or again != rid or r[ "id" ] != rid:
+    if not ok: raise ReuseError( "RECEIPT_CORRUPT", f"{rid}: wrong field types" )
+    if r[ "tool_version" ] != TOOL_VERSION or again != rid or r[ "id" ] != rid:
         raise ReuseError( "RECEIPT_ID_MISMATCH", f"{rid} recomputes to {again}" )
     return r
 
@@ -502,7 +528,7 @@ def read_capability_impl( names, ctx ):
     """
     pages, shas = {}, {}
     for n in names:
-        p = ctx.wiki_dir / "capabilities" / f"{n}.md" if isinstance( n, str ) and NAME_RE.match( n ) else None
+        p = ctx.wiki_dir / "capabilities" / f"{n}.md" if isinstance( n, str ) and NAME_RE.fullmatch( n ) else None
         if p is None: pages[ str( n ) ] = { "error": "BAD_NAME" }
         elif not p.exists(): pages[ n ] = { "error": "NOT_FOUND" }
         else: pages[ n ] = p.read_text( encoding="utf-8" ); shas[ n ] = sha( pages[ n ], 10 )
@@ -541,7 +567,8 @@ def replay_impl( rid, ctx ):
         - the HEAD re-run uses the current tree and the current index, and tests whether the code or
           the model still agrees
         - a damaged or absent input returns { status: "error", error: <NAME> } and no verdict:
-          RECEIPT_MISSING, RECEIPT_CORRUPT, RECEIPT_ID_MISMATCH, SNAPSHOT_MISSING, CACHE_MISSING, CACHE_CORRUPT
+          RECEIPT_MISSING, RECEIPT_CORRUPT, RECEIPT_ID_MISMATCH, SNAPSHOT_MISSING, SNAPSHOT_CORRUPT,
+          CACHE_MISSING, CACHE_CORRUPT
         - a read_capability receipt has no re-run: frozen and head are None
     """
     try:

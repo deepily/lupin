@@ -416,3 +416,141 @@ def test_context_from_environment_honours_the_relocation_variables( tmp_path, mo
 
 def test_live_transport_is_not_built_yet_and_says_so():
     with pytest.raises( NotImplementedError, match="W-A" ): rt.LiveJevTransport( "k" ).post( {} )
+
+
+# --- W-C re-loop (Tiberius, row 9babe43d): damaged files are named errors; one test per surviving mutant ----------------------
+
+def _healthy( env, answers=None, need=NEED, **kw ):
+    c = ctx_for( env, FakeJev( answers or { FEEDS_TEXT: resp( 0.95, 0.03, 0.02 ) }, need=need, **kw ) )
+    r = rt.check_exists_impl( need, c )
+    return c, r, env[ 1 ] / "receipts" / f"{r[ 'receipt_id' ]}.json"
+
+
+def test_c1_a_damaged_snapshot_is_a_named_error_never_a_raw_exception( env ):
+    c, r, _ = _healthy( env )
+    snap = next( ( env[ 1 ] / "snapshots" ).glob( "*.json.gz" ) ); good = snap.read_bytes()
+    import gzip
+    damage = { "garbage"  : b"not gzip at all", "truncated": good[ : len( good ) // 2 ],
+               "bad json" : gzip.compress( b"{nope" ), "wrong shape": gzip.compress( b'[1, 2]' ),
+               "no fields": gzip.compress( b'{"symbols_jsonl": 5, "l0": []}' ), "bad l0": gzip.compress( json.dumps( { "symbols_jsonl": "", "l0": "x" } ).encode() ),
+               "entry not a dict": gzip.compress( json.dumps( { "symbols_jsonl": "[1]\n", "l0": [] } ).encode() ),
+               "entry without sig": gzip.compress( json.dumps( { "symbols_jsonl": json.dumps( { "id": "a", "doc": "d", "file": "f" } ) + "\n", "l0": [] } ).encode() ) }
+    for label, blob in damage.items():
+        snap.write_bytes( blob )
+        out = rt.replay_impl( r[ "receipt_id" ], c )
+        assert ( out[ "status" ], out[ "error" ] ) == ( "error", "SNAPSHOT_CORRUPT" ) and "verdict" not in out, label
+    snap.write_bytes( good )
+    assert rt.replay_impl( r[ "receipt_id" ], c )[ "status" ] == "ok"
+
+
+def test_c1_a_receipt_with_wrong_field_types_is_receipt_corrupt( env ):
+    c, r, path = _healthy( env )
+    good = json.loads( path.read_text( encoding="utf-8" ) )
+    for label, change in ( ( "shortlist string", { "shortlist": "abc" } ), ( "shortlist entry", { "shortlist": [ 5 ] } ), ( "shortlist no id", { "shortlist": [ {} ] } ),
+                           ( "flags string", { "flags": "KEY" } ), ( "policy list", { "policy": [] } ), ( "template str", { "prompt_template": "x" } ),
+                           ( "verdict int", { "verdict": 3 } ), ( "causes str", { "causes": "x" } ), ( "tool_version int", { "tool_version": 1 } ) ):
+        path.write_text( json.dumps( { **good, **change } ), encoding="utf-8" )
+        out = rt.replay_impl( r[ "receipt_id" ], c )
+        assert ( out[ "status" ], out[ "error" ] ) == ( "error", "RECEIPT_CORRUPT" ), label
+    path.write_text( json.dumps( [ good ] ), encoding="utf-8" )
+    assert rt.replay_impl( r[ "receipt_id" ], c )[ "error" ] == "RECEIPT_CORRUPT"                   # a receipt that is not an object
+    path.write_text( rt.canonical( good ) + "\n", encoding="utf-8" )
+    assert rt.replay_impl( r[ "receipt_id" ], c )[ "status" ] == "ok"
+
+
+def test_c1_a_receipt_id_with_a_trailing_newline_is_not_a_name( env ):
+    c, r, _ = _healthy( env )
+    assert rt.replay_impl( r[ "receipt_id" ] + "\n", c )[ "error" ] == "RECEIPT_MISSING"
+
+
+def test_c2a_the_tool_version_is_part_of_the_receipt_id( monkeypatch ):
+    args = ( "check_exists", NEED, "abc", "m", rt.vd.POLICY, "t" )
+    base = rt.receipt_id( *args )
+    monkeypatch.setattr( rt, "TOOL_VERSION", "2" )
+    assert rt.receipt_id( *args ) != base                                                            # a bump must never return the old immutable receipt
+
+
+def test_c2b_a_failing_call_is_retried_exactly_twice_and_a_transient_failure_recovers( env ):
+    assert rt.RETRIES == 2                                                                           # pinned as a literal: the tests below count calls against it
+    class Flaky:
+        def __init__( self ): self.n = 0
+        def post( self, body ):
+            self.n += 1
+            if self.n <= 2: raise ConnectionError( "blip" )
+            return UNREL
+    f = Flaky()
+    need = N( "flaky" )
+    entries = [ { "id": "cosa.feeds.parse_feed", "sig": "(url)", "doc": "Parse an RSS feed into Article objects.", "file": "src/cosa/feeds.py" } ]
+    out = rt.sweep( ctx_for( env, f ), need, entries )
+    assert f.n == 3 and out[ "failed" ] == [] and out[ "calls" ] == 1                                # two failures, third attempt answers
+    class Down:
+        n = 0
+        def post( self, body ): type( self ).n += 1; raise ConnectionError( "down" )
+    dead = rt.sweep( ctx_for( env, Down() ), N( "down" ), entries )
+    assert Down.n == 3 and dead[ "failed" ] == [ "cosa.feeds.parse_feed" ]                           # 1 try + 2 retries, then a failed id
+
+
+def test_c2c_frozen_replay_uses_the_stored_template_and_model_not_the_current_ones( env ):
+    other_tpl = dict( rt.PROMPT_TEMPLATE, instructions="A changed prompt." )
+    c1  = ctx_for( env, FakeJev( { FEEDS_TEXT: resp( 0.95, 0.03, 0.02 ) }, instr="A changed prompt.", model="jev-1.14.0" ), template=other_tpl, model="jev-1.14.0" )
+    r   = rt.check_exists_impl( NEED, c1 )
+    assert r[ "verdict" ] == "REUSE"
+    now = ctx_for( env, FakeJev() )                                                                  # the current context has the default template and model
+    rep = rt.replay_impl( r[ "receipt_id" ], now )
+    assert rep[ "status" ] == "ok" and rep[ "frozen" ][ "verdict" ] == "REUSE" and rep[ "differences" ][ "frozen" ] == []   # frozen read the stored template's cache, not the current one's
+
+
+def test_c2d_the_frozen_rerun_really_runs_a_tampered_stored_verdict_shows_as_a_difference( env ):
+    c, r, path = _healthy( env, answers={ FEEDS_TEXT: UNREL } )
+    assert r[ "verdict" ] == "NEW"
+    doc = json.loads( path.read_text( encoding="utf-8" ) ); doc[ "verdict" ] = "REUSE"              # not an id input, so it loads
+    path.write_text( rt.canonical( doc ) + "\n", encoding="utf-8" )
+    rep = rt.replay_impl( r[ "receipt_id" ], c )
+    assert rep[ "stored" ][ "verdict" ] == "REUSE" and rep[ "frozen" ][ "verdict" ] == "NEW"
+    assert "verdict REUSE -> NEW" in rep[ "differences" ][ "frozen" ]
+
+
+def test_c2e_replay_at_head_writes_no_receipt_and_no_cache_entry_the_frozen_run_did_not_have( env ):
+    c, r, _ = _healthy( env )
+    ( env[ 0 ] / "src" / "cosa" / "extra.py" ).write_text( 'def parse_atom( url ):\n    """Parse an Atom feed."""\n    return url\n', encoding="utf-8" )
+    fake = FakeJev( { FEEDS_TEXT: resp( 0.95, 0.03, 0.02 ) } )
+    fake.table[ key_of( literal_body( NEED, "cosa.extra.parse_atom(url) — Parse an Atom feed." ) ) ] = resp( 0.93, 0.04, 0.03 )
+    before = [ p.name for p in receipts( env ) ]
+    rep = rt.replay_impl( r[ "receipt_id" ], ctx_for( env, fake ) )
+    assert rep[ "head" ][ "index_sha" ] != r[ "index_sha" ]                                          # HEAD really is a different index, so a write would make a new receipt
+    assert [ p.name for p in receipts( env ) ] == before
+
+
+# --- clean-closure: the reuse tools import with only stdlib, first-party roots and the install closure ----------------------------
+
+CLOSURE_PROBE = """
+import importlib.abc, sys
+from lupin_mcp import reuse_call_log_middleware                     # fastmcp and its own dependencies load before the blocker: the install script owns that closure
+ALLOWED = set( sys.stdlib_module_names ) | { "cosa", "lupin_mcp", "lupin_app", "lupin_cli", "tests", "pytz", "regex" }
+class Blocker( importlib.abc.MetaPathFinder ):
+    def find_spec( self, name, path=None, target=None ):
+        top = name.split( "." )[ 0 ]
+        if top not in ALLOWED and not top.startswith( "_" ): raise ModuleNotFoundError( f"DEPENDENCY_MISSING: {name}" )
+        return None
+sys.meta_path.insert( 0, Blocker() )
+assert "lupin_mcp.reuse_tools" not in sys.modules
+from lupin_mcp import reuse_tools
+from cosa.repo.symindex import build, verdict, wiki_lint, dups, diff, routes, py_index, js_index
+reuse_tools.context_from_environment( sys.argv[ 1 ] )               # its lazy import of cosa.utils.util runs under the blocker too
+print( "CLOSURE_OK" )
+"""
+
+
+def test_the_reuse_tools_import_inside_the_install_closure_and_a_stray_dependency_is_caught( tmp_path ):
+    env_ = { **os.environ, "PYTHONPATH": str( REPO_ROOT / "src" ), "LUPIN_ROOT": str( REPO_ROOT ) }
+    ok = subprocess.run( [ sys.executable, "-c", CLOSURE_PROBE, str( REPO_ROOT ) ], capture_output=True, text=True, env=env_, cwd=tmp_path )
+    assert ok.returncode == 0 and "CLOSURE_OK" in ok.stdout, ok.stderr[ -800: ]
+    bad = CLOSURE_PROBE.replace( "from lupin_mcp import reuse_tools", "import numpy\nfrom lupin_mcp import reuse_tools", 1 )    # control: the blocker does refuse a package outside the closure
+    out = subprocess.run( [ sys.executable, "-c", bad, str( REPO_ROOT ) ], capture_output=True, text=True, env=env_, cwd=tmp_path )
+    assert out.returncode != 0 and "DEPENDENCY_MISSING: numpy" in out.stderr
+
+
+def test_the_install_script_closure_names_exactly_what_the_probe_allows():
+    text = ( REPO_ROOT / "src" / "scripts" / "install-cosa-voice.sh" ).read_text( encoding="utf-8" )
+    line = next( l for l in text.splitlines() if l.startswith( "CC_VENV_REQS=" ) )
+    for pkg in ( "fastmcp", "regex", "pytz" ): assert pkg in line

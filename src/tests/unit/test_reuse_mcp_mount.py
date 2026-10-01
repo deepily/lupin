@@ -63,7 +63,7 @@ def test_the_middleware_logs_reuse_calls_with_receipt_error_and_caller_and_ignor
             await c.call_tool( "check_exists", { "need": "x" } )
             await c.call_tool( "fetch_similar", { "entry": "a.b" } )
             await c.call_tool( "read_capability", { "names": [ "x" ] } )
-            with pytest.raises( Exception ): await c.call_tool( "replay", { "receipt_id": "r" } )
+            with pytest.raises( Exception, match="boom" ): await c.call_tool( "replay", { "receipt_id": "r" } )       # the tool's own error reaches the caller: the middleware re-raises
             await c.call_tool( "get_session_info", {} )
     asyncio.run( go() )
     lines = _log( tmp_path )
