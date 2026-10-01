@@ -118,12 +118,14 @@ async def run_pair( pair, config, ledger, query_fn=None, judge_backend=None ):
         - pair has "id", "old", "new"; optionally "design" and "seed_span" ( start, end ) in old
         - config passes check_models
         - judge_backend, when given, has .prompt_version, .key_id (names the model and every setting
-          that changes a verdict, such as thresholds) and an async .judge( claims, new, design,
-          query_fn ) returning Judgements; without one the Claude judge runs
+          that changes a verdict, such as thresholds), .complete( judged ) and an async .judge( claims,
+          new, design, query_fn ) returning Judgements; without one the Claude judge runs
 
     Ensures:
         - the judge ledger key carries the backend's key_id and prompt version, so a Jev run can
           never resume a Claude verdict or a run with other thresholds
+        - a backend's verdicts are ledgered only when its .complete( judged ) is True, so a run in
+          which the backend failed to answer is asked again on resume instead of replayed
         - returns { "id", "seed_span", "lists" }; each list holds its claims, the count of
           discarded claims, the uncovered fraction of the old text, and one verdict row per
           judge run
@@ -160,7 +162,7 @@ async def run_pair( pair, config, ledger, query_fn=None, judge_backend=None ):
                 else:
                     judged = await judge_backend.judge( claims, pair[ "new" ], pair.get( "design" ), query_fn )
                 rows   = [ { "verdict": j.verdict, "escalated": j.escalated, "reason": j.reason, "noul": j.noul } for j in judged ]
-                ledger.put( jkey, rows )
+                if judge_backend is None or judge_backend.complete( judged ): ledger.put( jkey, rows )
             runs.append( rows )
         lists.append( { "claims": frozen[ "claims" ], "discarded": frozen[ "discarded" ],
                         "uncovered": frozen[ "uncovered" ], "longest_quote": frozen[ "longest_quote" ], "runs": runs } )

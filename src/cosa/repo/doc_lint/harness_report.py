@@ -91,13 +91,14 @@ def flagged( claim_list ):
     return bool( claim_list[ "claims" ] ) and any( final_absent( claim_list[ "runs" ] ) )
 
 
-def build_report( results, config, judge_prompt_version=None ):
+def build_report( results, config, judge_prompt_version=None, jev_run=False ):
     """
     Turn runner results into the exit-gate figures.
 
     Requires:
         - results come from run_all with the same config
         - judge_prompt_version, when given, is the judge back end's version (a Jev run), recorded in place of the Claude judge's
+        - jev_run is True when the judge back end was Jev, so rows without a probability are counted
         - a result with a seed_span is a seeded-removal pair; the others are unseeded
 
     Ensures:
@@ -111,7 +112,11 @@ def build_report( results, config, judge_prompt_version=None ):
         - false_alarm_ok is True only when every list flags at most FALSE_ALARM_CEILING of the
           unseeded pairs, so a harness that flags everything cannot pass
         - agreement_ok is True only when both agreement rates are known and at least AGREEMENT_BAR
-        - default_gate_pass is True only when all three hold
+        - default_gate_pass is True only when all three hold, and, on a jev_run, only when no claim
+          went without a Jev answer
+        - judge_unanswered counts the claim verdicts, over all lists and runs, that carry no Jev
+          probability: Jev gave no answer and the escalation model decided under Jev's name. It is
+          None on a run that did not use Jev
         - identical_list_pairs counts pairs whose extractor lists came out the same, because the
           SDK has no temperature and two "independent" lists can be one list drawn twice
 
@@ -153,6 +158,7 @@ def build_report( results, config, judge_prompt_version=None ):
     agree_all  = all_same / all_total if all_total else None
     agree_seed = seed_same / seed_total if seed_total else None
     agree_ok   = agree_all is not None and agree_seed is not None and agree_all >= AGREEMENT_BAR and agree_seed >= AGREEMENT_BAR
+    unanswered = sum( 1 for r in results for lst in r[ "lists" ] for run in lst[ "runs" ] for row in run if row[ "noul" ] is None ) if jev_run else None
     identical  = sum( 1 for r in results if len( { tuple( c[ "quote" ] for c in lst[ "claims" ] ) for lst in r[ "lists" ] } ) == 1 )
     return {
         "models"            : { "extractor": config.extractor_model, "judge": config.judge_model,
@@ -172,5 +178,6 @@ def build_report( results, config, judge_prompt_version=None ):
         "miss_criterion_met": miss_ok,
         "false_alarm_ok"    : fa_ok,
         "agreement_ok"      : agree_ok,
-        "default_gate_pass" : miss_ok and fa_ok and agree_ok,
+        "judge_unanswered"  : unanswered,
+        "default_gate_pass" : miss_ok and fa_ok and agree_ok and not unanswered,
     }

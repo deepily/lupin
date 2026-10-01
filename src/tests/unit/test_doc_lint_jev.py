@@ -241,10 +241,11 @@ def claude_query( answers, calls=None ):
     return query
 
 
-def run( claims, new, design=None, post=None, answers=None, calls=None, lo=0.3, hi=0.8 ):
+def run( claims, new, design=None, post=None, answers=None, calls=None, lo=0.3, hi=0.8, allow=True ):
     return asyncio.run( jev_judge.judge_claims_jev( claims, new, design, MODEL, lo, hi, "opus-x",
                                                     query_fn=claude_query( answers or {}, calls ),
-                                                    post_fn=post or fake_post(), sleep_fn=lambda s: None, environ=ENV ) )
+                                                    post_fn=post or fake_post(), sleep_fn=lambda s: None, environ=ENV,
+                                                    allow_design_text=allow ) )
 
 
 STATED  = C( "returns none when parked", "q1" )
@@ -332,8 +333,9 @@ def test_the_prompt_version_changes_with_the_code_it_names():
 
 # ---- the back end and the runner ----------------------------------------------------------
 
-def make_backend( post=None, lo=0.3, hi=0.8 ):
-    return jev_judge.JevBackend( MODEL, lo, hi, "opus-x", post_fn=post or fake_post(), sleep_fn=lambda s: None, environ=ENV )
+def make_backend( post=None, lo=0.3, hi=0.8, allow=False ):
+    return jev_judge.JevBackend( MODEL, lo, hi, "opus-x", post_fn=post or fake_post(), sleep_fn=lambda s: None, environ=ENV,
+                                 allow_design_text=allow )
 
 
 def test_the_backend_key_names_the_model_both_thresholds_and_the_escalation_model():
@@ -359,14 +361,19 @@ PAIR = { "id": "p1", "old": "returns none when parked. raises valueerror when bl
 CONFIG = harness_runner.HarnessConfig( "ext", MODEL, "opus-x", "writer", 1, 1 )
 
 
-def extractor_and_escalation_query():
+DEFAULT_ESCALATION = { "returns none when parked": "present", "raises valueerror when blank": "absent" }
+
+
+def extractor_and_escalation_query( answers=None ):
     async def query( prompt, options ):
         if options.model == "ext":
             claims = [ { "claim": "returns none when parked", "quote": "returns none when parked" },
                        { "claim": "raises valueerror when blank", "quote": "raises valueerror when blank" } ]
             text = json.dumps( { "claims": claims } )
         else:
-            text = "{}"
+            listed = re.search( r"<claims_(\w+)>\n(.*?)\n</claims_\1>", prompt, re.DOTALL ).group( 2 )
+            texts  = [ line.split( ". ", 1 )[ 1 ] for line in listed.splitlines() ]
+            text   = json.dumps( { "verdicts": [ { "id": n, "verdict": ( answers or DEFAULT_ESCALATION )[ t ] } for n, t in enumerate( texts, start=1 ) ] } )
         yield AssistantMessage( content=[ TextBlock( text ) ], model=options.model )
     return query
 
@@ -449,3 +456,94 @@ def test_a_gate_run_with_jev_needs_the_jev_prompt_version_among_the_frozen_versi
     args  = cli_args( tmp_path, "--judge-backend", "jev", "--t-lo", "0.3", "--t-hi", "0.8", "--gate", "--frozen-versions", wrong )
     assert harness_cli.main( args ) == 3
     assert jev_judge.PROMPT_VERSION in capsys.readouterr().err
+
+
+# ---- design text, unanswered claims and the ledger ----------------------------------------
+
+def test_a_design_document_is_refused_before_any_call_unless_allowed():
+    calls = []
+    with pytest.raises( jev_transport.JevConfigError, match="design document may not be sent" ):
+        run( [ STATED ], "text", design="a design document", post=fake_post( calls ), allow=False )
+    assert calls == []
+
+
+def test_a_design_document_is_sent_as_design_doc_when_allowed_and_never_when_absent():
+    calls = []
+    run( [ STATED ], "text", design="the design text", post=fake_post( calls ), allow=True )
+    assert json.loads( calls[ 0 ][ 2 ] )[ "state" ] == { "new_text": "text", "design_doc": "the design text" }
+    calls.clear()
+    run( [ STATED ], "text", design=None, post=fake_post( calls ), allow=False )
+    assert json.loads( calls[ 0 ][ 2 ] )[ "state" ] == { "new_text": "text" }
+
+
+def test_the_backend_refuses_a_design_document_by_default_and_sends_it_when_allowed():
+    with pytest.raises( jev_transport.JevConfigError ):
+        asyncio.run( make_backend().judge( [ STATED ], "t", "design", claude_query( {} ) ) )
+    calls = []
+    asyncio.run( make_backend( post=fake_post( calls ), allow=True ).judge( [ STATED ], "t", "design", claude_query( {} ) ) )
+    assert "design_doc" in json.loads( calls[ 0 ][ 2 ] )[ "state" ]
+
+
+def test_complete_is_false_when_any_claim_has_no_jev_answer():
+    backend = make_backend()
+    J = claim_judge.Judgement
+    assert backend.complete( [ J( STATED, "present", False, None, 0.9 ), J( DROPPED, "absent", False, None, 0.1 ) ] ) is True
+    assert backend.complete( [ J( STATED, "present", False, None, 0.9 ), J( DROPPED, "absent", True, "jev gave no answer", None ) ] ) is False
+    assert backend.complete( [] ) is True
+
+
+def outage_then_ok_post( calls ):
+    def post( url, headers, body, timeout ):
+        calls.append( 1 )
+        return ( 500, "boom" ) if len( calls ) <= 2 else ( 200, reply( haystack_noul( body ) ) )
+    return post
+
+
+def test_a_run_where_jev_did_not_answer_every_claim_is_not_ledgered_and_is_asked_again( tmp_path ):
+    ledger = harness_runner.Ledger( str( tmp_path / "ledger.jsonl" ) )
+    calls  = []
+    query  = extractor_and_escalation_query( { "returns none when parked": "present", "raises valueerror when blank": "absent" } )
+    first  = asyncio.run( harness_runner.run_pair( PAIR, CONFIG, ledger, query_fn=query, judge_backend=make_backend( post=outage_then_ok_post( calls ) ) ) )
+    assert [ r[ "noul" ] for r in first[ "lists" ][ 0 ][ "runs" ][ 0 ] ] == [ None, None ]
+    assert [ k for k in ledger.entries if k.startswith( "judge|" ) ] == []
+    again  = asyncio.run( harness_runner.run_pair( PAIR, CONFIG, ledger, query_fn=query, judge_backend=make_backend( post=outage_then_ok_post( calls ) ) ) )
+    assert all( r[ "noul" ] is not None for r in again[ "lists" ][ 0 ][ "runs" ][ 0 ] )
+    assert len( [ k for k in ledger.entries if k.startswith( "judge|" ) ] ) == 1
+
+
+def rows_report( noul_values, jev_run ):
+    rows = [ { "verdict": "present", "escalated": False, "reason": None, "noul": n } for n in noul_values ]
+    result = { "id": "p", "seed_span": None, "lists": [ { "claims": [ { "start": 0, "end": 1, "quote": "q" } for _ in rows ],
+                                                           "discarded": 0, "uncovered": 0.0, "longest_quote": 0.0, "runs": [ rows ] } ] }
+    return harness_report.build_report( [ result ], CONFIG, jev_run=jev_run )
+
+
+def test_the_report_counts_claims_that_carry_no_jev_probability():
+    assert rows_report( [ 0.9, None, None ], True )[ "judge_unanswered" ] == 2
+    assert rows_report( [ 0.9, 0.8 ], True )[ "judge_unanswered" ] == 0
+
+
+def test_a_jev_run_with_an_unanswered_claim_can_not_pass_the_gate():
+    clean   = rows_report( [ 0.9 ], True )
+    dirty   = rows_report( [ 0.9, None ], True )
+    assert clean[ "judge_unanswered" ] == 0 and dirty[ "default_gate_pass" ] is False
+
+
+def test_a_run_that_did_not_use_jev_reports_no_unanswered_count():
+    assert rows_report( [ None, None ], False )[ "judge_unanswered" ] is None
+
+
+def test_the_cli_refuses_a_design_document_without_the_flag_and_sends_it_with_the_flag( tmp_path, monkeypatch, capsys ):
+    monkeypatch.setenv( jev_transport.KEY_VARIABLE, KEY )
+    sent = []
+    monkeypatch.setattr( jev_transport, "_post", lambda url, headers, body, timeout: ( sent.append( body ) or ( 200, reply( haystack_noul( body ) ) ) ) )
+    with_design = dict( PAIR, design="linked design text" )
+    pairs_file  = tmp_path / "pairs.json"
+    pairs_file.write_text( json.dumps( [ with_design ] ) )
+    base = [ "--pairs", str( pairs_file ), "--ledger", str( tmp_path / "l.jsonl" ), "--out", str( tmp_path / "r.json" ),
+             "--extractor-model", "ext", "--judge-model", MODEL, "--escalation-model", "opus-x", "--writer-model", "writer",
+             "--extractor-lists", "1", "--judge-runs", "1", "--judge-backend", "jev", "--t-lo", "0.3", "--t-hi", "0.8" ]
+    assert harness_cli.main( base, query_fn=extractor_and_escalation_query() ) == 2
+    assert "design document may not be sent" in capsys.readouterr().err and sent == []
+    assert harness_cli.main( base + [ "--allow-design-text" ], query_fn=extractor_and_escalation_query() ) == 0
+    assert b"linked design text" in sent[ 0 ]
