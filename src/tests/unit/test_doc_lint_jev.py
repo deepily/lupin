@@ -547,3 +547,40 @@ def test_the_cli_refuses_a_design_document_without_the_flag_and_sends_it_with_th
     assert "design document may not be sent" in capsys.readouterr().err and sent == []
     assert harness_cli.main( base + [ "--allow-design-text" ], query_fn=extractor_and_escalation_query() ) == 0
     assert b"linked design text" in sent[ 0 ]
+
+
+def passing_jev_results( blank_one=False ):
+    """A run that clears every other gate criterion: 60 seeded pairs all caught, 20 calm unseeded pairs."""
+    from tests.unit.test_doc_lint_harness import synthetic
+    results = synthetic( 60, 0, unseeded=20 )
+    results = json.loads( json.dumps( results ) )
+    for r in results:
+        for lst in r[ "lists" ]:
+            for run in lst[ "runs" ]:
+                for row in run: row[ "noul" ] = 0.9
+    if blank_one: results[ 0 ][ "lists" ][ 0 ][ "runs" ][ 0 ][ 0 ][ "noul" ] = None
+    return results
+
+
+def test_one_unanswered_claim_is_the_only_thing_that_fails_an_otherwise_passing_jev_gate():
+    clean = harness_report.build_report( passing_jev_results(), CONFIG, jev_run=True )
+    dirty = harness_report.build_report( passing_jev_results( blank_one=True ), CONFIG, jev_run=True )
+    assert clean[ "default_gate_pass" ] is True and clean[ "judge_unanswered" ] == 0
+    assert dirty[ "judge_unanswered" ] == 1
+    assert ( dirty[ "miss_criterion_met" ], dirty[ "false_alarm_ok" ] ) == ( True, True )
+    assert dirty[ "default_gate_pass" ] is False
+
+
+def test_design_text_is_refused_by_default_on_both_entry_points():
+    with pytest.raises( jev_transport.JevConfigError ):
+        asyncio.run( jev_judge.judge_claims_jev( [ STATED ], "t", "design", MODEL, 0.3, 0.8, "opus-x",
+                                                 query_fn=claude_query( {} ), post_fn=fake_post(), environ=ENV ) )
+    backend = jev_judge.JevBackend( MODEL, 0.3, 0.8, "opus-x", post_fn=fake_post(), environ=ENV )
+    assert backend.allow_design_text is False
+
+
+def test_the_cli_report_of_a_jev_run_carries_the_unanswered_count( tmp_path, monkeypatch ):
+    monkeypatch.setenv( jev_transport.KEY_VARIABLE, KEY )
+    monkeypatch.setattr( jev_transport, "_post", lambda url, headers, body, timeout: ( 200, reply( haystack_noul( body ) ) ) )
+    assert harness_cli.main( cli_args( tmp_path, "--judge-backend", "jev", "--t-lo", "0.3", "--t-hi", "0.8" ), query_fn=extractor_and_escalation_query() ) == 0
+    assert json.loads( ( tmp_path / "r.json" ).read_text() )[ "judge_unanswered" ] == 0
