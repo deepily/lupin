@@ -103,8 +103,9 @@ def prose_lines( text, markdown=False ):
         - markdown is True for a markdown page, False for a docstring
 
     Ensures:
-        - docstring mode skips lines inside a contract or field section (Attributes, Parameters,
-          Params, Example) and bullet lines
+        - docstring mode skips lines inside a contract section and bullet lines
+        - a field section (Attributes, Parameters, Params, Example) covers only the lines indented
+          deeper than its header, so prose after it is read again
         - markdown mode keeps bullet text, with the bullet marker removed, and skips headings
           and table rows
         - blank lines are skipped in both modes
@@ -114,13 +115,20 @@ def prose_lines( text, markdown=False ):
     Raises:
         - nothing
     """
-    in_contract = False
+    in_contract  = False
+    field_indent = None
     for i, raw in enumerate( text.split( "\n" ) ):
-        if not markdown and ( CONTRACT_HEADER.match( raw ) or FIELD_HEADER.match( raw ) ):
+        if not markdown and CONTRACT_HEADER.match( raw ):
             in_contract = True
+            continue
+        if not markdown and FIELD_HEADER.match( raw ):
+            field_indent = len( raw ) - len( raw.lstrip() )
             continue
         if not raw.strip():
             continue
+        if field_indent is not None:
+            if len( raw ) - len( raw.lstrip() ) > field_indent: continue
+            field_indent = None
         if markdown:
             if raw.lstrip().startswith( ( "#", "|" ) ): continue
             yield i, BULLET_LINE.sub( "", raw, count=1 ), BULLET_LINE.match( raw ) is not None
