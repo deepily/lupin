@@ -1,5 +1,5 @@
 """
-The reader-test rig (plan 1, section 5, step 5).
+The reader-test rig (plan 1, section 5, reader test).
 
 A fresh model answers fixed questions using only the old text, then only the new text. A second
 model grades each answer against the answer key without being told which text produced it.
@@ -59,7 +59,7 @@ def parse_answer( raw ):
 
 
 def parse_score( raw ):
-    """Return 0 or 1 from a grader reply; raise ReaderParseError for anything else, including true and 1.0."""
+    """Return 0 or 1 from a grader reply; raise ReaderParseError for true, 1.0 or anything else."""
     return _parse_object( raw, "score", lambda v: type( v ) is int and v in ( 0, 1 ) )
 
 

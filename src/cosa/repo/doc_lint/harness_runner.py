@@ -1,11 +1,11 @@
 """
 The runner of the judge harness (plan 1, section 5, "Throughput and scheduling").
 
-For each before/after pair it draws several independent claim lists from the extractor, freezes
-each list, and runs the judge three times over it. Every finished model call is written to a
-ledger the moment it returns, so a killed run resumes without repeating a call. The ledger key
-carries the hash of the old text, the hash of the new text, the prompt version and the model id
-(ruling N5), so a changed prompt or model can never resume a stale verdict.
+For each before/after pair it draws several independent claim lists from the extractor and
+freezes each list. It then runs the judge three times over each list. Every finished model
+call is written to a ledger the moment it returns, so a killed run resumes without repeating
+a call. The ledger key carries the hash of the old text, the hash of the new text, the prompt
+version and the model id. A changed prompt or model can therefore never resume a stale verdict.
 """
 
 import hashlib

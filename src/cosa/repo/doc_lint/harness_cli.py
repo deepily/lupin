@@ -1,5 +1,5 @@
 """
-Command line for the judge harness: run a file of before/after pairs and write the exit-gate report.
+Command line for the judge harness: run before/after pairs and write the exit-gate report.
 
     python -m cosa.repo.doc_lint.harness_cli --pairs pairs.json --ledger run.jsonl --out report.json \
         --extractor-model ... --judge-model ... --escalation-model ... --writer-model ...
@@ -43,7 +43,7 @@ def main( argv, query_fn=None ):
         - returns 0 after writing the report, printing one summary line
         - returns 2 and prints the reason when the model configuration is refused
         - returns 3 and runs nothing when --gate is set and --frozen-versions is missing or is not
-          exactly the extractor and judge versions in this code, so a gate run cannot use prompts
+          the extractor and judge versions in this code, so a gate run cannot use prompts
           that changed after they were registered
         - the report carries the sha256 of the pairs file
     """

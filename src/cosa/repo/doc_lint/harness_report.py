@@ -1,9 +1,10 @@
 """
 The numbers of the judge harness exit gate (plan 1, section 5).
 
-All of it is plain arithmetic over the runner's results: how many seeded removals slipped past
-(with a one-sided 95% upper bound), how many untouched pairs were flagged, how often the three
-judge runs agree on a claim, and how much of the old text no verified quote covers.
+All of it is plain arithmetic over the runner's results. It counts the seeded removals that
+slipped past, with a one-sided 95% upper bound. It counts the untouched pairs that were flagged.
+It measures how often the three judge runs agree on a claim. It reports how much of the old
+text no verified quote covers.
 """
 
 from scipy.stats import beta
@@ -109,7 +110,7 @@ def build_report( results, config ):
         - false_alarm_ok is True only when every list flags at most FALSE_ALARM_CEILING of the
           unseeded pairs, so a harness that flags everything cannot pass
         - agreement_ok is True only when both agreement rates are known and at least AGREEMENT_BAR
-        - default_gate_pass is the AND of those three
+        - default_gate_pass is True only when all three hold
         - identical_list_pairs counts pairs whose extractor lists came out the same, because the
           SDK has no temperature and two "independent" lists can be one list drawn twice
 

@@ -1,9 +1,10 @@
 """
 Off-peak scheduling and submission for the judge harness (plan 1, section 5).
 
-The Max plan has rolling usage windows and the host is not up around the clock, so a batch run
-is scheduled for 10 AM to 1 PM Eastern, never the dead window overnight. It is submitted through
-POST /api/v2/submit with the command "agent router go to claude code", as CLAUDE.md prescribes.
+The Max plan has rolling usage windows and the host is not up around the clock. A batch run is
+therefore scheduled between 10:00 and 13:00 Eastern, never in the dead window overnight.
+It is submitted through POST /api/v2/submit with the command "agent router go to claude code",
+as CLAUDE.md prescribes.
 """
 
 import datetime
@@ -20,7 +21,7 @@ COMMAND       = "agent router go to claude code"
 
 def scheduled_at( now=None ):
     """
-    Return an ISO timestamp inside the 10 AM to 1 PM Eastern window.
+    Return an ISO timestamp inside the 10:00 to 13:00 Eastern window.
 
     Requires:
         - now is a timezone-aware datetime, or None for the current time
@@ -45,7 +46,7 @@ def build_submit_payload( argv, when ):
           user text; when is an ISO timestamp
 
     Ensures:
-        - the job is BOUNDED, so the Max plan covers it
+        - the job is bounded, so the Max plan covers it
         - scheduled_at is top level, outside the command's args
         - every argument is shell-quoted, so a path with a space or a quote stays one argument
     """

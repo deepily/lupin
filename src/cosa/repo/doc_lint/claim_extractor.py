@@ -1,11 +1,11 @@
 """
-The claim extractor of the judge harness (plan 1, section 5, step 1).
+The claim extractor of the judge harness (plan 1, section 5, first stage).
 
-A model lists the atomic claims in old text, each with a verbatim quote. Python then checks that
-the quote occurs in the old text and discards any claim whose quote does not. The quote's
-position is kept as a span of the original text, because the exit gate decides whether a
-seeded removal was caught by overlapping that span (ruling B3), and because the share of old
-text under no verified quote is the check for claims the model never listed (ruling B6).
+A model lists the atomic claims in old text, each with a verbatim quote. Python then checks
+that the quote occurs in the old text and discards any claim whose quote does not.
+The quote's position is kept as a span of the original text. The exit gate decides whether a
+seeded removal was caught by overlapping that span. The share of old text under no verified
+quote is the check for claims the model never listed.
 """
 
 import inspect

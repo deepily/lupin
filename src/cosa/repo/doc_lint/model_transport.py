@@ -1,5 +1,5 @@
 """
-The one door the judge harness uses to reach a model (plan 1, section 5, step 0).
+The one door the judge harness uses to reach a model (plan 1, section 5, billing path).
 
 Bounded Claude Code: in-process sdk_query with tools=[], so the Max plan covers the cost and the
 model can only emit text. The firewalled per-token SDK is never used here. Bounded CC has no
@@ -26,7 +26,7 @@ class ModelCallError( Exception ):
 
 def prompt_version( name, *parts ):
     """
-    Derive a prompt version from the text and code that make the prompt, so it cannot go stale.
+    Derive a prompt version from the text and code behind a prompt, so it cannot go stale.
 
     Requires:
         - name is a short label; parts are the strings (prompt text, parser source) to hash
@@ -62,7 +62,7 @@ async def complete( model, system_prompt, user_prompt, query_fn=None, timeout_se
     Send one prompt to a bounded Claude Code model and return its text.
 
     Requires:
-        - model is a non-empty string naming a model id; there is no default on purpose
+        - model is a non-empty string naming a model id; there is no default
         - query_fn, when given, is an async generator function with sdk_query's signature
           ( prompt=..., options=... ), used by tests to stand in for the SDK
 

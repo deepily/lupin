@@ -1,12 +1,13 @@
 """
 The prose judge: the style rules no regular expression can check (plan 1, section 4.1).
 
-A bounded Claude Code model reads one docstring at a time, with its signature, and quotes the
-sentences that break one of four rules: say only what the signature does not (2), one idea per
-sentence (3), no typographic emphasis (4), and no rhetoric such as "not X but Y" (5). Python
-checks that each quoted sentence occurs in the docstring and works out its file line, so a
-finding always points at real text. It reads changed text only and is not a commit gate: it
-makes a model call, so it runs in review.
+A bounded Claude Code model reads one docstring at a time, with its signature. It quotes the
+sentences that break one of four rules.
+Rule 2: say only what the signature does not. Rule 3: one idea per sentence.
+Rule 4: no typographic emphasis. Rule 5: no rhetoric such as "not X but Y".
+Python checks that each quoted sentence occurs in the docstring and works out its file line.
+A finding therefore always points at real text. The judge reads changed text only. It is not a
+commit gate, because it makes a model call, so it runs in review.
 """
 
 import ast
@@ -131,7 +132,7 @@ def parse_findings( raw ):
         - accepts one JSON object, optionally in one ```json fence; an empty list is valid
 
     Raises:
-        - ProseParseError for invalid JSON, extra or missing keys, a rule outside RULES, or a
+        - ProseParseError for invalid JSON, extra or missing keys, a rule outside the four, or a
           value that is not a non-empty string
     """
     text  = raw.strip()
@@ -155,7 +156,7 @@ def parse_findings( raw ):
 
 def locate_line( sentence, item ):
     """
-    Return the file line where a quoted sentence starts, or None if it is not in the docstring.
+    Return the file line where a quoted sentence starts, or None when it is absent.
 
     Requires:
         - item comes from items_from_source

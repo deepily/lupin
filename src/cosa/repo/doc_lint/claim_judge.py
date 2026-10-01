@@ -1,12 +1,12 @@
 """
-The claim judge of the judge harness (plan 1, section 5, steps 2 and 4).
+The claim judge of the judge harness (plan 1, section 5, judge and history labels).
 
 For each claim extracted from old text, one verdict: does the new text, or the design doc its
 Design: line points to, state it? The verdict is present, absent or uncertain, because bounded
 Claude Code gives no confidence score to threshold. An uncertain claim goes to the escalation
-model. A claim that stays uncertain, or whose reply cannot be parsed, is flagged dropped: the
-harness fails closed (ruling B2). The judge model is never asked to write a grade, only to
-choose one of three words per claim.
+model. A claim that stays uncertain, or whose reply cannot be parsed, is flagged dropped, so
+the harness fails closed. The judge model is never asked to write a grade, only to choose one
+of three words per claim.
 """
 
 import inspect
@@ -77,7 +77,7 @@ def parse_verdicts( raw, count ):
         - accepts one JSON object, optionally in one ```json fence
 
     Raises:
-        - JudgeParseError for invalid JSON, extra keys, a verdict outside VERDICTS, or ids that
+        - JudgeParseError for invalid JSON, extra keys, a verdict outside the three words, or ids that
           are not exactly 1 to count with none repeated or missing
     """
     text  = raw.strip()
