@@ -323,12 +323,61 @@ def _strip_type_arguments( expr ):
     return "".join( out )
 
 
+def _collapse_call_arguments( expr ):
+    """
+    `expr` with the inside of every outermost `( … )` group emptied, so `f( g( x ) )` reads `f()`.
+
+    🔴 WHY THIS EXISTS (measured 2026-09-30, row 20e9da2a). `DOM_TERMINAL` spells a call's
+    arguments as an open paren, non-close-paren characters, a close paren, which stops at the FIRST `)`. A DOM call whose argument holds
+    a call of its own — `document.getElementById( ( ui as T )._stripIconIdFor( W ) )` — therefore
+    never terminated in DOM as far as the guard was concerned, and three live hazards
+    (`session_reaped_handler` 119 and 139, `voice_persona_assigned_handler` 159) sat behind a
+    green gate. Same defect class as the type-argument hole: a predicate written as a pattern.
+
+    Requires:
+        - expr is operand source text
+
+    Ensures:
+        - parens inside a string or template literal are not counted
+        - an unbalanced `(` leaves the rest of the expression untouched
+        - never raises
+    """
+    out   = []
+    index = 0
+    while index < len( expr ):
+        ch = expr[ index ]
+        if ch != "(":
+            out.append( ch )
+            index += 1
+            continue
+        depth = 0
+        quote = None
+        end   = index
+        while end < len( expr ):
+            c = expr[ end ]
+            if quote is not None:
+                if   c == "\\": end += 1
+                elif c == quote: quote = None
+            elif c in "'\"`": quote = c
+            elif c == "(": depth += 1
+            elif c == ")":
+                depth -= 1
+                if depth == 0: break
+            end += 1
+        if end >= len( expr ):
+            out.append( expr[ index: ] )
+            break
+        out.append( "()" )
+        index = end + 1
+    return "".join( out )
+
+
 def _terminates_in_dom( expr ):
     """True when `expr`, stripped of a trailing `!` and `as <Type>`, ends in a DOM call or property."""
     expr = _strip_type_arguments( expr ).strip().rstrip( "!" )
     expr = _CAST.sub( "", expr ).strip().rstrip( "!" )
     if _is_comparison( expr ): return False
-    return bool( DOM_TERMINAL.search( expr ) )
+    return bool( DOM_TERMINAL.search( _collapse_call_arguments( expr ) ) )
 
 
 def name_bindings( text ):

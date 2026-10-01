@@ -557,6 +557,40 @@ class TestItSeesThroughTypeArguments:
         assert _strip_type_arguments( "q<A" ) == "q<A", "an unclosed `<` must survive, not raise"
 
 
+class TestItSeesThroughNestedCallArguments:
+    """
+    `document.getElementById( ui._stripIconIdFor( W ) )` is a DOM call whose argument holds a call
+    of its own. The terminal pattern stopped at the first `)`, so the guard read 0 over four live
+    hazards (`session_reaped_handler` 119/139, `voice_persona_assigned_handler` 159,
+    `manager_badge_live_update` 187) — row 20e9da2a, 2026-09-30.
+    """
+
+    @pytest.mark.parametrize( "src", [
+        "assert.equal( document.getElementById( ui._stripIconIdFor( NEWBIE ) ), null, 'no icon' );",
+        "const icon = document.getElementById( ( ui as { f: ( s: string ) => string } ).f( W ) );\nassert.equal( icon, null );",
+        "assert.equal( root.querySelector( sel( a, b( c ) ) ), null );",
+        "assert.equal( null, root.querySelector( `#${ f( x ) }` ) );",
+        "assert.equal( root.querySelector( \"a:not(.b)\" ), null );",
+        "assert.equal( root.querySelector<HTMLElement>( f( g( x ) ) ), null );",
+    ] )
+    def test_a_dom_call_with_a_nested_call_argument_is_flagged( self, src ):
+        assert scan_text( src ), "a nested call hid a DOM node from the guard: %s" % src
+
+    @pytest.mark.parametrize( "src", [
+        "assert.equal( root.querySelector( f( g( x ) ) )!.textContent, 'a' );",
+        "assert.ok( document.getElementById( f( g( x ) ) ) === null, 'absent' );",
+        "assert.equal( f( g( x ) ), 3 );",
+        "assert.equal( root.querySelectorAll( f( g( x ) ) ).length, 2 );",
+    ] )
+    def test_the_controls_stay_unflagged( self, src ):
+        assert not scan_text( src ), "false positive on: %s" % src
+
+    def test_collapse_ignores_parens_inside_strings_and_survives_an_unclosed_one( self ):
+        from tests.dom_assert_lint import _collapse_call_arguments
+        assert _collapse_call_arguments( 'a( b( ")" ), \'(\' ).c( d )' ) == "a().c()"
+        assert _collapse_call_arguments( "a( b( x )" ) == "a( b( x )", "an unclosed paren must be left alone, not raise"
+
+
 class TestTheBooleanFormReportsInsteadOfDying:
     """
     The remedy the lint recommends, shown to DISCRIMINATE: the SAME present element, the SAME

@@ -184,7 +184,7 @@ test( "FIX: plain notification with top-level manager_persona populates the map 
   await ui.handleNotificationUpdate( {
     notification: { id_hash: "dup2", type: "task", sender_id: NEWBIE, manager_persona: MGR, message: "hi" },
   } );
-  assert.equal( document.getElementById( ui._stripIconIdFor( NEWBIE ) ), null, "no icon yet" );
+  assert.ok( document.getElementById( ui._stripIconIdFor( NEWBIE ) ) === null, "no icon yet" );
   assert.ok( ( ui.managerPersonaMap as Map<string, unknown> ).has( NEWBIE ), "map populated ahead of the icon" );
 
   // Icon created later (e.g. by the persona event) reads the map → badge applied at creation.
