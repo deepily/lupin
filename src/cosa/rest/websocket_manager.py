@@ -145,8 +145,18 @@ class WebSocketManager:
         # buffer forever. The OrderedDict is an LRU over slots — least recently
         # EMITTED-TO is evicted first, because the device most likely to come back is
         # the one whose backlog is worth keeping.
+        #
+        # 🔴 BUT NEVER A SLOT WITH A CONNECTED HOLDER. The LRU ranks by emit recency, and a
+        # quiet phone that is still connected is exactly what ranks oldest. Evicting it
+        # discards the seq and the backlog of a socket that is open right now, and its next
+        # resume reads as a gap. Eviction takes the oldest slot with NO live holder; when
+        # every slot is live the map is allowed past the ceiling, bounded by the number of
+        # connections, and settles back at the next write once a holder disconnects.
         self.device_frame_buffers: "OrderedDict[tuple, deque]" = OrderedDict()
         self.device_seq: Dict[tuple, int] = {}
+        # True while the slot map is held above its ceiling because every slot beyond it has a
+        # live holder. It exists only so the overshoot warning fires once per CROSSING.
+        self.device_buffers_over_cap: bool = False
         # Store reference to main event loop for thread-safe operations
         self.main_loop: Optional[asyncio.AbstractEventLoop] = None
         # Session management configuration
@@ -662,7 +672,11 @@ class WebSocketManager:
               cannot silently rewrite history
             - the slot's buffer holds at most device_buffer_size frames (oldest
               dropped) and at most device_buffer_max_slots buffers exist, the least
-              recently emitted-to being evicted
+              recently emitted-to slot WITH NO LIVE HOLDER being evicted
+            - a slot with a connected holder is never evicted: when every slot beyond the
+              ceiling is live, the map exceeds device_buffer_max_slots by at most the
+              number of connected holders, one warning is printed per crossing, and the
+              next write after enough holders disconnect evicts back down to the ceiling
 
         Raises:
             - None
@@ -672,15 +686,42 @@ class WebSocketManager:
             buffers.move_to_end( slot )
         else:
             buffers[ slot ] = deque( maxlen=self.device_buffer_size )
-            while len( buffers ) > self.device_buffer_max_slots:
-                evicted, _dropped = buffers.popitem( last=False )
-                self.device_seq.pop( evicted, None )
+            self._evict_unheld_slots( keep=slot )
 
         seq = self.device_seq.get( slot, 0 ) + 1
         self.device_seq[ slot ] = seq
         stamped = { **message, "seq": seq }
         buffers[ slot ].append( stamped )
         return stamped
+
+    def _evict_unheld_slots( self, keep ) -> None:
+        """
+        Evict least-recently-emitted slots that have no live holder, down to the ceiling.
+
+        Requires:
+            - keep is the slot just inserted; it is never a candidate
+
+        Ensures:
+            - after the call len( device_frame_buffers ) <= device_buffer_max_slots, or every
+              slot past the ceiling has a connected holder
+            - a slot whose holder is connected is never removed
+            - one warning per crossing into the over-ceiling state, and the state is cleared
+              once the map is back at or under the ceiling
+
+        Raises:
+            - None
+        """
+        buffers = self.device_frame_buffers
+        for candidate in list( buffers ):
+            if len( buffers ) <= self.device_buffer_max_slots: break
+            if candidate == keep or self.slot_holder( candidate[ 0 ], candidate ) is not None: continue
+            del buffers[ candidate ]
+            self.device_seq.pop( candidate, None )
+        if len( buffers ) <= self.device_buffer_max_slots:
+            self.device_buffers_over_cap = False
+        elif not self.device_buffers_over_cap:
+            self.device_buffers_over_cap = True
+            print( f"[WS] device frame buffers: {len( buffers )} slots exceed the ceiling of {self.device_buffer_max_slots} because every slot beyond it has a connected holder; none are evicted" )
 
     def _stamp_for_session( self, session_id: str, message: dict ) -> dict:
         """

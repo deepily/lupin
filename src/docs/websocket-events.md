@@ -624,8 +624,10 @@ partial replay that stayed quiet would leave the client believing it was caught 
 would stop asking, which is strictly worse than not replaying.
 
 Retention is bounded by `websocket device frame buffer size` (default 200) per slot and
-`websocket device frame buffer max slots` (default 64) overall. Without an `ack` the
-buffer only ever shrinks by eviction — which is the thing that causes a `gap`.
+`websocket device frame buffer max slots` (default 64) overall, evicting the oldest slot with
+no connected holder. A connected slot is never evicted, so the total can exceed 64 by at most
+the number of connected holders (one warning per crossing) and settles back at the next write.
+Without an `ack` the buffer only ever shrinks by eviction — which is the thing that causes a `gap`.
 
 `resume_complete` is deliberately **not** in `websocket available events`: the endpoint
 sends it directly, like `auth_success`, and it never passes through the subscription

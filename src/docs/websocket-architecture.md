@@ -216,8 +216,11 @@ hold.
 **Bounded at both ends**, because the buffers deliberately outlive their sockets and
 per-slot capping alone would bound nothing: `websocket device frame buffer size`
 (default 200) frames per slot, and `websocket device frame buffer max slots` (default 64)
-slots, evicting the least-recently-emitted-to first — the device most likely to come back
-is the one whose backlog is worth keeping.
+slots, evicting the least-recently-emitted-to slot **that has no connected holder** first — the
+device most likely to come back is the one whose backlog is worth keeping. A slot whose
+socket is open is never evicted, however quiet: when every slot past the ceiling is live
+the map exceeds `max slots` by at most the number of connected holders (one `[WS]` warning
+per crossing, not per frame), and the next write after holders disconnect evicts back down.
 
 `resume_complete` is **not** in `websocket available events`, deliberately: the endpoint
 sends it directly like `auth_success` and it never passes through the subscription filter.
