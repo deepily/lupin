@@ -116,7 +116,7 @@ test( "session_reaped removes the reaped worker's strip badge + refreshes the br
   const reapedIcon   = document.getElementById( ( ui as { _stripIconIdFor: ( s: string ) => string } )._stripIconIdFor( WORKER ) );
   const survivorIcon = document.getElementById( ( ui as { _stripIconIdFor: ( s: string ) => string } )._stripIconIdFor( SURVIVOR ) );
 
-  assert.equal( reapedIcon, null, "reaped worker's strip badge removed from the focus bar" );
+  assert.ok( reapedIcon === null, "reaped worker's strip badge removed from the focus bar" );
   assert.ok( survivorIcon, "other sender's badge survives (scoped removal)" );
   assert.equal( refreshCalls.length, 1, "broadcast card recipient list refreshed exactly once" );
 } );
@@ -136,5 +136,5 @@ test( "session_reaped is a clean no-op when window.broadcastPanel is absent", as
   await ui.handleNotificationUpdate( { notification: { type: "session_reaped", sender_id: WORKER } } );
 
   const reapedIcon = document.getElementById( ( ui as { _stripIconIdFor: ( s: string ) => string } )._stripIconIdFor( WORKER ) );
-  assert.equal( reapedIcon, null, "badge still removed without a broadcast panel present" );
+  assert.ok( reapedIcon === null, "badge still removed without a broadcast panel present" );
 } );

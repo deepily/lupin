@@ -124,7 +124,7 @@ test( "the New button sits directly after the Find box — where he asked for it
 
 test( "no transport means no button, rather than a card that can only fail", () => {
   const { newButton } = setup( {} );
-  assert.equal( newButton(), null );
+  assert.ok( newButton() === null, "no transport means no button" );
 } );
 
 test( "without a Find box the button still mounts, first in the header actions", () => {

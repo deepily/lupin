@@ -164,7 +164,12 @@ def _operand_arguments( text, index ):
     out   = []
     args  = []
     while index < len( text ) and len( args ) < 2:
-        ch = text[ index ]
+        ch  = text[ index ]
+        end = _type_arguments_end( text, index )
+        if end >= 0:
+            out.append( text[ index : end ] )
+            index = end
+            continue
         if ch in "([{":
             depth += 1
         elif ch in ")]}":
@@ -255,12 +260,124 @@ def _is_comparison( expr ):
     return False
 
 
+_TYPE_ARGS_ALLOWED = re.compile( r"[\w$.,\s|&\[\]<>?:{}'\"=-]*" )
+
+
+def _type_arguments_end( text, index ):
+    """
+    The offset just past a TypeScript type-argument list that starts at `text[ index ]`, or -1.
+
+    Requires:
+        - 0 <= index < len( text )
+
+    Ensures:
+        - returns -1 unless text[ index ] is a `<` directly after an identifier character,
+          its balanced `>` exists, the contents look like a type, and a `(` follows
+        - `=>` inside the list (a function type) does not close it
+        - never raises
+    """
+    if text[ index ] != "<" or index == 0 or not ( text[ index - 1 ].isalnum() or text[ index - 1 ] in "_$" ):
+        return -1
+    depth = 0
+    end   = index
+    while end < len( text ):
+        if   text[ end ] == "<": depth += 1
+        elif text[ end ] == ">":
+            if text[ end - 1 ] != "=": depth -= 1
+            if depth == 0: break
+        end += 1
+    if end >= len( text ) or not _TYPE_ARGS_ALLOWED.fullmatch( text[ index + 1 : end ] ): return -1
+    if not text[ end + 1 : ].lstrip().startswith( "(" ): return -1
+    return end + 1
+
+
+def _strip_type_arguments( expr ):
+    """
+    `expr` with every call's TypeScript type-argument list removed.
+
+    🔴 WHY THIS EXISTS (measured 2026-09-30, row f2d3df2b). `DOM_TERMINAL` spells a call as
+    `.querySelector( … )`, so `root.querySelector<HTMLElement>( … )` — the same call, the same
+    node, the same SIGKILL — slid past it. 65 equal-family lines carry a generic query and 7 of
+    them were live hazards behind a green gate. Widening the regex to name `<…>` would be one
+    more spelling; the predicate is "a call", and a type argument is not part of what is called.
+
+    Requires:
+        - expr is operand source text
+
+    Ensures:
+        - an identifier directly followed by a balanced `<…>` and then `(` loses the `<…>`
+        - nested generics (`q<Map<A, B>>( x )`) are removed whole
+        - a `<` that is not closed by a `>` before the call paren is left alone, so a
+          comparison such as `a < b` is never rewritten
+        - never raises
+    """
+    out   = []
+    index = 0
+    while index < len( expr ):
+        end = _type_arguments_end( expr, index )
+        if end >= 0:
+            index = end
+            continue
+        out.append( expr[ index ] )
+        index += 1
+    return "".join( out )
+
+
+def _collapse_call_arguments( expr ):
+    """
+    `expr` with the inside of every outermost `( … )` group emptied, so `f( g( x ) )` reads `f()`.
+
+    🔴 WHY THIS EXISTS (measured 2026-09-30, row 20e9da2a). `DOM_TERMINAL` spells a call's
+    arguments as an open paren, non-close-paren characters, a close paren, which stops at the FIRST `)`. A DOM call whose argument holds
+    a call of its own — `document.getElementById( ( ui as T )._stripIconIdFor( W ) )` — therefore
+    never terminated in DOM as far as the guard was concerned, and three live hazards
+    (`session_reaped_handler` 119 and 139, `voice_persona_assigned_handler` 159) sat behind a
+    green gate. Same defect class as the type-argument hole: a predicate written as a pattern.
+
+    Requires:
+        - expr is operand source text
+
+    Ensures:
+        - parens inside a string or template literal are not counted
+        - an unbalanced `(` leaves the rest of the expression untouched
+        - never raises
+    """
+    out   = []
+    index = 0
+    while index < len( expr ):
+        ch = expr[ index ]
+        if ch != "(":
+            out.append( ch )
+            index += 1
+            continue
+        depth = 0
+        quote = None
+        end   = index
+        while end < len( expr ):
+            c = expr[ end ]
+            if quote is not None:
+                if   c == "\\": end += 1
+                elif c == quote: quote = None
+            elif c in "'\"`": quote = c
+            elif c == "(": depth += 1
+            elif c == ")":
+                depth -= 1
+                if depth == 0: break
+            end += 1
+        if end >= len( expr ):
+            out.append( expr[ index: ] )
+            break
+        out.append( "()" )
+        index = end + 1
+    return "".join( out )
+
+
 def _terminates_in_dom( expr ):
     """True when `expr`, stripped of a trailing `!` and `as <Type>`, ends in a DOM call or property."""
-    expr = expr.strip().rstrip( "!" )
+    expr = _strip_type_arguments( expr ).strip().rstrip( "!" )
     expr = _CAST.sub( "", expr ).strip().rstrip( "!" )
     if _is_comparison( expr ): return False
-    return bool( DOM_TERMINAL.search( expr ) )
+    return bool( DOM_TERMINAL.search( _collapse_call_arguments( expr ) ) )
 
 
 def name_bindings( text ):
@@ -308,7 +425,7 @@ def _named_operand_is_dom( operand, table, offset ):
         - `q()`, `q( a, b )!`, `q() as T`   → a "helper" binding must be DOM
         - anything following the name or its call (`.textContent`, `?.x`) → False
     """
-    operand = operand.strip()
+    operand = _strip_type_arguments( operand ).strip()
     head    = _NAME_HEAD.match( operand )
     if head is None: return False
     rest   = operand[ head.end(): ]

@@ -210,7 +210,7 @@ test( "every shortcut is inert while the operator types in an input", () => {
   press( "p" );
   assert.deepEqual( h.paused, [ "ar1" ], "control — the listener is attached and P works" );
   input.focus();
-  assert.equal( document.activeElement, input, "the input really holds focus — else the rest proves nothing" );
+  assert.ok( document.activeElement === input, "the input really holds focus — else the rest proves nothing" );
   press( "y" );
   press( "n" );
   press( "p" );
