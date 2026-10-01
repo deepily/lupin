@@ -17,7 +17,10 @@
 - **Waiting on Rick**: the TypeSafe plugin install (the permission classifier refused it; two commands for him to run). Board unstaffed: `3a2f726b` P0, `a3c59f2d`, `80513825`, `c4a81acc`, `8a99f2ee`.
 - **Files**: history.md, src/docs/vm-new-host-checklist.md, src/docs/README.md, src/docs/fastapi/api.json, src/docs/fastapi/api.md
 
-#### Checkpoint | 2026.10.01 15:10 | Test-VM follow-up closed out; history written
+#### Checkpoint | 2026.10.01 15:10 | Test-VM follow-up closed out; history written (`900e73b82`)
+
+- **Session end ~15:45 EDT, spun down on Rick's word** (fleet focus is docs + wiki; none of my rows is). No push, no backup. Memento: root slot, session `cf6ff92a`.
+- **Checks**: orphan-row check read 68 open rows, 2 findings, neither mine (`d8543167` → María, `768e852f` → Tiffany, past its chase). Delivery-collision scan exit 1 (informational). Orphaned-work sweep not installed in lupin. Memento sweep and both archives deferred (TODO Decisions Log 10-01).
 
 ### 2026.09.30 (evening) - Session 9d720da8 (Mr. Radio 🦉, manager; crew Maya 🌻, Chloé 🗼, Krishna 🦚, Sam 🎙️) | 17 rows closed on merges; doc viewer race closed; resume-job ownership; every job builder refuses bad input
 

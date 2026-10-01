@@ -16,6 +16,14 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 **Timers from the 09-30 skeleton crew** (these clean themselves up; nothing to fold in): `stop-poke-restore-20260930` (dev and test, 17:00 EDT) and `ratio-gate-reenable-20260930` (test, 12:46 EDT).
 **Not mine and uncommitted in the main tree** (left alone): the phase6b `action_required` PNG baseline (dirty since 09-22) and María's three `src/rnd/v0.2.1/` docs (kill-switch design, console-tee plan, cascade handoff).
 
+## 📚 DECISIONS LOG 2026-10-01 (Mr. Radio 🦉 `cf6ff92a`, no crew) — test-VM follow-up and the spin-down
+
+- **VM preflight stays check-only** (Rick, card, ~14:00 EDT). No provisioning verb; a new host stops with a named failure and a paste-ready fix. Row `72781b05`.
+- **Flow-ratio check C9 stays a warning** (Mr. Radio's call under Rick's 09-30 "set this as you see fit"). A block would stop every deploy after a slider move.
+- **lupin-host-test is left running** (Rick, same card).
+- **Mr. Radio spun down** (Rick, ~15:25 EDT): the fleet's focus is the docs rewrite and the code wiki, and none of his five board rows is that work. No push, no backup. He comes back after that work.
+- **Deferred to his return**: archive `history.md` (18.3k tokens, past the 17k warning) and the TODO.md horizon archive (this file is about 596 KB); the memento sweep (not run: the live-seat list for Cheech's crew was not read, and the dry run would have trashed their records).
+
 ## 📚 DECISIONS LOG 2026-09-30 — Rick's docs-rewrite walkthrough, plan 1 (John 🏄🏽 `abb3ab0e`, tester seat, Cheech's v0.2.2 crew; row `5e2915d0`)
 
 Source: plan 1 `src/rnd/v0.2.2/2026.09.30-lupin-af-documentation-rewrite-plan/2026.09.30-docs-rewrite-implementation-plan.md`. Rulings are in its Rulings block (R.1 to R.6) and in §14 (the D rows). Each entry below names its plan section; search by fixed string (`D7 —`, `R.5b —`).
