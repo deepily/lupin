@@ -321,3 +321,34 @@ def test_submit_raises_on_a_refused_login_or_submit():
 def test_submit_defaults_to_requests_post( monkeypatch ):
     monkeypatch.setattr( hs.requests, "post", fake_post() )
     assert hs.submit( {}, "http://h", "e", "p" ) == { "job_id": "j1" }
+
+
+# ---- command line ----------------------------------------------------------------------------
+
+def cli_args( tmp_path, **override ):
+    names = { "extractor-model": "ext-m", "judge-model": "judge-m", "escalation-model": "esc-m", "writer-model": "writer-m" }
+    names.update( override )
+    argv  = [ "--pairs", str( tmp_path / "pairs.json" ), "--ledger", str( tmp_path / "l" ), "--out", str( tmp_path / "out.json" ) ]
+    for k, v in names.items(): argv += [ f"--{k}", v ]
+    return argv
+
+
+def test_the_command_line_runs_pairs_and_writes_the_report(tmp_path, capsys):
+    from cosa.repo.doc_lint import harness_cli as cli
+    ( tmp_path / "pairs.json" ).write_text( json.dumps( [ pair( "seeded", L1 + "\n" + L3, seeded=L2 ) ] ) )
+    assert cli.main( cli_args( tmp_path ), query_fn=FakeModel() ) == 0
+    written = json.loads( ( tmp_path / "out.json" ).read_text() )
+    assert written[ "lists" ][ 0 ][ "positives" ] == 1 and written[ "lists" ][ 0 ][ "misses" ] == 0
+    assert "default_gate_pass=False" in capsys.readouterr().out
+
+
+def test_the_command_line_refuses_a_judge_that_is_the_writer(tmp_path, capsys):
+    from cosa.repo.doc_lint import harness_cli as cli
+    assert cli.main( cli_args( tmp_path, **{ "judge-model": "writer-m" } ), query_fn=FakeModel() ) == 2
+    assert "REFUSED" in capsys.readouterr().err and not ( tmp_path / "out.json" ).exists()
+
+
+def test_the_command_line_has_no_default_model(tmp_path):
+    from cosa.repo.doc_lint import harness_cli as cli
+    with pytest.raises( SystemExit ):
+        cli.parse_args( [ "--pairs", "a", "--ledger", "b", "--out", "c" ] )
