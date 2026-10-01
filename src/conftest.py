@@ -309,6 +309,7 @@ from cosa.utils.tree_state import (
     _primary_branch,
     _run_span,
     _tree_state_line,
+    capture_start_bundle,
     capture_start_sha,
     tree_state_line,
 )
@@ -402,6 +403,9 @@ _COVERAGE_FILE_AT_START = _coverage_file_at_start()
 # fetched/dirty at start answer questions nobody asked at eight times the cost. Design:
 # `src/rnd/v0.2.0/2026.08.28-tree-state-gap-1-start-and-end-sha.md` §2. — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.28-tree-state-gap-1-start-and-end-sha.md
 _TREE_STATE_START_SHA = capture_start_sha( _git_reader( os.path.dirname( os.path.abspath( __file__ ) ) ) )
+# Row 105ff244: the served-bundle hash at the same moment. dist/ is gitignored, so the sha above is
+# blind to a bundle rebuild inside the run; this is what makes `bundle-span=` in the line.
+_TREE_STATE_START_BUNDLE = capture_start_bundle( _git_reader( os.path.dirname( os.path.abspath( __file__ ) ) ) )
 
 
 
@@ -416,7 +420,7 @@ def pytest_terminal_summary( terminalreporter, exitstatus, config ):
     # FIRST, and outside every early return below: a run that ends before this has
     # printed is a green with no tree attached, which is the whole defect.
     try:
-        terminalreporter.write_line( tree_state_line( _git_reader( os.path.dirname( os.path.abspath( __file__ ) ) ), _TREE_STATE_START_SHA ) )
+        terminalreporter.write_line( tree_state_line( _git_reader( os.path.dirname( os.path.abspath( __file__ ) ) ), _TREE_STATE_START_SHA, _TREE_STATE_START_BUNDLE ) )
     except Exception:                                    # pragma: no cover - a diagnostic may never fail a run
         terminalreporter.write_line( "[tree-state] UNKNOWN — the tree-state probe itself failed" )
 

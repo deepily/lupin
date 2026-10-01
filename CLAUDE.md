@@ -748,6 +748,10 @@ whole-second mtime plus size, so a same-size edit inside one second runs the pre
 - The tier stamp's `run-span=unmoved` compares two HEAD shas; `tracked-dirty` is one sample at the end with
   untracked rows stripped. Neither certifies that the run measured the tree you think it did. Name a run by
   what it measured, not by the sha you asked for.
+  `bundle-span=` (row 105ff244) covers the one thing both are blind to: it hashes the CONTENT of every
+  served `.js` and `manifest.json` under `src/lupin_app/static/dist/` (gitignored; `.map` files are not served) at start and end, names the root hashed
+  (`bundle=<hash>@seat` or `@main`), and a rebuild inside the run reads `bundle-span=<a>..<b> ⚠️ BUNDLE
+  REBUILT MID-RUN` beside `run-span`. `@seat` and `@main` are different directories; `:8000` serves main's.
 
 ### Reading a result
 
