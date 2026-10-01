@@ -127,7 +127,8 @@ async def run_pair( pair, config, ledger, query_fn=None ):
         if frozen is None:
             result = await claim_extractor.extract_claims( pair[ "old" ], config.extractor_model, query_fn=query_fn )
             frozen = { "claims": [ c._asdict() for c in result.claims ], "discarded": len( result.discarded ),
-                       "uncovered": result.uncovered_fraction }
+                       "uncovered": result.uncovered_fraction,
+                       "longest_quote": result.longest_quote_share }
             ledger.put( key, frozen )
         claims = [ claim_extractor.Claim( **c ) for c in frozen[ "claims" ] ]
         runs   = []
@@ -142,7 +143,7 @@ async def run_pair( pair, config, ledger, query_fn=None ):
                 ledger.put( jkey, rows )
             runs.append( rows )
         lists.append( { "claims": frozen[ "claims" ], "discarded": frozen[ "discarded" ],
-                        "uncovered": frozen[ "uncovered" ], "runs": runs } )
+                        "uncovered": frozen[ "uncovered" ], "longest_quote": frozen[ "longest_quote" ], "runs": runs } )
     return { "id": pair[ "id" ], "seed_span": pair.get( "seed_span" ), "lists": lists }
 
 

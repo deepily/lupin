@@ -33,8 +33,8 @@ CONFIG = hn.HarnessConfig( "ext-m", "judge-m", "esc-m", "writer-m" )
 
 
 def tagged( prompt, tag ):
-    match = re.search( rf"<{tag}>\n(.*?)\n</{tag}>", prompt, re.DOTALL )
-    return match.group( 1 ) if match else ""
+    match = re.search( rf"<{tag}_(\w+)>\n(.*?)\n</{tag}_\1>", prompt, re.DOTALL )
+    return match.group( 2 ) if match else ""
 
 
 class FakeModel:
@@ -232,7 +232,7 @@ def test_a_report_with_no_pairs_has_no_figures():
 
 def synthetic( n, missed=0 ):
     """n seeded pairs; the first `missed` have a claim list that flags nothing."""
-    good = { "claims": [ { "start": 0, "end": 10 } ], "discarded": 0, "uncovered": 0.0,
+    good = { "claims": [ { "start": 0, "end": 10 } ], "discarded": 0, "uncovered": 0.0, "longest_quote": 0.25,
              "runs": [ [ { "verdict": "absent", "escalated": False } ] ] * 3 }
     bad  = dict( good, runs=[ [ { "verdict": "present", "escalated": False } ] ] * 3 )
     return [ { "id": i, "seed_span": [ 2, 5 ], "lists": [ bad if i < missed else good ] * 2 } for i in range( n ) ]
@@ -352,3 +352,8 @@ def test_the_command_line_has_no_default_model(tmp_path):
     from cosa.repo.doc_lint import harness_cli as cli
     with pytest.raises( SystemExit ):
         cli.parse_args( [ "--pairs", "a", "--ledger", "b", "--out", "c" ] )
+
+
+def test_the_report_carries_the_longest_verified_quote():
+    assert hr.build_report( synthetic( 2 ), CONFIG )[ "longest_quote" ] == 0.25
+    assert hr.build_report( [], CONFIG )[ "longest_quote" ] == 0.0

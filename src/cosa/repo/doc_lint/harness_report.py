@@ -127,10 +127,12 @@ def build_report( results, config ):
         } )
     all_total = all_same = seed_total = seed_same = escalations = discarded = 0
     uncovered = []
+    longest   = 0.0
     for r in results:
         for lst in r[ "lists" ]:
             discarded  += lst[ "discarded" ]
             uncovered.append( lst[ "uncovered" ] )
+            longest = max( longest, lst[ "longest_quote" ] )
             escalations += sum( row[ "escalated" ] for run in lst[ "runs" ] for row in run )
             for claim, same in zip( lst[ "claims" ], unanimous( lst[ "runs" ] ) if lst[ "claims" ] else [] ):
                 all_total += 1
@@ -149,6 +151,7 @@ def build_report( results, config ):
                                 "interval": interval( seed_same, seed_total ) },
         "escalations"       : escalations,
         "discarded_claims"  : discarded,
+        "longest_quote"     : longest,
         "mean_uncovered"    : sum( uncovered ) / len( uncovered ) if uncovered else None,
         "default_gate_pass" : bool( seeded ) and len( seeded ) >= DEFAULT_POSITIVES_NEEDED and all( l[ "misses" ] == 0 for l in lists ),
     }
