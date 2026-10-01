@@ -584,3 +584,55 @@ def test_the_cli_report_of_a_jev_run_carries_the_unanswered_count( tmp_path, mon
     monkeypatch.setattr( jev_transport, "_post", lambda url, headers, body, timeout: ( 200, reply( haystack_noul( body ) ) ) )
     assert harness_cli.main( cli_args( tmp_path, "--judge-backend", "jev", "--t-lo", "0.3", "--t-hi", "0.8" ), query_fn=extractor_and_escalation_query() ) == 0
     assert json.loads( ( tmp_path / "r.json" ).read_text() )[ "judge_unanswered" ] == 0
+
+
+def grid_results( blank_last=True ):
+    """Two lists of two runs each, every row answered but the very last one: the only unanswered claim."""
+    from tests.unit.test_doc_lint_harness import synthetic
+    results = json.loads( json.dumps( synthetic( 60, 0, unseeded=20 ) ) )
+    for r in results:
+        for lst in r[ "lists" ]:
+            lst[ "runs" ] = [ [ { "verdict": lst[ "runs" ][ 0 ][ 0 ][ "verdict" ], "escalated": False, "reason": None, "noul": 0.9 } ] for _ in range( 2 ) ]
+    if blank_last: results[ -1 ][ "lists" ][ -1 ][ "runs" ][ -1 ][ -1 ][ "noul" ] = None
+    return results
+
+
+def test_an_unanswered_claim_in_the_last_list_and_last_run_is_counted_and_fails_the_gate():
+    report = harness_report.build_report( grid_results(), CONFIG, jev_run=True )
+    assert report[ "judge_unanswered" ] == 1
+    assert ( report[ "miss_criterion_met" ], report[ "false_alarm_ok" ] ) == ( True, True )
+    assert report[ "default_gate_pass" ] is False
+    assert harness_report.build_report( grid_results( blank_last=False ), CONFIG, jev_run=True )[ "judge_unanswered" ] == 0
+
+
+def test_the_cli_reads_a_labelled_set_when_keys_are_given( tmp_path, monkeypatch ):
+    monkeypatch.setenv( jev_transport.KEY_VARIABLE, KEY )
+    sent = []
+    monkeypatch.setattr( jev_transport, "_post", lambda url, headers, body, timeout: ( sent.append( body ) or ( 200, reply( haystack_noul( body ) ) ) ) )
+    ( tmp_path / "dev" ).mkdir()
+    pair = { "id": "p0", "old": PAIR[ "old" ], "new": PAIR[ "new" ], "linked_doc": "linked design text" }
+    key  = { "id": "p0", "seeded_positive": True, "x_span_in_old": "raises valueerror when blank." }
+    ( tmp_path / "dev" / "pairs.jsonl" ).write_text( json.dumps( pair ) + "\n" )
+    ( tmp_path / "dev" / "keys.jsonl" ).write_text( json.dumps( key ) + "\n" )
+    args = [ "--pairs", str( tmp_path / "dev" / "pairs.jsonl" ), "--keys", str( tmp_path / "dev" / "keys.jsonl" ),
+             "--ledger", str( tmp_path / "l.jsonl" ), "--out", str( tmp_path / "r.json" ),
+             "--extractor-model", "ext", "--judge-model", MODEL, "--escalation-model", "opus-x", "--writer-model", "writer",
+             "--extractor-lists", "1", "--judge-runs", "1", "--judge-backend", "jev", "--t-lo", "0.3", "--t-hi", "0.8" ]
+    assert harness_cli.main( args, query_fn=extractor_and_escalation_query() ) == 2 and sent == []
+    assert harness_cli.main( args + [ "--allow-design-text" ], query_fn=extractor_and_escalation_query() ) == 0
+    assert b"linked design text" in sent[ 0 ]
+    assert json.loads( ( tmp_path / "r.json" ).read_text() )[ "pairs" ] == 1
+
+
+def test_the_cli_refuses_a_gate_path_and_a_file_that_is_not_json( tmp_path, capsys ):
+    ( tmp_path / "gate" ).mkdir()
+    gate_pairs = tmp_path / "gate" / "pairs.jsonl"
+    gate_pairs.write_text( "{}\n" )
+    base = [ "--ledger", str( tmp_path / "l.jsonl" ), "--out", str( tmp_path / "r.json" ), "--extractor-model", "ext",
+             "--judge-model", "claude-j", "--escalation-model", "opus-x", "--writer-model", "writer" ]
+    assert harness_cli.main( [ "--pairs", str( gate_pairs ), "--keys", str( tmp_path / "gate-keys.jsonl" ), *base ] ) == 2
+    assert "gate split" in capsys.readouterr().err
+    not_json = tmp_path / "pairs.json"
+    not_json.write_text( "this is not json" )
+    assert harness_cli.main( [ "--pairs", str( not_json ), *base ] ) == 2
+    assert "REFUSED" in capsys.readouterr().err

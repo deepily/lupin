@@ -13,13 +13,14 @@ import hashlib
 import json
 import sys
 
-from . import claim_extractor, claim_judge, harness_report, harness_runner, jev_judge, jev_transport
+from . import claim_extractor, claim_judge, harness_report, harness_runner, jev_judge, jev_transport, labelled_pairs
 
 
 def parse_args( argv ):
     """Parse the command line; every model id is required and none has a default."""
     parser = argparse.ArgumentParser( description="Run the claim-preservation judge harness." )
-    parser.add_argument( "--pairs", required=True, help="JSON list of { id, old, new, design?, seed_span? }" )
+    parser.add_argument( "--pairs", required=True, help="JSON list of { id, old, new, design?, seed_span? }, or a labelled-set JSON Lines file when --keys is given" )
+    parser.add_argument( "--keys", help="labelled-set keys file: --pairs is then read as the labelled set's pairs file (dev split only)" )
     parser.add_argument( "--ledger", required=True, help="append-only ledger file; reuse it to resume" )
     parser.add_argument( "--out", required=True, help="where to write the report JSON" )
     for name in ( "extractor", "judge", "escalation", "writer" ):
@@ -81,7 +82,11 @@ def main( argv, query_fn=None ):
     if args.gate and args.frozen_pairs_sha != pairs_sha:
         print( f"REFUSED: gate run needs --frozen-pairs-sha {pairs_sha}, got {args.frozen_pairs_sha}", file=sys.stderr )
         return 3
-    pairs = json.loads( raw )
+    try:
+        pairs = json.loads( raw ) if args.keys is None else labelled_pairs.load_pairs( args.pairs, args.keys )
+    except ValueError as e:
+        print( f"REFUSED: {e}", file=sys.stderr )
+        return 2
     try:
         results = asyncio.run( harness_runner.run_all( pairs, config, harness_runner.Ledger( args.ledger ), query_fn=query_fn, judge_backend=backend ) )
     except jev_transport.JevConfigError as e:
