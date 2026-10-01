@@ -92,8 +92,9 @@ def changed_items( before, after ):
     Ensures:
         - returns [ ( old, new ) ] for each old item whose best-overlapping new item reaches MATCH_MIN overlap
           while a guard word or operator of the old item is missing from the new items assigned to it
-        - old and new items are matched one to one, best overlap first, ties going to the lower old and new
-          index, so every old item claims its closest new item before any leftover is placed
+        - old and new items are matched one to one, best overlap first, ties going to the pair that also overlaps
+          most the other way round (new against old), then to the lower old and new index, so every old item
+          claims its closest new item before any leftover is placed
         - a new item left over joins the old item it overlaps most, if that is at least STAND_IN_MIN, so an
           item the writer split in two keeps its "never" in either half
         - a new item therefore vouches for one old item only, and a neighbour's "never" cannot cover for it
@@ -103,14 +104,14 @@ def changed_items( before, after ):
     Raises:
         - nothing
     """
-    ranked = sorted( ( -overlap( old, new ), i, j ) for i, old in enumerate( before ) for j, new in enumerate( after ) )
+    ranked = sorted( ( -overlap( old, new ), -overlap( new, old ), i, j ) for i, old in enumerate( before ) for j, new in enumerate( after ) )
     claimed, taken, group = {}, set(), { i : [] for i in range( len( before ) ) }
-    for score, i, j in ranked:
+    for score, _, i, j in ranked:
         if i in claimed or j in taken or -score < STAND_IN_MIN: continue
         claimed[ i ] = j
         taken.add( j )
         group[ i ].append( after[ j ] )
-    for score, i, j in ranked:
+    for score, _, i, j in ranked:
         if j not in taken and -score >= STAND_IN_MIN and i in claimed:
             taken.add( j )
             group[ i ].append( after[ j ] )

@@ -280,6 +280,15 @@ def test_old_items_claim_their_best_new_item_first_so_a_tie_cannot_steal_it():
     after  = [ "returns None when the queue is empty", "returns None when the queue is empty and closed" ]
     assert cd.changed_items( before, after ) == [ ( "never returns None when the queue is empty", "returns None when the queue is empty" ) ]
     assert cd.changed_items( before[ : : -1 ], after[ : : -1 ] ) == [ ( "never returns None when the queue is empty", "returns None when the queue is empty" ) ]
+    assert cd.changed_items( [ "x y", "never x y z" ], [ "x y z" ] ) == [], "one new item vouches for one old item, so the loser is a loss"
+
+
+def test_swapped_items_with_tied_forward_overlap_are_not_reported_as_changed():
+    before = [ "file path exists", "file path exists and never empty" ]
+    after  = [ "file path exists and never empty", "file path exists" ]
+    assert cd.changed_items( before, after ) == [], "same two items in the other order is not a change"
+    assert cd.changed_items( before[ : : -1 ], after[ : : -1 ] ) == []
+    assert cd.changed_items( before, [ "file path exists and empty", "file path exists" ] ) == [ ( "file path exists and never empty", "file path exists and empty" ) ]
 
 
 def test_a_neighbouring_item_with_its_own_never_cannot_vouch_for_a_weakened_one():
@@ -397,6 +406,7 @@ MUTANTS = [
     ( "if overlap( old, best ) < MATCH_MIN: continue", "pass", "test_an_old_item_whose_closest_new_item_belongs_to_a_neighbour_is_lost_not_changed" ),
     ( "OPERATOR_REGEX.findall( item )", "[]", "test_guards_and_changed_items_edges" ),
     ( "found += [ f\"CHANGED: {where}: {old!r} -> {new!r}\" for old, new in r[ \"changed\" ] ]", "pass", "test_a_weakened_clause_with_the_count_held_is_reported_as_changed_not_matched" ),
+    ( "-overlap( new, old ), i, j )", "0.0, i, j )", "test_swapped_items_with_tied_forward_overlap_are_not_reported_as_changed" ),
     ( "if i in claimed or j in taken or -score < STAND_IN_MIN: continue", "if i in claimed or -score < STAND_IN_MIN: continue", "test_old_items_claim_their_best_new_item_first_so_a_tie_cannot_steal_it" ),
     ( "if i in claimed or j in taken or -score < STAND_IN_MIN: continue", "if i in claimed or j in taken or -score < 2: continue", "test_a_weakened_clause_with_the_count_held_is_reported_as_changed_not_matched" ),
     ( "if j not in taken and -score >= STAND_IN_MIN and i in claimed:", "if False:", "test_an_item_split_in_two_keeps_its_guard_in_either_half_and_an_added_guard_is_not_reported" ),
