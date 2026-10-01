@@ -362,6 +362,13 @@ def test_a_jev_run_with_every_claim_answered_rebuilds_complete_and_its_report_sq
     assert report[ "judge_unanswered" ] == 0 and "incomplete" not in out[ "judges" ][ "jev" ] and out[ "judges" ][ "jev" ][ "headline" ][ "judge_unanswered" ] == 0
 
 
+def test_the_probe_answers_every_missing_claim_unanswered_so_a_rebuilt_report_counts_them( run, tmp_path ):
+    ledger, backend, config, _, run_report = jev_run( run, tmp_path, True )
+    _, rebuilt, missing = jc.rebuild( run[ "pairs" ], config, ledger, backend )
+    assert missing == [ 3, 3 ] and rebuilt[ "judge_unanswered" ] == 6, "the probe's rows carry no noul, so each of the 6 claims in the 2 missing passes counts as unanswered"
+    assert run_report[ "judge_unanswered" ] == 2, "the run itself had one unanswered claim in each of those passes"
+
+
 def test_a_jev_outage_leaves_passes_out_of_the_ledger_and_the_reason_counts_them( run, tmp_path ):
     ledger, backend, config, _, report = jev_run( run, tmp_path, True )
     assert report[ "judge_unanswered" ] == 2, "one unanswered claim in each of p5's two lists"
@@ -389,7 +396,6 @@ def test_a_report_that_is_not_from_this_run_is_refused_field_by_field( run, tmp_
     _, backend, _, _, report = jev_run( run, tmp_path, False )
     report = dict( report, claude_cli="/x", claude_cli_version="1.0" )
     binding = "claude_cli=/x|version=1.0"
-    assert jc.check_report_binds( "jev", report, report[ "pairs_sha" ] if "pairs_sha" in report else "sha", backend.prompt_version, JEV, binding ) is None if False else True
     report[ "pairs_sha" ] = "sha"
     args = ( "jev", report, "sha", backend.prompt_version, JEV, binding )
     assert jc.check_report_binds( *args ) is None
@@ -398,6 +404,7 @@ def test_a_report_that_is_not_from_this_run_is_refused_field_by_field( run, tmp_
     with pytest.raises( jc.ReportMismatch, match="judge prompt version" ): jc.check_report_binds( "jev", dict( report, prompt_versions={ "judge": "jev-other", "extractor": "e" } ), "sha", backend.prompt_version, JEV, binding )
     with pytest.raises( jc.ReportMismatch, match="judge model" ): jc.check_report_binds( "jev", dict( report, models=dict( report[ "models" ], judge="jev-9" ) ), "sha", backend.prompt_version, JEV, binding )
     with pytest.raises( jc.ReportMismatch, match="claude binary is 'claude_cli=/x\\|version=2.0'" ): jc.check_report_binds( "jev", dict( report, claude_cli_version="2.0" ), "sha", backend.prompt_version, JEV, binding )
+    with pytest.raises( jc.ReportMismatch, match="claude binary is 'claude_cli=/other\\|version=1.0'" ): jc.check_report_binds( "jev", dict( report, claude_cli="/other" ), "sha", backend.prompt_version, JEV, binding )
     assert jc.check_report_binds( "jev", dict( report, claude_cli_version="2.0" ), "sha", backend.prompt_version, JEV, None ) is None, "an unbound ledger has no binary to compare"
 
 
@@ -585,6 +592,8 @@ MUTANTS = [
     ( "        if missing:\n", "        if False:\n", "test_a_jev_outage_leaves_passes_out_of_the_ledger_and_the_reason_counts_them" ),
     ( "self.missing.append( len( claims ) )", "self.missing.append( 1 )", "test_a_jev_outage_leaves_passes_out_of_the_ledger_and_the_reason_counts_them" ),
     ( "if reports: check_report_binds(", "if False: check_report_binds(", "test_the_command_line_refuses_a_stale_jev_report_before_squaring_it" ),
+    ( "report.get( 'claude_cli' )", "'/x'", "test_a_report_that_is_not_from_this_run_is_refused_field_by_field" ),
+    ( 'claim_judge.Judgement( c, "uncertain", False, "no ledger row for this pass", None )', 'claim_judge.Judgement( c, "uncertain", False, "no ledger row for this pass", 0.5 )', "test_the_probe_answers_every_missing_claim_unanswered_so_a_rebuilt_report_counts_them" ),
     ( 'if stage == "extract": out[ "extract" ] += 1', 'if stage == "extract": out[ "extract" ] += 2', "test_call_counts_split_extractor_calls_from_each_judges_calls" ),
     ( "if caused_by_missing_row( e ): raise LedgerIncomplete(", "if True: raise LedgerIncomplete(", "test_a_missing_row_is_found_anywhere_in_an_error_chain_and_other_errors_pass_through" ),
     ( "error = error.__cause__ or error.__context__", "error = error.__cause__", "test_a_missing_row_is_found_anywhere_in_an_error_chain_and_other_errors_pass_through" ),
