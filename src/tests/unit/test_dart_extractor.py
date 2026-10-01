@@ -122,6 +122,22 @@ def test_fixture_declarations_come_back_with_kind_signature_doc_line_and_visibil
     assert all( r[ "lang" ] == "dart" and r[ "file" ] == "lib/a.dart" for r in records.values() )
 
 
+PRIVATE_OWNERS = '''class _Hidden { _Hidden(); _Hidden.make(); void shown() {} int get size => 1; }
+class Open { Open(); void _hid() {} void vis() {} }
+mixin _M { void m() {} }
+enum _E { a; String get label => name; }
+extension _X on int { int get dbl => this * 2; }
+'''
+
+
+def test_a_member_of_a_private_declaration_is_not_public_even_when_its_own_name_is_( mobile ):
+    ( mobile.root / "lib" / "b.dart" ).write_text( PRIVATE_OWNERS, encoding="utf-8" )
+    got = { r[ "name" ]: r[ "public" ] for r in de.extract_dart( mobile.root, [ mobile.root / "lib" / "b.dart" ], mobile.data ) }
+    assert got == { "_Hidden": False, "_Hidden._Hidden": False, "_Hidden._Hidden.make": False, "_Hidden.shown": False, "_Hidden.get size": False,
+                    "Open": True, "Open.Open": True, "Open._hid": False, "Open.vis": True,
+                    "_M": False, "_M.m": False, "_E": False, "_E.get label": False, "_X": False, "_X.get dbl": False }
+
+
 def test_a_comment_or_whitespace_edit_keeps_the_pin_text_and_a_token_edit_changes_it( mobile ):
     before = _by_name( de.extract_dart( mobile.root, [ mobile.file ], mobile.data ) )
     mobile.file.write_text( FIXTURE.replace( "/// Doubles it.", "/// Doubles it, differently worded.\n  // and a plain comment" ).replace( "T twice<R>(", "T   twice<R>(" ), encoding="utf-8" )

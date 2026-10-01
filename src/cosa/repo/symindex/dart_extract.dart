@@ -68,16 +68,17 @@ void emit( String file, CompilationUnit unit, String name, String kind, String s
   } );
 }
 
-void members( String file, CompilationUnit unit, String owner, NodeList<ClassMember> list ) {
+// A member is public only when its owner is too: `shown` in `class _Hidden` cannot be reached from outside the library.
+void members( String file, CompilationUnit unit, String owner, bool ownerPublic, NodeList<ClassMember> list ) {
   for ( final m in list ) {
     if ( m is MethodDeclaration ) {
       final n = m.name.lexeme;
       final label = m.isGetter ? 'get $n' : ( m.isSetter ? 'set $n' : n );
-      emit( file, unit, '$owner.$label', 'method', sigOf( m.typeParameters, m.parameters, m.returnType ), m, !n.startsWith( '_' ) );
+      emit( file, unit, '$owner.$label', 'method', sigOf( m.typeParameters, m.parameters, m.returnType ), m, ownerPublic && !n.startsWith( '_' ) );
     } else if ( m is ConstructorDeclaration ) {
       final n = m.name?.lexeme;
       emit( file, unit, n == null ? '$owner.$owner' : '$owner.$owner.$n', 'constructor',
-          sigOf( null, m.parameters, null ), m, n == null || !n.startsWith( '_' ) );
+          sigOf( null, m.parameters, null ), m, ownerPublic && ( n == null || !n.startsWith( '_' ) ) );
     }
   }
 }
@@ -114,23 +115,23 @@ void main() {
       } else if ( d is ClassDeclaration ) {
         final n = d.name.lexeme;
         emit( file, unit, n, 'class', '', d, !n.startsWith( '_' ) );
-        members( file, unit, n, d.members );
+        members( file, unit, n, !n.startsWith( '_' ), d.members );
       } else if ( d is MixinDeclaration ) {
         final n = d.name.lexeme;
         emit( file, unit, n, 'mixin', '', d, !n.startsWith( '_' ) );
-        members( file, unit, n, d.members );
+        members( file, unit, n, !n.startsWith( '_' ), d.members );
       } else if ( d is EnumDeclaration ) {
         final n = d.name.lexeme;
         emit( file, unit, n, 'enum', '', d, !n.startsWith( '_' ) );
-        members( file, unit, n, d.members );
+        members( file, unit, n, !n.startsWith( '_' ), d.members );
       } else if ( d is ExtensionDeclaration ) {
         final n = extensionName( d );
         emit( file, unit, n, 'extension', '', d, !n.startsWith( '_' ) );
-        members( file, unit, n, d.members );
+        members( file, unit, n, !n.startsWith( '_' ), d.members );
       } else if ( d is ExtensionTypeDeclaration ) {
         final n = d.name.lexeme;
         emit( file, unit, n, 'class', '', d, !n.startsWith( '_' ) );
-        members( file, unit, n, d.members );
+        members( file, unit, n, !n.startsWith( '_' ), d.members );
       }
     }
   }
