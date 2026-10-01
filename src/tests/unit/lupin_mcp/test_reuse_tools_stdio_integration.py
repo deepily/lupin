@@ -76,8 +76,15 @@ def dirs( tmp_path_factory ):
 
 
 def expected_cause():
-    """Ensures: returns the cause a call with no injected Jev transport must carry, from the key file the server reads."""
-    return "CALL_FAILED" if KEY_FILE.exists() else "KEY_UNREADABLE"
+    """
+    Ensures: returns ( cause, other ), the cause a call with no injected Jev transport must carry and the one it must also list.
+
+    A tree with no `node_modules/typescript` answers DEPENDENCY_MISSING first (the decision table's
+    precedence), with the key cause still listed; a tier-capable tree answers the key cause itself.
+    """
+    key = "CALL_FAILED" if KEY_FILE.exists() else "KEY_UNREADABLE"
+    if not ( REPO / "node_modules" / "typescript" ).exists(): return "DEPENDENCY_MISSING", key
+    return key, key
 
 
 def test_all_four_reuse_tools_are_registered_beside_the_voice_tools( dirs ):
@@ -98,8 +105,9 @@ def test_each_reuse_tool_answers_over_stdio_beside_a_voice_tool( dirs ):
         after  = client.call_tool( "get_session_info", {} )
     assert before[ "project" ] == "lupin" and after[ "project" ] == "lupin", "the voice tool answered before and after the reuse calls"
     assert check[ "tool" ] == "check_exists" and RECEIPT_ID.fullmatch( check[ "receipt_id" ] )
-    assert check[ "verdict" ] == "UNCERTAIN_READ_SOURCE" and check[ "cause" ] == expected_cause(), \
-        f"with no Jev transport the verdict is UNCERTAIN_READ_SOURCE with cause {expected_cause()}, never NEW: {check}"
+    cause, listed = expected_cause()
+    assert check[ "verdict" ] == "UNCERTAIN_READ_SOURCE" and check[ "cause" ] == cause and listed in check[ "causes" ], \
+        f"with no Jev transport the verdict is UNCERTAIN_READ_SOURCE with cause {cause} and {listed} listed, never NEW: {check}"
     assert similar[ "tool" ] == "fetch_similar" and RECEIPT_ID.fullmatch( similar[ "receipt_id" ] )
     assert ENTRY not in [ r[ "id" ] for r in similar[ "shortlist" ] + similar[ "nearest" ] ], "the symbol itself is excluded by id"
     assert read[ "pages" ] == { "no-such-capability": { "error": "NOT_FOUND" } }, "an unknown slug is a named error, not an empty page"
