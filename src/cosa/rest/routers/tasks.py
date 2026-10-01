@@ -464,6 +464,14 @@ TERSE_DATA_FIELDS = frozenset( {
     # against a projection that already carries eight fields, and it turns "who owns
     # this" from a second full-row query into something you can see.
     "owner_persona", "accountable_manager",
+
+    # Row 7e1d72d0 (item B). A terse row could not say what kind of thing it is: a task, a bug, a
+    # decision, a gate and a review request all read as a title, a status and a priority, and the
+    # projection a seat is told to prefer for token economy was the one that dropped the field.
+    # It cost a second full query more than once, the same cost argument as `project` and
+    # `owner_persona`. The wire name is `item_class` at every layer, because `class` is reserved.
+    # One short enum string (task, decision, review_request, bug, gate) carried off the column.
+    "item_class",
 } )
 
 TERSE_ADVISORY_FIELDS = frozenset( {
@@ -479,7 +487,7 @@ def _serialize_item_terse( item, blocker_statuses=None ) -> dict:
     owed-work peek) needs the at-a-glance fields, NOT the full row — `body` in
     particular can be multi-paragraph, and the audit trail (/events) is already
     a separate surface. This projection drops `body` and every non-glance field,
-    keeping ONLY id / title / status / blocked_by / next_chase_ts / priority /
+    keeping ONLY id / title / item_class / status / blocked_by / next_chase_ts / priority /
     park_reason_stale — so a list query over MCP costs a fraction of the
     full-row token weight (cosa-voice token-efficiency is goal #1). Field names
     are IDENTICAL to the full shape (one name at every layer) — a terse row is a
@@ -545,6 +553,7 @@ def _serialize_item_terse( item, blocker_statuses=None ) -> dict:
     return {
         "id"                : str( item.id ),
         "title"             : item.title,
+        "item_class"        : item.item_class,
         "status"            : item.status,
         "blocked_by"        : item.blocked_by,
         "next_chase_ts"     : item.next_chase_ts.isoformat() if item.next_chase_ts is not None else None,
@@ -3007,7 +3016,7 @@ def query_tasks(
           the multiplexer parses that one.
         - terse=True (§G token win, count_only=False): returns { tasks: [...],
           count } where each row is the at-a-glance projection (id / title /
-          status / blocked_by / next_chase_ts / priority / park_reason_stale —
+          item_class / status / blocked_by / next_chase_ts / priority / park_reason_stale —
           `body` and the other full-row fields dropped), so an on-demand "see my
           list" query over MCP costs a fraction of the full-row token weight.
           park_reason_stale rides the TERSE shape deliberately: a staleness flag
