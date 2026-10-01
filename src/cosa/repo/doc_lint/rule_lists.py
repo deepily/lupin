@@ -1,3 +1,4 @@
+# Frozen at 521f36f09, ruling b42eb0de (Rick, 2026-09-30): any change to the list contents needs his word.
 """
 Frozen lists for the docstring and markdown linters (documentation-standard plan).
 
