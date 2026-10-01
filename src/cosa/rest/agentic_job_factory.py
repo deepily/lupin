@@ -484,7 +484,7 @@ def _build_swe_team( command, args_dict, user_id, user_email, session_id, debug,
 
 def _refusing_bad_input( builder ):
     """
-    Wrap a job builder so a ValueError becomes a SubmitRefused (row a3c59f2d, María's review).
+    Wrap a builder so bad caller input becomes a SubmitRefused (rows a3c59f2d, a4014235).
 
     WHY. The flow degrades any OTHER exception from a builder to the RECEPTIONIST, and the
     queued executor then puts a real receptionist job on the todo queue: the caller gets
@@ -494,21 +494,28 @@ def _refusing_bad_input( builder ):
     that reads `status` must see "failed" here. SubmitRefused is that: a terminal `failed`
     carrying the cause in `error`, nothing queued.
 
+    Which errors count: ValueError (pydantic's ValidationError and PytestArgsRejected are both
+    ValueErrors) and TypeError (a wrong-typed argument reaching a constructor) are caller
+    input. AttributeError, KeyError and everything else are code bugs and pass through, so a
+    broken builder is not disguised as a bad request (Mr. Radio's ruling, row a4014235).
+
     Requires:
         - builder is a job builder with the JOB_BUILDERS signature
 
     Ensures:
-        - returns a builder that behaves identically except that a ValueError (pydantic's
-          ValidationError and PytestArgsRejected are both ValueErrors) surfaces as
-          SubmitRefused( "submit_refused", <the message> ); a SubmitRefused the builder
-          raised itself, and any non-ValueError, pass through unchanged
+        - returns a builder that behaves identically except that a ValueError or TypeError
+          surfaces as SubmitRefused( "submit_refused", <the message> ); a SubmitRefused the
+          builder raised itself, and any other exception, pass through unchanged
+        - the returned builder carries `refuses_bad_input = True`, which the registry guard
+          reads to find any JOB_BUILDERS entry that was left unwrapped
     """
     @functools.wraps( builder )
     def wrapper( *args, **kwargs ):
         try:
             return builder( *args, **kwargs )
-        except ValueError as e:
+        except ( ValueError, TypeError ) as e:
             raise SubmitRefused( "submit_refused", str( e ) ) from e
+    wrapper.refuses_bad_input = True
     return wrapper
 
 
@@ -774,7 +781,7 @@ def _build_test_fix_expediter_resume( command, args_dict, user_id, user_email, s
 #
 # Keys are exactly the eleven `command ==` strings the branch chain used to test,
 # copied from it rather than retyped.
-JOB_BUILDERS = {
+_UNWRAPPED_JOB_BUILDERS = {
     "agent router go to deep research"             : _build_deep_research,
     "agent router go to podcast generator"         : _build_podcast_generator,
     "agent router go to research to podcast"       : _build_research_to_podcast,
@@ -782,12 +789,17 @@ JOB_BUILDERS = {
     "agent router go to presentation generator"    : _build_presentation_generator,
     "agent router go to research to presentation"  : _build_research_to_presentation,
     "agent router go to swe team"                  : _build_swe_team,
-    "agent router go to test suite"                : _refusing_bad_input( _build_test_suite ),
-    "agent router go to mock job"                  : _refusing_bad_input( _build_mock_job ),
+    "agent router go to test suite"                : _build_test_suite,
+    "agent router go to mock job"                  : _build_mock_job,
     "agent router go to bug fix expediter"         : _build_bug_fix_expediter,
     "agent router go to test fix expediter"        : _build_test_fix_expediter,
     "agent router go to test fix expediter resume" : _build_test_fix_expediter_resume,
 }
+
+# Every builder is wrapped, here, once (row a4014235). A builder added to the dict above is
+# covered without anyone remembering to wrap it: two of twelve were wrapped by hand and ten
+# were not, so a bad-input error from any of the ten reported "waiting" for a refused submit.
+JOB_BUILDERS = { command: _refusing_bad_input( builder ) for command, builder in _UNWRAPPED_JOB_BUILDERS.items() }
 
 
 def create_agentic_job( command, args_dict, user_id, user_email, session_id, debug=False, verbose=False,
