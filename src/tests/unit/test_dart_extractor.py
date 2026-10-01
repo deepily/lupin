@@ -264,7 +264,9 @@ def test_a_file_with_syntax_errors_yields_no_records_and_one_warning_while_clean
     broken = mobile.root / "lib" / "broken.dart"
     broken.write_text( "class A {}\nclass Broken {\n  void f( {\n}\nclass After {}\nint g() => 1;\n", encoding="utf-8" )
     warnings = []
-    names = [ r[ "name" ] for r in de.extract_dart( mobile.root, [ broken, mobile.file ], mobile.data, warnings=warnings ) ]
+    unparsed = []
+    names = [ r[ "name" ] for r in de.extract_dart( mobile.root, [ broken, mobile.file ], mobile.data, warnings=warnings, unparsed=unparsed ) ]
+    assert unparsed == [ "lib/broken.dart" ]                                  # the clean file is not listed
     assert "Box" in names and not any( n in ( "A", "Broken", "Broken.g" ) for n in names )
     assert warnings == [ "lib/broken.dart: 5 parse errors, file skipped" ]
     de.extract_dart( mobile.root, [ broken ], mobile.data )
