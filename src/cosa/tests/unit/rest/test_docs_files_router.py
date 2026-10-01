@@ -232,7 +232,7 @@ class TestGetDocsFile( unittest.TestCase ):
         """
         captured = {}
 
-        def fake_serve( full_path, rel_path, scope, parent_validator ):
+        def fake_serve( full_path, rel_path, scope, parent_validator, scope_cfg ):
             captured[ "scope" ]    = scope
             captured[ "rel" ]      = rel_path
             captured[ "full" ]     = full_path
@@ -290,7 +290,12 @@ class TestServe( unittest.TestCase ):
     """
 
     def _serve( self, full="/repo/src/a.md", rel="src/a.md" ):
-        return _serve( full, rel, scope="proj", parent_validator=lambda p: True )
+        # Row 39b3035b: `_serve` opens the file and judges the OPEN descriptor. These tests stand in a
+        # fake descriptor (7) for the open+judge step, which test_docs_files_check_then_open_race.py
+        # exercises for real on real files, so the dispatch logic here is still what is under test.
+        with patch( "cosa.rest.routers.docs_files._open_judged_file", return_value=7 ), \
+             patch( "cosa.rest.routers.docs_files.os.close" ):
+            return _serve( full, rel, scope="proj", parent_validator=lambda p: True, scope_cfg=_ini_cfg() )
 
     def test_directory_returns_json( self ):
         """Ensures: a directory path returns a JSONResponse listing."""
@@ -325,7 +330,10 @@ class TestServe( unittest.TestCase ):
             m_fr.return_value = "FR"
             result = self._serve( full="/repo/img/x.png", rel="img/x.png" )
         self.assertEqual( result, "FR" )
-        m_fr.assert_called_once_with( path="/repo/img/x.png", media_type=MEDIA_TYPES[ ".png" ] )
+        _, kwargs = m_fr.call_args
+        self.assertEqual( kwargs[ "path" ], "/proc/self/fd/7" )          # the pinned descriptor, not the string
+        self.assertEqual( kwargs[ "media_type" ], MEDIA_TYPES[ ".png" ] )
+        self.assertIsNotNone( kwargs[ "background" ] )                 # closes the descriptor after the send
 
     def test_text_returns_plain_text_response( self ):
         """Ensures: a text file is read utf-8 and returned via PlainTextResponse."""
