@@ -17,7 +17,7 @@ from claude_agent_sdk import AssistantMessage, TextBlock
 from cosa.repo.doc_lint import claim_judge as cj
 from cosa.repo.doc_lint import model_transport as mt
 
-C = namedtuple( "C", [ "text", "quote" ] )
+C = namedtuple( "C", [ "text", "quote", "start", "end" ], defaults=( 0, 0 ) )
 
 
 def block( prompt, tag ):
@@ -50,7 +50,7 @@ def judge( claims, new, design=None, query=None, models=( "first", "second" ) ):
     return asyncio.run( cj.judge_claims( claims, new, design, models[ 0 ], models[ 1 ], query_fn=query or make_query() ) )
 
 
-CLAIMS = [ C( "returns none when parked", "q1" ), C( "raises valueerror when blank", "q2" ) ]
+CLAIMS = [ C( "returns none when parked", "q1", 0, 10 ), C( "raises valueerror when blank", "q2", 11, 30 ) ]
 
 
 def test_verdicts_follow_the_new_text():
@@ -159,7 +159,8 @@ def test_parse_verdicts_rejects_anything_off_contract( raw ):
 def test_history_report_lists_only_dropped_claims_and_waits_for_labels():
     results = judge( CLAIMS, "It returns none when parked." )
     report  = cj.history_report( results )
-    assert report == [ { "claim": "raises valueerror when blank", "quote": "q2", "reason": None, "label": None } ]
+    assert [ ( r[ "claim" ], r[ "quote" ], r[ "reason" ], r[ "label" ] ) for r in report ] == [ ( "raises valueerror when blank", "q2", None, None ) ]
+    assert ( report[ 0 ][ "start" ], report[ 0 ][ "end" ] ) == ( CLAIMS[ 1 ].start, CLAIMS[ 1 ].end )
     assert cj.unlabelled_drops( report ) == report
     report[ 0 ][ "label" ] = "history"
     assert cj.unlabelled_drops( report ) == []
@@ -169,16 +170,67 @@ def test_history_report_lists_only_dropped_claims_and_waits_for_labels():
     assert len( cj.unlabelled_drops( report ) ) == 1
 
 
-def test_history_destination_check_needs_the_quote_in_the_destination_text():
-    rows = [
-        { "claim": "a", "quote": "Raises ValueError when the id is blank.", "reason": None, "label": "history" },
-        { "claim": "b", "quote": "Returns None when the row is parked.", "reason": None, "label": "history" },
-        { "claim": "c", "quote": "Never mentioned anywhere else.", "reason": None, "label": "restored" },
-        { "claim": "d", "quote": "Also never mentioned anywhere.", "reason": None, "label": None },
+OLD_DOC = "Returns None when the row is parked. Raises ValueError when the id is blank."
+NEW_DOC = "Returns None when the row is parked."
+
+
+def history_rows():
+    return [
+        { "claim": "a", "quote": "Raises ValueError when the id is blank.", "start": 0, "end": 5, "reason": None, "label": "history" },
+        { "claim": "b", "quote": "Returns None when the row is parked.", "start": 0, "end": 5, "reason": None, "label": "history" },
+        { "claim": "c", "quote": "Never mentioned anywhere else.", "start": 0, "end": 5, "reason": None, "label": "restored" },
+        { "claim": "d", "quote": "Also never mentioned anywhere.", "start": 0, "end": 5, "reason": None, "label": None },
     ]
-    moved = cj.history_destinations_missing( rows, "History: Raises ValueError when the\n id is blank." )
+
+
+def test_history_destination_check_needs_the_quote_in_the_destination_text():
+    rows  = history_rows()
+    moved = cj.history_destinations_missing( rows, "History: Raises ValueError when the\n id is blank.", OLD_DOC, NEW_DOC )
     assert [ r[ "claim" ] for r in moved ] == [ "b" ]
-    assert cj.history_destinations_missing( rows, "" ) == [ rows[ 0 ], rows[ 1 ] ]
+    assert cj.history_destinations_missing( rows, "Something unrelated.", OLD_DOC, NEW_DOC ) == [ rows[ 0 ], rows[ 1 ] ]
+
+
+@pytest.mark.parametrize( "stand_in", [ OLD_DOC, NEW_DOC, "intro " + OLD_DOC + " outro" ] )
+def test_the_old_or_new_text_cannot_stand_in_as_its_own_history(stand_in):
+    with pytest.raises( ValueError, match="cannot hold history" ):
+        cj.history_destinations_missing( history_rows(), stand_in, OLD_DOC, NEW_DOC )
+
+
+def test_load_destination_needs_an_allowed_location_and_a_real_document(tmp_path):
+    allowed = tmp_path / "history"
+    allowed.mkdir()
+    ( allowed / "why.md" ).write_text( "Why it moved: raises ValueError when blank." )
+    ( allowed / "copy.md" ).write_text( OLD_DOC )
+    ( tmp_path / "elsewhere.md" ).write_text( "Why it moved: raises ValueError when blank." )
+    assert cj.load_destination( str( allowed / "why.md" ), [ str( allowed ) ], OLD_DOC, NEW_DOC ).startswith( "Why it moved" )
+    assert cj.load_destination( str( allowed ) + "/../history/why.md", [ str( allowed ) ], OLD_DOC, NEW_DOC ).startswith( "Why" )
+    with pytest.raises( ValueError, match="outside the allowed" ):
+        cj.load_destination( str( tmp_path / "elsewhere.md" ), [ str( allowed ) ], OLD_DOC, NEW_DOC )
+    with pytest.raises( ValueError, match="outside the allowed" ):
+        cj.load_destination( str( tmp_path / "history-evil" / ".." / "elsewhere.md" ), [ str( allowed ) ], OLD_DOC, NEW_DOC )
+    with pytest.raises( ValueError, match="cannot hold history" ):
+        cj.load_destination( str( allowed / "copy.md" ), [ str( allowed ) ], OLD_DOC, NEW_DOC )
+
+
+def test_a_restored_label_is_judged_again_and_fails_when_the_claim_is_still_missing():
+    rows = history_rows()
+    rows[ 2 ] = dict( rows[ 2 ], claim="raises valueerror when blank", label="restored" )
+    still = asyncio.run( cj.restored_still_dropped( rows, "It returns none when parked.", None, "first", "second", query_fn=make_query() ) )
+    assert [ r[ "claim" ] for r in still ] == [ "raises valueerror when blank" ]
+    back = asyncio.run( cj.restored_still_dropped( rows, "Raises valueerror when blank, returns none.", None, "first", "second", query_fn=make_query() ) )
+    assert back == []
+    assert asyncio.run( cj.restored_still_dropped( [ rows[ 0 ] ], "x", None, "first", "second", query_fn=make_query() ) ) == []
+
+
+def test_the_history_gate_runs_every_check_together():
+    rows = history_rows()
+    rows[ 2 ] = dict( rows[ 2 ], claim="raises valueerror when blank" )
+    shut = asyncio.run( cj.close_history_gate( rows, OLD_DOC, NEW_DOC, "Nothing useful.", None, "first", "second", query_fn=make_query() ) )
+    assert shut[ "ok" ] is False and len( shut[ "unlabelled" ] ) == 1
+    assert len( shut[ "destination_missing" ] ) == 2 and len( shut[ "restored_failed" ] ) == 1
+    ok_rows = [ dict( rows[ 0 ], label="history" ), dict( rows[ 2 ], label="restored" ) ]
+    open_ = asyncio.run( cj.close_history_gate( ok_rows, OLD_DOC, "Raises valueerror when blank.", "Raises ValueError when the id is blank.", None, "first", "second", query_fn=make_query() ) )
+    assert open_ == { "unlabelled": [], "destination_missing": [], "restored_failed": [], "ok": True }
 
 
 # ---- break-out, versions, and the guards that each need their own input ----------------------
@@ -202,8 +254,9 @@ def test_claims_are_numbered_from_one_in_the_prompt():
 
 def test_the_judge_version_is_derived_from_its_prompt_and_code():
     import inspect
-    rebuilt = mt.prompt_version( "judge", cj.SYSTEM_PROMPT, *[ inspect.getsource( f ) for f in ( cj.build_prompt, cj.parse_verdicts, cj.judge_claims ) ] )
-    assert cj.PROMPT_VERSION == rebuilt and cj.PROMPT_VERSION.startswith( "judge-" )
+    source = inspect.getsource( cj )
+    assert cj.PROMPT_VERSION == mt.prompt_version( "judge", source ) and cj.PROMPT_VERSION.startswith( "judge-" )
+    assert mt.prompt_version( "judge", source.replace( "_FENCE = ", "# moved\n_FENCE = ", 1 ) ) != cj.PROMPT_VERSION
 
 
 def test_a_verdict_entry_with_an_extra_key_is_refused():

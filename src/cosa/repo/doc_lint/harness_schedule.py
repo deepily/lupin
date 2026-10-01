@@ -7,6 +7,7 @@ POST /api/v2/submit with the command "agent router go to claude code", as CLAUDE
 """
 
 import datetime
+import shlex
 from zoneinfo import ZoneInfo
 
 import requests
@@ -35,18 +36,20 @@ def scheduled_at( now=None ):
     return datetime.datetime( day.year, day.month, day.day, WINDOW_START, tzinfo=ZONE ).isoformat()
 
 
-def build_submit_payload( command_line, when ):
+def build_submit_payload( argv, when ):
     """
     Build the /api/v2/submit body that runs one harness command as a bounded job.
 
     Requires:
-        - command_line is the shell command that starts the runner; when is an ISO timestamp
+        - argv is the runner's argument list, a fixed template that holds no pair text and no
+          user text; when is an ISO timestamp
 
     Ensures:
         - the job is BOUNDED, so the Max plan covers it
         - scheduled_at is top level, outside the command's args
+        - every argument is shell-quoted, so a path with a space or a quote stays one argument
     """
-    prompt = f"Run exactly this command, wait for it to finish, and reply with its last line: {command_line}"
+    prompt = f"Run exactly this command, wait for it to finish, and reply with its last line: {shlex.join( argv )}"
     return { "command": COMMAND, "args": { "prompt": prompt, "task_type": "BOUNDED" }, "scheduled_at": when }
 
 

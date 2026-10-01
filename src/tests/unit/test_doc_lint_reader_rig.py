@@ -135,6 +135,5 @@ def test_a_closing_tag_in_the_text_or_an_answer_cannot_end_its_block():
 def test_the_reader_version_is_derived_from_its_prompts_and_code():
     import inspect
     from cosa.repo.doc_lint import model_transport as mt
-    rebuilt = mt.prompt_version( "reader", rt.READER_SYSTEM, rt.GRADER_SYSTEM,
-                                 *[ inspect.getsource( f ) for f in ( rt.parse_answer, rt.parse_score, rt.score_text ) ] )
-    assert rt.PROMPT_VERSION == rebuilt
+    assert rt.PROMPT_VERSION == mt.prompt_version( "reader", inspect.getsource( rt ) )
+    assert mt.prompt_version( "reader", inspect.getsource( rt ).replace( "_FENCE = ", "# moved\n_FENCE = ", 1 ) ) != rt.PROMPT_VERSION

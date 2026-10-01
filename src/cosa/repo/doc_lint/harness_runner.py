@@ -31,6 +31,8 @@ def check_models( config ):
         - returns None when every model id is set and neither the judge nor the escalation model
           is the writer model
         - the extractor may equal the writer: it only lists claims, it does not grade a rewrite
+        - ids are compared as exact pinned ids, ignoring case and surrounding space; an alias of
+          the writer's model that is spelled differently is not detected, so use pinned ids
 
     Raises:
         - ValueError naming the missing id, or the judge role that equals the writer
@@ -38,7 +40,7 @@ def check_models( config ):
     for name in ( "extractor_model", "judge_model", "escalation_model", "writer_model" ):
         if not getattr( config, name ): raise ValueError( f"{name} is required: the harness has no default model" )
     for name in ( "judge_model", "escalation_model" ):
-        if getattr( config, name ) == config.writer_model:
+        if getattr( config, name ).strip().lower() == config.writer_model.strip().lower():
             raise ValueError( f"{name} equals the writer model {config.writer_model!r}: a model must not grade its own rewrite" )
 
 
@@ -87,13 +89,21 @@ class Ledger:
                         continue
                     self.entries[ record[ "key" ] ] = record[ "value" ]
 
+    def _ends_with_newline( self ):
+        """Say whether the ledger file's last byte is a newline."""
+        with open( self.path, "rb" ) as f:
+            f.seek( -1, os.SEEK_END )
+            return f.read( 1 ) == b"\n"
+
     def get( self, key ):
         """Return the stored value for key, or None when that call has not finished."""
         return self.entries.get( key )
 
     def put( self, key, value ):
         """Store a finished call durably before returning."""
+        torn = os.path.exists( self.path ) and os.path.getsize( self.path ) > 0 and not self._ends_with_newline()
         with open( self.path, "a", encoding="utf-8" ) as f:
+            if torn: f.write( "\n" )
             f.write( json.dumps( { "key": key, "value": value } ) + "\n" )
             f.flush()
             os.fsync( f.fileno() )
@@ -133,8 +143,8 @@ async def run_pair( pair, config, ledger, query_fn=None ):
         claims = [ claim_extractor.Claim( **c ) for c in frozen[ "claims" ] ]
         runs   = []
         for run in range( config.judge_runs ):
-            jkey = ledger_key( "judge", pair, claim_judge.PROMPT_VERSION,
-                               config.judge_model + "+" + config.escalation_model, f"{slot}.{run}" )
+            jkey = ledger_key( "judge", pair, claim_judge.PROMPT_VERSION, config.judge_model + "+" + config.escalation_model,
+                               f"{slot}.{run}.{text_hash( json.dumps( frozen[ 'claims' ], sort_keys=True ) )}" )
             rows = ledger.get( jkey )
             if rows is None:
                 judged = await claim_judge.judge_claims( claims, pair[ "new" ], pair.get( "design" ),

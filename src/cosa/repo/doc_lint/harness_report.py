@@ -105,7 +105,13 @@ def build_report( results, config ):
           its interval, because an overall figure can hide disagreement on the dropped claims
         - reports the escalation count, discarded-claim count and mean uncovered fraction
         - the model ids and prompt versions used are recorded in the report
-        - default_gate_pass is True only for zero misses on at least 60 seeded pairs in every list
+        - miss_criterion_met is True only for zero misses on at least 60 seeded pairs in every list
+        - false_alarm_ok is True only when every list flags at most FALSE_ALARM_CEILING of the
+          unseeded pairs, so a harness that flags everything cannot pass
+        - agreement_ok is True only when both agreement rates are known and at least AGREEMENT_BAR
+        - default_gate_pass is the AND of those three
+        - identical_list_pairs counts pairs whose extractor lists came out the same, because the
+          SDK has no temperature and two "independent" lists can be one list drawn twice
 
     Raises:
         - nothing
@@ -125,6 +131,8 @@ def build_report( results, config ):
             "false_alarms"      : alarms,
             "false_alarm_rate"  : alarms / len( unseeded ) if unseeded else None,
         } )
+    miss_ok = bool( seeded ) and len( seeded ) >= DEFAULT_POSITIVES_NEEDED and all( l[ "misses" ] == 0 for l in lists )
+    fa_ok   = all( l[ "false_alarm_rate" ] is not None and l[ "false_alarm_rate" ] <= FALSE_ALARM_CEILING for l in lists )
     all_total = all_same = seed_total = seed_same = escalations = discarded = 0
     uncovered = []
     longest   = 0.0
@@ -140,6 +148,10 @@ def build_report( results, config ):
                 if r[ "seed_span" ] is not None and claim_extractor.spans_overlap( ( claim[ "start" ], claim[ "end" ] ), tuple( r[ "seed_span" ] ) ):
                     seed_total += 1
                     seed_same  += same
+    agree_all  = all_same / all_total if all_total else None
+    agree_seed = seed_same / seed_total if seed_total else None
+    agree_ok   = agree_all is not None and agree_seed is not None and agree_all >= AGREEMENT_BAR and agree_seed >= AGREEMENT_BAR
+    identical  = sum( 1 for r in results if len( { tuple( c[ "quote" ] for c in lst[ "claims" ] ) for lst in r[ "lists" ] } ) == 1 )
     return {
         "models"            : { "extractor": config.extractor_model, "judge": config.judge_model,
                                 "escalation": config.escalation_model, "writer": config.writer_model },
@@ -153,5 +165,10 @@ def build_report( results, config ):
         "discarded_claims"  : discarded,
         "longest_quote"     : longest,
         "mean_uncovered"    : sum( uncovered ) / len( uncovered ) if uncovered else None,
-        "default_gate_pass" : bool( seeded ) and len( seeded ) >= DEFAULT_POSITIVES_NEEDED and all( l[ "misses" ] == 0 for l in lists ),
+        "identical_list_pairs" : identical,
+        "pairs"             : len( results ),
+        "miss_criterion_met": miss_ok,
+        "false_alarm_ok"    : fa_ok,
+        "agreement_ok"      : agree_ok,
+        "default_gate_pass" : miss_ok and fa_ok and agree_ok,
     }

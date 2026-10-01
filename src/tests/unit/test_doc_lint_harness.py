@@ -230,18 +230,25 @@ def test_a_report_with_no_pairs_has_no_figures():
     assert [ l[ "false_alarm_rate" ] for l in report[ "lists" ] ] == [ None, None ]
 
 
-def synthetic( n, missed=0 ):
-    """n seeded pairs; the first `missed` have a claim list that flags nothing."""
-    good = { "claims": [ { "start": 0, "end": 10 } ], "discarded": 0, "uncovered": 0.0, "longest_quote": 0.25,
-             "runs": [ [ { "verdict": "absent", "escalated": False } ] ] * 3 }
-    bad  = dict( good, runs=[ [ { "verdict": "present", "escalated": False } ] ] * 3 )
-    return [ { "id": i, "seed_span": [ 2, 5 ], "lists": [ bad if i < missed else good ] * 2 } for i in range( n ) ]
+def synthetic( n, missed=0, unseeded=0, alarmed=0, flip_second_list_misses=False ):
+    """n seeded pairs (the first `missed` flag nothing), then `unseeded` pairs (the first `alarmed` flag a claim)."""
+    row  = lambda verdict: { "verdict": verdict, "escalated": False }
+    flag = { "claims": [ { "start": 0, "end": 10, "quote": "q" } ], "discarded": 0, "uncovered": 0.0, "longest_quote": 0.25, "runs": [ [ row( "absent" ) ] ] * 3 }
+    calm = dict( flag, runs=[ [ row( "present" ) ] ] * 3 )
+    out  = []
+    for i in range( n ):
+        second = calm if flip_second_list_misses and i == 0 else ( calm if i < missed else flag )
+        out.append( { "id": i, "seed_span": [ 2, 5 ], "lists": [ calm if i < missed else flag, second ] } )
+    for i in range( unseeded ):
+        pick = flag if i < alarmed else calm
+        out.append( { "id": f"u{i}", "seed_span": None, "lists": [ pick, pick ] } )
+    return out
 
 
 @pytest.mark.parametrize( "n, missed, passes", [ ( 60, 0, True ), ( 59, 0, False ), ( 60, 1, False ) ] )
 def test_the_default_gate_needs_sixty_positives_and_no_misses( n, missed, passes ):
-    report = hr.build_report( synthetic( n, missed ), CONFIG )
-    assert report[ "default_gate_pass" ] is passes
+    report = hr.build_report( synthetic( n, missed, unseeded=20 ), CONFIG )
+    assert report[ "miss_criterion_met" ] is passes and report[ "default_gate_pass" ] is passes
     assert report[ "lists" ][ 0 ][ "misses" ] == missed
 
 
@@ -284,7 +291,7 @@ def test_scheduled_at_converts_other_zones_and_defaults_to_now():
 
 
 def test_the_submit_payload_is_a_bounded_job_with_a_top_level_schedule():
-    payload = hs.build_submit_payload( "python -m cosa.repo.doc_lint.x --go", "2026-10-02T10:00:00-04:00" )
+    payload = hs.build_submit_payload( [ "python", "-m", "cosa.repo.doc_lint.x", "--go" ], "2026-10-02T10:00:00-04:00" )
     assert payload[ "command" ] == "agent router go to claude code"
     assert payload[ "args" ][ "task_type" ] == "BOUNDED" and "python -m cosa.repo.doc_lint.x --go" in payload[ "args" ][ "prompt" ]
     assert payload[ "scheduled_at" ] == "2026-10-02T10:00:00-04:00" and "scheduled_at" not in payload[ "args" ]
@@ -357,3 +364,107 @@ def test_the_command_line_has_no_default_model(tmp_path):
 def test_the_report_carries_the_longest_verified_quote():
     assert hr.build_report( synthetic( 2 ), CONFIG )[ "longest_quote" ] == 0.25
     assert hr.build_report( [], CONFIG )[ "longest_quote" ] == 0.0
+
+
+# ---- review findings: ledger key, gate, torn line, alias, identical lists, shell quoting, frozen versions ----
+
+def test_the_judge_ledger_key_follows_the_claim_list_so_an_extractor_change_reruns_the_judge(tmp_path, monkeypatch):
+    path = str( tmp_path / "l" )
+    run( [ pair( "p", L1 + "\n" + L3 ) ], hn.Ledger( path ), FakeModel() )
+    monkeypatch.setattr( ce, "PROMPT_VERSION", "extractor-changed" )
+    rerun = FakeModel( skip=( L1, ) )  # the changed extractor now lists two claims, not three
+    result = run( [ pair( "p", L1 + "\n" + L3 ) ], hn.Ledger( path ), rerun )
+    assert [ k for k, _ in rerun.calls ].count( "extract" ) == 2 and [ k for k, _ in rerun.calls ].count( "judge" ) == 6
+    assert all( len( lst[ "claims" ] ) == len( lst[ "runs" ][ 0 ] ) == 2 for lst in result[ 0 ][ "lists" ] )
+
+
+def test_flagging_everything_does_not_pass_the_default_gate():
+    report = hr.build_report( synthetic( 60, unseeded=100, alarmed=100 ), CONFIG )
+    assert report[ "miss_criterion_met" ] is True and report[ "false_alarm_ok" ] is False and report[ "default_gate_pass" ] is False
+    assert report[ "lists" ][ 0 ][ "false_alarm_rate" ] == 1.0
+
+
+def test_the_false_alarm_ceiling_is_ten_percent_inclusive():
+    assert hr.build_report( synthetic( 60, unseeded=100, alarmed=10 ), CONFIG )[ "false_alarm_ok" ] is True
+    assert hr.build_report( synthetic( 60, unseeded=100, alarmed=11 ), CONFIG )[ "false_alarm_ok" ] is False
+    assert hr.build_report( synthetic( 60 ), CONFIG )[ "false_alarm_ok" ] is False
+
+
+def test_the_miss_criterion_must_hold_on_every_extractor_list():
+    report = hr.build_report( synthetic( 60, unseeded=20, flip_second_list_misses=True ), CONFIG )
+    assert [ l[ "misses" ] for l in report[ "lists" ] ] == [ 0, 1 ]
+    assert report[ "miss_criterion_met" ] is False and report[ "default_gate_pass" ] is False
+
+
+def test_agreement_below_the_bar_blocks_the_default_gate():
+    wobbly = synthetic( 60, unseeded=20 )
+    for r in wobbly[ :4 ]:
+        for lst in r[ "lists" ]:
+            lst[ "runs" ] = [ lst[ "runs" ][ 0 ], [ { "verdict": "present", "escalated": False } ], lst[ "runs" ][ 2 ] ]
+    report = hr.build_report( wobbly, CONFIG )
+    assert report[ "agreement_seeded" ][ "rate" ] < 0.95 and report[ "agreement_ok" ] is False
+    assert report[ "miss_criterion_met" ] is True and report[ "false_alarm_ok" ] is True and report[ "default_gate_pass" ] is False
+    assert hr.build_report( synthetic( 60, unseeded=20 ), CONFIG )[ "default_gate_pass" ] is True
+
+
+def test_identical_extractor_lists_are_counted():
+    report = hr.build_report( synthetic( 3, unseeded=2 ), CONFIG )
+    assert report[ "identical_list_pairs" ] == 5 and report[ "pairs" ] == 5
+    different = synthetic( 1 )
+    different[ 0 ][ "lists" ][ 1 ] = dict( different[ 0 ][ "lists" ][ 1 ], claims=[ { "start": 0, "end": 10, "quote": "other" } ] )
+    assert hr.build_report( different, CONFIG )[ "identical_list_pairs" ] == 0
+
+
+def test_a_torn_ledger_line_does_not_swallow_the_next_record(tmp_path):
+    path = str( tmp_path / "l" )
+    ledger = hn.Ledger( path )
+    ledger.put( "a", 1 )
+    with open( path, "a" ) as f: f.write( '{"key": "b", "val' )
+    hn.Ledger( path ).put( "c", 3 )
+    reloaded = hn.Ledger( path )
+    assert reloaded.get( "a" ) == 1 and reloaded.get( "c" ) == 3 and reloaded.get( "b" ) is None
+
+
+def test_every_put_is_synced_to_disk(tmp_path, monkeypatch):
+    synced = []
+    monkeypatch.setattr( hn.os, "fsync", lambda fd: synced.append( fd ) )
+    ledger = hn.Ledger( str( tmp_path / "l" ) )
+    ledger.put( "a", 1 )
+    ledger.put( "b", 2 )
+    assert len( synced ) == 2
+
+
+def test_a_writer_alias_that_differs_only_in_case_or_space_is_refused():
+    with pytest.raises( ValueError, match="own rewrite" ):
+        hn.check_models( CONFIG._replace( judge_model="  WRITER-M " ) )
+
+
+def test_the_submit_prompt_keeps_every_argument_a_single_shell_word():
+    payload = hs.build_submit_payload( [ "python", "--pairs", "my pairs; rm -rf x.json", "--out", "it's.json" ], "2026-10-02T10:00:00-04:00" )
+    import shlex
+    tail = payload[ "args" ][ "prompt" ].split( "last line: ", 1 )[ 1 ]
+    assert shlex.split( tail ) == [ "python", "--pairs", "my pairs; rm -rf x.json", "--out", "it's.json" ]
+
+
+def cli_gate_args( tmp_path, versions ):
+    return cli_args( tmp_path ) + [ "--gate" ] + ( [ "--frozen-versions", versions ] if versions is not None else [] )
+
+
+def test_a_gate_run_needs_the_registered_prompt_versions(tmp_path, capsys):
+    from cosa.repo.doc_lint import harness_cli as cli
+    ( tmp_path / "pairs.json" ).write_text( json.dumps( [ pair( "seeded", L1 + "\n" + L3, seeded=L2 ) ] ) )
+    for bad in ( None, "extractor-old,judge-old" ):
+        model = FakeModel()
+        assert cli.main( cli_gate_args( tmp_path, bad ), query_fn=model ) == 3
+        assert model.calls == [] and "REFUSED: gate run needs --frozen-versions" in capsys.readouterr().err
+    good = f"{ce.PROMPT_VERSION},{cj.PROMPT_VERSION}"
+    assert cli.main( cli_gate_args( tmp_path, good ), query_fn=FakeModel() ) == 0
+
+
+def test_the_report_names_the_sha_of_the_pairs_file(tmp_path):
+    import hashlib
+    from cosa.repo.doc_lint import harness_cli as cli
+    body = json.dumps( [ pair( "seeded", L1 + "\n" + L3, seeded=L2 ) ] )
+    ( tmp_path / "pairs.json" ).write_text( body )
+    cli.main( cli_args( tmp_path ), query_fn=FakeModel() )
+    assert json.loads( ( tmp_path / "out.json" ).read_text() )[ "pairs_sha" ] == hashlib.sha256( body.encode() ).hexdigest()

@@ -11,7 +11,9 @@ choose one of three words per claim.
 
 import inspect
 import json
+import os
 import re
+import sys
 from collections import namedtuple
 
 from . import claim_extractor, model_transport
@@ -165,7 +167,8 @@ def history_report( judgements ):
           and label None
         - the author sets label to "history" or "restored"; nothing else closes a row
     """
-    return [ { "claim": j.claim.text, "quote": j.claim.quote, "reason": j.reason, "label": None }
+    return [ { "claim": j.claim.text, "quote": j.claim.quote, "start": j.claim.start, "end": j.claim.end,
+               "reason": j.reason, "label": None }
              for j in judgements if j.verdict == "absent" ]
 
 
@@ -182,7 +185,39 @@ def unlabelled_drops( report ):
     return [ row for row in report if row[ "label" ] not in ( "history", "restored" ) ]
 
 
-def history_destinations_missing( report, destination_text ):
+def load_destination( path, allowed_roots, old_text, new_text ):
+    """
+    Read the document a history label says the claim moved to, refusing a stand-in.
+
+    Requires:
+        - path names the destination file; allowed_roots are the directories history may live in
+
+    Ensures:
+        - returns the file's text only when its real path is inside an allowed root and it does
+          not contain the whole old text or the whole new text, so the old docstring cannot be
+          offered as its own history
+
+    Raises:
+        - ValueError if the path is outside the allowed roots or the text is a stand-in
+    """
+    real  = os.path.realpath( path )
+    roots = [ os.path.realpath( root ) for root in allowed_roots ]
+    if not any( real == root or real.startswith( root + os.sep ) for root in roots ):
+        raise ValueError( f"history destination {path} is outside the allowed locations {allowed_roots}" )
+    with open( real, encoding="utf-8" ) as f: text = f.read()
+    refuse_stand_in( text, old_text, new_text )
+    return text
+
+
+def refuse_stand_in( destination_text, old_text, new_text ):
+    """Raise ValueError when the destination holds the whole old text or the whole new text."""
+    shaped = claim_extractor.normalize( destination_text )[ 0 ]
+    for name, text in ( ( "old", old_text ), ( "new", new_text ) ):
+        if claim_extractor.normalize( text )[ 0 ] in shaped:
+            raise ValueError( f"history destination contains the whole {name} text, so it cannot hold history" )
+
+
+def history_destinations_missing( report, destination_text, old_text, new_text ):
     """
     Return the history-labelled rows whose quote is absent from the text they say it moved to.
 
@@ -194,11 +229,49 @@ def history_destinations_missing( report, destination_text ):
         - only rows labelled "history" are checked; a restored or unlabelled row is not
         - a row passes when its quote occurs in destination_text under the extractor's
           normalization, so a history label cannot be used to drop a claim silently
+
+    Raises:
+        - ValueError if destination_text holds the whole old or new text
     """
+    refuse_stand_in( destination_text, old_text, new_text )
     return [ row for row in report
-             if row[ "label" ] == "history" and claim_extractor.locate_quote( row[ "quote" ], destination_text ) is None ]
+             if row[ "label" ] == "history" and claim_extractor.locate_quote( row[ "quote" ], destination_text, bounded=False ) is None ]
 
 
-PROMPT_VERSION = model_transport.prompt_version(
-    "judge", SYSTEM_PROMPT, *[ inspect.getsource( f ) for f in ( build_prompt, parse_verdicts, judge_claims ) ]
-)
+async def restored_still_dropped( report, new_text, design_text, judge_model, escalation_model, query_fn=None ):
+    """
+    Judge every row labelled restored against the new text and return those still absent.
+
+    Requires:
+        - report rows come from history_report, so each carries claim, quote, start and end
+
+    Ensures:
+        - a restored label is a claim to check, never a pass: the row is judged again
+        - returns the rows whose claim the new text and design doc still do not state
+    """
+    rows = [ row for row in report if row[ "label" ] == "restored" ]
+    if not rows: return []
+    claims  = [ claim_extractor.Claim( row[ "claim" ], row[ "quote" ], row[ "start" ], row[ "end" ] ) for row in rows ]
+    judged  = await judge_claims( claims, new_text, design_text, judge_model, escalation_model, query_fn=query_fn )
+    return [ row for row, j in zip( rows, judged ) if j.verdict == "absent" ]
+
+
+async def close_history_gate( report, old_text, new_text, destination_text, design_text, judge_model, escalation_model, query_fn=None ):
+    """
+    Run every check on the history report together, so a caller cannot run only one of them.
+
+    Requires:
+        - report rows come from history_report with labels filled in by the author
+
+    Ensures:
+        - returns { unlabelled, destination_missing, restored_failed, ok }
+        - ok is True only when all three lists are empty
+    """
+    unlabelled = unlabelled_drops( report )
+    missing    = history_destinations_missing( report, destination_text, old_text, new_text )
+    failed     = await restored_still_dropped( report, new_text, design_text, judge_model, escalation_model, query_fn=query_fn )
+    return { "unlabelled": unlabelled, "destination_missing": missing, "restored_failed": failed,
+             "ok": not ( unlabelled or missing or failed ) }
+
+
+PROMPT_VERSION = model_transport.prompt_version( "judge", inspect.getsource( sys.modules[ __name__ ] ) )

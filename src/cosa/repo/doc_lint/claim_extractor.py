@@ -11,6 +11,7 @@ text under no verified quote is the check for claims the model never listed (rul
 import inspect
 import json
 import re
+import sys
 from collections import namedtuple
 
 from . import model_transport
@@ -78,19 +79,26 @@ def normalize( text ):
     return "".join( chars ), offsets
 
 
-def locate_quote( quote, old_text ):
+def _has_structure( old_text, normalized ):
+    """Say whether a text has two or more sentences or two or more non-blank lines."""
+    return len( SENTENCE_END.findall( normalized ) ) >= 2 or sum( 1 for line in old_text.splitlines() if line.strip() ) >= 2
+
+
+def locate_quote( quote, old_text, bounded=True ):
     """
     Find a quote in old text and return its span, or None.
 
     Requires:
         - quote and old_text are str
+        - bounded is False only when searching a destination document, where a quote may be
+          most of a short text; the old text of a rewrite is always searched bounded
 
     Ensures:
         - returns ( start, end ) as offsets into the original old_text when the normalized
           quote occurs in the normalized old text, taking the first occurrence
         - returns None for a quote under MIN_QUOTE_WORDS words or MIN_QUOTE_CHARS characters,
           so a one-word quote can never verify
-        - returns None for a quote over MAX_QUOTE_CHARS, or, in a text of two or more sentences,
+        - returns None for a quote over MAX_QUOTE_CHARS, or, in a text of two or more sentences or lines,
           over MAX_QUOTE_SHARE of the text, so one quote cannot span a whole docstring and
           claim to catch every removal
         - returns None when the quote does not occur
@@ -101,8 +109,8 @@ def locate_quote( quote, old_text ):
     wanted, _ = normalize( quote )
     if len( wanted.split() ) < MIN_QUOTE_WORDS or len( wanted ) < MIN_QUOTE_CHARS: return None
     haystack, offsets = normalize( old_text )
-    if len( wanted ) > MAX_QUOTE_CHARS: return None
-    if len( wanted ) > MAX_QUOTE_SHARE * len( haystack ) and len( SENTENCE_END.findall( haystack ) ) >= 2: return None
+    if bounded and len( wanted ) > MAX_QUOTE_CHARS: return None
+    if bounded and len( wanted ) > MAX_QUOTE_SHARE * len( haystack ) and _has_structure( old_text, haystack ): return None
     position = haystack.find( wanted )
     if position < 0: return None
     return offsets[ position ], offsets[ position + len( wanted ) - 1 ] + 1
@@ -228,7 +236,4 @@ async def extract_claims( old_text, model, query_fn=None ):
     return ExtractionResult( claims, discarded, uncovered_fraction( old_text, [ ( c.start, c.end ) for c in claims ] ), longest )
 
 
-PROMPT_VERSION = model_transport.prompt_version(
-    "extractor", SYSTEM_PROMPT, str( ( MIN_QUOTE_WORDS, MIN_QUOTE_CHARS, MAX_QUOTE_CHARS, MAX_QUOTE_SHARE ) ),
-    *[ inspect.getsource( f ) for f in ( normalize, locate_quote, parse_claims, verify_claims, extract_claims ) ]
-)
+PROMPT_VERSION = model_transport.prompt_version( "extractor", inspect.getsource( sys.modules[ __name__ ] ) )

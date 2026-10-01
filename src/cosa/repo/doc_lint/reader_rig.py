@@ -11,6 +11,7 @@ not write the rewrite.
 import inspect
 import json
 import re
+import sys
 from collections import namedtuple
 
 from . import harness_runner, model_transport
@@ -139,6 +140,4 @@ async def run_reader_test( old, new, questions, config, ledger=None, query_fn=No
              "passes": new_mean >= old_mean }
 
 
-PROMPT_VERSION = model_transport.prompt_version(
-    "reader", READER_SYSTEM, GRADER_SYSTEM, *[ inspect.getsource( f ) for f in ( parse_answer, parse_score, score_text ) ]
-)
+PROMPT_VERSION = model_transport.prompt_version( "reader", inspect.getsource( sys.modules[ __name__ ] ) )

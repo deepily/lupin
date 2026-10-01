@@ -9,10 +9,11 @@ Every model id is required. Rerunning the same command after a kill resumes from
 
 import argparse
 import asyncio
+import hashlib
 import json
 import sys
 
-from . import harness_report, harness_runner
+from . import claim_extractor, claim_judge, harness_report, harness_runner
 
 
 def parse_args( argv ):
@@ -25,6 +26,8 @@ def parse_args( argv ):
         parser.add_argument( f"--{name}-model", required=True )
     parser.add_argument( "--extractor-lists", type=int, default=2 )
     parser.add_argument( "--judge-runs", type=int, default=3 )
+    parser.add_argument( "--gate", action="store_true", help="a gate run: refuse unless --frozen-versions matches" )
+    parser.add_argument( "--frozen-versions", help="extractor and judge prompt versions registered before the gate run, comma separated" )
     return parser.parse_args( argv )
 
 
@@ -39,6 +42,10 @@ def main( argv, query_fn=None ):
     Ensures:
         - returns 0 after writing the report, printing one summary line
         - returns 2 and prints the reason when the model configuration is refused
+        - returns 3 and runs nothing when --gate is set and --frozen-versions is missing or is not
+          exactly the extractor and judge versions in this code, so a gate run cannot use prompts
+          that changed after they were registered
+        - the report carries the sha256 of the pairs file
     """
     args   = parse_args( argv )
     config = harness_runner.HarnessConfig( args.extractor_model, args.judge_model, args.escalation_model,
@@ -48,9 +55,15 @@ def main( argv, query_fn=None ):
     except ValueError as e:
         print( f"REFUSED: {e}", file=sys.stderr )
         return 2
-    with open( args.pairs, encoding="utf-8" ) as f: pairs = json.load( f )
+    current = f"{claim_extractor.PROMPT_VERSION},{claim_judge.PROMPT_VERSION}"
+    if args.gate and args.frozen_versions != current:
+        print( f"REFUSED: gate run needs --frozen-versions {current}, got {args.frozen_versions}", file=sys.stderr )
+        return 3
+    with open( args.pairs, "rb" ) as f: raw = f.read()
+    pairs = json.loads( raw )
     results = asyncio.run( harness_runner.run_all( pairs, config, harness_runner.Ledger( args.ledger ), query_fn=query_fn ) )
     report  = harness_report.build_report( results, config )
+    report[ "pairs_sha" ] = hashlib.sha256( raw ).hexdigest()
     with open( args.out, "w", encoding="utf-8" ) as f: json.dump( report, f, indent=2 )
     print( f"report written to {args.out}: default_gate_pass={report[ 'default_gate_pass' ]}" )
     return 0

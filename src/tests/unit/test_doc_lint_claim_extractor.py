@@ -6,6 +6,7 @@ different text gets different claims. A canned reply would pass whatever the cod
 """
 
 import asyncio
+import inspect
 import json
 import re
 
@@ -108,16 +109,15 @@ def test_prompt_version_changes_with_any_part_and_the_modules_derive_theirs_from
     assert mt.prompt_version( "x", "a", "b" ) == mt.prompt_version( "x", "a", "b" )
     assert len( { mt.prompt_version( "x", "a", "b" ), mt.prompt_version( "x", "a", "c" ), mt.prompt_version( "y", "a", "b" ) } ) == 3
     assert ce.PROMPT_VERSION.startswith( "extractor-" ) and len( ce.PROMPT_VERSION ) == len( "extractor-" ) + 10
+    assert mt.TIMEOUT_SECONDS == 600 and inspect.signature( mt.complete ).parameters[ "timeout_seconds" ].default == 600
 
 
-def test_the_extractor_version_is_derived_from_its_prompt_and_code_not_typed_by_hand():
+def test_the_extractor_version_is_the_hash_of_its_whole_module_source():
     import inspect
-    rebuilt = mt.prompt_version(
-        "extractor", ce.SYSTEM_PROMPT, str( ( ce.MIN_QUOTE_WORDS, ce.MIN_QUOTE_CHARS, ce.MAX_QUOTE_CHARS, ce.MAX_QUOTE_SHARE ) ),
-        *[ inspect.getsource( f ) for f in ( ce.normalize, ce.locate_quote, ce.parse_claims, ce.verify_claims, ce.extract_claims ) ]
-    )
-    assert ce.PROMPT_VERSION == rebuilt
-    assert mt.prompt_version( "extractor", ce.SYSTEM_PROMPT + " edited" ) != mt.prompt_version( "extractor", ce.SYSTEM_PROMPT )
+    source = inspect.getsource( ce )
+    assert ce.PROMPT_VERSION == mt.prompt_version( "extractor", source )
+    for constant in ( "SENTENCE_END = ", "_FENCE       = ", "MAX_QUOTE_SHARE = ", "SYSTEM_PROMPT = " ):
+        assert constant in source and mt.prompt_version( "extractor", source.replace( constant, "# moved\n" + constant, 1 ) ) != ce.PROMPT_VERSION
 
 
 def test_new_suffix_never_occurs_in_the_texts_and_wrap_uses_it_on_both_tags(monkeypatch):
@@ -329,3 +329,31 @@ def test_each_length_threshold_is_enforced_on_its_own():
     assert ce.locate_quote( "parked_status flag", "Set the parked_status flag first." ) is None
     assert ce.locate_quote( "a is b", "Set a is b first, then continue." ) is None
     assert ce.locate_quote( "parked_status flag set", "Set the parked_status flag set first." ) is not None
+
+
+def test_a_bullet_only_docstring_quoted_whole_does_not_verify():
+    text = "Requires:\n - x is a str\nEnsures:\n - returns the id\n - raises ValueError when blank"
+    assert ce.locate_quote( text, text ) is None
+    assert ce.locate_quote( "raises ValueError when blank", text ) is not None
+
+
+def test_two_sentences_on_one_line_already_count_as_structure():
+    text = "Short head. This second sentence is much longer than the first one is."
+    assert ce.locate_quote( "This second sentence is much longer than the first one is.", text ) is None
+    assert ce.locate_quote( "Short head. This second sentence is much", text ) is not None
+
+
+def test_the_data_tag_suffix_is_eight_hex_digits():
+    seen = {}
+    def spy( prompt ):
+        seen[ "p" ] = prompt
+        return '{"claims": []}'
+    run( ce.extract_claims( OLD, "m", query_fn=make_query( spy ) ) )
+    assert re.match( r"<old_text_[0-9a-f]{8}>", seen[ "p" ] )
+
+
+def test_a_destination_search_is_unbounded_but_still_needs_a_real_quote():
+    short = "Raises ValueError when the id is blank.\nSecond line."
+    assert ce.locate_quote( "Raises ValueError when the id is blank.", short ) is None
+    assert ce.locate_quote( "Raises ValueError when the id is blank.", short, bounded=False ) == ( 0, 39 )
+    assert ce.locate_quote( "blank", short, bounded=False ) is None
