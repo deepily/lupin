@@ -142,21 +142,39 @@ def group_rows( results, keys, slots ):
     return rows
 
 
-def call_counts( ledger, models ):
+def pair_hashes( pairs ):
     """
-    Count the finished model calls in a ledger.
+    Return the ( old hash, new-side hash ) every ledger key of these pairs carries.
+
+    Requires:
+        - pairs are harness pairs
+
+    Ensures:
+        - the hashes are read from harness_runner.ledger_key itself, so the two cannot disagree
+    """
+    return { tuple( harness_runner.ledger_key( "x", p, "", "", 0 ).split( "|" )[ 1 : 3 ] ) for p in pairs }
+
+
+def call_counts( ledger, models, pairs ):
+    """
+    Count the finished model calls in a ledger that belong to one split's pairs.
 
     Requires:
         - ledger is a harness_runner.Ledger; models maps a judge name to the model field its judge keys carry
+        - pairs are the split's harness pairs
 
     Ensures:
         - returns { "extract": n, "judge": { name: n } }, read from the stage and model fields of each key
+        - a row whose old and new text hashes are not one of these pairs' is not counted, so a ledger that
+          also holds another split's calls does not inflate this one's
         - a Claude judge key carries "<judge>+<escalation>" and a Jev key its key_id, each whole, so a judge
           is counted when its model field equals the string given
     """
-    out = { "extract": 0, "judge": { name: 0 for name in models } }
+    out    = { "extract": 0, "judge": { name: 0 for name in models } }
+    mine   = pair_hashes( pairs )
     for key in ledger.entries:
-        stage, _, _, _, model = key.split( "|" )[ : 5 ]
+        stage, old_hash, new_hash, _, model = key.split( "|" )[ : 5 ]
+        if ( old_hash, new_hash ) not in mine: continue
         if stage == "extract": out[ "extract" ] += 1
         for name, field in models.items():
             if stage == "judge" and model == field: out[ "judge" ][ name ] += 1
@@ -194,15 +212,18 @@ def build_comparison( split, pairs, keys, ledger, judges, elapsed=None ):
         - elapsed is { name: seconds } or None
 
     Ensures:
-        - returns { split, pairs, judges, calls }; each judge holds model, headline (the harness report's
-          figures, worse list first), groups (group_rows), and escalations, unanswered and discarded counts
+        - returns { split, pairs, config, judges, calls }; config holds each judge's extractor lists and judge runs;
+          each judge holds model, headline (the harness report's figures), groups (group_rows), and seconds
         - a judge whose ledger is incomplete is { "incomplete": reason } and never a partial figure set
-        - calls is call_counts over the ledger; a judge's seconds are copied from elapsed when given, else None
+        - a judge whose ledger holds more or fewer calls than its configuration makes is incomplete too, so a run
+          made with more lists or runs is not rebuilt from a subset and passed off as whole
+        - calls is call_counts over this split's pairs; a judge's seconds are copied from elapsed, else None
     """
-    out = { "split": split, "pairs": len( pairs ), "judges": {}, "calls": None }
+    out = { "split": split, "pairs": len( pairs ), "config": {}, "judges": {}, "calls": None }
     models = {}
     for name, ( config, backend ) in judges.items():
         models[ name ] = backend.key_id if backend else config.judge_model + "+" + config.escalation_model
+        out[ "config" ][ name ] = { "extractor_lists": config.extractor_lists, "judge_runs": config.judge_runs }
         try:
             results, report = rebuild( pairs, config, ledger, backend )
         except LedgerIncomplete as e:
@@ -215,7 +236,14 @@ def build_comparison( split, pairs, keys, ledger, judges, elapsed=None ):
             "groups"      : group_rows( results, keys, slots ),
             "seconds"     : None if elapsed is None else elapsed.get( name )
         }
-    out[ "calls" ] = call_counts( ledger, models )
+    out[ "calls" ] = call_counts( ledger, models, pairs )
+    distinct = len( pair_hashes( pairs ) )
+    for name, judge in out[ "judges" ].items():
+        want_extract = distinct * out[ "config" ][ name ][ "extractor_lists" ]
+        want_judge   = want_extract * out[ "config" ][ name ][ "judge_runs" ]
+        if "incomplete" in judge or ( out[ "calls" ][ "extract" ], out[ "calls" ][ "judge" ][ name ] ) == ( want_extract, want_judge ): continue
+        out[ "judges" ][ name ] = { "incomplete": f"the ledger holds {out[ 'calls' ][ 'extract' ]} extractor and {out[ 'calls' ][ 'judge' ][ name ]} judge calls for this split, "
+                                                  f"and {out[ 'config' ][ name ][ 'extractor_lists' ]} lists x {out[ 'config' ][ name ][ 'judge_runs' ]} runs over {distinct} pairs make {want_extract} and {want_judge}" }
     return out
 
 
@@ -248,7 +276,8 @@ def render_markdown( comparison ):
     """
     split, judges = comparison[ "split" ], comparison[ "judges" ]
     done          = { n: j for n, j in judges.items() if "incomplete" not in j }
-    lines         = [ f"### {split} split ({comparison[ 'pairs' ]} pairs)", "" ]
+    lines         = [ f"### {split} split ({comparison[ 'pairs' ]} pairs)", "",
+                      "Configuration: " + "; ".join( f"{n} {c[ 'extractor_lists' ]} extractor lists x {c[ 'judge_runs' ]} judge runs" for n, c in comparison[ "config" ].items() ) + ".", "" ]
     for n, j in judges.items():
         if "incomplete" in j: lines += [ f"**{n}: incomplete.** {j[ 'incomplete' ]}", "" ]
     lines += [ "| judge | seeded n | false passes | false-pass rate | 95% upper bound | unseeded n | false alarms | false-alarm rate | 95% upper end | agreement, all | agreement, seeded |",
@@ -259,10 +288,10 @@ def render_markdown( comparison ):
         m  = worst_list( h, "misses" )
         a  = worst_list( h, "false_alarms" )
         fa = harness_report.interval( a[ "false_alarms" ], a[ "unseeded" ] )
-        passes[ n ] = ( m[ "misses" ] / m[ "positives" ] if m[ "positives" ] else 0.0, m[ "upper_bound" ] or 0.0 )
-        alarms[ n ] = ( a[ "false_alarm_rate" ] or 0.0, fa[ 1 ] if fa else 0.0 )
-        lines.append( f"| {n} | {m[ 'positives' ]} | {m[ 'misses' ]} | {pct( passes[ n ][ 0 ] )} | {pct( m[ 'upper_bound' ] )} | {a[ 'unseeded' ]} | {a[ 'false_alarms' ]} | "
-                      f"{pct( a[ 'false_alarm_rate' ] )} | {pct( fa[ 1 ] if fa else None )} | {pct( h[ 'agreement_all' ][ 'rate' ] )} | {pct( h[ 'agreement_seeded' ][ 'rate' ] )} |" )
+        if m[ "positives" ]: passes[ n ] = ( m[ "misses" ] / m[ "positives" ], m[ "upper_bound" ] )
+        if a[ "unseeded" ]:  alarms[ n ] = ( a[ "false_alarm_rate" ], fa[ 1 ] )
+        lines.append( f"| {n} | {m[ 'positives' ]} | {m[ 'misses' ]} | {pct( passes[ n ][ 0 ] if n in passes else None )} | {pct( m[ 'upper_bound' ] if n in passes else None )} | {a[ 'unseeded' ]} | {a[ 'false_alarms' ]} | "
+                      f"{pct( alarms[ n ][ 0 ] if n in alarms else None )} | {pct( alarms[ n ][ 1 ] if n in alarms else None )} | {pct( h[ 'agreement_all' ][ 'rate' ] )} | {pct( h[ 'agreement_seeded' ][ 'rate' ] )} |" )
     lines += [ "", "| judge | group | expected | n | wrong | rate | 95% bound | worst list |", "|---|---|---|---|---|---|---|---|" ]
     for n, j in done.items():
         for g in j[ "groups" ]:
@@ -275,13 +304,15 @@ def render_markdown( comparison ):
         lines.append( f"| {n} | {calls[ 'judge' ][ n ]} | {h[ 'escalations' ]} | {h[ 'discarded_claims' ]} | {h[ 'judge_unanswered' ] if h[ 'judge_unanswered' ] is not None else 'n/a'} | {j[ 'seconds' ] if j[ 'seconds' ] is not None else 'n/a'} |" )
     names = list( done )
     if names:
-        lines += [ "" ] + _chart( f"False-pass rate and 95% upper bound, {split} split", names, [ passes[ n ][ 0 ] for n in names ], [ passes[ n ][ 1 ] for n in names ], "bar", "line" )
-        lines += [ "" ] + _chart( f"False-alarm rate and 95% upper end, {split} split", names, [ alarms[ n ][ 0 ] for n in names ], [ alarms[ n ][ 1 ] for n in names ], "bar", "line" )
+        for title, figures, what in ( ( "False-pass rate and 95% upper bound", passes, "seeded pairs" ), ( "False-alarm rate and 95% upper end", alarms, "unseeded pairs" ) ):
+            drawn = [ n for n in names if n in figures ]
+            lines += [ "", f"No chart point for {', '.join( n for n in names if n not in figures )}: no {what}." ] if len( drawn ) < len( names ) else []
+            if drawn: lines += [ "" ] + _chart( f"{title}, {split} split", drawn, [ figures[ n ][ 0 ] for n in drawn ], [ figures[ n ][ 1 ] for n in drawn ], "bar", "line" )
         for title, wanted in ( ( "False-pass rate by pair type", ( "delete", "weaken", "injection (removed claim)" ) ),
                                ( "False-alarm rate by pair type", ( "relocate", "paraphrase", "injection (kept claim)" ) ) ):
             present = [ w for w in wanted if any( g[ "group" ] == w for j in done.values() for g in j[ "groups" ] ) ]
             if not present: continue
-            series  = { n: [ next( ( g[ "rate" ] for g in done[ n ][ "groups" ] if g[ "group" ] == w ), 0.0 ) for w in present ] for n in names }
+            series  = { n: [ { g[ "group" ]: g[ "rate" ] for g in done[ n ][ "groups" ] }[ w ] for w in present ] for n in names }
             lines  += [ "" ] + _lines_chart( f"{title}, {split} split", present, series )
         lines += [ "" ] + _calls_chart( f"Judge calls, {split} split", names, [ calls[ "judge" ][ n ] for n in names ] )
     return "\n".join( lines ) + "\n"
@@ -290,14 +321,14 @@ def render_markdown( comparison ):
 def _chart( title, names, first, second, kind_a, kind_b ):
     """Return an xychart block with two series over the judges, on a shared axis."""
     top = axis_top( first + second )
-    return [ "```mermaid", "xychart-beta", f'    title "{title}"', f"    x-axis [{', '.join( names )}]", f'    y-axis "share" 0 --> {top:.2f}',
+    return [ "```mermaid", "xychart-beta", f'    title "{title}"', f"    x-axis [{', '.join( f'\"{n}\"' for n in names )}]", f'    y-axis "share" 0 --> {top:.2f}',
              f"    {kind_a} [{', '.join( f'{v:.4f}' for v in first )}]", f"    {kind_b} [{', '.join( f'{v:.4f}' for v in second )}]", "```" ]
 
 
 def _lines_chart( title, groups, series ):
     """Return an xychart block with one line per judge across the pair groups."""
     top = axis_top( [ v for vals in series.values() for v in vals ] )
-    out = [ "```mermaid", "xychart-beta", f'    title "{title}"', f"    x-axis [{', '.join( g.replace( ' ', '_' ) for g in groups )}]", f'    y-axis "share" 0 --> {top:.2f}' ]
+    out = [ "```mermaid", "xychart-beta", f'    title "{title}"', f"    x-axis [{', '.join( f'\"{g}\"' for g in groups )}]", f'    y-axis "share" 0 --> {top:.2f}' ]
     out += [ f"    line [{', '.join( f'{v:.4f}' for v in vals )}]" for vals in series.values() ]
     out += [ "```", "Lines, in order: " + ", ".join( series ) + "." ]
     return out
@@ -305,7 +336,7 @@ def _lines_chart( title, groups, series ):
 
 def _calls_chart( title, names, counts ):
     """Return an xychart block with one bar per judge for its call count."""
-    return [ "```mermaid", "xychart-beta", f'    title "{title}"', f"    x-axis [{', '.join( names )}]", f'    y-axis "calls" 0 --> {max( counts + [ 1 ] )}',
+    return [ "```mermaid", "xychart-beta", f'    title "{title}"', f"    x-axis [{', '.join( f'\"{n}\"' for n in names )}]", f'    y-axis "calls" 0 --> {max( counts + [ 1 ] )}',
              f"    bar [{', '.join( str( c ) for c in counts )}]", "```" ]
 
 
@@ -322,6 +353,9 @@ def parse_args( argv ):
     parser.add_argument( "--t-hi", type=float, required=True )
     parser.add_argument( "--elapsed", help="JSON file { judge name: seconds }, written by whoever launched the run" )
     parser.add_argument( "--frozen-pairs-sha", help="gate only: sha256 of the pairs file registered before the gate run" )
+    parser.add_argument( "--extractor-lists", type=int, default=2, help="extractor lists per pair in the run being rebuilt" )
+    parser.add_argument( "--claude-judge-runs", type=int, default=3, help="judge passes per list for Haiku and Sonnet" )
+    parser.add_argument( "--jev-judge-runs", type=int, default=1, help="judge passes per list for Jev" )
     for name in ( "extractor", "escalation", "writer", "haiku", "sonnet", "jev" ):
         parser.add_argument( f"--{name}-model", required=True )
     return parser.parse_args( argv )
@@ -357,9 +391,9 @@ def main( argv ):
     for path in args.ledger[ 1 : ]: ledger.entries.update( harness_runner.Ledger( path ).entries )
     ext, esc, wri = args.extractor_model, args.escalation_model, args.writer_model
     judges = {
-        "haiku" : ( harness_runner.HarnessConfig( ext, args.haiku_model,  esc, wri, 2, 3 ), None ),
-        "sonnet": ( harness_runner.HarnessConfig( ext, args.sonnet_model, esc, wri, 2, 3 ), None ),
-        "jev"   : ( harness_runner.HarnessConfig( ext, args.jev_model,    esc, wri, 2, 1 ),
+        "haiku" : ( harness_runner.HarnessConfig( ext, args.haiku_model,  esc, wri, args.extractor_lists, args.claude_judge_runs ), None ),
+        "sonnet": ( harness_runner.HarnessConfig( ext, args.sonnet_model, esc, wri, args.extractor_lists, args.claude_judge_runs ), None ),
+        "jev"   : ( harness_runner.HarnessConfig( ext, args.jev_model,    esc, wri, args.extractor_lists, args.jev_judge_runs ),
                     jev_judge.JevBackend( args.jev_model, args.t_lo, args.t_hi, esc, post_fn=refuse_post, environ={ jev_transport.KEY_VARIABLE: "unused" } ) ),
     }
     try:

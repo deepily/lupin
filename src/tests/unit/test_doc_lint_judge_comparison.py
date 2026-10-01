@@ -143,9 +143,9 @@ def test_a_result_without_a_key_is_refused( run ):
 
 
 def test_call_counts_split_extractor_calls_from_each_judges_calls( run ):
-    counts = jc.call_counts( run[ "ledger" ], { "haiku": f"{HAIKU}+{ESC}", "sonnet": f"{SONNET}+{ESC}", "jev": "jev-m@0.1-0.9+esc-m" } )
+    counts = jc.call_counts( run[ "ledger" ], { "haiku": f"{HAIKU}+{ESC}", "sonnet": f"{SONNET}+{ESC}", "jev": "jev-m@0.1-0.9+esc-m" }, run[ "pairs" ] )
     assert counts == { "extract": 12, "judge": { "haiku": 36, "sonnet": 36, "jev": 0 } }, "6 pairs x 2 lists extracted once and shared; 6 x 2 x 3 judge runs each"
-    assert jc.call_counts( run[ "ledger" ], { "bare": SONNET } )[ "judge" ] == { "bare": 0 }, "the key carries the whole judge+escalation string, so a bare judge id matches nothing"
+    assert jc.call_counts( run[ "ledger" ], { "bare": SONNET }, run[ "pairs" ] )[ "judge" ] == { "bare": 0 }, "the key carries the whole judge+escalation string, so a bare judge id matches nothing"
 
 
 def test_rebuild_makes_no_model_call_and_a_missing_row_raises_instead_of_calling_one( run ):
@@ -181,6 +181,67 @@ def test_build_comparison_marks_an_incomplete_judge_and_never_gives_it_figures( 
     assert out[ "calls" ][ "judge" ] == { "haiku": 36, "other": 0 }
 
 
+def test_a_ledger_that_also_holds_another_splits_calls_counts_only_this_splits_pairs( run ):
+    foreign = dict( run[ "pairs" ][ 0 ], id="gate-1", old=OLD + " (gate pair)" )
+    asyncio.run( hn.run_all( [ foreign ], configs()[ "haiku" ][ 0 ], run[ "ledger" ], query_fn=FakeModel() ) )
+    models = { "haiku": f"{HAIKU}+{ESC}" }
+    assert jc.call_counts( run[ "ledger" ], models, run[ "pairs" ] ) == { "extract": 12, "judge": { "haiku": 36 } }
+    assert jc.call_counts( run[ "ledger" ], models, [ foreign ] ) == { "extract": 2, "judge": { "haiku": 6 } }
+    assert jc.call_counts( run[ "ledger" ], models, run[ "pairs" ] + [ foreign ] ) == { "extract": 14, "judge": { "haiku": 42 } }
+
+
+def test_a_ledger_made_with_more_judge_runs_than_the_configuration_says_is_incomplete_not_a_subset_passed_as_whole( run ):
+    more = ( hn.HarnessConfig( EXT, HAIKU, ESC, WRI, 2, 5 ), None )
+    asyncio.run( hn.run_all( run[ "pairs" ], more[ 0 ], run[ "ledger" ], query_fn=FakeModel() ) )
+    out = jc.build_comparison( "dev", run[ "pairs" ], run[ "keys" ], run[ "ledger" ], { "haiku": configs()[ "haiku" ], "sonnet": configs()[ "sonnet" ] } )
+    assert "incomplete" in out[ "judges" ][ "haiku" ] and "60 judge calls" in out[ "judges" ][ "haiku" ][ "incomplete" ] and "make 12 and 36" in out[ "judges" ][ "haiku" ][ "incomplete" ]
+    assert "incomplete" not in out[ "judges" ][ "sonnet" ], "the other judge's rows are untouched"
+    assert jc.build_comparison( "dev", run[ "pairs" ], run[ "keys" ], run[ "ledger" ], { "haiku": more } )[ "judges" ][ "haiku" ][ "headline" ][ "pairs" ] == 6
+
+
+def test_the_configuration_is_in_the_json_and_in_the_markdown_header( run ):
+    out  = jc.build_comparison( "dev", run[ "pairs" ], run[ "keys" ], run[ "ledger" ], configs() )
+    assert out[ "config" ] == { "haiku": { "extractor_lists": 2, "judge_runs": 3 }, "sonnet": { "extractor_lists": 2, "judge_runs": 3 } }
+    assert "Configuration: haiku 2 extractor lists x 3 judge runs; sonnet 2 extractor lists x 3 judge runs." in jc.render_markdown( out )
+
+
+def test_the_command_line_takes_the_run_configuration_and_defaults_to_two_lists_and_three_runs( run, tmp_path ):
+    more = hn.HarnessConfig( EXT, HAIKU, ESC, WRI, 2, 5 )
+    asyncio.run( hn.run_all( run[ "pairs" ], more, run[ "ledger" ], query_fn=FakeModel() ) )
+    assert jc.main( argv( run, tmp_path, "--claude-judge-runs", "5", "--extractor-lists", "2", "--jev-judge-runs", "1" ) ) == 0
+    data = json.loads( ( tmp_path / "c.json" ).read_text() )
+    assert data[ "config" ][ "haiku" ] == { "extractor_lists": 2, "judge_runs": 5 } and data[ "config" ][ "jev" ] == { "extractor_lists": 2, "judge_runs": 1 }
+    assert "incomplete" not in data[ "judges" ][ "haiku" ] and "incomplete" in data[ "judges" ][ "sonnet" ], "the same ledger read as 3 runs is not whole for sonnet"
+
+
+def test_a_judge_with_no_seeded_pairs_shows_n_a_and_gets_no_chart_point( tmp_path ):
+    unseeded = [ r for r in ROWS if r[ 3 ] is None ]
+    pairs_path = tmp_path / "pairs.jsonl"
+    keys_path  = tmp_path / "keys.jsonl"
+    pairs_path.write_text( "\n".join( json.dumps( { "id": i, "old": OLD, "new": new, "linked_doc": doc } ) for i, new, doc, _, _, _ in unseeded ) + "\n" )
+    keys_path.write_text( "\n".join( json.dumps( { "id": i, "seeded_positive": False, "x_span_in_old": "", "kind": kind, "injection": inj } ) for i, _, _, _, kind, inj in unseeded ) + "\n" )
+    pairs  = lp.load_pairs( str( pairs_path ), str( keys_path ) )
+    ledger = hn.Ledger( str( tmp_path / "l.jsonl" ) )
+    asyncio.run( hn.run_all( pairs, configs()[ "haiku" ][ 0 ], ledger, query_fn=FakeModel() ) )
+    text = jc.render_markdown( jc.build_comparison( "dev", pairs, jc.key_rows( str( keys_path ) ), ledger, { "haiku": configs()[ "haiku" ] } ) )
+    assert "| haiku | 0 | 0 | n/a | n/a | 3 | 1 | 33.3% | 90.6% |" in text
+    assert "No chart point for haiku: no seeded pairs." in text and "False-pass rate and 95% upper bound" not in text and "False-alarm rate and 95% upper end" in text
+
+
+def test_a_judge_with_no_unseeded_pairs_shows_n_a_for_false_alarms_and_gets_no_alarm_chart_point( tmp_path ):
+    seeded = [ r for r in ROWS if r[ 3 ] is not None ]
+    pairs_path = tmp_path / "pairs.jsonl"
+    keys_path  = tmp_path / "keys.jsonl"
+    pairs_path.write_text( "\n".join( json.dumps( { "id": i, "old": OLD, "new": new, "linked_doc": doc } ) for i, new, doc, _, _, _ in seeded ) + "\n" )
+    keys_path.write_text( "\n".join( json.dumps( { "id": i, "seeded_positive": True, "x_span_in_old": span, "kind": kind, "injection": inj } ) for i, _, _, span, kind, inj in seeded ) + "\n" )
+    pairs  = lp.load_pairs( str( pairs_path ), str( keys_path ) )
+    ledger = hn.Ledger( str( tmp_path / "l.jsonl" ) )
+    asyncio.run( hn.run_all( pairs, configs()[ "haiku" ][ 0 ], ledger, query_fn=FakeModel() ) )
+    text = jc.render_markdown( jc.build_comparison( "dev", pairs, jc.key_rows( str( keys_path ) ), ledger, { "haiku": configs()[ "haiku" ] } ) )
+    assert "| haiku | 3 | 0 | 0.0% | 63.2% | 0 | 0 | n/a | n/a |" in text
+    assert "No chart point for haiku: no unseeded pairs." in text and "False-alarm rate and 95% upper end" not in text and "False-pass rate and 95% upper bound" in text
+
+
 # ---- rendering -------------------------------------------------------------------------------
 
 def test_formatting_helpers():
@@ -207,22 +268,22 @@ def test_every_chart_number_is_a_number_from_the_comparison( run ):
     charts = [ block.split( "```" )[ 0 ] for block in text.split( "```mermaid\n" )[ 1 : ] ]
     assert len( charts ) == 5
     first = charts[ 0 ]
-    assert 'title "False-pass rate and 95% upper bound, dev split"' in first and "x-axis [haiku, sonnet]" in first
+    assert 'title "False-pass rate and 95% upper bound, dev split"' in first and 'x-axis ["haiku", "sonnet"]' in first
     assert "bar [0.0000, 0.0000]" in first and "line [0.6316, 0.6316]" in first, "rate 0 of 3, bound 63.2%, same for both judges"
     assert "bar [0.3333, 0.3333]" in charts[ 1 ] and "line [0.9057, 0.9057]" in charts[ 1 ]
-    assert "x-axis [delete, weaken, injection_(removed_claim)]" in charts[ 2 ] and charts[ 2 ].count( "    line [" ) == 2
-    assert "x-axis [relocate, paraphrase, injection_(kept_claim)]" in charts[ 3 ] and "line [0.0000, 0.5000, 1.0000]" in charts[ 3 ]
+    assert 'x-axis ["delete", "weaken", "injection (removed claim)"]' in charts[ 2 ] and charts[ 2 ].count( "    line [" ) == 2
+    assert 'x-axis ["relocate", "paraphrase", "injection (kept claim)"]' in charts[ 3 ] and "line [0.0000, 0.5000, 1.0000]" in charts[ 3 ]
     assert 'y-axis "calls" 0 --> 36' in charts[ 4 ] and "bar [36, 36]" in charts[ 4 ]
 
 
 def test_a_comparison_with_an_incomplete_judge_says_so_and_draws_only_the_complete_ones( run ):
     judges = { **configs( sonnet=False ), "other": ( hn.HarnessConfig( EXT, "other-judge", ESC, WRI, 2, 3 ), None ) }
     text   = jc.render_markdown( jc.build_comparison( "dev", run[ "pairs" ], run[ "keys" ], run[ "ledger" ], judges ) )
-    assert "**other: incomplete.**" in text and "| other |" not in text and "x-axis [haiku]" in text
+    assert "**other: incomplete.**" in text and "| other |" not in text and 'x-axis ["haiku"]' in text
 
 
 def test_a_comparison_with_no_complete_judge_has_no_charts_and_no_table_rows():
-    text = jc.render_markdown( { "split": "gate", "pairs": 0, "judges": { "jev": { "incomplete": "no rows" } }, "calls": { "extract": 0, "judge": { "jev": 0 } } } )
+    text = jc.render_markdown( { "split": "gate", "pairs": 0, "config": { "jev": { "extractor_lists": 2, "judge_runs": 1 } }, "judges": { "jev": { "incomplete": "no rows" } }, "calls": { "extract": 0, "judge": { "jev": 0 } } } )
     assert "**jev: incomplete.** no rows" in text and "```mermaid" not in text and "| jev |" not in text
 
 
@@ -309,11 +370,16 @@ MUTANTS = [
     ( 'if any( ( r[ "seed_span" ] is not None ) != seeded for r in group ): raise', "if False: raise", "test_a_group_that_mixes_seeded_and_unseeded_pairs_is_refused_whatever_order_they_arrive_in" ),
     ( "if not group: continue", "pass", "test_a_group_chart_is_left_out_when_the_keys_have_no_pair_of_its_kinds" ),
     ( "bound    = harness_report.upper_bound( wrong, len( group ) ) if seeded else harness_report.interval( wrong, len( group ) )[ 1 ]", "bound    = harness_report.upper_bound( wrong, len( group ) )", "test_a_removed_claim_group_reports_the_one_sided_upper_bound_and_a_kept_claim_group_the_interval_upper_end" ),
+    ( "if ( old_hash, new_hash ) not in mine: continue", "pass", "test_a_ledger_that_also_holds_another_splits_calls_counts_only_this_splits_pairs" ),
+    ( "if \"incomplete\" in judge or ( out[ \"calls\" ][ \"extract\" ], out[ \"calls\" ][ \"judge\" ][ name ] ) == ( want_extract, want_judge ): continue", "continue", "test_a_ledger_made_with_more_judge_runs_than_the_configuration_says_is_incomplete_not_a_subset_passed_as_whole" ),
+    ( "if m[ \"positives\" ]: passes[ n ] =", "passes[ n ] =", "test_a_judge_with_no_seeded_pairs_shows_n_a_and_gets_no_chart_point" ),
+    ( "if a[ \"unseeded\" ]:  alarms[ n ] =", "alarms[ n ] =", "test_a_judge_with_no_unseeded_pairs_shows_n_a_for_false_alarms_and_gets_no_alarm_chart_point" ),
+    ( 'f"    x-axis [{\', \'.join( f\'\\"{g}\\"\' for g in groups )}]"', 'f"    x-axis [{\', \'.join( g.replace( \' \', \'_\' ) for g in groups )}]"', "test_every_chart_number_is_a_number_from_the_comparison" ),
     ( 'if stage == "judge" and model == field:', 'if stage == "judge" and model.startswith( field ):', "test_call_counts_split_extractor_calls_from_each_judges_calls" ),
     ( 'if stage == "extract": out[ "extract" ] += 1', 'if stage == "extract": out[ "extract" ] += 2', "test_call_counts_split_extractor_calls_from_each_judges_calls" ),
     ( "if caused_by_missing_row( e ): raise LedgerIncomplete(", "if True: raise LedgerIncomplete(", "test_a_missing_row_is_found_anywhere_in_an_error_chain_and_other_errors_pass_through" ),
     ( "error = error.__cause__ or error.__context__", "error = error.__cause__", "test_a_missing_row_is_found_anywhere_in_an_error_chain_and_other_errors_pass_through" ),
-    ( "pct( fa[ 1 ] if fa else None )", "pct( fa[ 0 ] if fa else None )", "test_the_markdown_carries_each_figure_from_the_comparison_dict" ),
+    ( "pct( alarms[ n ][ 1 ] if n in alarms else None )", "pct( alarms[ n ][ 0 ] if n in alarms else None )", "test_the_markdown_carries_each_figure_from_the_comparison_dict" ),
     ( "return max( 0.05, math.ceil( max( values + [ 0.0 ] ) / 0.05 ) * 0.05 )", "return max( 0.05, math.floor( max( values + [ 0.0 ] ) / 0.05 ) * 0.05 )", "test_formatting_helpers" ),
     ( "if gate and args.frozen_pairs_sha != sha:", "if False:", "test_the_command_line_refuses_a_gate_split_without_the_frozen_sha_or_with_a_wrong_one" ),
     ( "for path in args.ledger[ 1 : ]: ledger.entries.update(", "for path in []: ledger.entries.update(", "test_the_command_line_merges_ledgers_in_the_order_given" ),
