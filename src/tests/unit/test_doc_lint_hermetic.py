@@ -90,7 +90,11 @@ def test_the_profile_carries_every_option_with_its_value():
     label, body = mt.CALL_PROFILE.split( "|", 1 )
     profile     = json.loads( body )
     assert label == "hermetic-1"
-    assert profile == { "settings": mt.ISOLATION_SETTINGS, "args": sorted( mt.ISOLATION_ARGS ), "setting_sources": [], "tools": [] }
+    home = str( pathlib.Path.home() )
+    assert home not in mt.CALL_PROFILE and "~/.claude/CLAUDE.md" in profile[ "settings" ][ "claudeMdExcludes" ]
+    assert any( pattern.startswith( home ) for pattern in mt.ISOLATION_SETTINGS[ "claudeMdExcludes" ] )
+    sent = dict( mt.ISOLATION_SETTINGS, claudeMdExcludes=[ "~/.claude/CLAUDE.md" if p.startswith( home ) else p for p in mt.ISOLATION_SETTINGS[ "claudeMdExcludes" ] ] )
+    assert profile == { "settings": sent, "args": sorted( mt.ISOLATION_ARGS ), "setting_sources": [], "tools": [] }
 
 
 def test_an_error_result_keeps_only_the_first_300_characters_of_the_apis_text():

@@ -45,7 +45,10 @@ ISOLATION_SETTINGS = {
 # option: it refuses OAuth and would force the per-token key.
 ISOLATION_ARGS     = { "settings": json.dumps( ISOLATION_SETTINGS, sort_keys=True ), "strict-mcp-config": None, "disable-slash-commands": None }
 SETTING_SOURCES    = []
-CALL_PROFILE       = "hermetic-1|" + json.dumps( { "settings": ISOLATION_SETTINGS, "args": sorted( ISOLATION_ARGS ), "setting_sources": SETTING_SOURCES, "tools": NO_TOOLS }, sort_keys=True )
+# The profile that is hashed names the home directory as "~", so the same options give the same
+# prompt version for every user and machine; the settings actually sent carry the real path.
+PORTABLE_SETTINGS  = dict( ISOLATION_SETTINGS, claudeMdExcludes=[ "~/.claude/CLAUDE.md" if pattern == os.path.join( os.path.expanduser( "~" ), ".claude", "CLAUDE.md" ) else pattern for pattern in ISOLATION_SETTINGS[ "claudeMdExcludes" ] ] )
+CALL_PROFILE       = "hermetic-1|" + json.dumps( { "settings": PORTABLE_SETTINGS, "args": sorted( ISOLATION_ARGS ), "setting_sources": SETTING_SOURCES, "tools": NO_TOOLS }, sort_keys=True )
 
 
 class ModelCallError( Exception ):
