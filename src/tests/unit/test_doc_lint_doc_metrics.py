@@ -128,10 +128,10 @@ def test_report_improved_requires_fewer_tokens_and_no_rate_above( repo ):
     assert report[ "other" ][ "improved" ] is False
 
 
-def _side( tokens, unparsed=0, **counts ):
+def _side( tokens, unparsed=(), **counts ):
     full = { c : 0 for c in mc.MARKER_COLUMNS }
     full.update( counts )
-    return { "tokens": tokens, "unparsed": unparsed, "counts": { "words": tokens, **full } }
+    return { "tokens": tokens, "unparsed": len( unparsed ), "unparsed_paths": list( unparsed ), "counts": { "words": tokens, **full } }
 
 
 def test_compare_rejects_a_rate_that_rose_even_when_tokens_fell():
@@ -148,9 +148,13 @@ def test_compare_is_exact_where_the_one_decimal_display_would_hide_a_rise():
 
 
 def test_compare_refuses_a_package_where_more_files_stopped_parsing():
-    assert dm.compare( _side( 1000 ), _side( 500, unparsed=3 ) ) is False
-    assert dm.compare( _side( 1000, unparsed=3 ), _side( 500, unparsed=3 ) ) is True
-    assert dm.compare( _side( 1000, unparsed=3 ), _side( 500, unparsed=2 ) ) is True
+    assert dm.compare( _side( 1000 ), _side( 500, unparsed=[ "a.py" ] ) ) is False
+    assert dm.compare( _side( 1000, unparsed=[ "a.py" ] ), _side( 500, unparsed=[ "a.py" ] ) ) is True
+    assert dm.compare( _side( 1000, unparsed=[ "a.py", "b.py" ] ), _side( 500, unparsed=[ "a.py" ] ) ) is True
+
+
+def test_compare_refuses_one_file_breaking_while_another_is_fixed():
+    assert dm.compare( _side( 12, unparsed=[ "a.py" ] ), _side( 2, unparsed=[ "b.py" ] ) ) is False
 
 
 def test_table_has_a_row_per_package_with_arrows( repo ):
@@ -217,10 +221,11 @@ def test_a_non_ascii_file_name_is_listed( repo ):
 # ---- mutation check: each mutant of the module must redden its named test ----
 
 MUTANTS = [
-    ( "if after[ \"tokens\" ] >= before[ \"tokens\" ] or after[ \"unparsed\" ] > before[ \"unparsed\" ]: return False", "if after[ \"tokens\" ] >= before[ \"tokens\" ]: return False", "test_compare_refuses_a_package_where_more_files_stopped_parsing" ),
+    ( "or not set( after[ \"unparsed_paths\" ] ) <= set( before[ \"unparsed_paths\" ] ): return False", "or len( after[ \"unparsed_paths\" ] ) > len( before[ \"unparsed_paths\" ] ): return False", "test_compare_refuses_one_file_breaking_while_another_is_fixed" ),
+    ( "or not set( after[ \"unparsed_paths\" ] ) <= set( before[ \"unparsed_paths\" ] ): return False", ": return False", "test_compare_refuses_a_package_where_more_files_stopped_parsing" ),
     ( "if after[ \"tokens\" ] >= before[ \"tokens\" ] or", "if after[ \"tokens\" ] > before[ \"tokens\" ] or", "test_compare_rejects_a_rate_that_rose_even_when_tokens_fell" ),
     ( "after[ \"counts\" ][ c ] * before[ \"tokens\" ] <= before[ \"counts\" ][ c ] * after[ \"tokens\" ]", "after[ \"rates\" ][ c ] <= before[ \"rates\" ][ c ]", "test_compare_is_exact_where_the_one_decimal_display_would_hide_a_rise" ),
-    ( "if texts is None:\n            unparsed += 1\n            continue", "if texts is None:\n            continue", "test_package_metrics_before_counts_every_marker_by_hand" ),
+    ( "if texts is None:\n            unparsed.append( path )\n            continue", "if texts is None:\n            continue", "test_package_metrics_before_counts_every_marker_by_hand" ),
     ( "p.endswith( SUFFIXES ) and in_scope( p )", "p.endswith( SUFFIXES )", "test_package_files_come_from_git_and_skip_tests_and_other_suffixes" ),
     ( "if rev is None:\n        with open", "if False:\n        with open", "test_package_metrics_working_tree_reads_the_edited_files" ),
     ( "names  = [ n for n in names if os.path.exists( f\"{root}/{n}\" ) ]", "names  = names", "test_a_deleted_tracked_file_and_an_untracked_new_file_are_reported_not_fatal" ),

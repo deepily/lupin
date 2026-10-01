@@ -116,20 +116,20 @@ def package_metrics( root, package, rev=None ):
         - root is a git working tree whose word list configure_root can find
 
     Ensures:
-        - returns { files, paths, unparsed, tokens, counts, rates }; counts holds the summed raw markers
+        - returns { files, paths, unparsed, unparsed_paths, tokens, counts, rates }; counts holds the summed raw markers
         - rates are per 1,000 tokens, computed from the summed counts
 
     Raises:
         - RuntimeError from git when a listing or read fails
     """
-    total, unparsed, paths = empty_counts(), 0, package_files( root, package, rev )
+    total, unparsed, paths = empty_counts(), [], package_files( root, package, rev )
     for path in paths:
         texts = doc_texts( path, _read( root, rev, path ) )
         if texts is None:
-            unparsed += 1
+            unparsed.append( path )
             continue
         for text in texts: add_counts( total, count_markers( text ) )
-    return { "files": len( paths ), "paths": paths, "unparsed": unparsed, "tokens": total[ "words" ], "counts": total, "rates": rates_per_thousand( total ) }
+    return { "files": len( paths ), "paths": paths, "unparsed": len( unparsed ), "unparsed_paths": unparsed, "tokens": total[ "words" ], "counts": total, "rates": rates_per_thousand( total ) }
 
 
 def compare( before, after ):
@@ -140,8 +140,10 @@ def compare( before, after ):
         - both are package_metrics results
 
     Ensures:
-        - returns True when tokens are lower, no more files fail to parse, and every marker rate is at or
-          below its before value
+        - returns True when tokens are lower, no file fails to parse that parsed before, and every marker
+          rate is at or below its before value
+        - the unparsed files are compared as a set of paths, so one file breaking while another is fixed
+          is still a refusal
         - rates are compared as exact fractions of the raw counts, so a rise too small to show in the
           one-decimal display still counts
         - a package with no tokens before cannot get lower, so it is never improved
@@ -149,7 +151,7 @@ def compare( before, after ):
     Raises:
         - nothing
     """
-    if after[ "tokens" ] >= before[ "tokens" ] or after[ "unparsed" ] > before[ "unparsed" ]: return False
+    if after[ "tokens" ] >= before[ "tokens" ] or not set( after[ "unparsed_paths" ] ) <= set( before[ "unparsed_paths" ] ): return False
     return all( after[ "counts" ][ c ] * before[ "tokens" ] <= before[ "counts" ][ c ] * after[ "tokens" ] for c in MARKER_COLUMNS )
 
 
