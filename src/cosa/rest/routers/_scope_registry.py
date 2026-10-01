@@ -865,6 +865,76 @@ def _is_secrets_path_for_scope( scope_cfg: ScopeConfig, relative_path: str ) -> 
     return False
 
 
+class ScopeLinkDanglingError( FileNotFoundError ):
+    """A symlink inside a scope whose target does not exist — a missing file, not an escape."""
+
+
+# Indirection so a test can give two directories one identity, which an unprivileged process
+# cannot build with real bind mounts. Production never rebinds it.
+_stat = os.stat
+
+
+def _ancestor_matching_root( real_path: str, roots ):
+    """
+    The ancestor of `real_path` (or itself) that is the SAME DIRECTORY as one of `roots`, else None.
+
+    Identity is `(st_dev, st_ino)`, never the spelling. 🔴 WHY (measured 2026-09-30, rows
+    cc39cee6 and the doc-viewer false rejection): in the container the repo is mounted at TWO
+    prefixes, `/var/lupin` and `/var/external-projects/lupin`, one host directory. Eleven
+    `io/test-suite/artifacts/*-latest.log` links point at the first spelling, so a prefix test
+    against the second refused eleven files that live inside the scope. A sibling such as
+    `lupin-evil` shares a prefix with nothing and an identity with nothing, so it stays refused.
+
+    Requires:
+        - real_path is an absolute, already-resolved path
+        - roots is an iterable of absolute directory paths (the scope's own root and aliases)
+
+    Ensures:
+        - returns the matching ancestor's path, which a caller may relativize against
+        - a root that cannot be stat'd is skipped, never raises
+        - a path that does not exist yet is judged by its nearest existing ancestor
+    """
+    identities = []
+    for root in roots:
+        try:
+            st = _stat( root )
+        except OSError:
+            continue
+        identities.append( ( st.st_dev, st.st_ino ) )
+    current = real_path
+    while True:
+        try:
+            st = _stat( current )
+            if ( st.st_dev, st.st_ino ) in identities: return current
+        except OSError:
+            pass
+        parent = os.path.dirname( current )
+        if parent == current: return None
+        current = parent
+
+
+def landed_within_roots( real_path: str, roots ) -> bool:
+    """True when `real_path` lands inside (or at) a directory with the identity of one of `roots`."""
+    return _ancestor_matching_root( real_path, roots ) is not None
+
+
+def landed_relative_path( real_path: str, root: str ) -> str:
+    """
+    `real_path` relative to `root`, even when it landed under another SPELLING of `root`.
+
+    Requires:
+        - landed_within_roots( real_path, [ root ] ) is True
+
+    Ensures:
+        - returns "" for the root itself, else a path with no leading `..`
+        - the guards that judge a path by its relative form (blocklist, whitelist) therefore
+          see `io/x.log`, not `../../lupin/io/x.log`
+    """
+    anchor = _ancestor_matching_root( real_path, [ root ] )
+    rel    = os.path.relpath( real_path, anchor )
+    return "" if rel == "." else rel
+
+
 def resolve_in_scope( scope_cfg: ScopeConfig, decoded_path: str ) -> str:
     """
     Resolve `decoded_path` against `scope_cfg.root`, blocking directory traversal.
@@ -874,22 +944,27 @@ def resolve_in_scope( scope_cfg: ScopeConfig, decoded_path: str ) -> str:
         - decoded_path is a URL-decoded relative path (no leading slash); may be ""
 
     Ensures:
-        - returns the REAL absolute path — symlinks followed — under (or equal to)
-          the real scope_cfg.root
-        - raises ValueError if the real path escapes the real scope_cfg.root
+        - returns the REAL absolute path — symlinks followed — which lands inside the scope
+          root's DIRECTORY (identity, so a second mount prefix of the same directory counts)
+        - raises ValueError if the real path escapes the scope root
+        - raises ScopeLinkDanglingError (a FileNotFoundError) when the path is a symlink
+          whose target does not exist — a missing file, not an escape
 
     Raises:
-        - ValueError when the resolved path would escape the scope root
+        - ValueError, ScopeLinkDanglingError
 
     `realpath`, not `normpath` (row 9ab0bddb). normpath collapses `..` textually and
     never follows a symlink, so a link planted inside the root was judged by the name
     the caller typed while `open()` read wherever it pointed. Callers re-run their
-    guards on the relative path derived from this return value.
+    guards on `landed_relative_path( returned, scope_cfg.root )`.
     """
     root      = os.path.realpath( scope_cfg.root )
-    full_path = os.path.realpath( os.path.join( root, decoded_path ) )
+    joined    = os.path.join( root, decoded_path )
+    full_path = os.path.realpath( joined )
 
-    if full_path != root and not full_path.startswith( root + os.sep ):
+    if not landed_within_roots( full_path, [ root ] ):
+        if os.path.islink( joined ) and not os.path.exists( joined ):
+            raise ScopeLinkDanglingError( f"Dangling symlink in scope {scope_cfg.name!r}: {decoded_path!r}" )
         raise ValueError( f"Path escapes scope root: {decoded_path!r} (scope={scope_cfg.name!r})" )
     return full_path
 

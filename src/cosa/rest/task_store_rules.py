@@ -367,9 +367,16 @@ def _validate_scoped_path( value: str, scope_roots: Optional[dict] ) -> list:
     if scope not in roots:
         return [ f"receipt path scope '{scope}' is not a registered repo scope" ]
 
-    root = roots[ scope ].rstrip( os.sep )
-    full = os.path.normpath( os.path.join( root, rel ) )
-    if full != root and not full.startswith( root + os.sep ):
+    # Resolve where the path LANDS, by the same predicate the doc-viewer door uses (row cc39cee6).
+    # `normpath` never follows a symlink, so containment judged the typed name while `isfile`
+    # followed the link to a different file.
+    from cosa.rest.routers._scope_registry import ScopeConfig, ScopeLinkDanglingError, resolve_in_scope
+    cfg = ScopeConfig( name=scope, root=roots[ scope ].rstrip( os.sep ), allowed_prefixes=() )
+    try:
+        full = resolve_in_scope( cfg, rel )
+    except ScopeLinkDanglingError:
+        return [ f"receipt path '{value}' does not exist in scope '{scope}'" ]
+    except ValueError:
         return [ f"receipt path '{value}' escapes its scope root" ]
 
     if not os.path.isfile( full ):

@@ -42,7 +42,9 @@ from cosa.rest.routers._scope_registry import (
     ScopeConfig,
     _is_secrets_path,
     _is_whitelisted_in_scope,
+    ScopeLinkDanglingError,
     build_scope_registry,
+    landed_relative_path,
     resolve_in_scope,
 )
 
@@ -224,6 +226,9 @@ def _resolve_scoped( path: str, registry: dict ) -> tuple:
 
     try:
         full_path = resolve_in_scope( scope_cfg, rel_path )
+    except ScopeLinkDanglingError as e:
+        # A link whose target is gone is a missing file, not an escape attempt.
+        raise HTTPException( status_code=404, detail=str( e ) )
     except ValueError as e:
         raise HTTPException( status_code=400, detail=str( e ) )
 
@@ -231,8 +236,7 @@ def _resolve_scoped( path: str, registry: dict ) -> tuple:
     # somewhere they would refuse (row 9ab0bddb: `sc/notes.json` -> `.claude/settings.local.json`),
     # so re-judge the path where it actually LANDS — the same double check
     # `cosa.rest.v2.source_document.validate_source_documents` applies.
-    landed_rel = os.path.relpath( full_path, os.path.realpath( scope_cfg.root ) )
-    if landed_rel == ".": landed_rel = ""
+    landed_rel = landed_relative_path( full_path, scope_cfg.root )   # identity-aware: a second mount prefix is still "inside"
     from cosa.rest.routers._scope_registry import _is_secrets_path_for_scope
     if _is_secrets_path_for_scope( scope_cfg, landed_rel ):   # floor + per-scope patterns
         raise HTTPException( status_code=400, detail="Path matches secrets blocklist" )
