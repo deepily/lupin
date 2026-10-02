@@ -15,7 +15,8 @@ An empty list means valid. The router maps a non-empty list to HTTP 422, so the
 repository never sees invalid input. A log_line receipt has the shape
 "<scope>/<rel-path>:<lineno>" and its file must exist.
 
-Design: src/docs/fleet-liveness-and-task-store-architecture.md
+The design record is planning-is-prompting/src/rnd/2026.06.11-unified-task-store-design.md, in the
+planning-is-prompting repo, not this one.
 """
 
 import os
@@ -518,10 +519,11 @@ def validate_receipt_refs( receipt_refs, scope_roots: Optional[dict] = None,
             doc_path - "<scope>/<rel>" existing file in a registered scope
             log_line - "<scope>/<rel>:<lineno>" with the file existing
             operator_attestation - 1-255 chars, no control characters (shape only)
+            manager_attestation  - the same shape as operator_attestation
         - a non-empty-but-junk receipt ({doc_path: "trust me"}) returns errors
         - never raises on malformed input; errors are data, not exceptions
         - with require_checkable, the receipts include a key from CLOSING_RECEIPT_KEYS
-          (commit, test_run, or an attestation key), so a path alone never closes a row
+          (commit, test_run, operator_attestation or manager_attestation), so a path alone never closes a row
         - with require_checkable, every commit is reachable from a branch in any
           registered scope, not only main
         - with require_checkable and no scope that is a git work tree, the check
@@ -1040,15 +1042,15 @@ def soft_guard_title( title, body, cap=TITLE_SOFT_CAP ):
     """
     Trim an over-long item title on write and move the overflow into the body.
 
-    The row clients show about 60 characters, so the overflow goes into the body and is never discarded.
-    This guard stays fail-open on create, because a rejected unattended create loses the filing. The edit door
+    Clients show about 60 characters of a title, but the cap is TITLE_SOFT_CAP, 120. The overflow goes
+    into the body and is never discarded. This guard stays fail-open on create, because a rejected unattended create loses the filing. The edit door
     rejects instead; see validate_edit_title_length.
 
     Requires:
         - title is a non-empty string (the column is `NOT NULL`; the wire model
           already rejects an empty title)
         - body is the candidate body value, a string or None
-        - cap is a positive int (the shared ~60 char limit)
+        - cap is a positive int (default TITLE_SOFT_CAP, 120, the same cap the edit door enforces)
 
     Ensures:
         - title length <= cap -> returns ( title, body, None ): a strict no-op,

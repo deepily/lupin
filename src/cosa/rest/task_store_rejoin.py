@@ -113,16 +113,18 @@ def classify_blocked_row( status, blocked_by, status_by_id ):
         - a key absent from the map was never looked up
 
     Ensures:
-        - returns { "verdict": str, "reason": str|None, "closed_blocker_ids": [str] }
-        - verdict is VERDICT_REJOIN only when status == BLOCKED_STATUS, blocked_by holds at
-          least one entry, every entry is {kind:"item"} with a str id, every id is present
+        - returns { "verdict": str|None, "reason": str|None, "closed_blocker_ids": [str] }
+        - verdict is VERDICT_REJOIN, with reason None, only when status == BLOCKED_STATUS, blocked_by
+          holds at least one entry, every entry is {kind:"item"} with a str id, every id is present
           in status_by_id, and every resolved status == REJOIN_BLOCKER_STATUS
+        - every other case is a hold: verdict is None and reason carries the HOLD_ value
         - status != BLOCKED_STATUS         -> HOLD_NOT_BLOCKED
         - no blockers at all               -> HOLD_NO_ITEM_BLOCKER
         - any persona/user/malformed entry -> HOLD_NON_ITEM_BLOCKER
         - any id absent from the map, or present as None -> HOLD_UNRESOLVED_BLOCKER
           (an absent row never happened; see the module docstring)
-        - any blocker `dropped`            -> HOLD_DROPPED_BLOCKER (never rejoined here)
+        - any blocker in a terminal status other than done (dropped or wont_fix)
+                                           -> HOLD_DROPPED_BLOCKER (never rejoined here)
         - any blocker non-terminal         -> HOLD_LIVE_BLOCKER (a genuine wait)
         - one done + one dropped           -> HOLD_DROPPED_BLOCKER (dropped dominates)
         - the hold reason is order-independent: several disqualifying blockers report the

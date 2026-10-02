@@ -137,10 +137,6 @@ def reach_disclosure( report, known_epic_keys=None, include_terminal=None, trunc
     Requires:
         - report is an `audit_rows` return dict
         - known_epic_keys is the same iterable passed to audit_rows, or None
-
-    Requires:
-        - report is an `audit_rows` return dict
-        - known_epic_keys is the same iterable passed to audit_rows, or None
         - include_terminal / truncated are True, False, or None for "not stated"
 
     Ensures:
