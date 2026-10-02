@@ -183,11 +183,10 @@ def test_the_second_call_can_cover_the_stretch_and_then_nothing_is_flagged():
     assert result.reextract_calls == 1 and result.flags == [] and len( result.claims ) == 3
 
 
-def test_an_unreadable_second_reply_flags_the_stretch_and_a_failed_first_reply_still_raises():
+def test_an_unreadable_second_reply_flags_the_stretch_and_keeps_the_first_claims():
     result = extract( [ reply( COVER_ALL[ 0 ], COVER_ALL[ 2 ] ), "not json" ] )
     assert result.reextract_calls == 1 and len( result.flags ) == 1 and len( result.claims ) == 2
-    with pytest.raises( ce.ExtractionParseError ):
-        extract( [ "not json" ] )
+    assert result.parse_failed is False and result.retry_calls == 0
 
 
 def test_an_invented_quote_is_counted_under_its_code_and_flags_nothing_when_the_text_is_covered():
@@ -210,7 +209,7 @@ CONFIG = hn.HarnessConfig( "e", "j", "x", "w", 1, 1 )
 def lst( claims=(), flags=(), discards=(), verdict="present" ):
     return { "claims": [ { "start": a, "end": b, "quote": "q" } for a, b in claims ], "discarded": len( discards ),
              "discards": [ { "code": "TOO_FEW_CHARS", "words": 2, "start": a, "end": b } for a, b in discards ],
-             "flags": [ list( f ) for f in flags ], "flag_words": [ 12 for _ in flags ], "reextract_calls": 0, "uncovered": 0.0, "longest_quote": 0.0,
+             "flags": [ list( f ) for f in flags ], "flag_words": [ 12 for _ in flags ], "reextract_calls": 0, "parse_failed": False, "retry_calls": 0, "uncovered": 0.0, "longest_quote": 0.0,
              "runs": [ [ { "verdict": verdict, "escalated": False, "noul": None } for _ in claims ] ] }
 
 
@@ -428,7 +427,69 @@ def test_the_runner_carries_the_flag_word_counts_of_a_frozen_list_into_the_repor
     config = hn.HarnessConfig( "e", "j", "x", "w", 1, 1 )
     ledger.put( hn.ledger_key( "extract", pair, ce.PROMPT_VERSION, "e", 0 ),
                 { "claims": [], "discarded": 0, "discards": [], "flags": [ [ 0, 40 ], [ 50, 70 ] ], "flag_words": [7, 9],
-                  "reextract_calls": 0, "uncovered": 1.0, "longest_quote": 0.0 } )
+                  "reextract_calls": 0, "parse_failed": False, "retry_calls": 0, "uncovered": 1.0, "longest_quote": 0.0 } )
     result = asyncio.run( hn.run_pair( pair, config, ledger, query_fn=no_model ) )
     assert result[ "lists" ][ 0 ][ "flag_words" ] == [ 7, 9 ]
     assert hr.build_report( [ result ], config )[ "mean_flag_words" ] == 8
+
+
+# ---- an unreadable first reply does not end the run (row 35d38e9f) ---------------------------
+
+def test_a_bad_first_reply_is_asked_once_more_and_the_good_retry_is_used():
+    seen   = []
+    result = extract( [ "Extra data: {} {}", reply( *COVER_ALL ) ], seen=seen )
+    assert result.parse_failed is False and result.retry_calls == 1 and len( result.claims ) == 3 and len( seen ) == 2
+
+
+def test_two_unreadable_replies_flag_the_whole_text_and_hand_both_to_the_sink():
+    got    = []
+    result = asyncio.run( ce.extract_claims( OLD, "m", query_fn=scripted_query( [ "{} {}", "nope" ] ),
+                                             on_unreadable=lambda attempt, raw, error: got.append( ( attempt, raw, bool( error ) ) ) ) )
+    assert result.parse_failed is True and result.retry_calls == 1 and result.claims == []
+    assert [ tuple( f ) for f in result.flags ] == [ ( 0, len( OLD ) ) ] and result.flag_words == [ len( OLD.split() ) ]
+    assert got == [ ( "first", "{} {}", True ), ( "retry", "nope", True ) ]
+
+
+def test_an_unreadable_second_call_reply_reaches_the_sink_too():
+    got = []
+    asyncio.run( ce.extract_claims( OLD, "m", query_fn=scripted_query( [ reply( COVER_ALL[ 0 ], COVER_ALL[ 2 ] ), "junk" ] ),
+                                    on_unreadable=lambda attempt, raw, error: got.append( ( attempt, raw ) ) ) )
+    assert got == [ ( "second", "junk" ) ]
+
+
+def parse_failed_list():
+    entry = lst()
+    entry.update( { "parse_failed": True, "retry_calls": 1, "flags": [ [ 0, len( OLD ) ] ], "flag_words": [ 16 ] } )
+    return entry
+
+
+def test_a_parse_failed_list_is_never_a_catch_and_is_counted_in_the_report():
+    failed = parse_failed_list()
+    assert hr.caught( failed, ( 4, 9 ) ) is False
+    out = hr.build_report( [ { "id": 0, "seed_span": [ 4, 9 ], "lists": [ failed ] }, { "id": 1, "seed_span": None, "lists": [ lst() ] } ], CONFIG )
+    assert out[ "lists" ][ 0 ][ "misses" ] == 1 and out[ "lists" ][ 0 ][ "parse_failed_pairs" ] == 1
+    assert out[ "parse_failed_pairs" ] == 1 and out[ "retry_calls" ] == 1
+
+
+def test_an_unreadable_pair_is_frozen_with_its_flag_and_not_asked_again_on_resume(tmp_path):
+    path = str( tmp_path / "l" )
+    seen = []
+    async def junk( prompt, options ):
+        seen.append( 1 )
+        yield AssistantMessage( content=[ TextBlock( "{} {}" ) ], model="fake" )
+    pairs  = [ { "id": "p", "old": OLD, "new": "x", "design": None, "seed_span": None } ]
+    config = CONFIG
+    sunk   = []
+    first  = asyncio.run( hn.run_all( pairs, config, hn.Ledger( path ), query_fn=junk, on_unreadable=lambda *a: sunk.append( a ) ) )
+    assert all( l[ "parse_failed" ] and l[ "retry_calls" ] == 1 and l[ "claims" ] == [] for l in first[ 0 ][ "lists" ] ) and len( first[ 0 ][ "lists" ] ) == 1
+    assert len( seen ) == 2 and [ s[ :3 ] for s in sunk ][ 0 ] == ( "p", 0, "first" )
+    again = asyncio.run( hn.run_all( pairs, config, hn.Ledger( path ), query_fn=junk ) )
+    assert again == first and len( seen ) == 2
+
+
+def test_the_raw_failure_sink_writes_one_line_per_reply_and_is_off_without_a_path(tmp_path):
+    assert harness_cli.raw_failure_sink( None ) is None
+    path = tmp_path / "raw.jsonl"
+    harness_cli.raw_failure_sink( str( path ) )( "p", 1, "retry", "{} {}", "Extra data" )
+    row = json.loads( path.read_text().strip() )
+    assert row == { "id": "p", "slot": 1, "attempt": "retry", "error": "Extra data", "raw": "{} {}" }

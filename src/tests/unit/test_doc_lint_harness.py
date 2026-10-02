@@ -236,7 +236,7 @@ def test_a_report_with_no_pairs_has_no_figures():
 def synthetic( n, missed=0, unseeded=0, alarmed=0, flip_second_list_misses=False ):
     """n seeded pairs (the first `missed` flag nothing), then `unseeded` pairs (the first `alarmed` flag a claim)."""
     row  = lambda verdict: { "verdict": verdict, "escalated": False }
-    flag = { "claims": [ { "start": 0, "end": 10, "quote": "q" } ], "discarded": 0, "discards": [], "flags": [], "flag_words": [], "reextract_calls": 0, "uncovered": 0.0, "longest_quote": 0.25, "runs": [ [ row( "absent" ) ] ] * 3 }
+    flag = { "claims": [ { "start": 0, "end": 10, "quote": "q" } ], "discarded": 0, "discards": [], "flags": [], "flag_words": [], "reextract_calls": 0, "parse_failed": False, "retry_calls": 0, "uncovered": 0.0, "longest_quote": 0.25, "runs": [ [ row( "absent" ) ] ] * 3 }
     calm = dict( flag, runs=[ [ row( "present" ) ] ] * 3 )
     out  = []
     for i in range( n ):
@@ -485,3 +485,17 @@ def test_seeded_claim_agreement_alone_can_block_the_gate_when_overall_agreement_
     report = hr.build_report( wobbly, CONFIG )
     assert report[ "agreement_all" ][ "rate" ] >= 0.95 > report[ "agreement_seeded" ][ "rate" ]
     assert report[ "agreement_ok" ] is False
+
+
+def test_the_command_line_survives_an_unreadable_reply_keeps_it_and_prints_the_count(tmp_path, capsys):
+    from cosa.repo.doc_lint import harness_cli as cli
+    ( tmp_path / "pairs.json" ).write_text( json.dumps( [ pair( "seeded", L1 + "\n" + L3, seeded=L2 ) ] ) )
+    async def junk( prompt, options ):
+        yield AssistantMessage( content=[ TextBlock( "{\"claims\": []}\n{\"claims\": []}" ) ], model=options.model )
+    raw = tmp_path / "raw.jsonl"
+    assert cli.main( cli_args( tmp_path ) + [ "--raw-failures", str( raw ) ], query_fn=junk ) == 0
+    written = json.loads( ( tmp_path / "out.json" ).read_text() )
+    assert written[ "parse_failed_pairs" ] == 1 and written[ "retry_calls" ] == 2 and written[ "lists" ][ 0 ][ "misses" ] == 1
+    rows = [ json.loads( l ) for l in raw.read_text().splitlines() ]
+    assert len( rows ) == 4 and "Extra data" in rows[ 0 ][ "error" ] and rows[ 0 ][ "id" ] == "seeded"
+    assert "parse_failed_pairs=1 retry_calls=2" in capsys.readouterr().out

@@ -285,9 +285,10 @@ def test_extract_claims_refuses_blank_text_and_a_blank_model():
         run( ce.extract_claims( OLD, "", query_fn=make_query( sentence_extractor ) ) )
 
 
-def test_extract_claims_raises_on_a_reply_off_contract():
-    with pytest.raises( ce.ExtractionParseError ):
-        run( ce.extract_claims( OLD, "m", query_fn=make_query( lambda prompt: "sure, here are the claims" ) ) )
+def test_extract_claims_does_not_raise_on_a_reply_off_contract_it_flags_the_whole_text():
+    result = run( ce.extract_claims( OLD, "m", query_fn=make_query( lambda prompt: "sure, here are the claims" ) ) )
+    assert result.parse_failed is True and result.retry_calls == 1 and result.claims == []
+    assert [ tuple( f ) for f in result.flags ] == [ ( 0, len( OLD ) ) ] and result.flag_words == [ len( OLD.split() ) ]
 
 
 # ---- quote bounds, tag break-out, and the guards that each need their own input ---------------

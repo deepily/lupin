@@ -155,6 +155,7 @@ def main( argv, query_fn=None ):
     report[ "call_residual_context" ] = model_transport.RESIDUAL_CONTEXT
     with open( args.out, "w", encoding="utf-8" ) as f: json.dump( report, f, indent=2 )
     print( f"report written to {args.out}: default_gate_pass={report[ 'default_gate_pass' ]}" )
+    print( f"parse_failed_pairs={report[ 'parse_failed_pairs' ]} retry_calls={report[ 'retry_calls' ]}" )
     return 0
 
 
