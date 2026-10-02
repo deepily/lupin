@@ -357,7 +357,7 @@ def test_d3_answer_with_no_live_waiter_lands_owed_and_is_retrievable( auth_heade
             session.commit()
 
         # ── submit an answer with NO live SSE waiter (the stream already died) ──
-        resp = requests.post( _RESPOND,
+        resp = requests.post( _RESPOND, headers=auth_headers,
                               json={ "notification_id": str( owed_id ), "response_value": "yes, proceed" },
                               timeout=15 )
         assert resp.status_code == 200, f"submit response failed: {resp.status_code} {resp.text}"
