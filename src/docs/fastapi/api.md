@@ -4868,6 +4868,7 @@ Request body for POST /api/v2/ask.
 | websocket_id |  | WebSocket session ID for TTS routing |
 | speak | boolean | Dispatch the answer as a TTS notification |
 | interactive | boolean | Whether a human is there to answer. Two effects: a missing argument parks and asks (else the call returns needs_input), and a near-match cache hit is confirmed before it is replayed (else the match is declined and the question is routed normally) |
+| parent_id_hash |  | id_hash of the monopolize job whose own request this is. When it matches the pool's active monopolizer, the queued executor stamps it on the job as spawned_by_id_hash, so the consumer's Gate B admits the job through the intake hold instead of deferring it as a foreign writer (same field, same meaning as on /api/v2/submit). Absent = today's behaviour exactly |
 
 
 ## AskResponse
@@ -6222,4 +6223,4 @@ Request model for admin password reset.
 | reason |  | Optional reason for audit trail |
 
 ---
-_Auto-generated on 2026.10.02 12:07:58 by `src/scripts/generate-api-docs.sh`_
+_Auto-generated on 2026.10.02 16:28:21 by `src/scripts/generate-api-docs.sh`_

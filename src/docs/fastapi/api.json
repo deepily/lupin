@@ -13135,6 +13135,18 @@
                         "title": "Interactive",
                         "description": "Whether a human is there to answer. Two effects: a missing argument parks and asks (else the call returns needs_input), and a near-match cache hit is confirmed before it is replayed (else the match is declined and the question is routed normally)",
                         "default": true
+                    },
+                    "parent_id_hash": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Parent Id Hash",
+                        "description": "id_hash of the monopolize job whose own request this is. When it matches the pool's active monopolizer, the queued executor stamps it on the job as spawned_by_id_hash, so the consumer's Gate B admits the job through the intake hold instead of deferring it as a foreign writer (same field, same meaning as on /api/v2/submit). Absent = today's behaviour exactly"
                     }
                 },
                 "type": "object",
