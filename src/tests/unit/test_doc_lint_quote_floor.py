@@ -210,7 +210,7 @@ CONFIG = hn.HarnessConfig( "e", "j", "x", "w", 1, 1 )
 def lst( claims=(), flags=(), discards=(), verdict="present" ):
     return { "claims": [ { "start": a, "end": b, "quote": "q" } for a, b in claims ], "discarded": len( discards ),
              "discards": [ { "code": "TOO_FEW_CHARS", "words": 2, "start": a, "end": b } for a, b in discards ],
-             "flags": [ list( f ) for f in flags ], "reextract_calls": 0, "uncovered": 0.0, "longest_quote": 0.0,
+             "flags": [ list( f ) for f in flags ], "flag_words": [ 12 for _ in flags ], "reextract_calls": 0, "uncovered": 0.0, "longest_quote": 0.0,
              "runs": [ [ { "verdict": verdict, "escalated": False, "noul": None } for _ in claims ] ] }
 
 
@@ -225,12 +225,38 @@ def test_a_flag_on_the_seeded_span_is_a_catch_and_a_flag_elsewhere_is_not():
     assert off_span[ "lists" ][ 0 ][ "misses" ] == 1 and off_span[ "lists" ][ 0 ][ "caught_by_flag_only" ] == 0
 
 
-def test_a_flag_on_an_unseeded_pair_is_a_false_alarm_and_the_flagged_rate_is_its_own_number():
+def test_a_flag_on_an_unseeded_pair_is_not_a_judge_false_alarm_and_has_its_own_rate_and_ceiling():
     out = report( ( None, lst( flags=[ ( 0, 5 ) ] ) ), ( None, lst() ), ( ( 10, 20 ), lst( flags=[ ( 12, 14 ) ] ) ), ( ( 10, 20 ), lst( claims=[ ( 10, 20 ) ], verdict="absent" ) ) )
     row = out[ "lists" ][ 0 ]
-    assert ( row[ "false_alarms" ], row[ "unseeded" ] ) == ( 1, 2 )
-    assert ( row[ "flagged_pairs" ], row[ "flagged_rate" ] ) == ( 2, 0.5 ) and out[ "flagged_rate" ] == 0.5
+    assert ( row[ "false_alarms" ], row[ "unseeded" ] ) == ( 0, 2 ), "a flagged run is not a judge false alarm"
+    assert ( row[ "flagged_pairs" ], row[ "flagged_rate" ] ) == ( 1, 0.5 ) and out[ "flagged_rate" ] == 0.5
+    assert row[ "mean_flag_words" ] == 12 and out[ "mean_flag_words" ] == 12
+    assert out[ "flagged_ok" ] is False and out[ "false_alarm_ok" ] is True
     assert row[ "caught_by_flag_only" ] == 1, "the pair caught by a dropped claim is not counted as caught by a flag alone"
+
+
+def test_the_flag_ceiling_is_fifteen_percent_inclusive_per_list_and_the_judge_ceiling_stays_ten():
+    def rate( flagged, judged, n=100 ):
+        pairs = [ ( None, lst( flags=[ ( 0, 5 ) ] if i < flagged else (), claims=[ ( 0, 3 ) ], verdict="absent" if flagged <= i < flagged + judged else "present" ) ) for i in range( n ) ]
+        return report( *pairs )
+    ok, over = rate( 15, 0 ), rate( 16, 0 )
+    assert ok[ "lists" ][ 0 ][ "flagged_rate" ] == 0.15 and ok[ "flagged_ok" ] is True
+    assert over[ "flagged_ok" ] is False
+    assert rate( 0, 10 )[ "false_alarm_ok" ] is True and rate( 0, 10 )[ "flagged_ok" ] is True and rate( 0, 11 )[ "false_alarm_ok" ] is False
+
+
+def test_the_review_rate_is_the_union_of_flagged_and_judged_pairs_and_has_no_ceiling():
+    out = report( ( None, lst( flags=[ ( 0, 5 ) ] ) ), ( None, lst( claims=[ ( 0, 3 ) ], verdict="absent" ) ),
+                  ( None, lst( flags=[ ( 0, 5 ) ], claims=[ ( 0, 3 ) ], verdict="absent" ) ), ( None, lst() ) )
+    row = out[ "lists" ][ 0 ]
+    assert ( row[ "flagged_pairs" ], row[ "false_alarms" ], row[ "review_pairs" ], row[ "review_rate" ] ) == ( 2, 2, 3, 0.75 )
+    assert out[ "review_rate" ] == 0.75
+
+
+def test_a_flag_that_fails_its_own_ceiling_blocks_the_default_gate_though_the_judge_is_clean():
+    pairs = [ ( ( 0, 3 ), lst( claims=[ ( 0, 3 ) ], verdict="absent" ) ) for _ in range( 60 ) ] + [ ( None, lst( flags=[ ( 0, 5 ) ] ) ) for _ in range( 10 ) ]
+    out   = report( *pairs )
+    assert out[ "miss_criterion_met" ] is True and out[ "false_alarm_ok" ] is True and out[ "flagged_ok" ] is False and out[ "default_gate_pass" ] is False
 
 
 def test_seeded_span_discarded_counts_a_discarded_quote_on_the_span_and_ignores_one_off_it():
@@ -254,7 +280,8 @@ def test_the_report_counts_discards_per_code_and_the_extra_calls():
 
 
 def test_a_report_with_no_pairs_has_no_flagged_rate():
-    assert hr.build_report( [], CONFIG )[ "flagged_rate" ] is None
+    out = hr.build_report( [], CONFIG )
+    assert out[ "flagged_rate" ] is None and out[ "mean_flag_words" ] is None and out[ "review_rate" ] is None and out[ "flagged_ok" ] is False
 
 
 # ---- a ledger entry from before the fix, and the runner end to end ---------------------------
@@ -346,8 +373,23 @@ def test_the_prose_judge_still_refuses_a_two_word_sentence_whatever_its_length()
     assert pj.locate_line( "Longer sentence of five words.", item ) == 5
 
 
-def test_the_default_minimum_run_is_eleven_words_as_measured_on_dev_per_list( monkeypatch ):
+def test_the_default_minimum_run_is_ten_words_provisionally( monkeypatch ):
     monkeypatch.undo()
-    assert ce.MIN_RUN_WORDS == 11
-    ten, eleven = " ".join( f"word{n}" for n in range( 10 ) ), " ".join( f"word{n}" for n in range( 11 ) )
-    assert ce.uncovered_runs( ten, [] ) == [] and ce.uncovered_runs( eleven, [] ) == [ ( 0, len( eleven ) ) ]
+    assert ce.MIN_RUN_WORDS == 10
+    nine, ten = " ".join( f"word{n}" for n in range( 9 ) ), " ".join( f"word{n}" for n in range( 10 ) )
+    assert ce.uncovered_runs( nine, [] ) == [] and ce.uncovered_runs( ten, [] ) == [ ( 0, len( ten ) ) ]
+
+
+def test_the_prose_judge_refuses_a_three_word_sentence_of_ten_to_fourteen_characters():
+    # Only the character floor refuses this one: 3 words meet either word floor, 12 characters meet the new
+    # character floor of 10 and miss the old one of 15, which the prose judge keeps (Tiberius, row ed2f9b4e).
+    from cosa.repo.doc_lint import prose_judge as pj
+    item = { "text": "Do not run. A longer sentence of six words here.", "first_line": 3 }
+    assert pj.locate_line( "Do not run.", item ) is None
+    assert pj.locate_line( "A longer sentence of six words here.", item ) == 3
+
+
+def test_the_flag_words_are_counted_per_run_in_an_extraction():
+    first = reply( COVER_ALL[ 0 ], COVER_ALL[ 2 ] )
+    out   = extract( [ first, "not json" ] )
+    assert list( out.flag_words ) == [ len( COVER_ALL[ 1 ].split() ) ]

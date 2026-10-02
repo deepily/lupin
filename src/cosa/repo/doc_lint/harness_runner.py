@@ -149,7 +149,7 @@ async def run_pair( pair, config, ledger, query_fn=None, judge_backend=None ):
           which the backend failed to answer is asked again on resume instead of replayed
         - returns { "id", "seed_span", "lists" }; each list holds its claims, the count of
           discarded claims, one { code, words, start, end } per discard (no quote text), the runs
-          flagged for a person, the extra extractor calls made, the uncovered fraction of the old text, and one verdict row per
+          flagged for a person and their word counts, the extra extractor calls made, the uncovered fraction of the old text, and one verdict row per
           judge run
         - the claim list of each extractor slot is frozen in the ledger before any judging
         - a frozen entry written before row ed2f9b4e has no discards, flags or reextract_calls; it reads
@@ -168,7 +168,7 @@ async def run_pair( pair, config, ledger, query_fn=None, judge_backend=None ):
         if frozen is None:
             result = await claim_extractor.extract_claims( pair[ "old" ], config.extractor_model, query_fn=query_fn )
             frozen = { "claims": [ c._asdict() for c in result.claims ], "discarded": len( result.discarded ),
-                       "discards": list( result.discards ), "flags": [ list( f ) for f in result.flags ],
+                       "discards": list( result.discards ), "flags": [ list( f ) for f in result.flags ], "flag_words": list( result.flag_words ),
                        "reextract_calls": result.reextract_calls,
                        "uncovered": result.uncovered_fraction,
                        "longest_quote": result.longest_quote_share }
@@ -192,7 +192,7 @@ async def run_pair( pair, config, ledger, query_fn=None, judge_backend=None ):
             runs.append( rows )
         lists.append( { "claims": frozen[ "claims" ], "discarded": frozen[ "discarded" ],
                         "discards": frozen.get( "discards", [] ), "flags": frozen.get( "flags", [] ),
-                        "reextract_calls": frozen.get( "reextract_calls", 0 ),
+                        "reextract_calls": frozen.get( "reextract_calls", 0 ), "flag_words": frozen.get( "flag_words", [] ),
                         "uncovered": frozen[ "uncovered" ], "longest_quote": frozen[ "longest_quote" ], "runs": runs } )
     return { "id": pair[ "id" ], "seed_span": pair.get( "seed_span" ), "lists": lists }
 

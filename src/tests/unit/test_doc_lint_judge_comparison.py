@@ -95,7 +95,7 @@ def test_a_key_whose_kind_and_seeded_positive_disagree_is_refused_so_a_group_nev
 
 def test_a_group_that_mixes_seeded_and_unseeded_pairs_is_refused_whatever_order_they_arrive_in():
     keys  = { "a": { "kind": "delete", "seeded_positive": True, "injection": False }, "b": { "kind": "delete", "seeded_positive": True, "injection": False } }
-    empty = { "claims": [], "flags": [], "discards": [], "runs": [] }
+    empty = { "claims": [], "flags": [], "flag_words": [], "discards": [], "runs": [] }
     seeded, unseeded = { "id": "a", "seed_span": [ 0, 3 ], "lists": [ empty ] }, { "id": "b", "seed_span": None, "lists": [ empty ] }
     for order in ( [ seeded, unseeded ], [ unseeded, seeded ] ):
         with pytest.raises( ValueError, match="mixes pairs" ): jc.group_rows( order, keys, 1 )
@@ -134,11 +134,11 @@ def test_a_removed_claim_group_reports_the_one_sided_upper_bound_and_a_kept_clai
 
 
 def test_the_worse_extractor_list_is_the_one_reported_and_a_tie_names_the_lower_slot():
-    seeded = { "id": "a", "seed_span": [ 0, 3 ], "lists": [ { "claims": [], "flags": [], "discards": [], "runs": [] }, { "claims": [], "flags": [], "discards": [], "runs": [] } ] }
+    seeded = { "id": "a", "seed_span": [ 0, 3 ], "lists": [ { "claims": [], "flags": [], "flag_words": [], "discards": [], "runs": [] }, { "claims": [], "flags": [], "flag_words": [], "discards": [], "runs": [] } ] }
     keys   = { "a": { "kind": "delete", "seeded_positive": True, "injection": False } }
     assert jc.group_rows( [ seeded ], keys, 2 )[ 0 ][ "worst_list" ] == 0
     assert jc.group_rows( [ seeded ], keys, 2 )[ 0 ][ "per_list" ] == [ 1, 1 ]
-    only_second = { **seeded, "lists": [ { "claims": [ { "start": 0, "end": 3, "quote": "x" } ], "flags": [], "discards": [], "runs": [ [ { "verdict": "absent" } ] ] }, { "claims": [], "flags": [], "discards": [], "runs": [] } ] }
+    only_second = { **seeded, "lists": [ { "claims": [ { "start": 0, "end": 3, "quote": "x" } ], "flags": [], "flag_words": [], "discards": [], "runs": [ [ { "verdict": "absent" } ] ] }, { "claims": [], "flags": [], "flag_words": [], "discards": [], "runs": [] } ] }
     assert jc.group_rows( [ only_second ], keys, 2 )[ 0 ][ "per_list" ] == [ 0, 1 ] and jc.group_rows( [ only_second ], keys, 2 )[ 0 ][ "worst_list" ] == 1
 
 

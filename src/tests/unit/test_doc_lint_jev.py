@@ -516,7 +516,7 @@ def test_a_run_where_jev_did_not_answer_every_claim_is_not_ledgered_and_is_asked
 def rows_report( noul_values, jev_run ):
     rows = [ { "verdict": "present", "escalated": False, "reason": None, "noul": n } for n in noul_values ]
     result = { "id": "p", "seed_span": None, "lists": [ { "claims": [ { "start": 0, "end": 1, "quote": "q" } for _ in rows ],
-                                                           "discarded": 0, "discards": [], "flags": [], "reextract_calls": 0, "uncovered": 0.0, "longest_quote": 0.0, "runs": [ rows ] } ] }
+                                                           "discarded": 0, "discards": [], "flags": [], "flag_words": [], "reextract_calls": 0, "uncovered": 0.0, "longest_quote": 0.0, "runs": [ rows ] } ] }
     return harness_report.build_report( [ result ], CONFIG, jev_run=jev_run )
 
 

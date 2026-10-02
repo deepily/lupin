@@ -39,16 +39,17 @@ SHARE_CAP       = "SHARE_CAP"
 DISCARD_CODES   = ( NOT_FOUND, TOO_FEW_WORDS, TOO_FEW_CHARS, AMBIGUOUS, TOO_LONG, SHARE_CAP )
 
 # An uncovered run of old text is flagged for a person only when it has this many words and at
-# least one content word (not in STOP_WORDS). Row ed2f9b4e dev measurement (42 unseeded pairs, 2 extractor
-# lists, before any re-extraction), flagged per list: 2 words 83% and 79%, 4 words 26% and 26%, 10 words 5% and 12%,
-# 11 words 5% and 10%. The 10% ceiling holds per list first at 11 words (the sum over both lists, 7/84, hides list 1
-# at 10). No flagged run overlapped a seeded span at any length, since the extractor had covered them.
-MIN_RUN_WORDS = 11
+# least one content word (not in STOP_WORDS). Row ed2f9b4e dev measurement (42 unseeded pairs per list, 2 extractor
+# lists, before any re-extraction), flagged per list: 2 words 35 and 33, 4 words 11 and 11, 10 words 2 and 5
+# (list 1 alone is 5 of 42; the sum 7 of 84 hides it), 11 words 2 and 4. Provisional, NOT frozen (Cheech's ruling
+# on the row): flags have their own 15% per-list ceiling, apart from the judge's false alarms. No flagged run
+# overlapped a seeded span at any length, since the extractor had covered them.
+MIN_RUN_WORDS = 10
 STOP_WORDS    = frozenset( "a an the of to in on at by for or and is are be it its if as with from that this".split() )
 
 Claim            = namedtuple( "Claim", [ "text", "quote", "start", "end" ] )
 ExtractionResult = namedtuple( "ExtractionResult", [ "claims", "discarded", "uncovered_fraction", "longest_quote_share",
-                                                     "discards", "flags", "reextract_calls" ], defaults=( (), (), 0 ) )
+                                                     "discards", "flags", "reextract_calls", "flag_words" ], defaults=( (), (), 0, () ) )
 
 SYSTEM_PROMPT = (
     "You list the atomic claims made by a piece of documentation. A claim is one fact a caller "
@@ -353,6 +354,7 @@ async def extract_claims( old_text, model, query_fn=None ):
           (see uncovered_runs) are put to the model once more, as their enclosing sentences, under the
           same prompt and floors, in one extra call (reextract_calls is 1, else 0); a run still under no
           kept quote afterwards is returned in flags as ( start, end ), for a person
+        - flag_words holds the word count of each flagged run, in the order of flags
         - an unreadable reply to that second call leaves its runs flagged; a failed call raises
         - longest_quote_share is the longest verified quote as a share of the old text, so a
           reader can see when one quote carries most of it
@@ -379,7 +381,7 @@ async def extract_claims( old_text, model, query_fn=None ):
         runs   = uncovered_runs( old_text, [ ( c.start, c.end ) for c in claims ] )
     longest = max( ( ( c.end - c.start ) / len( old_text ) for c in claims ), default=0.0 )
     return ExtractionResult( claims, discarded, uncovered_fraction( old_text, [ ( c.start, c.end ) for c in claims ] ), longest,
-                             rows, runs, calls )
+                             rows, runs, calls, [ len( old_text[ a:b ].split() ) for a, b in runs ] )
 
 
 PROMPT_VERSION = model_transport.prompt_version( "extractor", inspect.getsource( sys.modules[ __name__ ] ) )
