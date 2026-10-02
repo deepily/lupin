@@ -42,8 +42,8 @@ import type { EventBus } from "../shared/EventBus";
 import type { StoreHoldingAreaChangedPayload } from "../shared/types";
 import type { TaskListComposite } from "./taskListModel";
 import { formatFleetTimestamp } from "./fleetModel";
-import { groupHeldRowsByFiler } from "./holdingAreaModel";
-import { holdingGroupChevron, renderHoldingAreaGroups } from "./templates/holdingAreaTable";
+import { groupHeldRowsByFiler, groupHeldRowsByStory } from "./holdingAreaModel";
+import { holdingGroupChevron, renderHoldingAreaGroups, renderHoldingStories } from "./templates/holdingAreaTable";
 import {
   holdingBatchNeeds,
   holdingBatchExtras,
@@ -51,6 +51,7 @@ import {
   holdingBatchFinalStatus,
   HOLDING_BATCH_BLANK_REASON,
   HOLDING_BATCH_NO_ROWS,
+  HOLDING_BATCH_NO_ROWS_STORY,
 } from "./holdingAreaBatch";
 import {
   renderSectionHeader,
@@ -205,6 +206,14 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
   // meanwhile — a poll tick landing mid-batch would hand the operator live
   // buttons again. A set keyed by filer cannot be repainted away.
   private readonly batchesInFlight = new Set<string>();
+
+  // Stories mid-run, keyed by correlation_key — the same guard, for the story bar.
+  private readonly storiesInFlight = new Set<string>();
+
+  // The report of a story that ended PARTLY refused, so a render can put it back and so
+  // the bar outlives the shrinking of its story to one row. A fully approved story
+  // leaves no entry: its bar is gone because its rows are.
+  private readonly storyReports = new Map<string, string>();
 
   // The last batch report per filer, so a render can put it back. This is STATE,
   // not a cache of the DOM: the status line the groups template emits is empty
@@ -428,7 +437,12 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     if ( total === 0 ) {
       this.container.replaceChildren( ...banner, messageEl( "holding-area-empty", HOLDING_AREA_EMPTY_MESSAGE ) );
     } else {
-      this.container.replaceChildren( ...banner, renderHoldingAreaGroups( groups, undefined, [], this.expandedFilers ) );
+      const strip = renderHoldingStories( groupHeldRowsByStory( composite!.tasks, new Set( this.storyReports.keys() ) ) );
+      this.container.replaceChildren(
+        ...banner,
+        ...( strip === null ? [] : [ strip ] ),
+        renderHoldingAreaGroups( groups, undefined, [], this.expandedFilers ),
+      );
     }
     this.hydrateRequests();
     // Parity A-1a — restored after hydrate, as the Task List does. Into the empty
@@ -454,6 +468,11 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
       if ( !present.has( filer ) ) this.expandedFilers.delete( filer );
     }
     for ( const [ filer, message ] of this.batchReports ) this.applyGroupStatus( filer, message );
+    const liveKeys = new Set( ( composite!.tasks as Array<{ correlation_key?: string | null }> ).map( ( t ) => t.correlation_key ?? "" ) );
+    for ( const key of Array.from( this.storyReports.keys() ) ) {
+      if ( !liveKeys.has( key ) ) this.storyReports.delete( key );
+    }
+    for ( const [ key, message ] of this.storyReports ) this.paintStoryStatus( key, message );
 
     if ( stampUpdated ) this.stampUpdated();
   }
@@ -547,6 +566,11 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     const el = target as Element | null;
     /* c8 ignore next */ // defensive: a click whose target is not an element cannot reach a button.
     if ( el === null || typeof el.closest !== "function" ) return;
+    const story = el.closest<HTMLButtonElement>( ".holding-story-approve-all" );
+    if ( story !== null ) {
+      void this.runStoryApprove( story );
+      return;
+    }
     const btn = el.closest<HTMLButtonElement>( ".holding-approve-all, .holding-wont-fix-all" );
     if ( btn === null ) return;
     const verb = btn.classList.contains( "holding-approve-all" ) ? "approve" : "wont_fix";
@@ -729,6 +753,81 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
       () => this.stampReadBackFailed(),
     );
     this.paintGroupStatus( filer, holdingBatchFinalStatus( needs.pastLabel, ok, failed, ids.length, firstError ) );
+  }
+
+  /** One story's status span, matched in JavaScript so a key with a quote or bracket cannot break a selector. */
+  private storyStatusEl( story: string ): HTMLElement | null {
+    if ( this.container === null ) return null;
+    for ( const el of Array.from( this.container.querySelectorAll<HTMLElement>( ".holding-story-status" ) ) ) {
+      if ( el.dataset.story === story ) return el;
+    }
+    return null;
+  }
+
+  private paintStoryStatus( story: string, message: string ): void {
+    const el = this.storyStatusEl( story );
+    if ( el !== null ) el.textContent = message;
+  }
+
+  /**
+   * Approve every held row in one story, one transition at a time, then report.
+   *
+   * ⚠️ NO NEW DOOR. Each row goes through `store.transitionTask` — the single-row
+   * request the per-row control sends — so the approver allowlist, the promotion ask and
+   * the batch throttle all run per row on the server and a non-operator is refused row
+   * by row. Operator-only stays the server's rule, unchanged.
+   *
+   * Ensures:
+   *   - a second press on the same story while it runs is ignored
+   *   - the button is dead for the length of the run and live after
+   *   - the in-flight line counts ATTEMPTS; the final line counts successes, names the
+   *     refused count and the first refusal
+   *   - the final line is painted AFTER the read-back, because the repaint rebuilds the
+   *     bar and would erase it
+   */
+  private async runStoryApprove( button: HTMLButtonElement ): Promise<void> {
+    const story = button.dataset.story ?? "";
+    if ( story === "" ) return;
+    if ( this.storiesInFlight.has( story ) ) return;
+    const ids = ( button.dataset.taskIds ?? "" ).split( "," ).filter( ( id ) => id !== "" );
+    if ( ids.length === 0 ) {
+      this.paintStoryStatus( story, HOLDING_BATCH_NO_ROWS_STORY );
+      return;
+    }
+    const needs = holdingBatchNeeds( "approve" )!;
+    this.storiesInFlight.add( story );
+    this.paintStoryStatus( story, holdingBatchInFlightStatus( needs.pastLabel, 0, ids.length ) );
+    button.disabled = true;
+
+    let ok = 0;
+    let failed = 0;
+    let firstError: string | null = null;
+    try {
+      for ( const id of ids ) {
+        const result = await this.store.transitionTask( id, needs.status, {} );
+        if ( result.ok ) {
+          ok += 1;
+        } else {
+          failed += 1;
+          if ( firstError === null ) firstError = result.message ?? "";
+        }
+        this.paintStoryStatus( story, holdingBatchInFlightStatus( needs.pastLabel, ok + failed, ids.length ) );
+      }
+    } finally {
+      button.disabled = false;
+      this.storiesInFlight.delete( story );
+    }
+
+    // The report is remembered BEFORE the read-back: the repaint that read-back causes
+    // rebuilds the bar, and keeps a one-row remainder on screen only if a report is held.
+    const final = holdingBatchFinalStatus( needs.pastLabel, ok, failed, ids.length, firstError );
+    if ( failed > 0 ) this.storyReports.set( story, final );
+    else this.storyReports.delete( story );
+    await readBackAfterWrite(
+      () => this.store.refreshAfterWrite(),
+      () => this.stampReadBackFailed(),
+    );
+    this.paintStoryStatus( story, final );
   }
 
   private paintSentinel( text: string ): void {

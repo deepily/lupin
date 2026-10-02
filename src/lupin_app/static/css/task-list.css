@@ -1021,6 +1021,40 @@ tbody.task-group.collapsed .task-row {
     margin-left: 4px;
 }
 
+/* Stories strip (row eb235858): one bar per plan-import story, above the filer groups.
+   Same left rule and tint as a group header so it reads as part of the pane, with a
+   heavier key so the operator can tell a story bar from a filer bar at a glance. */
+.holding-area-stories {
+    margin-bottom : 14px;
+}
+
+.holding-story-bar {
+    display     : flex;
+    flex-wrap   : wrap;
+    gap         : 6px;
+    align-items : center;
+    padding     : 4px 6px;
+    margin-bottom : 4px;
+    border-left : 3px solid var( --task-not-approved );
+    background  : rgb( 126, 87, 194, 0.12 );
+}
+
+.holding-story-key {
+    font-weight : 700;
+}
+
+.holding-story-count {
+    opacity      : 0.7;
+    font-size    : 0.8rem;
+    margin-right : 8px;
+}
+
+.holding-story-status {
+    font-size   : 0.78rem;
+    opacity     : 0.85;
+    margin-left : 4px;
+}
+
 /* An empty holding area is a REAL state and says so in words. A blank pane is
    indistinguishable from one that failed to load, and this pane is expected to
    be empty most of the time — exactly when a silent blank is most likely to be

@@ -435,3 +435,62 @@ def test_a_TERMINAL_row_cannot_be_demoted_AT_THE_DOOR( client, repo, settings ):
 # substance assertions have a single place to move if the seam changes, instead of
 # four — and so nothing above pins a sentence.
 ACCOUNT_UNDER_JUDGEMENT = "no login account"
+
+
+# ------------------------------------------------------- approving a whole STORY
+#
+# Row eb235858. "Approve all N in this story" is a client loop over THESE single-row
+# transitions — there is no batch route, on purpose, so the approver gate, the promotion
+# ask and the throttle all keep running per row. These two arms enter at the layer the
+# loop enters at: the same POST, once per row of one correlation_key, in the order the
+# bar sends them.
+
+STORY_KEY = "epic:story-approve-probe"
+
+
+def _story( n=3 ):
+    """N held rows sharing one correlation_key — the shape a plan import files."""
+    return [ _item( status="not_approved", title=f"story row {i}", correlation_key=STORY_KEY )
+             for i in range( n ) ]
+
+
+def _serve_story( repo, rows ):
+    by_id = { r.id: r for r in rows }
+    repo.get_by_id_for_update.side_effect = lambda item_id: by_id[ item_id ]
+    repo.apply_transition.side_effect = lambda *a, **k: TaskEvent(
+        id=1, item_id=rows[ 0 ].id, item=rows[ 0 ], ts=NOW, actor=APPROVER,
+        transition="not_approved->queued", receipt_refs=None, authority="standing",
+    )
+
+
+def test_an_operator_approves_every_row_of_a_story_through_the_door( client, repo, settings ):
+    """Positive control: the operator's login clears all three rows, one transition each."""
+    _write( settings, approvers=[ "maria" ], enforcement_active=True,
+            approver_accounts={ APPROVER_EMAIL: "maria" } )
+    _who_is_logged_in[ "email" ] = APPROVER_EMAIL
+    rows = _story( 3 )
+    _serve_story( repo, rows )
+
+    codes = [ _post( client, r, "queued", APPROVER ).status_code for r in rows ]
+
+    assert codes == [ 200, 200, 200 ], f"the operator was refused part of a story: {codes}"
+    assert repo.apply_transition.call_count == 3, "not one transition per row of the story"
+
+
+def test_a_non_operator_is_refused_on_EVERY_row_of_a_story( client, repo, settings ):
+    """
+    The refusal the bar reports as "0 of 3 approved — 3 refused". Every row is refused —
+    none slips through because it came third — and no transition is ever applied, so
+    the whole story is still held when the bar repaints.
+    """
+    _write( settings, approvers=[ "maria" ], enforcement_active=True )
+    rows = _story( 3 )
+    _serve_story( repo, rows )
+
+    responses = [ _post( client, r, "queued", NON_APPROVER ) for r in rows ]
+
+    assert [ r.status_code for r in responses ] == [ 403, 403, 403 ]
+    assert all( ACCOUNT_UNDER_JUDGEMENT in r.json()[ "detail" ] for r in responses ), (
+        "a refusal did not name the account it judged — the bar's 'first refusal' would be a dead end"
+    )
+    repo.apply_transition.assert_not_called()

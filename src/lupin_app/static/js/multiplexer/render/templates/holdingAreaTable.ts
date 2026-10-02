@@ -32,7 +32,7 @@
 // src/tests/unit/multiplexer/render/holding_area_table.test.ts, which slices
 // both strings out of the legacy source and compares the substituted result.
 
-import type { HeldFilerGroup } from "../holdingAreaModel";
+import type { HeldFilerGroup, HeldStory } from "../holdingAreaModel";
 import { renderRowTableHead } from "./rowDisclosure";
 import { renderDisclosedRow } from "./taskRowDisclosed";
 
@@ -211,4 +211,67 @@ export function renderHoldingAreaGroups(
     frag.appendChild( renderHoldingAreaGroup( group, ianaZone, reassignTargets, expandedFilers.has( group.filer ) ) );
   }
   return frag;
+}
+
+/** The story approve button's label. Carbon copy of notifications.js `_renderHoldingStories`. */
+export function holdingStoryApproveLabel( n: number ): string {
+  return `Approve all ${ n } in this story`;
+}
+
+/** The story approve button's tooltip. Carbon copy of notifications.js `_renderHoldingStories`. */
+export function holdingStoryApproveTitle( key: string ): string {
+  return `Approve every held row in the story ${ key } — reversible, a row approved by mistake can be demoted straight back`;
+}
+
+/**
+ * The stories strip: one bar per story, each carrying ONE approve control.
+ *
+ * ⚠️ THE IDS RIDE ON THE BUTTON (`data-task-ids`), painted from the same composite as
+ * the rows beneath it. The press acts on what the operator was shown, and a row a peer
+ * has since moved is refused by the server and counted as refused, never skipped.
+ *
+ * Ensures:
+ *   - returns null for no stories, so the pane is unchanged when there are none
+ *   - otherwise one `.holding-area-stories` <div> holding one `.holding-story-bar`
+ *     per story, in order
+ *   - the button, the key and the status span each carry data-story
+ *   - the button's label and its data-task-ids carry the same N
+ */
+/* c8 ignore next */ // tsx phantom-branch artifact on the exported function-declaration line.
+export function renderHoldingStories( stories: ReadonlyArray<HeldStory> ): HTMLDivElement | null {
+  if ( stories.length === 0 ) return null;
+  const strip = document.createElement( "div" );
+  strip.className = "holding-area-stories";
+  for ( const story of stories ) {
+    const bar = document.createElement( "div" );
+    bar.className = "holding-story-bar";
+    bar.dataset.story = story.key;
+
+    const keyEl = document.createElement( "span" );
+    keyEl.className   = "holding-story-key";
+    keyEl.textContent = story.key;
+    bar.appendChild( keyEl );
+
+    const countEl = document.createElement( "span" );
+    countEl.className   = "holding-story-count";
+    countEl.textContent = String( story.ids.length );
+    bar.appendChild( countEl );
+
+    const btn = document.createElement( "button" );
+    btn.type      = "button";
+    btn.className = "task-action-btn holding-story-approve-all";
+    btn.dataset.story   = story.key;
+    btn.dataset.taskIds = story.ids.join( "," );
+    btn.title       = holdingStoryApproveTitle( story.key );
+    btn.textContent = holdingStoryApproveLabel( story.ids.length );
+    bar.appendChild( btn );
+
+    const status = document.createElement( "span" );
+    status.className = "holding-story-status";
+    status.dataset.story = story.key;
+    bar.appendChild( status );
+
+    strip.appendChild( bar );
+  }
+  return strip;
 }

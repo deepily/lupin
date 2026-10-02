@@ -13958,6 +13958,7 @@ class NotificationsUI {
             else if ( actionBtn.classList.contains( "task-priority-update" ) ) this._handlePriorityUpdateClick( actionBtn );
             else if ( actionBtn.classList.contains( "holding-approve-all" ) ) this._handleHoldingApproveAllClick( actionBtn );
             else if ( actionBtn.classList.contains( "holding-wont-fix-all" ) ) this._handleHoldingWontFixAllClick( actionBtn );
+            else if ( actionBtn.classList.contains( "holding-story-approve-all" ) ) this._handleHoldingStoryApproveClick( actionBtn );
             return true;
         }
 
@@ -14692,6 +14693,10 @@ class NotificationsUI {
         if ( !container ) return;
 
         this._wireHoldingAreaControls();
+        // Reports of stories that ended PARTLY refused; see _handleHoldingStoryApproveClick.
+        // Created with the pane, before any bar exists to press, so the click handler can rely on both.
+        if ( !( this._holdingStoryReports instanceof Map ) ) this._holdingStoryReports = new Map();
+        if ( !( this._holdingStoriesInFlight instanceof Set ) ) this._holdingStoriesInFlight = new Set();
 
         const countEl = document.getElementById( "holding-area-count" );
         const sentinels = {
@@ -14737,9 +14742,147 @@ class NotificationsUI {
         }
 
         const holdingState = this._captureOperatorState( container );
-        container.innerHTML = truncation + groups.map( g => this._renderHoldingAreaGroup( g.filer, g.tasks ) ).join( "" );
+        const stories = this._renderHoldingStories( this._groupHeldRowsByStory( composite && composite.tasks, new Set( this._holdingStoryReports.keys() ) ) );
+        container.innerHTML = truncation + stories + groups.map( g => this._renderHoldingAreaGroup( g.filer, g.tasks ) ).join( "" );
         this._restoreOperatorState( container, holdingState );
         this._hydrateRequestChips( container );
+        const liveKeys = new Set( ( composite.tasks || [] ).map( t => ( t && t.correlation_key ) || "" ) );
+        for ( const key of Array.from( this._holdingStoryReports.keys() ) ) {
+            if ( !liveKeys.has( key ) ) this._holdingStoryReports.delete( key );
+        }
+        for ( const [ key, message ] of this._holdingStoryReports ) this._renderHoldingStoryStatus( key, message );
+    }
+
+    _groupHeldRowsByStory( tasks, keep ) {
+        /**
+         * Group held rows by STORY — the `correlation_key` a plan import stamps on
+         * every row it files — keeping only keys shared by two or more rows.
+         *
+         * 🔴 ONE ROW IS NOT A STORY. A bar offering "approve all 1 in this story" is the
+         * per-row control wearing a bigger label, and a pane of them would bury the real
+         * stories. Rows with no key are never grouped: an absent key is not a shared one.
+         *
+         * Requires:
+         *     - tasks is an array of row objects (foreign wire data; any shape)
+         *
+         * Ensures:
+         *     - returns [ { key, ids } ], keys sorted alphabetically
+         *     - ids are the full row ids in the order the rows arrived, blanks dropped
+         *     - a key with fewer than two ids is omitted, EXCEPT a key in the `keep` Set (a
+         *       story whose last run left a report to show), which stays while one id is left
+         *     - a falsy/absent tasks argument yields []
+         *     - Pure: no DOM, no side effects; never throws
+         */
+        const rows  = Array.isArray( tasks ) ? tasks : [];
+        const byKey = new Map();
+        rows.forEach( raw => {
+            const task = raw || {};
+            const key  = task.correlation_key ? String( task.correlation_key ) : "";
+            const id   = task.id ? String( task.id ) : "";
+            if ( !key || !id ) return;
+            if ( byKey.has( key ) ) byKey.get( key ).push( id );
+            else byKey.set( key, [ id ] );
+        } );
+        return Array.from( byKey.keys() )
+            .filter( key => byKey.get( key ).length >= ( keep instanceof Set && keep.has( key ) ? 1 : 2 ) )
+            .sort( ( a, b ) => a.localeCompare( b ) )
+            .map( key => ( { key, ids : byKey.get( key ) } ) );
+    }
+
+    _renderHoldingStories( stories ) {
+        /**
+         * The stories strip: one bar per story, each with ONE approve control.
+         *
+         * ⚠️ THE IDS RIDE ON THE BUTTON, painted from the same composite as the rows
+         * beneath it. The press acts on what the operator was shown, and a row a peer has
+         * since moved is refused by the server and counted as refused — never silently
+         * skipped.
+         *
+         * Ensures:
+         *     - returns "" for no stories, so the pane is unchanged when there are none
+         *     - the button, key and status span each carry data-story
+         *     - the button's label and data-task-ids carry the same N
+         */
+        if ( !Array.isArray( stories ) || stories.length === 0 ) return "";
+        const bars = stories.map( st => {
+            const key = this._escapeTaskAttr( st.key );
+            const n   = st.ids.length;
+            return `
+                <div class="holding-story-bar" data-story="${key}">
+                    <span class="holding-story-key">${this.escapeHtml( st.key )}</span>
+                    <span class="holding-story-count">${n}</span>
+                    <button type="button" class="task-action-btn holding-story-approve-all" data-story="${key}"
+                            data-task-ids="${this._escapeTaskAttr( st.ids.join( "," ) )}"
+                            title="Approve every held row in the story ${this.escapeHtml( st.key )} — reversible, a row approved by mistake can be demoted straight back">Approve all ${n} in this story</button>
+                    <span class="holding-story-status" data-story="${key}"></span>
+                </div>`;
+        } ).join( "" );
+        return `<div class="holding-area-stories">${bars}</div>`;
+    }
+
+    _renderHoldingStoryStatus( story, message ) {
+        /**
+         * Show one story's inline status line. A missing bar is a no-op, never a throw.
+         */
+        const el = document.querySelector( `.holding-story-status[data-story="${CSS.escape( story )}"]` );
+        if ( el ) el.textContent = message || "";
+    }
+
+    async _handleHoldingStoryApproveClick( button ) {
+        /**
+         * Approve every held row in one story, one transition at a time, then report.
+         *
+         * ⚠️ NO NEW DOOR. Each row goes through `_transitionTask` — the same single-row
+         * request the per-row control sends — so the approver allowlist, the promotion ask
+         * and the batch throttle all run per row on the server, and a non-operator is
+         * refused row by row. Operator-only is therefore the server's rule, unchanged.
+         *
+         * Ensures:
+         *     - the button is dead for the length of the run, so a second press cannot
+         *       start the story over
+         *     - the status counts ATTEMPTS in flight and SUCCESSES at the end, naming the
+         *       refused count and the first refusal
+         *     - the pane is refreshed once, and the final line is painted AFTER that
+         *       refresh, because the refresh rebuilds the bar and would erase it
+         */
+        const story = button.dataset.story || "";
+        const ids   = ( button.dataset.taskIds || "" ).split( "," ).filter( Boolean );
+        if ( !story ) return;
+        // 🔴 THE GUARD IS THIS SET, NOT THE DISABLED ATTRIBUTE: a poll tick mid-run rebuilds
+        // the bar and hands the operator a fresh, enabled button.
+        if ( this._holdingStoriesInFlight.has( story ) ) return;
+        if ( ids.length === 0 ) {
+            this._renderHoldingStoryStatus( story, "No rows in this story." );
+            return;
+        }
+
+        this._holdingStoriesInFlight.add( story );
+        this._renderHoldingStoryStatus( story, `Approved 0 of ${ids.length}…` );
+        button.disabled = true;
+        let ok = 0, failed = 0, firstError = null;
+        try {
+            for ( const id of ids ) {
+                const result = await this._transitionTask( id, "queued", {} );
+                if ( result.ok ) ok += 1;
+                else {
+                    failed += 1;
+                    if ( firstError === null ) firstError = result.message;
+                }
+                this._renderHoldingStoryStatus( story, `Approved ${ok + failed} of ${ids.length}…` );
+            }
+        } finally {
+            button.disabled = false;
+            this._holdingStoriesInFlight.delete( story );
+        }
+        const final = failed === 0
+            ? `${ok} of ${ids.length} approved.`
+            : `${ok} of ${ids.length} approved — ${failed} refused. First refusal: ${firstError}`;
+        // Remembered BEFORE the refresh: the refresh rebuilds the bar, and keeps a one-row
+        // remainder on screen only while a report is held for it.
+        if ( failed > 0 ) this._holdingStoryReports.set( story, final );
+        else this._holdingStoryReports.delete( story );
+        await this.refreshHoldingArea();
+        this._renderHoldingStoryStatus( story, final );
     }
 
     _renderHoldingAreaGroup( filer, tasks ) {

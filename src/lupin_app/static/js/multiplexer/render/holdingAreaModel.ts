@@ -103,6 +103,50 @@ export function groupHeldRowsByFiler( tasks: unknown ): HeldFilerGroup[] {
     } ) );
 }
 
+/** One story's held rows: the `correlation_key` they share and their full ids. */
+export interface HeldStory {
+  key : string;
+  ids : string[];
+}
+
+/**
+ * Group held rows by STORY — the `correlation_key` a plan import stamps on every
+ * row it files — keeping only keys shared by two or more rows.
+ *
+ * 🔴 ONE ROW IS NOT A STORY. A bar offering "approve all 1 in this story" is the
+ * per-row control under a bigger label, and a pane of them would bury the real
+ * stories. A row with no key is never grouped: an absent key is not a shared one.
+ *
+ * Reproduces notifications.js `_groupHeldRowsByStory` as observational
+ * equivalence, not shared code.
+ *
+ * Ensures:
+ *   - returns [ { key, ids } ], keys sorted alphabetically
+ *   - ids are the full row ids in arrival order; a row with no id is dropped
+ *   - a key with fewer than two ids is omitted, EXCEPT a key named in `keep` (a story
+ *     whose last run left a report to show), which stays while it has one id left
+ *   - a falsy / non-array tasks argument yields []
+ *   - pure: no DOM, no side effects; never throws
+ */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+export function groupHeldRowsByStory( tasks: unknown, keep: ReadonlySet<string> = new Set() ): HeldStory[] {
+  const rows  = Array.isArray( tasks ) ? tasks : [];
+  const byKey = new Map<string, string[]>();
+  rows.forEach( ( raw ) => {
+    const task = ( raw ?? {} ) as TaskItem;
+    const key  = task.correlation_key ? String( task.correlation_key ) : "";
+    const id   = task.id ? String( task.id ) : "";
+    if ( key === "" || id === "" ) return;
+    const bucket = byKey.get( key );
+    if ( bucket ) bucket.push( id );
+    else byKey.set( key, [ id ] );
+  } );
+  return Array.from( byKey.keys() )
+    .filter( ( key ) => ( byKey.get( key ) as string[] ).length >= ( keep.has( key ) ? 1 : 2 ) )
+    .sort( ( a, b ) => a.localeCompare( b ) )
+    .map( ( key ) => ( { key, ids : byKey.get( key ) as string[] } ) );
+}
+
 /**
  * The number the Holding Area's header WOULD display for a composite, or null
  * when that pane would display no number at all.
