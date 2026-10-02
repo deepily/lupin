@@ -327,7 +327,9 @@ class TestJobQueueProgressiveDisclosure:
             assert job[ "agent_type" ] == "MathAgent", \
                 f"Expected MathAgent, got {job[ 'agent_type' ]}"
 
-    @NEEDS_A_DRAINED_QUEUE
+    # No NEEDS_A_DRAINED_QUEUE mark: it XPASSed(strict) in ts-84720dde on 222ba140c, once
+    # /api/v2/ask lineage (933287956, fa08ea851) made the drain observable. The other three
+    # marked tests were not reported as XPASS in that run and keep the mark.
     def test_job_interactions_endpoint( self, clean_test_db ):
         """
         Verify the /api/get-job-interactions/{job_id} endpoint works.

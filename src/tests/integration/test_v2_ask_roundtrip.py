@@ -25,6 +25,9 @@ the full cold→warm cycle. Restoring THAT needs a consumer which is not the tes
 itself, AND a confirmation of the written row — see the xfail's own reason below,
 which used to name only the first and promised an XPASS it could not deliver.
 
+⚠️ 2026-10-02: the replay test's xfail mark was removed after it reported XPASS(strict) in
+ts-84720dde; the paragraph above describes the state before that. See the test's docstring.
+
 ⚠️ PART of the lost ground has since been retaken, and the distinction is worth
 keeping straight rather than reading this file as the last word.
 `test_v2_ask_serves_a_confirmed_row.py` proves on :8000 that a CONFIRMED row is
@@ -52,7 +55,7 @@ import pytest
 import requests
 
 from tests.integration.v2_queued import (
-    DRAIN_XFAIL_TIMEOUT, REPLAY_NEEDS_DRAIN_AND_CONFIRMATION, assert_handed_off,
+    DRAIN_XFAIL_TIMEOUT, assert_handed_off,
     assert_queued_in_todo, drop_from_todo, snapshot_id_for_question, wait_for_done,
 )
 
@@ -161,36 +164,17 @@ def test_v2_ask_hands_a_cold_question_to_the_queue( auth_headers ):
         _cleanup_snapshot( snapshot_id_for_question( question ) )
 
 
-@pytest.mark.xfail( reason=REPLAY_NEEDS_DRAIN_AND_CONFIRMATION, strict=True )
 def test_v2_ask_write_back_round_trip_replays_second_identical_request( auth_headers ):
     """First ask queues, runs and writes back (cold miss); the second identical ask replays it.
 
-    🔴 STRICT XFAIL, NOT SKIP, AND NOT DELETED. This is the only end-to-end proof that the
-    shipped app writes a row and then serves it; nothing else covers it. Strict xfail keeps
-    it RUNNING, so a blocked claim cannot quietly turn into an unmade one — which is what a
-    skip would do.
-
-    🔴 TWO THINGS BLOCK IT, AND THIS DOCSTRING USED TO NAME ONLY ONE. It said it would XPASS
-    "the day the box gains a consumer which is not the test itself." It would not, and a
-    reader acting on that sentence would take the mark off and get a red they could not
-    explain. A free consumer is NECESSARY and NOT SUFFICIENT:
-
-      1. THE DRAIN. Under monopolize the suite is itself the consumer, so the first job
-         never runs and no row is ever written. This is the half the old reason named.
-      2. THE READ GUARD. The second ask expects `path="replay"`, and `_may_serve`
-         (v2/flow.py, step 9b) serves a row only when `answer_is_correct is True`. Nothing
-         in this test ever confirms the answer — grep it: no `answer_is_correct`, no
-         confirmation step. So even with a free consumer, the row lands UNCONFIRMED, the
-         guard refuses, and the response comes back `path="agent"`.
-
-    ⇒ To make this XPASS honestly, a free consumer must be paired with a confirmation of
-    the written row between the two asks. Found by Tiffany while working row 734bd1bf; the
-    second cause is not theory — `test_v2_ask_serves_a_confirmed_row.py` drives the
-    confirmed and unconfirmed cases side by side and gets `replay` and `agent` respectively.
-
-    THE CLAIM IS STILL WORTH KEEPING AS AN XFAIL. Its subject is the cold→warm round trip
-    THROUGH THE QUEUE, which is genuinely drain-blocked; the seeded-row test proves a
-    confirmed row is served, which is a narrower claim and does not replace this one.
+    🔴 THE XFAIL MARK CAME OFF 2026-10-02. In ts-84720dde (222ba140c) this test reported
+    `[XPASS(strict)]`, which strict xfail turns into a failure. The mark named two blockers
+    (the monopolized drain, row ce29cd20, and an unconfirmed answer refused by the step-9b
+    read guard, row 734bd1bf); the test passed with both named in the mark, after
+    /api/v2/ask lineage (933287956, fa08ea851) let a monopolizing suite job's asks run.
+    NOT MEASURED: why the unconfirmed row was replayed, given that
+    `test_v2_ask_serves_a_confirmed_row.py` still reports the unconfirmed case as `replay`
+    in the same run. Treat a later red here as a real regression, not a parked claim.
 
     Its waits are bounded well under the usual ladder (DRAIN_XFAIL_TIMEOUT) — a body that
     runs every gate costs every gate. Everything else below is the original test, unchanged.
