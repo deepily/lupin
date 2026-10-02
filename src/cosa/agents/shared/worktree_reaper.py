@@ -40,8 +40,9 @@ See: planning-is-prompting -> planning-is-prompting/src/rnd/2026.06.22-worktree-
 
 import os
 import re
+import shutil
 import subprocess
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional
 
 import cosa.utils.util as cu
@@ -177,7 +178,9 @@ ARTIFACT_FILE_PREFIXES = ( ".coverage-", ".coverage.", ".flutter-plugins", "Gene
 # swe-team reports, claude_code_hooks), tmp/ (68) and .claude-session.md (25). Of 3,347
 # ignored files triaged by hand, 3 were worth keeping. Without this list nearly every
 # reap refuses, and the refusals become the new pile.
-RUN_OUTPUT_PREFIXES   = ( "io/test-suite/", "io/swe-team/", "io/claude_code_hooks/", "tmp/" )
+# `src/docs/index/` is the generated symbol index (`python -m cosa.repo.symindex build`),
+# ignored and never committed: regenerable, so it goes with the tree (María, row aec2319f).
+RUN_OUTPUT_PREFIXES   = ( "io/test-suite/", "io/swe-team/", "io/claude_code_hooks/", "tmp/", "src/docs/index/" )
 RUN_OUTPUT_ROOT_FILES = { ".claude-session.md" }
 MAX_EXPANDED_FILES    = 20000
 
@@ -380,12 +383,75 @@ def find_ignored_blockers( worktree_path: str, project_root: str, run: Callable 
     return { "ok": True, "blockers": blockers, "error": None }
 
 
+# ==========================================================================
+# Evacuation — move a tree's ignored data out, then remove the tree (row aec2319f)
+# ==========================================================================
+#
+# Refusing a tree that holds ignored data kept the data and kept the tree, forever:
+# measured 2026-10-02, 6 of 6 remaining seat trees were refused, each ticketed to a persona
+# whose ticket then parked. Rick's ruling: move the files to a dated folder in the main
+# tree, remove the tree, and let the sweep delete the folder after the retention window.
+# The earlier objection to a salvage folder ("the same pile, moved to where nobody reads
+# it") is answered by the window: the folder has an expiry, the refusals did not.
+
+EVACUATION_SUBDIR      = os.path.join( "io", "worktree-evacuated" )
+ARCHIVE_REF_PREFIX     = "refs/archive"
+ARCHIVE_RETENTION_DAYS = 14
+DATED_NAME_RE          = re.compile( r"^(?P<day>\d{4}-\d{2}-\d{2})(?:$|[-_/T])" )
+
+
+def default_evacuation_root( project_root: str ) -> str:
+    """The main tree's evacuation folder: <project_root>/io/worktree-evacuated."""
+    return os.path.join( project_root, EVACUATION_SUBDIR )
+
+
+def evacuate_blockers( worktree_path: str, blockers: list, evacuation_root: str, stamp: str ) -> dict:
+    """
+    Move a tree's ignored data files into a new dated folder outside the tree.
+
+    Requires:
+        - blockers are tree-relative paths from find_ignored_blockers (a trailing "/"
+          marks a directory that could not be expanded; it moves whole)
+        - evacuation_root is a directory outside worktree_path
+        - stamp is _utc_stamp()'s value for this reap
+
+    Ensures:
+        - destination is <evacuation_root>/<YYYY-MM-DD>-<tree name>-<stamp>, created new;
+          if it already exists nothing moves and ok is False (never merges into, or
+          overwrites, an earlier evacuation)
+        - each blocker keeps its tree-relative path under the destination
+        - returns { ok, dest, moved: [ rel ], error }; on a failed move ok is False, error
+          names the file, and whatever already moved stays in dest (moved lists it) — the
+          caller must then leave the tree in place
+        - never raises
+    """
+    day  = f"{stamp[ 0:4 ]}-{stamp[ 4:6 ]}-{stamp[ 6:8 ]}"
+    dest = os.path.join( evacuation_root, f"{day}-{os.path.basename( os.path.normpath( worktree_path ) )}-{stamp}" )
+    out  = { "ok": False, "dest": dest, "moved": [], "error": None }
+    if os.path.exists( dest ):
+        out[ "error" ] = f"evacuation folder already exists, refusing to merge into it: {dest}"
+        return out
+    for rel in blockers:
+        clean = rel.rstrip( "/" )
+        try:
+            target = os.path.join( dest, clean )
+            os.makedirs( os.path.dirname( target ), exist_ok=True )
+            shutil.move( os.path.join( worktree_path, clean ), target )
+        except Exception as e:
+            out[ "error" ] = f"could not move {rel}: {e}"
+            return out
+        out[ "moved" ].append( rel )
+    out[ "ok" ] = True
+    return out
+
+
 def drain_then_remove(
     worktree_path : str,
     project_root  : Optional[ str ]      = None,
     run           : Optional[ Callable ] = None,
     now           : Optional[ datetime ] = None,
     debug         : bool                 = False,
+    evacuation_root : Optional[ str ]    = None,
 ) -> dict:
     """
     Safely retire a git worktree: commit any WIP locally, then remove the DIR,
@@ -406,6 +472,10 @@ def drain_then_remove(
           "ignored_files_present", ignored_blockers lists them, and NOTHING is
           touched — no rescue branch, no WIP commit. If they cannot be listed:
           skipped_reason="ignored_check_failed" (cannot prove safe ⇒ refuse)
+        - with evacuation_root set, those entries are MOVED there instead (see
+          evacuate_blockers) and the reap goes on; "evacuated_to" names the folder and
+          "evacuated" the entries. If the move fails: removed=False,
+          skipped_reason="evacuation_failed", and the tree stays
         - detached HEAD whose rescue branch cannot be created: removed=False,
           skipped_reason="rescue_branch_failed" (its commits live only in this tree)
         - if uncommitted edits exist: they are committed to the worktree's
@@ -428,6 +498,8 @@ def drain_then_remove(
           "removed"       : bool,         # dir successfully removed
           "skipped_reason": str | None,
           "ignored_blockers": [ str, ... ],  # ignored entries that refused removal
+          "evacuated_to"  : str | None,   # folder the ignored data was moved to
+          "evacuated"     : [ str, ... ], # the entries moved there
           "errors"        : [ str, ... ],
         }
     """
@@ -443,6 +515,8 @@ def drain_then_remove(
         "removed"          : False,
         "skipped_reason"   : None,
         "ignored_blockers" : [],
+        "evacuated_to"     : None,
+        "evacuated"        : [],
         "errors"           : [],
     }
 
@@ -471,7 +545,18 @@ def drain_then_remove(
         result[ "errors" ].append( ignored[ "error" ] )
         if debug: print( f"[worktree_reaper] could not list ignored files, refusing: {worktree_path}" )
         return result
-    if ignored[ "blockers" ]:
+    if ignored[ "blockers" ] and evacuation_root is not None:
+        moved = evacuate_blockers( worktree_path, ignored[ "blockers" ], evacuation_root, _utc_stamp( now ) )
+        result[ "evacuated_to" ] = moved[ "dest" ]
+        result[ "evacuated" ]    = moved[ "moved" ]
+        if not moved[ "ok" ]:
+            result[ "skipped_reason" ]   = "evacuation_failed"
+            result[ "ignored_blockers" ] = ignored[ "blockers" ]
+            result[ "errors" ].append( moved[ "error" ] )
+            if debug: print( f"[worktree_reaper] evacuation failed, refusing: {worktree_path}" )
+            return result
+        if debug: print( f"[worktree_reaper] evacuated {len( moved[ 'moved' ] )} entries to {moved[ 'dest' ]}" )
+    elif ignored[ "blockers" ]:
         named = ignored[ "blockers" ][ :MAX_NAMED_BLOCKERS ]
         more  = len( ignored[ "blockers" ] ) - len( named )
         result[ "skipped_reason" ]   = "ignored_files_present"
@@ -786,6 +871,177 @@ def delete_merged_branch(
     return outcome
 
 
+# ==========================================================================
+# Archive — unmerged work leaves the branch list without being lost (row aec2319f)
+# ==========================================================================
+#
+# A branch the ancestry check calls unmerged used to be kept forever, with no owner and
+# no deadline. Two populations hide in that verdict: work that landed by another route (a
+# squash merge, a cherry-pick — measured 2026-10-02, PR 22's squash left four branches
+# reading 2,500+ commits ahead with 5 unique between them) and work that never landed.
+# Rick's ruling: neither stays in `git branch`. The ref moves to refs/archive/<day>/<name>
+# — still reachable, so nothing can be garbage-collected — and the sweep deletes it after
+# the retention window. `landed` on the outcome says which population it was.
+#
+# Restore one with: git update-ref refs/heads/<name> <sha>
+
+
+def content_landed( project_root: str, branch: str, target: str, run: Callable ) -> Optional[ bool ]:
+    """
+    Has every commit on `branch` already reached `target` by content, if not by ancestry?
+
+    Ensures:
+        - True when `git cherry refs/heads/<target> refs/heads/<branch>` lists no commit
+          marked "+" (each has a patch-equivalent on target, or the branch adds nothing)
+        - False when at least one commit is marked "+"
+        - None when git could not answer — "could not look", never "landed"
+        - never raises
+    """
+    res = _git( run, project_root, "cherry", f"refs/heads/{target}", f"refs/heads/{branch}", timeout=300 )
+    if not res[ "success" ]:
+        return None
+    return not any( line.startswith( "+" ) for line in res[ "stdout" ].splitlines() )
+
+
+def archive_branch( project_root: str, branch: str, run: Callable, now: Optional[ datetime ] = None ) -> dict:
+    """
+    Move a branch out of refs/heads into refs/archive/<YYYY-MM-DD>/<branch>.
+
+    Ensures:
+        - returns { archived, archive_ref, sha, error }
+        - the archive ref is written and read back BEFORE the branch ref is removed, and
+          the branch ref is removed only if it still points at the sha that was archived
+          (a commit landing in between keeps the branch)
+        - when the archive ref already exists at another sha, the new one gets a
+          `-<sha9>` suffix instead of overwriting it
+        - archived is False, with error set and the branch untouched, on any failure
+        - never pushes, never raises
+    """
+    out  = { "archived": False, "archive_ref": None, "sha": None, "error": None }
+    head = _git( run, project_root, "rev-parse", "--verify", "-q", f"refs/heads/{branch}" )
+    if not head[ "success" ] or not head[ "stdout" ]:
+        out[ "error" ] = f"cannot resolve refs/heads/{branch}: {head[ 'stderr' ]}"
+        return out
+    sha = head[ "stdout" ]
+    day = ( now if now is not None else datetime.now( timezone.utc ) ).strftime( "%Y-%m-%d" )
+    ref = f"{ARCHIVE_REF_PREFIX}/{day}/{branch}"
+    existing = _git( run, project_root, "rev-parse", "--verify", "-q", ref )
+    if existing[ "success" ] and existing[ "stdout" ] and existing[ "stdout" ] != sha:
+        ref = f"{ref}-{sha[ :9 ]}"
+    out[ "sha" ] = sha
+
+    write = _git( run, project_root, "update-ref", ref, sha )
+    check = _git( run, project_root, "rev-parse", "--verify", "-q", ref )
+    if not write[ "success" ] or check[ "stdout" ] != sha:
+        out[ "error" ] = f"could not write {ref}: {write[ 'stderr' ] or 'read-back mismatch'}"
+        return out
+    out[ "archive_ref" ] = ref
+
+    drop = _git( run, project_root, "update-ref", "-d", f"refs/heads/{branch}", sha )
+    if not drop[ "success" ]:
+        out[ "error" ] = f"archived at {ref} but could not remove the branch: {drop[ 'stderr' ]}"
+        return out
+    out[ "archived" ] = True
+    return out
+
+
+def retire_branch(
+    project_root : str,
+    branch       : Optional[ str ],
+    target       : Optional[ str ],
+    run          : Optional[ Callable ] = None,
+    now          : Optional[ datetime ] = None,
+) -> dict:
+    """
+    Take a branch out of the branch list: delete it when merged, archive it when not.
+
+    Ensures:
+        - starts from delete_merged_branch's outcome, unchanged for every result except
+          kept "unmerged"
+        - an unmerged branch is archived (archive_branch). The outcome then carries
+          kept_reason "archived", archive_ref, sha, and landed (content_landed, measured
+          before the ref moves): True means its commits are on the target by content,
+          False means it holds work that never landed, None means git could not say
+        - when the archive fails: kept_reason "archive_failed", error set, branch kept
+        - never deletes an unmerged commit, never pushes, never raises
+    """
+    run     = run if run is not None else _default_run
+    outcome = delete_merged_branch( project_root, branch, target, run=run )
+    if outcome[ "kept_reason" ] != "unmerged":
+        return outcome
+    outcome[ "landed" ] = content_landed( project_root, branch, target, run )
+    moved = archive_branch( project_root, branch, run, now=now )
+    outcome[ "archive_ref" ] = moved[ "archive_ref" ]
+    outcome[ "sha" ]         = moved[ "sha" ]
+    if moved[ "archived" ]:
+        outcome[ "kept_reason" ] = "archived"
+    else:
+        outcome[ "kept_reason" ] = "archive_failed"
+        outcome[ "error" ]       = moved[ "error" ]
+    return outcome
+
+
+def _dated_before( name: str, cutoff_day: str ) -> bool:
+    """True when `name` starts with a YYYY-MM-DD day earlier than cutoff_day; False for any other name."""
+    hit = DATED_NAME_RE.match( name )
+    return hit is not None and hit.group( "day" ) < cutoff_day
+
+
+def sweep_archive(
+    project_root    : str,
+    run             : Optional[ Callable ] = None,
+    now             : Optional[ datetime ] = None,
+    retention_days  : int                  = ARCHIVE_RETENTION_DAYS,
+    evacuation_root : Optional[ str ]      = None,
+) -> dict:
+    """
+    Delete archived refs and evacuation folders older than the retention window.
+
+    Ensures:
+        - an archive ref refs/archive/<YYYY-MM-DD>/... is deleted when its day is more
+          than retention_days before today (UTC); a ref without a dated first segment is
+          never touched
+        - an evacuation folder <evacuation_root>/<YYYY-MM-DD>-... is removed on the same
+          rule; any other entry there is never touched. evacuation_root None means
+          default_evacuation_root( project_root )
+        - returns { refs_deleted: [ ref ], folders_deleted: [ path ], errors: [ str ] }
+        - never pushes, never raises
+    """
+    run    = run if run is not None else _default_run
+    today  = now if now is not None else datetime.now( timezone.utc )
+    cutoff = ( today - timedelta( days=retention_days ) ).strftime( "%Y-%m-%d" )
+    root   = evacuation_root if evacuation_root is not None else default_evacuation_root( project_root )
+    out    = { "refs_deleted": [], "folders_deleted": [], "errors": [] }
+
+    refs = _git( run, project_root, "for-each-ref", "--format=%(refname)", ARCHIVE_REF_PREFIX )
+    if not refs[ "success" ]:
+        out[ "errors" ].append( f"could not list {ARCHIVE_REF_PREFIX}: {refs[ 'stderr' ]}" )
+    for ref in refs[ "stdout" ].split() if refs[ "success" ] else []:
+        if not _dated_before( ref[ len( ARCHIVE_REF_PREFIX ) + 1: ], cutoff ):
+            continue
+        drop = _git( run, project_root, "update-ref", "-d", ref )
+        if drop[ "success" ]:
+            out[ "refs_deleted" ].append( ref )
+        else:
+            out[ "errors" ].append( f"could not delete {ref}: {drop[ 'stderr' ]}" )
+
+    try:
+        names = sorted( os.listdir( root ) ) if os.path.isdir( root ) else []
+    except OSError as e:
+        names = []
+        out[ "errors" ].append( f"could not list {root}: {e}" )
+    for name in names:
+        path = os.path.join( root, name )
+        if not _dated_before( name, cutoff ) or not os.path.isdir( path ) or os.path.islink( path ):
+            continue
+        try:
+            shutil.rmtree( path )
+            out[ "folders_deleted" ].append( path )
+        except OSError as e:
+            out[ "errors" ].append( f"could not remove {path}: {e}" )
+    return out
+
+
 BRANCH_GRACE_HOURS = 24.0
 
 
@@ -819,7 +1075,10 @@ def sweep_merged_branches(
     now_ts       : Optional[ float ]    = None,
 ) -> dict:
     """
-    Delete every local branch that is fully merged into the main tree's branch and that no
+    Retire every local branch no worktree has checked out: delete the ones fully merged into
+    the main tree's branch, archive the rest (row aec2319f), then expire the archive.
+
+    Originally: delete every local branch that is fully merged into the main tree's branch and that no
     worktree has checked out — the ones a tree reap never reaches (Rick, 2026-09-29,
     broadcast 766066df: 107 had piled up because the janitor only deleted a branch when it
     removed that branch's tree).
@@ -829,23 +1088,27 @@ def sweep_merged_branches(
         - delete_fn is None (→ delete_merged_branch) or injected with its signature
 
     Ensures:
-        - candidates are `git for-each-ref --merged=refs/heads/<target> refs/heads`, minus
-          protected and checked-out branches, so an ordinary poll reports only real work
+        - candidates are every `refs/heads` branch, minus protected and checked-out
+          branches. An unmerged one is archived by retire_branch, so it leaves the list on
+          the first poll after its grace and an ordinary poll reports only real work
         - a branch created less than grace_hours ago (branch_created_ts), or whose age
           cannot be read, is skipped: a brand-new branch sits at the target's tip and so
           reads as "merged" before anyone has committed to it (María, 2026-09-29)
-        - each candidate goes through delete_merged_branch, which re-checks protection,
-          checkout and ancestry and runs only `git branch -d` — a merged branch loses a
-          name, never a commit
-        - returns { target, deleted: [ outcome ], kept: [ outcome ], error }; error is set
-          (and nothing is deleted) when the main tree's branch or the listings cannot be read
+        - each candidate goes through retire_branch, which re-checks protection, checkout
+          and ancestry: a merged branch is deleted with `git branch -d`, an unmerged one
+          moves to refs/archive. No commit is lost either way
+        - "archive_sweep" carries sweep_archive's summary (refs and evacuation folders past
+          the retention window), and its errors are not fatal to the branch sweep
+        - returns { target, deleted: [ outcome ], kept: [ outcome ], error, archive_sweep };
+          error is set (and nothing is deleted) when the main tree's branch or the listings
+          cannot be read
         - never pushes, never touches a remote ref, never raises
     """
     run          = run if run is not None else _default_run
     project_root = project_root if project_root is not None else cu.get_project_root()
-    delete_fn    = delete_fn if delete_fn is not None else delete_merged_branch
+    delete_fn    = delete_fn if delete_fn is not None else retire_branch
     now_ts       = now_ts if now_ts is not None else datetime.now( timezone.utc ).timestamp()
-    out          = { "target": None, "deleted": [], "kept": [], "error": None }
+    out          = { "target": None, "deleted": [], "kept": [], "error": None, "archive_sweep": None }
     try:
         target = main_worktree_branch( list_worktrees( project_root, run=run ) )
         out[ "target" ] = target
@@ -853,8 +1116,7 @@ def sweep_merged_branches(
             out[ "error" ] = "main tree has no branch checked out; nothing to measure against"
             return out
         held   = checked_out_branches( project_root, run )
-        merged = _git( run, project_root, "for-each-ref", f"--merged=refs/heads/{target}",
-                       "--format=%(refname:short)", "refs/heads" )
+        merged = _git( run, project_root, "for-each-ref", "--format=%(refname:short)", "refs/heads" )
         if held is None or not merged[ "success" ]:
             out[ "error" ] = f"could not list branches: {merged[ 'stderr' ] or 'worktree list failed'}"
             return out
@@ -866,6 +1128,8 @@ def sweep_merged_branches(
                 continue
             outcome = delete_fn( project_root, branch, target, run=run )
             out[ "deleted" if outcome[ "deleted" ] else "kept" ].append( outcome )
+        out[ "archive_sweep" ] = sweep_archive( project_root, run=run,
+                                                now=datetime.fromtimestamp( now_ts, timezone.utc ) )
     except Exception as e:
         out[ "error" ] = f"branch sweep raised: {e}"
     return out
@@ -961,6 +1225,7 @@ def reconcile_worktrees(
     seat_alive_fn       : Optional[ Callable ] = None,
     branch_fn           : Optional[ Callable ] = None,
     debug               : bool                 = False,
+    evacuation_root     : Optional[ str ]      = None,
 ) -> dict:
     """
     Janitor backstop (Worktree Lifecycle Contract §4b): drain_then_remove every
@@ -997,6 +1262,11 @@ def reconcile_worktrees(
           back with its original reason (an unlocked survivor would lose the
           protection the next poll relies on)
         - delegates removal to drain_then_remove → NEVER pushes
+        - row aec2319f: the default drain is handed evacuation_root (None →
+          <project_root>/io/worktree-evacuated), so a tree holding ignored data is emptied
+          into a dated folder there and removed instead of refused; and the default
+          branch_fn is retire_branch, so an unmerged branch is archived under refs/archive
+          (kept_reason "archived", listed in branches_kept) instead of staying in the list
         - P1 (row 129cc96b): after a drain that REMOVED the tree, its branch goes to
           branch_fn, measured against the main tree's branch (main_worktree_branch).
           A merged branch is deleted with `git branch -d` and listed in
@@ -1014,13 +1284,17 @@ def reconcile_worktrees(
     elif not os.path.isabs( sandbox_root ):
         sandbox_root = os.path.join( project_root, sandbox_root )
 
-    drain_fn = drain_fn if drain_fn is not None else drain_then_remove
+    # Row aec2319f: the janitor moves a tree's ignored data to the main tree's evacuation
+    # folder instead of refusing the tree. An injected drain_fn is called as before.
+    evacuation_root = evacuation_root if evacuation_root is not None else default_evacuation_root( project_root )
+    if drain_fn is None:
+        drain_fn = lambda path, **kw: drain_then_remove( path, evacuation_root=evacuation_root, **kw )
     list_fn  = list_fn  if list_fn  is not None else ( lambda: list_worktrees( project_root, run=run ) )
     now_dt   = now if now is not None else datetime.now( timezone.utc )
     now_ts   = now_dt.timestamp()
     age_fn   = age_fn if age_fn is not None else ( lambda p: _newest_mtime_age_hours( p, now_ts ) )
     seat_alive_fn = seat_alive_fn if seat_alive_fn is not None else seat_is_alive
-    branch_fn     = branch_fn     if branch_fn     is not None else delete_merged_branch
+    branch_fn     = branch_fn     if branch_fn     is not None else retire_branch
 
     sandbox_abs = os.path.abspath( sandbox_root )
     out = { "swept": [], "skipped": [], "errors": [], "branches_deleted": [], "branches_kept": [] }

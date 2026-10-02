@@ -741,6 +741,22 @@ def _redirect_dm_traffic_corpus( tmp_path ):
         yield
 
 
+@pytest.fixture( autouse=True )
+def _isolate_heartbeat_poke_mute_switch( tmp_path, monkeypatch ):
+    """
+    Keep the operator's live poke switch out of every test (row 3526fb95).
+
+    `load_heartbeat_settings` reads the fleet switch file, which on the host is a real
+    file an admin flips from a notification client. Without this, muting the fleet would
+    change the result of every test that loads heartbeat settings.
+
+    Ensures:
+        - during any test, the switch path is a file inside the test's `tmp_path` that
+          does not exist until the test writes it
+    """
+    monkeypatch.setenv( "LUPIN_HEARTBEAT_POKE_MUTE_FILE", str( tmp_path / "heartbeat-poke-mute.json" ) )
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Visual-snapshot failures: run-scoped, and touched only by visual sessions (row d51ffc36)
 # ══════════════════════════════════════════════════════════════════════════════

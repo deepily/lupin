@@ -35,6 +35,7 @@ import type { HistoryWindow } from "../stores/historyWindow";
 // window with the SAME function the picker paints with, so they cannot word it differently.
 import { historyWindowLabel } from "../stores/historyWindow";
 import { createHistoryWindowDropdown, type HistoryWindowDropdownHandle } from "./historyWindowDropdown";
+import type { PokeMuteSwitchHandle } from "./pokeMuteSwitch";
 import {
   headerClickShouldCollapse,
   renderSectionHeader,
@@ -98,6 +99,9 @@ export interface NotificationsHeaderRendererOptions {
   bouncePollMs? : number;   // health poll interval (default 1500)
   bounceWaitMs? : number;   // give-up timeout      (default 90000)
   bounceGraceMs?: number;   // accept ok after this even if no down-blip was seen (default 25000)
+  // The stop poke switch (row 3526fb95). Boot builds it and passes it in; it sits beside
+  // the bounce button and paints itself on mount. Omitted means no switch in the bar.
+  pokeMuteSwitch? : PokeMuteSwitchHandle;
 }
 
 export interface NotificationsHeaderRenderer {
@@ -159,6 +163,7 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
   private headerClick  : ( ( e: Event ) => void ) | null = null;
   private historyOpen  = false;
   private readonly revealFilterSettings : ( () => void ) | undefined;
+  private readonly pokeMuteSwitch       : PokeMuteSwitchHandle | undefined;
 
   private readonly unsubscribers : Array<() => void> = [];
 
@@ -171,6 +176,7 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
     this.confirmFn = opts.confirmFn ?? ((m) => globalThis.confirm(m));
     this.isAdmin   = opts.isAdmin ?? ((): boolean => false);
     this.revealFilterSettings = opts.revealFilterSettings;
+    this.pokeMuteSwitch       = opts.pokeMuteSwitch;
     /* c8 ignore next */ // production-default fallback: globalThis.fetch is the runtime health poll; tests always inject fetchFn.
     this.fetchFn       = opts.fetchFn ?? globalThis.fetch.bind(globalThis);
     this.bouncePollMs  = opts.bouncePollMs  ?? 1500;
@@ -304,10 +310,16 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
       icon    : "",
       title   : "Claude Code Notifications:",
       testid  : "multiplexer-notifications-header",
-      actions : [ this.ttsSlot, this.historyWindowDropdown.element, this.filterSwitchEl, this.historyBtn, this.clearBtn, this.bounceBtn, this.statusEl ],
+      actions : [
+        this.ttsSlot, this.historyWindowDropdown.element, this.filterSwitchEl, this.historyBtn, this.clearBtn, this.bounceBtn,
+        ...( this.pokeMuteSwitch !== undefined ? [ this.pokeMuteSwitch.element ] : [] ),
+        this.statusEl,
+      ],
     });
     this.header  = header;
     this.countEl = header.countEl;
+    // Paint the stop poke switch from the server; not awaited, the bar must not wait on it.
+    if ( this.pokeMuteSwitch !== undefined ) void this.pokeMuteSwitch.refresh();
     this.countEl.id = "notifications-count";
     this.countEl.setAttribute("data-testid", "multiplexer-notifications-count");
 

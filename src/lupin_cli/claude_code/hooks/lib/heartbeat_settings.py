@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any
 
 from lupin_cli.claude_code.hooks.lib.heartbeat_poke_cap import DEFAULT_POKE_CAP
+from lupin_cli.claude_code.hooks.lib.heartbeat_poke_mute import mute_message, read_poke_mute
 
 
 # Documented defaults — single source of truth for "what does the user get
@@ -115,6 +116,11 @@ def load_heartbeat_settings() -> dict:
           non-positive-int → raises ValueError (fail-loud, like poke_cap)
         - "poke_output_enabled" missing → DEFAULT True (poke as today); non-bool →
           coerced to bool (Python truthiness)
+        - when settings.json leaves the poke on and the fleet switch file
+          (heartbeat_poke_mute.read_poke_mute) says muted, "poke_output_enabled" is
+          False; "poke_disabled_message" keeps the settings.json text when there is one,
+          and otherwise names who muted it and when. A settings.json mute wins outright;
+          the switch file is not read then
         - "poke_disabled_message" missing → DEFAULT "" (no output when muted);
           None → normalized to ""; non-str → raises ValueError (fail-loud: a
           non-string substitute would be emitted verbatim into the worker)
@@ -160,6 +166,17 @@ def load_heartbeat_settings() -> dict:
     _validate_poke_cap( poke_cap )
     _validate_verification_threshold( verification_threshold )
     poke_disabled_message = _normalize_poke_disabled_message( poke_disabled_message )
+
+    # The fleet switch (row 3526fb95): an admin's toggle in a notification client. The
+    # settings.json key above still mutes on its own; this can only ADD a mute, and a
+    # missing or broken switch file reads as not muted.
+    if poke_output_enabled:
+        fleet_switch = read_poke_mute()
+        if fleet_switch[ "muted" ]:
+            poke_output_enabled   = False
+            # The operator's own line wins when there is one (Rick: "I want the poke to
+            # simply say you're on skeleton crew"); the who-and-when line fills a blank.
+            poke_disabled_message = poke_disabled_message or mute_message( fleet_switch )
 
     return {
         "enabled"                        : enabled,

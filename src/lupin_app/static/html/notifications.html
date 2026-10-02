@@ -89,6 +89,11 @@
              not a section toggle. Hands off to POST /api/system/bounce, which the
              host-side watcher turns into the sanctioned warn → restart → all-clear. -->
         <button class="bounce-server-btn" id="bounce-dev-server-btn" data-testid="notifications-bounce-dev-server" type="button" title="Bounce the dev server (:7999) — warns the fleet, then restarts (~20s)">🔄</button>
+        <!-- Heartbeat stop poke switch (row 3526fb95). Same action-button class as the
+             bounce button: no data-section, so the section-visibility dispatcher ignores
+             it. Starts disabled and unknown; refreshPokeMute paints the real state, and
+             only an admin gets a working button. -->
+        <button class="bounce-server-btn" id="poke-mute-btn" data-testid="notifications-poke-mute" data-muted="unknown" type="button" disabled title="Heartbeat stop poke: loading…">❔</button>
     </div>
 
     <div class="container">
@@ -1529,7 +1534,7 @@
          that is commit 2033c006 from this morning, and 1a958c49 before it, the
          SAME defect twice in one day. Nothing enforces this yet; the stale-bundle
          gate on row 75044ab5 is the fix. Until it lands, this line is the fix. -->
-    <script src="/static/js/notifications.js?v=a5df7add46c2"></script>
+    <script src="/static/js/notifications.js?v=777f71b8b56c"></script>
     <!-- broadcast-panel.js 20260904d → 20260926a: row 319c57a3 (merged 29ae2d0ab) changed
          its bytes — a chip click now inserts exactly `@name`. Bumped by the merger. -->
     <script src="/static/js/broadcast-panel.js?v=1dd916a4a564"></script>

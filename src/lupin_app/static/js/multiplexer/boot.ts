@@ -28,6 +28,7 @@ import { eventBus } from "./shared/EventBus";
 import { storage } from "./shared/StorageService";
 import { createAuthManager } from "./auth/AuthManager";
 import { redirectToLoginIfUnauthenticated, bounceToLoginOnDeadSession, logout } from "./auth/authGuard";
+import { createPokeMuteSwitch } from "./render/pokeMuteSwitch";
 import { createApiClient } from "./api/ApiClient";
 import { createTransports } from "./transport";
 import { createStores } from "./stores";
@@ -526,6 +527,12 @@ function bootMultiplexer(): void {
     isAdmin : () => authManager.isCurrentUserAdmin(),
     // Parity A-2 #11 — the badge reveals Queue Filter Settings.
     revealFilterSettings,
+    // Row 3526fb95 — the stop poke switch: an indicator for everyone, a toggle for admins.
+    pokeMuteSwitch : createPokeMuteSwitch({
+      api     : apiClient,
+      isAdmin : () => authManager.isCurrentUserAdmin(),
+      onError : ( message, error ) => console.error( message, error ),
+    }),
   });
   const notificationsHeaderMountEl = document.getElementById("notifications-header-mount");
   if (notificationsHeaderMountEl === null) throw new Error("multiplexer: #notifications-header-mount not found");

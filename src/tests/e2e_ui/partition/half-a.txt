@@ -74,3 +74,4 @@ src/tests/e2e_ui/test_multiplexer_holding_area_flow_ratio.py
 src/tests/e2e_ui/test_multiplexer_action_required_card_parity.py
 src/tests/e2e_ui/test_doc_viewer_download.py
 src/tests/e2e_ui/test_doc_viewer_folder_roots_upload.py
+src/tests/e2e_ui/test_poke_mute_switch.py

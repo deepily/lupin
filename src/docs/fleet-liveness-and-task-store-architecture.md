@@ -81,6 +81,8 @@ Inputs 2 and 3 are **local / store-independent** and must keep poking even durin
 
 **Fail-safe (§C)**: store unreachable / timeout / malformed → owed_items contributes 0 + a distinct `heartbeat_store_unreachable` log phase, and the hook does **not** spurious-poke. Bounce-windows (Rick restarts `:7999` constantly under `--reload`) = no-poke windows by design.
 
+**Muting the poke** (two switches, either one mutes): `heartbeat.poke_output_enabled = false` in `~/.claude/settings.json` is the hand switch. The fleet switch is a small file an admin flips from a notification client's toolbar (multiplexer or legacy) through `PUT /api/heartbeat/poke-mute`; the Stop hook reads it on every stop through `hooks/lib/heartbeat_poke_mute.py`, so a flip lands on each seat's next stop with no restart. The file sits in the flow-ratio settings folder, which both rest containers already mount. A missing or malformed file reads as not muted, and no timer touches it. While muted, a seat is shown `heartbeat.poke_disabled_message` when that is set, and otherwise a line naming who muted it and when. `heartbeat.enabled` must stay `true` for either message to appear.
+
 > **Known limitation**: the self-poke *delivery/effect* path (Stop-hook `decision:block`) has not been confirmed to force a continuation turn (bug `f0d79d71`). The **reliable** wake path today is the arbiter's external tmux-injection (below), plus a session-run `/loop`.
 
 ---

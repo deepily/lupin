@@ -30,6 +30,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
+from lupin_cli.claude_code.hooks.lib.main_tree import main_tree_root
+
 RESERVED_TOPICS              = ( "broadcast-acks", "broadcasts", "presence", "system-events" )
 DEFAULT_PERSONA_NAME         = "<unknown>"
 DEFAULT_PERSONA_ICON         = "💬"
@@ -194,7 +196,8 @@ class CommonsStore:
     read + presence operations.
 
     Requires:
-        - `root` is a path-like; the project root (or any base path for tests)
+        - `root` is a path-like; the project root (or any base path for tests). A path
+          inside a `.claude/worktrees/` lane resolves to the main tree (main_tree_root)
 
     Ensures:
         - `<root>/io/commons/` and `<root>/io/commons/archive/` exist
@@ -204,7 +207,9 @@ class CommonsStore:
     """
 
     def __init__( self, root: os.PathLike ):
-        self.root          = Path( root )
+        # A seat pins LUPIN_ROOT to its own worktree; the commons is the repo's, so it
+        # always lives in the main tree (row aec2319f).
+        self.root          = Path( main_tree_root( root ) )
         self.commons_dir   = self.root / "io" / "commons"
         self.archive_dir   = self.commons_dir / "archive"
         self.commons_dir.mkdir( parents=True, exist_ok=True )

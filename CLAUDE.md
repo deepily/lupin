@@ -711,8 +711,12 @@ whole-second mtime plus size, so a same-size edit inside one second runs the pre
   (`seat-<name>`, locked while the seat lives); a hand-made one is
   `git worktree add .claude/worktrees/<persona>-<task>`. That folder is gitignored and swept by the arbiter
   janitor once a tree is idle. Anything next to the repo is swept by nobody — 227 had piled up by
-  2026-09-14. A reap refuses a tree holding ignored files that are not build artifacts or mirrored
-  mementos, so keep data in git or somewhere durable.
+  2026-09-14. The janitor moves a tree's ignored files that are not build artifacts or mirrored
+  mementos into `io/worktree-evacuated/<day>-<tree>-<stamp>/` in the main tree and then removes the tree;
+  an unmerged branch moves to `refs/archive/<day>/<name>` (restore with
+  `git update-ref refs/heads/<name> <sha>`). Both are deleted 14 days later, so keep data in git or
+  somewhere durable. A reap by any other door (a manager's dismiss, a seat's own teardown) still refuses
+  such a tree and leaves it for the janitor.
 - Pin all three, every time. `LUPIN_ROOT` is inherited from your shell and silently keeps naming the main
   repo:
 
