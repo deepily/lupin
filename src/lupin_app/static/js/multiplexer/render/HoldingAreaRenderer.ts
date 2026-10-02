@@ -43,7 +43,7 @@ import type { StoreHoldingAreaChangedPayload } from "../shared/types";
 import type { TaskListComposite } from "./taskListModel";
 import { formatFleetTimestamp } from "./fleetModel";
 import { groupHeldRowsByFiler, groupHeldRowsByStory } from "./holdingAreaModel";
-import { holdingGroupChevron, renderHoldingAreaGroups, renderHoldingStories } from "./templates/holdingAreaTable";
+import { holdingGroupChevron, holdingStoryApproveLabel, renderHoldingAreaGroups, renderHoldingStories } from "./templates/holdingAreaTable";
 import {
   holdingBatchNeeds,
   holdingBatchExtras,
@@ -52,6 +52,8 @@ import {
   holdingBatchRestLabel,
   holdingBatchConfirmLabel,
   holdingBatchArmedStatus,
+  holdingStoryConfirmLabel,
+  holdingStoryArmedStatus,
   HOLDING_BATCH_ARMED_CLASS,
   HOLDING_BATCH_BLANK_REASON,
   HOLDING_BATCH_NO_ROWS,
@@ -678,6 +680,18 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     }
   }
 
+  /** Return every story bar's button to its resting label. A repaint does the same by rebuilding the bar. */
+  private disarmStories(): void {
+    /* c8 ignore next */ // defensive: runStoryApprove only runs for a button inside the rendered container.
+    if ( this.container === null ) return;
+    for ( const b of Array.from( this.container.querySelectorAll<HTMLButtonElement>( ".holding-story-approve-all" ) ) ) {
+      if ( b.dataset.armed === "1" ) this.paintStoryStatus( b.dataset.story ?? "", "" );
+      delete b.dataset.armed;
+      b.classList.remove( HOLDING_BATCH_ARMED_CLASS );
+      b.textContent = holdingStoryApproveLabel( ( b.dataset.taskIds ?? "" ).split( "," ).filter( ( id ) => id !== "" ).length );
+    }
+  }
+
   /** The group's batch reason box, trimmed, or "" when it is not rendered. */
   private batchReason( filer: string ): string {
     const input = this.groupFor( filer )?.querySelector<HTMLInputElement>( ".holding-wont-fix-all-reason" );
@@ -826,6 +840,18 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
       this.paintStoryStatus( story, HOLDING_BATCH_NO_ROWS_STORY );
       return;
     }
+    // ARM, THEN CONFIRM (row 376dd4cb, the story-level half). The first press only arms: the
+    // button names the row count and nothing is posted. Arming one story disarms the others.
+    if ( button.dataset.armed !== "1" ) {
+      this.disarmStories();
+      button.dataset.armed = "1";
+      button.classList.add( HOLDING_BATCH_ARMED_CLASS );
+      button.textContent = holdingStoryConfirmLabel( ids.length );
+      this.paintStoryStatus( story, holdingStoryArmedStatus( ids.length ) );
+      return;
+    }
+    this.disarmStories();
+
     const needs = holdingBatchNeeds( "approve" )!;
     this.storiesInFlight.add( story );
     this.paintStoryStatus( story, holdingBatchInFlightStatus( needs.pastLabel, 0, ids.length ) );

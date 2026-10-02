@@ -35,6 +35,8 @@ import {
   holdingBatchRestLabel,
   holdingBatchConfirmLabel,
   holdingBatchArmedStatus,
+  holdingStoryConfirmLabel,
+  holdingStoryArmedStatus,
 } from "../../../../lupin_app/static/js/multiplexer/render/holdingAreaBatch";
 
 const HERE        = dirname( fileURLToPath( import.meta.url ) );
@@ -292,4 +294,27 @@ test( "every arming string is a carbon copy of notifications.js, compared agains
     assert.ok( quoted.includes( holdingBatchRestLabel( verb ) ), `legacy has no resting label ${ holdingBatchRestLabel( verb ) }` );
   }
   assert.ok( templates.length > 0 && quoted.length > 0, "the legacy region yielded nothing to compare against" );
+} );
+
+// ---------------------------------------------------------------------------
+// Arm, then confirm — the story bar's button (row 376dd4cb, story-level half)
+// ---------------------------------------------------------------------------
+
+test( "the story confirm label and armed status name the row count", () => {
+  assert.equal( holdingStoryConfirmLabel( 3 ),  "Confirm approve all 3 in this story" );
+  assert.equal( holdingStoryArmedStatus( 3 ), "Click again to approve 3 rows in this story." );
+} );
+
+test( "the story arming strings are carbon copies of notifications.js, compared against the file on disk", () => {
+  const src   = readFileSync( LEGACY_PATH, "utf8" );
+  const start = src.indexOf( "_disarmHoldingStoryButtons() {" );
+  assert.ok( start !== -1, "legacy _disarmHoldingStoryButtons not found — the extraction is pointing at nothing" );
+  const end   = src.indexOf( "async _handleHoldingStoryApproveClick( button ) {", start );
+  assert.ok( end > start, "legacy story handler not found after the arming helpers — the slice boundaries have moved" );
+  const templates = Array.from( src.slice( start, end ).matchAll( /`([^`\n]{6,})`/g ) ).map( ( m ) => m[ 1 ] as string );
+  assert.ok( templates.length > 0, "the legacy story region yielded no templates" );
+  const confirm   = holdingStoryConfirmLabel( 7 ).replace( "7", "${count}" );
+  const status    = holdingStoryArmedStatus( 7 ).replace( "7", "${count}" );
+  assert.ok( templates.includes( confirm ), `legacy has no template reading ${ JSON.stringify( confirm ) }` );
+  assert.ok( templates.includes( status ),  `legacy has no template reading ${ JSON.stringify( status ) }` );
 } );

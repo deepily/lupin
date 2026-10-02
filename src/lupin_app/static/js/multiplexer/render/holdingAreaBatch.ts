@@ -219,3 +219,23 @@ export function holdingBatchArmedStatus( verb: string, count: number ): string {
     ? `Click again to close ${ count } rows as won't fix with this reason.`
     : `Click again to approve ${ count } rows.`;
 }
+
+// ---------------------------------------------------------------------------
+// Arm, then confirm — the story bar's button (row 376dd4cb, story-level half)
+// ---------------------------------------------------------------------------
+
+/**
+ * The label an ARMED story button carries. Carbon copy of notifications.js `_armHoldingStoryButton`.
+ */
+export function holdingStoryConfirmLabel( count: number ): string {
+  return `Confirm approve all ${ count } in this story`;
+}
+
+/**
+ * The story status line while its button is armed. Not remembered across a repaint: the bar is
+ * rebuilt unarmed. Carbon copy of notifications.js `_armHoldingStoryButton`.
+ */
+/* c8 ignore next */ // tsx phantom-branch artifact on the exported function-declaration line (c8 reports one branch location at the identifier, line 238, with no conditional in the body); the function is called and its string pinned by holding_area_batch.test.ts and the story tests.
+export function holdingStoryArmedStatus( count: number ): string {
+  return `Click again to approve ${ count } rows in this story.`;
+}

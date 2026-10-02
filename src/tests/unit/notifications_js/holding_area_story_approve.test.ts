@@ -132,6 +132,8 @@ function mount( verdict: ( id: string ) => { ok: boolean; message?: string }, ho
 }
 
 const click  = ( el: Element ): void => { el.dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) ); };
+// ARM, THEN CONFIRM (row 376dd4cb): a story runs on the SECOND press of its button.
+const press  = ( el: Element ): void => { click( el ); click( el ); };
 const settle = (): Promise<void> => new Promise( ( r ) => setTimeout( r, 0 ) );
 
 // ───────────────────────────── grouping ─────────────────────────────
@@ -187,7 +189,7 @@ test( "pane: one bar per story of two or more rows, labelled with N, none for th
 
 test( "click: ONE press sends one queued transition per row of THAT story and no other row", async () => {
   const h = mount( () => ( { ok: true } ) );
-  click( h.button( "epic:plan-a" ) );
+  press( h.button( "epic:plan-a" ) );
   await settle();
   assert.deepEqual( h.calls.map( ( c ) => c.id ), [ "a1", "a2", "a3" ] );
   assert.deepEqual( [ ...new Set( h.calls.map( ( c ) => c.to ) ) ], [ "queued" ] );
@@ -198,7 +200,7 @@ test( "click: ONE press sends one queued transition per row of THAT story and no
 test( "a story that ends PARTLY refused says so, and keeps its bar even down to one row", async () => {
   const refusal = "403: actor 'maria' is not in approvers ['rick']";
   const h = mount( ( id ) => id === "a2" ? { ok: false, message: refusal } : { ok: true } );
-  click( h.button( "epic:plan-a" ) );
+  press( h.button( "epic:plan-a" ) );
   await settle();
 
   assert.deepEqual( h.bars(), [ "epic:plan-a", "epic:plan-c" ], "the half-approved story lost its bar" );
@@ -213,7 +215,7 @@ test( "a story that ends PARTLY refused says so, and keeps its bar even down to 
 
 test( "a non-operator is refused on every row: nothing skipped, nothing approved, the bar stays", async () => {
   const h = mount( () => ( { ok: false, message: "403: 'maria' is not an approver" } ) );
-  click( h.button( "epic:plan-c" ) );
+  press( h.button( "epic:plan-c" ) );
   await settle();
   assert.deepEqual( h.calls.map( ( c ) => c.id ), [ "c1", "c2" ], "the loop stopped at the first refusal" );
   assert.equal( h.status( "epic:plan-c" ), "0 of 2 approved — 2 refused. First refusal: 403: 'maria' is not an approver" );
@@ -224,12 +226,12 @@ test( "a non-operator is refused on every row: nothing skipped, nothing approved
 test( "a retry of the refused row clears the report once it succeeds", async () => {
   let refuse = true;
   const h = mount( ( id ) => id === "a2" && refuse ? { ok: false, message: "no" } : { ok: true } );
-  click( h.button( "epic:plan-a" ) );
+  press( h.button( "epic:plan-a" ) );
   await settle();
   assert.match( h.status( "epic:plan-a" ), /1 refused/ );
 
   refuse = false;
-  click( h.button( "epic:plan-a" ) );
+  press( h.button( "epic:plan-a" ) );
   await settle();
   assert.deepEqual( h.bars(), [ "epic:plan-c" ] );
   h.repaint();
@@ -239,7 +241,7 @@ test( "a retry of the refused row clears the report once it succeeds", async () 
 test( "the button is dead while the story runs", async () => {
   const h = mount( () => ( { ok: true } ), true );
   const btn = h.button( "epic:plan-a" );
-  click( btn );
+  press( btn );
   await settle();
   assert.equal( h.calls.length, 1 );
   assert.equal( btn.disabled, true, "the button stayed live mid-run" );
@@ -251,7 +253,7 @@ test( "the button is dead while the story runs", async () => {
   const fresh = h.button( "epic:plan-a" );
   assert.notEqual( fresh, btn, "the repaint did not rebuild the bar, so this arm tests nothing" );
   assert.equal( fresh.disabled, false, "precondition: the rebuilt button is live" );
-  click( fresh );
+  press( fresh );
   await settle();
   assert.equal( h.calls.length, 1, "a press on the rebuilt button started the story a second time" );
 
@@ -278,7 +280,7 @@ test( "defensive presses: no ids reports it and posts nothing; no story key does
 
 test( "a report is dropped when its story leaves the board entirely", async () => {
   const h = mount( ( id ) => id.startsWith( "c" ) ? { ok: false, message: "no" } : { ok: true } );
-  click( h.button( "epic:plan-c" ) );
+  press( h.button( "epic:plan-c" ) );
   await settle();
   assert.match( h.status( "epic:plan-c" ), /2 refused/ );
 
@@ -289,4 +291,69 @@ test( "a report is dropped when its story leaves the board entirely", async () =
   h.restoreKey( "epic:plan-c" );             // the same key returns later as a NEW story
   h.repaint();
   assert.equal( h.status( "epic:plan-c" ), "", "a dead story's report came back with its key" );
+} );
+
+// ───────────────────────── arm, then confirm (row 376dd4cb) ─────────────────────────
+
+test( "arm: the FIRST press posts nothing, names the count on the button and says what the next press does", async () => {
+  const h = mount( () => ( { ok: true } ) );
+  const btn = h.button( "epic:plan-a" );
+  click( btn );
+  await settle();
+  assert.equal( h.calls.length, 0, "the first press posted a transition" );
+  assert.equal( btn.textContent, "Confirm approve all 3 in this story" );
+  assert.equal( btn.dataset.armed, "1" );
+  assert.ok( btn.classList.contains( "task-submit-armed" ), "an armed button carries the armed class" );
+  assert.equal( h.status( "epic:plan-a" ), "Click again to approve 3 rows in this story." );
+} );
+
+test( "confirm: the SECOND press runs the story and the button is back to rest", async () => {
+  const h = mount( () => ( { ok: true } ) );
+  const btn = h.button( "epic:plan-a" );
+  click( btn );
+  click( btn );
+  await settle();
+  assert.deepEqual( h.calls.map( ( c ) => c.id ), [ "a1", "a2", "a3" ] );
+  assert.equal( btn.dataset.armed, undefined, "the button stayed armed after it ran" );
+  assert.equal( btn.classList.contains( "task-submit-armed" ), false );
+} );
+
+test( "arming one story disarms the other, and clears the status line of the one it disarmed", () => {
+  const h = mount( () => ( { ok: true } ) );
+  const a = h.button( "epic:plan-a" );
+  const c = h.button( "epic:plan-c" );
+  click( a );
+  click( c );
+  assert.equal( c.dataset.armed, "1" );
+  assert.equal( a.dataset.armed, undefined, "two story buttons were armed at once" );
+  assert.equal( a.textContent, "Approve all 3 in this story" );
+  assert.equal( h.status( "epic:plan-a" ), "", "a disarmed story kept its 'Click again' line" );
+  assert.equal( h.calls.length, 0 );
+} );
+
+test( "a repaint rebuilds the bar unarmed, and the armed status line does not outlive the arming", async () => {
+  const h = mount( () => ( { ok: true } ) );
+  click( h.button( "epic:plan-a" ) );
+  h.repaint();
+  const fresh = h.button( "epic:plan-a" );
+  assert.equal( fresh.dataset.armed, undefined );
+  assert.equal( fresh.textContent, "Approve all 3 in this story" );
+  assert.equal( h.status( "epic:plan-a" ), "" );
+  click( fresh );
+  await settle();
+  assert.equal( h.calls.length, 0, "a press after a repaint ran the story instead of arming it" );
+} );
+
+test( "disarming tolerates an armed bar whose attributes were stripped", () => {
+  const h = mount( () => ( { ok: true } ) );
+  const stray = h.button( "epic:plan-a" );
+  stray.dataset.armed = "1";
+  delete stray.dataset.story;
+  delete stray.dataset.taskIds;
+  const c = h.button( "epic:plan-c" );
+  click( c );
+  assert.equal( c.dataset.armed, "1", "the real press did not arm" );
+  assert.equal( stray.dataset.armed, undefined );
+  assert.equal( stray.textContent, "Approve all 0 in this story" );
+  assert.equal( h.calls.length, 0 );
 } );

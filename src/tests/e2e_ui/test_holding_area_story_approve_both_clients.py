@@ -164,6 +164,10 @@ def _non_operator_refused( page, pane, story ):
 
     posts = []
     page.on( "response", lambda r: posts.append( r ) if r.request.method == "POST" and "/transition" in r.url else None )
+    # ARM, THEN CONFIRM (row 376dd4cb): the first click only arms, so it posts nothing.
+    story_bar.locator( ".holding-story-approve-all" ).click()
+    expect( story_bar.locator( ".holding-story-approve-all" ) ).to_have_text( f"Confirm approve all {STORY_ROWS} in this story" )
+    assert posts == [ ], f"the arming click posted: {[ r.url for r in posts ]}"
     story_bar.locator( ".holding-story-approve-all" ).click()
 
     status = story_bar.locator( ".holding-story-status" )
@@ -234,29 +238,33 @@ def _route_operator( page ):
     return state
 
 
-def _operator_one_click( page, pane, state ):
+def _operator_two_clicks( page, pane, state ):
     page.wait_for_selector( f"{pane} .holding-area-group", state="attached" )
     story_bar = _bar( page, pane, STORY_KEY )
     expect( story_bar ).to_have_count( 1, timeout=TIMEOUT_MS )
     expect( _bar( page, pane, LONE_KEY ) ).to_have_count( 0 )
 
+    # ARM, THEN CONFIRM (row 376dd4cb): the first click arms and posts nothing.
+    story_bar.locator( ".holding-story-approve-all" ).click()
+    expect( story_bar.locator( ".holding-story-approve-all" ) ).to_have_text( f"Confirm approve all {STORY_ROWS} in this story" )
+    assert state[ "transitions" ] == [ ], f"the arming click posted: {state[ 'transitions' ]}"
     story_bar.locator( ".holding-story-approve-all" ).click()
 
     expect( _bar( page, pane, STORY_KEY ) ).to_have_count( 0, timeout=TIMEOUT_MS )
     sent = state[ "transitions" ]
     assert [ t[ "id" ] for t in sent ] == [ f"00000000-0000-0000-0000-00000000000{i}" for i in range( 1, STORY_ROWS + 1 ) ], \
-        f"one click did not post the story's three rows in order: {sent}"
+        f"two clicks did not post the story's three rows in order: {sent}"
     assert all( t[ "body" ][ "to_status" ] == "queued" for t in sent ), f"a row went somewhere other than queued: {sent}"
     assert "00000000-0000-0000-0000-0000000000f1" not in [ t[ "id" ] for t in sent ], "the lone row was approved"
 
 
-def test_story_approve_legacy_board_one_click_approves_the_story( logged_in_page ):
+def test_story_approve_legacy_board_two_clicks_approve_the_story( logged_in_page ):
     state = _route_operator( logged_in_page )
     pane  = _open_legacy( logged_in_page )
-    _operator_one_click( logged_in_page, pane, state )
+    _operator_two_clicks( logged_in_page, pane, state )
 
 
-def test_story_approve_multiplexer_board_one_click_approves_the_story( page ):
+def test_story_approve_multiplexer_board_two_clicks_approve_the_story( page ):
     state = _route_operator( page )
     pane  = _open_mux( page )
-    _operator_one_click( page, pane, state )
+    _operator_two_clicks( page, pane, state )

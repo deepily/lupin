@@ -14832,6 +14832,41 @@ class NotificationsUI {
         if ( el ) el.textContent = message || "";
     }
 
+    _disarmHoldingStoryButtons() {
+        /**
+         * Return every story bar's approve button to its resting label.
+         *
+         * Ensures:
+         *     - the armed flag and class are cleared on each, and the label reads
+         *       "Approve all N in this story" with the N its own data-task-ids carries
+         *     - the status line of a bar that was armed is cleared
+         *     - no story bars on the page is a no-op
+         */
+        document.querySelectorAll( ".holding-story-approve-all" ).forEach( b => {
+            if ( b.dataset.armed === "1" ) this._renderHoldingStoryStatus( b.dataset.story || "", "" );
+            delete b.dataset.armed;
+            b.classList.remove( "task-submit-armed" );
+            b.textContent = `Approve all ${ ( b.dataset.taskIds || "" ).split( "," ).filter( Boolean ).length } in this story`;
+        } );
+    }
+
+    _armHoldingStoryButton( button, story, count ) {
+        /**
+         * First click of a story's approve button: arm it, post nothing (row 376dd4cb).
+         *
+         * Ensures:
+         *     - every story button is disarmed, then this one is armed, so only one is
+         *       ever armed
+         *     - the label reads "Confirm approve all N in this story"
+         *     - the story's status line says what the next click will do
+         */
+        this._disarmHoldingStoryButtons();
+        button.dataset.armed = "1";
+        button.classList.add( "task-submit-armed" );
+        button.textContent = `Confirm approve all ${count} in this story`;
+        this._renderHoldingStoryStatus( story, `Click again to approve ${count} rows in this story.` );
+    }
+
     async _handleHoldingStoryApproveClick( button ) {
         /**
          * Approve every held row in one story, one transition at a time, then report.
@@ -14859,6 +14894,15 @@ class NotificationsUI {
             this._renderHoldingStoryStatus( story, "No rows in this story." );
             return;
         }
+
+        // TWO CLICKS (row 376dd4cb, the story-level half): the first press arms the button and
+        // posts nothing, the second runs the story. A story is the widest one-click approve on
+        // the page, so it is the same accident the group buttons were fixed for.
+        if ( button.dataset.armed !== "1" ) {
+            this._armHoldingStoryButton( button, story, ids.length );
+            return;
+        }
+        this._disarmHoldingStoryButtons();
 
         this._holdingStoriesInFlight.add( story );
         this._renderHoldingStoryStatus( story, `Approved 0 of ${ids.length}…` );
