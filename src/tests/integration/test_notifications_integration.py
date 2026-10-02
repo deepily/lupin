@@ -106,6 +106,17 @@ class _FakeAsyncEvent:
         self.was_set = True
 
 
+# What the door stores for a UI answer, exactly. `answered_by` is the SERVER's account of the caller
+# (row e20e249a): the harness overrides `require_api_key_or_jwt` to return "itest-user", and posts
+# with neither an X-API-Key nor a Bearer token, so the method is "jwt" and there is no account email.
+ITEST_ANSWERED_BY = { "user_id": "itest-user", "account_email": None, "method": "jwt" }
+
+
+def stored_ui_answer( value ):
+    """The dict `_stored_response_dict` hands the repository for a bare-string answer from this harness."""
+    return { "value": value, "source": "ui", "answered_by": ITEST_ANSWERED_BY }
+
+
 class _NotificationHarness:
     """Everything a test needs to drive POST /api/notify/response."""
     def __init__( self, client, ws_manager, notification ):
@@ -280,7 +291,7 @@ class TestSSEBlockingFlow:
         assert body[ "status" ]         == "success"
         assert body[ "response_value" ] == "yes"
 
-        assert notification_harness.persisted == { "value": "yes", "source": "ui" }, \
+        assert notification_harness.persisted == stored_ui_answer( "yes" ), \
             f"a bare string must be wrapped for storage, got {notification_harness.persisted!r}"
 
         assert waiter[ "event" ].was_set, "the waiting SSE stream was never woken"
@@ -319,7 +330,7 @@ class TestSSEBlockingFlow:
         assert response.status_code == 200, f"expected 200, got {response.status_code}: {response.text}"
         assert response.json()[ "response_value" ] == "The server is down"
         assert notification_harness.persisted == {
-            "value": "The server is down", "source": "ui"
+            "value": "The server is down", "source": "ui", "answered_by": ITEST_ANSWERED_BY
         }
 
     def test_open_ended_response_is_stripped_of_markup( self, notification_harness ):
@@ -397,7 +408,7 @@ class TestSSEBlockingFlow:
         response = notification_harness.respond( "no" )
 
         assert response.status_code == 200, f"expected 200, got {response.status_code}: {response.text}"
-        assert notification_harness.persisted == { "value": "no", "source": "ui" }
+        assert notification_harness.persisted == stored_ui_answer( "no" )
 
     @pytest.mark.parametrize(
         "notification_harness",
@@ -571,7 +582,7 @@ class TestMultiDeviceSync:
         """
         first = notification_harness.respond( "yes" )
         assert first.status_code == 200
-        assert notification_harness.persisted == { "value": "yes", "source": "ui" }
+        assert notification_harness.persisted == stored_ui_answer( "yes" )
 
         # The row is now answered, exactly as the database would have it.
         notification_harness.notification.state = "responded"
@@ -580,7 +591,7 @@ class TestMultiDeviceSync:
 
         assert second.status_code == 400, f"expected 400, got {second.status_code}"
         assert "already responded" in second.json()[ "detail" ].lower()
-        assert notification_harness.persisted == { "value": "yes", "source": "ui" }, \
+        assert notification_harness.persisted == stored_ui_answer( "yes" ), \
             "the losing tab must not overwrite the answer that was accepted first"
 
     def test_unknown_notification_is_404_not_500( self, notification_harness ):
@@ -641,27 +652,42 @@ class TestOfflineDetection:
         response = notification_harness.respond( "yes" )
 
         assert response.status_code == 200
-        assert notification_harness.persisted == { "value": "yes", "source": "ui" }
+        assert notification_harness.persisted == stored_ui_answer( "yes" )
         assert not notification_harness.answer_marked_delivered, \
             "with no live waiter the answer must stay owed, or catch-up will never re-hand it"
 
-    def test_answer_is_marked_delivered_only_when_someone_is_waiting( self, notification_harness ):
+    def test_a_registered_waiter_is_woken_with_the_answer_and_the_stamp_is_left_to_the_stream( self, notification_harness ):
         """
-        The other arm of the receipt-gated stamp, so the assertion above cannot
-        pass merely because the stamp never happens at all.
+        The other arm of the receipt-gated stamp, so the test above cannot pass merely because
+        nothing ever happens at the door.
+
+        This test used to assert that the door stamped `answer_delivered_at` when a waiter was
+        registered. Mr. Radio's ruling of 2026-09-05 (row 97ff4426, option B) moved that stamp
+        into the SSE generator, after the `responded` yield: waking a waiter predicts that the
+        stream will resume, it does not prove it did. So the door's part is now: wake the waiter,
+        hand it the response and the server's account of who answered, and stamp nothing.
+        The stream's own stamp is not reachable from this harness (no real stream), so it is
+        not asserted here.
 
         Ensures:
-            - a registered SSE waiter causes answer_delivered_at to be stamped
+            - the registered waiter's event was set
+            - the waiter carries the response and `answered_by`
+            - the door did not stamp answer_delivered_at
         """
         import cosa.rest.routers.notifications as notifications_module
 
+        waiter = _FakeAsyncEvent()
         notifications_module.pending_responses[ str( notification_harness.notification.id ) ] = {
-            "event": _FakeAsyncEvent()
+            "event": waiter
         }
 
         assert notification_harness.respond( "yes" ).status_code == 200
-        assert notification_harness.answer_marked_delivered, \
-            "a woken waiter is a receipt; the answer must be stamped delivered"
+        entry = notifications_module.pending_responses[ str( notification_harness.notification.id ) ]
+        assert waiter.was_set, "a registered SSE waiter must be woken by the answer"
+        assert entry[ "response_data" ] == "yes"
+        assert entry[ "answered_by" ] == ITEST_ANSWERED_BY
+        assert not notification_harness.answer_marked_delivered, \
+            "the door must not stamp delivered on a wake: that moved to the stream (row 97ff4426)"
 
 
 # Three unimplemented Phase 2.1 fixtures used to sit here: `test_database`,

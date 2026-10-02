@@ -63,7 +63,7 @@ if src_path not in sys.path:
 import cosa.utils.util as cu
 
 
-BASE_URL  = "http://localhost:8000"
+BASE_URL  = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
 API_KEY   = "claude_code_simple_key"
 TEST_USER = os.environ.get( "LUPIN_DEV_EMAIL", "test@example.com" )
 

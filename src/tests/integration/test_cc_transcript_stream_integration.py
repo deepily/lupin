@@ -225,7 +225,10 @@ class SeatFixture:
         self.cc_session_id   = str( uuid.uuid4() )
         self.root            = root
         self.transcript_path = os.path.join( root, f"{self.cc_session_id}.jsonl" )
-        self.bridge_path     = os.path.join( root, f"cc-itest-{self.cc_session_id[ :8 ]}.json" )
+        # The bridge lookup (`session_bridge.find_session_by_id`) globs `cc-*.json` in the sessions
+        # directory ITSELF and does not descend: a bridge in the `cc-transcript-itest` subdirectory is
+        # never found and the server answers `refused / not_found`. Only the transcript lives in `root`.
+        self.bridge_path     = os.path.join( HOST_SESSIONS_DIR, f"cc-itest-{self.cc_session_id[ :8 ]}.json" )
 
     # ── transcript ────────────────────────────────────────────────────────────
 
