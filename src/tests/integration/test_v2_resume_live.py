@@ -53,6 +53,19 @@ from tests.integration.v2_queued import (
 
 BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
 
+def _with_lineage( body ):
+    """
+    Tag an /api/v2/ask body with its monopolizing suite job, when there is one.
+
+    Under a monopoly hold the queue defers every job that is not the monopolizer's own
+    child, so an untagged ask sits in `todo` until the suite ends (row 4cbd4858). The suite
+    job exports its id as LUPIN_TEST_MONOPOLIZE_PARENT_ID; `/api/v2/ask` takes it as
+    `parent_id_hash`. Outside a suite the variable is unset and the body is unchanged.
+    """
+    parent_id = os.environ.get( "LUPIN_TEST_MONOPOLIZE_PARENT_ID" )
+    return { **body, "parent_id_hash": parent_id } if parent_id else body
+
+
 _EMAIL    = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" )
 _PASSWORD = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
 
@@ -111,7 +124,7 @@ def test_v2_ask_parks_then_resume_reaches_the_queue( auth_headers ):
     try:
         r1 = requests.post(
             _ASK,
-            json    = { "question": "what\'s the weather", "interactive": True, "speak": False },
+            json    = _with_lineage( { "question": "what\'s the weather", "interactive": True, "speak": False } ),
             headers = auth_headers,
             timeout = 120,
         )
@@ -167,7 +180,7 @@ def test_v2_ask_parks_then_resume_reaches_terminal_done( auth_headers ):
         # ── ask: interactive. A missing required arg (location) MUST park — not execute.
         r1 = requests.post(
             _ASK,
-            json    = { "question": "what's the weather", "interactive": True, "speak": False },
+            json    = _with_lineage( { "question": "what's the weather", "interactive": True, "speak": False } ),
             headers = auth_headers,
             timeout = 120,
         )

@@ -377,6 +377,43 @@ def _code_only( text ):
     return "\n".join( line.split( "#" )[ 0 ] for line in text.splitlines() )
 
 
+def names_endpoint_in_code( text, endpoint ):
+    """
+    Whether a test file's CODE carries `endpoint` as a string it could post to.
+
+    WHY THIS IS NOT `endpoint in text` (row 4cbd4858). Once `/api/v2/ask` became
+    lineage-aware, the substring test accused five files that post nothing to it:
+    `/api/v2/ask-audio` contains it as a prefix, a docstring or comment can name it, and
+    `assert "/api/v2/ask" in detail` only reads a 410 body. A checker that accuses innocent
+    files teaches people to ignore it, which is the lesson `lineage_aware_endpoints` already
+    records about the per-file rule.
+
+    Ensures:
+        - the endpoint must not be followed by a word character or `-` (so `/api/v2/ask` does
+          not match `/api/v2/ask-audio`, while `/api/v2/ask?x=1` and `/api/v2/ask"` do)
+        - docstrings and any string inside a comparison (`"..." in detail`, `== "..."`) do not
+          count: neither one posts anywhere
+        - a file that does not parse is read as raw text, strictly, as before — never silently
+          dropped from the check
+    """
+    pattern = re.compile( re.escape( endpoint ) + r"(?![\w-])" )
+    try:
+        tree = ast.parse( text )
+    except SyntaxError:
+        return pattern.search( text ) is not None
+    skipped = set()
+    for node in ast.walk( tree ):
+        if isinstance( node, ( ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef ) ):
+            body = node.body
+            if body and isinstance( body[ 0 ], ast.Expr ) and isinstance( body[ 0 ].value, ast.Constant ):
+                skipped.add( id( body[ 0 ].value ) )
+        if isinstance( node, ast.Compare ):
+            skipped.update( id( sub ) for sub in ast.walk( node ) )
+    return any( isinstance( node, ast.Constant ) and isinstance( node.value, str )
+                and id( node ) not in skipped and pattern.search( node.value )
+                for node in ast.walk( tree ) )
+
+
 def untagged_callers( endpoints, root, test_dirs ):
     """
     Test files that POST to a lineage-aware endpoint without READING the parent-id env var.
@@ -398,7 +435,7 @@ def untagged_callers( endpoints, root, test_dirs ):
             code = _code_only( text )
             if LINEAGE_ENV in code and LINEAGE_FIELD in code: continue
             for endpoint in endpoints:
-                if endpoint in text:
+                if names_endpoint_in_code( text, endpoint ):
                     offenders.append( ( os.path.join( d, name ), endpoint ) )
                     break
     return offenders
@@ -784,14 +821,17 @@ def test_no_router_in_the_tree_is_unmatched():
 def test_the_v2_submit_door_is_lineage_aware_and_its_siblings_are_not():
     """
     Against the REAL router tree, not a synthetic one. `/api/v2/submit` gained the field
-    when the nine retiring doors' scheduling and lineage moved onto it; `/api/v2/ask` and
-    `/api/v2/resume` never took it and must not be held to it.
+    when the nine retiring doors' scheduling and lineage moved onto it, and `/api/v2/ask`
+    gained it on 2026-10-02 (row 4cbd4858): a suite's asks used to be foreign by
+    construction, so under a monopoly hold every one sat out a 120 s collect timeout.
+    `/api/v2/resume` and `/api/v2/ask-audio` never took it and must not be held to it.
     """
     endpoints, _unmatched = lineage_aware_endpoints( ROUTER_DIR )
 
     assert endpoints.get( "/api/v2/submit" ) == "v2_ask.py"
-    assert "/api/v2/ask"    not in endpoints
-    assert "/api/v2/resume" not in endpoints
+    assert endpoints.get( "/api/v2/ask" )    == "v2_ask.py"
+    assert "/api/v2/resume"    not in endpoints
+    assert "/api/v2/ask-audio" not in endpoints
 
     # The v1 doors still LIVE are still watched. This used to name the research doors as
     # its examples; they retired, their models went with their handlers, and they left the
@@ -854,6 +894,39 @@ def test_a_comment_naming_the_env_var_does_NOT_satisfy_the_check( tmp_path ):
     assert untagged_callers( { "/api/deep-research/submit": "deep_research.py" },
                              str( tmp_path ), ( "smoke", ) ) == [
         ( "smoke/test_comment_only.py", "/api/deep-research/submit" ) ]
+
+
+@pytest.mark.parametrize( "source", [
+    'requests.post( f"{BASE_URL}/api/v2/ask-audio", files=files )\n',                  # a sibling door, longer path
+    '"""Posts to /api/v2/ask through a helper."""\nx = 1\n',                            # a docstring
+    'def test_a():\n    """Names /api/v2/ask."""\n    assert "/api/v2/ask" in detail\n',  # a docstring and a comparison
+    '# POST /api/v2/ask happens elsewhere\nx = 1\n',                                  # a comment
+] )
+def test_a_file_that_only_names_the_endpoint_is_not_a_caller( tmp_path, source ):
+    """
+    THE CONTROLS FOR THE NARROWER MATCH, one per way a file can name an endpoint without
+    posting to it. RED ON REVERT: go back to `endpoint in text` and every one of these is
+    accused.
+    """
+    smoke_dir = tmp_path / "smoke"
+    smoke_dir.mkdir()
+    ( smoke_dir / "test_names_it.py" ).write_text( source )
+    assert untagged_callers( { "/api/v2/ask": "v2_ask.py" }, str( tmp_path ), ( "smoke", ) ) == []
+
+
+@pytest.mark.parametrize( "source", [
+    'requests.post( f"{BASE_URL}/api/v2/ask", json=body )\n',
+    '_ASK = f"{BASE_URL}/api/v2/ask"\n',
+    'requests.post( f"{BASE_URL}/api/v2/ask?x=1", json=body )\n',
+    'def (: /api/v2/ask\n',                                   # unparseable: read as raw text, strictly
+] )
+def test_a_file_that_posts_to_the_endpoint_is_still_flagged( tmp_path, source ):
+    """The narrowing must not blind the check: each real way of reaching the door is still caught."""
+    smoke_dir = tmp_path / "smoke"
+    smoke_dir.mkdir()
+    ( smoke_dir / "test_posts.py" ).write_text( source )
+    assert untagged_callers( { "/api/v2/ask": "v2_ask.py" }, str( tmp_path ), ( "smoke", ) ) == [
+        ( "smoke/test_posts.py", "/api/v2/ask" ) ]
 
 
 # ── the real-tree assertions ────────────────────────────────────────────────
