@@ -24,6 +24,7 @@ That set is a subset of the two base statuses, and an import-time assert enforce
 `is_park_legal_from` also admits parked to parked, a quote refresh that admits nothing new.
 A `parked_from_status` column was rejected because the write-time rule gives the same guarantee with nothing to keep in sync.
 
+Both twins exist because the arbiter holds loaded rows in memory, while `task_query` and `count_only` must filter in Postgres before the query's limit and offset apply.
 The Python and SQLAlchemy twins are independent: neither calls the other and they share no helper.
 The parity gate perturbs one side and requires a failure, which a shared implementation cannot support.
 `now` is a required parameter on both, so the boundary case (chase equals now) is testable without patching.
@@ -236,9 +237,9 @@ def park_reason_is_stale( status, park_reason_captured_at, body_changed_ts ) -> 
     """
     True when the row body changed after its `park_reason` quote was captured.
 
-    It compares `body_changed_ts` (not `updated_ts`), reads no clock, and returns False on ambiguity; the flag is advisory.
-    A False answer means no body change since capture, never "verified still true". A basis `OUTSIDE` the row changes nothing in it; that limit is recorded on the store item aa543525.
-    The real property is `CONTENT CONTRADICTION`, which no timestamp can answer; the chase is the backstop.
+    It compares `body_changed_ts`, not `updated_ts`, which moves on every write and flagged correct quotes as stale after priority-only edits and transitions.
+    It reads no clock and returns False on ambiguity. A false stale cannot be corrected and teaches readers to ignore the flag; the flag is advisory.
+    A False answer means no body change since capture, never "verified still true". A basis `OUTSIDE` the row changes nothing in it; that limit is recorded on the store item aa543525. The real property is `CONTENT CONTRADICTION`. No timestamp can answer it, so the chase is the backstop.
 
     Requires:
         - status is the row's status string (any value accepted)
@@ -300,6 +301,7 @@ def holding_is_active( status, next_chase_ts, now ) -> bool:
 
     A `not_approved` row expires like a parked row: computed at read time, never written back.
     Expiry makes the row visible on the board but not owed, and an import-time assert keeps it out of the owed set.
+    A `not_approved` row was never owed by anyone, so re-admitting it on expiry would poke seats about work nobody approved.
 
     Requires:
         - status is a status string
