@@ -366,7 +366,8 @@ test( "holding area: after unmount the container's row listeners are gone", () =
 
 test( "holding area: the batch buttons still work beside the row controls", async () => {
   const m = mountPane( "holding area" );
-  click( q( m.root, ".holding-approve-all" ) );
+  click( q( m.root, ".holding-approve-all" ) );     // arms
+  click( q( m.root, ".holding-approve-all" ) );     // confirms
   await tick(); await tick();
   assert.deepEqual( m.calls.transitions.map( ( t ) => t.toStatus ), [ "queued" ] );
 } );

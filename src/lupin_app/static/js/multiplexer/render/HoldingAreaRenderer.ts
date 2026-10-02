@@ -49,6 +49,10 @@ import {
   holdingBatchExtras,
   holdingBatchInFlightStatus,
   holdingBatchFinalStatus,
+  holdingBatchRestLabel,
+  holdingBatchConfirmLabel,
+  holdingBatchArmedStatus,
+  HOLDING_BATCH_ARMED_CLASS,
   HOLDING_BATCH_BLANK_REASON,
   HOLDING_BATCH_NO_ROWS,
   HOLDING_BATCH_NO_ROWS_STORY,
@@ -574,7 +578,7 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     const btn = el.closest<HTMLButtonElement>( ".holding-approve-all, .holding-wont-fix-all" );
     if ( btn === null ) return;
     const verb = btn.classList.contains( "holding-approve-all" ) ? "approve" : "wont_fix";
-    void this.runBatch( btn.dataset.filer ?? "", verb );
+    void this.runBatch( btn, btn.dataset.filer ?? "", verb );
   }
 
   /**
@@ -661,6 +665,19 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     }
   }
 
+  /** Return one filer's BOTH batch buttons to their resting labels. A repaint does the same by rebuilding them. */
+  private disarmGroup( filer: string ): void {
+    const group = this.groupFor( filer );
+    /* c8 ignore next */ // defensive: runBatch only runs for a button that is inside a rendered group.
+    if ( group === null ) return;
+    for ( const b of Array.from( group.querySelectorAll<HTMLButtonElement>(
+      ".holding-approve-all, .holding-wont-fix-all" ) ) ) {
+      delete b.dataset.armed;
+      b.classList.remove( HOLDING_BATCH_ARMED_CLASS );
+      b.textContent = holdingBatchRestLabel( b.classList.contains( "holding-wont-fix-all" ) ? "wont_fix" : "approve" );
+    }
+  }
+
   /** The group's batch reason box, trimmed, or "" when it is not rendered. */
   private batchReason( filer: string ): string {
     const input = this.groupFor( filer )?.querySelector<HTMLInputElement>( ".holding-wont-fix-all-reason" );
@@ -696,7 +713,7 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
    *   - every row is attempted, whatever the ones before it returned
    *   - the pane refreshes exactly once, after all rows have been attempted
    */
-  private async runBatch( filer: string, verb: string ): Promise<void> {
+  private async runBatch( btn: HTMLButtonElement, filer: string, verb: string ): Promise<void> {
     if ( filer === "" ) return;
     const needs = holdingBatchNeeds( verb );
     /* c8 ignore next */ // defensive: handleBatchClick only ever passes one of the two known verbs.
@@ -705,15 +722,30 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
 
     const reason = needs.reason ? this.batchReason( filer ) : "";
     if ( needs.reason && reason === "" ) {
+      this.disarmGroup( filer );
       this.paintGroupStatus( filer, HOLDING_BATCH_BLANK_REASON );
       return;
     }
 
     const ids = this.heldRowIdsForFiler( filer );
     if ( ids.length === 0 ) {
+      this.disarmGroup( filer );
       this.paintGroupStatus( filer, HOLDING_BATCH_NO_ROWS );
       return;
     }
+
+    // ARM, THEN CONFIRM (row 376dd4cb). The first press only arms: the button names the verb
+    // and the row count, and nothing is posted. Arming one button disarms its sibling, so
+    // "Approve all" cannot sit armed while the operator reaches for "Won't fix all".
+    if ( btn.dataset.armed !== "1" ) {
+      this.disarmGroup( filer );
+      btn.dataset.armed = "1";
+      btn.classList.add( HOLDING_BATCH_ARMED_CLASS );
+      btn.textContent = holdingBatchConfirmLabel( verb, ids.length );
+      this.applyGroupStatus( filer, holdingBatchArmedStatus( verb, ids.length ) );
+      return;
+    }
+    this.disarmGroup( filer );
 
     const extras = holdingBatchExtras( verb, reason );
     this.batchesInFlight.add( filer );

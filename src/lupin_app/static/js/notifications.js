@@ -15199,35 +15199,113 @@ class NotificationsUI {
         return { ok, failed, firstError };
     }
 
+    _holdingBatchRestLabel( button ) {
+        /**
+         * A batch button's resting label, read off its class.
+         *
+         * Ensures:
+         *     - "Won't fix all" for the won't-fix button, "Approve all" for anything else
+         */
+        return button.classList.contains( "holding-wont-fix-all" ) ? "Won't fix all" : "Approve all";
+    }
+
+    _disarmHoldingBatchButtons( filer ) {
+        /**
+         * Return both of a filer's batch buttons to their resting labels.
+         *
+         * Ensures:
+         *     - the armed flag and class are cleared and the label reads "Approve all" /
+         *       "Won't fix all" on each
+         *     - a missing group is a no-op
+         */
+        const sel = `.holding-approve-all[data-filer="${CSS.escape( filer )}"], ` +
+                    `.holding-wont-fix-all[data-filer="${CSS.escape( filer )}"]`;
+        document.querySelectorAll( sel ).forEach( b => {
+            delete b.dataset.armed;
+            b.classList.remove( "task-submit-armed" );
+            b.textContent = this._holdingBatchRestLabel( b );
+        } );
+    }
+
+    _armHoldingBatchButton( button, filer, count ) {
+        /**
+         * First click of a batch button: arm it, post nothing. Rick approved a held row
+         * set by accident with a single click (row 376dd4cb), so the batch works the way
+         * the per-row Submit does: the first click ARMS, the second CONFIRMS.
+         *
+         * The label names the verb and the row count, so the second click is a decision
+         * about a stated number of rows. Arming one button disarms its sibling.
+         *
+         * Ensures:
+         *     - both buttons of the group are disarmed, then this one is armed
+         *     - the label reads "Confirm approve all N" / "Confirm won't fix all N"
+         *     - the group's status line says what the next click will do
+         *     - nothing is posted
+         */
+        const wontFix = button.classList.contains( "holding-wont-fix-all" );
+        this._disarmHoldingBatchButtons( filer );
+        button.dataset.armed = "1";
+        button.classList.add( "task-submit-armed" );
+        button.textContent = wontFix ? `Confirm won't fix all ${count}` : `Confirm approve all ${count}`;
+        this._renderHoldingGroupStatus( filer, wontFix
+            ? `Click again to close ${count} rows as won't fix with this reason.`
+            : `Click again to approve ${count} rows.` );
+    }
+
     async _handleHoldingApproveAllClick( button ) {
         /**
          * Batch approve — promote every row this filer put in the holding area.
          *
-         * No reason field and no confirm: this is the non-destructive direction, and
-         * a row approved by mistake is demoted straight back, which is the exact
-         * transition Rick added for the purpose.
+         * No reason field. TWO CLICKS (row 376dd4cb): the first arms the button, the
+         * second confirms. A row approved by mistake can be demoted straight back, but a
+         * batch is many rows at once and the promotion is what asks Rick.
          */
         const filer = button.dataset.filer || "";
         if ( !filer ) return;
+        if ( button.dataset.armed !== "1" ) {
+            const count = this._heldRowIdsForFiler( filer ).length;
+            if ( count === 0 ) {
+                this._disarmHoldingBatchButtons( filer );
+                this._renderHoldingGroupStatus( filer, "No rows in this group." );
+                return;
+            }
+            this._armHoldingBatchButton( button, filer, count );
+            return;
+        }
+        this._disarmHoldingBatchButtons( filer );
         await this._applyHoldingBatch( filer, "queued", {}, "Approved" );
     }
 
     async _handleHoldingWontFixAllClick( button ) {
         /**
          * Batch won't-fix — close every row this filer put in the holding area, all
-         * under ONE reason, which the server requires non-blank on each.
+         * under ONE reason, which the server requires non-blank on each. TWO CLICKS
+         * (row 376dd4cb): the first arms the button, the second confirms.
          *
          * The blank check is enforced here because the alternative is N identical
-         * 422s the operator has to read one at a time to learn a single fact.
+         * 422s the operator has to read one at a time to learn a single fact. It runs
+         * on BOTH clicks: a reason cleared between them refuses and disarms.
          */
         const filer = button.dataset.filer || "";
         if ( !filer ) return;
         const input  = document.querySelector( `.holding-wont-fix-all-reason[data-filer="${CSS.escape( filer )}"]` );
         const reason = input && typeof input.value === "string" ? input.value.trim() : "";
         if ( !reason ) {
+            this._disarmHoldingBatchButtons( filer );
             this._renderHoldingGroupStatus( filer, "A reason is required — it will be applied to every row in this group." );
             return;
         }
+        if ( button.dataset.armed !== "1" ) {
+            const count = this._heldRowIdsForFiler( filer ).length;
+            if ( count === 0 ) {
+                this._disarmHoldingBatchButtons( filer );
+                this._renderHoldingGroupStatus( filer, "No rows in this group." );
+                return;
+            }
+            this._armHoldingBatchButton( button, filer, count );
+            return;
+        }
+        this._disarmHoldingBatchButtons( filer );
         await this._applyHoldingBatch( filer, "wont_fix", { reason }, "Closed" );
     }
 

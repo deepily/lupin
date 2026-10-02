@@ -130,7 +130,8 @@ test( "a held row's chip shows who asked and why, and its Approve reaches the VE
   assert.deepEqual( store.transitions, [], "a chip click never runs the pane's own verbs" );
 
   // The pane's own batch buttons still work alongside the chip.
-  root.querySelector<HTMLButtonElement>( ".holding-approve-all" )!.click();
+  root.querySelector<HTMLButtonElement>( ".holding-approve-all" )!.click();    // arms
+  root.querySelector<HTMLButtonElement>( ".holding-approve-all" )!.click();    // confirms
   await tick();
   assert.equal( store.transitions.length, 2 );
 } );
@@ -142,7 +143,8 @@ test( "a holding area built WITHOUT a request store mounts no badge, and its bat
   const r = createHoldingAreaRenderer( { eventBus: bus, store } );
   r.mount( root );
   assert.equal( root.querySelectorAll( '[data-testid="multiplexer-holding-area-request-badge"]' ).length, 0 );
-  root.querySelector<HTMLButtonElement>( ".holding-approve-all" )!.click();
+  root.querySelector<HTMLButtonElement>( ".holding-approve-all" )!.click();    // arms
+  root.querySelector<HTMLButtonElement>( ".holding-approve-all" )!.click();    // confirms
   await tick();
   assert.deepEqual( store.transitions, [ "h2" ] );
   r.unmount();

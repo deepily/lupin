@@ -410,9 +410,12 @@ function mountHolding( rows: TaskItem[], failRead: () => boolean ): HoldingHarne
     writes : () => writes,
     reads  : () => reads,
     statusOf : ( filer ) => q<HTMLElement>( groupOf( filer ), ".holding-area-group-status" ).textContent ?? "",
-    clickApproveAll : ( filer ) =>
-      q<HTMLButtonElement>( groupOf( filer ), ".holding-approve-all" )
-        .dispatchEvent( new globalThis.MouseEvent( "click", { bubbles: true } ) ),
+    // Two clicks: the first ARMS the button, the second CONFIRMS (row 376dd4cb).
+    clickApproveAll : ( filer ) => {
+      const button = q<HTMLButtonElement>( groupOf( filer ), ".holding-approve-all" );
+      button.dispatchEvent( new globalThis.MouseEvent( "click", { bubbles: true } ) );
+      button.dispatchEvent( new globalThis.MouseEvent( "click", { bubbles: true } ) );
+    },
     unmount : () => renderer.unmount(),
   };
 }
