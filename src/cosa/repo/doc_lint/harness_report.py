@@ -77,18 +77,29 @@ def caught( claim_list, seed_span ):
         - claim_list is a run_pair list entry; seed_span is ( start, end ) in the old text
 
     Ensures:
-        - True only when a claim judged dropped has a verified quote that overlaps the seed span
-        - a flagged claim elsewhere does not count, and a seeded claim the extractor discarded
-          or never listed is a miss
+        - True when a claim judged dropped has a verified quote that overlaps the seed span, or when
+          a run flagged for a person overlaps it (rule B4 of row dad61023)
+        - a flagged claim or run elsewhere does not count, and a seeded claim the extractor never
+          listed, with no flagged run on it, is a miss
     """
     flags = final_absent( claim_list[ "runs" ] ) if claim_list[ "claims" ] else []
-    return any( flag and claim_extractor.spans_overlap( ( c[ "start" ], c[ "end" ] ), seed_span )
-                for flag, c in zip( flags, claim_list[ "claims" ] ) )
+    return run_flagged( claim_list, seed_span ) or any( flag and claim_extractor.spans_overlap( ( c[ "start" ], c[ "end" ] ), seed_span )
+                                                         for flag, c in zip( flags, claim_list[ "claims" ] ) )
+
+
+def run_flagged( claim_list, seed_span ):
+    """Say whether a flagged run of an extractor list overlaps a seed span."""
+    return any( claim_extractor.spans_overlap( tuple( f ), seed_span ) for f in claim_list[ "flags" ] )
+
+
+def discarded_on( claim_list, seed_span ):
+    """Say whether a discarded quote of an extractor list overlaps a seed span: the harness threw the claim away."""
+    return any( d[ "start" ] is not None and claim_extractor.spans_overlap( ( d[ "start" ], d[ "end" ] ), seed_span ) for d in claim_list[ "discards" ] )
 
 
 def flagged( claim_list ):
-    """Say whether an extractor list has any claim judged dropped."""
-    return bool( claim_list[ "claims" ] ) and any( final_absent( claim_list[ "runs" ] ) )
+    """Say whether an extractor list has any claim judged dropped, or any run flagged for a person."""
+    return bool( claim_list[ "flags" ] ) or ( bool( claim_list[ "claims" ] ) and any( final_absent( claim_list[ "runs" ] ) ) )
 
 
 def build_report( results, config, judge_prompt_version=None, jev_run=False ):
@@ -106,7 +117,11 @@ def build_report( results, config, judge_prompt_version=None, jev_run=False ):
           criterion must hold on every list and not on one lucky draw
         - agreement is reported over all claims and over claims overlapping a seed span, each with
           its interval, because an overall figure can hide disagreement on the dropped claims
-        - reports the escalation count, discarded-claim count and mean uncovered fraction
+        - reports the escalation count, discarded-claim count (and per code) and mean uncovered fraction
+        - per list: seeded_span_discarded counts seeded pairs where a DISCARDED quote overlaps the span
+          (the harness threw the claim away, the extractor did list it), flagged_pairs and flagged_rate
+          count pairs with a run flagged for a person, and caught_by_flag_only counts seeded pairs
+          caught by a flag alone; the top-level seeded_span_discarded and flagged_rate are the largest over the lists
         - the model ids and prompt versions used are recorded in the report
         - miss_criterion_met is True only for zero misses on at least 60 seeded pairs in every list
         - false_alarm_ok is True only when every list flags at most FALSE_ALARM_CEILING of the
@@ -129,6 +144,9 @@ def build_report( results, config, judge_prompt_version=None, jev_run=False ):
     for slot in range( config.extractor_lists ):
         misses = sum( 1 for r in seeded if not caught( r[ "lists" ][ slot ], tuple( r[ "seed_span" ] ) ) )
         alarms = sum( 1 for r in unseeded if flagged( r[ "lists" ][ slot ] ) )
+        flag_pairs = sum( 1 for r in results if r[ "lists" ][ slot ][ "flags" ] )
+        flag_only  = sum( 1 for r in seeded if run_flagged( r[ "lists" ][ slot ], tuple( r[ "seed_span" ] ) )
+                          and not caught( dict( r[ "lists" ][ slot ], flags=[] ), tuple( r[ "seed_span" ] ) ) )
         lists.append( {
             "slot"              : slot,
             "positives"         : len( seeded ),
@@ -137,15 +155,22 @@ def build_report( results, config, judge_prompt_version=None, jev_run=False ):
             "unseeded"          : len( unseeded ),
             "false_alarms"      : alarms,
             "false_alarm_rate"  : alarms / len( unseeded ) if unseeded else None,
+            "seeded_span_discarded" : sum( 1 for r in seeded if discarded_on( r[ "lists" ][ slot ], tuple( r[ "seed_span" ] ) ) ),
+            "flagged_pairs"     : flag_pairs,
+            "flagged_rate"      : flag_pairs / len( results ) if results else None,
+            "caught_by_flag_only": flag_only,
         } )
     miss_ok = bool( seeded ) and len( seeded ) >= DEFAULT_POSITIVES_NEEDED and all( l[ "misses" ] == 0 for l in lists )
     fa_ok   = all( l[ "false_alarm_rate" ] is not None and l[ "false_alarm_rate" ] <= FALSE_ALARM_CEILING for l in lists )
-    all_total = all_same = seed_total = seed_same = escalations = discarded = 0
+    all_total = all_same = seed_total = seed_same = escalations = discarded = reextract_calls = 0
+    codes     = { code: 0 for code in claim_extractor.DISCARD_CODES }
     uncovered = []
     longest   = 0.0
     for r in results:
         for lst in r[ "lists" ]:
             discarded  += lst[ "discarded" ]
+            reextract_calls += lst[ "reextract_calls" ]
+            for d in lst[ "discards" ]: codes[ d[ "code" ] ] += 1
             uncovered.append( lst[ "uncovered" ] )
             longest = max( longest, lst[ "longest_quote" ] )
             escalations += sum( row[ "escalated" ] for run in lst[ "runs" ] for row in run )
@@ -171,6 +196,10 @@ def build_report( results, config, judge_prompt_version=None, jev_run=False ):
                                 "interval": interval( seed_same, seed_total ) },
         "escalations"       : escalations,
         "discarded_claims"  : discarded,
+        "discard_codes"     : codes,
+        "seeded_span_discarded" : max( ( l[ "seeded_span_discarded" ] for l in lists ), default=0 ),
+        "flagged_rate"      : max( ( l[ "flagged_rate" ] for l in lists if l[ "flagged_rate" ] is not None ), default=None ),
+        "reextract_calls"   : reextract_calls,
         "longest_quote"     : longest,
         "mean_uncovered"    : sum( uncovered ) / len( uncovered ) if uncovered else None,
         "identical_list_pairs" : identical,

@@ -54,6 +54,8 @@ def main( argv, query_fn=None ):
         - returns 3 and runs nothing when --gate is set and --frozen-versions is missing or is not
           the extractor and judge versions in this code, so a gate run cannot use prompts
           that changed after they were registered
+        - returns 4 and runs nothing when a seeded pair's span is not itself quotable (locate_quote
+          refuses it): a removal the extractor cannot express would be an unmeasurable miss
         - returns 2 when --claude-cli-path is not an executable file; the report records the path used, or None for the SDK's own
         - returns 2 and opens nothing when a pairs or keys path names the gate split and --gate is not set
         - returns 3 and runs nothing when --gate is set with the Jev back end and --frozen-thresholds
@@ -113,6 +115,10 @@ def main( argv, query_fn=None ):
     except ValueError as e:
         print( f"REFUSED: {e}", file=sys.stderr )
         return 2
+    unquotable = harness_runner.unquotable_seeds( pairs )
+    if unquotable:
+        print( f"REFUSED: {len( unquotable )} seeded span(s) cannot be quoted under the extractor's floors, so the run could not catch them: {', '.join( unquotable )}", file=sys.stderr )
+        return 4
     try:
         binding = f"claude_cli={args.claude_cli_path}|version={model_transport.cli_version( args.claude_cli_path )}"
         results = asyncio.run( harness_runner.run_all( pairs, config, harness_runner.Ledger( args.ledger, binding=binding ), query_fn=query_fn, judge_backend=backend ) )

@@ -16,13 +16,36 @@ from collections import namedtuple
 
 from . import model_transport
 
-MIN_QUOTE_WORDS = 3
-MIN_QUOTE_CHARS = 15
-MAX_QUOTE_CHARS = 300
-MAX_QUOTE_SHARE = 0.6
+# Row ed2f9b4e: a removed span of two words was listed by the extractor and thrown away at the old
+# floors of 3 words and 15 characters. MIN_* are the floors a quote must meet in the old text. A
+# quote under the LONG_* floors (the old ones) must also occur exactly once there, because
+# locating takes the first occurrence and a short quote found twice would aim the span at the
+# wrong sentence. The destination search (bounded=False) and the prose judge keep the LONG_* floors.
+MIN_QUOTE_WORDS  = 2
+MIN_QUOTE_CHARS  = 10
+LONG_MIN_QUOTE_WORDS = 3
+LONG_MIN_QUOTE_CHARS = 15
+MAX_QUOTE_CHARS  = 300
+MAX_QUOTE_SHARE  = 0.6
+
+# The reason a claim is discarded. One code per discard, checked in this order after the quote is
+# located: NOT_FOUND, TOO_FEW_WORDS, TOO_FEW_CHARS, AMBIGUOUS, TOO_LONG, SHARE_CAP.
+NOT_FOUND       = "NOT_FOUND"
+TOO_FEW_WORDS   = "TOO_FEW_WORDS"
+TOO_FEW_CHARS   = "TOO_FEW_CHARS"
+AMBIGUOUS       = "AMBIGUOUS"
+TOO_LONG        = "TOO_LONG"
+SHARE_CAP       = "SHARE_CAP"
+DISCARD_CODES   = ( NOT_FOUND, TOO_FEW_WORDS, TOO_FEW_CHARS, AMBIGUOUS, TOO_LONG, SHARE_CAP )
+
+# An uncovered run of old text is flagged for a person only when it has this many words and at
+# least one content word (not in STOP_WORDS). Set on the dev split by measurement, not by hand.
+MIN_RUN_WORDS = 2
+STOP_WORDS    = frozenset( "a an the of to in on at by for or and is are be it its if as with from that this".split() )
 
 Claim            = namedtuple( "Claim", [ "text", "quote", "start", "end" ] )
-ExtractionResult = namedtuple( "ExtractionResult", [ "claims", "discarded", "uncovered_fraction", "longest_quote_share" ] )
+ExtractionResult = namedtuple( "ExtractionResult", [ "claims", "discarded", "uncovered_fraction", "longest_quote_share",
+                                                     "discards", "flags", "reextract_calls" ], defaults=( (), (), 0 ) )
 
 SYSTEM_PROMPT = (
     "You list the atomic claims made by a piece of documentation. A claim is one fact a caller "
@@ -84,9 +107,9 @@ def _has_structure( old_text, normalized ):
     return len( SENTENCE_END.findall( normalized ) ) >= 2 or sum( 1 for line in old_text.splitlines() if line.strip() ) >= 2
 
 
-def locate_quote( quote, old_text, bounded=True ):
+def classify_quote( quote, old_text, bounded=True ):
     """
-    Find a quote in old text and return its span, or None.
+    Decide whether a quote verifies in old text, and say why not when it does not.
 
     Requires:
         - quote and old_text are str
@@ -94,26 +117,56 @@ def locate_quote( quote, old_text, bounded=True ):
           most of a short text; the old text of a rewrite is always searched bounded
 
     Ensures:
-        - returns ( start, end ) as offsets into the original old_text when the normalized
-          quote occurs in the normalized old text, taking the first occurrence
-        - returns None for a quote under MIN_QUOTE_WORDS words or MIN_QUOTE_CHARS characters,
-          so a one-word quote can never verify
-        - returns None for a quote over MAX_QUOTE_CHARS, or, in a text of two or more sentences or lines,
-          over MAX_QUOTE_SHARE of the text, so one quote cannot span a whole docstring and
-          claim to catch every removal
-        - returns None when the quote does not occur
+        - returns ( None, ( start, end ) ) when the quote verifies: the span is into the original old_text,
+          the first occurrence of the normalized quote in the normalized old text
+        - returns ( code, span ) otherwise, code one of DISCARD_CODES; span is the first occurrence
+          in the original text when the quote occurs there, else None, so a discarded claim keeps
+          its stretch
+        - bounded: a quote under MIN_QUOTE_WORDS or MIN_QUOTE_CHARS is TOO_FEW_WORDS or TOO_FEW_CHARS;
+          one under the LONG_ floors that occurs more than once is AMBIGUOUS; one over MAX_QUOTE_CHARS
+          is TOO_LONG; one over MAX_QUOTE_SHARE of a text of two or more sentences or lines is SHARE_CAP
+        - not bounded: the LONG_ floors apply and nothing else is checked
+        - a quote that is blank, or that does not occur, is never verified
 
     Raises:
         - nothing
     """
     wanted, _ = normalize( quote )
-    if len( wanted.split() ) < MIN_QUOTE_WORDS or len( wanted ) < MIN_QUOTE_CHARS: return None
+    if not wanted: return TOO_FEW_WORDS, None
     haystack, offsets = normalize( old_text )
-    if bounded and len( wanted ) > MAX_QUOTE_CHARS: return None
-    if bounded and len( wanted ) > MAX_QUOTE_SHARE * len( haystack ) and _has_structure( old_text, haystack ): return None
     position = haystack.find( wanted )
-    if position < 0: return None
-    return offsets[ position ], offsets[ position + len( wanted ) - 1 ] + 1
+    if position < 0: return NOT_FOUND, None
+    span  = ( offsets[ position ], offsets[ position + len( wanted ) - 1 ] + 1 )
+    words = len( wanted.split() )
+    floor_words = MIN_QUOTE_WORDS if bounded else LONG_MIN_QUOTE_WORDS
+    floor_chars = MIN_QUOTE_CHARS if bounded else LONG_MIN_QUOTE_CHARS
+    if words < floor_words:       return TOO_FEW_WORDS, span
+    if len( wanted ) < floor_chars: return TOO_FEW_CHARS, span
+    if not bounded: return None, span
+    if ( words < LONG_MIN_QUOTE_WORDS or len( wanted ) < LONG_MIN_QUOTE_CHARS ) and haystack.find( wanted, position + 1 ) >= 0:
+        return AMBIGUOUS, span
+    if len( wanted ) > MAX_QUOTE_CHARS: return TOO_LONG, span
+    if len( wanted ) > MAX_QUOTE_SHARE * len( haystack ) and _has_structure( old_text, haystack ): return SHARE_CAP, span
+    return None, span
+
+
+def locate_quote( quote, old_text, bounded=True ):
+    """
+    Find a quote in old text and return its span, or None.
+
+    Requires:
+        - quote and old_text are str
+        - bounded is False only when searching a destination document (see classify_quote)
+
+    Ensures:
+        - returns ( start, end ) as offsets into the original old_text exactly when classify_quote
+          verifies the quote; every discard reason, including a short quote that occurs twice, gives None
+
+    Raises:
+        - nothing
+    """
+    code, span = classify_quote( quote, old_text, bounded )
+    return span if code is None else None
 
 
 def spans_overlap( first, second ):
@@ -192,16 +245,92 @@ def verify_claims( pairs, old_text ):
 
     Ensures:
         - a pair whose quote locates in old_text becomes a Claim carrying its span
-        - every other pair is returned in the discarded list with its reason
+        - every other pair is returned in the discarded list as ( claim, quote, code ), code one of DISCARD_CODES
         - len( claims ) + len( discarded ) == len( pairs )
     """
     claims    = []
     discarded = []
     for claim, quote in pairs:
-        span = locate_quote( quote, old_text )
-        if span is None: discarded.append( ( claim, quote, "quote not found in old text, or too short" ) )
-        else:            claims.append( Claim( claim, quote, span[ 0 ], span[ 1 ] ) )
+        code, span = classify_quote( quote, old_text )
+        if code is None: claims.append( Claim( claim, quote, span[ 0 ], span[ 1 ] ) )
+        else:            discarded.append( ( claim, quote, code ) )
     return claims, discarded
+
+
+def discard_rows( discarded, old_text ):
+    """
+    Turn discarded ( claim, quote, code ) triples into ledger rows that carry no quote text.
+
+    Requires:
+        - discarded comes from verify_claims on the same old_text
+
+    Ensures:
+        - one { code, words, start, end } per discard, in order; start and end are the first
+          occurrence of the quote in old_text, or None for a quote that does not occur
+        - the quote itself and the claim are never in a row
+    """
+    rows = []
+    for _, quote, code in discarded:
+        _, span = classify_quote( quote, old_text )
+        rows.append( { "code": code, "words": len( normalize( quote )[ 0 ].split() ),
+                       "start": None if span is None else span[ 0 ], "end": None if span is None else span[ 1 ] } )
+    return rows
+
+
+def uncovered_runs( old_text, spans ):
+    """
+    Return the runs of old text that no span covers and that are worth a person's look.
+
+    Requires:
+        - spans are ( start, end ) offsets into old_text
+
+    Ensures:
+        - returns a list of ( start, end ), in order; a run is consecutive whitespace-separated words
+          none of which overlaps a span
+        - a run is kept only with at least MIN_RUN_WORDS words, one of them not in STOP_WORDS
+        - uses no model
+    """
+    runs    = []
+    current = []
+    def close():
+        words = [ w for w in current if re.sub( r"[^0-9a-z_]", "", w[ 0 ].lower() ) not in STOP_WORDS | { "" } ]
+        if len( current ) >= MIN_RUN_WORDS and words: runs.append( ( current[ 0 ][ 1 ], current[ -1 ][ 2 ] ) )
+        current.clear()
+    for match in re.finditer( r"\S+", old_text ):
+        if any( spans_overlap( ( match.start(), match.end() ), span ) for span in spans ): close()
+        else: current.append( ( match.group(), match.start(), match.end() ) )
+    close()
+    return runs
+
+
+def enclosing_sentences( old_text, runs ):
+    """
+    Return the distinct sentences of old text that contain a run, joined by newlines.
+
+    Requires:
+        - runs are ( start, end ) offsets into old_text
+
+    Ensures:
+        - a sentence ends at SENTENCE_END or a line break; each is returned once, in text order
+        - returns "" for no runs
+    """
+    bounds = [ 0 ]
+    for match in re.finditer( r"[.!?](?:\s|$)|\n", old_text ): bounds.append( match.end() )
+    bounds.append( len( old_text ) )
+    picked = []
+    for start, end in runs:
+        for low, high in zip( bounds, bounds[ 1: ] ):
+            if low < end and start < high and ( low, high ) not in picked: picked.append( ( low, high ) )
+    return "\n".join( old_text[ low:high ].strip() for low, high in sorted( picked ) if old_text[ low:high ].strip() )
+
+
+async def _ask( old_text, model, query_fn, quoted_from=None ):
+    """Make one extractor call on a text and verify its quotes against quoted_from (default: the text)."""
+    suffix = model_transport.new_suffix( old_text )
+    raw    = await model_transport.complete(
+        model, SYSTEM_PROMPT, model_transport.wrap( "old_text", suffix, old_text ), query_fn=query_fn
+    )
+    return verify_claims( parse_claims( raw ), old_text if quoted_from is None else quoted_from )
 
 
 async def extract_claims( old_text, model, query_fn=None ):
@@ -213,9 +342,15 @@ async def extract_claims( old_text, model, query_fn=None ):
         - model is a model id string; there is no default
 
     Ensures:
-        - returns an ExtractionResult: verified claims, discarded ( claim, quote, reason )
-          triples, and the share of old text under no verified quote
-        - the discarded count is reported, never hidden: a discarded seeded claim is a miss
+        - returns an ExtractionResult: verified claims, discarded ( claim, quote, code ) triples,
+          and the share of old text under no verified quote
+        - the discarded count is reported, never hidden, and discards lists one { code, words, start, end }
+          per discard with no quote text
+        - a discarded claim never ends a stretch of text unwatched: runs of old text under no kept quote
+          (see uncovered_runs) are put to the model once more, as their enclosing sentences, under the
+          same prompt and floors, in one extra call (reextract_calls is 1, else 0); a run still under no
+          kept quote afterwards is returned in flags as ( start, end ), for a person
+        - an unreadable reply to that second call leaves its runs flagged; a failed call raises
         - longest_quote_share is the longest verified quote as a share of the old text, so a
           reader can see when one quote carries most of it
         - the old text is wrapped in tags with a random suffix absent from the text, so nothing
@@ -223,17 +358,25 @@ async def extract_claims( old_text, model, query_fn=None ):
 
     Raises:
         - ValueError if old_text is empty or model is empty
-        - model_transport.ModelCallError if the call fails
-        - ExtractionParseError if the reply breaks the JSON contract
+        - model_transport.ModelCallError if a call fails
+        - ExtractionParseError if the first reply breaks the JSON contract
     """
     if not old_text.strip(): raise ValueError( "old_text is empty" )
-    suffix = model_transport.new_suffix( old_text )
-    raw    = await model_transport.complete(
-        model, SYSTEM_PROMPT, model_transport.wrap( "old_text", suffix, old_text ), query_fn=query_fn
-    )
-    claims, discarded = verify_claims( parse_claims( raw ), old_text )
+    claims, discarded = await _ask( old_text, model, query_fn )
+    rows  = discard_rows( discarded, old_text )
+    runs  = uncovered_runs( old_text, [ ( c.start, c.end ) for c in claims ] )
+    calls = 0
+    if runs:
+        calls = 1
+        try:
+            more, _ = await _ask( enclosing_sentences( old_text, runs ), model, query_fn, quoted_from=old_text )
+        except ExtractionParseError:
+            more = []
+        claims = claims + [ c for c in more if ( c.start, c.end ) not in [ ( k.start, k.end ) for k in claims ] ]
+        runs   = uncovered_runs( old_text, [ ( c.start, c.end ) for c in claims ] )
     longest = max( ( ( c.end - c.start ) / len( old_text ) for c in claims ), default=0.0 )
-    return ExtractionResult( claims, discarded, uncovered_fraction( old_text, [ ( c.start, c.end ) for c in claims ] ), longest )
+    return ExtractionResult( claims, discarded, uncovered_fraction( old_text, [ ( c.start, c.end ) for c in claims ] ), longest,
+                             rows, runs, calls )
 
 
 PROMPT_VERSION = model_transport.prompt_version( "extractor", inspect.getsource( sys.modules[ __name__ ] ) )

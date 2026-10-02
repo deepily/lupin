@@ -148,9 +148,12 @@ async def run_pair( pair, config, ledger, query_fn=None, judge_backend=None ):
         - a backend's verdicts are ledgered only when its .complete( judged ) is True, so a run in
           which the backend failed to answer is asked again on resume instead of replayed
         - returns { "id", "seed_span", "lists" }; each list holds its claims, the count of
-          discarded claims, the uncovered fraction of the old text, and one verdict row per
+          discarded claims, one { code, words, start, end } per discard (no quote text), the runs
+          flagged for a person, the extra extractor calls made, the uncovered fraction of the old text, and one verdict row per
           judge run
         - the claim list of each extractor slot is frozen in the ledger before any judging
+        - a frozen entry written before row ed2f9b4e has no discards, flags or reextract_calls; it reads
+          as none of them, so judge_comparison can still rebuild a report from an old ledger
         - a finished call is never made again
 
     Raises:
@@ -165,6 +168,8 @@ async def run_pair( pair, config, ledger, query_fn=None, judge_backend=None ):
         if frozen is None:
             result = await claim_extractor.extract_claims( pair[ "old" ], config.extractor_model, query_fn=query_fn )
             frozen = { "claims": [ c._asdict() for c in result.claims ], "discarded": len( result.discarded ),
+                       "discards": list( result.discards ), "flags": [ list( f ) for f in result.flags ],
+                       "reextract_calls": result.reextract_calls,
                        "uncovered": result.uncovered_fraction,
                        "longest_quote": result.longest_quote_share }
             ledger.put( key, frozen )
@@ -186,8 +191,26 @@ async def run_pair( pair, config, ledger, query_fn=None, judge_backend=None ):
                 if judge_backend is None or judge_backend.complete( judged ): ledger.put( jkey, rows )
             runs.append( rows )
         lists.append( { "claims": frozen[ "claims" ], "discarded": frozen[ "discarded" ],
+                        "discards": frozen.get( "discards", [] ), "flags": frozen.get( "flags", [] ),
+                        "reextract_calls": frozen.get( "reextract_calls", 0 ),
                         "uncovered": frozen[ "uncovered" ], "longest_quote": frozen[ "longest_quote" ], "runs": runs } )
     return { "id": pair[ "id" ], "seed_span": pair.get( "seed_span" ), "lists": lists }
+
+
+def unquotable_seeds( pairs ):
+    """
+    Return the ids of seeded pairs whose seeded span cannot itself be quoted.
+
+    Requires:
+        - pairs is a list of run_pair inputs
+
+    Ensures:
+        - a pair with a seed_span is listed when locate_quote refuses the text of that span in the old
+          text: too short, ambiguous, or too much of the text; the instrument cannot express such a removal
+        - unseeded pairs are never listed; ids only, never text
+    """
+    return [ p[ "id" ] for p in pairs
+             if p.get( "seed_span" ) is not None and claim_extractor.locate_quote( p[ "old" ][ p[ "seed_span" ][ 0 ]:p[ "seed_span" ][ 1 ] ], p[ "old" ] ) is None ]
 
 
 async def run_all( pairs, config, ledger, query_fn=None, judge_backend=None ):

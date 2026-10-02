@@ -170,7 +170,7 @@ def locate_line( sentence, item ):
         - the line is first_line plus the newlines before the sentence in the raw docstring
     """
     wanted, _ = claim_extractor.normalize( sentence )
-    if len( wanted.split() ) < claim_extractor.MIN_QUOTE_WORDS or len( wanted ) < claim_extractor.MIN_QUOTE_CHARS: return None
+    if len( wanted.split() ) < claim_extractor.LONG_MIN_QUOTE_WORDS or len( wanted ) < claim_extractor.LONG_MIN_QUOTE_CHARS: return None
     haystack, offsets = claim_extractor.normalize( item[ "text" ] )
     position = haystack.find( wanted ) if wanted else -1
     if position < 0: return None

@@ -95,7 +95,7 @@ def test_a_key_whose_kind_and_seeded_positive_disagree_is_refused_so_a_group_nev
 
 def test_a_group_that_mixes_seeded_and_unseeded_pairs_is_refused_whatever_order_they_arrive_in():
     keys  = { "a": { "kind": "delete", "seeded_positive": True, "injection": False }, "b": { "kind": "delete", "seeded_positive": True, "injection": False } }
-    empty = { "claims": [], "runs": [] }
+    empty = { "claims": [], "flags": [], "discards": [], "runs": [] }
     seeded, unseeded = { "id": "a", "seed_span": [ 0, 3 ], "lists": [ empty ] }, { "id": "b", "seed_span": None, "lists": [ empty ] }
     for order in ( [ seeded, unseeded ], [ unseeded, seeded ] ):
         with pytest.raises( ValueError, match="mixes pairs" ): jc.group_rows( order, keys, 1 )
@@ -134,11 +134,11 @@ def test_a_removed_claim_group_reports_the_one_sided_upper_bound_and_a_kept_clai
 
 
 def test_the_worse_extractor_list_is_the_one_reported_and_a_tie_names_the_lower_slot():
-    seeded = { "id": "a", "seed_span": [ 0, 3 ], "lists": [ { "claims": [], "runs": [] }, { "claims": [], "runs": [] } ] }
+    seeded = { "id": "a", "seed_span": [ 0, 3 ], "lists": [ { "claims": [], "flags": [], "discards": [], "runs": [] }, { "claims": [], "flags": [], "discards": [], "runs": [] } ] }
     keys   = { "a": { "kind": "delete", "seeded_positive": True, "injection": False } }
     assert jc.group_rows( [ seeded ], keys, 2 )[ 0 ][ "worst_list" ] == 0
     assert jc.group_rows( [ seeded ], keys, 2 )[ 0 ][ "per_list" ] == [ 1, 1 ]
-    only_second = { **seeded, "lists": [ { "claims": [ { "start": 0, "end": 3, "quote": "x" } ], "runs": [ [ { "verdict": "absent" } ] ] }, { "claims": [], "runs": [] } ] }
+    only_second = { **seeded, "lists": [ { "claims": [ { "start": 0, "end": 3, "quote": "x" } ], "flags": [], "discards": [], "runs": [ [ { "verdict": "absent" } ] ] }, { "claims": [], "flags": [], "discards": [], "runs": [] } ] }
     assert jc.group_rows( [ only_second ], keys, 2 )[ 0 ][ "per_list" ] == [ 0, 1 ] and jc.group_rows( [ only_second ], keys, 2 )[ 0 ][ "worst_list" ] == 1
 
 
@@ -314,7 +314,10 @@ def test_a_group_chart_is_left_out_when_the_keys_have_no_pair_of_its_kinds( run 
 FIXTURES = os.path.join( cu.get_project_root(), "src", "tests", "fixtures", "judge_comparison" )
 
 
-def test_a_ledger_from_a_real_run_rebuilds_to_the_figures_the_harness_reported_and_to_pinned_literals():
+def test_a_ledger_from_a_real_run_rebuilds_to_the_figures_the_harness_reported_and_to_pinned_literals( monkeypatch ):
+    # The fixture ledger was written by the extractor before row ed2f9b4e (version extractor-a3bde07306, entries
+    # without discards or flags). Its keys carry that version, so the rebuild is pinned to it; the new extractor has another.
+    monkeypatch.setattr( hn.claim_extractor, "PROMPT_VERSION", "extractor-a3bde07306" )
     pairs  = json.load( open( os.path.join( FIXTURES, "pairs.json" ) ) )
     keys   = json.load( open( os.path.join( FIXTURES, "keys.json" ) ) )[ "keys" ]
     report = json.load( open( os.path.join( FIXTURES, "harness-report.json" ) ) )
@@ -324,7 +327,8 @@ def test_a_ledger_from_a_real_run_rebuilds_to_the_figures_the_harness_reported_a
     out    = jc.build_comparison( "dev", [ dict( p, design=None ) for p in pairs ], { k[ "id" ]: { f: k[ f ] for f in jc.KEY_FIELDS } for k in keys }, ledger, { "sonnet": ( config, None ) } )
     judge  = out[ "judges" ][ "sonnet" ]
     assert "incomplete" not in judge, judge
-    assert judge[ "headline" ][ "lists" ] == report[ "lists" ] and judge[ "headline" ][ "escalations" ] == report[ "escalations" ] == 2
+    # the committed report predates the ed2f9b4e fields; compare the figures it does carry
+    assert [ { k: l[ k ] for k in r } for l, r in zip( judge[ "headline" ][ "lists" ], report[ "lists" ] ) ] == report[ "lists" ] and judge[ "headline" ][ "escalations" ] == report[ "escalations" ] == 2
     assert [ ( l[ "positives" ], l[ "misses" ], l[ "unseeded" ], l[ "false_alarms" ] ) for l in judge[ "headline" ][ "lists" ] ] == [ ( 3, 0, 3, 0 ), ( 3, 0, 3, 0 ) ]
     assert out[ "calls" ] == { "extract": 12, "judge": { "sonnet": 36 } }, "49 ledger lines: one binding record, 12 extractor calls, 36 judge calls"
     groups = { g[ "group" ]: ( g[ "n" ], g[ "wrong" ] ) for g in judge[ "groups" ] }
