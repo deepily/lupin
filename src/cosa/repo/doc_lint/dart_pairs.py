@@ -2,15 +2,16 @@
 Dart pair builder: a git range to per-symbol before and after doc-comment text.
 
 The claim harness takes plain text pairs. This module builds them for Dart. It reads two
-revisions of a repository with git show, finds every doc-comment block with the lexer in
-dartdoc_lint, names each block by the declaration under it, and joins the two revisions on
-( file, symbol ). The output rows have the labelled-set pair shape, so a pairs file written
-here loads through labelled_pairs.load_pairs once a keys file exists. No model is called.
+revisions of a repository with git show. It finds every doc-comment block with the lexer in
+dartdoc_lint and names each block by the declaration under it. The two revisions are joined on
+( file, symbol ). The output rows have the labelled-set pair shape. A pairs file written here
+loads through labelled_pairs.load_pairs once a keys file exists. No model is called.
 
 Known limits:
-    - a symbol is "Owner.member" ( "Owner.new" for the unnamed constructor, "Owner.named" for a named one ), the owner being the class, mixin, enum or extension whose body
-      holds the block, found from a declaration at column 0 ending in { and the next line that
-      starts with } at column 0; a one-line declaration has no body, and a nested type is not an owner
+    - a symbol is "Owner.member": "Owner.new" for the unnamed constructor, "Owner.named" for a named one
+    - the owner is the class, mixin, enum or extension whose body holds the block. The body runs from a
+      declaration at column 0 ending in { to the next line that starts with } at column 0
+    - a one-line declaration has no body, and a nested type is not an owner
     - an unnamed extension ( extension on Foo ) has no name and its blocks read "<unattached>"
     - a renamed or moved symbol is reported as gone and as new, never as a pair
     - two declarations with the same name under one owner are named name, name#2, name#3 in file order
