@@ -84,28 +84,44 @@ def seed_db_password_from_dotenv( root=None ):
     wanted = ( "POSTGRES_PASSWORD", "LUPIN_HOST_DB_USER", "LUPIN_HOST_DB_PASSWORD",
                "LUPIN_TEST_DB_USER", "LUPIN_TEST_DB_PASSWORD" )
     found  = { }
+    seen   = set()
+    # THE FIRST LINE FOR A KEY DECIDES, blank or not, which is what the loop that stood here
+    # before row 80513825 did (it returned at the first `POSTGRES_PASSWORD=` line). The
+    # reviewer's three divergences (a duplicate key, a blank line before a value, undecodable
+    # bytes after the key) are tests in test_db_url_unchanged_without_the_new_keys.py.
     try:
-        with open( dotenv ) as fh:
+        # errors="replace": a stray non-UTF-8 byte in a comment must not hide a key on another line.
+        with open( dotenv, errors="replace" ) as fh:
             for line in fh:
                 line = line.strip()
                 for key in wanted:
-                    if not line.startswith( key + "=" ): continue
+                    if key in seen or not line.startswith( key + "=" ): continue
+                    seen.add( key )
                     value = line.split( "=", 1 )[ 1 ].strip().strip( "\"'" )
                     if value: found[ key ] = value
-    except OSError:
-        return
+                if len( seen ) == len( wanted ): break
+    except ( OSError, UnicodeDecodeError ):
+        # Whatever was read before the failure stands, as it did when the loop returned at the
+        # key. An unreadable file reads nothing and so sets nothing. Never raises: this module
+        # is imported by nearly everything at startup.
+        pass
 
     # ROLE KEYS WIN OVER THE SUPERUSER PASSWORD (row 80513825, the approval-settings guard rail).
     # A seat's `.env` is allowed to carry the credentials of a role that cannot write policy
     # (`lupin_host`, or `lupin_test` for the test database) instead of the superuser's. A
     # `testing` process reads the test role, anything else the host role. Absent the keys this
     # is the behaviour that has always been here.
-    prefix   = "LUPIN_TEST_DB_" if os.environ.get( "LUPIN_ENV", "" ).lower() == "testing" else "LUPIN_HOST_DB_"
+    testing  = os.environ.get( "LUPIN_ENV", "" ).lower() == "testing"
+    prefix   = "LUPIN_TEST_DB_" if testing else "LUPIN_HOST_DB_"
     password = found.get( prefix + "PASSWORD" )
     if password:
         os.environ[ "DB_PASSWORD" ] = password
-        if not os.environ.get( "DB_USER" ) and found.get( prefix + "USER" ):
-            os.environ[ "DB_USER" ] = found[ prefix + "USER" ]
+        # THE PASSWORD AND THE LOGIN NAME TRAVEL TOGETHER. A role's password paired with the
+        # superuser's default name fails to authenticate with an error that names the password,
+        # so a missing USER key falls back to the role the SQL creates (init-db-roles.sql).
+        # An exported DB_USER still wins.
+        if not os.environ.get( "DB_USER" ):
+            os.environ[ "DB_USER" ] = found.get( prefix + "USER" ) or ( "lupin_test" if testing else "lupin_host" )
         return
     if "POSTGRES_PASSWORD" in found: os.environ[ "DB_PASSWORD" ] = found[ "POSTGRES_PASSWORD" ]
 

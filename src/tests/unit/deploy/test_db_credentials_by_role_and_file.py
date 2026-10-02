@@ -63,10 +63,14 @@ def test_an_exported_db_user_is_not_overwritten_by_the_role_user( tmp_path, monk
     assert os.environ[ "DB_PASSWORD" ] == HOST
 
 
-def test_a_role_password_with_no_role_user_leaves_db_user_alone( tmp_path ):
+def test_a_role_password_with_no_role_user_takes_the_roles_default_name( tmp_path, monkeypatch ):
+    """The reviewer's pairing finding: never the superuser's name with a role's password."""
     seed_db_password_from_dotenv( root=_dotenv( tmp_path, _pair( "LUPIN_HOST_DB_PASSWORD", HOST ) ) )
-    assert os.environ[ "DB_PASSWORD" ] == HOST
-    assert "DB_USER" not in os.environ
+    assert ( os.environ[ "DB_PASSWORD" ], os.environ[ "DB_USER" ] ) == ( HOST, "lupin_host" )
+    for key in ( "DB_PASSWORD", "DB_USER" ): monkeypatch.delenv( key )
+    monkeypatch.setenv( "LUPIN_ENV", "testing" )
+    seed_db_password_from_dotenv( root=_dotenv( tmp_path, _pair( "LUPIN_TEST_DB_PASSWORD", TEST ) ) )
+    assert ( os.environ[ "DB_PASSWORD" ], os.environ[ "DB_USER" ] ) == ( TEST, "lupin_test" )
 
 
 def test_the_superuser_password_is_the_fallback_when_no_role_key_is_present( tmp_path ):

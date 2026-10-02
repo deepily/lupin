@@ -11,11 +11,11 @@ checked at the two seams the commit touched:
      of `.env` files that carry only POSTGRES_PASSWORD (a frozen copy of the old loop is the
      reference, `_old_seed`).
 
-Result of the review, recorded here as tests rather than prose: it is NOT identical for three
+Result of the review, recorded here as tests rather than prose: it was NOT identical for three
 `.env` shapes. The old loop stopped at the FIRST `POSTGRES_PASSWORD=` line and never read past
-it; the new loop reads the whole file and lets the LAST non-empty line win. Those three cases are
-`xfail( strict=True )`, so the divergence is on the record and the day somebody restores the old
-behaviour the strict xfail turns into a red that says to delete the marker.
+it; the new loop read the whole file and let the LAST non-empty line win. Those three cases were
+`xfail( strict=True )` when this file was written; the fix removed the markers and they now pass
+plain, so the claim "with none of the new keys nothing changes" is a passing test.
 
 Venue: :7999 (unit, no server, no database).
 """
@@ -125,17 +125,13 @@ DIVERGENT = [
 ]
 
 
-@pytest.mark.xfail( strict=True, reason="REVIEW FINDING (793eb070f): the new loop reads the whole file and the last "
-                                        "non-empty POSTGRES_PASSWORD wins; the old loop stopped at the first one" )
 @pytest.mark.parametrize( "dotenv", DIVERGENT )
-def test_KNOWN_DIVERGENCE_duplicate_or_blank_postgres_password_lines( tmp_path, monkeypatch, dotenv ):
+def test_duplicate_or_blank_postgres_password_lines_match_the_old_loop( tmp_path, monkeypatch, dotenv ):
+    """Fixed after the review: the FIRST `POSTGRES_PASSWORD=` line decides, blank or not, as before."""
     assert _new_seed( tmp_path, monkeypatch, dotenv.encode() ) == _old_seed( dotenv )
 
 
-@pytest.mark.xfail( strict=True, raises=UnicodeDecodeError,
-                    reason="REVIEW FINDING (793eb070f): the new loop reads past the key, so undecodable bytes later in "
-                           "the file now raise out of a module the contract says never raises; the old loop returned "
-                           "at the key and never saw them" )
-def test_KNOWN_DIVERGENCE_undecodable_bytes_after_the_key( tmp_path, monkeypatch ):
+def test_undecodable_bytes_after_the_key_do_not_raise_and_keep_what_was_read( tmp_path, monkeypatch ):
+    """Fixed after the review: the module's contract is that it never raises."""
     dotenv = b"POSTGRES_PASSWORD=ok\n# \xff\xfe not utf-8\n"
     assert _new_seed( tmp_path, monkeypatch, dotenv ) == "ok"
