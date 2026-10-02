@@ -356,7 +356,9 @@ def counting_classifier_for( sessions: Iterable ) -> Callable:
 
     Requires:
         - sessions is a list of (bridge_path, session_id, persona) triples, as returned
-          by `find_active_sessions`; it is iterated once, here
+          by `find_active_sessions`. It is walked here and again by `census()`, so a
+          one-shot iterator would be exhausted before the census saw it; a caller holding
+          one must `list()` it first (the spawn gate does)
 
     Ensures:
         - returns a one-argument classifier, shaped like `default_counting_classifier`
@@ -373,7 +375,6 @@ def counting_classifier_for( sessions: Iterable ) -> Callable:
     id, so two seats sharing a prefix could read each other's file. This reads the exact
     file of each seat.
     """
-    sessions = list( sessions )
     paths    = { entry[ 1 ]: entry[ 0 ] for entry in sessions
                  if isinstance( entry, ( tuple, list ) ) and len( entry ) > 1 }
     return functools.partial( default_counting_classifier, _find_path=paths.get )

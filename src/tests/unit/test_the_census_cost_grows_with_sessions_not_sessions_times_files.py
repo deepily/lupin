@@ -122,6 +122,20 @@ def test_the_spawn_gate_census_reads_a_bounded_number_of_files( sessions_dir, no
     assert counter.reads <= 3 * 200, f"{counter.reads} reads for 200 seats at the spawn gate"
 
 
+def test_the_spawn_gate_still_refuses_at_the_cap_when_census_fn_returns_a_generator( sessions_dir, no_pid_check, monkeypatch ):
+    """
+    The gate walks its census twice (path map, then the count). A one-shot generator
+    would reach the count already exhausted: total 0, an UNDER-count, the direction that
+    lets a spawn through. 10 planted seats against the shipped cap of 8 must refuse.
+    """
+    _plant_many( sessions_dir, 10 )
+    monkeypatch.setattr( fleet_size_cap, "config_file_path", lambda: str( sessions_dir / "none.ini" ) )
+    refusal = session_spawner.default_fleet_gate(
+        1, config_fn=lambda: None,
+        census_fn=lambda: ( t for t in sb.find_active_sessions( require_persona=False ) ) )
+    assert refusal is not None and "already running 10" in refusal, refusal
+
+
 # ───────────── (b) the counts are the old implementation's, on live/dead/foreign ─────────────
 
 def _old_counts( sessions, unreadable ):
