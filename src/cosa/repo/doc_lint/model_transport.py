@@ -111,12 +111,12 @@ def calls_used( model, ledger_path=None ):
         - ledger_path is a ledger file path or None for the one set_budget named; a missing file counts as zero
 
     Ensures:
-        - returns the number of ledger lines naming the model; a torn last line is not counted
+        - returns the number of ledger lines naming the model; a torn last line, even one cut inside a multibyte character, is not counted
     """
     path = BUDGET_LEDGER if ledger_path is None else ledger_path
     if path is None or not os.path.exists( path ): return 0
     used = 0
-    with open( path, encoding="utf-8" ) as f:
+    with open( path, encoding="utf-8", errors="replace" ) as f:
         for line in f:
             try: row = json.loads( line )
             except ValueError: continue
@@ -145,6 +145,8 @@ def _charge( model ):
         - a model with no cap is not charged
         - the count is read from the ledger under an exclusive file lock, so two processes cannot both take the last call
         - a call that would pass the cap raises CallBudgetExceeded and writes nothing
+        - a ledger whose last line was cut off mid-write (no trailing newline) is closed with a newline first, so the
+          torn fragment cannot fuse with the new row and hide it from the count
         - the line is flushed to disk before the model is contacted, so a crashed call still counts
 
     Raises:
@@ -157,6 +159,8 @@ def _charge( model ):
         used    = calls_used( model )
         allowed = used < cap
         if allowed:
+            size = os.fstat( f.fileno() ).st_size
+            if size > 0 and os.pread( f.fileno(), 1, size - 1 ) != b"\n": f.write( "\n" )
             f.write( json.dumps( { "model": model, "n": used + 1, "ts": datetime.datetime.now( datetime.timezone.utc ).isoformat() } ) + "\n" )
             f.flush()
             os.fsync( f.fileno() )

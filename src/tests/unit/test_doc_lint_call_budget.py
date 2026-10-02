@@ -196,3 +196,54 @@ def test_a_capped_call_takes_the_exclusive_file_lock_and_an_uncapped_call_does_n
     assert locks == []
     call( FABLE, transport )
     assert locks == [ mt.fcntl.LOCK_EX ]
+
+
+# ---- Tiberius's three asks (row c020773b) ------------------------------------------------------
+
+def test_a_ledger_torn_without_a_newline_does_not_hide_the_next_charge_so_the_cap_holds( tmp_path ):
+    path = tmp_path / "calls.jsonl"
+    path.write_text( json.dumps( { "model": FABLE, "n": 1 } ) + "\n" + '{"model": "claude-fab' )
+    mt.set_budget( str( path ), { FABLE: 2 } )
+    transport = Transport()
+    assert call( FABLE, transport ) == "ok"
+    with pytest.raises( mt.CallBudgetExceeded ): call( FABLE, transport )
+    assert transport.seen == [ FABLE ] and mt.calls_used( FABLE ) == 2
+    lines = path.read_text().split( "\n" )
+    assert lines[ 1 ] == '{"model": "claude-fab' and json.loads( lines[ 2 ] )[ "n" ] == 2 and lines[ 3 ] == ""
+
+
+def test_a_ledger_that_ends_in_a_newline_gets_no_extra_blank_line_and_a_multibyte_torn_tail_is_handled( tmp_path ):
+    path = tmp_path / "calls.jsonl"
+    mt.set_budget( str( path ), { FABLE: 9 } )
+    transport = Transport()
+    call( FABLE, transport )
+    call( FABLE, transport )
+    assert path.read_text().count( "\n" ) == 2 and "\n\n" not in path.read_text()
+    path.write_bytes( path.read_bytes() + '{"model": "café'.encode( "utf-8" )[ :-1 ] )
+    call( FABLE, transport )
+    assert mt.calls_used( FABLE ) == 3
+
+
+def test_model_ids_that_share_a_prefix_are_counted_apart( tmp_path ):
+    mt.set_budget( str( tmp_path / "calls.jsonl" ), { FABLE: 1, FABLE + "x": 1 } )
+    transport = Transport()
+    call( FABLE + "x", transport )
+    call( FABLE, transport )
+    with pytest.raises( mt.CallBudgetExceeded ): call( FABLE, transport )
+    with pytest.raises( mt.CallBudgetExceeded ): call( FABLE + "x", transport )
+    assert mt.calls_used( FABLE ) == 1 and mt.calls_used( FABLE + "x" ) == 1
+
+
+def test_the_guard_fails_a_test_that_reaches_the_real_sdk_and_an_except_exception_cannot_swallow_it():
+    with pytest.raises( BaseException ) as caught:
+        asyncio.run( mt.complete( "m", "s", "u" ) )
+    assert not isinstance( caught.value, Exception ) and "reached the real SDK" in str( caught.value )
+
+
+def test_a_test_may_put_its_own_stand_in_for_the_sdk_after_the_guard( monkeypatch ):
+    seen = []
+    async def stand_in( prompt, options ):
+        seen.append( options.model )
+        yield AssistantMessage( content=[ TextBlock( "ok" ) ], model=options.model )
+    monkeypatch.setattr( mt, "sdk_query", stand_in )
+    assert asyncio.run( mt.complete( "m", "s", "u" ) ) == "ok" and seen == [ "m" ]
