@@ -14758,6 +14758,9 @@ class NotificationsUI {
          * Group held rows by STORY — the `correlation_key` a plan import stamps on
          * every row it files — keeping only keys shared by two or more rows.
          *
+         * 🔴 `epic:unassigned` IS NOT A STORY EITHER — the key a row carries when nobody chose
+         * one, shared by unrelated rows; a bar over it would approve strangers together.
+         *
          * 🔴 ONE ROW IS NOT A STORY. A bar offering "approve all 1 in this story" is the
          * per-row control wearing a bigger label, and a pane of them would bury the real
          * stories. Rows with no key are never grouped: an absent key is not a shared one.
@@ -14779,7 +14782,8 @@ class NotificationsUI {
             const task = raw || {};
             const key  = task.correlation_key ? String( task.correlation_key ) : "";
             const id   = task.id ? String( task.id ) : "";
-            if ( !key || !id ) return;
+            // `epic:unassigned` is the deliberate no-epic answer, a bucket and not a story.
+            if ( !key || key === this.EPIC_UNASSIGNED_KEY || !id ) return;
             if ( byKey.has( key ) ) byKey.get( key ).push( id );
             else byKey.set( key, [ id ] );
         } );

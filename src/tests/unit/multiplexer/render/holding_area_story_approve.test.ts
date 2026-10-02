@@ -124,6 +124,14 @@ test( "model: a key held by two rows is a story, a key held by ONE is not, a key
   ] );
 } );
 
+test( "model: epic:unassigned is never a story, beside a real key that is", () => {
+  const rows = [ held( "u1", "epic:unassigned" ), held( "u2", "epic:unassigned" ),
+                 held( "r1", "epic:real" ), held( "r2", "epic:real" ) ];
+  assert.deepEqual( groupHeldRowsByStory( rows ), [ { key: "epic:real", ids: [ "r1", "r2" ] } ] );
+  assert.deepEqual( groupHeldRowsByStory( rows, new Set( [ "epic:unassigned" ] ) ).map( ( s ) => s.key ),
+    [ "epic:real" ], "a kept report resurrected a bar over epic:unassigned" );
+} );
+
 test( "model: keep names a key that stays at ONE row, and only that key", () => {
   const stories = groupHeldRowsByStory( ROWS(), new Set( [ "epic:plan-b" ] ) );
   assert.deepEqual( stories.map( ( s ) => s.key ), [ "epic:plan-a", "epic:plan-b", "epic:plan-c" ] );

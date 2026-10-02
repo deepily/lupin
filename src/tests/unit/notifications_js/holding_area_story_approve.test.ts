@@ -70,6 +70,11 @@ function newUI(): StoryUI {
   ui._taskListFetchInFlight = false; ui._holdingAreaFetchInFlight = false;
   ui._taskListLastGoodTasks = null; ui.queueSessionId = "test-session";
   ui._holdingAreaControlsWired = false; ui._taskListAccordionWired = false;
+  // The constructor is skipped, so its constants are absent. Read the real one out of the
+  // source rather than retyping it here, or the test would agree with itself.
+  const m = readFileSync( NOTIFICATIONS_JS, "utf8" ).match( /this\.EPIC_UNASSIGNED_KEY\s*=\s*'([^']+)'/ );
+  assert.ok( m, "the constructor no longer defines EPIC_UNASSIGNED_KEY" );
+  ui.EPIC_UNASSIGNED_KEY = m[ 1 ];
   return ui;
 }
 
@@ -137,6 +142,20 @@ test( "grouping: two rows make a story, ONE row does not, a keyless row never do
     { key: "epic:plan-a", ids: [ "a1", "a2", "a3" ] },
     { key: "epic:plan-c", ids: [ "c1", "c2" ] },
   ] );
+} );
+
+test( "grouping: epic:unassigned is never a story, beside a real key that is", () => {
+  const ui = newUI();
+  const rows = [ held( "u1", "epic:unassigned" ), held( "u2", "epic:unassigned" ),
+                 held( "r1", "epic:real" ), held( "r2", "epic:real" ) ];
+  assert.deepEqual( ui._groupHeldRowsByStory( rows ), [ { key: "epic:real", ids: [ "r1", "r2" ] } ] );
+  assert.deepEqual( ui._groupHeldRowsByStory( rows, new Set( [ "epic:unassigned" ] ) ).map( ( s ) => s.key ),
+    [ "epic:real" ], "a kept report resurrected a bar over epic:unassigned" );
+  // and in the pane: two unassigned rows paint no bar
+  realPageDOM();
+  ui.renderHoldingArea( { status: "", tasks: rows, count: 4, total: 4, has_more: false } );
+  const bars = Array.from( document.querySelectorAll<HTMLElement>( ".holding-story-bar" ) ).map( ( b ) => b.dataset.story );
+  assert.deepEqual( bars, [ "epic:real" ] );
 } );
 
 test( "grouping: keep names a key that stays at ONE row, and only that key", () => {

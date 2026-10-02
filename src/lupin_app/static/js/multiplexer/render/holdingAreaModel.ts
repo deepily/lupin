@@ -10,6 +10,7 @@
 
 import { priorityRank, taskTitleLabel, type TaskItem, type TaskListComposite } from "./taskListModel";
 import { personaLabel } from "../shared/personaLabel";
+import { EPIC_UNASSIGNED_KEY } from "./epicBoardModel";
 
 /** One filer's bucket of held rows. */
 export interface HeldFilerGroup {
@@ -113,6 +114,9 @@ export interface HeldStory {
  * Group held rows by STORY — the `correlation_key` a plan import stamps on every
  * row it files — keeping only keys shared by two or more rows.
  *
+ * 🔴 `epic:unassigned` IS NOT A STORY EITHER — it is the key a row carries when nobody chose one,
+ * shared by unrelated rows, and a bar over it would approve strangers together.
+ *
  * 🔴 ONE ROW IS NOT A STORY. A bar offering "approve all 1 in this story" is the
  * per-row control under a bigger label, and a pane of them would bury the real
  * stories. A row with no key is never grouped: an absent key is not a shared one.
@@ -136,7 +140,9 @@ export function groupHeldRowsByStory( tasks: unknown, keep: ReadonlySet<string> 
     const task = ( raw ?? {} ) as TaskItem;
     const key  = task.correlation_key ? String( task.correlation_key ) : "";
     const id   = task.id ? String( task.id ) : "";
-    if ( key === "" || id === "" ) return;
+    // "epic:unassigned" is the deliberate no-epic answer, a bucket and not a story: the same
+    // treatment as no key at all.
+    if ( key === "" || key === EPIC_UNASSIGNED_KEY || id === "" ) return;
     const bucket = byKey.get( key );
     if ( bucket ) bucket.push( id );
     else byKey.set( key, [ id ] );
