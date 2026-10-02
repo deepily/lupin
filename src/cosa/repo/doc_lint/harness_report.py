@@ -107,8 +107,14 @@ def flagged( claim_list ):
 
 
 def run_flagged_pair( claim_list ):
-    """Say whether an extractor list has any run of old text flagged for a person, whatever the judge said."""
-    return bool( claim_list[ "flags" ] )
+    """
+    Say whether an extractor list has any run of old text flagged for a person, whatever the judge said.
+
+    Ensures:
+        - a list whose extractor reply was unreadable (parse_failed) is not a flagged-run pair: its whole-text flag
+          is a parse failure, counted apart, so it neither feeds flagged_rate nor flag-only catches (row 35d38e9f)
+    """
+    return bool( claim_list[ "flags" ] ) and not claim_list[ "parse_failed" ]
 
 
 def build_report( results, config, judge_prompt_version=None, jev_run=False ):
@@ -127,7 +133,8 @@ def build_report( results, config, judge_prompt_version=None, jev_run=False ):
         - agreement is reported over all claims and over claims overlapping a seed span, each with
           its interval, because an overall figure can hide disagreement on the dropped claims
         - parse_failed_pairs counts, per list, the pairs whose extractor reply stayed unreadable after one retry
-          (top level: the largest list); retry_calls counts the retries; such a pair is flagged, never a catch
+          (top level: the largest list); retry_calls counts the retries; such a pair is never a catch, never a
+          flag-only catch, and stays out of flagged_pairs, flagged_rate and mean_flag_words; an unseeded one is in review_pairs
         - reports the escalation count, discarded-claim count (and per code) and mean uncovered fraction
         - per list: seeded_span_discarded counts seeded pairs where a DISCARDED quote overlaps the span
           (the harness threw the claim away, the extractor did list it), flagged_pairs and flagged_rate
@@ -160,9 +167,9 @@ def build_report( results, config, judge_prompt_version=None, jev_run=False ):
         misses = sum( 1 for r in seeded if not caught( r[ "lists" ][ slot ], tuple( r[ "seed_span" ] ) ) )
         alarms = sum( 1 for r in unseeded if flagged( r[ "lists" ][ slot ] ) )
         flag_pairs = sum( 1 for r in unseeded if run_flagged_pair( r[ "lists" ][ slot ] ) )
-        review     = sum( 1 for r in unseeded if flagged( r[ "lists" ][ slot ] ) or run_flagged_pair( r[ "lists" ][ slot ] ) )
-        words      = [ w for r in results for w in r[ "lists" ][ slot ][ "flag_words" ] ]
-        flag_only  = sum( 1 for r in seeded if run_flagged( r[ "lists" ][ slot ], tuple( r[ "seed_span" ] ) )
+        review     = sum( 1 for r in unseeded if flagged( r[ "lists" ][ slot ] ) or run_flagged_pair( r[ "lists" ][ slot ] ) or r[ "lists" ][ slot ][ "parse_failed" ] )
+        words      = [ w for r in results if not r[ "lists" ][ slot ][ "parse_failed" ] for w in r[ "lists" ][ slot ][ "flag_words" ] ]
+        flag_only  = sum( 1 for r in seeded if not r[ "lists" ][ slot ][ "parse_failed" ] and run_flagged( r[ "lists" ][ slot ], tuple( r[ "seed_span" ] ) )
                           and not caught( dict( r[ "lists" ][ slot ], flags=[] ), tuple( r[ "seed_span" ] ) ) )
         lists.append( {
             "slot"              : slot,
@@ -184,7 +191,7 @@ def build_report( results, config, judge_prompt_version=None, jev_run=False ):
     miss_ok = bool( seeded ) and len( seeded ) >= DEFAULT_POSITIVES_NEEDED and all( l[ "misses" ] == 0 for l in lists )
     fa_ok   = all( l[ "false_alarm_rate" ] is not None and l[ "false_alarm_rate" ] <= FALSE_ALARM_CEILING for l in lists )
     flag_ok = all( l[ "flagged_rate" ] is not None and l[ "flagged_rate" ] <= FLAGGED_CEILING for l in lists )
-    all_words = [ w for r in results for lst in r[ "lists" ] for w in lst[ "flag_words" ] ]
+    all_words = [ w for r in results for lst in r[ "lists" ] if not lst[ "parse_failed" ] for w in lst[ "flag_words" ] ]
     all_total = all_same = seed_total = seed_same = escalations = discarded = reextract_calls = 0
     codes     = { code: 0 for code in claim_extractor.DISCARD_CODES }
     uncovered = []

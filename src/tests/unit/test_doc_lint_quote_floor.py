@@ -493,3 +493,14 @@ def test_the_raw_failure_sink_writes_one_line_per_reply_and_is_off_without_a_pat
     harness_cli.raw_failure_sink( str( path ) )( "p", 1, "retry", "{} {}", "Extra data" )
     row = json.loads( path.read_text().strip() )
     assert row == { "id": "p", "slot": 1, "attempt": "retry", "error": "Extra data", "raw": "{} {}" }
+
+
+def test_a_parse_failed_pair_is_not_a_flag_catch_and_stays_out_of_the_flag_figures():
+    seeded   = { "id": 0, "seed_span": [ 4, 9 ], "lists": [ parse_failed_list() ] }
+    unseeded = { "id": 1, "seed_span": None, "lists": [ parse_failed_list() ] }
+    out      = hr.build_report( [ seeded, unseeded ], CONFIG )
+    one      = out[ "lists" ][ 0 ]
+    assert ( one[ "misses" ], one[ "caught_by_flag_only" ] ) == ( 1, 0 )
+    assert ( one[ "flagged_pairs" ], one[ "flagged_rate" ], one[ "mean_flag_words" ] ) == ( 0, 0.0, None )
+    assert one[ "review_pairs" ] == 1 and one[ "parse_failed_pairs" ] == 2 and out[ "mean_flag_words" ] is None
+    assert hr.run_flagged_pair( parse_failed_list() ) is False
