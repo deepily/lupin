@@ -57,17 +57,64 @@ def test_the_migration_chains_after_the_approval_settings_revision():
     assert module.revision == "b80513825c02"
 
 
-def test_upgrade_issues_one_guarded_revoke_that_leaves_select_alone(monkeypatch):
-    module = _migration()
-    seen   = []
-    monkeypatch.setattr( module.op, "execute", seen.append, raising=False )
+class _Result:
+    def __init__( self, value ): self._value = value
+    def scalar( self ): return self._value
+
+
+class _Connection:
+    """Answers the two queries upgrade() makes: still-writable, then current_user."""
+    def __init__( self, writable ): self.writable, self.asked = writable, []
+    def execute( self, statement ):
+        self.asked.append( str( statement ) )
+        return _Result( self.writable if "has_table_privilege" in str( statement ) else "lupin_app" )
+
+
+def _run( monkeypatch, writable ):
+    module, executed, connection = _migration(), [], _Connection( writable )
+    monkeypatch.setattr( module.op, "execute", executed.append, raising=False )
+    monkeypatch.setattr( module.op, "get_bind", lambda: connection, raising=False )
+    return module, executed, connection
+
+
+def test_upgrade_issues_one_guarded_revoke_that_leaves_select_alone_and_swallows_no_privilege(monkeypatch):
+    module, executed, _ = _run( monkeypatch, False )
     module.upgrade()
-    assert len( seen ) == 1
-    statement = seen[ 0 ]
-    assert "pg_roles" in statement and "rolname = 'lupin_host'" in statement
+    assert len( executed ) == 1
+    statement = executed[ 0 ]
+    assert "rolname = 'lupin_host'" in statement
     assert "to_regclass( 'public.approval_settings' ) IS NOT NULL" in statement
     assert "REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON public.approval_settings FROM lupin_host" in statement
-    assert "SELECT ON" not in statement
+    assert "EXCEPTION WHEN insufficient_privilege" in statement
+    assert "SELECT ON" not in statement and "RAISE" not in statement
+
+
+def test_no_warning_when_the_host_role_cannot_write_afterwards(monkeypatch, caplog):
+    module, _, connection = _run( monkeypatch, False )
+    with caplog.at_level( "WARNING", logger="alembic.runtime.migration" ):
+        module.upgrade()
+    assert caplog.records == []
+    assert len( connection.asked ) == 1
+
+
+def test_one_warning_through_alembics_logger_when_the_host_role_can_still_write(monkeypatch, caplog):
+    module, _, _ = _run( monkeypatch, True )
+    with caplog.at_level( "WARNING", logger="alembic.runtime.migration" ):
+        module.upgrade()
+    assert len( caplog.records ) == 1
+    record = caplog.records[ 0 ]
+    assert record.name == "alembic.runtime.migration" and record.levelname == "WARNING"
+    message = record.getMessage()
+    assert "lupin_host" in message and "approval_settings" in message
+    assert "lupin_app" in message and "Remedy" in message
+
+
+def test_the_still_writable_check_is_false_without_the_role_or_the_table():
+    module = _migration()
+    check  = module._STILL_WRITABLE_SQL
+    assert check.index( "pg_roles" ) < check.index( "to_regclass" ) < check.index( "has_table_privilege" )
+    for right in ( "INSERT", "UPDATE", "DELETE" ):
+        assert f"'{right}' )" in check
 
 
 def test_downgrade_restores_nothing():
