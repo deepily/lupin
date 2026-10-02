@@ -267,6 +267,11 @@ KNOWN_DIVERGENT_ENV = {
     "LUPIN_SERVER_PORT": {
         "cloud-gpu" : "2026-08-13 — same.",
     },
+    "LUPIN_HEARTBEAT_POKE_MUTE_FILE": {
+        "dev-dev"   : "2026-10-02 — only :8000 gets a test-only poke switch file; :7999 keeps the "
+                      "fleet's real heartbeat-poke-mute.json, which the Stop hook on the host reads.",
+        "cloud-gpu" : "2026-10-02 — no test server on the VM.",
+    },
     "CHROME_PATH": {
         "cloud-gpu" : "2026-07-26 — same.",
     },

@@ -19,13 +19,22 @@ Venue: :8000 (scheduled). Listed in partition/half-a.txt.
 """
 
 import json
+import os
 import urllib.error
 import urllib.request
 
 import pytest
 
-from lupin_cli.claude_code.hooks.lib.heartbeat_poke_mute import read_poke_mute, write_poke_mute
+from lupin_cli.claude_code.hooks.lib.heartbeat_poke_mute import MUTE_FILE_ENV, read_poke_mute, write_poke_mute
 from .conftest import BASE_URL
+
+# The switch file the SERVER writes, captured at import (collection) time. src/conftest.py's
+# autouse isolation fixture points this process's MUTE_FILE_ENV at an empty tmp file for every
+# test, so read_poke_mute() inside a test would read a file the server never touches and the
+# test's restore would write to it too, leaving the real switch where the clicks put it.
+# docker-compose.yml gives the :8000 container a test-only file in this variable, and the suite
+# subprocess inherits it, so this is the path the server uses.
+_SERVER_SWITCH_FILE = os.environ.get( MUTE_FILE_ENV )
 
 
 NOTIFICATIONS_URL = f"{BASE_URL}/app/notifications?classic=1"
@@ -45,8 +54,26 @@ def _server_state( page ):
 
 
 @pytest.fixture
-def switch_restored():
-    """Start every test from 'poke on', and put back whatever the fleet had."""
+def switch_restored( monkeypatch ):
+    """
+    Start every test from 'poke on', and put back what the file held.
+
+    Requires:
+        - the server under test writes a TEST-ONLY switch file, named to this process in
+          LUPIN_HEARTBEAT_POKE_MUTE_FILE (docker-compose.yml, lupin-rest-test)
+
+    Ensures:
+        - read_poke_mute() / write_poke_mute() here address the file the server writes
+        - without that variable the test FAILS rather than run: the only other file is the
+          fleet's real switch, which every seat's Stop hook reads
+    """
+    if not _SERVER_SWITCH_FILE:
+        pytest.fail( f"{MUTE_FILE_ENV} is not set, so the server under test would be using the fleet's "
+                     f"real poke switch. Refusing to flip it. Run against lupin-rest-test, "
+                     f"recreated from docker-compose.yml (`up -d --force-recreate lupin-rest-test`)." )
+    assert os.path.basename( _SERVER_SWITCH_FILE ) != "heartbeat-poke-mute.json", \
+        f"{_SERVER_SWITCH_FILE} is the fleet's real switch file, not a test-only one"
+    monkeypatch.setenv( MUTE_FILE_ENV, _SERVER_SWITCH_FILE )
     found = read_poke_mute()
     write_poke_mute( False, "e2e test_poke_mute_switch (setup)" )
     yield

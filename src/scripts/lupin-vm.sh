@@ -176,15 +176,12 @@ shift || true
 # `gcloud config` project, which may point elsewhere. (This mirrored the same guard in
 # deploy-cloud-test.sh, retired 2026-08-26 — row 0d175dac.)
 require_project() {
-    if [ -z "${LUPIN_GCP_PROJECT_ID:-}" ]; then
-        # --dry-run only prints the command, so it may show a placeholder; --help never gets here.
-        if [ "$DRY_RUN" -eq 1 ]; then
-            LUPIN_GCP_PROJECT_ID="<LUPIN_GCP_PROJECT_ID>"
-            log "LUPIN_GCP_PROJECT_ID is not set; showing a placeholder because this is a --dry-run"
-            return 0
-        fi
-        die "LUPIN_GCP_PROJECT_ID is not set. Export it first, e.g. export LUPIN_GCP_PROJECT_ID=hello-world-foo-423219"
+    # --dry-run only prints the command, so it may show a placeholder; --help never gets here.
+    if [ "$DRY_RUN" -eq 1 ] && [ -z "$( printenv LUPIN_GCP_PROJECT_ID )" ]; then
+        LUPIN_GCP_PROJECT_ID="<LUPIN_GCP_PROJECT_ID>"
+        log "LUPIN_GCP_PROJECT_ID is not set; showing a placeholder because this is a --dry-run"
     fi
+    : "${LUPIN_GCP_PROJECT_ID:?LUPIN_GCP_PROJECT_ID is not set. Export it first: export LUPIN_GCP_PROJECT_ID=<your-project-id>}"
 }
 
 # ---- run-or-echo ---------------------------------------------------------
