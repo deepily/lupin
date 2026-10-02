@@ -37,6 +37,15 @@ from pathlib import Path
 
 # Python path configured by src/tests/conftest.py
 
+# Per-file wall-clock cap (row 4cbd4858): no integration file may run longer than
+# LUPIN_TEST_INTEGRATION_FILE_TIMEOUT_MINUTES (default 15). Imported by name so pytest picks the
+# three hooks up from this conftest, and so they apply to this directory only.
+from tests.helpers.file_budget import (   # noqa: E402,F401
+    pytest_runtest_makereport,
+    pytest_runtest_protocol,
+    pytest_runtest_setup,
+)
+
 # Test server configuration — defaults to the dedicated test container (port 8000).
 # Override via LUPIN_TEST_BASE_URL env var for custom setups or Docker-internal routing.
 BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
