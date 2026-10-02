@@ -231,10 +231,7 @@
                     "item_class": "task",
                     "priority": "P2",
                     "acceptance": "False-pass rate with its 95% upper bound reported",
-                    "owner_role": "reviewer",
-                    "depends_on": [
-                        "ph2-s7"
-                    ]
+                    "done_receipt": "commit 5bc901ab3"
                 }
             ]
         },
