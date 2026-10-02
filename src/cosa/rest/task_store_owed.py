@@ -1,101 +1,32 @@
 """
-Task-store OWED definition — the ONE home for "is this row owed work?".
+Task-store owed definition: the single home for "is this row owed work?".
 
-Three independent readers ask that question and MUST agree (design
-src/rnd/v0.1.9/2026.07.19-parked-status-board-hygiene.md):
+Three readers ask that question and must agree: `task_query` (the board and MCP surface),
+the Stop-hook oracle (per-session self-poke) and the :8001 arbiter (fleet detectors).
+The rule lives here once so the readers cannot diverge.
 
-    1. `task_query`         — the board / MCP surface
-    2. the Stop-hook oracle — the per-session self-poke (src/lupin_cli/.../hooks/)
-    3. the :8001 arbiter    — the fleet detectors (heartbeat_arbiter/)
+This module is separate from `task_store_rules`, which declares itself pure (no DB, no HTTP).
+The SQLAlchemy twins here are not pure, so they live here and import the enums from the rules module.
 
-Divergence across those readers has bitten this fleet repeatedly, so the rule
-lives here exactly once.
+Park contract: a row is park-active when its status is "parked" and `next_chase_ts` is later than now.
+Expiry is computed at read time and never written back.
+A parked row whose chase has passed rejoins the owed count with no daemon, sweeper or cron.
+Arithmetic is used instead of a background job because a stopped sweeper leaves rows parked silently forever.
+A stopped predicate returns nothing at all, which is loud.
 
-WHY A SEPARATE MODULE FROM task_store_rules
--------------------------------------------
-`task_store_rules` declares itself PURE in its own docstring ("Every function is
-pure (no DB, no HTTP)"). The SQLAlchemy twin below is not pure by that
-definition, and a module whose docstring lies is how the next reader gets misled
-(Krishna's catch, ruled by Mr. Radio 2026-07-19). The owed definition gets its
-own home and IMPORTS the enums from `task_store_rules`, whose purity contract
-stays intact and untouched.
+The `owed_only` admission defines the owed set in one call: queued, in_progress, and parked rows that are not park-active.
+Park-suppression layered on a caller's status filter can only subtract rows, so it cannot restore an expired parked row.
+A client loop that sums per-status counts would count each expired parked row twice.
+So admission happens once, server-side.
 
-Named `_owed`, not `_parked`: it owns the OWED definition, of which parked-ness
-is one term.
+This is a restoration, not a widening: park entry is legal only from `PARK_LEGAL_FROM_STATUSES`.
+That set is a subset of the two base statuses, and an import-time assert enforces it.
+`is_park_legal_from` also admits parked to parked, a quote refresh that admits nothing new.
+A `parked_from_status` column was rejected because the write-time rule gives the same guarantee with nothing to keep in sync.
 
-THE PARK CONTRACT
------------------
-    park_is_active  ==  status == "parked" AND next_chase_ts > now
-
-Expiry is computed at READ time and NEVER written back. A parked row whose chase
-has passed is not parked any more — it rejoins the owed count automatically. No
-daemon, no sweeper, no cron, no human action. Parking buys BOUNDED,
-SELF-EXPIRING silence, never an exit.
-
-Arithmetic rather than a background job, on purpose: a sweeper that stops running
-leaves rows parked forever (silent); a predicate that stops running returns
-nothing at all (loud).
-
-WHY `owed_only` DEFINES THE SET IN ONE CALL (and why "additive" was wrong)
---------------------------------------------------------------------------
-An earlier ruling had park-suppression apply ON TOP of whatever status filter a
-caller already passed. It cannot express what it ordered, and the trace is short:
-
-    status=queued                          -> the Stop hook counts it
-    park it (status=parked, chase FUTURE)  -> matches neither queued nor
-                                              in_progress -> not counted (desired)
-    the chase PASSES (status=parked, PAST) -> STILL matches neither
-                                           -> STILL NOT COUNTED  <-- the bug
-
-Park-suppression is SUBTRACTIVE: it can only remove rows from a set. An expired
-parked row was never IN the Stop hook's set, because parking MOVED its status out
-of `queued`. Subtracting nothing from a set that already excludes it leaves it
-excluded forever — and the rejoin is the single most important behavior here.
-
-A second defect kills the additive shape outright: `query_owed`
-(task_store_client.py) LOOPS the status tuple and SUMS the per-status counts.
-Per-status admission would count every expired-parked row TWICE — parking a row
-would make the board look BUSIER than never parking it, inverting the feature.
-
-So the admission happens ONCE, server-side:
-
-    owed_only=True, status=None  ->  queued ∪ in_progress ∪ (parked AND NOT park-active)
-
-This is NOT a widening. Park ENTRY is legal ONLY from ("queued","in_progress"),
-so the restored set is a SUBSET of those same two statuses BY CONSTRUCTION.
-Nothing new is admitted; blocked/claimed/review membership is unchanged for
-every reader.
-
-`is_park_legal_from` (below) ALSO admits `parked -> parked` — a quote refresh,
-not an entry (row aa543525). That is provenance-idempotent and changes nothing
-here: a re-parked row was already parked, so it was already inside this set, and
-its pre-park status was already proven to be queued/in_progress by induction.
-The carrier of the proof is PARK_LEGAL_FROM_STATUSES, which stays exactly the
-two entry statuses — see the assert below, and `is_park_legal_from` for the
-induction.
-
-REJECTED ALTERNATIVE — a `parked_from_status` column. Rick overruled that exact
-shape today: a new field where a rule suffices. The write-time rule gives the
-same guarantee with nothing to keep in sync.
-
-THE TWO TWINS ARE DELIBERATELY INDEPENDENT
-------------------------------------------
-`park_is_active()` (Python) and `park_is_active_clause()` (SQLAlchemy) express
-the same rule in two languages, because the readers need both: the arbiter holds
-loaded rows in memory, while `task_query` / `count_only` must filter in Postgres
-BEFORE LIMIT/OFFSET (filtering after LIMIT is wrong; pulling the whole board
-defeats the unscoped guard).
-
-Neither calls the other, and neither derives from a shared third helper. That
-duplication is LICENSED, not accidental: the parity gate proves them identical by
-perturbing ONE side and requiring RED. A twin pair sharing an implementation
-cannot be mutation-tested — an equivalence test over a shared helper proves only
-that the helper equals itself.
-
-`now` IS A REQUIRED PARAMETER on both. The predicates never read a clock; callers
-resolve it at the boundary. An internally-sourced clock makes the boundary case
-(chase == now) unreachable without monkeypatching module state, which is exactly
-where that test goes flaky.
+The Python and SQLAlchemy twins are independent: neither calls the other and they share no helper.
+The parity gate perturbs one side and requires a failure, which a shared implementation cannot support.
+`now` is a required parameter on both, so the boundary case (chase equals now) is testable without patching.
 """
 
 import uuid
@@ -238,31 +169,26 @@ assert PARK_STATUS not in TERMINAL_STATUSES, (
 
 def park_is_active( status, next_chase_ts, now ) -> bool:
     """
-    True iff the row is parked AND its chase has NOT yet come due.
+    True when the row is parked and its chase has not yet come due.
 
-    THE SELF-EXPIRY RULE, computed at read time and never written back.
+    Expiry is computed at read time and never written back.
 
     Requires:
         - status is the row's status string (any value accepted)
         - next_chase_ts is an ISO-8601 string, a datetime, or None
-        - now is the comparison instant as a datetime — REQUIRED, never
-          defaulted (the predicate reads no clock; the caller resolves it).
-          A naive `now` is interpreted as UTC.
+        - now is the comparison instant as a datetime, required and never defaulted
+          (the predicate reads no clock; the caller resolves it)
+        - a naive `now` is interpreted as UTC
 
     Ensures:
-        - status != PARK_STATUS                -> False (checked FIRST, so a
-          non-parked row is never touched by the chase logic at all — NULL is
-          the modal chase value on this board, and a status-guard slip plus a
-          wrong NULL arm would silence the entire board inside the very fix
-          meant to prevent that)
-        - parked AND next_chase_ts >  now      -> True  (silence still bought)
-        - parked AND next_chase_ts == now      -> False (the boundary: the chase
-          has COME DUE, so the row has rejoined owed work)
-        - parked AND next_chase_ts <  now      -> False (EXPIRED — rejoins owed)
-        - parked AND next_chase_ts is None     -> False (fail-loud-toward-owed:
-          a malformed park is VISIBLE work; the write rule + DB CHECK make this
-          unreachable through the API)
-        - parked AND next_chase_ts unparseable -> False (same rationale)
+        - status != PARK_STATUS -> False (checked first, so a non-parked row never reaches
+          the chase logic; NULL is the common chase value on the board)
+        - parked and next_chase_ts > now  -> True (silence still in force)
+        - parked and next_chase_ts == now -> False (the chase has come due, so the row is owed)
+        - parked and next_chase_ts < now  -> False (expired, so the row rejoins owed work)
+        - parked and next_chase_ts is None -> False (a malformed park surfaces as visible work;
+          the write rule and the DB check make this unreachable through the API)
+        - parked and next_chase_ts unparseable -> False (same rationale)
         - never raises
     """
     if status != PARK_STATUS:
@@ -287,14 +213,10 @@ def park_is_active( status, next_chase_ts, now ) -> bool:
 
 def is_owed( status, next_chase_ts, now ) -> bool:
     """
-    The honest GENERAL owed predicate: non-terminal AND not currently park-active.
+    True when the row is non-terminal and not currently park-active.
 
-    ⚠️ SCOPE: no reader adopts this as its owed definition in this pass. The
-    readers use the one-call `owed_only` set (queued ∪ in_progress ∪ expired-
-    parked) described in the module docstring. Adopting this wholesale would
-    start counting blocked/claimed/review rows — an unordered behavior change.
-    It is the right long-term shape and is named here so the general rule has a
-    home; adopting it fleet-wide is a separate, ruled decision.
+    No reader adopts this as its owed definition yet; readers use the `owed_only` set from the module docstring.
+    Adopting it would start counting blocked, claimed and review rows, which changes behavior.
 
     Requires:
         - status / next_chase_ts / now as per park_is_active
@@ -312,116 +234,27 @@ def is_owed( status, next_chase_ts, now ) -> bool:
 
 def park_reason_is_stale( status, park_reason_captured_at, body_changed_ts ) -> bool:
     """
-    True iff the row's `park_reason` quote is provably OLDER than the row's BODY.
+    True when the row body changed after its `park_reason` quote was captured.
 
-    `park_reason` is a FROZEN QUOTE captured at park time. Amend the row afterward
-    and the quote stays syntactically valid while it stops being true, and NOTHING
-    GOES RED. This predicate is the red: it does not stop prose going stale, it
-    makes the divergence VISIBLE (design
-    src/rnd/v0.1.9/2026.07.19-park-reason-staleness-detection.md §3.2).
-
-    ⚠️ THE THIRD ARGUMENT IS `body_changed_ts`, NOT `updated_ts` — bug 54924128
-    -----------------------------------------------------------------------------
-    v1 compared against `updated_ts`, which moves on EVERY write. `task_edit`'s
-    five free-edit fields are title / body / priority / gate_class / urgency, and
-    **only `body` can make a park quote untrue.** The other four bumped
-    `updated_ts` and flipped the flag anyway; so did any transition, patch or
-    amend.
-
-    Two priority-only edits during a routine board recut on 2026-07-26 produced
-    two false STALEs in three minutes — at that moment **every parked row in
-    production carried the flag and every one was wrong, 0 of 2.** The single most
-    common maintenance write on the board was defaming correct quotes.
-
-    ⇒ `updated_ts` was a PROXY for "the row's content changed," and it is not one.
-    The spec always named the right event: this function's own local variable was
-    called `amended_ts` while bound to `updated_ts`. Only the binding was wrong.
-
-    ⇒ The shape is unchanged, and that was the point of choosing this fix over the
-    quote-in-body alternative: still no clock, still two values already on the row,
-    still ambiguity → FRESH. Both twins stay a plain column compare, which is what
-    makes their parity cheap to prove.
-
-    READS NO CLOCK — deliberately, and unlike `park_is_active`. Staleness is a
-    comparison of two values ALREADY ON THE ROW; `now` has no part in it. A `now`
-    parameter here would be an invitation to write `now() > captured_at`, which is
-    true of every parked row the instant after it is parked.
-
-    THE ORDERING THIS DEPENDS ON (§3.4 — read it before changing the writer):
-    `park_reason_captured_at` is set at park time to the DB-clock instant the park
-    write stamps into `updated_ts`, in ONE statement. `body_changed_ts` is stamped
-    from the SAME DB clock by the two paths that write `body`. So a body change
-    AFTER the park lands strictly greater and this returns True; a park AFTER a
-    body change lands strictly greater on the capture side and this returns False.
-    ⚠️ Both sides MUST come from the database clock — an application-clock stamp on
-    either would make this a cross-clock comparison, and skew would surface as a
-    false FRESH: a parked row silently failing to report an expired quote, which is
-    this feature's defect arriving in the direction nobody notices.
-
-    ⚠️ THE QUESTION THIS ANSWERS IS NARROWER THAN ITS NAME — row aa543525 §2
-    -----------------------------------------------------------------------------
-    It answers **"has the row's BODY changed since the quote was frozen?"** It does
-    NOT answer "is the park reason still true," and those come apart whenever the
-    reason's basis lives OUTSIDE the row.
-
-    MEASURED, 2026-07-25: four rows carried `park_reason_stale: false` while their
-    park reason was DEAD BY EVENT — each quoted a fleet-wide stand-down whose basis
-    had since evaporated. Nothing in those rows changed, so nothing could flag them,
-    and every one read FRESH. **That is not an ambiguous arm degrading to False; it
-    is a whole class this predicate cannot see even when both timestamps are perfect
-    and the comparison is exactly right.**
-
-    ⇒ SO A `False` HERE MEANS "no body change since capture," NEVER "verified still
-    true." A reader who treats FRESH as an endorsement is reading a claim this
-    function does not make — and it is the harder error to notice, because the flag
-    is silent in exactly the case a reader most wants it to speak.
-
-    ⇒ THE REAL PROPERTY IS CONTENT CONTRADICTION: a reason is stale when the row's
-    content no longer supports its quoted sentence. NO CLOCK CAN ANSWER THAT, which
-    is why re-stamping `park_reason_captured_at` on a "non-substantive" write was
-    rejected — it requires classifying every write as substantive-or-not, the exact
-    classification this flag exists to avoid needing. **The chase is the backstop:
-    a park is bounded and self-expiring, so an event-invalidated reason is corrected
-    by `next_chase_ts` passing, not by this predicate.** That bound is what makes
-    the gap survivable rather than open-ended.
-
-    WHICH WAY THIS INSTRUMENT LIES: every ambiguous arm returns False
-    (NOT-stale) — the OPPOSITE direction from `park_is_active`'s
-    fail-loud-toward-owed, and deliberately so. Staleness is ADVISORY (§3.3): it
-    changes no owed-ness and blocks nothing, so a false STALE has no mechanism to
-    correct it — it merely defames a correct quote and teaches readers to ignore
-    the flag, which disarms the feature permanently. A false FRESH is exactly the
-    status quo this change improves on. Silence is recoverable here; a crying wolf
-    is not.
-
-    ⚠️ That bias is a DESIGN-TIME answer about THIS hazard, not a universal — do
-    not lift it into another gate. It holds here because staleness blocks nothing,
-    so a miss costs only the status quo. A gate whose ambiguity implies an UNSAFE
-    action must refuse instead, and be right to.
+    It compares `body_changed_ts` (not `updated_ts`), reads no clock, and returns False on ambiguity; the flag is advisory.
+    A False answer means no body change since capture, never "verified still true". A basis `OUTSIDE` the row changes nothing in it; that limit is recorded on the store item aa543525.
+    The real property is `CONTENT CONTRADICTION`, which no timestamp can answer; the chase is the backstop.
 
     Requires:
         - status is the row's status string (any value accepted)
         - park_reason_captured_at is an ISO-8601 string, a datetime, or None
         - body_changed_ts is an ISO-8601 string, a datetime, or None
         - naive datetimes on either side are interpreted as UTC
+        - both stamps come from the database clock, so a skew cannot produce a false fresh
 
     Ensures:
-        - status != PARK_STATUS                       -> False (checked FIRST; a
-          non-parked row is never stale whatever its timestamps say — AC5)
-        - park_reason_captured_at is None             -> False (a row parked before
-          capture-time shipped has none; we cannot know what its quote described,
-          so we do not accuse it)
-        - body_changed_ts is None                     -> False (the body has not
-          changed since this column shipped — every row is NULL at migration
-          38e025169a73, which is why no backfill was written: every value it could
-          have invented would be a fabrication)
-        - either side unparseable                     -> False (same rationale)
-        - body_changed_ts >  park_reason_captured_at  -> True  (STALE — the body
-          changed after the quote was frozen, AC4)
-        - body_changed_ts == park_reason_captured_at  -> False (the freshly-parked
-          state, AC3 — the boundary, and the one the ordering trap turns on)
-        - body_changed_ts <  park_reason_captured_at  -> False (the body changed
-          BEFORE the park; the quote was taken from the current text)
+        - status != PARK_STATUS -> False (checked first; a non-parked row is never stale)
+        - park_reason_captured_at is None -> False (a row parked before capture existed has no quote to judge)
+        - body_changed_ts is None -> False (the body has not changed since the column shipped; no backfill)
+        - either side unparseable -> False (same rationale)
+        - body_changed_ts >  park_reason_captured_at -> True (the body changed after the quote was frozen)
+        - body_changed_ts == park_reason_captured_at -> False (the freshly parked state)
+        - body_changed_ts <  park_reason_captured_at -> False (the quote was taken from the current text)
         - never raises
     """
     if status != PARK_STATUS:
@@ -463,25 +296,10 @@ def park_reason_is_stale( status, park_reason_captured_at, body_changed_ts ) -> 
 
 def holding_is_active( status, next_chase_ts, now ) -> bool:
     """
-    True iff the row is in the holding area AND its triage chase has NOT come due.
+    True when the row is in the holding area and its triage chase has not come due.
 
-    🔨 RICK RULED 2026-09-02, by voice: `not_approved` is self-expiring, "like a chase
-    on a parked row." Same mechanism, deliberately — expiry computed at READ time,
-    never written back, no daemon and no sweeper. A sweeper that stops running leaves
-    rows buried forever, silently; a predicate that stops running returns nothing at
-    all, loudly.
-
-    🔴 EXPIRY MAKES A ROW VISIBLE, NOT OWED — AND THAT IS NOT A SOFTENING OF THE
-    RULING. A parked row REJOINS the owed count because it provably CAME from
-    queued/in_progress; that subset relation is what makes re-admission a
-    RESTORATION rather than a widening, and it is asserted at import in this module.
-    A `not_approved` row was NEVER owed by anyone — it has not been admitted to a
-    board. Re-admitting it to the owed set would poke every seat about work nobody
-    approved, which is precisely what the import-time assert below forbids.
-
-    ⇒ So the chase does the job the ruling asks of it by returning the row to the
-    BOARD, where a human sees an untriaged pile that stopped hiding itself. The
-    thing that must not be silent is the row, not the fleet's pokes.
+    A `not_approved` row expires like a parked row: computed at read time, never written back.
+    Expiry makes the row visible on the board but not owed, and an import-time assert keeps it out of the owed set.
 
     Requires:
         - status is a status string
@@ -489,15 +307,12 @@ def holding_is_active( status, next_chase_ts, now ) -> bool:
         - now is a datetime (naive treated as UTC)
 
     Ensures:
-        - non-holding status                      -> False (checked FIRST, so the
-          chase arithmetic never touches an unrelated row)
-        - holding AND next_chase_ts >  now        -> True  (still awaiting triage)
-        - holding AND next_chase_ts == now        -> False (the boundary: the chase
-          has come due, matching park_is_active exactly rather than by coincidence)
-        - holding AND next_chase_ts <  now        -> False (EXPIRED — becomes visible)
-        - holding AND next_chase_ts None/unparsed -> False (fail-loud-toward-VISIBLE:
-          a row whose chase cannot be read must surface, never hide indefinitely on
-          the strength of a field nobody can parse)
+        - non-holding status                      -> False (checked first, so an unrelated row skips the chase arithmetic)
+        - holding and next_chase_ts >  now        -> True (still awaiting triage)
+        - holding and next_chase_ts == now        -> False (the chase has come due, matching park_is_active)
+        - holding and next_chase_ts <  now        -> False (expired, so the row becomes visible)
+        - holding and next_chase_ts None/unparsed -> False (a row whose chase cannot be read must surface,
+          not hide indefinitely)
         - never raises
     """
     if status != NOT_APPROVED_STATUS:
@@ -522,23 +337,19 @@ def holding_is_active( status, next_chase_ts, now ) -> bool:
 
 def park_is_active_clause( model, now ):
     """
-    The SQL twin of `park_is_active`: a SQLAlchemy boolean expression true for
-    exactly the rows the Python predicate calls park-active.
+    SQLAlchemy twin of `park_is_active`: a boolean expression true for park-active rows.
 
     Requires:
-        - model is the mapped TaskItem class (or an alias) exposing `status` and
-          `next_chase_ts`
-        - now is the comparison instant as a datetime — REQUIRED, never
-          defaulted. A naive `now` is interpreted as UTC.
+        - model is the mapped TaskItem class (or an alias) exposing `status` and `next_chase_ts`
+        - now is the comparison instant as a datetime, required and never defaulted
+        - a naive `now` is interpreted as UTC
 
     Ensures:
         - returns a SQLAlchemy boolean expression, never a Python bool
-        - TRUE iff status == PARK_STATUS AND next_chase_ts IS NOT NULL
-                                         AND next_chase_ts > now
-        - a NULL next_chase_ts yields FALSE, not NULL — three-valued logic would
-          drop the row from BOTH sides of a filter, and it must land on the OWED
-          side (fail-loud-toward-owed), matching twin (a)'s NULL branch
-        - the status test is the FIRST conjunct, mirroring twin (a)'s guard
+        - True iff status == PARK_STATUS and next_chase_ts is not NULL and next_chase_ts > now
+        - a NULL next_chase_ts yields False, not NULL, because three-valued logic would drop the row
+          from both sides of a filter; it must land on the owed side, matching twin (a)'s NULL branch
+        - the status test is the first conjunct, mirroring twin (a)'s guard
     """
     from sqlalchemy import and_
 
@@ -553,21 +364,11 @@ def park_is_active_clause( model, now ):
 
 def holding_is_active_clause( model, now ):
     """
-    The SQLAlchemy twin of `holding_is_active` — the two MUST agree.
+    SQLAlchemy twin of `holding_is_active`, shaped like `park_is_active_clause`.
 
-    Kept beside `park_is_active_clause` and shaped identically on purpose: the two
-    predicates answer the same question about two different statuses, and a reader
-    comparing them should find nothing to compare. A divergence between a Python
-    predicate and its SQL twin is the defect this module's whole layout exists to
-    make visible, since each is individually plausible and only their disagreement
-    is wrong.
-
-    ⚠️ `isnot( None )` is load-bearing and is NOT redundant beside the `>` comparison:
-    in SQL a comparison against NULL yields NULL, not False, so without it a row with
-    no chase would be neither in the set nor out of it. The Python twin reaches the
-    same answer through its `else: return False` branch — same verdict, different
-    mechanism, which is exactly why both need testing rather than one being derived
-    from the other.
+    The `isnot( None )` test is needed beside `>`: in SQL a comparison against NULL yields NULL, not False.
+    Without it a row with no chase would be in neither set.
+    The Python twin reaches the same verdict through its `else` branch, so both need their own tests.
 
     Requires:
         - model is the TaskItem class (or a mapped alias)
@@ -576,7 +377,7 @@ def holding_is_active_clause( model, now ):
     Ensures:
         - returns a SQLAlchemy boolean expression, never a Python bool
         - True for a holding-area row whose chase is still in the future
-        - False for an expired, absent or unparseable chase — the row surfaces
+        - False for an expired, absent or unparseable chase, so the row surfaces
     """
     from sqlalchemy import and_
 
@@ -591,24 +392,19 @@ def holding_is_active_clause( model, now ):
 
 def item_blocker_ids( blocked_by ):
     """
-    Every `{kind: "item"}` id in a `blocked_by` list, as strings.
+    Return every `{kind: "item"}` id in a `blocked_by` list, as strings.
 
-    THE KIND FILTER IS THE WHOLE POINT, not hygiene. Only the ITEM arm has an oracle:
-    an item id resolves against this store and returns a status. A `{kind: "persona"}`
-    ref resolves against a namespace that HAS NO REGISTRY — `list_spawned_sessions`
-    carries no persona field (row 6f8fd858) and `commons_who` is a posting log, so
-    absence there is evidence of SILENCE, not of departure. A `{kind: "user"}` ref has
-    no lifecycle at all. Scanning either arm here would mark live-but-quiet seats as
-    resolved-and-dead, which is a false finding on the one flag that has no correcting
-    mechanism (see `blocker_is_terminal`'s which-way-this-lies note).
+    Only the item kind has an oracle: an item id resolves against this store and returns a status.
+    A persona ref has no registry and a user ref has no lifecycle.
+    Scanning those kinds would mark live but quiet seats as dead.
 
     Requires:
         - blocked_by is the row's blocked_by value (any type; non-list yields [])
 
     Ensures:
         - returns a list of str ids for entries shaped {kind: "item", id: <non-empty str>}
-        - a malformed entry (not a dict, wrong kind, missing/blank/non-str id) is
-          SKIPPED, never raised on — this runs on the read path of every query
+        - a malformed entry (not a dict, wrong kind, missing/blank/non-str id) is skipped, never raised on,
+          because this runs on the read path of every query
         - order is the list's own; duplicates are preserved (the caller batches)
         - never raises
     """
@@ -627,12 +423,10 @@ def item_blocker_ids( blocked_by ):
 
 def is_canonical_uuid( value ):
     """
-    True iff `value` is a full canonical UUID string.
+    True when `value` is a full canonical UUID string.
 
-    THE DISCRIMINATOR THAT KEEPS `blocker_is_terminal` HONEST. An unresolved id may only be
-    called DEAD when it was spelled in the one form that could not have failed for width —
-    anything shorter is an abbreviation our own read verbs accept, so its non-resolution is
-    a fact about the lookup, not about the row.
+    `blocker_is_terminal` calls an unresolved id dead only when it is spelled in full.
+    A shorter form is an abbreviation the read verbs accept, so its non-resolution describes the lookup.
 
     Requires:
         - value is any object
@@ -651,83 +445,27 @@ def is_canonical_uuid( value ):
 
 def blocker_is_terminal( status, blocked_by, status_by_id ):
     """
-    True iff this row's wait can never be satisfied by the mechanism it is relying on.
+    True when this row's wait can never be satisfied by the blocker it relies on.
 
-    THE DEFECT THIS IS THE RED FOR (store row 00a6bde2). `task_transition(..., "blocked",
-    blocked_by=[{kind:"item", id:X}])` accepts X with no check that X is non-terminal, and
-    NOTHING re-examines the edge afterward. Transition X to `done` or `dropped` — both
-    TERMINAL, so X can never transition again — and every row blocked on X keeps reporting
-    `blocked` forever. The row is not waiting. It is STRANDED, and it looks identical to
-    waiting. Six live instances found by hand 2026-07-25, one of them unsatisfiable for
-    eight days.
-
-    ADVISORY, exactly like `park_reason_is_stale`: it changes no owed-ness, unblocks
-    nothing, transitions nothing. It makes an invisible state visible and stops there.
-    The disposition of a stranded row is a separate decision — and a SPLIT one:
-
-        blocker `done`    -> the precondition ACTUALLY HAPPENED; the row should have
-                             rejoined the moment it did. Mechanical, no ruling needed.
-        blocker `dropped` -> dropping was a DECISION. A silent rejoin would overturn it.
-                             Rick's call, and ONLY there.
-
-    ⚠️ TWO CAUSES, ONE FLAG — BUT ONLY FOR A CANONICAL ID, AND THAT QUALIFIER WAS MISSING
-    IN THE FIRST VERSION. This returns True for a blocker that is terminal, and for one
-    that does not resolve WHEN ITS ID IS A FULL UUID. Both mean the same thing to the row:
-    the wait cannot be satisfied.
-
-    🔴 WHAT THE FIRST VERSION GOT WRONG (María 🌸, `fae1bbc4`, 2026-07-25 — measured, not
-       argued). The original text reasoned that "on a TYPED edge there is no ambiguity
-       about what an unresolvable id is", and excluded the prose arm's collision rule. That
-       exclusion is right about hex/sha collisions and WRONG ABOUT WIDTH.
-
-       `91067e47` stores its blocker as the 8-char prefix `"e2f11f6f"`. The real row is
-       `e2f11f6f-f3f8-4e73-ac94-e573f45da3ea`, status `queued` — ALIVE, a live decision
-       owed by Rick. The exact-match lookup found nothing, and this predicate read
-       looked-up-and-missing as DEAD. It CONDEMNED A LIVE ROW.
-
-       ⇒ A PREFIX BLOCKER ID IS INDISTINGUISHABLE FROM A DELETED ONE by string alone, and
-         our own verbs disagree about what an id is (`task_get` resolves an 8-char prefix;
-         `task_transition` 422s on one). A seat that reads with prefixes eventually writes
-         one into a `blocked_by`, and that edge is the proof it already happened.
-
-       ⇒ IT ALSO INVERTED THIS FUNCTION'S OWN STATED LIE-DIRECTION, which is the part worth
-         keeping. The "absent key ⇒ no finding" reasoning below is sound, but a prefix id is
-         never absent from the map — it is always looked-up-and-missing, i.e. the True arm.
-         The safe case and the dangerous case routed to opposite answers with ID WIDTH as
-         the only variable. And this is the direction with teeth: the done-arm disposition
-         is "auto-rejoin, mechanical, no ruling needed", so a false positive is the input to
-         an automatic unblock of a row genuinely waiting on a human.
-
-    The repository now resolves a prefix the way `task_get` does; an AMBIGUOUS or unmatched
-    prefix still arrives as None, and is NOT flagged here.
-
-    WHICH WAY THIS INSTRUMENT LIES: toward NOT-flagged. An unresolved blocker id is only
-    flagged when the caller actually looked it up and got nothing — a status map that
-    simply lacks the key (the caller batched a different page, or resolution failed) is
-    treated as "no evidence", not as "dead". Same direction as `park_reason_is_stale`, and
-    for the same reason: a false STALE has no mechanism to correct it, it merely defames a
-    correct row and teaches readers to ignore the flag, which disarms the feature
-    permanently. A false FRESH is the status quo this improves on.
+    A row blocked on an item that became `done` or `dropped` stays `blocked` forever; nothing re-examines the edge.
+    The flag is advisory: it changes no owed-ness and transitions nothing; a `dropped` blocker needs the owner's call.
+    Only a full canonical UUID that fails to resolve counts as dead; an id absent from `status_by_id` is no evidence.
 
     Requires:
         - status is the row's status string (any value accepted)
         - blocked_by is the row's blocked_by value (any type)
-        - status_by_id maps blocker-id str -> status str, with an explicit None value
-          for an id that was looked up and NOT FOUND. A key that is ABSENT from the map
-          was never looked up and yields no finding.
+        - status_by_id maps blocker-id str -> status str, with an explicit None value for an id
+          that was looked up and not found; a key absent from the map was never looked up and yields no finding
 
     Ensures:
-        - status != BLOCKED_STATUS       -> False (checked FIRST; a queued row carrying a
-          leftover blocked_by is not stranded — it is not waiting at all)
-        - no {kind:"item"} blocker        -> False (persona/user arms have no oracle)
-        - ANY item blocker resolving to a TERMINAL status -> True
-        - a CANONICAL-UUID blocker present in the map as None (looked up, absent) -> True
-        - a NON-canonical (prefix) blocker present as None -> False. Unresolvable-by-width
-          is "I cannot tell", never "it is dead" — the arm that condemned a live row
-        - every item blocker resolving to a NON-terminal status -> False
-        - an id ABSENT from status_by_id  -> contributes nothing either way
-        - one terminal + one live blocker -> True (a partial strand is a strand; the row
-          cannot proceed on the live half while the dead half still gates it)
+        - status != BLOCKED_STATUS -> False (checked first; a queued row with a leftover blocked_by is not waiting)
+        - no {kind:"item"} blocker -> False (persona and user arms have no oracle)
+        - any item blocker resolving to a terminal status -> True
+        - a canonical-UUID blocker present in the map as None (looked up, absent) -> True
+        - a non-canonical (prefix) blocker present as None -> False (unresolvable by width means "cannot tell")
+        - every item blocker resolving to a non-terminal status -> False
+        - an id absent from status_by_id contributes nothing either way
+        - one terminal blocker plus one live blocker -> True (the dead half still gates the row)
         - never raises
     """
     if status != BLOCKED_STATUS:
@@ -746,21 +484,11 @@ def blocker_is_terminal( status, blocked_by, status_by_id ):
 
 def park_reason_is_stale_clause( model ):
     """
-    The SQL twin of `park_reason_is_stale`: a SQLAlchemy boolean expression true
-    for exactly the rows the Python predicate calls stale.
+    SQLAlchemy twin of `park_reason_is_stale`: a boolean expression true for stale rows.
 
-    Self-contained BY DESIGN. Does not call twin (a); shares no helper with it.
-    That duplication is LICENSED (module docstring): the parity gate proves the
-    two identical by perturbing ONE side and requiring RED, which a pair sharing
-    an implementation cannot support.
-
-    NO `now` PARAMETER, matching twin (a) — staleness compares two columns of the
-    same row, and a clock has no part in it.
-
-    ⚠️ READS `body_changed_ts`, NOT `updated_ts` (bug 54924128, 2026-07-26). This
-    twin MUST move with twin (a) or the two halves silently disagree, and a reader
-    gets a different answer depending on whether the flag was computed in Python or
-    in SQL. See twin (a)'s docstring for why `updated_ts` was the wrong column.
+    The twin is self-contained: it does not call twin (a) and shares no helper with it, so the parity gate can perturb one side.
+    It takes no `now`, because staleness compares two columns of one row.
+    It reads `body_changed_ts`, not `updated_ts`, and must move together with twin (a) or the two halves disagree.
 
     Requires:
         - model is the mapped TaskItem class (or an alias) exposing `status`,
@@ -768,14 +496,11 @@ def park_reason_is_stale_clause( model ):
 
     Ensures:
         - returns a SQLAlchemy boolean expression, never a Python bool
-        - TRUE iff status == PARK_STATUS
-                  AND park_reason_captured_at IS NOT NULL
-                  AND body_changed_ts         IS NOT NULL
-                  AND body_changed_ts > park_reason_captured_at
-        - a NULL on EITHER timestamp yields FALSE, not NULL — three-valued logic
-          would drop the row from BOTH sides of a filter, and it must land on the
-          NOT-STALE side, matching twin (a)'s null arms
-        - the status test is the FIRST conjunct, mirroring twin (a)'s guard
+        - True iff status == PARK_STATUS and park_reason_captured_at is not NULL
+          and body_changed_ts is not NULL and body_changed_ts > park_reason_captured_at
+        - a NULL on either timestamp yields False, not NULL, because three-valued logic would drop
+          the row from both sides of a filter; it must land on the not-stale side, matching twin (a)
+        - the status test is the first conjunct, mirroring twin (a)'s guard
     """
     from sqlalchemy import and_
 
@@ -789,27 +514,20 @@ def park_reason_is_stale_clause( model ):
 
 def owed_clause( model, now ):
     """
-    The park-suppression clause: TRUE for every row that is NOT park-active.
+    Return the park-suppression clause: true for every row that is not park-active.
 
-    A bare boolean expression, droppable straight into `query.filter( ... )` on
-    BOTH the row query and the COUNT(*) query — the count side is where a reader
-    diverges silently, so it takes the identical expression, not a variant.
-
-    NOTE the scope discipline (module docstring): this clause SUBTRACTS
-    park-active rows. It does NOT by itself restore expired-parked rows to a
-    status-filtered set — that restoration is the `owed_only` admission, which
-    must select the status set in ONE call. Using this clause alone on top of a
-    ("queued","in_progress") filter reproduces the bug it was meant to fix.
+    The expression drops into `query.filter( ... )` on both the row query and the count query.
+    It only subtracts park-active rows; restoring expired parked rows needs `owed_status_clause`.
 
     Requires:
         - model is the mapped TaskItem class (or an alias)
-        - now is the comparison instant as a datetime — REQUIRED
+        - now is the comparison instant as a datetime, required
 
     Ensures:
         - returns a SQLAlchemy boolean expression
-        - an EXPIRED parked row passes (it has rejoined owed work)
-        - a parked row with a NULL chase passes (fail-loud-toward-owed)
-        - a park-active row does NOT pass
+        - an expired parked row passes (it has rejoined owed work)
+        - a parked row with a NULL chase passes (it surfaces as owed)
+        - a park-active row does not pass
     """
     from sqlalchemy import not_
 
@@ -818,41 +536,21 @@ def owed_clause( model, now ):
 
 def owed_status_clause( model, now ):
     """
-    THE `owed_only=True` SET, in ONE expression:
+    Return the `owed_only=True` set: queued, in_progress, and parked rows not park-active.
 
-        queued ∪ in_progress ∪ (parked AND NOT park-active)
-
-    This is the admission the Stop-hook oracle and the arbiter select on. It is
-    ONE clause because the owed set is SERVER-OWNED: no client holds a status
-    tuple, so there is no second thing to remember to pair, and the seam fails
-    CLOSED. A per-status admission would count every expired-parked row TWICE
-    (admitted on the queued call AND the in_progress call), making a parked board
-    look BUSIER than an unparked one — which inverts the feature.
-
-    ⚠️ CORRECTED 2026-07-20. This previously read "ONE clause rather than a
-    per-status loop BECAUSE `query_owed` SUMS per-status counts" — stale AND
-    backwards. `query_owed` stopped summing per-status on 2026-07-19; and the
-    causation ran the wrong way, naming the client loop as the REASON for the
-    server clause when the clause exists precisely so that no client loop is
-    needed. A reader reasoning from the old text could conclude the loop is
-    load-bearing and must be preserved. The double-count warning was always
-    correct; only its stated cause was wrong.
-
-    Not a widening: park ENTRY is restricted to PARK_LEGAL_FROM_STATUSES, so the
-    admitted expired-parked rows provably came from those same two statuses.
-    blocked/claimed/review membership is unchanged. (`is_park_legal_from` also
-    permits a `parked -> parked` quote refresh — provenance-idempotent, so it
-    admits nothing new; see that function for the induction.)
+    The Stop-hook oracle and the arbiter select on this admission, so the server owns the owed set.
+    A per-status admission would count each expired parked row twice.
+    It does not widen the set: park entry is restricted to `PARK_LEGAL_FROM_STATUSES`.
 
     Requires:
         - model is the mapped TaskItem class (or an alias)
-        - now is the comparison instant as a datetime — REQUIRED
+        - now is the comparison instant as a datetime, required
 
     Ensures:
         - returns a SQLAlchemy boolean expression
-        - TRUE for every queued / in_progress row, regardless of chase value
-        - TRUE for a parked row whose chase has come due (or is NULL)
-        - FALSE for a park-active row, and for every other status
+        - true for every queued / in_progress row, regardless of chase value
+        - true for a parked row whose chase has come due (or is NULL)
+        - false for a park-active row, and for every other status
     """
     from sqlalchemy import and_, not_, or_
 
@@ -867,39 +565,23 @@ def owed_status_clause( model, now ):
 
 def owed_status_row( status, next_chase_ts, now ) -> bool:
     """
-    The ROW-LEVEL twin of `owed_status_clause`: True iff the row is in the
-    `owed_only=True` set —
+    Row-level twin of `owed_status_clause`: True when the row is in the `owed_only=True` set.
 
-        queued ∪ in_progress ∪ (parked AND NOT park-active)
-
-    Needed because not every reader holds ORM rows. `task_store_drain` filters
-    task DICTS decoded from an HTTP body, so it cannot evaluate a SQLAlchemy
-    expression — without this verb it would have to compose the admission inline,
-    which is a second expression of the rule living outside this module.
-
-    ⚠️ NOT `is_owed`. That is the general non-terminal predicate and would admit
-    blocked / claimed / review. This is pinned to the two base statuses plus the
-    restored expired-parked set.
-
-    INDEPENDENCE (deliberate, load-bearing): this does its OWN inline coercion
-    and its OWN park-window comparison. It does NOT call `park_is_active`, and
-    `owed_status_clause` does not call it. That duplication is what lets the
-    equivalence gate mutate ONE side and require RED — the ADMISSION half is
-    where every defect in this build has lived, so it is exactly the half that
-    must be mutation-provable rather than assumed.
+    Readers that hold plain dicts, such as `task_store_drain`, cannot evaluate a SQLAlchemy expression, so they call this verb.
+    It is not `is_owed`, which would admit blocked, claimed and review rows.
+    It calls neither `park_is_active` nor the clause, so the equivalence gate can perturb one side and require a failure.
 
     Requires:
         - status is the row's status string (any value accepted)
         - next_chase_ts is an ISO-8601 string, a datetime, or None
-        - now is the comparison instant as a datetime — REQUIRED, never
-          defaulted. A naive `now` is interpreted as UTC.
+        - now is the comparison instant as a datetime, required and never defaulted
+        - a naive `now` is interpreted as UTC
 
     Ensures:
-        - status in OWED_BASE_STATUSES        -> True, whatever the chase value
-        - status == PARK_STATUS AND the chase has come due / is NULL / is
-          unparseable                          -> True (rejoined, or fail-loud-
-          toward-owed)
-        - status == PARK_STATUS AND the chase is still in the future -> False
+        - status in OWED_BASE_STATUSES -> True, whatever the chase value
+        - status == PARK_STATUS and the chase has come due / is NULL / is unparseable -> True
+          (rejoined, or a malformed park surfaces as owed)
+        - status == PARK_STATUS and the chase is still in the future -> False
         - every other status (blocked/claimed/review/done/dropped) -> False
         - never raises
     """
@@ -930,8 +612,9 @@ def owed_status_row( status, next_chase_ts, now ) -> bool:
 
 def quick_smoke_test():
     """
-    Quick smoke test for the owed predicate — exercises every branch of
-    park_is_active plus is_owed and the park-legality rule, on a fixed clock.
+    Smoke-test the owed predicates on a fixed clock.
+
+    Exercises every branch of park_is_active, plus is_owed, owed_status_row, staleness and park legality.
     """
     from datetime import timedelta
 

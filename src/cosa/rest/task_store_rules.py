@@ -1,25 +1,21 @@
 """
-Task-store structural rules — pure validation for the unified task store (Phase 1).
+Structural validation rules for the unified task store, as pure functions.
 
-This module is the ONE place where the task store's structural invariants live
-(design §2.2 "enforcement-light to start": the API enforces structural rules;
-social/role rules stay practice-layer in v1):
+The API enforces structural invariants here; role and social rules stay in practice.
+The module covers four areas:
 
-    - status / item_class / gate_class / priority / urgency / authority enum membership
-    - receipt_refs key whitelist + per-key shape rules (design §4.1 AC1 —
-      "receipt validation is not theater-able")
-    - typed blocked_by refs ({kind: item|persona|user, id}) (design §2.1)
-    - transition rules: terminal states are append-only; ->done requires valid
-      receipts; ->blocked requires next_chase_ts (I3) + >=1 typed blocked_by ref
+    - enum membership for status, item_class, gate_class, priority, urgency and authority
+    - the receipt_refs key whitelist and the shape rule for each key
+    - typed blocked_by refs of the form {kind: item|persona|user, id}
+    - transition rules: terminal states are append-only, done needs valid receipts,
+      and blocked needs next_chase_ts plus at least one typed blocked_by ref
 
-Every function is pure (no DB, no HTTP): callers pass state in, get a list of
-human-readable error strings back (empty list == valid). The router maps a
-non-empty list to HTTP 422; the repository never sees invalid input.
+Every function is pure: callers pass state in and get a list of error strings back.
+An empty list means valid. The router maps a non-empty list to HTTP 422, so the
+repository never sees invalid input. A log_line receipt has the shape
+"<scope>/<rel-path>:<lineno>" and its file must exist.
 
-Canonical design: planning-is-prompting ->
-planning-is-prompting/src/rnd/2026.06.11-unified-task-store-design.md (v0.4). Gate rulings (Tiberius,
-qid c8c73fde): item_class naming, terminal-state rule, blocked requires >=1 ref,
-log_line shape = "<scope>/<rel-path>:<lineno>" with exists check.
+Design: src/docs/fleet-liveness-and-task-store-architecture.md
 """
 
 import os
@@ -267,11 +263,11 @@ SCOPING_FILTERS = (
 
 class UnscopedQueryError( Exception ):
     """
-    Raised by TaskRepository.query_tasks when a BARE unscoped query would return
-    more than UNSCOPED_QUERY_THRESHOLD non-terminal rows and the caller did NOT
-    pass unscoped_audit=True. Carries the offending count + the threshold so the
-    router can render an educational HTTP 400 (name the two fixes) and the MCP
-    verb can surface a structured error-dict.
+    Signal that a bare query would return too many non-terminal rows.
+
+    TaskRepository.query_tasks raises it when an unscoped query matches more than UNSCOPED_QUERY_THRESHOLD
+    non-terminal rows and the caller did not pass unscoped_audit=True. It carries the row count and the
+    threshold. The router renders an HTTP 400 naming both fixes, and the MCP verb returns an error dict.
     """
 
     def __init__( self, count: int, threshold: int = UNSCOPED_QUERY_THRESHOLD ):
@@ -287,9 +283,9 @@ class UnscopedQueryError( Exception ):
 
 def is_unscoped( filters: dict ) -> bool:
     """
-    Return True iff NONE of the genuinely-narrowing SCOPING_FILTERS is present
-    (non-None) in `filters` — i.e. the query is a bare, un-narrowed full-store
-    pull that the guard must size-check.
+    Return True when no narrowing filter from SCOPING_FILTERS is present in the filters.
+
+    A True result marks a bare full-store pull that the size guard must check.
 
     Requires:
         - filters is a dict of filter-name -> value (absent keys and explicit
@@ -297,9 +293,9 @@ def is_unscoped( filters: dict ) -> bool:
 
     Ensures:
         - returns True when every SCOPING_FILTERS entry is absent or None
-          (`urgency` is NOT a scoping filter, so a urgency-only query is
+          (urgency is not a scoping filter, so an urgency-only query is
           still unscoped)
-        - returns False the moment ANY scoping filter carries a non-None value
+        - returns False as soon as any scoping filter carries a non-None value
         - never raises (a missing key is treated as None)
     """
     return not any( filters.get( name ) is not None for name in SCOPING_FILTERS )
@@ -322,9 +318,10 @@ _SCOPE_ROOTS: Optional[dict] = None  # lazy singleton — None means "not built 
 
 def _get_default_scope_roots() -> dict:
     """
-    Build (once per process) the scope-name -> absolute-root map for receipt
-    path validation, reusing the doc-viewer scope registry (design §4.1 AC1:
-    doc_path = exists-in-repo check; no new path grammar).
+    Build the scope-name to absolute-root map used for receipt path checks.
+
+    The map comes from the doc-viewer scope registry, so receipt paths add no new
+    path grammar. It is built once per process.
 
     Requires:
         - ConfigurationManager singleton is constructible (server context)
@@ -345,8 +342,9 @@ def _get_default_scope_roots() -> dict:
 
 def _validate_scoped_path( value: str, scope_roots: Optional[dict] ) -> list:
     """
-    Validate a "<scope>/<relative-path>" receipt path: registered scope,
-    no root escape, file exists.
+    Validate a "<scope>/<relative-path>" receipt path.
+
+    The path needs a registered scope, no root escape, and an existing file.
 
     Requires:
         - value is a non-empty string
@@ -390,7 +388,10 @@ def _validate_scoped_path( value: str, scope_roots: Optional[dict] ) -> list:
 
 def _validate_commit_reachable( sha: str, scope_roots: Optional[dict] ) -> list:
     """
-    Check that a receipt commit is REACHABLE FROM SOME BRANCH (row 9bfb4b73).
+    Check that a receipt commit is reachable from some branch in a registered repo.
+
+    The check searches every registered scope, because a receipt is validated without its row in hand.
+    A sha on a branch of any repo the store serves is one a human can read.
 
     Requires:
         - sha has already passed COMMIT_PATTERN (7-40 lowercase hex)
@@ -400,25 +401,17 @@ def _validate_commit_reachable( sha: str, scope_roots: Optional[dict] ) -> list:
         - returns [] when `git branch --all --contains <sha>` names at least one
           branch in at least one registered scope that is a git work tree
         - returns one error when every usable repo was searched and none has the
-          sha on a branch — this is the orphaned-object case: a sha left by a
-          reset or rebase resolves TODAY and vanishes at the next gc, so a
-          receipt pointing at one decays into a receipt pointing at nothing
+          sha on a branch; an orphaned sha left by a reset or rebase resolves now
+          but disappears at the next gc
         - returns one error quoting git's first stderr line and naming the repo when
-          git FAILED to run on any scope (dubious ownership, permission denied,
-          not a repo, missing binary, timeout) and no scope had the sha — the sha
-          was never checked there, so this is never reported as "not found"
-          (row 81f09303)
-        - returns one error, naming the reason, when NO registered scope is a
-          usable git work tree — the store cannot check, so it REFUSES rather
-          than accepting quietly. An unverifiable receipt silently accepted is
-          the hole this rule exists to close, with extra steps
+          git failed to run on any scope (dubious ownership, permission denied,
+          not a repo, missing binary, timeout) and no scope had the sha; the sha
+          was never checked there, so it is never reported as "not found"
+        - returns one error, naming the reason, when no registered scope is a
+          usable git work tree; the store cannot check, so it refuses
         - never raises: a missing git binary, a timeout, or an unreadable repo
           all resolve to the cannot-verify refusal, never to an exception and
           never to a pass
-
-    Searches EVERY registered scope rather than the item's own project because a
-    receipt is checked here without the row in hand; a sha found on a branch of
-    any repo the store serves is a sha a human can go read.
     """
     roots     = scope_roots if scope_roots is not None else _get_default_scope_roots()
     searched   = [ ]
@@ -503,16 +496,18 @@ def _validate_commit_reachable( sha: str, scope_roots: Optional[dict] ) -> list:
 def validate_receipt_refs( receipt_refs, scope_roots: Optional[dict] = None,
                            require_checkable: bool = False ) -> list:
     """
-    Validate a receipt_refs object against the key whitelist + per-key shapes.
+    Validate a receipt_refs object against the key whitelist and per-key shapes.
+
+    A closing receipt must carry something a third party can check. A file path may accompany a close but cannot be the close.
+    A commit must be reachable from a branch, because a sha orphaned by a reset or rebase vanishes at the next gc.
+    A green result is only a shape check; the router decides who may assert an attestation.
 
     Requires:
         - receipt_refs is the candidate receipts value (any type accepted;
           non-dict and empty-dict are rejected with errors, not exceptions)
         - scope_roots: optional { scope: abs_root } override for path checks
           (tests inject tmpdirs; server uses the registry default)
-        - require_checkable: True on a ->done transition (row 9bfb4b73). It adds
-          the two CLOSING rules below; every other caller keeps the prior
-          shape-only behaviour exactly.
+        - require_checkable: True on a done transition; it adds the closing rules below
 
     Ensures:
         - returns [] iff receipt_refs is a non-empty dict whose every key is
@@ -522,63 +517,15 @@ def validate_receipt_refs( receipt_refs, scope_roots: Optional[dict] = None,
             qid      - canonical lowercase UUID
             doc_path - "<scope>/<rel>" existing file in a registered scope
             log_line - "<scope>/<rel>:<lineno>" with the file existing
-            operator_attestation
-                     - 1-255 chars, no control characters. SHAPE ONLY: this
-                       module cannot tell a real operator from a caller who
-                       typed the key, and the router is where that is decided
+            operator_attestation - 1-255 chars, no control characters (shape only)
         - a non-empty-but-junk receipt ({doc_path: "trust me"}) returns errors
-        - never raises on malformed input — errors are data, not exceptions
-
-    WHAT require_checkable ADDS, AND WHY (row 9bfb4b73)
-
-    A row was closed citing `receipt_refs` that named the closer's own EDITED
-    FILE, while the same close's reason said "Uncommitted" — and the store took
-    it. Two separate gaps let that through, and both are closed here:
-
-    1. `doc_path` / `log_line` ARE UNVERIFIABLE BY CONSTRUCTION. The check is
-       "the file exists", and a file exists whether or not any work landed — you
-       can satisfy it by touching a file. So a path may still ACCOMPANY a close,
-       but it may no longer BE the close. A ->done receipt must carry at least
-       one thing a third party can independently check: a `commit` or a
-       `test_run`.
-
-    2. A `commit` WAS CHECKED BY SHAPE ONLY — 7-40 hex characters. "deadbeef"
-       passes that. So does a real sha that has since been orphaned by a reset
-       or rebase, which resolves today and is gone at the next gc. The commit is
-       now required to be REACHABLE FROM SOME BRANCH.
-
-    Deliberately NOT done: classifying a row as "code-bearing" to decide whether
-    it needs a commit. That is a category test standing in for the property —
-    the same mistake as the `--no-merges` filter and the withdrawn squash-shape
-    detector. Every closing row must cite something that can CARRY a close.
-
-    WHAT THE OPERATOR ATTESTATION CHANGES HERE, AND WHAT IT DELIBERATELY DOES NOT
-    (Rick's ruling 2026-09-04, row 1e12cc08)
-
-    `require_checkable` now looks for CLOSING_RECEIPT_KEYS rather than
-    CHECKABLE_RECEIPT_KEYS. That is a WIDENING of what may close a row and NOT a
-    weakening of the 9bfb4b73 rule, and the distinction is the whole design:
-
-      · For an AGENT nothing moves. Every seat authenticates by API key, has no
-        login account, and is refused the attestation key upstream in the router.
-        The commit/test_run requirement is exactly as hard as it was.
-      · For a HUMAN OPERATOR the receipt is the assertion itself, because there is
-        no artifact to cite — "I looked at it and it is fixed" is a judgement, and
-        manufacturing a test-shaped receipt for it would be the dishonest option.
-
-    ⚠️ SO A GREEN FROM THIS FUNCTION IS NOT AN AUTHORIZATION. It says the shape is
-    legal. Whether this caller may assert an attestation is answered one layer up,
-    and a test that exercises only this function CANNOT speak to that — it enters
-    below the layer the enforcement lives at.
-
-    ANY branch, never `main`: every commit landed on this branch tonight sits on
-    a wip branch, and requiring main would refuse every legitimate pre-merge
-    close and push people straight back to citing file paths — reintroducing gap
-    1 while looking stricter.
-
-    And when the store CANNOT check — no repo mounted, no scope root that is a
-    git work tree — it REFUSES and says so. An unverifiable receipt accepted
-    quietly is the same hole with extra steps.
+        - never raises on malformed input; errors are data, not exceptions
+        - with require_checkable, the receipts include a key from CLOSING_RECEIPT_KEYS
+          (commit, test_run, or an attestation key), so a path alone never closes a row
+        - with require_checkable, every commit is reachable from a branch in any
+          registered scope, not only main
+        - with require_checkable and no scope that is a git work tree, the check
+          refuses rather than accepting the receipt unverified
     """
     if not isinstance( receipt_refs, dict ) or not receipt_refs:
         return [ f"receipt_refs must be a non-empty object with at least one whitelisted key {RECEIPT_KEY_WHITELIST}" ]
@@ -646,36 +593,9 @@ def validate_blocked_by_refs( blocked_by ) -> list:
     """
     Validate a blocked_by value as a non-empty list of typed refs.
 
-    Requires:
-        - blocked_by is the candidate value (any type accepted; non-list and
-          empty-list are rejected with errors, not exceptions)
-
-    OPTIONAL `session_id` ON A PERSONA REF (row `00a6bde2` item 6, 2026-07-27).
-
-    A `{kind: "persona", id: <name>}` edge is UNRESOLVABLE BY CONSTRUCTION — there is
-    no persona lifecycle in this store to check a name against, so the edge cannot be
-    told "still waiting" from "waiting on someone who left". Worse than a dead ref:
-    overflow persona names (`extra 1`, `arnold`) are RE-GRANTED after a reap, so a
-    stale edge can silently RE-POINT at a different session and be "satisfied" by
-    someone who never had the context — a false GREEN, not a false wait.
-
-    ⇒ `session_id` is the discriminator. Accepting it is the WRITE half of the remedy
-    and it is worth landing alone, before any checker exists, because the cost of
-    delay is ASYMMETRIC: an edge written unstamped today is permanently unresolvable
-    by any later instrument, while a stamped one becomes checkable the moment a
-    persona-liveness surface lands (blocked on `6f8fd858` — `list_spawned_sessions`
-    carries no persona field, and `commons_who` is a posting log where absence means
-    silence, not death).
-
-    ⚠️ OPTIONAL, NOT REQUIRED. Making it mandatory would 422 every existing caller
-    and every peer that has not been updated — turning a latent correctness gap into
-    a live write outage. It is accepted-and-encouraged now; requiring it is a separate
-    decision once the fleet's callers actually send it.
-
-    ⚠️ PERSONA-ONLY, ENFORCED. On an `item` ref the id already resolves against this
-    store, and a `user` ref has no session at all — so a `session_id` there would be a
-    field that looks authoritative and means nothing, which is the shape this row
-    exists to kill.
+    A persona ref can carry an optional session_id, because persona names are re-granted after a reap.
+    A stamped edge becomes checkable once a persona-liveness surface exists. The field is optional so
+    that existing callers are not rejected.
 
     Requires:
         - blocked_by is the candidate value (any type accepted; non-list and
@@ -684,12 +604,11 @@ def validate_blocked_by_refs( blocked_by ) -> list:
     Ensures:
         - returns [] iff blocked_by is a non-empty list where every entry is
           { "kind": item|persona|user, "id": non-empty string } plus, on a persona
-          ref ONLY, an optional non-empty "session_id" — TYPED refs, never a mixed
-          string field (design §2.1)
-        - unknown keys remain errors (strict shape — R4 determinism at exactly the
-          field the oracle queries); `session_id` is the ONE key added to the allowed
-          set, and only for persona
-        - a `session_id` on a non-persona ref is an ERROR, not silently ignored
+          ref only, an optional non-empty "session_id"; refs are typed, never a
+          mixed string field
+        - unknown keys remain errors; session_id is the only key added to the
+          allowed set, and only for persona refs
+        - a session_id on a non-persona ref is an error, not silently ignored
     """
     if not isinstance( blocked_by, list ) or not blocked_by:
         return [ "blocked_by must be a non-empty list of typed refs [{kind, id}]" ]
@@ -717,23 +636,14 @@ def validate_blocked_by_refs( blocked_by ) -> list:
 
 def blocked_by_has_persona( blocked_by ) -> bool:
     """
-    True iff `blocked_by` contains at least one {kind: "persona"} ref (I3 kind-aware
-    chase rule, eab1d7da).
+    Return True when blocked_by contains at least one {kind: "persona"} ref.
 
-    The application-layer twin of the DB CHECK's `blocked_by @> '[{"kind":"persona"}]'`
-    jsonb-containment test: a chase time is REQUIRED for a persona blocker (a peer is
-    chaseable, so a chase is honest) and NOT for a user/item-only block (you cannot
-    schedule Rick; an item resolves on its own edge). Kept a separate predicate rather
-    than inlined so the rule and the CHECK are each expressed once and can be pinned to
-    agree by test.
-
-    Deliberately SHAPE-TOLERANT: it reads only well-formed persona refs and ignores
-    everything else, because malformed `blocked_by` is `validate_blocked_by_refs`'s
-    reject to surface — this predicate must never raise on the same input that function
-    is about to reject, or a bad ref would 500 instead of 422.
+    This mirrors the database check constraint on `blocked_by @> '[{"kind":"persona"}]'`. A persona blocker needs a chase time,
+    because a peer is chaseable; a user-only or item-only block does not. The predicate tolerates malformed input,
+    so a bad ref is a 422 from validate_blocked_by_refs and not a 500 from here.
 
     Requires:
-        - blocked_by is the candidate value (any type accepted; non-list → False)
+        - blocked_by is the candidate value (any type accepted; non-list -> False)
 
     Ensures:
         - True iff blocked_by is a list containing a dict ref whose kind == "persona"
@@ -750,23 +660,21 @@ def blocked_by_has_persona( blocked_by ) -> bool:
 
 def validate_blocked_fields( blocked_by, next_chase_ts ) -> list:
     """
-    The ->blocked structural invariant, expressed ONCE (I3 kind-aware chase +
-    >=1 typed ref). Shared VERBATIM by validate_transition's ->blocked branch AND
-    validate_create_status's blocked-MINT branch — one rule, one home, so a
-    transition-into-blocked and a create-as-blocked can never diverge (Rick's
-    one-call blocked-mint ruling 2026-07-20 reuses the SAME rule, never a fork).
+    Check the blocked-status invariant: a typed ref list and a kind-aware chase time.
+
+    validate_transition (blocked branch) and validate_create_status (blocked mint)
+    both call this function. A transition into blocked and a create as blocked
+    therefore apply one rule.
 
     Requires:
         - blocked_by / next_chase_ts are the candidate payload fields (each any
-          type; None accepted — this NEVER raises on malformed input, it returns
-          the error strings the caller maps to 422)
+          type; None accepted; malformed input never raises, it returns the
+          error strings the caller maps to 422)
 
     Ensures:
-        - returns [] iff BOTH hold:
-            next_chase_ts is present WHEN blocked_by contains a {kind:persona}
-            ref (I3 — a peer is chaseable, so a chase is honest; a user/item-only
-            block needs none: you cannot schedule Rick, an item resolves on its
-            own edge)
+        - returns [] iff both hold:
+            next_chase_ts is present when blocked_by contains a {kind:persona}
+            ref (a peer is chaseable; a user-only or item-only block needs none)
             blocked_by passes validate_blocked_by_refs (>=1 typed ref)
         - returns every violation otherwise (both at once)
     """
@@ -804,16 +712,10 @@ MIN_TASK_REF_PREFIX_LEN = 4
 
 def hyphenate_compact_prefix( compact_prefix ) -> str:
     """
-    Re-insert canonical UUID hyphens into a compact hex prefix. Pure.
+    Re-insert canonical UUID hyphens into a compact hex prefix.
 
-    THE ONE IMPLEMENTATION, on purpose. A compact prefix cannot be LIKE-matched
-    against the stored id directly: ids render hyphenated, so any prefix longer
-    than 8 chars crosses a boundary the compact form does not have. This logic
-    lived only inside `TaskRepository.find_by_id_prefix`; the moment a SECOND
-    caller needed it (the `id_prefix` query filter) a copy would have been the
-    obvious move — and a second copy of a matching rule is how two read paths
-    start disagreeing about which rows an identifier names. That is the
-    parallel-construction hazard row f45b37a9 is itself about.
+    A compact prefix cannot be matched with `LIKE` against the stored id, because stored ids are hyphenated.
+    TaskRepository.find_by_id_prefix and the id_prefix query filter share this implementation, so both match the same rows.
 
     Requires:
         - compact_prefix is lowercase hex with hyphens already stripped, as
@@ -832,25 +734,23 @@ def hyphenate_compact_prefix( compact_prefix ) -> str:
 
 def classify_task_ref( ref ) -> tuple:
     """
-    Classify a caller-supplied task reference as a full UUID, a hex prefix, or
-    invalid. Pure — no DB, no HTTP.
+    Classify a caller-supplied task reference as a full UUID, a hex prefix, or invalid.
 
     Requires:
         - ref is the raw caller value (any type; None and non-strings accepted
-          and classified INVALID rather than raising — errors are data)
+          and classified invalid rather than raising)
 
     Ensures:
         - returns ( kind, value )
         - a canonical UUID (any accepted UUID spelling) -> ( TASK_REF_FULL,
           uuid.UUID instance )
         - a hex string of >= MIN_TASK_REF_PREFIX_LEN chars, hyphens tolerated
-          (that is what a partially-copied UUID looks like), -> ( TASK_REF_PREFIX,
-          lowercased hex with hyphens stripped ). Lowercased because the stored
-          id renders lowercase and the comparison must not depend on how the
-          caller happened to paste it
-        - anything else -> ( TASK_REF_INVALID, None ). Junk must NEVER classify
-          as a prefix: a LIKE built from arbitrary caller text turns an id lookup
-          into a search surface
+          (a partially copied UUID looks like this), -> ( TASK_REF_PREFIX,
+          lowercased hex with hyphens stripped ); lowercased because the stored
+          id renders lowercase
+        - anything else -> ( TASK_REF_INVALID, None ); junk never classifies as a
+          prefix, because a `LIKE` pattern built from arbitrary caller text would
+          turn an id lookup into a search surface
     """
     if not isinstance( ref, str ):
         return ( TASK_REF_INVALID, None )
@@ -910,42 +810,31 @@ def classify_task_ref( ref ) -> tuple:
 
 def normalize_status_fields( status, blocked_by, next_chase_ts ) -> tuple:
     """
-    Resolve the status-dependent fields for a write, and REPORT what was dropped.
+    Resolve the status-dependent fields for a write and report what was dropped.
 
-    The single source of per-status field consistency for BOTH repository write
-    paths (create_item and apply_transition). Pure — no DB, no HTTP, no clock.
-
-    A normalizer that CANNOT silently drop (crew doctrine, Rachel 71061fb4): "a
-    rule that says 'be loud' is a rule someone forgets; a normalizer that cannot
-    silently drop is a mechanism." Anything discarded here is named in the second
-    return value, so a caller cannot fail to know it happened. That generalizes
-    past this fix to whatever field gets added next.
+    Both repository write paths (create_item and apply_transition) use this function for per-status field consistency.
+    Anything discarded is named in the second return value, so a caller always learns that a field was dropped.
 
     Requires:
-        - status is the TARGET status (already whitelist-validated by the caller;
+        - status is the target status (already whitelist-validated by the caller;
           this function normalizes, it does not validate)
         - blocked_by is the candidate typed-ref list, or None
         - next_chase_ts is the candidate chase time, or None
 
     Ensures:
         - returns ( resolved, dropped )
-        - resolved is a dict with EXACTLY the keys "blocked_by" and
+        - resolved is a dict with only the keys "blocked_by" and
           "next_chase_ts"
         - resolved["blocked_by"] is the given list when status == "blocked"
-          (None -> []), and [] for EVERY other status — a non-blocked row waits
-          on nothing
-        - resolved["next_chase_ts"] is ALWAYS the caller's value, on every
-          status. The caller alone determines the chase; supplying None means
-          None. This is what preserves every existing caller's behavior — the
-          only case that changes is the one where a caller supplied a chase and
-          it was thrown away
+          (None -> []), and [] for every other status, since a non-blocked row
+          waits on nothing
+        - resolved["next_chase_ts"] is always the caller's value, on every
+          status; supplying None means None
         - dropped is a list of field names whose caller-supplied value was
-          DISCARDED — "blocked_by" appears iff a NON-EMPTY blocked_by was emptied
-        - dropped is [] (never None) when nothing was discarded, so a legitimate
-          zero is readable without a truthiness trap
-        - an already-empty blocked_by is NEVER reported as dropped: discarding []
-          to [] discards nothing, and reporting it would train readers to ignore
-          the list — which is how a real signal becomes noise
+          discarded; "blocked_by" appears iff a non-empty blocked_by was emptied
+        - dropped is [] (never None) when nothing was discarded
+        - an already-empty blocked_by is never reported as dropped, because
+          discarding [] to [] discards nothing
     """
     dropped = [ ]
 
@@ -971,13 +860,10 @@ DROPPED_MARKER_PREFIX = "[dropped: "
 
 def compose_drop_marker( dropped, existing_reason=None ) -> Optional[str]:
     """
-    Fold a normalizer drop-list into an event reason, so a discard lands in the
-    AUDIT TRAIL rather than in a docstring nobody re-reads.
+    Fold a normalizer drop-list into an event reason so a discard reaches the audit trail.
 
-    This is what makes "the normalizer cannot silently drop" a MECHANISM rather
-    than a convention: `normalize_status_fields` reporting a discard to a caller
-    that binds it to `_dropped` and throws it away is the same silence one layer
-    up. Both repository write paths compose their event reason through here.
+    Both repository write paths compose their event reason through this function.
+    A caller that ignores the drop-list from normalize_status_fields still records the discard.
 
     Requires:
         - dropped is the normalizer's second return value (a list of field
@@ -985,12 +871,11 @@ def compose_drop_marker( dropped, existing_reason=None ) -> Optional[str]:
         - existing_reason is the caller's own reason string, or None
 
     Ensures:
-        - dropped is empty -> returns existing_reason UNCHANGED (including None).
-          A no-op discard must not manufacture an audit reason out of nothing,
-          or every row grows a marker and the marker stops meaning anything
+        - dropped is empty -> returns existing_reason unchanged (including None),
+          so a no-op discard adds no marker
         - dropped is non-empty -> returns a string containing DROPPED_MARKER_PREFIX
           followed by the comma-joined field names
-        - an existing reason is PRESERVED, never replaced — the caller's
+        - an existing reason is preserved, never replaced; the caller's
           justification and the machine's disclosure both survive
     """
     if not dropped:
@@ -1029,14 +914,15 @@ CREATE_ALLOWED_STATUSES = ( "queued", "blocked", "not_approved" )
 def validate_create( item_class: str, gate_class: str, priority: str, authority: str,
                      urgency: str = "normal" ) -> list:
     """
-    Validate the enum fields of a new item (creation is always status=queued —
-    the creation event stamps "->queued"; transitions move it from there).
+    Validate the enum fields of a new item.
+
+    A new item always starts as queued, and the creation event stamps "->queued".
 
     Requires:
         - item_class, gate_class, priority, authority are the candidate
           string values (authority stamps the "->queued" creation event)
         - urgency is the candidate operator-gate time-sensitivity (default
-          "normal"); A2 proactive-manager dimension, distinct from priority
+          "normal"); a proactive-manager dimension, distinct from priority
 
     Ensures:
         - returns [] iff all five are members of their enums
@@ -1058,14 +944,10 @@ def validate_create( item_class: str, gate_class: str, priority: str, authority:
 
 def validate_create_status( status, blocked_by, next_chase_ts ) -> list:
     """
-    Validate the MINT status of a new item (Rick's one-call blocked-mint ruling,
-    2026-07-20). A create may mint status = queued OR blocked ONLY.
+    Validate the mint status of a new item: queued or blocked only.
 
-    This is the STATUS-WHITELIST half of the ruling; the MANAGER-ONLY guard for a
-    blocked mint is enforced SEPARATELY in the router (create_task), because it
-    needs bridge IO to resolve the caller's role and this module is pure (no DB,
-    no HTTP). Keeping the two apart is deliberate: the whitelist is a data rule
-    (testable with no config), the guard is an authorization rule.
+    This is the status-whitelist half of the blocked-mint rule. The router (create_task) enforces the manager-only guard.
+    That guard needs bridge IO to resolve the caller's role, and this module is pure.
 
     Requires:
         - status is the candidate mint status (any string)
@@ -1074,17 +956,16 @@ def validate_create_status( status, blocked_by, next_chase_ts ) -> list:
 
     Ensures:
         - status not in CREATE_ALLOWED_STATUSES -> one error naming the whitelist
-          and WHY the rejected states are off it (done/dropped need receipts +
-          audit history; parked needs park_reason + is legal only from
-          queued/in_progress; claimed/in_progress/review are transition-only).
-          This SHORT-CIRCUITS — the blocked-field rules are meaningless without a
-          valid mint status (symmetry with validate_transition's to_status guard)
-        - status == "blocked" -> the SAME ->blocked invariant a transition enforces,
-          via validate_blocked_fields (>=1 typed ref AND a kind-aware chase) — the
-          rule is reused, NEVER forked
-        - status == "queued" -> [] (blocked_by / next_chase_ts are ignored — a
-          queued mint carries neither, preserving today's behavior exactly)
-        - never raises — every violation is a returned string the router maps to 422
+          and why the rejected states are off it (done/dropped need receipts and
+          audit history; parked needs park_reason and is legal only from
+          queued/in_progress; claimed/in_progress/review are transition-only);
+          this returns at once, since the blocked-field rules mean nothing without
+          a valid mint status
+        - status == "blocked" -> the same blocked invariant a transition enforces,
+          via validate_blocked_fields (>=1 typed ref and a kind-aware chase)
+        - status == "queued" -> [] (blocked_by / next_chase_ts are ignored; a
+          queued mint carries neither)
+        - never raises; every violation is a returned string the router maps to 422
     """
     if status not in CREATE_ALLOWED_STATUSES:
         return [
@@ -1157,98 +1038,35 @@ TITLE_OVERFLOW_MARKER = "[title overflow — the stored title was trimmed at the
 
 def soft_guard_title( title, body, cap=TITLE_SOFT_CAP ):
     """
-    Non-destructively soft-guard an over-long item title on write (design
-    2026.06.29 task-list row redesign §4.3, handoff ruling #1).
+    Trim an over-long item title on write and move the overflow into the body.
 
-    Workers stuff whole paragraphs into the `title` field; the row clients can
-    only show ~60 chars and the store's `body` field (the proper home for
-    detail) sits underused. This guard fixes the data at its SOURCE — the one
-    server-side write path EVERY caller (MCP wrapper, hook, raw POST) flows
-    through — so a paragraph-title never lands in the store unguarded.
-
-    ⚠️ THE FAIL-OPEN RULING IS NOW SCOPED TO CREATE, NOT TO THE STORE (Rick,
-    2026-09-01, bug 6ce252e7). This docstring used to say flatly "an over-long
-    title is NEVER a rejected write", and that sentence outlived the ruling it
-    described. It still holds HERE and on POST /api/tasks: a create is the
-    unattended door — hooks, the MCP wrapper, an agent filing mid-task — and a
-    rejected create loses the filing. The EDIT door now rejects instead, because a
-    writer editing a title is present to shorten it; see validate_edit_title_length.
+    The row clients show about 60 characters, so the overflow goes into the body and is never discarded.
+    This guard stays fail-open on create, because a rejected unattended create loses the filing. The edit door
+    rejects instead; see validate_edit_title_length.
 
     Requires:
-        - title is a non-empty string (the column is NOT NULL; the wire model
+        - title is a non-empty string (the column is `NOT NULL`; the wire model
           already rejects an empty title)
-        - body is the candidate body value — a string or None
-        - cap is a positive int (the shared ~60 char limit)
-
-    THE OVERFLOW IS NEVER DISCARDED (bug 28fc1fb4, fixed 2026-07-21). It used to
-    be relocated ONLY when the body was empty; a non-empty body meant the
-    remainder was dropped at exit 0, with `overflow_moved_to_body: false` as the
-    sole record that anything was lost. That condition ran BACKWARDS AGAINST NEED:
-    it preserved the overflow for title-only rows — where the title IS the content
-    and least is at stake — and discarded it for every row carrying a body, which
-    is every substantive filing in the store. Sam recorded the same fact from the
-    other side without naming it as the mechanism: "the bodies survived only
-    because I habitually put everything in the body." The guard protected the
-    careless filer and robbed the careful one.
-
-    The original ruling — "an existing body always wins" — forbade CLOBBERING a
-    body, and it still holds: the pre-existing body is preserved verbatim, in
-    full, and the overflow is filed under TITLE_OVERFLOW_MARKER. Adding to a body
-    is not overwriting one, so nothing about that ruling is reversed.
-
-    ⚠️ THE OVERFLOW IS APPENDED, NOT PREPENDED (row a6cb24e8, 2026-08-31). It was
-    prepended until now, and prepending damages the body in a way the ruling was
-    never asked about: the body's own opening line stops being the first thing a
-    reader sees, and a RETITLE over the cap prepends a SECOND marker above the
-    first. Tiberius 👑 and Maya 🌻 hit that independently within minutes — a body
-    opening with two stacked banners and the fragment "us", the tail of the word
-    "Tiberius", with the real opening line buried two blocks down. Both had to be
-    unpicked by hand.
-
-    Appending satisfies the same ruling and costs the reader nothing: the body
-    still wins, still appears verbatim, and now still STARTS where its author
-    started it. Stacked overflows from repeated retitles collect at the foot in
-    the order they happened, which is a readable history instead of a corrupted
-    head. The marker STRING is deliberately unchanged so the grep-recovery
-    property holds for rows written before this.
-
-    ⚠️ WHAT THIS STILL DOES NOT FIX, on the create path only: the trim silently
-    deletes the TAIL of a title, which is where writers put qualifiers —
-    "…DECLINED", "CONDITIONAL on…", "…by design". Six instances in one night each
-    lost a word whose job was to LIMIT the claim in front of it. Three fixes were
-    put to Rick and he took all three (bug 6ce252e7): the trim is marked where
-    readers are (`title_trimmed`, in the terse projection), the cap is raised to
-    120, and an over-cap write is rejected — on the EDIT door. Above 120 a create
-    still trims, by ruling, and that is the residue this paragraph now names.
-
-    Requires:
-        - title is a non-empty string (the column is NOT NULL; the wire model
-          already rejects an empty title)
-        - body is the candidate body value — a string or None
+        - body is the candidate body value, a string or None
         - cap is a positive int (the shared ~60 char limit)
 
     Ensures:
         - title length <= cap -> returns ( title, body, None ): a strict no-op,
           nothing trimmed, no advisory, body byte-for-byte unchanged
-        - title length  > cap -> returns ( title[:cap], new_body, advisory ):
-            * the stored title is trimmed to EXACTLY cap chars
-            * when body is empty (None / whitespace-only): new_body IS the
-              overflow (title[cap:]) — unmarked, because there is nothing for it
-              to be distinguished FROM
-            * when body is non-empty: new_body is the ORIGINAL BODY VERBATIM,
-              then the marker line, then the overflow — in that order. The
-              pre-existing body is never truncated, reordered, or rewritten,
-              and its FIRST LINE is never displaced (see the append note below)
+        - title length > cap -> returns ( title[:cap], new_body, advisory ):
+            * the stored title is trimmed to exactly cap chars
+            * when body is empty (None or whitespace-only): new_body is the
+              overflow (title[cap:]), unmarked
+            * when body is non-empty: new_body is the original body verbatim,
+              then the TITLE_OVERFLOW_MARKER line, then the overflow, so the body's
+              first line is not displaced and repeated retitles stack at the foot
             * `title + <the overflow substring of new_body>` reconstructs the
-              original title EXACTLY, on BOTH arms — nothing is ever lost
+              original title exactly, on both arms
             * advisory is { trimmed, original_length, cap,
-              overflow_moved_to_body, lost_tail }, and overflow_moved_to_body is
-              now True on BOTH arms because both arms relocate
-            * `lost_tail` is the exact text cut from the title — the same string
-              relocated into the body — so the writer is shown the words they lost
-              rather than a count of them. It is advisory ONLY: it changes nothing
-              about what is stored, rejects nothing, and leaves the fail-open
-              ruling and the exact-reconstruction guarantee untouched
+              overflow_moved_to_body, lost_tail }; overflow_moved_to_body is
+              True on both arms, and `lost_tail` is the exact text cut from the title
+            * the trim removes the tail, where qualifiers such as "DECLINED" sit,
+              so the terse projection flags it as `title_trimmed`
         - never raises; never returns a title longer than cap
     """
     if len( title ) <= cap:
@@ -1301,18 +1119,10 @@ TERMINAL_TITLE_PREFIXES = ( "WITHDRAWN", "SUPERSEDED", "CORRECTED" )
 
 def validate_terminal_title_prefix( old_title, new_title ):
     """
-    Decide whether a CLOSED row's proposed new title is a legal correction prefix
-    (Rick's ruling, 2026-09-01, decision 45c4c932: "Prefix only").
+    Decide whether a closed row's proposed new title is a legal correction prefix.
 
-    A terminal row refuses `edit` and `transition` and accepts only `amend`, which
-    writes to `body` — and `_serialize_item_terse` DROPS body, so a correction filed
-    there is invisible to every routine board glance. Measured live: `82ec60be` still
-    reads "APPROVED 757820dd + 08fce017" while its body records that the 08fce017
-    approval is WITHDRAWN. The false headline is what every reader sees and the
-    retraction is in the one field nobody is shown.
-
-    This is the narrow carve-out that lets the headline be corrected WITHOUT letting
-    it be rewritten.
+    A terminal row accepts only `amend`, which writes to `body`, and the terse projection drops body.
+    This carve-out lets the headline be corrected without letting it be rewritten.
 
     Requires:
         - old_title is the row's stored title (a non-empty string)
@@ -1320,17 +1130,15 @@ def validate_terminal_title_prefix( old_title, new_title ):
 
     Ensures:
         - new_title == "<MARKER> — <old_title>" for a marker in
-          TERMINAL_TITLE_PREFIXES -> [] (legal: the original survives VERBATIM)
-        - anything else -> a ONE-element list naming the markers AND showing the
-          exact string that would have been accepted, because "prefix only" without
-          the literal format is a rule the caller has to guess at
-        - the original text is compared byte-for-byte, so a "prefix" that also
-          reworded the tail is REFUSED — that is a rewrite wearing a prefix, and it
-          is precisely what the immutability wall exists to stop
-        - stacking is permitted: a row already prefixed WITHDRAWN may later take
-          SUPERSEDED in front of it, because the previous marker is part of the
-          old title it must reproduce verbatim. Corrections accumulate at the front
-          in the order they happened, which is a readable history
+          TERMINAL_TITLE_PREFIXES -> [] (legal: the original survives verbatim)
+        - anything else -> a one-element list naming the markers and showing the
+          exact string that would have been accepted
+        - the original text is compared byte-for-byte, so a prefix that also
+          rewords the tail is refused
+        - stacking is permitted: a row already prefixed "WITHDRAWN" may later take
+          "SUPERSEDED" in front of it, because the previous marker is part of the
+          old title it must reproduce verbatim; markers accumulate at the front in
+          the order they happened
         - never raises, never mutates
     """
     for marker in TERMINAL_TITLE_PREFIXES:
@@ -1347,17 +1155,10 @@ def validate_terminal_title_prefix( old_title, new_title ):
 
 def validate_terminal_edit_fields( fields, current_title, status ):
     """
-    Gate a PATCH against a TERMINAL row: refuse everything except a title
-    correction prefix (Rick's ruling, 2026-09-01, decision 45c4c932).
+    Gate a PATCH against a terminal row: refuse everything except a title correction prefix.
 
-    This replaces a flat "item is terminal — no edits to closed history". The wall
-    is unchanged for every other field; what it stops doing is blocking the ONE
-    change that makes a closed board honest.
-
-    ⚠️ THE FIELD SET IS CHECKED BEFORE THE PREFIX, and the order is load-bearing.
-    A caller who sends a legal prefix AND a priority change must be refused whole,
-    not have the prefix accepted while the priority rides along — a carve-out that
-    leaks other fields is not a carve-out, it is a hole.
+    The field set is checked before the prefix. A legal prefix sent with a priority change is refused whole,
+    so no other field rides along.
 
     Requires:
         - fields is the post-validation patch dict (may contain `title_trimmed`,
@@ -1366,10 +1167,10 @@ def validate_terminal_edit_fields( fields, current_title, status ):
         - status is the row's terminal status, used only in the message
 
     Ensures:
-        - no `title` in fields -> refused, naming the status (the old behaviour,
-          unchanged, for a patch that touches only non-title fields)
-        - `title` present ALONGSIDE any other caller-settable field -> refused,
-          NAMING the extra fields rather than silently dropping them
+        - no `title` in fields -> refused, naming the status (a patch that touches
+          only non-title fields)
+        - `title` present alongside any other caller-settable field -> refused,
+          naming the extra fields rather than silently dropping them
         - `title` alone, and a legal prefix of current_title -> [] (accepted)
         - `title` alone, not a legal prefix -> the prefix verb's own message,
           which shows the exact string that would have been accepted
@@ -1400,21 +1201,10 @@ def validate_terminal_edit_fields( fields, current_title, status ):
 
 def validate_edit_title_length( title, cap=TITLE_SOFT_CAP ):
     """
-    Reject an over-cap title on the EDIT door (Rick's ruling, 2026-09-01, bug
-    6ce252e7: "Raise to 120 with a 422 over it.").
+    Reject an over-cap title on the edit door.
 
-    THE TWO DOORS DELIBERATELY DISAGREE, and the asymmetry is the ruling rather
-    than the drift bug 28fc1fb4 was. A CREATE is unattended — a hook, the MCP
-    wrapper, an agent filing mid-task — and rejecting it loses the filing, so
-    create still trims fail-open through soft_guard_title. An EDIT is somebody
-    retyping a title with their hands on the keys: they can shorten it, and they
-    are the only party who knows which half of it is the qualifier.
-
-    That is the whole argument the trim bug turned on. A trim cuts the TAIL, and
-    a writer puts the limiting word at the end — "…DECLINED", "CONDITIONAL on…",
-    "(4 receipts)". Row 298af249's stored title ended "DM non-deli", losing the
-    word that named the defect. A flag tells a reader something is missing; a
-    rejection hands the choice back to the only person who can make it well.
+    The create and edit doors apply different rules. A create is unattended, so soft_guard_title trims it instead.
+    An edit is a person who can shorten the title and knows which part is the qualifier.
 
     Requires:
         - title is a string (the wire model already rejects empty / non-string)
@@ -1422,10 +1212,9 @@ def validate_edit_title_length( title, cap=TITLE_SOFT_CAP ):
 
     Ensures:
         - len( title ) <= cap -> [] (no error; the caller proceeds untouched)
-        - len( title )  > cap -> a ONE-element list carrying the ACTUAL LENGTH and
-          the cap, because "too long" without a number makes the writer count
-          characters by hand to find out how much to cut
-        - never raises, never mutates, never trims — this verb only reports
+        - len( title ) > cap -> a one-element list carrying the actual length and
+          the cap, so the writer knows how much to cut
+        - never raises, never mutates, never trims; this verb only reports
     """
     if len( title ) <= cap:
         return [ ]
@@ -1467,20 +1256,18 @@ _SESSION_ID_TAIL_PATTERN = re.compile( r"[0-9a-f]{6,}" )
 
 def _get_known_persona_keys() -> set:
     """
-    Build (once per process) the set of canonical keys for every KNOWN persona,
-    reusing the voice-persona pool loader (design D1: the pool loader in
-    voice_persona_helpers IS the roster accessor — no second INI reader).
+    Build the set of canonical keys for every known persona, once per process.
 
-    Twins _get_default_scope_roots: a lazy config-backed singleton, lazily
-    importing the config dependency so this pure module stays import-light.
+    The voice-persona pool loader in voice_persona_helpers is the roster accessor, so no second INI reader exists.
+    Like _get_default_scope_roots, it imports the config dependency on first use, which keeps this module import-light.
 
     Requires:
         - ConfigurationManager singleton is constructible (server context)
 
     Ensures:
         - returns a set of canonical_persona_key values for the allocatable pool
-          PLUS the overflow persona (each name canonicalized to the store key —
-          the INI keeps mixed case "Rachel"/"Tiberius", the store key is lower)
+          plus the overflow persona (each name canonicalized to the store key; the
+          INI keeps mixed case "Rachel"/"Tiberius", the store key is lower)
         - built exactly once; subsequent calls return the cached set
     """
     global _KNOWN_PERSONA_KEYS
@@ -1510,12 +1297,8 @@ def persona_from_created_by( created_by ) -> str:
     """
     Extract the canonical persona key from a bridge-stamped created_by string.
 
-    created_by is contract-stamped "<persona> <8-hex session id>"
-    (task_store_tools.py, e.g. "mr radio 372f9dc9"). The class-scoped owner
-    default (policy 2) needs the persona WITHOUT the session-id tail — but the
-    persona itself may contain spaces, so a plain split is wrong. This strips a
-    trailing session-id-shaped token (>=6 lowercase-hex chars) and canonicalizes
-    the remainder; a created_by with no such tail canonicalizes whole.
+    created_by has the form "<persona> <8-hex session id>". A persona name may contain spaces,
+    so the function strips a trailing session-id-shaped token (>=6 lowercase hex chars) and canonicalizes the rest.
 
     Requires:
         - created_by is the candidate value (any type; only a non-empty str is
@@ -1523,9 +1306,9 @@ def persona_from_created_by( created_by ) -> str:
 
     Ensures:
         - None / non-string / empty -> "" (canonical_persona_key's unmatchable
-          sentinel — the caller treats "" as "no derivable owner")
+          sentinel; the caller treats "" as "no derivable owner")
         - "<persona> <hex sid>" -> canonical_persona_key( "<persona>" )
-          ("mr radio 372f9dc9" -> "mr radio")
+          (persona "mr radio" plus a session id -> "mr radio")
         - a value with no session-id-shaped tail -> canonical_persona_key( whole )
           ("krishna" -> "krishna")
     """
@@ -1541,15 +1324,10 @@ def persona_from_created_by( created_by ) -> str:
 
 def session_id_from_created_by( created_by ) -> Optional[str]:
     """
-    Extract the SESSION-ID tail from a bridge-stamped created_by string — the
-    INVERSE of persona_from_created_by.
+    Extract the session-id tail from a bridge-stamped created_by string.
 
-    created_by is contract-stamped "<persona> <8-hex session id>"
-    (task_store_tools.py). The manager-only blocked-MINT guard (create_task) needs
-    the SID to resolve the caller's bridge role via is_manager_figure. Returns the
-    trailing session-id-shaped token (>=6 lowercase-hex chars), or None when
-    created_by carries no such tail — the guard then treats the caller as a
-    NON-manager (fail-CLOSED, the correct degrade for a WRITE authorization).
+    This is the inverse of persona_from_created_by. The manager-only blocked-mint guard in create_task needs the session id
+    to resolve the caller's bridge role. With no tail, the guard treats the caller as a non-manager, the safe default.
 
     Requires:
         - created_by is the candidate value (any type; only a non-empty str is
@@ -1557,7 +1335,7 @@ def session_id_from_created_by( created_by ) -> Optional[str]:
 
     Ensures:
         - None / non-string / empty -> None
-        - "<persona> <hex sid>" -> the hex sid ("Cheech 4d376217" -> "4d376217")
+        - "<persona> <hex sid>" -> the hex sid (the trailing >=6 lowercase hex chars)
         - a value with no session-id-shaped tail -> None (there is no sid to give,
           and fabricating one would defeat the guard)
     """
@@ -1571,26 +1349,22 @@ def session_id_from_created_by( created_by ) -> Optional[str]:
 
 def build_persona_advisory( owner_persona, accountable_manager, known_keys=None ):
     """
-    Flag off-roster persona fields (policy 1) — the pure roster check + advisory
-    + folded-marker assembly, shared by the create and reassign (PATCH) paths.
+    Flag off-roster persona fields and build the advisory and audit marker.
 
-    Each of owner_persona / accountable_manager is canonicalized and tested for
-    roster membership; a value matching no known persona is flagged. This NEVER
-    rejects — the router attaches the advisory to the response, logs a warn, and
-    folds the marker into the event reason, but the write always proceeds.
+    The create and reassign (PATCH) paths share this function. It never rejects: the router attaches the advisory,
+    logs a warning, and folds the marker into the event reason, and the write proceeds.
 
     Requires:
         - owner_persona / accountable_manager are the candidate values (str or
           None; already canonical from the router's _canon_persona, but this
-          re-canonicalizes defensively — idempotent — so it is correct on a raw
-          display value too)
+          re-canonicalizes defensively, idempotently, so a raw display value works)
         - known_keys is an explicit roster set to test against, or None to use
           the process-default _get_known_persona_keys() singleton (tests inject
           a fixed set; server uses the config-derived default)
 
     Ensures:
         - returns ( None, None ) when neither field is a non-empty off-roster key
-          (an absent / blank / on-roster persona is NOT flagged)
+          (an absent, blank or on-roster persona is not flagged)
         - otherwise returns ( advisory, marker ):
             * advisory = { field_name: canonical_key } for each off-roster field
               (owner_persona and/or accountable_manager)
@@ -1620,48 +1394,27 @@ def build_persona_advisory( owner_persona, accountable_manager, known_keys=None 
 def is_blocker_repoint( from_status, to_status, blocked_by, next_chase_ts,
                         current_blocked_by, current_next_chase_ts ):
     """
-    Is this `blocked`->`blocked` a genuine RE-POINT (the blocker or its chase
-    actually moved), as opposed to a true no-op?
+    Return True when a blocked->blocked transition really moves the blocker or its chase.
 
-    THE DEFECT THIS OPENS THE DOOR FOR (bee6856a). There was no legal way to
-    change WHO a blocked row is blocked on: this edge was refused, `task_edit`
-    refuses the invariant-bearing fields, and `task_amend` is body-only. The
-    only way through was `blocked -> in_progress -> blocked`, which writes a
-    `blocked->in_progress` event asserting work RESUMED on a row where none did.
-    A reason string on that event is a mitigation, not a fix — it makes a human
-    read prose to un-learn what the structured field says, and any tooling
-    counting in_progress transitions is simply lied to. Re-pointing is routine
-    (a manager re-spins, a blocking peer is reaped, a decision escalates to the
-    user), so the false event recurs by design rather than by accident.
-
-    WHAT THE OLD REJECTION WAS GUARDING: nothing designed. LEGAL_TRANSITIONS is
-    derived by `dst != src`, and its header calls that BEHAVIOR-PRESERVING — it
-    made the Phase-1 IMPLICIT graph explicit "so a future TIGHTENING has one
-    home". Nobody chose to forbid this edge; it was not callable in Phase 1, and
-    making the graph explicit froze an accident into a rule.
-
-    ⇒ SCOPED TO `blocked` ALONE, DELIBERATELY. The risk here is WIDENING, not
-    un-guarding: a general "permit same-status when the payload differs" would
-    silently open queued->queued, in_progress->in_progress, review->review and
-    parked->parked — four edges that each write an audit event and mean nothing.
-    The graph itself is NOT modified, so the mirror-edge regression and both
-    graph-shape tests hold unchanged; this is a carve-out at the point of use.
+    Without this carve-out, nothing could change who a blocked row waits on short of a false in_progress event.
+    The carve-out covers `blocked` alone and the graph is not modified. A general same-status permit would open
+    queued->queued, in_progress->in_progress, review->review and parked->parked, which write meaningless events.
 
     Requires:
         - from_status / to_status are valid statuses
-        - blocked_by / next_chase_ts are the CANDIDATE payload values
-        - current_* are the row's values BEFORE this transition (VALUES, never
-          the ORM item — this module is pure and must not import the model)
+        - blocked_by / next_chase_ts are the candidate payload values
+        - current_* are the row's values before this transition (values, not
+          the ORM item, because this module is pure and must not import the model)
 
     Ensures:
-        - returns True iff from_status == to_status == "blocked" AND at least
+        - returns True iff from_status == to_status == "blocked" and at least
           one of (blocked_by, next_chase_ts) differs from its current value
-        - returns False when the current values are absent — a caller that does
-          not supply them gets the old behaviour, so the carve-out can never
-          fire on absence of evidence (fail CLOSED)
+        - returns False when the current values are absent, so a caller that
+          does not supply them gets the old behaviour and the carve-out never
+          fires without evidence
         - returns False for every other status pair, including every other
           same-status pair
-        - NEVER relaxes the ->blocked payload rules: this opens an EDGE, and
+        - never relaxes the ->blocked payload rules: this opens an edge, and
           validate_blocked_fields still runs on the result
     """
     if from_status != "blocked" or to_status != "blocked":           return False
@@ -1671,58 +1424,24 @@ def is_blocker_repoint( from_status, to_status, blocked_by, next_chase_ts,
 
 def is_park_refresh( from_status, to_status, park_reason, next_chase_ts ):
     """
-    Is this `parked`->`parked` a genuine QUOTE REFRESH (re-freezing a park reason
-    against the row's current content), as opposed to a true no-op?
+    Return True when a parked->parked transition refreshes the park quote.
 
-    ⚠️ THIS REVERSES A DELIBERATE PRIOR RULING, ON EVIDENCE (row aa543525,
-    2026-07-27). `is_blocker_repoint` above scoped its carve-out to `blocked`
-    alone and named this very edge as one it was right to leave shut: *"a general
-    'permit same-status when the payload differs' would silently open
-    queued->queued, in_progress->in_progress, review->review and parked->parked —
-    four edges that each write an audit event and MEAN NOTHING."* That reasoning
-    was sound for three of the four. It is wrong for `parked`, and the difference
-    is mechanical rather than a matter of taste:
-
-        a ->parked write re-stamps `park_reason_captured_at` AND `updated_ts` to
-        ONE instant (task_repository), which is the whole definition of a park
-        whose justification is current.
-
-    So a re-park is not an event that means nothing — it is the ONLY operation
-    that restores the post-park equality invariant. Every other same-status edge
-    really would write a nullity.
-
-    THE DEFECT THIS CLOSES, and it is the same shape `is_blocker_repoint` closed.
-    `task_store_tools` prescribes *"Re-park to re-freeze the quote"* as the remedy
-    for a stale park reason, and that remedy was UNREACHABLE through TWO
-    independent gates: park-legality refused `parked` as a source, and this graph
-    refused the edge as a no-op. A seat that noticed its own park reason had
-    rotted had to go `parked -> queued -> parked`, which CLEARS the quote on the
-    way out and writes a `parked->queued` event asserting the row REJOINED the
-    owed set — on a row nobody un-parked. A false event, recurring by design.
-
-    ⇒ SCOPED TO `parked` ALONE, DELIBERATELY, for exactly the reason quoted above.
-    The graph itself is NOT modified; this is a carve-out at the point of use, so
-    the mirror-edge regression and both graph-shape tests hold unchanged.
-
-    NO "payload differs" TEST, and that asymmetry with `is_blocker_repoint` is
-    deliberate: a re-park with a byte-identical reason and an identical chase is
-    still meaningful, because the capture timestamp moves and that is the point of
-    the operation. Requiring a changed quote would refuse the commonest honest
-    case — *"I reviewed this park and it is still exactly right."*
+    Every ->parked write stamps `park_reason_captured_at` and `updated_ts` to one instant, so a re-park is the one same-status
+    operation that restores the post-park equality invariant. The carve-out covers `parked` alone and the graph is not modified.
+    It has no "payload differs" test, because an identical re-park still moves the capture timestamp.
 
     Requires:
         - from_status / to_status are valid statuses
-        - park_reason / next_chase_ts are the CANDIDATE payload values
+        - park_reason / next_chase_ts are the candidate payload values
 
     Ensures:
-        - returns True iff from_status == to_status == PARK_STATUS AND the park
-          payload is present (non-blank reason AND a chase)
-        - returns False when either payload field is absent — fail CLOSED, so a
-          caller that omits the park fields gets the old rejection rather than a
-          silently-permitted nullity
+        - returns True iff from_status == to_status == PARK_STATUS and the park
+          payload is present (non-blank reason and a chase)
+        - returns False when either payload field is absent, so a caller that
+          omits the park fields gets the old rejection
         - returns False for every other status pair, including every other
           same-status pair
-        - NEVER relaxes the ->parked payload rules: this opens an EDGE, and
+        - never relaxes the ->parked payload rules: this opens an edge, and
           validate_park still runs on the result
     """
     if from_status != PARK_STATUS or to_status != PARK_STATUS:            return False
@@ -1744,28 +1463,13 @@ def validate_transition(
     current_next_chase_ts = None,
 ) -> list:
     """
-    Validate one state transition against the Phase-1/2 structural rules.
+    Validate one state transition against the structural rules.
 
-    A RICHER legal-transition graph — which specific edges are MEANINGFUL — is
-    Phase-2+ backlog (design §4.1 C-items). ⚠️ Do NOT read that as "no edge is
-    checked here": the DERIVED `LEGAL_TRANSITIONS` graph IS enforced below, and
-    with it the terminal rule. A `dropped`/`done`/`wont_fix` source has no
-    out-edges at all, so a caller trying to move a closed row is refused by name
-    ("item is terminal … append-only, no transitions out"), and a ->done from a
-    live row must additionally carry a CHECKABLE receipt.
-
-    This wording is disambiguated rather than corrected — the old sentence was
-    true about the RICH graph and read as a statement about ALL edge checking.
-    The cost of that reading is not academic: it invites a caller to assume the
-    store will take any status pair and to build a client-side guard the server
-    already has, or worse, to treat a wrong verb arriving from a UI as data
-    corruption when this function refuses it. Measured 2026-09-02 against a
-    reported client defect sending a Drop button's verb as `done`: refused in
-    BOTH readings — terminal source by the rule above, live source by the
-    ->done receipt gate.
+    The derived LEGAL_TRANSITIONS graph is enforced here. A dropped, done or wont_fix source has no out-edges, so moving a
+    closed row is refused by name. A ->done from a live row must also carry a checkable receipt.
 
     Requires:
-        - from_status is the item's CURRENT status (read inside the same DB
+        - from_status is the item's current status (read inside the same DB
           session that will apply the transition)
         - to_status / authority are the candidate values
         - receipt_refs / next_chase_ts / blocked_by / reason are the candidate
@@ -1773,27 +1477,21 @@ def validate_transition(
         - scope_roots: optional override for receipt path checks (tests)
 
     Ensures:
-        - returns [] iff ALL hold:
+        - returns [] iff all hold:
             to_status is a valid status and differs from from_status
             authority is a valid authority
-            from_status is not terminal (done/dropped are append-only — gate
-            ruling #4: the audit invariant made mechanical)
-            to_status == done  => receipt_refs passes validate_receipt_refs
-            receipt_refs present on ANY transition => it passes
-            validate_receipt_refs (cold-review N2 — the §5 receipt-theater
-            guard outranks the design letter's done-only wording: junk never
-            lands in the audit trail)
-            to_status == blocked => next_chase_ts present (I3) AND blocked_by
-            passes validate_blocked_by_refs (gate ruling #5)
-            to_status == dropped => reason is a non-blank string (C12 pulled
-            forward into Phase 2, Tiberius ruling qid b312b0f1 — the T3
-            escape hatch must carry its justification)
-        - reason is OPTIONAL on every other transition (free text, no shape
-          rule — length is capped at the wire by the router's Pydantic model)
-        - returns the full list of violations otherwise — every problem at
-          once, with ONE exception: an invalid to_status short-circuits
-          (the dependent receipt/blocked/reason rules are meaningless without
-          a valid target state)
+            from_status is not terminal (done/dropped are append-only)
+            to_status == done => receipt_refs passes validate_receipt_refs
+            receipt_refs present on any transition => it passes
+            validate_receipt_refs, so junk never lands in the audit trail
+            to_status == blocked => next_chase_ts present and blocked_by
+            passes validate_blocked_by_refs
+            to_status == dropped => reason is a non-blank string
+        - reason is optional on every other transition (free text, no shape
+          rule; the router's Pydantic model caps its length at the wire)
+        - returns the full list of violations otherwise, with one exception: an
+          invalid to_status returns at once, since the dependent receipt, blocked
+          and reason rules mean nothing without a valid target state
     """
     if to_status not in VALID_STATUSES:
         return [ f"to_status '{to_status}' must be one of {VALID_STATUSES}" ]
@@ -2001,46 +1699,14 @@ def validate_transition(
 
 def is_park_legal_from( from_status ) -> bool:
     """
-    True iff a row may be parked FROM `from_status` — by ENTRY (queued /
-    in_progress) or by RE-ENTRY (`parked` -> `parked`, a quote refresh).
+    Return True when a row may be parked from from_status, by entry or by re-entry.
 
-    The guarantee this buys: expired-parked ⊆ ex-queued/in_progress, BY
-    CONSTRUCTION. That is what lets the owed-set admission take the entire
-    expired-parked set without widening any reader's owed definition.
-
-    ⭐ WHY `parked` IS LEGAL HERE WHILE STAYING OUT OF PARK_LEGAL_FROM_STATUSES
-    (store row aa543525, 2026-07-27). `task_store_tools` prescribes *"Re-park to
-    re-freeze the quote"* as the remedy for a park reason that has gone stale — and
-    that remedy was UNREACHABLE: the validator refused it, so a seat that noticed
-    its own park reason had rotted had no spellable way to do the right thing. Its
-    only recourse was to transition OUT of parked and back, which CLEARS the quote
-    (see `task_repository`) and fires an event asserting a status change that never
-    conceptually happened. A correct rule and correct advice composed into a hole
-    nobody owned.
-
-    THE PROOF STILL HOLDS, by induction on a row's park history:
-        base case — the FIRST park requires from_status ∈ PARK_LEGAL_FROM_STATUSES,
-                    which is ⊆ OWED_BASE_STATUSES (asserted at import in
-                    `task_store_owed`).
-        step      — a re-park requires from_status == `parked`, which by the
-                    induction hypothesis was itself reached from an owed status.
-        ⇒ every parked row's pre-park provenance is queued/in_progress, no matter
-          how many times its quote is refreshed. A re-park is IDEMPOTENT with
-          respect to provenance, which is exactly why it cannot widen admission.
-
-    So the invariant is about ENTRY, and `PARK_LEGAL_FROM_STATUSES` remains its
-    exact carrier. Adding `parked` to that tuple would break the assert while
-    proving nothing new — the two questions ("what may ENTER a park?" vs "what may
-    be parked FROM?") are kept as separate names for the same reason PARK_STATUS
-    and PARK_LEGAL_FROM_STATUSES already are.
-
-    ⚠️ The re-park is what makes the refresh HONEST, not merely possible: the
-    repository stamps `updated_ts` and `park_reason_captured_at` to one instant on
-    every ->parked write, so a re-park restores the post-park equality invariant —
-    which is precisely what "re-freeze the quote" means.
+    Entry is queued or in_progress; re-entry is parked -> parked, a quote refresh. Every parked row therefore came from an owed status,
+    so the owed set can admit every expired-parked row without widening any reader's owed definition.
+    PARK_LEGAL_FROM_STATUSES stays the carrier of the entry invariant (asserted a subset of OWED_BASE_STATUSES in `task_store_owed`).
 
     Requires:
-        - from_status is the row's CURRENT status (any value accepted)
+        - from_status is the row's current status (any value accepted)
 
     Ensures:
         - True iff from_status is in PARK_LEGAL_FROM_STATUSES, or is PARK_STATUS
@@ -2056,20 +1722,18 @@ def validate_park( from_status, next_chase_ts, park_reason ) -> list:
     Validate a ->parked transition's source status and required fields.
 
     Requires:
-        - from_status is the item's CURRENT status
+        - from_status is the item's current status
         - next_chase_ts / park_reason are the candidate payload fields
 
     Ensures:
-        - returns [] iff ALL hold:
-            from_status is park-legal — queued / in_progress (ENTRY), or
-              already `parked` (RE-ENTRY: a quote refresh; see is_park_legal_from)
+        - returns [] iff all hold:
+            from_status is park-legal: queued / in_progress (entry), or
+              already `parked` (re-entry, a quote refresh; see is_park_legal_from)
             next_chase_ts is present
             park_reason is a non-blank string
-        - the source-status rule is what makes the owed-set restoration exact:
-          an expired-parked row provably came from queued/in_progress, so
-          re-admitting the whole expired-parked set can never drag in a
-          blocked/claimed/review row (design §4.2). A `parked_from_status`
-          column was REJECTED — a new field where a rule suffices.
+        - the source-status rule keeps owed-set restoration exact: an expired-parked
+          row came from queued or in_progress, so re-admitting the whole expired-parked
+          set never pulls in a blocked, claimed or review row
         - one error string per violation; never raises
     """
     errors = [ ]
@@ -2107,19 +1771,11 @@ PATCH_PERSONA_FIELDS = ( "owner_persona", "accountable_manager" )
 
 def normalize_patch_fields( fields: dict ) -> dict:
     """
-    Canonicalize the persona-identity fields of a PATCH on write — the single,
-    100%-testable seam that keeps a re-owned item inside the new owner's
-    owed-row set (the 2026-06-18 false-idle bug-class guard, §2.2).
+    Canonicalize the persona-identity fields of a PATCH so a re-owned item stays queryable.
 
-    Delegates to the ONE global persona normalizer — `canonical_persona_key`
-    (lupin_mcp.persona_normalization) — for `owner_persona` / `accountable_manager`
-    ONLY, and ONLY when the field is present AND non-empty: a re-owned item is
-    stored under the SAME key the owed-query reads by, so a hand-supplied display
-    name ("María", "Mr. Radio") can never split into a row the new owner's query
-    misses. An EXPLICIT None (clear-the-owner) is PRESERVED — never collapsed to
-    "" or to a canonicalized blank — so unassigning an item stays a deliberate,
-    auditable clear. `canonical_persona_key` is idempotent, so this is safe even
-    when a caller pre-normalizes.
+    The function applies `canonical_persona_key` (lupin_mcp.persona_normalization) to owner_persona and accountable_manager, only when present and non-empty.
+    A re-owned item is then stored under the key the owed-query reads, so a display name such as "María" cannot split the row.
+    An explicit None (clear the owner) is preserved, and the normalizer is idempotent.
 
     Requires:
         - fields is the dict of provided editable fields (the router's
@@ -2127,12 +1783,11 @@ def normalize_patch_fields( fields: dict ) -> dict:
           empty
 
     Ensures:
-        - returns a NEW dict (input is never mutated)
+        - returns a new dict (input is never mutated)
         - every key not in PATCH_PERSONA_FIELDS is copied through verbatim
         - a persona field that is present and truthy -> canonical_persona_key( value )
-        - a persona field that is present and falsy (None / "") -> left verbatim
-          (an explicit None clear survives; canonical_persona_key is NOT applied
-          to a falsy value, which would turn None into the "" sentinel)
+        - a persona field that is present and falsy (None / "") -> left verbatim,
+          so an explicit None clear survives and does not become the "" sentinel
         - a persona field that is absent -> stays absent (no key is invented)
     """
     normalized = dict( fields )
@@ -2144,28 +1799,25 @@ def normalize_patch_fields( fields: dict ) -> dict:
 
 def validate_patch( fields: dict ) -> list:
     """
-    Validate an item-field PATCH (Phase 2.1). `fields` is the dict of EDITABLE
-    fields the caller actually set (the router passes
-    model_dump(exclude_unset=True) minus actor/authority).
+    Validate an item-field PATCH.
 
-    The forbidden fields — status / blocked_by / next_chase_ts / receipt_refs /
-    correlation_key — are excluded STRUCTURALLY by the TaskPatchIn model
-    (extra='forbid' → 422 at the wire) and never reach here: an item-PATCH can
-    NEVER bypass the transition oracle (reviewer ruling 2026-06-15).
+    `fields` holds the editable fields the caller set (the router passes model_dump(exclude_unset=True) minus actor/authority).
+    The TaskPatchIn model rejects status, blocked_by, next_chase_ts, receipt_refs and correlation_key at the wire (extra='forbid', 422).
+    An item PATCH therefore cannot bypass the transition oracle.
 
     Requires:
         - fields is a dict of provided editable fields (may be empty)
 
     Ensures:
-        - returns [] iff at least one editable field is set AND every provided
+        - returns [] iff at least one editable field is set and every provided
           constrained field is valid:
-            title      - non-empty string (the column is NOT NULL)
+            title      - non-empty string (the column is `NOT NULL`)
             priority   - member of VALID_PRIORITIES
             gate_class - member of VALID_GATE_CLASSES
             urgency    - member of VALID_URGENCIES
-          (body / owner_persona / accountable_manager are nullable free text —
-          a provided null clears them; no shape rule beyond the wire max_length)
-        - an empty patch (no editable field set) is rejected — a PATCH must
+          (body / owner_persona / accountable_manager are nullable free text;
+          a provided null clears them, with no shape rule beyond the wire max_length)
+        - an empty patch (no editable field set) is rejected, since a PATCH must
           change something
         - one error string per offending field; never raises
     """
@@ -2247,7 +1899,7 @@ MARKUP_PRONE_FIELDS = ( "park_reason", "reason", "note" )
 
 def envelope_tail_tag( text ):
     """
-    Name the tool-call closing tag `text` ENDS with, if any.
+    Name the tool-call closing tag that `text` ends with, if any.
 
     Requires:
         - text is anything; only a str can produce a non-None result
@@ -2255,12 +1907,11 @@ def envelope_tail_tag( text ):
     Ensures:
         - returns the offending tag when the value, ignoring trailing
           whitespace, ends with one of _ENVELOPE_TAGS
-        - returns None for legitimate content, INCLUDING a value that quotes one
+        - returns None for legitimate content, including a value that quotes one
           of these tags anywhere but the very end
-        - returns None for a non-str and for a blank value — validate_park and
-          the amend handler already own the "missing / blank" message and must
-          keep owning it, so this never competes for that error
-        - NEVER mutates or truncates: refusal is the caller's job, and the
+        - returns None for a non-str and for a blank value, because validate_park
+          and the amend handler already own the "missing / blank" message
+        - never mutates or truncates; refusal is the caller's job, and the
           caller still holds every byte it sent
     """
     if not isinstance( text, str ): return None
@@ -2278,12 +1929,11 @@ def validate_no_envelope_tail( fields ) -> list:
         - fields is a dict mapping field name -> candidate value
 
     Ensures:
-        - returns one error string per offending field, naming BOTH the field
-          and the tag, and telling the author what to do about it — a refusal
-          the author cannot act on is just a different kind of silence
+        - returns one error string per offending field, naming both the field
+          and the tag, and telling the author what to do about it
         - returns [] when every value is clean, non-str, or absent
-        - reports EVERY violation rather than the first, matching this module's
-          existing validators
+        - reports every violation rather than the first, matching this module's
+          other validators
         - never mutates the input dict and never rewrites a value
     """
     errors = [ ]
@@ -2376,11 +2026,10 @@ EPIC_KEY_ENFORCEMENT_ACTIVE = True
 
 def epic_key_advisory( correlation_key ):
     """
-    Judge one `correlation_key` against the epic-layer rule (row 5246bb67).
+    Judge one `correlation_key` against the epic-layer rule and return an advisory or None.
 
-    PURE — no I/O, no clock, no config. The caller decides what to do with the
-    verdict, which is what keeps the warn-only ramp a one-line change at the
-    router rather than a behaviour hidden in here.
+    The function does no I/O and reads no clock or config. The caller decides what to do with the verdict,
+    so the warn-only ramp stays a one-line change at the router.
 
     Requires:
         - correlation_key is a str or None (any other type is treated as absent,
@@ -2388,17 +2037,15 @@ def epic_key_advisory( correlation_key ):
           turn a soft advisory into a 500)
 
     Ensures:
-        - returns None when the row is COMPLIANT or EXEMPT:
-            * a key beginning "epic:" — including the explicit "epic:unassigned"
-            * a key beginning "cc-task:" — the harness mirror lane, exempt by ruling
-        - otherwise returns a non-empty advisory string naming BOTH the offending
-          value and "epic:unassigned" as a legal explicit answer, per the ruling
-        - never raises, and never rejects — rejection is the ROUTER's call, gated
+        - returns None when the row is compliant or exempt:
+            * a key beginning "epic:", including the explicit "epic:unassigned"
+            * a key beginning "cc-task:", the harness mirror lane, which is exempt
+        - otherwise returns a non-empty advisory string naming both the offending
+          value and "epic:unassigned" as a legal explicit answer
+        - the message says whether the key is blank or machine-style, so the advice
+          fits a row that already carries a correlation_key
+        - never raises and never rejects; rejection is the router's call, gated
           on EPIC_KEY_ENFORCEMENT_ACTIVE
-
-    ⚠️ BLANK AND MACHINE-KEYED ARE DIFFERENT FAILURES and the message says which,
-    because "add an epic key" is unhelpful to someone staring at a row that
-    already has a correlation_key on it.
     """
     key = correlation_key if isinstance( correlation_key, str ) else None
     key = ( key or "" ).strip()
@@ -2500,52 +2147,35 @@ RATIO_GATE_ENFORCEMENT_STARTS = "2026-09-08"
 def ratio_gate_advisory( created, closed, priority=None, correlation_key=None, allow_below=None,
                          petition=False ):
     """
-    Judge one create against the closed-vs-new ratio.
+    Judge one create against the closed-vs-new ratio and return a refusal string or None.
 
-    `petition=True` changes ONLY the refusal's closing sentence (row d2b1b59a, Finding 4):
-    a P0 petition is judged at the P1 it is minted at and must not be told "A P0 is
-    exempt". It never changes the verdict — the router passes the minted priority.
-
-    PURE — no I/O, no clock, no database. The caller supplies the counts and decides
-    what to do with the verdict, which keeps the warn-only ramp a one-line change at
-    the router and makes every case below testable without a store.
+    The function is pure when the caller passes allow_below. The None default reads cosa.rest.flow_ratio_settings.
+    The router passes the value, so the gate and the endpoint verdict share one threshold.
+    The petition flag changes only the closing sentence of a refusal, never the verdict.
 
     Requires:
         - created / closed are non-negative ints for the ruled window
         - priority is the create payload's priority (e.g. "P0"), or None
         - correlation_key is the payload's key, or None
         - allow_below is the operator's live threshold, or None to read it from
-          cosa.rest.flow_ratio_settings
-
-    🔴 PASS `allow_below` FROM THE ROUTER AND THIS FUNCTION STAYS PURE. It was 1.0
-    hardcoded here AND 1.0 hardcoded in the endpoint's verdict — two copies of one
-    number that the endpoint's docstring promises is computed in one place "so the
-    header and the gate cannot drift apart". Editing one and not the other would have
-    left the board saying "allow" while this refused the create, and nothing anywhere
-    would have reported the disagreement.
-
-    ⚠️ THE None DEFAULT READS A FILE, so it is NOT pure. It exists so an existing caller
-    keeps working, not as the intended path — the router supplies the value. If you are
-    writing a test that cares about purity, pass the threshold.
+          cosa.rest.flow_ratio_settings (the one impure path)
+        - petition is True for a P0 petition minted at P1; the router passes the minted priority
 
     Ensures:
-        - returns None when the write is ALLOWED or EXEMPT
-        - otherwise returns a refusal string naming the REAL COUNTS, the gate, and what
-          to do about it — Rick asked for "the appropriate message… success if under 1.0
-          and failure and why", so a bare refusal is not enough
-        - EXEMPTIONS, both returning None before any arithmetic:
-            * priority P0 — a gate that refuses the filing of an outage row is a gate
-              that gets switched off the first Friday it is wrong
-            * the harness mirror's `cc-task:` lane — it writes where no human is present
-              to answer a 422, the same carve-out the epic-key guard makes
-        - `closed == 0` with creations REFUSES (a window where nothing was finished is
-          exactly what the gate is for, and it is the common case on a quiet day);
-          `0/0` ALLOWS (an idle window is not a failing window)
-        - never raises, and never itself rejects — the ROUTER decides, gated on
+        - returns None when the write is allowed or exempt
+        - otherwise returns a refusal string naming the real counts, the gate, and what
+          to do about it
+        - exemptions, both returning None before any arithmetic:
+            * priority P0, so the gate never blocks filing an outage row
+            * the harness mirror's `cc-task:` lane, which writes where no human is
+              present to answer a 422, the same carve-out the epic-key guard makes
+        - `closed == 0` with creations refuses, because a window where nothing was
+          finished is what the gate is for; `0/0` allows, because an idle window is
+          not a failing window
+        - a petition refusal never offers the P0 exemption
+        - success is silent; the board header already shows the number
+        - never raises and never itself rejects; the router decides, gated on
           RATIO_GATE_ENFORCEMENT_ACTIVE
-
-    ⚠️ SUCCESS IS SILENT. A confirmation on every ordinary create is noise, and the
-    success signal is the number already sitting in the board header.
     """
     key = correlation_key if isinstance( correlation_key, str ) else ""
     if ( priority or "" ).upper() in RATIO_GATE_EXEMPT_PRIORITIES: return None
@@ -2656,25 +2286,11 @@ def ratio_gate_advisory( created, closed, priority=None, correlation_key=None, a
 
 def ratio_gate_reading( created, closed, allow_below, verdict ):
     """
-    The gate's reading, for the paths that do NOT refuse — row aba30387, defect 1.
+    Return the log line describing the gate's reading on a path that does not refuse.
 
-    PURE. Returns the line the caller should log; the caller decides where it goes.
-
-    🔴 WHY THIS EXISTS. `ratio_gate_advisory` returns None on an allow, and the router
-    discarded created / closed / ratio / threshold with all four in hand. So a PERMIT
-    produced no reading at all, and a working gate was indistinguishable from an absent
-    one from outside. Measured cost, 2026-09-04: Tiffany's three creates were permitted,
-    the row filed against them said the gate was "ARMED AND INERT", and settling that
-    needed the ratio AT THE TIME of each permit — which nothing had recorded. Mr Radio
-    reconstructed what he could and reported that the deciding value "remains INFERRED,
-    NOT MEASURED." It is unrecoverable now.
-
-    ⚠️ THIS REVERSES A DELIBERATE PRIOR DECISION, and the reasoning is worth keeping
-    rather than deleting: "SUCCESS IS SILENT. A confirmation on every ordinary create is
-    noise, and the success signal is the number already sitting in the board header."
-    That was not wrong about noise. It was wrong that the header substitutes — the header
-    is a LIVE number read at page time, while a verdict is a reading taken AT REQUEST TIME
-    over a specific window. When the two differ, the header cannot say what the gate saw.
+    ratio_gate_advisory returns None on an allow, so without this line a permit leaves no record of the counts and ratio.
+    The board header is a live number read at page time, while a verdict is a reading taken at request time over a specific window.
+    The function is pure; the caller decides where the line goes.
 
     Requires:
         - created / closed are the non-negative ints the verdict was computed from
@@ -2683,8 +2299,8 @@ def ratio_gate_reading( created, closed, allow_below, verdict ):
 
     Ensures:
         - returns a single line naming the verdict, both counts, the threshold, and the
-          ratio — or "n/a" for the ratio when closed is 0, since printing one without a
-          denominator would be inventing a reading
+          ratio, or "n/a" for the ratio when closed is 0, since printing one without a
+          denominator would invent a reading
         - never raises
     """
     ratio = f"{created / closed:.2f}" if closed else "n/a (nothing closed)"
@@ -2709,165 +2325,85 @@ _HEADROOM_PROBE_CEILING = 1 << 20   # a threshold high enough to admit a million
 
 def ratio_gate_headroom( created, closed, allow_below ):
     """
-    How many MORE ordinary creates the ratio gate would admit right now.
+    Return how many more ordinary creates the ratio gate would admit right now.
 
-    🔴 A PROJECTION OF THE GATE, NOT A SECOND GATE. Every answer below is
-    `ratio_gate_advisory`'s answer — this function asks it and counts, and holds no
-    threshold comparison of its own.
-
-    🔴 AND IT COUNTS ADMITTED CREATES, WHICH IS NOT THE SAME AS THE SPEC'S ALGEBRA —
-    THE TWO DISAGREE BY ONE AND THE GATE IS RIGHT. The design formula reads
-    `(created + N) / closed < allow_below`, i.e. "after N more creates the ratio is
-    still under". But the gate judges a create against the counts BEFORE it lands
-    (routers/tasks.py reads the counts, calls the advisory, and only then calls
-    create_item), so the create that TIPS the ratio to exactly the threshold is
-    admitted — it was judged one row earlier.
-
-        created 10, closed 13, allow_below 1.00
-            create #1 judged at 10/13 = 0.77  ADMITTED
-            create #2 judged at 11/13 = 0.85  ADMITTED
-            create #3 judged at 12/13 = 0.92  ADMITTED   <- ratio is now 1.00
-            create #4 judged at 13/13 = 1.00  REFUSED
-        the gate admits 3. The spec formula yields 2.
-
-    Reporting 2 would tell an operator the gate is shut while it is still open, which is
-    exactly the disagreement this projection exists to make impossible.
+    The function asks ratio_gate_advisory and counts, and holds no threshold comparison of its own, so it projects the gate and is not a second gate.
+    The gate judges each create against the counts before it lands, so the create that tips the ratio to the threshold is admitted.
+    The spec formula (created + N) / closed < allow_below therefore gives one fewer than the gate admits.
 
     Requires:
         - created / closed are non-negative ints for the ruled window
-        - allow_below is the operator's live threshold, read ONCE by the caller and
-          passed in — this function must never read it, or the projection and the gate
-          would be reading two values that can differ between two calls
+        - allow_below is the operator's live threshold, read once by the caller and
+          passed in; reading it here could make the projection and the gate disagree
 
     Ensures:
-        - returns the count of additional ORDINARY creates the gate would admit, i.e.
+        - returns the count of additional ordinary creates the gate would admit, i.e.
           the smallest n >= 0 at which the gate refuses
-        - 0 when the gate refuses right now — including a zero threshold, which is a
-          hard stop no closure can open
+        - 0 when the gate refuses right now, including a zero threshold, which no closure can open
         - 1 for an idle window (created 0, closed 0): the gate admits the next create
           and refuses the one after, because nothing has been closed
-        - None when no bound is found below _HEADROOM_PROBE_CEILING — "effectively
-          unbounded", never a large number a caller might render as a target
-        - PURE: no clock, no database, no settings read
-
-    ⚠️ ORDINARY MEANS ORDINARY. The gate exempts P0 and the harness mirror lane
-    unconditionally, so headroom does not describe either — for those the answer is
-    "always admitted", which is not a number and is deliberately not returned as one.
-
-    ⚠️ AND IT DESCRIBES THE GATE'S VERDICT, NOT TODAY'S BLOCKING. While
-    `task flow ratio enforcement active` is off, the router logs the refusal and lets
-    the write through. Headroom 0 then means "the gate would refuse", not "your create
-    will fail".
+        - None when no bound is found below _HEADROOM_PROBE_CEILING, meaning
+          effectively unbounded, never a large number a caller might render as a target
+        - example: created 10, closed 13, allow_below 1.00 returns 3 (judged at 10/13,
+          11/13, 12/13; the fourth, at 13/13, is refused)
+        - ordinary creates only: P0 and the harness mirror lane are exempt, so the
+          answer for those is "always admitted" and is not returned as a number
+        - describes the gate's verdict, not today's blocking: while
+          `task flow ratio enforcement active` is off, the router logs the refusal
+          and lets the write through
+        - pure: no clock, no database, no settings read
     """
     return _walk_the_gate( created, closed, allow_below, direction="create" )
 
 
 def ratio_gate_close_needed( created, closed, allow_below ):
     """
-    How many MORE closures the gate needs before it would admit an ordinary create.
+    Return how many more closures the gate needs before it would admit an ordinary create.
 
-    🔴 THE SAME LOOP WITH ONE VARIABLE SWAPPED, as the row requires — one function with a
-    direction flag, not two implementations that can drift. Both verbs delegate to
-    `_walk_the_gate`; the only difference is which count moves.
-
-    Increasing `closed` LOWERS created ÷ closed, so walking it upward moves back toward
-    allow — the mirror of walking `created` upward, which moves toward refuse.
+    This verb and ratio_gate_headroom both delegate to `_walk_the_gate`, one loop with a direction flag, so they cannot drift apart.
+    Increasing `closed` lowers created / closed, so walking it upward moves toward allow, the mirror of walking `created` toward refuse.
 
     Ensures:
         - 0 when the gate already admits (there is nothing to close)
         - otherwise the smallest number of additional closures at which it admits
-        - None when no bound is found below _HEADROOM_PROBE_CEILING — which is the REAL
-          answer for a zero threshold: no number of closures opens a gate set to 0, so a
-          number here would name a target that does not exist
-        - PURE: no clock, no database, no settings read
+        - None when no bound is found below _HEADROOM_PROBE_CEILING, which is the
+          correct answer for a zero threshold: no number of closures opens a gate set
+          to 0, so a number here would name a target that does not exist
+        - pure: no clock, no database, no settings read
     """
     return _walk_the_gate( created, closed, allow_below, direction="close" )
 
 
 def ratio_loop_headroom( created, closed, allow_below ):
     """
-    The badge's number: how many more creates leave the ratio STILL UNDER the threshold
-    AFTER they land. This is one LESS than the gate admits, deliberately.
+    Return how many more creates leave the ratio under the threshold after they land.
 
-    🔴 RICK RULED THIS BY KEYPRESS, 2026-09-05 13:11:13 EDT, on the option labelled
-    "Keep your three states — badge under-reports by one." Read the next three paragraphs
-    before "fixing" the off-by-one — it is the ruling, not a defect.
-
-    RECEIPT, so this is a reference and not a rumour: notifications row
-    `819dc891-7451-4a52-8eff-3a5c550e323f`, sender `claude.code@lupin.deepily.ai#e97796db`,
-    `state = responded`, `responded_at = 2026-09-05 17:11:13Z`, `source = "ui"` — a real
-    interaction, not a timeout default. The ask he answered read: "The capacity badge:
-    keep the gate's boundary and retire the word FULL, or keep your three states and
-    under-report by one?"
-
-    ⚠️ THIS WAS RELAYED BEFORE IT WAS SOURCED, AND THE CORRECTION IS WORTH THE LINES.
-    The ruling reached me through two DMs and I built to it on their specificity alone —
-    a label, a minute, an explicit "not a default". Then the relaying seat cleared, its
-    row still read "unanswered", and for a while each of us was the other's only source.
-    The DB row above is what closed it, and it moved the published time by 47 seconds
-    (13:12 was the relay's; 13:11:13 is the artifact's). A specific claim is not a sourced
-    one — quote the row id, never the recollection.
-
-    THE TWO SEMANTICS, which differ by exactly one wherever there is any room:
-
-      LOOP (this function, ruled)  probe created+1, created+2, … and stop at the LAST
-        increment that still PASSES. Asks whether the STATE AFTER k creates is under
-        the threshold. This is the method Rick specified on row f7c4f537 and the one
-        he re-affirmed when the divergence was put to him.
-      GATE (`ratio_gate_headroom`)  count the creates the gate actually ADMITS. The
-        router reads the counts, asks the advisory, and only THEN writes the row, so
-        each create is judged BEFORE it lands and the one that tips the ratio to
-        exactly the threshold still gets in.
-
-        created 10, closed 13, allow_below 1.00  ->  LOOP says 2, the GATE admits 3
-
-    ⚠️ SO THE BADGE KNOWINGLY UNDER-REPORTS BY ONE. It will say there is no room while
-    the gate would still accept one more ticket. That is the SAFER error for a
-    moratorium — the feature exists because "it is way too easy to add tickets and way
-    too hard to get them removed" — and Rick chose it over the exact number with the
-    trade named on the option.
-
-    🔴 THIS IS THE ONE PLACE THE DISPLAY IS ALLOWED TO DIFFER FROM THE GATE, AND IT
-    DIFFERS BY SUBTRACTING FROM THE GATE'S OWN ANSWER — never by re-deriving one. There
-    is still exactly ONE comparison in this module's projection, inside
-    `ratio_gate_advisory`. A version of this function that compared a ratio to a
-    threshold itself would be a second gate, and the first time the gate's rules moved
-    the board would go on quoting the old ones with no test able to see it.
+    This is one fewer than ratio_gate_headroom, so the badge errs toward a moratorium. The loop probes created+1, created+2 and stops at the last
+    increment that still passes. The gate judges each create before it lands, so the create that tips the ratio to the threshold is admitted.
 
     Requires:
         - created / closed are non-negative ints for the ruled window
-        - allow_below is the operator's live threshold, read ONCE by the caller and
-          passed in — never read here, or the number and the gate would be reading two
-          values that can differ between two calls
+        - allow_below is the operator's live threshold, read once by the caller and
+          passed in; reading it here could make the number and the gate disagree
 
     Ensures:
-        - returns `ratio_gate_headroom( … ) - 1` when the gate admits at all
-        - returns 0 when the gate admits exactly one more: the `FULL` state, meaning AT
-          CAPACITY AND STILL LEGAL. Under loop semantics this state is REACHABLE, which
-          is the whole substance of Rick's ruling — under gate semantics it had no
-          inputs at all
-        - returns None when the gate REFUSES right now. The honest answer there is
-          NEGATIVE, not zero: you are past the line, not at it. That case belongs to
-          `ratio_gate_close_needed` and its `CLOSE N` badge, and folding it into 0 would
-          make a healthy edge and a breach look identical
+        - returns `ratio_gate_headroom( ... ) - 1` when the gate admits at all
+        - returns 0 when the gate admits exactly one more: the "FULL" state, at capacity
+          and still legal; under the gate's own semantics that state has no inputs
+        - returns None when the gate refuses right now; that case belongs to
+          `ratio_gate_close_needed` and its "CLOSE N" badge, and folding it into 0
+          would make a healthy edge and a breach look identical
         - returns None when the gate finds no bound (e.g. a zero threshold no closure
-          can open) — a badge naming a target that does not exist is worse than none
-        - PURE: no clock, no database, no settings read
-
-    ⚠️ IDLE (created 0, closed 0) RETURNS 0 AND SO RENDERS `FULL` ON AN EMPTY BOARD.
-    Row f7c4f537 called that "surprising and probably wrong" while it was still an open
-    question. It is no longer open: Mr. Radio collapsed row ca08f05e into 307943fb as
-    subsumed, on the ground that the empty board and the at-the-line case are ONE
-    vocabulary choice seen from two inputs, and Rick's keypress settled both together.
-    Recorded here rather than silently — if this reads wrong on screen it is a new
-    decision for Rick, not a bug to patch here.
-
-    ⚠️ ORDINARY MEANS ORDINARY. The gate exempts P0 and the harness mirror lane
-    unconditionally, so this number does not describe either.
-
-    ⚠️ AND IT DESCRIBES THE GATE'S VERDICT, NOT TODAY'S BLOCKING. While
-    `task flow ratio enforcement active` is off, the router logs the refusal and lets
-    the write through.
+          can open), since a badge naming a target that does not exist is worse than none
+        - idle (created 0, closed 0) returns 0 and renders "FULL" on an empty board;
+          the empty board and the at-the-line case share one vocabulary choice
+        - example: created 10, closed 13, allow_below 1.00 returns 2 here and 3 from the gate
+        - makes no ratio comparison of its own; it subtracts one from the gate's answer,
+          so the display cannot drift from the gate's rules
+        - ordinary creates only: P0 and the harness mirror lane are exempt unconditionally
+        - describes the gate's verdict, not today's blocking, while
+          `task flow ratio enforcement active` is off
+        - pure: no clock, no database, no settings read
     """
     admitted = ratio_gate_headroom( created, closed, allow_below )
     if admitted is None or admitted == 0: return None
@@ -2876,16 +2412,12 @@ def ratio_loop_headroom( created, closed, allow_below ):
 
 def _walk_the_gate( created, closed, allow_below, direction ):
     """
-    The one loop both verbs share. Asks `ratio_gate_advisory` and counts; holds no
-    threshold comparison of its own.
+    Walk created or closed upward through ratio_gate_advisory and count the steps.
 
-    direction="create" -> move `created` up; count admissions before the first refusal
-    direction="close"  -> move `closed`  up; count closures until the first admission
-
-    ⚠️ THE TWO DIRECTIONS ARE NOT SYMMETRIC IN WHAT THEY RETURN, and the asymmetry is the
-    behaviour rather than an oversight. "create" counts how many pass BEFORE the flip;
-    "close" counts how many it takes to REACH the flip. Off by one from each other by
-    construction, because they answer opposite questions about the same boundary.
+    The loop asks `ratio_gate_advisory` and counts, holding no threshold comparison of its own.
+    With direction="create" the loop moves `created` up and counts admissions before the first refusal.
+    With direction="close" it moves `closed` up and counts closures until the first admission.
+    The two counts answer opposite questions about one boundary.
     """
     def _admits( n ):
         # The ONE decision point in this module's projection. No comparison sits beside it.
@@ -2927,8 +2459,7 @@ def _walk_the_gate( created, closed, allow_below, direction ):
 
 def quick_smoke_test():
     """
-    Quick smoke test for task_store_rules — exercises every validator at the
-    happy path + one representative rejection each.
+    Smoke-test task_store_rules: each validator once on the happy path and once rejected.
     """
     import cosa.utils.util as cu
 
