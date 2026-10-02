@@ -4032,3 +4032,20 @@ class TestTheDegradeExitReportsTheRouteThatWasChosen:
         assert delivered[ "command" ] == "agent router go to math", (
             "the flow told the truth and the response model handed the client something else" )
         assert delivered[ "path" ] == "receptionist"
+
+
+# ────────────────────────────────────────────────────────────── row 4cbd4858 — parent lineage
+
+@pytest.mark.parametrize( "sent, recorded", [ ( "suite-job-hash", "suite-job-hash" ), ( None, None ), ( "", None ) ] )
+def test_ask_records_the_parent_on_the_trace_the_executor_sees( tmp_path, notifier, monkeypatch, sent, recorded ):
+    """`parent_id_hash` reaches the executor on the trace; absent or empty, the trace carries no such key."""
+    monkeypatch.setattr( flow_mod, "resolve", lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=True ) )
+    seen = []
+    class _TraceSpy( FakeExecutor ):
+        def submit( self, work, trace ):
+            seen.append( trace.fields.get( "parent_id_hash" ) )
+            return super().submit( work, trace )
+    exe = _TraceSpy( _outcome( status="done", answer="42", answer_raw="42" ) )
+    f = _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(), exe, FakePending(), notifier )
+    f.ask( "what time is it", parent_id_hash=sent, **_CTX )
+    assert seen == [ recorded ]

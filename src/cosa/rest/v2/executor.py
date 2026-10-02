@@ -221,6 +221,11 @@ class QueuedExecutor:
             job.id_hash = self.todo_queue.user_job_tracker.register_scoped_job(
                 job.id_hash, work.user_id, work.session_id
             )
+            # Lineage (row 4cbd4858): an ask made on behalf of a monopolizing job carries that
+            # job's id on the trace; stamping it is what lets Gate B admit this job through
+            # the hold. Absent, the job is untouched and stays foreign, exactly as before.
+            parent_id_hash = trace.fields.get( "parent_id_hash" )
+            if parent_id_hash: job.spawned_by_id_hash = parent_id_hash
             self.todo_queue.push( job )
             # READ THE POSITION AFTER THE PUSH, IN ITS OWN GUARD. The push has succeeded, so
             # the job IS queued; a size() that raises must not reach the `except` below and

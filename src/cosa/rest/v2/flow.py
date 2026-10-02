@@ -161,7 +161,7 @@ class AskFlow:
     # ---------------------------------------------------------------- the flow
     def ask(
         self, question: str, user_id: str, user_email: str, session_id: str, websocket_id: str,
-        speak: bool=True, interactive: bool=True,
+        speak: bool=True, interactive: bool=True, parent_id_hash: Optional[ str ]=None,
     ) -> dict:
         """Route one question through cache → router → args → executor.
 
@@ -172,9 +172,17 @@ class AskFlow:
 
         This is the only path that may reach needs-input: it is the one with a human
         waiting at the other end.
+
+        `parent_id_hash` names the monopolize job this ask was made on behalf of. It rides
+        the per-request trace to the queued executor, which stamps it on the job as
+        `spawned_by_id_hash` so the consumer's Gate B admits it through a monopoly hold
+        instead of deferring it as foreign. It travels on the trace, not in `ctx`, because
+        `ctx` is unpacked five ways in a dozen places. Absent (None or empty), nothing is
+        recorded and the flow is byte-identical to before.
         """
         trace = StageTrace( trace_dir=self.trace_dir )
         trace.mark( "t_recv" )
+        if parent_id_hash: trace.set( "parent_id_hash", parent_id_hash )
         trace.update( decision_floor=self.similarity_floor, speak=speak, interactive=interactive,
                       question=question )
         ctx = ( user_id, user_email, session_id, websocket_id, speak )

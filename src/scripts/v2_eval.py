@@ -1280,7 +1280,7 @@ class HttpAskClient:
 
     Ensures:
         - ask(question) POSTs {question, websocket_id, speak:false, interactive:false}
-          and returns {utterance, ok, status_code, payload}.
+          (plus parent_id_hash when the client was given one) and returns {utterance, ok, status_code, payload}.
     """
 
     def __init__(
@@ -1294,7 +1294,9 @@ class HttpAskClient:
         relogin_fn   : Optional[ Callable[ [], str ] ] = None,
         attempt_log_fn : Optional[ Callable[ [ Dict[ str, Any ] ], None ] ] = None,
         wall_clock   : Callable[ [], float ]     = time.time,
+        parent_id_hash : Optional[ str ]         = None,
     ) -> None:
+        self.parent_id_hash = parent_id_hash     # the monopolizing suite job's id, when this run is its child
         self.base_url     = base_url.rstrip( "/" )
         self.bearer       = bearer
         self.websocket_id = websocket_id
@@ -1361,6 +1363,10 @@ class HttpAskClient:
             "speak"        : False,
             "interactive"  : False,
         }
+        # Lineage (row 4cbd4858): under a monopoly hold the queue defers every job that is not
+        # its own child, and an ask's job was always foreign, so each one sat out the full
+        # 120s collect timeout. Sent only when set, so a run outside a suite is unchanged.
+        if self.parent_id_hash: body[ "parent_id_hash" ] = self.parent_id_hash
         self._attempt_seq += 1
         seq      = self._attempt_seq
         send_ts  = self.clock()
@@ -2268,8 +2274,10 @@ def _default_client_factory( base_url: str ) -> HttpAskClient:
     # timeout: ASK_READ_TIMEOUT_SECONDS unless a run overrides it — a read wall must never again be
     # the thing that destroys 3 hours of unwritten arm data (ts-1686ce29, row d8d019f6).
     ask_timeout = float( os.environ.get( "LUPIN_V2_ASK_TIMEOUT_SECONDS", ASK_READ_TIMEOUT_SECONDS ) )
+    # The suite job exports its own id here; echoing it makes this run's jobs its lineage children.
+    parent_id = os.environ.get( "LUPIN_TEST_MONOPOLIZE_PARENT_ID" ) or None
     return HttpAskClient( base_url, bearer=_login(), relogin_fn=_login, timeout=ask_timeout,
-                          attempt_log_fn=make_attempt_logger() )
+                          attempt_log_fn=make_attempt_logger(), parent_id_hash=parent_id )
 
 
 def make_attempt_logger( path: Optional[ str ] = None ) -> Callable[ [ Dict[ str, Any ] ], None ]:

@@ -129,6 +129,8 @@ synchronously and returns an `AskResponse`. It also validates with a Pydantic mo
 malformed body comes back **422, not 400**. A caller cutting over changes how it reads the
 result, not only where it posts. (`AskResponse.queue_position` — added 2026-09-29 — is the one v1 field with a v2 counterpart: the todo queue's size right after a queued job was pushed, a snapshot rather than a live position, null on every path that queued nothing.)
 
+`AskRequest.parent_id_hash` (optional, row `4cbd4858`): the id of the monopolizing job on whose behalf the ask is made — the same field and meaning as on `/api/v2/submit`. Under `v2 executor = queued` the queued executor stamps it on the job as `spawned_by_id_hash`, so the consumer's intake hold admits the job as a lineage child instead of deferring it as foreign. Absent, nothing changes. The test-suite runner exports its id as `LUPIN_TEST_MONOPOLIZE_PARENT_ID`, which `v2_eval.py` echoes.
+
 **Table of record**: `src/cosa/rest/routers/_retired_doors.py`. **Test**:
 `src/tests/unit/test_retired_queue_doors_410.py`.
 
