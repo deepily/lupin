@@ -585,6 +585,15 @@ Paired splainer entries are in `src/conf/lupin-app-splainer.ini`.
 
 ---
 
+## 25a. Heartbeat Stop Poke Switch (`/api/heartbeat/*`)
+
+The fleet-wide on/off switch for the Stop-hook poke (row 3526fb95). A plain switch: no timer, it stays as set until an admin flips it. The state is one small file the Stop hook reads on every stop (`hooks/lib/heartbeat_poke_mute.py`), so a flip takes effect on each seat's next stop with no restart. `heartbeat.poke_output_enabled = false` in `~/.claude/settings.json` still mutes on its own.
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/api/heartbeat/poke-mute` | API key or JWT | Read the switch: `{ muted, set_by, set_at }`. A missing or unreadable switch file reads as not muted. |
+| PUT | `/api/heartbeat/poke-mute` | Admin JWT | Body `{ muted }` (a JSON boolean, else 422). Returns the state as read back. 403 for a signed-in user without the admin role, 403 for a caller presenting only `X-API-Key` (a Claude session may read the switch and may not flip it), 401 with no credentials. Each flip appends one line to `heartbeat-poke-mute.log` beside the switch file. |
+
 ## 26. Task Store — Promote/Demote Requests (`/api/tasks/*`)
 
 > Managers ASK Rick to move a row; only Rick answers (row c9fafb9d). **Sword of Damocles** (row ab8c5728): while `sword_of_damocles_active` is on, an admit must pledge one live ticket the requester owns, and Rick's approval drops it in the same transaction as the admit. Ownership is checked against the persona the server resolves (approver account, else the session bridge), never the typed actor. Plan: `src/rnd/v0.2.1/2026.09.14-sword-of-damocles-enforcement-plan.md`. Full schemas: `/docs`.

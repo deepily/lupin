@@ -1320,6 +1320,10 @@ class NotificationsUI {
         this.startCcConsoleButtonObserver();
         this.refreshCcConsoleRoster();
 
+        // Stop poke switch (row 3526fb95): paint its indicator. Not awaited — the page
+        // must not wait on it.
+        this.refreshPokeMute();
+
         this.log( `✓ Authentication setup complete for user: ${this.currentUserEmail} (admin: ${this.isAdmin}, config fetched, monitors started)` );
 
         // Fill the Q&A card's agent dropdown from the registry. BEFORE loadCurrentMode,
@@ -2370,6 +2374,13 @@ class NotificationsUI {
         const bounceBtn = document.getElementById( 'bounce-dev-server-btn' );
         if ( bounceBtn ) {
             bounceBtn.addEventListener( 'click', () => this.bounceDevServer() );
+        }
+
+        // Heartbeat stop poke switch (row 3526fb95). Static toolbar button, an action
+        // like the bounce button beside it, not a section toggle.
+        const pokeMuteBtn = document.getElementById( 'poke-mute-btn' );
+        if ( pokeMuteBtn ) {
+            pokeMuteBtn.addEventListener( 'click', () => this.togglePokeMute() );
         }
 
         // Enter key in Q&A input
@@ -8562,6 +8573,100 @@ class NotificationsUI {
                 cancelBtn.innerText = 'Cancel Job';
             }
         }
+    }
+
+    _paintPokeMute( state ) {
+        /**
+         * Paint the stop poke switch in the toolbar (row 3526fb95).
+         *
+         * Requires:
+         *     - state is the endpoint's { muted, set_by, set_at }, or null when it
+         *       could not be read
+         *
+         * Ensures:
+         *     - 🔔 when the poke is on, 🔕 when it is muted, ❔ when the state is unknown
+         *     - data-muted carries "true" / "false" / "unknown" for tests and styling
+         *     - the button is enabled only for an admin with a known state: everyone
+         *       else sees the indicator and cannot flip it
+         *     - returns false when the button is not in the DOM
+         */
+        const btn = document.getElementById( 'poke-mute-btn' );
+        if ( !btn ) return false;
+
+        if ( !state || typeof state.muted !== 'boolean' ) {
+            btn.textContent   = '❔';
+            btn.dataset.muted = 'unknown';
+            btn.disabled      = true;
+            btn.title         = 'Heartbeat stop poke: state unknown (could not reach the server)';
+            return true;
+        }
+
+        const who  = state.set_by ? ` by ${state.set_by}` : '';
+        const what = state.muted ? `MUTED${who}` : 'ON';
+        const hint = this.isAdmin
+            ? ( state.muted ? 'Click to turn it back on.' : 'Click to mute it for the whole fleet.' )
+            : 'Only an admin can change it.';
+
+        btn.textContent   = state.muted ? '🔕' : '🔔';
+        btn.dataset.muted = String( state.muted );
+        btn.disabled      = !this.isAdmin;
+        btn.title         = `Heartbeat stop poke: ${what}. ${hint}`;
+        return true;
+    }
+
+    async refreshPokeMute() {
+        /**
+         * Read the stop poke switch and paint it.
+         *
+         * Ensures:
+         *     - GETs /api/heartbeat/poke-mute and paints what the server said
+         *     - a failed read or a non-200 paints the unknown state, never a guess
+         *     - returns the state, or null when it could not be read
+         */
+        try {
+            const response = await this.authedFetch( '/api/heartbeat/poke-mute' );
+            const state    = response.ok ? await response.json() : null;
+            this._paintPokeMute( state );
+            return state;
+        } catch ( error ) {
+            this.error( '[POKE-MUTE] Read failed:', error );
+            this._paintPokeMute( null );
+            return null;
+        }
+    }
+
+    async togglePokeMute() {
+        /**
+         * Flip the stop poke switch, fleet-wide (admin only; the server enforces it).
+         *
+         * Ensures:
+         *     - PUTs the opposite of what the button currently shows
+         *     - paints what the server read back, so the indicator is never a guess
+         *     - on a refusal or a failure, logs it and re-reads the real state
+         *     - does nothing when the button is missing or its state is unknown
+         */
+        const btn = document.getElementById( 'poke-mute-btn' );
+        if ( !btn || ( btn.dataset.muted !== 'true' && btn.dataset.muted !== 'false' ) ) return null;
+
+        const wanted = btn.dataset.muted !== 'true';
+        btn.disabled = true;
+        try {
+            const response = await this.authedFetch( '/api/heartbeat/poke-mute', {
+                method  : 'PUT',
+                headers : { 'Content-Type': 'application/json' },
+                body    : JSON.stringify( { muted: wanted } )
+            } );
+            if ( response.ok ) {
+                const state = await response.json();
+                this._paintPokeMute( state );
+                this.log( `[POKE-MUTE] Stop poke is now ${state.muted ? 'MUTED' : 'ON'}` );
+                return state;
+            }
+            this.error( `[POKE-MUTE] Refused: HTTP ${response.status}` );
+        } catch ( error ) {
+            this.error( '[POKE-MUTE] Request failed:', error );
+        }
+        return this.refreshPokeMute();
     }
 
     async bounceDevServer() {
