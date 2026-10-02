@@ -49,7 +49,7 @@ STOP_WORDS    = frozenset( "a an the of to in on at by for or and is are be it i
 
 Claim            = namedtuple( "Claim", [ "text", "quote", "start", "end" ] )
 ExtractionResult = namedtuple( "ExtractionResult", [ "claims", "discarded", "uncovered_fraction", "longest_quote_share",
-                                                     "discards", "flags", "reextract_calls", "flag_words" ], defaults=( (), (), 0, () ) )
+                                                     "discards", "flags", "reextract_calls", "flag_words", "parse_failed", "retry_calls" ], defaults=( (), (), 0, (), False, 0 ) )
 
 SYSTEM_PROMPT = (
     "You list the atomic claims made by a piece of documentation. A claim is one fact a caller "
@@ -328,16 +328,29 @@ def enclosing_sentences( old_text, runs ):
     return "\n".join( old_text[ low:high ].strip() for low, high in sorted( picked ) if old_text[ low:high ].strip() )
 
 
-async def _ask( old_text, model, query_fn, quoted_from=None ):
-    """Make one extractor call on a text and verify its quotes against quoted_from (default: the text)."""
+async def _ask( old_text, model, query_fn, quoted_from=None, on_unreadable=None, attempt="first" ):
+    """
+    Make one extractor call on a text and verify its quotes against quoted_from (default: the text).
+
+    Requires:
+        - on_unreadable is None or a callable taking ( attempt, raw, error ), where raw is the reply text
+
+    Ensures:
+        - an unreadable reply is handed to on_unreadable first, then ExtractionParseError is raised
+    """
     suffix = model_transport.new_suffix( old_text )
     raw    = await model_transport.complete(
         model, SYSTEM_PROMPT, model_transport.wrap( "old_text", suffix, old_text ), query_fn=query_fn
     )
-    return verify_claims( parse_claims( raw ), old_text if quoted_from is None else quoted_from )
+    try:
+        pairs = parse_claims( raw )
+    except ExtractionParseError as e:
+        if on_unreadable is not None: on_unreadable( attempt, raw, str( e ) )
+        raise
+    return verify_claims( pairs, old_text if quoted_from is None else quoted_from )
 
 
-async def extract_claims( old_text, model, query_fn=None ):
+async def extract_claims( old_text, model, query_fn=None, on_unreadable=None ):
     """
     Ask a model for the claims in old text and keep only those whose quote verifies.
 
@@ -356,6 +369,10 @@ async def extract_claims( old_text, model, query_fn=None ):
           kept quote afterwards is returned in flags as ( start, end ), for a person
         - flag_words holds the word count of each flagged run, in the order of flags
         - an unreadable reply to that second call leaves its runs flagged; a failed call raises
+        - an unreadable FIRST reply is asked for once more (retry_calls is 1); if the retry is unreadable too,
+          the result has parse_failed True, no claims and the whole old text in flags, so the pair is flagged
+          for a person and never passed; a run does not die on one reply (row 35d38e9f)
+        - on_unreadable, when given, receives ( attempt, raw, error ) for every unreadable reply, so the cause can be read
         - longest_quote_share is the longest verified quote as a share of the old text, so a
           reader can see when one quote carries most of it
         - the old text is wrapped in tags with a random suffix absent from the text, so nothing
@@ -364,24 +381,33 @@ async def extract_claims( old_text, model, query_fn=None ):
     Raises:
         - ValueError if old_text is empty or model is empty
         - model_transport.ModelCallError if a call fails
-        - ExtractionParseError if the first reply breaks the JSON contract
+        - nothing for a reply that breaks the JSON contract; see parse_failed
     """
     if not old_text.strip(): raise ValueError( "old_text is empty" )
-    claims, discarded = await _ask( old_text, model, query_fn )
+    retries = 0
+    try:
+        claims, discarded = await _ask( old_text, model, query_fn, on_unreadable=on_unreadable, attempt="first" )
+    except ExtractionParseError:
+        retries = 1
+        try:
+            claims, discarded = await _ask( old_text, model, query_fn, on_unreadable=on_unreadable, attempt="retry" )
+        except ExtractionParseError:
+            return ExtractionResult( [], [], 1.0, 0.0, [], [ ( 0, len( old_text ) ) ], 0, [ len( old_text.split() ) ], True, retries )
     rows  = discard_rows( discarded, old_text )
     runs  = uncovered_runs( old_text, [ ( c.start, c.end ) for c in claims ] )
     calls = 0
     if runs:
         calls = 1
         try:
-            more, _ = await _ask( enclosing_sentences( old_text, runs ), model, query_fn, quoted_from=old_text )
+            more, _ = await _ask( enclosing_sentences( old_text, runs ), model, query_fn, quoted_from=old_text,
+                                  on_unreadable=on_unreadable, attempt="second" )
         except ExtractionParseError:
             more = []
         claims = claims + [ c for c in more if ( c.start, c.end ) not in [ ( k.start, k.end ) for k in claims ] ]
         runs   = uncovered_runs( old_text, [ ( c.start, c.end ) for c in claims ] )
     longest = max( ( ( c.end - c.start ) / len( old_text ) for c in claims ), default=0.0 )
     return ExtractionResult( claims, discarded, uncovered_fraction( old_text, [ ( c.start, c.end ) for c in claims ] ), longest,
-                             rows, runs, calls, [ len( old_text[ a:b ].split() ) for a, b in runs ] )
+                             rows, runs, calls, [ len( old_text[ a:b ].split() ) for a, b in runs ], False, retries )
 
 
 PROMPT_VERSION = model_transport.prompt_version( "extractor", inspect.getsource( sys.modules[ __name__ ] ) )

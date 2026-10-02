@@ -11,6 +11,7 @@ import argparse
 import asyncio
 import hashlib
 import json
+import os
 import sys
 
 from . import claim_extractor, claim_judge, harness_report, harness_runner, jev_judge, jev_transport, labelled_pairs, model_transport
@@ -30,6 +31,7 @@ def parse_args( argv ):
     parser.add_argument( "--t-hi", type=float, help="jev only: noul at or above this is present" )
     parser.add_argument( "--allow-design-text", action="store_true", help="labelled set only; real Design: documents need Rick's approval" )
     parser.add_argument( "--claude-cli-path", help="run this Claude Code binary instead of the SDK's bundled one (newer model ids can need a newer binary)" )
+    parser.add_argument( "--raw-failures", help="append every unreadable extractor reply, with its pair and list, to this JSON Lines file (keep it out of the repo)" )
     parser.add_argument( "--extractor-lists", type=int, default=2 )
     parser.add_argument( "--judge-runs", type=int, help="judge passes over each claim list: 3 for the Claude judge, 1 for Jev, whose answers are deterministic" )
     parser.add_argument( "--gate", action="store_true", help="the one door onto the gate split: refuse unless versions, thresholds and the pairs sha are frozen; run by a seat other than the implementer" )
@@ -37,6 +39,25 @@ def parse_args( argv ):
     parser.add_argument( "--frozen-thresholds", help="jev gate run: t_lo,t_hi registered before the gate run, as written on the command line" )
     parser.add_argument( "--frozen-versions", help="extractor and judge prompt versions registered before the gate run, comma separated" )
     return parser.parse_args( argv )
+
+
+def raw_failure_sink( path ):
+    """
+    Return the on_unreadable callback that keeps unreadable extractor replies in a file, or None without a path.
+
+    Requires:
+        - path is None or a writable file path outside the repo
+
+    Ensures:
+        - each call appends one JSON line { id, slot, attempt, error, raw } and flushes it to disk
+    """
+    if path is None: return None
+    def sink( pair_id, slot, attempt, raw, error ):
+        with open( path, "a", encoding="utf-8" ) as f:
+            f.write( json.dumps( { "id": pair_id, "slot": slot, "attempt": attempt, "error": error, "raw": raw } ) + "\n" )
+            f.flush()
+            os.fsync( f.fileno() )
+    return sink
 
 
 def main( argv, query_fn=None ):
@@ -121,7 +142,8 @@ def main( argv, query_fn=None ):
         return 4
     try:
         binding = f"claude_cli={args.claude_cli_path}|version={model_transport.cli_version( args.claude_cli_path )}"
-        results = asyncio.run( harness_runner.run_all( pairs, config, harness_runner.Ledger( args.ledger, binding=binding ), query_fn=query_fn, judge_backend=backend ) )
+        results = asyncio.run( harness_runner.run_all( pairs, config, harness_runner.Ledger( args.ledger, binding=binding ), query_fn=query_fn, judge_backend=backend,
+                                                       on_unreadable=raw_failure_sink( args.raw_failures ) ) )
     except ( jev_transport.JevConfigError, harness_runner.LedgerBindingError ) as e:
         print( f"REFUSED: {e}", file=sys.stderr )
         return 2

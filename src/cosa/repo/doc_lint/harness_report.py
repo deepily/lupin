@@ -80,9 +80,12 @@ def caught( claim_list, seed_span ):
     Ensures:
         - True when a claim judged dropped has a verified quote that overlaps the seed span, or when
           a run flagged for a person overlaps it (rule B4 of row dad61023)
+        - a list whose first reply was unreadable (parse_failed) never catches: its flag covers the whole old
+          text, which would overlap every span, so it is its own outcome and a miss here
         - a flagged claim or run elsewhere does not count, and a seeded claim the extractor never
           listed, with no flagged run on it, is a miss
     """
+    if claim_list[ "parse_failed" ]: return False
     flags = final_absent( claim_list[ "runs" ] ) if claim_list[ "claims" ] else []
     return run_flagged( claim_list, seed_span ) or any( flag and claim_extractor.spans_overlap( ( c[ "start" ], c[ "end" ] ), seed_span )
                                                          for flag, c in zip( flags, claim_list[ "claims" ] ) )
@@ -123,6 +126,8 @@ def build_report( results, config, judge_prompt_version=None, jev_run=False ):
           criterion must hold on every list and not on one lucky draw
         - agreement is reported over all claims and over claims overlapping a seed span, each with
           its interval, because an overall figure can hide disagreement on the dropped claims
+        - parse_failed_pairs counts, per list, the pairs whose extractor reply stayed unreadable after one retry
+          (top level: the largest list); retry_calls counts the retries; such a pair is flagged, never a catch
         - reports the escalation count, discarded-claim count (and per code) and mean uncovered fraction
         - per list: seeded_span_discarded counts seeded pairs where a DISCARDED quote overlaps the span
           (the harness threw the claim away, the extractor did list it), flagged_pairs and flagged_rate
@@ -174,6 +179,7 @@ def build_report( results, config, judge_prompt_version=None, jev_run=False ):
             "review_pairs"      : review,
             "review_rate"       : review / len( unseeded ) if unseeded else None,
             "caught_by_flag_only": flag_only,
+            "parse_failed_pairs": sum( 1 for r in results if r[ "lists" ][ slot ][ "parse_failed" ] ),
         } )
     miss_ok = bool( seeded ) and len( seeded ) >= DEFAULT_POSITIVES_NEEDED and all( l[ "misses" ] == 0 for l in lists )
     fa_ok   = all( l[ "false_alarm_rate" ] is not None and l[ "false_alarm_rate" ] <= FALSE_ALARM_CEILING for l in lists )
@@ -219,6 +225,8 @@ def build_report( results, config, judge_prompt_version=None, jev_run=False ):
         "mean_flag_words"   : sum( all_words ) / len( all_words ) if all_words else None,
         "review_rate"       : max( ( l[ "review_rate" ] for l in lists if l[ "review_rate" ] is not None ), default=None ),
         "reextract_calls"   : reextract_calls,
+        "retry_calls"       : sum( lst[ "retry_calls" ] for r in results for lst in r[ "lists" ] ),
+        "parse_failed_pairs": max( ( l[ "parse_failed_pairs" ] for l in lists ), default=0 ),
         "longest_quote"     : longest,
         "mean_uncovered"    : sum( uncovered ) / len( uncovered ) if uncovered else None,
         "identical_list_pairs" : identical,

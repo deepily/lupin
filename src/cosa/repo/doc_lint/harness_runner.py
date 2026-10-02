@@ -131,7 +131,7 @@ class Ledger:
         self.entries[ key ] = value
 
 
-async def run_pair( pair, config, ledger, query_fn=None, judge_backend=None ):
+async def run_pair( pair, config, ledger, query_fn=None, judge_backend=None, on_unreadable=None ):
     """
     Run the extractor and judge over one pair, skipping every call the ledger already holds.
 
@@ -152,8 +152,11 @@ async def run_pair( pair, config, ledger, query_fn=None, judge_backend=None ):
           flagged for a person and their word counts, the extra extractor calls made, the uncovered fraction of the old text, and one verdict row per
           judge run
         - the claim list of each extractor slot is frozen in the ledger before any judging
-        - a frozen entry written before row ed2f9b4e has no discards, flags or reextract_calls; it reads
-          as none of them, so judge_comparison can still rebuild a report from an old ledger
+        - a list whose first reply was unreadable twice is frozen with parse_failed True (the retry is not
+          repeated on resume), no claims, and its whole old text flagged; on_unreadable, when given, is called
+          with ( pair id, slot, attempt, raw reply, error ) for each unreadable reply
+        - a frozen entry written before row ed2f9b4e has no discards, flags, reextract_calls, parse_failed or
+          retry_calls; it reads as none of them, so judge_comparison can still rebuild a report from an old ledger
         - a finished call is never made again
 
     Raises:
@@ -166,9 +169,11 @@ async def run_pair( pair, config, ledger, query_fn=None, judge_backend=None ):
         key    = ledger_key( "extract", pair, claim_extractor.PROMPT_VERSION, config.extractor_model, slot )
         frozen = ledger.get( key )
         if frozen is None:
-            result = await claim_extractor.extract_claims( pair[ "old" ], config.extractor_model, query_fn=query_fn )
+            sink   = None if on_unreadable is None else ( lambda attempt, raw, error, slot=slot: on_unreadable( pair[ "id" ], slot, attempt, raw, error ) )
+            result = await claim_extractor.extract_claims( pair[ "old" ], config.extractor_model, query_fn=query_fn, on_unreadable=sink )
             frozen = { "claims": [ c._asdict() for c in result.claims ], "discarded": len( result.discarded ),
                        "discards": list( result.discards ), "flags": [ list( f ) for f in result.flags ], "flag_words": list( result.flag_words ),
+                       "parse_failed": result.parse_failed, "retry_calls": result.retry_calls,
                        "reextract_calls": result.reextract_calls,
                        "uncovered": result.uncovered_fraction,
                        "longest_quote": result.longest_quote_share }
@@ -193,6 +198,7 @@ async def run_pair( pair, config, ledger, query_fn=None, judge_backend=None ):
         lists.append( { "claims": frozen[ "claims" ], "discarded": frozen[ "discarded" ],
                         "discards": frozen.get( "discards", [] ), "flags": frozen.get( "flags", [] ),
                         "reextract_calls": frozen.get( "reextract_calls", 0 ), "flag_words": frozen.get( "flag_words", [] ),
+                        "parse_failed": frozen.get( "parse_failed", False ), "retry_calls": frozen.get( "retry_calls", 0 ),
                         "uncovered": frozen[ "uncovered" ], "longest_quote": frozen[ "longest_quote" ], "runs": runs } )
     return { "id": pair[ "id" ], "seed_span": pair.get( "seed_span" ), "lists": lists }
 
@@ -213,7 +219,7 @@ def unquotable_seeds( pairs ):
              if p.get( "seed_span" ) is not None and claim_extractor.locate_quote( p[ "old" ][ p[ "seed_span" ][ 0 ]:p[ "seed_span" ][ 1 ] ], p[ "old" ] ) is None ]
 
 
-async def run_all( pairs, config, ledger, query_fn=None, judge_backend=None ):
+async def run_all( pairs, config, ledger, query_fn=None, judge_backend=None, on_unreadable=None ):
     """
     Run every pair in order and return their results.
 
@@ -223,4 +229,4 @@ async def run_all( pairs, config, ledger, query_fn=None, judge_backend=None ):
     Ensures:
         - results are in the order of pairs; pairs run one at a time, so the ledger has a single writer
     """
-    return [ await run_pair( pair, config, ledger, query_fn=query_fn, judge_backend=judge_backend ) for pair in pairs ]
+    return [ await run_pair( pair, config, ledger, query_fn=query_fn, judge_backend=judge_backend, on_unreadable=on_unreadable ) for pair in pairs ]
