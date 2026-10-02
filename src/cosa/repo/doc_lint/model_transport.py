@@ -12,6 +12,8 @@ prompt version so a row made under another profile can never be replayed.
 """
 
 import asyncio
+import datetime
+import fcntl
 import hashlib
 import json
 import os
@@ -58,6 +60,107 @@ RESIDUAL_CONTEXT = [ "environment and working-directory block", "model name", "t
 
 class ModelCallError( Exception ):
     """A model call returned nothing usable or raised."""
+
+
+class CallBudgetExceeded( Exception ):
+    """
+    A call would pass the per-model cap, so it was refused before any model was contacted.
+
+    Not a ModelCallError: a caller that retries on a failed call must not retry past a cap.
+    """
+
+
+BUDGET_LEDGER = None
+BUDGET_CAPS   = {}
+
+
+def set_budget( ledger_path, caps ):
+    """
+    Cap the number of calls per model id for this process, counted from a ledger file that outlives it.
+
+    Requires:
+        - ledger_path is a file path in an existing directory, outside the repo; the file may not exist yet
+        - caps is a dict of model id to a maximum number of calls, each an int of zero or more
+        - every script that calls the same model names the same ledger, or the cap covers only one of them
+
+    Ensures:
+        - later calls to complete charge a model named in caps against that ledger
+        - a model not named in caps is not charged and not capped
+        - set_budget( None, {} ) removes the cap
+
+    Raises:
+        - ValueError if a cap is not an int of zero or more, a model id is empty, caps names a model but
+          ledger_path is None, or the ledger's directory does not exist
+    """
+    global BUDGET_LEDGER, BUDGET_CAPS
+    for model, cap in caps.items():
+        if not model: raise ValueError( "a cap needs a model id" )
+        if isinstance( cap, bool ) or not isinstance( cap, int ) or cap < 0: raise ValueError( f"cap for {model} must be an int of zero or more, got {cap!r}" )
+    if caps and ledger_path is None: raise ValueError( "caps need a ledger path" )
+    if ledger_path is not None and not os.path.isdir( os.path.dirname( os.path.abspath( ledger_path ) ) ):
+        raise ValueError( f"ledger directory for {ledger_path!r} does not exist" )
+    BUDGET_LEDGER = ledger_path
+    BUDGET_CAPS   = dict( caps )
+
+
+def calls_used( model, ledger_path=None ):
+    """
+    Count the calls charged to a model in the ledger file, so the figure survives a restart.
+
+    Requires:
+        - ledger_path is a ledger file path or None for the one set_budget named; a missing file counts as zero
+
+    Ensures:
+        - returns the number of ledger lines naming the model; a torn last line is not counted
+    """
+    path = BUDGET_LEDGER if ledger_path is None else ledger_path
+    if path is None or not os.path.exists( path ): return 0
+    used = 0
+    with open( path, encoding="utf-8" ) as f:
+        for line in f:
+            try: row = json.loads( line )
+            except ValueError: continue
+            if row.get( "model" ) == model: used += 1
+    return used
+
+
+def budget_summary():
+    """
+    Return the count and the cap of every capped model, for a result to print.
+
+    Ensures:
+        - returns { model: { "used": n, "cap": cap } } read from the ledger now; {} when no cap is set
+    """
+    return { model: { "used": calls_used( model ), "cap": cap } for model, cap in BUDGET_CAPS.items() }
+
+
+def _charge( model ):
+    """
+    Charge one call to a capped model, or refuse it; writes the ledger line before the call is made.
+
+    Requires:
+        - model is a non-empty model id
+
+    Ensures:
+        - a model with no cap is not charged
+        - the count is read from the ledger under an exclusive file lock, so two processes cannot both take the last call
+        - a call that would pass the cap raises CallBudgetExceeded and writes nothing
+        - the line is flushed to disk before the model is contacted, so a crashed call still counts
+
+    Raises:
+        - CallBudgetExceeded when the model has used its cap
+    """
+    cap = BUDGET_CAPS.get( model )
+    if cap is None: return
+    with open( BUDGET_LEDGER, "a+", encoding="utf-8" ) as f:
+        fcntl.flock( f, fcntl.LOCK_EX )
+        used    = calls_used( model )
+        allowed = used < cap
+        if allowed:
+            f.write( json.dumps( { "model": model, "n": used + 1, "ts": datetime.datetime.now( datetime.timezone.utc ).isoformat() } ) + "\n" )
+            f.flush()
+            os.fsync( f.fileno() )
+    if not allowed: raise CallBudgetExceeded( f"{model} has used {used} of its {cap} calls; no model was contacted" )
 
 
 def configure( cli_path=None, cwd=None ):
@@ -153,12 +256,15 @@ async def complete( model, system_prompt, user_prompt, query_fn=None, timeout_se
         - tools are disabled, so the model can only write text
         - returns the concatenated text blocks of the assistant messages, stripped
         - the text is never empty
+        - a model with a cap (set_budget) is charged one call before the model is contacted
 
     Raises:
         - ValueError if model is empty
+        - CallBudgetExceeded if the model has used its cap; nothing is contacted
         - ModelCallError if the call raises, times out, ends in an error result, or returns no text
     """
     if not model: raise ValueError( "model id is required: the harness has no default model" )
+    _charge( model )
     query_fn = sdk_query if query_fn is None else query_fn
     options  = ClaudeAgentOptions(
         model           = model,
