@@ -211,7 +211,7 @@ test( "the header puts the switch right after the bounce button and paints it on
   await new Promise( ( r ) => setTimeout( r, 0 ) );
 
   const bounce = root.querySelector( '[data-testid="multiplexer-bounce-dev-server"]' ) as HTMLElement;
-  assert.equal( bounce.nextElementSibling, sw.element );
+  assert.ok( bounce.nextElementSibling === sw.element, "the switch must be the element right after the bounce button" );
   assert.deepEqual( calls, [ { verb: "GET", path: POKE_MUTE_PATH } ] );
   assert.equal( sw.element.dataset.muted, "true" );
   renderer.unmount();
@@ -225,7 +225,7 @@ test( "a header built without the switch has none", () => {
   document.body.appendChild( root );
   renderer.mount( root );
 
-  assert.equal( root.querySelector( '[data-testid="multiplexer-poke-mute"]' ), null );
+  assert.equal( root.querySelectorAll( '[data-testid="multiplexer-poke-mute"]' ).length, 0 );
   const bounce = root.querySelector( '[data-testid="multiplexer-bounce-dev-server"]' ) as HTMLElement;
   assert.equal( bounce.nextElementSibling?.getAttribute( "data-testid" ), "multiplexer-notifications-header-status" );
   renderer.unmount();
