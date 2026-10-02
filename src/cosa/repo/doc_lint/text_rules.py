@@ -14,11 +14,12 @@ from .marker_counts import INLINE_CODE, blank_code, caps_words, is_section_ref_r
 from .rule_lists import (
     TIC_REGEX, EMPHASIS_GLYPHS, ID_REF_EXTENDED_REGEX, BARE_SHA_REGEX, RULING_REF_REGEX, AC_REF_REGEX,
     STEP_REF_REGEX, LABEL_REF_REGEX, SECTION_REGEX, DATED_BANNER_REGEX, ISO_DATE_REGEX, QUOTED_SPAN_REGEX,
-    AGENT_IMPERATIVE_REGEX, SUMMARY_MAX_CHARS, SENTENCE_MAX_WORDS, PREFACE_MAX_LINES
+    AGENT_IMPERATIVE_REGEX, DO_NOT_SENTENCE_REGEX, SUMMARY_MAX_CHARS, SENTENCE_MAX_WORDS, PREFACE_MAX_LINES
 )
 
 Finding = namedtuple( "Finding", [ "path", "line", "rule", "message" ] )
 
+CONTRACT_ITEMS  = re.compile( r"^(\s*)(?:Requires|Ensures|Raises)\s*:\s*$" )
 CONTRACT_HEADER = re.compile( r"^\s*(?:Requires|Ensures|Raises|Args|Arguments|Returns|Yields)\s*:\s*$" )
 BULLET_LINE     = re.compile( r"^\s*(?:[-*+]|\d+[.)])\s" )
 FIELD_HEADER    = re.compile( r"^\s*(?:Attributes|Parameters|Params|Examples?)\s*:\s*$" )
@@ -298,6 +299,52 @@ def reference_findings( text, path, first_line ):
     return findings
 
 
+def contract_item_lines( text ):
+    """
+    Return the 0-based indexes of the lines inside a Requires, Ensures or Raises section.
+
+    Requires:
+        - text is a str
+
+    Ensures:
+        - a section runs from its header to the next non-blank line indented no deeper than the header
+        - the header line itself is not in the set; blank lines are
+
+    Raises:
+        - nothing
+    """
+    inside, indent, found = False, 0, set()
+    for n, line in enumerate( text.split( "\n" ) ):
+        header = CONTRACT_ITEMS.match( line )
+        if header:
+            inside, indent = True, len( header.group( 1 ) )
+            continue
+        if inside and line.strip() and len( line ) - len( line.lstrip() ) <= indent: inside = False
+        if inside: found.add( n )
+    return found
+
+
+def do_not_starts( text ):
+    """
+    Find each sentence that starts with a Do not or Don't order to a model.
+
+    Requires:
+        - text is a str
+
+    Ensures:
+        - returns [ ( offset, phrase ) ] for each such sentence start, in text order
+        - nothing inside backticks or quotes, and nothing inside a Requires, Ensures or Raises section
+        - a mid-sentence "do not" and "Never ..." are not findings
+
+    Raises:
+        - nothing
+    """
+    blanked = QUOTED_SPAN_REGEX.sub( lambda q: " " * len( q.group( 0 ) ), text )
+    skip    = contract_item_lines( text )
+    return [ ( m.start( 1 ), m.group( 1 ) ) for m in DO_NOT_SENTENCE_REGEX.finditer( blanked )
+             if line_of_offset( blanked, m.start( 1 ) ) not in skip ]
+
+
 def history_findings( text, path, first_line, agent_rule=True ):
     """
     Check rule 7 and the agent-imperative rule: current state only, nothing addressed to a model.
@@ -307,7 +354,7 @@ def history_findings( text, path, first_line, agent_rule=True ):
 
     Ensures:
         - one Finding per dated banner, per calendar date outside quotes and code, and per imperative
-          aimed at a model, at its line
+          aimed at a model, at its line; a sentence that starts with Do not or Don't counts as one (do_not_starts)
         - agent_rule=False skips the imperative check, for text that is meant to address a model
 
     Raises:
@@ -319,8 +366,9 @@ def history_findings( text, path, first_line, agent_rule=True ):
     unquoted = QUOTED_SPAN_REGEX.sub( lambda q: " " * len( q.group( 0 ) ), text )
     for m in ISO_DATE_REGEX.finditer( unquoted ):
         findings.append( Finding( path, first_line + line_of_offset( text, m.start() ), "iso-date", f"date {m.group( 0 )} in prose belongs in history" ) )
-    for m in ( AGENT_IMPERATIVE_REGEX.finditer( text ) if agent_rule else () ):
-        findings.append( Finding( path, first_line + line_of_offset( text, m.start() ), "agent-imperative", f"text addressed to a model: {m.group( 0 )!r}" ) )
+    orders = [ ( m.start(), m.group( 0 ) ) for m in AGENT_IMPERATIVE_REGEX.finditer( text ) ] + do_not_starts( text ) if agent_rule else []
+    for start, phrase in orders:
+        findings.append( Finding( path, first_line + line_of_offset( text, start ), "agent-imperative", f"text addressed to a model: {phrase!r}" ) )
     return findings
 
 

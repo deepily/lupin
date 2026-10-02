@@ -330,6 +330,8 @@ def test_lint_text_ignores_code_blocks_inside_a_docstring():
     ( "2026-03-20-plan and 2026.03.20-plan", [] ),                                 # a trailing hyphen
     ( "2026-03-20.md and 2026.03.20.md", [] ),                                     # a file extension
     ( "2026.00.20 and 2026.03.00", [] ),                                           # month 00, day 00
+    ( "ended 1999.01.01 here", [ "1999.01.01" ] ),                                 # the 19xx years are dates
+    ( "ended 3026.06.11 here", [] ),                                               # a year outside 19xx and 20xx is not
 ] )
 def test_calendar_date_predicate_takes_either_separator_and_refuses_file_names_and_non_dates( text, expected ):
     assert [ m.group( 0 ) for m in rl.ISO_DATE_REGEX.finditer( text ) ] == expected
@@ -347,3 +349,55 @@ def test_history_rule_skips_the_agent_imperative_check_only_when_told_to():
     assert tr.history_findings( text, "a.py", 1, agent_rule=False ) == []
     assert [ f.rule for f in tr.lint_text( text, "a.py", 1, words=WORDS ) if f.rule == "agent-imperative" ] == [ "agent-imperative" ]
     assert [ f.rule for f in tr.lint_text( text, "a.py", 1, words=WORDS, agent_rule=False ) if f.rule == "agent-imperative" ] == []
+
+
+# ---- a sentence that starts with Do not / Don't (row e59bd0b3) -------------------------------
+
+@pytest.mark.parametrize( "text, lines", [
+    ( "Do not call this twice.", [ 1 ] ),
+    ( "Reads a row. Don't retry here.", [ 1 ] ),
+    ( "Reads a row.\n  DO NOT retry it.", [ 2 ] ),
+    ( "Don’t retry it.", [ 1 ] ),
+    ( "Reads a row.\n\nDo not retry.\nDon't loop either.", [ 3, 4 ] ),
+] )
+def test_a_sentence_that_starts_with_do_not_is_found_at_its_line( text, lines ):
+    assert [ tr.line_of_offset( text, o ) + 1 for o, _ in tr.do_not_starts( text ) ] == lines
+    found = tr.history_findings( text, "a.py", 1 )
+    assert [ f.line for f in found ] == lines and [ f.rule for f in found ] == [ "agent-imperative" ] * len( lines )
+
+
+@pytest.mark.parametrize( "text", [
+    "It does not matter, and we do not care.",
+    "A long line that says\ndo not wrap here.",
+    "Never raises on a blank id. Never call it twice.",
+    "Use `Do not` here. The phrase \"Don't stop\" is quoted.",
+    "Requires:\n    - Do not pass None\n    - Don't pass a blank id\nEnsures:\n    - Do not mutate its input",
+    "Raises:\n    - Do not\n      continue",
+    "Do nothing special. Donate it.",
+    "He said \"Fine. Do not go.\" and then `x. Don't y` was run.",
+    "The text says Do not here, and also so Don't there.",
+    "Requires:\n    - x\n      Do not pass None",
+    "Ensures:\n    - x\n      Do not mutate its input",
+    "Raises:\n    - x\n      Don't raise on a blank id",
+] )
+def test_mid_sentence_quoted_contract_item_and_never_text_is_not_found( text ):
+    assert tr.do_not_starts( text ) == [] and tr.history_findings( text, "a.py", 1 ) == []
+
+
+def test_a_contract_section_ends_at_the_next_line_that_is_not_indented_deeper():
+    text = "Requires:\n    - Do not pass None\n\nDo not call it twice.\n\nEnsures:\n    - x\nDon't loop."
+    assert [ f.line for f in tr.history_findings( text, "a.py", 1 ) ] == [ 4, 8 ]
+    assert tr.contract_item_lines( text ) == { 1, 2, 6 }
+
+
+def test_the_first_line_offset_is_added_and_a_tool_docstring_stays_exempt():
+    assert [ f.line for f in tr.history_findings( "x\nDo not y.", "a.py", 40 ) ] == [ 41 ]
+    assert [ f.rule for f in tr.history_findings( "Do not retry.", "a.py", 1 ) ] == [ "agent-imperative" ]
+    assert tr.history_findings( "Do not retry.", "a.py", 1, agent_rule=False ) == []
+    assert [ f.rule for f in tr.lint_text( "Do not retry.", "a.py", 1, words=WORDS ) if f.rule == "agent-imperative" ] == [ "agent-imperative" ]
+
+
+def test_the_do_not_rule_is_the_one_rule_the_markdown_and_dart_linters_run_too():
+    from cosa.repo.doc_lint import md_lint
+    assert "Do not retry." not in ( md_lint.__doc__ or "" )
+    assert [ f.rule for f in tr.lint_text( "Do not retry.", "a.md", 1, structure=False, markdown=True, words=WORDS ) if f.rule == "agent-imperative" ] == [ "agent-imperative" ]
