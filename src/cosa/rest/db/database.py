@@ -24,7 +24,7 @@ import os
 from typing import Generator
 
 from cosa.rest.postgres_models import Base
-from cosa.utils.dotenv_password import seed_db_password_from_dotenv
+from cosa.utils.dotenv_password import seed_db_password_from_dotenv, seed_db_password_from_file
 
 
 _CLOUD_BACKED_TRUTHY = ( "1", "true", "yes", "on" )
@@ -125,6 +125,7 @@ def get_database_url() -> str:
     # variable at create time — reaches that helper's early return and is unaffected.
     # This exists for the third consumer commit 765e7145 missed: host-run processes,
     # which are neither containers nor pytest. See cosa/utils/dotenv_password.py.
+    seed_db_password_from_file()
     seed_db_password_from_dotenv()
 
     env = os.environ.get( "LUPIN_ENV", "development" ).lower()

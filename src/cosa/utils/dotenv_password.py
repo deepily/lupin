@@ -81,13 +81,63 @@ def seed_db_password_from_dotenv( root=None ):
     dotenv = next( ( c for c in candidates if os.path.isfile( c ) ), None )
     if dotenv is None: return
 
+    wanted = ( "POSTGRES_PASSWORD", "LUPIN_HOST_DB_USER", "LUPIN_HOST_DB_PASSWORD",
+               "LUPIN_TEST_DB_USER", "LUPIN_TEST_DB_PASSWORD" )
+    found  = { }
     try:
         with open( dotenv ) as fh:
             for line in fh:
                 line = line.strip()
-                if not line.startswith( "POSTGRES_PASSWORD=" ): continue
-                value = line.split( "=", 1 )[ 1 ].strip().strip( "\"'" )
-                if value: os.environ[ "DB_PASSWORD" ] = value
-                return
+                for key in wanted:
+                    if not line.startswith( key + "=" ): continue
+                    value = line.split( "=", 1 )[ 1 ].strip().strip( "\"'" )
+                    if value: found[ key ] = value
     except OSError:
         return
+
+    # ROLE KEYS WIN OVER THE SUPERUSER PASSWORD (row 80513825, the approval-settings guard rail).
+    # A seat's `.env` is allowed to carry the credentials of a role that cannot write policy
+    # (`lupin_host`, or `lupin_test` for the test database) instead of the superuser's. A
+    # `testing` process reads the test role, anything else the host role. Absent the keys this
+    # is the behaviour that has always been here.
+    prefix   = "LUPIN_TEST_DB_" if os.environ.get( "LUPIN_ENV", "" ).lower() == "testing" else "LUPIN_HOST_DB_"
+    password = found.get( prefix + "PASSWORD" )
+    if password:
+        os.environ[ "DB_PASSWORD" ] = password
+        if not os.environ.get( "DB_USER" ) and found.get( prefix + "USER" ):
+            os.environ[ "DB_USER" ] = found[ prefix + "USER" ]
+        return
+    if "POSTGRES_PASSWORD" in found: os.environ[ "DB_PASSWORD" ] = found[ "POSTGRES_PASSWORD" ]
+
+
+def seed_db_password_from_file():
+    """
+    Fill a blank DB_PASSWORD from the file named by DB_PASSWORD_FILE (row 80513825).
+
+    Requires:
+        - nothing; DB_PASSWORD_FILE may be unset
+
+    Ensures:
+        - returns immediately if DB_PASSWORD is already non-empty, or DB_PASSWORD_FILE is unset
+        - sets os.environ[ "DB_PASSWORD" ] to the file's content with surrounding whitespace
+          stripped, when that is non-empty
+        - an unreadable or empty file prints one named warning and leaves DB_PASSWORD
+          unset: this module is imported by nearly everything at startup and must not
+          raise, and the empty-password announcement then fires downstream as it always has
+        - never raises
+
+    WHY A FILE. A password in a container's environment is readable by anyone who can run
+    `docker inspect`; a file mounted as a secret is readable by whoever owns the file. The
+    file is what lets the app's credential live somewhere a seat's `.env` is not.
+    """
+    if os.environ.get( "DB_PASSWORD" ): return
+    path = os.environ.get( "DB_PASSWORD_FILE" )
+    if not path: return
+    try:
+        with open( path ) as fh:
+            value = fh.read().strip()
+    except OSError as error:
+        print( f"[DB] WARNING: DB_PASSWORD_FILE={path} could not be read ({error.__class__.__name__}); DB_PASSWORD stays unset" )
+        return
+    if value: os.environ[ "DB_PASSWORD" ] = value
+    else: print( f"[DB] WARNING: DB_PASSWORD_FILE={path} is empty; DB_PASSWORD stays unset" )

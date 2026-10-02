@@ -1,0 +1,129 @@
+"""
+Provision the three database roles of the approval-settings guard rail (row 80513825).
+
+Feeds `src/scripts/sql/init-db-roles.sql` to a superuser `psql`. The passwords are read from
+FILES and sent to psql on STDIN as `\\set` lines, so they never appear in an argument list or a
+process listing, and a dry run prints the plan with every password redacted.
+
+⚠️ DRY RUN IS THE DEFAULT. Nothing touches a database unless `--apply` is given. Applying
+needs the three password files to exist, and the files that must be unreadable to a seat
+(the app's) are root-owned, which is a host-administration step this module neither performs
+nor works around.
+
+    python -m cosa.utils.db_roles --app-pw-file F --host-pw-file F --test-pw-file F \\
+        --psql "docker exec -i lupin-postgres psql -U lupin_dev -d lupin_db_dev" [--reassign] [--apply]
+"""
+
+import argparse
+import os
+import shlex
+import subprocess
+import sys
+
+SQL_RELATIVE_PATH = "src/scripts/sql/init-db-roles.sql"
+
+# A value that would break out of a psql single-quoted meta-command argument. Generated
+# passwords are hex; refusing these is simpler and safer than escaping them.
+_UNSAFE_CHARS = ( "'", "\\", "\n", "\r", "\x00" )
+
+
+def read_secret( path ):
+    """
+    Read one password file.
+
+    Requires:
+        - path names a readable file
+
+    Ensures:
+        - returns the content with surrounding whitespace stripped
+        - raises ValueError, naming the file, if it is missing, unreadable, empty, or holds a
+          character that cannot be sent safely in a psql meta-command (quote, backslash, newline)
+    """
+    try:
+        with open( path ) as handle: value = handle.read().strip()
+    except OSError as error:
+        raise ValueError( f"password file {path} could not be read: {error.__class__.__name__}" ) from error
+    if not value: raise ValueError( f"password file {path} is empty" )
+    if any( c in value for c in _UNSAFE_CHARS ):
+        raise ValueError( f"password file {path} holds a quote, backslash or newline; use a hex password" )
+    return value
+
+
+def build_psql_stdin( app_pw, host_pw, test_pw, sql_text, reassign=False, redact=False ):
+    """
+    The text sent to psql on stdin: three `\\set` lines, an optional `\\set reassign 1`, then the SQL.
+
+    The SQL travels on stdin rather than as `\\i <path>` because the psql may run INSIDE the
+    postgres container (`docker exec -i ... psql`), where a host path does not exist.
+
+    Requires:
+        - the three passwords are non-empty strings free of the unsafe characters
+        - sql_text is the content of init-db-roles.sql
+
+    Ensures:
+        - redact=True replaces each password with "<redacted>" and the SQL with a one-line
+          marker, so the text is safe and short to print
+        - reassign=True adds the cutover-only ownership transfer
+        - ends with a newline
+    """
+    shown = lambda value: "<redacted>" if redact else value
+    lines = [
+        f"\\set app_pw  '{shown( app_pw )}'",
+        f"\\set host_pw '{shown( host_pw )}'",
+        f"\\set test_pw '{shown( test_pw )}'",
+    ]
+    if reassign: lines.append( "\\set reassign 1" )
+    if redact: lines.append( f"-- <{len( sql_text.splitlines() )} lines of init-db-roles.sql follow here on a real run>" )
+    else:      lines.append( sql_text.rstrip( "\n" ) )
+    return "\n".join( lines ) + "\n"
+
+
+def main( argv=None, run_fn=subprocess.run, out=sys.stdout ):
+    """
+    Plan or apply the role provisioning.
+
+    Ensures:
+        - without --apply: prints the psql command and the redacted stdin, runs nothing, returns 0
+        - with --apply: runs the psql command with the real stdin and returns its exit code
+        - a bad password file, or an unreadable SQL file, returns 2 and prints why, before anything runs
+    """
+    parser = argparse.ArgumentParser( description=__doc__.split( "\n\n" )[ 0 ] )
+    parser.add_argument( "--app-pw-file",  required=True )
+    parser.add_argument( "--host-pw-file", required=True )
+    parser.add_argument( "--test-pw-file", required=True )
+    parser.add_argument( "--psql", required=True, help="the whole superuser psql command, connected to lupin_db_dev" )
+    parser.add_argument( "--sql", default=None, help="init-db-roles.sql path (default: from LUPIN_ROOT)" )
+    parser.add_argument( "--reassign", action="store_true", help="CUTOVER ONLY: move dev-database ownership to lupin_app" )
+    parser.add_argument( "--apply", action="store_true", help="run it; without this the plan is only printed" )
+    args = parser.parse_args( argv )
+
+    try:
+        app_pw, host_pw, test_pw = ( read_secret( p ) for p in ( args.app_pw_file, args.host_pw_file, args.test_pw_file ) )
+    except ValueError as error:
+        print( f"db_roles: {error}", file=out )
+        return 2
+
+    sql_path = args.sql
+    if sql_path is None:
+        root     = os.environ.get( "LUPIN_ROOT", "/var/lupin" )
+        sql_path = os.path.join( root, SQL_RELATIVE_PATH )
+    try:
+        with open( sql_path ) as handle: sql_text = handle.read()
+    except OSError as error:
+        print( f"db_roles: SQL file {sql_path} could not be read: {error.__class__.__name__}", file=out )
+        return 2
+    command = shlex.split( args.psql ) + [ "-v", "ON_ERROR_STOP=1", "-q" ]
+
+    if not args.apply:
+        print( "db_roles: DRY RUN (nothing was run). Add --apply to run it.", file=out )
+        print( "command: " + shlex.join( command ), file=out )
+        print( "stdin:", file=out )
+        print( build_psql_stdin( app_pw, host_pw, test_pw, sql_text, args.reassign, redact=True ), file=out, end="" )
+        return 0
+
+    stdin = build_psql_stdin( app_pw, host_pw, test_pw, sql_text, args.reassign )
+    return run_fn( command, input=stdin, text=True ).returncode
+
+
+if __name__ == "__main__":   # pragma: no cover  (thin entry point; main() is what is tested)
+    sys.exit( main() )
