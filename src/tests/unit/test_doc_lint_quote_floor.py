@@ -321,3 +321,20 @@ def test_the_command_line_refuses_an_unquotable_seeded_span_with_exit_4_before_a
     assert harness_cli.main( argv, query_fn=no_model ) == 4
     err = capsys.readouterr().err
     assert "one-word" in err and "ValueError" not in err and not ( tmp_path / "l.jsonl" ).exists()
+
+
+# ---- review follow-ups (Tiberius, row ed2f9b4e): the or in the ambiguity test, and the prose judge's floors ----
+
+def test_a_two_word_quote_of_fifteen_or_more_characters_that_occurs_twice_is_ambiguous():
+    # 2 words, 18 characters: under the old word floor but not the old character floor, so only an OR catches it.
+    text = "Set the parked_status flag first. Then clear the parked_status flag."
+    assert ce.classify_quote( "parked_status flag", text )[ 0 ] == ce.AMBIGUOUS
+    assert ce.classify_quote( "parked_status flag", "Set the parked_status flag first. Then stop." )[ 0 ] is None
+
+
+def test_the_prose_judge_still_refuses_a_two_word_sentence_whatever_its_length():
+    from cosa.repo.doc_lint import prose_judge as pj
+    item = { "text": "Raises Error here. ValueError raised now. Longer sentence of five words.", "first_line": 5 }
+    assert pj.locate_line( "Raises Error", item ) is None          # 2 words, 12 characters: over the new floors, under the old
+    assert pj.locate_line( "ValueError raised", item ) is None      # 2 words, 17 characters
+    assert pj.locate_line( "Longer sentence of five words.", item ) == 5
