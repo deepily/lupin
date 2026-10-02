@@ -30,7 +30,7 @@ OWNER_REGEX  = re.compile( r"^(?:(?:abstract|base|sealed|final|interface|mixin)\
 UNNAMED_EXTENSION = re.compile( r"^extension\s+on\b" )
 OPERATOR_REGEX = re.compile( r"\boperator\s*([^\s(]+)" )
 LIBRARY_REGEX = re.compile( r"^(?:library|part|import|export)\b" )
-HEAD_STOP    = re.compile( r"[({=;]|=>" )
+HEAD_STOP    = re.compile( r"[({}=;,]|=>" )
 MODIFIERS    = frozenset( "static final const late external abstract covariant factory async sync base sealed interface".split() )
 MAX_HEAD_LINES = 6
 DEFAULT_PREFIX = "lib"
@@ -101,6 +101,29 @@ def _skip_annotations( lines, index ):
     return index
 
 
+def _after_parentheses( text, start ):
+    """
+    Return the text after the parenthesis that opens at start and its matching close.
+
+    Requires:
+        - text[ start ] is an opening parenthesis
+
+    Ensures:
+        - nested parentheses are balanced
+        - returns "" when the parenthesis never closes
+
+    Raises:
+        - nothing
+    """
+    depth = 0
+    for position in range( start, len( text ) ):
+        if text[ position ] == "(": depth += 1
+        elif text[ position ] == ")":
+            depth -= 1
+            if depth == 0: return text[ position + 1 : ]
+    return ""
+
+
 def declaration_name( lines, index ):
     """
     Name the declaration that starts at a line.
@@ -115,6 +138,9 @@ def declaration_name( lines, index ):
         - a getter is named by its word, a setter as "word=", an operator as "operator==" and so on
           (read from the first line, before the = in the operator is taken for a delimiter)
         - an unnamed extension ( extension on Foo ) gives None
+        - a member whose type is a function type, such as "final void Function( int x )? onTap;", is named by the
+          word after the closing parenthesis of the parameter list ( onTap ), not by "Function"
+        - an enum value with a trailing comma is named without the comma
         - a constructor keeps its dots, so "Foo.named" and "factory Foo.fromJson" give "Foo.named" and "Foo.fromJson"
         - a class, mixin, enum, extension or typedef is named by its name
         - library, part, import and export lines give "<library>"
@@ -131,14 +157,15 @@ def declaration_name( lines, index ):
     if operator: return f"operator{operator.group( 1 )}"
     owner = OWNER_REGEX.match( first )
     if owner: return owner.group( 1 )
-    head = ""
-    for line in lines[ index : index + MAX_HEAD_LINES ]:
-        stop = HEAD_STOP.search( line )
-        head += " " + ( line[ : stop.start() ] if stop else line )
-        if stop: break
-    stripped = None
-    while stripped != head:
-        stripped, head = head, re.sub( r"<[^<>]*>", "", head )
+    text, previous = " ".join( lines[ index : index + MAX_HEAD_LINES ] ), None
+    while previous != text:
+        previous, text = text, re.sub( r"<[^<>]*>", "", text )
+    stop = HEAD_STOP.search( text )
+    head = text[ : stop.start() ] if stop else text
+    if stop and text[ stop.start() ] == "(" and head.split()[ -1: ] == [ "Function" ]:
+        after = _after_parentheses( text, stop.start() )
+        named = re.match( r"\s*\??\s*([A-Za-z_$][\w$]*)", after )
+        return named.group( 1 ) if named else None
     words = [ w for w in re.split( r"\s+", head.strip() ) if w and w not in MODIFIERS ]
     if not words: return None
     if len( words ) >= 2 and words[ -2 ] == "set": return f"{words[ -1 ]}="

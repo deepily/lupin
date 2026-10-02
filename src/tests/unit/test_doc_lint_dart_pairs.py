@@ -61,6 +61,28 @@ def test_constructors_factories_generics_and_fields_are_named():
     assert _symbols( "class Foo {\n  /// Plain.\n  Foo();\n}\n" ) == [ "Foo.new" ]
 
 
+def test_a_function_typed_member_is_named_by_the_word_after_its_parameter_list_not_by_Function():
+    src = ( "class A {\n  /// F1.\n  final void Function( TaskVerb verb )? onVerb;\n"
+            "  /// F2.\n  final void Function( { String? priority, String? owner } )? onField;\n"
+            "  /// F3.\n  final Future<List<Map<String, dynamic>>> Function(\n    String a,\n    int Function( int ) b,\n  )\n      fetchAll;\n"
+            "  /// F4.\n  final Future<double> Function() ttsFraction;\n}\n" )
+    assert _symbols( src ) == [ "A.onVerb", "A.onField", "A.fetchAll", "A.ttsFraction" ]
+
+
+def test_a_top_level_function_that_returns_a_function_type_is_named_by_the_function():
+    assert _symbols( "/// R.\nFuture<List<Sender>> Function()? muteRosterLoader( BuildContext context ) {\n  return null;\n}\n" ) == [ "muteRosterLoader" ]
+
+
+def test_a_function_type_with_no_name_after_it_or_an_unclosed_list_is_unattached():
+    assert _symbols( "/// A.\nvoid Function( int x )\n" ) == [ "<unattached>" ]
+    assert _symbols( "/// B.\nvoid Function( int x,\n" ) == [ "<unattached>" ]
+
+
+def test_enum_values_are_named_without_the_trailing_comma():
+    src = "enum Kind {\n  /// A.\n  image,\n\n  /// B.\n  directory,\n\n  /// C.\n  last\n}\n"
+    assert _symbols( src ) == [ "Kind.image", "Kind.directory", "Kind.last" ]
+
+
 def test_a_declaration_head_that_runs_over_lines_is_read_up_to_its_parenthesis():
     src = "class A {\n  /// M.\n  static const\n      Duration\n      timeout\n      = Duration( seconds: 1 );\n}\n"
     assert _symbols( src ) == [ "A.timeout" ]
@@ -168,6 +190,21 @@ def test_min_words_decides_which_old_blocks_are_eligible( repo ):
     assert low[ "eligible_old" ] == 6
     _, high = dp.build_pairs( root, old, new, min_words=36 )
     assert high[ "eligible_old" ] == 0 and high[ "pairs" ] == 0
+
+
+def test_a_block_of_exactly_min_words_is_eligible_and_one_word_less_is_not( tmp_path ):
+    _git( tmp_path, "init", "-q" )
+    ( tmp_path / "lib" ).mkdir()
+    thirty, twenty_nine = " ".join( f"w{i}" for i in range( 30 ) ), " ".join( f"w{i}" for i in range( 29 ) )
+    ( tmp_path / "lib" / "a.dart" ).write_text( f"/// {thirty}\nclass Edge {{}}\n\n/// {twenty_nine}\nclass Under {{}}\n", encoding="utf-8" )
+    _git( tmp_path, "add", "." )
+    _git( tmp_path, "commit", "-qm", "old" )
+    old = _git( tmp_path, "rev-parse", "HEAD" )
+    ( tmp_path / "lib" / "a.dart" ).write_text( "/// Short.\nclass Edge {}\n\n/// Short.\nclass Under {}\n", encoding="utf-8" )
+    _git( tmp_path, "commit", "-qam", "new" )
+    pairs, report = dp.build_pairs( tmp_path, old, "HEAD", min_words=30 )
+    assert [ p[ "symbol" ] for p in pairs ] == [ "Edge" ]
+    assert report[ "eligible_old" ] == 1
 
 
 def test_the_prefix_limits_the_population( repo ):
