@@ -24,7 +24,7 @@ That set is a subset of the two base statuses, and an import-time assert enforce
 `is_park_legal_from` also admits parked to parked, a quote refresh that admits nothing new.
 A `parked_from_status` column was rejected because the write-time rule gives the same guarantee with nothing to keep in sync.
 
-Both twins exist because the arbiter holds loaded rows in memory, while `task_query` and `count_only` must filter in Postgres before the query's limit and offset apply.
+Both twins exist because the arbiter holds loaded rows in memory. `task_query` and `count_only` must filter in Postgres before the query's limit and offset apply.
 The Python and SQLAlchemy twins are independent: neither calls the other and they share no helper.
 The parity gate perturbs one side and requires a failure, which a shared implementation cannot support.
 `now` is a required parameter on both, so the boundary case (chase equals now) is testable without patching.
