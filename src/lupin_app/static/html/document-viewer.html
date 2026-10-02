@@ -614,7 +614,9 @@
                 const contentType = response.headers.get( 'content-type' ) || '';
                 if ( !contentType.includes( 'application/json' ) || /\.json$/i.test( filename ) ) {
                     wireDownload( fetchUrl, filename );
-                    wireCopy( fetchUrl, isCopyableType( contentType, filename ) );
+                    const copyable = isCopyableType( contentType, filename );
+                    wireCopy( fetchUrl, copyable );
+                    if ( copyable ) preloadRawText( response );
                     wireFolder( folderPathFor( rawPath, apiPath === '/api/io/file' && firstSeg !== 'io' ) );
                 }
 
@@ -839,6 +841,20 @@
             return contentType.includes( 'application/json' ) && /\.json$/i.test( filename || '' );
         }
 
+        // Keeps the raw text ready BEFORE the click, from the response the page already holds,
+        // so the click can copy synchronously with no network call. Firefox ties a clipboard
+        // write to the click's user activation, and an awaited fetch in between can lose it.
+        //
+        // Requires: response is the not-yet-consumed Response for the file ( cloned here )
+        // Ensures:  window.__docViewerRawText becomes the body string once it has arrived; a
+        //           failure leaves it unset and the click falls back to fetching
+        function preloadRawText( response ) {
+            window.__docViewerRawText = null;
+            response.clone().text().then( ( t ) => { window.__docViewerRawText = t; } ).catch( () => {
+                // Left unset on purpose: the click handler fetches when nothing is preloaded.
+            } );
+        }
+
         // Puts `text` on the clipboard, or throws.
         //
         // ⚠️ navigator.clipboard exists only in a SECURE context ( https or localhost ). The
@@ -870,8 +886,8 @@
         //     - copyable is the verdict of isCopyableType()
         // Ensures:
         //     - the button is shown; DISABLED with an explanatory title when not copyable
-        //     - a click re-requests the raw body through authedFetch, since the page kept only
-        //       the rendered form, and copies it; the label reads "✓ Copied" for 1.5s
+        //     - a click copies the body preloaded by preloadRawText() with no network call; if
+        //       none is preloaded it re-requests it through authedFetch, then copies; the label reads "✓ Copied" for 1.5s
         //     - any failure is said beside the button, never in a browser dialog
         function wireCopy( fetchUrl, copyable ) {
             const bar    = document.getElementById( 'doc-viewer-toolbar' );
@@ -891,9 +907,15 @@
                 btn.disabled       = true;
                 status.textContent = '';
                 try {
-                    const resp = await window.__docViewerAuthedFetch( fetchUrl, {} );
-                    if ( !resp.ok ) throw new Error( 'Copy failed (HTTP ' + resp.status + ')' );
-                    await writeToClipboard( await resp.text() );
+                    // Preloaded text first: no await before the clipboard call, so the
+                    // click's user activation is still live ( Firefox ). Fetch is the fallback.
+                    let text = window.__docViewerRawText;
+                    if ( typeof text !== 'string' ) {
+                        const resp = await window.__docViewerAuthedFetch( fetchUrl, {} );
+                        if ( !resp.ok ) throw new Error( 'Copy failed (HTTP ' + resp.status + ')' );
+                        text = await resp.text();
+                    }
+                    await writeToClipboard( text );
                     btn.textContent = '✓ Copied';
                     setTimeout( () => { btn.textContent = label; }, 1500 );
                 } catch ( err ) {

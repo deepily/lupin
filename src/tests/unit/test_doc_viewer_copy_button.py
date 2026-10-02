@@ -55,19 +55,25 @@ if ( scenario.clipboard === "ok" ) {
 } else {
     setNav( {} );
 }
-global.window = { __docViewerAuthedFetch: async ( url ) => {
+global.window = { __docViewerRawText: scenario.preloaded, __docViewerAuthedFetch: async ( url ) => {
     global.__fetched = url;
     return { ok: scenario.httpOk, status: scenario.httpOk ? 200 : 403, text: async () => scenario.body };
 } };
 let timer = null;
 global.setTimeout = ( fn ) => { timer = fn; };
 
-const api = new Function( src + "; return { isCopyableType, writeToClipboard, wireCopy };" )();
+const api = new Function( src + "; return { isCopyableType, writeToClipboard, wireCopy, preloadRawText };" )();
 
 ( async () => {
     const out = {};
     if ( scenario.op === "types" ) {
         out.results = scenario.cases.map( ( [ ct, name ] ) => api.isCopyableType( ct, name ) );
+    } else if ( scenario.op === "preload" ) {
+        const resp = { clone: () => ( { text: async () => { if ( scenario.preloadFails ) throw new Error( "x" ); return "body"; } } ) };
+        api.preloadRawText( resp );
+        out.immediately = window.__docViewerRawText;
+        await new Promise( r => setImmediate( r ) );
+        out.after = window.__docViewerRawText;
     } else if ( scenario.op === "wire" ) {
         api.wireCopy( "/api/docs/file?path=x", scenario.copyable );
         if ( scenario.twice ) api.wireCopy( "/api/docs/file?path=x", scenario.copyable );
@@ -134,6 +140,18 @@ class TestDocViewerCopyButton( unittest.TestCase ):
         self.assertEqual( "", out[ "status" ] )
         self.assertFalse( out[ "disabledAfter" ] )
 
+    def test_a_preloaded_body_is_copied_with_no_fetch( self ):
+        out = _run( op="wire", copyable=True, click=True, preloaded="PRELOADED\n", body="from the network" )
+        self.assertEqual( [ "PRELOADED\n" ], out[ "written" ] )
+        self.assertIsNone( out[ "fetched" ] )
+
+    def test_preload_fills_the_text_from_a_clone_and_a_failure_leaves_it_unset( self ):
+        ok = _run( op="preload" )
+        self.assertIsNone( ok[ "immediately" ] )
+        self.assertEqual( "body", ok[ "after" ] )
+        bad = _run( op="preload", preloadFails=True )
+        self.assertIsNone( bad[ "after" ] )
+
     def test_binary_file_shows_a_disabled_button_with_no_click_handler( self ):
         out = _run( op="wire", copyable=False )
         self.assertFalse( out[ "hidden" ] )
@@ -181,7 +199,8 @@ class TestDocViewerCopyButton( unittest.TestCase ):
     def test_the_copy_button_sits_in_the_bar_with_its_test_id( self ):
         with open( _HTML, encoding="utf-8" ) as f: text = f.read()
         self.assertEqual( 1, len( re.findall( r'id="doc-copy-btn"[^>]*data-testid="doc-copy-btn"', text ) ) )
-        self.assertEqual( 1, text.count( "wireCopy( fetchUrl, isCopyableType( contentType, filename ) );" ) )
+        self.assertEqual( 1, text.count( "wireCopy( fetchUrl, copyable );" ) )
+        self.assertEqual( 1, text.count( "if ( copyable ) preloadRawText( response );" ) )
 
 
 if __name__ == "__main__":
