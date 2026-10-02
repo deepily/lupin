@@ -126,6 +126,7 @@ def test_reassign_owner_canonicalization_parity_across_three_seams( client ):
         "project"       : "lupin",
         "created_by"    : "clayton f04dfb67",
         "owner_persona" : OWNER_ACCENTED_DISPLAY,
+        "correlation_key" : "epic:unassigned",                         # the create route refuses a row with no epic key
     }
     r = client.post( "/api/tasks", json=create_body )
     assert r.status_code == 201, f"{r.status_code}: {r.text}"

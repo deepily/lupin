@@ -3267,11 +3267,30 @@ def _spawn_script_path() -> str:  # pragma: no cover  # trivial path join; exerc
     return os.path.join( os.environ.get( "LUPIN_ROOT", "" ), "src", "scripts", "start-cc-with-tmux.sh" )
 
 
-def _spawn_config_mgr():  # pragma: no cover  # constructs a real ConfigurationManager; logic lives in resolve_spawn_config
+# Why the last _spawn_config_mgr() call returned None; None when it built a manager.
+# spawn_sessions reads it to say so in its return (row c9252819).
+_spawn_config_error = None
+
+
+def _spawn_config_mgr():
+    """
+    Build the ConfigurationManager the spawn path reads its INI keys from.
+
+    Ensures:
+        - returns a ConfigurationManager when LUPIN_CONFIG_MGR_CLI_ARGS resolves
+        - returns None otherwise, and records the cause in `_spawn_config_error`
+          so spawn_sessions can report it instead of silently spawning on the
+          user default model
+        - clears `_spawn_config_error` on success
+    """
+    global _spawn_config_error
     try:
         from cosa.config.configuration_manager import ConfigurationManager
-        return ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+        mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+        _spawn_config_error = None
+        return mgr
     except Exception as e:
+        _spawn_config_error = str( e )
         logger.warning( f"[spawn] ConfigurationManager unavailable; using defaults. Reason: {e}" )
         return None
 
@@ -3340,12 +3359,15 @@ def spawn_sessions(
 
     Returns:
         dict: { spawned:[{session_name, requested_role, status, model, ...}],
-                manager_persona, collection_topic, model, ... } or {status:"error",...}
+                manager_persona, collection_topic, model, ... } or {status:"error",...}.
+        `config_warning` is added when the INI config manager could not be built
+        (INI model pins and spawn cap NOT applied); it names the cause.
     """
     _wait_for_sender_id()
     from lupin_mcp import session_spawner
     sid, persona = session_spawner.resolve_manager_identity( _get_cc_metadata(), fallback_session_id=SESSION_ID )
-    cfg          = session_spawner.resolve_spawn_config( _spawn_config_mgr() )
+    config_mgr   = _spawn_config_mgr()
+    cfg          = session_spawner.resolve_spawn_config( config_mgr )
     # Resolve the child's model: explicit param wins; else the per-role INI key;
     # else the INI `default` key (covers unknown/new roles); else None (no flag →
     # inherit the user default, fail-open). See ruling #2 (2026-07-02): managers
@@ -3377,6 +3399,15 @@ def spawn_sessions(
         )
     except ValueError as e:
         return { "status": "error", "reason": str( e ) }
+
+    # Say so when the INI could not be read (row c9252819). Without the config manager
+    # every role resolves to no model, so the child silently inherits the user default.
+    if config_mgr is None:
+        result[ "config_warning" ] = (
+            "ConfigurationManager unavailable; INI spawn settings (per-role model, spawn cap) were NOT applied. "
+            f"Cause: {_spawn_config_error}. Pass model= explicitly, or register the cosa-voice MCP "
+            "with LUPIN_CONFIG_MGR_CLI_ARGS (src/scripts/install-cosa-voice.sh)."
+        )
 
     # Arm the wake check on a RE-SPIN (row b0570b67). A spawn carrying a
     # seed_memento is a seat being brought back, and that is the path where a

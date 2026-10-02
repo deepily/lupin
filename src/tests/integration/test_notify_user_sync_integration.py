@@ -90,8 +90,11 @@ class TestNotifyClaudeSyncCLI:
 class TestSSENotificationAPI:
     """Test SSE notification API with live server."""
 
-    def test_offline_user_returns_default_immediately( self, server_check ):
+    def test_offline_user_returns_default_immediately( self, server_check, monkeypatch ):
         """Test offline detection returns default immediately."""
+        # A test may not block on a human (row e625e608) unless it opts out loudly. This one is
+        # the ask path's own test and cannot ask anyone: the target user does not exist.
+        monkeypatch.setenv( "LUPIN_ALLOW_HUMAN_ASK_IN_TESTS", "1" )
         import lupin_cli.notifications.notify_user_sync as sync_module
         from lupin_cli.notifications.notification_models import NotificationRequest
 

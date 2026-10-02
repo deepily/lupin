@@ -185,7 +185,10 @@ def _create_row( api_key, persona, title="AC6 park subject" ):
         "owner_persona"       : persona,
         "accountable_manager" : persona,
         "created_by"          : "rachel ac6",
-        "priority"            : "P3",
+        # P5 is what an API-key caller may file (priority firewall, 2026-09-08); the
+        # priority is incidental to what this file tests. The epic key is required.
+        "priority"            : "P5",
+        "correlation_key"     : "epic:unassigned",
     }
     r = requests.post( ENDPOINT, json=body, headers=_headers( api_key ), timeout=15 )
     assert r.status_code == 201, f"create failed {r.status_code}: {r.text}"
