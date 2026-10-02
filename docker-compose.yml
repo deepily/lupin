@@ -609,6 +609,14 @@ services:
       # ⚠️ Env + mounts resolve at container CREATE: picking this up needs
       # `docker compose up -d --force-recreate`, never a plain restart.
       LUPIN_FLOW_RATIO_DIR: /var/lupin/flow-ratio
+      # The heartbeat poke switch THIS server reads and writes: a test-only file in the shared
+      # flow-ratio folder, never the fleet's real heartbeat-poke-mute.json. The folder is mounted
+      # into both servers, and the Stop hook on the host reads the real file on every stop, so a
+      # test that flipped the real switch muted the whole fleet's pokes (2026-10-02, measured:
+      # test_poke_mute_switch left it muted by an admin). poke_mute_path() honours this key before
+      # LUPIN_FLOW_RATIO_DIR, and the suite subprocess inherits it, so the e2e test reads the
+      # file the server writes. ⚠️ Applies at container CREATE: `up -d --force-recreate`.
+      LUPIN_HEARTBEAT_POKE_MUTE_FILE: /var/lupin/flow-ratio/heartbeat-poke-mute.test.json
       LUPIN_SERVER_PORT: "8000"
       DB_HOST: lupin-postgres
       # database.py no longer carries a baked-in password default (row baac2474).
