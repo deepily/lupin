@@ -74,6 +74,109 @@ def owner_for_tree( path: str ) -> dict:
     return { "owner": NO_CREATOR_OWNER, "accountable": NO_CREATOR_OWNER, "creator_recorded": False }
 
 
+# ==========================================================================
+# Archived branches — one row per unmerged branch that never landed (row aec2319f)
+# ==========================================================================
+#
+# Rick's ruling, 2026-10-02: unmerged rescued work is archived and ticketed, never
+# auto-merged. The reaper does the archiving (retire_branch); this opens the row, so the
+# work has an owner before the 14-day sweep removes the archive ref.
+
+ARCHIVE_KEY_PREFIX = "archive:"
+RESCUE_STAMP_RE    = re.compile( r"-\d{8}T\d{6}Z$" )
+
+
+def owner_for_branch( branch: str ) -> dict:
+    """
+    Who owns the row for an archived branch.
+
+    Ensures:
+        - the last path segment, minus a rescue stamp (`-YYYYMMDDTHHMMSSZ`), is read as a
+          tree name by owner_for_tree: `wt-rescue/seat-cc-author-cheech-2-20261002T135947Z`
+          belongs to cheech
+        - any other name has no recorded creator, exactly as owner_for_tree reports
+    """
+    return owner_for_tree( RESCUE_STAMP_RE.sub( "", branch.rsplit( "/", 1 )[ -1 ] ) )
+
+
+def compose_archive_row( outcome: dict ) -> dict:
+    """
+    The row fields for one archived branch whose work did not land.
+
+    Requires:
+        - outcome is retire_branch's dict with kept_reason "archived", plus repo_root
+          (the arbiter adds it) or without it (then the project is "lupin")
+
+    Ensures:
+        - returns { title, body, owner, accountable, project, correlation_key }; the key
+          is "archive:" + the archive ref, one per archived tip
+        - the body names the ref, the sha, the count ahead, what landed means here, the
+          restore command and the 14-day deadline
+    """
+    branch  = outcome[ "branch" ]
+    ref     = outcome[ "archive_ref" ]
+    who     = owner_for_branch( branch )
+    root    = outcome.get( "repo_root" )
+    project = os.path.basename( os.path.normpath( root ) ) if root else "lupin"
+    ahead   = outcome.get( "commits_ahead" )
+    state   = ( "could not be checked for content already on the working branch"
+                if outcome.get( "landed" ) is None else "holds commits whose content is not on the working branch" )
+    lines = [
+        f"The worktree janitor archived branch `{branch}` at `{ref}` (sha `{outcome.get( 'sha' )}`).",
+        f"It is {ahead if ahead is not None else 'an unknown number of'} commits ahead of `{outcome.get( 'target' )}` and {state}.",
+        "",
+        "Nothing was merged and nothing was deleted. The archive ref is removed 14 days after the day in its name.",
+        f"Restore it with: `git update-ref refs/heads/{branch} {outcome.get( 'sha' )}`",
+        "",
+        "Merge what is green and reviewed, or close this row as dropped if the work is not wanted.",
+    ]
+    if not who[ "creator_recorded" ]:
+        lines += [ "", f"No creator recorded: the branch name does not identify a seat, so it is assigned to {NO_CREATOR_OWNER} for triage." ]
+    return {
+        "title"           : f"[{project.upper()}] Archived unmerged branch: {branch}"[ :120 ],
+        "body"            : "\n".join( lines ),
+        "owner"           : who[ "owner" ],
+        "accountable"     : who[ "accountable" ],
+        "project"         : project,
+        "correlation_key" : ARCHIVE_KEY_PREFIX + ref,
+    }
+
+
+def open_archive_tickets( branches_kept: list, store, log_fn: Callable ) -> dict:
+    """
+    Open one row per branch archived this poll whose work had not landed.
+
+    Requires:
+        - branches_kept is the janitor result's list of branch outcomes
+        - store has find_open( key ) and create( **compose_archive_row fields )
+
+    Ensures:
+        - only an outcome with kept_reason "archived" and landed not True gets a row; a
+          branch whose commits were already on the working branch by content gets none
+        - an open row already carrying the key is adopted, never duplicated
+        - one branch's store failure is logged and listed in errors; the others proceed
+        - returns { opened: [ ref ], adopted: [ ref ], errors: [ str ] }; never raises
+    """
+    out = { "opened": [], "adopted": [], "errors": [] }
+    for outcome in branches_kept or []:
+        if outcome.get( "kept_reason" ) != "archived" or outcome.get( "landed" ) is True:
+            continue
+        ref = outcome.get( "archive_ref" )
+        try:
+            row = compose_archive_row( outcome )
+            if store.find_open( row[ "correlation_key" ] ):
+                out[ "adopted" ].append( ref )
+            else:
+                store.create( **row )
+                out[ "opened" ].append( ref )
+        except Exception as e:
+            out[ "errors" ].append( f"{ref}: open failed: {e}" )
+            log_fn( "worktree_archive_ticket_failed", archive_ref=ref, error=str( e ) )
+    if out[ "opened" ] or out[ "adopted" ]:
+        log_fn( "worktree_archive_tickets", opened=out[ "opened" ], adopted=out[ "adopted" ] )
+    return out
+
+
 def project_for_tree( path: str ) -> str:
     """
     The store project a tree belongs to: the basename of the repo that holds it.

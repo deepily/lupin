@@ -713,6 +713,9 @@ def make_worktree_janitor_fn(
             except Exception as e:
                 result[ "errors" ].append( f"{root}: janitor raised: {e}" )
                 continue
+            # Row aec2319f: an archived branch gets a row, and the row needs its repo.
+            for kept in one.get( "branches_kept" ) or [ ]:
+                kept.setdefault( "repo_root", root )
             for key in ( "swept", "skipped", "errors", "branches_deleted", "branches_kept" ):
                 result[ key ].extend( one.get( key ) or [ ] )
             result[ "repos" ].append( { "root": root, "swept": len( one.get( "swept" ) or [ ] ) } )
@@ -720,6 +723,8 @@ def make_worktree_janitor_fn(
                 try:
                     bs = branch_sweep_fn( project_root=root )
                     result[ "branches_deleted" ].extend( bs.get( "deleted" ) or [ ] )
+                    for kept in bs.get( "kept" ) or [ ]:
+                        kept.setdefault( "repo_root", root )
                     result[ "branches_kept" ].extend( bs.get( "kept" ) or [ ] )
                     if bs.get( "error" ): result[ "errors" ].append( f"{root}: {bs[ 'error' ]}" )
                 except Exception as e:
@@ -766,6 +771,8 @@ def make_straggler_fn( *, ledger_path: str, janitor_idle_hours: float, log_fn: C
         - returns fn( reconcile_result ) -> sync_straggler_tickets' summary, judged on the
           same refused set the ledger records (refused_set with the ledger as `previous`)
         - a first sighting is backdated from the tree's idle age minus janitor_idle_hours
+        - the summary's "archived" is open_archive_tickets' result for this poll's
+          branches_kept: one row per archived branch whose work had not landed
     """
     from cosa.agents.shared.worktree_refusal_ledger import refused_set, load_ledger
     from cosa.agents.shared.worktree_reaper import _newest_mtime_age_hours
@@ -775,10 +782,13 @@ def make_straggler_fn( *, ledger_path: str, janitor_idle_hours: float, log_fn: C
 
     def straggler( result: dict ) -> dict:
         refused = refused_set( result, load_ledger( ledger_path ) )
-        return st.sync_straggler_tickets(
+        summary = st.sync_straggler_tickets(
             refused, state_path, store, log_fn,
             idle_hours_fn  = lambda p: _newest_mtime_age_hours( p, time.time() ),
             janitor_idle_h = janitor_idle_hours )
+        # Row aec2319f: one row per branch archived this poll whose work had not landed.
+        summary[ "archived" ] = st.open_archive_tickets( result.get( "branches_kept" ), store, log_fn )
+        return summary
 
     return straggler
 

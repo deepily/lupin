@@ -167,6 +167,24 @@ def test_kept_and_deleted_branches_are_logged_as_one_report():
                                        "archive_ref": None, "landed": None } ] } ) ]
 
 
+def test_every_kept_branch_is_tagged_with_the_repo_it_came_from():
+    """Row aec2319f: the row for an archived branch needs its project, so each outcome carries its root."""
+    def reconcile( **kw ):
+        return { "branches_kept": [ { "branch": f"tree-{kw[ 'project_root' ][ 1: ]}", "kept_reason": "archived" } ] }
+    sweep = lambda project_root: { "kept": [ { "branch": f"sweep-{project_root[ 1: ]}", "kept_reason": "archived" },
+                                             { "branch": "pre-tagged", "repo_root": "/elsewhere" } ] }
+    janitor = fal.make_worktree_janitor_fn(
+        sandbox_root=".claude/worktrees", age_hours=6, ledger_path="/nowhere", notify_fn=lambda m, a: [],
+        log_fn=lambda e, **f: None, reconcile_fn=reconcile, report_fn=lambda *a, **k: { "changed": False },
+        repo_roots=[ "/a", "/b" ], branch_sweep_fn=sweep )
+
+    out = janitor()
+
+    assert [ ( k[ "branch" ], k[ "repo_root" ] ) for k in out[ "branches_kept" ] ] == [
+        ( "tree-a", "/a" ), ( "sweep-a", "/a" ), ( "pre-tagged", "/elsewhere" ),
+        ( "tree-b", "/b" ), ( "sweep-b", "/b" ), ( "pre-tagged", "/elsewhere" ) ]
+
+
 def test_a_poll_that_touched_no_branch_logs_nothing():
     events = []
     _janitor( [ "/a" ], lambda **kw: {}, events )()

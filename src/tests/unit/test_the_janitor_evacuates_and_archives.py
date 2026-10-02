@@ -458,3 +458,77 @@ def test_a_tree_whose_evacuation_failed_is_in_the_refused_set():
     ], "skipped": [] }
 
     assert refused_set( out ) == { "/r/.claude/worktrees/a": [ "a.txt", "b.txt" ] }
+
+
+# ── an archived branch that never landed gets one row for its manager ────────
+
+class _Store:
+    def __init__( self, existing=(), fail_on=None ):
+        self.open, self.created, self.fail_on = set( existing ), [], fail_on
+
+    def find_open( self, key ):
+        if key == self.fail_on:
+            raise RuntimeError( "db down" )
+        return "row-1" if key in self.open else None
+
+    def create( self, **row ):
+        self.created.append( row )
+        return "row-new"
+
+
+def _archived( branch, landed, root="/repos/lupin-mobile", **extra ):
+    return { "branch": branch, "target": "wip-v9", "kept_reason": "archived", "commits_ahead": 3,
+             "archive_ref": f"refs/archive/2026-10-02/{branch}", "sha": "abc123", "landed": landed,
+             "repo_root": root, **extra }
+
+
+def test_one_row_per_archived_branch_that_did_not_land_and_none_for_one_that_did():
+    from cosa.agents.shared import worktree_straggler_tickets as st
+    store, events = _Store(), []
+    kept = [
+        _archived( "wt-rescue/seat-cc-author-cheech-2-20261002T135947Z", False ),
+        _archived( "wt-rescue/landed-by-pick-20261002T135947Z", True ),
+        _archived( "krishna-door18", None, root=None ),
+        { "branch": "feat-live", "kept_reason": "checked_out" },
+    ]
+
+    out = st.open_archive_tickets( kept, store, lambda name, **kw: events.append( ( name, kw ) ) )
+
+    refs = [ "refs/archive/2026-10-02/wt-rescue/seat-cc-author-cheech-2-20261002T135947Z",
+             "refs/archive/2026-10-02/krishna-door18" ]
+    assert out == { "opened": refs, "adopted": [], "errors": [] }
+    assert events == [ ( "worktree_archive_tickets", { "opened": refs, "adopted": [] } ) ]
+
+    seat, stray = store.created
+    assert ( seat[ "owner" ], seat[ "accountable" ], seat[ "project" ] ) == ( "cheech", "cheech", "lupin-mobile" )
+    assert seat[ "correlation_key" ] == "archive:" + refs[ 0 ]
+    assert seat[ "title" ] == "[LUPIN-MOBILE] Archived unmerged branch: wt-rescue/seat-cc-author-cheech-2-20261002T135947Z"
+    assert "3 commits ahead of `wip-v9` and holds commits whose content is not on the working branch" in seat[ "body" ]
+    assert "git update-ref refs/heads/wt-rescue/seat-cc-author-cheech-2-20261002T135947Z abc123" in seat[ "body" ]
+    assert "No creator recorded" not in seat[ "body" ]
+
+    assert ( stray[ "owner" ], stray[ "project" ] ) == ( st.NO_CREATOR_OWNER, "lupin" )
+    assert "could not be checked for content already on the working branch" in stray[ "body" ]
+    assert "No creator recorded" in stray[ "body" ]
+
+
+def test_an_open_row_is_adopted_and_a_store_failure_does_not_stop_the_rest():
+    from cosa.agents.shared import worktree_straggler_tickets as st
+    kept   = [ _archived( "a", False ), _archived( "b", False ), _archived( "c", False, commits_ahead=None ) ]
+    store  = _Store( existing={ "archive:refs/archive/2026-10-02/a" }, fail_on="archive:refs/archive/2026-10-02/b" )
+    events = []
+
+    out = st.open_archive_tickets( kept, store, lambda name, **kw: events.append( name ) )
+
+    assert out == { "opened": [ "refs/archive/2026-10-02/c" ], "adopted": [ "refs/archive/2026-10-02/a" ],
+                    "errors": [ "refs/archive/2026-10-02/b: open failed: db down" ] }
+    assert events == [ "worktree_archive_ticket_failed", "worktree_archive_tickets" ]
+    assert "an unknown number of commits ahead" in store.created[ 0 ][ "body" ]
+
+
+def test_a_poll_with_nothing_archived_opens_nothing_and_logs_nothing():
+    from cosa.agents.shared import worktree_straggler_tickets as st
+    events = []
+    assert st.open_archive_tickets( None, _Store(), lambda name, **kw: events.append( name ) ) == \
+        { "opened": [], "adopted": [], "errors": [] }
+    assert events == []
