@@ -53,8 +53,10 @@ def manager_seat( session_id, role="manager", sessions_dir=None ):
         - sessions_dir is a writable directory, or None for HOST_SESSIONS_DIR
 
     Ensures:
+        - the bridge file appears atomically (a rename), so no scanner can read it half-written
         - the bridge file exists for the whole `with` body and is gone after it, including
           when the body raises
+        - a failed write leaves no scratch file and no bridge behind
         - the file carries `session_id`, `stable_session_id`, `role` and `project`, the
           fields a real bridge carries that the firewall's reader uses
         - yields the bridge's path
@@ -70,8 +72,16 @@ def manager_seat( session_id, role="manager", sessions_dir=None ):
         "project"           : "lupin",
         "persona_name"      : "Itest Manager Seat",
     }
-    with open( path, "w", encoding="utf-8" ) as handle:
-        json.dump( payload, handle, indent=2 )
+    # ATOMIC: the bridge appears whole or not at all. Scanners glob `cc-*.json` and count a file
+    # they cannot parse as an unattributable bridge, so the content is written under a name that
+    # glob does not match and moved into place with one rename.
+    scratch = os.path.join( directory, f".{BRIDGE_PREFIX}{session_id[ :8 ]}.tmp" )
+    try:
+        with open( scratch, "w", encoding="utf-8" ) as handle:
+            json.dump( payload, handle, indent=2 )
+        os.replace( scratch, path )
+    finally:
+        if os.path.exists( scratch ): os.remove( scratch )
     try:
         yield path
     finally:

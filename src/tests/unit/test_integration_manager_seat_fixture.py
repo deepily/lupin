@@ -100,3 +100,32 @@ def test_the_default_directory_is_used_when_none_is_given( tmp_path, monkeypatch
     session_id, _ = new_seat_ids()
     with manager_seat( session_id ) as path:
         assert os.path.dirname( path ) == str( tmp_path )
+
+
+def test_the_bridge_appears_whole_by_a_single_rename( sessions, monkeypatch ):
+    """No `cc-*.json` exists until the rename, and what the rename moves is already parseable."""
+    session_id, _ = new_seat_ids()
+    seen = {}
+    real_replace = os.replace
+
+    def spy( source, target ):
+        seen[ "glob_before" ] = sorted( p.name for p in sessions.glob( "cc-*.json" ) )
+        seen[ "scratch_json" ] = json.load( open( source ) )
+        real_replace( source, target )
+
+    monkeypatch.setattr( os, "replace", spy )
+    with manager_seat( session_id, sessions_dir=str( sessions ) ) as path:
+        assert os.path.exists( path )
+    assert seen[ "glob_before" ] == [], "a cc-*.json was visible before the rename"
+    assert seen[ "scratch_json" ][ "role" ] == "manager", "the rename moved an incomplete file"
+
+
+def test_a_failed_write_leaves_no_scratch_and_no_bridge( sessions, monkeypatch ):
+    session_id, _ = new_seat_ids()
+
+    def broken( source, target ): raise OSError( "disk said no" )
+
+    monkeypatch.setattr( os, "replace", broken )
+    with pytest.raises( OSError, match="disk said no" ):
+        with manager_seat( session_id, sessions_dir=str( sessions ) ): pass
+    assert list( sessions.iterdir() ) == [], "a scratch file or a bridge was left behind"
