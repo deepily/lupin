@@ -25,7 +25,9 @@ import os
 from datetime import datetime, timezone
 from typing import Callable, Optional
 
-REFUSAL_REASONS  = ( "ignored_files_present", "ignored_check_failed" )
+# "evacuation_failed" (row aec2319f): the janitor now moves a tree's ignored data out
+# instead of refusing, so a refusal for held files is what is left when that move fails.
+REFUSAL_REASONS  = ( "ignored_files_present", "ignored_check_failed", "evacuation_failed" )
 # The escalation channel's outcome vocabulary (fleet_arbiter_loop.make_escalation_notify_fn
 # + arbiter_live_notify.parse_notify_outcome). Anything else — post_error, http_error,
 # unexpected_response, user_not_available — is logged as a failed notify.

@@ -152,12 +152,19 @@ def test_no_roots_means_one_reconcile_at_the_default_root():
 
 def test_kept_and_deleted_branches_are_logged_as_one_report():
     events = []
+    # Row aec2319f: an unmerged branch is archived, and the log says where it went and
+    # whether its work had landed. An outcome with no archive (wt-c) logs None for both.
     reconcile = lambda **kw: { "branches_deleted": [ { "branch": "wt-a" } ],
-                               "branches_kept": [ { "branch": "wt-b", "kept_reason": "unmerged", "commits_ahead": 2 } ] }
+                               "branches_kept": [ { "branch": "wt-b", "kept_reason": "archived", "commits_ahead": 2,
+                                                    "archive_ref": "refs/archive/2026-10-02/wt-b", "landed": False },
+                                                  { "branch": "wt-c", "kept_reason": "checked_out", "commits_ahead": None } ] }
     _janitor( [ "/a" ], reconcile, events )()
     assert events == [ ( "worktree_janitor_branches",
                          { "deleted": [ "wt-a" ],
-                           "kept": [ { "branch": "wt-b", "reason": "unmerged", "commits_ahead": 2 } ] } ) ]
+                           "kept": [ { "branch": "wt-b", "reason": "archived", "commits_ahead": 2,
+                                       "archive_ref": "refs/archive/2026-10-02/wt-b", "landed": False },
+                                     { "branch": "wt-c", "reason": "checked_out", "commits_ahead": None,
+                                       "archive_ref": None, "landed": None } ] } ) ]
 
 
 def test_a_poll_that_touched_no_branch_logs_nothing():

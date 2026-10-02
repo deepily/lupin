@@ -33,6 +33,18 @@ def branch_exists( repo, b ):
                            capture_output=True ).returncode == 0
 
 
+def archived( repo, b ):
+    """
+    True when branch b has left refs/heads and an archive ref holds it (row aec2319f).
+
+    The janitor no longer keeps an unmerged branch in the branch list: it moves the ref to
+    refs/archive/<day>/<b>. What these break tests guard is unchanged — the commits must
+    stay reachable — and `reachable` below still asks that of every ref.
+    """
+    held = g( repo, "for-each-ref", "--format=%(refname)", f"refs/archive/*/{b}" )
+    return bool( held ) and not branch_exists( repo, b )
+
+
 def reachable( repo, sha ):
     """Is sha reachable from any ref (branches, tags, remotes)?"""
     out = g( repo, "for-each-ref", "--contains", sha, "--format=%(refname)" )
@@ -77,8 +89,9 @@ def test_upstream_merged_but_wip_lacks_it_is_kept( repo, tmp_path ):
     sha = commit( t, "only-on-feat.txt" )
     g( t, "push", "-q", "-u", "origin", "feat-up" )
     out = sweep( repo )
-    assert branch_exists( repo, "feat-up" ), out
-    assert out[ "branches_kept" ][ 0 ][ "kept_reason" ] == "unmerged"
+    assert archived( repo, "feat-up" ), out
+    assert out[ "branches_kept" ][ 0 ][ "kept_reason" ] == "archived"
+    assert out[ "branches_kept" ][ 0 ][ "landed" ] is False
 
 
 # ── T6: rescue branch carrying a WIP auto-commit must survive ───────────────
@@ -88,7 +101,7 @@ def test_detached_dirty_tree_rescue_branch_survives( repo ):
     out    = sweep( repo )
     result = out[ "swept" ][ 0 ][ "result" ]
     assert result[ "wip_committed" ] and result[ "rescue_branch" ]
-    assert branch_exists( repo, result[ "rescue_branch" ] ), out
+    assert archived( repo, result[ "rescue_branch" ] ), out
     assert reachable( repo, result[ "wip_sha" ] )
 
 
@@ -97,7 +110,7 @@ def test_named_branch_with_wip_autocommit_survives( repo ):
     t = add_tree( repo, "seat-c", branch="feat-dirty" )
     with open( os.path.join( t, "new.txt" ), "w" ) as fh: fh.write( "untracked work" )
     out = sweep( repo )
-    assert branch_exists( repo, "feat-dirty" ), out
+    assert archived( repo, "feat-dirty" ), out
     assert out[ "swept" ][ 0 ][ "result" ][ "wip_committed" ]
 
 
@@ -153,7 +166,7 @@ def test_cross_repo_same_branch_name_measured_per_repo( tmp_path, monkeypatch, r
                                             seat_alive_fn=lambda s, p: False, **kw ),
                                         repo_roots=[ repo, b ] )
     out = janitor()
-    assert branch_exists( repo, "twin" ) and reachable( repo, a_sha ), out   # A keeps its unmerged twin
+    assert archived( repo, "twin" ) and reachable( repo, a_sha ), out        # A archives its unmerged twin
     assert not branch_exists( b, "twin" ), out                                # B deletes its merged twin
 
 
@@ -166,7 +179,7 @@ def test_tag_named_like_branch_does_not_delete_unmerged( repo ):
     print( "merge_verdict with tag shadow ->", verdict )
     out = sweep( repo )
     print( out[ "branches_kept" ], out[ "branches_deleted" ] )
-    assert branch_exists( repo, "shadow" ) and reachable( repo, sha )
+    assert archived( repo, "shadow" ) and reachable( repo, sha )
 
 
 # ── seat teardown (P3) ──────────────────────────────────────────────────────
@@ -234,7 +247,7 @@ def test_tag_shadow_plus_upstream_deletes_branch_not_on_wip( repo, tmp_path ):
     print( "DELETED:", [ o[ "branch" ] for o in out[ "branches_deleted" ] ],
            "| on WIP:", subprocess.run( [ "git", "merge-base", "--is-ancestor", sha, "wip-v9" ], cwd=repo ).returncode == 0,
            "| reachable only via:", g( repo, "for-each-ref", "--contains", sha, "--format=%(refname)" ) )
-    assert branch_exists( repo, "shadow2" ), "deleted a branch whose commits are NOT on the WIP line"
+    assert archived( repo, "shadow2" ), "a branch whose commits are NOT on the WIP line must be archived, never deleted"
 
 
 # ── BLOCKER candidate: seat teardown + a tag named like the seat's branch ────

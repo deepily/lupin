@@ -40,6 +40,11 @@ def _commit( cwd, name, text="x\n" ):
     assert _git( cwd, "commit", "-q", "-m", f"add {name}" ).returncode == 0
 
 
+def _archived_sha( repo, branch ):
+    """The sha an archive ref holds for `branch`, or "" when none does (row aec2319f)."""
+    return _git( repo, "for-each-ref", "--format=%(objectname)", f"refs/archive/*/{branch}" ).stdout.strip()
+
+
 def _has_branch( repo, branch ):
     return _git( repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}" ).returncode == 0
 
@@ -92,14 +97,16 @@ def test_an_unmerged_branch_is_kept_and_reported_with_its_count( repo ):
     tree = _idle_tree( repo, "wt-open", "wt-open" )
     _commit( tree, "a.txt" )
     _commit( tree, "b.txt" )
+    tip = _git( tree, "rev-parse", "HEAD" ).stdout.strip()
     _age( tree )
 
     out = _reconcile( repo )
 
     assert not tree.exists(), "the tree still goes — the janitor keeps its old contract"
-    assert _has_branch( repo, "wt-open" ), "an unmerged branch is never deleted"
+    assert not _has_branch( repo, "wt-open" ), "an unmerged branch leaves the branch list"
+    assert _archived_sha( repo, "wt-open" ) == tip, "and its tip is held by an archive ref, never deleted"
     kept = out[ "branches_kept" ]
-    assert [ ( k[ "branch" ], k[ "kept_reason" ], k[ "commits_ahead" ] ) for k in kept ] == [ ( "wt-open", "unmerged", 2 ) ]
+    assert [ ( k[ "branch" ], k[ "kept_reason" ], k[ "commits_ahead" ] ) for k in kept ] == [ ( "wt-open", "archived", 2 ) ]
     assert out[ "branches_deleted" ] == []
 
 
@@ -110,9 +117,10 @@ def test_uncommitted_work_the_janitor_saves_keeps_its_branch( repo ):
 
     out = _reconcile( repo )
 
-    assert _has_branch( repo, "wt-dirty" ), "the WIP auto-commit makes the branch unmerged, so it stays"
-    assert out[ "branches_kept" ][ 0 ][ "kept_reason" ] == "unmerged"
-    shown = _git( repo, "show", "wt-dirty:unsaved.txt" )
+    assert not _has_branch( repo, "wt-dirty" ), "the WIP auto-commit makes the branch unmerged, so it is archived"
+    assert _archived_sha( repo, "wt-dirty" ) == out[ "swept" ][ 0 ][ "result" ][ "wip_sha" ]
+    assert out[ "branches_kept" ][ 0 ][ "kept_reason" ] == "archived"
+    shown = _git( repo, "show", f"{_archived_sha( repo, 'wt-dirty' )}:unsaved.txt" )
     assert shown.stdout == "only here\n"
 
 
@@ -131,8 +139,9 @@ def test_merged_into_its_upstream_but_not_the_wip_branch_is_kept( repo ):
 
     out = _reconcile( repo )
 
-    assert _has_branch( repo, "feat" ), "merged into its upstream is NOT merged into the WIP branch"
-    assert out[ "branches_kept" ][ 0 ][ "kept_reason" ] == "unmerged"
+    assert not _has_branch( repo, "feat" ), "merged into its upstream is NOT merged into the WIP branch"
+    assert _archived_sha( repo, "feat" ), "so it is archived, not deleted"
+    assert out[ "branches_kept" ][ 0 ][ "kept_reason" ] == "archived"
 
 
 def test_the_upstream_trap_is_real_git_deletes_it_without_the_check( repo ):

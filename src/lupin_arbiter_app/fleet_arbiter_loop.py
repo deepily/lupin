@@ -728,7 +728,10 @@ def make_worktree_janitor_fn(
             log_fn( "worktree_janitor_branches",
                     deleted = [ o.get( "branch" ) for o in result[ "branches_deleted" ] ],
                     kept    = [ { "branch": o.get( "branch" ), "reason": o.get( "kept_reason" ),
-                                  "commits_ahead": o.get( "commits_ahead" ) }
+                                  "commits_ahead": o.get( "commits_ahead" ),
+                                  # Row aec2319f: an unmerged branch is archived, not kept in
+                                  # the list. Where it went, and whether its work had landed.
+                                  "archive_ref": o.get( "archive_ref" ), "landed": o.get( "landed" ) }
                                 for o in result[ "branches_kept" ] ] )
         try:
             result[ "refusals" ] = report_fn( result, ledger_path, notify_fn, log_fn )
