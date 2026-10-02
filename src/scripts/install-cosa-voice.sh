@@ -168,6 +168,16 @@ else
     pass_check "MCP server file found"
 fi
 
+# 3a. INI config-manager args for the MCP server's spawn path.
+# spawn_sessions reads the per-role worker model (`cc session spawn model *`) through a
+# ConfigurationManager built from LUPIN_CONFIG_MGR_CLI_ARGS. The registration used to omit it,
+# so the build failed, every role resolved to no model, and workers inherited the user default
+# (row c9252819). Paths are relative to the project root, so the value is host-independent;
+# only the block is overridable.
+LUPIN_MCP_CONFIG_BLOCK="${LUPIN_MCP_CONFIG_BLOCK:-Lupin:+Development}"
+CONFIG_MGR_CLI_ARGS="config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=$LUPIN_MCP_CONFIG_BLOCK"
+pass_check "LUPIN_CONFIG_MGR_CLI_ARGS = $CONFIG_MGR_CLI_ARGS"
+
 # 4. Claude CLI
 if ! command -v claude &> /dev/null; then
     fail_check "claude CLI not found on PATH"
@@ -412,6 +422,7 @@ else
         cosa-voice \
         -e "PYTHONPATH=$LUPIN_ROOT/src" \
         -e "LUPIN_ROOT=$LUPIN_ROOT" \
+        -e "LUPIN_CONFIG_MGR_CLI_ARGS=$CONFIG_MGR_CLI_ARGS" \
         -- "$VENV_PYTHON" "$MCP_SERVER" 2>/dev/null; then
         pass_check "cosa-voice registered at user scope (global)"
     else
@@ -421,6 +432,7 @@ else
         echo "      claude mcp add --scope user --transport stdio cosa-voice \\"
         echo "        -e \"PYTHONPATH=$LUPIN_ROOT/src\" \\"
         echo "        -e \"LUPIN_ROOT=$LUPIN_ROOT\" \\"
+        echo "        -e \"LUPIN_CONFIG_MGR_CLI_ARGS=$CONFIG_MGR_CLI_ARGS\" \\"
         echo "        -- \"$VENV_PYTHON\" \"$MCP_SERVER\""
         echo ""
         exit 1
