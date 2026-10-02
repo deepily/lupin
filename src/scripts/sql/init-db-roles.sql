@@ -35,6 +35,13 @@
 
 \set ON_ERROR_STOP on
 
+-- Keep the passwords out of the server log. Under log_statement='ddl' the CREATE ROLE / ALTER ROLE
+-- statements built below are logged WITH the clear password, and a failing one is logged again under
+-- log_min_error_statement. These settings are per session, so they are repeated after every \connect.
+SET log_statement = 'none';
+SET log_min_error_statement = 'panic';
+SET log_min_duration_statement = -1;
+
 -- A forgotten variable must stop the run, not set an empty password.
 \if :{?app_pw}
 \else
@@ -47,6 +54,14 @@
 \if :{?test_pw}
 \else
   DO $$ BEGIN RAISE EXCEPTION 'init-db-roles.sql: test_pw is not set'; END $$;
+\endif
+
+-- ---- precheck: both databases must exist before anything is applied ---------------------
+-- Without this, a missing lupin_db_test fails at the second \connect, after the dev half is applied.
+SELECT EXISTS ( SELECT FROM pg_database WHERE datname = 'lupin_db_test' ) AS has_test_db \gset
+\if :has_test_db
+\else
+  DO $$ BEGIN RAISE EXCEPTION 'init-db-roles.sql: database lupin_db_test does not exist'; END $$;
 \endif
 
 -- ---- roles -----------------------------------------------------------------------------
@@ -67,6 +82,9 @@ GRANT  CONNECT ON DATABASE lupin_db_test TO lupin_app, lupin_test;
 
 -- ---- lupin_db_dev ------------------------------------------------------------------------
 \connect lupin_db_dev
+SET log_statement = 'none';
+SET log_min_error_statement = 'panic';
+SET log_min_duration_statement = -1;
 
 GRANT USAGE, CREATE ON SCHEMA public TO lupin_app;
 GRANT USAGE         ON SCHEMA public TO lupin_host;
@@ -81,6 +99,9 @@ SELECT 'REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON approval_settings FROM lupin_
  WHERE to_regclass( 'public.approval_settings' ) IS NOT NULL
 \gexec
 
+-- RE-RUN THIS FILE AFTER MIGRATIONS that create tables: a table created before the role existed has
+-- no default grants, and revision b80513825c02 repeats the approval_settings REVOKE on the migration path.
+-- Ordering: run before --reassign; tables still owned by lupin_dev do not get the lupin_host default grants.
 -- Tables the app creates later belong to lupin_app and must come with the same host rights.
 ALTER DEFAULT PRIVILEGES FOR ROLE lupin_app IN SCHEMA public
     GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO lupin_host;
@@ -117,6 +138,9 @@ ALTER DEFAULT PRIVILEGES FOR ROLE lupin_app IN SCHEMA public
 
 -- ---- lupin_db_test -----------------------------------------------------------------------
 \connect lupin_db_test
+SET log_statement = 'none';
+SET log_min_error_statement = 'panic';
+SET log_min_duration_statement = -1;
 
 GRANT USAGE, CREATE ON SCHEMA public TO lupin_app, lupin_test;
 GRANT ALL ON ALL TABLES    IN SCHEMA public TO lupin_app, lupin_test;
