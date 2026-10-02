@@ -8,6 +8,15 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.10.01 - Session 37cbc13d (Cheech 🌿, manager; crew Sam 🎙️, Maya 🌻, Tiberius 👑, John 🏄🏽, Chloé 🗼) | v0.2.2 judge harness, doc tools and Jev adapter merged; gate run finished; e2e slowdown diagnosed; pushed on Rick's word
+
+- **Merged, each with Tiberius PASS (head `06503a6f1`)**: `c8b4818cc` claim harness + prose judge · `c770d3e90` between-suites reset fix (`07dde530`) · `26ff4b99f` precision/recall report (`f5482b4b`) · `0c617d906` Jev adapter · `1953cd470` Maya's doc tools + `judge_comparison.py` + hermetic harness (`46309646`) · `06503a6f1` dotted dates + MCP-tool exemption. Plan 1 Rulings R.9, R.10, B4 written.
+- **Gate run (row `0fc47c13`) finished 23:10**, Maya's report: Haiku, Sonnet, Jev legs all rc=0, 150 pairs; copies in `projects-data/lupin/gate-run-2026.10.01/`. The comparison report and Tiberius's review (`e982851a`) are not done; D3 (which judge) waits on them.
+- **NOT merged, pinned under `refs/keep/`**: `maya-d23063c0f` (script delta; whole-tree tier 28,481 passed, 1 failed: a 5.0 s timing cap missed by 0.07 s under load, bug `797a2dc3`) · `chloe-f28b78a21` (census fix, Tiberius PASS twice, no whole-tree tier).
+- **e2e gate NOT green (bug `ff85f78f`)**: both halves cut at the 2,500 s limit twice with 0 failures. Tiberius measured the cause: 689 dead session files from the first harness run make the fleet-size-cap census take 9 s per page load on both servers. They age out of the 12 h window about 04:20 to 05:35 EDT; Rick's answer on quarantining them timed out, nothing was moved.
+- **Still owed on `ca204c66`**: unit tier on a merged head with the two pinned commits, e2e re-run, integration (105 known reds with Mr. Radio), coverage gate, post-game for both days. Mementos: `.claude-memento-cheech-37cbc13d.md` (Rick's return list), `io/mementos/{maya,tiberius,chloe}.md`.
+- **Files**: history.md, TODO.md; code via reviewed merges only.
+
 ### 2026.10.01 - Session cf6ff92a (Mr. Radio 🦉, manager; no crew, Rick ruled "no workers yet") | Test-VM fixes proven on a recreate and documented
 
 - **Proven on lupin-host-test (row `72781b05`)**: resumed the suspended VM, deployed `a7f2af593` with a recreate; preflight pre 51 passed / 0 blocking, post 64 / 0. The 3 Google repos answer "dubious ownership" with the compose `GIT_CONFIG_*` off and resolve with it on. VM left running (Rick).

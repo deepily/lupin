@@ -16,6 +16,16 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 **Timers from the 09-30 skeleton crew** (these clean themselves up; nothing to fold in): `stop-poke-restore-20260930` (dev and test, 17:00 EDT) and `ratio-gate-reenable-20260930` (test, 12:46 EDT).
 **Not mine and uncommitted in the main tree** (left alone): the phase6b `action_required` PNG baseline (dirty since 09-22) and María's three `src/rnd/v0.2.1/` docs (kill-switch design, console-tee plan, cascade handoff).
 
+## 📚 DECISIONS LOG 2026-10-01 (Cheech 🌿 `37cbc13d`; crew Sam · Maya · Tiberius · John · Chloé) — v0.2.2 docs crew, day 2
+
+- **A failed between-suites reset stops the run** (Rick, yes on a direct ask, afternoon). Row `07dde530`, merged `c770d3e90`.
+- **Wiki slugs approved, provisional** (Rick; plan 1 R.10). The JS/TS docs revisit is an exit condition on row `94daf5b9`.
+- **Lint target is zero unwaived findings** (Rick; plan 1 B4). **The injection rule exempts MCP tool docstrings** (Rick; row `f5482b4b`).
+- **Jev may be called, and the labelled-set docstrings may be sent to it** (Rick; row `4627b1e0`). Real `Design:` documents are not approved to leave the machine.
+- **Claude sessions may not create branches** (existing ruling, row `0a9b1d68`): a seat commits on a detached HEAD and the manager merges by sha. Cheech told a seat to branch on 10-01 and the guard refused it.
+- **Open for Rick, not ruled**: D3 which judge (`4627b1e0`, needs the comparison report) · quarantine of 689 dead session files (`ff85f78f`, ask timed out) · dead-pid handling inside the containers (`ff85f78f`) · injection-rule widening to "Do not / Don't" (`e786f5e5`) · data approval for the reuse recall baseline (`06f44efa`) · plan 2 W-A exclusion list (`d39fbd85`) · B2, B3, B7 and Phase 3 sign-off (`5c1525c6`) · held rows `ed62edd5`, `0d4039e0`, `1b00e690`, `9641c0e8`, `797a2dc3`.
+- **Deferred again**: the TODO.md horizon archive and the memento sweep (closing time; the host powers off near 23:00).
+
 ## 📚 DECISIONS LOG 2026-10-01 (Mr. Radio 🦉 `cf6ff92a`, no crew) — test-VM follow-up and the spin-down
 
 - **VM preflight stays check-only** (Rick, card, ~14:00 EDT). No provisioning verb; a new host stops with a named failure and a paste-ready fix. Row `72781b05`.
