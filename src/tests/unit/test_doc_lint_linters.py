@@ -411,3 +411,36 @@ def test_docstring_lint_main_prints_how_many_tool_docstrings_were_exempted( repo
     out = io.StringIO()
     docstring_lint.main( [ "--repo-root", str( repo ), "--json" ], out )
     assert "exempted" not in out.getvalue()
+
+
+DO_NOT_SOURCE = '''
+@tool
+def registered():
+    """
+    Read a row.
+
+    Do not call this twice.
+    """
+
+def plain():
+    """
+    Read a row.
+
+    Do not call this twice.
+    """
+
+def raises_only():
+    """
+    Read a row.
+
+    Never raises on a blank id.
+    """
+'''
+
+
+def test_a_do_not_sentence_fires_on_a_plain_docstring_and_not_on_a_registered_tool_or_never_raises():
+    stats      = {}
+    findings   = docstring_lint.lint_source( "a.py", DO_NOT_SOURCE, None, stats )
+    imperative = [ ( f.line, f.message ) for f in findings if f.rule == "agent-imperative" ]
+    assert stats == { "exempted": 1 }
+    assert imperative == [ ( 14, "text addressed to a model: 'Do not'" ) ]

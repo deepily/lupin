@@ -406,3 +406,27 @@ def _a_previous_test_must_not_spend_this_test_s_notify_budget():
 
     notify_rate_limiter._limiter.reset()
     yield
+
+
+@pytest.fixture( autouse=True )
+def _no_real_model_in_doc_lint_tests( request, monkeypatch ):
+    """
+    Make a doc_lint unit test fail loudly if it reaches the real SDK, so no test can contact a model by accident.
+
+    Requires:
+        - the test is in a module named test_doc_lint_*; every other test is left alone
+
+    Ensures:
+        - model_transport.sdk_query is replaced by a function that fails the test when called, which is the
+          path complete() takes when no query_fn is passed
+        - the failure is pytest's own outcome and not an Exception, so complete()'s "except Exception" cannot
+          turn it into a ModelCallError that a test then swallows
+        - a test that wants the real path sets its own stand-in with monkeypatch.setattr, after this runs
+    """
+    if not request.module.__name__.startswith( "test_doc_lint_" ): return
+    from cosa.repo.doc_lint import model_transport
+
+    def refuse( *args, **kwargs ):
+        pytest.fail( "a doc_lint unit test reached the real SDK: pass a query_fn, or monkeypatch model_transport.sdk_query", pytrace=False )
+
+    monkeypatch.setattr( model_transport, "sdk_query", refuse )

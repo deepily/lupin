@@ -103,6 +103,14 @@ AGENT_IMPERATIVE_REGEX = re.compile(
     re.IGNORECASE
 )
 
+# Row e59bd0b3 (Rick, 2026-10-02): a sentence that STARTS with Do not / Don't / DO NOT also reads as an order to a model.
+# Sentence start is the start of the text, a line start, or the text after . ! ? and spaces. Capitalised on purpose, so a
+# wrapped line that continues "... and do not" is not a start; "Never" is not added. Group 1 is the phrase.
+DO_NOT_SENTENCE_REGEX = re.compile(
+    r"(?:^[ \t]*|(?<=[.!?])[ \t]+)(Do not|DO NOT|Don't|Don\u2019t)(?=[ \t]+\w)",
+    re.MULTILINE
+)
+
 # Provisional thresholds. Rick sets the real ones from pilot data at the Phase 3 sign-off.
 SUMMARY_MAX_CHARS   = 90
 SENTENCE_MAX_WORDS  = 25

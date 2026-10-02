@@ -32,6 +32,8 @@ def parse_args( argv ):
     parser.add_argument( "--allow-design-text", action="store_true", help="labelled set only; real Design: documents need Rick's approval" )
     parser.add_argument( "--claude-cli-path", help="run this Claude Code binary instead of the SDK's bundled one (newer model ids can need a newer binary)" )
     parser.add_argument( "--raw-failures", help="append every unreadable extractor reply, with its pair and list, to this JSON Lines file (keep it out of the repo)" )
+    parser.add_argument( "--call-ledger", help="file that counts every call to a capped model across runs and restarts; keep it outside the repo" )
+    parser.add_argument( "--model-cap", action="append", default=[], metavar="MODEL=N", help="refuse the call after N calls to MODEL, counted in --call-ledger; repeat for more models" )
     parser.add_argument( "--extractor-lists", type=int, default=2 )
     parser.add_argument( "--judge-runs", type=int, help="judge passes over each claim list: 3 for the Claude judge, 1 for Jev, whose answers are deterministic" )
     parser.add_argument( "--gate", action="store_true", help="the one door onto the gate split: refuse unless versions, thresholds and the pairs sha are frozen; run by a seat other than the implementer" )
@@ -85,6 +87,9 @@ def main( argv, query_fn=None ):
         - returns 3 and runs nothing when --gate is set and --frozen-pairs-sha is missing or is
           not the sha256 of the pairs file, so the gate file cannot change after registration
         - the report carries the sha256 of the pairs file
+        - --model-cap MODEL=N with --call-ledger caps that model's calls; the report and the last printed lines carry each capped model's count and cap
+        - returns 2 when a cap is not MODEL=N with N an int of zero or more, or caps are given without a ledger
+        - a call the cap refuses raises CallBudgetExceeded and ends the run; the ledger keeps the count for the next run
     """
     args   = parse_args( argv )
     runs   = args.judge_runs if args.judge_runs is not None else ( 1 if args.judge_backend == "jev" else 3 )
@@ -100,6 +105,12 @@ def main( argv, query_fn=None ):
         return 2
     try:
         model_transport.configure( args.claude_cli_path )
+    except ValueError as e:
+        print( f"REFUSED: {e}", file=sys.stderr )
+        return 2
+    try:
+        caps = { m: int( n ) for m, _, n in ( c.rpartition( "=" ) for c in args.model_cap ) }
+        model_transport.set_budget( args.call_ledger, caps )
     except ValueError as e:
         print( f"REFUSED: {e}", file=sys.stderr )
         return 2
@@ -151,11 +162,13 @@ def main( argv, query_fn=None ):
     report[ "pairs_sha" ] = pairs_sha
     report[ "claude_cli" ]         = args.claude_cli_path
     report[ "claude_cli_version" ] = model_transport.cli_version( args.claude_cli_path )
+    report[ "call_budget" ]        = model_transport.budget_summary()
     report[ "call_profile" ]       = model_transport.CALL_PROFILE
     report[ "call_residual_context" ] = model_transport.RESIDUAL_CONTEXT
     with open( args.out, "w", encoding="utf-8" ) as f: json.dump( report, f, indent=2 )
     print( f"report written to {args.out}: default_gate_pass={report[ 'default_gate_pass' ]}" )
     print( f"parse_failed_pairs={report[ 'parse_failed_pairs' ]} retry_calls={report[ 'retry_calls' ]}" )
+    for model, b in report[ "call_budget" ].items(): print( f"call budget {model}: {b[ 'used' ]} of {b[ 'cap' ]} calls used" )
     return 0
 
 
