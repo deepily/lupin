@@ -38,6 +38,7 @@ if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
 from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
+from lupin_cli.claude_code.hooks.lib.main_tree import WORKTREE_LANE_MARK, main_tree_root
 from lupin_cli.claude_code.hooks.lib.hook_common import (
     read_hook_input, log_payload, emit_json, get_buffer_path
 )
@@ -267,7 +268,7 @@ def _stop_listener( pid ):
 # Row 129cc96b P3: a seat's worktree lives here, and nowhere else (the P5 creation guard).
 # A cheap path filter so an ordinary session's exit does not start a waiter; the waiter
 # itself makes the real decision (seat lock, liveness, clean, merged).
-_WORKTREE_LANE_MARK          = os.sep + os.path.join( ".claude", "worktrees" ) + os.sep
+_WORKTREE_LANE_MARK          = WORKTREE_LANE_MARK
 _SEAT_TEARDOWN_WAIT_SECONDS = 120
 
 
@@ -287,7 +288,8 @@ def _schedule_seat_teardown( payload, popen_fn=None, lupin_root=None ):
         - returns None, starting nothing, on /clear or /compact (the session goes on),
           when LUPIN_ROOT is unset, or when cwd is not under a `.claude/worktrees/` lane
         - otherwise starts the waiter with start_new_session=True and cwd="/", appending
-          its one-line JSON verdict to <LUPIN_ROOT>/io/worktree-janitor/seat-teardown.jsonl,
+          its one-line JSON verdict to <main tree>/io/worktree-janitor/seat-teardown.jsonl
+          (main_tree_root( LUPIN_ROOT ) — never inside the seat's own tree),
           and returns the Popen handle
         - never raises; a failed launch is printed to stderr and the janitor stays the
           backstop
@@ -300,7 +302,9 @@ def _schedule_seat_teardown( payload, popen_fn=None, lupin_root=None ):
     if _WORKTREE_LANE_MARK not in cwd + os.sep:
         return None
     try:
-        log_dir = os.path.join( lupin_root, "io", "worktree-janitor" )
+        # The log is the repo's, not the seat's: written into the seat's own tree it is an
+        # ignored non-artifact file, which is what makes the janitor refuse that tree.
+        log_dir = os.path.join( main_tree_root( lupin_root ), "io", "worktree-janitor" )
         os.makedirs( log_dir, exist_ok=True )
         with open( os.path.join( log_dir, "seat-teardown.jsonl" ), "a" ) as log:
             return popen_fn(
