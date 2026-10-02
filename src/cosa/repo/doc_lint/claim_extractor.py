@@ -39,8 +39,10 @@ SHARE_CAP       = "SHARE_CAP"
 DISCARD_CODES   = ( NOT_FOUND, TOO_FEW_WORDS, TOO_FEW_CHARS, AMBIGUOUS, TOO_LONG, SHARE_CAP )
 
 # An uncovered run of old text is flagged for a person only when it has this many words and at
-# least one content word (not in STOP_WORDS). Set on the dev split by measurement, not by hand.
-MIN_RUN_WORDS = 2
+# least one content word (not in STOP_WORDS). Row ed2f9b4e dev measurement (70 pairs x 2 extractor
+# lists, before any re-extraction): runs of 2 words flagged 81% of unseeded pairs, 4 words 26%, 10 words 8%
+# (the ceiling is 10%); no flagged run overlapped a seeded span at any length, since the extractor had covered them.
+MIN_RUN_WORDS = 10
 STOP_WORDS    = frozenset( "a an the of to in on at by for or and is are be it its if as with from that this".split() )
 
 Claim            = namedtuple( "Claim", [ "text", "quote", "start", "end" ] )

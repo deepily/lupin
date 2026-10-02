@@ -20,6 +20,12 @@ import cosa.utils.util as cu
 from cosa.repo.doc_lint import claim_extractor as ce
 from cosa.repo.doc_lint import harness_cli, harness_report as hr, harness_runner as hn
 
+@pytest.fixture( autouse=True )
+def short_runs( monkeypatch ):
+    """The tests use short sentences, so they run the flag rule at 2 words; the default is pinned in its own test below."""
+    monkeypatch.setattr( ce, "MIN_RUN_WORDS", 2 )
+
+
 OLD = "The chase window is ten minutes. A parked row stays parked if idle. Raises ValueError when blank."
 
 
@@ -338,3 +344,10 @@ def test_the_prose_judge_still_refuses_a_two_word_sentence_whatever_its_length()
     assert pj.locate_line( "Raises Error", item ) is None          # 2 words, 12 characters: over the new floors, under the old
     assert pj.locate_line( "ValueError raised", item ) is None      # 2 words, 17 characters
     assert pj.locate_line( "Longer sentence of five words.", item ) == 5
+
+
+def test_the_default_minimum_run_is_ten_words_as_measured_on_dev( monkeypatch ):
+    monkeypatch.undo()
+    assert ce.MIN_RUN_WORDS == 10
+    nine, ten = " ".join( f"word{n}" for n in range( 9 ) ), " ".join( f"word{n}" for n in range( 10 ) )
+    assert ce.uncovered_runs( nine, [] ) == [] and ce.uncovered_runs( ten, [] ) == [ ( 0, len( ten ) ) ]
