@@ -109,7 +109,7 @@ Deployment contract (task 47c4801b):
                          running mount sets, the Cloud SQL socket ITSELF (not the proxy's self-
                          report), and credential ACCEPTANCE with a wrong-key control.
                          Assert-only — every failure prints an executable remedy.
-                         `deploy` runs the pre arm before, and the post arm after, automatically.
+                         'deploy' runs the pre arm before, and the post arm after, automatically.
   push-unversioned       ship the payloads git cannot deliver (gitignored keys, personal-data maps),
                          driven by src/conf/vm-unversioned-manifest.tsv. Rows with local_path '-'
                          are VM-local and only ASSERTED, never copied.
