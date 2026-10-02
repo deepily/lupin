@@ -207,8 +207,7 @@ def extract_blocks( source ):
         after = _skip_annotations( lines, first_line - 1 + count )
         name  = declaration_name( lines, after ) or "<unattached>"
         owner = next( ( name_ for start, end, name_ in spans if start < after < end ), None )
-        declared_here = after < len( lines ) and OWNER_REGEX.match( lines[ after ].strip() ) and not lines[ after ][ :1 ].isspace()
-        if owner is None or declared_here or name in ( "<library>", "<unattached>" ) or name.startswith( f"{owner}." ): symbol = name
+        if owner is None or name in ( "<library>", "<unattached>" ) or name.startswith( f"{owner}." ): symbol = name
         elif name == owner: symbol = f"{owner}.new"
         else: symbol = f"{owner}.{name}"
         seen[ symbol ] = seen.get( symbol, 0 ) + 1
@@ -245,8 +244,8 @@ def build_pairs( root, old_rev, new_rev, prefix=DEFAULT_PREFIX, min_words=30, in
     Ensures:
         - returns ( pairs, report ), pairs in ( file, symbol ) order
         - a pair is one doc block found at old_rev with at least min_words words and a block of the same
-          file and symbol at new_rev; its row is { id, file, symbol, old, new, linked_doc }, id being
-          "file::symbol" and linked_doc None
+          file and symbol at new_rev; its row is { id, file, symbol, old, new, linked_doc, changed }, id being
+          "file::symbol", linked_doc None and changed False for a pair kept only by include_unchanged
         - a pair whose old and new differ only in whitespace is dropped unless include_unchanged
         - the report counts what was not paired and why, so a drop is never silent:
           files_old, files_new, files_only_old, files_only_new, blocks_old, blocks_new, eligible_old,
@@ -261,27 +260,28 @@ def build_pairs( root, old_rev, new_rev, prefix=DEFAULT_PREFIX, min_words=30, in
     report = { "files_old" : len( old_files ), "files_new" : len( new_files ), "files_only_old" : only_old, "files_only_new" : only_new,
                "blocks_old" : 0, "blocks_new" : 0, "eligible_old" : 0,
                "dropped_file_deleted" : 0, "dropped_symbol_gone" : 0, "dropped_unchanged" : 0, "pairs" : 0 }
-    for path in new_files: report[ "blocks_new" ] += len( extract_blocks( _show( root, new_rev, path ) or "" ) )
+    new_blocks = { path : extract_blocks( _show( root, new_rev, path ) or "" ) for path in new_files }
+    report[ "blocks_new" ] = sum( len( blocks ) for blocks in new_blocks.values() )
     pairs = []
     for path in old_files:
         old_blocks = extract_blocks( _show( root, old_rev, path ) or "" )
         report[ "blocks_old" ] += len( old_blocks )
-        new_source = _show( root, new_rev, path )
-        new_by_symbol = { s : t for s, _, t in extract_blocks( new_source ) } if new_source is not None else {}
+        new_by_symbol = { s : t for s, _, t in new_blocks[ path ] } if path in new_blocks else {}
         for symbol, _, old_text in old_blocks:
             if len( old_text.split() ) < min_words: continue
             report[ "eligible_old" ] += 1
-            if new_source is None:
+            if path not in new_blocks:
                 report[ "dropped_file_deleted" ] += 1
                 continue
             if symbol not in new_by_symbol:
                 report[ "dropped_symbol_gone" ] += 1
                 continue
             new_text = new_by_symbol[ symbol ]
-            if squash( old_text ) == squash( new_text ) and not include_unchanged:
+            changed = squash( old_text ) != squash( new_text )
+            if not changed and not include_unchanged:
                 report[ "dropped_unchanged" ] += 1
                 continue
-            pairs.append( { "id" : f"{path}::{symbol}", "file" : path, "symbol" : symbol, "old" : old_text, "new" : new_text, "linked_doc" : None } )
+            pairs.append( { "id" : f"{path}::{symbol}", "file" : path, "symbol" : symbol, "old" : old_text, "new" : new_text, "linked_doc" : None, "changed" : changed } )
     report[ "pairs" ] = len( pairs )
     return pairs, report
 
