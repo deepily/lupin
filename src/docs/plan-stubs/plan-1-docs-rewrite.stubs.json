@@ -1,0 +1,358 @@
+{
+    "plan_ref": "src/rnd/v0.2.2/2026.09.30-lupin-af-documentation-rewrite-plan/2026.09.30-docs-rewrite-implementation-plan.md",
+    "project": "lupin",
+    "prefix": "LUPIN",
+    "plan_number": 1,
+    "plan_name": "Docs rewrite",
+    "correlation_key": "epic:v022-docs-and-reuse",
+    "owner_persona": "cheech",
+    "phases": [
+        {
+            "phase": 0,
+            "name": "Groundwork",
+            "steps": [
+                {
+                    "key": "ph0-s1",
+                    "name": "Re-pin the metrics baseline sha",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "Lupin HEAD sha recorded as the before-metrics baseline",
+                    "done_receipt": "store row a4719227 done"
+                },
+                {
+                    "key": "ph0-s2",
+                    "name": "Docstring and source-text test census",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "Every docstring-asserting test has a D15 disposition",
+                    "done_receipt": "store row be85e010 done"
+                },
+                {
+                    "key": "ph0-s3",
+                    "name": "Live fixtures for the six docstring patterns",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "One live fixture per pattern",
+                    "done_receipt": "store row 14c6a54f done"
+                },
+                {
+                    "key": "ph0-s4",
+                    "name": "Approve the linter lists",
+                    "item_class": "decision",
+                    "priority": "P2",
+                    "acceptance": "Rick approved the acronym, tic and bare-reference lists",
+                    "done_receipt": "store row b42eb0de done"
+                },
+                {
+                    "key": "ph0-s5",
+                    "name": "Record the 2026-09-30 rulings in the Decisions Log",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "Phase 0 exit gate: decisions D1 to D6, D12, D15 recorded in TODO.md",
+                    "done_receipt": "store row 5e2915d0 done"
+                },
+                {
+                    "key": "ph0-s6",
+                    "name": "Confirm deepily/cosa is archived",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "GitHub API reads archived = True",
+                    "done_receipt": "store row 4211c2b3 done"
+                },
+                {
+                    "key": "ph0-s7",
+                    "name": "Update the two live docs naming deepily/cosa",
+                    "item_class": "task",
+                    "priority": "P3",
+                    "acceptance": "SKILL.md and src/cosa/README.md say the repo is archived and src/cosa is in-tree source; Tiberius passes, Cheech merges",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph0-s6"
+                    ]
+                }
+            ]
+        },
+        {
+            "phase": 1,
+            "name": "Linters and verifiers",
+            "steps": [
+                {
+                    "key": "ph1-s1",
+                    "name": "Linters and Phase 0 step 4 draft",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "Rule linters built and warn-mode wired",
+                    "done_receipt": "store row df46926e done"
+                },
+                {
+                    "key": "ph1-s2",
+                    "name": "docs_only_diff verifier",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "Python stripped-AST and Dart comment-token check, reviewed",
+                    "done_receipt": "store row 40e69e8f done, merged in 1953cd470"
+                },
+                {
+                    "key": "ph1-s3",
+                    "name": "contract_diff verifier",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "Requires, Ensures and Raises counts before and after",
+                    "done_receipt": "store row db2800b0 done, merged in 1953cd470"
+                },
+                {
+                    "key": "ph1-s4",
+                    "name": "doc_metrics CLI",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "Per-package tokens and marker rates, before and after",
+                    "done_receipt": "store row 78f1dc07 done, merged in 1953cd470"
+                },
+                {
+                    "key": "ph1-s5",
+                    "name": "prose_judge",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "Rules 2, 3, 4 and 5 judged on changed text only",
+                    "done_receipt": "store row 689fef83 done"
+                },
+                {
+                    "key": "ph1-s6",
+                    "name": "Committed mutation test per doc_lint rule",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "Each rule has a mutant that reddens a named test",
+                    "done_receipt": "store row 0fe17241 done, merged in 1953cd470"
+                },
+                {
+                    "key": "ph1-s7",
+                    "name": "Per-rule precision and recall report",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "Clopper-Pearson figures from a blind sample",
+                    "done_receipt": "store row f5482b4b done"
+                },
+                {
+                    "key": "ph1-s8",
+                    "name": "Warn-mode pre-commit gate demo",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "Fresh clone and fresh worktree demo",
+                    "done_receipt": "store row d37a322b done"
+                },
+                {
+                    "key": "ph1-s9",
+                    "name": "Exit-gate audit, one ticket per gap",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "Audit item by item with a build ticket per gap",
+                    "done_receipt": "store row 90814a58 done"
+                },
+                {
+                    "key": "ph1-s10",
+                    "name": "lupin-mobile warn-mode gate",
+                    "item_class": "task",
+                    "priority": "P5",
+                    "acceptance": "Hook, installer and vendored dartdoc and markdown linters work in lupin-mobile",
+                    "owner_role": "implementer"
+                }
+            ]
+        },
+        {
+            "phase": 2,
+            "name": "Judge harness, no claim lost",
+            "steps": [
+                {
+                    "key": "ph2-s1",
+                    "name": "Claim extractor with quote check",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "Verbatim-quote check discards invented claims",
+                    "done_receipt": "store row 99887a99 done"
+                },
+                {
+                    "key": "ph2-s2",
+                    "name": "Claim judge, Opus escalation, history labels",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "Verdict enum, fail closed",
+                    "done_receipt": "store row 4ee58951 done"
+                },
+                {
+                    "key": "ph2-s3",
+                    "name": "Harness runner with resumable ledger",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "Resumable ledger, off-peak scheduling, repeat-run agreement",
+                    "done_receipt": "store row 3add585a done"
+                },
+                {
+                    "key": "ph2-s4",
+                    "name": "Blind labelled set of 180 pairs",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "At least 60 seeded removals, built by the tester seat",
+                    "done_receipt": "store row 1ed52688 done"
+                },
+                {
+                    "key": "ph2-s5",
+                    "name": "Reader-test rig",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "Blind grader, N runs, mean score old against new",
+                    "done_receipt": "store row cdf12a10 done"
+                },
+                {
+                    "key": "ph2-s6",
+                    "name": "Jev judge adapter",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "Adapter reviewed, thresholds set on dev and frozen",
+                    "done_receipt": "store row 46309646 done"
+                },
+                {
+                    "key": "ph2-s7",
+                    "name": "Gate run and the three-judge comparison report",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "Gate run done; report passes Tiberius and is merged",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph2-s6"
+                    ]
+                },
+                {
+                    "key": "ph2-s8",
+                    "name": "Decide D3: which model judges no claim lost",
+                    "item_class": "decision",
+                    "priority": "P2",
+                    "acceptance": "Rick has ruled Claude or Jev as the judge",
+                    "depends_on": [
+                        "ph2-s7"
+                    ]
+                },
+                {
+                    "key": "ph2-s9",
+                    "name": "Adversarial review and exit-gate report",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "False-pass rate with its 95% upper bound reported",
+                    "owner_role": "reviewer",
+                    "depends_on": [
+                        "ph2-s7"
+                    ]
+                }
+            ]
+        },
+        {
+            "phase": 3,
+            "name": "Pilot",
+            "steps": [
+                {
+                    "key": "ph3-s1",
+                    "name": "Rewrite task_store docstrings, run six checks",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "Six checks pass on src/cosa/rest/task_store_*.py",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph2-s9"
+                    ]
+                },
+                {
+                    "key": "ph3-s2",
+                    "name": "Rewrite one runbook and the CLAUDE.md files",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "Each meets its template",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph2-s9"
+                    ]
+                },
+                {
+                    "key": "ph3-s3",
+                    "name": "Rewrite one src/docs page as a capability page",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "Page passes the markdown linter and claim harness",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph2-s9"
+                    ]
+                },
+                {
+                    "key": "ph3-s4",
+                    "name": "Reader-test questions and answer keys",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "Written by a seat that did not write the rewrites",
+                    "owner_role": "tester",
+                    "depends_on": [
+                        "ph3-s1"
+                    ]
+                },
+                {
+                    "key": "ph3-s5",
+                    "name": "Pilot report with timings and thresholds",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "Timings, false-pass rate, before and after metrics, proposed floors",
+                    "depends_on": [
+                        "ph3-s1"
+                    ]
+                },
+                {
+                    "key": "ph3-s6",
+                    "name": "Sign off the spec and pilot, set floors and threshold",
+                    "item_class": "decision",
+                    "priority": "P2",
+                    "acceptance": "Rick signs off and sets the linter floors and judge threshold",
+                    "depends_on": [
+                        "ph3-s5"
+                    ]
+                },
+                {
+                    "key": "ph3-s7",
+                    "name": "Draft the capability names (before Phase 4)",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "src/wiki INDEX.md lists draft slugs",
+                    "done_receipt": "store row 1328e16d done"
+                },
+                {
+                    "key": "ph3-s8",
+                    "name": "Approve the capability slugs (before Phase 4)",
+                    "item_class": "decision",
+                    "priority": "P2",
+                    "acceptance": "Rick approved the slugs in src/docs/wiki/INDEX.md",
+                    "done_receipt": "store row 7765ea06 done"
+                }
+            ]
+        },
+        {
+            "phase": 4,
+            "name": "Package sweep, 77 packages on a daily train",
+            "steps": [],
+            "expand_trigger": "Phase 3 is signed off"
+        },
+        {
+            "phase": 5,
+            "name": "Reference docs to capability pages",
+            "steps": [],
+            "expand_trigger": "the sweep finishes"
+        },
+        {
+            "phase": 6,
+            "name": "R&D extract-then-archive",
+            "steps": [],
+            "expand_trigger": "Phase 5 finishes"
+        },
+        {
+            "phase": 7,
+            "name": "Ratchet and handover",
+            "steps": [],
+            "expand_trigger": "Phases 4 to 6 finish"
+        }
+    ]
+}

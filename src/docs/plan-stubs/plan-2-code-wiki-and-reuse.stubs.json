@@ -1,0 +1,118 @@
+{
+    "plan_ref": "src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.09.30-reuse-review-implementation-plan.md",
+    "project": "lupin",
+    "prefix": "LUPIN",
+    "plan_number": 2,
+    "plan_name": "Code wiki and Jev reuse review",
+    "correlation_key": "epic:v022-code-reuse-review",
+    "owner_persona": "cheech",
+    "phases": [
+        {
+            "phase": 1,
+            "label": "W-A",
+            "name": "Jev client",
+            "steps": [],
+            "expand_trigger": "E2 exclusion list is approved"
+        },
+        {
+            "phase": 2,
+            "label": "W-B",
+            "name": "Index, duplicates, wiki lint",
+            "steps": [
+                {
+                    "key": "ph2-s1",
+                    "name": "Symbol index and wiki_lint package",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "src/cosa/repo/symindex builds the index and lints pins",
+                    "done_receipt": "store row fffd5bb6 done"
+                },
+                {
+                    "key": "ph2-s2",
+                    "name": "Dart index of lupin-mobile lib/",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "Dart parser comparison and index",
+                    "done_receipt": "store row fdc6e4b6 done"
+                },
+                {
+                    "key": "ph2-s3",
+                    "name": "W-B exit gate: independent 30-module symbol count",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "Independent count over at least 30 modules agrees with the index",
+                    "owner_role": "tester",
+                    "depends_on": [
+                        "ph2-s1"
+                    ]
+                }
+            ]
+        },
+        {
+            "phase": 3,
+            "label": "W-C",
+            "name": "Reuse tools in cosa-voice",
+            "steps": [
+                {
+                    "key": "ph3-s1",
+                    "name": "Four reuse tools against a fake Jev",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "Tools answer with receipts against the request-keyed fake",
+                    "done_receipt": "store row 61dac26a done"
+                },
+                {
+                    "key": "ph3-s2",
+                    "name": "cosa-voice STDIO and reuse-import negative test",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "Integration test passes",
+                    "done_receipt": "store row e068e4a2 done"
+                }
+            ]
+        },
+        {
+            "phase": 4,
+            "label": "W-D",
+            "name": "Wiki bootstrap",
+            "steps": [],
+            "expand_trigger": "Plan 1 Phase 4 finishes"
+        },
+        {
+            "phase": 5,
+            "label": "W-E",
+            "name": "Baseline recall",
+            "steps": [
+                {
+                    "key": "ph5-s1",
+                    "name": "Reuse recall baseline on the OLD docstrings",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "Recall on the duplicate clusters measured before the sweep",
+                    "owner_role": "tester"
+                }
+            ]
+        },
+        {
+            "phase": 6,
+            "label": "W-F",
+            "name": "Review integration",
+            "steps": [],
+            "expand_trigger": "W-E reports and E10 is ruled"
+        },
+        {
+            "phase": 7,
+            "label": "W-G",
+            "name": "Librarian loop",
+            "steps": [],
+            "expand_trigger": "W-F closes"
+        },
+        {
+            "phase": 8,
+            "label": "W-H",
+            "name": "Voice and lupin-mobile (optional)",
+            "steps": [],
+            "expand_trigger": "Rick rules on scope (E9)"
+        }
+    ]
+}

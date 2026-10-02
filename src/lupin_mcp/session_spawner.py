@@ -710,7 +710,8 @@ def default_fleet_gate( requested, config_fn=None, census_fn=None ):
         # leaves it empty, which is right: a caller supplying its own population is
         # stating that population in full.
         sessions = census_fn()
-        counts   = fleet_size_cap.census( sessions, fleet_size_cap.default_counting_classifier,
+        sessions = list( sessions )
+        counts   = fleet_size_cap.census( sessions, fleet_size_cap.counting_classifier_for( sessions ),
                                           unreadable=len( unreadable_paths ) )
         return fleet_size_cap.refusal_for_spawn( requested, counts, cap )
     except Exception as e:

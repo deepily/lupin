@@ -82,18 +82,15 @@ For a complete list of dependencies, see the [requirements.txt](./requirements.t
 
 ### Installation
 
-```bash
-# Clone the repository
-git clone git@github.com:deepily/cosa.git
-cd cosa
+CoSA lives inside the Lupin repository as ordinary in-tree source, folded into it in May 2026. The former standalone repository, `deepily/cosa` on GitHub, is archived and read-only: do not clone it. Clone Lupin instead, and install this directory's dependencies from the checkout:
 
-# Install dependencies
-pip install -r requirements.txt
+```bash
+pip install -r src/cosa/requirements.txt
 ```
 
 ### Usage
 
-CoSA is designed to be used as a submodule/subtree within the parent "Lupin" project (formerly genie-in-the-box), but can also be used independently for agent development.
+CoSA is part of the "Lupin" project (formerly genie-in-the-box) and lives in its `src/cosa/` directory. It is no longer a separate repository or submodule.
 
 **TBD**: Usage examples and API documentation will be provided in future updates.
 
