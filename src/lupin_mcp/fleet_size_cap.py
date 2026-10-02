@@ -60,6 +60,7 @@ pool to the overflow persona and then to UNBOUNDED `Extra-N` seats. 18 requested
 ⚠️ AND THE POOL'S OWN COUNT IS NOT ITS SEAT COUNT: a pool entry with no `voice id` is
 silently skipped by the loader, so `pool_size()` counts voice ids rather than names.
 """
+import functools
 from typing import Any, Callable, Dict, Iterable, Optional
 
 # The fleet-wide default. Deliberately the same figure as the per-manager spawn cap so
@@ -346,6 +347,36 @@ def default_counting_classifier( session_id: str, _find_path: Optional[ Callable
     if fields is None:
         return SEAT_UNKNOWN
     return SEAT_MANAGER if counted_as_manager( *fields ) else SEAT_WORKER
+
+
+def counting_classifier_for( sessions: Iterable ) -> Callable:
+    """
+    A counting classifier that reads each session's OWN bridge file, from the path the
+    census triples already carry.
+
+    Requires:
+        - sessions is a list of (bridge_path, session_id, persona) triples, as returned
+          by `find_active_sessions`; it is iterated once, here
+
+    Ensures:
+        - returns a one-argument classifier, shaped like `default_counting_classifier`
+        - reads exactly one file per classified session, never rescans the directory
+        - a session id absent from `sessions` (or a bare id with no path) classifies as SEAT_UNKNOWN
+        - never raises
+
+    🔴 WHY: the default classifier resolved every id with `find_session_path_by_id`,
+    which globs and json-loads cc-*.json until it hits — sessions x files reads
+    (measured 248,160 visits at 704 files, row ff85f78f). The triples already name the
+    file, so the scan is redundant.
+
+    ⚠️ THE ONE KNOWN DIFFERENCE: the old lookup matched on the first 8 characters of the
+    id, so two seats sharing a prefix could read each other's file. This reads the exact
+    file of each seat.
+    """
+    sessions = list( sessions )
+    paths    = { entry[ 1 ]: entry[ 0 ] for entry in sessions
+                 if isinstance( entry, ( tuple, list ) ) and len( entry ) > 1 }
+    return functools.partial( default_counting_classifier, _find_path=paths.get )
 
 
 def census( sessions: Iterable, is_manager_fn: Callable[ [ str ], bool ],

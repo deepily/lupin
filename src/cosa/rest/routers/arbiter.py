@@ -271,7 +271,7 @@ def _live_fleet_counts():
         # a differently-filtered second reading would break that quietly.
         unreadable = [ ]
         sessions   = find_active_sessions( require_persona=False, unreadable_out=unreadable )
-        return fleet_size_cap.census( sessions, fleet_size_cap.default_counting_classifier,
+        return fleet_size_cap.census( sessions, fleet_size_cap.counting_classifier_for( sessions ),
                                       unreadable=len( unreadable ) )
     except Exception:
         return None
@@ -320,7 +320,7 @@ def _safe_live_counts():
                   "Auth: X-API-Key or Bearer JWT — the same guard as the fleet pane, "
                   "because anyone who can see the fleet should see the cap governing it."
 )
-async def get_fleet_size_cap(
+def get_fleet_size_cap(
     authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ]
 ):
     """
@@ -374,7 +374,7 @@ async def get_fleet_size_cap(
                   "value outside 1..`cc session fleet size cap maximum`. "
                   "Auth: X-API-Key or Bearer JWT — the same guard as the GET."
 )
-async def put_fleet_size_cap(
+def put_fleet_size_cap(
     body                  : FleetSizeCapIn,
     authenticated_user_id : Annotated[ str, Depends( require_api_key_or_jwt ) ]
 ):
