@@ -51,6 +51,7 @@ import uuid
 
 import pytest
 
+from tests.integration.manager_seat import manager_seat, new_seat_ids
 from lupin_mcp.task_store_tools import (
     task_edit_impl,
     task_amend_impl,
@@ -61,7 +62,11 @@ from lupin_mcp.task_store_tools import (
 
 
 BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )   # runner exports LUPIN_TEST_BASE_URL=:8000
-ACTOR    = "tiffany 2e399fd9"   # test actor (prod stamps the bridge identity; here a plain param)
+# The caller is a DECLARED MANAGER SEAT (manager_seat.py): the priority firewall refuses a
+# P2 create from an API-key caller with no declared role, and reads the caller's bridge via the
+# session id on the end of this actor string. Prod stamps the bridge identity; here the module
+# fixture below writes the bridge and removes it.
+SESSION_ID, ACTOR = new_seat_ids()
 
 # task_edit's FREE-EDIT set (5 — post-amendment; owner/manager REMOVED).
 EDITABLE_FIELDS = ( "title", "body", "priority", "gate_class", "urgency" )
@@ -97,6 +102,13 @@ def _api_key():
         return None
 
 
+@pytest.fixture( scope="module", autouse=True )
+def declared_manager_seat():
+    """Hold the manager bridge for every arm in this module; removed at module teardown."""
+    with manager_seat( SESSION_ID ):
+        yield
+
+
 @pytest.fixture( scope="module" )
 def api_key():
     key = _api_key()
@@ -106,7 +118,8 @@ def api_key():
 
 
 def _make_probe( api_key, **overrides ):
-    """Create one fresh, non-terminal probe row for a mutation arm (status=='queued')."""
+    """Create one fresh, non-terminal probe row for a mutation arm (minted queued, or not_approved
+    when the holding-area default is on, which is the case on :8000)."""
     body = {
         "created_by" : ACTOR,
         "item_class" : "task",
@@ -119,7 +132,7 @@ def _make_probe( api_key, **overrides ):
     }
     body.update( overrides )
     item = task_create_impl( BASE_URL, api_key, **body )
-    assert isinstance( item, dict ) and item.get( "status" ) == "queued", f"probe create failed: {item!r}"
+    assert isinstance( item, dict ) and item.get( "status" ) in ( "queued", "not_approved" ), f"probe create failed: {item!r}"
     return item
 
 
