@@ -11701,6 +11701,142 @@
                 }
             }
         },
+        "/api/heartbeat/poke-mute": {
+            "get": {
+                "tags": [
+                    "heartbeat"
+                ],
+                "summary": "Read the fleet switch for the heartbeat Stop poke",
+                "description": "Returns { muted, set_by, set_at }. A missing or unreadable switch file reads as not muted.",
+                "operationId": "get_poke_mute_api_heartbeat_poke_mute_get",
+                "parameters": [
+                    {
+                        "name": "x-api-key",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "X-Api-Key"
+                        }
+                    },
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "put": {
+                "tags": [
+                    "heartbeat"
+                ],
+                "summary": "Admin: turn the heartbeat Stop poke off or back on, fleet-wide",
+                "description": "Body { muted: bool }. Takes effect on each seat's next stop. No timer: it stays as set until an admin flips it. API-key callers and non-admin users get 403.",
+                "operationId": "put_poke_mute_api_heartbeat_poke_mute_put",
+                "parameters": [
+                    {
+                        "name": "x-api-key",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "X-Api-Key"
+                        }
+                    },
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/PokeMuteRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/dm/send": {
             "post": {
                 "tags": [
@@ -14327,6 +14463,19 @@
                 ],
                 "title": "PeerQueueResponse",
                 "description": "One-shot peer queue snapshot."
+            },
+            "PokeMuteRequest": {
+                "properties": {
+                    "muted": {
+                        "type": "boolean",
+                        "title": "Muted"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "muted"
+                ],
+                "title": "PokeMuteRequest"
             },
             "PredictionVoteRequest": {
                 "properties": {

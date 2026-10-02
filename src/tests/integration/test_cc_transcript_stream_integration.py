@@ -136,7 +136,7 @@ class QueueSocket:
     def __init__( self, access_token, subscribed_events, session_id=None ):
         self.access_token      = access_token
         self.subscribed_events = subscribed_events
-        self.session_id        = session_id or f"itest {uuid.uuid4().hex[ :8 ]}"
+        self.session_id        = session_id or f"itest-{uuid.uuid4().hex[ :8 ]}"
         self._socket           = None
         self.auth_frame        = None
 

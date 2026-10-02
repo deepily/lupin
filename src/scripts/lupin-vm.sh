@@ -75,7 +75,7 @@ Usage: lupin-vm.sh [--dry-run] <subcommand> [args]
 
 Instance lifecycle:
   vm-status              show RUNNING / STOPPED / SUSPENDED
-  vm-start               start the instance (needed before SSH; VM is suspended-by-default)
+  vm-start               resume a SUSPENDED instance or start a TERMINATED one (needed before SSH); reports which
   vm-stop                stop the instance (cost control)
 
 SSH:
@@ -109,7 +109,7 @@ Deployment contract (task 47c4801b):
                          running mount sets, the Cloud SQL socket ITSELF (not the proxy's self-
                          report), and credential ACCEPTANCE with a wrong-key control.
                          Assert-only — every failure prints an executable remedy.
-                         `deploy` runs the pre arm before, and the post arm after, automatically.
+                         'deploy' runs the pre arm before, and the post arm after, automatically.
   push-unversioned       ship the payloads git cannot deliver (gitignored keys, personal-data maps),
                          driven by src/conf/vm-unversioned-manifest.tsv. Rows with local_path '-'
                          are VM-local and only ASSERTED, never copied.
@@ -176,7 +176,15 @@ shift || true
 # `gcloud config` project, which may point elsewhere. (This mirrored the same guard in
 # deploy-cloud-test.sh, retired 2026-08-26 — row 0d175dac.)
 require_project() {
-    : "${LUPIN_GCP_PROJECT_ID:?Set LUPIN_GCP_PROJECT_ID (e.g. export LUPIN_GCP_PROJECT_ID=hello-world-foo-423219)}"
+    if [ -z "${LUPIN_GCP_PROJECT_ID:-}" ]; then
+        # --dry-run only prints the command, so it may show a placeholder; --help never gets here.
+        if [ "$DRY_RUN" -eq 1 ]; then
+            LUPIN_GCP_PROJECT_ID="<LUPIN_GCP_PROJECT_ID>"
+            log "LUPIN_GCP_PROJECT_ID is not set; showing a placeholder because this is a --dry-run"
+            return 0
+        fi
+        die "LUPIN_GCP_PROJECT_ID is not set. Export it first, e.g. export LUPIN_GCP_PROJECT_ID=hello-world-foo-423219"
+    fi
 }
 
 # ---- run-or-echo ---------------------------------------------------------
@@ -317,9 +325,37 @@ case "$SUBCMD" in
         ;;
 
     vm-start)
+        # The VM is suspended-by-default, and `instances start` refuses a SUSPENDED instance
+        # (it needs `resume`); a TERMINATED one needs `start`. Read the state, pick the verb,
+        # and say which one ran.
         require_project
-        runit gcloud compute instances start "$VM_NAME" \
-            --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID"
+        if [ "$DRY_RUN" -eq 1 ]; then
+            runit gcloud compute instances describe "$VM_NAME" \
+                --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --format='value(status)'
+            log "(dry-run) would then: SUSPENDED -> resume, TERMINATED/STOPPED -> start, RUNNING -> nothing"
+        else
+            VM_STATE="$( gcloud compute instances describe "$VM_NAME" \
+                --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --format='value(status)' )" \
+                || die "could not read the state of $VM_NAME"
+            case "$VM_STATE" in
+                SUSPENDED|SUSPENDING)
+                    log "$VM_NAME is $VM_STATE: running 'instances resume'"
+                    runit gcloud compute instances resume "$VM_NAME" \
+                        --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID"
+                    ;;
+                TERMINATED|STOPPED)
+                    log "$VM_NAME is $VM_STATE: running 'instances start'"
+                    runit gcloud compute instances start "$VM_NAME" \
+                        --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID"
+                    ;;
+                RUNNING)
+                    log "$VM_NAME is already RUNNING: nothing to do"
+                    ;;
+                *)
+                    die "$VM_NAME is in state '${VM_STATE:-unknown}'; not starting it (wait for the transition to finish, then retry)"
+                    ;;
+            esac
+        fi
         ;;
 
     vm-stop)

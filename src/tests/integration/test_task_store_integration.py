@@ -90,6 +90,8 @@ def _create_body( **overrides ):
         "title"      : "integration probe item",
         "project"    : "lupin",
         "created_by" : "krishna 38d15e3b",
+        # The create route refuses a row with no epic key (task_store_rules); these probes belong to no story.
+        "correlation_key" : "epic:unassigned",
     }
     body.update( overrides )
     return body
@@ -337,10 +339,13 @@ class TestTaskStorePhase2WritePaths:
         """The C1 key is REST-queryable (spool-replay idempotency probe shape)."""
         headers = { "X-API-Key": test_api_key[ "api_key" ] }
         ck      = f"cc-task:{uuid.uuid4()}:5"
-        requests.post( ENDPOINT, json=_create_body( correlation_key=ck ), headers=headers, timeout=10 )
+        minted = requests.post( ENDPOINT, json=_create_body( correlation_key=ck ), headers=headers, timeout=10 ).json()
         requests.post( ENDPOINT, json=_create_body(), headers=headers, timeout=10 )
 
-        r = requests.get( ENDPOINT, headers=headers, timeout=10, params={ "correlation_key": ck } )
+        # A new ticket may start in the holding area ("task approval new tickets start in holding area"),
+        # and the default query hides that status; ask for the status the server actually minted.
+        r = requests.get( ENDPOINT, headers=headers, timeout=10,
+                          params={ "correlation_key": ck, "status": minted[ "status" ] } )
         assert r.status_code == 200
         body = r.json()
         assert body[ "count" ] == 1 and body[ "tasks" ][ 0 ][ "correlation_key" ] == ck
@@ -352,13 +357,14 @@ class TestTaskStorePhase2WritePaths:
         new_ck  = f"cc-task:{uuid.uuid4()}:8"
         created = requests.post( ENDPOINT, json=_create_body( correlation_key=old_ck ), headers=headers, timeout=10 )
         task_id = created.json()[ "id" ]
+        minted_status = created.json()[ "status" ]                        # queued or not_approved, per the holding-area default
 
         r = requests.post( f"{ENDPOINT}/{task_id}/correlate", headers=headers, timeout=10,
                            json={ "correlation_key": new_ck, "actor": "tiffany d03e6219" } )
         assert r.status_code == 200
         body = r.json()
         assert body[ "item" ][ "correlation_key" ] == new_ck
-        assert body[ "item" ][ "status" ] == "queued"                     # status untouched
+        assert body[ "item" ][ "status" ] == minted_status                # status untouched
         assert body[ "event" ][ "transition" ] == "re-correlated"
         assert body[ "event" ][ "reason" ] == f"correlation_key: {old_ck} -> {new_ck}"
 
@@ -466,6 +472,7 @@ class TestTaskStoreWrapperE2E:
             title         = "wrapper-e2e happy-path probe",
             project       = "lupin",
             owner_persona = "krishna",
+            correlation_key = "epic:unassigned",
         )
         assert created.get( "status" ) == "queued", created
         assert created[ "created_by" ] == actor
@@ -508,7 +515,7 @@ class TestTaskStoreWrapperE2E:
 
         created = task_create_impl( api_base_url=BASE_URL, api_key=api_key, created_by=actor,
                                     item_class="task", title="wrapper-e2e blocked+correlate probe",
-                                    project="lupin" )
+                                    project="lupin", correlation_key="epic:unassigned" )
         task_id = created[ "id" ]
         task_transition_impl( api_base_url=BASE_URL, api_key=api_key, actor=actor,
                               task_id=task_id, to_status="in_progress" )

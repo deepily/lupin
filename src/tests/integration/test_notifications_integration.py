@@ -170,6 +170,7 @@ def notification_harness( request ):
 
     import cosa.rest.routers.notifications as notifications_module
     from cosa.rest.routers.notifications import router as notifications_router, get_websocket_manager
+    from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
 
     params = getattr( request, "param", { } ) or { }
 
@@ -208,6 +209,9 @@ def notification_harness( request ):
     app = FastAPI()
     app.include_router( notifications_router )
     app.dependency_overrides[ get_websocket_manager ] = lambda: ws_manager
+    # The door asks for a credential since row e20e249a. These tests are about what
+    # happens AFTER the door, so the caller is named here; the refusal has its own tests.
+    app.dependency_overrides[ require_api_key_or_jwt ] = lambda: "itest-user"
 
     saved_pending = dict( notifications_module.pending_responses )
     notifications_module.pending_responses.clear()

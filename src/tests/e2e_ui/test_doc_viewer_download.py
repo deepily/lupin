@@ -181,3 +181,44 @@ def test_the_button_stays_pinned_below_the_nav_while_scrolling( logged_in_page )
     top = page.evaluate( "() => document.getElementById( 'doc-download-btn' ).getBoundingClientRect().top" )
     assert 56 <= top <= 80, f"after scrolling, the button is at { top }px — hidden under the 56px nav or scrolled away"
     assert page.get_by_test_id( "doc-download-btn" ).is_visible()
+
+
+# ── 📋 Copy (row 20e26936) ────────────────────────────────────────────────────────────────
+# The clipboard write is intercepted in the page rather than read back with clipboard-read,
+# which headless Chromium gates behind a permission grant. What is asserted is the exact text
+# handed to writeText: the raw source, not the rendered page.
+
+def _capture_clipboard( page ):
+    """Replace navigator.clipboard.writeText with a recorder; return nothing, read window.__copied."""
+    page.evaluate( """() => {
+        window.__copied = null;
+        Object.defineProperty( navigator.clipboard, 'writeText',
+            { value: async ( t ) => { window.__copied = t; }, configurable: true } );
+    }""" )
+
+
+def test_copy_puts_the_raw_markdown_on_the_clipboard_not_the_render( logged_in_page ):
+    page = logged_in_page
+    _stub( page, MARKDOWN.encode(), "text/markdown; charset=utf-8" )
+    page.goto( f"{BASE_URL}/app/docs?path=lupin/src/rnd/notes.md" )
+    page.locator( "#doc-viewer-target h1" ).wait_for( timeout=5_000 )
+    _capture_clipboard( page )
+
+    btn = page.get_by_test_id( "doc-copy-btn" )
+    btn.wait_for( state="visible", timeout=5_000 )
+    assert btn.is_enabled()
+    btn.click()
+    page.wait_for_function( "window.__copied !== null", timeout=5_000 )
+    assert page.evaluate( "window.__copied" ) == MARKDOWN
+    assert "Copied" in btn.inner_text()
+
+
+def test_copy_is_disabled_for_media( logged_in_page ):
+    page = logged_in_page
+    _stub( page, MP3, "audio/mpeg" )
+    page.goto( f"{BASE_URL}/app/docs?path=lupin/src/rnd/clip.mp3" )
+    page.locator( "#doc-viewer-target audio" ).wait_for( state="attached", timeout=5_000 )
+
+    btn = page.get_by_test_id( "doc-copy-btn" )
+    btn.wait_for( state="visible", timeout=5_000 )
+    assert btn.is_disabled()

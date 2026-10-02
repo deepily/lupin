@@ -76,7 +76,10 @@ def _tree( repo, name, branch=None ):
 
 
 def _age( path, hours=7 ):
-    old = time.time() - hours * 3600
+    # Aged against NOW, the clock the janitor is handed, never the wall clock. Measured against
+    # time.time() this drifted: 7h before the real time is under 6h before NOW once the real
+    # time passes NOW + 1h, and the tree stopped being swept (red from 12:00 EDT 2026-10-02).
+    old = NOW.timestamp() - hours * 3600
     for p in path.rglob( "*" ):
         if p.is_file() and p.name != ".git":
             os.utime( p, ( old, old ) )

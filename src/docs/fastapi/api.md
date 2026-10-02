@@ -4234,6 +4234,56 @@ Returns { paused, resumes_at, set_by, set_at, push_enabled }. `push_enabled` is 
 | 200 | Successful Response | ... |
 | 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
  |
+## GET `/api/heartbeat/poke-mute`
+
+> **Read the fleet switch for the heartbeat Stop poke**
+
+Returns { muted, set_by, set_at }. A missing or unreadable switch file reads as not muted.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## PUT `/api/heartbeat/poke-mute`
+
+> **Admin: turn the heartbeat Stop poke off or back on, fleet-wide**
+
+Body { muted: bool }. Takes effect on each seat's next stop. No timer: it stays as set until an admin flips it. API-key callers and non-admin users get 403.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### 📦 Request Body 
+
+[PokeMuteRequest](#pokemuterequest)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
 ## POST `/api/dm/send`
 
 > **Send a notification-native AI↔AI direct message (body inline)**
@@ -5385,6 +5435,15 @@ One-shot peer queue snapshot.
 | upstream | object | Raw upstream response body |
 
 
+## PokeMuteRequest
+
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| muted | boolean |  |
+
+
 ## PredictionVoteRequest
 
 
@@ -6163,4 +6222,4 @@ Request model for admin password reset.
 | reason |  | Optional reason for audit trail |
 
 ---
-_Auto-generated on 2026.10.01 12:48:48 by `src/scripts/generate-api-docs.sh`_
+_Auto-generated on 2026.10.02 12:07:58 by `src/scripts/generate-api-docs.sh`_
