@@ -104,6 +104,9 @@ export const HOLDING_BATCH_BLANK_REASON =
  */
 export const HOLDING_BATCH_NO_ROWS = "No rows in this group.";
 
+/** What a story with no ids reports. Carbon copy of notifications.js `_handleHoldingStoryApproveClick`. */
+export const HOLDING_BATCH_NO_ROWS_STORY = "No rows in this story.";
+
 /**
  * The group status line WHILE a batch is running.
  *

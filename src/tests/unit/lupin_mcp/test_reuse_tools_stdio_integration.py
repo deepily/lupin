@@ -196,15 +196,24 @@ def test_when_the_call_log_middleware_import_raises_the_server_says_so_and_still
 
 
 class OverlappingClient( WireClient ):
-    """A client that can have two calls in flight and keeps every response it reads, whichever call it answers."""
+    """
+    A client that can have two calls in flight and keeps every response it reads, whichever call it
+    answers, together with WHEN it sent each call and WHEN it read each answer.
+
+    `answered_at` is the moment THIS process read the line, and lines are read in the order the
+    server wrote them, so comparing two answered_at values compares the server's write order.
+    """
 
     def __init__( self, *a, **k ):
         super().__init__( *a, **k )
-        self.seen = {}
+        self.seen        = {}
+        self.sent_at     = {}
+        self.answered_at = {}
 
     def send_call( self, name, arguments ):
-        """Ensures: sends tools/call without waiting; returns the request id."""
+        """Ensures: sends tools/call without waiting; returns the request id; records the send time."""
         req_id = self._allocate_id()
+        self.sent_at[ req_id ] = time.monotonic()
         self._send( { "jsonrpc": "2.0", "id": req_id, "method": "tools/call", "params": { "name": name, "arguments": arguments } } )
         return req_id
 
@@ -216,28 +225,73 @@ class OverlappingClient( WireClient ):
             if not line: raise RuntimeError( "server closed stdout while a call was pending" )
             try: msg = json.loads( line.decode( "utf-8" ) )
             except json.JSONDecodeError: continue
-            if "id" in msg: self.seen[ msg[ "id" ] ] = msg
+            if "id" in msg:
+                self.seen[ msg[ "id" ] ]        = msg
+                self.answered_at[ msg[ "id" ] ] = time.monotonic()
         return self.seen[ req_id ], time.monotonic() - t0
+
+    def latency( self, req_id ):
+        """Requires: req_id was sent and its answer read. Ensures: returns seconds from send to read."""
+        return self.answered_at[ req_id ] - self.sent_at[ req_id ]
+
+
+# Voice-tool probes sent while the reuse call runs, and what the run must show of them.
+#
+# 🔴 MEASURED 2026-10-02 (row 797a2dc3), one server, the voice tool probed while the index builds:
+#     idle   0.009  0.007  0.006 s
+#     during 0.075  0.015  2.332 s      (the reuse call took 11.3 s)
+# So the voice tool is NOT uniformly fast beside a running build: it hiccups for seconds, because
+# the build thread holds the interpreter lock, and that is a property of the box and the moment.
+# One probe against one wall-clock cap therefore tests the hiccup, not the loop. A loop BLOCKED by
+# the reuse call behaves differently in kind: it answers NO probe until the call has finished.
+# So the evidence is how many probes were answered while the call was still in flight, and what
+# the typical one cost relative to the call itself, both taken in the same run.
+PROBES               = 5
+PROBE_SPACING_SECS   = 0.4
+MIN_ANSWERED_IN_FLIGHT = 3
+STARVATION_RATIO_CEILING = 0.5
 
 
 def test_a_slow_reuse_call_does_not_starve_a_voice_tool( tmp_path ):
     """
     The heartbeat-shaped test for the reuse tools (plan 2 section 5): a seat has ONE STDIO process, so
     a reuse call that blocks the event loop silences every other verb. A fresh index directory forces
-    check_exists into a real index build (seconds), and a voice tool called while it runs must answer
+    check_exists into a real index build (seconds), and voice tools called while it runs must answer
     before it finishes, not after.
+
+    Row 797a2dc3: this used to cap ONE voice tool's wait at a bare 5.0 s, and a whole-tree tier beside
+    a model-calling gate read 5.07 s. A wall-clock cap cannot tell "the loop was blocked" from "the box
+    was slow". The evidence is now taken from the same run, over several probes (see PROBES above):
+        1. at least MIN_ANSWERED_IN_FLIGHT probes were answered while the reuse call was in flight
+        2. the median probe latency is under STARVATION_RATIO_CEILING of the reuse call's own latency
+    A blocked loop answers no probe until the call finishes, so it fails both. A slow or contended box
+    stretches the reuse call and the probes together and leaves most probes answered in flight.
     """
     env = server_env( tmp_path / "data", tmp_path / "out" )
     with OverlappingClient( env=env, cwd=str( REPO ), timeout_seconds=180.0 ) as client:
         client.initialize()
         slow = client.send_call( "check_exists", { "need": "a need that makes the server build its index first" } )
         time.sleep( 1.0 )                                                     # let the server start the build
-        fast = client.send_call( "get_session_info", {} )
-        fast_resp, fast_wait = client.wait_for( fast )
-        slow_done_when_fast_answered = slow in client.seen
-        slow_resp, slow_wait = client.wait_for( slow )
-    assert fast_resp[ "result" ][ "isError" ] is False, "the voice tool answered normally"
-    assert not slow_done_when_fast_answered, "positive control: the reuse call was still in flight when the voice tool answered"
-    assert fast_wait < 5.0, f"the voice tool waited {fast_wait:.1f}s behind a running reuse call: the event loop was blocked"
-    assert slow_wait + fast_wait > 3.0, "the reuse call must have been slow enough to prove anything"
+        probes = []                                                           # ( latency, reuse call still in flight )
+        for _ in range( PROBES ):
+            probe = client.send_call( "get_session_info", {} )
+            resp, _ = client.wait_for( probe )
+            assert resp[ "result" ][ "isError" ] is False, "the voice tool answered normally"
+            probes.append( ( client.latency( probe ), slow not in client.seen ) )
+            if slow in client.seen: break
+            time.sleep( PROBE_SPACING_SECS )
+        slow_resp, _ = client.wait_for( slow )
+        slow_latency = client.latency( slow )
+    in_flight  = [ lat for lat, flying in probes if flying ]
+    latencies  = sorted( lat for lat, _ in probes )
+    median     = latencies[ len( latencies ) // 2 ]
+    assert slow_latency > 3.0, f"the reuse call must have been slow enough to prove anything (took {slow_latency:.2f}s)"
+    assert len( in_flight ) >= MIN_ANSWERED_IN_FLIGHT, (
+        f"only {len( in_flight )} of {len( probes )} voice-tool probes were answered while the reuse call "
+        f"was still running ({slow_latency:.2f}s): the event loop was blocked"
+    )
+    assert median < STARVATION_RATIO_CEILING * slow_latency, (
+        f"the median voice-tool probe took {median:.2f}s against the reuse call's {slow_latency:.2f}s "
+        f"(ceiling {STARVATION_RATIO_CEILING} of it): the event loop was starved"
+    )
     assert slow_resp[ "result" ][ "isError" ] is False
