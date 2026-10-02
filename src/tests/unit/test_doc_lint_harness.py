@@ -191,10 +191,13 @@ def test_a_flag_on_some_other_claim_does_not_count_as_catching_the_seed(tmp_path
     assert [ l[ "misses" ] for l in report[ "lists" ] ] == [ 1, 1 ]
 
 
-def test_a_removed_claim_the_extractor_never_listed_is_a_miss(tmp_path):
+def test_a_removed_claim_the_extractor_never_listed_is_caught_only_by_the_flag_on_its_stretch(tmp_path, monkeypatch):
+    monkeypatch.setattr( ce, "MIN_RUN_WORDS", 2 )  # the fixture lines are short; the shipped minimum is 11 words
+    # Row ed2f9b4e: the stretch no kept quote covers is asked for once more and, still uncovered, flagged for a person.
+    # Before the fix this pair was a plain miss; the flag is scored as a catch only because it overlaps the seeded span.
     report = report_for( [ pair( "unlisted", L1 + "\n" + L3, seeded=L2 ) ], model=FakeModel( skip=( L2, ) ), tmp_path=tmp_path )
-    assert [ l[ "misses" ] for l in report[ "lists" ] ] == [ 1, 1 ]
-    assert report[ "mean_uncovered" ] > 0.0
+    assert [ ( l[ "misses" ], l[ "caught_by_flag_only" ] ) for l in report[ "lists" ] ] == [ ( 0, 1 ), ( 0, 1 ) ]
+    assert report[ "mean_uncovered" ] > 0.0 and report[ "reextract_calls" ] == 2
 
 
 def test_an_edit_to_an_unseeded_pair_counts_as_a_false_alarm(tmp_path):
@@ -233,7 +236,7 @@ def test_a_report_with_no_pairs_has_no_figures():
 def synthetic( n, missed=0, unseeded=0, alarmed=0, flip_second_list_misses=False ):
     """n seeded pairs (the first `missed` flag nothing), then `unseeded` pairs (the first `alarmed` flag a claim)."""
     row  = lambda verdict: { "verdict": verdict, "escalated": False }
-    flag = { "claims": [ { "start": 0, "end": 10, "quote": "q" } ], "discarded": 0, "uncovered": 0.0, "longest_quote": 0.25, "runs": [ [ row( "absent" ) ] ] * 3 }
+    flag = { "claims": [ { "start": 0, "end": 10, "quote": "q" } ], "discarded": 0, "discards": [], "flags": [], "flag_words": [], "reextract_calls": 0, "parse_failed": False, "retry_calls": 0, "uncovered": 0.0, "longest_quote": 0.25, "runs": [ [ row( "absent" ) ] ] * 3 }
     calm = dict( flag, runs=[ [ row( "present" ) ] ] * 3 )
     out  = []
     for i in range( n ):
@@ -374,6 +377,7 @@ def test_the_judge_ledger_key_follows_the_claim_list_so_an_extractor_change_reru
     monkeypatch.setattr( ce, "PROMPT_VERSION", "extractor-changed" )
     rerun = FakeModel( skip=( L1, ) )  # the changed extractor now lists two claims, not three
     result = run( [ pair( "p", L1 + "\n" + L3 ) ], hn.Ledger( path ), rerun )
+    # the stretch the changed extractor leaves uncovered is under the 11-word flag minimum, so no re-extraction (ed2f9b4e)
     assert [ k for k, _ in rerun.calls ].count( "extract" ) == 2 and [ k for k, _ in rerun.calls ].count( "judge" ) == 6
     assert all( len( lst[ "claims" ] ) == len( lst[ "runs" ][ 0 ] ) == 2 for lst in result[ 0 ][ "lists" ] )
 
@@ -481,3 +485,17 @@ def test_seeded_claim_agreement_alone_can_block_the_gate_when_overall_agreement_
     report = hr.build_report( wobbly, CONFIG )
     assert report[ "agreement_all" ][ "rate" ] >= 0.95 > report[ "agreement_seeded" ][ "rate" ]
     assert report[ "agreement_ok" ] is False
+
+
+def test_the_command_line_survives_an_unreadable_reply_keeps_it_and_prints_the_count(tmp_path, capsys):
+    from cosa.repo.doc_lint import harness_cli as cli
+    ( tmp_path / "pairs.json" ).write_text( json.dumps( [ pair( "seeded", L1 + "\n" + L3, seeded=L2 ) ] ) )
+    async def junk( prompt, options ):
+        yield AssistantMessage( content=[ TextBlock( "{\"claims\": []}\n{\"claims\": []}" ) ], model=options.model )
+    raw = tmp_path / "raw.jsonl"
+    assert cli.main( cli_args( tmp_path ) + [ "--raw-failures", str( raw ) ], query_fn=junk ) == 0
+    written = json.loads( ( tmp_path / "out.json" ).read_text() )
+    assert written[ "parse_failed_pairs" ] == 1 and written[ "retry_calls" ] == 2 and written[ "lists" ][ 0 ][ "misses" ] == 1
+    rows = [ json.loads( l ) for l in raw.read_text().splitlines() ]
+    assert len( rows ) == 4 and "Extra data" in rows[ 0 ][ "error" ] and rows[ 0 ][ "id" ] == "seeded"
+    assert "parse_failed_pairs=1 retry_calls=2" in capsys.readouterr().out

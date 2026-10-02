@@ -116,7 +116,7 @@ def test_the_extractor_version_is_the_hash_of_its_whole_module_source():
     import inspect
     source = inspect.getsource( ce )
     assert ce.PROMPT_VERSION == mt.prompt_version( "extractor", source )
-    for constant in ( "SENTENCE_END = ", "_FENCE       = ", "MAX_QUOTE_SHARE = ", "SYSTEM_PROMPT = " ):
+    for constant in ( "SENTENCE_END = ", "_FENCE       = ", "MAX_QUOTE_SHARE  = ", "SYSTEM_PROMPT = " ):
         assert constant in source and mt.prompt_version( "extractor", source.replace( constant, "# moved\n" + constant, 1 ) ) != ce.PROMPT_VERSION
 
 
@@ -165,6 +165,7 @@ def test_locate_quote_matches_across_wrapping_and_markdown():
     assert OLD[ start:end ] == "The `chase` window is *ten* minutes."
 
 
+# Row ed2f9b4e: the floors are law here on purpose. "is blank" is 2 words of 8 characters, under the character floor of 10.
 @pytest.mark.parametrize( "quote", [ "Returns", "is blank", "Returns None when the row is released.", "" ] )
 def test_locate_quote_refuses_short_or_absent_quotes( quote ):
     assert ce.locate_quote( quote, OLD ) is None
@@ -284,9 +285,10 @@ def test_extract_claims_refuses_blank_text_and_a_blank_model():
         run( ce.extract_claims( OLD, "", query_fn=make_query( sentence_extractor ) ) )
 
 
-def test_extract_claims_raises_on_a_reply_off_contract():
-    with pytest.raises( ce.ExtractionParseError ):
-        run( ce.extract_claims( OLD, "m", query_fn=make_query( lambda prompt: "sure, here are the claims" ) ) )
+def test_extract_claims_does_not_raise_on_a_reply_off_contract_it_flags_the_whole_text():
+    result = run( ce.extract_claims( OLD, "m", query_fn=make_query( lambda prompt: "sure, here are the claims" ) ) )
+    assert result.parse_failed is True and result.retry_calls == 1 and result.claims == []
+    assert [ tuple( f ) for f in result.flags ] == [ ( 0, len( OLD ) ) ] and result.flag_words == [ len( OLD.split() ) ]
 
 
 # ---- quote bounds, tag break-out, and the guards that each need their own input ---------------
@@ -326,7 +328,10 @@ def test_a_closing_tag_inside_the_old_text_cannot_end_the_data_block():
 
 
 def test_each_length_threshold_is_enforced_on_its_own():
-    assert ce.locate_quote( "parked_status flag", "Set the parked_status flag first." ) is None
+    # Row ed2f9b4e: the floors are 2 words and 10 characters for a quote that occurs once, so a unique two-word quote of
+    # 18 characters now verifies; it was refused at the old floor of three words.
+    assert ce.locate_quote( "parked_status flag", "Set the parked_status flag first." ) is not None
+    assert ce.locate_quote( "parked_status", "Set the parked_status flag first." ) is None
     assert ce.locate_quote( "a is b", "Set a is b first, then continue." ) is None
     assert ce.locate_quote( "parked_status flag set", "Set the parked_status flag set first." ) is not None
 
