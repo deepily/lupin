@@ -65,10 +65,7 @@
                     "item_class": "task",
                     "priority": "P3",
                     "acceptance": "SKILL.md and src/cosa/README.md say the repo is archived and src/cosa is in-tree source; Tiberius passes, Cheech merges",
-                    "owner_role": "implementer",
-                    "depends_on": [
-                        "ph0-s6"
-                    ]
+                    "done_receipt": "commit 2cbbfc0e3"
                 }
             ]
         },
@@ -216,10 +213,7 @@
                     "item_class": "task",
                     "priority": "P2",
                     "acceptance": "Gate run done; report passes Tiberius and is merged",
-                    "owner_role": "implementer",
-                    "depends_on": [
-                        "ph2-s6"
-                    ]
+                    "done_receipt": "commit 5bc901ab3"
                 },
                 {
                     "key": "ph2-s8",
