@@ -388,6 +388,9 @@
                     <button type="button" id="doc-upload-btn" class="doc-download-btn"
                             data-testid="doc-upload-btn" hidden
                             title="Upload a file into this folder (or drop one on the listing)">⬆ Upload</button>
+                    <button type="button" id="doc-copy-btn" class="doc-download-btn"
+                            data-testid="doc-copy-btn" hidden
+                            title="Copy the raw text of this file to the clipboard">📋 Copy</button>
                     <button type="button" id="doc-download-btn" class="doc-download-btn"
                             data-testid="doc-download-btn" hidden
                             title="Download the original file, without the viewer around it">⬇ Download</button>
@@ -611,6 +614,7 @@
                 const contentType = response.headers.get( 'content-type' ) || '';
                 if ( !contentType.includes( 'application/json' ) || /\.json$/i.test( filename ) ) {
                     wireDownload( fetchUrl, filename );
+                    wireCopy( fetchUrl, isCopyableType( contentType, filename ) );
                     wireFolder( folderPathFor( rawPath, apiPath === '/api/io/file' && firstSeg !== 'io' ) );
                 }
 
@@ -813,6 +817,85 @@
                     a.remove();
                     // Revoke after the browser has taken the bytes, not synchronously.
                     setTimeout( () => URL.revokeObjectURL( url ), 60000 );
+                } catch ( err ) {
+                    status.textContent = err.message;
+                } finally {
+                    btn.disabled = false;
+                }
+            } );
+        }
+
+        // Row 20e26936 — 📋 Copy: the raw text on the clipboard, not the rendered page.
+        //
+        // Requires:
+        //     - contentType is the response's Content-Type header ( may be empty )
+        //     - filename is the last path segment
+        // Ensures:
+        //     - true for text/* ( markdown, source, plain text ) and for a .json FILE
+        //     - false for images, audio, video, PDF and every other binary type
+        //     - a directory listing never reaches here ( it returns before the bar is wired )
+        function isCopyableType( contentType, filename ) {
+            if ( contentType.startsWith( 'text/' ) ) return true;
+            return contentType.includes( 'application/json' ) && /\.json$/i.test( filename || '' );
+        }
+
+        // Puts `text` on the clipboard, or throws.
+        //
+        // ⚠️ navigator.clipboard exists only in a SECURE context ( https or localhost ). The
+        // viewer is often opened over plain http on a LAN host, where it is undefined, so the
+        // fallback is a hidden textarea + execCommand( "copy" ) rather than a dead button.
+        async function writeToClipboard( text ) {
+            if ( navigator.clipboard && navigator.clipboard.writeText ) {
+                await navigator.clipboard.writeText( text );
+                return;
+            }
+            const ta = document.createElement( 'textarea' );
+            ta.value = text;
+            ta.setAttribute( 'readonly', '' );
+            ta.style.position = 'fixed';
+            ta.style.opacity  = '0';
+            document.body.appendChild( ta );
+            ta.select();
+            let ok = false;
+            try {
+                ok = document.execCommand( 'copy' );
+            } finally {
+                ta.remove();
+            }
+            if ( !ok ) throw new Error( 'Copy failed: the browser refused clipboard access' );
+        }
+
+        // Requires:
+        //     - fetchUrl is the same API URL the page itself loaded
+        //     - copyable is the verdict of isCopyableType()
+        // Ensures:
+        //     - the button is shown; DISABLED with an explanatory title when not copyable
+        //     - a click re-requests the raw body through authedFetch, since the page kept only
+        //       the rendered form, and copies it; the label reads "✓ Copied" for 1.5s
+        //     - any failure is said beside the button, never in a browser dialog
+        function wireCopy( fetchUrl, copyable ) {
+            const bar    = document.getElementById( 'doc-viewer-toolbar' );
+            const btn    = document.getElementById( 'doc-copy-btn' );
+            const status = document.getElementById( 'doc-download-status' );
+            if ( !bar || !btn || btn.dataset.wired === 'true' ) return;
+            btn.dataset.wired = 'true';
+            bar.hidden = false;
+            btn.hidden = false;
+            if ( !copyable ) {
+                btn.disabled = true;
+                btn.title    = 'Only text files can be copied — use ⬇ Download for this file type';
+                return;
+            }
+            const label = btn.textContent;
+            btn.addEventListener( 'click', async () => {
+                btn.disabled       = true;
+                status.textContent = '';
+                try {
+                    const resp = await window.__docViewerAuthedFetch( fetchUrl, {} );
+                    if ( !resp.ok ) throw new Error( 'Copy failed (HTTP ' + resp.status + ')' );
+                    await writeToClipboard( await resp.text() );
+                    btn.textContent = '✓ Copied';
+                    setTimeout( () => { btn.textContent = label; }, 1500 );
                 } catch ( err ) {
                     status.textContent = err.message;
                 } finally {
