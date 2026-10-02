@@ -393,3 +393,42 @@ def test_the_flag_words_are_counted_per_run_in_an_extraction():
     first = reply( COVER_ALL[ 0 ], COVER_ALL[ 2 ] )
     out   = extract( [ first, "not json" ] )
     assert list( out.flag_words ) == [ len( COVER_ALL[ 1 ].split() ) ]
+
+
+# ---- review follow-ups, second round (Tiberius, row ed2f9b4e) ----
+
+CONFIG2 = hn.HarnessConfig( "e", "j", "x", "w", 2, 1 )
+
+
+def two_list_results( flags0, flags1, n=100, words0=( 12, ), words1=( 12, ) ):
+    """n unseeded pairs, two extractor lists; list 0 flags the first flags0 pairs, list 1 the first flags1."""
+    def one( flagged, words ):
+        return lst( flags=[ ( 0, 5 ) ] if flagged else (), claims=[ ( 0, 3 ) ] ) | ( { "flag_words": list( words ) } if flagged else {} )
+    return [ { "id": i, "seed_span": None, "lists": [ one( i < flags0, words0 ), one( i < flags1, words1 ) ] } for i in range( n ) ]
+
+
+def test_the_flag_ceiling_must_hold_in_every_list_not_in_any_one():
+    assert hr.build_report( two_list_results( 5, 16 ), CONFIG2 )[ "flagged_ok" ] is False
+    assert hr.build_report( two_list_results( 16, 5 ), CONFIG2 )[ "flagged_ok" ] is False
+    assert hr.build_report( two_list_results( 5, 15 ), CONFIG2 )[ "flagged_ok" ] is True
+
+
+def test_the_mean_flag_length_is_a_mean_over_the_runs_of_a_list_and_over_all_lists():
+    out = hr.build_report( two_list_results( 2, 2, n=4, words0=( 4, ), words1=( 10, ) ), CONFIG2 )
+    assert [ l[ "mean_flag_words" ] for l in out[ "lists" ] ] == [ 4, 10 ]
+    assert out[ "mean_flag_words" ] == 7, "the mean over all four runs (4, 4, 10, 10), not their maximum or the first list's"
+    mixed = hr.build_report( two_list_results( 2, 0, n=4, words0=( 4, 8 ) ), CONFIG2 )
+    assert mixed[ "lists" ][ 0 ][ "mean_flag_words" ] == 6 and mixed[ "lists" ][ 1 ][ "mean_flag_words" ] is None
+
+
+def test_the_runner_carries_the_flag_word_counts_of_a_frozen_list_into_the_report( tmp_path ):
+    ledger = hn.Ledger( str( tmp_path / "l.jsonl" ) )
+    pair   = { "id": "p", "old": OLD, "new": OLD, "seed_span": None }
+    async def no_model( prompt, options ): raise AssertionError( "a model was called" ); yield
+    config = hn.HarnessConfig( "e", "j", "x", "w", 1, 1 )
+    ledger.put( hn.ledger_key( "extract", pair, ce.PROMPT_VERSION, "e", 0 ),
+                { "claims": [], "discarded": 0, "discards": [], "flags": [ [ 0, 40 ], [ 50, 70 ] ], "flag_words": [7, 9],
+                  "reextract_calls": 0, "uncovered": 1.0, "longest_quote": 0.0 } )
+    result = asyncio.run( hn.run_pair( pair, config, ledger, query_fn=no_model ) )
+    assert result[ "lists" ][ 0 ][ "flag_words" ] == [ 7, 9 ]
+    assert hr.build_report( [ result ], config )[ "mean_flag_words" ] == 8
