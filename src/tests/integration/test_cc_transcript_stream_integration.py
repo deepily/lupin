@@ -63,6 +63,7 @@ never ahead of it, or the integration gate reddens for a reason that is not a de
 That sequencing is the Manager's to hold.
 """
 
+import glob
 import json
 import os
 import shutil
@@ -323,8 +324,34 @@ class SeatFixture:
             if os.path.exists( path ): os.remove( path )
 
 
+@pytest.fixture( scope="session" )
+def swept_cc_itest_bridges():
+    """
+    Remove `cc-itest-*.json` bridges a crashed earlier run left in the live sessions directory.
+
+    The fixture bridge lives in the sessions directory itself (see `SeatFixture`), carries no
+    cc_pid and no tmux_session, and so is never reaped by `orphan_bridge_reaper` (it needs a
+    confirmed-dead pid) and reads as real contact to the serial bridge guard. Teardown removes it
+    on a normal run; this removes what a killed run could not.
+
+    Ensures:
+        - every `cc-itest-*.json` directly under HOST_SESSIONS_DIR is gone once per pytest session
+        - returns the list of paths it removed
+        - a file that vanishes between listing and removal is not an error
+    """
+    removed = [ ]
+    if os.path.isdir( HOST_SESSIONS_DIR ):
+        for path in glob.glob( os.path.join( HOST_SESSIONS_DIR, "cc-itest-*.json" ) ):
+            try:
+                os.remove( path )
+                removed.append( path )
+            except FileNotFoundError:
+                pass
+    return removed
+
+
 @pytest.fixture( scope="function" )
-def seat_fixture():
+def seat_fixture( swept_cc_itest_bridges ):
     """
     A fixtured seat under the bind-mounted sessions directory, cleaned up afterwards.
 
