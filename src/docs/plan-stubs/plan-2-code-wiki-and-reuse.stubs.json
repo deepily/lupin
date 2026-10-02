@@ -9,13 +9,15 @@
     "phases": [
         {
             "phase": 1,
-            "name": "W-A Jev client",
+            "label": "W-A",
+            "name": "Jev client",
             "steps": [],
             "expand_trigger": "E2 exclusion list is approved"
         },
         {
             "phase": 2,
-            "name": "W-B index, duplicates, wiki lint",
+            "label": "W-B",
+            "name": "Index, duplicates, wiki lint",
             "steps": [
                 {
                     "key": "ph2-s1",
@@ -48,7 +50,8 @@
         },
         {
             "phase": 3,
-            "name": "W-C reuse tools in cosa-voice",
+            "label": "W-C",
+            "name": "Reuse tools in cosa-voice",
             "steps": [
                 {
                     "key": "ph3-s1",
@@ -70,13 +73,15 @@
         },
         {
             "phase": 4,
-            "name": "W-D wiki bootstrap",
+            "label": "W-D",
+            "name": "Wiki bootstrap",
             "steps": [],
             "expand_trigger": "Plan 1 Phase 4 finishes"
         },
         {
             "phase": 5,
-            "name": "W-E baseline recall",
+            "label": "W-E",
+            "name": "Baseline recall",
             "steps": [
                 {
                     "key": "ph5-s1",
@@ -90,19 +95,22 @@
         },
         {
             "phase": 6,
-            "name": "W-F review integration",
+            "label": "W-F",
+            "name": "Review integration",
             "steps": [],
             "expand_trigger": "W-E reports and E10 is ruled"
         },
         {
             "phase": 7,
-            "name": "W-G librarian loop",
+            "label": "W-G",
+            "name": "Librarian loop",
             "steps": [],
             "expand_trigger": "W-F closes"
         },
         {
             "phase": 8,
-            "name": "W-H voice and lupin-mobile (optional)",
+            "label": "W-H",
+            "name": "Voice and lupin-mobile (optional)",
             "steps": [],
             "expand_trigger": "Rick rules on scope (E9)"
         }
