@@ -346,8 +346,8 @@ def test_the_prose_judge_still_refuses_a_two_word_sentence_whatever_its_length()
     assert pj.locate_line( "Longer sentence of five words.", item ) == 5
 
 
-def test_the_default_minimum_run_is_ten_words_as_measured_on_dev( monkeypatch ):
+def test_the_default_minimum_run_is_eleven_words_as_measured_on_dev_per_list( monkeypatch ):
     monkeypatch.undo()
-    assert ce.MIN_RUN_WORDS == 10
-    nine, ten = " ".join( f"word{n}" for n in range( 9 ) ), " ".join( f"word{n}" for n in range( 10 ) )
-    assert ce.uncovered_runs( nine, [] ) == [] and ce.uncovered_runs( ten, [] ) == [ ( 0, len( ten ) ) ]
+    assert ce.MIN_RUN_WORDS == 11
+    ten, eleven = " ".join( f"word{n}" for n in range( 10 ) ), " ".join( f"word{n}" for n in range( 11 ) )
+    assert ce.uncovered_runs( ten, [] ) == [] and ce.uncovered_runs( eleven, [] ) == [ ( 0, len( eleven ) ) ]

@@ -192,7 +192,7 @@ def test_a_flag_on_some_other_claim_does_not_count_as_catching_the_seed(tmp_path
 
 
 def test_a_removed_claim_the_extractor_never_listed_is_caught_only_by_the_flag_on_its_stretch(tmp_path, monkeypatch):
-    monkeypatch.setattr( ce, "MIN_RUN_WORDS", 2 )  # the fixture lines are short; the shipped minimum is 10 words
+    monkeypatch.setattr( ce, "MIN_RUN_WORDS", 2 )  # the fixture lines are short; the shipped minimum is 11 words
     # Row ed2f9b4e: the stretch no kept quote covers is asked for once more and, still uncovered, flagged for a person.
     # Before the fix this pair was a plain miss; the flag is scored as a catch only because it overlaps the seeded span.
     report = report_for( [ pair( "unlisted", L1 + "\n" + L3, seeded=L2 ) ], model=FakeModel( skip=( L2, ) ), tmp_path=tmp_path )
@@ -377,7 +377,7 @@ def test_the_judge_ledger_key_follows_the_claim_list_so_an_extractor_change_reru
     monkeypatch.setattr( ce, "PROMPT_VERSION", "extractor-changed" )
     rerun = FakeModel( skip=( L1, ) )  # the changed extractor now lists two claims, not three
     result = run( [ pair( "p", L1 + "\n" + L3 ) ], hn.Ledger( path ), rerun )
-    # the stretch the changed extractor leaves uncovered is under the 10-word flag minimum, so no re-extraction (ed2f9b4e)
+    # the stretch the changed extractor leaves uncovered is under the 11-word flag minimum, so no re-extraction (ed2f9b4e)
     assert [ k for k, _ in rerun.calls ].count( "extract" ) == 2 and [ k for k, _ in rerun.calls ].count( "judge" ) == 6
     assert all( len( lst[ "claims" ] ) == len( lst[ "runs" ][ 0 ] ) == 2 for lst in result[ 0 ][ "lists" ] )
 
