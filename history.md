@@ -8,6 +8,15 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.10.02 - Session 76f0cdab (Mr. Radio 🦉, manager; crew Chloé 🗼, Krishna 🦚, John 🏄🏽) | Poke toggle and worktree janitor landed; VM spawns default to Sonnet; Rick's 7 blockers ruled and worked; integration 66 → 50 reds
+
+- **Landed on the working branch (not pushed)**: `49f987d75` poke toggle + janitor (evacuate, archive, 14-day sweep) · `b098aa6f5` VM model pin · `3a6d805ec`/`92e0185e9`/`222ba140c` eval lineage fix, 15-minute per-file cap, Krishna's integration fixes, two-click approve · `f7e8890e1` DB-login guard rail, repo side (`80513825`) · `9718cf97c` section D rebaseline (`aee3ab5b`) · `38dd62dc4` task_create description (`a8a2651d`, María reviewed) · `06dfba7e6` suite-lineage jobs skip the correctness ask (`4cbd4858`), manager-seat callers, guarded `lupin_db_test` seeder, :8000 gets its own sessions folder, holding-area label never shows a raw key (`0d6d4387`) · `6e160dcb8` edit-parity probe gets an epic key.
+- **Rick's rulings at 21:00 (all 7 blockers, direct asks)**: VM config (he added the header, I did the rest) · seed fixture, test DB only · rebaseline section D · VM roster persona Cheech · separate :8000 sessions folder · skip the eval wait for suite jobs · sudo steps tomorrow 10 to 1.
+- **VM (`c9252819` P0)**: `~/.lupin/config` `[local]` filled, cosa-voice re-registered with the config args; all 4 spawn roles resolve to Sonnet 5.5. Owed: one real spawn after a VM session restarts. `72781b05` closed (roster line, preflight C11 OK).
+- **Integration on `06dfba7e6` (`ts-38f000d5`)**: 401 passed, 34 failed, 16 errors in 27 min (was 50/16, and hours long). Causes grouped on `d849a6d9`. The next one is the ratio gate in the test DB; the fix is one `[Lupin: Testing]` INI line, which waits on Rick's uncommitted fleet-cap edit in `lupin-app.ini`.
+- **Rows closed**: `72781b05`, `0d6d4387`, `a8a2651d`, `20e26936`, `a3c59f2d`, `376dd4cb`, `3526fb95`. Workers reaped with mementos in `io/mementos/`. Sudo runbook: `io/findings-80513825-sudo-runbook.md`.
+- **Files**: history.md; code via reviewed merges only.
+
 ### 2026.10.01 - Session 37cbc13d (Cheech 🌿, manager; crew Sam 🎙️, Maya 🌻, Tiberius 👑, John 🏄🏽, Chloé 🗼) | v0.2.2 judge harness, doc tools and Jev adapter merged; gate run finished; e2e slowdown diagnosed; pushed on Rick's word
 
 - **Merged, each with Tiberius PASS (head `06503a6f1`)**: `c8b4818cc` claim harness + prose judge · `c770d3e90` between-suites reset fix (`07dde530`) · `26ff4b99f` precision/recall report (`f5482b4b`) · `0c617d906` Jev adapter · `1953cd470` Maya's doc tools + `judge_comparison.py` + hermetic harness (`46309646`) · `06503a6f1` dotted dates + MCP-tool exemption. Plan 1 Rulings R.9, R.10, B4 written.
