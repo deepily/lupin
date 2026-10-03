@@ -49,7 +49,7 @@ SHORT_WORDS  = ( 2, 3 )
 WEAKEN_CLASSES = ( "negation", "quantifier", "modal", "number", "qualifier" )
 
 SHARED_CALL_LEDGER = "/mnt/DATA01/include/www.deepily.ai/projects-data/lupin/fable-call-ledger.jsonl"
-WRITER_SPLITS      = ( "dev", "gate" )
+WRITER_SPLITS      = ( "dev", "gate", "gate-reserve" )
 
 REWORD_INSTRUCTION       = "Reword every sentence. Keep the meaning, add nothing, drop nothing."
 DESIGN_PROSE_INSTRUCTION = "Write this sentence as a paragraph of design prose."
@@ -600,6 +600,23 @@ def check_plan_hash( plan ):
     if plan.get( "plan_sha256" ) != plan_hash( plan ): raise ValueError( f"plan for {plan[ 'split' ]} does not match the hash taken when it was drawn" )
 
 
+def check_reserve_plan_hash( base, plan ):
+    """
+    Refuse a reserve plan that is not the one plan drew, by the hash plan wrote beside it.
+
+    Requires:
+        - base is the gate output root, where plan wrote plan-hashes.json next to the split folders
+        - plan is the loaded reserve plan
+
+    Raises:
+        - ValueError when plan-hashes.json is missing, unreadable, lacks reserve_plan_sha256, or holds a hash that is not the plan's hash now
+    """
+    path = os.path.join( base, "plan-hashes.json" )
+    if not os.path.exists( path ): raise ValueError( f"{path} is missing: the reserve plan cannot be checked against the hash taken when it was drawn" )
+    recorded = json.loads( open( path, encoding="utf-8" ).read() ).get( "reserve_plan_sha256" )
+    if recorded != plan_hash( plan ): raise ValueError( f"reserve plan does not match reserve_plan_sha256 in {path}" )
+
+
 def check_ledger_identity( rows, model=None ):
     """
     Refuse a writer ledger whose rows disagree on the writer model or prompt, with each other or with now.
@@ -760,22 +777,28 @@ def cmd_write( args, query_fn=None ):
     Returns the exit code: 0 done, 2 refused, 3 a call cap stopped the run, 4 the first (canary) call failed,
     5 --max-consecutive-failures tasks in a row failed twice, 6 the run finished but dropped at least one task.
 
+    The split may be dev, gate or gate-reserve. A reserve write first compares the reserve plan with
+    reserve_plan_sha256 in plan-hashes.json in --base (the gate output root) and refuses on a mismatch.
+    --call-hold is required: the writer model's cap is lowered by that many calls before the budget is set, so no
+    call can pass cap minus hold, and the run is refused up front when the calls already spent on the ledger plus
+    two calls for each pending task (a retry counted) would pass it.
+
     --claude-cli-path is required: the binary and its version go on every ledger row and into the printed summary.
     --approved-calls bounds the pending TASKS (a dropped task is pending again). A task that fails is called a second
-    time, so calls can reach twice the approved count before the model cap stops them. The 10% hold of spec part 3
-    item 3 (cap, minus 10%, minus calls spent, read from the ledger) is not enforced here: it rests on the number
-    the approver gives.
+    time, so calls can reach twice the approved count; --call-hold bounds the calls.
     A plan edited after it was drawn, a ledger written by another model or prompt, or a ledger row for different
     task text (a plan redrawn into the same files) is refused with exit 2.
     """
     import asyncio
     if args.split not in WRITER_SPLITS:
-        print( f"REFUSED: the call cap covers {', '.join( WRITER_SPLITS )} only; {args.split} needs a second figure from Rick", file=sys.stderr )
+        print( f"REFUSED: the call cap covers {', '.join( WRITER_SPLITS )} only; {args.split} is not a Python split the writer builds", file=sys.stderr )
         return 2
     try:
         check_writer_model( args.writer_model, { "extractor": args.extractor_model, "judge": args.judge_model, "escalation": args.escalation_model } )
         caps = { m: int( n ) for m, _, n in ( c.rpartition( "=" ) for c in args.model_cap ) }
         if args.writer_model not in caps: raise ValueError( f"--model-cap {args.writer_model}=N is required" )
+        if args.call_hold < 0 or args.call_hold > caps[ args.writer_model ]: raise ValueError( f"--call-hold must be between 0 and the writer cap {caps[ args.writer_model ]}, got {args.call_hold}" )
+        caps[ args.writer_model ] -= args.call_hold
         if os.path.realpath( args.call_ledger ) != os.path.realpath( SHARED_CALL_LEDGER ): raise ValueError( f"--call-ledger must be the shared ledger {SHARED_CALL_LEDGER}" )
         model_transport.configure( args.claude_cli_path )
         model_transport.set_budget( args.call_ledger, caps )
@@ -785,7 +808,10 @@ def cmd_write( args, query_fn=None ):
     base   = os.path.join( args.base, args.split )
     tasks  = read_jsonl( os.path.join( base, "writer_tasks.jsonl" ) )
     ledger = os.path.join( base, "writer_ledger.jsonl" )
-    try: check_plan_hash( json.loads( open( os.path.join( base, "plan.json" ), encoding="utf-8" ).read() ) )
+    try:
+        plan = json.loads( open( os.path.join( base, "plan.json" ), encoding="utf-8" ).read() )
+        check_plan_hash( plan )
+        if args.split == "gate-reserve": check_reserve_plan_hash( args.base, plan )
     except ValueError as e:
         print( f"REFUSED: {e}", file=sys.stderr )
         return 2
@@ -793,6 +819,10 @@ def cmd_write( args, query_fn=None ):
     pending = [ t for t in tasks if t[ "task_id" ] not in done ]
     if len( pending ) > args.approved_calls:
         print( f"REFUSED: {len( pending )} calls are pending and only {args.approved_calls} are approved", file=sys.stderr )
+        return 2
+    spent, allowed = model_transport.calls_used( args.writer_model ), caps[ args.writer_model ]
+    if pending and spent + 2 * len( pending ) > allowed:
+        print( f"REFUSED: {spent} calls are spent and {len( pending )} pending tasks may take two calls each, {spent + 2 * len( pending )} in all; the cap less the hold allows {allowed}", file=sys.stderr )
         return 2
     version = model_transport.cli_version( args.claude_cli_path )
     try:
@@ -1006,6 +1036,7 @@ def build_parser():
     for name in ( "extractor", "judge", "escalation" ): w.add_argument( f"--{name}-model", required=True )
     w.add_argument( "--model-cap", action="append", default=[] ); w.add_argument( "--call-ledger", required=True )
     w.add_argument( "--approved-calls", type=int, required=True )
+    w.add_argument( "--call-hold", type=int, required=True, help="calls held back from the writer cap; the cap less this is the most the run may reach" )
     w.add_argument( "--claude-cli-path", required=True, help="the Claude Code binary every writer call runs (a newer model id can need a newer binary than the SDK's)" )
     w.add_argument( "--max-consecutive-failures", type=int, required=True, help="stop after this many tasks in a row fail twice" )
     v = sub.add_parser( "verify" )
