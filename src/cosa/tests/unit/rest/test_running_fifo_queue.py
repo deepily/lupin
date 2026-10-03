@@ -1375,6 +1375,33 @@ class TestCorrectnessLineageSkip( _RFQBase ):
 # ── _handle_base_agent ──────────────────────────────────────────────────────
 class TestHandleBaseAgent( _RFQBase ):
 
+    # ── row 4cbd4858: the CRUD agent is told its lineage at dispatch ──
+    def test_crud_agent_with_suite_lineage_is_flagged_before_do_all( self ):
+        rq = self.build()
+        rq.queue_dict[ "suite" ] = _Node( job_type="test_suite" )
+        job = _CrudFake( id_hash="c1", spawned_by_id_hash="suite", lineage_is_test_suite=False )
+        job.do_all = lambda: job.lineage_is_test_suite     # records what the agent saw when it ran
+        self._enqueue( rq, job )
+        rq._confirm_correctness = MagicMock()
+        rq._handle_base_agent( job, "q", rfq.sw.Stopwatch( "t" ) )
+        self.assertIs( job.lineage_is_test_suite, True )
+
+    def test_crud_agent_without_suite_lineage_stays_unflagged( self ):
+        rq = self.build()
+        job = _CrudFake( id_hash="c2", lineage_is_test_suite=False )
+        self._enqueue( rq, job )
+        rq._confirm_correctness = MagicMock()
+        rq._handle_base_agent( job, "q", rfq.sw.Stopwatch( "t" ) )
+        self.assertIs( job.lineage_is_test_suite, False )
+
+    def test_non_crud_agent_is_not_given_the_flag( self ):
+        rq = self.build()
+        job = _AgentBaseFake( id_hash="c3" )
+        self._enqueue( rq, job )
+        rq._confirm_correctness = MagicMock()
+        rq._handle_base_agent( job, "q", rfq.sw.Stopwatch( "t" ) )
+        self.assertFalse( hasattr( job, "lineage_is_test_suite" ) )
+
     def test_do_all_raises_routes_error_case( self ):
         rq = self.build(); rq._handle_error_case = MagicMock( return_value="err" )
         job = _AgentBaseFake( _do_all_exc=RuntimeError( "do_all fail" ) )
