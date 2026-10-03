@@ -161,13 +161,16 @@ def _plan( page, pane, key, filer=None ):
 
 
 def _row( page, pane, task_id ):
-    """The verb select every row carries — present when the row is painted, VISIBLE only when its group is open."""
-    return page.locator( f'{pane} .task-verb-select[data-task-id="{task_id}"]' )
+    """
+    The disclose button of a row's VISIBLE line, which both clients paint. Not the verb select: that lives in the
+    per-row editor, hidden until the button is pressed, so it is hidden even in an open group.
+    """
+    return page.locator( f'{pane} .task-disclose-button[data-task-id="{task_id}"]' )
 
 
 def _ungrouped_row( page, pane, task_id ):
     """A row sitting directly in a filer's own table — not inside any plan group."""
-    return page.locator( f'{pane} .holding-area-group > table .task-verb-select[data-task-id="{task_id}"]' )
+    return page.locator( f'{pane} .holding-area-group > table .task-disclose-button[data-task-id="{task_id}"]' )
 
 
 # ---------------------------------------------------------------------------
@@ -189,7 +192,7 @@ def _non_operator_refused( page, pane, plan ):
     for task_id in plan[ "ids" ]:
         expect( _row( page, pane, task_id ) ).to_be_visible()
     # The filer's own ungrouped row is NOT inside the plan group, and is listed under the filer.
-    expect( group.locator( f'.task-verb-select[data-task-id="{plan[ "ungrouped" ]}"]' ) ).to_have_count( 0 )
+    expect( group.locator( f'.task-disclose-button[data-task-id="{plan[ "ungrouped" ]}"]' ) ).to_have_count( 0 )
     expect( _ungrouped_row( page, pane, plan[ "ungrouped" ] ) ).to_be_visible()
 
     posts = []
