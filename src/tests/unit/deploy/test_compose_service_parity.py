@@ -298,9 +298,17 @@ KNOWN_DIVERGENT_ENV = {
         "dev-dev"  : "2026-07-26 — dev derives the DB from the compose postgres service.",
         "dev-test" : "2026-07-26 — same.",
     },
-    "DB_USER": {
-        "dev-dev"  : "2026-07-26 — see DB_NAME.",
-        "dev-test" : "2026-07-26 — same.",
+    # DB_USER: exemption removed 2026-10-03 (row 80513825) — dev and test now set it too
+    # (`lupin_app`), so all three services agree and the reverse arm would fail an entry here.
+    "DB_PASSWORD": {
+        "dev-dev"  : "2026-10-03 (row 80513825) — dev and test read the lupin_app password from a "
+                     "root-owned file (DB_PASSWORD_FILE below); cloud-gpu takes it from Secret Manager "
+                     "through the env.",
+        "dev-test" : "2026-10-03 — same.",
+    },
+    "DB_PASSWORD_FILE": {
+        "cloud-gpu" : "2026-10-03 (row 80513825) — the VM has no /etc/lupin/secrets; its password "
+                      "arrives as DB_PASSWORD from Secret Manager. See DB_PASSWORD.",
     },
     "CLOUD_SQL_CONNECTION_NAME": {
         "dev-dev"  : "2026-07-26 — no Cloud SQL on dev.",

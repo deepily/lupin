@@ -18,7 +18,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env — see row 856882e4}
       POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=en_US.UTF-8 --lc-ctype=en_US.UTF-8"
     ports:
-      - "5432:5432"
+      # Row 80513825: loopback only (was 0.0.0.0, measured 2026-10-02). Containers reach it over
+      # the docker network; host processes over 127.0.0.1.
+      - "127.0.0.1:5432:5432"
     volumes:
       # Postgres data lives outside the build context so BuildKit's context loader
       # never has to stat a 0700-owned dir. Same physical disk, same UID 70 / 0700.
@@ -164,6 +166,12 @@ services:
     init: true
     restart: unless-stopped
     user: "1001:1001"
+    # Row 80513825: supplementary group 1002 reads the root:1002 0440 DB password file.
+    # No `user:` change — io/ src/ projects/ are 744, so a uid other than 1001 could not write them.
+    group_add:
+      - "1002"
+    secrets:
+      - db_app_password
     ports:
       - "7999:7999"
     # host.docker.internal → host gateway so the in-container :7999 reverse-proxy
@@ -344,10 +352,14 @@ services:
       LUPIN_FLOW_RATIO_DIR: /var/lupin/flow-ratio
       LUPIN_SERVER_PORT: "7999"
       DB_HOST: lupin-postgres
-      # database.py no longer carries a baked-in password default (row baac2474).
-      # Same untracked .env as POSTGRES_PASSWORD above; env resolves at container
-      # CREATE, so picking this up needs `up -d --force-recreate`, not a restart.
-      DB_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env — see row 856882e4}
+      # Row 80513825 (Rick, 2026-10-03): the app connects as its OWN role, `lupin_app`, not
+      # the superuser. Its password is a root-owned file (root:1002 0440 under /etc/lupin/secrets),
+      # mounted read-only at /run/secrets/db_app_password via the `secrets:` block below and read
+      # through `group_add: ["1002"]` — the process stays 1001:1001. get_database_url reads
+      # DB_PASSWORD_FILE. Env, groups and mounts resolve at container CREATE: `up -d --force-recreate`.
+      # ⚠️ Applying this before /etc/lupin/secrets/db_app_password exists stops this service.
+      DB_USER: lupin_app
+      DB_PASSWORD_FILE: /run/secrets/db_app_password
       LUPIN_API_URL: http://localhost:7999
       LUPIN_API_KEY_FILE: /var/lupin/src/conf/keys/notification-api-claude-code-dev
       # The model-server client's own credential — NOT the notifications key
@@ -454,6 +466,12 @@ services:
     init: true
     restart: unless-stopped
     user: "1001:1001"
+    # Row 80513825: supplementary group 1002 reads the root:1002 0440 DB password file.
+    # No `user:` change — io/ src/ projects/ are 744, so a uid other than 1001 could not write them.
+    group_add:
+      - "1002"
+    secrets:
+      - db_app_password
     command: ["/bin/bash", "/var/lupin/src/scripts/run-fastapi-lupin-test.sh"]
     ports:
       - "8000:7999"
@@ -630,10 +648,14 @@ services:
       LUPIN_HEARTBEAT_POKE_MUTE_FILE: /var/lupin/flow-ratio/heartbeat-poke-mute.test.json
       LUPIN_SERVER_PORT: "8000"
       DB_HOST: lupin-postgres
-      # database.py no longer carries a baked-in password default (row baac2474).
-      # Same untracked .env as POSTGRES_PASSWORD above; env resolves at container
-      # CREATE, so picking this up needs `up -d --force-recreate`, not a restart.
-      DB_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env — see row 856882e4}
+      # Row 80513825 (Rick, 2026-10-03): the app connects as its OWN role, `lupin_app`, not
+      # the superuser. Its password is a root-owned file (root:1002 0440 under /etc/lupin/secrets),
+      # mounted read-only at /run/secrets/db_app_password via the `secrets:` block below and read
+      # through `group_add: ["1002"]` — the process stays 1001:1001. get_database_url reads
+      # DB_PASSWORD_FILE. Env, groups and mounts resolve at container CREATE: `up -d --force-recreate`.
+      # ⚠️ Applying this before /etc/lupin/secrets/db_app_password exists stops this service.
+      DB_USER: lupin_app
+      DB_PASSWORD_FILE: /run/secrets/db_app_password
       LUPIN_API_URL: http://localhost:7999
       LUPIN_API_KEY_FILE: /var/lupin/src/conf/keys/notification-api-claude-code-dev
       # The model-server client's own credential — NOT the notifications key
@@ -758,6 +780,13 @@ services:
   #     - lupin-dev-network
   #   depends_on:
   #     - postgres
+
+# Compose secret from a host file: in non-swarm compose this is a read-only bind mount that keeps
+# the host file's owner and mode (uid/gid/mode keys are ignored). Unlike a bare file bind, a missing
+# source fails the `up` instead of docker creating a root-owned directory there.
+secrets:
+  db_app_password:
+    file: /etc/lupin/secrets/db_app_password
 
 volumes:
   pgadmin_data:
