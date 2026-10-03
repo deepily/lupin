@@ -44,7 +44,7 @@ before( () => {
 type Row = Record<string, unknown>;
 type StoryUI = Record<string, unknown> & {
   renderHoldingArea: ( composite: unknown ) => void;
-  _groupHeldRowsByStory: ( tasks: unknown, keep?: unknown ) => Array<{ key: string; ids: string[] }>;
+  _groupHeldRowsByStory: ( tasks: unknown, keep?: unknown ) => Array<{ key: string; ids: string[]; title: string; filers: string[] }>;
   _renderHoldingStories: ( stories: unknown ) => string;
   _transitionTask: ( id: string, to: string, extras?: unknown ) => Promise<{ ok: boolean; message?: string }>;
   refreshHoldingArea: () => Promise<void>;
@@ -138,11 +138,25 @@ const settle = (): Promise<void> => new Promise( ( r ) => setTimeout( r, 0 ) );
 
 // ───────────────────────────── grouping ─────────────────────────────
 
+test( "label: the persona slot names the filers; the story is titled, the raw key never shows (row 0d6d4387)", () => {
+  const ui   = newUI() as StoryUI & { _storyTitle: ( k: string ) => string };
+  const rows = [ held( "m1", "epic:v022-docs-and-reuse", "sam" ), held( "m2", "epic:v022-docs-and-reuse", "amy" ),
+                 held( "m3", "epic:v022-docs-and-reuse", "sam" ) ];
+  const box  = document.createElement( "div" );
+  box.innerHTML = ui._renderHoldingStories( ui._groupHeldRowsByStory( rows ) );
+  assert.equal( box.querySelector( ".holding-story-filer" )?.textContent, "Amy, Sam" );
+  assert.equal( box.querySelector( ".holding-story-key" )?.textContent, "Story: v022 docs and reuse" );
+  assert.ok( ! ( box.querySelector( ".holding-story-bar" )?.textContent ?? "" ).includes( "epic:" ), "raw key visible on the bar" );
+  assert.equal( ( box.querySelector( ".holding-story-bar" ) as HTMLElement ).dataset.story, "epic:v022-docs-and-reuse" );
+  assert.equal( ui._storyTitle( "epic:" ), "epic:", "a prefix-only key was blanked" );
+  assert.equal( ui._storyTitle( "a_b--c" ), "a b c" );
+} );
+
 test( "grouping: two rows make a story, ONE row does not, a keyless row never does", () => {
   const ui = newUI();
   assert.deepEqual( ui._groupHeldRowsByStory( ROWS() ), [
-    { key: "epic:plan-a", ids: [ "a1", "a2", "a3" ] },
-    { key: "epic:plan-c", ids: [ "c1", "c2" ] },
+    { key: "epic:plan-a", ids: [ "a1", "a2", "a3" ], title: "plan a", filers: [ "Rachel" ] },
+    { key: "epic:plan-c", ids: [ "c1", "c2" ], title: "plan c", filers: [ "Rachel" ] },
   ] );
 } );
 
@@ -150,7 +164,7 @@ test( "grouping: epic:unassigned is never a story, beside a real key that is", (
   const ui = newUI();
   const rows = [ held( "u1", "epic:unassigned" ), held( "u2", "epic:unassigned" ),
                  held( "r1", "epic:real" ), held( "r2", "epic:real" ) ];
-  assert.deepEqual( ui._groupHeldRowsByStory( rows ), [ { key: "epic:real", ids: [ "r1", "r2" ] } ] );
+  assert.deepEqual( ui._groupHeldRowsByStory( rows ), [ { key: "epic:real", ids: [ "r1", "r2" ], title: "real", filers: [ "Rachel" ] } ] );
   assert.deepEqual( ui._groupHeldRowsByStory( rows, new Set( [ "epic:unassigned" ] ) ).map( ( s ) => s.key ),
     [ "epic:real" ], "a kept report resurrected a bar over epic:unassigned" );
   // and in the pane: two unassigned rows paint no bar
@@ -164,7 +178,7 @@ test( "grouping: keep names a key that stays at ONE row, and only that key", () 
   const ui = newUI();
   const stories = ui._groupHeldRowsByStory( ROWS(), new Set( [ "epic:plan-b" ] ) );
   assert.deepEqual( stories.map( ( s ) => s.key ), [ "epic:plan-a", "epic:plan-b", "epic:plan-c" ] );
-  assert.deepEqual( stories[ 1 ], { key: "epic:plan-b", ids: [ "b1" ] } );
+  assert.deepEqual( stories[ 1 ], { key: "epic:plan-b", ids: [ "b1" ], title: "plan b", filers: [ "Rachel" ] } );
 } );
 
 test( "grouping: junk in, empty out — and an id-less row cannot join a story", () => {
