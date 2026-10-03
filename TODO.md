@@ -16,6 +16,18 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 **Timers from the 09-30 skeleton crew** (these clean themselves up; nothing to fold in): `stop-poke-restore-20260930` (dev and test, 17:00 EDT) and `ratio-gate-reenable-20260930` (test, 12:46 EDT).
 **Not mine and uncommitted in the main tree** (left alone): the phase6b `action_required` PNG baseline (dirty since 09-22) and María's three `src/rnd/v0.2.1/` docs (kill-switch design, console-tee plan, cascade handoff).
 
+## 📚 DECISIONS LOG 2026-10-03 (Mr. Radio 🦉 `6d9a5ad1`; no crew)
+
+- 2026-10-03 — **Where do post-game documents live?** → **`src/docs/post-games/<work-branch version>/`, tracked** (Rick, about 15:55 EDT, direct card, `answered: true`, `default_used: false`, typed: "Let's keep that under src/docs/post-games/v0.2.2 and advance the post games on a per work branch version basis"). María updates the planning-is-prompting workflow docs. Index: `src/docs/post-games/README.md`.
+- 2026-10-03 — **Is `src/conf/lupin-app.ini` committed when the uncommitted edit is Rick's?** → **ALWAYS, AND STOP ASKING** (Rick, about 15:25 EDT, same kind of card, typed: "commit commit commit always and stop asking me"). Fourth time; auto-memory `feedback_always_commit_lupin_app_ini.md` updated. Done as `5e8537ba5`.
+- 2026-10-03 — **When do the approval-settings sudo steps run (row `80513825`)?** → **NOW, THIS AFTERNOON** (Rick, same card, option picked).
+- 2026-10-03 — **Who does the one real spawn on the test VM (row `c9252819`)?** → **MR. RADIO SPAWNS ONE WORKER THERE** (Rick, same card, option picked). Waits on `gcloud auth login`.
+
+## 📚 DECISIONS LOG 2026-10-03 (Cheech 🌿 `62243903`; crew Rio · Tiberius) — v0.2.2 docs crew, day 4
+
+- 2026-10-03 — **May Cheech start the board, and with which crew?** → **GO WITH RIO AND TIBERIUS** (Rick, mid-afternoon EDT, direct card, `answered: true`, `default_used: false`). Coverage gate first, then Rio writes the judge history class (row `9d40b2af`) and Tiberius reviews.
+- 2026-10-03 — **Which sets may the Fable writer write, and under what cap?** → **ALL SETS, ONE CAP OF 1,000** (Rick, same card, typed answer: "combine both Python dev and gate along with reserve and dart + its gate and can basically double the spend to 1000"). Python dev, Python gate, Python reserve, and the Dart set with its gate. Supersedes the 500 cap of 2026-10-02 (row `49001f67`) and closes its "second figure" note. Fable still writes only and judges nothing.
+
 ## 📚 DECISIONS LOG 2026-10-02 (Cheech 🌿 `bf81cf59`; crew Maya · Tiberius) — v0.2.2 docs crew, day 3
 
 - 2026-10-02 — **What may a docstring rewrite drop?** → **HISTORY MAY GO, REASONS STAY** (Rick, ~20:46 EDT, keypress, walkthrough 1 of 4; row `b3086a20`). Dates, row ids, incident figures, provenance and "was previously" may leave a docstring; every why and every behaviour stays. Why: the pilot claim check on rewrite `2b009b8d9` found claims missing in 53 of 78 docstrings, and Tiberius's sample of 48 read 37 as real losses, mostly history and "why" clauses (`io/tiberius-3254a847-claim-sort.md`). Rick added: María verifies or updates the workflow docs on what belongs in a docstring, what does not and where the rest goes, enforced by policy (row `360427a1`).

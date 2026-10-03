@@ -1,0 +1,13 @@
+# Post-games
+
+Retrospectives written by `/plan-post-game` after a substantive engagement. Tracked in git, one folder per work-branch version.
+
+Rick ruled this home on 2026-10-03: "Let's keep that under src/docs/post-games/v0.2.2 and advance the post games on a per work branch version basis."
+
+File naming: `yyyy.mm.dd-<slug>-post-game.md`. Frontmatter names the manager. Post-games written before 2026-10-03 are in the local, untracked folder `io/post-games/`.
+
+## v0.2.2
+
+| Date | Retro | Manager | Tier | Tags |
+|---|---|---|---|---|
+| 2026-10-02 | [Mr. Radio's crew day](v0.2.2/2026.10.02-mr-radio-crew-day-post-game.md) | Mr. Radio 🦉 | full | crew-run · across-five-respins · no-roundtable · merged-under-a-running-run · test-moved-a-live-switch · missed-own-timer · condensed-dm-read-as-fact · runbook-not-measured · 6 seats |

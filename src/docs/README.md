@@ -42,6 +42,7 @@ These three features share a common foundation in `src/cosa/agents/shared/`.
 | [deployment-runtime-config-examples.md](deployment-runtime-config-examples.md) | Runtime config patterns and examples |
 | [vm-new-host-checklist.md](vm-new-host-checklist.md) | Host configuration git does not carry (heartbeat block, manager roster, flow-ratio override, container git trust): symptom, preflight check id and fix for each |
 | [database-migrations.md](database-migrations.md) | Database migration procedures |
+| [post-games/README.md](post-games/README.md) | Post-game retrospectives, tracked, one folder per work-branch version (Rick's ruling 2026-10-03) |
 | [automated-interactive-testing.md](automated-interactive-testing.md) | Proxy auto-answer testing guide |
 
 ## Auth Subsystem
