@@ -14769,7 +14769,8 @@ class NotificationsUI {
          *     - tasks is an array of row objects (foreign wire data; any shape)
          *
          * Ensures:
-         *     - returns [ { key, ids } ], keys sorted alphabetically
+         *     - returns [ { key, ids, title, filers } ], keys sorted alphabetically; `title` is the
+         *       key made readable, `filers` the distinct filer labels (the bar's persona)
          *     - ids are the full row ids in the order the rows arrived, blanks dropped
          *     - a key with fewer than two ids is omitted, EXCEPT a key in the `keep` Set (a
          *       story whose last run left a report to show), which stays while one id is left
@@ -14777,7 +14778,8 @@ class NotificationsUI {
          *     - Pure: no DOM, no side effects; never throws
          */
         const rows  = Array.isArray( tasks ) ? tasks : [];
-        const byKey = new Map();
+        const byKey   = new Map();
+        const byFiler = new Map();
         rows.forEach( raw => {
             const task = raw || {};
             const key  = task.correlation_key ? String( task.correlation_key ) : "";
@@ -14786,11 +14788,31 @@ class NotificationsUI {
             if ( !key || key === this.EPIC_UNASSIGNED_KEY || !id ) return;
             if ( byKey.has( key ) ) byKey.get( key ).push( id );
             else byKey.set( key, [ id ] );
+            if ( !byFiler.has( key ) ) byFiler.set( key, new Set() );
+            byFiler.get( key ).add( this._taskFilerLabel( task ) );
         } );
         return Array.from( byKey.keys() )
             .filter( key => byKey.get( key ).length >= ( keep instanceof Set && keep.has( key ) ? 1 : 2 ) )
             .sort( ( a, b ) => a.localeCompare( b ) )
-            .map( key => ( { key, ids : byKey.get( key ) } ) );
+            .map( key => ( {
+                key,
+                ids    : byKey.get( key ),
+                title  : this._storyTitle( key ),
+                filers : Array.from( byFiler.get( key ) ).sort( ( a, b ) => a.localeCompare( b ) )
+            } ) );
+    }
+
+    _storyTitle( key ) {
+        /**
+         * A story key as a readable title: "epic:v022-docs-and-reuse" -> "v022 docs and reuse".
+         * The key is an identifier, never a name, and must not be painted where a persona goes.
+         *
+         * Ensures:
+         *     - strips a leading "epic:", turns hyphens/underscores into spaces
+         *     - a key that is only a prefix is returned as is, never blank
+         */
+        const title = String( key ).replace( /^epic:/, "" ).replace( /[-_]+/g, " " ).trim();
+        return title === "" ? String( key ) : title;
     }
 
     _renderHoldingStories( stories ) {
@@ -14804,6 +14826,7 @@ class NotificationsUI {
          *
          * Ensures:
          *     - returns "" for no stories, so the pane is unchanged when there are none
+         *     - the persona slot shows the story's filers; the story reads "Story: <title>", never the raw key
          *     - the button, key and status span each carry data-story
          *     - the button's label and data-task-ids carry the same N
          */
@@ -14813,7 +14836,8 @@ class NotificationsUI {
             const n   = st.ids.length;
             return `
                 <div class="holding-story-bar" data-story="${key}">
-                    <span class="holding-story-key">${this.escapeHtml( st.key )}</span>
+                    <span class="holding-area-filer holding-story-filer">${this.escapeHtml( st.filers.join( ", " ) )}</span>
+                    <span class="holding-story-key" title="${key}">Story: ${this.escapeHtml( st.title )}</span>
                     <span class="holding-story-count">${n}</span>
                     <button type="button" class="task-action-btn holding-story-approve-all" data-story="${key}"
                             data-task-ids="${this._escapeTaskAttr( st.ids.join( "," ) )}"
