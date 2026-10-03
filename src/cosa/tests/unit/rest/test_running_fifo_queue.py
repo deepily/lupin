@@ -1294,6 +1294,84 @@ class TestConfirmCorrectness( _RFQBase ):
         rq._confirm_correctness( _SnapFake(), "q", "a" )   # must not raise
 
 
+# ── _confirm_correctness: test-suite lineage skips the ask (row 4cbd4858) ───
+class _Node:
+    """A queue job stand-in carrying only what the lineage walk reads."""
+    def __init__( self, spawned_by=None, job_type=None ):
+        if spawned_by is not None: self.spawned_by_id_hash = spawned_by
+        if job_type   is not None: self.job_type           = job_type
+
+
+class TestCorrectnessLineageSkip( _RFQBase ):
+
+    def _snap( self, parent ):
+        snap = _SnapFake()
+        snap.id_hash = "child"
+        if parent is not None: snap.spawned_by_id_hash = parent
+        return snap
+
+    def test_a_test_suite_child_is_not_asked_and_takes_the_yes_default( self ):
+        rq = self.build()
+        rq.queue_dict[ "suite" ] = _Node( job_type="test_suite" )
+        snap = self._snap( "suite" )
+        rq._confirm_correctness( snap, "q", "a" )
+        self.notify_fn.assert_not_called()
+        self.assertTrue( snap.answer_is_correct )
+        rq.snapshot_mgr.save_snapshot.assert_called_once_with( snap )
+        rq.websocket_mgr.emit.assert_called_once()
+
+    def test_a_grandchild_of_a_test_suite_is_not_asked( self ):
+        rq = self.build()
+        rq.queue_dict[ "suite" ] = _Node( job_type="test_suite" )
+        rq.queue_dict[ "mid" ]   = _Node( spawned_by="suite" )
+        rq._confirm_correctness( self._snap( "mid" ), "q", "a" )
+        self.notify_fn.assert_not_called()
+
+    def test_the_skip_with_no_websocket_manager_still_records( self ):
+        rq = self.build(); rq.websocket_mgr = None
+        rq.queue_dict[ "suite" ] = _Node( job_type="test_suite" )
+        snap = self._snap( "suite" )
+        rq._confirm_correctness( snap, "q", "a" )
+        self.assertTrue( snap.answer_is_correct )
+
+    def test_a_job_with_no_lineage_is_still_asked( self ):
+        rq = self.build()
+        resp = MagicMock(); resp.status="responded"; resp.response_value="no"
+        self.notify_fn.return_value = resp
+        snap = self._snap( None )
+        rq._confirm_correctness( snap, "q", "a" )
+        self.notify_fn.assert_called_once()
+        self.assertFalse( snap.answer_is_correct )
+
+    def test_a_job_spawned_by_a_non_test_suite_job_is_still_asked( self ):
+        rq = self.build()
+        rq.queue_dict[ "other" ] = _Node( job_type="podcast_generator" )
+        resp = MagicMock(); resp.status="responded"; resp.response_value="yes"
+        self.notify_fn.return_value = resp
+        rq._confirm_correctness( self._snap( "other" ), "q", "a" )
+        self.notify_fn.assert_called_once()
+
+    def test_a_parent_no_longer_in_the_queue_is_unverifiable_so_the_ask_stays( self ):
+        rq = self.build()
+        resp = MagicMock(); resp.status="timeout"
+        self.notify_fn.return_value = resp
+        rq._confirm_correctness( self._snap( "gone" ), "q", "a" )
+        self.notify_fn.assert_called_once()
+
+    def test_a_lineage_cycle_terminates_and_asks( self ):
+        rq = self.build()
+        rq.queue_dict[ "a" ] = _Node( spawned_by="b" )
+        rq.queue_dict[ "b" ] = _Node( spawned_by="a" )
+        self.assertFalse( rq._lineage_traces_to_test_suite( self._snap( "a" ) ) )
+
+    def test_a_chain_longer_than_the_hop_cap_is_not_followed( self ):
+        rq = self.build()
+        n = rq.LINEAGE_MAX_HOPS
+        for i in range( n ): rq.queue_dict[ f"n{i}" ] = _Node( spawned_by=f"n{i + 1}" )
+        rq.queue_dict[ f"n{n}" ] = _Node( job_type="test_suite" )
+        self.assertFalse( rq._lineage_traces_to_test_suite( self._snap( "n0" ) ) )
+
+
 # ── _handle_base_agent ──────────────────────────────────────────────────────
 class TestHandleBaseAgent( _RFQBase ):
 

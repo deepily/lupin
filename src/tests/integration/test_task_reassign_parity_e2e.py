@@ -135,7 +135,8 @@ def test_reassign_owner_canonicalization_parity_across_three_seams( client ):
     # Stored CANONICAL, not the raw display form (normalize-on-write).
     assert item[ "owner_persona" ] == "maria"
     assert item[ "owner_persona" ] == canonical_persona_key( OWNER_ACCENTED_DISPLAY )
-    assert item[ "status" ]        == "queued"
+    # Minted queued, or not_approved when the holding-area default is on (it is on :8000).
+    assert item[ "status" ]        in ( "queued", "not_approved" )
 
     # owed-read seam sees the new row when queried by the ACCENTED display form:
     # the create-write canonical and the owed-read canonical MATCH (count rose by 1).
