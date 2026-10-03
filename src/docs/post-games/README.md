@@ -4,7 +4,7 @@ Retrospectives written by `/plan-post-game` after a substantive engagement. Trac
 
 Rick ruled this home on 2026-10-03: "Let's keep that under src/docs/post-games/v0.2.2 and advance the post games on a per work branch version basis."
 
-File naming: `yyyy.mm.dd-<slug>-post-game.md`. Frontmatter names the manager. Post-games written before 2026-10-03 are in the local, untracked folder `io/post-games/`.
+File naming: `yyyy.mm.dd-<slug>-post-game.md`. Frontmatter names the manager. The local, untracked folder `io/post-games/` that held earlier post-games was deleted on 2026-10-03 on Rick's word (14 files); nothing written before that date is kept here.
 
 ## v0.2.2
 

@@ -16,12 +16,16 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 **Timers from the 09-30 skeleton crew** (these clean themselves up; nothing to fold in): `stop-poke-restore-20260930` (dev and test, 17:00 EDT) and `ratio-gate-reenable-20260930` (test, 12:46 EDT).
 **Not mine and uncommitted in the main tree** (left alone): the phase6b `action_required` PNG baseline (dirty since 09-22) and María's three `src/rnd/v0.2.1/` docs (kill-switch design, console-tee plan, cascade handoff).
 
-## 📚 DECISIONS LOG 2026-10-03 (Mr. Radio 🦉 `6d9a5ad1`; no crew)
+## 📚 DECISIONS LOG 2026-10-03 (Mr. Radio 🦉 `6d9a5ad1`; crew Chloé · Krishna from about 16:25 EDT)
 
 - 2026-10-03 — **Where do post-game documents live?** → **`src/docs/post-games/<work-branch version>/`, tracked** (Rick, about 15:25 EDT, direct card, `answered: true`, `default_used: false`, typed: "Let's keep that under src/docs/post-games/v0.2.2 and advance the post games on a per work branch version basis"). María updates the planning-is-prompting workflow docs. Index: `src/docs/post-games/README.md`.
 - 2026-10-03 — **Is `src/conf/lupin-app.ini` committed when the uncommitted edit is Rick's?** → **ALWAYS, AND STOP ASKING** (Rick, about 15:15 EDT, same kind of card, typed: "commit commit commit always and stop asking me"). Fourth time; auto-memory `feedback_always_commit_lupin_app_ini.md` updated. Done as `5e8537ba5`.
 - 2026-10-03 — **When do the approval-settings sudo steps run (row `80513825`)?** → **NOW, THIS AFTERNOON** (Rick, same card, option picked).
 - 2026-10-03 — **Who does the one real spawn on the test VM (row `c9252819`)?** → **MR. RADIO SPAWNS ONE WORKER THERE** (Rick, same card, option picked). Waits on `gcloud auth login`.
+- 2026-10-03 — **How do the two app containers get to read the root-owned database password (row `80513825`)?** → **EXTRA GROUP ON THE TWO APP SERVICES** (Rick, a second card a little after 16:10 EDT, option picked; wording carried from my memento of 16:40, the card itself not re-read). The containers stay 1001:1001 and gain group 1002; no `useradd`. Built as `e74f798d1`, not merged until `/etc/lupin/secrets/db_app_password` exists.
+- 2026-10-03 — **May a job spawned by a test suite skip the "are you sure" confirmation (row `4cbd4858`)?** → **YES, SKIP FOR SUITE JOBS** (Rick, same card, option picked; same provenance). Done as `034955047` + `642633cf5`. Measured afterwards on job `ts-332ebcf6`: 0 confirmation asks, 12 skipped; the eval file is still over its 15-minute cap because each math job waits 60 s on the separate "was this answer correct" ask.
+- 2026-10-03 — **How many worker seats for the afternoon?** → **TWO SEATS** (Rick, same card, option picked; same provenance). Chloé and Krishna.
+- 2026-10-03 — **May lupin's `io/post-games` be deleted now that retros live under `src/docs/post-games/`?** → **YES** (Rick, about 16:30 EDT, asked directly; same provenance). Done: 14 files removed.
 
 ## 📚 DECISIONS LOG 2026-10-03 (Cheech 🌿 `62243903`; crew Rio · Tiberius) — v0.2.2 docs crew, day 4
 
