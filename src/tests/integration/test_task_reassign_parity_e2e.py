@@ -101,12 +101,19 @@ def client( txn_session ):
 
 def _owed_count( client, display_owner ):
     """Owed-read seam: count items owned by `display_owner`, queried BY THE DISPLAY FORM."""
-    r = client.get(
-        "/api/tasks",
-        params = { "owner_persona": display_owner, "count_only": "true" },
-    )
-    assert r.status_code == 200, f"{r.status_code}: {r.text}"
-    return r.json()[ "count" ]
+    # Counted per status and summed over the two a fresh create can land in. A query with no
+    # status filter leaves the holding area out, and the create door mints `not_approved`
+    # when the holding default is on, so the unfiltered count never moved (:8000 job
+    # ts-11c25f8a, 2026-10-03). What this file tests is the owner KEY the three seams agree on.
+    total = 0
+    for status in ( "queued", "not_approved" ):
+        r = client.get(
+            "/api/tasks",
+            params = { "owner_persona": display_owner, "count_only": "true", "status": status },
+        )
+        assert r.status_code == 200, f"{r.status_code}: {r.text}"
+        total += r.json()[ "count" ]
+    return total
 
 
 def test_reassign_owner_canonicalization_parity_across_three_seams( client ):
@@ -157,7 +164,7 @@ def test_reassign_owner_canonicalization_parity_across_three_seams( client ):
     assert resp[ "item" ][ "owner_persona" ] == canonical_persona_key( OWNER_PUNCTUATED_DISPLAY )
     # The patched event carries the manager's WHY verbatim (the reassign headline).
     assert resp[ "event" ][ "transition" ] == "patched"
-    assert resp[ "event" ][ "reason" ]     == "reassigned: balance the Phase-2 queue"
+    assert resp[ "event" ][ "reason" ]     == "owner_persona: 'maria' -> 'mr radio' | reason: reassigned: balance the Phase-2 queue"   # the field diff, then the caller's reason (task_repository, pinned in test_task_repository.py)
 
     # ── Seam 3: owed-read parity — old owner DROPS, new owner RISES ──────────────
     # Queried by the DISPLAY forms: the round-trip resolves both to the canonical
