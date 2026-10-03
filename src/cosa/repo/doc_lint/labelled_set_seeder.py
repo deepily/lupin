@@ -672,44 +672,83 @@ def writer_ledger_row( task_id, model, text ):
     return { "task_id": task_id, "model": model, "prompt_hash": prompt_hash(), "output_sha256": hashlib.sha256( text.encode( "utf-8" ) ).hexdigest() }
 
 
-async def run_writer( tasks, model, ledger_path, outputs_path, query_fn=None ):
+REASON_CHARS = 300
+
+
+class WriterStopped( Exception ):
+    """A writer run ended early on purpose; carries the reason and what the run had done by then."""
+
+    def __init__( self, message, called, dropped ):
+        super().__init__( message )
+        self.called, self.dropped = called, dropped
+
+
+class CanaryFailed( WriterStopped ):
+    """The one call made before the batch failed; nothing was retried and nothing was marked dropped."""
+
+
+class TooManyFailures( WriterStopped ):
+    """The run met the allowed number of consecutive tasks that failed twice."""
+
+
+async def run_writer( tasks, model, ledger_path, outputs_path, query_fn=None, *, max_consecutive_failures, cli_path=None, cli_version=None ):
     """
-    Phase 2 body: one blind call per task not already in the ledger, each retried once on failure.
+    Phase 2 body: one blind call per task without a finished row in the ledger, each retried once on failure.
 
     Requires:
         - model_transport.set_budget has been called with a cap for model
+        - max_consecutive_failures is an int of one or more
+        - cli_path and cli_version name the Claude Code binary configured for the run (None: the SDK's own)
 
     Ensures:
         - every ledger row is checked (content sha, model, prompt hash) before the first call; a mismatch is a ValueError and no call is made
-        - a task already in the ledger is never called again
+        - a task with a finished (not dropped) row is never called again; a dropped row is not final, so a later run calls
+          that task again and the ledger keeps both rows
         - the ledger's rows must agree on model and prompt hash with each other and with now, or ValueError
-        - a failed or empty call is retried once; still failing, the task is recorded as dropped
+        - the first pending task is a canary: ONE call, no retry; if it fails, CanaryFailed is raised with the reason and
+          no ledger row is written for it
+        - every other failed call prints its reason to stderr; a failed or empty call is retried once; still failing, the task is
+          recorded as dropped with the last reason (first 300 characters) on its row
+        - after max_consecutive_failures dropped tasks in a row, TooManyFailures is raised
+        - every row records cli_path and cli_version
         - a CallBudgetExceeded is not retried and ends the run
         - returns { "called": n, "dropped": [ task_id ] }
     """
+    if isinstance( max_consecutive_failures, bool ) or not isinstance( max_consecutive_failures, int ) or max_consecutive_failures < 1:
+        raise ValueError( f"max_consecutive_failures must be an int of one or more, got {max_consecutive_failures!r}" )
     rows = read_jsonl( ledger_path ) if os.path.exists( ledger_path ) else []
     check_ledger_identity( rows, model )
-    done = { r[ "task_id" ]: r for r in rows }
     for task in tasks:
-        if task[ "task_id" ] in done and done[ task[ "task_id" ] ].get( "task_sha" ) != task_sha( task[ "instruction" ], task[ "text" ] ):
-            raise ValueError( f"task {task[ 'task_id' ]} is in the ledger for different text: the plan was redrawn into the same files" )
-    called, dropped = 0, []
+        for row in rows:
+            if row[ "task_id" ] == task[ "task_id" ] and row.get( "task_sha" ) != task_sha( task[ "instruction" ], task[ "text" ] ):
+                raise ValueError( f"task {task[ 'task_id' ]} is in the ledger for different text: the plan was redrawn into the same files" )
+    finished = { r[ "task_id" ] for r in rows if not r.get( "dropped" ) }
+    called, dropped, consecutive, canary = 0, [], 0, True
     for task in tasks:
         sha = task_sha( task[ "instruction" ], task[ "text" ] )
-        if task[ "task_id" ] in done: continue
-        text = None
-        for _ in range( 2 ):
+        if task[ "task_id" ] in finished: continue
+        text, reason = None, None
+        for _ in range( 1 if canary else 2 ):
             try:
                 text = await model_transport.complete( model, WRITER_SYSTEM_PROMPT, task[ "instruction" ] + "\n\n" + task[ "text" ], query_fn=query_fn )
                 called += 1
                 break
-            except model_transport.ModelCallError:
+            except model_transport.ModelCallError as e:
                 called += 1
+                reason = str( e )[ :REASON_CHARS ]
+                print( f"writer call failed for {task[ 'task_id' ]}: {reason}", file=sys.stderr )
+        if canary and text is None: raise CanaryFailed( f"the first call failed ({task[ 'task_id' ]}): {reason}", called, dropped )
+        canary = False
         with open( ledger_path, "a", encoding="utf-8" ) as f:
-            row = dict( writer_ledger_row( task[ "task_id" ], model, text ), task_sha=sha ) if text is not None else { "task_id": task[ "task_id" ], "model": model, "prompt_hash": prompt_hash(), "task_sha": sha, "dropped": True }
+            stamp = { "claude_cli": cli_path, "claude_cli_version": cli_version }
+            row   = dict( writer_ledger_row( task[ "task_id" ], model, text ), task_sha=sha, **stamp ) if text is not None else { "task_id": task[ "task_id" ], "model": model, "prompt_hash": prompt_hash(), "task_sha": sha, "dropped": True, "reason": reason, **stamp }
             f.write( json.dumps( row, sort_keys=True ) + "\n" )
-        if text is None: dropped.append( task[ "task_id" ] )
+        if text is None:
+            dropped.append( task[ "task_id" ] )
+            consecutive += 1
+            if consecutive >= max_consecutive_failures: raise TooManyFailures( f"{consecutive} tasks in a row failed twice; the last reason: {reason}", called, dropped )
         else:
+            consecutive = 0
             with open( outputs_path, "a", encoding="utf-8" ) as f: f.write( json.dumps( { "task_id": task[ "task_id" ], "text": text, "task_sha": sha }, sort_keys=True ) + "\n" )
     return { "called": called, "dropped": dropped }
 
@@ -718,11 +757,14 @@ def cmd_write( args, query_fn=None ):
     """
     Phase 2: blind writer calls. Refuses without a cap, off the shared ledger, past the approved count, or for reserve.
 
-    Returns the exit code: 0 done, 2 refused, 3 a call cap stopped the run.
+    Returns the exit code: 0 done, 2 refused, 3 a call cap stopped the run, 4 the first (canary) call failed,
+    5 --max-consecutive-failures tasks in a row failed twice, 6 the run finished but dropped at least one task.
 
-    --approved-calls bounds the pending TASKS. A task that fails is called a second time, so calls can reach twice
-    the approved count before the model cap stops them. The 10% hold of spec part 3 item 3 (cap, minus 10%, minus
-    calls spent, read from the ledger) is not enforced here: it rests on the number the approver gives.
+    --claude-cli-path is required: the binary and its version go on every ledger row and into the printed summary.
+    --approved-calls bounds the pending TASKS (a dropped task is pending again). A task that fails is called a second
+    time, so calls can reach twice the approved count before the model cap stops them. The 10% hold of spec part 3
+    item 3 (cap, minus 10%, minus calls spent, read from the ledger) is not enforced here: it rests on the number
+    the approver gives.
     A plan edited after it was drawn, a ledger written by another model or prompt, or a ledger row for different
     task text (a plan redrawn into the same files) is refused with exit 2.
     """
@@ -735,6 +777,7 @@ def cmd_write( args, query_fn=None ):
         caps = { m: int( n ) for m, _, n in ( c.rpartition( "=" ) for c in args.model_cap ) }
         if args.writer_model not in caps: raise ValueError( f"--model-cap {args.writer_model}=N is required" )
         if os.path.realpath( args.call_ledger ) != os.path.realpath( SHARED_CALL_LEDGER ): raise ValueError( f"--call-ledger must be the shared ledger {SHARED_CALL_LEDGER}" )
+        model_transport.configure( args.claude_cli_path )
         model_transport.set_budget( args.call_ledger, caps )
     except ValueError as e:
         print( f"REFUSED: {e}", file=sys.stderr )
@@ -746,20 +789,31 @@ def cmd_write( args, query_fn=None ):
     except ValueError as e:
         print( f"REFUSED: {e}", file=sys.stderr )
         return 2
-    done   = { r[ "task_id" ] for r in read_jsonl( ledger ) } if os.path.exists( ledger ) else set()
+    done   = { r[ "task_id" ] for r in read_jsonl( ledger ) if not r.get( "dropped" ) } if os.path.exists( ledger ) else set()
     pending = [ t for t in tasks if t[ "task_id" ] not in done ]
     if len( pending ) > args.approved_calls:
         print( f"REFUSED: {len( pending )} calls are pending and only {args.approved_calls} are approved", file=sys.stderr )
         return 2
+    version = model_transport.cli_version( args.claude_cli_path )
     try:
-        result = asyncio.run( run_writer( tasks, args.writer_model, ledger, os.path.join( base, "writer_outputs.jsonl" ), query_fn ) )
+        result = asyncio.run( run_writer( tasks, args.writer_model, ledger, os.path.join( base, "writer_outputs.jsonl" ), query_fn,
+                                          max_consecutive_failures=args.max_consecutive_failures, cli_path=args.claude_cli_path, cli_version=version ) )
     except model_transport.CallBudgetExceeded as e:
         print( f"STOPPED: {e}", file=sys.stderr )
         return 3
+    except CanaryFailed as e:
+        print( f"CANARY FAILED: {e}; claude_cli={args.claude_cli_path} version={version}; nothing was retried or marked dropped", file=sys.stderr )
+        return 4
+    except TooManyFailures as e:
+        print( f"STOPPED: {e}; calls={e.called} dropped={len( e.dropped )} claude_cli={args.claude_cli_path} version={version}", file=sys.stderr )
+        return 5
     except ValueError as e:
         print( f"REFUSED: {e}", file=sys.stderr )
         return 2
-    print( f"writer calls={result[ 'called' ]} dropped={len( result[ 'dropped' ] )}" )
+    print( f"writer calls={result[ 'called' ]} dropped={len( result[ 'dropped' ] )} claude_cli={args.claude_cli_path} version={version}" )
+    if result[ "dropped" ]:
+        print( f"DROPPED: {len( result[ 'dropped' ] )} task(s) failed twice; a re-run calls them again", file=sys.stderr )
+        return 6
     return 0
 
 
@@ -952,6 +1006,8 @@ def build_parser():
     for name in ( "extractor", "judge", "escalation" ): w.add_argument( f"--{name}-model", required=True )
     w.add_argument( "--model-cap", action="append", default=[] ); w.add_argument( "--call-ledger", required=True )
     w.add_argument( "--approved-calls", type=int, required=True )
+    w.add_argument( "--claude-cli-path", required=True, help="the Claude Code binary every writer call runs (a newer model id can need a newer binary than the SDK's)" )
+    w.add_argument( "--max-consecutive-failures", type=int, required=True, help="stop after this many tasks in a row fail twice" )
     v = sub.add_parser( "verify" )
     v.add_argument( "--base", required=True ); v.add_argument( "--split", required=True )
     a = sub.add_parser( "assemble" )
