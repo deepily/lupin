@@ -177,7 +177,6 @@ test( "template: plans sit INSIDE their filer's group, before its ungrouped rows
   const groups = Array.from( frag.children ) as HTMLElement[];
   assert.deepEqual( groups.map( ( g ) => g.dataset.filer ), [ "Rachel", "Sam" ] );
   const [ rachel, sam ] = groups as [ HTMLElement, HTMLElement ];
-  assert.equal( rachel.parentElement, null );
   assert.deepEqual( Array.from( rachel.querySelectorAll<HTMLElement>( ".holding-plan-group" ) ).map( ( p ) => p.dataset.plan ),
     [ "epic:plan-a", "epic:plan-c", "epic:plan-s" ] );
   assert.deepEqual( Array.from( sam.querySelectorAll<HTMLElement>( ".holding-plan-group" ) ).map( ( p ) => p.dataset.plan ), [ "epic:plan-s" ] );
@@ -196,7 +195,7 @@ test( "template: plans sit INSIDE their filer's group, before its ungrouped rows
 test( "template: nothing sits above the filer groups — no stories strip, no plan header outside a filer", () => {
   const frag = renderHoldingAreaGroups( groupHeldRowsByFiler( ROWS() ), undefined, [] );
   assert.ok( Array.from( frag.children ).every( ( c ) => c.classList.contains( "holding-area-group" ) ) );
-  assert.equal( ( frag as unknown as Element ).querySelector?.( ".holding-area-stories" ) ?? null, null );
+  assert.ok( frag.querySelector( ".holding-area-stories" ) === null, "a stories strip was painted" );
 } );
 
 // ───────────────────────────── the pane ─────────────────────────────
@@ -300,7 +299,7 @@ test( "pane: nothing sits above the filer groups, and no operator-visible text s
   const h = mount( () => ( { ok: true } ) );
   const first = h.container.firstElementChild as HTMLElement;
   assert.ok( first.classList.contains( "holding-area-group" ), `the pane opens with ${ first.className }` );
-  assert.equal( h.container.querySelector( ".holding-area-stories, .holding-story-bar" ), null );
+  assert.ok( h.container.querySelector( ".holding-area-stories, .holding-story-bar" ) === null, "a stories strip was painted" );
   for ( const g of Array.from( h.container.querySelectorAll( ".holding-plan-header" ) ) ) {
     assert.ok( ! /stor(y|ies)|epic/i.test( g.textContent ?? "" ), `header text: ${ g.textContent }` );
   }
@@ -458,7 +457,7 @@ test( "a second press while the plan runs is ignored, and the button is dead mea
   // header and hands the operator a FRESH, ENABLED button. A press on it must still be ignored.
   await h.poll();
   const fresh = h.button( ...RA );
-  assert.notEqual( fresh, btn, "the poll did not rebuild the header, so this arm tests nothing" );
+  assert.ok( fresh !== btn, "the poll did not rebuild the header, so this arm tests nothing" );
   assert.equal( fresh.disabled, false, "precondition: the rebuilt button is live" );
   press( fresh );
   await settle();

@@ -291,7 +291,7 @@ test( "pane: nothing sits above the filer groups", () => {
   mount( () => ( { ok: true } ) );
   const first = ( document.getElementById( "holding-area-container" ) as HTMLElement ).firstElementChild as HTMLElement;
   assert.ok( first.classList.contains( "holding-area-group" ), `the pane opens with ${ first.className }` );
-  assert.equal( document.querySelector( ".holding-area-stories, .holding-story-bar" ), null );
+  assert.ok( document.querySelector( ".holding-area-stories, .holding-story-bar" ) === null, "a stories strip was painted" );
 } );
 
 test( "toggle: plans start collapsed; a click on the header opens ONLY that plan, a second closes it", () => {
@@ -431,7 +431,7 @@ test( "the button is dead while the plan runs, and a press on the rebuilt button
   // and hands the operator a fresh, enabled button, and a press on it must be ignored.
   h.repaint();
   const fresh = h.button( ...RA );
-  assert.notEqual( fresh, btn, "the repaint did not rebuild the header, so this arm tests nothing" );
+  assert.ok( fresh !== btn, "the repaint did not rebuild the header, so this arm tests nothing" );
   assert.equal( fresh.disabled, false, "precondition: the rebuilt button is live" );
   press( fresh );
   await settle();
