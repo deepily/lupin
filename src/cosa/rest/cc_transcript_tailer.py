@@ -388,6 +388,7 @@ class CcTranscriptTailer:
         coalesce_window = max( 0.0, self.settings[ "coalesce_window_ms" ] / 1000.0 )
         pending         = [ ]
         pending_offset  = None
+        pending_next    = None
         last_flush      = time.monotonic()
 
         grace       = max( 0.0, float( self.settings[ "grace_seconds" ] ) )
@@ -413,18 +414,21 @@ class CcTranscriptTailer:
                 print( f"[CC-TRANSCRIPT] poll error for {self.cc_session_id}: {e}" )
                 chunk = None
 
+            # `pending_next` is the end of the LAST read and is kept across quiet polls. With a
+            # coalesce window the flush runs on a later iteration than the read, and that one
+            # usually finds nothing new; clearing the end there sent frames whose next_offset
+            # equalled their offset, which every client's gap rule treats as a gap.
             if chunk is not None:
                 if pending_offset is None: pending_offset = chunk[ "offset" ]
                 pending.extend( chunk[ "blocks" ] )
                 pending_next = chunk[ "next_offset" ]
-            else:
-                pending_next = None
 
             now = time.monotonic()
             if pending and ( now - last_flush ) >= coalesce_window:
-                await self._flush( pending_offset, pending_next or pending_offset, pending )
+                await self._flush( pending_offset, pending_next, pending )
                 pending        = [ ]
                 pending_offset = None
+                pending_next   = None
                 last_flush     = now
 
             await asyncio.sleep( poll_interval )

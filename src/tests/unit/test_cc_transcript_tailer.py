@@ -536,6 +536,37 @@ async def test_an_append_frame_carries_the_whole_wire_contract( seat ):
 
 
 @pytest.mark.asyncio
+async def test_a_frame_flushed_after_a_quiet_poll_still_ends_where_the_read_ended( seat ):
+    """
+    With a real coalesce window, the flush happens on a LATER poll than the read, and that
+    later poll finds nothing new. The frame must still carry the end of what was read.
+
+    Every other loop test here runs `coalesce_window_ms=0`, which flushes on the same
+    iteration as the read and so can never reach this path. The live server runs 300 ms.
+    Measured on :8000 job ts-11c25f8a (2026-10-03): a frame at 18686 arrived with
+    next_offset 18686 for a 44776-byte file, and three integration tests went red on it.
+    A client applies `chunk.offset != last_next_offset` and would re-fetch on every frame.
+    """
+    path, bridge = seat
+    size   = _write_records( path, 5 )
+    emit   = EmitRecorder()
+    tailer = CcTranscriptTailer( SEAT, emit, settings=_fast_settings( coalesce_window_ms=60 ),
+                                 bridge_reader=bridge )
+
+    tailer.start( from_offset=0 )
+    try:
+        await asyncio.sleep( 0.3 )
+    finally:
+        await tailer.stop()
+
+    frames = emit.of( APPEND_EVENT )
+    assert len( frames ) == 1, f"expected the five records in one coalesced frame, got {len( frames )}"
+    assert ( frames[ 0 ][ "offset" ], frames[ 0 ][ "next_offset" ] ) == ( 0, size ), (
+        f"the frame says it ends at {frames[ 0 ][ 'next_offset' ]}; the file ends at {size}"
+    )
+
+
+@pytest.mark.asyncio
 async def test_offsets_chain_across_frames_with_no_gap( seat ):
     """
     Each frame starts where the previous one ended.
