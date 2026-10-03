@@ -18,8 +18,8 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 
 ## 📚 DECISIONS LOG 2026-10-03 (Mr. Radio 🦉 `6d9a5ad1`; no crew)
 
-- 2026-10-03 — **Where do post-game documents live?** → **`src/docs/post-games/<work-branch version>/`, tracked** (Rick, about 15:55 EDT, direct card, `answered: true`, `default_used: false`, typed: "Let's keep that under src/docs/post-games/v0.2.2 and advance the post games on a per work branch version basis"). María updates the planning-is-prompting workflow docs. Index: `src/docs/post-games/README.md`.
-- 2026-10-03 — **Is `src/conf/lupin-app.ini` committed when the uncommitted edit is Rick's?** → **ALWAYS, AND STOP ASKING** (Rick, about 15:25 EDT, same kind of card, typed: "commit commit commit always and stop asking me"). Fourth time; auto-memory `feedback_always_commit_lupin_app_ini.md` updated. Done as `5e8537ba5`.
+- 2026-10-03 — **Where do post-game documents live?** → **`src/docs/post-games/<work-branch version>/`, tracked** (Rick, about 15:25 EDT, direct card, `answered: true`, `default_used: false`, typed: "Let's keep that under src/docs/post-games/v0.2.2 and advance the post games on a per work branch version basis"). María updates the planning-is-prompting workflow docs. Index: `src/docs/post-games/README.md`.
+- 2026-10-03 — **Is `src/conf/lupin-app.ini` committed when the uncommitted edit is Rick's?** → **ALWAYS, AND STOP ASKING** (Rick, about 15:15 EDT, same kind of card, typed: "commit commit commit always and stop asking me"). Fourth time; auto-memory `feedback_always_commit_lupin_app_ini.md` updated. Done as `5e8537ba5`.
 - 2026-10-03 — **When do the approval-settings sudo steps run (row `80513825`)?** → **NOW, THIS AFTERNOON** (Rick, same card, option picked).
 - 2026-10-03 — **Who does the one real spawn on the test VM (row `c9252819`)?** → **MR. RADIO SPAWNS ONE WORKER THERE** (Rick, same card, option picked). Waits on `gcloud auth login`.
 
