@@ -504,23 +504,42 @@ def test_the_writer_model_may_not_be_a_judge_extractor_or_escalation_model():
     s.check_writer_model( FABLE, { "extractor": None } )
 
 
+FAKE_CLI_VERSION = "9.9.9 (Claude Code)"
+
+
+@pytest.fixture( autouse=True )
+def fake_cli( tmp_path_factory ):
+    """An executable that reports a version, so cmd_write can name the binary; the transport's global is put back afterwards."""
+    path = tmp_path_factory.mktemp( "cli" ) / "claude"
+    path.write_text( f"#!/bin/sh\necho '{FAKE_CLI_VERSION}'\n" )
+    path.chmod( 0o755 )
+    write_args.cli = str( path )
+    yield str( path )
+    mt.configure( None )
+
+
 def write_args( base, ledger, **over ):
-    a = { "base": str( base ), "split": "dev", "writer": FABLE, "cap": f"{FABLE}=500", "ledger": str( ledger ), "approved": "100" }
+    a = { "base": str( base ), "split": "dev", "writer": FABLE, "cap": f"{FABLE}=500", "ledger": str( ledger ), "approved": "100", "cli": write_args.cli, "max_fail": "3" }
     a.update( over )
     return [ "write", "--base", a[ "base" ], "--split", a[ "split" ], "--writer-model", a[ "writer" ], "--extractor-model", EXTRACT, "--judge-model", JUDGE,
-             "--escalation-model", ESCAL, "--model-cap", a[ "cap" ], "--call-ledger", a[ "ledger" ], "--approved-calls", a[ "approved" ] ]
+             "--escalation-model", ESCAL, "--model-cap", a[ "cap" ], "--call-ledger", a[ "ledger" ], "--approved-calls", a[ "approved" ],
+             "--claude-cli-path", a[ "cli" ], "--max-consecutive-failures", a[ "max_fail" ] ]
 
 
 class Writer:
     """A stand-in for sdk_query: records every call, answers a fixed reword, and can fail the first n calls of a text."""
 
-    def __init__( self, fail_first=0, fail_always_for=None ):
-        self.seen, self.fail_first, self.fail_always_for = [], fail_first, fail_always_for
+    def __init__( self, fail_first=0, fail_always_for=None, fail_after=None, message="down", fail_nth=() ):
+        self.fail_nth = fail_nth
+        self.seen, self.fail_first, self.fail_always_for, self.fail_after, self.message, self.cli_paths = [], fail_first, fail_always_for, fail_after, message, []
 
     async def __call__( self, prompt, options ):
         self.seen.append( ( options.model, prompt ) )
-        if self.fail_always_for is not None and self.fail_always_for in prompt: raise RuntimeError( "down" )
-        if len( self.seen ) <= self.fail_first: raise RuntimeError( "down" )
+        self.cli_paths.append( options.cli_path )
+        if self.fail_always_for is not None and self.fail_always_for in prompt: raise RuntimeError( self.message )
+        if len( self.seen ) <= self.fail_first: raise RuntimeError( self.message )
+        if self.fail_after is not None and len( self.seen ) > self.fail_after: raise RuntimeError( self.message )
+        if len( self.seen ) in self.fail_nth: raise RuntimeError( self.message )
         yield AssistantMessage( content=[ TextBlock( "Reworded: " + prompt.split( "\n\n", 1 )[ 1 ] ) ], model=options.model )
 
 
@@ -566,7 +585,7 @@ def test_write_makes_one_call_per_task_logs_hash_not_text_and_never_repeats_a_ta
     count = n_tasks( base )
     assert len( w.seen ) == count and { m for m, _ in w.seen } == { FABLE }
     rows = s.read_jsonl( str( base / "dev" / "writer_ledger.jsonl" ) )
-    assert len( rows ) == count and set( rows[ 0 ] ) == { "task_id", "model", "prompt_hash", "output_sha256", "task_sha" } and rows[ 0 ][ "prompt_hash" ] == s.prompt_hash()
+    assert len( rows ) == count and set( rows[ 0 ] ) == { "task_id", "model", "prompt_hash", "output_sha256", "task_sha", "claude_cli", "claude_cli_version" } and rows[ 0 ][ "prompt_hash" ] == s.prompt_hash()
     outs = s.read_jsonl( str( base / "dev" / "writer_outputs.jsonl" ) )
     assert rows[ 0 ][ "output_sha256" ] == hashlib.sha256( next( o for o in outs if o[ "task_id" ] == rows[ 0 ][ "task_id" ] )[ "text" ].encode() ).hexdigest()
     assert mt.calls_used( FABLE, str( shared ) ) == count
@@ -577,11 +596,12 @@ def test_write_makes_one_call_per_task_logs_hash_not_text_and_never_repeats_a_ta
 def test_a_failed_call_is_retried_once_and_a_task_that_fails_twice_is_dropped_by_count( planned, capsys ):
     tmp_path, shared = planned
     base  = tmp_path / "out"
-    first = s.read_jsonl( str( base / "dev" / "writer_tasks.jsonl" ) )[ 0 ]
+    first = s.read_jsonl( str( base / "dev" / "writer_tasks.jsonl" ) )[ 1 ]            # task 0 is the canary
     w = Writer( fail_always_for=first[ "text" ] )
-    assert s.main( write_args( base, shared ), query_fn=w ) == 0
+    assert s.main( write_args( base, shared ), query_fn=w ) == 6
     rows = s.read_jsonl( str( base / "dev" / "writer_ledger.jsonl" ) )
-    assert [ r for r in rows if r.get( "dropped" ) ] == [ { "task_id": first[ "task_id" ], "model": FABLE, "prompt_hash": s.prompt_hash(), "task_sha": s.task_sha( first[ "instruction" ], first[ "text" ] ), "dropped": True } ]
+    assert [ r for r in rows if r.get( "dropped" ) ] == [ { "task_id": first[ "task_id" ], "model": FABLE, "prompt_hash": s.prompt_hash(), "task_sha": s.task_sha( first[ "instruction" ], first[ "text" ] ), "dropped": True,
+                                                             "reason": f"model call to {FABLE} failed: down", "claude_cli": write_args.cli, "claude_cli_version": FAKE_CLI_VERSION } ]
     assert sum( first[ "text" ] in p for _, p in w.seen ) == 2
     assert "dropped=1" in capsys.readouterr().out
     outs = s.read_jsonl( str( base / "dev" / "writer_outputs.jsonl" ) )
@@ -591,7 +611,7 @@ def test_a_failed_call_is_retried_once_and_a_task_that_fails_twice_is_dropped_by
 def test_a_transient_failure_succeeds_on_the_retry( planned ):
     tmp_path, shared = planned
     base = tmp_path / "out"
-    assert s.main( write_args( base, shared ), query_fn=Writer( fail_first=1 ) ) == 0
+    assert s.main( write_args( base, shared ), query_fn=Writer( fail_nth=( 2, ) ) ) == 0              # call 1 is the canary; call 2 fails once, then the retry works
     assert not [ r for r in s.read_jsonl( str( base / "dev" / "writer_ledger.jsonl" ) ) if r.get( "dropped" ) ]
 
 
@@ -772,7 +792,7 @@ def test_run_writer_skips_a_task_the_ledger_already_holds( tmp_path ):
     ledger, outs = str( tmp_path / "l.jsonl" ), str( tmp_path / "o.jsonl" )
     s.write_jsonl( ledger, [ dict( s.writer_ledger_row( "t1", FABLE, "x" ), task_sha=s.task_sha( "i", "a" ) ) ] )
     w = Writer()
-    got = asyncio.run( s.run_writer( [ { "task_id": "t1", "instruction": "i", "text": "a" }, { "task_id": "t2", "instruction": "i", "text": "b" } ], FABLE, ledger, outs, w ) )
+    got = asyncio.run( s.run_writer( [ { "task_id": "t1", "instruction": "i", "text": "a" }, { "task_id": "t2", "instruction": "i", "text": "b" } ], FABLE, ledger, outs, w, max_consecutive_failures=3 ) )
     assert got == { "called": 1, "dropped": [] } and len( w.seen ) == 1 and "b" in w.seen[ 0 ][ 1 ]
 
 
@@ -964,3 +984,141 @@ def test_resuming_a_consistent_ledger_under_a_different_writer_model_is_refused_
     s.write_jsonl( str( base / "dev" / "writer_ledger.jsonl" ), rows[ :-1 ] )      # one task still pending, so a resume would call
     assert s.main( write_args( base, shared, writer=other, cap=f"{other}=500" ), query_fn=NoCallTransport() ) == 2
     assert f"was written by model {FABLE!r}, not {other!r}" in capsys.readouterr().err and mt.calls_used( other, str( shared ) ) == before
+
+
+# ---- bug 142197c4: the writer stops on a dead model, says why, and does not bury a failure --------
+
+def ledger_of( base ):
+    return s.read_jsonl( str( base / "dev" / "writer_ledger.jsonl" ) )
+
+
+def test_a_write_names_the_cli_binary_configures_it_and_records_path_and_version( planned, capsys ):
+    tmp_path, shared = planned
+    base, w = tmp_path / "out", Writer()
+    assert s.main( write_args( base, shared ), query_fn=w ) == 0
+    assert set( w.cli_paths ) == { write_args.cli }                                  # every call ran the named binary
+    assert { ( r[ "claude_cli" ], r[ "claude_cli_version" ] ) for r in ledger_of( base ) } == { ( write_args.cli, FAKE_CLI_VERSION ) }
+    assert f"claude_cli={write_args.cli} version={FAKE_CLI_VERSION}" in capsys.readouterr().out
+    with pytest.raises( SystemExit ): s.main( [ a for a in write_args( base, shared ) if a not in ( "--claude-cli-path", write_args.cli ) ] )
+
+
+def test_a_write_refuses_a_cli_path_that_is_not_an_executable_before_any_call( planned, capsys, tmp_path ):
+    _, shared = planned
+    w = Writer()
+    assert s.main( write_args( tmp_path / "out", shared, cli=str( tmp_path / "no-such-claude" ) ), query_fn=w ) == 2
+    assert "not an executable file" in capsys.readouterr().err and w.seen == []
+
+
+def test_b_every_failed_call_prints_its_reason_and_the_dropped_row_keeps_the_first_300_characters( planned, capsys ):
+    tmp_path, shared = planned
+    base  = tmp_path / "out"
+    w = Writer( fail_after=1, message="E" * 500 )
+    assert s.main( write_args( base, shared, max_fail="99" ), query_fn=w ) == 6
+    err = capsys.readouterr().err
+    assert err.count( "writer call failed for " ) == len( w.seen ) - 1               # every failed call, retries included
+    drops = [ r for r in ledger_of( base ) if r.get( "dropped" ) ]
+    assert drops and all( len( r[ "reason" ] ) == s.REASON_CHARS for r in drops )     # 500 characters in, 300 stored
+    assert drops[ 0 ][ "reason" ].endswith( "E" * 100 ) and drops[ 0 ][ "reason" ] in err
+
+
+def test_c_a_failed_canary_stops_with_exit_4_after_one_call_with_no_retry_and_no_ledger_row( planned, capsys ):
+    tmp_path, shared = planned
+    base, w = tmp_path / "out", Writer( fail_first=99, message="400 invalid model" )
+    assert s.main( write_args( base, shared ), query_fn=w ) == 4
+    err = capsys.readouterr().err
+    assert len( w.seen ) == 1 and "400 invalid model" in err and "CANARY FAILED" in err and f"version={FAKE_CLI_VERSION}" in err
+    assert not ( base / "dev" / "writer_ledger.jsonl" ).exists() and not ( base / "dev" / "writer_outputs.jsonl" ).exists()
+    assert mt.calls_used( FABLE, str( shared ) ) == 1
+
+
+def test_c_a_good_canary_is_the_first_task_not_an_extra_call( planned ):
+    tmp_path, shared = planned
+    base, w = tmp_path / "out", Writer()
+    assert s.main( write_args( base, shared ), query_fn=w ) == 0
+    assert len( w.seen ) == n_tasks( base ) == len( ledger_of( base ) )
+
+
+def test_d_the_run_stops_after_n_tasks_in_a_row_fail_twice_with_exit_5( planned, capsys ):
+    tmp_path, shared = planned
+    base, w = tmp_path / "out", Writer( fail_after=1, message="rate limited" )
+    assert s.main( write_args( base, shared, max_fail="3" ), query_fn=w ) == 5
+    err = capsys.readouterr().err
+    assert "3 tasks in a row failed twice" in err and "rate limited" in err
+    assert len( w.seen ) == 1 + 3 * 2 and len( [ r for r in ledger_of( base ) if r.get( "dropped" ) ] ) == 3
+
+
+def test_d_one_good_task_resets_the_count_of_failures_in_a_row( tmp_path ):
+    mt.set_budget( str( tmp_path / "shared.jsonl" ), { FABLE: 100 } )
+    ledger, outs = str( tmp_path / "l.jsonl" ), str( tmp_path / "o.jsonl" )
+    tasks = [ { "task_id": f"t{i}", "instruction": "i", "text": f"text-{i}" } for i in range( 6 ) ]
+    got = asyncio.run( s.run_writer( tasks, FABLE, ledger, outs, Writer( fail_nth=( 2, 3, 5, 6 ) ), max_consecutive_failures=2 ) )
+    assert got[ "dropped" ] == [ "t1", "t3" ]                    # two lone failures with a good task between: the count was reset, the run goes on
+    gone = [ { "task_id": f"u{i}", "instruction": "i", "text": f"text-u{i}" } for i in range( 6 ) ]
+    with pytest.raises( s.TooManyFailures ) as stopped: asyncio.run( s.run_writer( gone, FABLE, str( tmp_path / "l2.jsonl" ), outs, Writer( fail_after=1 ), max_consecutive_failures=2 ) )
+    assert stopped.value.dropped == [ "u1", "u2" ] and stopped.value.called == 5
+
+
+def test_d_max_consecutive_failures_must_be_one_or_more( planned, capsys ):
+    tmp_path, shared = planned
+    w = Writer()
+    assert s.main( write_args( tmp_path / "out", shared, max_fail="0" ), query_fn=w ) == 2
+    assert "one or more" in capsys.readouterr().err and w.seen == []
+    for bad in ( 0, True, "3", None ):
+        with pytest.raises( ValueError, match="one or more" ): asyncio.run( s.run_writer( [], FABLE, str( tmp_path / "l.jsonl" ), str( tmp_path / "o.jsonl" ), Writer(), max_consecutive_failures=bad ) )
+    with pytest.raises( SystemExit ): s.main( [ a for a in write_args( tmp_path, shared ) if a not in ( "--max-consecutive-failures", "3" ) ] )
+
+
+def test_e_a_dropped_row_is_not_final_a_rerun_calls_that_task_again_and_the_ledger_keeps_both_rows( planned ):
+    tmp_path, shared = planned
+    base  = tmp_path / "out"
+    first = s.read_jsonl( str( base / "dev" / "writer_tasks.jsonl" ) )[ 1 ]
+    assert s.main( write_args( base, shared ), query_fn=Writer( fail_always_for=first[ "text" ] ) ) == 6
+    w = Writer()
+    assert s.main( write_args( base, shared, approved="0" ), query_fn=w ) == 2       # the dropped task is pending again, so zero approved calls is refused
+    assert s.main( write_args( base, shared, approved="1" ), query_fn=w ) == 0
+    assert len( w.seen ) == 1 and first[ "text" ] in w.seen[ 0 ][ 1 ]
+    mine = [ r for r in ledger_of( base ) if r[ "task_id" ] == first[ "task_id" ] ]
+    assert [ bool( r.get( "dropped" ) ) for r in mine ] == [ True, False ]
+    assert first[ "task_id" ] in { o[ "task_id" ] for o in s.read_jsonl( str( base / "dev" / "writer_outputs.jsonl" ) ) }
+    assert s.main( write_args( base, shared, approved="0" ), query_fn=w ) == 0       # now nothing is pending
+    assert len( w.seen ) == 1
+
+
+def test_e_a_later_dropped_row_for_a_task_with_an_output_does_not_undo_the_output( tmp_path ):
+    mt.set_budget( str( tmp_path / "shared.jsonl" ), { FABLE: 10 } )
+    ledger, outs = str( tmp_path / "l.jsonl" ), str( tmp_path / "o.jsonl" )
+    sha = s.task_sha( "i", "a" )
+    s.write_jsonl( ledger, [ dict( s.writer_ledger_row( "t1", FABLE, "x" ), task_sha=sha ), { "task_id": "t1", "model": FABLE, "prompt_hash": s.prompt_hash(), "task_sha": sha, "dropped": True } ] )
+    w = Writer()
+    assert asyncio.run( s.run_writer( [ { "task_id": "t1", "instruction": "i", "text": "a" } ], FABLE, ledger, outs, w, max_consecutive_failures=1 ) ) == { "called": 0, "dropped": [] }
+    assert w.seen == []
+
+
+def test_e_a_dropped_row_for_different_text_is_still_a_redraw_refusal( tmp_path ):
+    mt.set_budget( str( tmp_path / "shared.jsonl" ), { FABLE: 10 } )
+    ledger = str( tmp_path / "l.jsonl" )
+    s.write_jsonl( ledger, [ { "task_id": "t1", "model": FABLE, "prompt_hash": s.prompt_hash(), "task_sha": s.task_sha( "i", "OLD" ), "dropped": True } ] )
+    w = Writer()
+    with pytest.raises( ValueError, match="different text" ): asyncio.run( s.run_writer( [ { "task_id": "t1", "instruction": "i", "text": "a" } ], FABLE, ledger, str( tmp_path / "o.jsonl" ), w, max_consecutive_failures=1 ) )
+    assert w.seen == []
+
+
+def test_f_the_exit_code_is_6_and_stderr_says_so_when_any_task_was_dropped( planned, capsys ):
+    tmp_path, shared = planned
+    base  = tmp_path / "out"
+    first = s.read_jsonl( str( base / "dev" / "writer_tasks.jsonl" ) )[ 1 ]
+    assert s.main( write_args( base, shared ), query_fn=Writer( fail_always_for=first[ "text" ] ) ) == 6
+    captured = capsys.readouterr()
+    assert "DROPPED: 1 task(s) failed twice" in captured.err and "dropped=1" in captured.out
+
+
+def test_end_to_end_cmd_write_with_a_failing_fake_gives_the_exit_code_the_stderr_reason_and_the_ledger_row( planned, capsys ):
+    tmp_path, shared = planned
+    base, w = tmp_path / "out", Writer( fail_after=1, message="credit balance is too low" )
+    assert s.main( write_args( base, shared, max_fail="2" ), query_fn=w ) == 5
+    err = capsys.readouterr().err
+    reason = f"model call to {FABLE} failed: credit balance is too low"
+    assert f"writer call failed for " in err and reason in err and "2 tasks in a row failed twice" in err
+    rows = ledger_of( base )
+    assert [ bool( r.get( "dropped" ) ) for r in rows ] == [ False, True, True ]
+    assert rows[ 1 ][ "reason" ] == reason and rows[ 1 ][ "claude_cli_version" ] == FAKE_CLI_VERSION
