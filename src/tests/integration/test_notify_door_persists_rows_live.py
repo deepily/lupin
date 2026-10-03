@@ -36,12 +36,13 @@ defect is the only thing holding the hammer. Fix auth while these two still sit
 on the :7999 sweep and the merge pyramid starts minting a response-required
 orphan on every fire. That is why this move lands FIRST and the auth fix second.
 
-⚠️ THESE TWO ARE RED TODAY, AND NOT BECAUSE OF THIS MOVE. Both fail 401
-"Missing auth. Provide X-API-Key or Authorization: Bearer <jwt>" — they send the
-credential as a query param and `api_key_auth.py:208` reads a Header. That is
-row c46ba7c0's staircase, deliberately NOT repaired here: read all three of its
-faults before touching the first, or you will fix one, see the next fire, and
-revert a correct repair.
+⚠️ THESE TWO WERE RED AT THE FIRST STEP OF row c46ba7c0's STAIRCASE, AND ARE REPAIRED
+THERE (2026-10-03, row 80513825's seat): they sent the key as a query param, which a
+Header-reading door never sees. They now authenticate with a Bearer JWT, as the sibling
+`test_notifications_sse_smoke.py` does. Steps 2 (key shape) and 3 (a bcrypt-matched row) were
+never reachable from here and are not this file's subject. NOT RUN ON ANY SERVER BY THE
+REPAIR: these tests write rows and :8000 is scheduled-only, so the proof is static
+(test_notify_door_persists_rows_live_credential.py) until a scheduled run reads it.
 """
 
 import sys
@@ -64,8 +65,51 @@ import cosa.utils.util as cu
 
 
 BASE_URL  = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
-API_KEY   = "claude_code_simple_key"
 TEST_USER = os.environ.get( "LUPIN_DEV_EMAIL", "test@example.com" )
+
+# `API_KEY = "claude_code_simple_key"` USED TO SIT HERE and was REMOVED, not relocated (row
+# c46ba7c0, same repair as test_notifications_sse_smoke.py). It was sent as a QUERY param, which
+# `require_api_key_or_jwt` never reads (it reads headers), and even as a header it could not pass:
+# step 2 wants ^ck_live_[A-Za-z0-9_-]{64,}$ and step 3 wants a bcrypt-matched row in the server's
+# api_keys table. These two tests are about the notify handler, not about authentication, so they
+# take the JWT door with the credentials CLAUDE.md § Test credentials prescribes.
+_BEARER_CACHE = { }
+
+
+def _bearer_headers():
+    """
+    Log in once and return the Bearer header for /api/notify.
+
+    Requires:
+        - LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL and ..._PASSWORD are set
+        - a server answering at BASE_URL
+
+    Ensures:
+        - returns { "Authorization": "Bearer <jwt>" }, cached for the process
+
+    Raises:
+        - ValueError naming the missing env vars
+        - AssertionError naming a failed LOGIN, so it is never read as an endpoint defect
+    """
+    if "headers" in _BEARER_CACHE: return _BEARER_CACHE[ "headers" ]
+
+    email    = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" )
+    password = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
+    if not email or not password:
+        raise ValueError(
+            "Set LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL and LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD "
+            "— see CLAUDE.md § Test credentials."
+        )
+
+    response = requests.post( f"{BASE_URL}/auth/login", json={ "email": email, "password": password }, timeout=10 )
+    assert response.status_code == 200, (
+        f"LOGIN FAILED with {response.status_code} — a harness authentication failure, "
+        f"NOT a defect in /api/notify. Body: {response.text[:200]}"
+    )
+
+    token = response.json()[ "tokens" ][ "access_token" ]
+    _BEARER_CACHE[ "headers" ] = { "Authorization": f"Bearer {token}" }
+    return _BEARER_CACHE[ "headers" ]
 
 
 def print_test_header( test_name ):
@@ -97,9 +141,9 @@ def test_fire_and_forget_mode():
             "message"     : "Smoke test fire-and-forget notification",
             "type"        : "task",
             "priority"    : "low",
-            "target_user" : TEST_USER,
-            "api_key"     : API_KEY
+            "target_user" : TEST_USER
         },
+        headers=_bearer_headers(),
         timeout=5
     )
 
@@ -138,11 +182,11 @@ def test_offline_with_default():
             "type"              : "task",
             "priority"          : "high",
             "target_user"       : TEST_USER,
-            "api_key"           : API_KEY,
             "response_requested": True,
             "response_type"     : "yes_no",
             "response_default"  : "no"
         },
+        headers=_bearer_headers(),
         timeout=5
     )
 
