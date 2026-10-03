@@ -163,7 +163,8 @@ def build_report( results, config, judge_prompt_version=None, jev_run=False ):
           and flagged_ok is True only when every list's flagged_rate is at most FLAGGED_CEILING (provisional)
         - the model ids and prompt versions used are recorded in the report
         - history_class carries the class version and, per list, the dropped claims that still count as lost and
-          the ones excused as history (a separate number, never folded into either gate figure); the
+          the ones excused as history (a separate number, never folded into either gate figure), and
+          excused_claims, one row per excused claim with its pair, list, text, quote and kinds, for a person to read; the
           gate figures above are computed from every dropped claim, history included
         - miss_criterion_met is True only for zero misses on at least 60 seeded pairs in every list
         - false_alarm_ok is True only when every list flags at most FALSE_ALARM_CEILING of the
@@ -232,6 +233,8 @@ def build_report( results, config, judge_prompt_version=None, jev_run=False ):
                 if r[ "seed_span" ] is not None and claim_extractor.spans_overlap( ( claim[ "start" ], claim[ "end" ] ), tuple( r[ "seed_span" ] ) ):
                     seed_total += 1
                     seed_same  += same
+    excused_claims = [ { "pair": r[ "id" ], "list": slot, "claim": lst[ "claims" ][ i ][ "text" ], "quote": lst[ "claims" ][ i ][ "quote" ], "kinds": kinds }
+                       for r in results for slot, lst in enumerate( r[ "lists" ] ) for i, kinds in loss_split( lst )[ 1 ] ]
     agree_all  = all_same / all_total if all_total else None
     agree_seed = seed_same / seed_total if seed_total else None
     agree_ok   = agree_all is not None and agree_seed is not None and agree_all >= AGREEMENT_BAR and agree_seed >= AGREEMENT_BAR
@@ -260,7 +263,8 @@ def build_report( results, config, judge_prompt_version=None, jev_run=False ):
         "mean_uncovered"    : sum( uncovered ) / len( uncovered ) if uncovered else None,
         "identical_list_pairs" : identical,
         "history_class"     : { "version": history_class.HISTORY_CLASS_VERSION,
-                                "lost": [ l[ "claims_lost" ] for l in lists ], "excused": [ l[ "history_excused" ] for l in lists ] },
+                                "lost": [ l[ "claims_lost" ] for l in lists ], "excused": [ l[ "history_excused" ] for l in lists ],
+                                "excused_claims": excused_claims },
         "pairs"             : len( results ),
         "miss_criterion_met": miss_ok,
         "false_alarm_ok"    : fa_ok,
