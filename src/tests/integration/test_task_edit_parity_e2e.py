@@ -121,14 +121,15 @@ def _make_probe( api_key, **overrides ):
     """Create one fresh, non-terminal probe row for a mutation arm (minted queued, or not_approved
     when the holding-area default is on, which is the case on :8000)."""
     body = {
-        "created_by" : ACTOR,
-        "item_class" : "task",
-        "title"      : "task_edit parity probe (PRE-EDIT)",
-        "project"    : "lupin",
-        "body"       : "PROBE-ORIGINAL-BODY",
-        "priority"   : "P2",
-        "gate_class" : "none",
-        "urgency"    : "normal",
+        "created_by"      : ACTOR,
+        "item_class"      : "task",
+        "title"           : "task_edit parity probe (PRE-EDIT)",
+        "project"         : "lupin",
+        "body"            : "PROBE-ORIGINAL-BODY",
+        "priority"        : "P2",
+        "gate_class"      : "none",
+        "urgency"         : "normal",
+        "correlation_key" : "epic:unassigned",   # the create door 422s a row with no epic key
     }
     body.update( overrides )
     item = task_create_impl( BASE_URL, api_key, **body )
