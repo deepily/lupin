@@ -5,10 +5,20 @@ It walks the Python files of ONE git commit and writes one JSON Lines row per do
 shape labelled_set_seeder reads: { id, file, symbol, old }. The files come from git at that commit,
 never from the working tree, so the same commit gives the same bytes whatever is checked out.
 
+The text of a row is inspect.cleandoc of the docstring: what a reader sees, with the indentation
+that depends on nesting depth removed. The manifest records that choice.
+
+A docstring whose text is the same as another's, after runs of whitespace are collapsed, is kept once.
+The seeder splits whole directories between dev, gate and reserve but never compares text, so a copy
+in two directories could land in dev and in the gate. The first row by id is kept; the manifest lists
+every dropped id under the kept one, and the count.
+
 A second file, <out>.manifest.json, records what the pool was built from: the full source sha, the
-sha256 of this builder's own file, the sha256 of the pool, the counts, and every file skipped and why.
-The manifest is a separate file so the pool stays exactly what the seeder reads. Nothing in either
-file depends on the time or the machine.
+sha256 of this builder's own file, the sha256 of the pool, the counts, every file skipped and why, and
+the duplicates dropped. The manifest is a separate file so the pool stays exactly what the seeder
+reads. Nothing in either file depends on the time or the machine.
+
+The builder has no view on tests or on any other directory: what is read is the run's --include and --exclude.
 """
 
 import argparse
@@ -122,17 +132,23 @@ def docstrings_of( tree ):
         - tree is an ast.Module
 
     Ensures:
-        - the docstring is the raw text, indentation kept, as ast.get_docstring( clean=False ) returns it
+        - the docstring is inspect.cleandoc of the raw text, which is what ast.get_docstring returns
         - symbol is MODULE_SYMBOL for the module and a dotted name for the rest, so a method is Class.method
+        - the whole tree is walked: a definition under an if, a try, a with or a loop is found, and is named
+          as if it sat beside its neighbours
         - a docstring that is blank after strip is left out
     """
     found = []
 
     def visit( node, prefix ):
-        text = ast.get_docstring( node, clean=False )
+        text = ast.get_docstring( node )
         if text is not None and text.strip(): found.append( ( prefix or MODULE_SYMBOL, text ) )
-        for child in node.body:
+        walk( node, prefix )
+
+    def walk( node, prefix ):
+        for child in ast.iter_child_nodes( node ):
             if isinstance( child, DEFINITIONS ): visit( child, prefix + "." + child.name if prefix else child.name )
+            else:                                walk( child, prefix )
 
     visit( tree, "" )
     return found
@@ -165,6 +181,31 @@ def pool_rows( path, source ):
     return rows, None
 
 
+def normalised( text ):
+    """Return text with every run of whitespace collapsed to one space, the form duplicates are compared in."""
+    return " ".join( text.split() )
+
+
+def drop_duplicates( rows ):
+    """
+    Keep one row for each distinct docstring text.
+
+    Requires:
+        - rows is a list of pool rows with unique ids
+
+    Ensures:
+        - returns ( kept, duplicates ): kept holds the rows in their original order, one per
+          whitespace-normalised text, the one with the smallest id
+        - duplicates is a list of { kept, dropped } sorted by the kept id, dropped being the other ids
+          of that text in id order; it is empty when every text is distinct
+    """
+    groups = {}
+    for row in rows: groups.setdefault( normalised( row[ "old" ] ), [] ).append( row[ "id" ] )
+    keep   = { min( group ) for group in groups.values() }
+    dups   = sorted( ( { "kept": min( group ), "dropped": sorted( group )[ 1: ] } for group in groups.values() if len( group ) > 1 ), key=lambda d: d[ "kept" ] )
+    return [ row for row in rows if row[ "id" ] in keep ], dups
+
+
 def build_pool( repo, sha, include, exclude ):
     """
     Build the pool rows and the facts the manifest records.
@@ -174,7 +215,9 @@ def build_pool( repo, sha, include, exclude ):
 
     Ensures:
         - rows are sorted by file and then source order, so the same commit gives the same rows
-        - facts holds source_sha (full), include, exclude, files_read, files_skipped ( file, reason ) and rows
+        - rows hold one docstring text once: see drop_duplicates
+        - facts holds source_sha (full), include, exclude, files_read, files_skipped ( file, reason ), docstring_text,
+          rows_before_dedupe, rows, duplicate_rows_dropped and duplicates
 
     Raises:
         - ValueError when include is empty or the pool would have no rows
@@ -190,9 +233,11 @@ def build_pool( repo, sha, include, exclude ):
         rows.extend( got )
         if reason: skipped.append( [ path, reason ] )
     if not rows: raise ValueError( f"no docstrings found at {full} under {include}: refusing to write an empty pool" )
+    kept, dups = drop_duplicates( rows )
     facts = { "source_sha": full, "include": list( include ), "exclude": list( exclude ), "files_read": len( sources ),
-              "files_skipped": skipped, "rows": len( rows ) }
-    return rows, facts
+              "files_skipped": skipped, "docstring_text": "inspect.cleandoc", "rows_before_dedupe": len( rows ), "rows": len( kept ),
+              "duplicate_rows_dropped": len( rows ) - len( kept ), "duplicates": dups }
+    return kept, facts
 
 
 def builder_sha256():
@@ -236,7 +281,8 @@ def main( argv ):
         print( f"REFUSED: {e}", file=sys.stderr )
         return 2
     write_pool( rows, facts, args.out )
-    print( f"pool: {facts[ 'rows' ]} docstrings from {facts[ 'files_read' ]} files at {facts[ 'source_sha' ]}; {len( facts[ 'files_skipped' ] )} files skipped" )
+    print( f"pool: {facts[ 'rows' ]} docstrings from {facts[ 'files_read' ]} files at {facts[ 'source_sha' ]}; "
+           f"{len( facts[ 'files_skipped' ] )} files skipped, {facts[ 'duplicate_rows_dropped' ]} duplicate docstrings dropped" )
     return 0
 
 

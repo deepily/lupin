@@ -92,12 +92,12 @@ def test_the_module_class_methods_and_nested_functions_each_become_a_row_in_sour
     assert [ r[ "id" ] for r in mine ][ :2 ] == [ "src/pkg/a.py::<module>", "src/pkg/a.py::Parked" ]
 
 
-def test_a_row_has_exactly_the_four_fields_the_seeder_reads_and_keeps_the_raw_docstring( populated ):
+def test_a_row_has_exactly_the_four_fields_the_seeder_reads_and_its_text_is_cleandoc( populated ):
     repo, sha = populated
     rows, _   = pb.build_pool( str( repo ), sha, [ "src/pkg" ], [] )
     assert rows and all( set( r ) == { "id", "file", "symbol", "old" } for r in rows )
     parked = next( r for r in rows if r[ "symbol" ] == "Parked" )
-    assert parked[ "old" ] == "Hold one parked row.\n\n    The flag is computed when the row is parked.\n    "
+    assert parked[ "old" ] == "Hold one parked row.\n\nThe flag is computed when the row is parked."
     assert seeder.stratum_of( parked[ "old" ] ) == "S"
 
 
@@ -116,6 +116,70 @@ def test_a_file_that_is_not_utf8_or_does_not_parse_is_skipped_with_its_reason():
     assert pb.pool_rows( "m.py", b"\xff\xfe" ) == ( [], "encoding" )
     assert pb.pool_rows( "m.py", b"def (:\n" ) == ( [], "syntax" )
     assert pb.pool_rows( "m.py", b"x = 1\x00\n" ) == ( [], "syntax" )
+
+
+NESTED_SRC = '''import os
+
+if os.name:
+    def under_if():
+        """Defined under an if."""
+else:
+    def under_else():
+        """Defined under an else."""
+
+try:
+    class UnderTry:
+        """Defined under a try."""
+except ImportError:
+    pass
+
+with open( __file__ ) as f:
+    def under_with():
+        """Defined under a with."""
+
+for _ in range( 1 ):
+    def under_for():
+        """Defined under a loop."""
+'''
+
+
+def test_a_definition_under_an_if_a_try_a_with_or_a_loop_is_found_and_named_like_its_neighbours():
+    rows, reason = pb.pool_rows( "m.py", NESTED_SRC.encode( "utf-8" ) )
+    assert reason is None
+    assert [ r[ "symbol" ] for r in rows ] == [ "under_if", "under_else", "UnderTry", "under_with", "under_for" ]
+
+
+# ---- one row for each distinct docstring --------------------------------------------------------
+
+SAME_DOC = '"""Return the idle workers, or zero when parked."""\n'
+
+
+def test_the_same_docstring_in_two_directories_gives_one_row_and_the_other_id_is_in_the_manifest( repo ):
+    sha = commit( repo, { "src/one/a.py": SAME_DOC, "src/two/b.py": SAME_DOC, "src/two/c.py": '"""A different docstring."""\n' } )
+    rows, facts = pb.build_pool( str( repo ), sha, [ "src" ], [] )
+    assert ids( rows ) == [ "src/one/a.py::<module>", "src/two/c.py::<module>" ]
+    assert facts[ "duplicates" ] == [ { "kept": "src/one/a.py::<module>", "dropped": [ "src/two/b.py::<module>" ] } ]
+    assert facts[ "rows_before_dedupe" ] == 3 and facts[ "rows" ] == 2 and facts[ "duplicate_rows_dropped" ] == 1
+
+
+def test_docstrings_that_differ_only_in_whitespace_are_the_same_text( repo ):
+    sha = commit( repo, { "src/a.py": '"""One two\n    three."""\n', "src/b.py": '"""One   two three."""\n' } )
+    rows, facts = pb.build_pool( str( repo ), sha, [ "src" ], [] )
+    assert ids( rows ) == [ "src/a.py::<module>" ] and facts[ "duplicates" ][ 0 ][ "dropped" ] == [ "src/b.py::<module>" ]
+
+
+def test_the_kept_row_is_the_smallest_id_and_a_group_of_three_lists_both_others():
+    rows = [ { "id": "z::f", "old": "Same text." }, { "id": "a::f", "old": "Same  text." }, { "id": "m::f", "old": "Same text." }, { "id": "q::f", "old": "Other." } ]
+    kept, dups = pb.drop_duplicates( rows )
+    assert [ r[ "id" ] for r in kept ] == [ "a::f", "q::f" ]
+    assert dups == [ { "kept": "a::f", "dropped": [ "m::f", "z::f" ] } ]
+
+
+def test_a_pool_of_distinct_texts_has_no_duplicates_listed_and_records_the_text_choice( populated ):
+    repo, sha = populated
+    _, facts  = pb.build_pool( str( repo ), sha, [ "src/pkg" ], [ "src/pkg/skip" ] )
+    assert facts[ "duplicates" ] == [] and facts[ "duplicate_rows_dropped" ] == 0 and facts[ "rows_before_dedupe" ] == facts[ "rows" ] > 0
+    assert facts[ "docstring_text" ] == "inspect.cleandoc"
 
 
 # ---- which files are read ------------------------------------------------------------------
@@ -184,10 +248,15 @@ def test_a_name_that_is_not_a_commit_is_refused( populated ):
         pb.build_pool( str( repo ), "no-such-commit", [ "src/pkg" ], [] )
 
 
-def test_two_files_with_the_same_content_are_read_once_and_both_give_rows( repo ):
+def test_two_files_with_the_same_content_are_read_once_and_give_one_set_of_rows( repo ):
     sha  = commit( repo, { "src/a.py": OTHER_SRC, "src/b.py": OTHER_SRC } )
     rows, facts = pb.build_pool( str( repo ), sha, [ "src" ], [] )
-    assert ids( rows ) == [ "src/a.py::<module>", "src/a.py::run", "src/b.py::<module>", "src/b.py::run" ] and facts[ "files_read" ] == 2
+    assert ids( rows ) == [ "src/a.py::<module>", "src/a.py::run" ] and facts[ "files_read" ] == 2 and facts[ "duplicate_rows_dropped" ] == 2
+
+
+def test_the_listing_is_sorted_whatever_order_git_returns_it_in( monkeypatch ):
+    monkeypatch.setattr( pb, "run_git", lambda repo, args, data=None: b"100644 blob bbb\tsrc/z.py\x00100644 blob aaa\tsrc/a.py\x00" )
+    assert pb.list_sources( "repo", "sha", [ "src" ], [] ) == [ ( "src/a.py", "aaa" ), ( "src/z.py", "bbb" ) ]
 
 
 def test_an_empty_oid_list_reads_nothing_and_a_wrong_answer_from_git_is_refused( repo, monkeypatch ):
