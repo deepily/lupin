@@ -13,6 +13,8 @@ Row `d18ce9ef`. Measurement and remedy pricing:
 """
 
 import os
+import py_compile
+import struct
 import subprocess
 import sys
 
@@ -55,10 +57,31 @@ def _read_lane( tmp_path ):
     return out.stdout.strip()
 
 
+def _recorded_second( pyc ):
+    """
+    Return the source whole second that a timestamp .pyc recorded in its own header.
+
+    Requires:
+        - pyc is a bytecode file written by a fresh interpreter
+
+    Ensures:
+        - returns bytes 8 to 12 of the header as an int, the number CPython compares with the source's mtime
+
+    Raises:
+        - AssertionError naming the flags when the file is hash-based, which has no mtime to copy
+    """
+    raw   = pyc.read_bytes()
+    flags = struct.unpack( "<I", raw[ 4:8 ] )[ 0 ]
+    assert flags == 0, f"{pyc} is a hash-based pyc (flags={flags}); this probe needs a timestamp pyc to arm the hazard"
+    return struct.unpack( "<I", raw[ 8:12 ] )[ 0 ]
+
+
 def _bake_stale_pyc( src ):
     """
     Manufacture the exact hazard: a .pyc whose recorded whole second and size both match a source
-    that has since changed. `touch -r` is what makes it deterministic rather than a timing gamble.
+    that has since changed. The source is given the second the pyc recorded in its header, not the
+    pyc file's own mtime: the file is written after the compile and can land in the next second
+    (row `9eb00d3b`, about one run in ten on a loaded box).
     """
     tmp_path = src.parent.parent
     src.write_text( 'LANE = "dead"\n', encoding="utf-8" )
@@ -67,8 +90,8 @@ def _bake_stale_pyc( src ):
 
     pycs = bytecode_files_for( src )
     assert pycs, "no .pyc was produced — this probe cannot test what it claims to test"
-    stat = pycs[ 0 ].stat()
-    os.utime( src, ( stat.st_atime, stat.st_mtime ) )            # same whole second
+    second = _recorded_second( pycs[ 0 ] )
+    os.utime( src, ( second, second ) )                          # the whole second the pyc recorded
     return pycs[ 0 ]
 
 
@@ -92,6 +115,39 @@ def test_negative_control_the_race_is_real_here( tmp_path ):
     )
 
 
+def test_arming_does_not_depend_on_the_second_the_pyc_file_was_written_in( tmp_path, monkeypatch ):
+    """
+    The pyc file can land one whole second after the source it was compiled from, which is what a
+    loaded box does when the compile straddles a second boundary. Arming must still hold.
+
+    Ensures:
+        - with the pyc file's mtime pushed two seconds ahead right after the compile, a fresh import still reads "dead"
+    """
+    real = _read_lane
+    def straddling( path ):
+        lane = real( path )
+        for pyc in path.rglob( "*.pyc" ):
+            stat = pyc.stat()
+            os.utime( pyc, ( stat.st_atime, stat.st_mtime + 2 ) )     # the file landed in a later second
+        return lane
+    src = _build_pkg( tmp_path, "todo" )
+    monkeypatch.setitem( globals(), "_read_lane", straddling )
+    _bake_stale_pyc( src )
+    monkeypatch.setitem( globals(), "_read_lane", real )
+    assert _read_lane( tmp_path ) == "dead", "hazard not armed: the source second was taken from the pyc file, not from the pyc header"
+
+
+def test_recorded_second_reads_a_timestamp_pyc_and_refuses_a_hash_based_one( tmp_path ):
+    src = tmp_path / "m.py"
+    src.write_text( 'LANE = "todo"\n', encoding="utf-8" )
+    os.utime( src, ( 1_700_000_000, 1_700_000_000 ) )
+    stamp = Path( py_compile.compile( str( src ), cfile=str( tmp_path / "stamp.pyc" ), invalidation_mode=py_compile.PycInvalidationMode.TIMESTAMP ) )
+    assert _recorded_second( stamp ) == 1_700_000_000
+    hashed = Path( py_compile.compile( str( src ), cfile=str( tmp_path / "hash.pyc" ), invalidation_mode=py_compile.PycInvalidationMode.CHECKED_HASH ) )
+    with pytest.raises( AssertionError, match="hash-based pyc" ):
+        _recorded_second( hashed )
+
+
 def test_refresh_source_makes_the_next_import_honest( tmp_path ):
     """
     Ensures:
@@ -99,7 +155,7 @@ def test_refresh_source_makes_the_next_import_honest( tmp_path ):
     """
     src = _build_pkg( tmp_path, "todo" )
     _bake_stale_pyc( src )
-    assert _read_lane( tmp_path ) == "dead"          # hazard armed
+    assert _read_lane( tmp_path ) == "dead", "arming failed before the remedy ran; this is not a refresh_source defect"
 
     refresh_source( src )
 
