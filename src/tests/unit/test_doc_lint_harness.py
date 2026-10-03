@@ -415,7 +415,7 @@ def test_identical_extractor_lists_are_counted():
     report = hr.build_report( synthetic( 3, unseeded=2 ), CONFIG )
     assert report[ "identical_list_pairs" ] == 5 and report[ "pairs" ] == 5
     different = synthetic( 1 )
-    different[ 0 ][ "lists" ][ 1 ] = dict( different[ 0 ][ "lists" ][ 1 ], claims=[ { "start": 0, "end": 10, "quote": "other" } ] )
+    different[ 0 ][ "lists" ][ 1 ] = dict( different[ 0 ][ "lists" ][ 1 ], claims=[ { "text": "other", "start": 0, "end": 10, "quote": "other" } ] )
     assert hr.build_report( different, CONFIG )[ "identical_list_pairs" ] == 0
 
 
