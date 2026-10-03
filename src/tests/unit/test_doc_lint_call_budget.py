@@ -8,6 +8,9 @@ refused too late or too early would show in that count and not only in an except
 import asyncio
 import json
 import multiprocessing
+import os
+import queue as std_queue
+import time
 
 import pytest
 from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock
@@ -130,26 +133,108 @@ def test_a_ledger_in_a_missing_directory_is_refused( tmp_path ):
 
 
 def _take( path, queue ):
-    mt.set_budget( path, { FABLE: 5 } )
-    async def transport( prompt, options ):
-        yield AssistantMessage( content=[ TextBlock( "ok" ) ], model=options.model )
-    got = 0
-    for _ in range( 3 ):
-        try:
-            asyncio.run( mt.complete( FABLE, "s", "u", query_fn=transport ) )
-            got += 1
-        except mt.CallBudgetExceeded:
-            pass
-    queue.put( got )
+    try:
+        mt.set_budget( path, { FABLE: 5 } )
+        async def transport( prompt, options ):
+            yield AssistantMessage( content=[ TextBlock( "ok" ) ], model=options.model )
+        got = 0
+        for _ in range( 3 ):
+            try:
+                asyncio.run( mt.complete( FABLE, "s", "u", query_fn=transport ) )
+                got += 1
+            except mt.CallBudgetExceeded:
+                pass
+        queue.put( ( "ok", got ) )
+    except Exception as e:
+        queue.put( ( "error", repr( e ) ) )
+
+
+def collect_children( procs, queue, what, timeout=30.0 ):
+    """
+    Gather one result per child process, or fail the test naming what it waited for; leave no child running.
+
+    Requires:
+        - procs are started multiprocessing.Process objects, each putting exactly one tuple on queue
+        - what is a phrase naming the result awaited, for the failure message
+
+    Ensures:
+        - returns the list of ( "ok", value ) results once every child has reported
+        - a child that ends without reporting fails the test within about a second, naming its pid and exit code
+        - no result within timeout seconds fails the test, naming what was waited for
+        - on every path, each child still alive is killed and joined before this returns or fails
+    """
+    deadline, results = time.monotonic() + timeout, []
+    try:
+        while len( results ) < len( procs ):
+            try:
+                results.append( queue.get( timeout=1.0 ) )
+            except std_queue.Empty:
+                gone = [ p for p in procs if p.exitcode is not None and p.exitcode != 0 ]
+                if gone: pytest.fail( f"waiting for {what}: child pid {gone[ 0 ].pid} ended with exit code {gone[ 0 ].exitcode} without reporting ({len( results )} of {len( procs )} reported)", pytrace=False )
+                if time.monotonic() > deadline: pytest.fail( f"waiting for {what}: {len( results )} of {len( procs )} children reported within {timeout} s", pytrace=False )
+        errors = [ r[ 1 ] for r in results if r[ 0 ] == "error" ]
+        if errors: pytest.fail( f"waiting for {what}: a child raised {errors[ 0 ]}", pytrace=False )
+        return results
+    finally:
+        for p in procs:
+            if p.is_alive(): p.kill()
+            p.join( timeout=10.0 )
 
 
 def test_two_processes_sharing_a_ledger_cannot_both_take_the_last_calls( tmp_path ):
     path  = str( tmp_path / "calls.jsonl" )
-    queue = multiprocessing.get_context( "fork" ).Queue()
-    procs = [ multiprocessing.get_context( "fork" ).Process( target=_take, args=( path, queue ) ) for _ in range( 3 ) ]
+    ctx   = multiprocessing.get_context( "fork" )
+    queue = ctx.Queue()
+    procs = [ ctx.Process( target=_take, args=( path, queue ) ) for _ in range( 3 ) ]
     for p in procs: p.start()
-    for p in procs: p.join()
-    assert sum( queue.get() for _ in procs ) == 5 and mt.calls_used( FABLE, path ) == 5
+    results = collect_children( procs, queue, "the three ledger children's call counts" )
+    assert sum( r[ 1 ] for r in results ) == 5 and mt.calls_used( FABLE, path ) == 5
+
+
+def _dies_without_reporting( queue ):
+    os._exit( 3 )
+
+
+def _hangs( queue ):
+    time.sleep( 600 )
+
+
+def _raises( queue ):
+    queue.put( ( "error", "RuntimeError('boom')" ) )
+
+
+def test_a_child_that_dies_without_reporting_fails_the_wait_fast_and_names_it():
+    ctx   = multiprocessing.get_context( "fork" )
+    queue = ctx.Queue()
+    procs = [ ctx.Process( target=_dies_without_reporting, args=( queue, ) ) ]
+    procs[ 0 ].start()
+    started = time.monotonic()
+    with pytest.raises( BaseException ) as caught:
+        collect_children( procs, queue, "the dying child's count", timeout=30.0 )
+    assert time.monotonic() - started < 10.0 and not procs[ 0 ].is_alive()
+    assert "the dying child's count" in str( caught.value ) and "exit code 3" in str( caught.value ) and "0 of 1 reported" in str( caught.value )
+
+
+def test_a_child_that_never_answers_fails_the_wait_at_the_timeout_and_is_killed():
+    ctx   = multiprocessing.get_context( "fork" )
+    queue = ctx.Queue()
+    procs = [ ctx.Process( target=_hangs, args=( queue, ) ) ]
+    procs[ 0 ].start()
+    started = time.monotonic()
+    with pytest.raises( BaseException ) as caught:
+        collect_children( procs, queue, "the sleeping child's count", timeout=2.0 )
+    assert 2.0 <= time.monotonic() - started < 10.0 and not procs[ 0 ].is_alive()
+    assert "the sleeping child's count" in str( caught.value ) and "0 of 1 children reported within 2.0 s" in str( caught.value )
+
+
+def test_a_child_that_reports_an_error_fails_the_wait_with_its_message():
+    ctx   = multiprocessing.get_context( "fork" )
+    queue = ctx.Queue()
+    procs = [ ctx.Process( target=_raises, args=( queue, ) ) ]
+    procs[ 0 ].start()
+    with pytest.raises( BaseException ) as caught:
+        collect_children( procs, queue, "the raising child's count" )
+    assert "a child raised RuntimeError('boom')" in str( caught.value ) and not procs[ 0 ].is_alive()
 
 
 # ---- the command line prints the count and the cap ----------------------------------------------
