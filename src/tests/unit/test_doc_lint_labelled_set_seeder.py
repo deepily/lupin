@@ -28,12 +28,16 @@ ESCAL    = "claude-opus-5-5"
 
 
 def docstring( n, filler ):
-    """A synthetic docstring that offers every weaken class and a 2-word deletion; filler lines set its stratum."""
-    lines = [ f"Return the number of idle workers in pool {n}, or zero when parked.", "",
-              f"    The count {n} is exact when the pool is open, and it never raises",
-              f"    if the pool is closed (it returns {n} instead). Callers must hold the lock",
-              f"    for at least {n} seconds, which keeps the figure stable. It is only a hint and is always safe." ]
-    lines += [ f"    Note {n} line {i} says something distinct about pool {n}." for i in range( filler ) ]
+    """
+    A synthetic docstring that offers every weaken class and deletable phrases under the selection rules.
+
+    The pool tag p{n} makes each text unique and is not a number; "three" is the one number; no phrase is restated by another sentence; filler lines set the stratum.
+    """
+    lines = [ f"Return the number of idle workers in pool p{n}, or zero when parked.", "",
+              "    The count is exact when the pool is open, and it never raises",
+              "    if the pool is closed (it returns zero instead). Callers must hold the lock (in practice)",
+              f"    for at least three seconds, which keeps the figure of pool p{n} stable. The figure is only a hint and is always safe." ]
+    lines += [ f"    Note {chr( 97 + i )} says something distinct about shape {chr( 97 + i )}." for i in range( filler ) ]
     return "\n".join( lines )
 
 
@@ -143,9 +147,10 @@ def test_bad_cut_on_a_sentence_of_only_punctuation_is_empty():
 
 
 def test_a_cut_that_leaves_a_dangling_conjunction_is_dropped_by_rule_and_counted():
-    old = "Returns the count, and it raises when the pool is closed."
+    old = "Returns the count of idle workers. The pool counts them, and it raises when the pool is closed."
+    assert s.bad_cut( old, "And it raises when the pool is closed." ) == "DANGLING"          # the cut that would start a sentence on a conjunction
     cands, refused = s.delete_candidates( old, SL )
-    assert refused.get( "DANGLING", 0 ) >= 1
+    assert sum( refused.values() ) >= 1                                                      # refusals are counted by reason code
     assert all( s.bad_cut( old, c[ "cut" ] ) is None for c in cands )
     assert "when the pool is closed" in [ c[ "span_text" ] for c in cands ]
 
@@ -573,6 +578,12 @@ def test_write_refuses_without_the_writer_cap_off_the_shared_ledger_or_past_the_
     assert w.seen == []
 
 
+def droppable_task( base, split="dev" ):
+    """A task after the canary whose text appears in no other task's text, so a fake that fails on that text fails it alone."""
+    rows = s.read_jsonl( str( base / split / "writer_tasks.jsonl" ) )
+    return next( r for i, r in enumerate( rows ) if i > 0 and sum( r[ "text" ] in other[ "text" ] for other in rows ) == 1 )
+
+
 def n_tasks( base, split="dev" ):
     return len( s.read_jsonl( str( base / split / "writer_tasks.jsonl" ) ) )
 
@@ -596,7 +607,7 @@ def test_write_makes_one_call_per_task_logs_hash_not_text_and_never_repeats_a_ta
 def test_a_failed_call_is_retried_once_and_a_task_that_fails_twice_is_dropped_by_count( planned, capsys ):
     tmp_path, shared = planned
     base  = tmp_path / "out"
-    first = s.read_jsonl( str( base / "dev" / "writer_tasks.jsonl" ) )[ 1 ]            # task 0 is the canary
+    first = droppable_task( base )            # task 0 is the canary
     w = Writer( fail_always_for=first[ "text" ] )
     assert s.main( write_args( base, shared ), query_fn=w ) == 6
     rows = s.read_jsonl( str( base / "dev" / "writer_ledger.jsonl" ) )
@@ -1084,7 +1095,7 @@ def test_d_max_consecutive_failures_must_be_one_or_more( planned, capsys ):
 def test_e_a_dropped_row_is_not_final_a_rerun_calls_that_task_again_and_the_ledger_keeps_both_rows( planned ):
     tmp_path, shared = planned
     base  = tmp_path / "out"
-    first = s.read_jsonl( str( base / "dev" / "writer_tasks.jsonl" ) )[ 1 ]
+    first = droppable_task( base )
     assert s.main( write_args( base, shared ), query_fn=Writer( fail_always_for=first[ "text" ] ) ) == 6
     w = Writer()
     assert s.main( write_args( base, shared, approved="0" ), query_fn=w ) == 2       # the dropped task is pending again, so zero approved calls is refused
@@ -1119,7 +1130,7 @@ def test_e_a_dropped_row_for_different_text_is_still_a_redraw_refusal( tmp_path 
 def test_f_the_exit_code_is_6_and_stderr_says_so_when_any_task_was_dropped( planned, capsys ):
     tmp_path, shared = planned
     base  = tmp_path / "out"
-    first = s.read_jsonl( str( base / "dev" / "writer_tasks.jsonl" ) )[ 1 ]
+    first = droppable_task( base )
     assert s.main( write_args( base, shared ), query_fn=Writer( fail_always_for=first[ "text" ] ) ) == 6
     captured = capsys.readouterr()
     assert "DROPPED: 1 task(s) failed twice" in captured.err and "dropped=1" in captured.out

@@ -34,6 +34,8 @@ import sys
 
 import cosa.utils.util as cu
 from cosa.repo.doc_lint import claim_extractor, labelled_pairs, model_transport
+from cosa.repo.doc_lint import labelled_set_rules as rules
+from cosa.repo.doc_lint.labelled_set_rules import EDGE_PUNCT, PRONOUNS, sentences_of, words_of
 
 # One table; every number is a parameter and none is hard-coded where it is used.
 SIZES = {
@@ -73,9 +75,6 @@ OPENERS     = ( "which", "when", "if", "unless", "because", "while", "until", "b
 OPENER_RE   = re.compile( r"(?<=\s)(?:" + "|".join( OPENERS ) + r")(?=\s)" )
 PUNCT_RE    = re.compile( r"[,;:—]" )
 PAREN_RE    = re.compile( r"\([^()\n]*\)" )
-SENTENCE_RE = re.compile( r"(?<=[.!?])\s+" )
-EDGE_PUNCT  = " \t\n.,;:!?"
-PRONOUNS    = frozenset( "this it that these those they such its".split() )
 START_DANGLERS = frozenset( "and or but which that of to with for because so while".split() )
 END_DANGLERS   = frozenset( "and or but if when which that the a an of to with for in on because so while".split() )
 AUX_VERBS   = frozenset( "is are was were be been am do does did has have had can could may might must shall should will would".split() )
@@ -134,19 +133,9 @@ def unit_of( file ):
     return os.path.dirname( file )
 
 
-def words_of( text ):
-    """Count words the way the spec does: split() on whitespace."""
-    return len( text.split() )
-
-
 def is_short( span_words ):
     """Say whether a span of this many words is short (2 or 3)."""
     return SHORT_WORDS[ 0 ] <= span_words <= SHORT_WORDS[ 1 ]
-
-
-def sentences_of( text ):
-    """Split a text into sentences at terminal punctuation followed by whitespace."""
-    return [ s for s in SENTENCE_RE.split( text.strip() ) if s ]
 
 
 def phrase_units( old ):
@@ -274,13 +263,14 @@ def delete_candidates( old, stoplist ):
     Return the seedable deletions of one docstring, each { span, span_text, cut }.
 
     Ensures:
-        - spans are phrase units that pass span_ok; cuts that bad_cut refuses are left out and counted
+        - spans are phrase units that pass span_ok; cuts that bad_cut or rules.delete_rejection (rules 4 and 5) refuse
+          are left out and counted by reason code
     """
     out, refused = [], {}
     for span in phrase_units( old ):
         if not span_ok( old, span, stoplist ): continue
         cut    = cut_text( old, span )
-        reason = bad_cut( old, cut )
+        reason = bad_cut( old, cut ) or rules.delete_rejection( old, span, cut )
         if reason is not None:
             refused[ reason ] = refused.get( reason, 0 ) + 1
             continue
@@ -348,12 +338,16 @@ def weaken_candidates( old, stoplist ):
         - the span is the smallest phrase unit holding the changed word, or a 2 to 3 word window around it
           (a short span); every span passes span_ok and holds the changed token
         - a weak text that is not confined to the changed token is left out
+        - a number or quantifier swap whose value or word occurs again in old is left out (rule 2)
+        - a qualifier deletion that rules.qualifier_rejected refuses is left out (rule 3)
     """
     units = phrase_units( old )
     out   = []
     for edit in weaken_edits( old ):
         weak = apply_edit( old, edit )
         if not edit_confined_to_token( old, weak, edit[ "changed_token" ] ): continue
+        if rules.restated_swap( old, edit[ "class" ], edit[ "changed_token" ], edit[ "start" ] ): continue
+        if edit[ "class" ] == "qualifier" and rules.qualifier_rejected( old, edit[ "start" ], edit[ "end" ], edit[ "changed_token" ] ): continue
         holding = [ u for u in units if u[ 0 ] <= edit[ "start" ] and edit[ "end" ] <= u[ 1 ] or u[ 0 ] <= edit[ "start" ] < u[ 1 ] ]
         spans   = [ min( holding, key=lambda u: u[ 1 ] - u[ 0 ] ) ] if holding else []
         words   = list( re.finditer( r"\S+", old ) )
@@ -468,6 +462,34 @@ def short_quota( sizes ):
     return int( math.ceil( sizes[ "short" ] / 2 ) )
 
 
+def build_docs( pool, stoplist, exclude=frozenset() ):
+    """
+    Return ( docs_by_kind, units ): every usable docstring of the pool with its candidates per kind, and the sorted units.
+
+    Requires:
+        - pool is a list of { id, file, symbol, old }; ids unique
+
+    Ensures:
+        - a docstring under 3 lines or in exclude is left out; a kind keeps only docstrings that have a candidate
+    """
+    docs = []
+    for row in sorted( pool, key=lambda r: r[ "id" ] ):
+        if row[ "id" ] in exclude: continue
+        stratum = stratum_of( row[ "old" ] )
+        if stratum is None: continue
+        docs.append( { "pool_id": row[ "id" ], "file": row[ "file" ], "symbol": row[ "symbol" ], "old": row[ "old" ], "stratum": stratum, "unit": unit_of( row[ "file" ] ) } )
+    docs_by_kind = { kind: [ dict( d, cands=candidates_for( kind, d[ "old" ], stoplist ) ) for d in docs ] for kind in KINDS }
+    for kind in KINDS: docs_by_kind[ kind ] = [ d for d in docs_by_kind[ kind ] if d[ "cands" ] ]
+    return docs_by_kind, sorted( { d[ "unit" ] for d in docs } )
+
+
+def partition_units( units, seed ):
+    """Return { "dev", "gate", "gate-reserve" } -> the units each split owns for a split seed (thirds of the shuffled units)."""
+    shuffled = split_units( units, seed )
+    third    = max( 1, len( shuffled ) // 3 )
+    return { "dev": shuffled[ :third ], "gate": shuffled[ third:2 * third ], "gate-reserve": shuffled[ 2 * third: ] }
+
+
 def seed_search( pool, stoplist, gate_sizes, dev_sizes, mix, split_seed_start, tries, draw_seed, exclude=frozenset() ):
     """
     Search split seeds until dev, gate and reserve can each fill every kind and stratum.
@@ -483,21 +505,11 @@ def seed_search( pool, stoplist, gate_sizes, dev_sizes, mix, split_seed_start, t
     Raises:
         - Shortfall naming the last failure when no seed in the range works
     """
-    docs = []
-    for row in sorted( pool, key=lambda r: r[ "id" ] ):
-        if row[ "id" ] in exclude: continue
-        stratum = stratum_of( row[ "old" ] )
-        if stratum is None: continue
-        docs.append( { "pool_id": row[ "id" ], "file": row[ "file" ], "symbol": row[ "symbol" ], "old": row[ "old" ], "stratum": stratum, "unit": unit_of( row[ "file" ] ) } )
-    docs_by_kind = { kind: [ dict( d, cands=candidates_for( kind, d[ "old" ], stoplist ) ) for d in docs ] for kind in KINDS }
-    for kind in KINDS: docs_by_kind[ kind ] = [ d for d in docs_by_kind[ kind ] if d[ "cands" ] ]
-    units  = sorted( { d[ "unit" ] for d in docs } )
-    last   = None
+    docs_by_kind, units = build_docs( pool, stoplist, exclude )
+    last = None
     for attempt in range( tries ):
-        seed    = split_seed_start + attempt
-        shuffled = split_units( units, seed )
-        third   = max( 1, len( shuffled ) // 3 )
-        parts   = { "dev": shuffled[ :third ], "gate": shuffled[ third:2 * third ], "gate-reserve": shuffled[ 2 * third: ] }
+        seed  = split_seed_start + attempt
+        parts = partition_units( units, seed )
         try:
             picks = {}
             for name, sizes in ( ( "dev", dev_sizes ), ( "gate", gate_sizes ), ( "gate-reserve", gate_sizes ) ):
@@ -506,6 +518,34 @@ def seed_search( pool, stoplist, gate_sizes, dev_sizes, mix, split_seed_start, t
         except Shortfall as e:
             last = e
     raise Shortfall( f"no split seed in {split_seed_start}..{split_seed_start + tries - 1} fills dev, gate and reserve; last: {last}" )
+
+
+def make_pair( pair_id, kind, d, c, rng, tasks, task_rows ):
+    """
+    Return the pair record of one pick and add its writer task(s) to tasks and task_rows.
+
+    Ensures:
+        - task ids come from rng, random-looking and unrelated to the pair id; the same instruction string serves delete,
+          weaken and paraphrase texts; relocate also has a design-prose task
+    """
+    def new_task( role, instruction, text ):
+        task_id = "t%016x" % rng.getrandbits( 64 )
+        tasks[ task_id ] = { "pair_id": pair_id, "role": role, "sha256": task_sha( INSTRUCTIONS[ instruction ], text ) }
+        task_rows.append( { "task_id": task_id, "instruction": INSTRUCTIONS[ instruction ], "text": text } )
+
+    span_text = c.get( "span_text", "" )
+    rec = { "id": pair_id, "pool_id": d[ "pool_id" ], "file": d[ "file" ], "symbol": d[ "symbol" ], "old": d[ "old" ], "kind": kind,
+            "weaken_class": c.get( "class" ), "changed_token": c.get( "changed_token" ), "stratum": d[ "stratum" ],
+            "x_span_in_old": span_text, "span_words": words_of( span_text ) if span_text else 0, "span_chars": len( span_text ),
+            "short": is_short( words_of( span_text ) ) if span_text else False }
+    if kind == "delete": new_task( "new", "reword", c[ "cut" ] )
+    elif kind == "weaken": new_task( "new", "reword", c[ "weak_text" ] )
+    elif kind == "paraphrase": new_task( "new", "reword", c[ "text" ] )
+    else:
+        rec[ "x_span_in_old" ] = c[ "sentence" ]
+        new_task( "new", "reword", c[ "cut" ] )
+        new_task( "linked_doc", "design", c[ "sentence" ] )
+    return rec
 
 
 def build_split_plan( name, picks, seed ):
@@ -522,27 +562,7 @@ def build_split_plan( name, picks, seed ):
     items = [ ( kind, d, c ) for kind in KINDS for d, c in picks[ kind ] ]
     rng.shuffle( items )
     pairs, tasks, task_rows = [], {}, []
-
-    def new_task( role, pair_id, instruction, text ):
-        task_id = "t%016x" % rng.getrandbits( 64 )
-        tasks[ task_id ] = { "pair_id": pair_id, "role": role, "sha256": task_sha( INSTRUCTIONS[ instruction ], text ) }
-        task_rows.append( { "task_id": task_id, "instruction": INSTRUCTIONS[ instruction ], "text": text } )
-
-    for index, ( kind, d, c ) in enumerate( items ):
-        pair_id = "p%03d" % index
-        span_text = c.get( "span_text", "" )
-        rec = { "id": pair_id, "pool_id": d[ "pool_id" ], "file": d[ "file" ], "symbol": d[ "symbol" ], "old": d[ "old" ], "kind": kind,
-                "weaken_class": c.get( "class" ), "changed_token": c.get( "changed_token" ), "stratum": d[ "stratum" ],
-                "x_span_in_old": span_text, "span_words": words_of( span_text ) if span_text else 0, "span_chars": len( span_text ),
-                "short": is_short( words_of( span_text ) ) if span_text else False }
-        if kind == "delete": new_task( "new", pair_id, "reword", c[ "cut" ] )
-        elif kind == "weaken": new_task( "new", pair_id, "reword", c[ "weak_text" ] )
-        elif kind == "paraphrase": new_task( "new", pair_id, "reword", c[ "text" ] )
-        else:
-            rec[ "x_span_in_old" ] = c[ "sentence" ]
-            new_task( "new", pair_id, "reword", c[ "cut" ] )
-            new_task( "linked_doc", pair_id, "design", c[ "sentence" ] )
-        pairs.append( rec )
+    for index, ( kind, d, c ) in enumerate( items ): pairs.append( make_pair( "p%03d" % index, kind, d, c, rng, tasks, task_rows ) )
     rng.shuffle( task_rows )
     plan = { "split": name, "pairs": pairs, "tasks": tasks, "units": sorted( { d[ "unit" ] for _, d, _ in items } ) }
     plan[ "plan_sha256" ] = plan_hash( plan )
@@ -874,6 +894,201 @@ def cmd_write( args, query_fn=None ):
     return 0
 
 
+NEGATION_CUES = frozenset( "not n't no never cannot without".split() )
+
+
+def weak_cues( cls, token ):
+    """
+    Return the lowercase words that show a weakened token in the writer's output; empty when the weak form is nothing (a deleted qualifier).
+
+    Requires:
+        - cls and token are a weaken pair's class and changed token as the plan recorded them
+
+    Ensures:
+        - a negation that adds "not" to the strong word ("is" to "is not"): any negation cue; number: the next number as digits and, up to six, as a word;
+          otherwise the last word of the table's weak form ("never" to "sometimes": sometimes)
+    """
+    if cls == "number":
+        value = rules.number_value( token ) + 1
+        return frozenset( [ str( value ) ] + [ w for w, v in rules.WORD_VALUES.items() if v == value ] )
+    for strong, weak, _ in WEAKEN_TABLE[ cls ]:
+        if strong != token.lower(): continue
+        words = weak.lower().split()
+        if not words: return frozenset()
+        return NEGATION_CUES if cls == "negation" and words[ 0 ] == strong else frozenset( [ words[ -1 ] ] )
+    return frozenset()
+
+
+def word_regex( word ):
+    """Return the pattern for a whole word; the contraction n't is matched as a suffix."""
+    return re.compile( r"n['’]t\b" if word == "n't" else r"(?<![\w'])" + re.escape( word ) + r"(?![\w])", re.IGNORECASE )
+
+
+def token_count( text, token ):
+    """Count whole-word occurrences of token in text, ignoring case."""
+    return len( word_regex( token.lower() ).findall( text ) )
+
+
+def check_pair( pair, task_text, new_text ):
+    """
+    Rule 1: the mechanical check of one seeded pair, from the plan's record and the writer's output. No model.
+
+    Requires:
+        - pair is a seeded (delete or weaken) pair record of a plan; task_text is the text the writer was given; new_text is what it returned
+
+    Ensures:
+        - SPAN_VERBATIM when the seeded span, normalised, is still in the new text; not asked of a negation weaken, whose
+          weak form ("is not") keeps the strong span as its own prefix, so a verbatim span proves nothing there and the
+          missing negation cue is what shows a restore
+        - weaken only: WEAK_TOKEN_MISSING when the class has a weak form and none of its cues is in the new text;
+          STRONG_RESTORED when the strong token occurs more often in the new text than in the text the writer was given
+          (not asked of negation, whose strong words are "is", "does": a count of those says nothing)
+        - returns the list of reason codes, empty when the pair passes
+
+    A heuristic, and it errs toward failing: a writer that rewords "usually" to "typically" fails WEAK_TOKEN_MISSING, and a
+    writer that adds a second "is" to a negation is not caught at all. A failure is a pair for a person to read, never a verdict.
+    """
+    reasons = []
+    wanted, _ = claim_extractor.normalize( pair[ "x_span_in_old" ] )
+    have, _   = claim_extractor.normalize( new_text )
+    if wanted in have and pair[ "weaken_class" ] != "negation": reasons.append( "SPAN_VERBATIM" )
+    if pair[ "kind" ] == "weaken":
+        cls, token = pair[ "weaken_class" ], pair[ "changed_token" ]
+        cues = weak_cues( cls, token )
+        if cues and not any( word_regex( cue ).search( new_text ) for cue in cues ): reasons.append( "WEAK_TOKEN_MISSING" )
+        if cls != "negation" and token_count( new_text, token ) > token_count( task_text, token ): reasons.append( "STRONG_RESTORED" )
+    return reasons
+
+
+def check_set( base, split ):
+    """
+    Run rule 1 over every seeded pair of one written split. Reads files only; no model, no ledger, no cap.
+
+    Ensures:
+        - returns ( { pair_id: [ reason ] }, seeded pairs checked ); a pair with no writer output is NO_OUTPUT,
+          one whose output answers different task text than the plan's is STALE_OUTPUT
+
+    Raises:
+        - ValueError if the plan was edited after it was drawn, or writer_tasks.jsonl lacks a task the plan names
+    """
+    folder = os.path.join( base, split )
+    plan   = json.loads( open( os.path.join( folder, "plan.json" ), encoding="utf-8" ).read() )
+    check_plan_hash( plan )
+    tasks_path, outputs_path = os.path.join( folder, "writer_tasks.jsonl" ), os.path.join( folder, "writer_outputs.jsonl" )
+    texts   = { r[ "task_id" ]: r[ "text" ] for r in read_jsonl( tasks_path ) }
+    outputs = { r[ "task_id" ]: r for r in read_jsonl( outputs_path ) } if os.path.exists( outputs_path ) else {}
+    failures, checked = {}, 0
+    for pair in plan[ "pairs" ]:
+        if pair[ "kind" ] not in SEEDED_KINDS: continue
+        checked += 1
+        task_id = next( tid for tid, meta in plan[ "tasks" ].items() if meta[ "pair_id" ] == pair[ "id" ] and meta[ "role" ] == "new" )
+        if task_id not in texts: raise ValueError( f"{tasks_path} lacks task {task_id} of pair {pair[ 'id' ]}" )
+        row = outputs.get( task_id )
+        if row is None: failures[ pair[ "id" ] ] = [ "NO_OUTPUT" ]
+        elif row.get( "task_sha" ) != plan[ "tasks" ][ task_id ][ "sha256" ]: failures[ pair[ "id" ] ] = [ "STALE_OUTPUT" ]
+        else:
+            reasons = check_pair( pair, texts[ task_id ], row[ "text" ] )
+            if reasons: failures[ pair[ "id" ] ] = reasons
+    return failures, checked
+
+
+def cmd_check( args ):
+    """
+    Rule 1 on a written set: list the failing seeded pairs. Makes no model call and touches no ledger.
+
+    Returns 0 when every seeded pair passes, 1 when any fails (ids and reasons printed), 2 when the plan or the task file is refused.
+    """
+    try: failures, checked = check_set( args.base, args.split )
+    except ( ValueError, OSError ) as e:
+        print( f"REFUSED: {e}", file=sys.stderr )
+        return 2
+    print( f"check {args.split}: {checked} seeded pairs, {len( failures )} fail" )
+    for pair_id in sorted( failures ): print( f"{pair_id} {' '.join( failures[ pair_id ] )}" )
+    return 1 if failures else 0
+
+
+def redraw_pairs( plan, failing, docs_by_kind, scope, rng ):
+    """
+    Choose a replacement for each failing pair that keeps every floor: same kind, weaken class, shortness and stratum.
+
+    Requires:
+        - scope is the set of units the split owns; docs_by_kind comes from build_docs under the current rules
+
+    Ensures:
+        - returns { pair_id: ( kind, doc, candidate ) }; a doc used by a kept pair is never reused; the failed span is never redrawn
+        - the split's class floors, short floor and strata quotas hold afterwards, because each replacement matches what it replaces
+
+    Raises:
+        - Shortfall naming the pair when nothing in scope matches it
+    """
+    by_id = { p[ "id" ]: p for p in plan[ "pairs" ] }
+    used  = { p[ "pool_id" ] for p in plan[ "pairs" ] if p[ "id" ] not in failing }
+    picks = {}
+    for pair_id in sorted( failing ):
+        pair = by_id[ pair_id ]
+        options = [ ( d, c ) for d in docs_by_kind[ pair[ "kind" ] ] if d[ "unit" ] in scope and d[ "pool_id" ] not in used and d[ "stratum" ] == pair[ "stratum" ]
+                    for c in d[ "cands" ] if c.get( "class" ) == pair[ "weaken_class" ] and is_short( words_of( c[ "span_text" ] ) ) == pair[ "short" ]
+                    and not ( d[ "pool_id" ] == pair[ "pool_id" ] and c[ "span_text" ] == pair[ "x_span_in_old" ] ) ]
+        if not options: raise Shortfall( f"redraw: nothing in scope replaces {pair_id} ({pair[ 'kind' ]}, class {pair[ 'weaken_class' ]}, stratum {pair[ 'stratum' ]}, short {pair[ 'short' ]})" )
+        d, c = options[ rng.randrange( len( options ) ) ]
+        used.add( d[ "pool_id" ] )
+        picks[ pair_id ] = ( pair[ "kind" ], d, c )
+    return picks
+
+
+def cmd_redraw( args ):
+    """
+    Redraw the pairs rule 1 fails, into a new folder, and say how many writer calls that needs BEFORE writing anything.
+
+    Returns 0 on success (or when nothing fails), 2 when refused: the pool is not the one the plan was drawn from, a
+    replacement is missing for a floor, or the output folder already holds this split.
+
+    Ensures:
+        - no model call is made; the source set is not changed
+        - the new folder holds the plan (replaced pairs keep their ids), the writer tasks (kept ones first), the ledger and
+          output rows of the kept tasks, and for a gate split a plan-hashes.json carrying the new hash
+        - `write --base <out>` then calls only the new tasks; --approved-calls and --call-hold bound that run as for any write
+    """
+    try:
+        failures, _ = check_set( args.base, args.split )
+        source = os.path.join( args.base, args.split )
+        plan   = json.loads( open( os.path.join( source, "plan.json" ), encoding="utf-8" ).read() )
+        if plan.get( "pool_sha" ) != sha256_file( args.pool ): raise ValueError( "the pool is not the one this plan was drawn from" )
+        if args.split in GATE_SPLITS: refuse_gate_out_in_repo( args.out )
+        target = os.path.join( args.out, args.split )
+        if os.path.exists( target ): raise ValueError( f"{target} already exists" )
+        if not failures:
+            print( f"redraw {args.split}: no seeded pair fails; nothing to redraw" )
+            return 0
+        exclude = frozenset( json.loads( open( args.exclude, encoding="utf-8" ).read() ) ) if args.exclude else frozenset()
+        docs_by_kind, units = build_docs( read_jsonl( args.pool ), load_stoplist( args.stoplist ), exclude )
+        split_seed = args.split_seed if args.split_seed is not None else plan.get( "split_seed" )
+        scope = set( partition_units( units, split_seed )[ args.split ] ) if split_seed is not None else set( plan[ "units" ] )
+        rng   = random.Random( f"{args.seed}|{args.split}|redraw" )
+        picks = redraw_pairs( plan, set( failures ), docs_by_kind, scope, rng )
+    except ( ValueError, OSError, Shortfall ) as e:
+        print( f"REFUSED: {e}", file=sys.stderr )
+        return 2
+    calls = len( picks )
+    print( f"redraw {args.split}: {calls} failed pair(s) {' '.join( sorted( picks ) )} are replaced; {calls} new writer call(s) needed, up to {2 * calls} with one retry each; no model call made" )
+    tasks, new_rows = { tid: meta for tid, meta in plan[ "tasks" ].items() if meta[ "pair_id" ] not in picks }, []
+    pairs = [ make_pair( p[ "id" ], *picks[ p[ "id" ] ], rng, tasks, new_rows ) if p[ "id" ] in picks else p for p in plan[ "pairs" ] ]
+    new_plan = dict( plan, pairs=pairs, tasks=tasks, units=sorted( { unit_of( p[ "file" ] ) for p in pairs } ), redrawn={ "pairs": sorted( picks ), "from_plan_sha256": plan[ "plan_sha256" ] } )
+    new_plan[ "plan_sha256" ] = plan_hash( new_plan )
+    write_json( os.path.join( target, "plan.json" ), new_plan )
+    kept = lambda name: [ r for r in read_jsonl( os.path.join( source, name ) ) if r[ "task_id" ] in tasks ] if os.path.exists( os.path.join( source, name ) ) else []
+    write_jsonl( os.path.join( target, "writer_tasks.jsonl" ), kept( "writer_tasks.jsonl" ) + new_rows )
+    for name in ( "writer_ledger.jsonl", "writer_outputs.jsonl" ):
+        rows = kept( name )
+        if rows: write_jsonl( os.path.join( target, name ), rows )
+    hashes_path = os.path.join( args.base, "plan-hashes.json" )
+    if args.split in GATE_SPLITS and os.path.exists( hashes_path ):
+        hashes = json.loads( open( hashes_path, encoding="utf-8" ).read() )
+        hashes[ "gate_plan_sha256" if args.split == "gate" else "reserve_plan_sha256" ] = new_plan[ "plan_sha256" ]
+        write_json( os.path.join( args.out, "plan-hashes.json" ), hashes )
+    return 0
+
+
 def checked_outputs( base, plan ):
     """
     Return { task_id: text } for every task of the plan, or raise.
@@ -896,13 +1111,19 @@ def cmd_verify( args ):
     """
     Phase 3: write the second seat's input (no kind labels) and a separate span file, and report what is missing.
 
-    Returns 0 when written. Reads writer_outputs.jsonl; refuses (2) while a task has no output.
+    Returns 0 when written. Reads writer_outputs.jsonl; refuses (2) while a task has no output, and while rule 1
+    (check_set) fails any seeded pair, so the second seat never reads a pair the script can already see is broken.
     """
     base = os.path.join( args.base, args.split )
     plan = json.loads( open( os.path.join( base, "plan.json" ), encoding="utf-8" ).read() )
-    try: outputs = checked_outputs( base, plan )
+    try:
+        outputs = checked_outputs( base, plan )
+        failures, _ = check_set( args.base, args.split )
     except ValueError as e:
         print( f"REFUSED: {e}", file=sys.stderr )
+        return 2
+    if failures:
+        print( f"REFUSED: rule 1 fails {len( failures )} seeded pair(s): {' '.join( sorted( failures ) )}; run `check` and redraw them", file=sys.stderr )
         return 2
     by_pair = { p[ "id" ]: { "id": p[ "id" ], "old": p[ "old" ], "new": "", "linked_doc": "" } for p in plan[ "pairs" ] }
     for task_id, meta in plan[ "tasks" ].items(): by_pair[ meta[ "pair_id" ] ][ meta[ "role" ] ] = outputs[ task_id ]
@@ -1070,6 +1291,11 @@ def build_parser():
     v.add_argument( "--base", required=True ); v.add_argument( "--split", required=True )
     a = sub.add_parser( "assemble" )
     a.add_argument( "--base", required=True ); a.add_argument( "--split", required=True ); a.add_argument( "--out", required=True ); a.add_argument( "--verification", required=True )
+    k = sub.add_parser( "check" )
+    k.add_argument( "--base", required=True ); k.add_argument( "--split", required=True )
+    r = sub.add_parser( "redraw" )
+    r.add_argument( "--base", required=True ); r.add_argument( "--split", required=True ); r.add_argument( "--pool", required=True ); r.add_argument( "--out", required=True )
+    r.add_argument( "--seed", type=int, required=True ); r.add_argument( "--split-seed", type=int ); r.add_argument( "--stoplist", default=DEFAULT_STOPLIST ); r.add_argument( "--exclude" )
     n = sub.add_parser( "natural" )
     n.add_argument( "--natural", required=True ); n.add_argument( "--out", required=True )
     m = sub.add_parser( "manifest" )
@@ -1082,7 +1308,7 @@ def main( argv, query_fn=None ):
     """Run one phase; returns its exit code."""
     args = build_parser().parse_args( argv )
     if args.command == "write": return cmd_write( args, query_fn )
-    return { "plan": cmd_plan, "verify": cmd_verify, "assemble": cmd_assemble, "natural": cmd_natural, "manifest": cmd_manifest }[ args.command ]( args )
+    return { "plan": cmd_plan, "verify": cmd_verify, "check": cmd_check, "redraw": cmd_redraw, "assemble": cmd_assemble, "natural": cmd_natural, "manifest": cmd_manifest }[ args.command ]( args )
 
 
 if __name__ == "__main__":  # pragma: no cover - thin process entry, main() is what the tests drive
