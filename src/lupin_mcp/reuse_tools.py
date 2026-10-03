@@ -262,10 +262,14 @@ class JevCache:
 BLANK        = "…"                                                          # replaces a string default in a signature
 OPENERS      = { "(": ")", "[": "]", "{": "}" }
 QUOTES       = ( "'", '"', "`" )
+PATH_ROOTS   = "home|mnt|var|etc|usr|opt|tmp|srv|root|proc|dev|Users|Volumes|private|run|media|boot|lib|bin|sbin|snap|nix|workspace"
+APP_DATA     = re.compile( r"(?<![\w/.:\-])/(?:app|data)(?:/[^\s/?#]+)+" )            # a route (/app/docs?path=) or a file under a container mount
 C1_PATTERNS  = { "email"      : re.compile( r"[\w.+-]+@[\w-]+\.[\w.-]+" ),
                  "url"        : re.compile( r"(?:\b[a-zA-Z][a-zA-Z0-9+.-]*://|\bwww\.)\S+" ),
-                 "ip"         : re.compile( r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?![\w.])|(?<![\w:])(?:[0-9A-Fa-f]{1,4}:){3,7}[0-9A-Fa-f]{1,4}(?![\w:])" ),
-                 "path"       : re.compile( r"(?<![\w/.:\-])(?:~|/(?:home|mnt|var|etc|usr|opt|tmp|srv|root|proc|dev|Users|Volumes|private))(?:/[\w.@+-]+)+/?|(?<![\w/.:\-])~/|\b[A-Za-z]:\\\S+" ),
+                 "ip"         : re.compile( r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?![\w.])"
+                                           r"|(?<![\w:])(?:[0-9A-Fa-f]{1,4}:){3,7}[0-9A-Fa-f]{1,4}(?![\w:])"
+                                           r"|(?<![\w:])(?=[0-9A-Fa-f:]*[0-9A-Fa-f])(?:[0-9A-Fa-f]{1,4}(?::[0-9A-Fa-f]{1,4}){0,6})?::(?:[0-9A-Fa-f]{1,4}(?::[0-9A-Fa-f]{1,4}){0,6})?(?![\w:])" ),
+                 "path"       : re.compile( rf"(?<![\w/.:\-])(?:/(?:{PATH_ROOTS})(?:/[^\s/]+)+|~[\w.-]*/|\$\{{?HOME\}}?/)|\b[A-Za-z]:[\\/]\S+|\\\\[\w.$-]+\\[\w.$-]+" ),
                  "credential" : re.compile( r"\bsk-[A-Za-z0-9_-]{8,}|\bAKIA[0-9A-Z]{16}\b|\bgh[pousr]_[A-Za-z0-9]{20,}|\bxox[abprs]-[A-Za-z0-9-]{10,}|\beyJ[A-Za-z0-9_-]{10,}"
                                            r"|\b(?=[A-Za-z0-9_-]*\d)(?=[A-Za-z0-9_-]*[A-Za-z])[A-Za-z0-9_-]{32,}\b" ) }
 
@@ -304,7 +308,7 @@ def blank_string_defaults( sig ):
         if c in OPENERS: stack.append( OPENERS[ c ] )
         elif stack and c == stack[ -1 ]: stack.pop()
         prev, nxt = sig[ i - 1 ] if i else "", sig[ i + 1 ] if i + 1 < n else ""
-        if c == "=" and nxt not in "=>" and prev not in "=!<>":
+        if c == "=" and nxt not in "=>" and prev not in "=!<":
             j, depth, angle = i + 1, len( stack ), 0
             while j < n:                                                     # find where this default ends
                 d = sig[ j ]
@@ -325,10 +329,23 @@ def blank_string_defaults( sig ):
     return "".join( out )
 
 
+def _is_mount_file( path ):
+    """
+    Ensures:
+        - returns True when a /app or /data path names a file, not a route: its last segment, after trailing
+          sentence punctuation is cut, ends in a file extension, or any segment starts with a dot
+        - /app/docs?path=x is a route: the query is not part of the matched path
+    """
+    segs = path.rstrip( ".,;:)]'\"`" ).split( "/" )[ 1: ]
+    return re.search( r"\.\w+$", segs[ -1 ] ) is not None or any( g.startswith( "." ) for g in segs )
+
+
 def c1_hits( rec ):
-    """Ensures: returns the sorted names of the C1 patterns (email, url, ip, path, credential) found in the symbol's id, signature or first docstring line."""
+    """Ensures: returns the sorted names of the C1 patterns (email, url, ip, path, credential; a /app or /data path counts only when it names a file) found in the symbol's id, signature or first docstring line."""
     text = "\n".join( [ rec[ "id" ], rec[ "sig" ], rec[ "doc" ] ] )
-    return sorted( name for name, rx in C1_PATTERNS.items() if rx.search( text ) )
+    hits = { name for name, rx in C1_PATTERNS.items() if rx.search( text ) }
+    if any( _is_mount_file( m.group( 0 ) ) for m in APP_DATA.finditer( text ) ): hits.add( "path" )
+    return sorted( hits )
 
 
 def sendable( entries, exclude_prefixes=() ):
