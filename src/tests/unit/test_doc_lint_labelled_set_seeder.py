@@ -439,7 +439,7 @@ def tree( path ):
 def test_plan_phase_writes_dev_in_the_repo_side_and_gate_and_reserve_outside( tmp_path, pool_file, outside_repo ):
     assert s.main( plan_args( tmp_path, pool_file ) ) == 0
     assert sorted( tree( tmp_path / "out" ) ) == [ "dev/plan.json", "dev/writer_tasks.jsonl" ]
-    assert sorted( tree( tmp_path / "gate-store" ) ) == [ "gate-reserve/plan.json", "gate-reserve/writer_tasks.jsonl", "gate/plan.json", "gate/writer_tasks.jsonl" ]
+    assert sorted( tree( tmp_path / "gate-store" ) ) == [ "gate-reserve/plan.json", "gate-reserve/writer_tasks.jsonl", "gate/plan.json", "gate/writer_tasks.jsonl", "plan-hashes.json" ]
     dev  = json.loads( ( tmp_path / "out" / "dev" / "plan.json" ).read_text() )
     gate = json.loads( ( tmp_path / "gate-store" / "gate" / "plan.json" ).read_text() )
     assert "split_seed" not in dev and "split_seed" in gate
@@ -566,7 +566,7 @@ def test_write_makes_one_call_per_task_logs_hash_not_text_and_never_repeats_a_ta
     count = n_tasks( base )
     assert len( w.seen ) == count and { m for m, _ in w.seen } == { FABLE }
     rows = s.read_jsonl( str( base / "dev" / "writer_ledger.jsonl" ) )
-    assert len( rows ) == count and set( rows[ 0 ] ) == { "task_id", "model", "prompt_hash", "output_sha256" } and rows[ 0 ][ "prompt_hash" ] == s.prompt_hash()
+    assert len( rows ) == count and set( rows[ 0 ] ) == { "task_id", "model", "prompt_hash", "output_sha256", "task_sha" } and rows[ 0 ][ "prompt_hash" ] == s.prompt_hash()
     outs = s.read_jsonl( str( base / "dev" / "writer_outputs.jsonl" ) )
     assert rows[ 0 ][ "output_sha256" ] == hashlib.sha256( next( o for o in outs if o[ "task_id" ] == rows[ 0 ][ "task_id" ] )[ "text" ].encode() ).hexdigest()
     assert mt.calls_used( FABLE, str( shared ) ) == count
@@ -581,7 +581,7 @@ def test_a_failed_call_is_retried_once_and_a_task_that_fails_twice_is_dropped_by
     w = Writer( fail_always_for=first[ "text" ] )
     assert s.main( write_args( base, shared ), query_fn=w ) == 0
     rows = s.read_jsonl( str( base / "dev" / "writer_ledger.jsonl" ) )
-    assert [ r for r in rows if r.get( "dropped" ) ] == [ { "task_id": first[ "task_id" ], "model": FABLE, "dropped": True } ]
+    assert [ r for r in rows if r.get( "dropped" ) ] == [ { "task_id": first[ "task_id" ], "model": FABLE, "prompt_hash": s.prompt_hash(), "task_sha": s.task_sha( first[ "instruction" ], first[ "text" ] ), "dropped": True } ]
     assert sum( first[ "text" ] in p for _, p in w.seen ) == 2
     assert "dropped=1" in capsys.readouterr().out
     outs = s.read_jsonl( str( base / "dev" / "writer_outputs.jsonl" ) )
@@ -741,7 +741,7 @@ def test_manifest_holds_the_dev_facts_and_the_gate_hashes_and_none_of_the_secret
     _, rows = verification_rows( base )
     s.write_jsonl( str( written / "ver.jsonl" ), rows )
     assert assemble( base, written / "ver.jsonl", written / "final" ) == 0
-    hashes = { "gate_pairs_sha256": "a" * 64, "gate_keys_sha256": "b" * 64, "reserve_pairs_sha256": "c" * 64, "reserve_keys_sha256": "d" * 64 }
+    hashes = { "gate_pairs_sha256": "a" * 64, "gate_keys_sha256": "b" * 64, "reserve_plan_sha256": "f" * 64 }
     ( written / "h.json" ).write_text( json.dumps( hashes ) )
     args = [ "manifest", "--dev-info", str( written / "final" / "dev-info.json" ), "--gate-hashes", str( written / "h.json" ), "--out", str( written / "final" ), "--seed", "1", "--harness-commit", "e" * 40 ]
     assert s.main( args ) == 0
@@ -770,7 +770,7 @@ def test_the_writer_cli_has_no_default_model_and_the_module_runs_as_a_script_thr
 def test_run_writer_skips_a_task_the_ledger_already_holds( tmp_path ):
     mt.set_budget( str( tmp_path / "shared.jsonl" ), { FABLE: 10 } )
     ledger, outs = str( tmp_path / "l.jsonl" ), str( tmp_path / "o.jsonl" )
-    s.write_jsonl( ledger, [ s.writer_ledger_row( "t1", FABLE, "x" ) ] )
+    s.write_jsonl( ledger, [ dict( s.writer_ledger_row( "t1", FABLE, "x" ), task_sha=s.task_sha( "i", "a" ) ) ] )
     w = Writer()
     got = asyncio.run( s.run_writer( [ { "task_id": "t1", "instruction": "i", "text": "a" }, { "task_id": "t2", "instruction": "i", "text": "b" } ], FABLE, ledger, outs, w ) )
     assert got == { "called": 1, "dropped": [] } and len( w.seen ) == 1 and "b" in w.seen[ 0 ][ 1 ]
@@ -800,5 +800,131 @@ def test_natural_arm_is_written_on_its_own_with_who_found_each_item( tmp_path ):
 
 def test_natural_arm_refuses_a_span_that_cannot_be_quoted_once( tmp_path, capsys ):
     s.write_jsonl( str( tmp_path / "nat.jsonl" ), [ { "id": "n0", "file": "f", "symbol": "s", "old": "Keeps a b. Keeps a b.", "new": "x", "x_span_in_old": "Keeps a b.", "found_by": "t" } ] )
+    assert s.main( [ "natural", "--natural", str( tmp_path / "nat.jsonl" ), "--out", str( tmp_path / "o" ) ] ) == 2
+    assert "n0" in capsys.readouterr().err and not ( tmp_path / "o" ).exists()
+
+
+# ---- Tiberius's four fixes (review of 5f99599c1) ---------------------------------------------
+
+def redraw( tmp_path ):
+    """Plan again into the same files with one drawn docstring excluded: the redraw recipe from the first build."""
+    plan = json.loads( ( tmp_path / "out" / "dev" / "plan.json" ).read_text() )
+    ex = tmp_path / "ex.json"
+    ex.write_text( json.dumps( [ plan[ "pairs" ][ 0 ][ "pool_id" ] ] ) )
+    assert s.main( plan_args( tmp_path, str( tmp_path / "pool.jsonl" ), exclude=str( ex ) ) ) == 0
+
+
+def test_fix1_a_redraw_into_the_same_files_is_refused_by_write_verify_and_assemble( written, capsys ):
+    base = written / "out"
+    _, rows = verification_rows( base )
+    s.write_jsonl( str( written / "ver.jsonl" ), rows )
+    old_tasks = { t[ "task_id" ]: t[ "text" ] for t in s.read_jsonl( str( base / "dev" / "writer_tasks.jsonl" ) ) }
+    redraw( written )
+    new_tasks = { t[ "task_id" ]: t[ "text" ] for t in s.read_jsonl( str( base / "dev" / "writer_tasks.jsonl" ) ) }
+    assert set( new_tasks ) & set( old_tasks ) and any( new_tasks[ k ] != old_tasks[ k ] for k in set( new_tasks ) & set( old_tasks ) )   # same ids, new texts
+    w = Writer()
+    shared = written / "shared-ledger.jsonl"
+    before = mt.calls_used( FABLE, str( shared ) )
+    assert s.main( write_args( base, shared ), query_fn=w ) == 2
+    assert w.seen == [] and mt.calls_used( FABLE, str( shared ) ) == before
+    assert s.main( [ "verify", "--base", str( base ), "--split", "dev" ] ) == 2
+    assert assemble( base, written / "ver.jsonl", written / "final" ) == 2
+    assert capsys.readouterr().err.count( "redrawn into the same files" ) == 3
+
+
+def test_fix1_a_task_sha_covers_instruction_and_text( ):
+    assert s.task_sha( "i", "t" ) != s.task_sha( "i", "u" ) != s.task_sha( "j", "u" )
+    assert s.task_sha( "ab", "c" ) != s.task_sha( "a", "bc" )
+
+
+def test_fix2_the_plan_hash_moves_with_a_unit_a_span_a_class_a_stratum_or_a_task_text( ):
+    plan, _ = plan_of( "gate-reserve" )
+    base = s.plan_hash( plan )
+    assert plan[ "plan_sha256" ] == base == s.plan_hash( json.loads( json.dumps( plan ) ) )
+    def changed( fn ):
+        copy = json.loads( json.dumps( plan ) )
+        fn( copy )
+        return s.plan_hash( copy )
+    first_seeded = lambda c: next( p for p in c[ "pairs" ] if p[ "kind" ] == "weaken" )
+    variants = [ changed( lambda c: c[ "units" ].append( "extra" ) ), changed( lambda c: first_seeded( c ).update( x_span_in_old = "other words" ) ),
+                 changed( lambda c: first_seeded( c ).update( weaken_class = "modal" if first_seeded( c )[ "weaken_class" ] != "modal" else "number" ) ),
+                 changed( lambda c: first_seeded( c ).update( stratum = "Z" ) ),
+                 changed( lambda c: c[ "tasks" ][ next( iter( c[ "tasks" ] ) ) ].update( sha256 = "0" * 64 ) ) ]
+    assert len( { base, *variants } ) == 6
+
+
+def test_fix2_the_reserve_plan_hash_is_written_at_draw_time_and_a_plan_made_no_model_call( tmp_path, pool_file, outside_repo, monkeypatch ):
+    def no_call( *a, **k ): raise AssertionError( "the plan phase must not call a model" )
+    monkeypatch.setattr( mt, "complete", no_call )
+    assert s.main( plan_args( tmp_path, pool_file ) ) == 0
+    hashes = json.loads( ( tmp_path / "gate-store" / "plan-hashes.json" ).read_text() )
+    reserve = json.loads( ( tmp_path / "gate-store" / "gate-reserve" / "plan.json" ).read_text() )
+    assert hashes[ "reserve_plan_sha256" ] == reserve[ "plan_sha256" ] == s.plan_hash( reserve ) and hashes[ "gate_plan_sha256" ] != hashes[ "reserve_plan_sha256" ]
+    assert json.loads( ( tmp_path / "out" / "dev" / "plan.json" ).read_text() )[ "plan_sha256" ]
+
+
+def test_fix2_a_plan_edited_after_it_was_drawn_is_refused_by_write_verify_and_assemble( written, capsys ):
+    base = written / "out"
+    _, rows = verification_rows( base )
+    s.write_jsonl( str( written / "ver.jsonl" ), rows )
+    path = base / "dev" / "plan.json"
+    plan = json.loads( path.read_text() )
+    plan[ "units" ].append( "tampered" )
+    path.write_text( json.dumps( plan ) )
+    assert s.main( write_args( base, written / "shared-ledger.jsonl" ), query_fn=Writer() ) == 2
+    assert s.main( [ "verify", "--base", str( base ), "--split", "dev" ] ) == 2
+    assert assemble( base, written / "ver.jsonl", written / "final" ) == 2
+    assert capsys.readouterr().err.count( "does not match the hash taken when it was drawn" ) == 3
+
+
+def test_fix2_the_manifest_carries_the_reserve_plan_hash_and_takes_no_reserve_pairs_hash( written ):
+    base = written / "out"
+    _, rows = verification_rows( base )
+    s.write_jsonl( str( written / "ver.jsonl" ), rows )
+    assert assemble( base, written / "ver.jsonl", written / "final" ) == 0
+    ( written / "h.json" ).write_text( json.dumps( { "gate_pairs_sha256": "a" * 64, "gate_keys_sha256": "b" * 64, "reserve_plan_sha256": "9" * 64 } ) )
+    assert s.main( [ "manifest", "--dev-info", str( written / "final" / "dev-info.json" ), "--gate-hashes", str( written / "h.json" ), "--out", str( written / "final" ), "--seed", "1", "--harness-commit", "e" * 40 ] ) == 0
+    m = json.loads( ( written / "final" / "MANIFEST.json" ).read_text() )
+    assert m[ "reserve_plan_sha256" ] == "9" * 64 and m[ "reserve_pairs_sha256" ] is None and m[ "reserve_keys_sha256" ] is None
+
+
+def test_fix3_a_ledger_row_from_another_model_or_prompt_is_refused_with_the_difference_named( ):
+    good = { "task_id": "t1", "model": FABLE, "prompt_hash": s.prompt_hash() }
+    s.check_ledger_identity( [ good, dict( good, task_id = "t2" ) ] )
+    s.check_ledger_identity( [] )
+    with pytest.raises( ValueError, match="t2 was written by model 'other', not 'claude-fable-5-1'" ): s.check_ledger_identity( [ good, dict( good, task_id = "t2", model = "other" ) ] )
+    with pytest.raises( ValueError, match="t2 was written by model" ): s.check_ledger_identity( [ good, dict( good, task_id = "t2", model = "other" ) ], FABLE )
+    with pytest.raises( ValueError, match="t1 was written by model 'claude-fable-5-1', not 'x'" ): s.check_ledger_identity( [ good ], "x" )
+    with pytest.raises( ValueError, match="prompt hash 'old'" ): s.check_ledger_identity( [ dict( good, prompt_hash = "old" ) ] )
+    with pytest.raises( ValueError, match="prompt hash None" ): s.check_ledger_identity( [ { "task_id": "t1", "model": FABLE } ] )
+
+
+def rewrite_ledger( base, **change ):
+    path = base / "dev" / "writer_ledger.jsonl"
+    rows = s.read_jsonl( str( path ) )
+    rows[ 0 ].update( change )
+    s.write_jsonl( str( path ), rows )
+
+
+def test_fix3_write_resume_and_assemble_refuse_a_ledger_written_under_another_model_or_prompt( written, capsys ):
+    base = written / "out"
+    _, rows = verification_rows( base )
+    s.write_jsonl( str( written / "ver.jsonl" ), rows )
+    rewrite_ledger( base, prompt_hash="stale" )
+    w = Writer()
+    assert s.main( write_args( base, written / "shared-ledger.jsonl" ), query_fn=w ) == 2
+    assert assemble( base, written / "ver.jsonl", written / "final" ) == 2
+    rewrite_ledger( base, prompt_hash=s.prompt_hash(), model="claude-someone-else" )
+    assert assemble( base, written / "ver.jsonl", written / "final" ) == 2
+    assert s.main( write_args( base, written / "shared-ledger.jsonl" ), query_fn=w ) == 2
+    err = capsys.readouterr().err
+    assert err.count( "prompt hash 'stale'" ) == 2 and err.count( "claude-someone-else" ) >= 2 and w.seen == []
+
+
+def test_fix4_a_natural_span_that_differs_from_old_only_in_whitespace_is_refused_at_ingest( tmp_path, capsys ):
+    old = "It walks the first item of a long list kept in the shared pool, and then\nstops when the list is empty. It never raises."
+    span = "and then stops when the list is empty"
+    assert s.quotable_once( old, span ) and old.count( span ) == 0          # the harness accepts it, the loader would not
+    s.write_jsonl( str( tmp_path / "nat.jsonl" ), [ { "id": "n0", "file": "f", "symbol": "s", "old": old, "new": "It walks the first.", "x_span_in_old": span, "found_by": "t" } ] )
     assert s.main( [ "natural", "--natural", str( tmp_path / "nat.jsonl" ), "--out", str( tmp_path / "o" ) ] ) == 2
     assert "n0" in capsys.readouterr().err and not ( tmp_path / "o" ).exists()

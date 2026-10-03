@@ -525,7 +525,7 @@ def build_split_plan( name, picks, seed ):
 
     def new_task( role, pair_id, instruction, text ):
         task_id = "t%016x" % rng.getrandbits( 64 )
-        tasks[ task_id ] = { "pair_id": pair_id, "role": role }
+        tasks[ task_id ] = { "pair_id": pair_id, "role": role, "sha256": task_sha( INSTRUCTIONS[ instruction ], text ) }
         task_rows.append( { "task_id": task_id, "instruction": INSTRUCTIONS[ instruction ], "text": text } )
 
     for index, ( kind, d, c ) in enumerate( items ):
@@ -544,7 +544,9 @@ def build_split_plan( name, picks, seed ):
             new_task( "linked_doc", pair_id, "design", c[ "sentence" ] )
         pairs.append( rec )
     rng.shuffle( task_rows )
-    return { "split": name, "pairs": pairs, "tasks": tasks }, task_rows
+    plan = { "split": name, "pairs": pairs, "tasks": tasks, "units": sorted( { d[ "unit" ] for _, d, _ in items } ) }
+    plan[ "plan_sha256" ] = plan_hash( plan )
+    return plan, task_rows
 
 
 def refuse_gate_out_in_repo( path ):
@@ -569,6 +571,50 @@ def check_writer_model( writer, other_ids ):
     if not writer or not writer.strip(): raise ValueError( "--writer-model is required" )
     for role, model in other_ids.items():
         if model and model.strip().lower() == writer.strip().lower(): raise ValueError( f"writer model {writer!r} is the {role} model: rule R.2 forbids it" )
+
+
+def task_sha( instruction, text ):
+    """Return the sha256 of one writer task's instruction and text, so an output can be tied to the task it answered."""
+    return hashlib.sha256( ( instruction + "\0" + text ).encode( "utf-8" ) ).hexdigest()
+
+
+def plan_hash( plan ):
+    """
+    Return the sha256 of a split's plan: its units, its picks (file, span, class, stratum) and every task's content sha.
+
+    Ensures:
+        - a changed unit, span, class, stratum or task text changes the hash; the same plan gives the same hash
+    """
+    body = { "units": plan[ "units" ], "pairs": [ [ p[ "id" ], p[ "pool_id" ], p[ "file" ], p[ "kind" ], p[ "x_span_in_old" ], p[ "weaken_class" ], p[ "stratum" ] ] for p in plan[ "pairs" ] ],
+             "tasks": sorted( [ tid, meta[ "pair_id" ], meta[ "role" ], meta[ "sha256" ] ] for tid, meta in plan[ "tasks" ].items() ) }
+    return hashlib.sha256( json.dumps( body, sort_keys=True ).encode( "utf-8" ) ).hexdigest()
+
+
+def check_plan_hash( plan ):
+    """
+    Refuse a plan whose stored plan_sha256 is not what its content hashes to now.
+
+    Raises:
+        - ValueError naming the split when the plan was edited after it was drawn
+    """
+    if plan.get( "plan_sha256" ) != plan_hash( plan ): raise ValueError( f"plan for {plan[ 'split' ]} does not match the hash taken when it was drawn" )
+
+
+def check_ledger_identity( rows, model=None ):
+    """
+    Refuse a writer ledger whose rows disagree on the writer model or prompt, with each other or with now.
+
+    Requires:
+        - rows are writer-ledger rows; model is the writer model expected, or None to take the first row's
+
+    Raises:
+        - ValueError naming which differs: the model, or the prompt hash
+    """
+    if not rows: return
+    want_model = rows[ 0 ][ "model" ] if model is None else model
+    for row in rows:
+        if row[ "model" ] != want_model: raise ValueError( f"ledger row {row[ 'task_id' ]} was written by model {row[ 'model' ]!r}, not {want_model!r}" )
+        if row.get( "prompt_hash" ) != prompt_hash(): raise ValueError( f"ledger row {row[ 'task_id' ]} was written under prompt hash {row.get( 'prompt_hash' )!r}, not the current {prompt_hash()!r}" )
 
 
 def prompt_hash():
@@ -608,6 +654,7 @@ def cmd_plan( args ):
     if not disjoint( picks ):  # pragma: no cover - seed_search builds disjoint unit sets; this is the assertion the spec asks for
         print( "REFUSED: dev, gate and reserve share a file or a unit", file=sys.stderr )
         return 2
+    plan_hashes = {}
     for name in ( "dev", "gate", "gate-reserve" ):
         plan, task_rows = build_split_plan( name, picks[ name ], args.seed if name == "dev" else args.gate_seed )
         base = os.path.join( args.out if name == "dev" else args.gate_out, name )
@@ -615,6 +662,8 @@ def cmd_plan( args ):
         if name != "dev": plan[ "split_seed" ] = seed
         write_json( os.path.join( base, "plan.json" ), plan )
         write_jsonl( os.path.join( base, "writer_tasks.jsonl" ), task_rows )
+        if name != "dev": plan_hashes[ name ] = plan[ "plan_sha256" ]
+    write_json( os.path.join( args.gate_out, "plan-hashes.json" ), { "gate_plan_sha256": plan_hashes[ "gate" ], "reserve_plan_sha256": plan_hashes[ "gate-reserve" ] } )
     return 0
 
 
@@ -631,15 +680,21 @@ async def run_writer( tasks, model, ledger_path, outputs_path, query_fn=None ):
         - model_transport.set_budget has been called with a cap for model
 
     Ensures:
-        - a task already in the ledger is never called again
+        - a task already in the ledger is never called again; its stored content sha must match the task's now, or ValueError
+        - the ledger's rows must agree on model and prompt hash with each other and with now, or ValueError
         - a failed or empty call is retried once; still failing, the task is recorded as dropped
         - a CallBudgetExceeded is not retried and ends the run
         - returns { "called": n, "dropped": [ task_id ] }
     """
-    done = { r[ "task_id" ]: r for r in read_jsonl( ledger_path ) } if os.path.exists( ledger_path ) else {}
+    rows = read_jsonl( ledger_path ) if os.path.exists( ledger_path ) else []
+    check_ledger_identity( rows, model )
+    done = { r[ "task_id" ]: r for r in rows }
     called, dropped = 0, []
     for task in tasks:
-        if task[ "task_id" ] in done: continue
+        sha = task_sha( task[ "instruction" ], task[ "text" ] )
+        if task[ "task_id" ] in done:
+            if done[ task[ "task_id" ] ].get( "task_sha" ) != sha: raise ValueError( f"task {task[ 'task_id' ]} is in the ledger for different text: the plan was redrawn into the same files" )
+            continue
         text = None
         for _ in range( 2 ):
             try:
@@ -649,11 +704,11 @@ async def run_writer( tasks, model, ledger_path, outputs_path, query_fn=None ):
             except model_transport.ModelCallError:
                 called += 1
         with open( ledger_path, "a", encoding="utf-8" ) as f:
-            row = writer_ledger_row( task[ "task_id" ], model, text ) if text is not None else { "task_id": task[ "task_id" ], "model": model, "dropped": True }
+            row = dict( writer_ledger_row( task[ "task_id" ], model, text ), task_sha=sha ) if text is not None else { "task_id": task[ "task_id" ], "model": model, "prompt_hash": prompt_hash(), "task_sha": sha, "dropped": True }
             f.write( json.dumps( row, sort_keys=True ) + "\n" )
         if text is None: dropped.append( task[ "task_id" ] )
         else:
-            with open( outputs_path, "a", encoding="utf-8" ) as f: f.write( json.dumps( { "task_id": task[ "task_id" ], "text": text }, sort_keys=True ) + "\n" )
+            with open( outputs_path, "a", encoding="utf-8" ) as f: f.write( json.dumps( { "task_id": task[ "task_id" ], "text": text, "task_sha": sha }, sort_keys=True ) + "\n" )
     return { "called": called, "dropped": dropped }
 
 
@@ -662,6 +717,12 @@ def cmd_write( args, query_fn=None ):
     Phase 2: blind writer calls. Refuses without a cap, off the shared ledger, past the approved count, or for reserve.
 
     Returns the exit code: 0 done, 2 refused, 3 a call cap stopped the run.
+
+    --approved-calls bounds the pending TASKS. A task that fails is called a second time, so calls can reach twice
+    the approved count before the model cap stops them. The 10% hold of spec part 3 item 3 (cap, minus 10%, minus
+    calls spent, read from the ledger) is not enforced here: it rests on the number the approver gives.
+    A plan edited after it was drawn, a ledger written by another model or prompt, or a ledger row for different
+    task text (a plan redrawn into the same files) is refused with exit 2.
     """
     import asyncio
     if args.split not in WRITER_SPLITS:
@@ -679,18 +740,43 @@ def cmd_write( args, query_fn=None ):
     base   = os.path.join( args.base, args.split )
     tasks  = read_jsonl( os.path.join( base, "writer_tasks.jsonl" ) )
     ledger = os.path.join( base, "writer_ledger.jsonl" )
+    try: check_plan_hash( json.loads( open( os.path.join( base, "plan.json" ), encoding="utf-8" ).read() ) )
+    except ValueError as e:
+        print( f"REFUSED: {e}", file=sys.stderr )
+        return 2
     done   = { r[ "task_id" ] for r in read_jsonl( ledger ) } if os.path.exists( ledger ) else set()
     pending = [ t for t in tasks if t[ "task_id" ] not in done ]
     if len( pending ) > args.approved_calls:
         print( f"REFUSED: {len( pending )} calls are pending and only {args.approved_calls} are approved", file=sys.stderr )
         return 2
     try:
-        result = asyncio.run( run_writer( pending, args.writer_model, ledger, os.path.join( base, "writer_outputs.jsonl" ), query_fn ) )
+        result = asyncio.run( run_writer( tasks, args.writer_model, ledger, os.path.join( base, "writer_outputs.jsonl" ), query_fn ) )
     except model_transport.CallBudgetExceeded as e:
         print( f"STOPPED: {e}", file=sys.stderr )
         return 3
+    except ValueError as e:
+        print( f"REFUSED: {e}", file=sys.stderr )
+        return 2
     print( f"writer calls={result[ 'called' ]} dropped={len( result[ 'dropped' ] )}" )
     return 0
+
+
+def checked_outputs( base, plan ):
+    """
+    Return { task_id: text } for every task of the plan, or raise.
+
+    Raises:
+        - ValueError if the plan was edited after it was drawn, a task has no output, or an output answers
+          different text than the plan's task now holds (the plan was redrawn into the same files)
+    """
+    check_plan_hash( plan )
+    path    = os.path.join( base, "writer_outputs.jsonl" )
+    rows    = { r[ "task_id" ]: r for r in read_jsonl( path ) } if os.path.exists( path ) else {}
+    missing = sorted( t for t in plan[ "tasks" ] if t not in rows )
+    if missing: raise ValueError( f"{len( missing )} writer task(s) have no output" )
+    stale = sorted( t for t, meta in plan[ "tasks" ].items() if rows[ t ].get( "task_sha" ) != meta[ "sha256" ] )
+    if stale: raise ValueError( f"{len( stale )} writer output(s) answer different text than the plan's task: the plan was redrawn into the same files" )
+    return { t: rows[ t ][ "text" ] for t in plan[ "tasks" ] }
 
 
 def cmd_verify( args ):
@@ -701,10 +787,9 @@ def cmd_verify( args ):
     """
     base = os.path.join( args.base, args.split )
     plan = json.loads( open( os.path.join( base, "plan.json" ), encoding="utf-8" ).read() )
-    outputs = { r[ "task_id" ]: r[ "text" ] for r in read_jsonl( os.path.join( base, "writer_outputs.jsonl" ) ) } if os.path.exists( os.path.join( base, "writer_outputs.jsonl" ) ) else {}
-    missing = sorted( t for t in plan[ "tasks" ] if t not in outputs )
-    if missing:
-        print( f"REFUSED: {len( missing )} writer task(s) have no output", file=sys.stderr )
+    try: outputs = checked_outputs( base, plan )
+    except ValueError as e:
+        print( f"REFUSED: {e}", file=sys.stderr )
         return 2
     by_pair = { p[ "id" ]: { "id": p[ "id" ], "old": p[ "old" ], "new": "", "linked_doc": "" } for p in plan[ "pairs" ] }
     for task_id, meta in plan[ "tasks" ].items(): by_pair[ meta[ "pair_id" ] ][ meta[ "role" ] ] = outputs[ task_id ]
@@ -754,9 +839,11 @@ def cmd_assemble( args ):
     base    = os.path.join( args.base, args.split )
     plan    = json.loads( open( os.path.join( base, "plan.json" ), encoding="utf-8" ).read() )
     ledger  = read_jsonl( os.path.join( base, "writer_ledger.jsonl" ) )
-    outputs = { r[ "task_id" ]: r[ "text" ] for r in read_jsonl( os.path.join( base, "writer_outputs.jsonl" ) ) }
-    if any( t not in outputs for t in plan[ "tasks" ] ):
-        print( "REFUSED: a writer task has no output", file=sys.stderr )
+    try:
+        outputs = checked_outputs( base, plan )
+        check_ledger_identity( ledger )
+    except ValueError as e:
+        print( f"REFUSED: {e}", file=sys.stderr )
         return 2
     problems = check_verification( plan, read_jsonl( args.verification ) )
     if problems:
@@ -795,6 +882,9 @@ def cmd_manifest( args ):
     """
     Write the dev-visible root MANIFEST.json.
 
+    The gate-hashes file holds gate_pairs_sha256, gate_keys_sha256 and reserve_plan_sha256 (written by plan into the gate
+    store as plan-hashes.json); the reserve pairs and keys hashes are optional, since no reserve writer call is made.
+
     Holds: the dev files and shas, the dev seed, the writer id, prompt hash, floors, dev counts, the gate and
     reserve pairs/keys sha256 values, the harness commit, the stoplist sha.
     Never holds: the gate seed, the split seed, a gate or reserve file list, a gate sha filename, gate counts by class.
@@ -810,7 +900,7 @@ def cmd_manifest( args ):
                  "floors": { "min_quote_words": claim_extractor.MIN_QUOTE_WORDS, "min_quote_chars": claim_extractor.MIN_QUOTE_CHARS },
                  "stoplist": { "path": os.path.basename( args.stoplist ), "sha256": sha256_file( args.stoplist ) },
                  "gate_pairs_sha256": hashes[ "gate_pairs_sha256" ], "gate_keys_sha256": hashes[ "gate_keys_sha256" ],
-                 "reserve_pairs_sha256": hashes[ "reserve_pairs_sha256" ], "reserve_keys_sha256": hashes[ "reserve_keys_sha256" ],
+                 "reserve_plan_sha256": hashes[ "reserve_plan_sha256" ], "reserve_pairs_sha256": hashes.get( "reserve_pairs_sha256" ), "reserve_keys_sha256": hashes.get( "reserve_keys_sha256" ),
                  "harness_commit": args.harness_commit }
     write_json( os.path.join( args.out, "MANIFEST.json" ), manifest )
     return 0
@@ -824,14 +914,15 @@ def cmd_natural( args ):
         - each row of --natural is { id, file, symbol, old, new, x_span_in_old, found_by }; found_by names who found it
 
     Ensures:
-        - every x_span_in_old passes quotable_once against old, or the whole file is refused (exit 2)
+        - every x_span_in_old occurs once in old exactly as typed (the loader's own rule: a person types this span,
+          so whitespace can differ from old) and passes quotable_once, or the whole file is refused (exit 2)
         - writes natural/pairs.jsonl and keys/natural-keys.jsonl, arm "natural", never joined to a pooled count
         - the keys carry found_by, because the manifest names who found each item
 
     Returns 0 done, 2 refused.
     """
     rows = read_jsonl( args.natural )
-    bad  = [ r[ "id" ] for r in rows if not quotable_once( r[ "old" ], r[ "x_span_in_old" ] ) ]
+    bad  = [ r[ "id" ] for r in rows if r[ "old" ].count( r[ "x_span_in_old" ] ) != 1 or not quotable_once( r[ "old" ], r[ "x_span_in_old" ] ) ]
     if bad:
         print( f"REFUSED: natural span(s) not quotable once in old: {', '.join( bad )}", file=sys.stderr )
         return 2
