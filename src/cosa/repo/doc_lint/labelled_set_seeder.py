@@ -818,7 +818,7 @@ def cmd_manifest( args ):
 
 def cmd_natural( args ):
     """
-    Validate natural.jsonl and write it as its own arm: real removals found in real sweep diffs, hand-labelled.
+    Validate natural.jsonl and write it as its own arm of hand-labelled real removals.
 
     Requires:
         - each row of --natural is { id, file, symbol, old, new, x_span_in_old, found_by }; found_by names who found it
