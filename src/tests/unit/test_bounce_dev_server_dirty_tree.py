@@ -249,6 +249,16 @@ class TestBounceDirtyTree( unittest.TestCase ):
             _, env = _make_tree( git=True, dirty=True )
         self.assertFalse( set( _GIT_REDIRECTS ) & set( env ) )
 
+    def test_a_users_global_git_config_is_not_read_by_the_isolated_environment( self ):
+        home = tempfile.mkdtemp()
+        ( Path( home ) / ".gitconfig" ).write_text( "[user]\n\tname = leaked-from-home\n" )
+        ask  = [ "git", "config", "--global", "--get", "user.name" ]
+        base = { "PATH": os.environ[ "PATH" ], "HOME": home }
+        seen = subprocess.run( ask, env=base, capture_output=True, text=True )
+        self.assertEqual( seen.stdout.strip(), "leaked-from-home" )                   # the control: HOME's config is visible without the isolation
+        iso  = subprocess.run( ask, env=_git_env( home, base ), capture_output=True, text=True )
+        self.assertEqual( ( iso.returncode, iso.stdout ), ( 1, "" ) )                 # isolated: not read
+
 
 if __name__ == "__main__":
     unittest.main()
