@@ -1059,7 +1059,7 @@ def test_the_table_header_has_one_source_shared_with_the_rows( client_code ):
     # ...and the holding table must actually CALL it. Asserting the header exists
     # once stays true when the second table simply stops rendering one — measured:
     # deleting the call left this test green and the pane headerless.
-    group_renderer = function_body( client_code, "_renderHoldingAreaGroup( filer, tasks ) {" )
+    group_renderer = function_body( client_code, "_renderHoldingAreaGroup( filer, tasks, plans, ungrouped ) {" )
     assert "_taskTableHeaderRow()" in group_renderer, (
         "the holding-area table renders rows with no header; unlabelled columns"
     )
@@ -1071,7 +1071,7 @@ def test_the_table_header_has_one_source_shared_with_the_rows( client_code ):
     assert "this._rowWidth()" in row, "the row renderer no longer derives its span width"
     for scope_name, signature in (
         ( "the shared row renderer",    "_renderRow( task, ianaZone, opts ) {" ),
-        ( "the holding-area group",     "_renderHoldingAreaGroup( filer, tasks ) {" ),
+        ( "the holding-area group",     "_renderHoldingAreaGroup( filer, tasks, plans, ungrouped ) {" ),
         ( "the epic group renderer",    "_renderEpicGroup( epicKey, headerLabel, tasks, state, extraClass, storyText ) {" ),
     ):
         body    = function_body( client_code, signature )
@@ -1109,7 +1109,7 @@ def test_the_holding_pane_is_grouped_by_filer_not_owner( client_src, client_code
     organising principle is who put them there.
     """
     assert "_groupHeldRowsByFiler" in client_src
-    grouper = function_body( client_code, "_groupHeldRowsByFiler( tasks ) {" )
+    grouper = function_body( client_code, "_groupHeldRowsByFiler( tasks, keep ) {" )
     assert "_taskFilerLabel" in grouper
     assert "owner_persona" not in grouper, "the holding area groups on the owner, not the filer"
 

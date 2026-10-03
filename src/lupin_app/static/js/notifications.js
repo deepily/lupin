@@ -10451,7 +10451,7 @@ class NotificationsUI {
         }
     }
 
-    _groupHeldRowsByFiler( tasks ) {
+    _groupHeldRowsByFiler( tasks, keep ) {
         /**
          * Group held rows BY FILER, which is what the triage session actually needs.
          *
@@ -10461,18 +10461,31 @@ class NotificationsUI {
          * they are two columns and never one merged "who". Triage asks "what did
          * this person file", so it groups on the filer.
          *
+         * 🔴 A PLAN LIVES INSIDE ONE FILER AND NEVER ABOVE IT. Within a filer, rows
+         * sharing a `correlation_key` form a plan; the same key under two filers is
+         * TWO plans, one under each, so an "approve all" can never reach a row
+         * another person filed.
+         *
          * Requires:
          *     - tasks is an array of row objects (foreign wire data; any shape)
+         *     - keep is a Set of plan ids (see _holdingPlanId) whose last run left a
+         *       report to show, or absent
          *
          * Ensures:
-         *     - returns [ { filer, tasks } ], filers sorted alphabetically
-         *     - within a filer, rows sort by priority then title (status is
-         *       uniform here — every row is not_approved — so ranking by it would
-         *       discriminate nothing)
+         *     - returns [ { filer, tasks, plans, ungrouped } ], filers sorted alphabetically
+         *     - `tasks` is EVERY row of the filer; within it rows sort by priority then
+         *       title (status is uniform here — every row is not_approved)
+         *     - `plans` is [ { key, title, tasks, ids } ], keys sorted alphabetically;
+         *       `tasks` keep the filer's row order and `ids` are those rows' ids
+         *     - a key forms a plan only with two or more of THIS filer's rows (each with an
+         *       id), EXCEPT a plan whose id is in `keep`, which stays while one row is left
+         *     - a blank key, `epic:unassigned` and a row with no id are never in a plan
+         *     - `ungrouped` is the filer's rows that are in no plan
          *     - a falsy/absent tasks argument yields []
          *     - Pure: no DOM, no side effects; never throws
          */
         const rows = Array.isArray( tasks ) ? tasks : [];
+        const kept = keep instanceof Set ? keep : new Set();
         const byFiler = new Map();
         rows.forEach( raw => {
             const task  = raw || {};
@@ -10480,14 +10493,32 @@ class NotificationsUI {
             if ( byFiler.has( filer ) ) byFiler.get( filer ).push( task );
             else byFiler.set( filer, [ task ] );
         } );
-        return Array.from( byFiler.keys() ).sort( ( a, b ) => a.localeCompare( b ) ).map( filer => ( {
-            filer,
-            tasks : byFiler.get( filer ).slice().sort( ( a, b ) => {
+        return Array.from( byFiler.keys() ).sort( ( a, b ) => a.localeCompare( b ) ).map( filer => {
+            const sorted = byFiler.get( filer ).slice().sort( ( a, b ) => {
                 const pr = this._taskPriorityRank( a.priority ) - this._taskPriorityRank( b.priority );
                 if ( pr !== 0 ) return pr;
                 return this._taskTitleLabel( a ).localeCompare( this._taskTitleLabel( b ) );
-            } )
-        } ) );
+            } );
+            const byKey = new Map();
+            sorted.forEach( task => {
+                const key = task.correlation_key ? String( task.correlation_key ) : "";
+                if ( !key || key === this.EPIC_UNASSIGNED_KEY || !task.id ) return;
+                if ( byKey.has( key ) ) byKey.get( key ).push( task );
+                else byKey.set( key, [ task ] );
+            } );
+            const plans = Array.from( byKey.keys() )
+                .filter( key => byKey.get( key ).length >= ( kept.has( this._holdingPlanId( filer, key ) ) ? 1 : 2 ) )
+                .sort( ( a, b ) => a.localeCompare( b ) )
+                .map( key => ( {
+                    key,
+                    title : this._planTitle( key ),
+                    tasks : byKey.get( key ),
+                    ids   : byKey.get( key ).map( t => String( t.id ) )
+                } ) );
+            const planned   = new Set( plans.map( p => p.key ) );
+            const ungrouped = sorted.filter( t => !( t.correlation_key && t.id && planned.has( String( t.correlation_key ) ) ) );
+            return { filer, tasks : sorted, plans, ungrouped };
+        } );
     }
 
     isTaskOpenStatus( status ) {
@@ -13958,7 +13989,7 @@ class NotificationsUI {
             else if ( actionBtn.classList.contains( "task-priority-update" ) ) this._handlePriorityUpdateClick( actionBtn );
             else if ( actionBtn.classList.contains( "holding-approve-all" ) ) this._handleHoldingApproveAllClick( actionBtn );
             else if ( actionBtn.classList.contains( "holding-wont-fix-all" ) ) this._handleHoldingWontFixAllClick( actionBtn );
-            else if ( actionBtn.classList.contains( "holding-story-approve-all" ) ) this._handleHoldingStoryApproveClick( actionBtn );
+            else if ( actionBtn.classList.contains( "holding-plan-approve-all" ) ) this._handleHoldingPlanApproveClick( actionBtn );
             return true;
         }
 
@@ -14693,10 +14724,11 @@ class NotificationsUI {
         if ( !container ) return;
 
         this._wireHoldingAreaControls();
-        // Reports of stories that ended PARTLY refused; see _handleHoldingStoryApproveClick.
-        // Created with the pane, before any bar exists to press, so the click handler can rely on both.
-        if ( !( this._holdingStoryReports instanceof Map ) ) this._holdingStoryReports = new Map();
-        if ( !( this._holdingStoriesInFlight instanceof Set ) ) this._holdingStoriesInFlight = new Set();
+        // Reports of plans that ended PARTLY refused; see _handleHoldingPlanApproveClick.
+        // Created with the pane, before any plan header exists to press, so the click handler can rely on all three.
+        if ( !( this._holdingPlanReports instanceof Map ) ) this._holdingPlanReports = new Map();
+        if ( !( this._holdingPlansInFlight instanceof Set ) ) this._holdingPlansInFlight = new Set();
+        if ( !( this._holdingAreaExpandedPlans instanceof Set ) ) this._holdingAreaExpandedPlans = new Set();
 
         const countEl = document.getElementById( "holding-area-count" );
         const sentinels = {
@@ -14710,7 +14742,7 @@ class NotificationsUI {
             return;
         }
 
-        const groups = this._groupHeldRowsByFiler( composite && composite.tasks );
+        const groups = this._groupHeldRowsByFiler( composite && composite.tasks, new Set( this._holdingPlanReports.keys() ) );
         const total  = groups.reduce( ( n, g ) => n + g.tasks.length, 0 );
 
         if ( countEl ) countEl.textContent = String( total );
@@ -14742,70 +14774,40 @@ class NotificationsUI {
         }
 
         const holdingState = this._captureOperatorState( container );
-        const stories = this._renderHoldingStories( this._groupHeldRowsByStory( composite && composite.tasks, new Set( this._holdingStoryReports.keys() ) ) );
-        container.innerHTML = truncation + stories + groups.map( g => this._renderHoldingAreaGroup( g.filer, g.tasks ) ).join( "" );
+        container.innerHTML = truncation + groups.map( g => this._renderHoldingAreaGroup( g.filer, g.tasks, g.plans, g.ungrouped ) ).join( "" );
         this._restoreOperatorState( container, holdingState );
         this._hydrateRequestChips( container );
-        const liveKeys = new Set( ( composite.tasks || [] ).map( t => ( t && t.correlation_key ) || "" ) );
-        for ( const key of Array.from( this._holdingStoryReports.keys() ) ) {
-            if ( !liveKeys.has( key ) ) this._holdingStoryReports.delete( key );
+        // A plan's open state and report outlive the repaint only while the plan is on screen.
+        const livePlans = new Set();
+        groups.forEach( g => g.plans.forEach( p => livePlans.add( this._holdingPlanId( g.filer, p.key ) ) ) );
+        const liveRows = new Set();
+        groups.forEach( g => g.tasks.forEach( t => { if ( t.correlation_key ) liveRows.add( this._holdingPlanId( g.filer, String( t.correlation_key ) ) ); } ) );
+        for ( const id of Array.from( this._holdingPlanReports.keys() ) ) {
+            if ( !liveRows.has( id ) ) this._holdingPlanReports.delete( id );
         }
-        for ( const [ key, message ] of this._holdingStoryReports ) this._renderHoldingStoryStatus( key, message );
+        for ( const id of Array.from( this._holdingAreaExpandedPlans ) ) {
+            if ( !livePlans.has( id ) ) this._holdingAreaExpandedPlans.delete( id );
+        }
+        for ( const [ id, message ] of this._holdingPlanReports ) this._renderHoldingPlanStatus( id, message );
     }
 
-    _groupHeldRowsByStory( tasks, keep ) {
+    _holdingPlanId( filer, key ) {
         /**
-         * Group held rows by STORY — the `correlation_key` a plan import stamps on
-         * every row it files — keeping only keys shared by two or more rows.
-         *
-         * 🔴 `epic:unassigned` IS NOT A STORY EITHER — the key a row carries when nobody chose
-         * one, shared by unrelated rows; a bar over it would approve strangers together.
-         *
-         * 🔴 ONE ROW IS NOT A STORY. A bar offering "approve all 1 in this story" is the
-         * per-row control wearing a bigger label, and a pane of them would bury the real
-         * stories. Rows with no key are never grouped: an absent key is not a shared one.
-         *
-         * Requires:
-         *     - tasks is an array of row objects (foreign wire data; any shape)
+         * The one identity of a plan on this pane: the filer it sits under plus its key.
+         * A key alone is not enough — two filers can hold rows under the same key, and each
+         * gets its own plan, its own open state, its own report.
          *
          * Ensures:
-         *     - returns [ { key, ids, title, filers } ], keys sorted alphabetically; `title` is the
-         *       key made readable, `filers` the distinct filer labels (the bar's persona)
-         *     - ids are the full row ids in the order the rows arrived, blanks dropped
-         *     - a key with fewer than two ids is omitted, EXCEPT a key in the `keep` Set (a
-         *       story whose last run left a report to show), which stays while one id is left
-         *     - a falsy/absent tasks argument yields []
-         *     - Pure: no DOM, no side effects; never throws
+         *     - two strings joined by a separator no persona label or key contains
+         *     - Pure: no DOM, no side effects
          */
-        const rows  = Array.isArray( tasks ) ? tasks : [];
-        const byKey   = new Map();
-        const byFiler = new Map();
-        rows.forEach( raw => {
-            const task = raw || {};
-            const key  = task.correlation_key ? String( task.correlation_key ) : "";
-            const id   = task.id ? String( task.id ) : "";
-            // `epic:unassigned` is the deliberate no-epic answer, a bucket and not a story.
-            if ( !key || key === this.EPIC_UNASSIGNED_KEY || !id ) return;
-            if ( byKey.has( key ) ) byKey.get( key ).push( id );
-            else byKey.set( key, [ id ] );
-            if ( !byFiler.has( key ) ) byFiler.set( key, new Set() );
-            byFiler.get( key ).add( this._taskFilerLabel( task ) );
-        } );
-        return Array.from( byKey.keys() )
-            .filter( key => byKey.get( key ).length >= ( keep instanceof Set && keep.has( key ) ? 1 : 2 ) )
-            .sort( ( a, b ) => a.localeCompare( b ) )
-            .map( key => ( {
-                key,
-                ids    : byKey.get( key ),
-                title  : this._storyTitle( key ),
-                filers : Array.from( byFiler.get( key ) ).sort( ( a, b ) => a.localeCompare( b ) )
-            } ) );
+        return `${filer}\u0001${key}`;
     }
 
-    _storyTitle( key ) {
+    _planTitle( key ) {
         /**
-         * A story key as a readable title: "epic:v022-docs-and-reuse" -> "v022 docs and reuse".
-         * The key is an identifier, never a name, and must not be painted where a persona goes.
+         * A plan key as a readable title: "epic:v022-docs-and-reuse" -> "v022 docs and reuse".
+         * The key is an identifier, never a name; the operator reads the title.
          *
          * Ensures:
          *     - strips a leading "epic:", turns hyphens/underscores into spaces
@@ -14815,85 +14817,116 @@ class NotificationsUI {
         return title === "" ? String( key ) : title;
     }
 
-    _renderHoldingStories( stories ) {
+    _renderHoldingPlanGroup( filer, plan ) {
         /**
-         * The stories strip: one bar per story, each with ONE approve control.
+         * One plan sub-group inside a filer's group: a header (chevron, "Plan: <title>",
+         * count, ONE approve control, status line) and a table of exactly the plan's rows.
          *
-         * ⚠️ THE IDS RIDE ON THE BUTTON, painted from the same composite as the rows
-         * beneath it. The press acts on what the operator was shown, and a row a peer has
-         * since moved is refused by the server and counted as refused — never silently
-         * skipped.
+         * ⚠️ THE IDS RIDE ON THE BUTTON, painted from the same rows as the table beneath it.
+         * The press acts on what the operator was shown, and a row a peer has since moved is
+         * refused by the server and counted as refused — never silently skipped.
          *
          * Ensures:
-         *     - returns "" for no stories, so the pane is unchanged when there are none
-         *     - the persona slot shows the story's filers; the story reads "Story: <title>", never the raw key
-         *     - the button, key and status span each carry data-story
-         *     - the button's label and data-task-ids carry the same N
+         *     - the label reads "Plan: <title>"; the raw key appears only in the tooltip and
+         *       in data attributes, never as text a reader sees
+         *     - the group is collapsed unless its plan id is in _holdingAreaExpandedPlans
+         *     - the button's label and data-task-ids carry the same N, which is the number of
+         *       rows in the table
+         *     - the group, button and status span each carry data-filer and data-plan
          */
-        if ( !Array.isArray( stories ) || stories.length === 0 ) return "";
-        const bars = stories.map( st => {
-            const key = this._escapeTaskAttr( st.key );
-            const n   = st.ids.length;
-            return `
-                <div class="holding-story-bar" data-story="${key}">
-                    <span class="holding-area-filer holding-story-filer">${this.escapeHtml( st.filers.join( ", " ) )}</span>
-                    <span class="holding-story-key" title="${key}">Story: ${this.escapeHtml( st.title )}</span>
-                    <span class="holding-story-count">${n}</span>
-                    <button type="button" class="task-action-btn holding-story-approve-all" data-story="${key}"
-                            data-task-ids="${this._escapeTaskAttr( st.ids.join( "," ) )}"
-                            title="Approve every held row in the story ${this.escapeHtml( st.key )} — reversible, a row approved by mistake can be demoted straight back">Approve all ${n} in this story</button>
-                    <span class="holding-story-status" data-story="${key}"></span>
-                </div>`;
-        } ).join( "" );
-        return `<div class="holding-area-stories">${bars}</div>`;
+        const fkey     = this._escapeTaskAttr( filer );
+        const pkey     = this._escapeTaskAttr( plan.key );
+        const n        = plan.ids.length;
+        const expanded = this._holdingAreaExpandedPlans instanceof Set
+            && this._holdingAreaExpandedPlans.has( this._holdingPlanId( filer, plan.key ) );
+        const ianaZone = this.getResolvedTimeZone ? this.getResolvedTimeZone() : undefined;
+        const rows     = plan.tasks.map( t => this._renderTaskRow( t, ianaZone ) ).join( "" );
+        return `
+            <div class="holding-plan-group${expanded ? "" : " collapsed"}" data-filer="${fkey}" data-plan="${pkey}">
+                <div class="holding-plan-header" role="button" tabindex="0" aria-expanded="${expanded ? "true" : "false"}"
+                     title="Click to show or hide the rows of this plan">
+                    <span class="holding-plan-chevron" aria-hidden="true">${expanded ? "▼" : "▶"}</span>
+                    <span class="holding-plan-label" title="${pkey}">Plan: ${this.escapeHtml( plan.title )}</span>
+                    <span class="holding-plan-count">${n}</span>
+                    <button type="button" class="task-action-btn holding-plan-approve-all" data-filer="${fkey}" data-plan="${pkey}"
+                            data-task-ids="${this._escapeTaskAttr( plan.ids.join( "," ) )}"
+                            title="Approve the ${n} rows listed under this plan — reversible, a row approved by mistake can be demoted straight back">Approve all ${n}</button>
+                    <span class="holding-plan-status" data-filer="${fkey}" data-plan="${pkey}"></span>
+                </div>
+                <table class="task-list-table holding-area-table">
+                    ${this._taskTableHeaderRow()}
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>`;
     }
 
-    _renderHoldingStoryStatus( story, message ) {
+    _holdingPlanStatusEl( id ) {
         /**
-         * Show one story's inline status line. A missing bar is a no-op, never a throw.
+         * The status span of one plan, matched in JavaScript so a key with a quote or bracket
+         * cannot break a selector. Null when the plan is not on screen.
          */
-        const el = document.querySelector( `.holding-story-status[data-story="${CSS.escape( story )}"]` );
+        for ( const el of document.querySelectorAll( ".holding-plan-status" ) ) {
+            if ( this._holdingPlanId( el.dataset.filer || "", el.dataset.plan || "" ) === id ) return el;
+        }
+        return null;
+    }
+
+    _renderHoldingPlanStatus( id, message ) {
+        /**
+         * Show one plan's inline status line. A missing plan is a no-op, never a throw.
+         */
+        const el = this._holdingPlanStatusEl( id );
         if ( el ) el.textContent = message || "";
     }
 
-    _disarmHoldingStoryButtons() {
+    _planButtonId( button ) {
         /**
-         * Return every story bar's approve button to its resting label.
+         * The plan id a plan approve button carries (its filer and plan data attributes).
+         */
+        return this._holdingPlanId( button.dataset.filer || "", button.dataset.plan || "" );
+    }
+
+    _disarmHoldingPlanButtons() {
+        /**
+         * Return every plan header's approve button to its resting label.
          *
          * Ensures:
          *     - the armed flag and class are cleared on each, and the label reads
-         *       "Approve all N in this story" with the N its own data-task-ids carries
-         *     - the status line of a bar that was armed is cleared
-         *     - no story bars on the page is a no-op
+         *       "Approve all N" with the N its own data-task-ids carries
+         *     - the status line of a plan that was armed is cleared
+         *     - no plan headers on the page is a no-op
          */
-        document.querySelectorAll( ".holding-story-approve-all" ).forEach( b => {
-            if ( b.dataset.armed === "1" ) this._renderHoldingStoryStatus( b.dataset.story || "", "" );
+        document.querySelectorAll( ".holding-plan-approve-all" ).forEach( b => {
+            if ( b.dataset.armed === "1" ) this._renderHoldingPlanStatus( this._planButtonId( b ), "" );
             delete b.dataset.armed;
             b.classList.remove( "task-submit-armed" );
-            b.textContent = `Approve all ${ ( b.dataset.taskIds || "" ).split( "," ).filter( Boolean ).length } in this story`;
+            b.textContent = `Approve all ${ ( b.dataset.taskIds || "" ).split( "," ).filter( Boolean ).length }`;
         } );
     }
 
-    _armHoldingStoryButton( button, story, count ) {
+    _armHoldingPlanButton( button, id, count ) {
         /**
-         * First click of a story's approve button: arm it, post nothing (row 376dd4cb).
+         * First click of a plan's approve button: arm it, post nothing (row 376dd4cb).
          *
          * Ensures:
-         *     - every story button is disarmed, then this one is armed, so only one is
+         *     - every plan button is disarmed, then this one is armed, so only one is
          *       ever armed
-         *     - the label reads "Confirm approve all N in this story"
-         *     - the story's status line says what the next click will do
+         *     - the label reads "Confirm approve all N"
+         *     - the plan's status line says what the next click will do
+         *     - the plan's rows are opened, so the operator sees what the next click approves
          */
-        this._disarmHoldingStoryButtons();
+        this._disarmHoldingPlanButtons();
         button.dataset.armed = "1";
         button.classList.add( "task-submit-armed" );
-        button.textContent = `Confirm approve all ${count} in this story`;
-        this._renderHoldingStoryStatus( story, `Click again to approve ${count} rows in this story.` );
+        button.textContent = `Confirm approve all ${count}`;
+        this._renderHoldingPlanStatus( id, `Click again to approve ${count} rows in this plan.` );
+        // The rows about to be approved must be on screen BEFORE the confirming press.
+        this._setHoldingPlanOpen( button.closest( ".holding-plan-group" ), true );
     }
 
-    async _handleHoldingStoryApproveClick( button ) {
+    async _handleHoldingPlanApproveClick( button ) {
         /**
-         * Approve every held row in one story, one transition at a time, then report.
+         * Approve every row listed under one plan, one transition at a time, then report.
          *
          * ⚠️ NO NEW DOOR. Each row goes through `_transitionTask` — the same single-row
          * request the per-row control sends — so the approver allowlist, the promotion ask
@@ -14902,62 +14935,61 @@ class NotificationsUI {
          *
          * Ensures:
          *     - the button is dead for the length of the run, so a second press cannot
-         *       start the story over
+         *       start the plan over
          *     - the status counts ATTEMPTS in flight and SUCCESSES at the end, naming the
          *       refused count and the first refusal
          *     - the pane is refreshed once, and the final line is painted AFTER that
-         *       refresh, because the refresh rebuilds the bar and would erase it
+         *       refresh, because the refresh rebuilds the header and would erase it
          */
-        const story = button.dataset.story || "";
-        const ids   = ( button.dataset.taskIds || "" ).split( "," ).filter( Boolean );
-        if ( !story ) return;
+        const id  = this._planButtonId( button );
+        const ids = ( button.dataset.taskIds || "" ).split( "," ).filter( Boolean );
+        if ( !button.dataset.plan ) return;
         // 🔴 THE GUARD IS THIS SET, NOT THE DISABLED ATTRIBUTE: a poll tick mid-run rebuilds
-        // the bar and hands the operator a fresh, enabled button.
-        if ( this._holdingStoriesInFlight.has( story ) ) return;
+        // the header and hands the operator a fresh, enabled button.
+        if ( this._holdingPlansInFlight.has( id ) ) return;
         if ( ids.length === 0 ) {
-            this._renderHoldingStoryStatus( story, "No rows in this story." );
+            this._renderHoldingPlanStatus( id, "No rows in this plan." );
             return;
         }
 
-        // TWO CLICKS (row 376dd4cb, the story-level half): the first press arms the button and
-        // posts nothing, the second runs the story. A story is the widest one-click approve on
-        // the page, so it is the same accident the group buttons were fixed for.
+        // TWO CLICKS (row 376dd4cb, the plan-level half): the first press arms the button and
+        // posts nothing, the second runs the plan.
         if ( button.dataset.armed !== "1" ) {
-            this._armHoldingStoryButton( button, story, ids.length );
+            this._armHoldingPlanButton( button, id, ids.length );
             return;
         }
-        this._disarmHoldingStoryButtons();
+        this._disarmHoldingPlanButtons();
 
-        this._holdingStoriesInFlight.add( story );
-        this._renderHoldingStoryStatus( story, `Approved 0 of ${ids.length}…` );
+        this._holdingPlansInFlight.add( id );
+        this._renderHoldingPlanStatus( id, `Approved 0 of ${ids.length}…` );
         button.disabled = true;
         let ok = 0, failed = 0, firstError = null;
         try {
-            for ( const id of ids ) {
-                const result = await this._transitionTask( id, "queued", {} );
+            for ( const rowId of ids ) {
+                const result = await this._transitionTask( rowId, "queued", {} );
                 if ( result.ok ) ok += 1;
                 else {
                     failed += 1;
                     if ( firstError === null ) firstError = result.message;
                 }
-                this._renderHoldingStoryStatus( story, `Approved ${ok + failed} of ${ids.length}…` );
+                this._renderHoldingPlanStatus( id, `Approved ${ok + failed} of ${ids.length}…` );
             }
         } finally {
             button.disabled = false;
-            this._holdingStoriesInFlight.delete( story );
+            this._holdingPlansInFlight.delete( id );
         }
         const final = failed === 0
             ? `${ok} of ${ids.length} approved.`
             : `${ok} of ${ids.length} approved — ${failed} refused. First refusal: ${firstError}`;
-        // Remembered BEFORE the refresh: the refresh rebuilds the bar, and keeps a one-row
+        // Remembered BEFORE the refresh: the refresh rebuilds the header, and keeps a one-row
         // remainder on screen only while a report is held for it.
-        if ( failed > 0 ) this._holdingStoryReports.set( story, final );
-        else this._holdingStoryReports.delete( story );
+        if ( failed > 0 ) this._holdingPlanReports.set( id, final );
+        else this._holdingPlanReports.delete( id );
         await this.refreshHoldingArea();
-        this._renderHoldingStoryStatus( story, final );
+        this._renderHoldingPlanStatus( id, final );
     }
 
-    _renderHoldingAreaGroup( filer, tasks ) {
+    _renderHoldingAreaGroup( filer, tasks, plans, ungrouped ) {
         /**
          * One filer's held rows: a header bar carrying the batch controls, then the
          * rows themselves reusing the task-list row renderer.
@@ -14980,16 +15012,29 @@ class NotificationsUI {
          *
          * Requires:
          *     - filer is the display label; tasks is that filer's held rows
+         *     - plans is the filer's plan sub-groups and ungrouped the rows in none of them
+         *       (see _groupHeldRowsByFiler); both default to "no plans, every row ungrouped"
          *
          * Ensures:
          *     - returns escaped HTML for one group
          *     - the group's controls carry data-filer so the handler can find its rows
+         *     - each plan sub-group is listed first, then the ungrouped rows in the filer's own
+         *       table, which is omitted when there are none
+         *     - the filer's batch controls still cover every row, grouped or not
          */
         const key   = this._escapeTaskAttr( filer );
         const label = this.escapeHtml( filer );
         const ianaZone = this.getResolvedTimeZone ? this.getResolvedTimeZone() : undefined;
 
-        const rows = tasks.map( t => this._renderTaskRow( t, ianaZone ) ).join( "" );
+        const planList = Array.isArray( plans ) ? plans : [];
+        const loose    = Array.isArray( ungrouped ) ? ungrouped : tasks;
+        const planHtml = planList.map( p => this._renderHoldingPlanGroup( filer, p ) ).join( "" );
+        const rows     = loose.map( t => this._renderTaskRow( t, ianaZone ) ).join( "" );
+        const table    = loose.length === 0 ? "" : `
+                <table class="task-list-table holding-area-table">
+                    ${this._taskTableHeaderRow()}
+                    <tbody>${rows}</tbody>
+                </table>`;
 
         // Row 52142a84 — every group is an accordion, COLLAPSED until the operator
         // opens it; the open set survives the 60s repaint (see _toggleHoldingAreaGroup).
@@ -15009,11 +15054,7 @@ class NotificationsUI {
                     <input type="text" class="task-action-input holding-wont-fix-all-reason" data-filer="${key}"
                            placeholder="one reason, applied to every row below…" aria-label="Batch won't-fix reason">
                     <span class="holding-area-group-status" data-filer="${key}"></span>
-                </div>
-                <table class="task-list-table holding-area-table">
-                    ${this._taskTableHeaderRow()}
-                    <tbody>${rows}</tbody>
-                </table>
+                </div>${planHtml}${table}
             </div>`;
     }
 
@@ -15054,13 +15095,14 @@ class NotificationsUI {
             if ( this._handleRequestChipClick( e.target ) ) return;   // a request verdict, never a row verb
             if ( this._handleTaskIdCopyClick( e.target ) ) return;
             if ( this._handleDetailEmojiClick( e.target ) ) return;
+            if ( this._toggleHoldingPlanGroup( e.target ) ) return;
             if ( this._toggleHoldingAreaGroup( e.target ) ) return;
             this._handleRowControlClick( e.target );
         } );
         container.addEventListener( "keydown", ( e ) => {
             // Enter / Space on a focused group header toggles it, as the task list's does.
             if ( e.key !== "Enter" && e.key !== " " && e.key !== "Spacebar" ) return;
-            if ( this._toggleHoldingAreaGroup( e.target ) ) e.preventDefault();
+            if ( this._toggleHoldingPlanGroup( e.target ) || this._toggleHoldingAreaGroup( e.target ) ) e.preventDefault();
         } );
         this._wireVerbSelects( container );
 
@@ -15098,6 +15140,46 @@ class NotificationsUI {
         if ( expanded ) this._holdingAreaExpandedFilers.add( filer );
         else this._holdingAreaExpandedFilers.delete( filer );
         return true;
+    }
+
+    _toggleHoldingPlanGroup( target ) {
+        /**
+         * Open or close one plan sub-group from a click or key on its header bar.
+         *
+         * ⚠️ The approve control lives on the same bar, so a target inside a button is NOT a
+         * toggle. A plan sits inside its filer's group but its header is not the filer's, so a
+         * click here never folds the filer.
+         *
+         * Ensures:
+         *     - returns false for anything that is not a bare plan header
+         *     - otherwise flips .collapsed, aria-expanded and the chevron IN PLACE, records the
+         *       choice in _holdingAreaExpandedPlans so the next repaint keeps it, returns true
+         */
+        if ( !target || typeof target.closest !== "function" ) return false;
+        const header = target.closest( ".holding-plan-header" );
+        if ( !header ) return false;
+        if ( target.closest( "button, input, select, textarea, a" ) ) return false;
+        const group = header.closest( ".holding-plan-group" );
+        this._setHoldingPlanOpen( group, group.classList.contains( "collapsed" ) );
+        return true;
+    }
+
+    _setHoldingPlanOpen( group, open ) {
+        /**
+         * Open or close one plan's rows IN PLACE and record the choice for the next repaint.
+         *
+         * Ensures:
+         *     - .collapsed, the header's aria-expanded and the chevron all agree with `open`
+         *     - the plan id is in _holdingAreaExpandedPlans exactly when `open`
+         */
+        if ( !( this._holdingAreaExpandedPlans instanceof Set ) ) this._holdingAreaExpandedPlans = new Set();
+        const id     = this._holdingPlanId( group.dataset.filer || "", group.dataset.plan || "" );
+        const header = group.querySelector( ".holding-plan-header" );
+        group.classList.toggle( "collapsed", !open );
+        header.setAttribute( "aria-expanded", open ? "true" : "false" );
+        header.querySelector( ".holding-plan-chevron" ).textContent = open ? "▼" : "▶";
+        if ( open ) this._holdingAreaExpandedPlans.add( id );
+        else this._holdingAreaExpandedPlans.delete( id );
     }
 
     _heldRowIdsForFiler( filer ) {

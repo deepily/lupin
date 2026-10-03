@@ -609,10 +609,10 @@ tbody.task-group.collapsed .task-row {
     background: #f1b0b7;
 }
 
-/* ARMED — the holding area's "Approve all" / "Won't fix all" and the story bar's "Approve all N in this story" (row 376dd4cb). Same colours as
+/* ARMED — the holding area's "Approve all" / "Won't fix all" and a plan header's "Approve all N" (row 376dd4cb). Same colours as
    the per-row Submit above; the label already says "Confirm …", so the red is redundant. */
 .holding-area-group-header .task-action-btn.task-submit-armed,
-.holding-story-bar .task-action-btn.task-submit-armed {
+.holding-plan-header .task-action-btn.task-submit-armed {
     border-color: #f5c6cb;
     background: #f8d7da;
     color: #721c24;
@@ -620,7 +620,7 @@ tbody.task-group.collapsed .task-row {
 }
 
 .holding-area-group-header .task-action-btn.task-submit-armed:hover:not(:disabled),
-.holding-story-bar .task-action-btn.task-submit-armed:hover:not(:disabled) {
+.holding-plan-header .task-action-btn.task-submit-armed:hover:not(:disabled) {
     background: #f1b0b7;
 }
 

@@ -12,10 +12,29 @@ import { priorityRank, taskTitleLabel, type TaskItem, type TaskListComposite } f
 import { personaLabel } from "../shared/personaLabel";
 import { EPIC_UNASSIGNED_KEY } from "./epicBoardModel";
 
-/** One filer's bucket of held rows. */
-export interface HeldFilerGroup {
-  filer : string;
+/** One plan inside one filer's group: the key its rows share, a readable title, those rows and their ids. */
+export interface HeldPlan {
+  key   : string;
+  title : string;
   tasks : TaskItem[];
+  ids   : string[];
+}
+
+/** One filer's bucket of held rows: every row, split into plans and the rows that are in none. */
+export interface HeldFilerGroup {
+  filer     : string;
+  tasks     : TaskItem[];
+  plans     : HeldPlan[];
+  ungrouped : TaskItem[];
+}
+
+/**
+ * The one identity of a plan on this pane: the filer it sits under plus its key. A key alone is
+ * not enough — two filers can hold rows under the same key, and each gets its own plan, its own
+ * open state and its own report.
+ */
+export function holdingPlanId( filer: string, key: string ): string {
+  return `${ filer }\u0001${ key }`;
 }
 
 /**
@@ -73,14 +92,29 @@ export function taskFilerLabel( task: TaskItem | null | undefined ): string {
  * definition. (This is the one place the holding area's comparator diverges
  * from `groupTasksByOwner`, which DOES rank by status first.)
  *
+ * 🔴 A PLAN LIVES INSIDE ONE FILER AND NEVER ABOVE IT. Within a filer, rows sharing a
+ * `correlation_key` form a plan; the same key under two filers is TWO plans, one under each,
+ * so an "approve all" can never reach a row another person filed.
+ *
+ * `keep` names plan ids (see holdingPlanId) whose last run left a report to show; such a plan
+ * stays while it has one row left.
+ *
+ * Reproduces notifications.js `_groupHeldRowsByFiler` as observational equivalence.
+ *
  * Ensures:
- *   - returns [ { filer, tasks } ], filers sorted alphabetically
- *   - within a filer, rows sort by priority then title
+ *   - returns [ { filer, tasks, plans, ungrouped } ], filers sorted alphabetically
+ *   - `tasks` is EVERY row of the filer, sorted by priority then title
+ *   - `plans` is [ { key, title, tasks, ids } ], keys sorted alphabetically; `tasks` keep the
+ *     filer's row order and `ids` are those rows' ids
+ *   - a key forms a plan only with two or more of THIS filer's rows (each with an id), except a
+ *     plan named in `keep`
+ *   - a blank key, "epic:unassigned" and a row with no id are never in a plan
+ *   - `ungrouped` is the filer's rows in no plan
  *   - a falsy / non-array tasks argument yields []
  *   - pure: no DOM, no side effects; never throws
  */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
-export function groupHeldRowsByFiler( tasks: unknown ): HeldFilerGroup[] {
+export function groupHeldRowsByFiler( tasks: unknown, keep: ReadonlySet<string> = new Set() ): HeldFilerGroup[] {
   const rows = Array.isArray( tasks ) ? tasks : [];
 
   const byFiler = new Map<string, TaskItem[]>();
@@ -94,92 +128,50 @@ export function groupHeldRowsByFiler( tasks: unknown ): HeldFilerGroup[] {
 
   return Array.from( byFiler.keys() )
     .sort( ( a, b ) => a.localeCompare( b ) )
-    .map( ( filer ) => ( {
-      filer,
-      tasks : ( byFiler.get( filer ) as TaskItem[] ).slice().sort( ( a, b ) => {
+    .map( ( filer ) => {
+      const sorted = ( byFiler.get( filer ) as TaskItem[] ).slice().sort( ( a, b ) => {
         const pr = priorityRank( a.priority ) - priorityRank( b.priority );
         if ( pr !== 0 ) return pr;
         return taskTitleLabel( a ).localeCompare( taskTitleLabel( b ) );
-      } ),
-    } ) );
-}
-
-/** One story's held rows: the `correlation_key` they share and their full ids. */
-export interface HeldStory {
-  key    : string;
-  ids    : string[];
-  title  : string;
-  filers : string[];
+      } );
+      const byKey = new Map<string, TaskItem[]>();
+      for ( const task of sorted ) {
+        const key = task.correlation_key ? String( task.correlation_key ) : "";
+        // "epic:unassigned" is the deliberate no-plan answer, a bucket and not a plan.
+        if ( key === "" || key === EPIC_UNASSIGNED_KEY || !task.id ) continue;
+        const bucket = byKey.get( key );
+        if ( bucket ) bucket.push( task );
+        else byKey.set( key, [ task ] );
+      }
+      const plans: HeldPlan[] = Array.from( byKey.keys() )
+        .filter( ( key ) => ( byKey.get( key ) as TaskItem[] ).length >= ( keep.has( holdingPlanId( filer, key ) ) ? 1 : 2 ) )
+        .sort( ( a, b ) => a.localeCompare( b ) )
+        .map( ( key ) => ( {
+          key,
+          title : planTitle( key ),
+          tasks : byKey.get( key ) as TaskItem[],
+          ids   : ( byKey.get( key ) as TaskItem[] ).map( ( t ) => String( t.id ) ),
+        } ) );
+      const planned   = new Set( plans.map( ( p ) => p.key ) );
+      const ungrouped = sorted.filter( ( t ) => !( t.correlation_key && t.id && planned.has( String( t.correlation_key ) ) ) );
+      return { filer, tasks : sorted, plans, ungrouped };
+    } );
 }
 
 /**
- * A story's key as a readable title: "epic:v022-docs-and-reuse" → "v022 docs and reuse".
+ * A plan key as a readable title: "epic:v022-docs-and-reuse" → "v022 docs and reuse".
  *
- * The key is an identifier, not a name, and it must never be painted where a person's name
- * goes. Strips a leading "epic:", turns hyphens and underscores into spaces.
+ * The key is an identifier, not a name. Strips a leading "epic:", turns hyphens and
+ * underscores into spaces.
  *
  * Ensures:
  *   - never returns the empty string for a non-empty key: a key that is only a prefix stays as is
  *   - pure; never throws
  */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
-export function storyTitle( key: string ): string {
+export function planTitle( key: string ): string {
   const title = key.replace( /^epic:/, "" ).replace( /[-_]+/g, " " ).trim();
   return title === "" ? key : title;
-}
-
-/**
- * Group held rows by STORY — the `correlation_key` a plan import stamps on every
- * row it files — keeping only keys shared by two or more rows.
- *
- * 🔴 `epic:unassigned` IS NOT A STORY EITHER — it is the key a row carries when nobody chose one,
- * shared by unrelated rows, and a bar over it would approve strangers together.
- *
- * 🔴 ONE ROW IS NOT A STORY. A bar offering "approve all 1 in this story" is the
- * per-row control under a bigger label, and a pane of them would bury the real
- * stories. A row with no key is never grouped: an absent key is not a shared one.
- *
- * Reproduces notifications.js `_groupHeldRowsByStory` as observational
- * equivalence, not shared code.
- *
- * Ensures:
- *   - returns [ { key, ids, title, filers } ], keys sorted alphabetically; `title` is the key made
- *     readable and `filers` the distinct filer labels (what the bar shows as the persona)
- *   - ids are the full row ids in arrival order; a row with no id is dropped
- *   - a key with fewer than two ids is omitted, EXCEPT a key named in `keep` (a story
- *     whose last run left a report to show), which stays while it has one id left
- *   - a falsy / non-array tasks argument yields []
- *   - pure: no DOM, no side effects; never throws
- */
-/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
-export function groupHeldRowsByStory( tasks: unknown, keep: ReadonlySet<string> = new Set() ): HeldStory[] {
-  const rows  = Array.isArray( tasks ) ? tasks : [];
-  const byKey   = new Map<string, string[]>();
-  const byFiler = new Map<string, Set<string>>();
-  rows.forEach( ( raw ) => {
-    const task = ( raw ?? {} ) as TaskItem;
-    const key  = task.correlation_key ? String( task.correlation_key ) : "";
-    const id   = task.id ? String( task.id ) : "";
-    // "epic:unassigned" is the deliberate no-epic answer, a bucket and not a story: the same
-    // treatment as no key at all.
-    if ( key === "" || key === EPIC_UNASSIGNED_KEY || id === "" ) return;
-    const bucket = byKey.get( key );
-    if ( bucket ) bucket.push( id );
-    else byKey.set( key, [ id ] );
-    const filer = taskFilerLabel( task );
-    const seen  = byFiler.get( key );
-    if ( seen ) seen.add( filer );
-    else byFiler.set( key, new Set( [ filer ] ) );
-  } );
-  return Array.from( byKey.keys() )
-    .filter( ( key ) => ( byKey.get( key ) as string[] ).length >= ( keep.has( key ) ? 1 : 2 ) )
-    .sort( ( a, b ) => a.localeCompare( b ) )
-    .map( ( key ) => ( {
-      key,
-      ids    : byKey.get( key ) as string[],
-      title  : storyTitle( key ),
-      filers : Array.from( byFiler.get( key ) as Set<string> ).sort( ( a, b ) => a.localeCompare( b ) ),
-    } ) );
 }
 
 /**
