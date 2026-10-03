@@ -284,6 +284,121 @@ def test_gate_allows_the_commit_outside_a_repository( tmp_path ):
     assert "GATE CRASHED, commit allowed: RuntimeError" in err.getvalue()
 
 
+# ---- the blocking allowlist ------------------------------------------------------------------
+
+def _doc( line ):
+    return f'def f():\n    """\n    Return it.\n\n    {line}\n    """\n'
+
+
+KIND_CASES = [
+    ( "dated-banner",     "Added on 2026-01-02 for the parser." ),
+    ( "iso-date",         "The version was cut on 2026-01-02." ),
+    ( "agent-imperative", "You must call this first." ),
+    ( "bare-ref",         "Tracked in row 8dbe659a." ),
+    ( "bare-ref",         "Introduced in 91574fce for speed." ),
+]
+
+
+def test_the_allowlist_ships_empty_so_merging_the_gate_changes_nobodys_commits():
+    assert gate.BLOCKING_PACKAGES == ()
+
+
+@pytest.mark.parametrize( "rule,line", KIND_CASES )
+def test_each_mechanical_kind_on_an_untouched_line_is_refused_when_its_package_is_listed( repo, monkeypatch, rule, line ):
+    _no_external( monkeypatch )
+    monkeypatch.setattr( gate, "BLOCKING_PACKAGES", ( "src/pkg/", ) )
+    old = _doc( line )
+    _stage( repo, { "src/pkg/a.py": old } )
+    _git( repo, "commit", "-q", "-m", "base" )
+    _stage( repo, { "src/pkg/a.py": old + "\nx = 1\n" } )                      # the docstring line is not in the diff
+    err = io.StringIO()
+    assert gate.main( [ "--repo-root", str( repo ) ], err ) == gate.REFUSAL_EXIT
+    text = err.getvalue()
+    assert f"[doc-lint] REFUSED src/pkg/a.py:5: {rule}: " in text and "this history belongs in " in text
+    assert "commit REFUSED" in text and text.count( f"REFUSED src/pkg/a.py:5: {rule}:" ) == 1
+
+
+@pytest.mark.parametrize( "rule,line", KIND_CASES )
+def test_the_same_line_in_an_unlisted_package_is_only_warned_and_only_when_touched( repo, monkeypatch, rule, line ):
+    _no_external( monkeypatch )
+    monkeypatch.setattr( gate, "BLOCKING_PACKAGES", ( "src/other/", ) )
+    old = _doc( line )
+    _stage( repo, { "src/pkg/a.py": old } )
+    err = io.StringIO()
+    assert gate.main( [ "--repo-root", str( repo ) ], err ) == 0                  # new file: every line is touched, so it warns
+    assert f"[doc-lint] src/pkg/a.py:5: {rule}: " in err.getvalue() and "REFUSED" not in err.getvalue()
+    _git( repo, "commit", "-q", "-m", "base" )
+    _stage( repo, { "src/pkg/a.py": old + "\nx = 1\n" } )
+    err = io.StringIO()
+    assert gate.main( [ "--repo-root", str( repo ) ], err ) == 0
+    assert "0 findings on staged lines (warn mode, commit allowed)" in err.getvalue()
+
+
+def test_a_refused_finding_on_a_touched_line_is_printed_once_as_a_refusal_not_also_as_a_warning( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    monkeypatch.setattr( gate, "BLOCKING_PACKAGES", ( "src/pkg/", ) )
+    _stage( repo, { "src/pkg/a.py": _doc( "The version was cut on 2026-01-02." ) } )   # a new file: the line is touched
+    err = io.StringIO()
+    assert gate.main( [ "--repo-root", str( repo ) ], err ) == gate.REFUSAL_EXIT
+    assert "[doc-lint] src/pkg/a.py:5: iso-date" not in err.getvalue() and "REFUSED src/pkg/a.py:5: iso-date" in err.getvalue()
+
+
+def test_a_clean_file_passes_whether_its_package_is_listed_or_not( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { "src/pkg/a.py": _doc( "Return the thing." ), "docs/p.md": "A clean line.\n" } )
+    for packages in ( ( "src/pkg/", "docs/" ), () ):
+        monkeypatch.setattr( gate, "BLOCKING_PACKAGES", packages )
+        err = io.StringIO()
+        assert gate.main( [ "--repo-root", str( repo ) ], err ) == 0
+        assert "0 findings on staged lines (warn mode, commit allowed)" in err.getvalue()
+
+
+def test_markdown_in_a_listed_package_is_refused_on_an_untouched_line( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    monkeypatch.setattr( gate, "BLOCKING_PACKAGES", ( "docs/", ) )
+    _stage( repo, { "docs/p.md": "Measured 2026-01-02 here.\n" } )
+    _git( repo, "commit", "-q", "-m", "base" )
+    _stage( repo, { "docs/p.md": "Measured 2026-01-02 here.\nA new clean line.\n" } )
+    err = io.StringIO()
+    assert gate.main( [ "--repo-root", str( repo ) ], err ) == gate.REFUSAL_EXIT
+    assert "REFUSED docs/p.md:1: dated-banner" in err.getvalue()
+
+
+def test_an_incident_story_and_the_non_id_references_are_not_refused( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    monkeypatch.setattr( gate, "BLOCKING_PACKAGES", ( "src/pkg/", ) )
+    story = "The parser once dropped a column after a bad merge, so the loader now checks the width. See section 4 of this module, ruling 3, AC4 and D4."
+    _stage( repo, { "src/pkg/a.py": _doc( story ) } )
+    err = io.StringIO()
+    assert gate.main( [ "--repo-root", str( repo ) ], err ) == 0
+    assert "REFUSED" not in err.getvalue()
+
+
+def test_is_mechanical_sorts_the_history_kinds_from_the_rest():
+    def f( rule, message="m" ): return Finding( "a.py", 1, rule, message )
+    for rule in ( "dated-banner", "iso-date", "agent-imperative" ): assert gate.is_mechanical( f( rule ) )
+    assert gate.is_mechanical( f( "bare-ref", "bare reference 'row 8dbe659a'" ) )
+    assert gate.is_mechanical( f( "bare-ref", "bare reference '91574fce'" ) )
+    assert not gate.is_mechanical( f( "bare-ref", "bare reference 'ruling 3'" ) )
+    assert not gate.is_mechanical( f( "bare-ref", "bare reference 'AC4'" ) )
+    assert not gate.is_mechanical( f( "bare-ref", "section reference '\u00a74' has no path" ) )
+    assert not gate.is_mechanical( f( "caps" ) ) and not gate.is_mechanical( f( "ruff:D205" ) )
+
+
+def test_in_blocking_package_matches_a_directory_prefix_only():
+    assert gate.in_blocking_package( "src/pkg/a.py", ( "src/x/", "src/pkg/" ) )
+    assert not gate.in_blocking_package( "src/pkg2/a.py", ( "src/pkg/", ) ) and not gate.in_blocking_package( "src/pkg/a.py", () )
+
+
+def test_the_chain_refuses_the_commit_on_exit_three_and_allows_every_other_gate_failure( repo ):
+    pkg = repo / "src" / "cosa" / "repo" / "doc_lint"
+    pkg.mkdir( parents=True )
+    for d in ( repo / "src" / "cosa", repo / "src" / "cosa" / "repo", pkg ): ( d / "__init__.py" ).write_text( "", encoding="utf-8" )
+    ( pkg / "gate.py" ).write_text( "raise SystemExit( 3 )\n", encoding="utf-8" )
+    res = _run_chain( repo )
+    assert res.returncode == 1 and "doc-lint gate REFUSED the commit" in res.stderr
+
+
 # ---- the chain wrapper -----------------------------------------------------------------------
 
 CHAIN = os.path.join( cu.get_project_root(), "src", "scripts", "pre-commit-chain.sh" )
