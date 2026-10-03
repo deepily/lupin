@@ -332,13 +332,129 @@ def test_before_offset_with_a_max_bytes_lands_on_a_boundary( transcript ):
     assert next_offset == size
 
 
-def test_a_backward_window_holding_no_complete_line_is_empty_not_an_error( tmp_path ):
-    """A window landing entirely inside one long line yields nothing, quietly."""
-    path = tmp_path / "long.jsonl"
-    path.write_text( json.dumps( { "type": "assistant", "text": "z" * 500 } ) + "\n" )
-    records, offset, next_offset = read_window_before( path, os.path.getsize( path ), 20 )
-    assert records == [ ]
-    assert offset == next_offset
+def test_a_backward_window_inside_one_long_line_returns_that_line_whole( tmp_path ):
+    """
+    A window landing entirely inside one long line returns that line, not nothing.
+
+    This pinned the empty page as correct until 2026-10-03. An empty page at the same offset
+    is a "load earlier" that never moves (the plan owner's ruling: the cap is a target).
+    """
+    path   = tmp_path / "long.jsonl"
+    record = { "type": "assistant", "text": "z" * 500 }
+    path.write_text( json.dumps( record ) + "\n" )
+    size = os.path.getsize( path )
+    assert read_window_before( path, size, 20 ) == ( [ record ], 0, size )
+
+
+# ── the progress rule: a page is never stuck behind a record larger than the cap ──
+
+def _oversized_file( tmp_path ):
+    """Three small records, one 5,000-byte record, two small ones; returns ( path, line starts, size )."""
+    path    = tmp_path / "oversized.jsonl"
+    records = _numbered( 3 ) + [ { "type": "assistant", "n": 3, "pad": "p" * 5000 } ] + _numbered( 2, start=4 )
+    _write_jsonl( path, records )
+    starts, position = [ ], 0
+    with open( path, "rb" ) as f:
+        for line in f:
+            starts.append( position )
+            position += len( line )
+    return path, starts, position
+
+
+def test_a_backward_page_behind_an_oversized_record_returns_exactly_that_record( tmp_path ):
+    """
+    The stuck case, at its real shape: `before_offset` sits right after a record larger
+    than the cap. One record comes back — not nothing, and not the whole file — and the
+    page starts strictly before the offset it was asked to precede.
+    """
+    path, starts, _ = _oversized_file( tmp_path )
+    before = starts[ 4 ]                                   # the big record ends here
+
+    records, offset, next_offset = read_window_before( path, before, 100 )
+
+    assert [ r[ "n" ] for r in records ] == [ 3 ], "exactly the oversized record, alone"
+    assert ( offset, next_offset ) == ( starts[ 3 ], before )
+    assert offset < before
+
+
+def test_paging_backwards_from_the_end_reaches_the_top_and_loses_nothing( tmp_path ):
+    """
+    The whole walk with a cap far smaller than the big record: every page starts strictly
+    before its bound, pages abut, and the records come back complete and in order.
+    """
+    path, _, size = _oversized_file( tmp_path )
+
+    seen, bound, pages = [ ], size, 0
+    while bound > 0:
+        records, offset, next_offset = read_window_before( path, bound, 100 )
+        assert offset < bound, f"a page before {bound} started at {offset}: no progress"
+        assert next_offset == bound, "the page does not abut the one it precedes"
+        seen  = [ r[ "n" ] for r in records ] + seen
+        bound = offset
+        pages += 1
+        assert pages < 50, "the walk is not terminating"
+
+    assert seen == [ 0, 1, 2, 3, 4, 5 ]
+    assert read_window_before( path, 0, 100 ) == ( [ ], 0, 0 ), "the top answers the documented empty triple"
+
+
+def test_tail_bytes_smaller_than_the_last_record_returns_that_record_whole( tmp_path ):
+    """Opening the pane on a transcript whose last record exceeds the cap shows that record."""
+    path, starts, size = _oversized_file( tmp_path )
+    with open( path, "r+b" ) as f:
+        f.truncate( starts[ 4 ] )                          # the big record is now the last line
+
+    records, offset, next_offset = read_tail_bytes( path, 100 )
+
+    assert [ r[ "n" ] for r in records ] == [ 3 ]
+    assert ( offset, next_offset ) == ( starts[ 3 ], starts[ 4 ] )
+
+
+def test_a_forward_page_at_an_oversized_record_returns_exactly_that_record( tmp_path ):
+    """The gap-repair verb has the same shape and gets the same rule."""
+    path, starts, _ = _oversized_file( tmp_path )
+
+    records, offset, next_offset = read_window_from( path, starts[ 3 ], 100 )
+
+    assert [ r[ "n" ] for r in records ] == [ 3 ], "exactly the oversized record, alone"
+    assert ( offset, next_offset ) == ( starts[ 3 ], starts[ 4 ] )
+
+
+def test_a_forward_page_at_a_record_still_being_written_waits_for_its_newline( tmp_path ):
+    """Widening stops at the file's end: a line with no newline yet is not a record."""
+    path = tmp_path / "partial.jsonl"
+    path.write_text( json.dumps( { "type": "assistant", "n": 0 } ) + "\n" + "x" * 400 )
+    first_line = len( json.dumps( { "type": "assistant", "n": 0 } ) ) + 1
+
+    assert read_window_from( path, first_line, 50 ) == ( [ ], first_line, first_line )
+
+
+def test_the_newline_scans_cross_block_boundaries_and_survive_an_unreadable_path( tmp_path, monkeypatch ):
+    """
+    The two scans read in blocks. With a 16-byte block the oversized record spans hundreds
+    of them, so a scan that only looked at one block would miss the newline. A directory in
+    place of the file is the unreadable case: both answer -1 and never raise.
+    """
+    import cosa.utils.transcript_tail as module
+
+    monkeypatch.setattr( module, "SCAN_BLOCK_BYTES", 16 )
+    path, starts, size = _oversized_file( tmp_path )
+
+    assert module._find_newline_before( path, starts[ 4 ] - 1 ) == starts[ 3 ] - 1
+    assert module._find_newline_from( path, starts[ 3 ], size ) == starts[ 4 ] - 1
+    assert module._find_newline_before( path, 0 ) == -1
+    assert module._find_newline_from( path, size, size ) == -1
+    assert [ r[ "n" ] for r in read_window_before( path, starts[ 4 ], 100 )[ 0 ] ] == [ 3 ]
+    assert [ r[ "n" ] for r in read_window_from( path, starts[ 3 ], 100 )[ 0 ] ] == [ 3 ]
+
+    assert module._find_newline_before( tmp_path, 10 ) == -1
+    assert module._find_newline_from( tmp_path, 0, 10 ) == -1
+
+    # A file that shrank after its size was read: the scan runs out of bytes before `size`
+    # and stops, where a loop trusting `size` would spin on empty reads.
+    shrunk = tmp_path / "shrunk.jsonl"
+    shrunk.write_text( "x" * 10 )
+    assert module._find_newline_from( shrunk, 0, 500 ) == -1
 
 
 def test_a_window_whose_span_is_zero_is_empty( transcript ):
@@ -416,9 +532,8 @@ def test_a_backward_window_with_no_newline_anywhere_is_empty( tmp_path ):
     """
     path = tmp_path / "noeol.jsonl"
     path.write_text( "x" * 400 )                          # no newline at all
-    records, offset, next_offset = read_window_before( path, 400, 50 )
-    assert records == [ ]
-    assert offset == next_offset == 400
+    # No newline anywhere means no complete record before the bound: the documented top.
+    assert read_window_before( path, 400, 50 ) == ( [ ], 0, 0 )
 
 
 def test_a_backward_window_skips_malformed_json_inside_it( tmp_path ):
