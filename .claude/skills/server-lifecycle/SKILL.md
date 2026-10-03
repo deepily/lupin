@@ -56,7 +56,7 @@ This skill activates when the user says any of:
 
 **The trap behind "I changed the mount but it's not there":** `docker restart` reuses cached compose config. Any compose-level change (mount, env, port, depends_on, networks) requires `down`/`up` — `restart` will silently apply nothing.
 
-For deeper edge cases (CoSA submodule reloads, Jinja templates, in-memory state loss), see `references/change-impact-matrix.md`.
+For deeper edge cases (CoSA edits, Jinja templates, in-memory state loss), see `references/change-impact-matrix.md`.
 
 ---
 
