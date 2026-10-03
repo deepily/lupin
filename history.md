@@ -8,6 +8,16 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.10.03 - Session 6d9a5ad1 (Mr. Radio 🦉, manager; crew Chloé 🗼, Krishna 🦚 from about 16:25 EDT) | Integration 34 → 3 reds; three console-stream server defects fixed; DB login built and waiting on sudo
+
+- **Integration on :8000, four runs**: `ts-11c25f8a` 417 passed / 34 failed · `ts-8584a00b` 445 / 6 · `ts-332ebcf6` 446 / 5 · `ts-3c700544` (head `77f5e626d`) 448 / 3. Causes and fixes are on row `d849a6d9`.
+- **Landed on the working branch (not pushed)**: `5e8537ba5` ratio gate off for `[Lupin: Testing]` · seeder and task-store test fixes (`033da9aba`, `da4dd78e5`, `89989afb4`, `3795b1feb`, `f572b5c28`, `978967905`, `497059313`) · console stream server fixes, María reviewed: `f60627d28` (offset kept across a quiet poll), `91574fce7` (frames chain across unseen records, a /clear is announced, non-admin watch refused in the contract's frame), `42961911a` (a backlog page always returns one whole record) · `034955047` + `642633cf5` suite-lineage CRUD jobs skip the confirmation (`4cbd4858`) · `28aa569ff` worktree guard covers lupin-mobile's scripts (`5aedbad2`) · `2cf2be63d` notify-door tests send a Bearer JWT (`c46ba7c0`, green live in `ts-3c700544`) · `8bf4377fc` Decisions Log.
+- **Built, reviewed, not on main at 19:10 EDT**: `78145754d` (task-store tests meet the pull switch; Krishna PASS) and `18b28b44e` (a recast job keeps its suite lineage, no 60 s correctness wait; Krishna PASS). The auto-mode permission check refused the cherry-pick three times, once after Rick's yes. They address the 3 remaining reds. Not run live.
+- **DB login (`80513825`)**: Rick ruled "extra group on the two app services". Compose commit `e74f798d1` built and reviewed, held until `/etc/lupin/secrets/db_app_password` exists (his sudo steps, not run at 19:09).
+- **Rows filed or scoped**: `8d4a5a59` (a request body can claim suite lineage; Krishna's code read) · `8796333b` scoped (one invalidation event for the task panes; Chloé). `c9252819` still waits on `gcloud auth login`.
+- **Seat re-spun itself at 16:40 EDT** (session id 6d9a5ad1 → 6809e0d5, same seat).
+- **Files**: history.md, TODO.md, src/docs/post-games/README.md; code via reviewed merges only.
+
 ### 2026.10.02 - Session bf81cf59 (Cheech 🌿, manager; crew Maya 🌻, Tiberius 👑, Rio) | Harness fix, Do not rule, Fable call cap and labelled-set seeder merged; pilot held for claim loss
 
 - **Merged on the working branch (head `57a0a35e7`, pushed on Rick's broadcast `ae5e1f8c`)**: `4592dc181` harness quote-floor fix + stub manifests + Dart pair builder · `3aa15187f` Do not / Don't injection rule + Fable per-model call cap · `96ddb2ed6` cap test timeout · `394f6c9e9` Rio's seeding script (row `13878d1c`, 96 tests, Tiberius PASS after four rounds). All with Tiberius PASS.
