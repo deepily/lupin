@@ -236,7 +236,7 @@ def test_a_report_with_no_pairs_has_no_figures():
 def synthetic( n, missed=0, unseeded=0, alarmed=0, flip_second_list_misses=False ):
     """n seeded pairs (the first `missed` flag nothing), then `unseeded` pairs (the first `alarmed` flag a claim)."""
     row  = lambda verdict: { "verdict": verdict, "escalated": False }
-    flag = { "claims": [ { "start": 0, "end": 10, "quote": "q" } ], "discarded": 0, "discards": [], "flags": [], "flag_words": [], "reextract_calls": 0, "parse_failed": False, "retry_calls": 0, "uncovered": 0.0, "longest_quote": 0.25, "runs": [ [ row( "absent" ) ] ] * 3 }
+    flag = { "claims": [ { "start": 0, "end": 10, "text": "q", "quote": "q" } ], "discarded": 0, "discards": [], "flags": [], "flag_words": [], "reextract_calls": 0, "parse_failed": False, "retry_calls": 0, "uncovered": 0.0, "longest_quote": 0.25, "runs": [ [ row( "absent" ) ] ] * 3 }
     calm = dict( flag, runs=[ [ row( "present" ) ] ] * 3 )
     out  = []
     for i in range( n ):

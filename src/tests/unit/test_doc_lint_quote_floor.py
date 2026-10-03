@@ -207,7 +207,7 @@ CONFIG = hn.HarnessConfig( "e", "j", "x", "w", 1, 1 )
 
 
 def lst( claims=(), flags=(), discards=(), verdict="present" ):
-    return { "claims": [ { "start": a, "end": b, "quote": "q" } for a, b in claims ], "discarded": len( discards ),
+    return { "claims": [ { "start": a, "end": b, "text": "q", "quote": "q" } for a, b in claims ], "discarded": len( discards ),
              "discards": [ { "code": "TOO_FEW_CHARS", "words": 2, "start": a, "end": b } for a, b in discards ],
              "flags": [ list( f ) for f in flags ], "flag_words": [ 12 for _ in flags ], "reextract_calls": 0, "parse_failed": False, "retry_calls": 0, "uncovered": 0.0, "longest_quote": 0.0,
              "runs": [ [ { "verdict": verdict, "escalated": False, "noul": None } for _ in claims ] ] }

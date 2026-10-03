@@ -9,7 +9,7 @@ text no verified quote covers.
 
 from scipy.stats import beta
 
-from . import claim_extractor, claim_judge
+from . import claim_extractor, claim_judge, history_class
 
 DEFAULT_POSITIVES_NEEDED = 60
 AGREEMENT_BAR            = 0.95
@@ -91,6 +91,23 @@ def caught( claim_list, seed_span ):
                                                          for flag, c in zip( flags, claim_list[ "claims" ] ) )
 
 
+def loss_split( claim_list ):
+    """
+    Split one extractor list's dropped claims into lost and excused-as-history (row 9d40b2af).
+
+    Requires:
+        - claim_list is a run_pair list entry
+
+    Ensures:
+        - returns ( lost, excused ): indexes of claims judged dropped that are not history, and
+          ( index, kinds ) for those that are; see history_class
+        - an empty claim list gives two empty lists
+        - it never changes final_absent, caught or flagged, so the gate figures are measured as before
+    """
+    if not claim_list[ "claims" ]: return [], []
+    return history_class.split_absent( claim_list[ "claims" ], final_absent( claim_list[ "runs" ] ) )
+
+
 def run_flagged( claim_list, seed_span ):
     """Say whether a flagged run of an extractor list overlaps a seed span."""
     return any( claim_extractor.spans_overlap( tuple( f ), seed_span ) for f in claim_list[ "flags" ] )
@@ -145,6 +162,9 @@ def build_report( results, config, judge_prompt_version=None, jev_run=False ):
         - false_alarm_rate counts the judge's false alarms only; a flagged run is counted apart, in flagged_rate,
           and flagged_ok is True only when every list's flagged_rate is at most FLAGGED_CEILING (provisional)
         - the model ids and prompt versions used are recorded in the report
+        - history_class carries the class version and, per list, the dropped claims that still count as lost and
+          the ones excused as history (a separate number, never folded into either gate figure); the
+          gate figures above are computed from every dropped claim, history included
         - miss_criterion_met is True only for zero misses on at least 60 seeded pairs in every list
         - false_alarm_ok is True only when every list flags at most FALSE_ALARM_CEILING of the
           unseeded pairs, so a harness that flags everything cannot pass
@@ -187,6 +207,8 @@ def build_report( results, config, judge_prompt_version=None, jev_run=False ):
             "review_rate"       : review / len( unseeded ) if unseeded else None,
             "caught_by_flag_only": flag_only,
             "parse_failed_pairs": sum( 1 for r in results if r[ "lists" ][ slot ][ "parse_failed" ] ),
+            "claims_lost"       : sum( len( loss_split( r[ "lists" ][ slot ] )[ 0 ] ) for r in results ),
+            "history_excused"   : sum( len( loss_split( r[ "lists" ][ slot ] )[ 1 ] ) for r in results ),
         } )
     miss_ok = bool( seeded ) and len( seeded ) >= DEFAULT_POSITIVES_NEEDED and all( l[ "misses" ] == 0 for l in lists )
     fa_ok   = all( l[ "false_alarm_rate" ] is not None and l[ "false_alarm_rate" ] <= FALSE_ALARM_CEILING for l in lists )
@@ -237,6 +259,8 @@ def build_report( results, config, judge_prompt_version=None, jev_run=False ):
         "longest_quote"     : longest,
         "mean_uncovered"    : sum( uncovered ) / len( uncovered ) if uncovered else None,
         "identical_list_pairs" : identical,
+        "history_class"     : { "version": history_class.HISTORY_CLASS_VERSION,
+                                "lost": [ l[ "claims_lost" ] for l in lists ], "excused": [ l[ "history_excused" ] for l in lists ] },
         "pairs"             : len( results ),
         "miss_criterion_met": miss_ok,
         "false_alarm_ok"    : fa_ok,

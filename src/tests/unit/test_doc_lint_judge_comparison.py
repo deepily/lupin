@@ -138,7 +138,7 @@ def test_the_worse_extractor_list_is_the_one_reported_and_a_tie_names_the_lower_
     keys   = { "a": { "kind": "delete", "seeded_positive": True, "injection": False } }
     assert jc.group_rows( [ seeded ], keys, 2 )[ 0 ][ "worst_list" ] == 0
     assert jc.group_rows( [ seeded ], keys, 2 )[ 0 ][ "per_list" ] == [ 1, 1 ]
-    only_second = { **seeded, "lists": [ { "claims": [ { "start": 0, "end": 3, "quote": "x" } ], "flags": [], "flag_words": [], "discards": [], "parse_failed": False, "retry_calls": 0, "runs": [ [ { "verdict": "absent" } ] ] }, { "claims": [], "flags": [], "flag_words": [], "discards": [], "parse_failed": False, "retry_calls": 0, "runs": [] } ] }
+    only_second = { **seeded, "lists": [ { "claims": [ { "start": 0, "end": 3, "text": "x", "quote": "x" } ], "flags": [], "flag_words": [], "discards": [], "parse_failed": False, "retry_calls": 0, "runs": [ [ { "verdict": "absent" } ] ] }, { "claims": [], "flags": [], "flag_words": [], "discards": [], "parse_failed": False, "retry_calls": 0, "runs": [] } ] }
     assert jc.group_rows( [ only_second ], keys, 2 )[ 0 ][ "per_list" ] == [ 0, 1 ] and jc.group_rows( [ only_second ], keys, 2 )[ 0 ][ "worst_list" ] == 1
 
 
