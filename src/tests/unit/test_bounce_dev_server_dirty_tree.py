@@ -62,13 +62,12 @@ def _git_env( tmp, base=None ):
         - no variable in _GIT_REDIRECTS survives
         - GIT_CEILING_DIRECTORIES names the parent of tmp, so git stops looking for a repo above tmp: a tree that
           is not itself a repo can never resolve to a repo that happens to enclose it
-        - the user's and the system's git config are not read, so a global hook or template cannot slow or change a commit
+        - the user's global git config is not read, so a global hook or template cannot slow or change a commit
     """
     env = dict( os.environ if base is None else base )
     for name in _GIT_REDIRECTS: env.pop( name, None )
     env[ "GIT_CEILING_DIRECTORIES" ] = os.path.dirname( os.path.realpath( tmp ) )
     env[ "GIT_CONFIG_GLOBAL" ]       = os.devnull
-    env[ "GIT_CONFIG_NOSYSTEM" ]     = "1"
     return env
 
 
