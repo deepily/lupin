@@ -575,8 +575,19 @@ services:
       #
       # ⚠️ MUST STAY BELOW claude-creds-test — that volume shadows the whole
       # /home/rruiz/.claude. Same trap as dev; see the note there.
+      #
+      # ⚠️ THE TEST SERVER HAS ITS OWN SESSIONS FOLDER (row d849a6d9, Rick 2026-10-02): NOT
+      # the host's. The integration fixtures write manager-seat bridges
+      # (`cc-itest-mgr-*.json`, role "manager"), and the fleet-size census counts every
+      # manager bridge under the host's ~/.claude/sessions — so a test seat read as a live
+      # manager. The container still sees ~/.claude/sessions at the same path, so every
+      # reader inside is unchanged; only the host side of the bind differs. The one cost: a
+      # real seat's bridge is no longer visible here, so a test that needs a persona writes
+      # its own bridge (preflight 5c does). A pytest run on the HOST against :8000 must set
+      # LUPIN_HOST_SESSIONS_DIR to this folder. The host folder must exist before the
+      # recreate (create_host_path is false): mkdir -p /home/rruiz/.claude/sessions-test
       - type: bind
-        source: ${LUPIN_HOST_SESSIONS_DIR:-/home/rruiz/.claude/sessions}
+        source: ${LUPIN_TEST_SESSIONS_DIR:-/home/rruiz/.claude/sessions-test}
         target: /home/rruiz/.claude/sessions
         bind:
           create_host_path: false

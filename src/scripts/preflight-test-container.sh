@@ -121,9 +121,12 @@ fi
 # (Sword of Damocles, row ab8c5728). No mount means every pledged admit request 403s.
 # Same probe as test_session_bridge_mount_resolves_a_known_persona.
 if run_cmd docker exec "${CONTAINER}" sh -c 'test -d /home/rruiz/.claude/sessions' 2>/dev/null; then
-    known="$(python3 - <<'PY'
-import glob, json, os
-paths = sorted( glob.glob( os.path.expanduser( "~/.claude/sessions/cc-*.json" ) ), key=os.path.getmtime, reverse=True )
+    # Row d849a6d9: the test container's sessions folder is its own. Read the host side
+    # from the running container's mount, not from ~/.claude/sessions.
+    host_sessions="$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/home/rruiz/.claude/sessions"}}{{.Source}}{{end}}{{end}}' "${CONTAINER}" 2>/dev/null)"
+    known="$(python3 - "${host_sessions}" <<'PY'
+import glob, json, os, sys
+paths = sorted( glob.glob( os.path.join( sys.argv[ 1 ] or "/nonexistent", "cc-*.json" ) ), key=os.path.getmtime, reverse=True )
 for path in paths:
     try:
         body = json.load( open( path ) )
