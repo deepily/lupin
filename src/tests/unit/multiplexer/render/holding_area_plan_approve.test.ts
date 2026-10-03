@@ -11,7 +11,7 @@
 // what a non-operator's session earns — a 403 per row — and asserts that nothing is silently
 // skipped and that the plan stays for a retry.
 
-import { test, before } from "node:test";
+import { test, before, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
@@ -37,6 +37,11 @@ import type { TaskListComposite, TaskItem } from "../../../../lupin_app/static/j
 before( () => {
   if ( typeof globalThis.document === "undefined" ) GlobalRegistrator.register();
 } );
+
+// A pane left mounted by a test that failed before its own unmount keeps timers alive, and the
+// runner then hangs on the first red instead of reporting it. Every harness is torn down here.
+const mounted: Array<() => void> = [];
+afterEach( () => { for ( const unmount of mounted.splice( 0 ) ) unmount(); } );
 
 function held( id: string, key: string | null, filer = "rachel" ): TaskItem {
   return {
@@ -245,6 +250,8 @@ function mount( verdict: ( id: string ) => { ok: boolean; message?: string }, ho
   const root = document.createElement( "div" );
   const renderer = createHoldingAreaRenderer( { eventBus: bus, store, nowDateFn: () => new Date( "2026-10-02T15:00:00Z" ) } );
   renderer.mount( root );
+  let unmounted = false;
+  mounted.push( () => { if ( !unmounted ) renderer.unmount(); } );
   const container = root.querySelector( ".holding-area-container" ) as HTMLElement;
   const group = ( filer: string, key: string ): HTMLElement => {
     const g = Array.from( container.querySelectorAll<HTMLElement>( ".holding-plan-group" ) )
@@ -263,7 +270,7 @@ function mount( verdict: ( id: string ) => { ok: boolean; message?: string }, ho
     poll  : async () => { await store.refresh(); },
     dropRows   : ( key ) => { rows = rows.filter( ( r ) => r.correlation_key !== key ); },
     restoreRows: ( key ) => { rows = [ ...rows, ...ROWS().filter( ( r ) => r.correlation_key === key ) ]; },
-    unmount: () => renderer.unmount(),
+    unmount: () => { unmounted = true; renderer.unmount(); },
   } as Harness;
 }
 
