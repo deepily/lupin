@@ -715,3 +715,28 @@ def server_embedder():
         return resp.json()[ "embeddings" ][ 0 ]
 
     return embed
+
+
+@pytest.fixture( scope="function" )
+def seeded_task_rows( clean_test_db ):
+    """
+    Live `queued` task rows inserted straight into lupin_db_test, removed after the test.
+
+    The create door files at `not_approved` and only an approver may admit a row, so tests that
+    need a row to park or go stale take it from here instead. The guard in
+    tests/integration/seeded_task_rows.py refuses any database not named lupin_db_test.
+
+    Requires:
+        - the in-process engine is bound to lupin_db_test (clean_test_db has asserted it)
+
+    Ensures:
+        - yields a SeededRows; every row it created is deleted on teardown, also when the test fails
+    """
+    from cosa.rest.db import database as db_module
+    from tests.integration.seeded_task_rows import SeededRows
+
+    rows = SeededRows( db_module.engine.url, db_module.get_db )
+    try:
+        yield rows
+    finally:
+        rows.delete_all()

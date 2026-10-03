@@ -70,7 +70,7 @@ EXPIRY_WINDOW_SECONDS = 4
 
 
 @pytest.fixture
-def test_api_key( clean_test_db ):
+def test_api_key( clean_test_db, seeded_task_rows ):
     """Create a test API key and store its bcrypt hash in the test database."""
     api_key   = "ck_live_" + secrets.token_urlsafe( 48 )
     key_bytes = api_key.encode( "utf-8" )
@@ -176,23 +176,14 @@ def _headers( api_key ):
     return { "X-API-Key": api_key }
 
 
-def _create_row( api_key, persona, title="AC6 park subject" ):
-    """Create a queued row owned by `persona`. Returns the row dict."""
-    body = {
-        "item_class"          : "task",
-        "title"               : title,
-        "project"             : "lupin",
-        "owner_persona"       : persona,
-        "accountable_manager" : persona,
-        "created_by"          : "rachel ac6",
-        # P5 is what an API-key caller may file (priority firewall, 2026-09-08); the
-        # priority is incidental to what this file tests. The epic key is required.
-        "priority"            : "P5",
-        "correlation_key"     : "epic:unassigned",
-    }
-    r = requests.post( ENDPOINT, json=body, headers=_headers( api_key ), timeout=15 )
-    assert r.status_code == 201, f"create failed {r.status_code}: {r.text}"
-    row = r.json()
+def _create_row( seeded_task_rows, persona, title="AC6 park subject" ):
+    """
+    A queued row owned by `persona`, inserted straight into lupin_db_test.
+
+    The create door files at `not_approved` and only an approver may admit a row, so the row
+    is seeded; everything the tests are about (park, expiry, rejoin) still goes through the API.
+    """
+    row = seeded_task_rows.create( persona, title, created_by="rachel ac6" )
     assert row[ "status" ] == "queued"
     return row
 
@@ -253,7 +244,7 @@ def _get_row( api_key, task_id ):
 
 class TestAC6ParkExpireRejoin:
 
-    def test_park_expires_by_the_passage_of_time_alone( self, test_api_key, persona, store_settings ):
+    def test_park_expires_by_the_passage_of_time_alone( self, test_api_key, persona, store_settings, seeded_task_rows ):
         """
         🔴 THIS IS AC6. Everything else in this file supports it.
 
@@ -265,7 +256,7 @@ class TestAC6ParkExpireRejoin:
         test fails: nothing runs during the sleep.
         """
         api_key = test_api_key[ "api_key" ]
-        row     = _create_row( api_key, persona )
+        row     = _create_row( seeded_task_rows, persona )
 
         baseline = _owed_count( store_settings, api_key, persona )
         assert baseline == 1, f"fixture not isolated — expected exactly 1 owed row, got {baseline}"
@@ -294,7 +285,7 @@ class TestAC6ParkExpireRejoin:
             "parked forever, silently)"
         )
 
-    def test_expired_park_is_counted_exactly_once( self, test_api_key, persona, store_settings ):
+    def test_expired_park_is_counted_exactly_once( self, test_api_key, persona, store_settings, seeded_task_rows ):
         """
         THE DOUBLE-COUNT GUARD, live.
 
@@ -307,7 +298,7 @@ class TestAC6ParkExpireRejoin:
         assertion passes at 2 when the baseline was also doubled.
         """
         api_key = test_api_key[ "api_key" ]
-        row     = _create_row( api_key, persona )
+        row     = _create_row( seeded_task_rows, persona )
 
         past = datetime.now( timezone.utc ) - timedelta( hours=6 )
         _park( api_key, row[ "id" ], past, "AC6: already-expired park" )
@@ -315,7 +306,7 @@ class TestAC6ParkExpireRejoin:
         count = _owed_count( store_settings, api_key, persona )
         assert count == 1, f"expired parked row counted {count} times, expected exactly 1"
 
-    def test_active_park_is_silent_and_expired_park_is_not( self, test_api_key, persona, store_settings ):
+    def test_active_park_is_silent_and_expired_park_is_not( self, test_api_key, persona, store_settings, seeded_task_rows ):
         """
         THE DISCRIMINATING CONTROL — two rows, same persona, opposite chases.
 
@@ -324,8 +315,8 @@ class TestAC6ParkExpireRejoin:
         and the other must not, on the same query.
         """
         api_key = test_api_key[ "api_key" ]
-        future_row = _create_row( api_key, persona, title="AC6 still-parked" )
-        past_row   = _create_row( api_key, persona, title="AC6 expired" )
+        future_row = _create_row( seeded_task_rows, persona, title="AC6 still-parked" )
+        past_row   = _create_row( seeded_task_rows, persona, title="AC6 expired" )
 
         now = datetime.now( timezone.utc )
         _park( api_key, future_row[ "id" ], now + timedelta( days=1 ), "AC6: chase still ahead" )
@@ -344,7 +335,7 @@ class TestAC6ParkExpireRejoin:
 
 class TestParkWritePath:
 
-    def test_park_reason_is_persisted_on_the_row( self, test_api_key, persona ):
+    def test_park_reason_is_persisted_on_the_row( self, test_api_key, persona, seeded_task_rows ):
         """
         `park_reason` must survive the round trip.
 
@@ -354,7 +345,7 @@ class TestParkWritePath:
         returns 200" would not have caught it.
         """
         api_key = test_api_key[ "api_key" ]
-        row     = _create_row( api_key, persona )
+        row     = _create_row( seeded_task_rows, persona )
         reason  = "TABLED, NOT CLOSED — everything else can wait"
 
         _park( api_key, row[ "id" ], datetime.now( timezone.utc ) + timedelta( days=1 ), reason )
@@ -365,7 +356,7 @@ class TestParkWritePath:
             f"park_reason did not survive the write path: {stored.get( 'park_reason' )!r}"
         )
 
-    def test_park_write_advances_updated_ts_using_server_values_only( self, test_api_key, persona ):
+    def test_park_write_advances_updated_ts_using_server_values_only( self, test_api_key, persona, seeded_task_rows ):
         """
         The row is born NOT-STALE: the park write advances `updated_ts`.
 
@@ -385,7 +376,7 @@ class TestParkWritePath:
         smuggled into this gate, which ships first.
         """
         api_key = test_api_key[ "api_key" ]
-        row     = _create_row( api_key, persona )
+        row     = _create_row( seeded_task_rows, persona )
 
         before = datetime.fromisoformat( row[ "updated_ts" ] )
 
@@ -400,10 +391,10 @@ class TestParkWritePath:
             f"freshly-parked row as neglected"
         )
 
-    def test_park_without_reason_is_rejected( self, test_api_key, persona ):
+    def test_park_without_reason_is_rejected( self, test_api_key, persona, seeded_task_rows ):
         """park_reason is REQUIRED — a park nobody can refute is not a park."""
         api_key = test_api_key[ "api_key" ]
-        row     = _create_row( api_key, persona )
+        row     = _create_row( seeded_task_rows, persona )
 
         r = requests.post(
             f"{ENDPOINT}/{row[ 'id' ]}/transition",
@@ -417,7 +408,7 @@ class TestParkWritePath:
         assert r.status_code == 422, f"expected 422, got {r.status_code}: {r.text}"
         assert "park_reason" in r.text
 
-    def test_park_without_chase_is_rejected( self, test_api_key, persona ):
+    def test_park_without_chase_is_rejected( self, test_api_key, persona, seeded_task_rows ):
         """
         next_chase_ts is REQUIRED — the chase IS the un-park.
 
@@ -425,7 +416,7 @@ class TestParkWritePath:
         VISIBLE. A park with no chase would be an invisible exit.
         """
         api_key = test_api_key[ "api_key" ]
-        row     = _create_row( api_key, persona )
+        row     = _create_row( seeded_task_rows, persona )
 
         r = requests.post(
             f"{ENDPOINT}/{row[ 'id' ]}/transition",
@@ -435,7 +426,7 @@ class TestParkWritePath:
         assert r.status_code == 422, f"expected 422, got {r.status_code}: {r.text}"
         assert "next_chase_ts" in r.text
 
-    def test_park_from_blocked_is_rejected( self, test_api_key, persona ):
+    def test_park_from_blocked_is_rejected( self, test_api_key, persona, seeded_task_rows ):
         """
         Park is legal ONLY from queued / in_progress.
 
@@ -445,7 +436,7 @@ class TestParkWritePath:
         expiring it would inject a row R2 never counted before.
         """
         api_key = test_api_key[ "api_key" ]
-        row     = _create_row( api_key, persona )
+        row     = _create_row( seeded_task_rows, persona )
 
         blocked = requests.post(
             f"{ENDPOINT}/{row[ 'id' ]}/transition",
@@ -478,10 +469,10 @@ class TestParkWritePath:
 
 class TestParkedVisibility:
 
-    def test_park_active_row_is_hidden_by_default_and_surfaced_explicitly( self, test_api_key, persona ):
+    def test_park_active_row_is_hidden_by_default_and_surfaced_explicitly( self, test_api_key, persona, seeded_task_rows ):
         """A parked row is suppressed from the default board and reachable via the audit surface."""
         api_key = test_api_key[ "api_key" ]
-        row     = _create_row( api_key, persona )
+        row     = _create_row( seeded_task_rows, persona )
         _park( api_key, row[ "id" ], datetime.now( timezone.utc ) + timedelta( days=1 ), "AC6: hidden by default" )
 
         default = requests.get( ENDPOINT, params={ "owner_persona": persona },
@@ -497,7 +488,7 @@ class TestParkedVisibility:
             "would be unauditable, which is an exit, not a hold"
         )
 
-    def test_expired_park_is_visible_on_the_default_board( self, test_api_key, persona ):
+    def test_expired_park_is_visible_on_the_default_board( self, test_api_key, persona, seeded_task_rows ):
         """
         An EXPIRED park must be visible again, not merely counted.
 
@@ -505,7 +496,7 @@ class TestParkedVisibility:
         incoherence this build exists to remove.
         """
         api_key = test_api_key[ "api_key" ]
-        row     = _create_row( api_key, persona )
+        row     = _create_row( seeded_task_rows, persona )
         _park( api_key, row[ "id" ], datetime.now( timezone.utc ) - timedelta( days=1 ), "AC6: expired, must resurface" )
 
         default = requests.get( ENDPOINT, params={ "owner_persona": persona },
@@ -521,7 +512,7 @@ class TestParkedVisibility:
 
 class TestTimezoneAwareBoundary:
 
-    def test_chase_stored_and_compared_as_tz_aware( self, test_api_key, persona, store_settings ):
+    def test_chase_stored_and_compared_as_tz_aware( self, test_api_key, persona, store_settings, seeded_task_rows ):
         """
         The gap the unit suite names and cannot close.
 
@@ -532,7 +523,7 @@ class TestTimezoneAwareBoundary:
         and this is the only place that would show it.
         """
         api_key = test_api_key[ "api_key" ]
-        row     = _create_row( api_key, persona )
+        row     = _create_row( seeded_task_rows, persona )
 
         # 5 hours ago expressed as a -04:00 offset — the same INSTANT as UTC-5h,
         # but a naive read would misinterpret the wall-clock digits.

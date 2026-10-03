@@ -101,7 +101,7 @@ CHASE_HOURS = 6
 
 
 @pytest.fixture
-def test_api_key( clean_test_db ):
+def test_api_key( clean_test_db, seeded_task_rows ):
     """Create a test API key and store its bcrypt hash in the test database."""
     api_key   = "ck_live_" + secrets.token_urlsafe( 48 )
     key_bytes = api_key.encode( "utf-8" )
@@ -192,23 +192,16 @@ def _headers( api_key ):
     return { "X-API-Key": api_key }
 
 
-def _create_row( api_key, persona, title="AC3 staleness subject" ):
-    """Create a queued row owned by `persona`. Returns the row dict."""
-    body = {
-        "item_class"          : "task",
-        "title"               : title,
-        "project"             : "lupin",
-        "owner_persona"       : persona,
-        "accountable_manager" : persona,
-        "created_by"          : "seat3 ac3",
-        # P5 is what an API-key caller may file (priority firewall, 2026-09-08); the
-        # priority is incidental to what this file tests. The epic key is required.
-        "priority"            : "P5",
-        "correlation_key"     : "epic:unassigned",
-    }
-    r = requests.post( ENDPOINT, json=body, headers=_headers( api_key ), timeout=15 )
-    assert r.status_code == 201, f"create failed {r.status_code}: {r.text}"
-    return r.json()
+def _create_row( seeded_task_rows, persona, title="AC3 staleness subject" ):
+    """
+    A queued row owned by `persona`, inserted straight into lupin_db_test.
+
+    The create door files at `not_approved` and only an approver may admit a row, so the row
+    is seeded; park, amend and the staleness reads still go through the API.
+    """
+    row = seeded_task_rows.create( persona, title, created_by="seat3 ac3" )
+    assert row[ "status" ] == "queued"
+    return row
 
 
 def _park( api_key, task_id, park_reason, chase_hours=CHASE_HOURS ):
@@ -305,7 +298,7 @@ def _ts( value ):
 # AC3 — the load-bearing assertion
 # ===========================================================================
 
-def test_park_captures_the_post_write_updated_ts( test_api_key, persona ):
+def test_park_captures_the_post_write_updated_ts( test_api_key, persona, seeded_task_rows ):
     """
     AC3: a freshly parked row satisfies `park_reason_captured_at == updated_ts`,
     asserted as EQUALITY, directly.
@@ -315,7 +308,7 @@ def test_park_captures_the_post_write_updated_ts( test_api_key, persona ):
     undetectable amendment window. This asserts the mechanism.
     """
     api_key = test_api_key[ "api_key" ]
-    row     = _create_row( api_key, persona )
+    row     = _create_row( seeded_task_rows, persona )
 
     _park( api_key, row[ "id" ], "NOT TO BE WORKED per Rick's direct instruction" )
     parked = _get_row( api_key, row[ "id" ] )
@@ -334,7 +327,7 @@ def test_park_captures_the_post_write_updated_ts( test_api_key, persona ):
     assert parked[ "park_reason" ], "park_reason must be present on a parked row"
 
 
-def test_the_equality_assertion_is_not_vacuous( test_api_key, persona ):
+def test_the_equality_assertion_is_not_vacuous( test_api_key, persona, seeded_task_rows ):
     """
     POSITIVE CONTROL for AC3 — the control that MUST be able to fail.
 
@@ -348,7 +341,7 @@ def test_the_equality_assertion_is_not_vacuous( test_api_key, persona ):
     control that amended AC3's subject would be measuring its own edit.
     """
     api_key = test_api_key[ "api_key" ]
-    row     = _create_row( api_key, persona, title="AC3 control subject" )
+    row     = _create_row( seeded_task_rows, persona, title="AC3 control subject" )
 
     _park( api_key, row[ "id" ], "control row — quote frozen here" )
     before = _get_row( api_key, row[ "id" ] )
@@ -375,7 +368,7 @@ def test_the_equality_assertion_is_not_vacuous( test_api_key, persona ):
 # AC4 — live: a row amended after park IS stale
 # ===========================================================================
 
-def test_a_row_amended_after_park_is_reported_stale( test_api_key, persona ):
+def test_a_row_amended_after_park_is_reported_stale( test_api_key, persona, seeded_task_rows ):
     """
     AC4 through the real write path: PATCH a parked row, and the staleness flag
     fires on the wire.
@@ -392,7 +385,7 @@ def test_a_row_amended_after_park_is_reported_stale( test_api_key, persona ):
     title case to FRESH. Neither arm means anything without the other.
     """
     api_key = test_api_key[ "api_key" ]
-    row     = _create_row( api_key, persona )
+    row     = _create_row( seeded_task_rows, persona )
 
     _park( api_key, row[ "id" ], "blocked on the arbiter migration landing" )
     fresh = _get_row( api_key, row[ "id" ] )
@@ -412,7 +405,7 @@ def test_a_row_amended_after_park_is_reported_stale( test_api_key, persona ):
     )
 
 
-def test_a_row_whose_PRIORITY_changed_after_park_is_NOT_stale( test_api_key, persona ):
+def test_a_row_whose_PRIORITY_changed_after_park_is_NOT_stale( test_api_key, persona, seeded_task_rows ):
     """
     BUG 54924128, LIVE — the arm this suite did not have, and the reason it shipped.
 
@@ -429,7 +422,7 @@ def test_a_row_whose_PRIORITY_changed_after_park_is_NOT_stale( test_api_key, per
     cannot be bought by the PATCH silently unparking or rewriting anything.
     """
     api_key = test_api_key[ "api_key" ]
-    row     = _create_row( api_key, persona )
+    row     = _create_row( seeded_task_rows, persona )
 
     _park( api_key, row[ "id" ], "not right now — revisit when something forces it" )
     assert _get_row( api_key, row[ "id" ] )[ "park_reason_stale" ] is False
@@ -449,7 +442,7 @@ def test_a_row_whose_PRIORITY_changed_after_park_is_NOT_stale( test_api_key, per
     )
 
 
-def test_staleness_is_visible_in_the_terse_projection( test_api_key, persona ):
+def test_staleness_is_visible_in_the_terse_projection( test_api_key, persona, seeded_task_rows ):
     """
     §3.3: the terse projection carries `park_reason_stale`.
 
@@ -458,7 +451,7 @@ def test_staleness_is_visible_in_the_terse_projection( test_api_key, persona ):
     a nicety.
     """
     api_key = test_api_key[ "api_key" ]
-    row     = _create_row( api_key, persona )
+    row     = _create_row( seeded_task_rows, persona )
 
     _park( api_key, row[ "id" ], "quote to be invalidated" )
     _amend( api_key, row[ "id" ], body="invalidated" )
@@ -507,7 +500,7 @@ def test_staleness_is_visible_in_the_terse_projection( test_api_key, persona ):
 # AC7 — live: staleness is ADVISORY
 # ===========================================================================
 
-def test_a_stale_park_still_suppresses_exactly_like_a_fresh_one( test_api_key, persona, store_settings ):
+def test_a_stale_park_still_suppresses_exactly_like_a_fresh_one( test_api_key, persona, store_settings, seeded_task_rows ):
     """
     AC7 on the LIVE owed path: staleness changes NOTHING about owed-ness.
 
@@ -521,8 +514,8 @@ def test_a_stale_park_still_suppresses_exactly_like_a_fresh_one( test_api_key, p
     """
     api_key = test_api_key[ "api_key" ]
 
-    fresh_row = _create_row( api_key, persona, title="fresh park" )
-    stale_row = _create_row( api_key, persona, title="stale park" )
+    fresh_row = _create_row( seeded_task_rows, persona, title="fresh park" )
+    stale_row = _create_row( seeded_task_rows, persona, title="stale park" )
 
     baseline = _owed_count( store_settings, api_key, persona )
     assert baseline == 2, f"expected both new rows owed, got {baseline}"
