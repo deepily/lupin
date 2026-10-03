@@ -90,7 +90,7 @@ test( "model: a key shared across two filers makes one plan under each, never on
 test( "model: one row per filer under a shared key is NOT a plan, even though the key is held twice overall", () => {
   const groups = groupHeldRowsByFiler( ROWS() );
   assert.deepEqual( groups.find( ( g ) => g.filer === "Sam" )!.ungrouped.map( ( t ) => t.id ), [ "ts1" ] );
-  assert.ok( ! groups.find( ( g ) => g.filer === "Sam" )!.plans.some( ( p ) => p.key === "epic:plan-t" ) );
+  assert.ok( ! groups.find( ( g ) => g.filer === "Sam" )!.plans.some( ( p ) => p.key === "epic:plan-t" ), "expected: ! groups.find( ( g ) => g.filer === 'Sam' )!.plans.some( ( p ) => p.key === 'epic:plan-t' )" );
 } );
 
 test( "model: epic:unassigned and a blank key are never a plan, beside a real key that is", () => {
@@ -155,11 +155,11 @@ test( "template: the label reads 'Plan: <title>', the raw key is only a tooltip,
 test( "template: collapsed by default, open when asked, with chevron and aria-expanded in agreement", () => {
   const g = groupHeldRowsByFiler( [ held( "m1", "k" ), held( "m2", "k" ) ] )[ 0 ]!;
   const shut = renderHoldingPlanGroup( g.filer, g.plans[ 0 ]!, undefined, [], false );
-  assert.ok( shut.classList.contains( "collapsed" ) );
+  assert.ok( shut.classList.contains( "collapsed" ), "expected: shut.classList.contains( 'collapsed' )" );
   assert.equal( shut.querySelector( ".holding-plan-header" )!.getAttribute( "aria-expanded" ), "false" );
   assert.equal( shut.querySelector( ".holding-plan-chevron" )!.textContent, "▶" );
   const open = renderHoldingPlanGroup( g.filer, g.plans[ 0 ]!, undefined, [], true );
-  assert.ok( ! open.classList.contains( "collapsed" ) );
+  assert.ok( ! open.classList.contains( "collapsed" ), "expected: ! open.classList.contains( 'collapsed' )" );
   assert.equal( open.querySelector( ".holding-plan-header" )!.getAttribute( "aria-expanded" ), "true" );
   assert.equal( open.querySelector( ".holding-plan-chevron" )!.textContent, "▼" );
 });
@@ -199,7 +199,7 @@ test( "template: plans sit INSIDE their filer's group, before its ungrouped rows
 
 test( "template: nothing sits above the filer groups — no stories strip, no plan header outside a filer", () => {
   const frag = renderHoldingAreaGroups( groupHeldRowsByFiler( ROWS() ), undefined, [] );
-  assert.ok( Array.from( frag.children ).every( ( c ) => c.classList.contains( "holding-area-group" ) ) );
+  assert.ok( Array.from( frag.children ).every( ( c ) => c.classList.contains( "holding-area-group" ) ), "expected: Array.from( frag.children ).every( ( c ) => c.classList.contains( 'holding-area-group' ) )" );
   assert.ok( frag.querySelector( ".holding-area-stories" ) === null, "a stories strip was painted" );
 } );
 
@@ -315,7 +315,7 @@ test( "pane: nothing sits above the filer groups, and no operator-visible text s
 
 test( "toggle: plans start collapsed; a click on the header opens ONLY that plan, and a second click closes it", () => {
   const h = mount( () => ( { ok: true } ) );
-  assert.ok( h.group( ...RA ).classList.contains( "collapsed" ) );
+  assert.ok( h.group( ...RA ).classList.contains( "collapsed" ), "expected: h.group( ...RA ).classList.contains( 'collapsed' )" );
   const header = h.group( ...RA ).querySelector( ".holding-plan-header" ) as HTMLElement;
   click( header );
   assert.equal( h.group( ...RA ).classList.contains( "collapsed" ), false );
@@ -326,7 +326,7 @@ test( "toggle: plans start collapsed; a click on the header opens ONLY that plan
   const filerGroup = h.group( ...RA ).closest( ".holding-area-group" ) as HTMLElement;
   assert.ok( filerGroup.classList.contains( "collapsed" ), "opening a plan opened its filer" );
   click( header );
-  assert.ok( h.group( ...RA ).classList.contains( "collapsed" ) );
+  assert.ok( h.group( ...RA ).classList.contains( "collapsed" ), "expected: h.group( ...RA ).classList.contains( 'collapsed' )" );
   assert.equal( header.getAttribute( "aria-expanded" ), "false" );
   assert.equal( header.querySelector( ".holding-plan-chevron" )!.textContent, "▶" );
   h.unmount();
@@ -350,7 +350,7 @@ test( "toggle: an open plan survives the 60s repaint, and its open state is forg
   click( h.group( ...RC ).querySelector( ".holding-plan-header" ) as HTMLElement );
   await h.poll();
   assert.equal( h.group( ...RC ).classList.contains( "collapsed" ), false, "the repaint snapped an open plan shut" );
-  assert.ok( h.group( ...RA ).classList.contains( "collapsed" ) );
+  assert.ok( h.group( ...RA ).classList.contains( "collapsed" ), "expected: h.group( ...RA ).classList.contains( 'collapsed' )" );
 
   h.dropRows( "epic:plan-c" );
   await h.poll();

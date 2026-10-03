@@ -180,7 +180,7 @@ test( "grouping: a key shared across two filers makes one plan under each, never
 test( "grouping: one row per filer under a shared key is NOT a plan, even though the key is held twice overall", () => {
   const sam = newUI()._groupHeldRowsByFiler( ROWS() ).find( ( g ) => g.filer === "Sam" )!;
   assert.deepEqual( ids( sam.ungrouped ), [ "ts1" ] );
-  assert.ok( ! sam.plans.some( ( p ) => p.key === "epic:plan-t" ) );
+  assert.ok( ! sam.plans.some( ( p ) => p.key === "epic:plan-t" ), "expected: ! sam.plans.some( ( p ) => p.key === 'epic:plan-t' )" );
 } );
 
 test( "grouping: epic:unassigned and a blank key are never a plan, beside a real key that is", () => {
@@ -246,17 +246,17 @@ test( "markup: collapsed by default, open when asked, chevron and aria-expanded 
   const ui = newUI();
   const shut = document.createElement( "div" );
   shut.innerHTML = ui._renderHoldingAreaGroup( "Rachel", ROWS(), ui._groupHeldRowsByFiler( ROWS() )[ 0 ]!.plans, [] );
-  assert.ok( shut.querySelector( ".holding-plan-group" )!.classList.contains( "collapsed" ) );
+  assert.ok( shut.querySelector( ".holding-plan-group" )!.classList.contains( "collapsed" ), "expected: shut.querySelector( '.holding-plan-group' )!.classList.contains( 'collapsed' )" );
   assert.equal( shut.querySelector( ".holding-plan-header" )!.getAttribute( "aria-expanded" ), "false" );
   assert.equal( shut.querySelector( ".holding-plan-chevron" )!.textContent, "▶" );
   ui._holdingAreaExpandedPlans = new Set( [ ui._holdingPlanId( "Rachel", "epic:plan-a" ) ] );
   const open = document.createElement( "div" );
   open.innerHTML = ui._renderHoldingAreaGroup( "Rachel", ROWS(), ui._groupHeldRowsByFiler( ROWS() )[ 0 ]!.plans, [] );
   const a = open.querySelector( ".holding-plan-group[data-plan='epic:plan-a']" ) as HTMLElement;
-  assert.ok( ! a.classList.contains( "collapsed" ) );
+  assert.ok( ! a.classList.contains( "collapsed" ), "expected: ! a.classList.contains( 'collapsed' )" );
   assert.equal( a.querySelector( ".holding-plan-header" )!.getAttribute( "aria-expanded" ), "true" );
   assert.equal( a.querySelector( ".holding-plan-chevron" )!.textContent, "▼" );
-  assert.ok( open.querySelector( ".holding-plan-group[data-plan='epic:plan-c']" )!.classList.contains( "collapsed" ) );
+  assert.ok( open.querySelector( ".holding-plan-group[data-plan='epic:plan-c']" )!.classList.contains( "collapsed" ), "expected: open.querySelector( '.holding-plan-group[data-plan='epic:plan-c']' )!.classList.contains( 'collapsed" );
 } );
 
 test( "markup: a group with no plan arguments paints every row in its own table; one with all rows planned paints none", () => {
@@ -296,7 +296,7 @@ test( "pane: nothing sits above the filer groups", () => {
 
 test( "toggle: plans start collapsed; a click on the header opens ONLY that plan, a second closes it", () => {
   const h = mount( () => ( { ok: true } ) );
-  assert.ok( h.group( ...RA ).classList.contains( "collapsed" ) );
+  assert.ok( h.group( ...RA ).classList.contains( "collapsed" ), "expected: h.group( ...RA ).classList.contains( 'collapsed' )" );
   const header = h.group( ...RA ).querySelector( ".holding-plan-header" ) as HTMLElement;
   click( header );
   assert.equal( h.group( ...RA ).classList.contains( "collapsed" ), false );
@@ -306,7 +306,7 @@ test( "toggle: plans start collapsed; a click on the header opens ONLY that plan
   assert.ok( h.group( ...SS ).classList.contains( "collapsed" ), "opening Rachel's plan opened Sam's plan of the same key" );
   assert.ok( ( h.group( ...RA ).closest( ".holding-area-group" ) as HTMLElement ).classList.contains( "collapsed" ), "opening a plan opened its filer" );
   click( header );
-  assert.ok( h.group( ...RA ).classList.contains( "collapsed" ) );
+  assert.ok( h.group( ...RA ).classList.contains( "collapsed" ), "expected: h.group( ...RA ).classList.contains( 'collapsed' )" );
   assert.equal( header.getAttribute( "aria-expanded" ), "false" );
   assert.equal( header.querySelector( ".holding-plan-chevron" )!.textContent, "▶" );
 } );
@@ -328,7 +328,7 @@ test( "toggle: a plan opened before the controls were wired still toggles — th
   delete h.ui._holdingAreaExpandedPlans;
   click( h.group( ...RC ).querySelector( ".holding-plan-header" ) as HTMLElement );
   assert.equal( h.group( ...RC ).classList.contains( "collapsed" ), false );
-  assert.ok( ( h.ui._holdingAreaExpandedPlans as Set<string> ).has( h.ui._holdingPlanId( ...RC ) ) );
+  assert.ok( ( h.ui._holdingAreaExpandedPlans as Set<string> ).has( h.ui._holdingPlanId( ...RC ) ), "expected: ( h.ui._holdingAreaExpandedPlans as Set<string> ).has( h.ui._holdingPlanId( ...RC ) )" );
 } );
 
 test( "toggle: an open plan survives the repaint, and its open state is forgotten when the plan is gone", () => {
@@ -336,7 +336,7 @@ test( "toggle: an open plan survives the repaint, and its open state is forgotte
   click( h.group( ...RC ).querySelector( ".holding-plan-header" ) as HTMLElement );
   h.repaint();
   assert.equal( h.group( ...RC ).classList.contains( "collapsed" ), false, "the repaint snapped an open plan shut" );
-  assert.ok( h.group( ...RA ).classList.contains( "collapsed" ) );
+  assert.ok( h.group( ...RA ).classList.contains( "collapsed" ), "expected: h.group( ...RA ).classList.contains( 'collapsed' )" );
   h.dropRows( "epic:plan-c" );
   h.repaint();
   h.restoreRows( "epic:plan-c" );
@@ -414,7 +414,7 @@ test( "a retry of the refused row clears the report once it succeeds", async () 
   refuse = false;
   press( h.button( ...RA ) );
   await settle();
-  assert.ok( ! h.plans().includes( "Rachel/epic:plan-a" ) );
+  assert.ok( ! h.plans().includes( "Rachel/epic:plan-a" ), "expected: ! h.plans().includes( 'Rachel/epic:plan-a' )" );
   h.repaint();
   assert.ok( ! h.plans().includes( "Rachel/epic:plan-a" ), "a stale report resurrected the plan on the next repaint" );
 } );
@@ -500,7 +500,7 @@ test( "arm: the FIRST press posts nothing, names the count on the button and say
   assert.equal( h.calls.length, 0, "the first press posted a transition" );
   assert.equal( btn.textContent, "Confirm approve all 3" );
   assert.equal( btn.dataset.armed, "1" );
-  assert.ok( btn.classList.contains( "task-submit-armed" ) );
+  assert.ok( btn.classList.contains( "task-submit-armed" ), "expected: btn.classList.contains( 'task-submit-armed' )" );
   assert.equal( h.status( ...RA ), "Click again to approve 3 rows in this plan." );
 } );
 
