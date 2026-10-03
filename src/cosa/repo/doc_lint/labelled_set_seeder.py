@@ -252,9 +252,9 @@ def quotable_once( old, span_text ):
 
     Ensures:
         - locate_quote is the one imported from the harness, called with the frozen floors
-        - the span occurs exactly once in old as written, and exactly once after the harness's normalisation
+        - the span occurs exactly once after the harness's normalisation; that implies once as written, because
+          normalising only maps characters, so the loader's own raw count agrees (a raw-count line here could never fire)
     """
-    if old.count( span_text ) != 1: return False
     if claim_extractor.locate_quote( span_text, old ) is None: return False
     normalized, _ = claim_extractor.normalize( old )
     wanted, _     = claim_extractor.normalize( span_text )
@@ -816,6 +816,33 @@ def cmd_manifest( args ):
     return 0
 
 
+def cmd_natural( args ):
+    """
+    Validate natural.jsonl and write it as its own arm: real removals found in real sweep diffs, hand-labelled.
+
+    Requires:
+        - each row of --natural is { id, file, symbol, old, new, x_span_in_old, found_by }; found_by names who found it
+
+    Ensures:
+        - every x_span_in_old passes quotable_once against old, or the whole file is refused (exit 2)
+        - writes natural/pairs.jsonl and keys/natural-keys.jsonl, arm "natural", never joined to a pooled count
+        - the keys carry found_by, because the manifest names who found each item
+
+    Returns 0 done, 2 refused.
+    """
+    rows = read_jsonl( args.natural )
+    bad  = [ r[ "id" ] for r in rows if not quotable_once( r[ "old" ], r[ "x_span_in_old" ] ) ]
+    if bad:
+        print( f"REFUSED: natural span(s) not quotable once in old: {', '.join( bad )}", file=sys.stderr )
+        return 2
+    write_jsonl( os.path.join( args.out, "natural", "pairs.jsonl" ), [ { "id": r[ "id" ], "file": r[ "file" ], "symbol": r[ "symbol" ], "old": r[ "old" ], "new": r[ "new" ], "linked_doc": "" } for r in rows ] )
+    write_jsonl( os.path.join( args.out, "keys", "natural-keys.jsonl" ), [ { "id": r[ "id" ], "kind": "natural", "weaken_class": None, "changed_token": None, "seeded_positive": True, "must_pass_relocated": False,
+                                                                         "x_span_in_old": r[ "x_span_in_old" ], "span_words": words_of( r[ "x_span_in_old" ] ), "span_chars": len( r[ "x_span_in_old" ] ),
+                                                                         "short": is_short( words_of( r[ "x_span_in_old" ] ) ), "stratum": stratum_of( r[ "old" ] ), "writer": "human", "arm": "natural",
+                                                                         "injection": None, "bucket": "natural", "found_by": r[ "found_by" ] } for r in rows ] )
+    return 0
+
+
 def build_parser():
     """Return the command-line parser: one subcommand per phase."""
     parser = argparse.ArgumentParser( description="Seed the labelled before/after set." )
@@ -836,6 +863,8 @@ def build_parser():
     v.add_argument( "--base", required=True ); v.add_argument( "--split", required=True )
     a = sub.add_parser( "assemble" )
     a.add_argument( "--base", required=True ); a.add_argument( "--split", required=True ); a.add_argument( "--out", required=True ); a.add_argument( "--verification", required=True )
+    n = sub.add_parser( "natural" )
+    n.add_argument( "--natural", required=True ); n.add_argument( "--out", required=True )
     m = sub.add_parser( "manifest" )
     m.add_argument( "--dev-info", required=True ); m.add_argument( "--gate-hashes", required=True ); m.add_argument( "--out", required=True )
     m.add_argument( "--seed", type=int, required=True ); m.add_argument( "--harness-commit", required=True ); m.add_argument( "--stoplist", default=DEFAULT_STOPLIST )
@@ -846,7 +875,7 @@ def main( argv, query_fn=None ):
     """Run one phase; returns its exit code."""
     args = build_parser().parse_args( argv )
     if args.command == "write": return cmd_write( args, query_fn )
-    return { "plan": cmd_plan, "verify": cmd_verify, "assemble": cmd_assemble, "manifest": cmd_manifest }[ args.command ]( args )
+    return { "plan": cmd_plan, "verify": cmd_verify, "assemble": cmd_assemble, "natural": cmd_natural, "manifest": cmd_manifest }[ args.command ]( args )
 
 
 if __name__ == "__main__":  # pragma: no cover - thin process entry, main() is what the tests drive

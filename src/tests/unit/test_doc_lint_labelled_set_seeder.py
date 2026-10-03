@@ -785,3 +785,20 @@ def test_a_one_word_span_is_refused_even_if_the_harness_floors_were_lowered( mon
     start = old.index( "parked" )
     assert s.quotable_once( old, "parked" )                      # the harness would now accept it
     assert not s.span_ok( old, ( start, start + 6 ), SL )         # the script still refuses a 1-word span
+
+
+def test_natural_arm_is_written_on_its_own_with_who_found_each_item( tmp_path ):
+    old = "Returns the count when parked. It is exact."
+    s.write_jsonl( str( tmp_path / "nat.jsonl" ), [ { "id": "n0", "file": "pkg/a.py", "symbol": "f", "old": old, "new": "Returns the count.", "x_span_in_old": "when parked", "found_by": "tiberius" } ] )
+    assert s.main( [ "natural", "--natural", str( tmp_path / "nat.jsonl" ), "--out", str( tmp_path / "o" ) ] ) == 0
+    pairs, keys = str( tmp_path / "o" / "natural" / "pairs.jsonl" ), str( tmp_path / "o" / "keys" / "natural-keys.jsonl" )
+    loaded = labelled_pairs.load_pairs( pairs, keys )
+    assert loaded[ 0 ][ "seed_span" ] == ( old.index( "when parked" ), old.index( "when parked" ) + 11 )
+    key = s.read_jsonl( keys )[ 0 ]
+    assert ( key[ "arm" ], key[ "found_by" ], key[ "short" ], key[ "writer" ] ) == ( "natural", "tiberius", True, "human" )
+
+
+def test_natural_arm_refuses_a_span_that_cannot_be_quoted_once( tmp_path, capsys ):
+    s.write_jsonl( str( tmp_path / "nat.jsonl" ), [ { "id": "n0", "file": "f", "symbol": "s", "old": "Keeps a b. Keeps a b.", "new": "x", "x_span_in_old": "Keeps a b.", "found_by": "t" } ] )
+    assert s.main( [ "natural", "--natural", str( tmp_path / "nat.jsonl" ), "--out", str( tmp_path / "o" ) ] ) == 2
+    assert "n0" in capsys.readouterr().err and not ( tmp_path / "o" ).exists()
