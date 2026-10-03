@@ -520,7 +520,6 @@ def build_split_plan( name, picks, seed ):
     """
     rng   = random.Random( f"{seed}|{name}|shuffle" )
     items = [ ( kind, d, c ) for kind in KINDS for d, c in picks[ kind ] ]
-    items.sort( key=lambda t: ( t[ 1 ][ "pool_id" ], t[ 0 ] ) )
     rng.shuffle( items )
     pairs, tasks, task_rows = [], {}, []
 

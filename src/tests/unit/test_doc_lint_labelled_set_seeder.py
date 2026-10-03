@@ -774,3 +774,14 @@ def test_run_writer_skips_a_task_the_ledger_already_holds( tmp_path ):
     w = Writer()
     got = asyncio.run( s.run_writer( [ { "task_id": "t1", "instruction": "i", "text": "a" }, { "task_id": "t2", "instruction": "i", "text": "b" } ], FABLE, ledger, outs, w ) )
     assert got == { "called": 1, "dropped": [] } and len( w.seen ) == 1 and "b" in w.seen[ 0 ][ 1 ]
+
+
+def test_a_one_word_span_is_refused_even_if_the_harness_floors_were_lowered( monkeypatch ):
+    old = "Returns the count when parked now."
+    monkeypatch.setattr( claim_extractor, "MIN_QUOTE_WORDS", 1 )
+    monkeypatch.setattr( claim_extractor, "MIN_QUOTE_CHARS", 1 )
+    monkeypatch.setattr( claim_extractor, "LONG_MIN_QUOTE_WORDS", 1 )
+    monkeypatch.setattr( claim_extractor, "LONG_MIN_QUOTE_CHARS", 1 )
+    start = old.index( "parked" )
+    assert s.quotable_once( old, "parked" )                      # the harness would now accept it
+    assert not s.span_ok( old, ( start, start + 6 ), SL )         # the script still refuses a 1-word span
