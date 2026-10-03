@@ -17,7 +17,7 @@
 1. **MUST use the following project-specific configuration**:
    - **[SHORT_PROJECT_PREFIX]**: [LUPIN]
    - **Canonical workflow**: planning-is-prompting → workflow/post-game.md
-   - **Output location**: `src/rnd/yyyy.mm.dd-<slug>-post-game.md` (full retro) or one line in `history.md` (lightweight)
+   - **Output location**: `src/docs/post-games/<version>/yyyy.mm.dd-<slug>-post-game.md` (full retro; `<version>` is the work branch's version) or one line in `history.md` (lightweight). A full retro carries `manager:` frontmatter and is registered in `src/docs/post-games/README.md`. Canonical: planning-is-prompting → workflow/post-game.md §5.6
    - Do NOT proceed without these parameters
 
 2. **MUST read the canonical workflow document**:
