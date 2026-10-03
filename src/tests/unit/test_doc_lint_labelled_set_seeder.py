@@ -1227,3 +1227,59 @@ def test_the_hold_also_lowers_the_cap_the_transport_enforces_while_the_run_goes(
     assert s.main( write_args( base, shared, cap=f"{FABLE}={2 * count + 10}", hold="10" ), query_fn=w ) == 3
     assert "STOPPED" in capsys.readouterr().err
     assert 2 * count <= mt.calls_used( FABLE, str( shared ) ) <= 2 * count + 2        # stopped at cap less hold, not at the cap
+
+
+# ---- review 1 of row 8a2de64c: the reserve and the gate are written by one model under one prompt --------
+
+OTHER_WRITER = "claude-fable-5-2"
+
+
+def write_split( gate_root, shared, split, **over ):
+    """Write one gate-root split with the fake; returns the exit code."""
+    return s.main( write_args( gate_root, shared, split=split, **over ), query_fn=Writer() )
+
+
+def test_fa_a_reserve_write_by_another_model_than_the_gate_is_refused_naming_the_model_before_any_call( planned, capsys ):
+    tmp_path, shared = planned
+    gate_root, w = tmp_path / "gate-store", Writer()
+    assert write_split( gate_root, shared, "gate" ) == 0
+    capsys.readouterr()
+    used = mt.calls_used( FABLE, str( shared ) )
+    assert s.main( write_args( gate_root, shared, split="gate-reserve", writer=OTHER_WRITER, cap=f"{OTHER_WRITER}=500" ), query_fn=w ) == 2
+    err = capsys.readouterr().err
+    assert "split gate was written differently from this gate-reserve write" in err and FABLE in err and OTHER_WRITER in err and w.seen == []
+    assert mt.calls_used( OTHER_WRITER, str( shared ) ) == 0 and mt.calls_used( FABLE, str( shared ) ) == used
+
+
+def test_fa_a_reserve_write_under_another_prompt_than_the_gate_is_refused_naming_the_prompt( planned, capsys ):
+    tmp_path, shared = planned
+    gate_root, w = tmp_path / "gate-store", Writer()
+    assert write_split( gate_root, shared, "gate" ) == 0
+    ledger = gate_root / "gate" / "writer_ledger.jsonl"
+    rows   = s.read_jsonl( str( ledger ) )
+    rows[ 0 ][ "prompt_hash" ] = "an-older-prompt"
+    s.write_jsonl( str( ledger ), rows )
+    capsys.readouterr()
+    assert s.main( write_args( gate_root, shared, split="gate-reserve" ), query_fn=w ) == 2
+    assert "prompt hash" in capsys.readouterr().err and w.seen == []
+
+
+def test_fa_a_gate_write_is_refused_the_same_way_when_the_reserve_was_written_by_another_model( planned, capsys ):
+    tmp_path, shared = planned
+    gate_root, w = tmp_path / "gate-store", Writer()
+    assert s.main( write_args( gate_root, shared, split="gate-reserve", writer=OTHER_WRITER, cap=f"{OTHER_WRITER}=500" ), query_fn=Writer() ) == 0
+    capsys.readouterr()
+    assert s.main( write_args( gate_root, shared, split="gate" ), query_fn=w ) == 2
+    assert "split gate-reserve was written differently from this gate write" in capsys.readouterr().err and w.seen == []
+
+
+def test_fa_the_same_model_and_prompt_may_write_the_reserve_after_the_gate_and_a_split_with_no_ledger_is_no_obstacle( planned ):
+    tmp_path, shared = planned
+    gate_root = tmp_path / "gate-store"
+    assert write_split( gate_root, shared, "gate" ) == 0
+    assert write_split( gate_root, shared, "gate-reserve" ) == 0
+    assert ( gate_root / "gate-reserve" / "writer_ledger.jsonl" ).exists()
+
+
+def test_fc_the_manifest_docstring_no_longer_says_no_reserve_writer_call_is_made( ):
+    assert "no reserve writer call is made" not in s.cmd_manifest.__doc__

@@ -608,6 +608,10 @@ def check_reserve_plan_hash( base, plan ):
         - base is the gate output root, where plan wrote plan-hashes.json next to the split folders
         - plan is the loaded reserve plan
 
+    Limit: plan-hashes.json is written by the same plan run and sits beside the plan, so this catches an edit of plan.json that
+    left plan-hashes.json alone, not an edit of both. The independent witness is reserve_plan_sha256 in the repo's MANIFEST.json,
+    which the manifest phase writes after the writer phase, so it does not exist yet when a reserve write runs.
+
     Raises:
         - ValueError when plan-hashes.json is missing, unreadable, lacks reserve_plan_sha256, or holds a hash that is not the plan's hash now
     """
@@ -615,6 +619,26 @@ def check_reserve_plan_hash( base, plan ):
     if not os.path.exists( path ): raise ValueError( f"{path} is missing: the reserve plan cannot be checked against the hash taken when it was drawn" )
     recorded = json.loads( open( path, encoding="utf-8" ).read() ).get( "reserve_plan_sha256" )
     if recorded != plan_hash( plan ): raise ValueError( f"reserve plan does not match reserve_plan_sha256 in {path}" )
+
+
+def check_sibling_ledgers( base, split, model ):
+    """
+    Refuse a write whose writer model or prompt differs from what the other splits under the same base were written with.
+
+    Each split has its own writer ledger and the identity check inside one ledger cannot see another, so a different model id
+    would otherwise get a fresh cap and a different prompt would change what the reserve measures against the gate.
+
+    Requires:
+        - base is the folder holding the split folders; model is the writer model of this write
+
+    Raises:
+        - ValueError naming the other split and whether its model id or its prompt hash differs
+    """
+    for other in WRITER_SPLITS:
+        path = os.path.join( base, other, "writer_ledger.jsonl" )
+        if other == split or not os.path.exists( path ): continue
+        try: check_ledger_identity( read_jsonl( path ), model )
+        except ValueError as e: raise ValueError( f"split {other} was written differently from this {split} write: {e}" ) from e
 
 
 def check_ledger_identity( rows, model=None ):
@@ -777,7 +801,9 @@ def cmd_write( args, query_fn=None ):
     Returns the exit code: 0 done, 2 refused, 3 a call cap stopped the run, 4 the first (canary) call failed,
     5 --max-consecutive-failures tasks in a row failed twice, 6 the run finished but dropped at least one task.
 
-    The split may be dev, gate or gate-reserve. A reserve write first compares the reserve plan with
+    The split may be dev, gate or gate-reserve. Any write is refused when another split's writer ledger under --base shows a
+    different writer model id or prompt hash, so the gate and the reserve are written by one model under one prompt and one cap.
+    A reserve write first compares the reserve plan with
     reserve_plan_sha256 in plan-hashes.json in --base (the gate output root) and refuses on a mismatch.
     --call-hold is required: the writer model's cap is lowered by that many calls before the budget is set, so no
     call can pass cap minus hold, and the run is refused up front when the calls already spent on the ledger plus
@@ -812,6 +838,7 @@ def cmd_write( args, query_fn=None ):
         plan = json.loads( open( os.path.join( base, "plan.json" ), encoding="utf-8" ).read() )
         check_plan_hash( plan )
         if args.split == "gate-reserve": check_reserve_plan_hash( args.base, plan )
+        check_sibling_ledgers( args.base, args.split, args.writer_model )
     except ValueError as e:
         print( f"REFUSED: {e}", file=sys.stderr )
         return 2
@@ -969,7 +996,7 @@ def cmd_manifest( args ):
     Write the dev-visible root MANIFEST.json.
 
     The gate-hashes file holds gate_pairs_sha256, gate_keys_sha256 and reserve_plan_sha256 (written by plan into the gate
-    store as plan-hashes.json); the reserve pairs and keys hashes are optional, since no reserve writer call is made.
+    store as plan-hashes.json); the reserve pairs and keys hashes are optional.
 
     Holds: the dev files and shas, the dev seed, the writer id, prompt hash, floors, dev counts, the gate and
     reserve pairs/keys sha256 values, the harness commit, the stoplist sha.
