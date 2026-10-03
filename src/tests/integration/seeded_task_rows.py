@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from sqlalchemy.engine import make_url
 
 from cosa.rest.postgres_models import TaskEvent, TaskItem
+from lupin_mcp.persona_normalization import canonical_persona_key
 
 TEST_DB_NAME = "lupin_db_test"
 
@@ -65,17 +66,21 @@ class SeededRows:
 
         Ensures:
             - the row exists with the given status, priority P5, epic key "epic:unassigned"
+            - owner_persona and accountable_manager are stored as `canonical_persona_key( persona )`,
+              the key the create door stores and the owed query reads by; a raw "ac6-1f" would
+              never match the server's "ac6 1f" and the row would read as not owed
             - returns { "id", "status", "updated_ts" } as strings, the fields the tests read
               from a create response
         """
         refuse_unless_test_db( self.db_url )
+        owner_key = canonical_persona_key( persona )
         with self.session_factory() as session:
             item = TaskItem(
                 item_class          = "task",
                 title               = title,
                 project             = "lupin",
-                owner_persona       = persona,
-                accountable_manager = persona,
+                owner_persona       = owner_key,
+                accountable_manager = owner_key,
                 created_by          = created_by,
                 status              = status,
                 priority            = "P5",

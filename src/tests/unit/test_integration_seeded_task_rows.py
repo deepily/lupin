@@ -131,13 +131,29 @@ def test_create_inserts_one_queued_p5_row_and_its_creation_event( factory, sessi
     assert isinstance( item, TaskItem ) and isinstance( event, TaskEvent )
     assert ( item.item_class, item.title, item.project, item.status, item.priority ) == \
            ( "task", "a title", "lupin", "queued", "P5" )
+    # The owner is stored under the canonical key ("ac6 abc"), pinned as a literal: the owed
+    # query reads by that key, and a raw "ac6-abc" made 9 live park tests read 0 owed rows
+    # (:8000 job ts-11c25f8a, 2026-10-03). created_by is an audit string and stays as given.
     assert ( item.owner_persona, item.accountable_manager, item.created_by ) == \
-           ( "ac6-abc", "ac6-abc", "rachel ac6" )
+           ( "ac6 abc", "ac6 abc", "rachel ac6" )
     assert item.correlation_key == "epic:unassigned"
     assert ( event.item_id, event.actor, event.transition, event.authority ) == \
            ( item.id, "rachel ac6", "->queued", "standing" )
     assert row == { "id": str( item.id ), "status": "queued", "updated_ts": "2026-10-02T12:00:00+00:00" }
     assert rows.ids == [ row[ "id" ] ]
+
+
+@pytest.mark.parametrize( "given, stored", [
+    ( "ac3-0123abcd", "ac3 0123abcd" ),
+    ( "María",        "maria" ),
+    ( "Mr. Radio",    "mr radio" ),
+    ( "plain",        "plain" ),
+] )
+def test_create_stores_the_owner_under_the_key_the_owed_query_reads_by( given, stored, factory, session_log ):
+    SeededRows( TEST_URL, factory ).create( given, "a title" )
+
+    item = session_log[ 0 ].added[ 0 ]
+    assert ( item.owner_persona, item.accountable_manager ) == ( stored, stored )
 
 
 def test_create_honours_a_status_and_the_default_creator( factory, session_log ):
