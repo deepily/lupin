@@ -1,7 +1,6 @@
 # Lupin development guide
 
-> Rules only. Where a rule came from — the measurements, the reconciliations, the corrections —
-> is archived in `src/docs/doctrine/` and is not required reading.
+> Rules only. Measurements and rulings behind a rule live in `src/docs/doctrine/`; they are not required reading.
 
 ## Commands
 - Run FastAPI server: `src/scripts/run-fastapi-lupin.sh` (Runs on port 7999)
@@ -32,17 +31,17 @@ CJ Flow is Lupin's unified work queue system. All jobs that implement the `Queue
 **Queue Pipeline**: todo → running → done/dead
 **Protocol**: `QueueableJob` (22 attrs + 4 methods) — see `src/cosa/rest/queue_protocol.py`
 
-**Dispatch architecture (v0.1.7+)**: `RunningFifoQueue._process_job(job)` dispatches by `isinstance`:
-- `AgenticJobBase` → `_submit_agentic_job` → `ThreadPoolExecutor` (the **agentic pool**, size = `cj flow max concurrent agentic jobs` INI key: `[Lupin: Production]` and `[Lupin: Development]` set `= 3`, only `[Lupin: Baseline]` sets `= 1`, `[Lupin: Testing]` does not set it — read 2026-09-11 at `1e0028dd`; re-read the INI before relying on it). Consumer thread returns immediately; `Future.add_done_callback` fires `_on_agentic_complete` which calls `_transition_to_done` or `_transition_to_dead`.
-- `AgentBase` / `SolutionSnapshot` → inline fast-lane on the consumer thread (unchanged). Pool does NOT block fast-lane.
+**Dispatch architecture**: `RunningFifoQueue._process_job(job)` dispatches by `isinstance`:
+- `AgenticJobBase` → `_submit_agentic_job` → `ThreadPoolExecutor` (the **agentic pool**, size = `cj flow max concurrent agentic jobs` INI key: `[Lupin: Production]` and `[Lupin: Development]` set `= 3`, only `[Lupin: Baseline]` sets `= 1`, `[Lupin: Testing]` does not set it; re-read the INI before relying on it). Consumer thread returns immediately; `Future.add_done_callback` fires `_on_agentic_complete` which calls `_transition_to_done` or `_transition_to_dead`.
+- `AgentBase` / `SolutionSnapshot` → inline fast-lane on the consumer thread. Pool does NOT block fast-lane.
 
-**Thread safety (v0.1.7+)**: `FifoQueue` has `threading.RLock` protecting `queue_list` + `queue_dict`. Pool workers and consumer thread can mutate concurrently. All 9 `self.pop()` sites in `running_fifo_queue.py` migrated to `self.delete_by_id_hash(job.id_hash)` — head-of-queue is no longer deterministic under pool-callback concurrency.
+**Thread safety**: `FifoQueue` has `threading.RLock` protecting `queue_list` + `queue_dict`. Pool workers and consumer thread can mutate concurrently. `running_fifo_queue.py` removes jobs with `self.delete_by_id_hash(job.id_hash)`, never `self.pop()`, because the head of the queue is not deterministic under pool-callback concurrency.
 
-**Ghost-job sweeper (v0.1.7 Phase 3)**: daemon thread on `RunningFifoQueue` runs every `cj flow ghost job sweep interval seconds` (default 30s). Scans `_agentic_futures` for entries whose `Future.done()` is True but whose job is still in running queue — dead-letters them via `_transition_to_dead`. Suspenders to the callback's defensive belt.
+**Ghost-job sweeper**: daemon thread on `RunningFifoQueue` runs every `cj flow ghost job sweep interval seconds` (default 30s). Scans `_agentic_futures` for entries whose `Future.done()` is True but whose job is still in running queue — dead-letters them via `_transition_to_dead`. It backs up the completion callback.
 
-**Rate-limit / API contention (v0.1.7 Phase 3)**: `ApiResourceManager` singleton at `src/cosa/utils/api_resource_manager.py` centralizes per-provider waits + call recording. Deep Research migrated (`await get_arm().acquire("anthropic_web_search")` + `get_arm().record_call(...)`). Podcast/Presentation/BFE/TFE/ClaudeCode stay on legacy per-agent `_call_with_retry` patterns; two-path invariant documented in `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/01-design-review.md §3a`.
+**Rate-limit / API contention**: `ApiResourceManager` singleton at `src/cosa/utils/api_resource_manager.py` centralizes per-provider waits + call recording. Agents call `await get_arm().acquire( ... )` before a call and `get_arm().record_call( ... )` after it. Podcast, Presentation, BFE, TFE and ClaudeCode keep their own per-agent `_call_with_retry` loops; the two-path invariant is in `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/01-design-review.md §3a`.
 
-**Observability (v0.1.7 Phase 3)**: ⚠️ **These fields describe the POOL, not the venue — do not derive idleness from them (row `e6b8fe56`); use `cosa.rest.venue_idle` / `GET /api/busy`, see §TESTING VENUES.** `GET /api/queue/pool-status` (JWT) returns `{inflight_agentic_jobs, max_agentic_workers, pending_in_pool, monopolize_inflight, monopolize_id, api_resource_manager: {...}}`. **Shape-B (bug fe375cf6)**: a monopolize job runs on a DEDICATED single-worker executor (`_monopolize_pool`), NOT the shared pool, so it is EXCLUDED from `inflight_agentic_jobs`/`pending_in_pool` (those keep their exact prior meaning = shared-pool occupancy) and surfaced instead via `monopolize_inflight` (bool) + `monopolize_id` (id or null). At most one monopolizer exists at a time (Gate B defers a 2nd at intake).
+**Observability**: ⚠️ **These fields describe the pool, not the venue — do not derive idleness from them; use `cosa.rest.venue_idle` / `GET /api/busy`, see §TESTING VENUES.** `GET /api/queue/pool-status` (JWT) returns `{inflight_agentic_jobs, max_agentic_workers, pending_in_pool, monopolize_inflight, monopolize_id, api_resource_manager: {...}}`. A monopolize job runs on a DEDICATED single-worker executor (`_monopolize_pool`), NOT the shared pool, so it is EXCLUDED from `inflight_agentic_jobs`/`pending_in_pool` (those two mean shared-pool occupancy only) and surfaced instead via `monopolize_inflight` (bool) + `monopolize_id` (id or null). At most one monopolizer exists at a time (a second one is deferred at intake).
 
 **Job Types Handled**:
 - **AgentBase** — Traditional sync agents (MathAgent, CalendarAgent, DateAndTimeAgent, etc.) — run inline on consumer
@@ -57,9 +56,7 @@ CJ Flow is Lupin's unified work queue system. All jobs that implement the `Queue
 - `src/cosa/rest/todo_fifo_queue.py` — Ingress queue + agent routing
 - `src/cosa/rest/running_fifo_queue.py` — Execution engine + pool + ghost sweeper + transition primitives
 - `src/cosa/rest/queue_consumer.py` — Background consumer thread
-- `src/cosa/utils/api_resource_manager.py` — ApiResourceManager singleton (v0.1.7 Phase 3)
-
-**Architecture diagrams (before vs after v0.1.7)**: `src/rnd/v0.1.5/2026.02.19-approach-c-hybrid-queue-architecture.md` *(REMOVED by `b113a3a7`; recover: `git show b113a3a7^:src/rnd/v0.1.5/2026.02.19-approach-c-hybrid-queue-architecture.md`)* — ✅ Implementation Complete banner with full before/after Mermaid.
+- `src/cosa/utils/api_resource_manager.py` — ApiResourceManager singleton
 
 **Packaging Guide**: `src/rnd/v0.1.4/2026.02.12-cj-flow-bounded-job-packaging-guide.md`
 
@@ -72,7 +69,7 @@ Two LLM-cost paths exist in Lupin. Knowing which one a feature lands on is a des
 | **Bounded `ClaudeCodeJob`** (CJ Flow, `task_type=BOUNDED`) | Claude Code CLI / Claude Agent SDK using Max-subscription OAuth | **Covered by Max 200 plan — zero per-token cost** |
 | **Direct Anthropic SDK** (`AsyncAnthropic( api_key=… )`) | `ANTHROPIC_API_KEY_FIREWALLED` env var | **Billed per token against the firewalled Anthropic account** |
 
-**Empirical confirmation (2026-05-12)**: A 10-job probe reported $2.0514 in SDK `cost_usd` telemetry while the Anthropic console credit balance moved **$0.00**. Forensic record: `src/rnd/v0.1.7/2026.05.12-bounded-cc-billing-empirical-confirmation.md` *(REMOVED by `b113a3a7`; recover: `git show b113a3a7^:src/rnd/v0.1.7/2026.05.12-bounded-cc-billing-empirical-confirmation.md`)*.
+The SDK's `cost_usd` telemetry on a bounded job is a notional figure: the Anthropic console balance does not move for it.
 
 The "firewalled" naming is intentional defense-in-depth: the API key is stored under `ANTHROPIC_API_KEY_FIREWALLED`, **not** the bare `ANTHROPIC_API_KEY` that the Anthropic SDK auto-discovers. The CC CLI ignores the firewalled name and uses OAuth instead. Verbatim per `src/cosa/agents/deep_research/__init__.py:27`: "NEVER use ANTHROPIC_API_KEY - that is reserved for Claude Code CLI."
 
@@ -85,9 +82,9 @@ The bounded CC pattern is the cost-optimal default for LLM-driven agents that:
 3. Tolerate ~1-3s SDK-subprocess spawn overhead per invocation
 4. Use Anthropic-backed models only
 
-Already migrated: **BFE** (`src/cosa/agents/bug_fix_expediter/`), **TFE** (`src/cosa/agents/test_fix_expediter/`), **Podcast script generation** (`src/cosa/agents/podcast_generator/` — Phase 1, 2026-06-18; in-process `sdk_query`, `tools=[]`, D6-lenient parsers), **Presentation content generation** (`src/cosa/agents/presentation_generator/` — Phase 2, 2026-06-18; 7 methods → `sdk_query`, D6-STRICT parsers, Gemini path untouched), **Deep Research** (`src/cosa/agents/deep_research/` — Phase 3, 2026-06-18; lead agent `tools=[]` + research subagents `tools=[WebSearch, WebFetch]` replacing native `web_search_20250305`, ARM web-search gating dropped, D6-STRICT parsers).
+On bounded CC: **BFE** (`src/cosa/agents/bug_fix_expediter/`), **TFE** (`src/cosa/agents/test_fix_expediter/`), **Podcast script generation** (`src/cosa/agents/podcast_generator/`; in-process `sdk_query`, `tools=[]`, lenient parsers), **Presentation content generation** (`src/cosa/agents/presentation_generator/`; seven methods through `sdk_query`, strict parsers, the Gemini path is separate), **Deep Research** (`src/cosa/agents/deep_research/`; lead agent `tools=[]`, research subagents `tools=[WebSearch, WebFetch]`, strict parsers).
 
-Migration candidates (tracked in TODO.md): the three ratified bounded-CC migrations (Podcast → Presentation → Deep Research) are all complete. Remaining opportunities are deferred per D4/D5 (OpenAI call sites, Runtime Argument Expeditor) — not yet ratified for migration.
+Not migrated, by decision: OpenAI call sites and the Runtime Argument Expeditor (see TODO.md).
 
 **Framing**: this is a **cost-shift, not zero-cost**. The Max 200 plan is a fixed monthly bill. Migrations convert per-token metered spend into already-paid fixed cost. Never describe a migration as "free" — describe it as "covered by existing fixed cost."
 
@@ -111,8 +108,7 @@ bounded job — batch generation, scheduled regression sweeps, podcast, presenta
 | **10 AM – 1 PM** | ✅ **optimal — schedule batch work here** |
 | 1 PM – 9 PM | 🟡 acceptable |
 
-Rick ruled 2026-08-31 that the boot window is a real constraint, not a record of his habit. The box also
-goes down mid-day sometimes, so "optimal" means *most likely up*, never *guaranteed up* — a long job must
+The boot window is a hard constraint, not a habit. The box also goes down mid-day sometimes, so "optimal" means *most likely up*, never *guaranteed up* — a long job must
 tolerate a restart.
 
 Re-derive the window rather than trusting the table; use `journalctl --list-boots --no-pager`, not
@@ -158,13 +154,10 @@ A job that lands in the dead window drains late but not silently — `job_persis
   - `/src/lupin_app/main.py`: Main FastAPI server entry point
   - `/src/cosa/rest/routers/`: API endpoint routers
 - `/src/cosa/`: Contains the CoSA (Collection of Small Agents) framework
-  - **Folded into the Lupin mono-repo (2026-05-29)**: `src/cosa/` is now a regular
-    in-tree directory tracked by the Lupin repository — it is **no longer a separate
-    git repo/submodule**. Manage its files AND its git operations exactly like any
-    other Lupin source (stage/commit/push normally). The former CoSA repo's full
-    history is preserved off-tree at `/mnt/DATA02/cosa-git-archive-2026.05.29/`.
-  - CoSA retains its own README.md and CLAUDE.md (historical; the submodule guidance
-    inside `src/cosa/CLAUDE.md` is superseded by this mono-repo state).
+  - `src/cosa/` is a regular in-tree directory of this repository, not a separate repo or submodule.
+    Manage its files and its git operations like any other Lupin source.
+  - It keeps its own README.md and CLAUDE.md; where `src/cosa/CLAUDE.md` talks about a submodule,
+    this file governs.
 - `/src/cosa/agents/`: Agent implementations (math, calendar, deep_research, podcast/presentation generators, BFE/TFE, etc.)
 - `/src/cosa/orchestration/`: Claude Code dispatch + CJ Flow task orchestration
 - `/src/cosa/rest/`: FastAPI routers, queues, and DB repositories (queue pipeline, notifications, auth)
@@ -177,13 +170,6 @@ A job that lands in the dead window drains late but not silently — `job_persis
 - `/src/cosa/io/`: Input/output helpers
 - `/src/cosa/utils/`: Shared utility functions
 - `/src/cosa/docs/`, `/src/cosa/history/`, `/src/cosa/rnd/`, `/src/cosa/tests/`: documentation, history, R&D, and tests
-
-> **`/src/lib/` was DELETED 2026-08-26** (Rick's ruling, row `e2099400` §3b). It held the desktop
-> client — `lupin_client.py`, `lupin_client_cmd.py`, `lupin_client_gui.py`, 1,454 lines — which had
-> been unimportable since `pyaudio` left the environment, was last touched 2026-01-28, and carried
-> 524 statements at 0% inside a 100% coverage mandate. Its only live caller,
-> `src/scripts/run-lupin-gui.sh`, went with it: a Mac-only launcher invoking `python3.10` over SSHFS
-> in a 3.13 repo. **Recover either with `git checkout 71d5efaa -- src/lib src/scripts/run-lupin-gui.sh`.**
 
 ## Debugging
 - Set `debug=True` and `verbose=True` parameters in class instantiations
@@ -225,8 +211,8 @@ A job that lands in the dead window drains late but not silently — `job_persis
 - **Archive access**: If deeper historical context needed, follow links to `history/YYYY-MM-history.md` files
 - **Ignore sub-repo histories**: do not read these sub-repository history files as they are managed separately:
   - `src/lupin-plugin-firefox/history.md` (Firefox plugin sub-repo)
-  - `../lupin-mobile/history.md` (Mobile app — a SIBLING of lupin since 2026-08-30, no longer under `src/`)
-  - (`src/cosa/history.md` is **no longer** a sub-repo history — CoSA folded into the mono-repo 2026-05-29; it is now a normal in-tree doc.)
+  - `../lupin-mobile/history.md` (Mobile app — a sibling repo of lupin, not under `src/`)
+  - `src/cosa/history.md` is an ordinary in-tree doc and may be read.
 
 ## Project short names
 - This repo's SHORT_PROJECT_PREFIX is [LUPIN]
@@ -239,7 +225,7 @@ A job that lands in the dead window drains late but not silently — `job_persis
 - Please assume that there is a Fast API server instance bound to port 7999. I will start and stop it if needed. You never need to spin up another instance unless it's for a ephemeral use on port 8000.
 - **Before clicking Resume on any TFE/BFE stalled job, or before scheduling a live E2E run on `:8000`**, run `src/scripts/preflight-test-container.sh` (or `pytest src/tests/smoke/test_container_preflight.py -v`). This catches docker-compose.yml drift — cases where a `.git`, credentials, or other bind-mount change has not been applied to the running container because only `docker rm -f` + `docker compose up -d` picks up new mounts (not `docker restart`). Failure output includes the exact remedy.
 - **Server lifecycle (when does a change land? when do I bounce? which command?)**: See skill `server-lifecycle` — encodes the per-server decision matrix, the restart-vs-`--force-recreate` distinction, the queue-check courtesy, and the `:8000` monopolize-mode protocol. Auto-fires on bounce/restart/refresh/rebuild phrasing including ASR variants ("doctor" → "Docker").
-  - ⚠️ **CHANGED 2026-08-01 — two policy changes the same day.** (1) `uvicorn --reload` is now **OFF by default on `:7999`**, opt-in via `LUPIN_RELOAD` and gated by `reload_enabled()` in `bootstrap_helpers.py` — watching the tree was taking the server down for the whole fleet whenever anyone touched a watched file. **A `.py` change no longer goes live on its own; both servers need a bounce now.** (2) The old "never volunteer a `:7999` bounce" rule is **retired** — anybody may bounce `:7999`, within reason, to pick up fresh code.
+  - `uvicorn --reload` is **off by default on `:7999`**: opt in with `LUPIN_RELOAD`, gated by `reload_enabled()` in `bootstrap_helpers.py`. A watcher took the server down for the whole fleet whenever anyone touched a watched file. **A `.py` change does not go live on its own; both servers need a bounce.** Anybody may bounce `:7999`, within reason, to pick up fresh code.
   - **Use the sanctioned path**: `./src/scripts/bounce-dev-server.sh` (`--quiet` for a one-liner). It posts an **ack-confirmed** warning broadcast so the fleet holds notifications *before* the server dies, restarts the container, and polls `/health`; the **all-clear is emitted by the restarted server's own startup hook**, so it covers every restart path.
   - **`restart` ≠ `--force-recreate`**: mount specs and env resolve at container **CREATE**. Changed `docker-compose.yml`, a bind mount, or an env var? Use `docker compose up -d --force-recreate <svc>` — a restart reuses the old values and your change silently does not land. (This is also why re-arming `LUPIN_RELOAD` needs a recreate.)
 
@@ -250,16 +236,15 @@ A job that lands in the dead window drains late but not silently — `job_persis
 ### Repository structure
 
 **Parent Repository** (Manage with /plan-session-end):
-- **Name**: Lupin (evolved from Genie-in-the-Box)
+- **Name**: Lupin
 - **Location**: `/mnt/DATA01/include/www.deepily.ai/projects/lupin/`
 - **Prefix**: [LUPIN]
 - **Git Operations**: Managed normally via `/plan-session-end` workflow
 
 **Nested Repositories** (DO NOT manage from parent context):
 
-> **CoSA was folded into the Lupin mono-repo (2026-05-29)** and is **no longer a
-> nested repo** — manage `src/cosa/` as normal in-tree Lupin source. Only the two
-> repos below remain nested/separately-managed.
+> `src/cosa/` is not a nested repo; manage it as normal in-tree Lupin source. Only the Firefox plugin is
+> nested; the mobile app is a sibling repo. Both are managed separately.
 
 1. **Firefox Plugin**
    - **Location**: `/src/lupin-plugin-firefox/`
@@ -267,7 +252,7 @@ A job that lands in the dead window drains late but not silently — `job_persis
    - **History**: Has own history.md (DO NOT read from Lupin context)
 
 2. **Mobile App**
-   - **Location**: `/mnt/DATA01/include/www.deepily.ai/projects/lupin-mobile/` — a **SIBLING** of the Lupin repo since 2026-08-30, moved out of `src/`. It is no longer nested, so it will not appear in Lupin's `git status` at all.
+   - **Location**: `/mnt/DATA01/include/www.deepily.ai/projects/lupin-mobile/` — a **sibling** of the Lupin repo, outside `src/`, so it does not appear in Lupin's `git status` at all.
    - **Management**: Separate repository, managed independently
    - **History**: Has own history.md (DO NOT read from Lupin context)
 
@@ -345,11 +330,10 @@ Suites that qualify:
 - Inline `quick_smoke_test()` blocks + `py_compile` + import-chain checks
 - `src/tests/smoke/test_calculator_live_pipeline.py`
 - `src/tests/smoke/test_container_preflight.py`
-- `src/tests/smoke/test_memory_cap_binds.py` — ⚠️ it runs `systemd-run` and gets a process
-  SIGKILLed, which reads like a :8000 suite and is not one. Routed by the rubric: the scope is
-  transient (`--scope --collect`, dies with the command), so nothing persists; ~0.5s; and the only
-  process it kills is the allocator it started, inside a cgroup it owns — which is the very
-  property one of its cases asserts. It needs no monopoly and takes none.
+- `src/tests/smoke/test_memory_cap_binds.py` — it runs `systemd-run` and gets a process SIGKILLed,
+  which reads like a :8000 suite and is not one. The scope is transient (`--scope --collect`, dies
+  with the command), so nothing persists; it takes about 0.5s; and the only process it kills is the
+  allocator it started, inside a cgroup it owns. It needs no monopoly.
 - `src/tests/websocket_smoke/` (run via `src/scripts/run-websocket-smoke-tests.sh`)
 
 ### :8000 (test) — monopolize mode, scheduled only
@@ -401,14 +385,13 @@ The directory name is not a venue marker. Files living in `src/tests/smoke/` can
 
 ## 100% coverage mandate
 
-**A Lupin-wide hard gate.** Ratified 2026-05-06 (multiplexer-only), **scope-expanded Lupin-wide 2026-05-16** ("Everything has to pass at 100%. Full stop."). CoSA inherits it as of the 2026-05-29 mono-repo fold, on a grandfathering ramp — see the TODO.md top entry (deadline 2026-06-05).
+**A Lupin-wide hard gate**, covering `src/cosa` too.
 
 **The rule**: **100% coverage — lines AND branches AND functions** on all Lupin code. Python via `pytest --cov` (`--cov-fail-under=100`); TypeScript via `c8 --100`.
 
 - **Exceptions**: `# pragma: no cover` (Python) / `c8 ignore` (TS) only for genuinely-unreachable defensive branches, and only with a same-line comment giving the reason. "No time to test" is never valid — fix the test, not the gate.
 - **In plan ACs**: write "100% lines/branches/functions" — never ≥90%/≥95%.
 - **Excludes**: sub-repos `lupin-mobile`, `lupin-plugin-firefox`, and external-project bind-mounts.
-- **Canonical record**: auto-memory `feedback_100pct_coverage_multiplexer.md` (directive + Lupin-wide expansion). Origin doc: `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/08-phase6a-jobs-surface-design.md` AC6.
 
 ## Testing
 
@@ -417,11 +400,11 @@ Three-tier strategy (unit → integration → E2E). Venue routing (`:7999` vs `:
 | Suite | Venue | Command | Notes |
 |---|---|---|---|
 | Unit | :7999 | `pytest src/tests/unit/` | Fast isolated tests, mocked deps |
-| TypeScript | :8000 (scheduled) | `./src/tests/run-typescript-tests.sh` | 119 `*.test.ts` under c8 at 100%; ~8-25 min, no server. Runs inside the capped `jstest.slice` cgroup (RSS watchdog 2048 MB fires before the 8 G `MemoryMax`). **Tier ban LIFTED 2026-08-25** (row 92e94cb7) — all four doors are capped, so `test_types: ["all"]` is safe again. ⚠️ A full run may still HANG on leaked transports (row f8055be3) — an RC=124 is that defect, not memory |
+| TypeScript | :8000 (scheduled) | `./src/tests/run-typescript-tests.sh` | 119 `*.test.ts` under c8 at 100%; ~8-25 min, no server. Runs inside the capped `jstest.slice` cgroup (RSS watchdog 2048 MB fires before the 8 G `MemoryMax`). Every door to it is memory-capped, so `test_types: ["all"]` is safe. ⚠️ A full run can still HANG on leaked transports; an RC=124 is that defect, not memory |
 | Smoke (inline) | :7999 | `python -m cosa.rest.<module>` | `quick_smoke_test()` blocks; non-destructive. `src/tests/smoke/` files are heterogeneous — route each by the §TESTING VENUES rubric, not the folder |
 | WebSocket smoke | :7999 | `src/scripts/run-websocket-smoke-tests.sh` | 50 tests; connection/auth/events |
 | Integration | :8000 (scheduled) | `./src/tests/run-integration-tests.sh --bg -v` | 43 tests; **FINAL merge gate**; always `--bg` |
-| E2E UI (Playwright) | :8000 (scheduled) | `./src/scripts/run-e2e-ui-tests.sh --bg -v` · one half: `--half a` / `--half b` | 830 tests in 2992.7s (full run ts-cf9f5f85, 2026-09-12). The merge gate runs it as two halves, suites `e2e_a` then `e2e_b`, each with its own timeout (row 2818dad7). The files are in `src/tests/e2e_ui/partition/`, and `test_e2e_halves_partition.py` fails on a test file in neither half or both. `-k visual` (visual only), `--update-snapshots` (rebaseline); snapshots version-controlled |
+| E2E UI (Playwright) | :8000 (scheduled) | `./src/scripts/run-e2e-ui-tests.sh --bg -v` · one half: `--half a` / `--half b` | About 830 tests, about 50 minutes for a full run. The merge gate runs it as two halves, suites `e2e_a` then `e2e_b`, each with its own timeout. The files are in `src/tests/e2e_ui/partition/`, and `test_e2e_halves_partition.py` fails on a test file in neither half or both. `-k visual` (visual only), `--update-snapshots` (rebaseline); snapshots version-controlled |
 | Interactive proxy | :8000 (scheduled) | `python src/tests/smoke/test_proxy_integration.py --group all --auto-proxy --no-confirm` | 12 scenarios; mutates state, ~180s/scenario |
 | Presentation regression | :8000 (scheduled) | `./src/tests/run-presentation-regression.sh --bg` | render→Sonnet→(Opus); real LLM spend; `--include-opus` / `--all` variants |
 
@@ -434,26 +417,22 @@ All must pass before merging to main, in this order: typecheck → stylelint →
 smoke → serial bridge guard → websocket smoke → e2e UI and visual regression, as two halves e2e_a then
 e2e_b → integration, which is the final gate. Each requires 100% pass. Venues and commands are in § TESTING above.
 
-**typecheck runs FIRST and it is the cheapest thing here** — the three tsc projects, ~3s of static
-analysis (measured 3.00s wall, 2026-09-09) against the ~25min TypeScript tier. Ruled a blocking gate by
-Rick on 2026-09-09 (row `7bc67019`, answered on a direct ask). ⚠️ Its summary counts PROJECTS, not
+**typecheck runs FIRST because it is the cheapest gate** — the three tsc projects, about 3s of static
+analysis against the roughly 25 minute TypeScript tier. ⚠️ Its summary counts PROJECTS, not
 tests: `Failed: 1` means one tsconfig project is red, which may be one type error or four hundred.
 
-**stylelint runs SECOND, for the same reason** — every `git ls-files '*.css'` file (32), measured 1.5s wall.
-Ruled a blocking gate by Rick on 2026-09-18 21:06 (row `d3d4a18c`), after 329 errors had built up as
-"pre-existing" with no gate to stop them. ⚠️ Its summary counts FILES: `Failed: 1` is one red .css file,
+**stylelint runs SECOND, for the same reason** — every `git ls-files '*.css'` file, about 1.5s. ⚠️ Its summary counts FILES: `Failed: 1` is one red .css file,
 and the error count is printed on its own line. A waiver needs a same-line reason
 (`stylelint-disable-next-line <rule> -- <why>`); the config refuses one without. Tracked .html inline
 `<style>` blocks are NOT covered — that needs postcss-html, which is not installed.
 
-> The heading above is SHOUTED and the HTML comment above is machine-read — neither is styling.
+> The heading above is capitalised and the HTML comment above is machine-read; neither is styling.
 > `test_bridge_dir_guard.py` looks for the exact string `## PR MERGE REQUIREMENTS`, and
 > `test_typescript_suite_gate.py` parses the `merge-pyramid-suites` marker and compares its set to
 > `ALL_SUITE_COMPONENTS` in `src/cosa/agents/test_suite/job.py`, then checks the paragraph beneath it
-> names every one. Lowercasing the heading or dropping the marker reddens the unit tier — measured
-> 2026-09-08, when a reformatting pass did both. The marker is a SET, not a sequence: the shell array
+> names every one. Lowercasing the heading or dropping the marker reddens the unit tier. The marker is a SET, not a sequence: the shell array
 > runs integration before e2e while the documented pyramid holds integration back as the final gate,
-> and that ordering difference is a ruling rather than drift.
+> and that ordering difference is deliberate.
 
 | # | gate | venue |
 |---|---|---|
@@ -470,12 +449,10 @@ and the error count is printed on its own line. A waiver needs a same-line reaso
 | 11 | E2E UI + visual regression, half B — `e2e_b`, `src/scripts/run-e2e-ui-tests-half-b.sh` | :8000 scheduled |
 | 12 | **integration — the final gate** | :8000 scheduled |
 
-✅ **This table's numbering and membership are now guarded** by
+This table's numbering and membership are guarded by
 `test_claude_md_numbered_gate_table_carries_every_suite`: rows run 1..n, every suite in
 `ALL_SUITE_COMPONENTS` appears in a row, and the count is the suites plus the serial bridge guard.
-It did not exist when "typecheck" was added: that reddened the marker test and left this table
-silently one gate short until Mr. Radio 🦉 read the diff and caught it (2026-09-09, row `7bc67019`). **A doc that is half machine-checked is
-the worst of both: the checked half earns trust the unchecked half then spends.**
+A new suite therefore needs a row here as well as a marker entry.
 
 The coverage gate re-runs nothing: the unit and cosa tiers append to one isolated data file, and it renders
 that, checks `fail_under`, and checks the frame still measures every file it claims.
@@ -493,18 +470,15 @@ different file or none means peer noise. Then read that file's `session_id` / `c
 `ls /proc/<cc_pid>`; if it belongs to a live seat that is not you, it is noise. One green is also one
 sample: the discriminator is determinism, not the colour.
 
-**Test counts move.** Re-derive them rather than quoting one — the cosa tier has read 8,622 · 8,668 · 8,671
-· 8,788 across a fortnight, every figure correct when taken, with tests added in between.
+**Test counts move.** Re-derive them rather than quoting one; tests are added between any two readings.
 
 **On failure**: do not merge. Fix the failing tests, then re-run the full suite. A genuinely-flaky failure
 that is not your code gets documented plus a separate fix — never a merge bypass.
 
 ### 🔴 THE COVERAGE GATE HAS SIX EXIT CODES AND ONLY ONE OF THEM MEANS "COVERAGE IS TOO LOW"
 
-Documented here, where a caller reads it, not only in the script where it is raised
-(Mr. Radio 🦉's ruling, row `73ebccb1`, 2026-09-05): **a code is a contract and a message
-drifts**, so distinct exit codes beat distinct messages — and `run-all-tests.sh` flattens
-all six to `coverage FAILED` in its summary.
+**A code is a contract and a message drifts**, so the gate answers with distinct exit codes, and
+`run-all-tests.sh` flattens all six to `coverage FAILED` in its summary.
 
 | exit | meaning | the right response |
 |---|---|---|
@@ -519,10 +493,9 @@ all six to `coverage FAILED` in its summary.
 action from "coverage is too low". Reading one of them as a breach sends someone to write
 tests for a run that never measured anything.
 
-🔴 **EXIT 4 IS ALSO PYTEST'S `EXIT_USAGE_ERROR`, AND UNDER `--run-tiers` THE MISDIAGNOSIS
-IS LIVE — NOT LATENT.** `TestSuiteJob` calls `diagnose( exit_code, stdout )` with no gate on
-suite type, and `pytest_collection_diagnosis.py` defines `4` as *conftest failed to import*.
-Measured 2026-09-05 on **two real exit-4 runs**:
+🔴 **EXIT 4 IS ALSO PYTEST'S `EXIT_USAGE_ERROR`, AND UNDER `--run-tiers` IT IS MISDIAGNOSED.**
+`TestSuiteJob` calls `diagnose( exit_code, stdout )` with no gate on suite type, and
+`pytest_collection_diagnosis.py` defines `4` as *conftest failed to import*. Two real exit-4 runs gave:
 
 | mode | `conftest` in output | `diagnose( 4, … )` |
 |---|---|---|
@@ -537,8 +510,7 @@ tree mid-run — goes unreported. The protection was never the code; it was
 `"conftest" in output.lower()` happening to be false, and the tiers put that word in the
 stream themselves. **A message match standing in for a code contract.**
 
-⚠️ An earlier cut of this table said "safe today". That was true of pyramid mode only and is
-corrected here rather than reworded away — the mode people actually run is the broken one.
+Pyramid mode is safe only because it carries no tier stdout; `--run-tiers`, the mode people actually run, is the broken one.
 
 ### Test credentials
 
@@ -563,8 +535,7 @@ Patterns: `src/tests/AUTH-TESTING-GUIDE.md`. For pipeline testing use the automa
 
 ## Working rules
 
-Hard-won, and stated as rules rather than argued. The measurements behind them are archived in
-`src/docs/doctrine/` for anyone tracing where one came from; you do not need them to follow the rule.
+Stated as rules. The measurements behind them are in `src/docs/doctrine/`; you do not need them to follow a rule.
 
 ### Reporting a measurement
 
@@ -710,8 +681,7 @@ whole-second mtime plus size, so a same-size edit inside one second runs the pre
 - Every worktree goes under `.claude/worktrees/`, never `../`. A spawned seat's tree lands there on its own
   (`seat-<name>`, locked while the seat lives); a hand-made one is
   `git worktree add .claude/worktrees/<persona>-<task>`. That folder is gitignored and swept by the arbiter
-  janitor once a tree is idle. Anything next to the repo is swept by nobody — 227 had piled up by
-  2026-09-14. The janitor moves a tree's ignored files that are not build artifacts or mirrored
+  janitor once a tree is idle. Anything next to the repo is swept by nobody. The janitor moves a tree's ignored files that are not build artifacts or mirrored
   mementos into `io/worktree-evacuated/<day>-<tree>-<stamp>/` in the main tree and then removes the tree;
   an unmerged branch moves to `refs/archive/<day>/<name>` (restore with
   `git update-ref refs/heads/<name> <sha>`). Both are deleted 14 days later, so keep data in git or
@@ -752,7 +722,7 @@ whole-second mtime plus size, so a same-size edit inside one second runs the pre
 - The tier stamp's `run-span=unmoved` compares two HEAD shas; `tracked-dirty` is one sample at the end with
   untracked rows stripped. Neither certifies that the run measured the tree you think it did. Name a run by
   what it measured, not by the sha you asked for.
-  `bundle-span=` (row 105ff244) covers the one thing both are blind to: it hashes the CONTENT of every
+  `bundle-span=` covers what both are blind to: it hashes the CONTENT of every
   served `.js` and `manifest.json` under `src/lupin_app/static/dist/` (gitignored; `.map` files are not served) at start and end, names the root hashed
   (`bundle=<hash>@seat` or `@main`), and a rebuild inside the run reads `bundle-span=<a>..<b> ⚠️ BUNDLE
   REBUILT MID-RUN` beside `run-span`. `@seat` and `@main` are different directories; `:8000` serves main's.
@@ -837,22 +807,22 @@ When modifying code in these areas, update the corresponding documentation:
 | `src/cosa/agents/shared/` (PlanWriter, GitStrategist, FixExecutor) | `src/docs/agents/shared-fix-primitives-reference.md` |
 | `src/cosa/agents/test_suite/` | `src/docs/agents/test-suite-scheduling-guide.md` |
 | `src/cosa/rest/test_suite_completion_watchdog.py` | `src/docs/agents/test-fix-expediter-guide.md` |
-| `src/lupin_arbiter_app/*` import graph (any NEW third-party import) | **Run `src/scripts/check-arbiter-venv.py` in the arbiter venv and add the package to `src/scripts/requirements-arbiter.txt`.** The standalone `:8001` arbiter runs on a deliberately LIGHT host venv, so an import the venv lacks kills a worker THREAD while the process stays `active (running)` and `/health` returns 200 — invisible for two days on 2026-08-08. Also update `src/rnd/v0.1.9/2026.07.22-arbiter-bringup-on-lupin-host-test.md` *(REMOVED by `b113a3a7`; recover: `git show b113a3a7^:src/rnd/v0.1.9/2026.07.22-arbiter-bringup-on-lupin-host-test.md`)* §7 and `src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md` *(REMOVED by `c752ab9e`; recover: `git show c752ab9e^:src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md`)* |
-| A feature gated by an INI flag that imports a heavy/optional module | Read the flag **before** the import (pattern: `fleet_arbiter_loop.make_follow_through_watcher_factory`). A disabled feature must not impose its dependencies — that is what took the fleet loop down while `follow through escalation enabled = false` |
+| `src/lupin_arbiter_app/*` import graph (any NEW third-party import) | **Run `src/scripts/check-arbiter-venv.py` in the arbiter venv and add the package to `src/scripts/requirements-arbiter.txt`.** The standalone `:8001` arbiter runs on a deliberately LIGHT host venv, so an import the venv lacks kills a worker THREAD while the process stays `active (running)` and `/health` returns 200. |
+| A feature gated by an INI flag that imports a heavy/optional module | Read the flag **before** the import (pattern: `fleet_arbiter_loop.make_follow_through_watcher_factory`). A disabled feature must not impose its dependencies. |
 | `lupin-app.ini` `bug fix expediter *` keys | `src/docs/agents/bug-fix-expediter-guide.md` INI Reference |
 | `lupin-app.ini` `test fix expediter *` keys | `src/docs/agents/test-fix-expediter-guide.md` INI Reference |
 | BFE/TFE endpoint rows | `src/docs/rest-api-reference.md` sections 17/17a/17b |
-| `routers/voice_persona.py` + `voice_persona_helpers.py` | `src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md` (architecture, allocation flow, /clear preservation, conversation-mode orthogonality) + `src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md` *(REMOVED by `b113a3a7`; recover: `git show b113a3a7^:src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md`)* (host-side prune at SessionStart, mtime TTL guard, Sam-as-overflow allocation) |
-| `lupin-app.ini` `cc session voice persona *` keys | Same R&D docs — base pool reference in 2026.04.28 §3 (Voice Pool); Sam-overflow keys (`sam icon/color/profile/display name`) + `stale threshold seconds` in 2026.05.16 §Solution Design Layer 3 |
-| `lupin_cli/claude_code/hooks/lib/session_bridge.py` `prune_dead_persona_bridges` + `find_active_voice_persona_sessions` TTL guard | `src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md` *(REMOVED by `b113a3a7`; recover: `git show b113a3a7^:src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md`)* (Layers 1–3: host-side prune + mtime TTL) |
-| New LLM-driven agent OR migration of an existing agent between bounded-CC and firewalled-SDK paths | `src/docs/cost-model-bounded-cc-vs-firewalled-sdk.md`, R&D doc `src/rnd/v0.1.7/2026.05.12-bounded-cc-billing-empirical-confirmation.md` *(REMOVED by `b113a3a7`; recover: `git show b113a3a7^:src/rnd/v0.1.7/2026.05.12-bounded-cc-billing-empirical-confirmation.md`)*, auto-memory `feedback_prefer_bounded_cc_over_anthropic_sdk.md`, and CLAUDE.md § "COST MODEL — BOUNDED CC vs FIREWALLED SDK" if guardrails or candidate list change |
-| `src/cosa/rest/routers/_scope_registry.py` + `docs_files.py` + `io_files.py` + `lupin-app.ini` `external repo *` keys + `docker-compose.yml` bind-mounts | `src/rnd/v0.1.7/2026.05.12-multi-repo-doc-viewer.md` *(REMOVED by `b113a3a7`; recover: `git show b113a3a7^:src/rnd/v0.1.7/2026.05.12-multi-repo-doc-viewer.md`)* (scopes table, mount lines, blocklist patterns). Adding a new external scope requires the four-step checklist in auto-memory `feedback_multi_repo_doc_viewer.md`. |
+| `routers/voice_persona.py` + `voice_persona_helpers.py` | `src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md` (architecture, allocation flow, /clear preservation, conversation-mode orthogonality) |
+| `lupin-app.ini` `cc session voice persona *` keys | Same design doc, § 3 (Voice Pool) for the base pool |
+| `lupin_cli/claude_code/hooks/lib/session_bridge.py` `prune_dead_persona_bridges` + `find_active_voice_persona_sessions` TTL guard | The same design doc; the host-side prune runs at SessionStart and a bridge file's mtime TTL decides staleness |
+| New LLM-driven agent OR migration of an existing agent between bounded-CC and firewalled-SDK paths | `src/docs/cost-model-bounded-cc-vs-firewalled-sdk.md`, auto-memory `feedback_prefer_bounded_cc_over_anthropic_sdk.md`, and this file's § Cost model if its guardrails or migrated list change |
+| `src/cosa/rest/routers/_scope_registry.py` + `docs_files.py` + `io_files.py` + `lupin-app.ini` `external repo *` keys + `docker-compose.yml` bind-mounts | Update the `docker-compose.yml` mounts and this file's § Doc viewer scope together. Adding a new external scope requires the four-step checklist in auto-memory `feedback_multi_repo_doc_viewer.md`. |
 
 **Documentation index**: `src/docs/README.md` — lists all docs with verification dates.
 
-**Fleet liveness + unified task-store architecture (top-to-bottom)**: `src/docs/fleet-liveness-and-task-store-architecture.md` — the canonical reference for the one-store/three-readers design (Stop-hook self-poke · `:8001` arbiter · human UI card), the heartbeat seam + `heartbeat.owed_source_from_store` cutover flag + fail-safe, the arbiter detectors (staleness 2700s / tap-ACK 600s / whole-fleet-stall 1800s) + how to bounce it (`systemctl --user restart lupin-arbiter-app.service`), the manager/worker spawn→worktree→review→merge-held→push lifecycle, and the migration drain. Read this before touching the liveness path, the task store, or the arbiter.
+**Fleet liveness + unified task-store architecture (top-to-bottom)**: `src/docs/fleet-liveness-and-task-store-architecture.md` — the canonical reference for the one-store/three-readers design (Stop-hook self-poke · `:8001` arbiter · human UI card), the heartbeat seam + `heartbeat.owed_source_from_store` cutover flag + fail-safe, the arbiter detectors (staleness 2700s / tap-ACK 600s / whole-fleet-stall 1800s) + how to bounce it (`systemctl --user restart lupin-arbiter-app.service`), and the manager/worker spawn→worktree→review→merge-held→push lifecycle. Read this before touching the liveness path, the task store, or the arbiter.
 
-**Declaring a hold (parking a session) — use the VERB, never hand-write the JSON**: to park a session with a hold, run the `heartbeat_hold_io.py` **write** verb — it records the hold AND verify-reads it back so the hook will actually honor it. **Never hand-write a `.heartbeat-hold-*.json` file** (Write tool or `>`): a hand-written hold lands in the **repo root**, where no reader looks — the arbiter and the Stop hook both resolve holds under `fleet_data_root()` — so the session parks **invisibly** and the poke keeps coming (row `011f1f90`). One example beats a paragraph:
+**Declaring a hold (parking a session) — use the VERB, never hand-write the JSON**: to park a session with a hold, run the `heartbeat_hold_io.py` **write** verb — it records the hold AND verify-reads it back so the hook will actually honor it. **Never hand-write a `.heartbeat-hold-*.json` file** (Write tool or `>`): a hand-written hold lands in the **repo root**, where no reader looks — the arbiter and the Stop hook both resolve holds under `fleet_data_root()` — so the session parks **invisibly** and the poke keeps coming. The arbiter's sweep flags a misplaced hold (`hold_is_misplaced`, the `misplaced` field), but flagging is the backstop, not the instruction. One example beats a paragraph:
 
 ```bash
 python3 -m lupin_cli.claude_code.hooks.lib.heartbeat_hold_io write \
@@ -860,42 +830,30 @@ python3 -m lupin_cli.claude_code.hooks.lib.heartbeat_hold_io write \
   --ttl-seconds 14400 --awaiting "user:<name>"
 ```
 
-> **History — the instruction was already correct, and was ignored anyway.** `planning-is-prompting → workflow/fleet-pause-resume.md` did once prescribe hand-writing the JSON, and that was corrected on **2026-07-21** (commit `0f39b03`). Since then line 77 has read *"Write the hold with the VERB, not by hand"*, line 87 *"Do not hand-write `.heartbeat-hold-<id>.json`"*, and the schema block is explicitly fenced *"Schema reference only — NOT the instruction, do not hand-author it."*
->
-> **All 14 lupin repo-root holds are dated 2026-07-31 to 08-04 — every one written AFTER that fix.** Fleet-wide the split is about half: of 33 misplaced files, 16 predate the fix and 16 postdate it. So a correct doc changed nothing for half the population, and nothing at all for lupin.
->
-> That is why this note is not the remedy. **The remedy is the detector** (`hold_is_misplaced` + the `misplaced` field in the arbiter's sweep, row `011f1f90`), which catches the file regardless of what anyone read. A rule that is written down but not enforced is a rule that half the fleet will break — treat the doc as a courtesy and the detector as the control.
-
 **Principle**: FastAPI `/docs` and `/redoc` are the authoritative API reference. Hand-written docs cover architecture, concepts, and operations only.
 
 ## History structure notes
-- **Project Span**: December 2024 - Present (Lupin evolution from Genie-in-the-Box)
-- **Key Archived Periods**: 
-  - 2024.12-2025.05: PEFT training, agent migrations, Flask→FastAPI transition
-  - 2025.06: Lupin renaming, notification system, WebSocket foundation
-  - 2025.07: Progressive TTS streaming, user routing architecture
-  - 2025.08: Unit testing framework, Fresh Queue UI, audio debugging
 - **Current Implementation Docs**: Referenced in history.md header
 - **Archive Location**: `history/` directory with monthly organization
 
 ## Doc viewer scope (unified path-prefix routing)
 
-**URL format**: `/app/docs?path=<project>/<rel>` where the first path segment names a registered project. The legacy `?scope=` query param is **RETIRED** — its presence triggers HTTP 400 with an educational pointer to this section (policy flipped from silent-ignore to aggressive-400 on 2026-05-21 per amendment to AC4b.7 of `src/rnd/v0.1.7/2026.05.15-doc-viewer-scope-unification.md` *(REMOVED by `b113a3a7`; recover: `git show b113a3a7^:src/rnd/v0.1.7/2026.05.15-doc-viewer-scope-unification.md`)*).
+**URL format**: `/app/docs?path=<project>/<rel>` where the first path segment names a registered project. The `?scope=` query param is **retired**: its presence answers HTTP 400 with a pointer to this section.
 
 - **Lupin files**: `/app/docs?path=lupin/<rel>` — e.g. `/app/docs?path=lupin/bug-fix-queue.md`, `/app/docs?path=lupin/src/rnd/foo.md`. Whitelist authority is `lupin/.docview.yml` at repo root.
 - **Other registered repos**: `cosa-voice`, `planning-is-prompting`, `lookml`, `par-pacific`, `claude-plans`, `retail-ai-location-strategy`, `lupin-mobile` — same URL shape, scope name is the project name.
 - **Source of truth**: `src/conf/lupin-app.ini` § `external repos` plus each repo's `.docview.yml` (when present).
 - **Runtime discovery**: `GET /api/docs/scopes` (admin endpoint, JWT-auth) returns the full registry; cosa-voice MCP `get_session_info()` exposes a single `project_name` string for the current session.
 - **Floor blocklist**: ~46 universal regex patterns block `.env`, `.venv`, `node_modules`, `__pycache__`, `CLAUDE.local.md`, `.ssh/`, etc. across EVERY scope — defense-in-depth; cannot be weakened by any repo's manifest.
-- **Supported file types**: text (`.md`, `.txt`, `.json`, `.yaml`/`.yml`), source code (`.py`, `.ts`/`.tsx`, `.js`/`.jsx`, `.css`, `.html`, `.sh`, `.sql`, `.toml`, `.ini`/`.cfg`, `.xml`), images (`.png`, `.jpg`/`.jpeg`, `.gif`, `.svg`, `.webp` — added 2026-05-21), and audio/video/PDF (`.mp3`, `.wav`, `.mp4`, `.webm`, `.pdf` — added 2026-09-24, ticket 668aa0a3). Binary MIMEs serve via `FileResponse`; text/code via `PlainTextResponse`. The SPA renders images as `<img>`, audio/video as players, PDF inline, and anything else as "no preview". Every file view carries a **⬇ Download** button that saves the raw bytes (the markdown source, not the render). io audio (`.mp3`/`.wav`) hands off to the existing `/app/audio` player rather than a second one.
-- **Folder, Roots, Upload (ticket 416d4b00, 2026-09-24)**: a file view also carries **📁 Folder** (opens its parent listing; a legacy bare io path gains its `io/` prefix). Every listing opens with a closed **🗂 Roots** panel — `io/` plus every scope and allowed prefix from the live `/api/docs/scopes`, never a literal. Admins get **⬆ Upload** on a listing (button or drop), posting to `POST /api/docs/upload` — the same read guards apply to the target, a name clash answers 409 with `suggested_name` and the page offers Replace / Rename / Cancel as buttons (never a browser dialog). A read-only mount answers 403 — which is exactly what the external-repo mounts did until 2026-09-26, and this sentence used to end "while they stay `:ro`". ⚠️ **They no longer do.** The upload route landed 2026-09-24 and the mounts stayed `:ro`, so every upload into an external scope got EROFS and answered 403 for two days; Rick's probe measured errno 30 at mkstemp in `weil-nda-drafting-suite/src/rnd`. Ruling 02f3bc8f made them writable (row b84bbf1c), and `test_external_repo_mounts_are_writable.py` now fails if any bind goes back. `~/.claude/plans` stays `:ro` deliberately — it is not an upload scope.
+- **Supported file types**: text (`.md`, `.txt`, `.json`, `.yaml`/`.yml`), source code (`.py`, `.ts`/`.tsx`, `.js`/`.jsx`, `.css`, `.html`, `.sh`, `.sql`, `.toml`, `.ini`/`.cfg`, `.xml`), images (`.png`, `.jpg`/`.jpeg`, `.gif`, `.svg`, `.webp`), and audio/video/PDF (`.mp3`, `.wav`, `.mp4`, `.webm`, `.pdf`). Binary MIMEs serve via `FileResponse`; text/code via `PlainTextResponse`. The SPA renders images as `<img>`, audio/video as players, PDF inline, and anything else as "no preview". Every file view carries a **⬇ Download** button that saves the raw bytes (the markdown source, not the render). io audio (`.mp3`/`.wav`) hands off to the existing `/app/audio` player rather than a second one.
+- **Folder, Roots, Upload**: a file view also carries **📁 Folder** (opens its parent listing; a legacy bare io path gains its `io/` prefix). Every listing opens with a closed **🗂 Roots** panel — `io/` plus every scope and allowed prefix from the live `/api/docs/scopes`, never a literal. Admins get **⬆ Upload** on a listing (button or drop), posting to `POST /api/docs/upload` — the same read guards apply to the target, a name clash answers 409 with `suggested_name` and the page offers Replace / Rename / Cancel as buttons (never a browser dialog). A read-only mount answers 403. The external-repo mounts are writable, and `test_external_repo_mounts_are_writable.py` fails if any bind goes back to read-only. `~/.claude/plans` stays `:ro` deliberately — it is not an upload scope.
 
 **Examples**:
 - `/app/docs?path=lupin/src/rnd/v0.1.7/2026.04.24-cosa-voice-nested-repo-detection-fix.md` ✅
-- `/app/docs?path=lupin/bug-fix-queue.md` ✅ (formerly 404 — fixed in this milestone)
+- `/app/docs?path=lupin/bug-fix-queue.md` ✅
 - `/app/docs?path=lupin/CLAUDE.local.md` → 400 (floor blocks)
 - `/app/docs?path=bug-fix-queue.md` → 400 (missing project prefix)
 - `/app/docs?path=docs/anything` → 400 (unknown project — `docs` retired)
-- `/app/docs?path=lupin/CLAUDE.md&scope=docs` → 400 "The `?scope=` query parameter is RETIRED..." (aggressive-400 since 2026-05-21; scope-presence check fires BEFORE path validation)
+- `/app/docs?path=lupin/CLAUDE.md&scope=docs` → 400 "The `?scope=` query parameter is RETIRED..." (the scope-presence check fires BEFORE path validation)
 
 **For sessions emitting links**: ALWAYS prefix with the project name. `scope=` is dead — do not include it. The endpoint will 400 immediately if you do, with an educational message naming the canonical form + the live registered-project list.
