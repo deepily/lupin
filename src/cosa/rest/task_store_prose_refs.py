@@ -2,8 +2,8 @@
 Prose-reference scanner: flags rows citing a terminal task id in prose with no edge.
 
 `blocker_terminal` (`task_store_owed.blocker_is_terminal`) catches a stranded row whose
-dependency is a typed `blocked_by` edge. It cannot see a row that names its precondition
-only in prose. Such a dependency cannot be scheduled, chased or transitioned.
+dependency is a typed `blocked_by` edge. It is blind to the commoner shape, a row that names its
+precondition only in prose. Such a dependency cannot be scheduled, chased or transitioned.
 
 The prose arm has two halves, and only one is detectable:
 
@@ -12,19 +12,21 @@ The prose arm has two halves, and only one is detectable:
     (B) Cites a premise, "until the demos ship". There is no token to resolve. This is an
         authoring problem, because no oracle can follow a dependency never written as an id.
 
-This module implements (A) only.
-
-A clean (A) result does not mean "no dangling preconditions", because the unscannable (B)
-half sits underneath it. `scope_disclosure()` is therefore required output. The CLI prints it
-on every run, and `scan_rows` returns it in the report.
+This module implements (A) only, and is built so that boundary is impossible to miss.
+It must not produce a false green, an instrument answering a narrower question than its reader believes.
+A clean (A) result reads as "no dangling preconditions" while the unscannable (B) half sits underneath.
+So `scope_disclosure()` is required output: the CLI prints it every run, and `scan_rows` returns it.
 
 Counts are never collapsed to one. An 8-hex token may be a task id, a commit sha or a session
-id, and no regex separates them. Session ids are the largest population: every amendment
-header is stamped `<persona> <8-hex>`, so that count grows once per amendment.
+id, and no regex separates them. Shas share the shape and are dense in the bodies. Session ids
+are the largest population: every amendment header is stamped `<persona> <8-hex>`. That count
+grows continuously, which means neither a broken scanner nor a spreading defect.
 
-A false positive, a sha reported as a broken id, is visible. A false negative, a mistyped id
-lost among the shas, is silent. So the report carries the unresolved bucket as a number, split
-by confidence tier, and the amendment-stamp exclusion as its own count.
+A false positive, a sha reported as a broken id, is visible. A false negative is silent and more
+dangerous: treating every unresolvable token as "not a task id" loses a mistyped id among the shas.
+So the report carries the unresolved bucket as a number, split by tier, and the amendment-stamp
+exclusion as its own count. An unreported exclusion looks like tokens never seen, and an empty-looking
+bucket that is merely unexamined is a false green.
 
 Tiers:
     - Full UUID citation: high confidence, resolved against the task store.
@@ -32,12 +34,11 @@ Tiers:
       by prefix, because a prefix resolve turns an amendment stamp into a finding.
 
 Store ids are 36-char dashed UUIDs, and the 8-hex form is an abbreviation. A dashed UUID cannot
-collide with a 40-hex git sha. It does share the UUID space with session ids, so a resolve means
-"found in the task store", not "is UUID-shaped". The caller injects `status_by_id` from a
-task-store lookup, and this module has no resolver of its own.
+collide with a 40-hex git sha, but the tier buys nothing against other UUIDs the fleet writes.
+Session ids are one. A resolve therefore means "found in the task store", not "is UUID-shaped".
+The caller injects `status_by_id` from a task-store lookup, and this module has no resolver of its own.
 
-The long-run fix is authoring: citing full ids shrinks the unresolved bucket, and minting a
-dependency as a row removes it. The bucket never reaches zero.
+The long-run fix is authoring: full ids shrink the unresolved bucket; a dependency minted as a row leaves it. It never reaches zero.
 """
 
 import re
@@ -68,8 +69,9 @@ def strip_amendment_stamps( body ):
     """
     Remove amendment header stamps from a body and return how many were removed.
 
-    The count is reported because a silent exclusion looks like a scanner that never saw
-    those tokens. Stamps are the largest population in the 8-hex bucket and grow once per amendment.
+    The count is the point, more than the strip. A silent exclusion looks like a scanner that never saw those tokens.
+    Without the count a caller cannot tell a shrinking bucket from a working filter.
+    Stamps are the largest 8-hex population and grow once per amendment, indefinitely.
 
     Requires:
         - body is any object (non-str yields ( "", 0 ))
@@ -125,9 +127,8 @@ def classify_prose_refs( body, blocked_by, status_by_id ):
     """
     Classify one row's prose citations against resolved task-store statuses.
 
-    A finding is a citation of a terminal id that has no matching `blocked_by` edge.
-    A citation that has an edge is already covered by `blocker_is_terminal` on the read path.
-    Reporting it here would count one stranded row under two instruments.
+    A finding is a citation of a terminal id with no matching `blocked_by` edge. An edge-covered citation is
+    already covered by `blocker_is_terminal`, and reporting it here double-counts one row, inflating the count.
 
     Requires:
         - body is the row's body (any type)

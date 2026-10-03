@@ -322,7 +322,8 @@ def _get_default_scope_roots() -> dict:
     Build the scope-name to absolute-root map used for receipt path checks.
 
     The map comes from the doc-viewer scope registry, so receipt paths add no new
-    path grammar. It is built once per process.
+    path grammar: doc_path validation is an exists-in-repo check and nothing more.
+    It is built once per process.
 
     Requires:
         - ConfigurationManager singleton is constructible (server context)
@@ -393,6 +394,7 @@ def _validate_commit_reachable( sha: str, scope_roots: Optional[dict] ) -> list:
 
     The check searches every registered scope, because a receipt is validated without its row in hand.
     A sha on a branch of any repo the store serves is one a human can read.
+    Accepting a receipt the store cannot verify would defeat the check, so an unverifiable sha is refused.
 
     Requires:
         - sha has already passed COMMIT_PATTERN (7-40 lowercase hex)
@@ -499,16 +501,16 @@ def validate_receipt_refs( receipt_refs, scope_roots: Optional[dict] = None,
     """
     Validate a receipt_refs object against the key whitelist and per-key shapes.
 
-    A closing receipt must carry something a third party can check. A file path may accompany a close but cannot be the close.
-    A commit must be reachable from a branch, because a sha orphaned by a reset or rebase vanishes at the next gc.
-    A green result is only a shape check; the router decides who may assert an attestation.
+    A closing receipt must carry something a third party can check. A file path may accompany a close but cannot be the close. A doc_path or log_line only proves a file exists, which touching it satisfies.
+    A commit must be reachable from a branch. A shape check passes "deadbeef". A sha orphaned by a reset or rebase vanishes at the next gc. The rule applies to every closing row, with no code-bearing classification.
+    A green result is a shape check, not an authorization; the router decides who may assert an attestation.
 
     Requires:
         - receipt_refs is the candidate receipts value (any type accepted;
           non-dict and empty-dict are rejected with errors, not exceptions)
         - scope_roots: optional { scope: abs_root } override for path checks
           (tests inject tmpdirs; server uses the registry default)
-        - require_checkable: True on a done transition; it adds the closing rules below
+        - require_checkable: True on a done transition; it adds the closing rules below, and every other caller keeps shape-only behaviour
 
     Ensures:
         - returns [] iff receipt_refs is a non-empty dict whose every key is
@@ -520,14 +522,20 @@ def validate_receipt_refs( receipt_refs, scope_roots: Optional[dict] = None,
             log_line - "<scope>/<rel>:<lineno>" with the file existing
             operator_attestation - 1-255 chars, no control characters (shape only)
             manager_attestation  - the same shape as operator_attestation
+        - an attestation is checked for shape only: this module cannot tell a real operator from a caller
+          who typed the key. A test of this function alone cannot speak to authorization
         - a non-empty-but-junk receipt ({doc_path: "trust me"}) returns errors
         - never raises on malformed input; errors are data, not exceptions
+        - with require_checkable, an agent still needs commit or test_run. Agents authenticate by API key,
+          have no login account, and are refused the attestation key upstream. The widening does not weaken the rule
+        - for a human operator the receipt is the assertion itself: no artifact exists to cite, and a
+          test-shaped receipt would be dishonest
         - with require_checkable, the receipts include a key from CLOSING_RECEIPT_KEYS
           (commit, test_run, operator_attestation or manager_attestation), so a path alone never closes a row
         - with require_checkable, every commit is reachable from a branch in any
-          registered scope, not only main
+          registered scope, not only main, so a legitimate pre-merge close is not refused
         - with require_checkable and no scope that is a git work tree, the check
-          refuses rather than accepting the receipt unverified
+          refuses rather than accepting the receipt unverified, which would be the same hole
     """
     if not isinstance( receipt_refs, dict ) or not receipt_refs:
         return [ f"receipt_refs must be a non-empty object with at least one whitelisted key {RECEIPT_KEY_WHITELIST}" ]
@@ -595,9 +603,9 @@ def validate_blocked_by_refs( blocked_by ) -> list:
     """
     Validate a blocked_by value as a non-empty list of typed refs.
 
-    A persona ref can carry an optional session_id, because persona names are re-granted after a reap.
-    A stamped edge becomes checkable once a persona-liveness surface exists. The field is optional so
-    that existing callers are not rejected.
+    A persona ref cannot be resolved, because the store has no persona lifecycle to check a name against. A still-waiting edge looks the same as one waiting on someone who left. Persona names are re-granted after a reap, so a stale edge can re-point at another session, a false green.
+    A persona ref can carry an optional session_id, which tells those sessions apart. It is accepted before any checker exists, because the cost of delay is asymmetric. An unstamped edge can never be resolved later, while a stamped one is checkable once a persona-liveness surface exists.
+    The field is optional so existing callers are not rejected; requiring it is a separate decision once callers send it.
 
     Requires:
         - blocked_by is the candidate value (any type accepted; non-list and
@@ -610,7 +618,8 @@ def validate_blocked_by_refs( blocked_by ) -> list:
           mixed string field
         - unknown keys remain errors; session_id is the only key added to the
           allowed set, and only for persona refs
-        - a session_id on a non-persona ref is an error, not silently ignored
+        - a session_id on a non-persona ref is an error, not silently ignored: an item id already
+          resolves in this store and a user has no session, so it would look authoritative and mean nothing
     """
     if not isinstance( blocked_by, list ) or not blocked_by:
         return [ "blocked_by must be a non-empty list of typed refs [{kind, id}]" ]
@@ -649,6 +658,8 @@ def blocked_by_has_persona( blocked_by ) -> bool:
 
     Ensures:
         - True iff blocked_by is a list containing a dict ref whose kind == "persona"
+        - a user-only block needs no chase time because a user cannot be scheduled; an item-only block needs none because an item resolves on its own edge
+        - kept as a predicate apart from the check so the rule and the database constraint are each expressed once, and a test can pin them to agree
         - False for None, non-list, empty list, or a list with no persona ref
         - never raises
     """
@@ -676,7 +687,8 @@ def validate_blocked_fields( blocked_by, next_chase_ts ) -> list:
     Ensures:
         - returns [] iff both hold:
             next_chase_ts is present when blocked_by contains a {kind:persona}
-            ref (a peer is chaseable; a user-only or item-only block needs none)
+            ref (a peer is chaseable, so a chase is honest; a user-only or item-only
+            block needs none: a user cannot be scheduled and an item resolves on its own edge)
             blocked_by passes validate_blocked_by_refs (>=1 typed ref)
         - returns every violation otherwise (both at once)
     """
@@ -727,6 +739,8 @@ def hyphenate_compact_prefix( compact_prefix ) -> str:
         - returns the prefix re-hyphenated at 8-4-4-4-12 positions, truncated to
           the supplied length (no trailing hyphen for an exact-boundary prefix)
         - a prefix shorter than 8 chars is returned unchanged
+        - re-hyphenation is needed because ids render hyphenated, so a prefix longer than 8 chars crosses a hyphen boundary the compact form lacks
+        - one shared implementation, because a second copy of the matching rule would let two read paths disagree about which rows an identifier names
         - never raises
     """
     chunks = [ ( 0, 8 ), ( 8, 12 ), ( 12, 16 ), ( 16, 20 ), ( 20, 32 ) ]
@@ -737,6 +751,8 @@ def hyphenate_compact_prefix( compact_prefix ) -> str:
 def classify_task_ref( ref ) -> tuple:
     """
     Classify a caller-supplied task reference as a full UUID, a hex prefix, or invalid.
+
+    The function is pure: it does no database access and makes no HTTP calls.
 
     Requires:
         - ref is the raw caller value (any type; None and non-strings accepted
@@ -825,6 +841,8 @@ def normalize_status_fields( status, blocked_by, next_chase_ts ) -> tuple:
 
     Ensures:
         - returns ( resolved, dropped )
+        - pure: no database, HTTP or clock
+        - a rule that says be loud gets forgotten, so the normalizer is a mechanism that cannot silently drop; it covers whatever field is added next
         - resolved is a dict with only the keys "blocked_by" and
           "next_chase_ts"
         - resolved["blocked_by"] is the given list when status == "blocked"
@@ -877,6 +895,9 @@ def compose_drop_marker( dropped, existing_reason=None ) -> Optional[str]:
           so a no-op discard adds no marker
         - dropped is non-empty -> returns a string containing DROPPED_MARKER_PREFIX
           followed by the comma-joined field names
+        - a caller that binds the drop-list and throws it away would reproduce the same silence one layer up, so the fold lives here
+        - an empty drop-list adds no marker; otherwise every row would carry one and the marker would mean nothing
+        - the no-silent-drop guarantee is a mechanism, not a convention
         - an existing reason is preserved, never replaced; the caller's
           justification and the machine's disclosure both survive
     """
@@ -918,7 +939,7 @@ def validate_create( item_class: str, gate_class: str, priority: str, authority:
     """
     Validate the enum fields of a new item.
 
-    A new item always starts as queued, and the creation event stamps "->queued".
+    A new item always starts as queued, the creation event stamps "->queued", and transitions move it onward from there.
 
     Requires:
         - item_class, gate_class, priority, authority are the candidate
@@ -948,8 +969,8 @@ def validate_create_status( status, blocked_by, next_chase_ts ) -> list:
     """
     Validate the mint status of a new item: queued or blocked only.
 
-    This is the status-whitelist half of the blocked-mint rule. The router (create_task) enforces the manager-only guard.
-    That guard needs bridge IO to resolve the caller's role, and this module is pure.
+    A create may mint queued or blocked only, in a single call. This is the status-whitelist half of the blocked-mint rule. The router (create_task) enforces the manager-only guard.
+    That guard needs bridge IO to resolve the caller's role, and this module is pure. The whitelist is a data rule testable with no config; the guard is an authorization rule.
 
     Requires:
         - status is the candidate mint status (any string)
@@ -1042,9 +1063,9 @@ def soft_guard_title( title, body, cap=TITLE_SOFT_CAP ):
     """
     Trim an over-long item title on write and move the overflow into the body.
 
-    Clients show about 60 characters of a title, but the cap is TITLE_SOFT_CAP, 120. The overflow goes
-    into the body and is never discarded. This guard stays fail-open on create, because a rejected unattended create loses the filing. The edit door
-    rejects instead; see validate_edit_title_length.
+    Workers put whole paragraphs in the title, clients show about 60 characters, and the body, the proper home for detail, sits underused. The guard fixes this at the one server-side write path every caller flows through (MCP wrapper, hook, raw POST). So a paragraph-title never lands unguarded.
+    The cap is TITLE_SOFT_CAP, 120, and the overflow goes into the body and is never discarded. This guard stays fail-open on create and on POST /api/tasks, because a create is unattended and a rejected one loses the filing.
+    Above the cap a create still trims, by ruling. The edit door rejects instead; see validate_edit_title_length.
 
     Requires:
         - title is a non-empty string (the column is `NOT NULL`; the wire model
@@ -1060,13 +1081,15 @@ def soft_guard_title( title, body, cap=TITLE_SOFT_CAP ):
             * when body is empty (None or whitespace-only): new_body is the
               overflow (title[cap:]), unmarked
             * when body is non-empty: new_body is the original body verbatim,
-              then the TITLE_OVERFLOW_MARKER line, then the overflow, so the body's
+              then the TITLE_OVERFLOW_MARKER line (a stable string, so grep recovery works on older rows), then the overflow, so the body's
               first line is not displaced and repeated retitles stack at the foot
             * `title + <the overflow substring of new_body>` reconstructs the
               original title exactly, on both arms
             * advisory is { trimmed, original_length, cap,
               overflow_moved_to_body, lost_tail }; overflow_moved_to_body is
-              True on both arms, and `lost_tail` is the exact text cut from the title
+              True on both arms, and `lost_tail` is the exact text cut from the title;
+              it is advisory only: it changes nothing stored, rejects nothing, and leaves
+              the fail-open rule and exact reconstruction untouched
             * the trim removes the tail, where qualifiers such as "DECLINED" sit,
               so the terse projection flags it as `title_trimmed`
         - never raises; never returns a title longer than cap
@@ -1124,6 +1147,7 @@ def validate_terminal_title_prefix( old_title, new_title ):
     Decide whether a closed row's proposed new title is a legal correction prefix.
 
     A terminal row accepts only `amend`, which writes to `body`, and the terse projection drops body.
+    So a correction filed there is invisible on a routine board glance. Readers see the false headline, while the retraction sits in a field nobody is shown.
     This carve-out lets the headline be corrected without letting it be rewritten.
 
     Requires:
@@ -1134,9 +1158,9 @@ def validate_terminal_title_prefix( old_title, new_title ):
         - new_title == "<MARKER> — <old_title>" for a marker in
           TERMINAL_TITLE_PREFIXES -> [] (legal: the original survives verbatim)
         - anything else -> a one-element list naming the markers and showing the
-          exact string that would have been accepted
+          exact string that would have been accepted, since a "prefix only" rule without the literal format has to be guessed
         - the original text is compared byte-for-byte, so a prefix that also
-          rewords the tail is refused
+          rewords the tail is refused: that is a rewrite wearing a prefix, which the immutability wall exists to stop
         - stacking is permitted: a row already prefixed "WITHDRAWN" may later take
           "SUPERSEDED" in front of it, because the previous marker is part of the
           old title it must reproduce verbatim; markers accumulate at the front in
@@ -1159,8 +1183,9 @@ def validate_terminal_edit_fields( fields, current_title, status ):
     """
     Gate a PATCH against a terminal row: refuse everything except a title correction prefix.
 
-    The field set is checked before the prefix. A legal prefix sent with a priority change is refused whole,
-    so no other field rides along.
+    The field set is checked before the prefix, and the order is required. A legal prefix sent with a priority change is refused whole,
+    so no other field rides along. A carve-out that leaks other fields is a hole.
+    The carve-out allows the one change that keeps a closed board honest.
 
     Requires:
         - fields is the post-validation patch dict (may contain `title_trimmed`,
@@ -1205,8 +1230,9 @@ def validate_edit_title_length( title, cap=TITLE_SOFT_CAP ):
     """
     Reject an over-cap title on the edit door.
 
-    The create and edit doors apply different rules. A create is unattended, so soft_guard_title trims it instead.
-    An edit is a person who can shorten the title and knows which part is the qualifier.
+    The create and edit doors apply different rules. A create is unattended (hooks, the MCP wrapper, agents filing mid-task), so rejecting it would lose the filing; soft_guard_title trims it instead.
+    A trim cuts the tail, but writers put the limiting qualifier at the end. An edit is a person who can shorten the title and knows which part is the qualifier.
+    Rejection hands that choice back to the one who can make it well, where a flag only tells a reader something is missing. The router answers the returned error with a 422.
 
     Requires:
         - title is a string (the wire model already rejects empty / non-string)
@@ -1307,6 +1333,8 @@ def persona_from_created_by( created_by ) -> str:
           transformed)
 
     Ensures:
+        - the persona is wanted without the session tail because the class-scoped owner default depends on it
+        - the created_by format is stamped in task_store_tools.py
         - None / non-string / empty -> "" (canonical_persona_key's unmatchable
           sentinel; the caller treats "" as "no derivable owner")
         - "<persona> <hex sid>" -> canonical_persona_key( "<persona>" )
@@ -1328,7 +1356,8 @@ def session_id_from_created_by( created_by ) -> Optional[str]:
     """
     Extract the session-id tail from a bridge-stamped created_by string.
 
-    This is the inverse of persona_from_created_by. The manager-only blocked-mint guard in create_task needs the session id
+    This is the inverse of persona_from_created_by. By contract, created_by is stamped "<persona> <8-hex session id>" (task_store_tools.py).
+    The manager-only blocked-mint guard in create_task needs the session id
     to resolve the caller's bridge role. With no tail, the guard treats the caller as a non-manager, the safe default.
 
     Requires:
@@ -1416,6 +1445,9 @@ def is_blocker_repoint( from_status, to_status, blocked_by, next_chase_ts,
           fires without evidence
         - returns False for every other status pair, including every other
           same-status pair
+        - the false in_progress event it avoids misleads tooling that counts in_progress transitions; a reason string on it only mitigates
+        - re-pointing is routine: a manager re-spin, a reaped blocking peer, or a decision escalated to the user
+        - task_edit refuses the invariant-bearing fields and task_amend is body-only, so this edge is the only route
         - never relaxes the ->blocked payload rules: this opens an edge, and
           validate_blocked_fields still runs on the result
     """
@@ -1443,6 +1475,10 @@ def is_park_refresh( from_status, to_status, park_reason, next_chase_ts ):
           omits the park fields gets the old rejection
         - returns False for every other status pair, including every other
           same-status pair
+        - every other same-status edge stays closed, because it would write an event that means nothing
+        - a changed quote is not required, since that would refuse the commonest honest case: a reviewer confirming the park is still right
+        - task_store_tools prescribes re-parking as the remedy for a stale park reason
+        - without this edge the only route, parked -> queued -> parked, clears the quote and writes a false parked->queued event
         - never relaxes the ->parked payload rules: this opens an edge, and
           validate_park still runs on the result
     """
@@ -1467,8 +1503,9 @@ def validate_transition(
     """
     Validate one state transition against the structural rules.
 
-    The derived LEGAL_TRANSITIONS graph is enforced here. A dropped, done or wont_fix source has no out-edges, so moving a
-    closed row is refused by name. A ->done from a live row must also carry a checkable receipt.
+    The derived LEGAL_TRANSITIONS graph is enforced here. A dropped, done or wont_fix source has no out-edges, so moving a closed row is refused by name.
+    A ->done from a live row must also carry a checkable receipt. A richer map of which edges are meaningful is not enforced, and callers need no client-side guard for the edges refused here.
+    A wrong verb arriving from a UI is refused, which is a rejection, not data corruption.
 
     Requires:
         - from_status is the item's current status (read inside the same DB
@@ -1714,6 +1751,11 @@ def is_park_legal_from( from_status ) -> bool:
         - True iff from_status is in PARK_LEGAL_FROM_STATUSES, or is PARK_STATUS
         - False for every other status, including blocked/claimed/review and the
           terminal states
+        - adding `parked` to PARK_LEGAL_FROM_STATUSES would break its import-time assert, so entry and re-entry stay separate names
+        - a re-park keeps the pre-park provenance, so by induction over a row's park history it cannot widen admission
+        - a re-park restores the post-park equality of updated_ts and park_reason_captured_at, which is what re-freezing the quote means
+        - task_store_tools prescribes re-parking as the remedy for a stale park reason
+        - without re-entry the only route out and back clears the quote and fires a false status-change event
         - never raises
     """
     return from_status in PARK_LEGAL_FROM_STATUSES or from_status == PARK_STATUS
@@ -1791,6 +1833,7 @@ def normalize_patch_fields( fields: dict ) -> dict:
         - a persona field that is present and falsy (None / "") -> left verbatim,
           so an explicit None clear survives and does not become the "" sentinel
         - a persona field that is absent -> stays absent (no key is invented)
+        - this is the single, fully testable seam against the false-idle bug class
     """
     normalized = dict( fields )
     for field_name in PATCH_PERSONA_FIELDS:
@@ -2151,9 +2194,9 @@ def ratio_gate_advisory( created, closed, priority=None, correlation_key=None, a
     """
     Judge one create against the closed-vs-new ratio and return a refusal string or None.
 
-    The function is pure when the caller passes allow_below. The None default reads cosa.rest.flow_ratio_settings.
-    The router passes the value, so the gate and the endpoint verdict share one threshold.
-    The petition flag changes only the closing sentence of a refusal, never the verdict.
+    The function is pure when the caller passes allow_below and decides what to do with the verdict. That keeps the warn-only ramp a one-line router change and every case testable without a store.
+    The None default reads cosa.rest.flow_ratio_settings so existing callers keep working; it is not the intended path. The router passes the value, so the gate and the endpoint verdict share one threshold.
+    Two copies of the threshold could drift, showing "allow" on the board while the gate refuses, with nothing reporting the disagreement. The petition flag changes only the closing sentence of a refusal, never the verdict.
 
     Requires:
         - created / closed are non-negative ints for the ruled window
@@ -2166,16 +2209,17 @@ def ratio_gate_advisory( created, closed, priority=None, correlation_key=None, a
     Ensures:
         - returns None when the write is allowed or exempt
         - otherwise returns a refusal string naming the real counts, the gate, and what
-          to do about it
+          to do about it; a bare refusal would not tell the operator why
         - exemptions, both returning None before any arithmetic:
-            * priority P0, so the gate never blocks filing an outage row
+            * priority P0, so the gate never blocks filing an outage row; a gate that did
+              would be switched off the first time it was wrong
             * the harness mirror's `cc-task:` lane, which writes where no human is
               present to answer a 422, the same carve-out the epic-key guard makes
         - `closed == 0` with creations refuses, because a window where nothing was
-          finished is what the gate is for; `0/0` allows, because an idle window is
-          not a failing window
+          finished is what the gate is for, and it is common on a quiet day;
+          `0/0` allows, because an idle window is not a failing window
         - a petition refusal never offers the P0 exemption
-        - success is silent; the board header already shows the number
+        - success is silent, because a confirmation on every ordinary create is noise; the board header already shows the number
         - never raises and never itself rejects; the router decides, gated on
           RATIO_GATE_ENFORCEMENT_ACTIVE
     """
@@ -2290,8 +2334,8 @@ def ratio_gate_reading( created, closed, allow_below, verdict ):
     """
     Return the log line describing the gate's reading on a path that does not refuse.
 
-    ratio_gate_advisory returns None on an allow, so without this line a permit leaves no record of the counts and ratio.
-    The board header is a live number read at page time, while a verdict is a reading taken at request time over a specific window.
+    ratio_gate_advisory returns None on an allow, so without this line a permit leaves no record of the counts and ratio. Without that record a working gate cannot be told from an absent one from outside.
+    The board header is a live number read at page time, while a verdict is a reading taken at request time over a specific window. When the two differ, the header cannot say what the gate saw.
     The function is pure; the caller decides where the line goes.
 
     Requires:
@@ -2331,7 +2375,7 @@ def ratio_gate_headroom( created, closed, allow_below ):
 
     The function asks ratio_gate_advisory and counts, and holds no threshold comparison of its own, so it projects the gate and is not a second gate.
     The gate judges each create against the counts before it lands, so the create that tips the ratio to the threshold is admitted.
-    The spec formula (created + N) / closed < allow_below therefore gives one fewer than the gate admits.
+    The spec formula (created + N) / closed < allow_below therefore gives one fewer than the gate admits. Reporting that value would tell an operator the gate is shut while it is open, the disagreement this projection exists to prevent.
 
     Requires:
         - created / closed are non-negative ints for the ruled window
@@ -2363,6 +2407,7 @@ def ratio_gate_close_needed( created, closed, allow_below ):
     Return how many more closures the gate needs before it would admit an ordinary create.
 
     This verb and ratio_gate_headroom both delegate to `_walk_the_gate`, one loop with a direction flag, so they cannot drift apart.
+    The only difference between the two verbs is which count moves.
     Increasing `closed` lowers created / closed, so walking it upward moves toward allow, the mirror of walking `created` toward refuse.
 
     Ensures:
@@ -2380,8 +2425,9 @@ def ratio_loop_headroom( created, closed, allow_below ):
     """
     Return how many more creates leave the ratio under the threshold after they land.
 
-    This is one fewer than ratio_gate_headroom, so the badge errs toward a moratorium. The loop probes created+1, created+2 and stops at the last
-    increment that still passes. The gate judges each create before it lands, so the create that tips the ratio to the threshold is admitted.
+    This is one fewer than ratio_gate_headroom, so the badge under-reports by one and errs toward a moratorium. A moratorium exists because adding tickets is too easy and getting them removed is too hard.
+    The one-less result is a ruling, not a defect; changing it is a new decision, not a bug to patch here. The loop probes created+1, created+2 and stops at the last increment that still passes.
+    The gate judges each create before it lands, so the create that tips the ratio to the threshold is admitted.
 
     Requires:
         - created / closed are non-negative ints for the ruled window
@@ -2392,7 +2438,8 @@ def ratio_loop_headroom( created, closed, allow_below ):
         - returns `ratio_gate_headroom( ... ) - 1` when the gate admits at all
         - returns 0 when the gate admits exactly one more: the "FULL" state, at capacity
           and still legal; under the gate's own semantics that state has no inputs
-        - returns None when the gate refuses right now; that case belongs to
+        - returns None when the gate refuses right now; the honest answer there is negative, not zero, because the
+          caller is past the line. That case belongs to
           `ratio_gate_close_needed` and its "CLOSE N" badge, and folding it into 0
           would make a healthy edge and a breach look identical
         - returns None when the gate finds no bound (e.g. a zero threshold no closure
@@ -2401,7 +2448,9 @@ def ratio_loop_headroom( created, closed, allow_below ):
           the empty board and the at-the-line case share one vocabulary choice
         - example: created 10, closed 13, allow_below 1.00 returns 2 here and 3 from the gate
         - makes no ratio comparison of its own; it subtracts one from the gate's answer,
-          so the display cannot drift from the gate's rules
+          so the display cannot drift from the gate's rules; a function that compared a ratio itself
+          would be a second gate, and the board would keep quoting old rules after the gate changed
+        - this is the one place the display may differ from the gate
         - ordinary creates only: P0 and the harness mirror lane are exempt unconditionally
         - describes the gate's verdict, not today's blocking, while
           `task flow ratio enforcement active` is off
@@ -2419,7 +2468,7 @@ def _walk_the_gate( created, closed, allow_below, direction ):
     The loop asks `ratio_gate_advisory` and counts, holding no threshold comparison of its own.
     With direction="create" the loop moves `created` up and counts admissions before the first refusal.
     With direction="close" it moves `closed` up and counts closures until the first admission.
-    The two counts answer opposite questions about one boundary.
+    The two counts answer opposite questions about one boundary, which is why they differ by one.
     """
     def _admits( n ):
         # The ONE decision point in this module's projection. No comparison sits beside it.

@@ -2,9 +2,10 @@
 Rejoin blocked task rows whose blockers are all done, and refuse to rejoin dropped ones.
 
 `blocker_is_terminal` in `src/cosa/rest/task_store_owed.py` only flags a stranded row.
-This module acts on the done half of that split and leaves the dropped half alone.
+This module acts on the done half of that split and leaves the dropped half to the project owner's decision.
 
     blocker `done`    -> rejoin. The precondition happened, so no judgment call is left.
+                         The row is lost work waiting on nothing.
     blocker `dropped` -> flag only. Dropping was a decision, and a rejoin would overturn it.
 
 The dropped arm never rejoins here. Transposing the two arms would silently overturn
@@ -17,8 +18,10 @@ that warning to the next reader. The caller is `src/scripts/rejoin-done-blocked-
 which is dry-run by default.
 
 This instrument errs toward not rejoining, the opposite polarity of `blocker_is_terminal`.
+That predicate errs toward not flagging, because a false flag defames a correct row.
+A rejoin is a write that moves a row into the workable set, where a seat picks it up.
 A false hold leaves a row where the defect already left it. A false rejoin puts a row that
-is waiting on a human in front of a seat that will work it.
+is waiting on a human in front of a seat that will work it. Both errors lie toward doing nothing.
 
 An unresolvable canonical blocker id is flagged by `blocker_is_terminal` but never rejoined
 here. A flag says the edge is dead, while a rejoin says the precondition happened, and an
@@ -101,9 +104,9 @@ def classify_blocked_row( status, blocked_by, status_by_id ):
     """
     Decide whether one blocked row's wait is over, which is the done-arm predicate.
 
-    Every blocker must be an item, looked up, and `done`. Any other shape holds, because a
-    rejoin asserts that every named precondition happened. Persona and user blockers hold,
-    though `item_blocker_ids` drops them when flagging.
+    Every blocker must be an item, looked up, and `done`; any other shape holds, because a rejoin asserts every precondition happened.
+    `item_blocker_ids` drops persona and user refs when flagging, as they have no resolvable lifecycle and would manufacture false findings.
+    Here they hold: a persona edge is a real wait on a real seat, and rejoining past it unblocks work whose blocker was never examined.
 
     Requires:
         - status is the row's status string (any value accepted)
@@ -122,13 +125,14 @@ def classify_blocked_row( status, blocked_by, status_by_id ):
         - no blockers at all               -> HOLD_NO_ITEM_BLOCKER
         - any persona/user/malformed entry -> HOLD_NON_ITEM_BLOCKER
         - any id absent from the map, or present as None -> HOLD_UNRESOLVED_BLOCKER
-          (an absent row never happened; see the module docstring)
+          (an absent row never happened, so an unresolvable id stops the write rather than being skipped)
         - any blocker in a terminal status other than done (dropped or wont_fix)
                                            -> HOLD_DROPPED_BLOCKER (never rejoined here)
         - any blocker non-terminal         -> HOLD_LIVE_BLOCKER (a genuine wait)
         - one done + one dropped           -> HOLD_DROPPED_BLOCKER (dropped dominates)
         - the hold reason is order-independent: several disqualifying blockers report the
-          same reason in any order, by the precedence non-item > dropped > unresolved > live
+          same reason in any order, by the precedence non-item > dropped > unresolved > live,
+          because stopping at first sight would tie the reason to list order, which no reader can act on
         - closed_blocker_ids lists the done blockers seen, in list order, on every verdict
         - never raises
     """
@@ -200,9 +204,9 @@ def dormancy_stamp( closed_blockers, now ):
     """
     Build the amendment text that marks a rejoined row as not freshly vetted.
 
-    A row that rejoins after weeks reads as freshly vetted, even when its premises went
-    false while it waited. The stamp reports the dormancy and the blockers, and says the
-    premise is unverified. It cannot say what moved, since no field holds that.
+    A row that rejoins after weeks reads as freshly vetted, even when its premises went false while it waited.
+    The stamp reports the dormancy and blockers, says the premise is unverified, and names where to look: the blockers' closing receipts.
+    It cannot say what moved, since no field holds that, and a stamp implying it could would overclaim its own reach.
 
     Requires:
         - closed_blockers is a list of { "id": str, "closed_at": <iso|datetime|None> }
@@ -210,10 +214,10 @@ def dormancy_stamp( closed_blockers, now ):
 
     Ensures:
         - returns a non-empty str suitable as a `task_amend` note
-        - the headline dormancy is measured from the latest close, the instant the row
-          actually became free
-        - the headline is the minimum of the per-blocker spans, the shortest true wait
-          across the blockers, so a multi-blocker row is not inflated
+        - the headline dormancy is measured from the latest close, the instant the row actually became free,
+          because an earlier-closing blocker did not release it while a later one still gated it
+        - the headline is the minimum of the per-blocker spans, the shortest true wait across the blockers;
+          reporting the longest would inflate the number on multi-blocker rows
         - every blocker's own span is listed underneath, so the headline never hides them
         - a blocker whose close time is unparseable is listed with "close time unknown"
           rather than dropped or defaulted to zero days
@@ -253,7 +257,7 @@ def scope_disclosure( counts ):
     """
     Describe what the rejoin pass did and which rows it left alone.
 
-    The report is required output. A pass that prints "3 rejoined" reads as "the stranded
+    The report is required output, not a courtesy line, with the same mandate as the prose-ref scanner. A pass that prints "3 rejoined" reads as "the stranded
     rows are handled" while every dropped-blocked and unresolvable row is still untouched.
 
     Requires:

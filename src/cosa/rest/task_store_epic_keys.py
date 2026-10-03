@@ -4,6 +4,7 @@ Epic-key drift detector: finds rows whose correlation_key does not carry an epic
 The epic layer answers "where is the work going" without reading every live body.
 It lives in `TaskItem.correlation_key` as an `epic:<slug>` value, and nothing enforces it at creation.
 This module reports the drift. It does not prevent it.
+A detector with no caller is still silence, so the scan script that calls it is part of the design.
 
 A creation-time check is not used, because the field has three tenants and only one is an epic key:
 
@@ -13,14 +14,17 @@ A creation-time check is not used, because the field has three tenants and only 
     - `cascade-quick-ask` (no prefix) is a free-text run tag typed through the MCP door.
 
 A non-empty check passes all three, so it would report compliance on rows it cannot group.
+A check at `POST /api/tasks` also covers only the doors that exist today, and still reads as enforced.
 
 Reach:
     - It reads rows, not creation doors. A row from the MCP verb, the hook lane, a raw POST,
       a direct repo call or hand-written SQL is equally visible.
-    - It does not prevent drift. Between two runs the board can be wrong and nobody is told.
+    - It does not prevent drift. It makes drift hard to miss, not impossible to occur.
+      Between two runs the board can be wrong and nobody is told.
     - It cannot say whether a mirror row should have an epic. The `cc-task:` key feeds the
       idempotency probe, so re-stamping it with `epic:` would break the upsert. Those rows
-      get their own bucket and are never a finding. A separate epic column is a schema change.
+      get their own bucket and are never a finding. If that lane runs again, those rows stay
+      ungroupable. A scan cannot fix that, and a separate epic column is a schema change.
     - It sees only the rows the caller hands it. A caller that pages a subset gets a verdict
       about that subset, and must report truncation. `reach_disclosure` names the count seen.
     - An unknown `epic:` slug is a finding. A key like `epic:not-a-real-thing` satisfies the
@@ -130,9 +134,9 @@ def reach_disclosure( report, known_epic_keys=None, include_terminal=None, trunc
     """
     Return the text stating what a scan covered and what it could not see.
 
-    The disclosure is mandatory: a clean verdict that omits the mirror bucket reads as "fully grouped".
-    The row-status frame is part of the reach. `audit_rows` sees only rows, so the fetch's
-    terminal-row filter and row cap arrive as arguments. None means "not stated".
+    The disclosure is required output, not a courtesy line, with the same mandate as `task_store_prose_refs.scope_disclosure`.
+    A clean verdict that omits the mirror bucket reads as "fully grouped", so a caller cannot report a verdict without its reach.
+    The frame is part of the reach: the fetch excludes terminal rows by default, and silence about that is the defect prevented.
 
     Requires:
         - report is an `audit_rows` return dict
@@ -146,6 +150,10 @@ def reach_disclosure( report, known_epic_keys=None, include_terminal=None, trunc
         - always names the row-status frame: terminal rows included, excluded, or not stated
           by the caller, and is never silent about it
         - always names whether the fetch was truncated, including when unknown
+        - `audit_rows` sees only rows, so the terminal-row filter and row cap arrive as arguments;
+          None means "not stated" and can never yield a complete-looking reach line
+        - callers report this string, not a module docstring, so the frame sits in the string,
+          because a disclosure that omits its own frame certifies itself
         - the text is emitted whether the scan was clean or not
         - never raises
     """
