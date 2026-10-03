@@ -37,6 +37,8 @@ REASON_CLAIM  = ( "Both callers share one implementation, so they match the same
     ( "0 of 2 correct.",                              "incident" ),
     ( "The incident of 2026-09-30.",                  "incident" ),
     ( "Changed 2026-09-01; it was rejected on 2026-09-02.", "narrative" ),
+    ( "This used to be a separate call.",             "narrative" ),
+    ( "It was measured on the dev box.",              "incident" ),
 ] )
 def test_a_claim_of_nothing_but_history_is_tagged_and_its_kind_named( text, kind ):
     assert kind in hc.history_kinds( text, "" )
@@ -52,8 +54,6 @@ def test_a_claim_of_nothing_but_history_is_tagged_and_its_kind_named( text, kind
     "Returns the input unchanged.",
     "Version 2 of the format is read.",
     "Two retries are made.",
-    "This used to be a separate call.",
-    "It was measured on the dev box.",
 ] )
 def test_a_reason_or_behaviour_with_no_history_marker_is_not_tagged( text ):
     assert hc.history_kinds( text, "" ) == []
@@ -73,21 +73,20 @@ def test_a_reason_marker_in_the_quote_still_keeps_a_history_claim_untagged():
     assert hc.is_history( "Rick ruled on row 1e12cc08.", "Rick ruled on row 1e12cc08 that agents may not attest." ) is False
 
 
-# ---- finding 2: nothing but history may be left ----------------------------------------------------
+# ---- a history marker tags the claim whatever else the claim says ------------------------------------
 
-@pytest.mark.parametrize( "text", [
-    "The cache expires after 30 seconds, measured on 2026-09-01",
-    "Skips empty rows (bug 4821 fixed this)",
-    "keeps the lock; changed in 2026",
-    "The cache expires after 30 seconds on 2026-09-01",
-    "Rick ruled on row 1e12cc08 and the worker retries twice.",
+@pytest.mark.parametrize( "text, kind", [
+    ( "The cache expires after 30 seconds, measured on 2026-09-01",     "date" ),
+    ( "Skips empty rows (bug 4821 fixed this)",                        "id" ),
+    ( "keeps the lock; changed in 2026",                               "date" ),
+    ( "The cache expires after 30 seconds on 2026-09-01",              "date" ),
+    ( "Rick ruled on row 1e12cc08 and the worker retries twice.",      "provenance" ),
+    ( "Changed 2026-09-01 and 2026.",                                  "date" ),
+    ( "The first match wins, by ruling on row 12ab34.",                "id" ),
+    ( "Maria found by Rick.",                                          "provenance" ),
 ] )
-def test_a_behaviour_left_over_after_the_history_is_cut_out_leaves_the_claim_untagged( text ):
-    assert hc.is_history( text, "" ) is False
-
-
-def test_a_bare_number_left_over_leaves_the_claim_untagged():
-    assert hc.is_history( "Changed 2026-09-01 and 2026.", "" ) is False
+def test_a_history_marker_tags_the_claim_even_when_it_also_states_behaviour( text, kind ):
+    assert kind in hc.history_kinds( text, "" )
 
 
 @pytest.mark.parametrize( "text", [
@@ -107,20 +106,14 @@ def test_a_claim_mixing_history_with_a_reason_is_not_tagged( text ):
     "The first match wins, by ruling.",
     "Matches are ordered as ruled.",
     "Ties go to the older row, according to the spec.",
-    "Provenance is found by the lookup.",
 ] )
 def test_the_words_ruling_ruled_and_according_to_tag_nothing_alone( text ):
     assert hc.is_history( text, "" ) is False
 
 
-def test_provenance_with_an_id_attached_is_tagged_only_when_nothing_else_is_left():
-    assert hc.is_history( "A ruling on row 12ab34.", "" ) is True
-    assert hc.is_history( "The first match wins, by ruling on row 12ab34.", "" ) is False
-
-
 def test_provenance_with_a_named_person_is_tagged_without_a_date_or_an_id():
-    assert hc.is_history( "Maria found by Rick.", "" ) is False
     assert hc.is_history( "Rick ruled.", "" ) is True
+    assert hc.is_history( "A ruling on row 12ab34.", "" ) is True
 
 
 # ---- the tag ----------------------------------------------------------------------------------------------

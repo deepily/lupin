@@ -13,13 +13,11 @@ It is a post-filter on claims the judge already called absent. It is not part of
 judge, because a change to either prompt would void every ledgered verdict. The filter is plain Python,
 so no ledger key moves and no model is called.
 
-Two tests must both pass before a claim is tagged.
-    1. History is found in the claim text. The quote is never searched for history: it is a stretch
-       of the old docstring and often ends in a citation or a date that the claim does not state.
-    2. Nothing but history is left. The history spans are cut out of the claim text, and every word
-       that remains must be a word of history vocabulary or a function word (HISTORY_GLUE). Any
-       other word is read as a statement of what the code does, so the claim is not tagged.
-Any reason or behaviour marker in the claim text or in its quote also keeps a claim untagged.
+A claim is tagged when its claim text carries a history marker. The quote is never searched for
+history: it is a stretch of the old docstring and often ends in a citation or a date that the claim
+does not state. What else the claim says does not matter, because a tag excuses nothing and the
+reader sees every tagged claim in the report. Any reason or behaviour marker in the claim text or in
+its quote keeps a claim untagged.
 
 Provenance tags only with a named person ("Rick ruled") or alongside a date or an id. The words
 "ruled", "ruling" and "according to" tag nothing alone. The words "no longer" and "unchanged" are
@@ -36,7 +34,7 @@ import sys
 
 _UNITS = r"(?:ms|s|sec|secs|seconds?|minutes?|hours?)"
 
-# A history marker names the kind of history it found. Every match is a span that the residue test cuts out.
+# A history marker names the kind of history it found.
 HISTORY_MARKERS = (
     ( "date",       re.compile( r"\b\d{4}[-./]\d{2}[-./]\d{2}\b|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.? \d{1,2}(?:st|nd|rd|th)?,? \d{4}\b|\bUPDATE:|\b(?:fixed|added|changed|removed|measured|ruled) (?:on |in )?(?:19|20)\d{2}\b(?![-./]\d)", re.IGNORECASE ) ),
     ( "id",         re.compile( r"\b(?:row|task|bug|ticket|decision|job|pr|issue|commit|session)\s+#?[0-9a-f]{6,40}\b|\b(?:row|task|bug|ticket|decision|job|pr|issue)\s+#?\d+\b|(?<![\w-])(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}(?![\w-])", re.IGNORECASE ) ),
@@ -46,14 +44,6 @@ HISTORY_MARKERS = (
     ( "narrative",  re.compile( r"\b(?:was|were) previously\b|\bused to\b|\bformerly\b|\boriginally\b|\bearlier (?:text|version|draft)\b|\b(?:was|were) (?:changed|renamed|moved|rewritten|rejected)\b|\bwould have been the obvious\b|\brejected alternative\b|\bthe obvious (?:move|fix|choice)\b", re.IGNORECASE ) ),
 )
 
-# What may be left of a claim once its history spans are cut out: function words and the vocabulary of
-# history itself. Every other word, and every bare number, is read as a statement about the code.
-HISTORY_GLUE = frozenset( (
-    "a an the of to in on at by for and or is are was were be been it its that this these those with from as after before when then also which who"
-    " row task bug ticket decision job pr issue commit session sha ruled ruling decided found reported noticed requested asked raised"
-    " fixed added changed removed renamed moved rewritten rejected introduced reverted merged landed measured incident previously formerly"
-    " originally earlier text version draft update updated see per" ).split() )
-
 # A reason or behaviour marker. A claim that matches any of these in its text or its quote states something
 # that is still true of the code, so it is never tagged: where they meet, keep the reason, drop the story.
 REASON_MARKERS = re.compile(
@@ -62,8 +52,6 @@ REASON_MARKERS = re.compile(
     r"|\brequires?\b|\braises?\b|\bensures?\b|\breturns?\b|\brefus(?:e|es)\b|\brejects?\b|\bshould\b"
     r"|\bis (?:computed|checked|enforced|stored|validated)\b|\bare (?:computed|checked|enforced|stored|validated)\b",
     re.IGNORECASE )
-
-_WORD = re.compile( r"[A-Za-z][A-Za-z'-]*|\d+" )
 
 HISTORY_CLASS_VERSION = "history-" + hashlib.sha256( inspect.getsource( sys.modules[ __name__ ] ).encode( "utf-8" ) ).hexdigest()[ :10 ]
 
@@ -79,21 +67,10 @@ def history_kinds( claim_text, quote ):
         - returns [] when a reason or behaviour marker matches the claim text or its quote
         - history markers are searched in claim_text only, never in the quote
         - returns [] when no history marker matches the claim text
-        - returns [] when, with every history span cut out of claim_text, any word is outside HISTORY_GLUE
-          or any bare number remains: a statement about the code is left, so the claim is not tagged
         - otherwise returns the matched kind names in marker order
     """
     if REASON_MARKERS.search( claim_text ) or REASON_MARKERS.search( quote ): return []
-    kinds = []
-    cut   = [ False ] * len( claim_text )
-    for kind, pattern in HISTORY_MARKERS:
-        found = list( pattern.finditer( claim_text ) )
-        if found: kinds.append( kind )
-        for match in found: cut[ match.start():match.end() ] = [ True ] * ( match.end() - match.start() )
-    if not kinds: return []
-    left = "".join( " " if gone else char for char, gone in zip( claim_text, cut ) )
-    if any( word.lower() not in HISTORY_GLUE for word in _WORD.findall( left ) ): return []
-    return kinds
+    return [ kind for kind, pattern in HISTORY_MARKERS if pattern.search( claim_text ) ]
 
 
 def is_history( claim_text, quote ):
