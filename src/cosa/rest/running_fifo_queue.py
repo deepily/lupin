@@ -1837,6 +1837,18 @@ class RunningFifoQueue( FifoQueue ):
             - None
         """
         try:
+            # Row 4cbd4858 (Rick, 2026-10-02): a job whose lineage traces to a test-suite job
+            # is not asked. The harness's own listener makes the user look online, so every
+            # ask here sat out the full window and test_v2_eval_live crawled. It still takes
+            # the "yes" default below and is saved and announced like any unanswered ask; only
+            # the wait goes. Every other job keeps the ask.
+            if self._lineage_traces_to_test_suite( snapshot ):
+                snapshot.answer_is_correct = True
+                print( f"[CORRECTNESS] Test-suite lineage for [{truncated_question}] — not asking, recording the 'yes' default" )
+                self.snapshot_mgr.save_snapshot( snapshot )
+                self._emit_answer_verified( snapshot )
+                return
+
             msg = f"Was this answer correct? Question: '{truncated_question}' Answer: '{truncated_answer}'"
 
             request = NotificationRequest(
@@ -1863,21 +1875,67 @@ class RunningFifoQueue( FifoQueue ):
                 print( f"[CORRECTNESS] No response for [{truncated_question}] (status={response.status}) — recording the 'yes' default" )
 
             self.snapshot_mgr.save_snapshot( snapshot )
-
-            if self.websocket_mgr:
-                self.websocket_mgr.emit(
-                    "answer_verified",
-                    {
-                        "job_id"            : snapshot.id_hash,
-                        "answer_is_correct" : snapshot.answer_is_correct,
-                        "user_id"           : snapshot.user_id
-                    }
-                )
+            self._emit_answer_verified( snapshot )
 
         except Exception as e:
             # Named, and never re-raised. The user already HAS their answer; a failure to
             # record a verdict about it must not retroactively fail the job.
             print( f"[CORRECTNESS] Error during verification for [{truncated_question}]: {type( e ).__name__}: {e}" )
+
+    def _emit_answer_verified( self, snapshot: SolutionSnapshot ) -> None:
+        """
+        Announce the recorded verdict over the WebSocket when a manager is wired.
+
+        Requires:
+            - snapshot.answer_is_correct has been written
+
+        Ensures:
+            - emits `answer_verified` once when self.websocket_mgr is set; otherwise nothing
+        """
+        if self.websocket_mgr:
+            self.websocket_mgr.emit(
+                "answer_verified",
+                {
+                    "job_id"            : snapshot.id_hash,
+                    "answer_is_correct" : snapshot.answer_is_correct,
+                    "user_id"           : snapshot.user_id
+                }
+            )
+
+    # Longest lineage chain walked. Real chains are one hop (suite -> ask); the cap is only
+    # a stop for a malformed cycle, which the seen-set also catches.
+    LINEAGE_MAX_HOPS = 8
+
+    def _lineage_traces_to_test_suite( self, job: Any ) -> bool:
+        """
+        True when `job` was spawned, directly or through ancestors, by a test-suite job.
+
+        Walks `spawned_by_id_hash` through this queue. A job never stamped with lineage
+        (most are not) has no such attribute, so the check is by `hasattr`, not a fallback.
+
+        Requires:
+            - job is any queue job
+
+        Ensures:
+            - True only when an ancestor found in this queue has job_type "test_suite"
+            - False for no lineage, an ancestor no longer in the queue (unverifiable, so the
+              ask stays), a cycle, or a chain longer than LINEAGE_MAX_HOPS
+            - never raises
+        """
+        seen    = set()
+        current = job
+        for _ in range( self.LINEAGE_MAX_HOPS ):
+            parent_hash = current.spawned_by_id_hash if hasattr( current, "spawned_by_id_hash" ) else None
+            if not parent_hash or parent_hash in seen:
+                return False
+            seen.add( parent_hash )
+            with self._lock:
+                current = self.queue_dict.get( parent_hash )
+            if current is None:
+                return False
+            if hasattr( current, "job_type" ) and current.job_type == "test_suite":
+                return True
+        return False
 
     def _may_serve_cached( self, cached_snapshot: Any, why: str ) -> bool:
         """
