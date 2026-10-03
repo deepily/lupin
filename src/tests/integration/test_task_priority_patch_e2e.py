@@ -41,6 +41,7 @@ written here outlives the test. No server, no network.
 import os
 import sys
 from contextlib import contextmanager
+from datetime import datetime, timezone
 
 import pytest
 from fastapi import FastAPI
@@ -56,6 +57,8 @@ from cosa.rest.db import database as db_module
 from cosa.rest.routers import tasks
 from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
 from cosa.rest import task_store_rules as rules
+from cosa.rest.postgres_models import TaskEvent, TaskItem
+from tests.integration.seeded_task_rows import refuse_unless_test_db
 
 
 # The literals `_patchTaskFields` hardcodes (notifications.js, symbol
@@ -107,25 +110,44 @@ def client( txn_session ):
     return TestClient( app )
 
 
-def _create_row( client, **overrides ):
-    """Mint a row through the real endpoint. P0 so the flow-ratio gate cannot refuse it."""
-    body = {
-        "item_class" : "task",
-        "title"      : "priority-patch probe (e2e)",
-        "project"    : "lupin",
-        "created_by" : "maya d1cbb9ef",
-        "priority"   : "P0",
-        "status"     : "queued",
-    }
-    body.update( overrides )
-    r = client.post( "/api/tasks", json=body )
-    assert r.status_code == 201, f"{r.status_code}: {r.text}"
-    item = r.json()
-    assert item[ "priority" ] == body[ "priority" ], (
-        f"the row minted at priority '{item['priority']}' rather than '{body['priority']}' — "
-        f"every arm below measures a MOVE from a known starting value, so it must be known"
+def _create_row( session ):
+    """
+    Put one queued P0 row in the test's own transaction and return { "id", "priority" }.
+
+    The row is inserted directly, not through POST /api/tasks: that door reserves P0 for the
+    operator's login account and files every other new row in the holding area, and this file
+    tests the PATCH field seam, not the create door. P0 is the starting value because every arm
+    below moves the priority DOWN, which the priority firewall allows any caller.
+
+    Requires:
+        - session is the `txn_session` fixture, bound to lupin_db_test (refused otherwise)
+
+    Ensures:
+        - the row and its creation event exist inside the outer transaction and nowhere else
+    """
+    refuse_unless_test_db( session.get_bind().engine.url )
+    item = TaskItem(
+        item_class          = "task",
+        title               = "priority-patch probe (e2e)",
+        project             = "lupin",
+        owner_persona       = "maya",
+        accountable_manager = "maya",
+        created_by          = "maya d1cbb9ef",
+        status              = "queued",
+        priority            = "P0",
+        correlation_key     = "epic:unassigned",
     )
-    return item
+    session.add( item )
+    session.flush()
+    session.add( TaskEvent(
+        item_id    = item.id,
+        ts         = datetime.now( timezone.utc ),
+        actor      = "maya d1cbb9ef",
+        transition = "->queued",
+        authority  = "standing",
+    ) )
+    session.flush()
+    return { "id": str( item.id ), "priority": item.priority }
 
 
 def _patch_priority( client, task_id, priority, authority=CLIENT_AUTHORITY ):
@@ -150,7 +172,7 @@ def _stored_priority( client, task_id ):
     return r.json()[ "priority" ]
 
 
-def test_a_VALID_priority_is_STORED_and_READABLE_BACK( client ):
+def test_a_VALID_priority_is_STORED_and_READABLE_BACK( client, txn_session ):
     """
     The accept claim, read from the store rather than from the response.
 
@@ -159,7 +181,7 @@ def test_a_VALID_priority_is_STORED_and_READABLE_BACK( client ):
     would still echo P2 here. The GET is a separate request through a separate seam and
     is the only leg that can tell a write from an echo.
     """
-    item = _create_row( client )
+    item = _create_row( txn_session )
 
     r = _patch_priority( client, item[ "id" ], "P2" )
     assert r.status_code == 200, (
@@ -174,7 +196,7 @@ def test_a_VALID_priority_is_STORED_and_READABLE_BACK( client ):
     )
 
 
-def test_an_INVALID_priority_is_REFUSED_in_the_SERVER_S_OWN_WORDS_and_the_row_does_NOT_move( client ):
+def test_an_INVALID_priority_is_REFUSED_in_the_SERVER_S_OWN_WORDS_and_the_row_does_NOT_move( client, txn_session ):
     """
     🔴 THE LOAD-BEARING TEST IN THIS FILE, and the positive control at the end is what
     stops it passing for the wrong reason.
@@ -183,7 +205,7 @@ def test_an_INVALID_priority_is_REFUSED_in_the_SERVER_S_OWN_WORDS_and_the_row_do
     client puts `body.detail` straight into the operator's row stripe — a 422 whose text
     does not name the alternatives leaves the operator with a red stripe and no recourse.
     """
-    item = _create_row( client )
+    item = _create_row( txn_session )
 
     # ── THE REFUSAL ──────────────────────────────────────────────────────────────
     r = _patch_priority( client, item[ "id" ], "P9" )
@@ -216,7 +238,7 @@ def test_an_INVALID_priority_is_REFUSED_in_the_SERVER_S_OWN_WORDS_and_the_row_do
     assert _stored_priority( client, item[ "id" ] ) == "P1"
 
 
-def test_the_CLIENT_S_OWN_authority_literal_is_ACCEPTED_and_authority_is_REALLY_CHECKED( client ):
+def test_the_CLIENT_S_OWN_authority_literal_is_ACCEPTED_and_authority_is_REALLY_CHECKED( client, txn_session ):
     """
     Two legs, one variable — and the second leg is the reason the first one means
     anything.
@@ -225,7 +247,7 @@ def test_the_CLIENT_S_OWN_authority_literal_is_ACCEPTED_and_authority_is_REALLY_
     would pass identically against a server that never looks at the field, which is the
     state in which a client-side typo would ship silently and forever.
     """
-    item = _create_row( client )
+    item = _create_row( txn_session )
 
     # LEG 1 — the literal the browser sends
     r = _patch_priority( client, item[ "id" ], "P2", authority=CLIENT_AUTHORITY )
@@ -247,7 +269,7 @@ def test_the_CLIENT_S_OWN_authority_literal_is_ACCEPTED_and_authority_is_REALLY_
     )
 
 
-def test_a_PATCH_that_names_NO_priority_still_works( client ):
+def test_a_PATCH_that_names_NO_priority_still_works( client, txn_session ):
     """
     THE NEGATIVE CONTROL FOR THE WHOLE FILE. A title edit through the same endpoint,
     with the same actor and authority, must succeed.
@@ -256,7 +278,7 @@ def test_a_PATCH_that_names_NO_priority_still_works( client ):
     broken outright — the refusals would still be 422s and the two acceptance legs would
     be the only failures, which reads as a priority defect rather than a dead door.
     """
-    item = _create_row( client )
+    item = _create_row( txn_session )
 
     r = client.patch(
         f"/api/tasks/{item['id']}",
