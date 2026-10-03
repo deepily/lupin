@@ -4,7 +4,7 @@
 
 **Rule it implements**: [`CLAUDE.md` § Cost model](../../CLAUDE.md) — prefer a bounded job over the direct SDK when the agent fits.
 
-**Capability page**: `src/docs/wiki/capabilities/bounded-claude-code-jobs.md` says what a bounded job is; this page says how to move an agent onto one.
+**Capability page**: `src/docs/wiki/capabilities/bounded-claude-code-jobs.md` says what a bounded job is. That page is pinned for merge and is not in the tree yet. This page says how to move an agent onto one.
 
 ## The two cost paths
 
@@ -25,7 +25,7 @@ A migration shifts cost; it does not remove it. The plan is a fixed monthly bill
 
 ## Prerequisites
 
-The agent must pass all five questions. If any answer is no, it stays on Path B, and its design doc says which question failed.
+The agent must pass all five questions. If any answer is no, it stays on Path B, and its design doc says which question failed. That record stops a later reviewer from re-implementing a direct-SDK agent that should have been bounded.
 
 1. An Anthropic model is enough (no OpenAI, Groq or Mistral).
 2. The work is one self-contained prompt with a bounded turn count, not a long stateful conversation.
@@ -38,11 +38,11 @@ Agents that stay on Path B for these reasons: `notification_proxy/strategies/llm
 ## Steps to follow
 
 1. **Find the boundary.** Often only part of an agent is LLM-driven. Podcast generation has an LLM script phase and a text-to-speech phase; migrate the LLM phase only.
-2. **Replace the call.** Swap `AsyncAnthropic( … ).messages.create( … )` for a `ClaudeCodeJob` submission or an in-process `sdk_query` call. With a job, the prompt becomes the job prompt and the parsed output becomes its terminal output. The in-process form that Podcast, Presentation and Deep Research use runs with `tools=[]` for pure text work. It also sets `permission_mode="plan"` (read-only) and reads `max_turns` from the INI.
+2. **Replace the call.** Swap `AsyncAnthropic( … ).messages.create( … )` for a `ClaudeCodeJob` submission or an in-process `sdk_query` call. With a job, the prompt becomes the job prompt and the parsed output becomes its terminal output. The in-process form that Podcast, Presentation and Deep Research use runs with `tools=[]` for pure text work. It also sets `permission_mode="plan"` (read-only). It reads `max_turns` from the INI. The keys are `podcast script max turns` (default 5), `presentation generator content max turns` (default 5) and `deep research max research turns` (default 20).
 3. **Harden the parser.** A bounded job can return chatty text around the answer. Recover the JSON from it. Use a lenient parser where a missing field has a safe default (Podcast). Use a strict one where the data feeds a renderer (Presentation, Deep Research); it fails loudly on a missing, empty or malformed result.
-4. **Replace web search if the agent used it.** The native `web_search_20250305` server tool has no bounded equivalent. Give research subagents `tools=[WebSearch, WebFetch]` and keep the lead agent at `tools=[]`. The rolling plan limit then governs, so drop any per-minute token gating that existed only for the native tool.
+4. **Replace web search if the agent used it.** The native `web_search_20250305` server tool has no bounded equivalent. Give research subagents `tools=[WebSearch, WebFetch]` and keep the lead agent at `tools=[]`. WebSearch fires in a non-interactive bounded job with no `allowed_tools` list or `can_use_tool` callback. That was verified live. The rolling plan limit then governs, so drop any per-minute token gating that existed only for the native tool.
 5. **Drop the key dependency for the migrated phase.** Remove its references to `ANTHROPIC_API_KEY_FIREWALLED`. If other phases still need the key, leave their imports alone.
-6. **Schedule batch callers.** Rolling plan limits make batch work compete with interactive sessions. Any non-interactive caller sets `scheduled_at` inside a window when the host is up. The field is top-level in the submit request, because `args` is checked against the command's own argument contract. 10 a.m. to 1 p.m. Eastern is optimal. The host is usually off from about 11 p.m. to 10 a.m., so a job scheduled then waits for the next boot. A user-clicked job omits `scheduled_at` and runs at once.
+6. **Schedule batch callers.** Rolling plan limits make batch work compete with interactive sessions. Any non-interactive caller sets `scheduled_at` inside a window when the host is up. The field is top-level in the submit request, because `args` is checked against the command's own argument contract. 10 a.m. to 1 p.m. Eastern is optimal, and 1 p.m. to 9 p.m. is acceptable. Avoid 9 p.m. to 11 p.m., the owner's interactive peak, because a batch job competes with their own work. The host is usually off from about 11 p.m. to 10 a.m., so a job scheduled then waits for the next boot. The window table is in [`CLAUDE.md` § Off-peak scheduling rule](../../CLAUDE.md). A user-clicked job omits `scheduled_at` and runs at once.
 7. **Update the docs.** Edit the agent's page under `src/docs/agents/` if it has one. In its `__init__.py`, update the "API Key Configuration" paragraph. It should say the phase is bounded and link this page.
 
 A scheduled submit:

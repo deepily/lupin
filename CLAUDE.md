@@ -32,14 +32,14 @@ CJ Flow is Lupin's unified work queue system. All jobs that implement the `Queue
 **Protocol**: `QueueableJob` (22 attrs + 4 methods) — see `src/cosa/rest/queue_protocol.py`
 
 **Dispatch architecture**: `RunningFifoQueue._process_job(job)` dispatches by `isinstance`:
-- `AgenticJobBase` → `_submit_agentic_job` → `ThreadPoolExecutor` (the **agentic pool**, size = `cj flow max concurrent agentic jobs` INI key: `[Lupin: Production]` and `[Lupin: Development]` set `= 3`, only `[Lupin: Baseline]` sets `= 1`, `[Lupin: Testing]` does not set it; re-read the INI before relying on it). Consumer thread returns immediately; `Future.add_done_callback` fires `_on_agentic_complete` which calls `_transition_to_done` or `_transition_to_dead`.
+- `AgenticJobBase` → `_submit_agentic_job` → `ThreadPoolExecutor` (the **agentic pool**, size = `cj flow max concurrent agentic jobs` INI key: `[Lupin: Production]` and `[Lupin: Development]` set `= 3`, only `[Lupin: Baseline]` sets `= 1`, `[Lupin: Testing]` does not set it — read 2026-09-11 at `1e0028dd`; re-read the INI before relying on it). Consumer thread returns immediately; `Future.add_done_callback` fires `_on_agentic_complete` which calls `_transition_to_done` or `_transition_to_dead`.
 - `AgentBase` / `SolutionSnapshot` → inline fast-lane on the consumer thread. Pool does NOT block fast-lane.
 
 **Thread safety**: `FifoQueue` has `threading.RLock` protecting `queue_list` + `queue_dict`. Pool workers and consumer thread can mutate concurrently. `running_fifo_queue.py` removes jobs with `self.delete_by_id_hash(job.id_hash)`, never `self.pop()`, because the head of the queue is not deterministic under pool-callback concurrency.
 
 **Ghost-job sweeper**: daemon thread on `RunningFifoQueue` runs every `cj flow ghost job sweep interval seconds` (default 30s). Scans `_agentic_futures` for entries whose `Future.done()` is True but whose job is still in running queue — dead-letters them via `_transition_to_dead`. It backs up the completion callback.
 
-**Rate-limit / API contention**: `ApiResourceManager` singleton at `src/cosa/utils/api_resource_manager.py` centralizes per-provider waits + call recording. Agents call `await get_arm().acquire( ... )` before a call and `get_arm().record_call( ... )` after it. Podcast, Presentation, BFE, TFE and ClaudeCode keep their own per-agent `_call_with_retry` loops; the two-path invariant is in `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/01-design-review.md §3a`.
+**Rate-limit / API contention**: `ApiResourceManager` singleton at `src/cosa/utils/api_resource_manager.py` centralizes per-provider waits + call recording. The API is `await get_arm().acquire( provider )` before a call and `get_arm().record_call( provider )` after it. No agent calls it today: Deep Research dropped its `anthropic_web_search` gating when it moved to bounded CC, because the plan's rolling window governs web search there, and the singleton remains for the pool-status report. Podcast, Presentation, BFE, TFE and ClaudeCode keep their own per-agent `_call_with_retry` loops; the two-path invariant is in `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/01-design-review.md §3a`.
 
 **Observability**: ⚠️ **These fields describe the pool, not the venue — do not derive idleness from them; use `cosa.rest.venue_idle` / `GET /api/busy`, see §TESTING VENUES.** `GET /api/queue/pool-status` (JWT) returns `{inflight_agentic_jobs, max_agentic_workers, pending_in_pool, monopolize_inflight, monopolize_id, api_resource_manager: {...}}`. A monopolize job runs on a DEDICATED single-worker executor (`_monopolize_pool`), NOT the shared pool, so it is EXCLUDED from `inflight_agentic_jobs`/`pending_in_pool` (those two mean shared-pool occupancy only) and surfaced instead via `monopolize_inflight` (bool) + `monopolize_id` (id or null). At most one monopolizer exists at a time (a second one is deferred at intake).
 
@@ -84,7 +84,7 @@ The bounded CC pattern is the cost-optimal default for LLM-driven agents that:
 
 On bounded CC: **BFE** (`src/cosa/agents/bug_fix_expediter/`), **TFE** (`src/cosa/agents/test_fix_expediter/`), **Podcast script generation** (`src/cosa/agents/podcast_generator/`; in-process `sdk_query`, `tools=[]`, lenient parsers), **Presentation content generation** (`src/cosa/agents/presentation_generator/`; seven methods through `sdk_query`, strict parsers, the Gemini path is separate), **Deep Research** (`src/cosa/agents/deep_research/`; lead agent `tools=[]`, research subagents `tools=[WebSearch, WebFetch]`, strict parsers).
 
-Not migrated, by decision: OpenAI call sites and the Runtime Argument Expeditor (see TODO.md).
+Deferred and not ratified for migration: OpenAI call sites and the Runtime Argument Expeditor (see TODO.md).
 
 **Framing**: this is a **cost-shift, not zero-cost**. The Max 200 plan is a fixed monthly bill. Migrations convert per-token metered spend into already-paid fixed cost. Never describe a migration as "free" — describe it as "covered by existing fixed cost."
 
@@ -155,7 +155,8 @@ A job that lands in the dead window drains late but not silently — `job_persis
   - `/src/cosa/rest/routers/`: API endpoint routers
 - `/src/cosa/`: Contains the CoSA (Collection of Small Agents) framework
   - `src/cosa/` is a regular in-tree directory of this repository, not a separate repo or submodule.
-    Manage its files and its git operations like any other Lupin source.
+    Manage its files and its git operations like any other Lupin source. The former CoSA repo's full
+    history is kept off-tree at `/mnt/DATA02/cosa-git-archive-2026.05.29/`.
   - It keeps its own README.md and CLAUDE.md; where `src/cosa/CLAUDE.md` talks about a submodule,
     this file governs.
 - `/src/cosa/agents/`: Agent implementations (math, calendar, deep_research, podcast/presentation generators, BFE/TFE, etc.)
@@ -170,6 +171,8 @@ A job that lands in the dead window drains late but not silently — `job_persis
 - `/src/cosa/io/`: Input/output helpers
 - `/src/cosa/utils/`: Shared utility functions
 - `/src/cosa/docs/`, `/src/cosa/history/`, `/src/cosa/rnd/`, `/src/cosa/tests/`: documentation, history, R&D, and tests
+
+`src/lib/` no longer exists. It held the desktop client (`lupin_client.py`, `lupin_client_cmd.py`, `lupin_client_gui.py`), which could not be imported and carried 0% coverage under the 100% mandate; its launcher `src/scripts/run-lupin-gui.sh` went with it. Recover both with `git checkout 71d5efaa -- src/lib src/scripts/run-lupin-gui.sh`.
 
 ## Debugging
 - Set `debug=True` and `verbose=True` parameters in class instantiations
@@ -385,13 +388,14 @@ The directory name is not a venue marker. Files living in `src/tests/smoke/` can
 
 ## 100% coverage mandate
 
-**A Lupin-wide hard gate**, covering `src/cosa` too.
+**A Lupin-wide hard gate** ("Everything has to pass at 100%. Full stop."), covering `src/cosa` too.
 
 **The rule**: **100% coverage — lines AND branches AND functions** on all Lupin code. Python via `pytest --cov` (`--cov-fail-under=100`); TypeScript via `c8 --100`.
 
 - **Exceptions**: `# pragma: no cover` (Python) / `c8 ignore` (TS) only for genuinely-unreachable defensive branches, and only with a same-line comment giving the reason. "No time to test" is never valid — fix the test, not the gate.
 - **In plan ACs**: write "100% lines/branches/functions" — never ≥90%/≥95%.
 - **Excludes**: sub-repos `lupin-mobile`, `lupin-plugin-firefox`, and external-project bind-mounts.
+- **Canonical record**: auto-memory `feedback_100pct_coverage_multiplexer.md` (directive and Lupin-wide scope). Origin: `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/08-phase6a-jobs-surface-design.md` AC6.
 
 ## Testing
 
@@ -418,10 +422,10 @@ smoke → serial bridge guard → websocket smoke → e2e UI and visual regressi
 e2e_b → integration, which is the final gate. Each requires 100% pass. Venues and commands are in § TESTING above.
 
 **typecheck runs FIRST because it is the cheapest gate** — the three tsc projects, about 3s of static
-analysis against the roughly 25 minute TypeScript tier. ⚠️ Its summary counts PROJECTS, not
+analysis against the roughly 25 minute TypeScript tier. It is a blocking gate so a type-red branch fails before any slow tier runs. ⚠️ Its summary counts PROJECTS, not
 tests: `Failed: 1` means one tsconfig project is red, which may be one type error or four hundred.
 
-**stylelint runs SECOND, for the same reason** — every `git ls-files '*.css'` file, about 1.5s. ⚠️ Its summary counts FILES: `Failed: 1` is one red .css file,
+**stylelint runs SECOND, for the same reason** — every `git ls-files '*.css'` file, about 1.5s. It is a blocking gate so style errors cannot pile up as "pre-existing" with nothing to stop them. ⚠️ Its summary counts FILES: `Failed: 1` is one red .css file,
 and the error count is printed on its own line. A waiver needs a same-line reason
 (`stylelint-disable-next-line <rule> -- <why>`); the config refuses one without. Tracked .html inline
 `<style>` blocks are NOT covered — that needs postcss-html, which is not installed.
@@ -813,14 +817,14 @@ When modifying code in these areas, update the corresponding documentation:
 | `lupin-app.ini` `test fix expediter *` keys | `src/docs/agents/test-fix-expediter-guide.md` INI Reference |
 | BFE/TFE endpoint rows | `src/docs/rest-api-reference.md` sections 17/17a/17b |
 | `routers/voice_persona.py` + `voice_persona_helpers.py` | `src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md` (architecture, allocation flow, /clear preservation, conversation-mode orthogonality) |
-| `lupin-app.ini` `cc session voice persona *` keys | Same design doc, § 3 (Voice Pool) for the base pool |
-| `lupin_cli/claude_code/hooks/lib/session_bridge.py` `prune_dead_persona_bridges` + `find_active_voice_persona_sessions` TTL guard | The same design doc; the host-side prune runs at SessionStart and a bridge file's mtime TTL decides staleness |
+| `lupin-app.ini` `cc session voice persona *` keys | Same design doc, § 3 (Voice Pool) for the base pool. The Sam-overflow keys (`cc session voice persona sam icon/color/profile/display name`) and `stale threshold seconds` configure the overflow persona and the stale-bridge cutoff |
+| `lupin_cli/claude_code/hooks/lib/session_bridge.py` `prune_dead_persona_bridges` + `find_active_voice_persona_sessions` TTL guard | The same design doc; the host-side prune runs at SessionStart, a bridge file's mtime TTL decides staleness, and "Sam" is the overflow persona allocated when the base pool is full |
 | New LLM-driven agent OR migration of an existing agent between bounded-CC and firewalled-SDK paths | `src/docs/cost-model-bounded-cc-vs-firewalled-sdk.md`, auto-memory `feedback_prefer_bounded_cc_over_anthropic_sdk.md`, and this file's § Cost model if its guardrails or migrated list change |
 | `src/cosa/rest/routers/_scope_registry.py` + `docs_files.py` + `io_files.py` + `lupin-app.ini` `external repo *` keys + `docker-compose.yml` bind-mounts | Update the `docker-compose.yml` mounts and this file's § Doc viewer scope together. Adding a new external scope requires the four-step checklist in auto-memory `feedback_multi_repo_doc_viewer.md`. |
 
 **Documentation index**: `src/docs/README.md` — lists all docs with verification dates.
 
-**Fleet liveness + unified task-store architecture (top-to-bottom)**: `src/docs/fleet-liveness-and-task-store-architecture.md` — the canonical reference for the one-store/three-readers design (Stop-hook self-poke · `:8001` arbiter · human UI card), the heartbeat seam + `heartbeat.owed_source_from_store` cutover flag + fail-safe, the arbiter detectors (staleness 2700s / tap-ACK 600s / whole-fleet-stall 1800s) + how to bounce it (`systemctl --user restart lupin-arbiter-app.service`), and the manager/worker spawn→worktree→review→merge-held→push lifecycle. Read this before touching the liveness path, the task store, or the arbiter.
+**Fleet liveness + unified task-store architecture (top-to-bottom)**: `src/docs/fleet-liveness-and-task-store-architecture.md` — the canonical reference for the one-store/three-readers design (Stop-hook self-poke · `:8001` arbiter · human UI card), the heartbeat seam + `heartbeat.owed_source_from_store` cutover flag + fail-safe, the arbiter detectors (staleness 2700s / tap-ACK 600s / whole-fleet-stall 1800s) + how to bounce it (`systemctl --user restart lupin-arbiter-app.service`), the manager/worker spawn→worktree→review→merge-held→push lifecycle, and the migration drain. Read this before touching the liveness path, the task store, or the arbiter.
 
 **Declaring a hold (parking a session) — use the VERB, never hand-write the JSON**: to park a session with a hold, run the `heartbeat_hold_io.py` **write** verb — it records the hold AND verify-reads it back so the hook will actually honor it. **Never hand-write a `.heartbeat-hold-*.json` file** (Write tool or `>`): a hand-written hold lands in the **repo root**, where no reader looks — the arbiter and the Stop hook both resolve holds under `fleet_data_root()` — so the session parks **invisibly** and the poke keeps coming. The arbiter's sweep flags a misplaced hold (`hold_is_misplaced`, the `misplaced` field), but flagging is the backstop, not the instruction. One example beats a paragraph:
 
@@ -834,7 +838,7 @@ python3 -m lupin_cli.claude_code.hooks.lib.heartbeat_hold_io write \
 
 ## History structure notes
 - **Current Implementation Docs**: Referenced in history.md header
-- **Archive Location**: `history/` directory with monthly organization
+- **Archive Location**: `history/` directory, organized by period; `history/README.md` indexes each archive by period and key topics
 
 ## Doc viewer scope (unified path-prefix routing)
 

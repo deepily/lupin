@@ -7,6 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `src/cosa/` is a regular in-tree directory of the Lupin repository, not a submodule; the Lupin repo is the only git repo. The root `CLAUDE.md` governs git, testing and merging.
 - Never commit or push without the user's explicit approval.
 - Session history goes in the Lupin `history.md`, not in a history file here.
+- The former CoSA repo's full history is kept off-tree at `/mnt/DATA02/cosa-git-archive-2026.05.29/`.
 
 ## PROJECT SHORT NAMES
 - This repo's SHORT_PROJECT_PREFIX is [COSA]
