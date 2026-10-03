@@ -334,20 +334,30 @@ def test_empty_updates_rejected( probe, api_key ):
 # ---------------------------------------------------------------------------
 def test_terminal_item_edit_rejected( api_key ):
     """AC5: a done/dropped item refuses any edit ('no edits to closed history')."""
-    item    = _make_probe( api_key, title="task_edit parity probe (TERMINAL)" )
-    task_id = item[ "id" ]
-    trans   = task_transition_impl(
-        BASE_URL, api_key, ACTOR, task_id, "dropped",
-        reason="parity E2E: retire to terminal for the reject arm",
-    )
-    assert not _is_refused( trans ), f"could not drop probe: {trans!r}"
+    # The row is SEEDED as queued, not created through the API: a created probe sits in the
+    # holding area, and closing it from there needs an approver's login (403 on :8000 job
+    # ts-11c25f8a). Built by hand rather than through the `seeded_task_rows` fixture, which
+    # pulls in `clean_test_db` and would drop the module-scoped `probe` row under the tests
+    # that follow.
+    from cosa.rest.db import database as db_module
+    from tests.integration.seeded_task_rows import SeededRows
 
-    resp = task_edit_impl( BASE_URL, api_key, ACTOR, task_id, { "priority": "P1" }, reason="parity E2E: edit terminal" )
+    rows = SeededRows( db_module.engine.url, db_module.get_db )
+    try:
+        task_id = rows.create( "itest edit parity", "task_edit parity probe (TERMINAL)", created_by=ACTOR )[ "id" ]
+        trans   = task_transition_impl(
+            BASE_URL, api_key, ACTOR, task_id, "dropped",
+            reason="parity E2E: retire to terminal for the reject arm",
+        )
+        assert not _is_refused( trans ), f"could not drop probe: {trans!r}"
 
-    assert _is_refused( resp ), f"terminal edit should be refused: {resp!r}"
-    if "http_status" in resp:
-        assert resp[ "http_status" ] == 422, f"expected 422 on terminal edit, got {resp!r}"
-    # No teardown — the row is already terminal.
+        resp = task_edit_impl( BASE_URL, api_key, ACTOR, task_id, { "priority": "P1" }, reason="parity E2E: edit terminal" )
+
+        assert _is_refused( resp ), f"terminal edit should be refused: {resp!r}"
+        if "http_status" in resp:
+            assert resp[ "http_status" ] == 422, f"expected 422 on terminal edit, got {resp!r}"
+    finally:
+        rows.delete_all()
 
 
 # ---------------------------------------------------------------------------

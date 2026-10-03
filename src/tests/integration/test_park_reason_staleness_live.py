@@ -192,14 +192,14 @@ def _headers( api_key ):
     return { "X-API-Key": api_key }
 
 
-def _create_row( seeded_task_rows, persona, title="AC3 staleness subject" ):
+def _create_row( seeded_task_rows, persona, title="AC3 staleness subject", **columns ):
     """
     A queued row owned by `persona`, inserted straight into lupin_db_test.
 
     The create door files at `not_approved` and only an approver may admit a row, so the row
     is seeded; park, amend and the staleness reads still go through the API.
     """
-    row = seeded_task_rows.create( persona, title, created_by="seat3 ac3" )
+    row = seeded_task_rows.create( persona, title, created_by="seat3 ac3", **columns )
     assert row[ "status" ] == "queued"
     return row
 
@@ -422,16 +422,19 @@ def test_a_row_whose_PRIORITY_changed_after_park_is_NOT_stale( test_api_key, per
     cannot be bought by the PATCH silently unparking or rewriting anything.
     """
     api_key = test_api_key[ "api_key" ]
-    row     = _create_row( seeded_task_rows, persona )
+    # Seeded at P3 and moved DOWN to P4: the priority firewall refuses an API-key caller who
+    # RAISES a priority (403 on :8000 job ts-11c25f8a), and this test is about a priority-only
+    # edit, in either direction, leaving the quote fresh.
+    row     = _create_row( seeded_task_rows, persona, priority="P3" )
 
     _park( api_key, row[ "id" ], "not right now — revisit when something forces it" )
     assert _get_row( api_key, row[ "id" ] )[ "park_reason_stale" ] is False
 
-    _amend( api_key, row[ "id" ], priority="P3" )
+    _amend( api_key, row[ "id" ], priority="P4" )
     after = _get_row( api_key, row[ "id" ] )
 
     assert after[ "status" ]      == "parked",  "PATCH must not unpark the row"
-    assert after[ "priority" ]    == "P3",      "sanity: the edit must actually have applied"
+    assert after[ "priority" ]    == "P4",      "sanity: the edit must actually have applied"
     assert after[ "park_reason" ] == "not right now — revisit when something forces it", (
         "the quote must be untouched — this test is about a quote that is still TRUE"
     )
