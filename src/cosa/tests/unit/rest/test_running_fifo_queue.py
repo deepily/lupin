@@ -1380,11 +1380,12 @@ class TestHandleBaseAgent( _RFQBase ):
         rq = self.build()
         rq.queue_dict[ "suite" ] = _Node( job_type="test_suite" )
         job = _CrudFake( id_hash="c1", spawned_by_id_hash="suite", lineage_is_test_suite=False )
-        job.do_all = lambda: job.lineage_is_test_suite     # records what the agent saw when it ran
+        seen = []
+        job.do_all = lambda: seen.append( job.lineage_is_test_suite ) or "output"   # what the agent saw WHEN it ran
         self._enqueue( rq, job )
         rq._confirm_correctness = MagicMock()
         rq._handle_base_agent( job, "q", rfq.sw.Stopwatch( "t" ) )
-        self.assertIs( job.lineage_is_test_suite, True )
+        self.assertEqual( seen, [ True ] )
 
     def test_crud_agent_without_suite_lineage_stays_unflagged( self ):
         rq = self.build()
