@@ -942,12 +942,12 @@ def test_a_redraw_over_a_partial_ledger_is_refused_before_the_first_call( planne
     tmp_path, shared = planned
     base = tmp_path / "out"
     tasks = s.read_jsonl( str( base / "dev" / "writer_tasks.jsonl" ) )
-    done = tasks[ :3 ]                                           # a partial ledger: the third held task was redrawn with new text
+    done = tasks[ -3: ]                                          # a partial ledger holding the LAST three tasks, so pending tasks come first
     s.write_jsonl( str( base / "dev" / "writer_ledger.jsonl" ), [ dict( s.writer_ledger_row( t[ "task_id" ], FABLE, "x" ), task_sha=s.task_sha( t[ "instruction" ], t[ "text" ] ) ) for t in done ] )
-    tasks[ 2 ] = dict( tasks[ 2 ], text = "redrawn text" )
+    tasks[ -1 ] = dict( tasks[ -1 ], text = "redrawn text" )   # the last held task is redrawn, after every pending one
     s.write_jsonl( str( base / "dev" / "writer_tasks.jsonl" ), tasks )
     plan = json.loads( ( base / "dev" / "plan.json" ).read_text() )
-    plan[ "tasks" ][ tasks[ 2 ][ "task_id" ] ][ "sha256" ] = s.task_sha( tasks[ 2 ][ "instruction" ], "redrawn text" )
+    plan[ "tasks" ][ tasks[ -1 ][ "task_id" ] ][ "sha256" ] = s.task_sha( tasks[ -1 ][ "instruction" ], "redrawn text" )
     plan[ "plan_sha256" ] = s.plan_hash( plan )
     ( base / "dev" / "plan.json" ).write_text( json.dumps( plan ) )
     assert s.main( write_args( base, shared ), query_fn=NoCallTransport() ) == 2
