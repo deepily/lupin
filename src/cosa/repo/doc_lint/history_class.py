@@ -1,27 +1,28 @@
 """
-The history class of the claim check.
+The history class of the claim check: a tag, never an excuse.
 
-A claim taken from the old docstring that is only history does not count as lost when the new text
-leaves it out. The class is the "may go" column of planning-is-prompting workflow/docstring-content.md
-section 2: dates; row, ticket, commit and session ids; provenance; incident figures and one-off
-measurements; historical narrative, including the story of a rejected alternative.
-A dropped reason or behaviour still counts as lost.
+A claim taken from the old docstring that looks like history is tagged. The class is the "may go"
+column of planning-is-prompting workflow/docstring-content.md section 2: dates; row, ticket, commit
+and session ids; provenance; incident figures and one-off measurements; historical narrative,
+including the story of a rejected alternative.
+
+The tag changes no count. Every claim the judge calls absent is still lost; the report lists the
+tagged ones apart, with a count, so a person can read them and decide. No claim is excused here.
 
 It is a post-filter on claims the judge already called absent. It is not part of the extractor or the
-judge, because a change to either prompt would void every ledgered verdict, and a model would then
-decide what to excuse. The filter is plain Python, so no ledger key moves and no model is called.
+judge, because a change to either prompt would void every ledgered verdict. The filter is plain Python,
+so no ledger key moves and no model is called.
 
-The filter is an upper bound on excusing, and a person reads every excused claim: the report lists
-each one with its quote. Two tests must both pass before a claim is excused.
+Two tests must both pass before a claim is tagged.
     1. History is found in the claim text. The quote is never searched for history: it is a stretch
        of the old docstring and often ends in a citation or a date that the claim does not state.
     2. Nothing but history is left. The history spans are cut out of the claim text, and every word
        that remains must be a word of history vocabulary or a function word (HISTORY_GLUE). Any
-       other word is read as a statement of what the code does, so the claim counts as lost.
-Any reason or behaviour marker in the claim text or in its quote also keeps the claim lost.
+       other word is read as a statement of what the code does, so the claim is not tagged.
+Any reason or behaviour marker in the claim text or in its quote also keeps a claim untagged.
 
-Provenance counts only with a named person ("Rick ruled") or alongside a date or an id. The words
-"ruled", "ruling" and "according to" excuse nothing alone. The words "no longer" and "unchanged" are
+Provenance tags only with a named person ("Rick ruled") or alongside a date or an id. The words
+"ruled", "ruling" and "according to" tag nothing alone. The words "no longer" and "unchanged" are
 not markers, because each also states present behaviour.
 
 The class was defined after the pilot's losses were seen, by an author who did not open them.
@@ -54,7 +55,7 @@ HISTORY_GLUE = frozenset( (
     " originally earlier text version draft update updated see per" ).split() )
 
 # A reason or behaviour marker. A claim that matches any of these in its text or its quote states something
-# that is still true of the code, so it is never excused: where they meet, keep the reason, drop the story.
+# that is still true of the code, so it is never tagged: where they meet, keep the reason, drop the story.
 REASON_MARKERS = re.compile(
     r"\bbecause\b|\bso that\b|\bso (?:a|an|the|both|every|each|it|they|that)\b|\bin order to\b|\bto (?:avoid|prevent|keep|ensure|guarantee|stop)\b"
     r"|\bmust\b|\bmay not\b|\bmust not\b|\bcannot\b|\bnever\b|\balways\b|\bonly (?:when|if)\b|\bunless\b|\botherwise\b"
@@ -69,7 +70,7 @@ HISTORY_CLASS_VERSION = "history-" + hashlib.sha256( inspect.getsource( sys.modu
 
 def history_kinds( claim_text, quote ):
     """
-    Name the history kinds of a claim that is only history, or none.
+    Name the history kinds a claim is tagged with, or none.
 
     Requires:
         - claim_text and quote are str; quote may be empty
@@ -79,7 +80,7 @@ def history_kinds( claim_text, quote ):
         - history markers are searched in claim_text only, never in the quote
         - returns [] when no history marker matches the claim text
         - returns [] when, with every history span cut out of claim_text, any word is outside HISTORY_GLUE
-          or any bare number remains: a statement about the code is left, so the claim is lost
+          or any bare number remains: a statement about the code is left, so the claim is not tagged
         - otherwise returns the matched kind names in marker order
     """
     if REASON_MARKERS.search( claim_text ) or REASON_MARKERS.search( quote ): return []
@@ -96,34 +97,34 @@ def history_kinds( claim_text, quote ):
 
 
 def is_history( claim_text, quote ):
-    """Say whether a claim is only history, so its absence from the new text is not a loss."""
+    """Say whether a claim is tagged as history. The tag excuses nothing."""
     return bool( history_kinds( claim_text, quote ) )
 
 
-def split_absent( claims, absent_flags ):
+def tag_absent( claims, absent_flags ):
     """
-    Split the claims judged dropped into lost and excused-as-history.
+    List the claims judged dropped, and say which of them are tagged as history.
 
     Requires:
         - claims is a list of objects with .text and .quote (extractor Claims) or ledger dicts with "text" and "quote"
         - absent_flags has one bool per claim: True when the judge called it dropped
 
     Ensures:
-        - returns ( lost, excused ); lost holds the indexes of dropped claims that are not history,
-          excused holds ( index, kinds ) for dropped claims that are
+        - returns ( dropped, tagged ): dropped holds the indexes of every claim judged dropped, tagged or not;
+          tagged holds ( index, kinds ) for those of them that look like history
+        - tagged is a subset of dropped, and no dropped claim is left out: nothing is excused
         - a claim not judged dropped is in neither list
-        - the two lists together cover every dropped claim, so the split drops none
 
     Raises:
         - ValueError when the two lists differ in length
     """
     if len( claims ) != len( absent_flags ): raise ValueError( f"{len( claims )} claims but {len( absent_flags )} flags" )
-    lost    = []
-    excused = []
+    dropped = []
+    tagged  = []
     for i, ( claim, absent ) in enumerate( zip( claims, absent_flags ) ):
         if not absent: continue
+        dropped.append( i )
         text, quote = ( claim[ "text" ], claim[ "quote" ] ) if isinstance( claim, dict ) else ( claim.text, claim.quote )
         kinds = history_kinds( text, quote )
-        if kinds: excused.append( ( i, kinds ) )
-        else:     lost.append( i )
-    return lost, excused
+        if kinds: tagged.append( ( i, kinds ) )
+    return dropped, tagged

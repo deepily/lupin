@@ -91,21 +91,22 @@ def caught( claim_list, seed_span ):
                                                          for flag, c in zip( flags, claim_list[ "claims" ] ) )
 
 
-def loss_split( claim_list ):
+def drop_tags( claim_list ):
     """
-    Split one extractor list's dropped claims into lost and excused-as-history.
+    List one extractor list's dropped claims and say which look like history.
 
     Requires:
         - claim_list is a run_pair list entry
 
     Ensures:
-        - returns ( lost, excused ): indexes of claims judged dropped that are not history, and
-          ( index, kinds ) for those that are; see history_class
+        - returns ( dropped, tagged ): the indexes of every claim judged dropped, and ( index, kinds ) for the
+          ones tagged as history; see history_class
+        - the tag excuses nothing: tagged is a subset of dropped
         - an empty claim list gives two empty lists
         - it never changes final_absent, caught or flagged, so the gate figures are measured as before
     """
     if not claim_list[ "claims" ]: return [], []
-    return history_class.split_absent( claim_list[ "claims" ], final_absent( claim_list[ "runs" ] ) )
+    return history_class.tag_absent( claim_list[ "claims" ], final_absent( claim_list[ "runs" ] ) )
 
 
 def run_flagged( claim_list, seed_span ):
@@ -162,10 +163,9 @@ def build_report( results, config, judge_prompt_version=None, jev_run=False ):
         - false_alarm_rate counts the judge's false alarms only; a flagged run is counted apart, in flagged_rate,
           and flagged_ok is True only when every list's flagged_rate is at most FLAGGED_CEILING (provisional)
         - the model ids and prompt versions used are recorded in the report
-        - history_class carries the class version and, per list, the dropped claims that still count as lost and
-          the ones excused as history (a separate number, never folded into either gate figure), and
-          excused_claims, one row per excused claim with its pair, list, text, quote and kinds, for a person to read; the
-          gate figures above are computed from every dropped claim, history included
+        - history_class carries the class version and, per list, claims_lost (every claim judged dropped: nothing is excused)
+          and the tagged count, the dropped claims that look like history; tagged_claims lists each tagged claim with its
+          pair, list, text, quote and kinds, for a person to read. The gate figures above use every dropped claim, as before
         - miss_criterion_met is True only for zero misses on at least 60 seeded pairs in every list
         - false_alarm_ok is True only when every list flags at most FALSE_ALARM_CEILING of the
           unseeded pairs, so a harness that flags everything cannot pass
@@ -208,8 +208,8 @@ def build_report( results, config, judge_prompt_version=None, jev_run=False ):
             "review_rate"       : review / len( unseeded ) if unseeded else None,
             "caught_by_flag_only": flag_only,
             "parse_failed_pairs": sum( 1 for r in results if r[ "lists" ][ slot ][ "parse_failed" ] ),
-            "claims_lost"       : sum( len( loss_split( r[ "lists" ][ slot ] )[ 0 ] ) for r in results ),
-            "history_excused"   : sum( len( loss_split( r[ "lists" ][ slot ] )[ 1 ] ) for r in results ),
+            "claims_lost"       : sum( len( drop_tags( r[ "lists" ][ slot ] )[ 0 ] ) for r in results ),
+            "history_tagged"    : sum( len( drop_tags( r[ "lists" ][ slot ] )[ 1 ] ) for r in results ),
         } )
     miss_ok = bool( seeded ) and len( seeded ) >= DEFAULT_POSITIVES_NEEDED and all( l[ "misses" ] == 0 for l in lists )
     fa_ok   = all( l[ "false_alarm_rate" ] is not None and l[ "false_alarm_rate" ] <= FALSE_ALARM_CEILING for l in lists )
@@ -233,8 +233,8 @@ def build_report( results, config, judge_prompt_version=None, jev_run=False ):
                 if r[ "seed_span" ] is not None and claim_extractor.spans_overlap( ( claim[ "start" ], claim[ "end" ] ), tuple( r[ "seed_span" ] ) ):
                     seed_total += 1
                     seed_same  += same
-    excused_claims = [ { "pair": r[ "id" ], "list": slot, "claim": lst[ "claims" ][ i ][ "text" ], "quote": lst[ "claims" ][ i ][ "quote" ], "kinds": kinds }
-                       for r in results for slot, lst in enumerate( r[ "lists" ] ) for i, kinds in loss_split( lst )[ 1 ] ]
+    tagged_claims = [ { "pair": r[ "id" ], "list": slot, "claim": lst[ "claims" ][ i ][ "text" ], "quote": lst[ "claims" ][ i ][ "quote" ], "kinds": kinds }
+                      for r in results for slot, lst in enumerate( r[ "lists" ] ) for i, kinds in drop_tags( lst )[ 1 ] ]
     agree_all  = all_same / all_total if all_total else None
     agree_seed = seed_same / seed_total if seed_total else None
     agree_ok   = agree_all is not None and agree_seed is not None and agree_all >= AGREEMENT_BAR and agree_seed >= AGREEMENT_BAR
@@ -263,8 +263,8 @@ def build_report( results, config, judge_prompt_version=None, jev_run=False ):
         "mean_uncovered"    : sum( uncovered ) / len( uncovered ) if uncovered else None,
         "identical_list_pairs" : identical,
         "history_class"     : { "version": history_class.HISTORY_CLASS_VERSION,
-                                "lost": [ l[ "claims_lost" ] for l in lists ], "excused": [ l[ "history_excused" ] for l in lists ],
-                                "excused_claims": excused_claims },
+                                "lost": [ l[ "claims_lost" ] for l in lists ], "tagged": [ l[ "history_tagged" ] for l in lists ],
+                                "tagged_claims": tagged_claims },
         "pairs"             : len( results ),
         "miss_criterion_met": miss_ok,
         "false_alarm_ok"    : fa_ok,
