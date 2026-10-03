@@ -106,8 +106,26 @@ export function groupHeldRowsByFiler( tasks: unknown ): HeldFilerGroup[] {
 
 /** One story's held rows: the `correlation_key` they share and their full ids. */
 export interface HeldStory {
-  key : string;
-  ids : string[];
+  key    : string;
+  ids    : string[];
+  title  : string;
+  filers : string[];
+}
+
+/**
+ * A story's key as a readable title: "epic:v022-docs-and-reuse" → "v022 docs and reuse".
+ *
+ * The key is an identifier, not a name, and it must never be painted where a person's name
+ * goes. Strips a leading "epic:", turns hyphens and underscores into spaces.
+ *
+ * Ensures:
+ *   - never returns the empty string for a non-empty key: a key that is only a prefix stays as is
+ *   - pure; never throws
+ */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+export function storyTitle( key: string ): string {
+  const title = key.replace( /^epic:/, "" ).replace( /[-_]+/g, " " ).trim();
+  return title === "" ? key : title;
 }
 
 /**
@@ -125,7 +143,8 @@ export interface HeldStory {
  * equivalence, not shared code.
  *
  * Ensures:
- *   - returns [ { key, ids } ], keys sorted alphabetically
+ *   - returns [ { key, ids, title, filers } ], keys sorted alphabetically; `title` is the key made
+ *     readable and `filers` the distinct filer labels (what the bar shows as the persona)
  *   - ids are the full row ids in arrival order; a row with no id is dropped
  *   - a key with fewer than two ids is omitted, EXCEPT a key named in `keep` (a story
  *     whose last run left a report to show), which stays while it has one id left
@@ -135,7 +154,8 @@ export interface HeldStory {
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function groupHeldRowsByStory( tasks: unknown, keep: ReadonlySet<string> = new Set() ): HeldStory[] {
   const rows  = Array.isArray( tasks ) ? tasks : [];
-  const byKey = new Map<string, string[]>();
+  const byKey   = new Map<string, string[]>();
+  const byFiler = new Map<string, Set<string>>();
   rows.forEach( ( raw ) => {
     const task = ( raw ?? {} ) as TaskItem;
     const key  = task.correlation_key ? String( task.correlation_key ) : "";
@@ -146,11 +166,20 @@ export function groupHeldRowsByStory( tasks: unknown, keep: ReadonlySet<string> 
     const bucket = byKey.get( key );
     if ( bucket ) bucket.push( id );
     else byKey.set( key, [ id ] );
+    const filer = taskFilerLabel( task );
+    const seen  = byFiler.get( key );
+    if ( seen ) seen.add( filer );
+    else byFiler.set( key, new Set( [ filer ] ) );
   } );
   return Array.from( byKey.keys() )
     .filter( ( key ) => ( byKey.get( key ) as string[] ).length >= ( keep.has( key ) ? 1 : 2 ) )
     .sort( ( a, b ) => a.localeCompare( b ) )
-    .map( ( key ) => ( { key, ids : byKey.get( key ) as string[] } ) );
+    .map( ( key ) => ( {
+      key,
+      ids    : byKey.get( key ) as string[],
+      title  : storyTitle( key ),
+      filers : Array.from( byFiler.get( key ) as Set<string> ).sort( ( a, b ) => a.localeCompare( b ) ),
+    } ) );
 }
 
 /**

@@ -234,6 +234,7 @@ export function holdingStoryApproveTitle( key: string ): string {
  *   - returns null for no stories, so the pane is unchanged when there are none
  *   - otherwise one `.holding-area-stories` <div> holding one `.holding-story-bar`
  *     per story, in order
+ *   - the persona slot shows the story's filers; the story shows as "Story: <title>", never the raw key
  *   - the button, the key and the status span each carry data-story
  *   - the button's label and its data-task-ids carry the same N
  */
@@ -247,9 +248,17 @@ export function renderHoldingStories( stories: ReadonlyArray<HeldStory> ): HTMLD
     bar.className = "holding-story-bar";
     bar.dataset.story = story.key;
 
+    // The persona slot names a PERSON (the filers of the held rows), as the filer bars do.
+    // The story rides beside it as a readable title behind a "Story:" tag, never the raw key.
+    const filerEl = document.createElement( "span" );
+    filerEl.className   = "holding-area-filer holding-story-filer";
+    filerEl.textContent = story.filers.join( ", " );
+    bar.appendChild( filerEl );
+
     const keyEl = document.createElement( "span" );
     keyEl.className   = "holding-story-key";
-    keyEl.textContent = story.key;
+    keyEl.textContent = `Story: ${ story.title }`;
+    keyEl.title       = story.key;
     bar.appendChild( keyEl );
 
     const countEl = document.createElement( "span" );

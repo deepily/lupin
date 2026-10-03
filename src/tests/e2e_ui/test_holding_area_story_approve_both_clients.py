@@ -268,3 +268,15 @@ def test_story_approve_multiplexer_board_two_clicks_approve_the_story( page ):
     state = _route_operator( page )
     pane  = _open_mux( page )
     _operator_two_clicks( page, pane, state )
+
+
+def test_story_bar_multiplexer_board_never_paints_the_raw_key_in_the_persona_slot( page ):
+    """Row 0d6d4387: the persona slot names the filer; the story is a titled label, not `epic:...`."""
+    _route_operator( page )
+    pane = _open_mux( page )
+    page.wait_for_selector( f"{pane} .holding-area-group", state="attached" )
+    story_bar = _bar( page, pane, STORY_KEY )
+    expect( story_bar ).to_have_count( 1, timeout=TIMEOUT_MS )
+    expect( story_bar.locator( ".holding-story-filer" ) ).to_have_text( "Rachel" )
+    expect( story_bar.locator( ".holding-story-key" ) ).to_have_text( "Story: e2e story approve" )
+    assert "epic:" not in story_bar.inner_text(), f"the raw key is visible on the bar: {story_bar.inner_text()!r}"

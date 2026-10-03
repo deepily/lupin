@@ -20,7 +20,7 @@ import {
   createHoldingAreaRenderer,
   type HoldingAreaStoreLike,
 } from "../../../../lupin_app/static/js/multiplexer/render/HoldingAreaRenderer";
-import { groupHeldRowsByStory } from "../../../../lupin_app/static/js/multiplexer/render/holdingAreaModel";
+import { groupHeldRowsByStory, storyTitle } from "../../../../lupin_app/static/js/multiplexer/render/holdingAreaModel";
 import { HOLDING_BATCH_ARMED_CLASS, HOLDING_BATCH_NO_ROWS_STORY } from "../../../../lupin_app/static/js/multiplexer/render/holdingAreaBatch";
 import {
   holdingStoryApproveLabel,
@@ -121,15 +121,15 @@ const settle = (): Promise<void> => new Promise( ( r ) => setTimeout( r, 0 ) );
 test( "model: a key held by two rows is a story, a key held by ONE is not, a keyless row never is", () => {
   const stories = groupHeldRowsByStory( ROWS() );
   assert.deepEqual( stories, [
-    { key: "epic:plan-a", ids: [ "a1", "a2", "a3" ] },
-    { key: "epic:plan-c", ids: [ "c1", "c2" ] },
+    { key: "epic:plan-a", ids: [ "a1", "a2", "a3" ], title: "plan a", filers: [ "Rachel" ] },
+    { key: "epic:plan-c", ids: [ "c1", "c2" ], title: "plan c", filers: [ "Rachel" ] },
   ] );
 } );
 
 test( "model: epic:unassigned is never a story, beside a real key that is", () => {
   const rows = [ held( "u1", "epic:unassigned" ), held( "u2", "epic:unassigned" ),
                  held( "r1", "epic:real" ), held( "r2", "epic:real" ) ];
-  assert.deepEqual( groupHeldRowsByStory( rows ), [ { key: "epic:real", ids: [ "r1", "r2" ] } ] );
+  assert.deepEqual( groupHeldRowsByStory( rows ), [ { key: "epic:real", ids: [ "r1", "r2" ], title: "real", filers: [ "Rachel" ] } ] );
   assert.deepEqual( groupHeldRowsByStory( rows, new Set( [ "epic:unassigned" ] ) ).map( ( s ) => s.key ),
     [ "epic:real" ], "a kept report resurrected a bar over epic:unassigned" );
 } );
@@ -137,7 +137,7 @@ test( "model: epic:unassigned is never a story, beside a real key that is", () =
 test( "model: keep names a key that stays at ONE row, and only that key", () => {
   const stories = groupHeldRowsByStory( ROWS(), new Set( [ "epic:plan-b" ] ) );
   assert.deepEqual( stories.map( ( s ) => s.key ), [ "epic:plan-a", "epic:plan-b", "epic:plan-c" ] );
-  assert.deepEqual( stories[ 1 ], { key: "epic:plan-b", ids: [ "b1" ] } );
+  assert.deepEqual( stories[ 1 ], { key: "epic:plan-b", ids: [ "b1" ], title: "plan b", filers: [ "Rachel" ] } );
 } );
 
 test( "model: junk in, empty out — and a row with no id cannot join a story", () => {
@@ -146,6 +146,27 @@ test( "model: junk in, empty out — and a row with no id cannot join a story", 
   assert.deepEqual( groupHeldRowsByStory( [ null, undefined, {} ] ), [] );
   const rows = [ { correlation_key: "k" }, { id: "z1", correlation_key: "k" } ];
   assert.deepEqual( groupHeldRowsByStory( rows ), [], "an id-less row counted toward a story" );
+} );
+
+test( "model: storyTitle strips epic:, turns hyphens and underscores to spaces, never blanks a key", () => {
+  assert.equal( storyTitle( "epic:v022-docs-and-reuse" ), "v022 docs and reuse" );
+  assert.equal( storyTitle( "plan_x--y" ), "plan x y" );
+  assert.equal( storyTitle( "epic:" ), "epic:" );
+} );
+
+test( "model: filers are the distinct, sorted persona labels of the story's rows", () => {
+  const rows = [ held( "m1", "epic:mix", "zed" ), held( "m2", "epic:mix", "amy" ), held( "m3", "epic:mix", "zed" ) ];
+  assert.deepEqual( groupHeldRowsByStory( rows )[ 0 ]?.filers, [ "Amy", "Zed" ] );
+} );
+
+test( "template: the bar's persona slot names the filer and the story reads as a titled story, never the raw key", () => {
+  const rows  = [ held( "m1", "epic:v022-docs-and-reuse", "rachel" ), held( "m2", "epic:v022-docs-and-reuse", "sam" ) ];
+  const strip = renderHoldingStories( groupHeldRowsByStory( rows ) ) as HTMLElement;
+  assert.equal( strip.querySelector( ".holding-story-filer" )?.textContent, "Rachel, Sam" );
+  assert.equal( strip.querySelector( ".holding-story-key" )?.textContent, "Story: v022 docs and reuse" );
+  assert.ok( ! ( strip.querySelector( ".holding-story-filer" )?.textContent ?? "" ).includes( "epic:" ), "raw key in the persona slot" );
+  assert.ok( ! ( strip.querySelector( ".holding-story-key" )?.textContent ?? "" ).includes( "epic:" ), "raw key in the story label" );
+  assert.equal( ( strip.querySelector( ".holding-story-bar" ) as HTMLElement ).dataset.story, "epic:v022-docs-and-reuse" );
 } );
 
 test( "template: no stories renders nothing at all; the label and tooltip name N and the key", () => {
