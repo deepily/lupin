@@ -1,24 +1,24 @@
 """
-The history class of the claim check (row 9d40b2af).
+The history class of the claim check.
 
-A claim taken from OLD docstring text that is only history does not count as lost when the new
-text leaves it out. The class is the "may go" column of planning-is-prompting
-workflow/docstring-content.md section 2 (commit 7fb35af): dates; row, ticket, commit and session
-ids; provenance; incident figures and one-off measurements; historical narrative, including the
-story of a rejected alternative. A dropped reason or behaviour still counts as lost.
+A claim taken from the old docstring that is only history does not count as lost when the new text
+leaves it out. The class is the "may go" column of planning-is-prompting workflow/docstring-content.md
+section 2: dates; row, ticket, commit and session ids; provenance; incident figures and one-off
+measurements; historical narrative, including the story of a rejected alternative.
+A dropped reason or behaviour still counts as lost.
 
-Where it is applied: a POST-FILTER on claims the judge already called absent. Not the extractor
-(its prompt version would change and every ledgered extraction would be invalid), not the judge
-(same, and a model would decide what to excuse). The filter is plain Python over the claim text and
-its quote, so no ledger key moves and no model call is made. It can only turn an absent claim into
-an excused one, and it is tuned to excuse too little: a claim is excused only when a history marker
-matches and no reason or behaviour marker does. Anything uncertain stays lost, the harness's usual
-fail-closed side. Judgement kinds with no reliable surface (provenance told in plain words,
-rejected-alternative stories) are caught only by the phrases below; the rest stay lost and are the
-reviewer's to read.
+It is a post-filter on claims the judge already called absent. It is not part of the extractor or the
+judge, because a change to either prompt would void every ledgered verdict, and a model would then
+decide what to excuse. The filter is plain Python over the claim text and its quote, so no ledger key
+moves and no model is called.
 
-Honest origin: this class was defined AFTER the pilot's 523 losses were seen, by an author who did not
-open them. Freeze it by the sha of this file (HISTORY_CLASS_VERSION) before any pilot re-run.
+It is built to excuse too little. A claim is excused only when a history marker matches and no reason
+or behaviour marker does, and anything unclear stays lost, the harness's usual fail-closed side.
+Kinds with no reliable surface, such as provenance told in plain words, are caught only by the phrases
+below. The rest stay lost for the reviewer to read.
+
+The class was defined after the pilot's losses were seen, by an author who did not open them.
+HISTORY_CLASS_VERSION is the hash of this file, so freeze the class by recording it before any re-run.
 """
 
 import hashlib
@@ -27,7 +27,7 @@ import re
 import sys
 
 # A history marker names the kind of history it found. The phrase "no longer" and the word
-# "unchanged" are left out on purpose: each also states present behaviour ("the lock is no longer held").
+# "unchanged" are left out because each also states present behaviour ("the lock is no longer held").
 HISTORY_MARKERS = (
     ( "date",        re.compile( r"\b\d{4}[-./]\d{2}[-./]\d{2}\b|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.? \d{1,2}(?:st|nd|rd|th)?,? \d{4}\b|\bUPDATE:|\b(?:fixed|added|changed|removed|measured|ruled) (?:on |in )?(?:19|20)\d{2}\b", re.IGNORECASE ) ),
     ( "id",          re.compile( r"\b(?:row|task|bug|ticket|decision|job|pr|issue|commit|session)\s+#?[0-9a-f]{6,40}\b|\b(?:row|task|bug|ticket|decision|job|pr|issue)\s+#?\d+\b|(?<![\w-])(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}(?![\w-])", re.IGNORECASE ) ),
@@ -80,10 +80,10 @@ def split_absent( claims, absent_flags ):
         - absent_flags has one bool per claim: True when the judge called it dropped
 
     Ensures:
-        - returns ( lost, excused ): lost holds the indexes of dropped claims that are not history,
+        - returns ( lost, excused ); lost holds the indexes of dropped claims that are not history,
           excused holds ( index, kinds ) for dropped claims that are
         - a claim not judged dropped is in neither list
-        - the two lists together are exactly the dropped claims, so nothing is lost by the split
+        - the two lists together cover every dropped claim, so the split drops none
 
     Raises:
         - ValueError when the two lists differ in length

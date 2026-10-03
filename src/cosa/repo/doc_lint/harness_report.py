@@ -93,7 +93,7 @@ def caught( claim_list, seed_span ):
 
 def loss_split( claim_list ):
     """
-    Split one extractor list's dropped claims into lost and excused-as-history (row 9d40b2af).
+    Split one extractor list's dropped claims into lost and excused-as-history.
 
     Requires:
         - claim_list is a run_pair list entry
