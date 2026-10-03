@@ -104,8 +104,8 @@ export const HOLDING_BATCH_BLANK_REASON =
  */
 export const HOLDING_BATCH_NO_ROWS = "No rows in this group.";
 
-/** What a story with no ids reports. Carbon copy of notifications.js `_handleHoldingStoryApproveClick`. */
-export const HOLDING_BATCH_NO_ROWS_STORY = "No rows in this story.";
+/** What a plan with no ids reports. Carbon copy of notifications.js `_handleHoldingPlanApproveClick`. */
+export const HOLDING_BATCH_NO_ROWS_PLAN = "No rows in this plan.";
 
 /**
  * The group status line WHILE a batch is running.
@@ -221,21 +221,21 @@ export function holdingBatchArmedStatus( verb: string, count: number ): string {
 }
 
 // ---------------------------------------------------------------------------
-// Arm, then confirm — the story bar's button (row 376dd4cb, story-level half)
+// Arm, then confirm — the plan header's button (row 376dd4cb, plan-level half)
 // ---------------------------------------------------------------------------
 
 /**
- * The label an ARMED story button carries. Carbon copy of notifications.js `_armHoldingStoryButton`.
+ * The label an ARMED plan button carries. Carbon copy of notifications.js `_armHoldingPlanButton`.
  */
-export function holdingStoryConfirmLabel( count: number ): string {
-  return `Confirm approve all ${ count } in this story`;
+export function holdingPlanConfirmLabel( count: number ): string {
+  return `Confirm approve all ${ count }`;
 }
 
 /**
- * The story status line while its button is armed. Not remembered across a repaint: the bar is
- * rebuilt unarmed. Carbon copy of notifications.js `_armHoldingStoryButton`.
+ * The plan status line while its button is armed. Not remembered across a repaint: the header is
+ * rebuilt unarmed. Carbon copy of notifications.js `_armHoldingPlanButton`.
  */
-/* c8 ignore next */ // tsx phantom-branch artifact on the exported function-declaration line (c8 reports one branch location at the identifier, line 238, with no conditional in the body); the function is called and its string pinned by holding_area_batch.test.ts and the story tests.
-export function holdingStoryArmedStatus( count: number ): string {
-  return `Click again to approve ${ count } rows in this story.`;
+/* c8 ignore next */ // tsx phantom-branch artifact on the exported function-declaration line (c8 reports one branch location at the identifier, line 238, with no conditional in the body); the function is called and its string pinned by holding_area_batch.test.ts and the plan tests.
+export function holdingPlanArmedStatus( count: number ): string {
+  return `Click again to approve ${ count } rows in this plan.`;
 }

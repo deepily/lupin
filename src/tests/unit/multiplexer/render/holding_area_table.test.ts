@@ -63,7 +63,7 @@ import {
   HOLDING_WONT_FIX_REASON_PLACEHOLDER,
   HOLDING_WONT_FIX_REASON_ARIA_LABEL,
 } from "../../../../lupin_app/static/js/multiplexer/render/templates/holdingAreaTable";
-import { groupHeldRowsByFiler } from "../../../../lupin_app/static/js/multiplexer/render/holdingAreaModel";
+import { groupHeldRowsByFiler, type HeldFilerGroup } from "../../../../lupin_app/static/js/multiplexer/render/holdingAreaModel";
 import { rowWidth } from "../../../../lupin_app/static/js/multiplexer/render/rowSchema";
 import type { TaskItem } from "../../../../lupin_app/static/js/multiplexer/render/taskListModel";
 
@@ -83,7 +83,7 @@ const LEGACY_PATH = resolve( HERE, "../../../../lupin_app/static/js/notification
 /** The body of `_renderHoldingAreaGroup`, sliced out of the legacy client. */
 function legacyGroupSource(): string {
   const src   = readFileSync( LEGACY_PATH, "utf8" );
-  const start = src.indexOf( "_renderHoldingAreaGroup( filer, tasks ) {" );
+  const start = src.indexOf( "_renderHoldingAreaGroup( filer, tasks, plans, ungrouped ) {" );
   assert.ok( start !== -1, "legacy _renderHoldingAreaGroup not found — the extraction is pointing at nothing" );
   const end   = src.indexOf( "_wireHoldingAreaControls()", start );
   assert.ok( end > start,  "legacy _wireHoldingAreaControls not found after the group renderer" );
@@ -109,6 +109,11 @@ function legacyAttr( pattern: RegExp ): string {
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
+
+/** A filer group with no plans: every row is its own ungrouped row (plans are covered in holding_area_plan_approve.test.ts). */
+function flatGroup( filer: string, tasks: TaskItem[] ): HeldFilerGroup {
+  return { filer, tasks, plans: [], ungrouped: tasks };
+}
 
 function heldTask( id: string, filer: string, title = "a held row" ): TaskItem {
   return {
@@ -176,7 +181,7 @@ test( "the batch reason box's placeholder and accessible name match the legacy c
 } );
 
 test( "a rendered group carries both tooltips with THIS group's filer in them", () => {
-  const group = { filer: "Mr Radio", tasks: [ heldTask( "t1", "mr radio 0e61abe3" ) ] };
+  const group = flatGroup( "Mr Radio", [ heldTask( "t1", "mr radio 0e61abe3" ) ] );
   const el    = renderHoldingAreaGroup( group, null );
 
   const approve = el.querySelector( "button.holding-approve-all" ) as HTMLButtonElement;
@@ -201,7 +206,7 @@ test( "a rendered group carries both tooltips with THIS group's filer in them", 
 // ---------------------------------------------------------------------------
 
 test( "every keyed element in the header carries this group's data-filer", () => {
-  const group = { filer: "Krishna", tasks: [ heldTask( "t1", "Krishna 420f5ec9" ) ] };
+  const group = flatGroup( "Krishna", [ heldTask( "t1", "Krishna 420f5ec9" ) ] );
   const el    = renderHoldingAreaGroup( group, null );
 
   assert.equal( el.getAttribute( "data-filer" ), "Krishna" );
@@ -222,7 +227,7 @@ test( "every keyed element in the header carries this group's data-filer", () =>
 } );
 
 test( "the group's table uses the SHARED row head, so its width cannot drift from the row's", () => {
-  const group = { filer: "Krishna", tasks: [ heldTask( "t1", "Krishna 420f5ec9" ) ] };
+  const group = flatGroup( "Krishna", [ heldTask( "t1", "Krishna 420f5ec9" ) ] );
   const el    = renderHoldingAreaGroup( group, null );
 
   const table = el.querySelector( "table" ) as HTMLTableElement;
@@ -233,7 +238,7 @@ test( "the group's table uses the SHARED row head, so its width cannot drift fro
 } );
 
 test( "each held row renders the SHARED disclosed row, tagged for this pane and not the epic board", () => {
-  const group = { filer: "Krishna", tasks: [ heldTask( "t1", "Krishna 420f5ec9" ), heldTask( "t2", "Krishna 420f5ec9" ) ] };
+  const group = flatGroup( "Krishna", [ heldTask( "t1", "Krishna 420f5ec9" ), heldTask( "t2", "Krishna 420f5ec9" ) ] );
   const el    = renderHoldingAreaGroup( group, null );
 
   const rows = el.querySelectorAll( "tbody tr.task-row" );
@@ -253,7 +258,7 @@ test( "each held row renders the SHARED disclosed row, tagged for this pane and 
 
 test( "the group count is the number of rows in THAT group, not the pane total", () => {
   const el = renderHoldingAreaGroup(
-    { filer: "Krishna", tasks: [ heldTask( "t1", "k" ), heldTask( "t2", "k" ), heldTask( "t3", "k" ) ] }, null );
+    flatGroup( "Krishna", [ heldTask( "t1", "k" ), heldTask( "t2", "k" ), heldTask( "t3", "k" ) ] ), null );
   assert.equal( ( el.querySelector( ".holding-area-group-count" ) as HTMLElement ).textContent, "3" );
   assert.equal( ( el.querySelector( ".holding-area-filer" ) as HTMLElement ).textContent, "Krishna" );
 } );
@@ -303,7 +308,7 @@ test( "an empty model yields an EMPTY fragment — the 'nothing waiting' message
 
 test( "reassignTargets reach the row's owner select through this pane too", () => {
   const el = renderHoldingAreaGroup(
-    { filer: "Krishna", tasks: [ heldTask( "t1", "Krishna 420f5ec9" ) ] }, null, [ "rachel", "sam" ] );
+    flatGroup( "Krishna", [ heldTask( "t1", "Krishna 420f5ec9" ) ] ), null, [ "rachel", "sam" ] );
   const options = Array.from( el.querySelectorAll( "select option" ) ).map( ( o ) => o.textContent );
   assert.ok( options.some( ( o ) => o === "rachel" ), `owner select never received the roster: ${ JSON.stringify( options ) }` );
   assert.ok( options.some( ( o ) => o === "sam" ) );

@@ -35,8 +35,8 @@ import {
   holdingBatchRestLabel,
   holdingBatchConfirmLabel,
   holdingBatchArmedStatus,
-  holdingStoryConfirmLabel,
-  holdingStoryArmedStatus,
+  holdingPlanConfirmLabel,
+  holdingPlanArmedStatus,
 } from "../../../../lupin_app/static/js/multiplexer/render/holdingAreaBatch";
 
 const HERE        = dirname( fileURLToPath( import.meta.url ) );
@@ -297,24 +297,24 @@ test( "every arming string is a carbon copy of notifications.js, compared agains
 } );
 
 // ---------------------------------------------------------------------------
-// Arm, then confirm — the story bar's button (row 376dd4cb, story-level half)
+// Arm, then confirm — the plan header's button (row 376dd4cb, plan-level half)
 // ---------------------------------------------------------------------------
 
-test( "the story confirm label and armed status name the row count", () => {
-  assert.equal( holdingStoryConfirmLabel( 3 ),  "Confirm approve all 3 in this story" );
-  assert.equal( holdingStoryArmedStatus( 3 ), "Click again to approve 3 rows in this story." );
+test( "the plan confirm label and armed status name the row count", () => {
+  assert.equal( holdingPlanConfirmLabel( 3 ),  "Confirm approve all 3" );
+  assert.equal( holdingPlanArmedStatus( 3 ), "Click again to approve 3 rows in this plan." );
 } );
 
-test( "the story arming strings are carbon copies of notifications.js, compared against the file on disk", () => {
+test( "the plan arming strings are carbon copies of notifications.js, compared against the file on disk", () => {
   const src   = readFileSync( LEGACY_PATH, "utf8" );
-  const start = src.indexOf( "_disarmHoldingStoryButtons() {" );
-  assert.ok( start !== -1, "legacy _disarmHoldingStoryButtons not found — the extraction is pointing at nothing" );
-  const end   = src.indexOf( "async _handleHoldingStoryApproveClick( button ) {", start );
-  assert.ok( end > start, "legacy story handler not found after the arming helpers — the slice boundaries have moved" );
+  const start = src.indexOf( "_disarmHoldingPlanButtons() {" );
+  assert.ok( start !== -1, "legacy _disarmHoldingPlanButtons not found — the extraction is pointing at nothing" );
+  const end   = src.indexOf( "async _handleHoldingPlanApproveClick( button ) {", start );
+  assert.ok( end > start, "legacy plan handler not found after the arming helpers — the slice boundaries have moved" );
   const templates = Array.from( src.slice( start, end ).matchAll( /`([^`\n]{6,})`/g ) ).map( ( m ) => m[ 1 ] as string );
-  assert.ok( templates.length > 0, "the legacy story region yielded no templates" );
-  const confirm   = holdingStoryConfirmLabel( 7 ).replace( "7", "${count}" );
-  const status    = holdingStoryArmedStatus( 7 ).replace( "7", "${count}" );
+  assert.ok( templates.length > 0, "the legacy plan region yielded no templates" );
+  const confirm   = holdingPlanConfirmLabel( 7 ).replace( "7", "${count}" );
+  const status    = holdingPlanArmedStatus( 7 ).replace( "7", "${count}" );
   assert.ok( templates.includes( confirm ), `legacy has no template reading ${ JSON.stringify( confirm ) }` );
   assert.ok( templates.includes( status ),  `legacy has no template reading ${ JSON.stringify( status ) }` );
 } );

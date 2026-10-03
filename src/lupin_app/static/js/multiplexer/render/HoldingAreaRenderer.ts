@@ -42,8 +42,8 @@ import type { EventBus } from "../shared/EventBus";
 import type { StoreHoldingAreaChangedPayload } from "../shared/types";
 import type { TaskListComposite } from "./taskListModel";
 import { formatFleetTimestamp } from "./fleetModel";
-import { groupHeldRowsByFiler, groupHeldRowsByStory } from "./holdingAreaModel";
-import { holdingGroupChevron, holdingStoryApproveLabel, renderHoldingAreaGroups, renderHoldingStories } from "./templates/holdingAreaTable";
+import { groupHeldRowsByFiler, holdingPlanId } from "./holdingAreaModel";
+import { holdingGroupChevron, holdingPlanApproveLabel, holdingPlanChevron, renderHoldingAreaGroups } from "./templates/holdingAreaTable";
 import {
   holdingBatchNeeds,
   holdingBatchExtras,
@@ -52,12 +52,12 @@ import {
   holdingBatchRestLabel,
   holdingBatchConfirmLabel,
   holdingBatchArmedStatus,
-  holdingStoryConfirmLabel,
-  holdingStoryArmedStatus,
+  holdingPlanConfirmLabel,
+  holdingPlanArmedStatus,
   HOLDING_BATCH_ARMED_CLASS,
   HOLDING_BATCH_BLANK_REASON,
   HOLDING_BATCH_NO_ROWS,
-  HOLDING_BATCH_NO_ROWS_STORY,
+  HOLDING_BATCH_NO_ROWS_PLAN,
 } from "./holdingAreaBatch";
 import {
   renderSectionHeader,
@@ -179,6 +179,11 @@ function messageEl( className: string, text: string ): HTMLParagraphElement {
   return p;
 }
 
+/** The plan id a plan approve button carries (its filer and plan data attributes). */
+function planButtonId( button: HTMLElement ): string {
+  return holdingPlanId( button.dataset.filer ?? "", button.dataset.plan ?? "" );
+}
+
 class HoldingAreaRendererImpl implements HoldingAreaRenderer {
   private readonly bus       : EventBus;
   private readonly store     : HoldingAreaStoreLike;
@@ -213,13 +218,17 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
   // buttons again. A set keyed by filer cannot be repainted away.
   private readonly batchesInFlight = new Set<string>();
 
-  // Stories mid-run, keyed by correlation_key — the same guard, for the story bar.
-  private readonly storiesInFlight = new Set<string>();
+  // Plans mid-run, keyed by holdingPlanId( filer, key ) — the same guard, for the plan header.
+  private readonly plansInFlight = new Set<string>();
 
-  // The report of a story that ended PARTLY refused, so a render can put it back and so
-  // the bar outlives the shrinking of its story to one row. A fully approved story
-  // leaves no entry: its bar is gone because its rows are.
-  private readonly storyReports = new Map<string, string>();
+  // The report of a plan that ended PARTLY refused, so a render can put it back and so
+  // the plan outlives the shrinking of its rows to one. A fully approved plan
+  // leaves no entry: its header is gone because its rows are.
+  private readonly planReports = new Map<string, string>();
+
+  // The plans the operator has OPENED, keyed by holdingPlanId. Plans start collapsed, like
+  // their filers, and an open one survives the 60s repaint.
+  private readonly expandedPlans = new Set<string>();
 
   // The last batch report per filer, so a render can put it back. This is STATE,
   // not a cache of the DOM: the status line the groups template emits is empty
@@ -316,6 +325,7 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     const onClick = ( e: Event ): void => {
       if ( this.requests !== null && this.requests.handleClick( e.target ) ) return;
       if ( rows.handleClick( e.target ) ) return;
+      if ( this.handlePlanToggle( e.target ) ) return;
       if ( this.handleGroupToggle( e.target ) ) return;
       this.handleBatchClick( e.target );
     };
@@ -324,7 +334,7 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
       const k = e as KeyboardEvent;
       // Enter / Space on a focused group header toggles it, as the task list's does.
       // "Spacebar" is the legacy spelling; the classic client accepts it too.
-      if ( ( k.key === "Enter" || k.key === " " || k.key === "Spacebar" ) && this.handleGroupToggle( k.target ) ) {
+      if ( ( k.key === "Enter" || k.key === " " || k.key === "Spacebar" ) && ( this.handlePlanToggle( k.target ) || this.handleGroupToggle( k.target ) ) ) {
         k.preventDefault();
         return;
       }
@@ -428,7 +438,7 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
       return;
     }
 
-    const groups = groupHeldRowsByFiler( composite!.tasks );
+    const groups = groupHeldRowsByFiler( composite!.tasks, new Set( this.planReports.keys() ) );
     const total  = groups.reduce( ( n, g ) => n + g.tasks.length, 0 );
 
     this.setCountText( String( total ) );
@@ -443,11 +453,9 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     if ( total === 0 ) {
       this.container.replaceChildren( ...banner, messageEl( "holding-area-empty", HOLDING_AREA_EMPTY_MESSAGE ) );
     } else {
-      const strip = renderHoldingStories( groupHeldRowsByStory( composite!.tasks, new Set( this.storyReports.keys() ) ) );
       this.container.replaceChildren(
         ...banner,
-        ...( strip === null ? [] : [ strip ] ),
-        renderHoldingAreaGroups( groups, undefined, [], this.expandedFilers ),
+        renderHoldingAreaGroups( groups, undefined, [], this.expandedFilers, this.expandedPlans ),
       );
     }
     this.hydrateRequests();
@@ -474,11 +482,21 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
       if ( !present.has( filer ) ) this.expandedFilers.delete( filer );
     }
     for ( const [ filer, message ] of this.batchReports ) this.applyGroupStatus( filer, message );
-    const liveKeys = new Set( ( composite!.tasks as Array<{ correlation_key?: string | null }> ).map( ( t ) => t.correlation_key ?? "" ) );
-    for ( const key of Array.from( this.storyReports.keys() ) ) {
-      if ( !liveKeys.has( key ) ) this.storyReports.delete( key );
+    // A plan's open state and report outlive the repaint only while the plan is on screen
+    // (an open state) or one of its rows is (a report, which keeps a one-row remainder up).
+    const livePlans = new Set<string>();
+    const liveRows  = new Set<string>();
+    for ( const g of groups ) {
+      for ( const p of g.plans ) livePlans.add( holdingPlanId( g.filer, p.key ) );
+      for ( const t of g.tasks ) if ( t.correlation_key ) liveRows.add( holdingPlanId( g.filer, String( t.correlation_key ) ) );
     }
-    for ( const [ key, message ] of this.storyReports ) this.paintStoryStatus( key, message );
+    for ( const id of Array.from( this.planReports.keys() ) ) {
+      if ( !liveRows.has( id ) ) this.planReports.delete( id );
+    }
+    for ( const id of Array.from( this.expandedPlans ) ) {
+      if ( !livePlans.has( id ) ) this.expandedPlans.delete( id );
+    }
+    for ( const [ id, message ] of this.planReports ) this.paintPlanStatus( id, message );
 
     if ( stampUpdated ) this.stampUpdated();
   }
@@ -522,6 +540,36 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
   // -------------------------------------------------------------------------
   // The per-filer accordion (row 52142a84)
   // -------------------------------------------------------------------------
+
+  /**
+   * A click or key on a plan header's bar → open or close that plan's rows.
+   *
+   * ⚠️ The approve control lives on the same bar, so a target inside a button is NOT a toggle.
+   * A plan sits inside its filer's group but its header is not the filer's, so a click here
+   * never folds the filer.
+   *
+   * Ensures:
+   *   - returns false for anything that is not a bare plan header
+   *   - otherwise flips `.collapsed`, aria-expanded and the chevron IN PLACE, records the choice
+   *     for the next repaint, and returns true
+   */
+  private handlePlanToggle( target: EventTarget | null ): boolean {
+    /* c8 ignore next */ // defensive: a click whose target is not an element cannot reach a header.
+    if ( !( target instanceof Element ) ) return false;
+    const header = target.closest<HTMLElement>( ".holding-plan-header" );
+    if ( header === null ) return false;
+    if ( target.closest( "button, input, select, textarea, a" ) !== null ) return false;
+    const group = header.closest<HTMLElement>( ".holding-plan-group" )!;
+    /* c8 ignore next */ // `?? ""` RHS: the template stamps data-filer and data-plan on every plan group.
+    const id       = holdingPlanId( group.dataset.filer ?? "", group.dataset.plan ?? "" );
+    const expanded = group.classList.contains( "collapsed" );
+    group.classList.toggle( "collapsed", !expanded );
+    header.setAttribute( "aria-expanded", expanded ? "true" : "false" );
+    header.querySelector( ".holding-plan-chevron" )!.textContent = holdingPlanChevron( expanded );
+    if ( expanded ) this.expandedPlans.add( id );
+    else this.expandedPlans.delete( id );
+    return true;
+  }
 
   /**
    * A click or key on a group header's bar → open or close that filer's group.
@@ -572,9 +620,9 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     const el = target as Element | null;
     /* c8 ignore next */ // defensive: a click whose target is not an element cannot reach a button.
     if ( el === null || typeof el.closest !== "function" ) return;
-    const story = el.closest<HTMLButtonElement>( ".holding-story-approve-all" );
-    if ( story !== null ) {
-      void this.runStoryApprove( story );
+    const plan = el.closest<HTMLButtonElement>( ".holding-plan-approve-all" );
+    if ( plan !== null ) {
+      void this.runPlanApprove( plan );
       return;
     }
     const btn = el.closest<HTMLButtonElement>( ".holding-approve-all, .holding-wont-fix-all" );
@@ -680,15 +728,15 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     }
   }
 
-  /** Return every story bar's button to its resting label. A repaint does the same by rebuilding the bar. */
-  private disarmStories(): void {
-    /* c8 ignore next */ // defensive: runStoryApprove only runs for a button inside the rendered container.
+  /** Return every plan header's button to its resting label. A repaint does the same by rebuilding the header. */
+  private disarmPlans(): void {
+    /* c8 ignore next */ // defensive: runPlanApprove only runs for a button inside the rendered container.
     if ( this.container === null ) return;
-    for ( const b of Array.from( this.container.querySelectorAll<HTMLButtonElement>( ".holding-story-approve-all" ) ) ) {
-      if ( b.dataset.armed === "1" ) this.paintStoryStatus( b.dataset.story ?? "", "" );
+    for ( const b of Array.from( this.container.querySelectorAll<HTMLButtonElement>( ".holding-plan-approve-all" ) ) ) {
+      if ( b.dataset.armed === "1" ) this.paintPlanStatus( planButtonId( b ), "" );
       delete b.dataset.armed;
       b.classList.remove( HOLDING_BATCH_ARMED_CLASS );
-      b.textContent = holdingStoryApproveLabel( ( b.dataset.taskIds ?? "" ).split( "," ).filter( ( id ) => id !== "" ).length );
+      b.textContent = holdingPlanApproveLabel( ( b.dataset.taskIds ?? "" ).split( "," ).filter( ( id ) => id !== "" ).length );
     }
   }
 
@@ -801,22 +849,23 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     this.paintGroupStatus( filer, holdingBatchFinalStatus( needs.pastLabel, ok, failed, ids.length, firstError ) );
   }
 
-  /** One story's status span, matched in JavaScript so a key with a quote or bracket cannot break a selector. */
-  private storyStatusEl( story: string ): HTMLElement | null {
+  /** One plan's status span, matched in JavaScript so a key with a quote or bracket cannot break a selector. */
+  private planStatusEl( id: string ): HTMLElement | null {
+    /* c8 ignore next */ // defensive: only reached once a plan header has been rendered into the container.
     if ( this.container === null ) return null;
-    for ( const el of Array.from( this.container.querySelectorAll<HTMLElement>( ".holding-story-status" ) ) ) {
-      if ( el.dataset.story === story ) return el;
+    for ( const el of Array.from( this.container.querySelectorAll<HTMLElement>( ".holding-plan-status" ) ) ) {
+      if ( holdingPlanId( el.dataset.filer ?? "", el.dataset.plan ?? "" ) === id ) return el;
     }
     return null;
   }
 
-  private paintStoryStatus( story: string, message: string ): void {
-    const el = this.storyStatusEl( story );
+  private paintPlanStatus( id: string, message: string ): void {
+    const el = this.planStatusEl( id );
     if ( el !== null ) el.textContent = message;
   }
 
   /**
-   * Approve every held row in one story, one transition at a time, then report.
+   * Approve every row listed under one plan, one transition at a time, then report.
    *
    * ⚠️ NO NEW DOOR. Each row goes through `store.transitionTask` — the single-row
    * request the per-row control sends — so the approver allowlist, the promotion ask and
@@ -824,68 +873,68 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
    * by row. Operator-only stays the server's rule, unchanged.
    *
    * Ensures:
-   *   - a second press on the same story while it runs is ignored
+   *   - a second press on the same plan while it runs is ignored
    *   - the button is dead for the length of the run and live after
    *   - the in-flight line counts ATTEMPTS; the final line counts successes, names the
    *     refused count and the first refusal
    *   - the final line is painted AFTER the read-back, because the repaint rebuilds the
-   *     bar and would erase it
+   *     header and would erase it
    */
-  private async runStoryApprove( button: HTMLButtonElement ): Promise<void> {
-    const story = button.dataset.story ?? "";
-    if ( story === "" ) return;
-    if ( this.storiesInFlight.has( story ) ) return;
-    const ids = ( button.dataset.taskIds ?? "" ).split( "," ).filter( ( id ) => id !== "" );
+  private async runPlanApprove( button: HTMLButtonElement ): Promise<void> {
+    if ( ( button.dataset.plan ?? "" ) === "" ) return;
+    const id = planButtonId( button );
+    if ( this.plansInFlight.has( id ) ) return;
+    const ids = ( button.dataset.taskIds ?? "" ).split( "," ).filter( ( rowId ) => rowId !== "" );
     if ( ids.length === 0 ) {
-      this.paintStoryStatus( story, HOLDING_BATCH_NO_ROWS_STORY );
+      this.paintPlanStatus( id, HOLDING_BATCH_NO_ROWS_PLAN );
       return;
     }
-    // ARM, THEN CONFIRM (row 376dd4cb, the story-level half). The first press only arms: the
-    // button names the row count and nothing is posted. Arming one story disarms the others.
+    // ARM, THEN CONFIRM (row 376dd4cb, the plan-level half). The first press only arms: the
+    // button names the row count and nothing is posted. Arming one plan disarms the others.
     if ( button.dataset.armed !== "1" ) {
-      this.disarmStories();
+      this.disarmPlans();
       button.dataset.armed = "1";
       button.classList.add( HOLDING_BATCH_ARMED_CLASS );
-      button.textContent = holdingStoryConfirmLabel( ids.length );
-      this.paintStoryStatus( story, holdingStoryArmedStatus( ids.length ) );
+      button.textContent = holdingPlanConfirmLabel( ids.length );
+      this.paintPlanStatus( id, holdingPlanArmedStatus( ids.length ) );
       return;
     }
-    this.disarmStories();
+    this.disarmPlans();
 
     const needs = holdingBatchNeeds( "approve" )!;
-    this.storiesInFlight.add( story );
-    this.paintStoryStatus( story, holdingBatchInFlightStatus( needs.pastLabel, 0, ids.length ) );
+    this.plansInFlight.add( id );
+    this.paintPlanStatus( id, holdingBatchInFlightStatus( needs.pastLabel, 0, ids.length ) );
     button.disabled = true;
 
     let ok = 0;
     let failed = 0;
     let firstError: string | null = null;
     try {
-      for ( const id of ids ) {
-        const result = await this.store.transitionTask( id, needs.status, {} );
+      for ( const rowId of ids ) {
+        const result = await this.store.transitionTask( rowId, needs.status, {} );
         if ( result.ok ) {
           ok += 1;
         } else {
           failed += 1;
           if ( firstError === null ) firstError = result.message ?? "";
         }
-        this.paintStoryStatus( story, holdingBatchInFlightStatus( needs.pastLabel, ok + failed, ids.length ) );
+        this.paintPlanStatus( id, holdingBatchInFlightStatus( needs.pastLabel, ok + failed, ids.length ) );
       }
     } finally {
       button.disabled = false;
-      this.storiesInFlight.delete( story );
+      this.plansInFlight.delete( id );
     }
 
     // The report is remembered BEFORE the read-back: the repaint that read-back causes
-    // rebuilds the bar, and keeps a one-row remainder on screen only if a report is held.
+    // rebuilds the header, and keeps a one-row remainder on screen only if a report is held.
     const final = holdingBatchFinalStatus( needs.pastLabel, ok, failed, ids.length, firstError );
-    if ( failed > 0 ) this.storyReports.set( story, final );
-    else this.storyReports.delete( story );
+    if ( failed > 0 ) this.planReports.set( id, final );
+    else this.planReports.delete( id );
     await readBackAfterWrite(
       () => this.store.refreshAfterWrite(),
       () => this.stampReadBackFailed(),
     );
-    this.paintStoryStatus( story, final );
+    this.paintPlanStatus( id, final );
   }
 
   private paintSentinel( text: string ): void {

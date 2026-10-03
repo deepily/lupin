@@ -46,7 +46,7 @@ function legacyPaneSource(): string {
   const src   = readFileSync( LEGACY_PATH, "utf8" );
   const start = src.indexOf( "renderHoldingArea( composite ) {" );
   assert.ok( start !== -1, "legacy renderHoldingArea not found — the extraction is pointing at nothing" );
-  const end   = src.indexOf( "_renderHoldingAreaGroup( filer, tasks ) {", start );
+  const end   = src.indexOf( "_renderHoldingAreaGroup( filer, tasks, plans, ungrouped ) {", start );
   assert.ok( end > start, "legacy _renderHoldingAreaGroup not found after the pane renderer" );
   return src.slice( start, end );
 }
