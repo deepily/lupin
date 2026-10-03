@@ -50,6 +50,12 @@ class CrudForDataFramesAgent( AgentBase ):
         - Raises CodeGenerationFailedException if both paths fail
     """
 
+    # Set by RunningFifoQueue at dispatch (row 4cbd4858): True when this job's lineage traces
+    # to a test-suite job, which takes the confirmation default without asking. A class-level
+    # default, not a constructor line, so an agent built without __init__ (several unit
+    # fixtures do) still has the attribute and keeps the ask.
+    lineage_is_test_suite = False
+
     def __init__( self, question="", question_gist="", last_question_asked="",
                   push_counter=-1,
                   routing_command="agent router go to crud for dataframes",
@@ -297,9 +303,16 @@ class CrudForDataFramesAgent( AgentBase ):
         Ensures:
             - Returns True if user confirms (says yes)
             - Returns False on denial, timeout, or error (safe default)
+            - Returns False WITHOUT asking when self.lineage_is_test_suite is True (row 4cbd4858,
+              Rick 2026-10-03: the harness's own listener makes the user look online, so every
+              ask sat out its 30 s window); every other job keeps the ask
         """
         operation   = self.crud_intent.operation
         target_list = self.crud_intent.target_list or "your list"
+
+        if self.lineage_is_test_suite:
+            print( f"[CRUD] Test-suite lineage — not asking to {operation} from {target_list}, taking the 'no' default" )
+            return False
 
         message = f"Are you sure you want to {operation} from {target_list}?"
 

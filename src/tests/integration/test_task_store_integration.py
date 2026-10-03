@@ -168,8 +168,11 @@ class TestTaskStoreLifecycle:
         assert any( t[ "id" ] == task_id for t in q.json()[ "tasks" ] )
 
         # 4. claim → in_progress
+        #    Starting a row someone else assigned needs a `reason` (409 without one on
+        #    :8000 job ts-8584a00b): the owner is krishna, the manager tiberius.
         for to_status in ( "claimed", "in_progress" ):
-            r = _transition( headers, task_id, to_status=to_status, actor=actor )
+            r = _transition( headers, task_id, to_status=to_status, actor=actor,
+                             reason="integration probe: starting the row I own" )
             assert r.status_code == 200, f"->{to_status}: {r.status_code}: {r.text}"
         assert r.json()[ "item" ][ "status" ] == "in_progress"
 
@@ -477,6 +480,7 @@ class TestTaskStoreWrapperE2E:
             project       = "lupin",
             owner_persona = "krishna",
             correlation_key = "epic:unassigned",
+            priority      = "P5",              # the wrapper's own default is P2, which an API-key caller may not file
         )
         # The create door mints into the holding area; the rest of the lifecycle runs on a
         # seeded queued row, because only an approver's login may admit the created one.

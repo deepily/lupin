@@ -638,6 +638,8 @@ Ruling Q6 is "since the last `/clear`, capped ~64 KB, with load-earlier", and **
 
 Every response lands on **complete-line boundaries**, and `next_offset` is always the end of a complete line.
 
+**Every page makes progress; the byte cap is a target, not a hard limit.** When a window holds no complete record because the record at its edge is larger than the cap, that one record is returned whole (all three verbs, since 2026-10-03, row `d849a6d9`). Before that a backward page came back empty at the same offset and "load earlier" stayed stuck behind any record over 64 KB. An empty `( [], 0, 0 )` from `before_offset` now means only one thing: the top of the file.
+
 ### The roster is a projection, and its gate is its own
 
 `/api/arbiter/fleet-state` is guarded by `require_api_key_or_jwt`, which is **looser than admin**. The console is admin-only (ruling Q5), so the roster projection carries **its own `require_admin` gate** rather than inheriting fleet-state's. Assert against the projection, never against `/arbiter/fleet-state`.

@@ -19,7 +19,7 @@ metadata:
 |------------|----------|--------|------------|
 | **Lupin** (parent) | `/` | lupin repo | Normal via `/plan-session-end` |
 | **Firefox Plugin** | `/src/lupin-plugin-firefox/` | separate repo | Independent |
-| **Mobile App** | `/src/lupin-mobile/` | separate repo | Independent |
+| **Mobile App** | `../lupin-mobile/` (a sibling of Lupin, not nested) | separate repo | Independent |
 
 ## Safety Rules
 
@@ -45,7 +45,7 @@ The workflow automatically:
 **You'll see**:
 ```
 ⚠️ Detected changes in nested repositories:
-• /src/lupin-mobile/ (1 new file)
+• /src/lupin-plugin-firefox/ (1 new file)
 
 These are separate Git repositories and will not be included in this commit.
 Reminder: Manage nested repositories in their own sessions/contexts.
@@ -72,7 +72,7 @@ find . -name ".git" -type d | grep -v "^./.git$"
 
 **From Lupin context, do NOT read**:
 - `src/lupin-plugin-firefox/history.md`
-- `src/lupin-mobile/history.md`
+- `../lupin-mobile/history.md` (sibling repo)
 
 These are managed by their respective repositories.
 

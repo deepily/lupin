@@ -1567,6 +1567,11 @@ class RunningFifoQueue( FifoQueue ):
         # half of row 4a9ebc4b. The agentic lane already does this for itself.
         running_job.started_at = du.get_current_datetime_iso()
 
+        # Row 4cbd4858: a CRUD agent whose lineage traces to a test-suite job skips its
+        # destructive-operation ask. The agent has no queue reference, so tell it here.
+        if isinstance( running_job, CrudForDataFramesAgent ):
+            running_job.lineage_is_test_suite = self._lineage_traces_to_test_suite( running_job )
+
         try:
             formatted_output    = running_job.do_all()
         
