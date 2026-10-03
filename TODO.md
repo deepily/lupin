@@ -16,6 +16,14 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 **Timers from the 09-30 skeleton crew** (these clean themselves up; nothing to fold in): `stop-poke-restore-20260930` (dev and test, 17:00 EDT) and `ratio-gate-reenable-20260930` (test, 12:46 EDT).
 **Not mine and uncommitted in the main tree** (left alone): the phase6b `action_required` PNG baseline (dirty since 09-22) and María's three `src/rnd/v0.2.1/` docs (kill-switch design, console-tee plan, cascade handoff).
 
+## 📚 DECISIONS LOG 2026-10-02 (Cheech 🌿 `bf81cf59`; crew Maya · Tiberius) — v0.2.2 docs crew, day 3
+
+- 2026-10-02 — **What may a docstring rewrite drop?** → **HISTORY MAY GO, REASONS STAY** (Rick, ~20:46 EDT, keypress, walkthrough 1 of 4; row `b3086a20`). Dates, row ids, incident figures, provenance and "was previously" may leave a docstring; every why and every behaviour stays. Why: the pilot claim check on rewrite `2b009b8d9` found claims missing in 53 of 78 docstrings, and Tiberius's sample of 48 read 37 as real losses, mostly history and "why" clauses (`io/tiberius-3254a847-claim-sort.md`). Rick added: María verifies or updates the workflow docs on what belongs in a docstring, what does not and where the rest goes, enforced by policy (row `360427a1`).
+- 2026-10-02 — **Did the Max plan cover the one Fable test call?** → **COVERED, FABLE MAY PROCEED** (Rick, ~20:56 EDT, keypress, walkthrough 2 of 4; row `49001f67`). Within the cap of 500 on the shared ledger; Fable writes pairs only. The Python reserve set and the Dart set still need a second figure from Rick.
+- 2026-10-02 — **Which held rows to admit?** → **ALL FOUR GROUPS** (Rick, ~20:58 EDT, walkthrough 3 of 4): `dad61023`, `bf2f35d6`, `1b00e690` and the ten plan phase stubs. `9641c0e8` stays held.
+- 2026-10-02 — **Push?** → Rick pushes at the end of the night; do not ask about pushing (walkthrough 4 of 4).
+- Earlier today, all on row `dad61023`: 190 gate pairs (94 seeded, 1 miss allowed; 59 short, 0 allowed) · Fable writes only, cap 500 · no second extractor · injection rule adds sentence-initial Do not / Don't (merged `3aa15187f`) · no human arm · flag ceiling 15% per list.
+
 ## 📚 DECISIONS LOG 2026-10-01 (Cheech 🌿 `37cbc13d`; crew Sam · Maya · Tiberius · John · Chloé) — v0.2.2 docs crew, day 2
 
 - **A failed between-suites reset stops the run** (Rick, yes on a direct ask, afternoon). Row `07dde530`, merged `c770d3e90`.

@@ -8,6 +8,14 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.10.02 - Session bf81cf59 (Cheech 🌿, manager; crew Maya 🌻, Tiberius 👑, Rio) | Harness fix, Do not rule, Fable call cap and labelled-set seeder merged; pilot held for claim loss
+
+- **Merged on the working branch (head `57a0a35e7`, pushed on Rick's broadcast `ae5e1f8c`)**: `4592dc181` harness quote-floor fix + stub manifests + Dart pair builder · `3aa15187f` Do not / Don't injection rule + Fable per-model call cap · `96ddb2ed6` cap test timeout · `394f6c9e9` Rio's seeding script (row `13878d1c`, 96 tests, Tiberius PASS after four rounds). All with Tiberius PASS.
+- **Pilot rewrite held**: the claim check found claims missing in 53 of 78 docstrings; Tiberius's sample of 48 read 37 as real loss. Rick ruled history may go and reasons stay (`b3086a20`); the restored rewrite `refs/keep/maya-pilot-restore` (`7f5c619de`) waits on a judge history class (`9d40b2af`).
+- **Rick ruled** (Decisions Log 2026-10-02 in TODO.md): 190 gate pairs, Fable writes only with a cap of 500, the Fable test call was covered by the plan, held rows admitted except `9641c0e8`.
+- **Owed Monday**: coverage gate on a quiet box first (tonight's run refused, exit 2 from contention) · judge history class · pilot claim check · first Fable writer run · post-game for 10-01 and 10-02 (row `ca204c66`). Crew down; mementos in `io/mementos/{maya,rio,tiberius}-*.md`.
+- **Files**: history.md, TODO.md; code via reviewed merges only.
+
 ### 2026.10.02 - Session 76f0cdab (Mr. Radio 🦉, manager; crew Chloé 🗼, Krishna 🦚, John 🏄🏽) | Poke toggle and worktree janitor landed; VM spawns default to Sonnet; Rick's 7 blockers ruled and worked; integration 66 → 50 reds
 
 - **Landed on the working branch (not pushed)**: `49f987d75` poke toggle + janitor (evacuate, archive, 14-day sweep) · `b098aa6f5` VM model pin · `3a6d805ec`/`92e0185e9`/`222ba140c` eval lineage fix, 15-minute per-file cap, Krishna's integration fixes, two-click approve · `f7e8890e1` DB-login guard rail, repo side (`80513825`) · `9718cf97c` section D rebaseline (`aee3ab5b`) · `38dd62dc4` task_create description (`a8a2651d`, María reviewed) · `06dfba7e6` suite-lineage jobs skip the correctness ask (`4cbd4858`), manager-seat callers, guarded `lupin_db_test` seeder, :8000 gets its own sessions folder, holding-area label never shows a raw key (`0d6d4387`) · `6e160dcb8` edit-parity probe gets an epic key.
