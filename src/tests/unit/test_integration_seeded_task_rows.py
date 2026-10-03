@@ -156,6 +156,22 @@ def test_create_stores_the_owner_under_the_key_the_owed_query_reads_by( given, s
     assert ( item.owner_persona, item.accountable_manager ) == ( stored, stored )
 
 
+def test_create_takes_column_overrides_and_canonicalizes_only_the_manager( factory, session_log ):
+    SeededRows( TEST_URL, factory ).create(
+        "krishna", "a title",
+        accountable_manager = "Mr. Radio",
+        priority            = "P1",
+        gate_class          = "manager",
+        body                = "ORIGINAL SPEC verbatim.",
+        correlation_key     = "cc-task:abc:3",
+    )
+
+    item = session_log[ 0 ].added[ 0 ]
+    assert ( item.owner_persona, item.accountable_manager ) == ( "krishna", "mr radio" )
+    assert ( item.priority, item.gate_class, item.body, item.correlation_key ) == \
+           ( "P1", "manager", "ORIGINAL SPEC verbatim.", "cc-task:abc:3" )
+
+
 def test_create_honours_a_status_and_the_default_creator( factory, session_log ):
     rows = SeededRows( TEST_URL, factory )
     row  = rows.create( "p", "t", status="in_progress" )

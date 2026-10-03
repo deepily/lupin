@@ -60,7 +60,7 @@ class SeededRows:
         self.session_factory = session_factory
         self.ids             = []
 
-    def create( self, persona, title, status="queued", created_by="itest seed" ):
+    def create( self, persona, title, status="queued", created_by="itest seed", **columns ):
         """
         Insert one task row owned by `persona`, plus the creation event the API would write.
 
@@ -71,21 +71,27 @@ class SeededRows:
               never match the server's "ac6 1f" and the row would read as not owed
             - returns { "id", "status", "updated_ts" } as strings, the fields the tests read
               from a create response
+            - `columns` overrides or adds TaskItem columns by name (priority, gate_class, body,
+              correlation_key, accountable_manager); accountable_manager is canonicalized like
+              the owner, every other value is stored as given
         """
         refuse_unless_test_db( self.db_url )
         owner_key = canonical_persona_key( persona )
         with self.session_factory() as session:
-            item = TaskItem(
-                item_class          = "task",
-                title               = title,
-                project             = "lupin",
-                owner_persona       = owner_key,
-                accountable_manager = owner_key,
-                created_by          = created_by,
-                status              = status,
-                priority            = "P5",
-                correlation_key     = "epic:unassigned",
-            )
+            fields = {
+                "item_class"          : "task",
+                "title"               : title,
+                "project"             : "lupin",
+                "owner_persona"       : owner_key,
+                "accountable_manager" : owner_key,
+                "created_by"          : created_by,
+                "status"              : status,
+                "priority"            : "P5",
+                "correlation_key"     : "epic:unassigned",
+            }
+            fields.update( columns )
+            fields[ "accountable_manager" ] = canonical_persona_key( fields[ "accountable_manager" ] )
+            item = TaskItem( **fields )
             session.add( item )
             session.flush()
             session.add( TaskEvent(

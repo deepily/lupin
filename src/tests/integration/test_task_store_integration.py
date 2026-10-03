@@ -97,6 +97,18 @@ def _create_body( **overrides ):
     return body
 
 
+def _queued_row( seeded_task_rows, **columns ):
+    """
+    The id of a live `queued` row, inserted straight into lupin_db_test.
+
+    The create door files every new row at `not_approved` and only an approver's login account
+    may admit it, so a test of what happens AFTER a row is on the board takes its row from the
+    seeder (tests/integration/seeded_task_rows.py) instead of from POST /api/tasks.
+    """
+    return seeded_task_rows.create( "krishna", "integration probe item",
+                                    created_by="krishna 38d15e3b", **columns )[ "id" ]
+
+
 def _transition( headers, task_id, **body ):
     return requests.post( f"{ENDPOINT}/{task_id}/transition", json=body, headers=headers, timeout=10 )
 
@@ -116,7 +128,9 @@ class TestTaskStoreAuth:
         headers = { "X-API-Key": test_api_key[ "api_key" ] }
         r = requests.post( ENDPOINT, json=_create_body(), headers=headers, timeout=10 )
         assert r.status_code == 201, f"{r.status_code}: {r.text}"
-        assert r.json()[ "status" ] == "queued"
+        # A new row starts in the holding area ('task approval new tickets start in holding
+        # area = True', inherited by [Lupin: Testing]); pinned as a literal.
+        assert r.json()[ "status" ] == "not_approved"
 
     def test_query_with_jwt_returns_200( self, auth_headers ):
         r = requests.get( ENDPOINT, headers=auth_headers, timeout=10 )
@@ -127,20 +141,16 @@ class TestTaskStoreAuth:
 class TestTaskStoreLifecycle:
     """Full item lifecycle against real Postgres — the R4 determinism proof."""
 
-    def test_full_lifecycle_with_audit_trail( self, test_api_key ):
+    def test_full_lifecycle_with_audit_trail( self, test_api_key, seeded_task_rows ):
         headers = { "X-API-Key": test_api_key[ "api_key" ] }
         actor   = "krishna 38d15e3b"
 
-        # 1. create — queued, creation event stamped
-        created = requests.post( ENDPOINT, json=_create_body(
-            owner_persona       = "krishna",
-            accountable_manager = "tiberius",
-            gate_class          = "manager",
-            priority            = "P1",
-        ), headers=headers, timeout=10 )
-        assert created.status_code == 201, f"{created.status_code}: {created.text}"
-        item = created.json()
-        task_id = item[ "id" ]
+        # 1. a queued row with its creation event (seeded: the create door mints not_approved)
+        task_id = _queued_row( seeded_task_rows, accountable_manager="tiberius",
+                               gate_class="manager", priority="P1" )
+        first   = requests.get( f"{ENDPOINT}/{task_id}", headers=headers, timeout=10 )
+        assert first.status_code == 200, f"{first.status_code}: {first.text}"
+        item = first.json()
         assert item[ "status" ] == "queued" and item[ "blocked_by" ] == [ ]
         assert item[ "created_ts" ] is not None and item[ "updated_ts" ] is not None
 
@@ -237,7 +247,7 @@ class TestTaskStoreLifecycle:
         assert events[ -1 ][ "authority" ] == "manager_relay"
         assert all( e[ "actor" ] == actor for e in events[ 1: ] )
 
-    def test_doc_path_receipt_validates_against_live_scope_registry( self, test_api_key ):
+    def test_doc_path_receipt_validates_against_live_scope_registry( self, test_api_key, seeded_task_rows ):
         """
         doc_path receipts resolve via the SERVER's scope registry (container mounts).
 
@@ -257,8 +267,7 @@ class TestTaskStoreLifecycle:
         headers = { "X-API-Key": test_api_key[ "api_key" ] }
         actor   = "krishna 38d15e3b"
 
-        created = requests.post( ENDPOINT, json=_create_body(), headers=headers, timeout=10 )
-        task_id = created.json()[ "id" ]
+        task_id = _queued_row( seeded_task_rows )
         for to_status in ( "claimed", "in_progress", "review" ):
             _transition( headers, task_id, to_status=to_status, actor=actor )
 
@@ -302,11 +311,10 @@ class TestTaskStoreLifecycle:
         r = requests.get( ENDPOINT, headers=headers, timeout=10, params={ "limit": -1 } )
         assert r.status_code == 422
 
-    def test_transition_rejects_junk_receipts_on_non_done( self, test_api_key ):
+    def test_transition_rejects_junk_receipts_on_non_done( self, test_api_key, seeded_task_rows ):
         """N2 live: junk receipts on ->claimed never land in the audit trail."""
         headers = { "X-API-Key": test_api_key[ "api_key" ] }
-        created = requests.post( ENDPOINT, json=_create_body(), headers=headers, timeout=10 )
-        task_id = created.json()[ "id" ]
+        task_id = _queued_row( seeded_task_rows )
         r = _transition( headers, task_id, to_status="claimed", actor="krishna 38d15e3b",
                          receipt_refs={ "vibes": "good" } )
         assert r.status_code == 422
@@ -317,11 +325,10 @@ class TestTaskStoreLifecycle:
 class TestTaskStorePhase2WritePaths:
     """Phase 2 live wire: reason on ->dropped, correlation_key filter, /correlate, /amend."""
 
-    def test_dropped_requires_reason_and_persists_it( self, test_api_key ):
+    def test_dropped_requires_reason_and_persists_it( self, test_api_key, seeded_task_rows ):
         """C12 live: ->dropped without reason 422s; with reason it lands on the event row."""
         headers = { "X-API-Key": test_api_key[ "api_key" ] }
-        created = requests.post( ENDPOINT, json=_create_body(), headers=headers, timeout=10 )
-        task_id = created.json()[ "id" ]
+        task_id = _queued_row( seeded_task_rows )
 
         bare = _transition( headers, task_id, to_status="dropped", actor="tiffany d03e6219" )
         assert bare.status_code == 422
@@ -350,14 +357,13 @@ class TestTaskStorePhase2WritePaths:
         body = r.json()
         assert body[ "count" ] == 1 and body[ "tasks" ][ 0 ][ "correlation_key" ] == ck
 
-    def test_correlate_restamps_key_with_audit_event( self, test_api_key ):
+    def test_correlate_restamps_key_with_audit_event( self, test_api_key, seeded_task_rows ):
         """Respawn adoption live: re-stamp + 're-correlated' event; terminal items refuse."""
         headers = { "X-API-Key": test_api_key[ "api_key" ] }
         old_ck  = f"cc-task:{uuid.uuid4()}:3"
         new_ck  = f"cc-task:{uuid.uuid4()}:8"
-        created = requests.post( ENDPOINT, json=_create_body( correlation_key=old_ck ), headers=headers, timeout=10 )
-        task_id = created.json()[ "id" ]
-        minted_status = created.json()[ "status" ]                        # queued or not_approved, per the holding-area default
+        task_id = _queued_row( seeded_task_rows, correlation_key=old_ck )
+        minted_status = "queued"                                          # what the seeder wrote
 
         r = requests.post( f"{ENDPOINT}/{task_id}/correlate", headers=headers, timeout=10,
                            json={ "correlation_key": new_ck, "actor": "tiffany d03e6219" } )
@@ -379,12 +385,10 @@ class TestTaskStorePhase2WritePaths:
         assert locked.status_code == 422
         assert any( "immutable" in e for e in locked.json()[ "detail" ][ "errors" ] )
 
-    def test_amend_appends_body_with_audit_event( self, test_api_key ):
+    def test_amend_appends_body_with_audit_event( self, test_api_key, seeded_task_rows ):
         """Append-only body amend live: original body preserved verbatim, 'amended' event, blank-note refuses, terminal lands as a post-terminal addendum."""
         headers = { "X-API-Key": test_api_key[ "api_key" ] }
-        created = requests.post( ENDPOINT, json=_create_body( body="ORIGINAL SPEC verbatim." ),
-                                 headers=headers, timeout=10 )
-        task_id = created.json()[ "id" ]
+        task_id = _queued_row( seeded_task_rows, body="ORIGINAL SPEC verbatim." )
 
         r = requests.post( f"{ENDPOINT}/{task_id}/amend", headers=headers, timeout=10,
                            json={ "note": "SCOPE REFRAME: subscriber path now.",
@@ -458,12 +462,12 @@ class TestTaskStoreWrapperE2E:
     X-API-Key into the test DB, so this suite is :8000-by-construction.
     """
 
-    def test_four_tool_happy_path_through_wrappers( self, test_api_key ):
+    def test_four_tool_happy_path_through_wrappers( self, test_api_key, seeded_task_rows ):
         """create → query → transition (full lifecycle) → done-with-receipts, all via the impls."""
         api_key = test_api_key[ "api_key" ]
         actor   = "krishna 7e8fb0d6"
 
-        # task_create_impl → 201 item dict verbatim, status queued, created_by passthrough
+        # task_create_impl → 201 item dict verbatim, status not_approved, created_by passthrough
         created = task_create_impl(
             api_base_url  = BASE_URL,
             api_key       = api_key,
@@ -474,9 +478,11 @@ class TestTaskStoreWrapperE2E:
             owner_persona = "krishna",
             correlation_key = "epic:unassigned",
         )
-        assert created.get( "status" ) == "queued", created
+        # The create door mints into the holding area; the rest of the lifecycle runs on a
+        # seeded queued row, because only an approver's login may admit the created one.
+        assert created.get( "status" ) == "not_approved", created
         assert created[ "created_by" ] == actor
-        task_id = created[ "id" ]
+        task_id = _queued_row( seeded_task_rows )
 
         # task_query_impl → filter passthrough finds it; unset filters omitted entirely
         q = task_query_impl( api_base_url=BASE_URL, api_key=api_key, owner_persona="krishna", status="queued" )
@@ -508,15 +514,12 @@ class TestTaskStoreWrapperE2E:
         assert locked[ "status" ] == "error" and locked[ "http_status" ] == 422, locked
         assert any( "append-only" in e for e in locked[ "errors" ] ), locked
 
-    def test_blocked_gate_and_correlate_through_wrappers( self, test_api_key ):
+    def test_blocked_gate_and_correlate_through_wrappers( self, test_api_key, seeded_task_rows ):
         """→blocked gate (reject then accept) and task_correlate re-key, all via the impls."""
         api_key = test_api_key[ "api_key" ]
         actor   = "krishna 7e8fb0d6"
 
-        created = task_create_impl( api_base_url=BASE_URL, api_key=api_key, created_by=actor,
-                                    item_class="task", title="wrapper-e2e blocked+correlate probe",
-                                    project="lupin", correlation_key="epic:unassigned" )
-        task_id = created[ "id" ]
+        task_id = _queued_row( seeded_task_rows )
         task_transition_impl( api_base_url=BASE_URL, api_key=api_key, actor=actor,
                               task_id=task_id, to_status="in_progress" )
 
