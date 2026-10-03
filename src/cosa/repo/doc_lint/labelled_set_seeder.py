@@ -680,7 +680,8 @@ async def run_writer( tasks, model, ledger_path, outputs_path, query_fn=None ):
         - model_transport.set_budget has been called with a cap for model
 
     Ensures:
-        - a task already in the ledger is never called again; its stored content sha must match the task's now, or ValueError
+        - every ledger row is checked (content sha, model, prompt hash) before the first call; a mismatch is a ValueError and no call is made
+        - a task already in the ledger is never called again
         - the ledger's rows must agree on model and prompt hash with each other and with now, or ValueError
         - a failed or empty call is retried once; still failing, the task is recorded as dropped
         - a CallBudgetExceeded is not retried and ends the run
@@ -689,12 +690,13 @@ async def run_writer( tasks, model, ledger_path, outputs_path, query_fn=None ):
     rows = read_jsonl( ledger_path ) if os.path.exists( ledger_path ) else []
     check_ledger_identity( rows, model )
     done = { r[ "task_id" ]: r for r in rows }
+    for task in tasks:
+        if task[ "task_id" ] in done and done[ task[ "task_id" ] ].get( "task_sha" ) != task_sha( task[ "instruction" ], task[ "text" ] ):
+            raise ValueError( f"task {task[ 'task_id' ]} is in the ledger for different text: the plan was redrawn into the same files" )
     called, dropped = 0, []
     for task in tasks:
         sha = task_sha( task[ "instruction" ], task[ "text" ] )
-        if task[ "task_id" ] in done:
-            if done[ task[ "task_id" ] ].get( "task_sha" ) != sha: raise ValueError( f"task {task[ 'task_id' ]} is in the ledger for different text: the plan was redrawn into the same files" )
-            continue
+        if task[ "task_id" ] in done: continue
         text = None
         for _ in range( 2 ):
             try:

@@ -928,3 +928,39 @@ def test_fix4_a_natural_span_that_differs_from_old_only_in_whitespace_is_refused
     s.write_jsonl( str( tmp_path / "nat.jsonl" ), [ { "id": "n0", "file": "f", "symbol": "s", "old": old, "new": "It walks the first.", "x_span_in_old": span, "found_by": "t" } ] )
     assert s.main( [ "natural", "--natural", str( tmp_path / "nat.jsonl" ), "--out", str( tmp_path / "o" ) ] ) == 2
     assert "n0" in capsys.readouterr().err and not ( tmp_path / "o" ).exists()
+
+
+class NoCallTransport:
+    """A transport that fails the test on any call."""
+
+    async def __call__( self, prompt, options ):
+        raise AssertionError( "a model call was made" )
+        yield  # pragma: no cover - makes this an async generator
+
+
+def test_a_redraw_over_a_partial_ledger_is_refused_before_the_first_call( planned, capsys ):
+    tmp_path, shared = planned
+    base = tmp_path / "out"
+    tasks = s.read_jsonl( str( base / "dev" / "writer_tasks.jsonl" ) )
+    done = tasks[ :3 ]                                           # a partial ledger: the third held task was redrawn with new text
+    s.write_jsonl( str( base / "dev" / "writer_ledger.jsonl" ), [ dict( s.writer_ledger_row( t[ "task_id" ], FABLE, "x" ), task_sha=s.task_sha( t[ "instruction" ], t[ "text" ] ) ) for t in done ] )
+    tasks[ 2 ] = dict( tasks[ 2 ], text = "redrawn text" )
+    s.write_jsonl( str( base / "dev" / "writer_tasks.jsonl" ), tasks )
+    plan = json.loads( ( base / "dev" / "plan.json" ).read_text() )
+    plan[ "tasks" ][ tasks[ 2 ][ "task_id" ] ][ "sha256" ] = s.task_sha( tasks[ 2 ][ "instruction" ], "redrawn text" )
+    plan[ "plan_sha256" ] = s.plan_hash( plan )
+    ( base / "dev" / "plan.json" ).write_text( json.dumps( plan ) )
+    assert s.main( write_args( base, shared ), query_fn=NoCallTransport() ) == 2
+    assert "redrawn into the same files" in capsys.readouterr().err and mt.calls_used( FABLE, str( shared ) ) == 0
+
+
+def test_resuming_a_consistent_ledger_under_a_different_writer_model_is_refused_with_no_call( planned, capsys ):
+    tmp_path, shared = planned
+    base = tmp_path / "out"
+    assert s.main( write_args( base, shared, approved="1000" ), query_fn=Writer() ) == 0
+    other = "claude-fable-5-2"
+    before = mt.calls_used( other, str( shared ) )
+    rows = s.read_jsonl( str( base / "dev" / "writer_ledger.jsonl" ) )
+    s.write_jsonl( str( base / "dev" / "writer_ledger.jsonl" ), rows[ :-1 ] )      # one task still pending, so a resume would call
+    assert s.main( write_args( base, shared, writer=other, cap=f"{other}=500" ), query_fn=NoCallTransport() ) == 2
+    assert f"was written by model {FABLE!r}, not {other!r}" in capsys.readouterr().err and mt.calls_used( other, str( shared ) ) == before
