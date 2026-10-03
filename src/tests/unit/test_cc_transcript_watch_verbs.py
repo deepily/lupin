@@ -324,7 +324,15 @@ async def test_a_non_admin_watch_is_refused_and_registers_nothing( router_module
     await router_module.handle_cc_transcript_verb(
         socket, BROWSER, { "type": "cc_transcript_watch", "cc_session_id": SEAT } )
 
-    assert socket.of_type( "error" ), "a non-admin watch produced no refusal"
+    # The refusal is the contract's own frame, pinned whole: state "refused", reason
+    # "admin_only", no epoch. A generic "error" frame is what no transcript screen reads.
+    assert socket.sent == [ {
+        "type"          : "cc_transcript_state",
+        "cc_session_id" : SEAT,
+        "file_epoch"    : None,
+        "state"         : "refused",
+        "reason"        : "admin_only",
+    } ], f"a non-admin watch was not refused in the contract's frame: {socket.sent}"
     assert manager.cc_transcript_watchers_of( SEAT ) == set(), "a non-admin was registered"
     assert fake_tailer.instances == [ ], "a non-admin watch started a tailer"
 
@@ -339,7 +347,8 @@ async def test_a_session_with_no_admin_entry_at_all_is_refused( router_module, m
     socket = FakeSocket()
     await router_module.handle_cc_transcript_verb(
         socket, "a-session-nobody-registered", { "type": "cc_transcript_watch", "cc_session_id": SEAT } )
-    assert socket.of_type( "error" )
+    assert [ ( f[ "type" ], f[ "state" ], f[ "reason" ] ) for f in socket.sent ] == \
+           [ ( "cc_transcript_state", "refused", "admin_only" ) ]
     assert manager.cc_transcript_watchers == { }
 
 
@@ -946,8 +955,16 @@ async def test_both_verbs_are_dispatched_from_the_receive_loop( queue_endpoint_e
 
     await websocket_queue_endpoint( websocket=socket, session_id=BROWSER )
 
-    refusals = [ frame for frame in socket.sent
-                 if frame.get( "type" ) == "error" and frame.get( "event" ) == verb ]
+    # Each verb's own refusal frame, both produced only by the handler: a refused watch is a
+    # `cc_transcript_state {state: refused}` frame for this seat, a refused unwatch a generic
+    # error naming the verb.
+    if verb == "cc_transcript_watch":
+        refusals = [ frame for frame in socket.sent
+                     if frame.get( "type" ) == "cc_transcript_state" and frame.get( "state" ) == "refused"
+                     and frame.get( "cc_session_id" ) == SEAT ]
+    else:
+        refusals = [ frame for frame in socket.sent
+                     if frame.get( "type" ) == "error" and frame.get( "event" ) == verb ]
     assert refusals, f"{verb} never reached the handler; frames were {socket.sent}"
 
 

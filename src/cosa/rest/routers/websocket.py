@@ -414,6 +414,21 @@ async def handle_cc_transcript_verb( websocket, session_id, message ):
     # 🔴 The WS half of ruling Q5, on state connect() already stores. The REST half is
     # require_admin — a different mechanism, so a test of one proves nothing about the other.
     if not websocket_manager.session_is_admin.get( session_id, False ):
+        # A refused WATCH answers in the contract's own frame, `cc_transcript_state
+        # {state: refused}`, the shape the clients already render for a seat that is not
+        # found (plan §5, "a refused watch is expected, not exceptional"). It was a generic
+        # "error" frame, which no transcript screen reads. An unwatch has no screen waiting
+        # on it and keeps the generic error.
+        if verb == "cc_transcript_watch":
+            from cosa.rest.cc_transcript_tailer import REASON_ADMIN_ONLY, STATE_EVENT, STATE_REFUSED
+            await websocket.send_json( {
+                "type"          : STATE_EVENT,
+                "cc_session_id" : cc_session_id,
+                "file_epoch"    : None,
+                "state"         : STATE_REFUSED,
+                "reason"        : REASON_ADMIN_ONLY,
+            } )
+            return
         await websocket.send_json( {
             "type"          : "error",
             "event"         : verb,

@@ -441,28 +441,28 @@ def admin_socket_events():
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def test_an_admin_authenticates_on_the_real_socket_and_its_subscription_survives(
-    create_test_admin, admin_socket_events
+    create_test_admin, seat_fixture, admin_socket_events
 ):
     """
     The real handshake, and the T3 failure mode asserted rather than assumed.
 
     T3: a name absent from `websocket available events` is dropped at subscribe time,
     SILENTLY — a client whose whole list validates to `[]` has every frame dropped while
-    auth reports success. So `auth_success` alone does not establish that the four
-    cc_transcript names were accepted. This asserts the server echoes them back as
-    subscribed; the INI-side half is the unit tier's A2.6.
+    auth reports success. So `auth_success` alone does not establish that the
+    cc_transcript names were accepted.
+
+    The proof is a frame, not an echo. The plan never asked `auth_success` to list the
+    accepted subscriptions and the server does not (the plan owner's answer, 2026-10-03),
+    so this watches a seat and requires the `live` state frame to ARRIVE: the send path
+    drops any frame whose type the session is not subscribed to, so a `cc_transcript_state`
+    name that validated away would leave this waiting until it times out.
     """
     with QueueSocket( create_test_admin[ "access_token" ], admin_socket_events ) as socket:
         assert socket.auth_frame[ "type" ] == "auth_success", socket.auth_frame
 
-        echoed = socket.auth_frame.get( "subscribed_events" )
-        assert echoed is not None, (
-            "auth_success did not report the accepted subscription list, so a client "
-            "cannot tell an accepted name from a silently dropped one — the exact "
-            "condition the in-place comment at websocket_manager.py:207-219 describes"
-        )
-        missing = [ name for name in CC_TRANSCRIPT_EVENTS if name not in echoed ]
-        assert not missing, f"these names validated away silently: {missing}"
+        watch( socket, seat_fixture, from_offset=0 )
+        frame = socket.recv_frame( expect=STATE_EVENT )
+        assert frame[ "state" ] == "live", frame
 
 
 def test_a_non_admin_watch_is_refused_and_no_blocks_follow( create_test_user, seat_fixture, admin_socket_events ):
@@ -483,7 +483,7 @@ def test_a_non_admin_watch_is_refused_and_no_blocks_follow( create_test_user, se
 
         states = [ f for f in frames if f.get( "type" ) == STATE_EVENT ]
         assert states, "the watch was neither honoured nor refused — a silent drop"
-        assert any( "denied" in str( f.get( "state" ) ) or "forbidden" in str( f.get( "state" ) ) for f in states ), (
+        assert [ ( f.get( "state" ), f.get( "reason" ) ) for f in states ] == [ ( "refused", "admin_only" ) ], (
             f"the refusal does not name itself: {states}"
         )
 

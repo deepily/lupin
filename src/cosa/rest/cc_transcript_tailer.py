@@ -57,6 +57,7 @@ STATE_EPOCH_MISMATCH = "epoch_mismatch"
 # mobile client already handles `refused` as final: static message, no buffer, no retry.
 STATE_REFUSED        = "refused"
 REASON_NOT_FOUND     = "not_found"     # no such seat, or its transcript file is not here
+REASON_ADMIN_ONLY    = "admin_only"    # the caller's session does not hold the admin role (ruling Q5)
 
 # Defaults. Every one is overridden from the INI by `load_settings`; they live here so the
 # module is usable (and testable) without a ConfigurationManager.
@@ -387,8 +388,10 @@ class CcTranscriptTailer:
         poll_interval  = max( 0.01, float( self.settings[ "poll_interval_seconds" ] ) )
         coalesce_window = max( 0.0, self.settings[ "coalesce_window_ms" ] / 1000.0 )
         pending         = [ ]
-        pending_offset  = None
-        pending_next    = None
+        # Where the next frame starts: the end of the last frame sent, or the watch's own
+        # starting offset. A frame covers every byte from here to the read position, so
+        # frames chain even across records that map to no blocks.
+        frame_start     = self.offset
         last_flush      = time.monotonic()
 
         grace       = max( 0.0, float( self.settings[ "grace_seconds" ] ) )
@@ -414,22 +417,30 @@ class CcTranscriptTailer:
                 print( f"[CC-TRANSCRIPT] poll error for {self.cc_session_id}: {e}" )
                 chunk = None
 
-            # `pending_next` is the end of the LAST read and is kept across quiet polls. With a
-            # coalesce window the flush runs on a later iteration than the read, and that one
-            # usually finds nothing new; clearing the end there sent frames whose next_offset
-            # equalled their offset, which every client's gap rule treats as a gap.
-            if chunk is not None:
-                if pending_offset is None: pending_offset = chunk[ "offset" ]
+            # A ROTATION (a /clear swapped the path, or the file was truncated): `poll_once`
+            # has already moved the epoch and reset the read position. Blocks read from the
+            # old file and not yet sent are dropped, because a frame carries the CURRENT
+            # epoch and they do not belong to it; the client clears its buffer on `rotated`
+            # and re-fetches. Then the rotation is announced. Nothing else calls
+            # `announce_rotation`.
+            if chunk is not None and chunk[ "rotated" ]:
+                pending     = [ ]
+                frame_start = self.offset
+                await self.announce_rotation()
+            elif chunk is not None:
                 pending.extend( chunk[ "blocks" ] )
-                pending_next = chunk[ "next_offset" ]
 
+            # The frame ends at the READ POSITION, not at a value saved from one chunk. With a
+            # coalesce window the flush runs on a later iteration than the read, and a saved
+            # end was lost on the quiet poll in between; and a record that maps to no blocks
+            # moves the read position without producing a chunk at all. Either way the client's
+            # gap rule (`chunk.offset != last_next_offset`) fired on every frame.
             now = time.monotonic()
             if pending and ( now - last_flush ) >= coalesce_window:
-                await self._flush( pending_offset, pending_next, pending )
-                pending        = [ ]
-                pending_offset = None
-                pending_next   = None
-                last_flush     = now
+                await self._flush( frame_start, self.offset, pending )
+                pending     = [ ]
+                frame_start = self.offset
+                last_flush  = now
 
             await asyncio.sleep( poll_interval )
 

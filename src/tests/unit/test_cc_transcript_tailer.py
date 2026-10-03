@@ -567,6 +567,75 @@ async def test_a_frame_flushed_after_a_quiet_poll_still_ends_where_the_read_ende
 
 
 @pytest.mark.asyncio
+async def test_offsets_chain_across_a_record_that_maps_to_no_blocks( seat ):
+    """
+    A record that renders as nothing (a `file-history-snapshot` here) still moves the read
+    position. The frame after it must start where the previous frame ended, or the client's
+    gap rule fires and it re-fetches over REST. Found by María in review of f60627d28.
+    """
+    path, bridge = seat
+    emit   = EmitRecorder()
+    tailer = CcTranscriptTailer( SEAT, emit, settings=_fast_settings(), bridge_reader=bridge )
+    tailer.start()
+    try:
+        _write_records( path, 1, start=0 )
+        await asyncio.sleep( 0.05 )
+        with open( path, "a" ) as f:
+            f.write( json.dumps( { "type": "file-history-snapshot", "messageId": "m1" } ) + "\n" )
+        await asyncio.sleep( 0.05 )
+        size = _write_records( path, 1, start=1 )
+        await asyncio.sleep( 0.05 )
+    finally:
+        await tailer.stop()
+
+    frames = emit.of( APPEND_EVENT )
+    assert [ b[ "text" ] for frame in frames for b in frame[ "blocks" ] ] == [ "block 0", "block 1" ]
+    assert len( frames ) == 2, f"expected one frame per visible record, got {len( frames )}"
+    assert frames[ 1 ][ "offset" ] == frames[ 0 ][ "next_offset" ], (
+        f"gap: frame starts at {frames[ 1 ][ 'offset' ]}, previous ended at {frames[ 0 ][ 'next_offset' ]}"
+    )
+    assert ( frames[ 0 ][ "offset" ], frames[ 1 ][ "next_offset" ] ) == ( 0, size )
+
+
+@pytest.mark.asyncio
+async def test_a_clear_during_a_live_watch_reaches_the_watcher_as_a_rotated_frame( seat, tmp_path ):
+    """
+    The LOOP announces a rotation. `announce_rotation` had a unit test of its own and no
+    caller: `poll_once` set `rotated` and the loop never read it, so a `/clear` on a watched
+    seat sent no state frame (:8000 job ts-11c25f8a: "no frame of type cc_transcript_state
+    within 12.0s"). Blocks read from the old file and not yet sent are dropped, never sent
+    under the new file's epoch; the client clears its buffer on `rotated` and re-fetches.
+    """
+    path, bridge = seat
+    emit   = EmitRecorder()
+    tailer = CcTranscriptTailer( SEAT, emit, settings=_fast_settings( coalesce_window_ms=200 ),
+                                 bridge_reader=bridge )
+    tailer.start()
+    try:
+        _write_records( path, 2, start=0 )           # read, held by the 200 ms window
+        await asyncio.sleep( 0.05 )
+
+        new_path = tmp_path / "after-the-clear.jsonl"
+        new_path.write_text( "" )
+        bridge.transcript_path = str( new_path )     # the /clear: the bridge names a new file
+        await asyncio.sleep( 0.05 )
+        size = _write_records( new_path, 1, start=7 )
+        await asyncio.sleep( 0.4 )
+    finally:
+        await tailer.stop()
+
+    states = [ ( f[ "state" ], f[ "file_epoch" ] ) for f in emit.of( STATE_EVENT ) ]
+    assert states == [ ( "live", epoch_for_path( path ) ), ( STATE_ROTATED, epoch_for_path( new_path ) ) ]
+
+    frames = emit.of( APPEND_EVENT )
+    assert [ ( f[ "file_epoch" ], f[ "offset" ], f[ "next_offset" ], [ b[ "text" ] for b in f[ "blocks" ] ] )
+             for f in frames ] == [ ( epoch_for_path( new_path ), 0, size, [ "block 7" ] ) ], (
+        "the old file's unsent blocks must not go out under the new epoch, and the new "
+        "file's frame starts at 0"
+    )
+
+
+@pytest.mark.asyncio
 async def test_offsets_chain_across_frames_with_no_gap( seat ):
     """
     Each frame starts where the previous one ended.
