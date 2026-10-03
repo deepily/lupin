@@ -4800,37 +4800,16 @@ def task_create(
     authority           : str              = "standing",
 ) -> dict:
     """
-    **[SELF-DISCLOSURE]** Create a TYPED or CROSS-PERSONA item in the unified task store.
+    **[SELF-DISCLOSURE]** Create an item in the unified task store, the one door for owed work.
 
-    ┌─ WHICH DOOR? ──────────────────────────────────────────────────────────┐
-    │ Do NOT use this for your OWN work stubs. Use the native harness          │
-    │ `TaskCreate` instead — it auto-mirrors into this same durable store      │
-    │ via the PostToolUse hook. Reach for THIS verb ONLY for the two things    │
-    │ the harness physically cannot express: a TYPED item, or one OWNED BY     │
-    │ ANOTHER persona.                                                         │
-    └─────────────────────────────────────────────────────────────────────────┘
-
-    Two creation methods, ONE destination, different EXPRESSIVENESS
-    ---------------------------------------------------------------
-    Both the harness `TaskCreate` and this `task_create` ultimately write to
-    the SAME store (POST /api/tasks). They are NOT distinguished by durability
-    or by "session-local vs cross-session" — the harness items survive /clear
-    too. They differ ONLY in what SHAPE of item they can mint:
-
-    - Harness `TaskCreate` (the default, ~90% of items): the PostToolUse mirror
-      (task_store_mirror.py:356-362) HARDCODES `item_class="task"`,
-      `owner_persona = accountable_manager = <self>`, and reads only
-      `metadata.task_store_id`. So the harness can mint EXACTLY ONE shape:
-      a generic, SELF-OWNED `task`. That covers your own work stubs.
-
-    - This `task_create` is the ONLY agent-facing path that can mint:
-        (a) a CROSS-PERSONA item — `owner_persona` / `accountable_manager`
-            set to someone OTHER than yourself (assigning work to a worker);
-        (b) a TYPED item — `item_class` in {decision, gate, bug, review_request}
-            (e.g. a `decision` with `gate_class="operator"` for the operator queue,
-            a durable `bug`, a `review_request`, a `gate`).
-      If your item is neither (a) nor (b), you are at the WRONG door — go use
-      the harness `TaskCreate`.
+    Every owed item goes through here, your own work included
+    ---------------------------------------------------------
+    The store is the single source of truth for owed work, and this verb writes to it.
+    The native harness `TaskCreate` list is not a liveness source and is not mirrored
+    into the store. An item created there is invisible to the fleet, the arbiter and the
+    operator's board. Use this verb for a self-owned task, a cross-persona assignment, and
+    a typed item (decision, gate, bug, review_request) alike. See planning-is-prompting
+    workflow/task-store-discipline.md.
 
     NOT a reason to reach here
     --------------------------
@@ -4838,24 +4817,8 @@ def task_create(
     `source_qid` is a provenance FIELD (plumbed through TaskCreateIn) RESERVED
     for a designed-but-NOT-YET-BUILT server-side DM→task auto-create path
     (cold-review C10, still an OPEN design question — no such auto-creator
-    exists in src/cosa today). It is NOT what this wrapper is for: this
-    wrapper's `source_qid` param only stamps provenance when you are ALREADY
-    minting a typed/cross-persona item here for one of the reasons above.
-
-    Forward-note (Rick ruling 2026-06-16)
-    -------------------------------------
-    This verb is KEPT, not deleted — its purpose is intentionally distinct from
-    the harness method. The future route to a SINGLE creation door is to teach
-    the mirror to also read `metadata.item_class` / `owner_persona` /
-    `gate_class` from harness `TaskCreate`; once the harness can express typed +
-    cross-persona items, THIS verb can be retired with zero capability loss.
-    Until that lands, deleting it would amputate cross-persona assignment and
-    the decision/gate/bug/review_request classes — exactly the items that
-    surface decisions to Rick. See planning-is-prompting
-    workflow/task-store-discipline.md §3.
-
-    Managers-first write practice (design F4) is enforced socially + by the
-    audit trail, not by tool gating.
+    exists in src/cosa today). This wrapper's `source_qid` param only stamps
+    provenance on an item you are already minting.
 
     FILING A P0 THAT RICK ORDERED (row d2b1b59a)
     --------------------------------------------
@@ -4899,8 +4862,10 @@ def task_create(
                     priority="P0", authority="user_direct")
         #   → then task_promotion_status(ticket_id=<petition.ticket_id>)
 
-        # Your OWN work stub → DON'T use this; use the harness instead:
-        #   TaskCreate(subject="Draft the docstring", description="...")
+        # Your own work (a self-owned task uses this door too):
+        task_create(item_class="task", title="Draft the docstring",
+                    project="lupin", owner_persona="<you>",
+                    accountable_manager="<your manager>")
 
     Args:
         item_class: task | decision | review_request | bug | gate
