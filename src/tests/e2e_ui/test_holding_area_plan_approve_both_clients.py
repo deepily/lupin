@@ -283,15 +283,19 @@ def _operator_two_clicks( page, pane, state ):
     expect( rachel.locator( ".holding-plan-count" ) ).to_have_text( str( PLAN_ROWS ) )
     expect( sam.locator( ".holding-plan-count" ) ).to_have_text( str( len( SAM_IDS ) ) )
 
-    rachel.locator( ".holding-plan-header" ).click( position={ "x": 4, "y": 4 } )
+    # The plan is CLOSED on arrival, and its rows are hidden.
+    expect( rachel.locator( ".holding-plan-header" ) ).to_have_attribute( "aria-expanded", "false" )
+    expect( _row( page, pane, "00000000-0000-0000-0000-000000000001" ) ).to_be_hidden()
+
+    # ARM, THEN CONFIRM (row 376dd4cb): the first click arms and posts nothing — and it OPENS the
+    # plan, so the rows about to be approved are on screen before the confirming click.
+    rachel.locator( ".holding-plan-approve-all" ).click()
+    expect( rachel.locator( ".holding-plan-approve-all" ) ).to_have_text( f"Confirm approve all {PLAN_ROWS}" )
+    expect( rachel.locator( ".holding-plan-header" ) ).to_have_attribute( "aria-expanded", "true" )
     for i in range( 1, PLAN_ROWS + 1 ):
         expect( _row( page, pane, f"00000000-0000-0000-0000-00000000000{i}" ) ).to_be_visible()
     expect( _ungrouped_row( page, pane, UNGROUPED_ID ) ).to_be_visible()
     expect( sam.locator( ".holding-plan-header" ) ).to_have_attribute( "aria-expanded", "false" )
-
-    # ARM, THEN CONFIRM (row 376dd4cb): the first click arms and posts nothing.
-    rachel.locator( ".holding-plan-approve-all" ).click()
-    expect( rachel.locator( ".holding-plan-approve-all" ) ).to_have_text( f"Confirm approve all {PLAN_ROWS}" )
     assert state[ "transitions" ] == [ ], f"the arming click posted: {state[ 'transitions' ]}"
     rachel.locator( ".holding-plan-approve-all" ).click()
 

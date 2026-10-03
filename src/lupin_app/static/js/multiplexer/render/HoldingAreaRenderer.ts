@@ -560,15 +560,26 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     if ( header === null ) return false;
     if ( target.closest( "button, input, select, textarea, a" ) !== null ) return false;
     const group = header.closest<HTMLElement>( ".holding-plan-group" )!;
-    /* c8 ignore next */ // `?? ""` RHS: the template stamps data-filer and data-plan on every plan group.
-    const id       = holdingPlanId( group.dataset.filer ?? "", group.dataset.plan ?? "" );
-    const expanded = group.classList.contains( "collapsed" );
-    group.classList.toggle( "collapsed", !expanded );
-    header.setAttribute( "aria-expanded", expanded ? "true" : "false" );
-    header.querySelector( ".holding-plan-chevron" )!.textContent = holdingPlanChevron( expanded );
-    if ( expanded ) this.expandedPlans.add( id );
-    else this.expandedPlans.delete( id );
+    this.setPlanOpen( group, group.classList.contains( "collapsed" ) );
     return true;
+  }
+
+  /**
+   * Open or close one plan's rows IN PLACE and record the choice for the next repaint.
+   *
+   * Ensures:
+   *   - `.collapsed`, the header's aria-expanded and the chevron all agree with `open`
+   *   - the plan id is in expandedPlans exactly when `open`
+   */
+  private setPlanOpen( group: HTMLElement, open: boolean ): void {
+    /* c8 ignore next */ // `?? ""` RHS: the template stamps data-filer and data-plan on every plan group.
+    const id = holdingPlanId( group.dataset.filer ?? "", group.dataset.plan ?? "" );
+    group.classList.toggle( "collapsed", !open );
+    const header = group.querySelector<HTMLElement>( ".holding-plan-header" )!;
+    header.setAttribute( "aria-expanded", open ? "true" : "false" );
+    header.querySelector( ".holding-plan-chevron" )!.textContent = holdingPlanChevron( open );
+    if ( open ) this.expandedPlans.add( id );
+    else this.expandedPlans.delete( id );
   }
 
   /**
@@ -897,6 +908,8 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
       button.classList.add( HOLDING_BATCH_ARMED_CLASS );
       button.textContent = holdingPlanConfirmLabel( ids.length );
       this.paintPlanStatus( id, holdingPlanArmedStatus( ids.length ) );
+      // The rows about to be approved must be on screen BEFORE the confirming press.
+      this.setPlanOpen( button.closest<HTMLElement>( ".holding-plan-group" )!, true );
       return;
     }
     this.disarmPlans();

@@ -635,3 +635,19 @@ test( "a plan's identity is read from its filer AND its plan attributes: an arme
   assert.equal( h.calls.length, 0 );
   h.unmount();
 } );
+
+test( "arm: the FIRST press OPENS the closed plan, so its rows are on screen before the confirming press; only that plan opens", async () => {
+  const h = mount( () => ( { ok: true } ) );
+  assert.ok( h.group( ...RA ).classList.contains( "collapsed" ), "precondition: the plan starts closed" );
+  click( h.button( ...RA ) );
+  assert.ok( ! h.group( ...RA ).classList.contains( "collapsed" ), "arming did not open the plan" );
+  const header = h.group( ...RA ).querySelector( ".holding-plan-header" ) as HTMLElement;
+  assert.equal( header.getAttribute( "aria-expanded" ), "true" );
+  assert.equal( header.querySelector( ".holding-plan-chevron" )!.textContent, "▼" );
+  assert.ok( h.group( ...RC ).classList.contains( "collapsed" ), "arming one plan opened a sibling" );
+  assert.ok( h.group( ...SS ).classList.contains( "collapsed" ), "arming opened another filer's plan of the same key" );
+  assert.equal( h.calls.length, 0, "arming posted" );
+  await h.poll();
+  assert.ok( ! h.group( ...RA ).classList.contains( "collapsed" ), "the repaint shut the plan the operator is about to approve" );
+  h.unmount();
+} );

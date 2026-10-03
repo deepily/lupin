@@ -14913,12 +14913,15 @@ class NotificationsUI {
          *       ever armed
          *     - the label reads "Confirm approve all N"
          *     - the plan's status line says what the next click will do
+         *     - the plan's rows are opened, so the operator sees what the next click approves
          */
         this._disarmHoldingPlanButtons();
         button.dataset.armed = "1";
         button.classList.add( "task-submit-armed" );
         button.textContent = `Confirm approve all ${count}`;
         this._renderHoldingPlanStatus( id, `Click again to approve ${count} rows in this plan.` );
+        // The rows about to be approved must be on screen BEFORE the confirming press.
+        this._setHoldingPlanOpen( button.closest( ".holding-plan-group" ), true );
     }
 
     async _handleHoldingPlanApproveClick( button ) {
@@ -15157,15 +15160,26 @@ class NotificationsUI {
         if ( !header ) return false;
         if ( target.closest( "button, input, select, textarea, a" ) ) return false;
         const group = header.closest( ".holding-plan-group" );
-        if ( !( this._holdingAreaExpandedPlans instanceof Set ) ) this._holdingAreaExpandedPlans = new Set();
-        const id       = this._holdingPlanId( group.dataset.filer || "", group.dataset.plan || "" );
-        const expanded = group.classList.contains( "collapsed" );
-        group.classList.toggle( "collapsed", !expanded );
-        header.setAttribute( "aria-expanded", expanded ? "true" : "false" );
-        header.querySelector( ".holding-plan-chevron" ).textContent = expanded ? "▼" : "▶";
-        if ( expanded ) this._holdingAreaExpandedPlans.add( id );
-        else this._holdingAreaExpandedPlans.delete( id );
+        this._setHoldingPlanOpen( group, group.classList.contains( "collapsed" ) );
         return true;
+    }
+
+    _setHoldingPlanOpen( group, open ) {
+        /**
+         * Open or close one plan's rows IN PLACE and record the choice for the next repaint.
+         *
+         * Ensures:
+         *     - .collapsed, the header's aria-expanded and the chevron all agree with `open`
+         *     - the plan id is in _holdingAreaExpandedPlans exactly when `open`
+         */
+        if ( !( this._holdingAreaExpandedPlans instanceof Set ) ) this._holdingAreaExpandedPlans = new Set();
+        const id     = this._holdingPlanId( group.dataset.filer || "", group.dataset.plan || "" );
+        const header = group.querySelector( ".holding-plan-header" );
+        group.classList.toggle( "collapsed", !open );
+        header.setAttribute( "aria-expanded", open ? "true" : "false" );
+        header.querySelector( ".holding-plan-chevron" ).textContent = open ? "▼" : "▶";
+        if ( open ) this._holdingAreaExpandedPlans.add( id );
+        else this._holdingAreaExpandedPlans.delete( id );
     }
 
     _heldRowIdsForFiler( filer ) {

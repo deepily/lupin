@@ -553,3 +553,18 @@ test( "disarming tolerates an armed header whose attributes were stripped", () =
   assert.equal( stray.textContent, "Approve all 0" );
   assert.equal( h.calls.length, 0 );
 } );
+
+test( "arm: the FIRST press OPENS the closed plan, so its rows are on screen before the confirming press; only that plan opens", () => {
+  const h = mount( () => ( { ok: true } ) );
+  assert.ok( h.group( ...RA ).classList.contains( "collapsed" ), "precondition: the plan starts closed" );
+  click( h.button( ...RA ) );
+  assert.ok( ! h.group( ...RA ).classList.contains( "collapsed" ), "arming did not open the plan" );
+  const header = h.group( ...RA ).querySelector( ".holding-plan-header" ) as HTMLElement;
+  assert.equal( header.getAttribute( "aria-expanded" ), "true" );
+  assert.equal( header.querySelector( ".holding-plan-chevron" )!.textContent, "▼" );
+  assert.ok( h.group( ...RC ).classList.contains( "collapsed" ), "arming one plan opened a sibling" );
+  assert.ok( h.group( ...SS ).classList.contains( "collapsed" ), "arming opened another filer's plan of the same key" );
+  assert.equal( h.calls.length, 0, "arming posted" );
+  h.repaint();
+  assert.ok( ! h.group( ...RA ).classList.contains( "collapsed" ), "the repaint shut the plan the operator is about to approve" );
+} );
