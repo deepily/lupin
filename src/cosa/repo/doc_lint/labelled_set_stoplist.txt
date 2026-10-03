@@ -1,0 +1,24 @@
+# Words that alone are never a seeded span (row 13878d1c, build spec part 2). One per line, lower-case.
+the
+a
+an
+not
+no
+is
+are
+it
+its
+this
+that
+of
+to
+in
+on
+and
+or
+as
+by
+for
+with
+if
+be
