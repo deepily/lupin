@@ -30,10 +30,11 @@ Choose a bounded job only when all of these hold; otherwise use the direct SDK a
 - The Claude Code tool surface covers what the task needs.
 - One to three seconds of start-up per call is acceptable: at most about 10 calls per second, and latency budgets over 2 seconds.
 - The caller needs no token streaming; a bounded job returns once, on completion.
+- Reference agents: `bug_fix_expediter`, `test_fix_expediter`, `podcast_generator`, `presentation_generator`, `deep_research`. `notification_proxy` and `decision_proxy` stay on the direct SDK.
 
 ## When to run it
 - Rolling plan limits make batch work compete with interactive sessions, so set `scheduled_at` on any non-interactive bounded job.
 - `scheduled_at` is top-level in the submit request, because `args` is checked against the command's own argument contract.
-- Pick a window when the host is up; late morning to 1 PM Eastern is optimal.
+- Pick a window when the host is up: 10 a.m. to 1 p.m. Eastern is optimal. Avoid 9 to 11 p.m., the owner's interactive peak.
 - The host is usually off from about 11 PM to 10 in the morning, so a job scheduled then waits for the next boot.
 - A user-clicked job omits `scheduled_at` and runs at once.
