@@ -8,6 +8,9 @@ Design of record: Lupin src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-re
 
 Every call writes an immutable, content-addressed receipt. A receipt never lists callers or
 times; those live in the per-session call log written by reuse_call_log_middleware.py.
+What a call may carry is decided in one place, sendable(): no module and no language is excluded
+(Rick, 2026-10-03), string defaults in signatures are blanked, and a symbol that still carries an
+email, URL, IP address, absolute path or credential-shaped token is dropped before the sweep.
 The Jev transport is injected. The live transport is not built yet (plan phase W-A), so with no
 injected transport a call reports KEY_UNREADABLE when the key file is absent and CALL_FAILED when
 it is present.
@@ -154,6 +157,8 @@ class ReuseContext:
 def context_from_environment( root=None ):
     """
     Ensures:
+        - exclude_prefixes is left empty, by Rick's ruling of 2026-10-03: no module is excluded from a
+          call, and sendable() blanks and screens what is sent instead
         - returns a ReuseContext for the git toplevel of the working directory (or `root`), with the
           per-repository data directory and the key file under LUPIN_ROOT
         - LUPIN_REUSE_DATA_DIR and LUPIN_REUSE_OUT_DIR relocate the data directory and the generated
@@ -252,6 +257,99 @@ class JevCache:
         """Ensures: stores the response once; an existing entry is never rewritten."""
         entry = { "request_hash": key, "response": response, "response_sha": sha( canonical( response ) ) }
         write_once( self._path( key ), ( canonical( entry ) + "\n" ).encode( "utf-8" ) )
+
+
+BLANK        = "…"                                                          # replaces a string default in a signature
+OPENERS      = { "(": ")", "[": "]", "{": "}" }
+QUOTES       = ( "'", '"', "`" )
+C1_PATTERNS  = { "email"      : re.compile( r"[\w.+-]+@[\w-]+\.[\w.-]+" ),
+                 "url"        : re.compile( r"(?:\b[a-zA-Z][a-zA-Z0-9+.-]*://|\bwww\.)\S+" ),
+                 "ip"         : re.compile( r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?![\w.])|(?<![\w:])(?:[0-9A-Fa-f]{1,4}:){3,7}[0-9A-Fa-f]{1,4}(?![\w:])" ),
+                 "path"       : re.compile( r"(?<![\w/.:\-])(?:~|/(?:home|mnt|var|etc|usr|opt|tmp|srv|root|proc|dev|Users|Volumes|private))(?:/[\w.@+-]+)+/?|(?<![\w/.:\-])~/|\b[A-Za-z]:\\\S+" ),
+                 "credential" : re.compile( r"\bsk-[A-Za-z0-9_-]{8,}|\bAKIA[0-9A-Z]{16}\b|\bgh[pousr]_[A-Za-z0-9]{20,}|\bxox[abprs]-[A-Za-z0-9-]{10,}|\beyJ[A-Za-z0-9_-]{10,}"
+                                           r"|\b(?=[A-Za-z0-9_-]*\d)(?=[A-Za-z0-9_-]*[A-Za-z])[A-Za-z0-9_-]{32,}\b" ) }
+
+
+def _skip_string( text, i ):
+    """Ensures: returns the index just past the string literal that opens at text[ i ] (the end of text when it never closes)."""
+    q, i = text[ i ], i + 1
+    while i < len( text ):
+        if text[ i ] == "\\": i += 2; continue
+        if text[ i ] == q: return i + 1
+        i += 1
+    return len( text )
+
+
+def blank_string_defaults( sig ):
+    """
+    Remove the literal values of string defaults from a signature, for every language in the index.
+
+    A default is whatever follows a bare `=` (not `==`, `=>`, `<=`, `>=`, `!=`) up to the next comma
+    at the same bracket depth, or the bracket that closes the list it sits in. This covers Python
+    `a: str = "x"`, TypeScript and JavaScript `a = 'x'`, `a: T = "x"`, `{ a = "x" }` destructuring
+    and Dart `{ String a = 'x' }`. A default whose text holds a quote of any kind ('  "  `), including
+    one nested in a call, object or template literal, is replaced whole by an ellipsis. A string in
+    an annotation (`-> "Foo"`, `type: "a" | "b"`) is not a default and stays.
+
+    Ensures:
+        - returns sig unchanged when no default holds a quote
+        - otherwise returns sig with each such default replaced by an ellipsis, so no quoted default
+          text survives
+    """
+    out, i, n, stack = [], 0, len( sig ), []
+    while i < n:
+        c = sig[ i ]
+        if c in QUOTES:
+            j = _skip_string( sig, i ); out.append( sig[ i:j ] ); i = j; continue
+        if c in OPENERS: stack.append( OPENERS[ c ] )
+        elif stack and c == stack[ -1 ]: stack.pop()
+        prev, nxt = sig[ i - 1 ] if i else "", sig[ i + 1 ] if i + 1 < n else ""
+        if c == "=" and nxt not in "=>" and prev not in "=!<>":
+            j, depth, angle = i + 1, len( stack ), 0
+            while j < n:                                                     # find where this default ends
+                d = sig[ j ]
+                if d in QUOTES: j = _skip_string( sig, j ); continue
+                if d in OPENERS: stack.append( OPENERS[ d ] )
+                elif d in OPENERS.values():
+                    if len( stack ) <= depth: break
+                    stack.pop()
+                elif d == "<": angle += 1
+                elif d == ">" and sig[ j - 1 ] != "=" and angle: angle -= 1
+                elif d == "," and len( stack ) == depth and not angle: break
+                j += 1
+            del stack[ depth: ]
+            default = sig[ i + 1:j ]
+            if any( q in default for q in QUOTES ): out.append( "=" + BLANK ); i = j; continue
+            out.append( c + default ); i = j; continue
+        out.append( c ); i += 1
+    return "".join( out )
+
+
+def c1_hits( rec ):
+    """Ensures: returns the sorted names of the C1 patterns (email, url, ip, path, credential) found in the symbol's id, signature or first docstring line."""
+    text = "\n".join( [ rec[ "id" ], rec[ "sig" ], rec[ "doc" ] ] )
+    return sorted( name for name, rx in C1_PATTERNS.items() if rx.search( text ) )
+
+
+def sendable( entries, exclude_prefixes=() ):
+    """
+    The one place that decides what of the index may leave the machine (Rick's ruling, 2026-10-03).
+
+    Ensures:
+        - returns ( kept, dropped ): kept are copies of the entries with string defaults blanked, in
+          input order; dropped are the ids that still carried an email, URL, IP address, absolute path
+          or credential-shaped token after blanking
+        - every language in the index is kept; no module is excluded unless exclude_prefixes names it,
+          and that list is empty by ruling
+        - an entry whose signature holds no string default is returned equal to its input
+    """
+    kept, dropped = [], []
+    for r in entries:
+        if r[ "id" ].startswith( tuple( exclude_prefixes ) ): continue
+        c = { **r, "sig": blank_string_defaults( r[ "sig" ] ) }
+        if c1_hits( c ): dropped.append( r[ "id" ] )
+        else: kept.append( c )
+    return kept, dropped
 
 
 def entry_text( rec ):
@@ -401,7 +499,7 @@ def prepare( ctx ):
 
     Ensures:
         - returns ( flags, entries, sha, gen ): flags is the set of pipeline causes that hold, entries the
-          index symbols to ask about (exclusions removed), sha the index_sha, gen the live generation or None
+          index symbols to ask about, as sendable() leaves them (defaults blanked, backstop drops removed), sha the index_sha, gen the live generation or None
         - a tree that is not lupin gives NOT_LUPIN_TREE and no entries
         - a stale index that cannot be rebuilt gives INDEX_STALE and no entries
         - a tool missing from the index header gives DEPENDENCY_MISSING; the sweep still runs on what was indexed
@@ -421,7 +519,7 @@ def prepare( ctx ):
             ctx.transport = LiveJevTransport( read_key( ctx.key_path ) )
         except KeyUnreadable:
             flags.add( "KEY_UNREADABLE" )
-    entries = [ r for r in sx_build.read_symbols( gen ) if not r[ "id" ].startswith( ctx.exclude_prefixes ) ]
+    entries, _ = sendable( sx_build.read_symbols( gen ), ctx.exclude_prefixes )
     l0      = l0_lines( ctx.wiki_dir )
     sha_    = index_sha( header[ "symbols_sha" ], l0 )
     save_snapshot( ctx, sha_, gen, l0 )
@@ -576,11 +674,11 @@ def replay_impl( rid, ctx ):
         if stored[ "tool" ] == "read_capability":
             return { "status": "ok", "receipt_id": rid, "stored": stored, "frozen": None, "head": None, "differences": { "frozen": [], "head": [] } }
         entries, _ = load_snapshot( ctx, stored[ "index_sha" ] )
+        entries, _ = sendable( entries, ctx.exclude_prefixes )
         need       = stored[ "query" ]
         if stored[ "tool" ] == "fetch_similar":
             need    = next( ( entry_text( e ) for e in entries if e[ "id" ] == stored[ "query" ] ), stored[ "query" ] )
             entries = [ e for e in entries if e[ "id" ] != stored[ "query" ] ]
-        entries = [ e for e in entries if not e[ "id" ].startswith( ctx.exclude_prefixes ) ]
         hard    = set( stored[ "flags" ] ) & { "NOT_LUPIN_TREE", "INDEX_STALE", "KEY_UNREADABLE" }
         if hard or not entries:
             fz = { "verdict": stored[ "verdict" ], "cause": stored[ "cause" ], "shortlist": stored[ "shortlist" ] }

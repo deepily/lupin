@@ -571,3 +571,151 @@ def test_a_capability_name_that_starts_valid_is_bad_name( env ):
 
 def test_a_receipt_id_that_starts_valid_is_receipt_missing( env ):
     assert rt.replay_impl( "ab/../x", ctx_for( env, None ) )[ "error" ] == "RECEIPT_MISSING"
+
+
+# --- what may leave the machine: Rick's ruling of 2026-10-03 (row d39fbd85) ------------------------------------------------
+# No exclusion list, every language; string defaults blanked, then a backstop drops a symbol that still carries an email, URL,
+# IP address, absolute path or credential-shaped token. Every test below names the guard whose deletion turns it red.
+
+CFG_SRC = ( '"""Connection settings."""\n\n\n'
+            'def connect( host="db.internal.example", token_name=\'LITERAL-ONE\', retries=3 ):\n'
+            '    """Open a connection."""\n' )
+PLANTED_DEFAULTS = ( "db.internal.example", "LITERAL-ONE" )
+
+
+class Recorder:
+    """A transport that records every body it is sent and answers 'unrelated' to all of them."""
+
+    def __init__( self ): self.seen = []
+
+    def post( self, body ):
+        self.seen.append( body ); return UNREL
+
+
+def _production_ctx( env, tmp_path, monkeypatch ):
+    """The context the MCP server builds: from the environment, with only the transport injected."""
+    root, data, out = env
+    ( root / "src" / "cosa" / "cfg.py" ).write_text( CFG_SRC, encoding="utf-8" )
+    monkeypatch.setenv( "LUPIN_ROOT", str( REPO_ROOT ) )
+    monkeypatch.setenv( "LUPIN_REUSE_DATA_DIR", str( data ) ); monkeypatch.setenv( "LUPIN_REUSE_OUT_DIR", str( out ) )
+    ctx = rt.context_from_environment( root )
+    ctx.transport = Recorder()
+    return ctx
+
+
+def _bodies_text( ctx ): return "\n".join( rt.canonical( b ) for b in ctx.transport.seen )
+
+
+def test_the_production_context_excludes_no_module_and_sends_no_string_default( env, tmp_path, monkeypatch ):
+    # red when: sendable() is not applied in prepare() (arm A) or blank_string_defaults() is dropped from sendable() (arm B)
+    ctx = _production_ctx( env, tmp_path, monkeypatch )
+    assert ctx.exclude_prefixes == ()                                                           # empty by ruling
+    r = rt.check_exists_impl( NEED, ctx )
+    assert r[ "status" ] == "ok" and r[ "stats" ][ "entries" ] == 4                            # nothing excluded: cfg.connect plus the three
+    text = _bodies_text( ctx )
+    assert "cosa.cfg.connect(host=…, token_name=…, retries=3) — Open a connection." in [ b[ "state" ][ "candidate" ] for b in ctx.transport.seen ]
+    assert not any( lit in text for lit in PLANTED_DEFAULTS )
+    assert all( lit not in rt.canonical( r ) for lit in PLANTED_DEFAULTS )                       # nor in the stored receipt's shortlist view
+
+
+def test_fetch_similar_and_its_replay_send_no_string_default_either( env, tmp_path, monkeypatch ):
+    # red when: the need of fetch_similar is built from an unblanked entry (arm C), or replay_impl() skips sendable() (arm D:
+    # the frozen re-run then asks for a body that was never cached and answers CACHE_MISSING)
+    ctx = _production_ctx( env, tmp_path, monkeypatch )
+    f   = rt.fetch_similar_impl( "cosa.cfg.connect", ctx )
+    assert f[ "status" ] == "ok"
+    rep = rt.replay_impl( f[ "receipt_id" ], ctx )
+    assert rep[ "status" ] == "ok" and rep[ "differences" ] == { "frozen": [], "head": [] }
+    assert not any( lit in _bodies_text( ctx ) for lit in PLANTED_DEFAULTS )
+
+
+C1_CASES = [ ( "email",      "Mail ops@example.com when done" ),
+             ( "url",        "Fetch https://example.com/x for the list" ),
+             ( "url",        "Open www.example.com" ),
+             ( "ip",         "Bind 192.168.1.5 first" ),
+             ( "ip",         "Bind fe80:0:0:1 first" ),
+             ( "path",       "Reads /home/someone/.cfg" ),
+             ( "path",       "Reads ~/.claude/settings.json" ),
+             ( "path",       "Reads C:\\Users\\someone\\x" ),
+             ( "credential", "Key sk-abcdef1234567890" ),
+             ( "credential", "Key AKIAABCDEFGHIJKLMNOP" ),
+             ( "credential", "Key ghp_abcdefghijklmnopqrstuv" ),
+             ( "credential", "Key xoxb-1234567890-abcdef" ),
+             ( "credential", "Key eyJhbGciOiJIUzI1NiJ9" ),
+             ( "credential", "Key a1b2c3d4e5f6a7b8c9d0a1b2c3d4e5f6a7b8" ) ]
+C1_CLEAN = [ "Route /api/v2/submit and and/or I/O", "Version 1.2.3 of the API", "Skip dir names (skip_dir_names)", "A plain sentence." ]
+
+
+def _rec( id_, sig="()", doc="Does a thing.", lang="py" ): return { "id": id_, "sig": sig, "doc": doc, "file": "x", "lang": lang }
+
+
+@pytest.mark.parametrize( "name,doc", C1_CASES )
+def test_c1_a_symbol_that_still_carries_a_pattern_is_dropped_and_its_clean_twin_is_sent( name, doc ):
+    # red when: that pattern is deleted from C1_PATTERNS, or sendable() stops calling c1_hits()
+    kept, dropped = rt.sendable( [ _rec( "m.bad", doc=doc ), _rec( "m.good" ) ] )
+    assert dropped == [ "m.bad" ] and [ k[ "id" ] for k in kept ] == [ "m.good" ]
+    assert rt.c1_hits( _rec( "m.bad", doc=doc ) ) == [ name ]                                  # the named pattern fired, not another
+
+
+@pytest.mark.parametrize( "doc", C1_CLEAN )
+def test_c1_text_without_a_pattern_is_sent( doc ):
+    kept, dropped = rt.sendable( [ _rec( "m.ok", doc=doc ) ] )
+    assert dropped == [] and len( kept ) == 1
+
+
+def test_c1_looks_at_the_signature_and_the_id_after_blanking_not_before():
+    # red when: c1 runs before blank_string_defaults (arm E): the default URL would then drop a symbol the ruling says to send
+    kept, dropped = rt.sendable( [ _rec( "m.a", sig='(url="https://example.com/x")' ), _rec( "m.b", sig="(url: https://example.com/x)" ),
+                                   _rec( "bad@example.com.id" ) ] )
+    assert [ k[ "id" ] for k in kept ] == [ "m.a" ] and kept[ 0 ][ "sig" ] == "(url=…)" and dropped == [ "m.b", "bad@example.com.id" ]
+
+
+def test_the_backstop_drops_before_the_sweep_so_the_dropped_symbol_never_reaches_a_body( env, monkeypatch ):
+    # red when: prepare() sends entries that sendable() dropped
+    orig = rt.sx_build.read_symbols
+    monkeypatch.setattr( rt.sx_build, "read_symbols", lambda gen, all_symbols=False: orig( gen, all_symbols ) + [ _rec( "cosa.leak.fn", doc="Reads /home/someone/.cfg" ) ] )
+    fake = Recorder()
+    r = rt.check_exists_impl( NEED, ctx_for( env, fake ) )
+    assert r[ "stats" ][ "entries" ] == 3 and not any( "leak" in rt.canonical( b ) for b in fake.seen )
+
+
+def test_typescript_and_javascript_entries_are_sent_with_their_defaults_blanked( env, monkeypatch ):
+    # red when: a language filter is put back in prepare() or sendable() (the draft's B1)
+    ts = _rec( "src.lupin_app.static.ts.log.say", sig='(message: string, type: LogType = "info"): void', doc="Write one log line.", lang="ts" )
+    js = _rec( "src.lupin_app.static.js.ui.show", sig="(title, mode = 'full', opts = { sep: `,` })", doc="Show a panel.", lang="js" )
+    orig = rt.sx_build.read_symbols
+    monkeypatch.setattr( rt.sx_build, "read_symbols", lambda gen, all_symbols=False: orig( gen, all_symbols ) + [ ts, js ] )
+    fake = Recorder()
+    r = rt.check_exists_impl( NEED, ctx_for( env, fake ) )
+    sent = [ b[ "state" ][ "candidate" ] for b in fake.seen ]
+    assert r[ "stats" ][ "entries" ] == 5
+    assert 'src.lupin_app.static.ts.log.say(message: string, type: LogType =…): void — Write one log line.' in sent
+    assert "src.lupin_app.static.js.ui.show(title, mode =…, opts =…) — Show a panel." in sent
+    assert not any( lit in rt.canonical( b ) for b in fake.seen for lit in ( '"info"', "'full'", "`,`" ) )
+
+
+BLANK_CASES = [ ( "(self, a: str='x', b=2) -> 'Foo'",                                   "(self, a: str=…, b=2) -> 'Foo'" ),
+                ( '(message: string, type: LogType = "info"): void',                      '(message: string, type: LogType =…): void' ),
+                ( "(a = {k:'v, w', z:1}, b)",                                             "(a =…, b)" ),
+                ( '(x: Map<string, number> = new Map<"a", "b">(), y=1)',                  "(x: Map<string, number> =…, y=1)" ),
+                ( "({ a = 'q', b }: Opts)",                                               "({ a =…, b }: Opts)" ),
+                ( "(a, b=`t${x}`)",                                                       "(a, b=…)" ),
+                ( "(a=1, b==2, c!=3, d<=4, e>=5)",                                        "(a=1, b==2, c!=3, d<=4, e>=5)" ),
+                ( "(x: 'A' | 'B' = 'A')",                                                 "(x: 'A' | 'B' =…)" ),
+                ( "(a=lambda q='z': q, b=3)",                                             "(a=…, b=3)" ),
+                ( "(String a = 'x', {String b = \"y\"})",                                 "(String a =…, {String b =…})" ),
+                ( "(a=\"it's\", b=1)",                                                    "(a=…, b=1)" ),
+                ( "(a='say \\'hi\\'', b=1)",                                              "(a=…, b=1)" ),
+                ( "(cb: () => void = null, f = (x) => 'a', g = [1, 2], h = 3)",           "(cb: () => void = null, f =…, g = [1, 2], h = 3)" ),
+                ( "(a = [1, 'x'], b = f(1, 2) )",                                         "(a =…, b = f(1, 2) )" ),
+                ( "(a: 'open",                                                            "(a: 'open" ),
+                ( "(a = 'open",                                                           "(a =…" ),
+                ( "<T = 'a'>(x)",                                                         "<T =…" ),
+                ( "()",                                                                   "()" ) ]
+
+
+@pytest.mark.parametrize( "sig,want", BLANK_CASES )
+def test_blank_string_defaults_across_languages( sig, want ):
+    # red when: any branch of the scanner is changed; each row pins one (separator, bracket, quote, comparison, arrow or generic case)
+    assert rt.blank_string_defaults( sig ) == want
+
