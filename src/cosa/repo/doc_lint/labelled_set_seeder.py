@@ -992,17 +992,51 @@ def check_set( base, split ):
     return failures, checked
 
 
+WAIVABLE = frozenset( [ "WEAK_TOKEN_MISSING" ] )
+
+
+def rule1_status( base, split, accept_path=None ):
+    """
+    Run rule 1 and take out the pairs a reader accepted.
+
+    Requires:
+        - accept_path is None or a JSON file holding a list of pair ids, written by the person who read those pairs
+
+    Ensures:
+        - returns ( remaining failures, { pair_id: reasons } accepted, seeded pairs checked )
+        - only a pair whose every reason is in WAIVABLE (a weak word reworded with a synonym the cue set does not hold)
+          can be accepted; an id that passes rule 1 anyway is ignored
+        - without an accept file the accepted dict is empty
+
+    Raises:
+        - ValueError if the accept file is not a list of strings, names a pair that is not in the plan, or names a pair
+          that fails for a reason that cannot be waived (the span back in the text, the strong word restored, no output)
+    """
+    failures, checked = check_set( base, split )
+    if accept_path is None: return failures, {}, checked
+    ids = json.loads( open( accept_path, encoding="utf-8" ).read() )
+    if not isinstance( ids, list ) or not all( isinstance( i, str ) for i in ids ): raise ValueError( f"{accept_path} must hold a JSON list of pair ids" )
+    known = { p[ "id" ] for p in json.loads( open( os.path.join( base, split, "plan.json" ), encoding="utf-8" ).read() )[ "pairs" ] }
+    unknown = sorted( set( ids ) - known )
+    if unknown: raise ValueError( f"{accept_path} names pairs that are not in the plan: {' '.join( unknown )}" )
+    blocked = sorted( i for i in set( ids ) if i in failures and not set( failures[ i ] ) <= WAIVABLE )
+    if blocked: raise ValueError( "cannot accept " + "; ".join( f"{i} ({' '.join( failures[ i ] )})" for i in blocked ) + f": only {' '.join( sorted( WAIVABLE ) )} can be accepted" )
+    accepted = { i: failures[ i ] for i in sorted( set( ids ) ) if i in failures }
+    return { i: r for i, r in failures.items() if i not in accepted }, accepted, checked
+
+
 def cmd_check( args ):
     """
     Rule 1 on a written set: list the failing seeded pairs. Makes no model call and touches no ledger.
 
-    Returns 0 when every seeded pair passes, 1 when any fails (ids and reasons printed), 2 when the plan or the task file is refused.
+    Returns 0 when every seeded pair passes or is accepted, 1 when any fails (ids and reasons printed), 2 when the plan, the task file or
+    the accept file is refused. --accept FILE names pairs a reader has read and judged fine (see rule1_status).
     """
-    try: failures, checked = check_set( args.base, args.split )
+    try: failures, accepted, checked = rule1_status( args.base, args.split, args.accept )
     except ( ValueError, OSError ) as e:
         print( f"REFUSED: {e}", file=sys.stderr )
         return 2
-    print( f"check {args.split}: {checked} seeded pairs, {len( failures )} fail" )
+    print( f"check {args.split}: {checked} seeded pairs, {len( failures )} fail" + ( f", {len( accepted )} accepted by a reader" if args.accept else "" ) )
     for pair_id in sorted( failures ): print( f"{pair_id} {' '.join( failures[ pair_id ] )}" )
     return 1 if failures else 0
 
@@ -1050,7 +1084,7 @@ def cmd_redraw( args ):
         - `write --base <out>` then calls only the new tasks; --approved-calls and --call-hold bound that run as for any write
     """
     try:
-        failures, _ = check_set( args.base, args.split )
+        failures, _, _ = rule1_status( args.base, args.split, args.accept )
         source = os.path.join( args.base, args.split )
         plan   = json.loads( open( os.path.join( source, "plan.json" ), encoding="utf-8" ).read() )
         if plan.get( "pool_sha" ) != sha256_file( args.pool ): raise ValueError( "the pool is not the one this plan was drawn from" )
@@ -1113,18 +1147,23 @@ def cmd_verify( args ):
 
     Returns 0 when written. Reads writer_outputs.jsonl; refuses (2) while a task has no output, and while rule 1
     (check_set) fails any seeded pair, so the second seat never reads a pair the script can already see is broken.
+    --accept FILE (a JSON list of pair ids a reader has read) lets a pair past that fails only WEAK_TOKEN_MISSING; the
+    list and its sha256 are recorded in rule1-accepted.json, and the count of accepted pairs is printed.
     """
     base = os.path.join( args.base, args.split )
     plan = json.loads( open( os.path.join( base, "plan.json" ), encoding="utf-8" ).read() )
     try:
         outputs = checked_outputs( base, plan )
-        failures, _ = check_set( args.base, args.split )
-    except ValueError as e:
+        failures, accepted, _ = rule1_status( args.base, args.split, args.accept )
+    except ( ValueError, OSError ) as e:
         print( f"REFUSED: {e}", file=sys.stderr )
         return 2
     if failures:
-        print( f"REFUSED: rule 1 fails {len( failures )} seeded pair(s): {' '.join( sorted( failures ) )}; run `check` and redraw them", file=sys.stderr )
+        print( f"REFUSED: rule 1 fails {len( failures )} seeded pair(s): {' '.join( sorted( failures ) )}; run `check`, then redraw them or accept the ones a reader judged fine", file=sys.stderr )
         return 2
+    if args.accept:
+        write_json( os.path.join( base, "rule1-accepted.json" ), { "accepted": accepted, "accept_file_sha256": sha256_file( args.accept ) } )
+        print( f"rule 1: accepted {len( accepted )} pair(s) by a reader's list; recorded in rule1-accepted.json" )
     by_pair = { p[ "id" ]: { "id": p[ "id" ], "old": p[ "old" ], "new": "", "linked_doc": "" } for p in plan[ "pairs" ] }
     for task_id, meta in plan[ "tasks" ].items(): by_pair[ meta[ "pair_id" ] ][ meta[ "role" ] ] = outputs[ task_id ]
     write_jsonl( os.path.join( base, "verify-input.jsonl" ), [ by_pair[ p[ "id" ] ] for p in plan[ "pairs" ] ] )
@@ -1288,14 +1327,14 @@ def build_parser():
     w.add_argument( "--claude-cli-path", required=True, help="the Claude Code binary every writer call runs (a newer model id can need a newer binary than the SDK's)" )
     w.add_argument( "--max-consecutive-failures", type=int, required=True, help="stop after this many tasks in a row fail twice" )
     v = sub.add_parser( "verify" )
-    v.add_argument( "--base", required=True ); v.add_argument( "--split", required=True )
+    v.add_argument( "--base", required=True ); v.add_argument( "--split", required=True ); v.add_argument( "--accept" )
     a = sub.add_parser( "assemble" )
     a.add_argument( "--base", required=True ); a.add_argument( "--split", required=True ); a.add_argument( "--out", required=True ); a.add_argument( "--verification", required=True )
     k = sub.add_parser( "check" )
-    k.add_argument( "--base", required=True ); k.add_argument( "--split", required=True )
+    k.add_argument( "--base", required=True ); k.add_argument( "--split", required=True ); k.add_argument( "--accept" )
     r = sub.add_parser( "redraw" )
     r.add_argument( "--base", required=True ); r.add_argument( "--split", required=True ); r.add_argument( "--pool", required=True ); r.add_argument( "--out", required=True )
-    r.add_argument( "--seed", type=int, required=True ); r.add_argument( "--split-seed", type=int ); r.add_argument( "--stoplist", default=DEFAULT_STOPLIST ); r.add_argument( "--exclude" )
+    r.add_argument( "--seed", type=int, required=True ); r.add_argument( "--split-seed", type=int ); r.add_argument( "--stoplist", default=DEFAULT_STOPLIST ); r.add_argument( "--exclude" ); r.add_argument( "--accept" )
     n = sub.add_parser( "natural" )
     n.add_argument( "--natural", required=True ); n.add_argument( "--out", required=True )
     m = sub.add_parser( "manifest" )

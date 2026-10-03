@@ -311,10 +311,10 @@ def new_task_of( plan, pair_id ):
     return next( t for t, m in plan[ "tasks" ].items() if m[ "pair_id" ] == pair_id and m[ "role" ] == "new" )
 
 
-def break_outputs( base, split, n=2 ):
+def break_outputs( base, split, n=2, skip=() ):
     """Make the first n seeded pairs fail rule 1 by putting the seeded span back in the output; returns their ids."""
     plan    = load( base, split )
-    seeded  = [ p for p in plan[ "pairs" ] if p[ "kind" ] in s.SEEDED_KINDS ][ :n ]
+    seeded  = [ p for p in plan[ "pairs" ] if p[ "kind" ] in s.SEEDED_KINDS and p[ "weaken_class" ] != "negation" and p[ "id" ] not in skip ][ :n ]      # a negation keeps its strong span by design
     path    = str( base / split / "writer_outputs.jsonl" )
     outputs = s.read_jsonl( path )
     for p in seeded:
@@ -572,3 +572,125 @@ def test_redraw_takes_a_given_split_seed_over_the_plans_and_falls_back_to_the_pl
     if ( tmp_path / "redrawn" ).exists(): (tmp_path / "redrawn").rename( tmp_path / "again" )
     s.main( redraw_args( tmp_path, pool, split="dev", base="out" ) )
     assert seen[ "scope" ] == set( load( tmp_path / "out", "dev" )[ "units" ] )
+
+
+# ---- review of a754c102f: the four boundaries the mutation run found untested ------------------------------
+
+def test_r4_a_sentence_of_exactly_three_words_is_refused_and_one_of_four_is_not():
+    old3 = "Return the count of workers. Callers wait here, which is stable. Callers retry on failure."
+    assert reject( old3, "which is stable" ) == "SHORT_SENTENCE"                                                      # leaves "Callers wait here." : 3 words
+    old4 = "Return the count of workers. Callers wait here now, which is stable. Callers retry on failure."
+    assert reject( old4, "which is stable" ) is None                                                                  # leaves 4 words
+
+
+def test_r3_a_sentence_sharing_exactly_two_content_words_with_an_exclusion_cue_blocks_the_deletion_and_one_word_does_not():
+    head  = "Return the count of workers. The call returns only idle workers of the open pool."
+    two   = head + " Busy workers are never returned."                         # shares workers + ... see content words below
+    assert len( rules.content_words( "The call returns only idle workers of the open pool." ) & rules.content_words( "Busy workers are never returned." ) ) == 1
+    assert qualifier_spans( two )                                                # one shared word: not blocked
+    shared2 = head + " Idle workers are never returned."
+    assert len( rules.content_words( "The call returns only idle workers of the open pool." ) & rules.content_words( "Idle workers are never returned." ) ) == 2
+    assert qualifier_spans( shared2 ) == []                                      # two shared words: blocked
+
+
+def test_r4_a_span_that_starts_in_the_summary_and_ends_after_it_is_refused():
+    old  = "Return the count of workers. Callers hold the lock here."
+    span = ( old.index( "workers" ), old.index( "Callers" ) + len( "Callers" ) )
+    assert span[ 0 ] < rules.first_sentence_end( old ) < span[ 1 ]
+    assert rules.delete_rejection( old, span, s.cut_text( old, span ) ) == "SUMMARY"
+
+
+def test_r4_a_heading_that_was_already_empty_is_not_blamed_on_the_cut():
+    old = "Return the count of workers.\n\nRaises:\n\nEnsures:\n    the count is exact, and it is never negative\n"
+    assert rules.structure_emptied( old, old ) is None
+    assert reject( old, "and it is never negative" ) is None
+
+
+# ---- accepting the pairs a reader judged fine (rule 1 false alarms on a synonym) ---------------------------
+
+def synonym_pair( base, split ):
+    """Reword the weak word of one weaken pair to a word the cue set lacks; returns that pair's id."""
+    plan    = load( base, split )
+    path    = str( base / split / "writer_outputs.jsonl" )
+    outputs = s.read_jsonl( path )
+    for pair in plan[ "pairs" ]:
+        cues = s.weak_cues( pair[ "weaken_class" ], pair[ "changed_token" ] ) if pair[ "kind" ] == "weaken" else frozenset()
+        if not cues or pair[ "weaken_class" ] == "negation": continue
+        tid = new_task_of( plan, pair[ "id" ] )
+        for row in outputs:
+            if row[ "task_id" ] == tid:
+                for cue in cues: row[ "text" ] = s.word_regex( cue ).sub( "perchance", row[ "text" ] )
+        s.write_jsonl( path, outputs )
+        return pair[ "id" ]
+    raise AssertionError( "no weaken pair with a cue" )
+
+
+def write_accept( tmp_path, ids, name="accept.json" ):
+    path = tmp_path / name
+    path.write_text( json.dumps( ids ) )
+    return str( path )
+
+
+def test_accept_verify_refuses_a_synonym_false_alarm_and_goes_on_when_a_reader_accepts_it( written, capsys ):
+    tmp_path, _ = written
+    base = tmp_path / "out"
+    pid  = synonym_pair( base, "dev" )
+    assert s.check_set( str( base ), "dev" )[ 0 ] == { pid: [ "WEAK_TOKEN_MISSING" ] }
+    assert s.main( [ "verify", "--base", str( base ), "--split", "dev" ] ) == 2
+    capsys.readouterr()
+    accept = write_accept( tmp_path, [ pid ] )
+    assert s.main( [ "verify", "--base", str( base ), "--split", "dev", "--accept", accept ] ) == 0
+    assert "rule 1: accepted 1 pair(s)" in capsys.readouterr().out
+    record = json.loads( ( base / "dev" / "rule1-accepted.json" ).read_text() )
+    assert record == { "accepted": { pid: [ "WEAK_TOKEN_MISSING" ] }, "accept_file_sha256": s.sha256_file( accept ) }
+    assert ( base / "dev" / "verify-input.jsonl" ).exists()
+
+
+def test_accept_a_pair_that_passes_anyway_is_ignored_and_the_count_says_zero( written, capsys ):
+    tmp_path, _ = written
+    base = tmp_path / "out"
+    plan = load( base, "dev" )
+    assert s.main( [ "verify", "--base", str( base ), "--split", "dev", "--accept", write_accept( tmp_path, [ plan[ "pairs" ][ 0 ][ "id" ] ] ) ] ) == 0
+    assert "accepted 0 pair(s)" in capsys.readouterr().out
+
+
+def test_accept_cannot_waive_a_pair_that_fails_for_another_reason( written, capsys ):
+    tmp_path, _ = written
+    base = tmp_path / "out"
+    bad  = break_outputs( base, "dev", 1 )[ 0 ]
+    assert s.main( [ "verify", "--base", str( base ), "--split", "dev", "--accept", write_accept( tmp_path, [ bad ] ) ] ) == 2
+    err = capsys.readouterr().err
+    assert f"cannot accept {bad}" in err and "WEAK_TOKEN_MISSING can be accepted" in err
+    assert not ( base / "dev" / "verify-input.jsonl" ).exists()
+
+
+def test_accept_refuses_a_file_that_is_not_a_list_of_ids_names_an_unknown_pair_or_is_missing( written, capsys ):
+    tmp_path, _ = written
+    base = tmp_path / "out"
+    for payload, words in ( ( { "p000": 1 }, "must hold a JSON list" ), ( [ 1 ], "must hold a JSON list" ), ( [ "p999" ], "not in the plan: p999" ) ):
+        assert s.main( [ "verify", "--base", str( base ), "--split", "dev", "--accept", write_accept( tmp_path, payload ) ] ) == 2
+        assert words in capsys.readouterr().err
+    assert s.main( [ "verify", "--base", str( base ), "--split", "dev", "--accept", str( tmp_path / "no-such.json" ) ] ) == 2
+    assert "REFUSED" in capsys.readouterr().err
+
+
+def test_accept_check_counts_the_accepted_pair_and_exits_0( written, capsys ):
+    tmp_path, _ = written
+    base = tmp_path / "out"
+    pid  = synonym_pair( base, "dev" )
+    assert s.main( [ "check", "--base", str( base ), "--split", "dev" ] ) == 1
+    capsys.readouterr()
+    assert s.main( [ "check", "--base", str( base ), "--split", "dev", "--accept", write_accept( tmp_path, [ pid ] ) ] ) == 0
+    assert "0 fail, 1 accepted by a reader" in capsys.readouterr().out
+
+
+def test_accept_redraw_leaves_an_accepted_pair_alone_and_replaces_only_the_rest( written, capsys ):
+    tmp_path, pool = written
+    gate = tmp_path / "gate-store"
+    kept = synonym_pair( gate, "gate" )
+    broken = break_outputs( gate, "gate", 3, skip=( kept, ) )
+    assert broken
+    accept = write_accept( tmp_path, [ kept ] )
+    assert s.main( redraw_args( tmp_path, pool, accept=accept ) ) == 0
+    named = capsys.readouterr().out.split( "failed pair(s) " )[ 1 ].split( " are replaced" )[ 0 ].split()
+    assert named == sorted( broken ) and kept not in named
