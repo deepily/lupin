@@ -182,27 +182,65 @@ def test_a_failing_run_keeps_its_own_verdict( tmp_path ):
 
 
 # ── 4. DROPPING `exec` CHANGED PROCESS SHAPE — measure what it changed ──────
+def run_and_interrupt( tmp_path ):
+    """
+    Start a slow pytest run through the wrapper, send one SIGINT to its process group once the slow test is running,
+    and return ( returncode, output ).
+
+    The child's SIGINT disposition is set here to the default, between fork and exec, and is never inherited. A
+    process that was started with SIGINT ignored (a shell script run in the background, nohup) passes that on to its
+    children, and a child that ignores SIGINT takes no notice of this signal and finishes its 60 s test with exit 0.
+    The run is started only after the slow test has written its marker, so no fixed wait decides whether the signal lands
+    on a running test, and a child still alive 10 s after the signal fails the test with its output instead of waiting out the 60 s.
+    """
+    d      = tmp_path / "slow"; d.mkdir()
+    marker = d / "started"
+    ( d / "test_slow.py" ).write_text( f"import pathlib, time\ndef test_slow():\n    pathlib.Path( {str( marker )!r} ).write_text( 'x' )\n    time.sleep( 60 )\n" )
+    proc = subprocess.Popen(
+        [ "bash", RUN_DIRECT, str( d ), "-p", "no:cacheprovider" ],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, start_new_session=True,
+        preexec_fn=lambda: signal.signal( signal.SIGINT, signal.SIG_DFL ),
+    )
+    deadline = time.monotonic() + 90
+    while not marker.exists():
+        if proc.poll() is not None or time.monotonic() > deadline:
+            if proc.poll() is None: os.killpg( os.getpgid( proc.pid ), signal.SIGKILL )
+            pytest.fail( f"the slow test never started; the run ended with {proc.poll()}:\n{proc.communicate()[ 0 ]}" )
+        time.sleep( 0.1 )
+    os.killpg( os.getpgid( proc.pid ), signal.SIGINT )
+    try:
+        output = proc.communicate( timeout=10 )[ 0 ]
+    except subprocess.TimeoutExpired:
+        os.killpg( os.getpgid( proc.pid ), signal.SIGKILL )
+        pytest.fail( f"the run was still alive 10 s after SIGINT:\n{proc.communicate()[ 0 ]}" )
+    return proc.returncode, output
+
+
 def test_ctrl_c_still_ends_the_run_with_130( tmp_path ):
     """
     `exec` handed the terminal's signal straight to pytest. Now a shell sits in between,
     so this asserts the observable a human cares about: one SIGINT to the process group
     (what Ctrl-C sends) ends the run with 130, and no diagnosis block is invented for it.
     """
-    d = tmp_path / "slow"; d.mkdir()
-    ( d / "test_slow.py" ).write_text( "import time\ndef test_slow(): time.sleep( 60 )\n" )
-
-    proc = subprocess.Popen(
-        [ "bash", RUN_DIRECT, str( d ), "-p", "no:cacheprovider" ],
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, start_new_session=True,
-    )
-    # Wait for pytest to actually be running before interrupting, so the signal lands on a
-    # started run rather than on process startup.
-    time.sleep( 8 )
-    os.killpg( os.getpgid( proc.pid ), signal.SIGINT )
-    output = proc.communicate( timeout=60 )[ 0 ]
-
-    assert proc.returncode == 130, f"expected 130 for an interrupted run, got {proc.returncode}"
+    code, output = run_and_interrupt( tmp_path )
+    assert code == 130, f"expected 130 for an interrupted run, got {code}"
     assert BLOCK_HEADLINE not in output, "an interrupt is not a collection error"
+
+
+def test_ctrl_c_ends_the_run_with_130_when_this_process_was_started_ignoring_sigint( tmp_path ):
+    """
+    Bug bb721da8: run from a background shell, the test process ignores SIGINT, and the child it started inherited that,
+    so the interrupt did nothing and the run ended 0 after its 60 s test. This process is put in that state here, and the
+    child must still end with 130, because the test gives the child the default disposition itself.
+    """
+    before = signal.signal( signal.SIGINT, signal.SIG_IGN )
+    try:
+        assert signal.getsignal( signal.SIGINT ) == signal.SIG_IGN, "this process must be ignoring SIGINT for the case to mean anything"
+        code, output = run_and_interrupt( tmp_path )
+    finally:
+        signal.signal( signal.SIGINT, before )
+    assert code == 130, f"expected 130 for an interrupted run, got {code}"
+    assert BLOCK_HEADLINE not in output
 
 
 def test_a_timeout_kill_keeps_its_own_status( tmp_path ):
