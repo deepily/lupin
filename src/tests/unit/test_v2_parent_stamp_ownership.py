@@ -188,16 +188,16 @@ def test_a_stranger_claiming_a_real_parent_is_dropped_loudly_but_the_request_sti
 
     assert body[ "status" ] == "waiting", "a dropped stamp is not a refusal"
     assert _stamp( queue ) is None
-    assert [ r.get( "parent_id_hash_dropped" ) for r in _traces( tmp_path ) ] == [ f"{PARENT}:not_owner" ]
+    assert [ r.get( "parent_id_hash_dropped" ) for r in _traces( tmp_path ) ] == [ "'ts-parentjob':not_owner" ]
     line = [ l for l in capsys.readouterr().out.splitlines() if l.startswith( "[v2-lineage]" ) ]
     assert len( line ) == 1
-    assert "someone@example.test" in line[ 0 ] and "caller-uid-9999" in line[ 0 ] and PARENT in line[ 0 ] and "not_owner" in line[ 0 ]
+    assert "'someone@example.test'" in line[ 0 ] and "'caller-uid-9999'" in line[ 0 ] and "'ts-parentjob'" in line[ 0 ] and "not_owner" in line[ 0 ]
 
 
 def test_a_claim_on_a_parent_with_no_job_history_row_is_dropped_as_owner_unknown( queue, tmp_path, world ):
     _submit( _client( queue, tmp_path, _user( uid=OWNER_UID ) ), parent="ts-never-persisted" )
     assert _stamp( queue ) is None
-    assert [ r.get( "parent_id_hash_dropped" ) for r in _traces( tmp_path ) ] == [ "ts-never-persisted:owner_unknown" ]
+    assert [ r.get( "parent_id_hash_dropped" ) for r in _traces( tmp_path ) ] == [ "'ts-never-persisted':owner_unknown" ]
     assert world[ "asked" ] == [ "ts-never-persisted" ]
 
 
@@ -246,7 +246,7 @@ def test_ask_honours_an_owner_and_forwards_no_drop_note( world ):
 def test_ask_drops_a_strangers_claim_and_names_it_for_the_trace( world ):
     kwargs = _ask( _user() )
     assert kwargs[ "parent_id_hash" ] is None
-    assert kwargs[ "parent_stamp_dropped" ] == f"{PARENT}:not_owner"
+    assert kwargs[ "parent_stamp_dropped" ] == "'ts-parentjob':not_owner"
 
 
 def test_ask_without_a_claim_sends_none_and_no_note( world ):
@@ -261,8 +261,8 @@ def test_ask_flow_records_the_drop_in_its_own_trace( tmp_path ):
                     notifier=lambda request: None, agentic_factory=create_agentic_job,
                     receptionist_factory=_Receptionist, trace_dir=str( tmp_path ) )
     flow.ask( question="", user_id="u", user_email="u@x", session_id="s", websocket_id="s",
-              parent_id_hash=None, parent_stamp_dropped="ts-x:not_owner" )     # a blank question is rejected at the gate; the trace is still written
-    assert [ r.get( "parent_id_hash_dropped" ) for r in _traces( tmp_path ) ] == [ "ts-x:not_owner" ]
+              parent_id_hash=None, parent_stamp_dropped="'ts-x':not_owner" )     # a blank question is rejected at the gate; the trace is still written
+    assert [ r.get( "parent_id_hash_dropped" ) for r in _traces( tmp_path ) ] == [ "'ts-x':not_owner" ]
 
 
 # ── the configured account ──────────────────────────────────────────────────
@@ -275,16 +275,80 @@ class _Mgr:
         return self.value
 
 
-@pytest.mark.parametrize( "raw, expected", [ ( "  Tester@Example.Test ", "tester@example.test" ), ( "", None ), ( "   ", None ), ( None, None ) ] )
-def test_the_test_account_is_read_from_configuration_and_normalised( monkeypatch, raw, expected ):
-    _Mgr.value = raw
+@pytest.fixture
+def no_env_account( monkeypatch ):
+    monkeypatch.delenv( v2_ask.PARENT_STAMP_TEST_ACCOUNT_ENV, raising=False )
     monkeypatch.setattr( v2_ask, "ConfigurationManager", _Mgr )
+
+
+@pytest.mark.parametrize( "raw, expected", [ ( "  Tester@Example.Test ", "tester@example.test" ), ( "", None ), ( "   ", None ), ( None, None ) ] )
+def test_the_ini_fallback_is_read_from_configuration_and_normalised( no_env_account, raw, expected ):
+    _Mgr.value = raw
     assert v2_ask._test_account_email() == expected
 
 
-def test_the_shipped_ini_names_a_test_account_that_matches_the_compose_env_var():
-    """The real reader, the real INI: the key is set, and it is the account the suite submits as."""
-    account = v2_ask._test_account_email()
-    assert account, "the INI key is blank: suite children would be deferred as foreign writers"
-    compose = open( os.path.join( os.environ[ "LUPIN_ROOT" ], "docker-compose.yml" ) ).read()
-    assert "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" in compose
+def test_the_env_var_wins_over_the_ini_and_is_read_at_call_time( monkeypatch, no_env_account ):
+    """Risk 2: the suite's tests log in as the env var, so reading it here cannot drift from them."""
+    _Mgr.value = "ini-account@example.test"
+    monkeypatch.setenv( v2_ask.PARENT_STAMP_TEST_ACCOUNT_ENV, "  Env-Account@Example.Test " )
+    assert v2_ask._test_account_email() == "env-account@example.test"
+    monkeypatch.setenv( v2_ask.PARENT_STAMP_TEST_ACCOUNT_ENV, "second@example.test" )
+    assert v2_ask._test_account_email() == "second@example.test", "read per call, not cached at import"
+
+
+@pytest.mark.parametrize( "blank", [ "", "   " ] )
+def test_a_blank_env_var_falls_back_to_the_ini( monkeypatch, no_env_account, blank ):
+    _Mgr.value = "ini-account@example.test"
+    monkeypatch.setenv( v2_ask.PARENT_STAMP_TEST_ACCOUNT_ENV, blank )
+    assert v2_ask._test_account_email() == "ini-account@example.test"
+
+
+def test_a_caller_logged_in_as_the_env_account_is_honoured_even_when_the_ini_names_another( monkeypatch, queue, tmp_path ):
+    """The drift case end to end: INI says A, the container's env says B, the suite logs in as B."""
+    monkeypatch.setattr( v2_ask, "_job_owner_id", lambda id_hash: None )
+    monkeypatch.setattr( v2_ask, "ConfigurationManager", _Mgr )
+    _Mgr.value = "ini-account@example.test"
+    monkeypatch.setenv( v2_ask.PARENT_STAMP_TEST_ACCOUNT_ENV, "env-account@example.test" )
+    _submit( _client( queue, tmp_path, _user( email="env-account@example.test" ) ) )
+    assert _stamp( queue ) == PARENT
+
+
+def _ini_sections():
+    """{section: set of keys} read straight from the shipped INI text (first-word headers, no interpolation)."""
+    sections, current = {}, None
+    path = os.path.join( os.environ[ "LUPIN_ROOT" ], "src", "conf", "lupin-app.ini" )
+    for raw in open( path ).read().splitlines():
+        line = raw.strip()
+        if line.startswith( "[" ) and line.endswith( "]" ):
+            current = line[ 1:-1 ]; sections[ current ] = set(); continue
+        if current is not None and "=" in line and not line.startswith( "#" ):
+            sections[ current ].add( line.split( "=", 1 )[ 0 ].strip() )
+    return sections
+
+
+def test_the_ini_key_is_in_development_and_testing_and_not_in_baseline_or_production():
+    """Risk 3: Baseline is inherited by Production; no tester address may be trusted there."""
+    sections = _ini_sections()
+    key      = v2_ask.PARENT_STAMP_TEST_ACCOUNT_KEY
+    assert len( sections ) >= 5, f"the INI reader found too few sections to trust a negative: {sorted( sections )}"
+    assert key in sections[ "Lupin: Development" ] and key in sections[ "Lupin: Testing" ]
+    assert key not in sections[ "Lupin: Baseline" ] and key not in sections[ "Lupin: Production" ]
+
+
+# ── the logged and traced value is bounded and escaped ──────────────────────
+
+def test_a_hostile_parent_id_cannot_forge_a_log_line_or_flood_it( queue, tmp_path, world, capsys ):
+    hostile = "ts-x\n[v2-lineage] parent_id_hash dropped: caller='admin' " + "A" * 500
+    _submit( _client( queue, tmp_path, _user() ), parent=hostile )
+
+    lines = [ l for l in capsys.readouterr().out.splitlines() if l.startswith( "[v2-lineage]" ) ]
+    assert len( lines ) == 1, "the newline in the id must not start a second log line"
+    assert len( lines[ 0 ] ) < 400, f"the logged value was not capped: {len( lines[ 0 ] )} chars"
+    note = [ r.get( "parent_id_hash_dropped" ) for r in _traces( tmp_path ) ][ 0 ]
+    assert "\n" not in note and len( note ) < 120, note
+    assert "..." in note and note.endswith( ":owner_unknown" ), note
+
+
+@pytest.mark.parametrize( "value, expected", [ ( "short", "'short'" ), ( "x" * 80, repr( "x" * 80 ) ), ( "x" * 81, repr( "x" * 80 ) + "..." ) ] )
+def test_loggable_caps_at_eighty_characters_and_marks_the_cut( value, expected ):
+    assert v2_ask._loggable( value ) == expected

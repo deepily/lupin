@@ -407,11 +407,30 @@ async def v2_agents(
 PARENT_STAMP_TEST_ACCOUNT_KEY = "v2 parent stamp test account email"
 
 
+PARENT_STAMP_TEST_ACCOUNT_ENV = "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL"
+PARENT_STAMP_LOG_MAX          = 80
+
+
 def _test_account_email() -> Optional[ str ]:
-    """The configured test account (lower-cased), or None when the key is unset or blank."""
+    """
+    The test account (lower-cased), or None when neither source names one.
+
+    The env var is read AT CALL TIME and wins: it is what the suite's own tests log in as, so
+    reading it here cannot drift from them the way a literal INI value could (row 8d4a5a59,
+    review risk 2). The INI key is only the fallback, and it is set in Development and Testing only.
+    """
+    from_env = os.environ.get( PARENT_STAMP_TEST_ACCOUNT_ENV, "" ).strip().lower()
+    if from_env: return from_env
     config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
     value      = config_mgr.get( PARENT_STAMP_TEST_ACCOUNT_KEY, default=None, return_type="string" ) or ""
     return value.strip().lower() or None
+
+
+def _loggable( value: Any ) -> str:
+    """repr() of at most PARENT_STAMP_LOG_MAX characters of `value`, so a caller-supplied string cannot forge or flood log lines."""
+    text = str( value )
+    shown = repr( text[ :PARENT_STAMP_LOG_MAX ] )
+    return shown + "..." if len( text ) > PARENT_STAMP_LOG_MAX else shown
 
 
 def vet_parent_id_hash( parent_id_hash: Optional[ str ], current_user: dict, user_id: str, user_email: str ) -> tuple:
@@ -432,10 +451,14 @@ def vet_parent_id_hash( parent_id_hash: Optional[ str ], current_user: dict, use
     Ensures:
         - an absent or empty claim returns it unchanged and ( claim, None ): nothing to vet.
         - an honoured claim returns ( parent_id_hash, None ).
-        - a refused claim returns ( None, reason ): the request carries on WITHOUT the stamp, so
-          a wrong claim costs admission (the child is deferred as a foreign writer), never a 4xx.
+        - a refused claim returns ( None, reason ): the request carries on WITHOUT the stamp, never
+          a 4xx. ⚠️ The consequence for a LEGITIMATE suite child is not "a small loss": Gate B defers
+          every job that is not a lineage child while a monopolize job is active, so a dropped child
+          waits behind the suite that is waiting on it and can starve for the whole run (review
+          risk 1; making a refused claim on the ACTIVE monopolizer a loud 403 is Rick's call, unbuilt).
           reason is "not_owner" or "owner_unknown" (no job_history row for the parent).
-        - the refusal is never silent: one log line names caller and parent.
+        - the refusal is never silent: one log line names caller and parent, both repr()'d and
+          length-capped (a caller-supplied id cannot forge or flood log lines).
     """
     if not parent_id_hash: return parent_id_hash, None
     if is_admin( current_user ): return parent_id_hash, None
@@ -444,14 +467,14 @@ def vet_parent_id_hash( parent_id_hash: Optional[ str ], current_user: dict, use
     owner = _job_owner_id( parent_id_hash )
     if owner is not None and str( owner ) == str( user_id ): return parent_id_hash, None
     reason = "owner_unknown" if owner is None else "not_owner"
-    print( f"[v2-lineage] parent_id_hash dropped: caller={user_email} ({user_id}) parent={parent_id_hash} reason={reason}" )
+    print( f"[v2-lineage] parent_id_hash dropped: caller={_loggable( user_email )} ({_loggable( user_id )}) parent={_loggable( parent_id_hash )} reason={reason}" )
     return None, reason
 
 
 def _flow_kwargs_for_dropped_stamp( parent_id_hash: Optional[ str ], reason: Optional[ str ] ) -> dict:
     """Extra flow kwargs naming a dropped claim for the request trace; empty when nothing was dropped."""
     if reason is None: return {}
-    return { "parent_stamp_dropped": f"{parent_id_hash}:{reason}" }
+    return { "parent_stamp_dropped": f"{_loggable( parent_id_hash )}:{reason}" }
 
 
 @router.post( "/api/v2/ask", response_model=AskResponse )
