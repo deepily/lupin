@@ -151,3 +151,14 @@ def test_exact_tie_passes_when_float_means_differ( monkeypatch ):
     result = asyncio.run( rt.run_reader_test( "o", "n", QUESTIONS, rt.ReaderConfig( "r", "g", 3 ) ) )
     assert result[ "old_mean" ] > result[ "new_mean" ]
     assert result[ "old_total" ] == result[ "new_total" ] == 7 and result[ "passes" ] is True
+
+
+def test_per_run_total_rounds_a_float_score_back_to_the_whole_count( monkeypatch ):
+    # 15 of 22 right is the score 15/22, and 15/22 * 22 is 14.999999999999998: int() would total 14
+    async def fake_score( *args, **kwargs ):
+        return 15 / 22
+
+    monkeypatch.setattr( rt, "score_text", fake_score )
+    questions = [ { "id": f"q{i}", "question": f"Q{i}?", "key": "k" } for i in range( 22 ) ]
+    result    = asyncio.run( rt.run_reader_test( "o", "n", questions, rt.ReaderConfig( "r", "g", 1 ) ) )
+    assert result[ "old_total" ] == result[ "new_total" ] == 15
