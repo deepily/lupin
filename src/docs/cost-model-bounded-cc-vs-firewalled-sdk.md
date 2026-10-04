@@ -1,151 +1,51 @@
-# Cost Model — Bounded ClaudeCodeJob vs Firewalled Anthropic SDK
+# Runbook: move an LLM-driven agent to a bounded Claude Code job
 
-**Audience**: developers designing or modifying LLM-driven agents in Lupin.
-**Last verified**: 2026-05-12.
-**Empirical record**: `src/rnd/v0.1.7/2026.05.12-bounded-cc-billing-empirical-confirmation.md` *(REMOVED by `b113a3a7`; recover: `git show b113a3a7^:src/rnd/v0.1.7/2026.05.12-bounded-cc-billing-empirical-confirmation.md`)*.
-**Canonical mandate**: [`CLAUDE.md` § "COST MODEL — BOUNDED CC vs FIREWALLED SDK"](../../CLAUDE.md).
+**Audience**: developers who design or change an LLM-driven agent.
 
----
+**Rule it implements**: [`CLAUDE.md` § Cost model](../../CLAUDE.md) — prefer a bounded job over the direct SDK when the agent fits.
 
-## The two LLM-cost paths
+**Capability page**: `src/docs/wiki/capabilities/bounded-claude-code-jobs.md` says what a bounded job is. That page is pinned for merge and is not in the tree yet. This page says how to move an agent onto one.
 
-Lupin runs LLM-driven work on one of two paths. The choice is a design-time decision that determines whether the workload contributes to per-token API spend or rides Rick's fixed Max-plan subscription.
+## The two cost paths
 
-### Path A — Bounded `ClaudeCodeJob`
-
-| Aspect | Detail |
-|---|---|
-| Code | `src/cosa/agents/claude_code/job.py` (`AgenticJobBase` subclass) |
-| Routing | CJ Flow `RunningFifoQueue._process_job` → `_submit_agentic_job` → agentic pool |
-| Submission endpoint | `POST /api/v2/submit`, command `agent router go to claude code`, `args.task_type=BOUNDED` |
-| Underlying invocation | Claude Code CLI / Claude Agent SDK subprocess |
-| Auth | OAuth token tied to the Max 200 subscription |
-| **Billing** | **Covered by Max plan — zero per-token cost** |
-| Reported `cost_usd` in job record | Telemetry-only; NOT an actual charge |
-| Spawn overhead per call | ~1-3s (subprocess startup) |
-| Tool surface available | Read, Write, Bash, Grep, Glob, WebSearch, WebFetch, plus whatever else the CC CLI ships with |
-| Streaming UX to caller | None — bounded jobs return a single result on completion |
-
-### Path B — Direct Anthropic SDK
-
-| Aspect | Detail |
-|---|---|
-| Code | `AsyncAnthropic( api_key=… )` directly in the agent module |
-| Submission | Whatever queue/flow that agent uses (no shared shape) |
-| Auth | `ANTHROPIC_API_KEY_FIREWALLED` env var (read via `get_anthropic_api_key()` at `src/cosa/agents/utils/proxy_agents/base_config.py:88`) |
-| **Billing** | **Per token against the firewalled Anthropic account** |
-| Spawn overhead | None — in-process SDK call |
-| Tool surface | Whatever the agent implements; not Claude Code's |
-| Streaming UX | Supports token-by-token streaming |
-
-The `ANTHROPIC_API_KEY_FIREWALLED` env var naming is deliberate. The Anthropic SDK's default key-discovery looks for the bare `ANTHROPIC_API_KEY`. Lupin reserves the bare name for the Claude Code CLI (which uses OAuth, not the API key) and uses the suffixed name for SDK consumers. This means a process that inherits the shell env doesn't accidentally pick up the SDK key — only code that explicitly reads `ANTHROPIC_API_KEY_FIREWALLED` gets it. Defense-in-depth.
-
-Per the load-bearing docstring at `src/cosa/agents/deep_research/__init__.py:27`:
-
-> **IMPORTANT: NEVER use ANTHROPIC_API_KEY - that is reserved for Claude Code CLI.**
-
----
-
-## How we know — the empirical confirmation
-
-On 2026-05-12, a throwaway 10-job probe (5 in-repo prompts + 5 web-search prompts) was submitted via `/api/claude-code/submit` with `task_type=BOUNDED` (that door was retired on 2026-08-21; the same probe now posts to `/api/v2/submit`). The probe ran sequentially with 60s spacing so the Anthropic console UI had time to settle between each.
-
-**Result**:
-
-| | Value |
-|---|---|
-| Jobs submitted | 10 |
-| Jobs completed successfully | 9 (1 failed on an unrelated streaming-parse bug) |
-| Total `cost_usd` telemetry (SDK-reported) | **$2.0514** |
-| Anthropic console credit balance movement | **$0.00** (confirmed 10 min post-run) |
-
-The `cost_usd` field is SDK-side accounting (the SDK knows what API charges *would* have been for the equivalent direct call), but the actual billing path uses the Max-plan OAuth, so the firewalled account is never charged. The console balance is the only ground truth for "did Anthropic bill me?" and it says no.
-
-Full experimental record in the R&D doc linked at the top.
-
----
-
-## Decision framework — which path to choose for a new (or migrated) agent
-
-Use this flowchart at design time. Document the answer in the R&D / design doc for the agent.
-
-```
-                      ┌─────────────────────────────────────┐
-                      │ Need LLM reasoning in a new agent / │
-                      │ refactoring an existing one         │
-                      └─────────────────┬───────────────────┘
-                                        ▼
-                  ┌──────────────────────────────────────────────┐
-                  │ Q1. Anthropic-backed model is sufficient?    │
-                  │ (No need for OpenAI / Groq / Mistral / etc.) │
-                  └─────────────┬────────────────────────────────┘
-                                ▼
-                      No ─────────────────► Path B (direct SDK)
-                                │
-                                ▼ Yes
-                  ┌──────────────────────────────────────────────┐
-                  │ Q2. Can the work be expressed as a            │
-                  │ self-contained prompt with bounded turns?    │
-                  │ (Not multi-day stateful conversation.)       │
-                  └─────────────┬────────────────────────────────┘
-                                ▼
-                      No ─────────────────► Path B (direct SDK)
-                                │
-                                ▼ Yes
-                  ┌──────────────────────────────────────────────┐
-                  │ Q3. CC's tool surface (Read/Write/Bash/Grep/ │
-                  │ WebSearch/WebFetch/etc.) is enough?          │
-                  └─────────────┬────────────────────────────────┘
-                                ▼
-                      No ─────────────────► Path B (direct SDK)
-                                │
-                                ▼ Yes
-                  ┌──────────────────────────────────────────────┐
-                  │ Q4. Tolerates ~1-3s SDK-subprocess spawn     │
-                  │ overhead per invocation?                     │
-                  │ (i.e., not >10 QPS, latency budget > ~2s)    │
-                  └─────────────┬────────────────────────────────┘
-                                ▼
-                      No ─────────────────► Path B (direct SDK)
-                                │
-                                ▼ Yes
-                  ┌──────────────────────────────────────────────┐
-                  │ Q5. Caller doesn't need token-by-token       │
-                  │ progressive streaming?                       │
-                  └─────────────┬────────────────────────────────┘
-                                ▼
-                      No ─────────────────► Path B (direct SDK)
-                                │
-                                ▼ Yes
-                          Path A (bounded CC)
-```
-
-If you land on **Path B**, the design doc must justify which guardrail forced it (Q1–Q5 answer + why). This is so future reviewers don't silently re-implement direct-SDK agents that should have been bounded CC.
-
----
-
-## Off-peak scheduling — operational complement
-
-Even though Path A is "free" in marginal-cost terms, the Max plan is NOT infinite throughput — it has rolling-window usage limits. Bounded jobs that run during Rick's interactive Claude Code peak (9 PM – 12 AM EDT) **compete** with his real work and can cause it to throttle.
-
-### Rick's daily usage profile — AND the box's
-
-⚠️ **Corrected 2026-08-17 (Rick's ruling, row `f0b3f630`).** This table used to say `12 AM – 9 AM EDT` was ideal because Rick is asleep. That was true about Rick and false about the machine: measured boot history, unbroken since Aug 5, shows the host is **powered off ~10:53 PM – 7:17 AM**. Jobs scheduled there did not run early, quietly, or at all — they sat until the next boot and drained hours late.
-
-⚠️ **Corrected AGAIN 2026-08-20 (Rick's ruling), and this doc had not caught up.** The `7:17 AM` above came from a single boot on Aug 6. Across the 12 morning boots since Aug 4 the **median is 09:24 and eleven of twelve are after 08:52**, so a job at 7:30 still sits dead 1.5-2.5h on almost every day. **10 AM - 1 PM EDT is the only window reliably both up and quiet.** CLAUDE.md § Off-peak scheduling rule is the source of truth; re-derive with `last -x reboot | head -20` rather than trusting this table.
-
-| Window (EDT) | State | Bounded-job-friendliness |
+| | Path A: bounded `ClaudeCodeJob` | Path B: direct Anthropic SDK |
 |---|---|---|
-| ~11 PM – 9 AM | **Host powered OFF, and usually still down past 8:52 AM** | ☠️ **Never schedule here** — the job does not run until boot |
-| 9 PM – 10:53 PM | Peak interactive Claude Code work | ❌ Avoid scheduled batch here |
-| **7:30 AM – 10 AM** | Box up, Rick barely on | 🟢 **Ideal for batch / long-running** |
-| 10 AM – 9 PM | Light-to-moderate interactive use | 🟡 OK for short jobs; avoid heavy batch |
+| Code | `src/cosa/agents/claude_code/job.py`, an `AgenticJobBase` subclass; also in-process `claude_agent_sdk.query` (`sdk_query`) | `AsyncAnthropic( api_key=… )` in the agent module |
+| Submit | `POST /api/v2/submit`, command `agent router go to claude code`, `args.task_type=BOUNDED` | whatever queue the agent uses |
+| Auth | Claude Code CLI with subscription OAuth | `ANTHROPIC_API_KEY_FIREWALLED`, read by `get_anthropic_api_key` in `src/cosa/agents/utils/proxy_agents/base_config.py` |
+| Billing | covered by the fixed plan; no per-token charge | per token, against the firewalled account |
+| Start-up | about 1 to 3 s per call (subprocess) | none |
+| Streaming | none; one result on completion | token by token |
 
-### Rule
+The `cost_usd` in a bounded job's record is the SDK's estimate of what a direct call would have cost. It is telemetry, not a charge. The Anthropic console balance is the only ground truth for whether a run was billed; `cost_usd` is not.
 
-For any bounded CC job that does NOT need to complete synchronously (batch generation, scheduled regression sweeps, podcast/presentation/deep-research work), **set `scheduled_at` inside a window the box is awake for — prefer 10 AM – 1 PM EDT** — via the `scheduled_at` field on `SubmitRequest` (`src/cosa/rest/routers/v2_ask.py`).
+The key name carries a suffix so a process cannot pick it up by accident. The Anthropic SDK looks for the bare `ANTHROPIC_API_KEY`, which Lupin reserves for the Claude Code CLI. Only code that names `ANTHROPIC_API_KEY_FIREWALLED` gets the key. `src/cosa/agents/deep_research/__init__.py` states the rule in its banner.
 
-`scheduled_at` stays TOP-LEVEL rather than going inside `args`: it tells the queue *when* to run the work, and `args` is checked against the command's own argument contract, which no scheduling instruction is in.
+A migration shifts cost; it does not remove it. The plan is a fixed monthly bill, so describe a migration as "covered by existing fixed cost", never as "free".
+
+## Prerequisites
+
+The agent must pass all five questions. If any answer is no, it stays on Path B, and its design doc says which question failed. That record stops a later reviewer from re-implementing a direct-SDK agent that should have been bounded.
+
+1. An Anthropic model is enough (no OpenAI, Groq or Mistral).
+2. The work is one self-contained prompt with a bounded turn count, not a long stateful conversation.
+3. Claude Code's tool surface (Read, Write, Bash, Grep, Glob, WebSearch, WebFetch) covers what the agent needs.
+4. One to three seconds of start-up per call is acceptable. That means at most about 10 calls per second and a latency budget over about 2 seconds.
+5. The caller needs no token-by-token streaming.
+
+Agents that stay on Path B for these reasons: `notification_proxy/strategies/llm_fallback.py` (per-message classification, so start-up would dominate) and `decision_proxy/` (latency budget).
+
+## Steps to follow
+
+1. **Find the boundary.** Often only part of an agent is LLM-driven. Podcast generation has an LLM script phase and a text-to-speech phase; migrate the LLM phase only.
+2. **Replace the call.** Swap `AsyncAnthropic( … ).messages.create( … )` for a `ClaudeCodeJob` submission or an in-process `sdk_query` call. With a job, the prompt becomes the job prompt and the parsed output becomes its terminal output. The in-process form that Podcast, Presentation and Deep Research use runs with `tools=[]` for pure text work. It also sets `permission_mode="plan"` (read-only). It reads `max_turns` from the INI. The keys are `podcast script max turns` (default 5), `presentation generator content max turns` (default 5) and `deep research max research turns` (default 20).
+3. **Harden the parser.** A bounded job can return chatty text around the answer. Recover the JSON from it. Use a lenient parser where a missing field has a safe default (Podcast). Use a strict one where the data feeds a renderer (Presentation, Deep Research); it fails loudly on a missing, empty or malformed result.
+4. **Replace web search if the agent used it.** The native `web_search_20250305` server tool has no bounded equivalent. Give research subagents `tools=[WebSearch, WebFetch]` and keep the lead agent at `tools=[]`. WebSearch fires in a non-interactive bounded job with no `allowed_tools` list or `can_use_tool` callback. That was verified live. Swapping the search tool leaves the downstream contract intact. `ResearchOrchestratorAgent` in `src/cosa/agents/deep_research/orchestrator.py` reads only `APIResponse.content`, the model's text, and never a web-search result block. The subagent writes its sources into that text, and `parse_subagent_response` reads them there. The rolling plan limit then governs, so drop any per-minute token gating that existed only for the native tool. Deep Research makes no `acquire` or `record_call` call to `ApiResourceManager` for web search. The singleton still exists: `get_arm()` in `src/cosa/utils/api_resource_manager.py`, initialised at startup in `src/lupin_app/main.py`. Its only production caller is the pool-status payload in `running_fifo_queue.py`, which reads `get_status()`.
+5. **Drop the key dependency for the migrated phase.** Remove its references to `ANTHROPIC_API_KEY_FIREWALLED`. If other phases still need the key, leave their imports alone.
+6. **Schedule batch callers.** Rolling plan limits make batch work compete with interactive sessions. Any non-interactive caller sets `scheduled_at` inside a window when the host is up. The field is top-level in the submit request, because `args` is checked against the command's own argument contract. 10 a.m. to 1 p.m. Eastern is optimal, and 1 p.m. to 9 p.m. is acceptable. Avoid 9 p.m. to 11 p.m., the owner's interactive peak, because a batch job competes with their own work. The host is usually off from about 11 p.m. to 10 a.m., so a job scheduled then waits for the next boot. The window table is in [`CLAUDE.md` § Off-peak scheduling rule](../../CLAUDE.md). A user-clicked job omits `scheduled_at` and runs at once.
+7. **Update the docs.** Edit the agent's page under `src/docs/agents/` if it has one. In its `__init__.py`, update the "API Key Configuration" paragraph. It should say the phase is bounded and link this page.
+
+A scheduled submit:
 
 ```json
 POST /api/v2/submit
@@ -161,75 +61,34 @@ POST /api/v2/submit
 }
 ```
 
-User-interactive bounded jobs (a user clicks a button and expects a result) are **exempt** — they fire immediately.
+## Verify
 
----
+- Submit a representative payload through the new path and confirm the job lands in the CJ Flow agentic pool (`GET /api/queue/pool-status`, `inflight_agentic_jobs`).
+- Compare the result with the old SDK output for the same payload; it must be functionally equivalent.
+- Confirm the Anthropic console balance does not move.
+- Run the agent's unit tests and its `quick_smoke_test()`, and keep coverage at 100% lines, branches and functions.
 
-## Migration playbook
+## Rollback
 
-When migrating an existing direct-SDK agent to bounded CC, follow this order:
+- Revert the migration commit. The Path B call returns, and so does its use of `ANTHROPIC_API_KEY_FIREWALLED`, so confirm the key is still set in the environment first.
+- If only the parser misbehaves, loosen or tighten it rather than reverting; the call path is not the cause.
+- If a scheduled job missed its window, resubmit it with a new `scheduled_at`. A job that lands in the dead window drains late and `job_persistence.py` logs `[CJ-CATCHUP-LATE]` with the hours late.
 
-1. **Confirm fit**: Walk the agent through the Q1–Q5 framework above. Document the answers in the agent's R&D / design doc.
-2. **Identify the migration boundary**: Often only part of an agent is LLM-driven. E.g., podcast generation has a script-generation phase (LLM) and an audio-synthesis phase (TTS). Migrate the LLM phase only; leave non-LLM parts alone.
-3. **Refactor invocation**: Replace `AsyncAnthropic( api_key=… ).messages.create(...)` with a `ClaudeCodeJob` submission. The prompt becomes the bounded job prompt; the parsed response becomes the job's terminal output.
-4. **Drop the firewalled key dependency** for the migrated phase. If the agent's other phases still need it, leave the import alone; just remove unused references.
-5. **Add `scheduled_at` defaulting**: For batch / non-interactive callers of the migrated phase, default `scheduled_at` to the next morning slot the box is awake for (7:30–10 AM EDT) — **not** post-midnight, which is dead time. Synchronous callers omit it.
-6. **Update or write the agent's user-facing doc** under `src/docs/agents/` if applicable.
-7. **Update the agent's `__init__.py` banner** (the "API Key Configuration" pattern paragraph if present): note the migration date and link this doc + the R&D doc.
-8. **Verify the migration**: Submit a representative payload through the new path, confirm the job lands in CJ Flow's agentic pool, confirm the result is functionally equivalent to the old SDK output, confirm Anthropic console balance does not move.
+## Reference implementations
 
-### Precedent — already migrated
-
-- **BFE** (Bug Fix Expediter) — `src/cosa/agents/bug_fix_expediter/`. Autonomous bug-fix workflow.
-- **TFE** (Test Fix Expediter) — `src/cosa/agents/test_fix_expediter/`. Autonomous test-fix workflow.
-- **Podcast script generation** (`src/cosa/agents/podcast_generator/`) — migrated 2026-06-18 (bounded-CC Phase 1). The four script-phase LLM methods in `PodcastAPIClient` (`call_for_analysis`/`call_for_script`/`call_for_revision`/`call_with_json_output`) swapped from `AsyncAnthropic.messages.create` to in-process `claude_agent_sdk.query` (D-DR1 Option X) with `tools=[]` (pure text synthesis), `permission_mode="plan"`, and `max_turns=podcast script max turns` (INI, default 5). Parsers made D6-LENIENT (recover JSON from chatty completions). The audio (TTS/ElevenLabs) phase is unchanged. Scope: `src/rnd/v0.1.8/2026.06.18-podcast-phase1-bounded-cc-scope.md` *(REMOVED by `b113a3a7`; recover: `git show b113a3a7^:src/rnd/v0.1.8/2026.06.18-podcast-phase1-bounded-cc-scope.md`)*.
-- **Presentation content generation** (`src/cosa/agents/presentation_generator/`) — migrated 2026-06-18 (bounded-CC Phase 2). All **seven** content-phase methods in `PresentationAPIClient` (`call_for_analysis`/`call_for_outline`/`call_for_elaboration`/`call_for_mermaid`/`call_for_matplotlib`/`call_for_d2`/`call_with_json_output`) swapped to in-process `sdk_query` (`tools=[]`, `permission_mode="plan"`, `max_turns=presentation generator content max turns`, default 5). Parsers (`parse_analysis_response`/`parse_outline_response`/`parse_elaboration_response` + `call_with_json_output`) made **D6-STRICT** (recover JSON from chatty output, fail-loud on missing/empty/non-list — slide data feeds pptx rendering). The **Gemini image/video path (`gemini_client.py`, NanoBanana/Veo) is non-Anthropic and was left untouched**; pptx/Marp assembly + diagram rendering unchanged. Scope: `src/rnd/v0.1.8/2026.06.18-presentation-phase2-bounded-cc-scope.md` *(REMOVED by `b113a3a7`; recover: `git show b113a3a7^:src/rnd/v0.1.8/2026.06.18-presentation-phase2-bounded-cc-scope.md`)*.
-- **Deep Research** (`src/cosa/agents/deep_research/`) — migrated 2026-06-18 (bounded-CC Phase 3). `ResearchAPIClient`'s LLM loop (`call_lead_agent`/`call_subagent`/`call_with_json_output`) swapped from `AsyncAnthropic.messages.create` to in-process `claude_agent_sdk.query` (D-DR1 Option X). **The DR-specific delta vs Podcast/Presentation is web search**: the native Anthropic `web_search_20250305` server tool is replaced by CC's built-in **WebSearch + WebFetch** — the lead agent runs `tools=[]` (planning/synthesis), research subagents run `tools=[WebSearch, WebFetch]`. `permission_mode="plan"` (read-only) — **live-verified** that WebSearch fires in a non-interactive bounded job with no `allowed_tools`/`can_use_tool` callback. The legacy `ApiResourceManager` `acquire`/`record_call("anthropic_web_search")` 30k-tokens/min gating is dropped from the call path (Max-plan rolling window governs instead; the ARM singleton is untouched — no other caller). Parsers D6-STRICT (`extract_json_object` recovers JSON then fails loud, never silent-default). `max_turns=deep research max research turns` (INI, default 20). The downstream contract is preserved by construction — the orchestrator consumes only `APIResponse.content`, never the API's web-search result blocks. Scope: `src/rnd/v0.1.8/2026.06.18-bounded-cc-d1d9-ratification-package.md` *(REMOVED by `b113a3a7`; recover: `git show b113a3a7^:src/rnd/v0.1.8/2026.06.18-bounded-cc-d1d9-ratification-package.md`)* (§2).
-
-All five ride the CJ Flow agentic pool with `task_type=BOUNDED` (BFE/TFE) or in-process `sdk_query` (Podcast / Presentation / Deep Research); all have been validated without consuming firewalled-key budget. Use them as code-shape references when migrating new agents.
-
-### Candidates (tracked in `TODO.md`)
-
-| Agent | Current state | Notes |
+| Agent | Where | Shape |
 |---|---|---|
-| ~~**Deep Research**~~ (`src/cosa/agents/deep_research/`) | ✅ **MIGRATED 2026-06-18** (Phase 3) | See "Precedent — already migrated" above. Web search → CC WebSearch/WebFetch; ARM gating dropped; D6-STRICT parsers. |
-| ~~**Podcast script generation**~~ | ✅ **MIGRATED 2026-06-18** (Phase 1) | See "Precedent — already migrated" above. |
-| ~~**Presentation generation**~~ | ✅ **MIGRATED 2026-06-18** (Phase 2) | See "Precedent — already migrated" above. |
+| BFE (bug fix) | `src/cosa/agents/bug_fix_expediter/` | bounded CC job |
+| TFE (test fix) | `src/cosa/agents/test_fix_expediter/` | bounded CC job |
+| Podcast script | `src/cosa/agents/podcast_generator/` | `sdk_query`, `tools=[]`, lenient parsers; text-to-speech unchanged |
+| Presentation content | `src/cosa/agents/presentation_generator/` | `sdk_query` in seven content methods, strict parsers; the Gemini image and video path is non-Anthropic and stays as it is. The pptx and Marp assembly is unchanged. The diagram renderers in `renderers/` still render from source text, and they now get that source from the migrated `call_for_mermaid`, `call_for_matplotlib` and `call_for_d2` |
+| Deep Research | `src/cosa/agents/deep_research/` | lead `tools=[]`, subagents `tools=[WebSearch, WebFetch]`, strict parsers |
 
-### NOT candidates
-
-| Agent | Current state | Why stays |
-|---|---|---|
-| `notification_proxy/strategies/llm_fallback.py` LLM classifier | Path B | High-frequency per-message classification; subprocess spawn overhead would dominate. |
-| `decision_proxy/` | Path B | Latency-sensitive; subprocess spawn would break the budget. |
-
----
+`src/rnd/v0.1.4/2026.02.12-cj-flow-bounded-job-packaging-guide.md` explains how to package a bounded job for CJ Flow. `/api/v2/submit` is defined in `src/cosa/rest/routers/v2_ask.py`; the retired `/api/claude-code/*` doors answer 410 from `src/cosa/rest/routers/claude_code_queue.py`.
 
 ## Common confusions
 
-### "But the job record reports `cost_usd: 0.23`! That's billing, right?"
-
-No. The `cost_usd` field is the Claude Agent SDK's own telemetry — it knows what a direct API call with the same token count *would* have cost, and reports that for observability. The actual billing on the bounded path goes through OAuth Max-subscription auth, which is fixed-rate. The console balance is the ground truth.
-
-### "Doesn't migration to bounded CC just make things free?"
-
-No — it shifts cost. Rick still pays the Max 200 plan monthly. The migration converts metered per-token spend into already-paid fixed spend. Describe migrations as "covered by existing fixed cost", not as "free".
-
-### "If bounded CC is cheaper, why do we still have direct-SDK agents at all?"
-
-Because the constraints (Q1–Q5 in the decision framework) eliminate direct-SDK paths where bounded CC isn't a fit — high-frequency classification, hard latency budgets, non-Anthropic models, streaming UX. Direct SDK has legitimate use cases. The mandate is to PREFER bounded CC, not to eliminate direct SDK.
-
-### "Can I just slap the migration on without checking the constraints?"
-
-No. Walk the Q1–Q5 framework, document the answers, get the migration plan reviewed. The wrong migration creates latency regressions or breaks streaming UX in ways that are hard to undo.
-
----
-
-## See also
-
-- `CLAUDE.md` § "COST MODEL — BOUNDED CC vs FIREWALLED SDK" — the canonical mandate.
-- `src/rnd/v0.1.7/2026.05.12-bounded-cc-billing-empirical-confirmation.md` *(REMOVED by `b113a3a7`; recover: `git show b113a3a7^:src/rnd/v0.1.7/2026.05.12-bounded-cc-billing-empirical-confirmation.md`)* — full experiment record.
-- `src/cosa/agents/bug_fix_expediter/` + `src/cosa/agents/test_fix_expediter/` — already-migrated reference implementations.
-- `src/rnd/v0.1.4/2026.02.12-cj-flow-bounded-job-packaging-guide.md` — how to package a bounded job (CJ Flow integration).
-- `src/cosa/rest/routers/v2_ask.py` — `/api/v2/submit` route definition (including the `scheduled_at` field).
-- `src/cosa/rest/routers/claude_code_queue.py` — the two retired `/api/claude-code/*` tombstones.
+- **"`cost_usd` is 0.23, so this was billed."** No. It is the SDK's estimate; billing on this path is the fixed plan.
+- **"Migration makes things free."** No; see the cost-shift note above.
+- **"Direct SDK agents should all move."** No. The rule is to prefer bounded jobs, and the five questions exclude agents that need high call rates, hard latency, non-Anthropic models or streaming.
+- **"I can skip the questions."** A wrong migration adds latency or breaks streaming in ways that are hard to undo. Answer them in the design doc and have the plan reviewed.

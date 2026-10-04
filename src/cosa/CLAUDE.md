@@ -2,21 +2,12 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## IMPORTANT: Repository Context
+## Repository Context
 
-> **SUPERSEDED 2026-05-29 — CoSA was folded into the Lupin mono-repo.** `src/cosa/`
-> is now a regular in-tree directory of the Lupin repository; it is **no longer a
-> separate git subproject/submodule**. Manage it as normal Lupin source — the Lupin
-> repo is the only git repo. The former CoSA repo's history is preserved off-tree at
-> `/mnt/DATA02/cosa-git-archive-2026.05.29/`. The historical submodule guidance below
-> is retained for reference only and **no longer applies**.
-
-- This COSA repo is a git subproject/submodule contained within the parent "Lupin" project
-- When working within the COSA directory, only manage this repository (not the parent project)
-- Do not stage, commit, or push changes to the parent repository from here
-- NEVER commit or push changes automatically - ALWAYS wait for user review and explicit approval before committing
-- The global Claude Code Configuration file found in my home directory will direct you to update the parent "Lupin" project history.md file as a part of your end of session ritual..
-- After updating the Lupin repo, I want you to duplicate your history entry in this repo's history.md
+- `src/cosa/` is a regular in-tree directory of the Lupin repository, not a submodule; the Lupin repo is the only git repo. The root `CLAUDE.md` governs git, testing and merging.
+- Never commit or push without the user's explicit approval.
+- Session history goes in the Lupin `history.md`, not in a history file here.
+- The former CoSA repo's full history is kept off-tree at `/mnt/DATA02/cosa-git-archive-2026.05.29/`.
 
 ## PROJECT SHORT NAMES
 - This repo's SHORT_PROJECT_PREFIX is [COSA]
@@ -38,7 +29,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Don't forget to add the following path to the Python path environment variable so that you can call Cosa objects from within the Cosa Directory: `Bash(export PYTHONPATH="/mnt/DATA01/include/www.deepily.ai/projects/lupin/src:$PYTHONPATH"`
 - The configuration manager always needs an environment variable when it's instantiated, like this `self.config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )`
 - Every time that you add, modify or delete a new key value pair to the configuration manager contained `lupin-app.ini` I want you to make sure that there is an explainer value provided for the same key value in `lupin-app-splainer.ini`
-- When you start up, I want you to read two Two history files: 1) The history file that is at your repo root, and 2) The history file contained within the parent `Genie in the box project` root found in `../..` These two histories are related.
 
 ## Code Style
 - **Imports**: Group by stdlib, third-party, local packages
@@ -135,11 +125,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - Includes try/catch blocks with ✓/✗ status indicators
   - Professional output with clear progress messages
   - When creating new modules, always ask the user if they want a smoke test included
-
-## Recent Changes
-- **Standardized Smoke Testing (December 2025)**: All 21 core modules refactored with consistent `quick_smoke_test()` patterns
-- Refactoring to use external LLM services instead of in-memory models
-- Implementing router for directing requests to appropriate LLM endpoints
 
 ## Installed Workflows
 
