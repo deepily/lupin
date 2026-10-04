@@ -352,13 +352,13 @@ def test_common_wrong_answer_and_other_fields_never_reach_a_prompt( repo ):
 
 def file_result( old, new, compared, dropped=0 ):
     """A score_file-shaped result with the fields summarize reads."""
-    return { "old_total": old, "new_total": new, "compared": compared, "dropped": dropped, "old_answered": compared, "new_answered": compared, "unscored_records": [] }
+    return { "old_total": old, "new_total": new, "compared": compared, "dropped": dropped, "old_answered": compared, "new_answered": compared, "unscored_records": [], "salvaged_records": [] }
 
 
 def test_summarize_adds_file_totals_so_each_file_counts_by_its_pairs():
     per_file = { "a": file_result( 2, 0, 2 ), "b": file_result( 2, 6, 6 ) }       # file a: 1 question x 2 runs; file b: 3 questions x 2 runs
     got = rr.summarize( per_file )
-    assert got == { "compared": 8, "dropped": 0, "old_answered": 8, "new_answered": 8, "unscored": 0, "old_total": 4, "new_total": 6,
+    assert got == { "compared": 8, "dropped": 0, "salvaged": 0, "old_answered": 8, "new_answered": 8, "unscored": 0, "old_total": 4, "new_total": 6,
                     "old_mean": 0.5, "new_mean": 0.75, "passes": True, "verdict": "PASS" }          # an unweighted mean of file means would be 0.5 too: see the end-to-end test
     assert rr.summarize( { "a": file_result( 2, 0, 2 ) } )[ "verdict" ] == "FAIL"
 
@@ -432,9 +432,9 @@ def test_per_file_and_overall_figures_end_to_end( repo, capsys ):
     assert ( a[ "old_mean" ], a[ "new_mean" ], a[ "passes" ], a[ "questions" ] ) == ( 1.0, 0.0, False, 1 )
     assert a[ "old_scores" ] == [ 1.0, 1.0 ] and a[ "new_scores" ] == [ 0.0, 0.0 ]
     assert ( b[ "old_mean" ], b[ "new_mean" ], b[ "passes" ], b[ "questions" ] ) == ( 1.0, 1.0, True, 3 )
-    assert report[ "overall" ] == { "questions": 4, "compared": 8, "dropped": 0, "old_answered": 8, "new_answered": 8, "unscored": 0,
+    assert report[ "overall" ] == { "questions": 4, "compared": 8, "dropped": 0, "salvaged": 0, "old_answered": 8, "new_answered": 8, "unscored": 0,
                                     "old_total": 8, "new_total": 6, "old_mean": 1.0, "new_mean": 0.75, "passes": False, "verdict": "FAIL" }    # an unweighted mean of the file means would be 0.5
-    assert "overall: questions=4 compared=8 dropped=0 old_total=8 new_total=6 verdict=FAIL" in printed
+    assert "overall: questions=4 compared=8 dropped=0 salvaged=0 old_total=8 new_total=6 verdict=FAIL" in printed
     assert f"calls spent {READER}: " in printed and f"calls spent {GRADER}: " in printed
 
 
@@ -478,8 +478,8 @@ def calls_used( repo, model ):
     return model_transport.calls_used( model, str( repo[ "tmp" ] / "ledger.jsonl.calls" ) )
 
 
-def test_a_reply_with_prose_around_the_json_is_retried_and_then_scored( repo ):
-    models = FakeModels( grader_script=[ 'Sure! Here is the grade: {"score": 1}' ] )
+def test_a_reply_with_text_after_the_json_is_retried_and_then_scored( repo ):
+    models = FakeModels( grader_script=[ '{"score": 1} Hope that helps!' ] )
     code, _ = run( repo, [ QA ], models, **{ "--runs": "1" } )
     assert code == 0
     assert len( models.by( READER ) ) == 2          # the reader answer was cached once it parsed, so the retry cost a grader call only
@@ -596,4 +596,147 @@ def test_a_cap_reached_mid_run_is_not_retried_and_retries_count_against_it( tmp_
 def test_score_question_uses_the_sdk_when_no_query_function_is_given( monkeypatch ):
     monkeypatch.setattr( model_transport, "sdk_query", FakeModels() )
     config = reader_rig.ReaderConfig( READER, GRADER, 1 )
-    assert asyncio.run( rr.score_question( "the lid stays shut.", rr.rig_questions( [ QB1 ] )[ 0 ], config, 0, None, None ) ) == ( 1, None )
+    assert asyncio.run( rr.score_question( "the lid stays shut.", rr.rig_questions( [ QB1 ] )[ 0 ], config, 0, None, None ) ) == ( 1, None, None )
+
+
+# ---- the grader that reasons first: salvage ---------------------------------------------------
+
+REASON = "The key has two points: 1. an empty dict 2. never raises. The answer states both.\n"
+
+
+@pytest.mark.parametrize( "reply, taken", [
+    ( REASON + '{"score": 1}', '{"score": 1}' ),
+    ( REASON + '{ "score" : 0 }', '{"score": 0}' ),
+    ( REASON + '```json\n{"score": 1}\n```', '{"score": 1}' ),
+    ( '\n' + REASON + '{"score":1}\n\n', '{"score": 1}' ),
+] )
+def test_reasoning_then_one_score_object_is_taken( reply, taken ):
+    assert rr.take_score_object( reply ) == taken
+
+
+@pytest.mark.parametrize( "reply", [
+    '{"score": 1}',                                    # already a bare object: the rig takes it, nothing to salvage
+    '```json\n{"score": 1}\n```',                      # a fenced bare object, likewise
+    REASON,                                            # no object
+    REASON + '{"score": 1} {"score": 0}',              # two objects
+    'Example {"score": 1} and then the real one. {"score": 0}',     # two objects, one earlier in the text
+    REASON + '{"score": 1} Hope that helps!',          # text after the object
+    REASON + '{"score": 1}\n```\nmore',                # text after the closing fence
+    REASON + '{"score": 2}',                           # a score other than 0 or 1
+    REASON + '{"score": 10}',
+    REASON + '{"score": true}',
+    REASON + '{"score": 1.0}',
+    REASON + '{"score": 1, "why": "both"}',            # another key
+] )
+def test_anything_else_is_not_salvaged( reply ):
+    assert rr.take_score_object( reply ) is None
+
+
+def test_the_tracker_hands_the_rig_only_the_object_and_keeps_the_raw_reply():
+    class Inner:
+        async def __call__( self, prompt, options ):
+            yield object()
+            yield AssistantMessage( content=[ TextBlock( REASON ), TextBlock( '{"score": 1}' ) ], model="m" )
+            yield AssistantMessage( content=[], model="m" )          # a second assistant message with no text: it is dropped, only one is handed on
+
+    class Options:
+        system_prompt = reader_rig.GRADER_SYSTEM
+
+    async def collect( tracker ):
+        return [ m async for m in tracker( "p", Options() ) ]
+
+    tracker  = rr.CallTracker( Inner() )
+    messages = asyncio.run( collect( tracker ) )
+    assert len( messages ) == 2 and not isinstance( messages[ 0 ], AssistantMessage )
+    assert [ b.text for b in messages[ 1 ].content ] == [ '{"score": 1}' ]
+    assert tracker.step == "grader" and tracker.salvaged == { "score": 1, "raw": REASON + '{"score": 1}' }
+    assert tracker.salvaged[ "raw" ] == tracker.raw
+
+
+def test_the_salvaged_raw_reply_is_cut_to_two_thousand_characters():
+    long_reply = "reasoning " * 400 + '{"score": 1}'
+
+    class Inner:
+        async def __call__( self, prompt, options ):
+            yield AssistantMessage( content=[ TextBlock( long_reply ) ], model="m" )
+
+    class Options:
+        system_prompt = reader_rig.GRADER_SYSTEM
+
+    async def collect( tracker ):
+        return [ m async for m in tracker( "p", Options() ) ]
+
+    tracker = rr.CallTracker( Inner() )
+    asyncio.run( collect( tracker ) )
+    assert tracker.salvaged[ "score" ] == 1 and len( tracker.salvaged[ "raw" ] ) == 2000 and tracker.raw == long_reply
+
+
+def test_a_salvaged_score_counts_and_is_recorded_per_text( repo, capsys ):
+    out    = str( repo[ "tmp" ] / "salvage.json" )
+    models = FakeModels( grader_script=[ REASON + '{"score": 1}', REASON + '{"score": 0}' ] )
+    code, _ = run( repo, [ QA ], models, **{ "--runs": "1", "--out": out } )
+    report  = json.load( open( out ) )
+    file    = report[ "files" ][ "src/mod_a.py" ]
+    assert code == 0 and len( models.by( GRADER ) ) == 2 and calls_used( repo, GRADER ) == 2       # taken on the first reply: no retry
+    assert ( file[ "old_total" ], file[ "new_total" ], file[ "verdict" ] ) == ( 1, 0, "FAIL" )
+    assert file[ "salvaged_records" ] == [ { "score": 1, "raw": REASON + '{"score": 1}', "file": "src/mod_a.py", "text": "old", "run": 0, "id": "qa" },
+                                           { "score": 0, "raw": REASON + '{"score": 0}', "file": "src/mod_a.py", "text": "new", "run": 0, "id": "qa" } ]
+    assert report[ "overall" ][ "salvaged" ] == 2 and report[ "strict_grader" ] is False
+
+
+def test_the_summary_line_prints_the_salvaged_count( repo, capsys ):
+    run( repo, [ QA ], FakeModels( grader_script=[ REASON + '{"score": 1}', REASON + '{"score": 0}' ] ), **{ "--runs": "1" } )
+    printed = capsys.readouterr().out
+    assert "src/mod_a.py: questions=1 compared=1 dropped=0 salvaged=2" in printed and "overall: questions=1 compared=1 dropped=0 salvaged=2" in printed
+
+
+def test_a_salvaged_score_is_not_recounted_from_the_ledger( repo ):
+    run( repo, [ QA ], FakeModels( grader_script=[ REASON + '{"score": 1}', REASON + '{"score": 0}' ] ), **{ "--runs": "1" } )
+    out = str( repo[ "tmp" ] / "again.json" )
+    code, models = run( repo, [ QA ], **{ "--runs": "1", "--out": out } )
+    report = json.load( open( out ) )
+    assert code == 0 and models.calls == [] and report[ "overall" ][ "salvaged" ] == 0 and "this run only" in report[ "salvage_scope" ]
+
+
+def test_a_salvaged_score_in_a_dropped_pair_is_not_recorded( repo ):
+    out    = str( repo[ "tmp" ] / "dropped-salvage.json" )
+    models = FakeModels( grader_script=[ REASON + '{"score": 1}', "nope", "nope", "nope" ] )     # the old text is salvaged; the new text never parses
+    code, _ = run( repo, [ QA ], models, **{ "--runs": "1", "--out": out } )
+    file    = json.load( open( out ) )[ "files" ][ "src/mod_a.py" ]
+    assert code == 3 and file[ "dropped" ] == 1 and file[ "salvaged_records" ] == []
+
+
+def test_a_reader_reply_is_never_touched_by_salvage( repo ):
+    out = str( repo[ "tmp" ] / "reader.json" )
+    reply = 'Let me think. {"score": 1}'            # the shape the grader salvage would take, in a reader reply
+    code, models = run( repo, [ QB1 ], FakeModels( reader_script=[ reply ] * 3 ), **{ "--runs": "1", "--out": out } )
+    file = json.load( open( out ) )[ "files" ][ "src/mod_b.py" ]
+    old, _ = file[ "unscored_records" ]
+    assert code == 3 and old[ "step" ] == "reader" and old[ "raws" ] == [ reply ] * 3 and file[ "salvaged_records" ] == []
+    assert "reply is not JSON" in old[ "error" ]       # the rig saw the reply as written, not cut down to the object
+
+
+def test_the_tracker_leaves_a_reader_reply_as_written():
+    class Inner:
+        async def __call__( self, prompt, options ):
+            yield AssistantMessage( content=[ TextBlock( 'Let me think. {"score": 1}' ) ], model="m" )
+
+    class Options:
+        system_prompt = reader_rig.READER_SYSTEM
+
+    async def collect( tracker ):
+        return [ m async for m in tracker( "p", Options() ) ]
+
+    tracker  = rr.CallTracker( Inner() )
+    messages = asyncio.run( collect( tracker ) )
+    assert [ b.text for b in messages[ 0 ].content ] == [ 'Let me think. {"score": 1}' ] and tracker.salvaged is None
+
+
+def test_strict_grader_refuses_what_salvage_would_take( repo ):
+    out    = str( repo[ "tmp" ] / "strict.json" )
+    models = FakeModels( grader_script=[ REASON + '{"score": 1}' ] * 3 )
+    code, _ = run( repo, [ QB1 ], models, extra=[ "--strict-grader" ], **{ "--runs": "1", "--out": out } )
+    report  = json.load( open( out ) )
+    old, _  = report[ "files" ][ "src/mod_b.py" ][ "unscored_records" ]
+    assert code == 3 and report[ "strict_grader" ] is True and report[ "overall" ][ "salvaged" ] == 0
+    assert old[ "step" ] == "grader" and old[ "raws" ] == [ REASON + '{"score": 1}' ] * 3 and len( models.by( GRADER ) ) == 3
