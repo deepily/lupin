@@ -30,6 +30,10 @@ from cosa.repo.doc_lint import dart_pairs, labelled_set_seeder, pool_builder
 
 UNATTACHED = "<unattached>"
 
+# Test and generated files are not prose a person wrote for a reader: a directory named for one is refused at any depth.
+TEST_DIRECTORIES   = frozenset( ( "test", "integration_test" ) )
+GENERATED_SUFFIXES = ( ".g.dart", ".freezed.dart", ".mocks.dart" )
+
 
 def read_file_list( path ):
     """
@@ -45,6 +49,22 @@ def read_file_list( path ):
         return list( dict.fromkeys( line.strip() for line in f if line.strip() ) )
 
 
+def refusal_reason( path ):
+    """
+    Say why a file may not enter the pool.
+
+    Requires:
+        - path is a repo-relative path
+
+    Ensures:
+        - returns "test file" when a directory in the path is named test or integration_test, "generated file" when the name
+          ends in .g.dart, .freezed.dart or .mocks.dart, else None
+    """
+    if TEST_DIRECTORIES & set( path.split( "/" )[ :-1 ] ): return "test file"
+    if path.endswith( GENERATED_SUFFIXES ): return "generated file"
+    return None
+
+
 def list_blobs( repo, sha, files ):
     """
     Find the blob of each listed file at one commit.
@@ -56,12 +76,15 @@ def list_blobs( repo, sha, files ):
         - returns ( path, blob oid ) pairs in the order of files
 
     Raises:
-        - ValueError when files is empty, a path does not end in .dart, or a path is not a blob at that commit
+        - ValueError when files is empty, a path does not end in .dart, a path is a test or generated file (every such file is named
+          with its reason), or a path is not a blob at that commit
         - RuntimeError when git cannot list the commit
     """
     if not files: raise ValueError( "give at least one file: the pool's population is declared, not defaulted" )
     wrong = [ f for f in files if not f.endswith( ".dart" ) ]
     if wrong: raise ValueError( f"not Dart files: {' '.join( wrong )}" )
+    refused = [ f"{f} ({why})" for f in files for why in [ refusal_reason( f ) ] if why ]
+    if refused: raise ValueError( f"refused, not prose for the pool: {'; '.join( refused )}" )
     found = {}
     for entry in pool_builder.run_git( repo, [ "ls-tree", "-z", "--full-tree", sha, "--", *files ] ).decode( "utf-8" ).split( "\0" ):
         if not entry: continue

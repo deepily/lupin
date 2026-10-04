@@ -556,12 +556,13 @@ def planned( tmp_path, pool_file, outside_repo, monkeypatch ):
     return tmp_path, shared
 
 
-def test_write_refuses_a_split_that_is_not_a_python_split_before_any_call( planned, capsys ):
+def test_write_refuses_a_split_the_writer_does_not_build_before_any_call( planned, capsys ):
     tmp_path, shared = planned
     w = Writer()
     for split in ( "dart", "natural", "reserve" ):
         assert s.main( write_args( tmp_path / "gate-store", shared, split=split ), query_fn=w ) == 2
-    assert "not a Python split" in capsys.readouterr().err and w.seen == []
+    err = capsys.readouterr().err
+    assert "is not a split the writer builds" in err and "Python" not in err and w.seen == []
 
 
 def test_write_refuses_without_the_writer_cap_off_the_shared_ledger_or_past_the_approved_count( planned, capsys ):

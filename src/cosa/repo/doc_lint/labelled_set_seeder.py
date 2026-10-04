@@ -18,7 +18,8 @@ Known limits (stated, not hidden):
     - a weaken tests only the five coded classes; a clean result says nothing about subtler weakening
     - the writer is still a Claude model, so a family effect is untouched (no human arm is built)
     - the "has a verb" test in the cut-repair rule is a word-list heuristic, not a parser
-    - phase 2 stops before the reserve set and the Dart set: they need a second call-cap figure from Rick
+    - phase 2 builds the dev, gate and gate-reserve splits of a pool in any language; a Dart pool (dart_pool_builder) is drawn by the same
+      commands, and its writer calls need their own call-cap figure from Rick
 """
 
 import argparse
@@ -860,7 +861,7 @@ def cmd_write( args, query_fn=None ):
     """
     import asyncio
     if args.split not in WRITER_SPLITS:
-        print( f"REFUSED: the call cap covers {', '.join( WRITER_SPLITS )} only; {args.split} is not a Python split the writer builds", file=sys.stderr )
+        print( f"REFUSED: the call cap covers {', '.join( WRITER_SPLITS )} only; {args.split} is not a split the writer builds", file=sys.stderr )
         return 2
     try:
         check_writer_model( args.writer_model, { "extractor": args.extractor_model, "judge": args.judge_model, "escalation": args.escalation_model } )
