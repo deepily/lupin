@@ -144,6 +144,45 @@ def test_an_empty_list_a_non_dart_path_and_a_path_that_is_not_a_file_at_the_comm
     with pytest.raises( ValueError, match="not a file at .*: dir.dart" ): dpb.build_dart_pool( str( repo ), sha2, [ "dir.dart" ] )
 
 
+@pytest.mark.parametrize( "path, why", [
+    ( "test/widget_test.dart",                  "test file" ),
+    ( "integration_test/app_test.dart",         "test file" ),
+    ( "packages/core/test/a_test.dart",         "test file" ),
+    ( "lib/src/test/helper.dart",               "test file" ),
+    ( "lib/models/user.g.dart",                 "generated file" ),
+    ( "lib/models/user.freezed.dart",           "generated file" ),
+    ( "lib/services/api.mocks.dart",            "generated file" ),
+    ( "test/user.g.dart",                       "test file" ),                       # a test directory is named before the generated suffix
+    ( "lib/latest/page.dart",                   None ),                              # a directory that merely contains "test" is not a test directory
+    ( "lib/testing/page.dart",                  None ),
+    ( "lib/test_utils.dart",                    None ),                              # nor is a file name that starts with it
+    ( "lib/contest/integration_tester.dart",    None ),
+    ( "lib/models/user.dart",                   None ),
+    ( "lib/models/g.dart",                      None ),
+    ( "lib/models/user.generated_helper.dart",  None ),
+] )
+def test_a_test_or_generated_file_is_named_with_its_reason_and_nothing_else_is( path, why ):
+    assert dpb.refusal_reason( path ) == why
+
+
+def test_every_test_and_generated_file_is_refused_and_named_before_anything_is_read( populated ):
+    repo, sha = populated
+    listed = [ "lib/widgets.dart", "test/widgets_test.dart", "lib/user.g.dart", "integration_test/a.dart", "lib/nope.dart" ]
+    with pytest.raises( ValueError ) as caught: dpb.build_dart_pool( str( repo ), sha, listed )
+    message = str( caught.value )
+    assert message == "refused, not prose for the pool: test/widgets_test.dart (test file); lib/user.g.dart (generated file); integration_test/a.dart (test file)"
+    assert "lib/widgets.dart" not in message and "nope" not in message                        # the refusal comes first, so the missing file is not reported yet
+
+
+def test_the_command_line_refuses_a_listed_test_file_with_exit_2_and_writes_nothing( populated, tmp_path, capsys ):
+    repo, sha = populated
+    listing = tmp_path / "files.txt"
+    listing.write_text( "lib/widgets.dart\ntest/widgets_test.dart\n", encoding="utf-8" )
+    out = tmp_path / "pool.jsonl"
+    assert dpb.main( [ "--repo", str( repo ), "--sha", sha, "--files-from", str( listing ), "--out", str( out ) ] ) == 2
+    assert "REFUSED: refused, not prose for the pool: test/widgets_test.dart (test file)" in capsys.readouterr().err and not out.exists()
+
+
 def test_a_pool_with_no_rows_and_an_unknown_commit_are_refused( repo ):
     sha = commit( repo, { "lib/a.dart": "class A {}\n" } )
     with pytest.raises( ValueError, match="empty pool" ): dpb.build_dart_pool( str( repo ), sha, [ "lib/a.dart" ] )
