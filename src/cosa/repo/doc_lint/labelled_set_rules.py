@@ -268,7 +268,7 @@ def code_regions( old ):
 
 
 def link_regions( old ):
-    """Return the ( start, end ) regions of old that are [reference] links, with their ( target ) or [ label ] when present."""
+    """Return the ( start, end ) of each [reference] link in old, its target or label included."""
     return [ ( m.start(), m.end() ) for m in LINK_RE.finditer( old ) ]
 
 
