@@ -101,14 +101,14 @@ def test_control_the_same_pair_is_declined_unasked_when_confirmation_is_on_and_n
 def test_control_a_near_match_with_the_same_quantity_is_still_replayed_when_confirmation_is_off( tmp_path, notifier, monkeypatch ):
     """
     THE NEGATIVE CONTROL, and the reason the guard is not "refuse every near match". The stored
-    question names the same quantity (10 miles) as the one asked, at the same measured score, so
+    question says the same thing about the same quantity (10 miles into kilometers) as the one asked, at the same measured score, so
     the auto-accept still serves it. Without this a build that refused ALL near matches would pass
     the test above.
 
     RED ON REVERT: make `quantities_differ` return True unconditionally.
     """
     executor = _RecordingExecutor( v2._outcome() )
-    same     = v2._snapshot( question="What is 10 miles in kilometers?", id_hash="same-quantity",
+    same     = v2._snapshot( question="Convert 10 miles into kilometers", id_hash="same-quantity",
                              answer_is_correct=True, routing_command="agent router go to calculator" )
     lookup   = v2._lookup( is_replay_hit=False, best_candidate=same, best_score=MEASURED_SCORE,
                            similarity=MEASURED_SCORE, tier="ann" )
@@ -132,3 +132,23 @@ def test_the_refusal_is_recorded_in_the_trace( tmp_path, notifier, monkeypatch )
     flow.ask( ASKED, interactive=False, **v2._CTX )
 
     assert any( "near_match_refused_quantity" in text for text in _trace_texts( tmp_path ) )
+
+
+def test_a_candidate_with_no_question_is_routed_not_raised( tmp_path, notifier, monkeypatch ):
+    """
+    Rio's third case, through the real flow: a candidate row whose `question` is None used to
+    raise inside the guard. It now counts as unverifiable and the question is routed.
+
+    RED ON REVERT: let `quantities_differ` treat None as "same" (or raise on it).
+    """
+    executor = _RecordingExecutor( v2._outcome() )
+    nameless = v2._snapshot( question=None, id_hash="no-question", answer_is_correct=True,
+                             routing_command="agent router go to calculator" )
+    lookup   = v2._lookup( is_replay_hit=False, best_candidate=nameless, best_score=MEASURED_SCORE,
+                           similarity=MEASURED_SCORE, tier="ann" )
+    flow     = _flow( tmp_path, notifier, monkeypatch, lookup, executor, threshold=NEAR_MATCH_FLOOR )
+
+    result = flow.ask( ASKED, interactive=False, **v2._CTX )
+
+    assert executor.kinds == [ "agent" ], f"a candidate with no question was served: {executor.kinds}"
+    assert result[ "path" ] == "agent"
