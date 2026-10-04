@@ -55,7 +55,7 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 
 - 2026-10-03 — **Manager ruling (Cheech): Dart labelled-set quotas follow the Dart pool's own size mix** (short 69%, medium 23%, long 8%), dev 80 and gate 175, 255 Fable calls from the shared cap. Reason: only 89 of 4,375 Dart doc blocks reach 13 lines, so the Python mix cannot be filled (John's count, reproduced by Sam). Rick can overrule.
 
-- 2026-10-03 — **OPEN for Rick, not blocking**: the pilot claim re-check's first ledger (489 calls, CLI 2.1.288) cannot be resumed because the CLI auto-updated to 2.1.289 mid-run and the harness refuses to mix binaries. A fresh run on a pinned binary is going. Allow the old 489 calls to be reused, or keep the clean re-run?
+- 2026-10-03 — **May the pilot claim re-check reuse its first ledger although the Claude CLI changed version mid-run?** → **YES, REUSE THE 489 CALLS** (Rick, about 23:23 EDT, voice message, his words: "I absolutely want you to reuse the first 489 of about 625 calls ... saving us about 3 and a half hours"). The first ledger was written under CLI 2.1.288; the rest runs under 2.1.289. The report must say which calls ran under which version. The original `ledger.jsonl` stays untouched; the resume works on a copy that records the version change.
 
 ## 📚 DECISIONS LOG 2026-10-02 (Cheech 🌿 `bf81cf59`; crew Maya · Tiberius) — v0.2.2 docs crew, day 3
 
