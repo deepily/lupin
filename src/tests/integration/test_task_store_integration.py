@@ -200,7 +200,10 @@ class TestTaskStoreLifecycle:
         assert body[ "blocked_by" ] == [ { "kind": "user", "id": "rick" } ]
 
         # 6. unblock clears block state (unblocked = blocked on nothing)
-        unblocked = _transition( headers, task_id, to_status="in_progress", actor=actor )
+        #    Back into in_progress is a pull like step 4, so it needs the same `reason`
+        #    (409 without one on :8000 job ts-332ebcf6).
+        unblocked = _transition( headers, task_id, to_status="in_progress", actor=actor,
+                                 reason="integration probe: resuming the row I own" )
         assert unblocked.status_code == 200
         body = unblocked.json()[ "item" ]
         assert body[ "next_chase_ts" ] is None and body[ "blocked_by" ] == [ ]
@@ -270,9 +273,13 @@ class TestTaskStoreLifecycle:
         headers = { "X-API-Key": test_api_key[ "api_key" ] }
         actor   = "krishna 38d15e3b"
 
-        task_id = _queued_row( seeded_task_rows )
+        # The owner may start a row only when someone ELSE manages it, and with a `reason`.
+        # This setup used to go unchecked, so a refused pull left the row in `claimed` unseen.
+        task_id = _queued_row( seeded_task_rows, accountable_manager="tiberius" )
         for to_status in ( "claimed", "in_progress", "review" ):
-            _transition( headers, task_id, to_status=to_status, actor=actor )
+            r = _transition( headers, task_id, to_status=to_status, actor=actor,
+                             reason="integration probe: starting the row I own" )
+            assert r.status_code == 200, f"->{to_status}: {r.status_code}: {r.text}"
 
         # NEGATIVE: an unregistered scope is refused even though the close is otherwise valid.
         # A 422 leaves the row in `review`, so the positive arm below still has a row to close.
@@ -486,7 +493,9 @@ class TestTaskStoreWrapperE2E:
         # seeded queued row, because only an approver's login may admit the created one.
         assert created.get( "status" ) == "not_approved", created
         assert created[ "created_by" ] == actor
-        task_id = _queued_row( seeded_task_rows )
+        # Someone else manages the row and the pull carries a `reason`: the two things the
+        # pull switch asks of an owner starting its own row (409 on :8000 job ts-332ebcf6).
+        task_id = _queued_row( seeded_task_rows, accountable_manager="tiberius" )
 
         # task_query_impl → filter passthrough finds it; unset filters omitted entirely
         q = task_query_impl( api_base_url=BASE_URL, api_key=api_key, owner_persona="krishna", status="queued" )
@@ -494,7 +503,8 @@ class TestTaskStoreWrapperE2E:
 
         # task_transition_impl → in_progress returns { item, event } verbatim
         prog = task_transition_impl( api_base_url=BASE_URL, api_key=api_key, actor=actor,
-                                     task_id=task_id, to_status="in_progress" )
+                                     task_id=task_id, to_status="in_progress",
+                                     reason="integration probe: starting the row I own" )
         assert prog[ "item" ][ "status" ] == "in_progress", prog
         assert prog[ "event" ][ "transition" ] == "queued->in_progress"
         assert prog[ "event" ][ "actor" ] == actor
@@ -514,7 +524,8 @@ class TestTaskStoreWrapperE2E:
 
         # terminal lockout surfaces through the wrapper as a verbatim 422 error dict
         locked = task_transition_impl( api_base_url=BASE_URL, api_key=api_key, actor=actor,
-                                       task_id=task_id, to_status="in_progress" )
+                                       task_id=task_id, to_status="in_progress",
+                                       reason="should be refused: the row is closed" )
         assert locked[ "status" ] == "error" and locked[ "http_status" ] == 422, locked
         assert any( "append-only" in e for e in locked[ "errors" ] ), locked
 
@@ -523,9 +534,11 @@ class TestTaskStoreWrapperE2E:
         api_key = test_api_key[ "api_key" ]
         actor   = "krishna 7e8fb0d6"
 
-        task_id = _queued_row( seeded_task_rows )
-        task_transition_impl( api_base_url=BASE_URL, api_key=api_key, actor=actor,
-                              task_id=task_id, to_status="in_progress" )
+        task_id = _queued_row( seeded_task_rows, accountable_manager="tiberius" )
+        started = task_transition_impl( api_base_url=BASE_URL, api_key=api_key, actor=actor,
+                                        task_id=task_id, to_status="in_progress",
+                                        reason="integration probe: starting the row I own" )
+        assert started.get( "item", { } ).get( "status" ) == "in_progress", started
 
         # blocked-gate KIND-AWARE (I3, eab1d7da): a bare ->blocked (no refs) → 1 error
         # on the empty typed-refs; the chase requirement fires ONLY for a persona ref.

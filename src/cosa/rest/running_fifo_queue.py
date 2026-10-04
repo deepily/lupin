@@ -1567,10 +1567,17 @@ class RunningFifoQueue( FifoQueue ):
         # half of row 4a9ebc4b. The agentic lane already does this for itself.
         running_job.started_at = du.get_current_datetime_iso()
 
-        # Row 4cbd4858: a CRUD agent whose lineage traces to a test-suite job skips its
-        # destructive-operation ask. The agent has no queue reference, so tell it here.
+        # Row 4cbd4858: whether this job traces to a test-suite job is decided HERE, on the agent,
+        # because the agent is the object that carries `spawned_by_id_hash`. The snapshot made from
+        # it below does not, and must not: a snapshot is a stored cache row, so a stamp carried onto
+        # it could be replayed later for an ordinary user and silently skip that user's ask. The
+        # verdict travels as a plain bool and dies with this call.
+        suite_lineage = self._lineage_traces_to_test_suite( running_job )
+
+        # A CRUD agent with suite lineage skips its destructive-operation ask. The agent has no
+        # queue reference, so tell it here.
         if isinstance( running_job, CrudForDataFramesAgent ):
-            running_job.lineage_is_test_suite = self._lineage_traces_to_test_suite( running_job )
+            running_job.lineage_is_test_suite = suite_lineage
 
         try:
             formatted_output    = running_job.do_all()
@@ -1628,7 +1635,8 @@ class RunningFifoQueue( FifoQueue ):
                 self._confirm_correctness(
                     running_job,
                     truncated_question,
-                    du.truncate_string( running_job.answer_conversational or running_job.answer, 120 )
+                    du.truncate_string( running_job.answer_conversational or running_job.answer, 120 ),
+                    suite_lineage = suite_lineage
                 )
 
                 du.print_banner( "running_job.runtime_stats", prepend_nl=True )
@@ -1795,7 +1803,7 @@ class RunningFifoQueue( FifoQueue ):
         
         return running_job
 
-    def _confirm_correctness( self, snapshot: SolutionSnapshot, truncated_question: str, truncated_answer: str ) -> None:
+    def _confirm_correctness( self, snapshot: SolutionSnapshot, truncated_question: str, truncated_answer: str, suite_lineage: bool=None ) -> None:
         """
         Ask the user whether the answer was correct — INLINE, on the calling thread.
 
@@ -1829,6 +1837,9 @@ class RunningFifoQueue( FifoQueue ):
         Requires:
             - snapshot is a SolutionSnapshot that has already been saved to the store
             - truncated_question and truncated_answer are short strings for the prompt
+            - suite_lineage is None (decide from the snapshot's own stamp, as replay and agentic
+              jobs do) or the verdict already reached on the job BEFORE it was recast into a
+              snapshot, which carries no stamp (row 4cbd4858)
 
         Ensures:
             - blocks the calling thread for at most the request's timeout
@@ -1847,7 +1858,8 @@ class RunningFifoQueue( FifoQueue ):
             # ask here sat out the full window and test_v2_eval_live crawled. It still takes
             # the "yes" default below and is saved and announced like any unanswered ask; only
             # the wait goes. Every other job keeps the ask.
-            if self._lineage_traces_to_test_suite( snapshot ):
+            if suite_lineage is None: suite_lineage = self._lineage_traces_to_test_suite( snapshot )
+            if suite_lineage:
                 snapshot.answer_is_correct = True
                 print( f"[CORRECTNESS] Test-suite lineage for [{truncated_question}] — not asking, recording the 'yes' default" )
                 self.snapshot_mgr.save_snapshot( snapshot )
