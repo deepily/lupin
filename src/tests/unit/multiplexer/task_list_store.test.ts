@@ -623,3 +623,84 @@ test("refreshAfterWrite: a SECOND writer on the same poll joins the fresh read i
   await Promise.all([a, b]);
   assert.deepEqual(order.slice(0, 4), ["start 1", "end 1", "start 2", "end 2"]);
 });
+
+// ---------------------------------------------------------------------------
+// Row 8796333b slice 1 — `task_store_changed` push re-reads through the debounced refresh()
+// ---------------------------------------------------------------------------
+
+function pushedStore() {
+  const { bus } = makeBus();
+  const ctx     = makeApi();
+  const timers  = makeTimers();
+  const store   = createTaskListStore({
+    bus, api: ctx.api, endpoint: ENDPOINT, nowFn,
+    setIntervalFn: timers.setIntervalFn, clearIntervalFn: timers.clearIntervalFn,
+  });
+  const push = (): void => bus.emit({ type: "task_store_changed", payload: { count: 1 } } as never);
+  return { store, ctx, timers, push };
+}
+
+test("task_store_changed: a push while polling triggers one more read", async () => {
+  const { store, ctx, push } = pushedStore();
+  store.startPolling();
+  await tick();
+  assert.equal(ctx.getCalls.length, 1);
+
+  push();
+  await tick();
+  assert.equal(ctx.getCalls.length, 2, "the push re-read the list");
+  store.stopPolling();
+});
+
+test("task_store_changed: a burst of pushes inside one fetch collapses to one read (refresh() debounce)", async () => {
+  const { store, ctx, push } = pushedStore();
+  store.startPolling();
+  await tick();
+  const before = ctx.getCalls.length;
+
+  push(); push(); push();
+  await tick();
+  assert.equal(ctx.getCalls.length - before, 1);
+  store.stopPolling();
+});
+
+test("task_store_changed: ignored before polling starts and after it stops; the poll is untouched", async () => {
+  const { store, ctx, timers, push } = pushedStore();
+  push();
+  await tick();
+  assert.equal(ctx.getCalls.length, 0, "not subscribed before startPolling");
+
+  store.startPolling();
+  await tick();
+  assert.equal(timers.scheduled.length, 1, "the 60s poll is still scheduled alongside the push");
+  store.stopPolling();
+  const after = ctx.getCalls.length;
+
+  push();
+  await tick();
+  assert.equal(ctx.getCalls.length, after, "unsubscribed after stopPolling");
+});
+
+test("task_store_changed: restarting polling does not leave a second subscription behind", async () => {
+  const { bus } = makeBus();
+  const ctx     = makeApi();
+  let subscribed = 0, unsubscribed = 0;
+  const realOn = bus.on.bind(bus);
+  (bus as { on: unknown }).on = (type: string, listener: never) => {
+    const off = realOn(type as never, listener);
+    if (type === "task_store_changed") { subscribed++; return () => { unsubscribed++; off(); }; }
+    return off;
+  };
+  const timers = makeTimers();
+  const store  = createTaskListStore({
+    bus, api: ctx.api, endpoint: ENDPOINT, nowFn,
+    setIntervalFn: timers.setIntervalFn, clearIntervalFn: timers.clearIntervalFn,
+  });
+  store.startPolling();
+  store.startPolling();
+  assert.equal(subscribed, 2);
+  assert.equal(unsubscribed, 1, "the first subscription was released before the second was taken");
+  store.stopPolling();
+  assert.equal(unsubscribed, 2);
+  await tick();
+});

@@ -135,6 +135,7 @@ test("on socket open: sends correctly-shaped auth_request envelope", async () =>
   assert.equal(env.session_id, "wise_penguin");
   assert.ok(Array.isArray(env.subscribed_events));
   assert.ok(env.subscribed_events.includes("auth_success"));
+  assert.ok(env.subscribed_events.includes("task_store_changed"), "row 8796333b: the task panes' push rides the queue socket");
 });
 
 test("on auth_success: emits transport_ready with payload.transport=QueueTransport", async () => {

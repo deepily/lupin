@@ -77,6 +77,9 @@ export type LupinEventType =
   // deliberately absent here.
   | "cc_transcript_append"
   | "cc_transcript_state"
+  // Row 8796333b slice 1 — server invalidation push: a commit appended task-store events. No delta;
+  // TaskListStore re-reads on it. The 60s poll stays as the safety net.
+  | "task_store_changed"
   // R5 (2026-07-01) — session-name/topic control event. NotificationStore
   // intercepts a `session_topic` notification (raw notification_type), skips
   // carding it (legacy notifications.js:5862 "skip history card"), and re-emits

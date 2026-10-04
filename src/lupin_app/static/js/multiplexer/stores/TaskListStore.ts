@@ -4,8 +4,10 @@
 // Owns the poll-driven task-list lifecycle, mirroring FleetStatusStore. Reads
 // the EXISTING `GET /api/tasks` endpoint (routers/tasks.py:419-477, full-row
 // fidelity) — a read-only consumer; this card never touches tasks.py. Like
-// fleet-status it is an autonomous-timer feature (60s), OFF the WS transports;
-// it does NOT subscribe to the EventBus, it only emits `store_task_list_changed`.
+// fleet-status it is an autonomous-timer feature (60s). Row 8796333b slice 1 adds one
+// EventBus subscription, `task_store_changed` (a server invalidation push), which calls
+// the same debounced refresh(); the poll stays as the safety net. It emits
+// `store_task_list_changed`.
 //
 // Fetch + cache + timer only. The DOM dispatch (auth_required / unreachable /
 // empty / table) + the "updated" stamp live in TaskListRenderer; the pure
@@ -193,6 +195,7 @@ class TaskListStoreImpl implements TaskListStore {
   private inFlight      = false;
   private inFlightRun   : Promise<void> | null = null;
   private pollHandle    : number | null = null;
+  private unsubscribePush : ( () => void ) | null = null;
 
   constructor( opts: TaskListStoreOptions ) {
     this.bus = opts.bus;
@@ -243,13 +246,20 @@ class TaskListStoreImpl implements TaskListStore {
   startPolling(): void {
     this.stopPolling();
     void this.refresh();
-    this.pollHandle = this.setIntervalFn( () => void this.refresh(), TASK_LIST_POLL_INTERVAL_MS );
+    this.pollHandle      = this.setIntervalFn( () => void this.refresh(), TASK_LIST_POLL_INTERVAL_MS );
+    // Server push: "the store changed, re-read". refresh() is already debounced by its
+    // in-flight guard, so a burst of pushes costs at most one fetch per round trip.
+    this.unsubscribePush = this.bus.on( "task_store_changed", () => void this.refresh() );
   }
 
   stopPolling(): void {
     if ( this.pollHandle !== null ) {
       this.clearIntervalFn( this.pollHandle );
       this.pollHandle = null;
+    }
+    if ( this.unsubscribePush !== null ) {
+      this.unsubscribePush();
+      this.unsubscribePush = null;
     }
   }
 

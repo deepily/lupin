@@ -70,6 +70,7 @@ from cosa.rest.task_store_owed import (
 # Whether a pending request survives a move is the lifecycle module's rule, asked here
 # rather than restated (row c9fafb9d, design §7).
 from cosa.rest import task_request_lifecycle as request_lifecycle
+from cosa.rest import task_store_change_notifier as change_notifier
 
 
 class TaskRepository( BaseRepository[TaskItem] ):
@@ -1952,6 +1953,8 @@ class TaskRepository( BaseRepository[TaskItem] ):
 
         Ensures:
             - TaskEvent added + flushed (id populated); commit NOT called
+            - the event is parked on the session so that its COMMIT (never a rollback)
+              emits one task_store_changed (task_store_change_notifier)
             - event.ts == ts when supplied, else the func.now() default
 
         Returns:
@@ -1968,4 +1971,5 @@ class TaskRepository( BaseRepository[TaskItem] ):
         if ts is not None: event.ts = ts
         self.session.add( event )
         self.session.flush()
+        change_notifier.record_appended_event( self.session, event )
         return event
