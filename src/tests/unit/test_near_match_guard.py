@@ -10,15 +10,15 @@ from cosa.rest.v2.near_match_guard import has_number, quantities_differ, quantit
 
 
 @pytest.mark.parametrize( "text, expected", [
-    ( "Convert 10 miles to kilometers",              [ "convert", "10", "mile", "kilometer" ] ),
-    ( "How many miles is 10 kilometers?",            [ "mile", "10", "kilometer" ] ),
-    ( "Convert 100 degrees fahrenheit to celsius",   [ "convert", "100", "degree", "fahrenheit", "celsius" ] ),
+    ( "Convert 10 miles to kilometers",              [ "convert", "10", "mile", "to", "kilometer" ] ),
+    ( "How many miles is 10 kilometers?",            [ "many", "mile", "10", "kilometer" ] ),
+    ( "Convert 100 degrees fahrenheit to celsius",   [ "convert", "100", "degree", "fahrenheit", "to", "celsius" ] ),
     ( "Uh... what\u2019s 253 plus, uh, 147?",           [ "253", "plus", "147" ] ),
     ( "what is 2 + 2",                               [ "2", "plus", "2" ] ),
     ( "5-3",                                         [ "5", "minus", "3" ] ),
     ( "5 - 3",                                       [ "5", "minus", "3" ] ),
     ( "a 45-degree angle",                           [ "45", "degree", "angle" ] ),
-    ( "couch-to-5K plan",                            [ "couch", "5", "k", "plan" ] ),
+    ( "couch-to-5K plan",                            [ "couch", "to", "5", "k", "plan" ] ),
     ( "dash - alone and trailing -",                 [ "dash", "trailing" ] ),
     ( "what is -5 plus 3",                           [ "-5", "plus", "3" ] ),
     ( "what is \u22125 plus 3",                      [ "-5", "plus", "3" ] ),
@@ -31,7 +31,7 @@ from cosa.rest.v2.near_match_guard import has_number, quantities_differ, quantit
     ( "eat berries, glasses, boxes, lunches, dishes, plus, this, bus", [ "eat", "berry", "glass", "box", "lunch", "dish", "plus", "bus" ] ),
     ( "it\u2019s you\u2019re we'll I'd they've I'm don't",     [ "don" ] ),
     ( "hmmm ummm uhhh errr ahh ehh ohh",             [] ),
-    ( "no numbers here",                             [ "number" ] ),
+    ( "no numbers here",                             [ "no", "number" ] ),
     ( "",                                            [] ),
 ] )
 def test_quantity_tokens( text, expected ):
@@ -88,3 +88,19 @@ def test_a_candidate_whose_question_is_none_is_refused_not_raised():
 
 def test_a_missing_asked_question_is_refused_not_raised():
     assert quantities_differ( None, "Convert 10 miles to kilometers" ) is True
+
+
+@pytest.mark.parametrize( "asked, stored, why", [
+    ( "what is 10 more than 5",              "what is 10 less than 5",              "more/less are spaCy stop words but decide the answer" ),
+    ( "what is 10 before 5 pm",              "what is 10 after 5 pm",               "before/after flip the meaning" ),
+    ( "is 10 above 5",                       "is 10 below 5",                       "above/below flip the meaning" ),
+    ( "is 10 over 5",                        "is 10 under 5",                       "over/under flip the meaning" ),
+    ( "10 is not 5",                         "10 is 5",                             "negation is a stop word and flips the meaning" ),
+    ( "convert 10 miles from kilometers",    "convert 10 miles to kilometers",      "from/to name the direction" ),
+    ( "the first 10 of 50",                  "the last 10 of 50",                   "first/last differ" ),
+    ( "what is ten plus 5",                  "what is five plus 5",                 "spelled numbers are stop words and must still be compared" ),
+    ( "10 miles per hour",                   "10 miles an hour over 3",             "per is kept as a word" ),
+    ( "at least 10 apples",                  "at most 10 apples",                   "least/most differ" ),
+] )
+def test_direction_negation_and_spelled_number_words_are_not_dropped_as_stop_words( asked, stored, why ):
+    assert quantities_differ( asked, stored ) is True, why

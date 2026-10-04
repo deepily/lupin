@@ -12,8 +12,8 @@ changes the quantity asked about is a confidently wrong reply.
 THE PREDICATE (second version, after Rio's review of the first). Build, for each question, the ORDERED
 sequence of its numbers and its content words:
 
-    "Convert 100 degrees fahrenheit to celsius"   -> [ convert, 100, degree, fahrenheit, celsius ]
-    "How many miles is 10 kilometers?"            -> [ mile, 10, kilometer ]
+    "Convert 100 degrees fahrenheit to celsius"   -> [ convert, 100, degree, fahrenheit, to, celsius ]
+    "How many miles is 10 kilometers?"            -> [ many, mile, 10, kilometer ]
     "Uh... what's 253 plus, uh, 147?"             -> [ 253, plus, 147 ]
 
 When NEITHER question has a number, nothing is refused: the guard is silent and the near match behaves
@@ -24,7 +24,8 @@ point that differs, or a number that moved relative to the words around it, all 
 
 Content words are lowercase alphabetic tokens with the function words REMOVED, plural-folded, and
 hesitations ("uh", "um", "hmm") dropped. The function-word list is the English stop-word list that ships
-with spaCy, the library the cache's normaliser already uses; no list of units is kept here, so a unit
+with spaCy, the library the cache's normaliser already uses, MINUS the words that decide an answer
+(more, less, before, after, not, to, from, spelled numbers ...: _MEANING_BEARING); no list of units is kept here, so a unit
 this module has never seen is still compared as a word. A number is a digit run with an optional sign,
 a decimal point, or thousands grouping; the symbols % $ + * x / and = are folded to the words they stand
 for ("percent", "dollar", "plus", "times", "divided", "equal"), and a "-" between two numbers is "minus"
@@ -48,6 +49,20 @@ from typing import List, Optional
 
 from spacy.lang.en.stop_words import STOP_WORDS
 
+# spaCy's stop-word list is built for search, not meaning: it holds words that decide an answer. Measured
+# 2026-10-03 (Rio's review of 5277d09bc): "what is 10 more than 5" and "what is 10 less than 5" both
+# reduced to [ 10, 5 ]. These are KEPT as content words. Anything not listed stays a function word.
+_MEANING_BEARING = frozenset( {
+    "more", "less", "fewer", "most", "least", "few", "many", "much", "than", "enough",
+    "before", "after", "above", "below", "over", "under", "up", "down", "out", "off", "into", "from", "to",
+    "per", "between", "within", "through", "across", "around", "behind", "beyond", "against", "until",
+    "during", "since", "first", "last", "next", "top", "bottom", "front", "back", "again", "once",
+    "no", "not", "nor", "never", "none", "cannot", "n't", "nothing", "neither", "either", "both",
+    "all", "each", "every", "only", "just", "same", "other", "another", "half", "whole",
+    "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
+    "twenty", "thirty", "forty", "fifty", "sixty", "hundred", "third", "fourth", "fifth", "sixth",
+} )
+_FUNCTION_WORDS = frozenset( STOP_WORDS ) - _MEANING_BEARING
 _NUMBER      = r"(?:(?<![\w.])[-−])?(?:\d+(?:,\d{3})*(?:\.\d+)?|\.\d+)"
 _WORD        = r"[^\W\d_]+(?:['’][^\W\d_]+)?"
 _TOKEN       = re.compile( f"{_NUMBER}|{_WORD}|[%$+*/=\\-\u00d7\u00f7]" )
@@ -106,14 +121,14 @@ def _content_word( token: str ) -> Optional[ str ]:
 
     Ensures:
         - "what's" is "what" (a trailing 's, 're, 'll, 'd, 've, 'm or 't clitic is dropped)
-        - returns None for spaCy stop words and for hesitation sounds
+        - returns None for spaCy stop words (except the _MEANING_BEARING ones) and for hesitation sounds
         - otherwise the lowercase plural-folded word
     """
     word = token.lower().replace( "’", "'" )
     if "'" in word:
         stem, clitic = word.split( "'", 1 )
         word         = stem if clitic in _CLITICS else stem + clitic
-    if word in STOP_WORDS or _HESITATION.fullmatch( word ): return None
+    if word in _FUNCTION_WORDS or _HESITATION.fullmatch( word ): return None
     return _fold_plural( word )
 
 

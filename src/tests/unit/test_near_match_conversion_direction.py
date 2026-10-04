@@ -101,14 +101,14 @@ def test_control_the_same_pair_is_declined_unasked_when_confirmation_is_on_and_n
 def test_control_a_near_match_with_the_same_quantity_is_still_replayed_when_confirmation_is_off( tmp_path, notifier, monkeypatch ):
     """
     THE NEGATIVE CONTROL, and the reason the guard is not "refuse every near match". The stored
-    question says the same thing about the same quantity (10 miles into kilometers) as the one asked, at the same measured score, so
+    question says the same thing about the same quantity (10 miles to kilometers) as the one asked, at the same measured score, so
     the auto-accept still serves it. Without this a build that refused ALL near matches would pass
     the test above.
 
     RED ON REVERT: make `quantities_differ` return True unconditionally.
     """
     executor = _RecordingExecutor( v2._outcome() )
-    same     = v2._snapshot( question="Convert 10 miles into kilometers", id_hash="same-quantity",
+    same     = v2._snapshot( question="convert 10 miles to kilometers!", id_hash="same-quantity",
                              answer_is_correct=True, routing_command="agent router go to calculator" )
     lookup   = v2._lookup( is_replay_hit=False, best_candidate=same, best_score=MEASURED_SCORE,
                            similarity=MEASURED_SCORE, tier="ann" )
