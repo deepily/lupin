@@ -205,3 +205,13 @@ def test_tense_variables_and_am_are_compared( asked, stored, why ):
 ] )
 def test_irregular_clitics_and_please_are_pinned( text, expected ):
     assert quantity_tokens( text ) == expected
+
+
+@pytest.mark.parametrize( "text, expected", [
+    ( "show 5 n't",     [ "show", "5", "not" ] ),
+    ( "n't 5",          [ "not", "5" ] ),
+] )
+def test_a_bare_nt_is_not_and_never_an_empty_token( text, expected ):
+    tokens = quantity_tokens( text )
+    assert "" not in tokens, f"empty token in {tokens}"
+    assert tokens == expected

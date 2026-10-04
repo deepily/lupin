@@ -121,6 +121,7 @@ def _content_words( token: str ) -> List[ str ]:
           "isn't" and "don't" are ["not"] (the "is" and "do" are noise); "won't" is ["will", "not"]
         - returns [] for the _NOISE_WORDS and for hesitation sounds
         - every other word, lowercase and plural-folded, is returned: nothing is dropped by default
+        - never returns an empty string: a bare "n't" (stem "n", which loses its "n") is just ["not"]
     """
     word = token.lower().replace( "\u2019", "'" )
     if word == "cannot": return [ "can", "not" ]
@@ -133,7 +134,7 @@ def _content_words( token: str ) -> List[ str ]:
         else:
             word = stem + clitic
     words = []
-    if word not in _NOISE_WORDS and not _HESITATION.fullmatch( word ): words.append( _fold_plural( word ) )
+    if word and word not in _NOISE_WORDS and not _HESITATION.fullmatch( word ): words.append( _fold_plural( word ) )
     return words + [ w for w in tail if w not in _NOISE_WORDS ]
 
 
