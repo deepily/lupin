@@ -16,9 +16,13 @@ COST-SHIFT to the already-paid Max plan, NOT "free": the SDK reports
 `total_cost_usd` telemetry, but the firewalled Anthropic console balance does
 not move. D6=STRICT parsers (fail-loud on unrecoverable/empty structured
 content). The Gemini image/video path (`gemini_client.py`, NanoBanana/Veo) is
-NON-Anthropic and UNTOUCHED; the pptx/Marp assembly + diagram rendering phases
-are unchanged. The firewalled-key prose elsewhere in this package is HISTORICAL
-for the content phase.
+NON-Anthropic and UNTOUCHED; the pptx/Marp assembly is unchanged. Diagram
+rendering is NOT unchanged: the Mermaid, matplotlib and D2 renderers get their
+diagram code from `api_client.call_for_mermaid`, `call_for_matplotlib` and
+`call_for_d2`, three of the seven migrated methods, so those calls now go through
+`sdk_query` too; only what happens to the returned code (extraction, the d2 CLI,
+the sandboxed matplotlib run) calls no LLM. The firewalled-key prose elsewhere in
+this package is HISTORICAL for the content phase.
   - Scope:        src/rnd/v0.1.8/2026.06.18-presentation-phase2-bounded-cc-scope.md
   - Ratification: src/rnd/v0.1.8/2026.06.18-bounded-cc-d1d9-ratification-package.md
   - Cost model:   src/docs/cost-model-bounded-cc-vs-firewalled-sdk.md
