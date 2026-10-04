@@ -1294,3 +1294,47 @@ def test_fa_the_same_model_and_prompt_may_write_the_reserve_after_the_gate_and_a
 
 def test_fc_the_manifest_docstring_no_longer_says_no_reserve_writer_call_is_made( ):
     assert "no reserve writer call is made" not in s.cmd_manifest.__doc__
+
+
+# ---- a strata mix carried by --sizes-json (the Dart draw: its pool has few long docs) -------------------
+
+def delete_strata( base ):
+    plan = json.loads( ( base / "out" / "dev" / "plan.json" ).read_text() )
+    counts = {}
+    for p in plan[ "pairs" ]:
+        if p[ "kind" ] == "delete": counts[ p[ "stratum" ] ] = counts.get( p[ "stratum" ], 0 ) + 1
+    return plan, counts
+
+
+def test_a_strata_mix_in_sizes_json_sets_the_stratum_quotas_and_is_recorded_in_the_plan( tmp_path, pool_file, outside_repo ):
+    mix  = { "S": 0.6, "M": 0.2, "L": 0.2 }
+    args = plan_args( tmp_path, pool_file )
+    args[ args.index( "--sizes-json" ) + 1 ] = json.dumps( { "gate": SMALL, "dev": SMALL, "strata_mix": mix } )
+    assert s.main( args ) == 0
+    plan, counts = delete_strata( tmp_path )
+    assert counts == { "S": 2, "M": 1, "L": 1 } and plan[ "strata_mix" ] == mix                   # 4 deletes at .6/.2/.2, not the default 1/2/1
+
+
+def test_without_a_strata_mix_the_default_quotas_hold_and_the_plan_records_none( tmp_path, pool_file, outside_repo ):
+    assert s.main( plan_args( tmp_path, pool_file ) ) == 0
+    plan, counts = delete_strata( tmp_path )
+    assert counts == { "S": 1, "M": 2, "L": 1 } and "strata_mix" not in plan and s.strata_mix_of( None ) is s.STRATA_MIX
+    assert s.strata_mix_of( { "dev": SMALL } ) is s.STRATA_MIX
+
+
+@pytest.mark.parametrize( "bad, match", [ ( [ 0.5, 0.5 ],                              "exactly" ),
+                                           ( { "S": 0.5, "M": 0.5 },                    "exactly" ),
+                                           ( { "S": 0.5, "M": 0.3, "L": 0.2, "X": 0 }, "exactly" ),
+                                           ( { "S": "a", "M": 0.5, "L": 0.5 },          "numbers from 0 to 1" ),
+                                           ( { "S": -0.1, "M": 0.6, "L": 0.5 },         "numbers from 0 to 1" ),
+                                           ( { "S": 1.5, "M": -0.25, "L": -0.25 },      "numbers from 0 to 1" ),
+                                           ( { "S": 0.5, "M": 0.3, "L": 0.3 },          "sum to 1" ) ] )
+def test_a_bad_strata_mix_is_refused_naming_what_is_wrong( bad, match, tmp_path, pool_file, outside_repo, capsys ):
+    with pytest.raises( ValueError, match=match ): s.strata_mix_of( { "strata_mix": bad } )
+    args = plan_args( tmp_path, pool_file )
+    args[ args.index( "--sizes-json" ) + 1 ] = json.dumps( { "gate": SMALL, "dev": SMALL, "strata_mix": bad } )
+    assert s.main( args ) == 2 and "REFUSED" in capsys.readouterr().err and not ( tmp_path / "out" ).exists()
+
+
+def test_the_boundary_shares_zero_and_one_are_accepted():
+    assert s.strata_mix_of( { "strata_mix": { "S": 1, "M": 0, "L": 0 } } ) == { "S": 1, "M": 0, "L": 0 }

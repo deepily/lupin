@@ -693,6 +693,28 @@ def disjoint( picks_by_split ):
     return True
 
 
+def strata_mix_of( override ):
+    """
+    Return the strata mix a plan draws with: STRATA_MIX, or the "strata_mix" a --sizes-json file carries.
+
+    Requires:
+        - override is the parsed --sizes-json object, or None
+
+    Ensures:
+        - returns { "S", "M", "L" } -> share; shares are numbers from 0 to 1 that sum to 1 within 1e-9
+
+    Raises:
+        - ValueError naming what is wrong with a strata_mix that is not a dict of exactly S, M and L, or whose shares are not numbers
+          from 0 to 1 summing to 1
+    """
+    if override is None or "strata_mix" not in override: return STRATA_MIX
+    mix = override[ "strata_mix" ]
+    if not isinstance( mix, dict ) or set( mix ) != set( STRATA_MIX ): raise ValueError( f"strata_mix must hold exactly {sorted( STRATA_MIX )}, got {mix!r}" )
+    if any( type( v ) not in ( int, float ) or not 0 <= v <= 1 for v in mix.values() ): raise ValueError( f"strata_mix shares must be numbers from 0 to 1, got {mix!r}" )
+    if abs( sum( mix.values() ) - 1 ) > 1e-9: raise ValueError( f"strata_mix shares must sum to 1, got {sum( mix.values() )}" )
+    return mix
+
+
 def cmd_plan( args ):
     """
     Phase 1: no model call. Writes plan.json and writer_tasks.jsonl per split; gate and reserve go outside the repo.
@@ -701,14 +723,14 @@ def cmd_plan( args ):
     """
     gate_sizes = SIZES[ args.option ]
     dev_sizes  = SIZES[ "dev" ]
-    if args.sizes_json:
-        override = json.loads( args.sizes_json )
-        gate_sizes, dev_sizes = override.get( "gate", gate_sizes ), override.get( "dev", dev_sizes )
+    override   = json.loads( args.sizes_json ) if args.sizes_json else None
+    if override: gate_sizes, dev_sizes = override.get( "gate", gate_sizes ), override.get( "dev", dev_sizes )
     try:
+        mix = strata_mix_of( override )
         refuse_gate_out_in_repo( args.gate_out )
         stoplist = load_stoplist( args.stoplist )
         exclude  = frozenset( json.loads( open( args.exclude, encoding="utf-8" ).read() ) ) if args.exclude else frozenset()
-        seed, picks = seed_search( read_jsonl( args.pool ), stoplist, gate_sizes, dev_sizes, STRATA_MIX, args.split_seed, args.split_tries, args.seed, exclude )
+        seed, picks = seed_search( read_jsonl( args.pool ), stoplist, gate_sizes, dev_sizes, mix, args.split_seed, args.split_tries, args.seed, exclude )
     except ( ValueError, Shortfall ) as e:
         print( f"REFUSED: {e}", file=sys.stderr )
         return 2
@@ -720,6 +742,7 @@ def cmd_plan( args ):
         plan, task_rows = build_split_plan( name, picks[ name ], args.seed if name == "dev" else args.gate_seed )
         base = os.path.join( args.out if name == "dev" else args.gate_out, name )
         plan[ "pool_sha" ] = sha256_file( args.pool )
+        if mix != STRATA_MIX: plan[ "strata_mix" ] = mix
         if name != "dev": plan[ "split_seed" ] = seed
         write_json( os.path.join( base, "plan.json" ), plan )
         write_jsonl( os.path.join( base, "writer_tasks.jsonl" ), task_rows )
