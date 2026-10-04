@@ -247,7 +247,7 @@ def park_reason_is_stale( status, park_reason_captured_at, body_changed_ts ) -> 
     """
     True when the row body changed after its `park_reason` quote was captured.
 
-    It compares `body_changed_ts`, not `updated_ts`, which moves on every write and flagged correct quotes as stale after priority-only edits and transitions. Of the five free-edit fields (title, body, priority, gate_class, urgency) only body can make a quote untrue. `updated_ts` marks any write. It reads no clock, because `now() > captured_at` would be true of every parked row just after parking. It returns False on ambiguity. A false stale cannot be corrected and teaches readers to ignore the flag. A false fresh is only the prior status quo.
+    It compares `body_changed_ts`, not `updated_ts`, which moves on every write and flagged correct quotes as stale after priority-only edits and transitions. Of the five free-edit fields (title, body, priority, gate_class, urgency) only body can make a quote untrue. `updated_ts` marks any write. Re-stamping `park_reason_captured_at` on a non-substantive write is rejected, because it needs every write classified as substantive or not. It reads no clock, because `now() > captured_at` would be true of every parked row just after parking. It returns False on ambiguity. A false stale cannot be corrected and teaches readers to ignore the flag. A false fresh is only the prior status quo.
     That bias holds because staleness blocks nothing; a gate whose ambiguity implies an unsafe action must refuse instead. The park statement stamps `park_reason_captured_at` in one statement with the same database-clock instant it writes to `updated_ts`. The two paths that write body stamp `body_changed_ts` from that clock, so write order decides the answer.
     A False answer means no body change since capture, never "verified still true". A basis `OUTSIDE` the row changes nothing in it; that limit is recorded on the store item aa543525. The real property is `CONTENT CONTRADICTION`. No timestamp can answer it, so the chase is the backstop. A reason that dies by event, such as a stand-down whose basis has gone, changes nothing in the row, so it reads fresh. This is a whole class the predicate cannot see even with perfect timestamps, and the flag stays silent where a reader most wants it.
 
@@ -582,7 +582,7 @@ def owed_status_row( status, next_chase_ts, now ) -> bool:
     Row-level twin of `owed_status_clause`: True when the row is in the `owed_only=True` set.
 
     Readers that hold plain dicts, such as `task_store_drain`, cannot evaluate a SQLAlchemy expression, so they call this verb. Without it a caller would compose the admission inline, a second expression of the rule living outside this module.
-    It is not `is_owed`, which would admit blocked, claimed and review rows. It calls neither `park_is_active` nor the clause, and does its own coercion and park-window comparison.
+    It is not `is_owed`, which would admit blocked, claimed and review rows. It calls neither `park_is_active` nor the clause, and does its own coercion and park-window comparison. `owed_status_clause` does not call `park_is_active` either; it builds on `park_is_active_clause`.
     The duplication is deliberate: the admission half must be mutation-provable rather than assumed, so the gate perturbs one side and requires a failure.
 
     Requires:
