@@ -135,6 +135,30 @@ def run_flagged_pair( claim_list ):
     return bool( claim_list[ "flags" ] ) and not claim_list[ "parse_failed" ]
 
 
+def call_timing( results ):
+    """
+    Sum the recorded model-call time and call counts by stage over every result.
+
+    Requires:
+        - results come from run_all; a result with no "timing" (a report rebuilt from an older run) adds nothing
+
+    Ensures:
+        - returns { "stages": { stage: { "seconds", "calls" } }, "untimed_rows" }; a row resumed from the ledger
+          is in the totals with its recorded time, and a row with no recorded time is only counted in untimed_rows
+    """
+    stages  = {}
+    untimed = 0
+    for r in results:
+        timing   = r.get( "timing" )
+        if timing is None: continue
+        untimed += timing[ "untimed_rows" ]
+        for stage, entry in timing[ "stages" ].items():
+            total = stages.setdefault( stage, { "seconds": 0.0, "calls": 0 } )
+            total[ "seconds" ] += entry[ "seconds" ]
+            total[ "calls" ]   += entry[ "calls" ]
+    return { "stages": stages, "untimed_rows": untimed }
+
+
 def build_report( results, config, judge_prompt_version=None, jev_run=False ):
     """
     Turn runner results into the exit-gate figures.
@@ -175,6 +199,8 @@ def build_report( results, config, judge_prompt_version=None, jev_run=False ):
         - judge_unanswered counts the claim verdicts, over all lists and runs, that carry no Jev
           probability: Jev gave no answer and the escalation model decided under Jev's name. It is
           None on a run that did not use Jev
+        - call_timing holds per-stage (extractor, judge, escalation) seconds and call counts over the whole run,
+          resumed rows included at their recorded time, and judge_thinking records the setting the judge ran under
         - identical_list_pairs counts pairs whose extractor lists came out the same, because the
           SDK has no temperature and two "independent" lists can be one list drawn twice
 
@@ -266,6 +292,8 @@ def build_report( results, config, judge_prompt_version=None, jev_run=False ):
                                 "lost": [ l[ "claims_lost" ] for l in lists ], "tagged": [ l[ "history_tagged" ] for l in lists ],
                                 "tagged_claims": tagged_claims },
         "pairs"             : len( results ),
+        "call_timing"       : call_timing( results ),
+        "judge_thinking"    : config.judge_thinking,
         "miss_criterion_met": miss_ok,
         "false_alarm_ok"    : fa_ok,
         "flagged_ok"        : flag_ok,

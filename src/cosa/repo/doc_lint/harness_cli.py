@@ -36,6 +36,8 @@ def parse_args( argv ):
     parser.add_argument( "--model-cap", action="append", default=[], metavar="MODEL=N", help="refuse the call after N calls to MODEL, counted in --call-ledger; repeat for more models" )
     parser.add_argument( "--extractor-lists", type=int, default=2 )
     parser.add_argument( "--judge-runs", type=int, help="judge passes over each claim list: 3 for the Claude judge, 1 for Jev, whose answers are deterministic" )
+    parser.add_argument( "--judge-thinking", choices=model_transport.THINKING_SETTINGS, default="default", help="off: the first-pass Claude judge call runs with thinking disabled; extractor and escalation calls are unchanged. A different setting is a different ledger key, never a reused verdict" )
+    parser.add_argument( "--parallel", type=int, default=1, help="pairs in flight at once (1 = one at a time)" )
     parser.add_argument( "--gate", action="store_true", help="the one door onto the gate split: refuse unless versions, thresholds and the pairs sha are frozen; run by a seat other than the implementer" )
     parser.add_argument( "--frozen-pairs-sha", help="sha256 of the pairs file registered before the gate run" )
     parser.add_argument( "--frozen-thresholds", help="jev gate run: t_lo,t_hi registered before the gate run, as written on the command line" )
@@ -87,6 +89,8 @@ def main( argv, query_fn=None ):
         - returns 3 and runs nothing when --gate is set and --frozen-pairs-sha is missing or is
           not the sha256 of the pairs file, so the gate file cannot change after registration
         - the report carries the sha256 of the pairs file
+        - returns 2 when --parallel is below 1, or --judge-thinking off is given with the Jev back end, where it would be ignored
+        - the report carries call_timing (seconds and calls per stage) and the judge_thinking setting
         - --model-cap MODEL=N with --call-ledger caps that model's calls; the report and the last printed lines carry each capped model's count and cap
         - returns 2 when a cap is not MODEL=N with N an int of zero or more, or caps are given without a ledger
         - a call the cap refuses raises CallBudgetExceeded and ends the run; the ledger keeps the count for the next run
@@ -94,7 +98,13 @@ def main( argv, query_fn=None ):
     args   = parse_args( argv )
     runs   = args.judge_runs if args.judge_runs is not None else ( 1 if args.judge_backend == "jev" else 3 )
     config = harness_runner.HarnessConfig( args.extractor_model, args.judge_model, args.escalation_model,
-                                           args.writer_model, args.extractor_lists, runs )
+                                           args.writer_model, args.extractor_lists, runs, args.judge_thinking )
+    if args.parallel < 1:
+        print( "REFUSED: --parallel must be 1 or more", file=sys.stderr )
+        return 2
+    if args.judge_backend == "jev" and args.judge_thinking != "default":
+        print( "REFUSED: --judge-thinking only applies to --judge-backend claude", file=sys.stderr )
+        return 2
     if args.judge_backend == "claude" and ( args.t_lo is not None or args.t_hi is not None ):
         print( "REFUSED: --t-lo and --t-hi only apply to --judge-backend jev", file=sys.stderr )
         return 2
@@ -154,7 +164,7 @@ def main( argv, query_fn=None ):
     try:
         binding = f"claude_cli={args.claude_cli_path}|version={model_transport.cli_version( args.claude_cli_path )}"
         results = asyncio.run( harness_runner.run_all( pairs, config, harness_runner.Ledger( args.ledger, binding=binding ), query_fn=query_fn, judge_backend=backend,
-                                                       on_unreadable=raw_failure_sink( args.raw_failures ) ) )
+                                                       on_unreadable=raw_failure_sink( args.raw_failures ), parallel=args.parallel ) )
     except ( jev_transport.JevConfigError, harness_runner.LedgerBindingError ) as e:
         print( f"REFUSED: {e}", file=sys.stderr )
         return 2
@@ -168,6 +178,7 @@ def main( argv, query_fn=None ):
     with open( args.out, "w", encoding="utf-8" ) as f: json.dump( report, f, indent=2 )
     print( f"report written to {args.out}: default_gate_pass={report[ 'default_gate_pass' ]}" )
     print( f"parse_failed_pairs={report[ 'parse_failed_pairs' ]} retry_calls={report[ 'retry_calls' ]}" )
+    for stage, t in report[ "call_timing" ][ "stages" ].items(): print( f"call time {stage}: {t[ 'seconds' ]:.1f}s over {t[ 'calls' ]} calls" )
     for model, b in report[ "call_budget" ].items(): print( f"call budget {model}: {b[ 'used' ]} of {b[ 'cap' ]} calls used" )
     return 0
 

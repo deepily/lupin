@@ -499,3 +499,314 @@ def test_the_command_line_survives_an_unreadable_reply_keeps_it_and_prints_the_c
     rows = [ json.loads( l ) for l in raw.read_text().splitlines() ]
     assert len( rows ) == 4 and "Extra data" in rows[ 0 ][ "error" ] and rows[ 0 ][ "id" ] == "seeded"
     assert "parse_failed_pairs=1 retry_calls=2" in capsys.readouterr().out
+
+
+# ---- judge thinking, parallel pairs and per-call timing (row: fast claim check) ---------------
+
+class OptionsSpy( FakeModel ):
+    """FakeModel that also keeps each call's thinking option, in call order, with a fixed pause so calls overlap."""
+
+    def __init__( self, pause=0.0, **kwargs ):
+        super().__init__( **kwargs )
+        self.thinking = []
+        self.pause    = pause
+        self.live     = 0
+        self.peak     = 0
+
+    async def __call__( self, prompt, options ):
+        self.thinking.append( ( options.model, options.thinking ) )
+        self.live += 1
+        self.peak  = max( self.peak, self.live )
+        try:
+            await asyncio.sleep( self.pause )
+            async for message in super().__call__( prompt, options ): yield message
+        finally:
+            self.live -= 1
+
+
+MAYBE = pair( "p", OLD + "\n" + L4, old=OLD + "\n" + L4 )        # L4 makes the first-pass judge answer uncertain, so the escalation model is asked
+
+
+def thinking_of( spy, model ):
+    return [ t for m, t in spy.thinking if m == model ]
+
+
+async def one_call( model, **kwargs ):
+    seen = []
+    async def query( prompt, options ):
+        seen.append( options )
+        yield AssistantMessage( content=[ TextBlock( "ok" ) ], model="m" )
+    await mt.complete( model, "sys", "user", query_fn=query, **kwargs )
+    return seen[ 0 ]
+
+
+def test_complete_sends_no_thinking_option_by_default_and_disables_it_on_request():
+    assert asyncio.run( one_call( "m" ) ).thinking is None
+    assert asyncio.run( one_call( "m", thinking="default" ) ).thinking is None
+    assert asyncio.run( one_call( "m", thinking="off" ) ).thinking == { "type": "disabled" }
+
+
+def test_complete_refuses_an_unknown_thinking_setting_before_any_call():
+    with pytest.raises( ValueError, match="thinking must be one of" ):
+        asyncio.run( one_call( "m", thinking="maybe" ) )
+
+
+def test_record_calls_times_each_finished_call_by_the_stage_its_plan_names_and_repeats_the_last():
+    async def three():
+        with mt.record_calls( ( ( "judge", "off" ), ( "escalation", "default" ) ) ) as calls:
+            first  = await one_call( "m" )
+            second = await one_call( "m" )
+            third  = await one_call( "m" )
+        return calls, first, second, third
+    calls, first, second, third = asyncio.run( three() )
+    assert [ s for s, _ in calls ] == [ "judge", "escalation", "escalation" ] and all( t >= 0 for _, t in calls )
+    assert first.thinking == { "type": "disabled" } and second.thinking is None and third.thinking is None
+
+
+def test_a_call_that_names_its_own_thinking_keeps_it_inside_a_record_calls_block():
+    async def go():
+        with mt.record_calls( ( ( "judge", "off" ), ) ): return await one_call( "m", thinking="default" ), None
+    assert asyncio.run( go() )[ 0 ].thinking == { "type": "disabled" }
+
+
+def test_a_failed_call_is_not_recorded_and_the_block_restores_the_outer_scope():
+    async def bad( prompt, options ):
+        raise RuntimeError( "boom" )
+        yield
+    async def go():
+        with mt.record_calls() as outer:
+            with mt.record_calls() as inner:
+                with pytest.raises( mt.ModelCallError ): await mt.complete( "m", "s", "u", query_fn=bad )
+            await one_call( "m" )
+        return outer, inner
+    outer, inner = asyncio.run( go() )
+    assert inner == [] and [ s for s, _ in outer ] == [ "call" ]
+
+
+def test_a_call_outside_any_block_records_nothing_and_default_plan_is_one_call_stage():
+    asyncio.run( one_call( "m" ) )
+    assert mt._SCOPE.get() is None
+
+
+def test_check_models_refuses_an_unknown_judge_thinking():
+    with pytest.raises( ValueError, match="judge_thinking must be one of" ):
+        hn.check_models( CONFIG._replace( judge_thinking="maybe" ) )
+
+
+def test_thinking_off_reaches_the_first_pass_judge_only_never_the_extractor_or_escalation(tmp_path):
+    spy = OptionsSpy()
+    run( [ MAYBE ], hn.Ledger( str( tmp_path / "l" ) ), spy, CONFIG._replace( extractor_lists=1, judge_runs=1, judge_thinking="off" ) )
+    assert thinking_of( spy, "ext-m" ) == [ None ]
+    assert thinking_of( spy, "judge-m" ) == [ { "type": "disabled" } ]
+    assert thinking_of( spy, "esc-m" ) == [ None ]
+
+
+def test_thinking_default_sends_the_options_it_always_sent(tmp_path):
+    spy = OptionsSpy()
+    run( [ MAYBE ], hn.Ledger( str( tmp_path / "l" ) ), spy, CONFIG._replace( extractor_lists=1, judge_runs=1 ) )
+    assert { t for _, t in spy.thinking } == { None }
+
+
+def test_a_default_run_keeps_the_judge_key_it_always_had(tmp_path):
+    ledger = hn.Ledger( str( tmp_path / "l" ) )
+    run( [ pair( "p", OLD ) ], ledger, FakeModel(), CONFIG._replace( extractor_lists=1, judge_runs=1 ) )
+    judge_keys = [ k for k in ledger.entries if k.startswith( "judge|" ) ]
+    assert len( judge_keys ) == 1 and "thinking" not in judge_keys[ 0 ] and f"|{CONFIG.judge_model}+{CONFIG.escalation_model}|" in judge_keys[ 0 ]
+
+
+def test_a_row_judged_under_one_thinking_setting_is_never_reused_under_the_other_in_either_direction(tmp_path):
+    path  = str( tmp_path / "l" )
+    small = CONFIG._replace( extractor_lists=1, judge_runs=1 )
+    first = FakeModel()
+    run( [ pair( "p", OLD ) ], hn.Ledger( path ), first, small )
+    off   = FakeModel()
+    run( [ pair( "p", OLD ) ], hn.Ledger( path ), off, small._replace( judge_thinking="off" ) )
+    assert [ c[ 0 ] for c in off.calls ] == [ "judge" ]          # extractor list reused, judge rerun
+    ledger = hn.Ledger( path )
+    judge_keys = [ k for k in ledger.entries if k.startswith( "judge|" ) ]
+    assert len( judge_keys ) == 2 and sum( 1 for k in judge_keys if "|judge-m+esc-m|thinking=off|" not in k and "thinking" not in k ) == 1
+    again = FakeModel()
+    run( [ pair( "p", OLD ) ], ledger, again, small )
+    assert again.calls == []                                        # back to default: its own row is found
+    third = FakeModel()
+    run( [ pair( "p", OLD ) ], hn.Ledger( path ), third, small._replace( judge_thinking="off" ) )
+    assert third.calls == []
+
+
+def test_timing_is_recorded_by_stage_and_a_resumed_row_reports_its_recorded_time_not_zero(tmp_path):
+    path  = str( tmp_path / "l" )
+    small = CONFIG._replace( extractor_lists=1, judge_runs=1 )
+    fresh = run( [ MAYBE ], hn.Ledger( path ), OptionsSpy( pause=0.02 ), small )[ 0 ][ "timing" ]
+    assert set( fresh[ "stages" ] ) == { "extractor", "judge", "escalation" } and fresh[ "untimed_rows" ] == 0
+    assert [ fresh[ "stages" ][ s ][ "calls" ] for s in ( "extractor", "judge", "escalation" ) ] == [ 1, 1, 1 ]
+    assert all( fresh[ "stages" ][ s ][ "seconds" ] >= 0.02 for s in fresh[ "stages" ] )
+    model   = FakeModel()
+    resumed = run( [ MAYBE ], hn.Ledger( path ), model, small )[ 0 ][ "timing" ]
+    assert model.calls == [] and resumed == fresh
+
+
+def test_a_row_ledgered_without_timing_is_counted_untimed_not_as_zero_seconds(tmp_path):
+    path  = str( tmp_path / "l" )
+    small = CONFIG._replace( extractor_lists=1, judge_runs=1 )
+    run( [ pair( "p", OLD ) ], hn.Ledger( path ), FakeModel(), small )
+    stripped = [ { k: v for k, v in json.loads( line ).items() if k != "timing" } for line in open( path ) ]
+    open( path, "w" ).write( "".join( json.dumps( r ) + "\n" for r in stripped ) )
+    result = run( [ pair( "p", OLD ) ], hn.Ledger( path ), FakeModel(), small )[ 0 ]
+    assert result[ "timing" ] == { "stages": {}, "untimed_rows": 2 }
+    assert hr.call_timing( [ result ] ) == { "stages": {}, "untimed_rows": 2 }
+
+
+def test_timing_is_no_part_of_a_ledger_key_and_shares_the_rows_line(tmp_path):
+    path   = str( tmp_path / "l" )
+    run( [ pair( "p", OLD ) ], hn.Ledger( path ), FakeModel(), CONFIG._replace( extractor_lists=1, judge_runs=1 ) )
+    lines  = [ json.loads( l ) for l in open( path ) ]
+    assert all( "timing" in l for l in lines if "key" in l ) and not any( "timing" in l[ "key" ] for l in lines if "key" in l )
+    ledger = hn.Ledger( path )
+    assert ledger.timing( lines[ 0 ][ "key" ] ) == lines[ 0 ][ "timing" ] and ledger.timing( "no such key" ) is None
+    ledger.put( "k", [ 1 ] )
+    assert ledger.timing( "k" ) is None and ledger.get( "k" ) == [ 1 ]
+
+
+def test_a_backend_run_times_its_escalation_calls_under_that_stage(tmp_path):
+    class Backend:
+        prompt_version = "jev-v"
+        key_id         = "jev-key"
+        def complete( self, judged ): return True
+        async def judge( self, claims, new, design, query_fn ):
+            return await cj.finish_judgements( claims, [ "uncertain" ] * len( claims ), new, design, "esc-m", query_fn=query_fn )
+    result = asyncio.run( hn.run_all( [ pair( "p", L1 + "\n" + L4 ) ], CONFIG._replace( extractor_lists=1, judge_runs=1 ),
+                                      hn.Ledger( str( tmp_path / "l" ) ), query_fn=FakeModel(), judge_backend=Backend() ) )[ 0 ]
+    assert set( result[ "timing" ][ "stages" ] ) == { "extractor", "escalation" }
+
+
+def test_the_report_sums_call_time_and_counts_by_stage_and_names_the_thinking_setting(tmp_path):
+    small   = CONFIG._replace( extractor_lists=1, judge_runs=2, judge_thinking="off" )
+    results = run( [ pair( "a", L1 + "\n" + L4 ), pair( "b", OLD, old=OLD + "\n" + L4 ) ], hn.Ledger( str( tmp_path / "l" ) ), FakeModel(), small )
+    report  = hr.build_report( results, small )
+    stages  = report[ "call_timing" ][ "stages" ]
+    assert report[ "judge_thinking" ] == "off" and report[ "call_timing" ][ "untimed_rows" ] == 0
+    assert stages[ "extractor" ][ "calls" ] == 2 and stages[ "judge" ][ "calls" ] == 4
+    assert stages[ "extractor" ][ "seconds" ] == sum( r[ "timing" ][ "stages" ][ "extractor" ][ "seconds" ] for r in results )
+
+
+def test_a_result_without_timing_adds_nothing_to_the_report_timing():
+    assert hr.call_timing( [ { "id": "old-style" } ] ) == { "stages": {}, "untimed_rows": 0 }
+
+
+# ---- parallel pairs ------------------------------------------------------------------------------
+
+def many( n ):
+    return [ pair( f"p{i}", OLD, old=OLD + f"\nLine number {i} stays." ) for i in range( n ) ]
+
+
+def run_parallel( pairs, ledger, model, parallel, config=CONFIG ):
+    return asyncio.run( hn.run_all( pairs, config, ledger, query_fn=model, parallel=parallel ) )
+
+
+def test_parallel_runs_up_to_n_pairs_at_once_and_returns_results_in_input_order(tmp_path):
+    spy     = OptionsSpy( pause=0.01 )
+    pairs   = many( 6 )
+    results = run_parallel( pairs, hn.Ledger( str( tmp_path / "l" ) ), spy, 3, CONFIG._replace( extractor_lists=1, judge_runs=1 ) )
+    assert [ r[ "id" ] for r in results ] == [ p[ "id" ] for p in pairs ]
+    assert spy.peak == 3
+
+
+def test_parallel_one_runs_one_pair_at_a_time_and_matches_the_sequential_results(tmp_path):
+    small = CONFIG._replace( extractor_lists=1, judge_runs=1 )
+    spy   = OptionsSpy( pause=0.005 )
+    seq   = run_parallel( many( 3 ), hn.Ledger( str( tmp_path / "a" ) ), spy, 1, small )
+    assert spy.peak == 1
+    par   = run_parallel( many( 3 ), hn.Ledger( str( tmp_path / "b" ) ), FakeModel(), 4, small )
+    strip = lambda rs: [ { k: v for k, v in r.items() if k != "timing" } for r in rs ]
+    assert strip( seq ) == strip( par )
+
+
+def test_parallel_below_one_is_refused():
+    with pytest.raises( ValueError, match="parallel must be 1 or more" ):
+        run_parallel( many( 1 ), None, FakeModel(), 0 )
+
+
+def test_ledger_lines_stay_whole_under_concurrency(tmp_path):
+    path = str( tmp_path / "l" )
+    run_parallel( many( 8 ), hn.Ledger( path ), OptionsSpy( pause=0.005 ), 4 )
+    lines = open( path ).read().splitlines()
+    parsed = [ json.loads( l ) for l in lines ]          # a torn or interleaved line would not parse
+    assert len( parsed ) == 8 * ( 2 + 6 ) and len( {p[ "key" ] for p in parsed} ) == len( parsed )
+
+
+def test_the_call_budget_refuses_at_the_cap_and_never_overshoots_it_under_concurrency(tmp_path):
+    budget = str( tmp_path / "calls.jsonl" )
+    mt.set_budget( budget, { "judge-m": 5 } )
+    try:
+        with pytest.raises( mt.CallBudgetExceeded ):
+            run_parallel( many( 8 ), hn.Ledger( str( tmp_path / "l" ) ), OptionsSpy( pause=0.005 ), 4, CONFIG._replace( extractor_lists=1, judge_runs=1 ) )
+        assert mt.calls_used( "judge-m" ) == 5
+    finally:
+        mt.set_budget( None, {} )
+
+
+def test_one_pairs_failure_keeps_the_rows_of_pairs_that_finished_and_the_earliest_failure_is_raised(tmp_path):
+    path = str( tmp_path / "l" )
+    class Dies( OptionsSpy ):
+        async def __call__( self, prompt, options ):
+            if "Line number 2 " in prompt or "Line number 3 " in prompt: raise RuntimeError( f"killed on {options.model}" )
+            async for m in super().__call__( prompt, options ): yield m
+    small = CONFIG._replace( extractor_lists=1, judge_runs=1 )
+    with pytest.raises( mt.ModelCallError, match="failed" ):
+        run_parallel( many( 4 ), hn.Ledger( path ), Dies( pause=0.01 ), 4, small )
+    done = [ json.loads( l ) for l in open( path ) ]
+    keys = [ d[ "key" ] for d in done ]
+    ok   = [ pair_ for pair_ in many( 4 ) if "2 " not in pair_[ "old" ].splitlines()[ -1 ] and "3 " not in pair_[ "old" ].splitlines()[ -1 ] ]
+    for p in ok: assert hn.ledger_key( "extract", p, ce.PROMPT_VERSION, "ext-m", 0 ) in keys
+    after = FakeModel()
+    run_parallel( many( 4 ), hn.Ledger( path ), after, 2, small )
+    assert len( [ c for c in after.calls if c[ 0 ] == "extract" ] ) == 2          # only the two failed pairs extract again
+
+
+def test_pairs_not_started_when_one_has_failed_are_skipped(tmp_path):
+    class Dies( FakeModel ):
+        async def __call__( self, prompt, options ):
+            if "Line number 0 " in prompt: raise RuntimeError( "killed" )
+            async for m in super().__call__( prompt, options ): yield m
+    model = Dies()
+    with pytest.raises( mt.ModelCallError ):
+        run_parallel( many( 5 ), hn.Ledger( str( tmp_path / "l" ) ), model, 2, CONFIG._replace( extractor_lists=1, judge_runs=1 ) )
+    assert len( [ c for c in model.calls if c[ 0 ] == "extract" ] ) < 5
+
+
+def test_a_resumed_parallel_run_makes_no_duplicate_call(tmp_path):
+    path  = str( tmp_path / "l" )
+    first = FakeModel()
+    run_parallel( many( 5 ), hn.Ledger( path ), first, 3 )
+    second = FakeModel()
+    run_parallel( many( 5 ), hn.Ledger( path ), second, 3 )
+    assert len( first.calls ) == 5 * 8 and second.calls == []
+
+
+def test_pairs_with_the_same_text_run_one_after_another_so_a_twin_never_repeats_a_call(tmp_path):
+    model = OptionsSpy( pause=0.005 )
+    run_parallel( [ pair( "a", OLD ), pair( "b", OLD ), pair( "c", OLD ) ], hn.Ledger( str( tmp_path / "l" ) ), model, 3 )
+    assert len( model.calls ) == 8 and model.peak == 1
+
+
+# ---- command line ---------------------------------------------------------------------------------
+
+def test_the_command_line_passes_parallel_and_thinking_and_prints_call_time(tmp_path, capsys):
+    from cosa.repo.doc_lint import harness_cli as cli
+    ( tmp_path / "pairs.json" ).write_text( json.dumps( [ pair( "p0", L1 + "\n" + L3, seeded=L2 ), pair( "p1", OLD ) ] ) )
+    spy = OptionsSpy( pause=0.01 )
+    assert cli.main( cli_args( tmp_path ) + [ "--parallel", "2", "--judge-thinking", "off" ], query_fn=spy ) == 0
+    out     = capsys.readouterr().out
+    written = json.loads( ( tmp_path / "out.json" ).read_text() )
+    assert spy.peak == 2 and written[ "judge_thinking" ] == "off" and written[ "call_timing" ][ "stages" ][ "judge" ][ "calls" ] > 0
+    assert "call time extractor:" in out and "call time judge:" in out
+    assert thinking_of( spy, "judge-m" ) and set( map( json.dumps, thinking_of( spy, "judge-m" ) ) ) == { json.dumps( { "type": "disabled" } ) }
+
+
+def test_the_command_line_refuses_parallel_below_one_and_thinking_off_with_jev(tmp_path, capsys):
+    from cosa.repo.doc_lint import harness_cli as cli
+    ( tmp_path / "pairs.json" ).write_text( json.dumps( [ pair( "p", OLD ) ] ) )
+    assert cli.main( cli_args( tmp_path ) + [ "--parallel", "0" ], query_fn=FakeModel() ) == 2
+    assert "--parallel must be 1 or more" in capsys.readouterr().err
+    assert cli.main( cli_args( tmp_path ) + [ "--judge-backend", "jev", "--judge-thinking", "off", "--t-lo", "0.3", "--t-hi", "0.8" ], query_fn=FakeModel() ) == 2
+    assert "--judge-thinking only applies" in capsys.readouterr().err

@@ -8,16 +8,17 @@ a call. The ledger key carries the hash of the old text, the hash of the new tex
 version and the model id. A changed prompt or model can therefore never resume a stale verdict.
 """
 
+import asyncio
 import hashlib
 import json
 import os
 from collections import namedtuple
 
-from . import claim_extractor, claim_judge
+from . import claim_extractor, claim_judge, model_transport
 
 HarnessConfig = namedtuple( "HarnessConfig", [
-    "extractor_model", "judge_model", "escalation_model", "writer_model", "extractor_lists", "judge_runs"
-], defaults=( 2, 3 ) )
+    "extractor_model", "judge_model", "escalation_model", "writer_model", "extractor_lists", "judge_runs", "judge_thinking"
+], defaults=( 2, 3, "default" ) )
 
 
 def check_models( config ):
@@ -35,8 +36,11 @@ def check_models( config ):
           the writer's model that is spelled differently is not detected, so use pinned ids
 
     Raises:
-        - ValueError naming the missing id, or the judge role that equals the writer
+        - ValueError naming the missing id, or the judge role that equals the writer, or a judge_thinking that
+          is not one of model_transport.THINKING_SETTINGS
     """
+    if config.judge_thinking not in model_transport.THINKING_SETTINGS:
+        raise ValueError( f"judge_thinking must be one of {model_transport.THINKING_SETTINGS}, got {config.judge_thinking!r}" )
     for name in ( "extractor_model", "judge_model", "escalation_model", "writer_model" ):
         if not getattr( config, name ): raise ValueError( f"{name} is required: the harness has no default model" )
     for name in ( "judge_model", "escalation_model" ):
@@ -82,11 +86,14 @@ class Ledger:
           that differs from this one is refused (LedgerBindingError), so a resume never mixes binaries
         - every put is on disk before it returns, so a kill loses at most the call in flight
         - a torn last line from a kill during a write is ignored on load
+        - a put may carry the call time of the row, written in the same line, so a row and its time are
+          on disk together or not at all; timing is no part of the key, and a row written without it reads as None
     """
 
     def __init__( self, path, binding=None ):
         self.path     = path
         self.entries  = {}
+        self.timings  = {}
         self.recorded = None
         if os.path.exists( path ):
             with open( path, encoding="utf-8" ) as f:
@@ -99,6 +106,7 @@ class Ledger:
                         self.recorded = record[ "binding" ]
                     else:
                         self.entries[ record[ "key" ] ] = record[ "value" ]
+                        if "timing" in record: self.timings[ record[ "key" ] ] = record[ "timing" ]
         if binding is not None:
             if ( self.entries or self.recorded is not None ) and self.recorded != binding:
                 raise LedgerBindingError( f"ledger {path} was written under {self.recorded!r} and this run is {binding!r}: use a new ledger" )
@@ -125,10 +133,17 @@ class Ledger:
             f.flush()
             os.fsync( f.fileno() )
 
-    def put( self, key, value ):
-        """Store a finished call durably before returning."""
-        self._append( { "key": key, "value": value } )
+    def timing( self, key ):
+        """Return the recorded { stage: { "seconds", "calls" } } of a finished row, or None when it was written without one."""
+        return self.timings.get( key )
+
+    def put( self, key, value, timing=None ):
+        """Store a finished call durably before returning; timing, when given, is stored in the same line."""
+        record = { "key": key, "value": value }
+        if timing is not None: record[ "timing" ] = timing
+        self._append( record )
         self.entries[ key ] = value
+        if timing is not None: self.timings[ key ] = timing
 
 
 async def run_pair( pair, config, ledger, query_fn=None, judge_backend=None, on_unreadable=None ):
@@ -158,49 +173,99 @@ async def run_pair( pair, config, ledger, query_fn=None, judge_backend=None, on_
         - a frozen entry written before row ed2f9b4e has no discards, flags, reextract_calls, parse_failed or
           retry_calls; it reads as none of them, so judge_comparison can still rebuild a report from an old ledger
         - a finished call is never made again
+        - with judge_thinking "off" the judge key carries "|thinking=off", so a verdict judged with thinking
+          on is never reused for thinking off or the other way round; a ledger of the other setting is not
+          refused, its judge rows simply miss and the judge calls run again (extractor lists are shared)
+        - "timing" holds { "stages": { stage: { "seconds", "calls" } }, "untimed_rows" }, summed over every
+          row of the pair, fresh or resumed (a resumed row reports its recorded time); a row ledgered before
+          timing existed counts in untimed_rows; timing is never part of a ledger key
 
     Raises:
         - ValueError if config fails check_models
         - whatever the extractor or judge raises for a failed call; finished calls stay in the ledger
     """
     check_models( config )
-    lists = []
+    lists   = []
+    timing  = {}
+    untimed = 0
+
+    def tally( recorded ):
+        """Add one finished row's recorded timing to the pair's totals; a row with none counts as untimed."""
+        nonlocal untimed
+        if recorded is None:
+            untimed += 1
+            return
+        for stage, entry in recorded.items():
+            total = timing.setdefault( stage, { "seconds": 0.0, "calls": 0 } )
+            total[ "seconds" ] += entry[ "seconds" ]
+            total[ "calls" ]   += entry[ "calls" ]
+
     for slot in range( config.extractor_lists ):
         key    = ledger_key( "extract", pair, claim_extractor.PROMPT_VERSION, config.extractor_model, slot )
         frozen = ledger.get( key )
         if frozen is None:
             sink   = None if on_unreadable is None else ( lambda attempt, raw, error, slot=slot: on_unreadable( pair[ "id" ], slot, attempt, raw, error ) )
-            result = await claim_extractor.extract_claims( pair[ "old" ], config.extractor_model, query_fn=query_fn, on_unreadable=sink )
+            with model_transport.record_calls( ( ( "extractor", "default" ), ) ) as calls:
+                result = await claim_extractor.extract_claims( pair[ "old" ], config.extractor_model, query_fn=query_fn, on_unreadable=sink )
+            recorded = summarize_calls( calls )
             frozen = { "claims": [ c._asdict() for c in result.claims ], "discarded": len( result.discarded ),
                        "discards": list( result.discards ), "flags": [ list( f ) for f in result.flags ], "flag_words": list( result.flag_words ),
                        "parse_failed": result.parse_failed, "retry_calls": result.retry_calls,
                        "reextract_calls": result.reextract_calls,
                        "uncovered": result.uncovered_fraction,
                        "longest_quote": result.longest_quote_share }
-            ledger.put( key, frozen )
+            ledger.put( key, frozen, timing=recorded )
+        else:
+            recorded = ledger.timing( key )
+        tally( recorded )
         claims = [ claim_extractor.Claim( **c ) for c in frozen[ "claims" ] ]
         runs   = []
         for run in range( config.judge_runs ):
             version = claim_judge.PROMPT_VERSION if judge_backend is None else judge_backend.prompt_version
             model   = config.judge_model + "+" + config.escalation_model if judge_backend is None else judge_backend.key_id
+            if judge_backend is None and config.judge_thinking != "default": model += "|thinking=" + config.judge_thinking
             jkey    = ledger_key( "judge", pair, version, model,
                                   f"{slot}.{run}.{text_hash( json.dumps( frozen[ 'claims' ], sort_keys=True ) )}" )
             rows = ledger.get( jkey )
             if rows is None:
-                if judge_backend is None:
-                    judged = await claim_judge.judge_claims( claims, pair[ "new" ], pair.get( "design" ),
-                                                             config.judge_model, config.escalation_model, query_fn=query_fn )
-                else:
-                    judged = await judge_backend.judge( claims, pair[ "new" ], pair.get( "design" ), query_fn )
-                rows   = [ { "verdict": j.verdict, "escalated": j.escalated, "reason": j.reason, "noul": j.noul } for j in judged ]
-                if judge_backend is None or judge_backend.complete( judged ): ledger.put( jkey, rows )
+                plan = ( ( "judge", config.judge_thinking ), ( "escalation", "default" ) ) if judge_backend is None else ( ( "escalation", "default" ), )
+                with model_transport.record_calls( plan ) as calls:
+                    if judge_backend is None:
+                        judged = await claim_judge.judge_claims( claims, pair[ "new" ], pair.get( "design" ),
+                                                                 config.judge_model, config.escalation_model, query_fn=query_fn )
+                    else:
+                        judged = await judge_backend.judge( claims, pair[ "new" ], pair.get( "design" ), query_fn )
+                rows     = [ { "verdict": j.verdict, "escalated": j.escalated, "reason": j.reason, "noul": j.noul } for j in judged ]
+                recorded = summarize_calls( calls )
+                if judge_backend is None or judge_backend.complete( judged ): ledger.put( jkey, rows, timing=recorded )
+            else:
+                recorded = ledger.timing( jkey )
+            tally( recorded )
             runs.append( rows )
         lists.append( { "claims": frozen[ "claims" ], "discarded": frozen[ "discarded" ],
                         "discards": frozen.get( "discards", [] ), "flags": frozen.get( "flags", [] ),
                         "reextract_calls": frozen.get( "reextract_calls", 0 ), "flag_words": frozen.get( "flag_words", [] ),
                         "parse_failed": frozen.get( "parse_failed", False ), "retry_calls": frozen.get( "retry_calls", 0 ),
                         "uncovered": frozen[ "uncovered" ], "longest_quote": frozen[ "longest_quote" ], "runs": runs } )
-    return { "id": pair[ "id" ], "seed_span": pair.get( "seed_span" ), "lists": lists }
+    return { "id": pair[ "id" ], "seed_span": pair.get( "seed_span" ), "lists": lists, "timing": { "stages": timing, "untimed_rows": untimed } }
+
+
+def summarize_calls( calls ):
+    """
+    Fold ( stage, seconds ) call records into { stage: { "seconds", "calls" } }.
+
+    Requires:
+        - calls is a list of ( stage, seconds ) as record_calls() yields
+
+    Ensures:
+        - one entry per stage seen; seconds is the sum of that stage's wall-clock seconds, calls their count
+    """
+    totals = {}
+    for stage, seconds in calls:
+        entry = totals.setdefault( stage, { "seconds": 0.0, "calls": 0 } )
+        entry[ "seconds" ] += seconds
+        entry[ "calls" ]   += 1
+    return totals
 
 
 def unquotable_seeds( pairs ):
@@ -219,14 +284,46 @@ def unquotable_seeds( pairs ):
              if p.get( "seed_span" ) is not None and claim_extractor.locate_quote( p[ "old" ][ p[ "seed_span" ][ 0 ]:p[ "seed_span" ][ 1 ] ], p[ "old" ] ) is None ]
 
 
-async def run_all( pairs, config, ledger, query_fn=None, judge_backend=None, on_unreadable=None ):
+async def run_all( pairs, config, ledger, query_fn=None, judge_backend=None, on_unreadable=None, parallel=1 ):
     """
-    Run every pair in order and return their results.
+    Run every pair and return their results in input order.
 
     Requires:
         - pairs is a list of run_pair inputs
+        - parallel is an int of 1 or more
 
     Ensures:
-        - results are in the order of pairs; pairs run one at a time, so the ledger has a single writer
+        - with parallel 1 the pairs run one at a time, as before
+        - with parallel N above 1, up to N pairs are in flight at once; the ledger and the call budget are
+          written without an await between check and write, so lines stay whole and a cap is never passed
+        - pairs with the same old text, new text and design run one after another, so a resumed or repeated
+          pair never makes a call a twin has finished
+        - once one pair fails, pairs not yet started are skipped, every pair in flight finishes (its ledger
+          rows are kept), and then the failure of the earliest pair in input order is raised
+
+    Raises:
+        - ValueError if parallel is below 1
+        - whatever run_pair raises
     """
-    return [ await run_pair( pair, config, ledger, query_fn=query_fn, judge_backend=judge_backend, on_unreadable=on_unreadable ) for pair in pairs ]
+    if parallel < 1: raise ValueError( f"parallel must be 1 or more, got {parallel}" )
+    if parallel == 1:
+        return [ await run_pair( pair, config, ledger, query_fn=query_fn, judge_backend=judge_backend, on_unreadable=on_unreadable ) for pair in pairs ]
+    slots  = asyncio.Semaphore( parallel )
+    twins  = {}
+    errors = {}
+
+    async def one( index, pair ):
+        """Run one pair under its twin lock and a slot; record, rather than raise, its failure."""
+        lock = twins.setdefault( ( pair[ "old" ], pair[ "new" ], pair.get( "design" ) ), asyncio.Lock() )
+        outcome = None
+        async with lock, slots:
+            if not errors:
+                try:
+                    outcome = await run_pair( pair, config, ledger, query_fn=query_fn, judge_backend=judge_backend, on_unreadable=on_unreadable )
+                except Exception as e:
+                    errors[ index ] = e
+        return outcome
+
+    results = await asyncio.gather( *[ one( i, pair ) for i, pair in enumerate( pairs ) ] )
+    if errors: raise errors[ min( errors ) ]
+    return list( results )

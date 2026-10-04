@@ -12,6 +12,8 @@ prompt version so a row made under another profile can never be replayed.
 """
 
 import asyncio
+import contextlib
+import contextvars
 import datetime
 import fcntl
 import hashlib
@@ -19,6 +21,7 @@ import json
 import os
 import secrets
 import subprocess
+import time
 
 from claude_agent_sdk import ClaudeAgentOptions, AssistantMessage, ResultMessage, TextBlock, query as sdk_query
 
@@ -56,6 +59,54 @@ CALL_PROFILE       = "hermetic-1|" + json.dumps( { "settings": PORTABLE_SETTINGS
 # What the probe still saw after the profile (11 context blocks before, 5 after). The
 # report states these, because "hermetic" here means no operator instructions, not an empty context.
 RESIDUAL_CONTEXT = [ "environment and working-directory block", "model name", "token budget", "account email header", "current date" ]
+
+
+THINKING_SETTINGS = ( "default", "off" )
+
+# The plan for the model calls made under a record_calls() block, one per context (an asyncio task has its own),
+# so pairs in flight at once cannot write into each other's tally. It is kept here, and not passed down through
+# claim_extractor and claim_judge, because those modules' source is hashed into their prompt versions: editing them
+# would orphan every existing ledger.
+_SCOPE = contextvars.ContextVar( "model_call_scope", default=None )
+
+
+class _CallScope:
+    """What record_calls() keeps for its block: the finished calls, and which stage and thinking setting the next call has."""
+
+    def __init__( self, plan ):
+        self.plan   = plan
+        self.issued = 0
+        self.calls  = []
+
+    def next_call( self ):
+        """Return ( stage, thinking ) for the next call issued in the block; the last plan entry repeats."""
+        entry        = self.plan[ min( self.issued, len( self.plan ) - 1 ) ]
+        self.issued += 1
+        return entry
+
+
+@contextlib.contextmanager
+def record_calls( plan=( ( "call", "default" ), ) ):
+    """
+    Collect ( stage, seconds ) for every call to complete() made inside the block, in this context only.
+
+    Requires:
+        - plan is a non-empty tuple of ( stage, thinking ), one per call in the order the block issues them;
+          the last entry stands for every call after it. The judge block is ( ( "judge", setting ), ( "escalation", "default" ) ):
+          the first call is the first-pass judge and any later call is the escalation, so the thinking
+          setting reaches the first pass only
+
+    Ensures:
+        - yields a list that grows by one ( stage, seconds ) per finished call; a call that fails is not recorded
+        - a call whose own thinking argument is "default" takes the plan's thinking setting
+        - the previous scope is restored on exit, so blocks nest
+    """
+    scope = _CallScope( plan )
+    token = _SCOPE.set( scope )
+    try:
+        yield scope.calls
+    finally:
+        _SCOPE.reset( token )
 
 
 class ModelCallError( Exception ):
@@ -247,7 +298,7 @@ def wrap( label, suffix, body ):
     return f"<{label}_{suffix}>\n{body}\n</{label}_{suffix}>"
 
 
-async def complete( model, system_prompt, user_prompt, query_fn=None, timeout_seconds=TIMEOUT_SECONDS ):
+async def complete( model, system_prompt, user_prompt, query_fn=None, timeout_seconds=TIMEOUT_SECONDS, thinking="default" ):
     """
     Send one prompt to a bounded Claude Code model and return its text.
 
@@ -261,15 +312,26 @@ async def complete( model, system_prompt, user_prompt, query_fn=None, timeout_se
         - returns the concatenated text blocks of the assistant messages, stripped
         - the text is never empty
         - a model with a cap (set_budget) is charged one call before the model is contacted
+        - thinking "default" sends exactly the options sent before this setting existed; "off" adds
+          the SDK's thinking-disabled option
+        - a finished call is added to the enclosing record_calls() list as ( stage, wall-clock seconds )
+        - an enclosing record_calls() block decides the thinking setting when thinking is "default"
 
     Raises:
-        - ValueError if model is empty
+        - ValueError if model is empty, or thinking is not one of THINKING_SETTINGS
         - CallBudgetExceeded if the model has used its cap; nothing is contacted
         - ModelCallError if the call raises, times out, ends in an error result, or returns no text
     """
     if not model: raise ValueError( "model id is required: the harness has no default model" )
+    if thinking not in THINKING_SETTINGS: raise ValueError( f"thinking must be one of {THINKING_SETTINGS}, got {thinking!r}" )
+    scope = _SCOPE.get()
+    stage = None
+    if scope is not None:
+        stage, planned = scope.next_call()
+        if thinking == "default": thinking = planned
     _charge( model )
     query_fn = sdk_query if query_fn is None else query_fn
+    extra    = { "thinking": { "type": "disabled" } } if thinking == "off" else {}
     options  = ClaudeAgentOptions(
         model           = model,
         system_prompt   = system_prompt,
@@ -280,8 +342,10 @@ async def complete( model, system_prompt, user_prompt, query_fn=None, timeout_se
         cwd             = CWD if CWD is not None else cu.get_project_root(),
         setting_sources = list( SETTING_SOURCES ),
         extra_args      = dict( ISOLATION_ARGS ),
+        **extra,
     )
     parts = []
+    started = time.monotonic()
 
     async def collect():
         async for message in query_fn( prompt=user_prompt, options=options ):
@@ -300,4 +364,5 @@ async def complete( model, system_prompt, user_prompt, query_fn=None, timeout_se
         raise ModelCallError( f"model call to {model} failed: {e}" ) from e
     text = "".join( parts ).strip()
     if not text: raise ModelCallError( f"model call to {model} returned no text" )
+    if scope is not None: scope.calls.append( ( stage, time.monotonic() - started ) )
     return text
