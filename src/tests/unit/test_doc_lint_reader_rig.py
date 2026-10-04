@@ -137,3 +137,28 @@ def test_the_reader_version_is_derived_from_its_prompts_and_code():
     from cosa.repo.doc_lint import model_transport as mt
     assert rt.PROMPT_VERSION == mt.prompt_version( "reader", inspect.getsource( rt ) )
     assert mt.prompt_version( "reader", inspect.getsource( rt ).replace( "_FENCE = ", "# moved\n_FENCE = ", 1 ) ) != rt.PROMPT_VERSION
+
+
+def test_exact_tie_passes_when_float_means_differ( monkeypatch ):
+    # 3 questions, 3 runs: run totals ( 1, 3, 3 ) against ( 2, 2, 3 ) are both 7, but the float means are
+    # 0.7777777777777778 against 0.7777777777777777
+    scores = iter( [ 1 / 3, 1.0, 1.0, 2 / 3, 2 / 3, 1.0 ] )
+
+    async def fake_score( *args, **kwargs ):
+        return next( scores )
+
+    monkeypatch.setattr( rt, "score_text", fake_score )
+    result = asyncio.run( rt.run_reader_test( "o", "n", QUESTIONS, rt.ReaderConfig( "r", "g", 3 ) ) )
+    assert result[ "old_mean" ] > result[ "new_mean" ]
+    assert result[ "old_total" ] == result[ "new_total" ] == 7 and result[ "passes" ] is True
+
+
+def test_per_run_total_rounds_a_float_score_back_to_the_whole_count( monkeypatch ):
+    # 15 of 22 right is the score 15/22, and 15/22 * 22 is 14.999999999999998: int() would total 14
+    async def fake_score( *args, **kwargs ):
+        return 15 / 22
+
+    monkeypatch.setattr( rt, "score_text", fake_score )
+    questions = [ { "id": f"q{i}", "question": f"Q{i}?", "key": "k" } for i in range( 22 ) ]
+    result    = asyncio.run( rt.run_reader_test( "o", "n", questions, rt.ReaderConfig( "r", "g", 1 ) ) )
+    assert result[ "old_total" ] == result[ "new_total" ] == 15

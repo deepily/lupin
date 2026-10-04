@@ -123,9 +123,10 @@ async def run_reader_test( old, new, questions, config, ledger=None, query_fn=No
         - config has reader_model, grader_model and runs (the N repeats, 3 to start)
 
     Ensures:
-        - returns { old_scores, new_scores, old_mean, new_mean, passes }
-        - passes is True when new_mean >= old_mean: with few questions one flipped answer moves the
-          score a lot, so the comparison is on means over the runs
+        - returns { old_scores, new_scores, old_mean, new_mean, old_total, new_total, passes }
+        - passes is True when new_total >= old_total, the counts of answers graded 1 over all runs; both
+          texts get the same questions and runs, so this is the means comparison done in whole numbers,
+          where a float comparison can call an exact tie a loss
         - every run uses a fresh reader call per question
 
     Raises:
@@ -136,8 +137,10 @@ async def run_reader_test( old, new, questions, config, ledger=None, query_fn=No
     new_scores = [ await score_text( new, questions, config, run, ledger, query_fn ) for run in range( config.runs ) ]
     old_mean   = sum( old_scores ) / len( old_scores )
     new_mean   = sum( new_scores ) / len( new_scores )
+    old_total  = sum( round( s * len( questions ) ) for s in old_scores )
+    new_total  = sum( round( s * len( questions ) ) for s in new_scores )
     return { "old_scores": old_scores, "new_scores": new_scores, "old_mean": old_mean, "new_mean": new_mean,
-             "passes": new_mean >= old_mean }
+             "old_total": old_total, "new_total": new_total, "passes": new_total >= old_total }
 
 
 PROMPT_VERSION = model_transport.prompt_version( "reader", inspect.getsource( sys.modules[ __name__ ] ) )
