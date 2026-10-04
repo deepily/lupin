@@ -66,7 +66,8 @@ run_scope_summary_line() {
     [ -f "$capture" ] || return 0
     _run_scope_strip_ansi < "$capture" \
         | grep -E '(passed|failed|error|errors|skipped|deselected|xfailed|xpassed|warnings?|no tests ran|tests? collected)[^|]*in [0-9]+\.[0-9]+s' \
-        | tail -1
+        | tail -1 \
+        || true   # no summary line is the THIRD answer ("unknown"), not a failure: under `set -eo pipefail` grep's 1 would kill the caller (row cb64a4b1)
 }
 
 # Echo the number pytest deselected, or nothing when the line does not say.
@@ -76,7 +77,11 @@ run_scope_summary_line() {
 # this function reports only what the line it was given says.
 run_scope_deselected_count() {
     local line="$1"
-    echo "$line" | grep -oE '[0-9]+ deselected' | head -1 | grep -oE '^[0-9]+'
+    # 🔴 `|| true`: the last grep exits 1 on a line with no "N deselected" clause, which is every fully
+    # green unfiltered run. Under the caller's `set -e` the assignment `x="$( ... )"` then killed the runner
+    # before its banner and before `exit $PYTEST_EXIT_CODE`: a green e2e half was recorded as exit 1 (row cb64a4b1).
+    # Empty output still means "no clause" (zero); only the exit status is neutralised.
+    echo "$line" | grep -oE '[0-9]+ deselected' | head -1 | grep -oE '^[0-9]+' || true
 }
 
 # Echo how many tests pytest actually reported an outcome for: passed + failed + error(s) +
