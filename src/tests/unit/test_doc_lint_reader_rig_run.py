@@ -684,6 +684,17 @@ def test_a_salvaged_score_counts_and_is_recorded_per_text( repo, capsys ):
     assert report[ "overall" ][ "salvaged" ] == 2 and report[ "strict_grader" ] is False
 
 
+def test_a_salvaged_record_carries_its_run_and_question_and_both_identical_texts( repo ):
+    # mod_b reads the same in both revisions. A grade is cached per answer, so a grader call at run 2 needs a new answer:
+    # the 9th reader call (run 2, third question) answers differently, and the 4th grader call is the one that is salvaged
+    out    = str( repo[ "tmp" ] / "late-salvage.json" )
+    models = FakeModels( reader_script=[ None ] * 8 + [ '{"answer": "the lid stays shut, again"}' ], grader_script=[ None, None, None, REASON + '{"score": 1}' ] )
+    code, _ = run( repo, [ QB1, QB2, QB3 ], models, **{ "--runs": "3", "--out": out } )
+    file    = json.load( open( out ) )[ "files" ][ "src/mod_b.py" ]
+    assert code == 0 and file[ "dropped" ] == 0 and len( models.by( GRADER ) ) == 4
+    assert file[ "salvaged_records" ] == [ { "score": 1, "raw": REASON + '{"score": 1}', "file": "src/mod_b.py", "text": label, "run": 2, "id": "qb3" } for label in ( "old", "new" ) ]
+
+
 def test_the_summary_line_prints_the_salvaged_count( repo, capsys ):
     run( repo, [ QA ], FakeModels( grader_script=[ REASON + '{"score": 1}', REASON + '{"score": 0}' ] ), **{ "--runs": "1" } )
     printed = capsys.readouterr().out
