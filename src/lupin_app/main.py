@@ -1160,9 +1160,10 @@ async def lifespan( app: FastAPI ):
     init_tracker( config_mgr, debug=app_debug )
     init_watchdogs( config_mgr, jobs_todo_queue, debug=app_debug, ask_flow=ask_flow )
 
-    # Initialize API Resource Manager singleton (Phase 1 CJ Flow async multi-lane).
-    # No agents call it yet — wiring ensures the infrastructure is alive from boot
-    # so Phase 2/3 can migrate callers without a startup-plumbing pass.
+    # Initialize the API Resource Manager singleton. No agent calls acquire() or
+    # record_call() today (Deep Research dropped its gating when it moved to bounded
+    # CC); it is initialised so the pool-status report in running_fifo_queue can
+    # include get_arm().get_status() and not an "uninitialised" marker.
     from cosa.utils.api_resource_manager import init_arm
     init_arm()
 
