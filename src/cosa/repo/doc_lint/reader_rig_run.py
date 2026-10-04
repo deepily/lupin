@@ -60,6 +60,7 @@ def parse_args( argv ):
     parser.add_argument( "--reader-cap", type=int, required=True, help="most reader calls this ledger may ever hold" )
     parser.add_argument( "--grader-cap", type=int, required=True, help="most grader calls this ledger may ever hold" )
     parser.add_argument( "--out", help="where to write the JSON report" )
+    parser.add_argument( "--file-prefix", default="", help="put in front of each question's file before reading it from git, e.g. src/cosa/rest/" )
     parser.add_argument( "--repo", default=None, help="git repository to read from; default is the project root" )
     parser.add_argument( "--claude-cli-path", help="run this Claude Code binary instead of the SDK's bundled one" )
     parser.add_argument( "--dry-run", action="store_true", help="print sizes and projected calls, make no model call" )
@@ -102,6 +103,22 @@ def load_questions( path ):
         if not isinstance( points, list ) or not points or not all( isinstance( p, str ) and p.strip() for p in points ):
             raise RunRefused( f"question {q[ 'id' ]!r} has no key_points" )
     return questions, hashlib.sha256( raw ).hexdigest()
+
+
+def check_prefix( prefix ):
+    """
+    Refuse a file prefix that could leave the repository.
+
+    Requires:
+        - prefix is a string, empty for none
+
+    Ensures:
+        - returns None for a prefix that is empty or relative and holds no ".." part
+
+    Raises:
+        - RunRefused if the prefix starts with a slash or contains ".."
+    """
+    if prefix.startswith( "/" ) or ".." in prefix: raise RunRefused( f"--file-prefix {prefix!r} must be relative and hold no '..'" )
 
 
 def rig_questions( questions ):
@@ -277,6 +294,8 @@ def main( argv, query_fn=None ):
     Ensures:
         - returns 0 after printing a per-file line, an overall line and the calls spent per model
         - returns 2 before anything else when --runs is below 1
+        - returns 2 and makes no model call when --file-prefix starts with a slash or contains ".."
+        - --file-prefix goes in front of each question's file before the file is read from git; reports name the full paths
         - returns 2 and makes no model call when the questions file is refused (count differs, an id
           repeats, a question has no key_points), a revision or file cannot be read from git, the two
           model ids are equal or a cap is not an int of zero or more
@@ -296,7 +315,9 @@ def main( argv, query_fn=None ):
     try:
         repo = args.repo if args.repo is not None else cu.get_project_root()
         if args.reader_model == args.grader_model: raise RunRefused( "reader and grader model ids must differ: the call caps are counted per model id" )
+        check_prefix( args.file_prefix )
         questions, questions_sha = load_questions( args.questions )
+        questions                = [ dict( q, file=args.file_prefix + q[ "file" ] ) for q in questions ]
         old_sha, new_sha         = resolve_rev( repo, args.old_rev ), resolve_rev( repo, args.new_rev )
         groups                   = group_by_file( questions )
         texts                    = { f: ( extract_doc_text( read_at( repo, old_sha, f ), f ), extract_doc_text( read_at( repo, new_sha, f ), f ) ) for f in groups }
@@ -330,7 +351,7 @@ def main( argv, query_fn=None ):
     for model, n in spent.items(): print( f"calls spent {model}: {n}" )
     if args.out is not None:
         report = { "old_rev": old_sha, "new_rev": new_sha, "questions_sha256": questions_sha, "reader_model": args.reader_model,
-                   "grader_model": args.grader_model, "runs": args.runs, "prompt_version": reader_rig.PROMPT_VERSION,
+                   "grader_model": args.grader_model, "runs": args.runs, "file_prefix": args.file_prefix, "paths_read": list( groups ), "prompt_version": reader_rig.PROMPT_VERSION,
                    "files": { f: dict( per_file[ f ], questions=counts[ f ] ) for f in per_file }, "overall": overall, "calls_spent": spent }
         with open( args.out, "w", encoding="utf-8" ) as out: json.dump( report, out, indent=2 )
     return 0

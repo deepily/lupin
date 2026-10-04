@@ -397,3 +397,25 @@ def test_report_names_revisions_models_and_hashes( repo ):
     assert ( report[ "reader_model" ], report[ "grader_model" ], report[ "runs" ] ) == ( READER, GRADER, 2 )
     assert report[ "prompt_version" ] == reader_rig.PROMPT_VERSION
     assert report[ "calls_spent" ] == { READER: 4, GRADER: 2 }
+
+
+def test_file_prefix_finds_a_bare_file_name( repo, capsys ):
+    bare = [ dict( QA, file="mod_a.py" ) ]
+    assert run( repo, bare, **{ "--runs": "1" } )[ 0 ] == 2        # without the prefix the old refusal still fires
+    out  = str( repo[ "tmp" ] / "pfx.json" )
+    code, models = run( repo, bare, extra=[ "--file-prefix", "src/" ], **{ "--out": out } )
+    report = json.load( open( out ) )
+    assert code == 0 and models.calls
+    assert report[ "file_prefix" ] == "src/" and report[ "paths_read" ] == [ "src/mod_a.py" ] and list( report[ "files" ] ) == [ "src/mod_a.py" ]
+
+
+def test_bare_file_name_without_prefix_is_refused_as_not_in_commit( repo, capsys ):
+    assert run( repo, [ dict( QA, file="mod_a.py" ) ] )[ 0 ] == 2
+    assert "mod_a.py is not in commit" in capsys.readouterr().err
+
+
+def test_bad_file_prefixes_are_refused_with_no_call( repo, capsys ):
+    for bad in ( "/src/", "src/../", "..", "a/../b/" ):
+        code, models = run( repo, [ QA ], extra=[ "--file-prefix", bad ] )
+        assert code == 2 and "--file-prefix" in capsys.readouterr().err
+        assert models.calls == []
