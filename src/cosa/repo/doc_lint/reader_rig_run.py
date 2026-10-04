@@ -291,40 +291,75 @@ async def score_question( text, question, config, run, ledger, query_fn ):
 
     Ensures:
         - returns ( 1 or 0, None ) on the first attempt that gets a parseable reply to both steps
-        - returns ( None, { step, error, raw } ) when every attempt failed, raw cut to RAW_LIMIT characters
+        - returns ( None, { step, error, raws } ) when every attempt failed: the step and error of the last
+          attempt, and raws holding the raw reply of every attempt, each cut to RAW_LIMIT characters
         - a retry is a real call, charged to the cap; a reader answer cached after it parsed is not asked again
 
     Raises:
         - model_transport.CallBudgetExceeded: a cap is not a failure to retry
     """
     tracker = CallTracker( model_transport.sdk_query if query_fn is None else query_fn )
+    raws    = []
     for _ in range( ATTEMPTS ):
         try:
             return int( await reader_rig.score_text( text, [ question ], config, run, ledger=ledger, query_fn=tracker ) ), None
         except ( reader_rig.ReaderParseError, model_transport.ModelCallError ) as e:
             error = f"{type( e ).__name__}: {e}"
-    return None, { "step": tracker.step, "error": error, "raw": tracker.raw[ :RAW_LIMIT ] }
+            raws.append( tracker.raw[ :RAW_LIMIT ] )
+    return None, { "step": tracker.step, "error": error, "raws": raws }
+
+
+async def score_pair( old_text, new_text, question, config, run, ledger, query_fn ):
+    """
+    Score one question and run on both texts.
+
+    Ensures:
+        - returns ( old, old_failure, new, new_failure ), each as score_question returns it
+        - when the two texts are identical the question is scored once and both sides share the result, so a
+          reply that never parses is not retried a second time for the same words
+
+    Raises:
+        - model_transport.CallBudgetExceeded when a cap stops a call
+    """
+    old, old_failure = await score_question( old_text, question, config, run, ledger, query_fn )
+    if new_text == old_text: return old, old_failure, old, old_failure
+    new, new_failure = await score_question( new_text, question, config, run, ledger, query_fn )
+    return old, old_failure, new, new_failure
 
 
 def verdict_word( old_total, new_total, dropped ):
-    """Name the outcome in capitals: incomplete, pass or fail."""
+    """
+    Name the outcome in capitals: incomplete, pass or fail.
+
+    Requires:
+        - old_total and new_total are whole numbers of answers graded 1 over the same compared pairs
+        - dropped is the count of pairs left out because a text could not be scored
+
+    Ensures:
+        - returns "INCOMPLETE" when dropped is above zero, whatever the totals
+        - otherwise returns "PASS" when new_total is at least old_total, else "FAIL"
+    """
     if dropped: return "INCOMPLETE"
     return "PASS" if new_total >= old_total else "FAIL"
 
 
-async def score_file( path, old_text, new_text, group, config, ledger, query_fn ):
+async def score_file( path, old_text, new_text, group, config, ledger, query_fn, halt ):
     """
     Score every question of one file on both texts for every run, on the same questions.
 
     Requires:
         - group is the file's questions as { id, question, key } dicts
+        - halt is a dict { "reason": None } shared by every file of the run
 
     Ensures:
         - a question and run that fails to score on either text is dropped from both totals
+        - when a cap stops a call, halt["reason"] takes its message; that pair and every later pair, in this
+          file and the next, make no call and are recorded unscored on both texts with step "cap"
         - returns { old_scores, new_scores, old_total, new_total, compared, dropped, old_answered, new_answered,
           unscored_records, old_mean, new_mean, passes, verdict }, totals being whole numbers of answers graded 1
-        - each unscored record holds file, text (old or new, never sent to a model), run, id, step, error and raw
-        - old_mean and new_mean are None when nothing was compared; passes is new_total >= old_total
+        - each unscored record holds file, text (old or new, never sent to a model), run, id, step, error and raws
+        - old_mean and new_mean are None when nothing was compared
+        - passes is None when any pair was dropped, else new_total >= old_total
     """
     totals    = { "old": 0, "new": 0 }
     answered  = { "old": 0, "new": 0 }
@@ -335,8 +370,16 @@ async def score_file( path, old_text, new_text, group, config, ledger, query_fn 
     for run in range( config.runs ):
         run_totals, run_compared = { "old": 0, "new": 0 }, 0
         for q in group:
-            old, old_failure = await score_question( old_text, q, config, run, ledger, query_fn )
-            new, new_failure = await score_question( new_text, q, config, run, ledger, query_fn )
+            outcome = None
+            if halt[ "reason" ] is None:
+                try:
+                    outcome = await score_pair( old_text, new_text, q, config, run, ledger, query_fn )
+                except model_transport.CallBudgetExceeded as e:
+                    halt[ "reason" ] = str( e )
+            if outcome is None:
+                stopped = { "step": "cap", "error": halt[ "reason" ], "raws": [] }
+                outcome = ( None, stopped, None, stopped )
+            old, old_failure, new, new_failure = outcome
             for label, failure in ( ( "old", old_failure ), ( "new", new_failure ) ):
                 if failure is not None: records.append( dict( failure, file=path, text=label, run=run, id=q[ "id" ] ) )
             answered[ "old" ] += old is not None
@@ -354,7 +397,7 @@ async def score_file( path, old_text, new_text, group, config, ledger, query_fn 
     return { "old_scores": per_run[ "old" ], "new_scores": per_run[ "new" ], "old_total": totals[ "old" ], "new_total": totals[ "new" ],
              "compared": compared, "dropped": dropped, "old_answered": answered[ "old" ], "new_answered": answered[ "new" ], "unscored_records": records,
              "old_mean": totals[ "old" ] / compared if compared else None, "new_mean": totals[ "new" ] / compared if compared else None,
-             "passes": totals[ "new" ] >= totals[ "old" ], "verdict": verdict_word( totals[ "old" ], totals[ "new" ], dropped ) }
+             "passes": None if dropped else totals[ "new" ] >= totals[ "old" ], "verdict": verdict_word( totals[ "old" ], totals[ "new" ], dropped ) }
 
 
 def summarize( per_file ):
@@ -368,7 +411,8 @@ def summarize( per_file ):
         - returns { compared, dropped, old_answered, new_answered, unscored, old_total, new_total, old_mean, new_mean, passes, verdict }
         - each total is the sum of the file totals, so a file counts by its compared pairs, which is its question count times its runs
           unless pairs were dropped
-        - passes compares the whole-number totals, never the float means; verdict says incomplete when any pair was dropped
+        - passes compares the whole-number totals, never the float means, and is None when any pair was dropped
+        - verdict says incomplete when any pair was dropped
         - the means are None when nothing was compared
     """
     old      = sum( r[ "old_total" ] for r in per_file.values() )
@@ -378,7 +422,7 @@ def summarize( per_file ):
     return { "compared": compared, "dropped": dropped, "old_answered": sum( r[ "old_answered" ] for r in per_file.values() ),
              "new_answered": sum( r[ "new_answered" ] for r in per_file.values() ), "unscored": sum( len( r[ "unscored_records" ] ) for r in per_file.values() ),
              "old_total": old, "new_total": new, "old_mean": old / compared if compared else None, "new_mean": new / compared if compared else None,
-             "passes": new >= old, "verdict": verdict_word( old, new, dropped ) }
+             "passes": None if dropped else new >= old, "verdict": verdict_word( old, new, dropped ) }
 
 
 def refuse( message ):
@@ -414,14 +458,15 @@ def main( argv, query_fn=None ):
         - returns 2 and makes no model call when the worst case of the calls still owed, each counted three
           times and added to those the ledger's call count already holds, passes --reader-cap or --grader-cap
         - returns 3 after writing the report when any question and run could not be scored; the verdict
-          says incomplete and the stderr line gives the count of unscored answers
+          says incomplete and the stderr line gives the count of unscored answers; without --out the unscored
+          records are printed to stderr, one JSON object per line
+        - a cap reached mid-run does not end the run with a traceback: the report holds what was scored, the
+          pairs after it are recorded unscored with step "cap", and the exit code is 3
         - a rerun against a full ledger makes zero calls
         - with --dry-run no model is contacted and nothing is written
         - the report holds both full shas, the questions file's sha256, the model ids, runs and the
           rig's prompt version
 
-    Raises:
-        - model_transport.CallBudgetExceeded when a cap is hit mid-run; finished calls stay in the ledger
     """
     args = parse_args( argv )
     if args.runs < 1: return refuse( f"--runs must be 1 or more, got {args.runs}" )
@@ -454,7 +499,8 @@ def main( argv, query_fn=None ):
         return refuse( f"worst case with {ATTEMPTS} attempts per call (reader {ATTEMPTS * owed[ 'reader' ]}, grader {ATTEMPTS * owed[ 'grader' ]}) on top of those used (reader {used[ 'reader' ]}, grader {used[ 'grader' ]}) passes a cap (reader {args.reader_cap}, grader {args.grader_cap}); no model was contacted" )
 
     async def run_all():
-        return { f: await score_file( f, texts[ f ][ 0 ], texts[ f ][ 1 ], rig_questions( group ), config, ledger, query_fn ) for f, group in groups.items() }
+        halt = { "reason": None }
+        return { f: await score_file( f, texts[ f ][ 0 ], texts[ f ][ 1 ], rig_questions( group ), config, ledger, query_fn, halt ) for f, group in groups.items() }
 
     per_file = asyncio.run( run_all() )
     counts   = { f: len( group ) for f, group in groups.items() }
@@ -469,6 +515,9 @@ def main( argv, query_fn=None ):
                    "attempts": ATTEMPTS, "files": { f: dict( per_file[ f ], questions=counts[ f ] ) for f in per_file }, "overall": overall, "calls_spent": spent }
         with open( args.out, "w", encoding="utf-8" ) as out: json.dump( report, out, indent=2 )
     if overall[ "dropped" ]:
+        if args.out is None:
+            for r in per_file.values():
+                for record in r[ "unscored_records" ]: print( json.dumps( record ), file=sys.stderr )
         print( f"UNSCORED: {overall[ 'unscored' ]} answers got no scoreable reply after {ATTEMPTS} attempts; {overall[ 'dropped' ]} pairs dropped from both texts; verdict INCOMPLETE", file=sys.stderr )
         return 3
     return 0

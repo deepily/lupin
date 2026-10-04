@@ -39,6 +39,10 @@ OLD_B = '''class Box:
         return hidden_body
 '''
 NEW_B = OLD_B
+OLD_C = '''def spin():
+    """Alpha holds. Beta holds. Gamma holds."""
+'''
+NEW_C = OLD_C.replace( " Gamma holds.", "" )
 READER = "reader-m"
 GRADER = "grader-m"
 
@@ -70,10 +74,12 @@ def repo( tmp_path ):
     git( "init", "-q" )
     ( root / "src" / "mod_a.py" ).write_text( OLD_A )
     ( root / "src" / "mod_b.py" ).write_text( OLD_B )
+    ( root / "src" / "mod_c.py" ).write_text( OLD_C )
     git( "add", "." )
     git( "commit", "-qm", "old" )
     old = git( "rev-parse", "HEAD" )
     ( root / "src" / "mod_a.py" ).write_text( NEW_A )
+    ( root / "src" / "mod_c.py" ).write_text( NEW_C )
     git( "add", "." )
     git( "commit", "-qm", "new" )
     new = git( "rev-parse", "HEAD" )
@@ -120,6 +126,9 @@ QA   = q( "qa", "src/mod_a.py", "What does fn_a return for an empty list?", [ "e
 QB1  = q( "qb1", "src/mod_b.py", "What does the box do?", [ "lid stays shut" ] )
 QB2  = q( "qb2", "src/mod_b.py", "What sticks?", [ "sticks in cold weather" ] )
 QB3  = q( "qb3", "src/mod_b.py", "What does open_it do?", [ "Open the lid" ] )
+QC1  = q( "qc1", "src/mod_c.py", "What holds first?", [ "Alpha holds" ] )
+QC2  = q( "qc2", "src/mod_c.py", "What holds second?", [ "Beta holds" ] )
+QC3  = q( "qc3", "src/mod_c.py", "What holds third?", [ "Gamma holds" ] )
 
 
 def argv( repo, qpath, out=None, **over ):
@@ -362,7 +371,7 @@ def test_overall_tie_across_files_passes():
 
 def test_summarize_with_nothing_compared_has_no_means_and_is_incomplete():
     got = rr.summarize( { "a": file_result( 0, 0, 0, dropped=2 ) } )
-    assert got[ "old_mean" ] is None and got[ "new_mean" ] is None and got[ "verdict" ] == "INCOMPLETE"
+    assert got[ "old_mean" ] is None and got[ "new_mean" ] is None and got[ "verdict" ] == "INCOMPLETE" and got[ "passes" ] is None
 
 
 class Scripted:
@@ -387,9 +396,9 @@ def test_exact_tie_passes_even_when_per_run_scores_differ( repo, monkeypatch ):
     items    = [ float( x ) for o, n in zip( old_runs, new_runs ) for pair in zip( o, n ) for x in pair ]
     monkeypatch.setattr( reader_rig, "score_text", Scripted( items ) )
     out  = str( repo[ "tmp" ] / "tie.json" )
-    code = rr.main( argv( repo, questions_file( repo, [ QB1, QB2, QB3 ] ), out=out, **{ "--runs": "3" } ), query_fn=FakeModels() )
+    code = rr.main( argv( repo, questions_file( repo, [ QC1, QC2, QC3 ] ), out=out, **{ "--runs": "3" } ), query_fn=FakeModels() )
     report = json.load( open( out ) )
-    file   = report[ "files" ][ "src/mod_b.py" ]
+    file   = report[ "files" ][ "src/mod_c.py" ]
     assert sum( file[ "old_scores" ] ) / 3 > sum( file[ "new_scores" ] ) / 3
     assert code == 0 and file[ "old_total" ] == file[ "new_total" ] == 7 and file[ "passes" ] is True and file[ "verdict" ] == "PASS"
     assert report[ "overall" ][ "passes" ] is True and report[ "overall" ][ "verdict" ] == "PASS"
@@ -399,8 +408,8 @@ def test_a_one_answer_loss_fails_the_per_file_verdict( repo, monkeypatch ):
     items = [ 1.0 ] * 17 + [ 0.0 ]          # 3 questions x 3 runs x 2 texts: only the last new answer is wrong
     monkeypatch.setattr( reader_rig, "score_text", Scripted( items ) )
     out  = str( repo[ "tmp" ] / "loss.json" )
-    code = rr.main( argv( repo, questions_file( repo, [ QB1, QB2, QB3 ] ), out=out, **{ "--runs": "3" } ), query_fn=FakeModels() )
-    file = json.load( open( out ) )[ "files" ][ "src/mod_b.py" ]
+    code = rr.main( argv( repo, questions_file( repo, [ QC1, QC2, QC3 ] ), out=out, **{ "--runs": "3" } ), query_fn=FakeModels() )
+    file = json.load( open( out ) )[ "files" ][ "src/mod_c.py" ]
     assert code == 0 and ( file[ "old_total" ], file[ "new_total" ], file[ "passes" ], file[ "verdict" ] ) == ( 9, 8, False, "FAIL" )
 
 
@@ -437,7 +446,7 @@ def test_report_names_revisions_models_and_hashes( repo ):
     assert report[ "old_rev" ] == repo[ "old" ] and report[ "new_rev" ] == repo[ "new" ] and len( report[ "old_rev" ] ) == 40
     assert report[ "questions_sha256" ] == __import__( "hashlib" ).sha256( open( path, "rb" ).read() ).hexdigest()
     assert ( report[ "reader_model" ], report[ "grader_model" ], report[ "runs" ] ) == ( READER, GRADER, 2 )
-    assert report[ "prompt_version" ] == reader_rig.PROMPT_VERSION
+    assert report[ "prompt_version" ] == reader_rig.PROMPT_VERSION and report[ "attempts" ] == 3
     assert report[ "calls_spent" ] == { READER: 4, GRADER: 2 }
 
 
@@ -477,35 +486,89 @@ def test_a_reply_with_prose_around_the_json_is_retried_and_then_scored( repo ):
     assert len( models.by( GRADER ) ) == 3 and calls_used( repo, GRADER ) == 3    # the retry is a real call, charged to the cap
 
 
-def test_a_reply_that_never_parses_is_unscored_and_dropped_from_both_texts( repo, capsys ):
+def test_a_reply_that_never_parses_is_unscored_on_both_identical_texts_with_one_set_of_calls( repo, capsys ):
     out    = str( repo[ "tmp" ] / "unscored.json" )
-    models = FakeModels( grader_script=[ "nope", "nope", "nope" ] )     # the old text fails all 3 attempts; the new text, which reads the same, grades fine
+    models = FakeModels( grader_script=[ "nope", "nope", "nope" ] )     # mod_b reads the same in both revisions: one question, one set of attempts
     code, _ = run( repo, [ QB1 ], models, **{ "--runs": "1", "--out": out } )
     printed = capsys.readouterr()
     report  = json.load( open( out ) )
     file    = report[ "files" ][ "src/mod_b.py" ]
-    assert code == 3 and len( models.by( GRADER ) ) == 4 and len( models.by( READER ) ) == 1
-    assert ( file[ "compared" ], file[ "dropped" ], file[ "old_total" ], file[ "new_total" ] ) == ( 0, 1, 0, 0 )   # the new text's 1 is left out too
-    assert ( file[ "old_answered" ], file[ "new_answered" ], file[ "verdict" ] ) == ( 0, 1, "INCOMPLETE" )
+    assert code == 3 and len( models.by( GRADER ) ) == 3 and len( models.by( READER ) ) == 1    # not 6: the new text is not retried for the same words
+    assert ( file[ "compared" ], file[ "dropped" ], file[ "old_total" ], file[ "new_total" ] ) == ( 0, 1, 0, 0 )
+    assert ( file[ "old_answered" ], file[ "new_answered" ], file[ "verdict" ], file[ "passes" ] ) == ( 0, 0, "INCOMPLETE", None )
+    old, new = file[ "unscored_records" ]
+    for record, label in ( ( old, "old" ), ( new, "new" ) ):
+        assert ( record[ "file" ], record[ "text" ], record[ "run" ], record[ "id" ], record[ "step" ], record[ "raws" ] ) == ( "src/mod_b.py", label, 0, "qb1", "grader", [ "nope" ] * 3 )
+        assert record[ "error" ].startswith( "ReaderParseError" )
+    overall = report[ "overall" ]
+    assert ( overall[ "unscored" ], overall[ "dropped" ], overall[ "verdict" ], overall[ "passes" ] ) == ( 2, 1, "INCOMPLETE", None )    # 2 records, 1 dropped pair
+    assert "verdict=INCOMPLETE" in printed.out and "UNSCORED: 2 answers" in printed.err and "1 pairs dropped" in printed.err
+
+
+def test_the_new_text_failing_alone_drops_the_pair_and_exits_3( repo ):
+    out    = str( repo[ "tmp" ] / "new-alone.json" )
+    models = FakeModels( grader_script=[ None, "bad", "bad", "bad" ] )       # the old text grades fine; the new text fails all 3 attempts
+    code, _ = run( repo, [ QA ], models, **{ "--runs": "1", "--out": out } )
+    file   = json.load( open( out ) )[ "files" ][ "src/mod_a.py" ]
     [ record ] = file[ "unscored_records" ]
-    assert ( record[ "file" ], record[ "text" ], record[ "run" ], record[ "id" ], record[ "step" ], record[ "raw" ] ) == ( "src/mod_b.py", "old", 0, "qb1", "grader", "nope" )
-    assert record[ "error" ].startswith( "ReaderParseError" )
-    assert report[ "overall" ][ "unscored" ] == 1 and report[ "overall" ][ "dropped" ] == 1 and report[ "overall" ][ "verdict" ] == "INCOMPLETE"
-    assert "verdict=INCOMPLETE" in printed.out and "UNSCORED: 1 answers" in printed.err
+    assert code == 3 and ( file[ "compared" ], file[ "dropped" ], file[ "old_total" ], file[ "new_total" ] ) == ( 0, 1, 0, 0 )
+    assert ( file[ "old_answered" ], file[ "new_answered" ], file[ "passes" ] ) == ( 1, 0, None ) and record[ "text" ] == "new"
+
+
+def test_the_record_names_its_run_and_question_and_overall_counts_both_texts( repo ):
+    out    = str( repo[ "tmp" ] / "late.json" )
+    models = FakeModels( reader_script=[ None ] * 8 + [ "", "", "" ] )      # the 9th reader call is run 2, third question
+    code, _ = run( repo, [ QB1, QB2, QB3 ], models, **{ "--runs": "3", "--out": out } )
+    report  = json.load( open( out ) )
+    records = report[ "files" ][ "src/mod_b.py" ][ "unscored_records" ]
+    assert code == 3 and [ ( r[ "text" ], r[ "run" ], r[ "id" ], r[ "step" ] ) for r in records ] == [ ( "old", 2, "qb3", "reader" ), ( "new", 2, "qb3", "reader" ) ]
+    assert ( report[ "overall" ][ "compared" ], report[ "overall" ][ "dropped" ], report[ "overall" ][ "unscored" ] ) == ( 8, 1, 2 )
+
+
+def test_without_out_the_unscored_records_go_to_stderr( repo, capsys ):
+    code, _ = run( repo, [ QB1 ], FakeModels( grader_script=[ "nope" ] * 3 ), **{ "--runs": "1" } )
+    lines   = [ json.loads( line ) for line in capsys.readouterr().err.splitlines() if line.startswith( "{" ) ]
+    assert code == 3 and [ ( r[ "text" ], r[ "raws" ] ) for r in lines ] == [ ( "old", [ "nope" ] * 3 ), ( "new", [ "nope" ] * 3 ) ]
+
+
+class Spender( FakeModels ):
+    """A fake whose first call also charges the grader's call count, as a peer process would."""
+
+    def __init__( self, calls_path ):
+        super().__init__()
+        self.calls_path = calls_path
+
+    async def __call__( self, prompt, options ):
+        if not self.calls:
+            with open( self.calls_path, "a", encoding="utf-8" ) as f: f.write( "".join( json.dumps( { "model": GRADER, "n": i } ) + "\n" for i in range( 100 ) ) )
+        async for message in super().__call__( prompt, options ): yield message
+
+
+def test_a_cap_reached_mid_run_writes_the_report_and_exits_3( repo, capsys ):
+    out    = str( repo[ "tmp" ] / "cap.json" )
+    models = Spender( str( repo[ "tmp" ] / "ledger.jsonl.calls" ) )
+    code, _ = run( repo, [ QA, QB1 ], models, **{ "--runs": "1", "--grader-cap": "12", "--out": out } )
+    report  = json.load( open( out ) )
+    records = [ r for f in report[ "files" ].values() for r in f[ "unscored_records" ] ]
+    assert code == 3 and len( models.by( READER ) ) == 1 and models.by( GRADER ) == []      # the refused call never reached a model; nothing after it ran
+    assert [ ( r[ "file" ], r[ "text" ], r[ "step" ] ) for r in records ] == [ ( "src/mod_a.py", "old", "cap" ), ( "src/mod_a.py", "new", "cap" ), ( "src/mod_b.py", "old", "cap" ), ( "src/mod_b.py", "new", "cap" ) ]
+    assert "no model was contacted" in records[ 0 ][ "error" ] and records[ 0 ][ "raws" ] == []
+    assert ( report[ "overall" ][ "dropped" ], report[ "overall" ][ "compared" ], report[ "overall" ][ "verdict" ], report[ "overall" ][ "passes" ] ) == ( 2, 0, "INCOMPLETE", None )
+
 
 def test_an_empty_reader_reply_is_unscored_at_the_reader_step( repo ):
     out = str( repo[ "tmp" ] / "empty.json" )
     code, models = run( repo, [ QB1 ], FakeModels( reader_script=[ "", "", "" ] ), **{ "--runs": "1", "--out": out } )
-    [ record ] = json.load( open( out ) )[ "files" ][ "src/mod_b.py" ][ "unscored_records" ]
-    assert code == 3 and ( record[ "text" ], record[ "step" ], record[ "raw" ] ) == ( "old", "reader", "" )
-    assert record[ "error" ].startswith( "ModelCallError" ) and len( models.by( READER ) ) == 3 + 1    # three tries for the old text, one for the new
+    old, new = json.load( open( out ) )[ "files" ][ "src/mod_b.py" ][ "unscored_records" ]
+    assert code == 3 and ( old[ "text" ], new[ "text" ], old[ "step" ], old[ "raws" ] ) == ( "old", "new", "reader", [ "" ] * 3 )
+    assert old[ "error" ].startswith( "ModelCallError" ) and len( models.by( READER ) ) == 3
 
 
 def test_a_transport_error_is_retried_and_then_unscored( repo ):
     out = str( repo[ "tmp" ] / "boom.json" )
     code, models = run( repo, [ QB1 ], FakeModels( reader_script=[ RuntimeError( "boom" ) ] * 3 ), **{ "--runs": "1", "--out": out } )
-    [ record ] = json.load( open( out ) )[ "files" ][ "src/mod_b.py" ][ "unscored_records" ]
-    assert code == 3 and record[ "step" ] == "reader" and "boom" in record[ "error" ] and record[ "raw" ] == ""
+    old, _ = json.load( open( out ) )[ "files" ][ "src/mod_b.py" ][ "unscored_records" ]
+    assert code == 3 and old[ "step" ] == "reader" and "boom" in old[ "error" ] and old[ "raws" ] == [ "" ] * 3
 
 
 def test_a_transport_error_that_clears_on_the_retry_is_scored( repo ):
@@ -516,8 +579,8 @@ def test_a_transport_error_that_clears_on_the_retry_is_scored( repo ):
 def test_the_raw_reply_is_cut_to_two_thousand_characters( repo ):
     out = str( repo[ "tmp" ] / "long.json" )
     run( repo, [ QB1 ], FakeModels( grader_script=[ "x" * 5000 ] * 3 ), **{ "--runs": "1", "--out": out } )
-    [ record ] = json.load( open( out ) )[ "files" ][ "src/mod_b.py" ][ "unscored_records" ]
-    assert len( record[ "raw" ] ) == rr.RAW_LIMIT == 2000
+    old, _ = json.load( open( out ) )[ "files" ][ "src/mod_b.py" ][ "unscored_records" ]
+    assert [ len( raw ) for raw in old[ "raws" ] ] == [ rr.RAW_LIMIT ] * 3 and rr.RAW_LIMIT == 2000
 
 
 def test_a_cap_reached_mid_run_is_not_retried_and_retries_count_against_it( tmp_path ):
