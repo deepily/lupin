@@ -17,7 +17,7 @@ from cosa.rest.v2.near_match_guard import has_number, quantities_differ, quantit
     ( "what is 2 + 2",                               [ "what", "2", "plus", "2" ] ),
     ( "5-3",                                         [ "5", "minus", "3" ] ),
     ( "5 - 3",                                       [ "5", "minus", "3" ] ),
-    ( "a 45-degree angle",                           [ "45", "degree", "angle" ] ),
+    ( "a 45-degree angle",                           [ "a", "45", "degree", "angle" ] ),
     ( "couch-to-5K plan",                            [ "couch", "to", "5", "k", "plan" ] ),
     ( "dash - alone and trailing -",                 [ "dash", "alone", "and", "trailing" ] ),
     ( "what is -5 plus 3",                           [ "what", "-5", "plus", "3" ] ),
@@ -26,10 +26,10 @@ from cosa.rest.v2.near_match_guard import has_number, quantities_differ, quantit
     ( "pay 1,000 dollars or 3.50 dollars",           [ "pay", "1000", "dollar", "or", "3.5", "dollar" ] ),
     ( "interest at 7% on $5,000",                    [ "interest", "at", "7", "percent", "on", "dollar", "5000" ] ),
     ( "3 \u00d7 4 \u00f7 2 * 1 / 1 = 6",             [ "3", "times", "4", "divided", "2", "times", "1", "divided", "1", "equal", "6" ] ),
-    ( "a 3,5 thing",                                 [ "3", "5", "thing" ] ),
+    ( "a 3,5 thing",                                 [ "a", "3", "5", "thing" ] ),
     ( "-0 and 0.0",                                  [ "0", "and", "0" ] ),
     ( "eat berries, glasses, boxes, lunches, dishes, plus, this, bus", [ "eat", "berry", "glass", "box", "lunch", "dish", "plus", "this", "bus" ] ),
-    ( "it\u2019s you\u2019re we'll I'd they've I'm don't",     [ "it", "you", "we", "will", "i", "would", "they", "have", "i", "not" ] ),
+    ( "it\u2019s you\u2019re we'll I'd they've I'm don't",     [ "it", "you", "we", "will", "i", "would", "they", "have", "i", "am", "not" ] ),
     ( "hmmm ummm uhhh errr ahh ehh ohh",             [] ),
     ( "can't won't isn't cannot o'clock John's", [ "can", "not", "will", "not", "not", "can", "not", "oclock", "john" ] ),
     ( "no numbers here",                             [ "no", "number", "here" ] ),
@@ -156,18 +156,20 @@ _KEPT_WORDS = (
     "more less fewer most least few many much than enough before after above below over under up down out off into from to "
     "per between within through across around behind beyond against until during since first last next top bottom front back "
     "again once twice no not nor never none cannot nothing neither either both all each every only just same other another half "
-    "whole one two three ten hundred and or but without with unless if then also now here there always sometimes never someone "
+    "whole a was were did been am one two three ten hundred and or but without with unless if then also now here there always sometimes never someone "
     "anyone nobody everyone who whom whose what which when where why how can could may might must shall should will would have has had "
     "i you he she it we they me us them my your his her its our their this that these those some any such own very too also"
 ).split()
 
 
+_PINNED_NOISE = [ "an", "the", "of", "please", "is", "are", "be", "do", "does" ]
+
+
 def test_the_noise_list_is_exactly_what_the_tests_below_pin():
-    assert sorted( _NOISE_WORDS ) == sorted( [ "a", "an", "the", "of", "please", "is", "are", "was", "were", "be", "been", "am",
-                                                "do", "does", "did" ] )
+    assert sorted( _NOISE_WORDS ) == sorted( _PINNED_NOISE )
 
 
-@pytest.mark.parametrize( "word", sorted( _NOISE_WORDS ) )
+@pytest.mark.parametrize( "word", _PINNED_NOISE )
 def test_each_noise_word_added_to_a_question_still_replays( word ):
     assert quantities_differ( f"show 5 apples {word} 3", "show 5 apples 3" ) is False, f"{word!r} is noise"
 
@@ -176,3 +178,30 @@ def test_each_noise_word_added_to_a_question_still_replays( word ):
 def test_each_kept_word_added_to_a_question_refuses( word ):
     assert word not in _NOISE_WORDS
     assert quantities_differ( f"show 5 apples {word} 3", "show 5 apples 3" ) is True, f"{word!r} is compared"
+
+
+@pytest.mark.parametrize( "asked, stored, why", [
+    ( "solve 5a = 10",              "solve 5 = 10",            "a variable next to a number" ),
+    ( "what is a plus 5",           "what is plus 5",          "a variable beside an operator" ),
+    ( "5 a day",                    "5 day",                   "a is a word" ),
+    ( "meet at 5 am",               "meet at 5",               "am is a word" ),
+    ( "is 5 even",                  "was 5 even",              "tense" ),
+    ( "is 5 even",                  "were 5 even",             "tense" ),
+    ( "does 5 work",                "did 5 work",              "tense" ),
+    ( "has 5 been done",            "has 5 done",              "perfect tense" ),
+    ( "isn't 5 big",                "wasn't 5 big",            "n't keeps the tense word" ),
+    ( "I'm 5",                      "I 5",                     "'m is am" ),
+] )
+def test_tense_variables_and_am_are_compared( asked, stored, why ):
+    assert quantities_differ( asked, stored ) is True, why
+
+
+@pytest.mark.parametrize( "text, expected", [
+    ( "I shan't use 5",             [ "i", "shall", "not", "use", "5" ] ),
+    ( "it ain't 5",                 [ "it", "not", "5" ] ),
+    ( "I'm 5",                      [ "i", "am", "5" ] ),
+    ( "they're 5",                  [ "they", "5" ] ),
+    ( "please show 5",              [ "show", "5" ] ),
+] )
+def test_irregular_clitics_and_please_are_pinned( text, expected ):
+    assert quantity_tokens( text ) == expected

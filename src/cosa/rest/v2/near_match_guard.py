@@ -51,13 +51,11 @@ from typing import List, Optional
 # word nobody has thought of fails closed. The first two versions dropped spaCy's whole stop-word list and
 # then a denylist of "meaning-bearing" words; each review found another word that flips an answer that
 # the lists still dropped (more/less, then and/or, without, can't, modals, ...). Only articles, "of",
-# "please", and forms of "be" and "do" are dropped: they add nothing a question's answer depends on.
+# "please", and the present-tense "is", "are", "be", "do", "does" are dropped. Not dropped, on Rio's fourth
+# review: "a" (it can be an algebra variable: "solve 5a = 10"), "am" ("5 am" vs "5 pm"), and the past tense
+# was / were / did / been (an answer that depends on time can flip).
 # wh-words (what, how, who, whom ...), modals, prepositions and quantifiers are all COMPARED.
-_NOISE_WORDS = frozenset( {
-    "a", "an", "the", "of", "please",
-    "is", "are", "was", "were", "be", "been", "am",
-    "do", "does", "did",
-} )
+_NOISE_WORDS = frozenset( { "an", "the", "of", "please", "is", "are", "be", "do", "does" } )
 _NUMBER      = r"(?:(?<![\w.])[-−])?(?:\d+(?:,\d{3})*(?:\.\d+)?|\.\d+)"
 _WORD        = r"[^\W\d_]+(?:['’][^\W\d_]+)?"
 _TOKEN       = re.compile( f"{_NUMBER}|{_WORD}|[%$+*/=\\-\u00d7\u00f7]" )
@@ -135,7 +133,7 @@ def _content_words( token: str ) -> List[ str ]:
         else:
             word = stem + clitic
     words = []
-    if word and word not in _NOISE_WORDS and not _HESITATION.fullmatch( word ): words.append( _fold_plural( word ) )
+    if word not in _NOISE_WORDS and not _HESITATION.fullmatch( word ): words.append( _fold_plural( word ) )
     return words + [ w for w in tail if w not in _NOISE_WORDS ]
 
 
