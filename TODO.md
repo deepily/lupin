@@ -26,6 +26,10 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 - 2026-10-03 — **May a job spawned by a test suite skip the "are you sure" confirmation (row `4cbd4858`)?** → **YES, SKIP FOR SUITE JOBS** (Rick, same card, option picked; same provenance). Done as `034955047` + `642633cf5`. Measured afterwards on job `ts-332ebcf6`: 0 confirmation asks, 12 skipped; the eval file is still over its 15-minute cap because each math job waits 60 s on the separate "was this answer correct" ask.
 - 2026-10-03 — **How many worker seats for the afternoon?** → **TWO SEATS** (Rick, same card, option picked; same provenance). Chloé and Krishna.
 - 2026-10-03 — **May lupin's `io/post-games` be deleted now that retros live under `src/docs/post-games/`?** → **YES** (Rick, about 16:30 EDT, asked directly; same provenance). Done: 14 files removed.
+- 2026-10-03 — **When do the DB login sudo steps run, asked again in the evening (row `80513825`)?** → **RIGHT NOW** (Rick, 20:44 EDT, direct card, as carried in Mr. Radio's memento of 21:28). Not yet done: he typed them into Mr. Radio's pane with `!` twice, where sudo cannot prompt; they need an ordinary host terminal.
+- 2026-10-03 — **How is history.md brought back under its size line?** → **OPTION A, ONE CUT** (Rick, evening, direct card, same provenance). Done: `6e5a8518d`, 2026-09-06 to 09-19 moved verbatim.
+- 2026-10-03 — **May Mr. Radio's seat run `git cherry-pick` without the permission check refusing it?** → **YES, BY AN ALLOW RULE** (Rick, 20:40 EDT; he added `Bash(git cherry-pick:*)` to `.claude/settings.local.json` himself). It matches only a bare `git cherry-pick <sha>`, not one inside a compound line.
+- 2026-10-03 — **NOT RULED, asked and timed out at 21:22 EDT**: how a near match is refused when the two questions differ in a number or unit (row `1b3ec88f`). A timeout is not a ruling; to be asked again.
 
 ## 📚 DECISIONS LOG 2026-10-03 (Cheech 🌿 `62243903`; crew Rio · Tiberius) — v0.2.2 docs crew, day 4
 
