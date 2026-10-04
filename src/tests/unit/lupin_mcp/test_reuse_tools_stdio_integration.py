@@ -10,9 +10,8 @@ What this adds to the in-process unit tests:
     - when `lupin_mcp.reuse_tools` raises at import, the server still starts and a voice tool answers
     - when the call-log middleware raises at import, the server still starts and says so on stderr
 
-No live Jev is called: the transport is not built yet (plan phase W-A), so a call with no injected
-transport reports KEY_UNREADABLE when the key file is absent and CALL_FAILED when it is present.
-Both are asserted against the key file the server itself will look at.
+No live Jev is called: the spawned server's environment has JEV_API_TOASTER removed, so a call with
+no injected transport reports KEY_UNREADABLE whatever the host holds.
 
 Tests write only under temporary directories injected through LUPIN_REUSE_DATA_DIR and
 LUPIN_REUSE_OUT_DIR, so they leave no persistent state.
@@ -33,7 +32,6 @@ from tests.helpers.mcp_stdio_test_client import MCPStdioClient
 REPO       = pathlib.Path( __file__ ).resolve().parents[ 4 ]
 REUSE      = { "check_exists", "fetch_similar", "read_capability", "replay" }
 ENTRY      = "cosa.rest.task_store_owed.park_reason_is_stale"
-KEY_FILE   = REPO / "src" / "conf" / "keys" / "typesafe-api-key"
 RECEIPT_ID = re.compile( r"[0-9a-f]{16}" )
 
 
@@ -53,7 +51,7 @@ class WireClient( MCPStdioClient ):
 
 def server_env( data, out, extra_pythonpath=None ):
     """Ensures: returns the environment of a spawned cosa-voice with the reuse data and index relocated."""
-    env = dict( os.environ )
+    env = { k: v for k, v in os.environ.items() if k != "JEV_API_TOASTER" }
     node_bins = sorted( pathlib.Path.home().glob( ".nvm/versions/node/*/bin" ) )
     path = os.pathsep.join( [ str( b ) for b in node_bins ] + [ env.get( "PATH", "" ) ] )
     pp   = os.pathsep.join( [ p for p in ( extra_pythonpath, str( REPO / "src" ) ) if p ] )
@@ -83,7 +81,7 @@ def expected_cause():
     A tree with no `node_modules/typescript` answers DEPENDENCY_MISSING first (the decision table's
     precedence), with the key cause still listed; a tier-capable tree answers the key cause itself.
     """
-    key = "CALL_FAILED" if KEY_FILE.exists() else "KEY_UNREADABLE"
+    key = "KEY_UNREADABLE"
     if not ( REPO / "node_modules" / "typescript" ).exists(): return "DEPENDENCY_MISSING", key
     return key, key
 
