@@ -24,9 +24,11 @@ import argparse
 import ast
 import asyncio
 import copy
+import dataclasses
 import hashlib
 import io
 import json
+import re
 import subprocess
 import sys
 import tokenize
@@ -40,6 +42,9 @@ from . import harness_runner, model_transport, reader_rig
 DOC_NODES    = ( ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef )
 ATTEMPTS     = 3
 RAW_LIMIT    = 2000
+SCORE_MENTION = re.compile( r'\{[^{}]*"score"[^{}]*\}' )
+SCORE_STRICT  = re.compile( r'\{\s*"score"\s*:\s*([01])\s*\}' )
+FENCE_OPEN    = re.compile( r"^```(?:json)?" )
 
 
 class RunRefused( Exception ):
@@ -71,6 +76,7 @@ def parse_args( argv ):
     parser.add_argument( "--file-prefix", default="", help="put in front of each question's file before reading it from git, e.g. src/cosa/rest/" )
     parser.add_argument( "--repo", default=None, help="git repository to read from; default is the project root" )
     parser.add_argument( "--claude-cli-path", help="run this Claude Code binary instead of the SDK's bundled one" )
+    parser.add_argument( "--strict-grader", action="store_true", help="refuse every grader reply that is not a bare score object; the default salvages a score that follows the grader's reasoning" )
     parser.add_argument( "--dry-run", action="store_true", help="print sizes and projected calls, make no model call" )
     return parser.parse_args( argv )
 
@@ -257,74 +263,119 @@ def projected_calls( texts, questions, config, ledger ):
     return { "reader": len( reader_keys ), "grader": owed_pairs + len( missing ) }
 
 
+def take_score_object( raw ):
+    """
+    Take the grader's score object out of a reply that reasons first and ends with it.
+
+    Requires:
+        - raw is the text of one grader reply
+
+    Ensures:
+        - returns the text '{"score": 0}' or '{"score": 1}' when the reply holds text before the object
+          (more than a code fence), exactly one object that mentions score, that object is a score of 0 or 1
+          with no other key, and nothing follows it but whitespace and an optional closing code fence
+        - returns None otherwise, so the rig sees the reply unchanged: a bare object (fenced or not), no
+          object, two or more objects, text after the object, a score other than 0 or 1
+    """
+    text = raw.strip()
+    found = SCORE_MENTION.findall( text )
+    if len( found ) != 1: return None
+    taken = SCORE_STRICT.fullmatch( found[ -1 ] )
+    if taken is None: return None
+    start = text.rfind( found[ -1 ] )
+    if not FENCE_OPEN.sub( "", text[ :start ].strip() ).strip(): return None
+    if text[ start + len( found[ -1 ] ): ].strip() not in ( "", "```" ): return None
+    return '{"score": ' + taken.group( 1 ) + "}"
+
+
 class CallTracker:
     """
-    Wrap a query function and remember the last call's step and raw reply.
+    Wrap a query function: remember the last step and raw reply, and maybe salvage a score.
 
     Requires:
         - inner is an async generator function with sdk_query's signature ( prompt=..., options=... )
+        - salvage is True to hand the rig only the score object of a grader reply that reasons first (see take_score_object)
 
     Ensures:
         - after a call, step is "reader" or "grader" by the system prompt and raw is the reply text so far
-        - the wrapped function's messages pass through unchanged
+        - salvaged is None, or { score, raw } when the last call was a grader call whose reply was cut down to its object
+        - a reader reply is never changed, and a grader reply is changed only by salvage
+        - every other message passes through unchanged
     """
 
-    def __init__( self, inner ):
-        self.inner = inner
-        self.step  = None
-        self.raw   = ""
+    def __init__( self, inner, salvage=True ):
+        self.inner    = inner
+        self.salvage  = salvage
+        self.step     = None
+        self.raw      = ""
+        self.salvaged = None
 
     async def __call__( self, prompt, options ):
-        self.step = "reader" if options.system_prompt == reader_rig.READER_SYSTEM else "grader"
-        self.raw  = ""
+        self.step     = "reader" if options.system_prompt == reader_rig.READER_SYSTEM else "grader"
+        self.raw      = ""
+        self.salvaged = None
+        messages      = []
         async for message in self.inner( prompt=prompt, options=options ):
+            messages.append( message )
             if isinstance( message, AssistantMessage ): self.raw += "".join( b.text for b in message.content if isinstance( b, TextBlock ) )
-            yield message
+        taken = take_score_object( self.raw ) if self.salvage and self.step == "grader" else None
+        if taken is None:
+            for message in messages: yield message
+            return
+        self.salvaged = { "score": json.loads( taken )[ "score" ], "raw": self.raw[ :RAW_LIMIT ] }
+        first = True
+        for message in messages:
+            if not isinstance( message, AssistantMessage ): yield message
+            elif first:
+                first = False
+                yield dataclasses.replace( message, content=[ TextBlock( taken ) ] )
 
 
-async def score_question( text, question, config, run, ledger, query_fn ):
+async def score_question( text, question, config, run, ledger, query_fn, salvage=True ):
     """
     Score one question on one text for one run, trying up to three times.
 
     Requires:
         - question is one { id, question, key } dict; query_fn is None or a stand-in for the SDK
+        - salvage is False to hand the rig every grader reply as the model wrote it
 
     Ensures:
-        - returns ( 1 or 0, None ) on the first attempt that gets a parseable reply to both steps
-        - returns ( None, { step, error, raws } ) when every attempt failed: the step and error of the last
+        - returns ( 1 or 0, None, salvaged ) on the first attempt that gets a parseable reply to both steps;
+          salvaged is { score, raw } when that attempt's grader reply was cut down to its score object, else None
+        - returns ( None, { step, error, raws }, None ) when every attempt failed: the step and error of the last
           attempt, and raws holding the raw reply of every attempt, each cut to RAW_LIMIT characters
         - a retry is a real call, charged to the cap; a reader answer cached after it parsed is not asked again
+        - a score read from the ledger, not from a call made now, reports no salvage
 
     Raises:
         - model_transport.CallBudgetExceeded: a cap is not a failure to retry
     """
-    tracker = CallTracker( model_transport.sdk_query if query_fn is None else query_fn )
+    tracker = CallTracker( model_transport.sdk_query if query_fn is None else query_fn, salvage )
     raws    = []
     for _ in range( ATTEMPTS ):
         try:
-            return int( await reader_rig.score_text( text, [ question ], config, run, ledger=ledger, query_fn=tracker ) ), None
+            return int( await reader_rig.score_text( text, [ question ], config, run, ledger=ledger, query_fn=tracker ) ), None, tracker.salvaged
         except ( reader_rig.ReaderParseError, model_transport.ModelCallError ) as e:
             error = f"{type( e ).__name__}: {e}"
             raws.append( tracker.raw[ :RAW_LIMIT ] )
-    return None, { "step": tracker.step, "error": error, "raws": raws }
+    return None, { "step": tracker.step, "error": error, "raws": raws }, None
 
 
-async def score_pair( old_text, new_text, question, config, run, ledger, query_fn ):
+async def score_pair( old_text, new_text, question, config, run, ledger, query_fn, salvage=True ):
     """
     Score one question and run on both texts.
 
     Ensures:
-        - returns ( old, old_failure, new, new_failure ), each as score_question returns it
+        - returns ( old, new ), each the three-part result score_question returns
         - when the two texts are identical the question is scored once and both sides share the result, so a
           reply that never parses is not retried a second time for the same words
 
     Raises:
         - model_transport.CallBudgetExceeded when a cap stops a call
     """
-    old, old_failure = await score_question( old_text, question, config, run, ledger, query_fn )
-    if new_text == old_text: return old, old_failure, old, old_failure
-    new, new_failure = await score_question( new_text, question, config, run, ledger, query_fn )
-    return old, old_failure, new, new_failure
+    old = await score_question( old_text, question, config, run, ledger, query_fn, salvage )
+    if new_text == old_text: return old, old
+    return old, await score_question( new_text, question, config, run, ledger, query_fn, salvage )
 
 
 def verdict_word( old_total, new_total, dropped ):
@@ -343,21 +394,24 @@ def verdict_word( old_total, new_total, dropped ):
     return "PASS" if new_total >= old_total else "FAIL"
 
 
-async def score_file( path, old_text, new_text, group, config, ledger, query_fn, halt ):
+async def score_file( path, old_text, new_text, group, config, ledger, query_fn, halt, salvage=True ):
     """
     Score every question of one file on both texts for every run, on the same questions.
 
     Requires:
         - group is the file's questions as { id, question, key } dicts
         - halt is a dict { "reason": None } shared by every file of the run
+        - salvage is False for the strict grader, which refuses every reply that is not a bare score object
 
     Ensures:
         - a question and run that fails to score on either text is dropped from both totals
         - when a cap stops a call, halt["reason"] takes its message; that pair and every later pair, in this
           file and the next, make no call and are recorded unscored on both texts with step "cap"
         - returns { old_scores, new_scores, old_total, new_total, compared, dropped, old_answered, new_answered,
-          unscored_records, old_mean, new_mean, passes, verdict }, totals being whole numbers of answers graded 1
+          unscored_records, salvaged_records, old_mean, new_mean, passes, verdict }, totals being whole numbers of answers graded 1
         - each unscored record holds file, text (old or new, never sent to a model), run, id, step, error and raws
+        - each salvaged record holds file, text, run, id, the score taken and the raw reply cut to RAW_LIMIT; only
+          pairs that were compared get one, since only they are in the totals
         - old_mean and new_mean are None when nothing was compared
         - passes is None when any pair was dropped, else new_total >= old_total
     """
@@ -365,6 +419,7 @@ async def score_file( path, old_text, new_text, group, config, ledger, query_fn,
     answered  = { "old": 0, "new": 0 }
     per_run   = { "old": [], "new": [] }
     records   = []
+    salvaged  = []
     compared  = 0
     dropped   = 0
     for run in range( config.runs ):
@@ -373,13 +428,13 @@ async def score_file( path, old_text, new_text, group, config, ledger, query_fn,
             outcome = None
             if halt[ "reason" ] is None:
                 try:
-                    outcome = await score_pair( old_text, new_text, q, config, run, ledger, query_fn )
+                    outcome = await score_pair( old_text, new_text, q, config, run, ledger, query_fn, salvage )
                 except model_transport.CallBudgetExceeded as e:
                     halt[ "reason" ] = str( e )
             if outcome is None:
                 stopped = { "step": "cap", "error": halt[ "reason" ], "raws": [] }
-                outcome = ( None, stopped, None, stopped )
-            old, old_failure, new, new_failure = outcome
+                outcome = ( ( None, stopped, None ), ( None, stopped, None ) )
+            ( old, old_failure, old_salvage ), ( new, new_failure, new_salvage ) = outcome
             for label, failure in ( ( "old", old_failure ), ( "new", new_failure ) ):
                 if failure is not None: records.append( dict( failure, file=path, text=label, run=run, id=q[ "id" ] ) )
             answered[ "old" ] += old is not None
@@ -387,6 +442,8 @@ async def score_file( path, old_text, new_text, group, config, ledger, query_fn,
             if old is None or new is None:
                 dropped += 1
                 continue
+            for label, taken in ( ( "old", old_salvage ), ( "new", new_salvage ) ):
+                if taken is not None: salvaged.append( dict( taken, file=path, text=label, run=run, id=q[ "id" ] ) )
             compared     += 1
             run_compared += 1
             run_totals[ "old" ] += old
@@ -395,7 +452,7 @@ async def score_file( path, old_text, new_text, group, config, ledger, query_fn,
             totals[ label ] += run_totals[ label ]
             per_run[ label ].append( run_totals[ label ] / run_compared if run_compared else None )
     return { "old_scores": per_run[ "old" ], "new_scores": per_run[ "new" ], "old_total": totals[ "old" ], "new_total": totals[ "new" ],
-             "compared": compared, "dropped": dropped, "old_answered": answered[ "old" ], "new_answered": answered[ "new" ], "unscored_records": records,
+             "compared": compared, "dropped": dropped, "old_answered": answered[ "old" ], "new_answered": answered[ "new" ], "unscored_records": records, "salvaged_records": salvaged,
              "old_mean": totals[ "old" ] / compared if compared else None, "new_mean": totals[ "new" ] / compared if compared else None,
              "passes": None if dropped else totals[ "new" ] >= totals[ "old" ], "verdict": verdict_word( totals[ "old" ], totals[ "new" ], dropped ) }
 
@@ -408,7 +465,8 @@ def summarize( per_file ):
         - per_file is { file: result of score_file }
 
     Ensures:
-        - returns { compared, dropped, old_answered, new_answered, unscored, old_total, new_total, old_mean, new_mean, passes, verdict }
+        - returns { compared, dropped, salvaged, old_answered, new_answered, unscored, old_total, new_total, old_mean, new_mean, passes, verdict }
+        - salvaged is the number of salvaged records over all files, one per text answer
         - each total is the sum of the file totals, so a file counts by its compared pairs, which is its question count times its runs
           unless pairs were dropped
         - passes compares the whole-number totals, never the float means, and is None when any pair was dropped
@@ -419,7 +477,8 @@ def summarize( per_file ):
     new      = sum( r[ "new_total" ] for r in per_file.values() )
     compared = sum( r[ "compared" ] for r in per_file.values() )
     dropped  = sum( r[ "dropped" ] for r in per_file.values() )
-    return { "compared": compared, "dropped": dropped, "old_answered": sum( r[ "old_answered" ] for r in per_file.values() ),
+    return { "compared": compared, "dropped": dropped, "salvaged": sum( len( r[ "salvaged_records" ] ) for r in per_file.values() ),
+             "old_answered": sum( r[ "old_answered" ] for r in per_file.values() ),
              "new_answered": sum( r[ "new_answered" ] for r in per_file.values() ), "unscored": sum( len( r[ "unscored_records" ] ) for r in per_file.values() ),
              "old_total": old, "new_total": new, "old_mean": old / compared if compared else None, "new_mean": new / compared if compared else None,
              "passes": None if dropped else new >= old, "verdict": verdict_word( old, new, dropped ) }
@@ -500,19 +559,19 @@ def main( argv, query_fn=None ):
 
     async def run_all():
         halt = { "reason": None }
-        return { f: await score_file( f, texts[ f ][ 0 ], texts[ f ][ 1 ], rig_questions( group ), config, ledger, query_fn, halt ) for f, group in groups.items() }
+        return { f: await score_file( f, texts[ f ][ 0 ], texts[ f ][ 1 ], rig_questions( group ), config, ledger, query_fn, halt, not args.strict_grader ) for f, group in groups.items() }
 
     per_file = asyncio.run( run_all() )
     counts   = { f: len( group ) for f, group in groups.items() }
     overall  = dict( summarize( per_file ), questions=sum( counts.values() ) )
     spent    = { m: model_transport.calls_used( m ) for m in ( args.reader_model, args.grader_model ) }
-    for f, r in per_file.items(): print( f"{f}: questions={counts[ f ]} compared={r[ 'compared' ]} dropped={r[ 'dropped' ]} old_total={r[ 'old_total' ]} new_total={r[ 'new_total' ]} verdict={r[ 'verdict' ]}" )
-    print( f"overall: questions={overall[ 'questions' ]} compared={overall[ 'compared' ]} dropped={overall[ 'dropped' ]} old_total={overall[ 'old_total' ]} new_total={overall[ 'new_total' ]} verdict={overall[ 'verdict' ]}" )
+    for f, r in per_file.items(): print( f"{f}: questions={counts[ f ]} compared={r[ 'compared' ]} dropped={r[ 'dropped' ]} salvaged={len( r[ 'salvaged_records' ] )} old_total={r[ 'old_total' ]} new_total={r[ 'new_total' ]} verdict={r[ 'verdict' ]}" )
+    print( f"overall: questions={overall[ 'questions' ]} compared={overall[ 'compared' ]} dropped={overall[ 'dropped' ]} salvaged={overall[ 'salvaged' ]} old_total={overall[ 'old_total' ]} new_total={overall[ 'new_total' ]} verdict={overall[ 'verdict' ]}" )
     for model, n in spent.items(): print( f"calls spent {model}: {n}" )
     if args.out is not None:
         report = { "old_rev": old_sha, "new_rev": new_sha, "questions_sha256": questions_sha, "reader_model": args.reader_model,
                    "grader_model": args.grader_model, "runs": args.runs, "file_prefix": args.file_prefix, "paths_read": list( groups ), "prompt_version": reader_rig.PROMPT_VERSION,
-                   "attempts": ATTEMPTS, "files": { f: dict( per_file[ f ], questions=counts[ f ] ) for f in per_file }, "overall": overall, "calls_spent": spent }
+                   "attempts": ATTEMPTS, "strict_grader": args.strict_grader, "salvage_scope": "calls made in this run only: a grade cached by an earlier run is not recounted", "files": { f: dict( per_file[ f ], questions=counts[ f ] ) for f in per_file }, "overall": overall, "calls_spent": spent }
         with open( args.out, "w", encoding="utf-8" ) as out: json.dump( report, out, indent=2 )
     if overall[ "dropped" ]:
         if args.out is None:
