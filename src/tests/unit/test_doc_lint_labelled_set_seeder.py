@@ -28,12 +28,16 @@ ESCAL    = "claude-opus-5-5"
 
 
 def docstring( n, filler ):
-    """A synthetic docstring that offers every weaken class and a 2-word deletion; filler lines set its stratum."""
-    lines = [ f"Return the number of idle workers in pool {n}, or zero when parked.", "",
-              f"    The count {n} is exact when the pool is open, and it never raises",
-              f"    if the pool is closed (it returns {n} instead). Callers must hold the lock",
-              f"    for at least {n} seconds, which keeps the figure stable. It is only a hint and is always safe." ]
-    lines += [ f"    Note {n} line {i} says something distinct about pool {n}." for i in range( filler ) ]
+    """
+    A synthetic docstring that offers every weaken class and deletable phrases under the selection rules.
+
+    The pool tag p{n} makes each text unique and is not a number; "three" is the one number; no phrase is restated by another sentence; filler lines set the stratum.
+    """
+    lines = [ f"Return the number of idle workers in pool p{n}, or zero when parked.", "",
+              "    The count is exact when the pool is open, and it never raises",
+              "    if the pool is closed (it returns zero instead). Callers must hold the lock (in practice)",
+              f"    for at least three seconds, which keeps the figure of pool p{n} stable. The figure is only a hint and is always safe." ]
+    lines += [ f"    Note {chr( 97 + i )} says something distinct about shape {chr( 97 + i )}." for i in range( filler ) ]
     return "\n".join( lines )
 
 
@@ -143,9 +147,10 @@ def test_bad_cut_on_a_sentence_of_only_punctuation_is_empty():
 
 
 def test_a_cut_that_leaves_a_dangling_conjunction_is_dropped_by_rule_and_counted():
-    old = "Returns the count, and it raises when the pool is closed."
+    old = "Returns the count of idle workers. The pool counts them, and it raises when the pool is closed."
+    assert s.bad_cut( old, "And it raises when the pool is closed." ) == "DANGLING"          # the cut that would start a sentence on a conjunction
     cands, refused = s.delete_candidates( old, SL )
-    assert refused.get( "DANGLING", 0 ) >= 1
+    assert sum( refused.values() ) >= 1                                                      # refusals are counted by reason code
     assert all( s.bad_cut( old, c[ "cut" ] ) is None for c in cands )
     assert "when the pool is closed" in [ c[ "span_text" ] for c in cands ]
 
@@ -519,11 +524,11 @@ def fake_cli( tmp_path_factory ):
 
 
 def write_args( base, ledger, **over ):
-    a = { "base": str( base ), "split": "dev", "writer": FABLE, "cap": f"{FABLE}=500", "ledger": str( ledger ), "approved": "100", "cli": write_args.cli, "max_fail": "3" }
+    a = { "base": str( base ), "split": "dev", "writer": FABLE, "cap": f"{FABLE}=500", "ledger": str( ledger ), "approved": "100", "cli": write_args.cli, "max_fail": "3", "hold": "0" }
     a.update( over )
     return [ "write", "--base", a[ "base" ], "--split", a[ "split" ], "--writer-model", a[ "writer" ], "--extractor-model", EXTRACT, "--judge-model", JUDGE,
              "--escalation-model", ESCAL, "--model-cap", a[ "cap" ], "--call-ledger", a[ "ledger" ], "--approved-calls", a[ "approved" ],
-             "--claude-cli-path", a[ "cli" ], "--max-consecutive-failures", a[ "max_fail" ] ]
+             "--claude-cli-path", a[ "cli" ], "--max-consecutive-failures", a[ "max_fail" ], "--call-hold", a[ "hold" ] ]
 
 
 class Writer:
@@ -551,12 +556,12 @@ def planned( tmp_path, pool_file, outside_repo, monkeypatch ):
     return tmp_path, shared
 
 
-def test_write_refuses_the_reserve_set_and_an_unknown_split_before_any_call( planned, capsys ):
+def test_write_refuses_a_split_that_is_not_a_python_split_before_any_call( planned, capsys ):
     tmp_path, shared = planned
     w = Writer()
-    for split in ( "gate-reserve", "dart", "natural" ):
+    for split in ( "dart", "natural", "reserve" ):
         assert s.main( write_args( tmp_path / "gate-store", shared, split=split ), query_fn=w ) == 2
-    assert "second figure from Rick" in capsys.readouterr().err and w.seen == []
+    assert "not a Python split" in capsys.readouterr().err and w.seen == []
 
 
 def test_write_refuses_without_the_writer_cap_off_the_shared_ledger_or_past_the_approved_count( planned, capsys ):
@@ -571,6 +576,12 @@ def test_write_refuses_without_the_writer_cap_off_the_shared_ledger_or_past_the_
     err = capsys.readouterr().err
     assert "--model-cap" in err and "shared ledger" in err and "3 are approved" in err.replace( "only ", "" ) and "R.2" in err
     assert w.seen == []
+
+
+def droppable_task( base, split="dev" ):
+    """A task after the canary whose text appears in no other task's text, so a fake that fails on that text fails it alone."""
+    rows = s.read_jsonl( str( base / split / "writer_tasks.jsonl" ) )
+    return next( r for i, r in enumerate( rows ) if i > 0 and sum( r[ "text" ] in other[ "text" ] for other in rows ) == 1 )
 
 
 def n_tasks( base, split="dev" ):
@@ -596,7 +607,7 @@ def test_write_makes_one_call_per_task_logs_hash_not_text_and_never_repeats_a_ta
 def test_a_failed_call_is_retried_once_and_a_task_that_fails_twice_is_dropped_by_count( planned, capsys ):
     tmp_path, shared = planned
     base  = tmp_path / "out"
-    first = s.read_jsonl( str( base / "dev" / "writer_tasks.jsonl" ) )[ 1 ]            # task 0 is the canary
+    first = droppable_task( base )            # task 0 is the canary
     w = Writer( fail_always_for=first[ "text" ] )
     assert s.main( write_args( base, shared ), query_fn=w ) == 6
     rows = s.read_jsonl( str( base / "dev" / "writer_ledger.jsonl" ) )
@@ -615,13 +626,26 @@ def test_a_transient_failure_succeeds_on_the_retry( planned ):
     assert not [ r for r in s.read_jsonl( str( base / "dev" / "writer_ledger.jsonl" ) ) if r.get( "dropped" ) ]
 
 
+class PeerSpender( Writer ):
+    """A writer whose neighbours spend calls on the shared ledger while it runs: the one way a run outgrows its own worst-case count."""
+
+    def __init__( self, ledger, per_call, **kw ):
+        super().__init__( **kw )
+        self.ledger, self.per_call = ledger, per_call
+
+    async def __call__( self, prompt, options ):
+        with open( self.ledger, "a" ) as f: f.write( ( json.dumps( { "model": FABLE, "peer": 1 } ) + "\n" ) * self.per_call )
+        async for message in super().__call__( prompt, options ): yield message
+
+
 def test_the_call_cap_stops_the_run_and_is_not_retried( planned, capsys ):
     tmp_path, shared = planned
     base = tmp_path / "out"
-    w = Writer()
-    assert s.main( write_args( base, shared, cap=f"{FABLE}=2" ), query_fn=w ) == 3
-    assert len( w.seen ) == 2 and "STOPPED" in capsys.readouterr().err
-    assert mt.calls_used( FABLE, str( shared ) ) == 2
+    count = n_tasks( base )
+    w = PeerSpender( shared, 2 )
+    assert s.main( write_args( base, shared, cap=f"{FABLE}={2 * count}" ), query_fn=w ) == 3
+    assert len( w.seen ) < count and "STOPPED" in capsys.readouterr().err
+    assert 2 * count <= mt.calls_used( FABLE, str( shared ) ) <= 2 * count + 2
 
 
 # ---- verify, assemble, manifest (U18, U19) --------------------------------------------------
@@ -1071,7 +1095,7 @@ def test_d_max_consecutive_failures_must_be_one_or_more( planned, capsys ):
 def test_e_a_dropped_row_is_not_final_a_rerun_calls_that_task_again_and_the_ledger_keeps_both_rows( planned ):
     tmp_path, shared = planned
     base  = tmp_path / "out"
-    first = s.read_jsonl( str( base / "dev" / "writer_tasks.jsonl" ) )[ 1 ]
+    first = droppable_task( base )
     assert s.main( write_args( base, shared ), query_fn=Writer( fail_always_for=first[ "text" ] ) ) == 6
     w = Writer()
     assert s.main( write_args( base, shared, approved="0" ), query_fn=w ) == 2       # the dropped task is pending again, so zero approved calls is refused
@@ -1106,7 +1130,7 @@ def test_e_a_dropped_row_for_different_text_is_still_a_redraw_refusal( tmp_path 
 def test_f_the_exit_code_is_6_and_stderr_says_so_when_any_task_was_dropped( planned, capsys ):
     tmp_path, shared = planned
     base  = tmp_path / "out"
-    first = s.read_jsonl( str( base / "dev" / "writer_tasks.jsonl" ) )[ 1 ]
+    first = droppable_task( base )
     assert s.main( write_args( base, shared ), query_fn=Writer( fail_always_for=first[ "text" ] ) ) == 6
     captured = capsys.readouterr()
     assert "DROPPED: 1 task(s) failed twice" in captured.err and "dropped=1" in captured.out
@@ -1122,3 +1146,151 @@ def test_end_to_end_cmd_write_with_a_failing_fake_gives_the_exit_code_the_stderr
     rows = ledger_of( base )
     assert [ bool( r.get( "dropped" ) ) for r in rows ] == [ False, True, True ]
     assert rows[ 1 ][ "reason" ] == reason and rows[ 1 ][ "claude_cli_version" ] == FAKE_CLI_VERSION
+
+
+# ---- row 8a2de64c: the reserve write, the reserve plan hash, and the call hold in code --------------
+
+def test_a_reserve_write_is_allowed_as_its_own_split_in_the_gate_output_root( planned, capsys ):
+    tmp_path, shared = planned
+    gate_root, w = tmp_path / "gate-store", Writer()
+    count = len( s.read_jsonl( str( gate_root / "gate-reserve" / "writer_tasks.jsonl" ) ) )
+    assert s.main( write_args( gate_root, shared, split="gate-reserve", approved=str( count ) ), query_fn=w ) == 0
+    assert len( w.seen ) == count and len( s.read_jsonl( str( gate_root / "gate-reserve" / "writer_ledger.jsonl" ) ) ) == count
+    assert not ( gate_root / "gate" / "writer_ledger.jsonl" ).exists()
+
+
+def test_a_reserve_write_with_a_plan_hash_that_is_not_the_recorded_one_is_refused_before_any_call( planned, capsys ):
+    tmp_path, shared = planned
+    gate_root, w = tmp_path / "gate-store", Writer()
+    hashes = json.loads( ( gate_root / "plan-hashes.json" ).read_text() )
+    hashes[ "reserve_plan_sha256" ] = "0" * 64
+    ( gate_root / "plan-hashes.json" ).write_text( json.dumps( hashes ) )
+    assert s.main( write_args( gate_root, shared, split="gate-reserve" ), query_fn=w ) == 2
+    assert "does not match reserve_plan_sha256" in capsys.readouterr().err and w.seen == []
+    del hashes[ "reserve_plan_sha256" ]
+    ( gate_root / "plan-hashes.json" ).write_text( json.dumps( hashes ) )
+    assert s.main( write_args( gate_root, shared, split="gate-reserve" ), query_fn=w ) == 2 and w.seen == []
+
+
+def test_a_reserve_write_with_no_plan_hashes_file_is_refused_before_any_call( planned, capsys ):
+    tmp_path, shared = planned
+    gate_root, w = tmp_path / "gate-store", Writer()
+    ( gate_root / "plan-hashes.json" ).unlink()
+    assert s.main( write_args( gate_root, shared, split="gate-reserve" ), query_fn=w ) == 2
+    assert "plan-hashes.json is missing" in capsys.readouterr().err and w.seen == []
+
+
+def test_a_reserve_plan_edited_after_it_was_drawn_is_still_refused_by_its_own_hash_first( planned, capsys ):
+    tmp_path, shared = planned
+    gate_root = tmp_path / "gate-store"
+    plan_path = gate_root / "gate-reserve" / "plan.json"
+    plan = json.loads( plan_path.read_text() )
+    plan[ "units" ] = plan[ "units" ] + [ "an-edit" ]
+    plan_path.write_text( json.dumps( plan ) )
+    w = Writer()
+    assert s.main( write_args( gate_root, shared, split="gate-reserve" ), query_fn=w ) == 2
+    assert "does not match the hash taken when it was drawn" in capsys.readouterr().err and w.seen == []
+
+
+def test_the_hold_is_required_and_must_lie_between_zero_and_the_writer_cap( planned, capsys ):
+    tmp_path, shared = planned
+    w = Writer()
+    with pytest.raises( SystemExit ): s.main( [ a for a in write_args( tmp_path / "out", shared ) if a not in ( "--call-hold", "0" ) ] )
+    for hold in ( "-1", "501" ):
+        assert s.main( write_args( tmp_path / "out", shared, hold=hold ), query_fn=w ) == 2
+    assert capsys.readouterr().err.count( "--call-hold must be between 0 and the writer cap 500" ) == 2 and w.seen == []
+
+
+def test_a_run_whose_worst_case_calls_pass_the_cap_less_the_hold_is_refused_before_any_call( planned, capsys ):
+    tmp_path, shared = planned
+    base = tmp_path / "out"
+    count, w = n_tasks( base ), Writer()
+    assert s.main( write_args( base, shared, cap=f"{FABLE}={2 * count + 5}", hold="6" ), query_fn=w ) == 2     # allowed 2*count - 1: one call short of two per task
+    err = capsys.readouterr().err
+    assert f"{2 * count} in all; the cap less the hold allows {2 * count - 1}" in err and w.seen == []
+    assert s.main( write_args( base, shared, cap=f"{FABLE}={2 * count + 5}", hold="5" ), query_fn=w ) == 0     # allowed exactly 2*count
+
+
+def test_calls_already_spent_on_the_shared_ledger_count_against_the_hold( planned, capsys ):
+    tmp_path, shared = planned
+    base = tmp_path / "out"
+    count, w = n_tasks( base ), Writer()
+    shared.write_text( ( json.dumps( { "model": FABLE } ) + "\n" ) * 4 )
+    assert s.main( write_args( base, shared, cap=f"{FABLE}={2 * count + 3}" ), query_fn=w ) == 2             # 4 spent + 2*count > 2*count + 3
+    assert "4 calls are spent" in capsys.readouterr().err and w.seen == []
+    assert s.main( write_args( base, shared, cap=f"{FABLE}={2 * count + 4}" ), query_fn=w ) == 0
+
+
+def test_a_rerun_with_nothing_pending_is_not_refused_by_the_hold_even_when_the_ledger_is_over( planned ):
+    tmp_path, shared = planned
+    base, w = tmp_path / "out", Writer()
+    assert s.main( write_args( base, shared ), query_fn=w ) == 0
+    assert mt.calls_used( FABLE, str( shared ) ) > 1
+    assert s.main( write_args( base, shared, cap=f"{FABLE}=1", approved="0" ), query_fn=w ) == 0
+
+
+def test_the_hold_also_lowers_the_cap_the_transport_enforces_while_the_run_goes( planned, capsys ):
+    tmp_path, shared = planned
+    base = tmp_path / "out"
+    count = n_tasks( base )
+    assert count >= 3
+    w = PeerSpender( shared, 2 )                                    # neighbours spend two calls for each one of ours
+    assert s.main( write_args( base, shared, cap=f"{FABLE}={2 * count + 10}", hold="10" ), query_fn=w ) == 3
+    assert "STOPPED" in capsys.readouterr().err
+    assert 2 * count <= mt.calls_used( FABLE, str( shared ) ) <= 2 * count + 2        # stopped at cap less hold, not at the cap
+
+
+# ---- review 1 of row 8a2de64c: the reserve and the gate are written by one model under one prompt --------
+
+OTHER_WRITER = "claude-fable-5-2"
+
+
+def write_split( gate_root, shared, split, **over ):
+    """Write one gate-root split with the fake; returns the exit code."""
+    return s.main( write_args( gate_root, shared, split=split, **over ), query_fn=Writer() )
+
+
+def test_fa_a_reserve_write_by_another_model_than_the_gate_is_refused_naming_the_model_before_any_call( planned, capsys ):
+    tmp_path, shared = planned
+    gate_root, w = tmp_path / "gate-store", Writer()
+    assert write_split( gate_root, shared, "gate" ) == 0
+    capsys.readouterr()
+    used = mt.calls_used( FABLE, str( shared ) )
+    assert s.main( write_args( gate_root, shared, split="gate-reserve", writer=OTHER_WRITER, cap=f"{OTHER_WRITER}=500" ), query_fn=w ) == 2
+    err = capsys.readouterr().err
+    assert "split gate was written differently from this gate-reserve write" in err and FABLE in err and OTHER_WRITER in err and w.seen == []
+    assert mt.calls_used( OTHER_WRITER, str( shared ) ) == 0 and mt.calls_used( FABLE, str( shared ) ) == used
+
+
+def test_fa_a_reserve_write_under_another_prompt_than_the_gate_is_refused_naming_the_prompt( planned, capsys ):
+    tmp_path, shared = planned
+    gate_root, w = tmp_path / "gate-store", Writer()
+    assert write_split( gate_root, shared, "gate" ) == 0
+    ledger = gate_root / "gate" / "writer_ledger.jsonl"
+    rows   = s.read_jsonl( str( ledger ) )
+    rows[ 0 ][ "prompt_hash" ] = "an-older-prompt"
+    s.write_jsonl( str( ledger ), rows )
+    capsys.readouterr()
+    assert s.main( write_args( gate_root, shared, split="gate-reserve" ), query_fn=w ) == 2
+    assert "prompt hash" in capsys.readouterr().err and w.seen == []
+
+
+def test_fa_a_gate_write_is_refused_the_same_way_when_the_reserve_was_written_by_another_model( planned, capsys ):
+    tmp_path, shared = planned
+    gate_root, w = tmp_path / "gate-store", Writer()
+    assert s.main( write_args( gate_root, shared, split="gate-reserve", writer=OTHER_WRITER, cap=f"{OTHER_WRITER}=500" ), query_fn=Writer() ) == 0
+    capsys.readouterr()
+    assert s.main( write_args( gate_root, shared, split="gate" ), query_fn=w ) == 2
+    assert "split gate-reserve was written differently from this gate write" in capsys.readouterr().err and w.seen == []
+
+
+def test_fa_the_same_model_and_prompt_may_write_the_reserve_after_the_gate_and_a_split_with_no_ledger_is_no_obstacle( planned ):
+    tmp_path, shared = planned
+    gate_root = tmp_path / "gate-store"
+    assert write_split( gate_root, shared, "gate" ) == 0
+    assert write_split( gate_root, shared, "gate-reserve" ) == 0
+    assert ( gate_root / "gate-reserve" / "writer_ledger.jsonl" ).exists()
+
+
+def test_fc_the_manifest_docstring_no_longer_says_no_reserve_writer_call_is_made( ):
+    assert "no reserve writer call is made" not in s.cmd_manifest.__doc__
