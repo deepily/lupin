@@ -13,6 +13,10 @@ The extraction leaves out, on both revisions: decorators, attribute docstrings (
 assignment) and any string that is not a docstring. Signatures are re-rendered by ast.unparse on one
 line, so line breaks and quote style in the source are not shown to the reader.
 
+The runner scores one question at a time through reader_rig.score_text. It tries a question up to
+three times when a reply is off contract or a call fails. A question that fails all three is unscored.
+It is then dropped from both texts for that run, so old and new are compared on the same questions.
+
 Every model id and both call caps are required. Rerunning the same command resumes from the ledger.
 """
 
@@ -27,11 +31,15 @@ import subprocess
 import sys
 import tokenize
 
+from claude_agent_sdk import AssistantMessage, TextBlock
+
 import cosa.utils.util as cu
 
 from . import harness_runner, model_transport, reader_rig
 
-DOC_NODES = ( ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef )
+DOC_NODES    = ( ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef )
+ATTEMPTS     = 3
+RAW_LIMIT    = 2000
 
 
 class RunRefused( Exception ):
@@ -249,24 +257,128 @@ def projected_calls( texts, questions, config, ledger ):
     return { "reader": len( reader_keys ), "grader": owed_pairs + len( missing ) }
 
 
-def summarize( per_file, counts ):
+class CallTracker:
     """
-    Return the overall means weighted by question count, and the pass verdict.
+    Wrap a query function and remember the last call's step and raw reply.
 
     Requires:
-        - per_file is { file: result of run_reader_test }, counts is { file: question count }
+        - inner is an async generator function with sdk_query's signature ( prompt=..., options=... )
 
     Ensures:
-        - returns { questions, old_mean, new_mean, old_total, new_total, passes }
-        - each total is the sum of the file totals, so each file counts by its question count
-        - each mean is that total over ( total questions x runs ), and passes compares the whole-number
-          totals, never the float means
+        - after a call, step is "reader" or "grader" by the system prompt and raw is the reply text so far
+        - the wrapped function's messages pass through unchanged
     """
-    total = sum( counts.values() )
-    runs  = len( next( iter( per_file.values() ) )[ "old_scores" ] )
-    old   = sum( r[ "old_total" ] for r in per_file.values() )
-    new   = sum( r[ "new_total" ] for r in per_file.values() )
-    return { "questions": total, "old_mean": old / ( total * runs ), "new_mean": new / ( total * runs ), "old_total": old, "new_total": new, "passes": new >= old }
+
+    def __init__( self, inner ):
+        self.inner = inner
+        self.step  = None
+        self.raw   = ""
+
+    async def __call__( self, prompt, options ):
+        self.step = "reader" if options.system_prompt == reader_rig.READER_SYSTEM else "grader"
+        self.raw  = ""
+        async for message in self.inner( prompt=prompt, options=options ):
+            if isinstance( message, AssistantMessage ): self.raw += "".join( b.text for b in message.content if isinstance( b, TextBlock ) )
+            yield message
+
+
+async def score_question( text, question, config, run, ledger, query_fn ):
+    """
+    Score one question on one text for one run, trying up to three times.
+
+    Requires:
+        - question is one { id, question, key } dict; query_fn is None or a stand-in for the SDK
+
+    Ensures:
+        - returns ( 1 or 0, None ) on the first attempt that gets a parseable reply to both steps
+        - returns ( None, { step, error, raw } ) when every attempt failed, raw cut to RAW_LIMIT characters
+        - a retry is a real call, charged to the cap; a reader answer cached after it parsed is not asked again
+
+    Raises:
+        - model_transport.CallBudgetExceeded: a cap is not a failure to retry
+    """
+    tracker = CallTracker( model_transport.sdk_query if query_fn is None else query_fn )
+    for _ in range( ATTEMPTS ):
+        try:
+            return int( await reader_rig.score_text( text, [ question ], config, run, ledger=ledger, query_fn=tracker ) ), None
+        except ( reader_rig.ReaderParseError, model_transport.ModelCallError ) as e:
+            error = f"{type( e ).__name__}: {e}"
+    return None, { "step": tracker.step, "error": error, "raw": tracker.raw[ :RAW_LIMIT ] }
+
+
+def verdict_word( old_total, new_total, dropped ):
+    """Name the outcome in capitals: incomplete, pass or fail."""
+    if dropped: return "INCOMPLETE"
+    return "PASS" if new_total >= old_total else "FAIL"
+
+
+async def score_file( path, old_text, new_text, group, config, ledger, query_fn ):
+    """
+    Score every question of one file on both texts for every run, on the same questions.
+
+    Requires:
+        - group is the file's questions as { id, question, key } dicts
+
+    Ensures:
+        - a question and run that fails to score on either text is dropped from both totals
+        - returns { old_scores, new_scores, old_total, new_total, compared, dropped, old_answered, new_answered,
+          unscored_records, old_mean, new_mean, passes, verdict }, totals being whole numbers of answers graded 1
+        - each unscored record holds file, text (old or new, never sent to a model), run, id, step, error and raw
+        - old_mean and new_mean are None when nothing was compared; passes is new_total >= old_total
+    """
+    totals    = { "old": 0, "new": 0 }
+    answered  = { "old": 0, "new": 0 }
+    per_run   = { "old": [], "new": [] }
+    records   = []
+    compared  = 0
+    dropped   = 0
+    for run in range( config.runs ):
+        run_totals, run_compared = { "old": 0, "new": 0 }, 0
+        for q in group:
+            old, old_failure = await score_question( old_text, q, config, run, ledger, query_fn )
+            new, new_failure = await score_question( new_text, q, config, run, ledger, query_fn )
+            for label, failure in ( ( "old", old_failure ), ( "new", new_failure ) ):
+                if failure is not None: records.append( dict( failure, file=path, text=label, run=run, id=q[ "id" ] ) )
+            answered[ "old" ] += old is not None
+            answered[ "new" ] += new is not None
+            if old is None or new is None:
+                dropped += 1
+                continue
+            compared     += 1
+            run_compared += 1
+            run_totals[ "old" ] += old
+            run_totals[ "new" ] += new
+        for label in ( "old", "new" ):
+            totals[ label ] += run_totals[ label ]
+            per_run[ label ].append( run_totals[ label ] / run_compared if run_compared else None )
+    return { "old_scores": per_run[ "old" ], "new_scores": per_run[ "new" ], "old_total": totals[ "old" ], "new_total": totals[ "new" ],
+             "compared": compared, "dropped": dropped, "old_answered": answered[ "old" ], "new_answered": answered[ "new" ], "unscored_records": records,
+             "old_mean": totals[ "old" ] / compared if compared else None, "new_mean": totals[ "new" ] / compared if compared else None,
+             "passes": totals[ "new" ] >= totals[ "old" ], "verdict": verdict_word( totals[ "old" ], totals[ "new" ], dropped ) }
+
+
+def summarize( per_file ):
+    """
+    Return the overall figures over every file's compared pairs.
+
+    Requires:
+        - per_file is { file: result of score_file }
+
+    Ensures:
+        - returns { compared, dropped, old_answered, new_answered, unscored, old_total, new_total, old_mean, new_mean, passes, verdict }
+        - each total is the sum of the file totals, so a file counts by its compared pairs, which is its question count times its runs
+          unless pairs were dropped
+        - passes compares the whole-number totals, never the float means; verdict says incomplete when any pair was dropped
+        - the means are None when nothing was compared
+    """
+    old      = sum( r[ "old_total" ] for r in per_file.values() )
+    new      = sum( r[ "new_total" ] for r in per_file.values() )
+    compared = sum( r[ "compared" ] for r in per_file.values() )
+    dropped  = sum( r[ "dropped" ] for r in per_file.values() )
+    return { "compared": compared, "dropped": dropped, "old_answered": sum( r[ "old_answered" ] for r in per_file.values() ),
+             "new_answered": sum( r[ "new_answered" ] for r in per_file.values() ), "unscored": sum( len( r[ "unscored_records" ] ) for r in per_file.values() ),
+             "old_total": old, "new_total": new, "old_mean": old / compared if compared else None, "new_mean": new / compared if compared else None,
+             "passes": new >= old, "verdict": verdict_word( old, new, dropped ) }
 
 
 def refuse( message ):
@@ -299,16 +411,17 @@ def main( argv, query_fn=None ):
         - returns 2 and makes no model call when the questions file is refused (count differs, an id
           repeats, a question has no key_points), a revision or file cannot be read from git, the two
           model ids are equal or a cap is not an int of zero or more
-        - returns 2 and makes no model call when the calls still owed, added to those the ledger's
-          call count already holds, pass --reader-cap or --grader-cap
+        - returns 2 and makes no model call when the worst case of the calls still owed, each counted three
+          times and added to those the ledger's call count already holds, passes --reader-cap or --grader-cap
+        - returns 3 after writing the report when any question and run could not be scored; the verdict
+          says incomplete and the stderr line gives the count of unscored answers
         - a rerun against a full ledger makes zero calls
         - with --dry-run no model is contacted and nothing is written
         - the report holds both full shas, the questions file's sha256, the model ids, runs and the
           rig's prompt version
 
     Raises:
-        - model_transport.CallBudgetExceeded, ReaderParseError or ModelCallError from a failed call;
-          finished calls stay in the ledger
+        - model_transport.CallBudgetExceeded when a cap is hit mid-run; finished calls stay in the ledger
     """
     args = parse_args( argv )
     if args.runs < 1: return refuse( f"--runs must be 1 or more, got {args.runs}" )
@@ -335,25 +448,29 @@ def main( argv, query_fn=None ):
     if args.dry_run:
         for f, group in groups.items(): print( f"{f}: {len( group )} questions, old text {len( texts[ f ][ 0 ] )} chars, new text {len( texts[ f ][ 1 ] )} chars" )
         print( f"projected calls: reader {owed[ 'reader' ]} (cap {args.reader_cap}, used {used[ 'reader' ]}), grader {owed[ 'grader' ]} (cap {args.grader_cap}, used {used[ 'grader' ]})" )
+        print( f"cap check uses the worst case of {ATTEMPTS} attempts per call: reader {ATTEMPTS * owed[ 'reader' ]}, grader {ATTEMPTS * owed[ 'grader' ]}" )
         return 0
-    if used[ "reader" ] + owed[ "reader" ] > args.reader_cap or used[ "grader" ] + owed[ "grader" ] > args.grader_cap:
-        return refuse( f"calls owed (reader {owed[ 'reader' ]}, grader {owed[ 'grader' ]}) on top of those used (reader {used[ 'reader' ]}, grader {used[ 'grader' ]}) pass a cap (reader {args.reader_cap}, grader {args.grader_cap}); no model was contacted" )
+    if used[ "reader" ] + ATTEMPTS * owed[ "reader" ] > args.reader_cap or used[ "grader" ] + ATTEMPTS * owed[ "grader" ] > args.grader_cap:
+        return refuse( f"worst case with {ATTEMPTS} attempts per call (reader {ATTEMPTS * owed[ 'reader' ]}, grader {ATTEMPTS * owed[ 'grader' ]}) on top of those used (reader {used[ 'reader' ]}, grader {used[ 'grader' ]}) passes a cap (reader {args.reader_cap}, grader {args.grader_cap}); no model was contacted" )
 
     async def run_all():
-        return { f: await reader_rig.run_reader_test( texts[ f ][ 0 ], texts[ f ][ 1 ], rig_questions( group ), config, ledger=ledger, query_fn=query_fn ) for f, group in groups.items() }
+        return { f: await score_file( f, texts[ f ][ 0 ], texts[ f ][ 1 ], rig_questions( group ), config, ledger, query_fn ) for f, group in groups.items() }
 
     per_file = asyncio.run( run_all() )
     counts   = { f: len( group ) for f, group in groups.items() }
-    overall  = summarize( per_file, counts )
+    overall  = dict( summarize( per_file ), questions=sum( counts.values() ) )
     spent    = { m: model_transport.calls_used( m ) for m in ( args.reader_model, args.grader_model ) }
-    for f, r in per_file.items(): print( f"{f}: questions={counts[ f ]} old_mean={r[ 'old_mean' ]:.3f} new_mean={r[ 'new_mean' ]:.3f} passes={r[ 'passes' ]}" )
-    print( f"overall: questions={overall[ 'questions' ]} old_mean={overall[ 'old_mean' ]:.3f} new_mean={overall[ 'new_mean' ]:.3f} passes={overall[ 'passes' ]}" )
+    for f, r in per_file.items(): print( f"{f}: questions={counts[ f ]} compared={r[ 'compared' ]} dropped={r[ 'dropped' ]} old_total={r[ 'old_total' ]} new_total={r[ 'new_total' ]} verdict={r[ 'verdict' ]}" )
+    print( f"overall: questions={overall[ 'questions' ]} compared={overall[ 'compared' ]} dropped={overall[ 'dropped' ]} old_total={overall[ 'old_total' ]} new_total={overall[ 'new_total' ]} verdict={overall[ 'verdict' ]}" )
     for model, n in spent.items(): print( f"calls spent {model}: {n}" )
     if args.out is not None:
         report = { "old_rev": old_sha, "new_rev": new_sha, "questions_sha256": questions_sha, "reader_model": args.reader_model,
                    "grader_model": args.grader_model, "runs": args.runs, "file_prefix": args.file_prefix, "paths_read": list( groups ), "prompt_version": reader_rig.PROMPT_VERSION,
-                   "files": { f: dict( per_file[ f ], questions=counts[ f ] ) for f in per_file }, "overall": overall, "calls_spent": spent }
+                   "attempts": ATTEMPTS, "files": { f: dict( per_file[ f ], questions=counts[ f ] ) for f in per_file }, "overall": overall, "calls_spent": spent }
         with open( args.out, "w", encoding="utf-8" ) as out: json.dump( report, out, indent=2 )
+    if overall[ "dropped" ]:
+        print( f"UNSCORED: {overall[ 'unscored' ]} answers got no scoreable reply after {ATTEMPTS} attempts; {overall[ 'dropped' ]} pairs dropped from both texts; verdict INCOMPLETE", file=sys.stderr )
+        return 3
     return 0
 
 

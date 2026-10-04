@@ -83,18 +83,33 @@ def repo( tmp_path ):
 
 
 class FakeModels:
-    def __init__( self ):
-        self.calls = []
+    """
+    The fake reader replies with the whole text; the fake grader scores 1 when every key point occurs in the answer.
+    reader_script and grader_script hold raw replies used in order, one per call; None means the default reply, and
+    an Exception instance is raised from the call. Once a script runs out the default reply is used.
+    """
+
+    def __init__( self, reader_script=None, grader_script=None ):
+        self.calls         = []
+        self.reader_script = list( reader_script or [] )
+        self.grader_script = list( grader_script or [] )
 
     async def __call__( self, prompt, options ):
         self.calls.append( ( options.model, options.system_prompt, prompt ) )
-        if options.system_prompt == reader_rig.READER_SYSTEM:
+        is_reader = options.system_prompt == reader_rig.READER_SYSTEM
+        script    = self.reader_script if is_reader else self.grader_script
+        scripted  = script.pop( 0 ) if script else None
+        if isinstance( scripted, Exception ): raise scripted
+        if scripted is not None:
+            text = scripted
+        elif is_reader:
             body = re.search( r"<text_(\w+)>\n(.*?)\n</text_\1>", prompt, re.DOTALL ).group( 2 )
             text = json.dumps( { "answer": body } )
         else:
             key    = re.search( r"<key_(\w+)>\n(.*?)\n</key_\1>", prompt, re.DOTALL ).group( 2 )
             answer = re.search( r"<answer_(\w+)>\n(.*?)\n</answer_\1>", prompt, re.DOTALL ).group( 2 )
             text   = json.dumps( { "score": 1 if all( p in answer for p in key.split( "; " ) ) else 0 } )
+        yield object()          # a message that is not an assistant message: the tracker must pass it through
         yield AssistantMessage( content=[ TextBlock( text ) ], model=options.model )
 
     def by( self, model ):
@@ -227,26 +242,34 @@ def test_default_repo_is_the_project_root( repo, capsys, monkeypatch ):
 
 def test_reader_cap_refusal_makes_no_call( repo, capsys ):
     code, models = run( repo, [ QA ], **{ "--reader-cap": "3" } )   # 1 question x 2 texts x 2 runs = 4 reader calls
-    assert code == 2 and "pass a cap" in capsys.readouterr().err
+    assert code == 2 and "passes a cap" in capsys.readouterr().err
     assert models.calls == []
 
 
 def test_grader_cap_refusal_makes_no_call( repo, capsys ):
     code, models = run( repo, [ QA ], **{ "--grader-cap": "3" } )
-    assert code == 2 and "pass a cap" in capsys.readouterr().err
+    assert code == 2 and "passes a cap" in capsys.readouterr().err
     assert models.calls == []
 
 
+def test_cap_check_allows_for_the_retries( repo, capsys ):
+    # 4 reader and 4 grader calls owed, each possibly made 3 times: 11 is one short of the worst case
+    code, models = run( repo, [ QA ], **{ "--reader-cap": "11", "--grader-cap": "1000" } )
+    assert code == 2 and "worst case with 3 attempts" in capsys.readouterr().err and models.calls == []
+    code, models = run( repo, [ QA ], **{ "--reader-cap": "1000", "--grader-cap": "11" } )
+    assert code == 2 and models.calls == []
+
+
 def test_caps_at_exactly_the_worst_case_are_allowed( repo ):
-    code, models = run( repo, [ QA ], **{ "--reader-cap": "4", "--grader-cap": "4" } )
+    code, models = run( repo, [ QA ], **{ "--reader-cap": "12", "--grader-cap": "12" } )
     assert code == 0 and len( models.by( READER ) ) == 4 and len( models.by( GRADER ) ) == 2   # equal answers share one grade
 
 
 def test_calls_already_used_count_against_the_cap( repo, capsys ):
-    assert run( repo, [ QA ], **{ "--reader-cap": "4", "--grader-cap": "4" } )[ 0 ] == 0
+    assert run( repo, [ QA ], **{ "--reader-cap": "12", "--grader-cap": "12" } )[ 0 ] == 0
     ledger = repo[ "tmp" ] / "ledger.jsonl"
     ledger.unlink()                      # results forgotten, call count kept: the run is owed again
-    code, models = run( repo, [ QA ], **{ "--reader-cap": "4", "--grader-cap": "4" } )
+    code, models = run( repo, [ QA ], **{ "--reader-cap": "12", "--grader-cap": "12" } )
     assert code == 2 and models.calls == []
 
 
@@ -268,6 +291,7 @@ def test_dry_run_prints_sizes_and_projection_and_calls_nothing( repo, capsys ):
     assert f"src/mod_a.py: 1 questions, old text {len( rr.extract_doc_text( OLD_A ) )} chars, new text {len( rr.extract_doc_text( NEW_A ) )} chars" in out
     assert "src/mod_b.py: 2 questions" in out
     assert "projected calls: reader 8 (cap 1000, used 0), grader 8" in out    # a: 1 question x 2 texts x 2 runs = 4; b: 2 questions x 1 text (old == new) x 2 runs = 4
+    assert "cap check uses the worst case of 3 attempts per call: reader 24, grader 24" in out
     assert not ( repo[ "tmp" ] / "ledger.jsonl.calls" ).exists()
 
 
@@ -317,50 +341,67 @@ def test_common_wrong_answer_and_other_fields_never_reach_a_prompt( repo ):
 
 # ---- arithmetic and the report ----------------------------------------------------------------
 
-def result( old_scores, new_scores, n ):
-    """A run_reader_test-shaped result for n questions, totals derived the way the rig derives them."""
-    return { "old_scores": old_scores, "new_scores": new_scores, "old_total": sum( round( x * n ) for x in old_scores ), "new_total": sum( round( x * n ) for x in new_scores ) }
+def file_result( old, new, compared, dropped=0 ):
+    """A score_file-shaped result with the fields summarize reads."""
+    return { "old_total": old, "new_total": new, "compared": compared, "dropped": dropped, "old_answered": compared, "new_answered": compared, "unscored_records": [] }
 
 
-def test_summarize_weights_files_by_question_count():
-    per_file = { "a": result( [ 1.0, 1.0 ], [ 0.0, 0.0 ], 1 ), "b": result( [ 1 / 3, 1 / 3 ], [ 1.0, 1.0 ], 3 ) }   # old totals 2 + 2, new totals 0 + 6
-    got = rr.summarize( per_file, { "a": 1, "b": 3 } )
-    assert got == { "questions": 4, "old_mean": 0.5, "new_mean": 0.75, "old_total": 4, "new_total": 6, "passes": True }
-    assert rr.summarize( { "a": result( [ 1.0 ], [ 0.0 ], 2 ) }, { "a": 2 } )[ "passes" ] is False
+def test_summarize_adds_file_totals_so_each_file_counts_by_its_pairs():
+    per_file = { "a": file_result( 2, 0, 2 ), "b": file_result( 2, 6, 6 ) }       # file a: 1 question x 2 runs; file b: 3 questions x 2 runs
+    got = rr.summarize( per_file )
+    assert got == { "compared": 8, "dropped": 0, "old_answered": 8, "new_answered": 8, "unscored": 0, "old_total": 4, "new_total": 6,
+                    "old_mean": 0.5, "new_mean": 0.75, "passes": True, "verdict": "PASS" }          # an unweighted mean of file means would be 0.5 too: see the end-to-end test
+    assert rr.summarize( { "a": file_result( 2, 0, 2 ) } )[ "verdict" ] == "FAIL"
 
 
 def test_overall_tie_across_files_passes():
-    per_file = { "a": result( [ 1.0 ], [ 1 / 3 ], 3 ), "b": result( [ 1 / 3 ], [ 1.0 ], 3 ) }    # file a loses 2, file b gains 2: totals 4 and 4
-    got = rr.summarize( per_file, { "a": 3, "b": 3 } )
-    assert got[ "old_total" ] == got[ "new_total" ] == 4 and got[ "passes" ] is True
+    per_file = { "a": file_result( 3, 1, 3 ), "b": file_result( 1, 3, 3 ) }       # file a loses 2, file b gains 2: totals 4 and 4
+    got = rr.summarize( per_file )
+    assert got[ "old_total" ] == got[ "new_total" ] == 4 and got[ "passes" ] is True and got[ "verdict" ] == "PASS"
 
 
-def test_exact_tie_passes_even_when_the_float_means_differ( repo, monkeypatch ):
-    # 3 questions, 3 runs: per-run totals ( 1, 3, 3 ) against ( 2, 2, 3 ) are both 7, yet the float means are
-    # 0.7777777777777778 against 0.7777777777777777, so a float >= calls the tie a loss
-    scores = iter( [ 1 / 3, 1.0, 1.0, 2 / 3, 2 / 3, 1.0 ] )
+def test_summarize_with_nothing_compared_has_no_means_and_is_incomplete():
+    got = rr.summarize( { "a": file_result( 0, 0, 0, dropped=2 ) } )
+    assert got[ "old_mean" ] is None and got[ "new_mean" ] is None and got[ "verdict" ] == "INCOMPLETE"
 
-    async def fake_score( *args, **kwargs ):
-        return next( scores )
 
-    monkeypatch.setattr( reader_rig, "score_text", fake_score )
+class Scripted:
+    """Stands in for reader_rig.score_text: each call returns the next scripted item, or raises it."""
+
+    def __init__( self, items ):
+        self.items = list( items )
+        self.calls = 0
+
+    async def __call__( self, *args, **kwargs ):
+        self.calls += 1
+        item = self.items.pop( 0 )
+        if isinstance( item, Exception ): raise item
+        return item
+
+
+def test_exact_tie_passes_even_when_per_run_scores_differ( repo, monkeypatch ):
+    # 3 questions, 3 runs. Old right per run ( 1, 3, 3 ), new ( 2, 2, 3 ): both 7, though the mean of the per-run scores is
+    # 0.7777777777777778 for old and 0.7777777777777777 for new, so a float >= on those means calls the tie a loss
+    old_runs = [ [ 1, 0, 0 ], [ 1, 1, 1 ], [ 1, 1, 1 ] ]
+    new_runs = [ [ 1, 1, 0 ], [ 1, 0, 1 ], [ 1, 1, 1 ] ]
+    items    = [ float( x ) for o, n in zip( old_runs, new_runs ) for pair in zip( o, n ) for x in pair ]
+    monkeypatch.setattr( reader_rig, "score_text", Scripted( items ) )
     out  = str( repo[ "tmp" ] / "tie.json" )
     code = rr.main( argv( repo, questions_file( repo, [ QB1, QB2, QB3 ] ), out=out, **{ "--runs": "3" } ), query_fn=FakeModels() )
+    report = json.load( open( out ) )
+    file   = report[ "files" ][ "src/mod_b.py" ]
+    assert sum( file[ "old_scores" ] ) / 3 > sum( file[ "new_scores" ] ) / 3
+    assert code == 0 and file[ "old_total" ] == file[ "new_total" ] == 7 and file[ "passes" ] is True and file[ "verdict" ] == "PASS"
+    assert report[ "overall" ][ "passes" ] is True and report[ "overall" ][ "verdict" ] == "PASS"
+
+
+def test_a_one_answer_loss_fails_the_per_file_verdict( repo, monkeypatch ):
+    items = [ 1.0 ] * 17 + [ 0.0 ]          # 3 questions x 3 runs x 2 texts: only the last new answer is wrong
+    monkeypatch.setattr( reader_rig, "score_text", Scripted( items ) )
+    out  = str( repo[ "tmp" ] / "loss.json" )
+    code = rr.main( argv( repo, questions_file( repo, [ QB1, QB2, QB3 ] ), out=out, **{ "--runs": "3" } ), query_fn=FakeModels() )
     file = json.load( open( out ) )[ "files" ][ "src/mod_b.py" ]
-    assert code == 0 and file[ "old_mean" ] > file[ "new_mean" ]
-    assert file[ "old_total" ] == file[ "new_total" ] == 7 and file[ "passes" ] is True
-    assert json.load( open( out ) )[ "overall" ][ "passes" ] is True
-
-
-def test_a_one_answer_loss_still_fails_the_per_file_verdict( monkeypatch ):
-    scores = iter( [ 1.0, 1.0, 1.0, 1.0, 1.0, 2 / 3 ] )
-
-    async def fake_score( *args, **kwargs ):
-        return next( scores )
-
-    monkeypatch.setattr( reader_rig, "score_text", fake_score )
-    got = asyncio.run( reader_rig.run_reader_test( "o", "n", rr.rig_questions( [ QB1, QB2, QB3 ] ), reader_rig.ReaderConfig( READER, GRADER, 3 ) ) )
-    assert ( got[ "old_total" ], got[ "new_total" ], got[ "passes" ] ) == ( 9, 8, False )
+    assert code == 0 and ( file[ "old_total" ], file[ "new_total" ], file[ "passes" ], file[ "verdict" ] ) == ( 9, 8, False, "FAIL" )
 
 
 def test_runs_below_one_is_refused_before_anything_else( repo, capsys ):
@@ -382,8 +423,9 @@ def test_per_file_and_overall_figures_end_to_end( repo, capsys ):
     assert ( a[ "old_mean" ], a[ "new_mean" ], a[ "passes" ], a[ "questions" ] ) == ( 1.0, 0.0, False, 1 )
     assert a[ "old_scores" ] == [ 1.0, 1.0 ] and a[ "new_scores" ] == [ 0.0, 0.0 ]
     assert ( b[ "old_mean" ], b[ "new_mean" ], b[ "passes" ], b[ "questions" ] ) == ( 1.0, 1.0, True, 3 )
-    assert report[ "overall" ] == { "questions": 4, "old_mean": 1.0, "new_mean": 0.75, "old_total": 8, "new_total": 6, "passes": False }    # unweighted would be 0.5
-    assert "overall: questions=4 old_mean=1.000 new_mean=0.750 passes=False" in printed
+    assert report[ "overall" ] == { "questions": 4, "compared": 8, "dropped": 0, "old_answered": 8, "new_answered": 8, "unscored": 0,
+                                    "old_total": 8, "new_total": 6, "old_mean": 1.0, "new_mean": 0.75, "passes": False, "verdict": "FAIL" }    # an unweighted mean of the file means would be 0.5
+    assert "overall: questions=4 compared=8 dropped=0 old_total=8 new_total=6 verdict=FAIL" in printed
     assert f"calls spent {READER}: " in printed and f"calls spent {GRADER}: " in printed
 
 
@@ -419,3 +461,76 @@ def test_bad_file_prefixes_are_refused_with_no_call( repo, capsys ):
         code, models = run( repo, [ QA ], extra=[ "--file-prefix", bad ] )
         assert code == 2 and "--file-prefix" in capsys.readouterr().err
         assert models.calls == []
+
+
+# ---- off-contract replies: retry, then unscored ------------------------------------------------
+
+def calls_used( repo, model ):
+    return model_transport.calls_used( model, str( repo[ "tmp" ] / "ledger.jsonl.calls" ) )
+
+
+def test_a_reply_with_prose_around_the_json_is_retried_and_then_scored( repo ):
+    models = FakeModels( grader_script=[ 'Sure! Here is the grade: {"score": 1}' ] )
+    code, _ = run( repo, [ QA ], models, **{ "--runs": "1" } )
+    assert code == 0
+    assert len( models.by( READER ) ) == 2          # the reader answer was cached once it parsed, so the retry cost a grader call only
+    assert len( models.by( GRADER ) ) == 3 and calls_used( repo, GRADER ) == 3    # the retry is a real call, charged to the cap
+
+
+def test_a_reply_that_never_parses_is_unscored_and_dropped_from_both_texts( repo, capsys ):
+    out    = str( repo[ "tmp" ] / "unscored.json" )
+    models = FakeModels( grader_script=[ "nope", "nope", "nope" ] )     # the old text fails all 3 attempts; the new text, which reads the same, grades fine
+    code, _ = run( repo, [ QB1 ], models, **{ "--runs": "1", "--out": out } )
+    printed = capsys.readouterr()
+    report  = json.load( open( out ) )
+    file    = report[ "files" ][ "src/mod_b.py" ]
+    assert code == 3 and len( models.by( GRADER ) ) == 4 and len( models.by( READER ) ) == 1
+    assert ( file[ "compared" ], file[ "dropped" ], file[ "old_total" ], file[ "new_total" ] ) == ( 0, 1, 0, 0 )   # the new text's 1 is left out too
+    assert ( file[ "old_answered" ], file[ "new_answered" ], file[ "verdict" ] ) == ( 0, 1, "INCOMPLETE" )
+    [ record ] = file[ "unscored_records" ]
+    assert ( record[ "file" ], record[ "text" ], record[ "run" ], record[ "id" ], record[ "step" ], record[ "raw" ] ) == ( "src/mod_b.py", "old", 0, "qb1", "grader", "nope" )
+    assert record[ "error" ].startswith( "ReaderParseError" )
+    assert report[ "overall" ][ "unscored" ] == 1 and report[ "overall" ][ "dropped" ] == 1 and report[ "overall" ][ "verdict" ] == "INCOMPLETE"
+    assert "verdict=INCOMPLETE" in printed.out and "UNSCORED: 1 answers" in printed.err
+
+def test_an_empty_reader_reply_is_unscored_at_the_reader_step( repo ):
+    out = str( repo[ "tmp" ] / "empty.json" )
+    code, models = run( repo, [ QB1 ], FakeModels( reader_script=[ "", "", "" ] ), **{ "--runs": "1", "--out": out } )
+    [ record ] = json.load( open( out ) )[ "files" ][ "src/mod_b.py" ][ "unscored_records" ]
+    assert code == 3 and ( record[ "text" ], record[ "step" ], record[ "raw" ] ) == ( "old", "reader", "" )
+    assert record[ "error" ].startswith( "ModelCallError" ) and len( models.by( READER ) ) == 3 + 1    # three tries for the old text, one for the new
+
+
+def test_a_transport_error_is_retried_and_then_unscored( repo ):
+    out = str( repo[ "tmp" ] / "boom.json" )
+    code, models = run( repo, [ QB1 ], FakeModels( reader_script=[ RuntimeError( "boom" ) ] * 3 ), **{ "--runs": "1", "--out": out } )
+    [ record ] = json.load( open( out ) )[ "files" ][ "src/mod_b.py" ][ "unscored_records" ]
+    assert code == 3 and record[ "step" ] == "reader" and "boom" in record[ "error" ] and record[ "raw" ] == ""
+
+
+def test_a_transport_error_that_clears_on_the_retry_is_scored( repo ):
+    code, models = run( repo, [ QB1 ], FakeModels( reader_script=[ RuntimeError( "blip" ) ] ), **{ "--runs": "1" } )
+    assert code == 0 and len( models.by( READER ) ) == 2
+
+
+def test_the_raw_reply_is_cut_to_two_thousand_characters( repo ):
+    out = str( repo[ "tmp" ] / "long.json" )
+    run( repo, [ QB1 ], FakeModels( grader_script=[ "x" * 5000 ] * 3 ), **{ "--runs": "1", "--out": out } )
+    [ record ] = json.load( open( out ) )[ "files" ][ "src/mod_b.py" ][ "unscored_records" ]
+    assert len( record[ "raw" ] ) == rr.RAW_LIMIT == 2000
+
+
+def test_a_cap_reached_mid_run_is_not_retried_and_retries_count_against_it( tmp_path ):
+    config = reader_rig.ReaderConfig( READER, GRADER, 1 )
+    path   = str( tmp_path / "calls.jsonl" )
+    model_transport.set_budget( path, { GRADER: 2 } )
+    models = FakeModels( grader_script=[ "bad", "bad", "bad" ] )
+    with pytest.raises( model_transport.CallBudgetExceeded ):
+        asyncio.run( rr.score_question( "the lid stays shut.", rr.rig_questions( [ QB1 ] )[ 0 ], config, 0, harness_runner.Ledger( str( tmp_path / "l.jsonl" ) ), models ) )
+    assert model_transport.calls_used( GRADER, path ) == 2 and len( models.by( GRADER ) ) == 2    # attempts 1 and 2 were charged; attempt 3 was refused
+
+
+def test_score_question_uses_the_sdk_when_no_query_function_is_given( monkeypatch ):
+    monkeypatch.setattr( model_transport, "sdk_query", FakeModels() )
+    config = reader_rig.ReaderConfig( READER, GRADER, 1 )
+    assert asyncio.run( rr.score_question( "the lid stays shut.", rr.rig_questions( [ QB1 ] )[ 0 ], config, 0, None, None ) ) == ( 1, None )
