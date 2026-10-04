@@ -19,6 +19,18 @@ How it works:
 Known reach limit: a writer in a process that never installs the sink cannot
 push. The arbiter's straggler-ticket and follow-through writes are that case;
 their rows appear on the next poll.
+
+SAVEPOINTS ARE UNSUPPORTED (measured by Krishna on Postgres 16, review of 21d22e889).
+Session `after_commit` / `after_rollback` also fire for a savepoint (begin_nested):
+    - a savepoint ROLLBACK discards EVERY parked event on the session, including ones
+      that go on to commit with the outer transaction -> a missed push;
+    - a savepoint RELEASE fires `after_commit` early -> the push can reach a client
+      before the outer commit is durable, and an outer rollback after it still emitted.
+The outcome is a missed or early invalidation, never a wrong board (the poll stays).
+No non-test code takes a savepoint today. The first code that does must first key the
+listeners on `session.in_nested_transaction()` (via `after_soft_rollback`).
+Also: a Session closed without commit keeps its parked list; reuse of one Session
+object across commits would count that event. `get_db` makes a fresh Session per use.
 """
 
 from sqlalchemy import event
