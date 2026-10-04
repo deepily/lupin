@@ -404,6 +404,56 @@ async def v2_agents(
     )
 
 
+PARENT_STAMP_TEST_ACCOUNT_KEY = "v2 parent stamp test account email"
+
+
+def _test_account_email() -> Optional[ str ]:
+    """The configured test account (lower-cased), or None when the key is unset or blank."""
+    config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+    value      = config_mgr.get( PARENT_STAMP_TEST_ACCOUNT_KEY, default=None, return_type="string" ) or ""
+    return value.strip().lower() or None
+
+
+def vet_parent_id_hash( parent_id_hash: Optional[ str ], current_user: dict, user_id: str, user_email: str ) -> tuple:
+    """
+    Decide whether a caller's `parent_id_hash` lineage claim is honoured (row 8d4a5a59).
+
+    The field takes any id from the body, and GET /api/busy publishes the running suite's id,
+    so without a check any logged-in caller could claim suite lineage and walk through the
+    monopoly hold. A claim is honoured when ANY of these holds, cheapest first:
+        1. the caller is an admin;
+        2. the caller is the configured test account (the suite's own tests log in as it,
+           whoever submitted the suite, e.g. a TFE validation rerun);
+        3. the parent job's owner is the caller (owner read from job_history).
+
+    Requires:
+        - user_id / user_email come from the token (identity_or_401).
+
+    Ensures:
+        - an absent or empty claim returns it unchanged and ( claim, None ): nothing to vet.
+        - an honoured claim returns ( parent_id_hash, None ).
+        - a refused claim returns ( None, reason ): the request carries on WITHOUT the stamp, so
+          a wrong claim costs admission (the child is deferred as a foreign writer), never a 4xx.
+          reason is "not_owner" or "owner_unknown" (no job_history row for the parent).
+        - the refusal is never silent: one log line names caller and parent.
+    """
+    if not parent_id_hash: return parent_id_hash, None
+    if is_admin( current_user ): return parent_id_hash, None
+    test_account = _test_account_email()
+    if test_account is not None and user_email.strip().lower() == test_account: return parent_id_hash, None
+    owner = _job_owner_id( parent_id_hash )
+    if owner is not None and str( owner ) == str( user_id ): return parent_id_hash, None
+    reason = "owner_unknown" if owner is None else "not_owner"
+    print( f"[v2-lineage] parent_id_hash dropped: caller={user_email} ({user_id}) parent={parent_id_hash} reason={reason}" )
+    return None, reason
+
+
+def _flow_kwargs_for_dropped_stamp( parent_id_hash: Optional[ str ], reason: Optional[ str ] ) -> dict:
+    """Extra flow kwargs naming a dropped claim for the request trace; empty when nothing was dropped."""
+    if reason is None: return {}
+    return { "parent_stamp_dropped": f"{parent_id_hash}:{reason}" }
+
+
 @router.post( "/api/v2/ask", response_model=AskResponse )
 async def v2_ask(
     request      : AskRequest,
@@ -425,6 +475,8 @@ async def v2_ask(
     user_id, user_email = identity_or_401( current_user )
 
     session_id = request.websocket_id or f"api-{user_id[ :8 ]}"
+    claimed        = request.parent_id_hash
+    parent_id_hash, dropped = await run_in_threadpool( lambda: vet_parent_id_hash( claimed, current_user, user_id, user_email ) )
     # flow.ask() is SYNCHRONOUS and takes as long as the agent takes — measured at
     # ~70s for a single ask on :8000, of which routing is ~1s (row 1c36199e). Called
     # directly from this coroutine it holds the event loop for that whole span, and
@@ -439,7 +491,8 @@ async def v2_ask(
             websocket_id= request.websocket_id or session_id,
             speak       = request.speak,
             interactive = request.interactive,
-            parent_id_hash = request.parent_id_hash,
+            parent_id_hash = parent_id_hash,
+            **_flow_kwargs_for_dropped_stamp( claimed, dropped ),
         )
     )
     return AskResponse( **result )
@@ -670,6 +723,8 @@ async def v2_submit(
     user_id, user_email = identity_or_401( current_user )
 
     session_id = request.websocket_id or f"api-{user_id[ :8 ]}"
+    claimed        = request.parent_id_hash
+    parent_id_hash, dropped = await run_in_threadpool( lambda: vet_parent_id_hash( claimed, current_user, user_id, user_email ) )
     # Same reason as /api/v2/ask: submit skips the head (no routing, no cache read)
     # but still RUNS THE AGENT, so it holds the caller for the agent's full span.
     # On the loop that starves /health with workers=1 (row 1c36199e); off it, it
@@ -692,7 +747,8 @@ async def v2_submit(
                 speak          = request.speak,
                 scheduled_at   = request.scheduled_at,
                 monopolize     = request.monopolize,
-                parent_id_hash = request.parent_id_hash,
+                parent_id_hash = parent_id_hash,
+                **_flow_kwargs_for_dropped_stamp( claimed, dropped ),
             )
         )
     finally:

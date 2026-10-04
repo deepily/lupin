@@ -24,7 +24,8 @@ _scripts = os.path.join( cu.get_project_root(), "src", "scripts" )
 if _scripts not in sys.path: sys.path.insert( 0, _scripts )
 import v2_eval as ve   # noqa: E402
 
-USER = { "uid": "u1234567890", "email": "u@x.com" }
+# An admin, so the lineage claim is honoured (row 8d4a5a59 vets it; see test_v2_parent_stamp_ownership.py).
+USER = { "uid": "u1234567890", "email": "u@x.com", "roles": [ "admin" ] }
 
 
 class _Job:

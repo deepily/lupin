@@ -159,6 +159,7 @@ class AskFlow:
     def ask(
         self, question: str, user_id: str, user_email: str, session_id: str, websocket_id: str,
         speak: bool=True, interactive: bool=True, parent_id_hash: Optional[ str ]=None,
+        parent_stamp_dropped: Optional[ str ]=None,
     ) -> dict:
         """Route one question through router, cache, arguments and executor.
 
@@ -171,6 +172,7 @@ class AskFlow:
         trace = StageTrace( trace_dir=self.trace_dir )
         trace.mark( "t_recv" )
         if parent_id_hash: trace.set( "parent_id_hash", parent_id_hash )
+        if parent_stamp_dropped: trace.set( "parent_id_hash_dropped", parent_stamp_dropped )   # row 8d4a5a59: the door refused the caller's lineage claim
         trace.update( decision_floor=self.similarity_floor, speak=speak, interactive=interactive,
                       question=question )
         ctx = ( user_id, user_email, session_id, websocket_id, speak )
@@ -314,7 +316,7 @@ class AskFlow:
         command: Optional[ str ]=None, args: Optional[ dict ]=None, question: Optional[ str ]=None,
         job: Any=None, speak: bool=True,
         scheduled_at: Optional[ str ]=None, monopolize: bool=False,
-        parent_id_hash: Optional[ str ]=None,
+        parent_id_hash: Optional[ str ]=None, parent_stamp_dropped: Optional[ str ]=None,
     ) -> dict:
         """Run work whose command is already decided: the door beside ask.
 
@@ -350,6 +352,7 @@ class AskFlow:
 
         trace = StageTrace( trace_dir=self.trace_dir )
         trace.mark( "t_recv" )
+        if parent_stamp_dropped: trace.set( "parent_id_hash_dropped", parent_stamp_dropped )   # row 8d4a5a59: the door refused the caller's lineage claim
         # ONE definition of "there is a question here", used by all three sites below:
         # what gets logged as the verbatim, whether the row says those words are a
         # person's, and whether the result may be cached. `ask`'s fitness gate already

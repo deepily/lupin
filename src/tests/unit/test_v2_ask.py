@@ -163,7 +163,9 @@ def test_submit_carries_the_three_queue_directives_to_the_flow():
     RED ON REVERT: drop any of the three from the flow.submit call and its assert fails.
     """
     flow = FakeFlow()
-    client = TestClient( _app( { "uid": "u1", "email": "u@x.com" }, flow ) )
+    # An admin, so the lineage claim is honoured (row 8d4a5a59 vets it; the vet itself is
+    # pinned in test_v2_parent_stamp_ownership.py).
+    client = TestClient( _app( { "uid": "u1", "email": "u@x.com", "roles": [ "admin" ] }, flow ) )
     resp = client.post( "/api/v2/submit",
                         json={ "command": "agent router go to deep research",
                                "args": { "query": "state of AI" },
