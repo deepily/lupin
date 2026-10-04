@@ -22,7 +22,8 @@ raises Shortfall when a floor cannot be met) and each has a stated blind spot:
     R8  markup_rejection    a delete or weaken span is skipped when it cuts into inline code, a code fence or a
                             [reference] link, a weaken when its changed word sits inside one, and a delete when it
                             removes the opening words of a list item (row 9d3f4562, after 5 of 16 Dart deletes came
-                            out garbled). Misses: an indented code block with no fence; a link broken over two lines.
+                            out garbled). Misses: an indented code block with no fence; a fence written with tildes;
+                            a backtick span or a link broken over two lines.
                             Over-rejects: plain square brackets such as "[0]" are read as a link.
 
 Rule 1 (the mechanical check after the writer) and the redraw path live in labelled_set_seeder.py.
