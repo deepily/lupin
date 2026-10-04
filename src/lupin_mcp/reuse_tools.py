@@ -11,9 +11,9 @@ times; those live in the per-session call log written by reuse_call_log_middlewa
 What a call may carry is decided in one place, sendable(): no module and no language is excluded
 (Rick, 2026-10-03), string defaults in signatures are blanked, and a symbol that still carries an
 email, URL, IP address, absolute path or credential-shaped token is dropped before the sweep.
-The Jev transport is injected. The live transport is not built yet (plan phase W-A), so with no
-injected transport a call reports KEY_UNREADABLE when the key file is absent and CALL_FAILED when
-it is present.
+The Jev transport is injected; with none injected the live transport is used. It goes through
+cosa.repo.doc_lint.jev_transport, the one HTTP path to Jev, and the key comes from the environment
+variable JEV_API_TOASTER only. A server started without the variable reports KEY_UNREADABLE.
 """
 import concurrent.futures
 import gzip
@@ -25,6 +25,7 @@ import re
 import uuid
 import zlib
 
+from cosa.repo.doc_lint import jev_transport
 from cosa.repo.symindex import build as sx_build
 from cosa.repo.symindex import verdict as vd
 from cosa.repo.symindex.paths import data_dir, default_out_dir
@@ -34,7 +35,6 @@ TOOL_VERSION = "1"
 JEV_MODEL    = "jev-1.13.0"                     # pinned: a moving alias would break replay
 RETRIES      = 2
 WORKERS      = 32
-KEY_FILE     = "src/conf/keys/typesafe-api-key"
 NAME_RE      = re.compile( r"[\w\-]+" )
 SYMBOL_FIELDS = ( "id", "sig", "doc", "file" )
 
@@ -52,10 +52,6 @@ class ReuseError( Exception ):
     def __init__( self, name, detail="" ):
         super().__init__( f"{name}: {detail}" if detail else name )
         self.name, self.detail = name, detail
-
-
-class KeyUnreadable( Exception ):
-    """The Jev key file is absent or cannot be read."""
 
 
 def canonical( obj ):
@@ -142,7 +138,7 @@ class ReuseContext:
         - data is the per-repository data directory (receipts, snapshots, cache, call log)
     """
 
-    def __init__( self, root, data, out_dir=None, wiki_dir=None, transport=None, exclude_prefixes=(), template=None, model=JEV_MODEL, key_path=None ):
+    def __init__( self, root, data, out_dir=None, wiki_dir=None, transport=None, exclude_prefixes=(), template=None, model=JEV_MODEL ):
         self.root             = pathlib.Path( root )
         self.data             = pathlib.Path( data )
         self.out_dir          = pathlib.Path( out_dir ) if out_dir is not None else default_out_dir( self.root )
@@ -151,7 +147,6 @@ class ReuseContext:
         self.exclude_prefixes = tuple( exclude_prefixes )
         self.template         = template if template is not None else PROMPT_TEMPLATE
         self.model            = model
-        self.key_path         = pathlib.Path( key_path ) if key_path is not None else None
 
 
 def context_from_environment( root=None ):
@@ -160,7 +155,7 @@ def context_from_environment( root=None ):
         - exclude_prefixes is left empty, by Rick's ruling of 2026-10-03: no module is excluded from a
           call, and sendable() blanks and screens what is sent instead
         - returns a ReuseContext for the git toplevel of the working directory (or `root`), with the
-          per-repository data directory and the key file under LUPIN_ROOT
+          per-repository data directory
         - LUPIN_REUSE_DATA_DIR and LUPIN_REUSE_OUT_DIR relocate the data directory and the generated
           index; they exist so tests and sandboxes leave no persistent state
         - a directory that is not a git working tree is used as it is, and the tools then answer
@@ -170,11 +165,9 @@ def context_from_environment( root=None ):
         top = pathlib.Path( root ) if root else git_toplevel()
     except NotARepo:
         top = pathlib.Path.cwd()                                          # not a repository: the tools answer NOT_LUPIN_TREE
-    import cosa.utils.util as cu
     data = os.environ.get( "LUPIN_REUSE_DATA_DIR" )
     out  = os.environ.get( "LUPIN_REUSE_OUT_DIR" )
-    return ReuseContext( top, data if data else data_dir( top ), out_dir=out if out else None,
-                         key_path=pathlib.Path( cu.get_project_root() ) / KEY_FILE )
+    return ReuseContext( top, data if data else data_dir( top ), out_dir=out if out else None )
 
 
 def append_call_log( ctx, session_id, record ):
@@ -198,28 +191,33 @@ def append_call_log( ctx, session_id, record ):
         os.close( fd )
 
 
-def read_key( path ):
-    """
-    Ensures:
-        - returns the key text
-    Raises:
-        - KeyUnreadable naming the cause: absent, or present but not readable by this process
-    """
-    if path is None or not path.exists(): raise KeyUnreadable( f"key file absent: {path}" )
-    try:
-        return path.read_text( encoding="utf-8" ).strip()
-    except OSError as e:
-        raise KeyUnreadable( f"key file present but unreadable ({e.strerror}): {path}" ) from e
-
-
 class LiveJevTransport:
-    """The live Jev transport. Not built yet: phase W-A supplies the endpoint, headers and request shape."""
+    """
+    The live Jev transport: posts a request body through jev_transport.send and returns the parsed response.
 
-    def __init__( self, key ):
-        self.key = key
+    Ensures:
+        - the key is read from the environment on each post and is never stored on this object
+        - once Jev refuses the key or the request (JevConfigError), later posts raise at once without
+          any HTTP, so a bad key costs one refusal per in-flight call and not one per index entry
+    Raises:
+        - JevConfigError, JevCallError as jev_transport.send does; JevCallError for a body that is not JSON
+    """
+
+    def __init__( self, post_fn=None, sleep_fn=None, environ=None ):
+        self.post_fn, self.sleep_fn, self.environ = post_fn, sleep_fn, environ
+        self.refusal = None
 
     def post( self, body ):
-        raise NotImplementedError( "live Jev transport is phase W-A" )
+        if self.refusal is not None: raise self.refusal
+        try:
+            text = jev_transport.send( json.dumps( body ).encode( "utf-8" ), self.post_fn, self.sleep_fn, self.environ )
+        except jev_transport.JevConfigError as e:
+            self.refusal = e
+            raise
+        try:
+            return json.loads( text )
+        except ValueError as e:
+            raise jev_transport.JevCallError( "response body is not JSON" ) from e
 
 
 class JevCache:
@@ -520,7 +518,7 @@ def prepare( ctx ):
         - a tree that is not lupin gives NOT_LUPIN_TREE and no entries
         - a stale index that cannot be rebuilt gives INDEX_STALE and no entries
         - a tool missing from the index header gives DEPENDENCY_MISSING; the sweep still runs on what was indexed
-        - no transport and no readable key gives KEY_UNREADABLE; the entries are still returned
+        - no transport and no JEV_API_TOASTER in the environment gives KEY_UNREADABLE; the entries are still returned
     """
     flags = set()
     if not is_lupin_tree( ctx.root ): return { "NOT_LUPIN_TREE" }, [], "none", None
@@ -532,10 +530,8 @@ def prepare( ctx ):
     header = sx_build.read_header( gen )
     if header[ "missing_dependencies" ]: flags.add( "DEPENDENCY_MISSING" )
     if ctx.transport is None:
-        try:
-            ctx.transport = LiveJevTransport( read_key( ctx.key_path ) )
-        except KeyUnreadable:
-            flags.add( "KEY_UNREADABLE" )
+        if jev_transport.has_key(): ctx.transport = LiveJevTransport()
+        else: flags.add( "KEY_UNREADABLE" )
     entries, _ = sendable( sx_build.read_symbols( gen ), ctx.exclude_prefixes )
     l0      = l0_lines( ctx.wiki_dir )
     sha_    = index_sha( header[ "symbols_sha" ], l0 )

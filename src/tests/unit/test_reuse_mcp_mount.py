@@ -163,7 +163,7 @@ asyncio.run( go() )
 
 def test_if_the_reuse_imports_raise_cosa_voice_still_starts_and_a_voice_tool_answers( tmp_path ):
     script = tmp_path / "probe.py"; script.write_text( _PROBE, encoding="utf-8" )
-    env = { **os.environ, "PYTHONPATH": str( REPO_ROOT / "src" ), "LUPIN_ROOT": str( REPO_ROOT ) }
+    env = { **{ k: v for k, v in os.environ.items() if k != "JEV_API_TOASTER" }, "PYTHONPATH": str( REPO_ROOT / "src" ), "LUPIN_ROOT": str( REPO_ROOT ) }
     out = subprocess.run( [ sys.executable, str( script ), "lupin_mcp.reuse_tools", "lupin_mcp.reuse_call_log_middleware" ], capture_output=True, text=True, env=env, timeout=180 )
     assert out.returncode == 0, out.stderr[ -800: ]
     lines = { l.split( " ", 1 )[ 0 ]: l.split( " ", 1 )[ 1 ] for l in out.stdout.splitlines() if l.split( " ", 1 )[ 0 ] in ( "TOOLS", "MW", "REUSE", "VOICE" ) }
@@ -188,10 +188,9 @@ def _rpc( proc, msg, want_id, timeout=90 ):
     raise AssertionError( f"no reply to {msg.get( 'method' )} within {timeout}s" )
 
 
-@pytest.mark.skipif( ( REPO_ROOT / rt.KEY_FILE ).exists(), reason="a Jev key is present on this host, so the no-key path is not what runs" )
 def test_stdio_session_calls_each_reuse_tool_alongside_a_voice_tool( tmp_path ):
     root = make_lupin_repo( tmp_path )
-    env  = { **os.environ, "PYTHONPATH": str( REPO_ROOT / "src" ), "LUPIN_ROOT": str( REPO_ROOT ),
+    env  = { **{ k: v for k, v in os.environ.items() if k != "JEV_API_TOASTER" }, "PYTHONPATH": str( REPO_ROOT / "src" ), "LUPIN_ROOT": str( REPO_ROOT ),
              "LUPIN_REUSE_DATA_DIR": str( tmp_path / "data" ), "LUPIN_REUSE_OUT_DIR": str( tmp_path / "out" ) }
     proc = subprocess.Popen( [ sys.executable, "-m", "lupin_mcp.cosa_voice_mcp" ], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, env=env, cwd=str( REPO_ROOT ) )
     try:

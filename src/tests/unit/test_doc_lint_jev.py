@@ -813,3 +813,18 @@ def test_the_cli_refuses_a_missing_binary_and_records_none_by_default( tmp_path,
     assert "not an executable file" in capsys.readouterr().err
     assert harness_cli.main( cli_args( tmp_path ), query_fn=cli_claude_query() ) == 0
     assert json.loads( ( tmp_path / "r.json" ).read_text() )[ "claude_cli" ] is None
+
+
+def test_has_key_reports_presence_only_from_the_given_or_real_environment( monkeypatch ):
+    assert jev_transport.has_key( { jev_transport.KEY_VARIABLE: KEY } ) is True
+    assert jev_transport.has_key( {} ) is False and jev_transport.has_key( { jev_transport.KEY_VARIABLE: "" } ) is False
+    monkeypatch.setenv( jev_transport.KEY_VARIABLE, KEY )
+    assert jev_transport.has_key() is True
+    monkeypatch.delenv( jev_transport.KEY_VARIABLE )
+    assert jev_transport.has_key() is False
+
+
+def test_send_returns_the_response_text_and_refuses_without_a_key():
+    body = b'{"any": "shape"}'
+    assert jev_transport.send( body, post_fn=scripted_post( [ 200 ] ), environ=ENV ) == reply( 0.9 )
+    with pytest.raises( jev_transport.JevConfigError ): jev_transport.send( body, post_fn=fake_post(), environ={} )

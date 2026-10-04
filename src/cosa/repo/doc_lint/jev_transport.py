@@ -83,41 +83,63 @@ def parse_answer( text, model ):
     return float( noul ), got
 
 
-def ask_noul( model, state, instructions, criteria, post_fn=None, sleep_fn=None, environ=None ):
+def has_key( environ=None ):
+    """Ensures: returns True when the key variable is set to a non-empty value; the value is never returned."""
+    return bool( ( os.environ if environ is None else environ ).get( KEY_VARIABLE ) )
+
+
+def send( body, post_fn=None, sleep_fn=None, environ=None ):
     """
-    Ask Jev one yes/no question about a state and return the probability of yes.
+    Send one request body to Jev and return the response text. The only HTTP path to Jev.
 
     Requires:
-        - model is a non-empty pinned id such as jev-1.13.0; there is no default
+        - body is the JSON bytes of one request
         - post_fn, when given, has _post's signature; sleep_fn has time.sleep's; both are test stand-ins
         - environ, when given, replaces os.environ
 
     Ensures:
-        - returns ( noul, response_model ) as parse_answer does
+        - returns the text of a 200 response
         - a 429 or 529 is retried up to MAX_ATTEMPTS calls in all, waiting BACKOFF_SECONDS doubled each time
         - the key appears only in the Authorization header of the request
 
     Raises:
-        - ValueError if model is empty
         - JevConfigError if the key variable is absent or empty, or the server answers 401, 403 or 422
-        - JevCallError if retries run out, any other status is not 200, or the body is unusable
+        - JevCallError if retries run out, the network fails, or any other status is not 200
     """
-    if not model: raise ValueError( "model id is required: the harness has no default Jev model" )
     key = ( os.environ if environ is None else environ ).get( KEY_VARIABLE )
     if not key: raise JevConfigError( f"{KEY_VARIABLE} is not set; the Jev judge refuses to run without it" )
     post_fn  = _post if post_fn is None else post_fn
     sleep_fn = time.sleep if sleep_fn is None else sleep_fn
     headers  = { "Authorization": "Bearer " + key, "Content-Type": "application/json" }
-    body     = build_body( model, state, instructions, criteria )
     for attempt in range( MAX_ATTEMPTS ):
         try:
             status, text = post_fn( URL, headers, body, TIMEOUT_SECONDS )
         except OSError as e:
             raise JevCallError( f"call to Jev failed: {type( e ).__name__}" ) from e
-        if status == 200: return parse_answer( text, model )
+        if status == 200: return text
         if status in RETRY_STATUSES:
             if attempt < MAX_ATTEMPTS - 1: sleep_fn( BACKOFF_SECONDS * 2 ** attempt )
             continue
         if status in ( 401, 403, 422 ): raise JevConfigError( f"Jev refused the request with status {status}" )
         raise JevCallError( f"Jev answered status {status}" )
     raise JevCallError( f"Jev still answered a retry status after {MAX_ATTEMPTS} calls" )
+
+
+def ask_noul( model, state, instructions, criteria, post_fn=None, sleep_fn=None, environ=None ):
+    """
+    Ask Jev one yes/no question about a state and return the probability of yes.
+
+    Requires:
+        - model is a non-empty pinned id such as jev-1.13.0; there is no default
+        - post_fn, sleep_fn and environ are send's test stand-ins
+
+    Ensures:
+        - returns ( noul, response_model ) as parse_answer does
+
+    Raises:
+        - ValueError if model is empty
+        - JevConfigError and JevCallError as send does, and JevCallError for an unusable body
+    """
+    if not model: raise ValueError( "model id is required: the harness has no default Jev model" )
+    body = build_body( model, state, instructions, criteria )
+    return parse_answer( send( body, post_fn, sleep_fn, environ ), model )

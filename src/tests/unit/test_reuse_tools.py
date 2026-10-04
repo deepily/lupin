@@ -14,6 +14,7 @@ import sys
 
 import pytest
 
+from cosa.repo.doc_lint import jev_transport
 from cosa.repo.symindex import build as sx_build
 from cosa.repo.symindex.spec import git_toplevel
 from lupin_mcp import reuse_tools as rt
@@ -67,6 +68,12 @@ class FakeJev:
         return self.table[ k ]
 
 
+@pytest.fixture( autouse=True )
+def no_jev_key( monkeypatch ):
+    """No test in this file may find a real key: a live call would be spend and a leak."""
+    monkeypatch.delenv( jev_transport.KEY_VARIABLE, raising=False )
+
+
 @pytest.fixture
 def env( tmp_path ):
     root = make_lupin_repo( tmp_path )
@@ -115,14 +122,9 @@ def test_each_uncertain_path_asserts_its_cause_not_only_the_verdict( env, tmp_pa
     assert _uncertain( env, "shape", { FEEDS_TEXT: { "unexpected": "shape" } } )[ "malformed" ][ 0 ][ "reason" ] == "not_a_mapping"      # response without the expected keys
     half = FakeJev( need=N( "half" ) ); half.table.pop( next( iter( half.table ) ) )
     assert rt.check_exists_impl( N( "half" ), ctx_for( env, half ) )[ "cause" ] == "CALL_FAILED"
-    nokey = ctx_for( env, None, key_path=tmp_path / "no-such-key" )
+    nokey = ctx_for( env, None )
     r = rt.check_exists_impl( N( "nokey" ), nokey )
     assert r[ "cause" ] == "KEY_UNREADABLE" and r[ "shortlist" ] == [] and r[ "stats" ][ "calls" ] == 0
-    keyfile = tmp_path / "key"; keyfile.write_text( "secret\n", encoding="utf-8" )
-    live = rt.check_exists_impl( N( "live" ), ctx_for( env, None, key_path=keyfile ) )
-    assert live[ "cause" ] == "CALL_FAILED"                                                      # key present, live transport not built yet (W-A)
-    locked = tmp_path / "locked"; locked.write_text( "x", encoding="utf-8" ); locked.chmod( 0 )
-    if os.geteuid() != 0: assert rt.check_exists_impl( N( "locked" ), ctx_for( env, None, key_path=locked ) )[ "cause" ] == "KEY_UNREADABLE"
     bare = tmp_path / "bare"; bare.mkdir()
     r = rt.check_exists_impl( NEED, rt.ReuseContext( bare, tmp_path / "d2", transport=FakeJev() ) )
     assert r[ "cause" ] == "NOT_LUPIN_TREE" and r[ "stats" ][ "entries" ] == 0
@@ -132,11 +134,11 @@ def test_each_uncertain_path_asserts_its_cause_not_only_the_verdict( env, tmp_pa
 
 def test_an_incomplete_receipt_never_shadows_the_complete_one_for_the_same_question( env, tmp_path ):
     need    = N( "shadow" )
-    broken  = rt.check_exists_impl( need, ctx_for( env, None, key_path=tmp_path / "no-key" ) )
+    broken  = rt.check_exists_impl( need, ctx_for( env, None ) )
     healthy = rt.check_exists_impl( need, ctx_for( env, FakeJev( need=need ) ) )
     assert broken[ "cause" ] == "KEY_UNREADABLE" and healthy[ "cause" ] is None and healthy[ "verdict" ] == "NEW"
     assert broken[ "receipt_id" ] != healthy[ "receipt_id" ]
-    assert rt.check_exists_impl( need, ctx_for( env, None, key_path=tmp_path / "no-key" ) )[ "receipt_id" ] == broken[ "receipt_id" ]
+    assert rt.check_exists_impl( need, ctx_for( env, None ) )[ "receipt_id" ] == broken[ "receipt_id" ]
 
 
 def test_a_missing_index_tool_is_dependency_missing_and_the_sweep_still_runs( env, monkeypatch ):
@@ -215,7 +217,7 @@ def test_fetch_similar_excludes_the_symbol_itself_and_reports_its_uncertainty( e
     assert [ s[ "id" ] for s in r[ "shortlist" ] ] == [ "cosa.mathx.add" ] and len( fake.seen ) == 2     # itself is never asked about
     assert all( s[ "candidate" ] != FEEDS_TEXT for s in ( b[ "state" ] for b in fake.seen ) )
     assert rt.fetch_similar_impl( "cosa.nope", ctx_for( env, FakeJev() ) ) == { "status": "error", "error": "UNKNOWN_ENTRY", "entry": "cosa.nope" }
-    nokey = rt.fetch_similar_impl( "cosa.feeds.parse_feed", ctx_for( env, None, key_path=env[ 1 ] / "none" ) )
+    nokey = rt.fetch_similar_impl( "cosa.feeds.parse_feed", ctx_for( env, None ) )
     assert nokey[ "uncertain" ] == "KEY_UNREADABLE" and nokey[ "shortlist" ] == [] and nokey[ "receipt_id" ] != r[ "receipt_id" ]
     stale = rt.fetch_similar_impl( "cosa.feeds.parse_feed", rt.ReuseContext( env[ 1 ], env[ 1 ] / "d", transport=FakeJev() ) )     # a directory that is not a lupin tree
     assert stale[ "uncertain" ] == "NOT_LUPIN_TREE"
@@ -272,9 +274,9 @@ def test_replay_of_fetch_similar_uses_the_frozen_snapshot( env ):
 
 
 def test_replay_of_an_unfinished_receipt_reproduces_it_without_calls( env, tmp_path ):
-    r = rt.check_exists_impl( NEED, ctx_for( env, None, key_path=tmp_path / "none" ) )
+    r = rt.check_exists_impl( NEED, ctx_for( env, None ) )
     assert r[ "cause" ] == "KEY_UNREADABLE"
-    rep = rt.replay_impl( r[ "receipt_id" ], ctx_for( env, None, key_path=tmp_path / "none" ) )
+    rep = rt.replay_impl( r[ "receipt_id" ], ctx_for( env, None ) )
     assert rep[ "status" ] == "ok" and rep[ "frozen" ][ "cause" ] == "KEY_UNREADABLE" and rep[ "differences" ][ "frozen" ] == []
 
 
@@ -336,7 +338,7 @@ def test_gate_iii_a_corrupt_or_missing_input_is_a_named_error_never_a_verdict( e
     assert rt.replay_impl( rid, c )[ "error" ] == "CACHE_CORRUPT"                                   # an entry filed under the wrong request
     # missing entry
     cache_files[ 0 ].unlink()
-    out = rt.replay_impl( rid, ctx_for( env, None, key_path=env[ 1 ] / "none" ) )
+    out = rt.replay_impl( rid, ctx_for( env, None ) )
     assert out[ "error" ] == "CACHE_MISSING" and "verdict" not in out
     cache_files[ 0 ].write_text( original, encoding="utf-8" )
     assert rt.replay_impl( rid, c )[ "status" ] == "ok"
@@ -403,7 +405,7 @@ def test_context_from_environment_honours_the_relocation_variables( tmp_path, mo
     monkeypatch.setenv( "LUPIN_ROOT", str( REPO_ROOT ) )
     monkeypatch.setenv( "LUPIN_REUSE_DATA_DIR", str( tmp_path / "d" ) ); monkeypatch.setenv( "LUPIN_REUSE_OUT_DIR", str( tmp_path / "o" ) )
     c = rt.context_from_environment( root )
-    assert c.data == tmp_path / "d" and c.out_dir == tmp_path / "o" and c.root == root and c.key_path.as_posix().endswith( rt.KEY_FILE )
+    assert c.data == tmp_path / "d" and c.out_dir == tmp_path / "o" and c.root == root
     monkeypatch.delenv( "LUPIN_REUSE_DATA_DIR" ); monkeypatch.delenv( "LUPIN_REUSE_OUT_DIR" )
     monkeypatch.setattr( rt, "data_dir", lambda top: tmp_path / "fleet" )
     c2 = rt.context_from_environment( root )
@@ -414,8 +416,69 @@ def test_context_from_environment_honours_the_relocation_variables( tmp_path, mo
     assert rt.context_from_environment().root == root
 
 
-def test_live_transport_is_not_built_yet_and_says_so():
-    with pytest.raises( NotImplementedError, match="W-A" ): rt.LiveJevTransport( "k" ).post( {} )
+def live_post( replies, seen=None ):
+    """A stand-in for the HTTP door: returns the scripted ( status, text ) pairs in order, repeating the last."""
+    queue = list( replies )
+    def post( url, headers, body, timeout ):
+        if seen is not None: seen.append( ( url, headers, body ) )
+        return queue.pop( 0 ) if len( queue ) > 1 else queue[ 0 ]
+    return post
+
+
+def test_a_server_without_the_key_variable_reports_key_unreadable_and_makes_no_call( env, monkeypatch ):
+    seen = []
+    monkeypatch.setattr( jev_transport, "_post", lambda *a: seen.append( a ) )
+    r = rt.check_exists_impl( N( "nokey" ), ctx_for( env, None ) )
+    assert ( r[ "verdict" ], r[ "cause" ] ) == ( "UNCERTAIN_READ_SOURCE", "KEY_UNREADABLE" ) and r[ "shortlist" ] == []
+    assert r[ "stats" ][ "calls" ] == 0 and seen == []
+    monkeypatch.setenv( jev_transport.KEY_VARIABLE, "" )                                           # an empty variable is a missing one
+    assert rt.check_exists_impl( N( "empty" ), ctx_for( env, None ) )[ "cause" ] == "KEY_UNREADABLE" and seen == []
+
+
+def test_with_the_variable_set_the_live_transport_is_used_through_the_one_http_path( env, monkeypatch ):
+    need = N( "live" )
+    fake = FakeJev( { FEEDS_TEXT: resp( 0.95, 0.03, 0.02 ) }, need=need )
+    seen = []
+    def door( url, headers, body, timeout ):
+        seen.append( ( url, headers ) )
+        return 200, json.dumps( fake.post( json.loads( body ) ) )
+    monkeypatch.setenv( jev_transport.KEY_VARIABLE, "fake-key-value" )
+    monkeypatch.setattr( jev_transport, "_post", door )
+    r = rt.check_exists_impl( need, ctx_for( env, None ) )
+    assert ( r[ "verdict" ], r[ "cause" ] ) == ( "REUSE", None ) and fake.unexpected == []
+    assert len( seen ) == 3 and all( u == jev_transport.URL and h[ "Authorization" ] == "Bearer fake-key-value" for u, h in seen )
+    assert "fake-key-value" not in json.dumps( r )                                                 # the key never reaches a receipt
+
+
+def test_the_live_transport_posts_json_and_returns_the_parsed_response():
+    seen = []
+    t = rt.LiveJevTransport( post_fn=live_post( [ ( 200, '{"a": 1}' ) ], seen ), environ={ jev_transport.KEY_VARIABLE: "k" } )
+    assert t.post( { "x": 1 } ) == { "a": 1 } and json.loads( seen[ 0 ][ 2 ] ) == { "x": 1 }
+    assert not hasattr( t, "key" ) and "k" not in vars( t ).values()                              # the key is not kept on the object
+
+
+def test_the_live_transport_names_a_body_that_is_not_json():
+    t = rt.LiveJevTransport( post_fn=live_post( [ ( 200, "<html>" ) ] ), environ={ jev_transport.KEY_VARIABLE: "k" } )
+    with pytest.raises( jev_transport.JevCallError, match="not JSON" ): t.post( {} )
+
+
+def test_a_refused_key_stops_all_later_http_calls_and_every_entry_becomes_call_failed( env, monkeypatch ):
+    seen = []
+    monkeypatch.setenv( jev_transport.KEY_VARIABLE, "wrong" )
+    monkeypatch.setattr( jev_transport, "_post", live_post( [ ( 401, "no" ) ], seen ) )
+    r = rt.check_exists_impl( N( "refused" ), ctx_for( env, None ) )
+    assert ( r[ "verdict" ], r[ "cause" ] ) == ( "UNCERTAIN_READ_SOURCE", "CALL_FAILED" )
+    assert 1 <= len( seen ) <= rt.WORKERS                                                          # bounded by calls already in flight, never entries x retries
+    t = rt.LiveJevTransport( post_fn=live_post( [ ( 401, "no" ) ], seen ), environ={ jev_transport.KEY_VARIABLE: "k" } )
+    with pytest.raises( jev_transport.JevConfigError ): t.post( {} )
+    n = len( seen )
+    with pytest.raises( jev_transport.JevConfigError ): t.post( {} )
+    assert len( seen ) == n
+
+
+def test_the_dead_key_file_path_is_gone():
+    assert not hasattr( rt, "KEY_FILE" ) and not hasattr( rt, "read_key" ) and not hasattr( rt, "KeyUnreadable" )
+    assert "key_path" not in rt.ReuseContext.__init__.__code__.co_varnames
 
 
 # --- W-C re-loop (Tiberius, row 9babe43d): damaged files are named errors; one test per surviving mutant ----------------------
