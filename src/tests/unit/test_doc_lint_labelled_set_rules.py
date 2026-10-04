@@ -744,3 +744,123 @@ def test_accept_redraw_leaves_an_accepted_pair_alone_and_replaces_only_the_rest(
     assert s.main( redraw_args( tmp_path, pool, accept=accept ) ) == 0
     named = capsys.readouterr().out.split( "failed pair(s) " )[ 1 ].split( " are replaced" )[ 0 ].split()
     assert named == sorted( broken ) and kept not in named
+
+
+# ---- rule 8 (row 9d3f4562): a span is never drawn inside inline code, a [reference] link, or the opening of a list item ----
+# Every text below is made up, in the shape of a Dart doc comment with its /// markers removed.
+
+SUMMARY = "Return the cached session for the signed-in user. "
+
+
+def delete_spans( old ):
+    return sorted( c[ "span_text" ] for c in s.delete_candidates( old, SL )[ 0 ] )
+
+
+def refusals( old ):
+    return s.delete_candidates( old, SL )[ 1 ]
+
+
+def span_of( old, text ):
+    start = old.index( text )
+    return ( start, start + len( text ) )
+
+
+def test_r8_a_delete_that_cuts_into_backticks_is_refused_and_the_same_words_in_prose_are_candidates():
+    marked = SUMMARY + "Callers pass `retry: true, backoff: slow` to the reader when the lock is busy."
+    plain  = marked.replace( "`", "" )
+    assert "true, backoff" in delete_spans( plain )                                          # the control: without the backticks the phrase is a candidate
+    assert delete_spans( marked ) == [ "when the lock is busy" ]
+    assert refusals( marked )[ "CODE" ] == 4 and "CODE" not in refusals( plain )
+
+
+def test_r8_a_delete_that_cuts_into_a_code_fence_is_refused():
+    old = SUMMARY + "The reader waits for the lock.\n\n```\nopen( retry, backoff ) when the lock is busy\n```\n\nThe handle is closed after the read."
+    assert rules.markup_rejection( old, span_of( old, "when the lock is busy" ) ) == "CODE"
+    assert rules.markup_rejection( old, span_of( old, "The handle is closed after the read" ) ) is None
+
+
+def test_r8_a_delete_that_cuts_into_a_reference_link_is_refused_and_one_that_holds_the_whole_link_is_kept():
+    old = SUMMARY + "The handle stays open while [SessionStore.open, SessionStore.close] keep the count above zero."
+    assert delete_spans( old ) == [ "while [SessionStore.open, SessionStore.close] keep the count above zero" ]
+    assert refusals( old )[ "LINK" ] == 3
+
+
+def test_r8_a_delete_of_a_markdown_link_target_or_of_its_text_alone_is_refused():
+    old = SUMMARY + "Callers read [the session guide](docs/session.md) before they change how the handle is kept."
+    assert delete_spans( old ) == [ "before they change how the handle is kept" ]
+    assert rules.markup_rejection( old, span_of( old, "(docs/session.md)" ) ) == "LINK"
+    assert rules.markup_rejection( old, span_of( old, "Callers read [the session guide]" ) ) == "LINK"
+    labelled = "See [the session guide][guide] first."
+    assert rules.markup_rejection( labelled, span_of( labelled, "[guide] first" ) ) == "LINK"
+
+
+def test_r8_a_delete_that_holds_a_whole_code_span_is_kept():
+    old = SUMMARY + "The reader waits for the lock, which `SessionStore` releases on close, before it reads the handle."
+    assert "which `SessionStore` releases on close" in delete_spans( old )
+    assert "CODE" not in refusals( old )
+
+
+LISTED = SUMMARY.strip() + "\n\n- keeps the handle open for the reader, which avoids a second login\n- drops the handle when the app is paused, unless a write is running"
+
+
+def test_r8_a_delete_that_removes_the_opening_of_a_list_item_is_refused_and_a_trailing_clause_is_kept():
+    assert rules.markup_rejection( LISTED, span_of( LISTED, "drops the handle when the app is paused" ) ) == "LIST_ITEM"
+    assert rules.markup_rejection( LISTED, span_of( LISTED, "keeps the handle open for the reader, which avoids a second login" ) ) == "LIST_ITEM"
+    assert rules.markup_rejection( LISTED, span_of( LISTED, "unless a write is running" ) ) is None
+    assert "unless a write is running" in delete_spans( LISTED )
+
+
+def test_r8_a_delete_that_runs_from_one_line_into_the_next_list_item_is_refused():
+    assert rules.markup_rejection( LISTED, span_of( LISTED, "which avoids a second login\n- drops the handle" ) ) == "LIST_ITEM"
+    assert all( "\n" not in span for span in delete_spans( LISTED ) )
+    assert refusals( LISTED )[ "LIST_ITEM" ] == 2
+
+
+@pytest.mark.parametrize( "marker", [ "-", "*", "+", "•", "1.", "2)" ] )
+def test_r8_every_list_marker_the_word_count_knows_starts_a_list_item( marker ):
+    old = "Return the session.\n\n" + marker + " drops the handle when the app is paused"
+    assert rules.markup_rejection( old, span_of( old, "drops the handle" ) ) == "LIST_ITEM"
+    assert rules.markup_rejection( old.replace( marker + " ", "" ), span_of( old.replace( marker + " ", "" ), "drops the handle" ) ) is None
+
+
+def modal_spans( old ):
+    return sorted( c[ "span_text" ] for c in s.weaken_candidates( old, SL ) if c[ "class" ] == "modal" )
+
+
+@pytest.mark.parametrize( "o, c, code", [ ( "`", "`", "CODE" ), ( "[", "]", "LINK" ) ] )
+def test_r8_a_weaken_whose_changed_word_is_inside_backticks_or_a_link_is_refused_and_the_same_words_in_prose_are_candidates( o, c, code ):
+    text   = SUMMARY + "The reader sends {o}handle must stay open{c} to the store when the lock is busy."
+    marked = text.format( o=o, c=c )
+    assert modal_spans( text.format( o="", c="" ) )                                           # the control: in plain prose the modal is a candidate
+    assert modal_spans( marked ) == []
+    token = span_of( marked, "must" )
+    assert rules.markup_rejection( marked, span_of( marked, o + "handle must stay open" + c ), token=token ) == code
+
+
+def test_r8_a_weaken_span_that_cuts_into_backticks_is_refused_and_one_that_stays_outside_is_kept():
+    old = SUMMARY + "The reader must `wait here` for the lock before it reads the handle."
+    assert rules.markup_rejection( old, span_of( old, "must `wait" ), token=span_of( old, "must" ) ) == "CODE"
+    assert rules.markup_rejection( old, span_of( old, "reader must" ), token=span_of( old, "must" ) ) is None
+    assert "reader must" in modal_spans( old ) and "must `wait" not in modal_spans( old )
+
+
+def test_r8_a_weaken_in_a_list_item_is_not_refused_for_the_list():
+    old = "Return the session.\n\n- must keep the handle open for the reader"
+    assert rules.markup_rejection( old, span_of( old, "must keep the handle" ) ) == "LIST_ITEM"
+    assert rules.markup_rejection( old, span_of( old, "must keep the handle" ), token=span_of( old, "must" ) ) is None
+
+
+def test_r8_the_first_reason_to_fire_is_code_then_link_then_list_item():
+    old = "Return the session.\n\n- `open now` and [close later] run in turn"
+    assert rules.markup_rejection( old, span_of( old, "`open" ) ) == "CODE"
+    assert rules.markup_rejection( old, span_of( old, "now` and [close" ) ) == "CODE"
+    assert rules.markup_rejection( old, span_of( old, "and [close" ) ) == "LINK"
+    assert rules.markup_rejection( old, span_of( old, "`open now` and [close later] run" ) ) == "LIST_ITEM"
+    assert rules.markup_rejection( old, span_of( old, "run in turn" ) ) is None
+
+
+def test_r8_text_with_no_markup_has_no_regions_and_refuses_nothing():
+    old = SUMMARY + "The reader waits for the lock before it reads the handle."
+    assert rules.code_regions( old ) == [] and rules.link_regions( old ) == [] and rules.list_item_starts( old ) == []
+    assert rules.markup_rejection( old, span_of( old, "before it reads the handle" ) ) is None
+    assert rules.cuts_into( [ ( 5, 9 ) ], 0, 5 ) is False and rules.cuts_into( [ ( 5, 9 ) ], 9, 12 ) is False     # touching an edge is not cutting in

@@ -19,6 +19,11 @@ raises Shortfall when a floor cannot be met) and each has a stated blind spot:
     R5  restated_elsewhere  a delete is skipped when another sentence holds 60% of the span's content words.
                             Misses: a restatement in synonyms; over-rejects a span built from common words.
     R7  words_of            a leading bullet or list marker is not a word.
+    R8  markup_rejection    a delete or weaken span is skipped when it cuts into inline code, a code fence or a
+                            [reference] link, a weaken when its changed word sits inside one, and a delete when it
+                            removes the opening words of a list item (row 9d3f4562, after 5 of 16 Dart deletes came
+                            out garbled). Misses: an indented code block with no fence; a link broken over two lines.
+                            Over-rejects: plain square brackets such as "[0]" are read as a link.
 
 Rule 1 (the mechanical check after the writer) and the redraw path live in labelled_set_seeder.py.
 """
@@ -55,6 +60,13 @@ PROTECTED_RES = (
     re.compile( r"\"[^\"\n]+\"|“[^”\n]+”" ),
     re.compile( r"(?im)^[ \t]*(?:examples?\b[^\n]*|>>>[^\n]*)(?:\n(?![ \t]*\n)[^\n]*)*" ),
 )
+
+
+# Rule 8: markup a cut must not land inside. A link is [text], [text](target) or [text][label]; Dart doc comments
+# write a symbol reference as [Name].
+CODE_RES     = ( re.compile( r"```.*?(?:```|\Z)", re.DOTALL ), re.compile( r"`[^`\n]+`" ) )
+LINK_RE      = re.compile( r"\[[^\[\]\n]+\](?:\([^()\n]*\)|\[[^\[\]\n]*\])?" )
+LIST_ITEM_RE = re.compile( r"(?m)^[ \t]*(?:[-*+•]|\d+[.)])[ \t]+(?=\S)" )
 
 
 def sentences_of( text ):
@@ -248,3 +260,46 @@ def delete_rejection( old, span, cut ):
     for sentence in sentences_of( cut ):
         if " ".join( sentence.split() ) not in old_sentences and words_of( sentence ) < MIN_SENTENCE_WORDS: return "SHORT_SENTENCE"
     return structure_emptied( old, cut )
+
+
+def code_regions( old ):
+    """Return the ( start, end ) regions of old that are code fences or backtick spans."""
+    return [ ( m.start(), m.end() ) for pattern in CODE_RES for m in pattern.finditer( old ) ]
+
+
+def link_regions( old ):
+    """Return the ( start, end ) regions of old that are [reference] links, with their ( target ) or [ label ] when present."""
+    return [ ( m.start(), m.end() ) for m in LINK_RE.finditer( old ) ]
+
+
+def cuts_into( regions, start, end ):
+    """Say whether [ start, end ) overlaps one of the regions without holding all of it."""
+    return any( a < end and start < b and not ( start <= a and b <= end ) for a, b in regions )
+
+
+def list_item_starts( old ):
+    """Return the offsets where the text of each list item begins, just after its bullet or number."""
+    return [ m.end() for m in LIST_ITEM_RE.finditer( old ) ]
+
+
+def markup_rejection( old, span, token=None ):
+    """
+    Return the reason code a span is refused for because of markup (rule 8), or None.
+
+    Requires:
+        - span is the ( start, end ) of the span in old
+        - token is None for a delete, or the ( start, end ) of the changed word for a weaken
+
+    Ensures:
+        - CODE: the span cuts into a code fence or a backtick span, or the changed word overlaps one
+        - LINK: the span cuts into a [reference] link, or the changed word overlaps one
+        - LIST_ITEM: a delete whose span holds the first character of a list item's text, so the item would be
+          left as a bare marker or opening on a fragment; never returned for a weaken
+        - a span that holds a whole code span or a whole link is not refused for it
+        - the checks run in that order and the first to fire is returned
+    """
+    for code, regions in ( ( "CODE", code_regions( old ) ), ( "LINK", link_regions( old ) ) ):
+        if cuts_into( regions, span[ 0 ], span[ 1 ] ): return code
+        if token is not None and any( a < token[ 1 ] and token[ 0 ] < b for a, b in regions ): return code
+    if token is None and any( span[ 0 ] <= at < span[ 1 ] for at in list_item_starts( old ) ): return "LIST_ITEM"
+    return None

@@ -264,14 +264,14 @@ def delete_candidates( old, stoplist ):
     Return the seedable deletions of one docstring, each { span, span_text, cut }.
 
     Ensures:
-        - spans are phrase units that pass span_ok; cuts that bad_cut or rules.delete_rejection (rules 4 and 5) refuse
-          are left out and counted by reason code
+        - spans are phrase units that pass span_ok; cuts that bad_cut, rules.delete_rejection (rules 4 and 5) or
+          rules.markup_rejection (rule 8) refuse are left out and counted by reason code
     """
     out, refused = [], {}
     for span in phrase_units( old ):
         if not span_ok( old, span, stoplist ): continue
         cut    = cut_text( old, span )
-        reason = bad_cut( old, cut ) or rules.delete_rejection( old, span, cut )
+        reason = bad_cut( old, cut ) or rules.delete_rejection( old, span, cut ) or rules.markup_rejection( old, span )
         if reason is not None:
             refused[ reason ] = refused.get( reason, 0 ) + 1
             continue
@@ -341,6 +341,7 @@ def weaken_candidates( old, stoplist ):
         - a weak text that is not confined to the changed token is left out
         - a number or quantifier swap whose value or word occurs again in old is left out (rule 2)
         - a qualifier deletion that rules.qualifier_rejected refuses is left out (rule 3)
+        - a span that rules.markup_rejection refuses for the changed word is left out (rule 8)
     """
     units = phrase_units( old )
     out   = []
@@ -364,6 +365,7 @@ def weaken_candidates( old, stoplist ):
                          span[ 1 ] - ( len( old[ span[ 0 ]:span[ 1 ] ] ) - len( old[ span[ 0 ]:span[ 1 ] ].rstrip( EDGE_PUNCT ) ) ) )
             text = old[ stripped[ 0 ]:stripped[ 1 ] ]
             if edit[ "changed_token" ] not in text or not span_ok( old, stripped, stoplist ): continue
+            if rules.markup_rejection( old, stripped, token=( edit[ "start" ], edit[ "end" ] ) ): continue
             out.append( { "class": edit[ "class" ], "changed_token": edit[ "changed_token" ], "span": stripped, "span_text": text, "weak_text": weak } )
     return out
 
