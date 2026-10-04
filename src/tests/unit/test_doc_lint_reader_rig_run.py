@@ -7,6 +7,7 @@ The fake reader replies with the whole text it was given. The fake grader scores
 occurs in that reply, so a sentence lost from the new text really lowers the new score.
 """
 
+import asyncio
 import json
 import re
 import subprocess
@@ -177,6 +178,14 @@ def test_extraction_covers_classes_async_methods_and_decorators():
     assert "hidden_body" not in text and "staticmethod" not in text
 
 
+def test_extraction_keeps_indented_and_end_of_line_comments_and_nested_defs():
+    text = rr.extract_doc_text( 'def outer():\n    """Outer doc."""\n    # indented note\n    x = 1  # trailing note\n'
+                                '    def inner( a ):\n        """Inner doc."""\n        return a\n' )
+    assert "# indented note" in text and "# trailing note" in text
+    assert "def inner(a):" in text and "Inner doc." in text and "x = 1" not in text
+    assert text.index( "def outer" ) < text.index( "# indented note" ) < text.index( "def inner" )
+
+
 def test_extraction_refuses_source_that_does_not_parse():
     with pytest.raises( rr.RunRefused, match="does not parse" ):
         rr.extract_doc_text( "def broken(:\n", "x.py" )
@@ -308,11 +317,58 @@ def test_common_wrong_answer_and_other_fields_never_reach_a_prompt( repo ):
 
 # ---- arithmetic and the report ----------------------------------------------------------------
 
+def result( old_scores, new_scores, n ):
+    """A run_reader_test-shaped result for n questions, totals derived the way the rig derives them."""
+    return { "old_scores": old_scores, "new_scores": new_scores, "old_total": sum( round( x * n ) for x in old_scores ), "new_total": sum( round( x * n ) for x in new_scores ) }
+
+
 def test_summarize_weights_files_by_question_count():
-    per_file = { "a": { "old_mean": 1.0, "new_mean": 0.0 }, "b": { "old_mean": 0.5, "new_mean": 1.0 } }
+    per_file = { "a": result( [ 1.0, 1.0 ], [ 0.0, 0.0 ], 1 ), "b": result( [ 1 / 3, 1 / 3 ], [ 1.0, 1.0 ], 3 ) }   # old totals 2 + 2, new totals 0 + 6
     got = rr.summarize( per_file, { "a": 1, "b": 3 } )
-    assert got == { "questions": 4, "old_mean": 0.625, "new_mean": 0.75, "passes": True }
-    assert rr.summarize( { "a": { "old_mean": 1.0, "new_mean": 0.0 } }, { "a": 2 } )[ "passes" ] is False
+    assert got == { "questions": 4, "old_mean": 0.5, "new_mean": 0.75, "old_total": 4, "new_total": 6, "passes": True }
+    assert rr.summarize( { "a": result( [ 1.0 ], [ 0.0 ], 2 ) }, { "a": 2 } )[ "passes" ] is False
+
+
+def test_overall_tie_across_files_passes():
+    per_file = { "a": result( [ 1.0 ], [ 1 / 3 ], 3 ), "b": result( [ 1 / 3 ], [ 1.0 ], 3 ) }    # file a loses 2, file b gains 2: totals 4 and 4
+    got = rr.summarize( per_file, { "a": 3, "b": 3 } )
+    assert got[ "old_total" ] == got[ "new_total" ] == 4 and got[ "passes" ] is True
+
+
+def test_exact_tie_passes_even_when_the_float_means_differ( repo, monkeypatch ):
+    # 3 questions, 3 runs: per-run totals ( 1, 3, 3 ) against ( 2, 2, 3 ) are both 7, yet the float means are
+    # 0.7777777777777778 against 0.7777777777777777, so a float >= calls the tie a loss
+    scores = iter( [ 1 / 3, 1.0, 1.0, 2 / 3, 2 / 3, 1.0 ] )
+
+    async def fake_score( *args, **kwargs ):
+        return next( scores )
+
+    monkeypatch.setattr( reader_rig, "score_text", fake_score )
+    out  = str( repo[ "tmp" ] / "tie.json" )
+    code = rr.main( argv( repo, questions_file( repo, [ QB1, QB2, QB3 ] ), out=out, **{ "--runs": "3" } ), query_fn=FakeModels() )
+    file = json.load( open( out ) )[ "files" ][ "src/mod_b.py" ]
+    assert code == 0 and file[ "old_mean" ] > file[ "new_mean" ]
+    assert file[ "old_total" ] == file[ "new_total" ] == 7 and file[ "passes" ] is True
+    assert json.load( open( out ) )[ "overall" ][ "passes" ] is True
+
+
+def test_a_one_answer_loss_still_fails_the_per_file_verdict( monkeypatch ):
+    scores = iter( [ 1.0, 1.0, 1.0, 1.0, 1.0, 2 / 3 ] )
+
+    async def fake_score( *args, **kwargs ):
+        return next( scores )
+
+    monkeypatch.setattr( reader_rig, "score_text", fake_score )
+    got = asyncio.run( reader_rig.run_reader_test( "o", "n", rr.rig_questions( [ QB1, QB2, QB3 ] ), reader_rig.ReaderConfig( READER, GRADER, 3 ) ) )
+    assert ( got[ "old_total" ], got[ "new_total" ], got[ "passes" ] ) == ( 9, 8, False )
+
+
+def test_runs_below_one_is_refused_before_anything_else( repo, capsys ):
+    for runs in ( "0", "-1" ):
+        models = FakeModels()
+        assert rr.main( argv( repo, "/no/such/questions.json", **{ "--runs": runs } ), query_fn=models ) == 2
+        assert "--runs must be 1 or more" in capsys.readouterr().err
+        assert models.calls == []
 
 
 def test_per_file_and_overall_figures_end_to_end( repo, capsys ):
@@ -326,7 +382,7 @@ def test_per_file_and_overall_figures_end_to_end( repo, capsys ):
     assert ( a[ "old_mean" ], a[ "new_mean" ], a[ "passes" ], a[ "questions" ] ) == ( 1.0, 0.0, False, 1 )
     assert a[ "old_scores" ] == [ 1.0, 1.0 ] and a[ "new_scores" ] == [ 0.0, 0.0 ]
     assert ( b[ "old_mean" ], b[ "new_mean" ], b[ "passes" ], b[ "questions" ] ) == ( 1.0, 1.0, True, 3 )
-    assert report[ "overall" ] == { "questions": 4, "old_mean": 1.0, "new_mean": 0.75, "passes": False }    # unweighted would be 0.5
+    assert report[ "overall" ] == { "questions": 4, "old_mean": 1.0, "new_mean": 0.75, "old_total": 8, "new_total": 6, "passes": False }    # unweighted would be 0.5
     assert "overall: questions=4 old_mean=1.000 new_mean=0.750 passes=False" in printed
     assert f"calls spent {READER}: " in printed and f"calls spent {GRADER}: " in printed
 

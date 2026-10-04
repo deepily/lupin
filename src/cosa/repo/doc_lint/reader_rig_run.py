@@ -9,6 +9,10 @@ the same in both revisions. Leaving it in would let the reader answer from code 
 docstring claim. Each module, class and function contributes its signature line and docstring, and every
 # comment line is kept, in file order.
 
+The extraction leaves out, on both revisions: decorators, attribute docstrings (a string under an
+assignment) and any string that is not a docstring. Signatures are re-rendered by ast.unparse on one
+line, so line breaks and quote style in the source are not shown to the reader.
+
 Every model id and both call caps are required. Rerunning the same command resumes from the ledger.
 """
 
@@ -35,7 +39,16 @@ class RunRefused( Exception ):
 
 
 def parse_args( argv ):
-    """Parse the command line; models, ledger and both caps are required and none has a default."""
+    """
+    Parse the command line.
+
+    Requires:
+        - argv is the argument list without the program name
+
+    Ensures:
+        - returns the parsed namespace; models, ledger and both caps are required and have no default
+        - --runs defaults to 3
+    """
     parser = argparse.ArgumentParser( description="Run the reader test over a file at two revisions." )
     parser.add_argument( "--old-rev", required=True, help="git revision holding the old text" )
     parser.add_argument( "--new-rev", required=True, help="git revision holding the new text" )
@@ -103,7 +116,15 @@ def rig_questions( questions ):
 
 
 def group_by_file( questions ):
-    """Return { file: [ question, ... ] } in the order files first appear."""
+    """
+    Group questions by their file.
+
+    Requires:
+        - questions is a list of dicts that each hold "file"
+
+    Ensures:
+        - returns { file: [ question, ... ] }, files and questions in the order first seen
+    """
     groups = {}
     for q in questions: groups.setdefault( q[ "file" ], [] ).append( q )
     return groups
@@ -134,7 +155,15 @@ def read_at( repo, sha, path ):
 
 
 def signature_line( node ):
-    """Return the one-line signature of a class or function, with no decorators and no body."""
+    """
+    Return the one-line signature of a class or function, with no decorators and no body.
+
+    Requires:
+        - node is an ast.ClassDef, FunctionDef or AsyncFunctionDef
+
+    Ensures:
+        - returns the signature as ast.unparse renders it, on one line; node is not changed
+    """
     bare = copy.copy( node )
     bare.body           = [ ast.Pass() ]
     bare.decorator_list = []
@@ -205,23 +234,34 @@ def projected_calls( texts, questions, config, ledger ):
 
 def summarize( per_file, counts ):
     """
-    Return the overall means weighted by question count.
+    Return the overall means weighted by question count, and the pass verdict.
 
     Requires:
         - per_file is { file: result of run_reader_test }, counts is { file: question count }
 
     Ensures:
-        - returns { questions, old_mean, new_mean, passes } with each mean the sum of the file means
-          times the file's question count, over the total count
+        - returns { questions, old_mean, new_mean, old_total, new_total, passes }
+        - each total is the sum of the file totals, so each file counts by its question count
+        - each mean is that total over ( total questions x runs ), and passes compares the whole-number
+          totals, never the float means
     """
     total = sum( counts.values() )
-    old   = sum( per_file[ f ][ "old_mean" ] * counts[ f ] for f in per_file ) / total
-    new   = sum( per_file[ f ][ "new_mean" ] * counts[ f ] for f in per_file ) / total
-    return { "questions": total, "old_mean": old, "new_mean": new, "passes": new >= old }
+    runs  = len( next( iter( per_file.values() ) )[ "old_scores" ] )
+    old   = sum( r[ "old_total" ] for r in per_file.values() )
+    new   = sum( r[ "new_total" ] for r in per_file.values() )
+    return { "questions": total, "old_mean": old / ( total * runs ), "new_mean": new / ( total * runs ), "old_total": old, "new_total": new, "passes": new >= old }
 
 
 def refuse( message ):
-    """Print a refusal and return exit code 2."""
+    """
+    Print a refusal to stderr.
+
+    Requires:
+        - message is a string or an exception
+
+    Ensures:
+        - prints "REFUSED: " and the message, and returns 2
+    """
     print( f"REFUSED: {message}", file=sys.stderr )
     return 2
 
@@ -236,6 +276,7 @@ def main( argv, query_fn=None ):
 
     Ensures:
         - returns 0 after printing a per-file line, an overall line and the calls spent per model
+        - returns 2 before anything else when --runs is below 1
         - returns 2 and makes no model call when the questions file is refused (count differs, an id
           repeats, a question has no key_points), a revision or file cannot be read from git, the two
           model ids are equal or a cap is not an int of zero or more
@@ -251,6 +292,7 @@ def main( argv, query_fn=None ):
           finished calls stay in the ledger
     """
     args = parse_args( argv )
+    if args.runs < 1: return refuse( f"--runs must be 1 or more, got {args.runs}" )
     try:
         repo = args.repo if args.repo is not None else cu.get_project_root()
         if args.reader_model == args.grader_model: raise RunRefused( "reader and grader model ids must differ: the call caps are counted per model id" )
