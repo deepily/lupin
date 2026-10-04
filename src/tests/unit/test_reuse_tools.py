@@ -819,3 +819,14 @@ def test_blank_string_defaults_across_languages( sig, want ):
     # red when: any branch of the scanner is changed; each row pins one (separator, bracket, quote, comparison, arrow or generic case)
     assert rt.blank_string_defaults( sig ) == want
 
+
+
+def test_a_refused_sweep_returns_a_verdict_and_receipt_that_never_carry_the_key( env, monkeypatch, capsys ):
+    sentinel = "sentinel-key-4d2b8e6a90"
+    monkeypatch.setenv( jev_transport.KEY_VARIABLE, sentinel )
+    monkeypatch.setattr( jev_transport, "_post", live_post( [ ( 401, "no" ) ] ) )
+    r = rt.check_exists_impl( N( "leak" ), ctx_for( env, None ) )
+    assert r[ "cause" ] == "CALL_FAILED"
+    stored = "".join( p.read_text( encoding="utf-8" ) for p in receipts( env ) )
+    out, err = capsys.readouterr()
+    assert stored and sentinel not in json.dumps( r ) + stored + out + err

@@ -828,3 +828,51 @@ def test_send_returns_the_response_text_and_refuses_without_a_key():
     body = b'{"any": "shape"}'
     assert jev_transport.send( body, post_fn=scripted_post( [ 200 ] ), environ=ENV ) == reply( 0.9 )
     with pytest.raises( jev_transport.JevConfigError ): jev_transport.send( body, post_fn=fake_post(), environ={} )
+
+
+SENTINEL = "sentinel-key-9f3a7c1e5b"
+
+
+def chain_text( exc ):
+    """Ensures: returns the str, repr and formatted traceback of an exception and of everything in its cause/context chain."""
+    import traceback
+    out, seen = [], set()
+    while exc is not None and id( exc ) not in seen:
+        seen.add( id( exc ) )
+        out += [ str( exc ), repr( exc ), "".join( traceback.format_exception( exc ) ) ]
+        exc = exc.__cause__ or exc.__context__
+    return "\n".join( out )
+
+
+def refusing_post( status, text="no" ):
+    def post( url, headers, body, timeout ): return status, text
+    return post
+
+
+def failing_post( url, headers, body, timeout ):
+    raise ConnectionError( "connection reset" )
+
+
+@pytest.mark.parametrize( "post, error", [
+    ( refusing_post( 401 ),          jev_transport.JevConfigError ),
+    ( refusing_post( 422 ),          jev_transport.JevConfigError ),
+    ( refusing_post( 500 ),          jev_transport.JevCallError ),
+    ( refusing_post( 429 ),          jev_transport.JevCallError ),
+    ( failing_post,                  jev_transport.JevCallError ),
+    ( refusing_post( 200, "<html>" ), jev_transport.JevCallError ),
+] )
+def test_no_error_message_or_chain_ever_contains_the_key_value( post, error ):
+    with pytest.raises( error ) as caught:
+        jev_transport.ask_noul( MODEL, {}, "q", jev_judge.CRITERIA, post_fn=post, sleep_fn=lambda s: None, environ={ jev_transport.KEY_VARIABLE: SENTINEL } )
+    text = chain_text( caught.value )
+    assert SENTINEL not in text and "Bearer" not in text and len( text ) > 0
+
+
+def test_the_live_transport_and_a_refused_sweep_never_leak_the_key_into_errors_logs_or_the_verdict( capsys, caplog ):
+    from lupin_mcp import reuse_tools as rt
+    t = rt.LiveJevTransport( post_fn=refusing_post( 403 ), sleep_fn=lambda s: None, environ={ jev_transport.KEY_VARIABLE: SENTINEL } )
+    for _ in range( 2 ):                                                                            # the first refusal, then the remembered one
+        with pytest.raises( jev_transport.JevConfigError ) as caught: t.post( {} )
+        assert SENTINEL not in chain_text( caught.value )
+    out, err = capsys.readouterr()
+    assert SENTINEL not in out + err + caplog.text
