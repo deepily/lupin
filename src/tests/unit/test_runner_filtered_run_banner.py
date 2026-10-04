@@ -437,3 +437,79 @@ def test_the_published_summary_line_is_cleared_between_runs( tmp_path ):
     assert first[ 0 ] not in ( second[ 0 ], ) or second[ 0 ] == "", (
         f"the first run's summary line survived into the second call: {second[ 0 ]!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Row cb64a4b1 — the helpers under `set -e`
+# ---------------------------------------------------------------------------
+#
+# 🔴 EVERY TEST ABOVE CALLS THE FUNCTIONS FROM A SHELL WITH `set -e` OFF (`_banner` and
+# `_real_summary_line` run a bare `bash -c`), and run-e2e-ui-tests.sh calls report_run_scope
+# with `set -e` ON (it is switched back on at the line before the call). `run_scope_deselected_count`
+# ends in a grep pipeline that exits 1 when the summary line has no "N deselected" clause, which
+# is every fully green unfiltered run, so under `set -e` the assignment
+# `x="$( run_scope_deselected_count "$line" )"` killed the runner before the banner and before
+# `exit $PYTEST_EXIT_CODE`. Measured: a green e2e half (502 passed) recorded as exit 1.
+# The 14 tests above never saw it because they never ran under the runner's shell option.
+
+SHELL_OPTIONS = [ "set -e", "set -eo pipefail" ]
+
+
+def _run_under( option, body, *positional ):
+    """Run `body` in a bash that has `option` on, after sourcing the real lib; return the CompletedProcess."""
+    script = f'{option}\nsource "{SCOPE_LIB}"\n{body}\necho "reached-end"\n'
+    return subprocess.run( [ "bash", "-c", script, "bash", *positional ], cwd=PROJECT_ROOT,
+                           capture_output=True, text=True, timeout=60 )
+
+
+@pytest.mark.parametrize( "option", SHELL_OPTIONS )
+@pytest.mark.parametrize( "half, claim", [ ( "", FULL_CLAIM ), ( "b", PARTIAL_CLAIM ) ] )
+def test_a_green_run_with_no_deselection_gets_its_banner_and_the_shell_survives_set_e( tmp_path, option, half, claim ):
+    """
+    The exact failing shape, with a REAL pytest summary line: unfiltered, nothing deselected, exit 0.
+    Full and half. The shell must reach the next statement (the runner's `exit $PYTEST_EXIT_CODE`).
+    """
+    line, status = _real_summary_line( _suite( tmp_path ) )
+    assert status == 0 and "deselected" not in line, f"this arm needs a green, undeselected run; got {status} {line!r}"
+
+    proc = _run_under( option, 'report_run_scope "E2E UI tests" 0 "$1" "$2"', line, half )
+
+    assert proc.returncode == 0, f"{option}: the shell died inside report_run_scope.\nstdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+    assert claim in proc.stdout, f"{option}, half={half!r}: no banner.\n{proc.stdout}"
+    assert proc.stdout.rstrip().endswith( "reached-end" )
+
+
+@pytest.mark.parametrize( "option", SHELL_OPTIONS )
+@pytest.mark.parametrize( "status", [ 0, 1 ] )
+def test_every_run_scope_helper_survives_set_e_on_a_summary_line_with_no_deselected_clause( option, status ):
+    """Each helper alone, because the runner reaches them through different doors."""
+    line = "=========== 502 passed, 2 skipped, 5 warnings in 1586.94s (0:26:26) ============"
+
+    deselected = _run_under( option, 'x="$( run_scope_deselected_count "$1" )"; echo "deselected=[$x]"', line )
+    assert deselected.returncode == 0 and "deselected=[]" in deselected.stdout, (deselected.stdout, deselected.stderr)
+
+    selected = _run_under( option, 'x="$( run_scope_selected_count "$1" )"; echo "selected=[$x]"', line )
+    assert selected.returncode == 0 and "selected=[504]" in selected.stdout, (selected.stdout, selected.stderr)
+
+    verdict = _run_under( option, 'x="$( run_scope_verdict "$1" "" )"; echo "verdict=[$x]"', line )
+    assert verdict.returncode == 0 and "verdict=[full]" in verdict.stdout, (verdict.stdout, verdict.stderr)
+
+    banner = _run_under( option, f'report_run_scope "E2E UI tests" {status} "$1" ""', line )
+    assert banner.returncode == 0, (banner.stdout, banner.stderr)
+
+
+@pytest.mark.parametrize( "option", SHELL_OPTIONS )
+def test_the_summary_line_reader_survives_set_e_when_there_is_no_summary_line( tmp_path, option ):
+    """A log with no summary (a crash, a timeout kill), a missing file, and an empty argument: all three are 'unknown', never a dead runner."""
+    log = tmp_path / "no-summary.log"
+    log.write_text( "collected 3 items\nKilled\n" )
+    for arg in ( str( log ), str( tmp_path / "does-not-exist.log" ), "" ):
+        proc = _run_under( option, 'x="$( run_scope_summary_line "$1" )"; echo "line=[$x]"', arg )
+        assert proc.returncode == 0 and "line=[]" in proc.stdout, ( arg, proc.stdout, proc.stderr )
+
+
+@pytest.mark.parametrize( "option", SHELL_OPTIONS )
+def test_the_selected_count_survives_set_e_on_a_line_with_no_outcome_words( option ):
+    """`run_scope_selected_count` of a line that names no outcomes is 0, not a dead shell."""
+    proc = _run_under( option, 'x="$( run_scope_selected_count "$1" )"; echo "selected=[$x]"', "no tests ran in 0.01s" )
+    assert proc.returncode == 0 and "selected=[0]" in proc.stdout, ( proc.stdout, proc.stderr )
