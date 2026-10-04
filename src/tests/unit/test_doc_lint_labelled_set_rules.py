@@ -664,6 +664,56 @@ def test_accept_cannot_waive_a_pair_that_fails_for_another_reason( written, caps
     assert not ( base / "dev" / "verify-input.jsonl" ).exists()
 
 
+def damage_one( base, split, kind, mutate, want ):
+    """Apply mutate( pair, text ) to the writer's new text of one pair of this kind until rule 1 fails it for exactly the reasons in want; returns its id."""
+    plan     = load( base, split )
+    path     = str( base / split / "writer_outputs.jsonl" )
+    original = s.read_jsonl( path )
+    for pair in plan[ "pairs" ]:
+        if pair[ "kind" ] != kind or pair[ "weaken_class" ] == "negation": continue
+        if kind == "weaken" and not s.weak_cues( pair[ "weaken_class" ], pair[ "changed_token" ] ): continue
+        tid  = new_task_of( plan, pair[ "id" ] )
+        rows = [ dict( r, text=mutate( pair, r[ "text" ] ) if r[ "task_id" ] == tid else r[ "text" ] ) for r in original ]
+        s.write_jsonl( path, rows )
+        if s.check_set( str( base ), split )[ 0 ].get( pair[ "id" ] ) == want: return pair[ "id" ]
+    s.write_jsonl( path, original )
+    raise AssertionError( f"no {kind} pair can be made to fail for exactly {want}" )
+
+
+def reword( pair, text ):
+    for cue in s.weak_cues( pair[ "weaken_class" ], pair[ "changed_token" ] ): text = s.word_regex( cue ).sub( "perchance", text )
+    return text
+
+
+def refused_accept( tmp_path, base, pid, capsys, reasons ):
+    """An --accept naming pid is refused, names the pid and its reasons, and verify goes no further."""
+    assert s.main( [ "verify", "--base", str( base ), "--split", "dev", "--accept", write_accept( tmp_path, [ pid ] ) ] ) == 2
+    err = capsys.readouterr().err
+    assert f"cannot accept {pid} ({reasons})" in err and "only WEAK_TOKEN_MISSING can be accepted" in err
+    assert not ( base / "dev" / "verify-input.jsonl" ).exists() and not ( base / "dev" / "rule1-accepted.json" ).exists()
+
+
+def test_accept_refuses_a_pair_whose_only_failure_is_a_restored_strong_word( written, capsys ):
+    tmp_path, _ = written
+    base = tmp_path / "out"
+    pid  = damage_one( base, "dev", "weaken", lambda p, text: text + " " + p[ "changed_token" ], [ "STRONG_RESTORED" ] )
+    refused_accept( tmp_path, base, pid, capsys, "STRONG_RESTORED" )
+
+
+def test_accept_refuses_a_pair_whose_only_failure_is_the_seeded_span_coming_back( written, capsys ):
+    tmp_path, _ = written
+    base = tmp_path / "out"
+    pid  = damage_one( base, "dev", "delete", lambda p, text: text + " " + p[ "x_span_in_old" ], [ "SPAN_VERBATIM" ] )
+    refused_accept( tmp_path, base, pid, capsys, "SPAN_VERBATIM" )
+
+
+def test_accept_refuses_a_pair_that_misses_the_weak_word_and_also_fails_another_rule( written, capsys ):
+    tmp_path, _ = written
+    base = tmp_path / "out"
+    pid  = damage_one( base, "dev", "weaken", lambda p, text: reword( p, text ) + " " + p[ "changed_token" ], [ "WEAK_TOKEN_MISSING", "STRONG_RESTORED" ] )
+    refused_accept( tmp_path, base, pid, capsys, "WEAK_TOKEN_MISSING STRONG_RESTORED" )
+
+
 def test_accept_refuses_a_file_that_is_not_a_list_of_ids_names_an_unknown_pair_or_is_missing( written, capsys ):
     tmp_path, _ = written
     base = tmp_path / "out"
