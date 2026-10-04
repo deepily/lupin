@@ -2437,7 +2437,8 @@ def ratio_loop_headroom( created, closed, allow_below ):
     Ensures:
         - returns `ratio_gate_headroom( ... ) - 1` when the gate admits at all
         - returns 0 when the gate admits exactly one more: the "FULL" state, at capacity
-          and still legal; under the gate's own semantics that state has no inputs
+          and still legal. Under loop semantics this state is reachable, which is the
+          substance of Rick's ruling; under the gate's own semantics it has no inputs
         - returns None when the gate refuses right now; the honest answer there is negative, not zero, because the
           caller is past the line. That case belongs to
           `ratio_gate_close_needed` and its "CLOSE N" badge, and folding it into 0
@@ -2509,9 +2510,7 @@ def _walk_the_gate( created, closed, allow_below, direction ):
 
 
 def quick_smoke_test():
-    """
-    Smoke-test task_store_rules: each validator once on the happy path and once rejected.
-    """
+    """Smoke-test task_store_rules: each validator once on the happy path and once rejected."""
     import cosa.utils.util as cu
 
     cu.print_banner( "Task-Store Rules Smoke Test", prepend_nl=True )
