@@ -47,27 +47,26 @@ import re
 from decimal import Decimal, InvalidOperation
 from typing import List, Optional
 
-from spacy.lang.en.stop_words import STOP_WORDS
-
-# spaCy's stop-word list is built for search, not meaning: it holds words that decide an answer. Measured
-# 2026-10-03 (Rio's review of 5277d09bc): "what is 10 more than 5" and "what is 10 less than 5" both
-# reduced to [ 10, 5 ]. These are KEPT as content words. Anything not listed stays a function word.
-_MEANING_BEARING = frozenset( {
-    "more", "less", "fewer", "most", "least", "few", "many", "much", "than", "enough",
-    "before", "after", "above", "below", "over", "under", "up", "down", "out", "off", "into", "from", "to",
-    "per", "between", "within", "through", "across", "around", "behind", "beyond", "against", "until",
-    "during", "since", "first", "last", "next", "top", "bottom", "front", "back", "again", "once",
-    "no", "not", "nor", "never", "none", "cannot", "n't", "nothing", "neither", "either", "both",
-    "all", "each", "every", "only", "just", "same", "other", "another", "half", "whole",
-    "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
-    "twenty", "thirty", "forty", "fifty", "sixty", "hundred", "third", "fourth", "fifth", "sixth",
+# THE NOISE LIST IS AN ALLOWLIST (row 1b3ec88f, fourth round). Every word NOT named here is compared, so a
+# word nobody has thought of fails closed. The first two versions dropped spaCy's whole stop-word list and
+# then a denylist of "meaning-bearing" words; each review found another word that flips an answer that
+# the lists still dropped (more/less, then and/or, without, can't, modals, ...). Only articles, "of",
+# "please", and forms of "be" and "do" are dropped: they add nothing a question's answer depends on.
+# wh-words (what, how, who, whom ...), modals, prepositions and quantifiers are all COMPARED.
+_NOISE_WORDS = frozenset( {
+    "a", "an", "the", "of", "please",
+    "is", "are", "was", "were", "be", "been", "am",
+    "do", "does", "did",
 } )
-_FUNCTION_WORDS = frozenset( STOP_WORDS ) - _MEANING_BEARING
 _NUMBER      = r"(?:(?<![\w.])[-−])?(?:\d+(?:,\d{3})*(?:\.\d+)?|\.\d+)"
 _WORD        = r"[^\W\d_]+(?:['’][^\W\d_]+)?"
 _TOKEN       = re.compile( f"{_NUMBER}|{_WORD}|[%$+*/=\\-\u00d7\u00f7]" )
 _HESITATION  = re.compile( r"u+h+|u+m+|h+m+|e+r+m*|a+h+|e+h+|o+h+" )
-_CLITICS     = ( "s", "re", "ll", "d", "ve", "m", "t" )
+# what an apostrophe clitic stands for: "'s" is dropped (possessive or "is"), the rest become their words,
+# and "n't" becomes "not" so "can't" is "can not", never "can"
+_NT_STEMS     = { "can": "can", "won": "will", "shan": "shall", "ain": "be" }   # every other "...n't" loses its "n"
+_CLITIC_WORDS = { "s": [], "re": [ "are" ], "m": [ "am" ], "ll": [ "will" ], "d": [ "would" ],
+                  "ve": [ "have" ], "t": [ "not" ] }
 _SYMBOL_WORD = { "%": "percent", "$": "dollar", "+": "plus", "*": "times", "\u00d7": "times",
                  "/": "divided", "\u00f7": "divided", "=": "equal" }
 
@@ -112,24 +111,32 @@ def _canonical_number( token: str ) -> str:
     return format( value if value != 0 else Decimal( 0 ), "f" )
 
 
-def _content_word( token: str ) -> Optional[ str ]:
+def _content_words( token: str ) -> List[ str ]:
     """
-    The comparable form of a word token, or None when it is a function word or a hesitation.
+    The comparable words a word token stands for; empty when it is noise or a hesitation.
 
     Requires:
         - token matched the word pattern (letters, optionally one apostrophe clitic)
 
     Ensures:
-        - "what's" is "what" (a trailing 's, 're, 'll, 'd, 've, 'm or 't clitic is dropped)
-        - returns None for spaCy stop words (except the _MEANING_BEARING ones) and for hesitation sounds
-        - otherwise the lowercase plural-folded word
+        - "what's" is ["what"]; "I'll" is ["i", "will"]; "can't" and "cannot" are ["can", "not"];
+          "isn't" and "don't" are ["not"] (the "is" and "do" are noise); "won't" is ["will", "not"]
+        - returns [] for the _NOISE_WORDS and for hesitation sounds
+        - every other word, lowercase and plural-folded, is returned: nothing is dropped by default
     """
-    word = token.lower().replace( "’", "'" )
+    word = token.lower().replace( "\u2019", "'" )
+    if word == "cannot": return [ "can", "not" ]
+    tail = []
     if "'" in word:
         stem, clitic = word.split( "'", 1 )
-        word         = stem if clitic in _CLITICS else stem + clitic
-    if word in _FUNCTION_WORDS or _HESITATION.fullmatch( word ): return None
-    return _fold_plural( word )
+        if clitic in _CLITIC_WORDS:
+            tail = _CLITIC_WORDS[ clitic ]
+            word = _NT_STEMS.get( stem, stem[ :-1 ] ) if clitic == "t" else stem
+        else:
+            word = stem + clitic
+    words = []
+    if word and word not in _NOISE_WORDS and not _HESITATION.fullmatch( word ): words.append( _fold_plural( word ) )
+    return words + [ w for w in tail if w not in _NOISE_WORDS ]
 
 
 def quantity_tokens( text: str ) -> List[ str ]:
@@ -157,8 +164,7 @@ def quantity_tokens( text: str ) -> List[ str ]:
         elif token[ -1 ].isdigit():
             tokens.append( _canonical_number( token ) )
         else:
-            word = _content_word( token )
-            if word is not None: tokens.append( word )
+            tokens.extend( _content_words( token ) )
     return tokens
 
 
