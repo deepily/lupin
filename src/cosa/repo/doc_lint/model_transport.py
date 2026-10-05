@@ -21,11 +21,14 @@ import json
 import os
 import secrets
 import subprocess
+import tempfile
+import threading
 import time
 
 from claude_agent_sdk import ClaudeAgentOptions, AssistantMessage, ResultMessage, TextBlock, query as sdk_query
 
 import cosa.utils.util as cu
+from cosa.orchestration.agy import runtime as agy_runtime
 
 # With tools=[] there is nothing to permit. "plan" would put the model in plan mode and change
 # what it writes (podcast_generator/api_client.py documents the failure), so it is "default".
@@ -62,6 +65,23 @@ RESIDUAL_CONTEXT = [ "environment and working-directory block", "model name", "t
 
 
 THINKING_SETTINGS = ( "default", "off" )
+
+# Which tool answers complete(). "claude" is bounded Claude Code, described above. "agy" sends the
+# call to a Gemini model through the Antigravity command-line agent (cosa.orchestration.agy).
+TRANSPORTS = ( "claude", "agy" )
+TRANSPORT  = "claude"
+
+# agy takes one prompt and has no system-prompt slot, so the two are joined with this text.
+AGY_PROMPT_JOIN = "\n\n"
+
+AGY_BIN     = None
+AGY_PIN     = None
+AGY_VERSION = None
+AGY_RUNNER  = None
+
+# Tokens agy reported, summed per model id for this process. Calls run in worker threads.
+AGY_USAGE       = {}
+_AGY_USAGE_LOCK = threading.Lock()
 
 # The plan for the model calls made under a record_calls() block, one per context (an asyncio task has its own),
 # so pairs in flight at once cannot write into each other's tally. It is kept here, and not passed down through
@@ -244,6 +264,106 @@ def configure( cli_path=None, cwd=None ):
     CWD      = cwd
 
 
+def configure_agy( agy_bin=agy_runtime.DEFAULT_AGY_BIN, runner=None ):
+    """
+    Send every later call through agy, pinned to the binary on disk now, for this process.
+
+    Requires:
+        - agy_bin is a command name on the search path, or a path to the agy binary
+        - runner, when given, stands in for subprocess.run in tests, for the version call and every model call
+
+    Ensures:
+        - later calls to complete go to agy, and the token tally starts empty
+        - the version is read first and the fingerprint second, because asking agy for its
+          version can start its updater
+        - returns the ledger binding: the binary's path, size, modification time and version.
+          A ledger written under one binary is refused under another
+        - a binary that changes later stops the run: complete raises AgyBinaryChanged
+
+    Raises:
+        - ValueError if the binary cannot be found or does not report a version
+    """
+    global TRANSPORT, AGY_BIN, AGY_PIN, AGY_VERSION, AGY_RUNNER
+    try:
+        version = agy_runtime.agy_version( agy_bin, runner=runner )
+        pin     = agy_runtime.binary_fingerprint( agy_bin )
+    except agy_runtime.AgyCallError as e:
+        raise ValueError( f"agy binary {agy_bin!r} is not usable: {e}" ) from e
+    TRANSPORT   = "agy"
+    AGY_BIN     = agy_bin
+    AGY_PIN     = pin
+    AGY_VERSION = version
+    AGY_RUNNER  = runner
+    with _AGY_USAGE_LOCK: AGY_USAGE.clear()
+    return f"agy={pin[ 'path' ]}|size={pin[ 'size' ]}|mtime_ns={pin[ 'mtime_ns' ]}|version={version}"
+
+
+def configure_claude():
+    """
+    Send every later call through bounded Claude Code again, and forget the agy pin.
+
+    Ensures:
+        - the transport is "claude", the default, and the agy binary, pin, version and runner are None
+    """
+    global TRANSPORT, AGY_BIN, AGY_PIN, AGY_VERSION, AGY_RUNNER
+    TRANSPORT   = "claude"
+    AGY_BIN     = None
+    AGY_PIN     = None
+    AGY_VERSION = None
+    AGY_RUNNER  = None
+
+
+def agy_usage_summary():
+    """
+    Return the tokens agy reported so far, per model id, for a report to print.
+
+    Ensures:
+        - returns { model: { "calls": n, "input_tokens": n, "output_tokens": n, "thinking_tokens": n,
+          "cache_read_tokens": n, "total_tokens": n } }; {} when no agy call has finished
+        - the result is a copy, so a caller cannot change the tally
+    """
+    with _AGY_USAGE_LOCK: return { model: dict( tally ) for model, tally in AGY_USAGE.items() }
+
+
+AGY_USAGE_FIELDS = ( "input_tokens", "output_tokens", "thinking_tokens", "cache_read_tokens", "total_tokens" )
+
+
+def _agy_call( model, prompt, timeout_seconds ):
+    """
+    Make one agy call in a fresh, empty scratch directory and return the answer text.
+
+    Requires:
+        - configure_agy has run; prompt is the joined system and user prompt
+
+    Ensures:
+        - agy runs with an empty temporary directory as its working directory, removed afterwards
+        - returns the answer stripped, and adds the call's tokens to the tally for model
+        - an answer is refused when agy tried a tool action or left anything in the scratch
+          directory: the Claude path runs with no tools, and a tool attempt is not a text answer
+
+    Raises:
+        - ModelCallError if agy fails, tried a tool action, or wrote into the scratch directory
+        - AgyBinaryChanged if the binary differs from the pin; it is not a ModelCallError, so a
+          caller that retries failed calls does not retry under another binary
+    """
+    with tempfile.TemporaryDirectory( prefix="agy-call-" ) as scratch:
+        try:
+            result = agy_runtime.run_agy( prompt, model=model, workspace_dir=scratch, timeout_seconds=timeout_seconds,
+                                          agy_bin=AGY_BIN, pinned_fingerprint=AGY_PIN, runner=AGY_RUNNER )
+        except agy_runtime.AgyCallError as e:
+            raise ModelCallError( f"model call to {model} failed: {e}" ) from e
+        left_behind = sorted( os.listdir( scratch ) )
+    if result.denied_actions:
+        raise ModelCallError( f"model call to {model} tried tool actions and was refused them: {result.denied_actions}" )
+    if left_behind:
+        raise ModelCallError( f"model call to {model} wrote into its scratch directory: {left_behind}" )
+    with _AGY_USAGE_LOCK:
+        tally = AGY_USAGE.setdefault( model, dict( { field: 0 for field in AGY_USAGE_FIELDS }, calls=0 ) )
+        tally[ "calls" ] += 1
+        for field in AGY_USAGE_FIELDS: tally[ field ] += result.usage.get( field, 0 )
+    return result.response.strip()
+
+
 def cli_version( cli_path, run_fn=None ):
     """
     Return the version string a Claude Code binary reports, so a report names the binary and not just its path.
@@ -300,7 +420,7 @@ def wrap( label, suffix, body ):
 
 async def complete( model, system_prompt, user_prompt, query_fn=None, timeout_seconds=TIMEOUT_SECONDS, thinking="default" ):
     """
-    Send one prompt to a bounded Claude Code model and return its text.
+    Send one prompt to a model and return its text, through Claude Code or agy.
 
     Requires:
         - model is a non-empty string naming a model id; there is no default
@@ -316,9 +436,14 @@ async def complete( model, system_prompt, user_prompt, query_fn=None, timeout_se
           the SDK's thinking-disabled option
         - a finished call is added to the enclosing record_calls() list as ( stage, wall-clock seconds )
         - an enclosing record_calls() block decides the thinking setting when thinking is "default"
+        - under agy the system prompt and the user prompt are joined by AGY_PROMPT_JOIN and sent as one
+          prompt, query_fn is not used, and the call runs in a worker thread so calls can overlap
+        - under agy the reasoning level is part of the model id, so thinking must resolve to "default"
 
     Raises:
-        - ValueError if model is empty, or thinking is not one of THINKING_SETTINGS
+        - ValueError if model is empty, thinking is not one of THINKING_SETTINGS, or thinking resolves
+          to "off" under agy; nothing is charged or contacted
+        - AgyBinaryChanged, under agy, if the binary differs from the one configure_agy pinned
         - CallBudgetExceeded if the model has used its cap; nothing is contacted
         - ModelCallError if the call raises, times out, ends in an error result, or returns no text
     """
@@ -329,6 +454,13 @@ async def complete( model, system_prompt, user_prompt, query_fn=None, timeout_se
     if scope is not None:
         stage, planned = scope.next_call()
         if thinking == "default": thinking = planned
+    if TRANSPORT == "agy":
+        if thinking != "default": raise ValueError( "thinking 'off' has no agy setting: choose the model id with the reasoning level wanted, such as one ending in -low" )
+        _charge( model )
+        started = time.monotonic()
+        text    = await asyncio.to_thread( _agy_call, model, system_prompt + AGY_PROMPT_JOIN + user_prompt, timeout_seconds )
+        if scope is not None: scope.calls.append( ( stage, time.monotonic() - started ) )
+        return text
     _charge( model )
     query_fn = sdk_query if query_fn is None else query_fn
     extra    = { "thinking": { "type": "disabled" } } if thinking == "off" else {}

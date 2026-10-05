@@ -14,6 +14,8 @@ import json
 import os
 import sys
 
+from cosa.orchestration.agy import runtime as agy_runtime
+
 from . import claim_extractor, claim_judge, harness_report, harness_runner, jev_judge, jev_transport, labelled_pairs, model_transport
 
 
@@ -31,6 +33,8 @@ def parse_args( argv ):
     parser.add_argument( "--t-hi", type=float, help="jev only: noul at or above this is present" )
     parser.add_argument( "--allow-design-text", action="store_true", help="labelled set only; real Design: documents need Rick's approval" )
     parser.add_argument( "--claude-cli-path", help="run this Claude Code binary instead of the SDK's bundled one (newer model ids can need a newer binary)" )
+    parser.add_argument( "--transport", choices=model_transport.TRANSPORTS, default="claude", help="agy: every model call goes to a Gemini model through the agy command-line agent, and each model id is an agy model identifier" )
+    parser.add_argument( "--agy-bin", help="agy only: the agy binary to run, a command name or a path (default: agy on the search path)" )
     parser.add_argument( "--raw-failures", help="append every unreadable extractor reply, with its pair and list, to this JSON Lines file (keep it out of the repo)" )
     parser.add_argument( "--call-ledger", help="file that counts every call to a capped model across runs and restarts; keep it outside the repo" )
     parser.add_argument( "--model-cap", action="append", default=[], metavar="MODEL=N", help="refuse the call after N calls to MODEL, counted in --call-ledger; repeat for more models" )
@@ -64,13 +68,14 @@ def raw_failure_sink( path ):
     return sink
 
 
-def main( argv, query_fn=None ):
+def main( argv, query_fn=None, agy_runner=None ):
     """
     Run the harness and write the report.
 
     Requires:
         - argv is the argument list without the program name
         - query_fn, when given, stands in for the SDK in tests
+        - agy_runner, when given, stands in for subprocess.run on the agy path in tests
 
     Ensures:
         - returns 0 after writing the report, printing one summary line
@@ -94,6 +99,13 @@ def main( argv, query_fn=None ):
         - --model-cap MODEL=N with --call-ledger caps that model's calls; the report and the last printed lines carry each capped model's count and cap
         - returns 2 when a cap is not MODEL=N with N an int of zero or more, or caps are given without a ledger
         - a call the cap refuses raises CallBudgetExceeded and ends the run; the ledger keeps the count for the next run
+        - with --transport agy the ledger binding is the agy binary's path, size, modification time and version,
+          and the report carries transport, agy_binding and agy_usage (tokens per model id)
+        - returns 2 when --transport agy is given with --claude-cli-path or with --judge-thinking off, when
+          --agy-bin is given without --transport agy, or when the agy binary is not usable
+        - returns 2 when the agy binary changes during the run; finished calls stay in the ledger, which then
+          resumes only under the binary it was written with
+        - the transport is set back to Claude before returning, whatever the outcome
     """
     args   = parse_args( argv )
     runs   = args.judge_runs if args.judge_runs is not None else ( 1 if args.judge_backend == "jev" else 3 )
@@ -113,11 +125,36 @@ def main( argv, query_fn=None ):
     except ValueError as e:
         print( f"REFUSED: {e}", file=sys.stderr )
         return 2
+    if args.transport == "agy" and args.claude_cli_path is not None:
+        print( "REFUSED: --claude-cli-path only applies to --transport claude", file=sys.stderr )
+        return 2
+    if args.transport == "agy" and args.judge_thinking != "default":
+        print( "REFUSED: --judge-thinking only applies to --transport claude; with agy the reasoning level is part of the model id", file=sys.stderr )
+        return 2
+    if args.transport != "agy" and args.agy_bin is not None:
+        print( "REFUSED: --agy-bin only applies to --transport agy", file=sys.stderr )
+        return 2
     try:
         model_transport.configure( args.claude_cli_path )
     except ValueError as e:
         print( f"REFUSED: {e}", file=sys.stderr )
         return 2
+    try:
+        return run_after_checks( args, config, query_fn, agy_runner )
+    finally:
+        model_transport.configure_claude()
+
+
+def run_after_checks( args, config, query_fn, agy_runner ):
+    """
+    Do the work of main once the command line has passed its first checks.
+
+    Requires:
+        - args and config are main's parsed arguments and harness configuration
+
+    Ensures:
+        - returns main's exit code; main sets the transport back to Claude afterwards
+    """
     try:
         caps = { m: int( n ) for m, _, n in ( c.rpartition( "=" ) for c in args.model_cap ) }
         model_transport.set_budget( args.call_ledger, caps )
@@ -161,15 +198,26 @@ def main( argv, query_fn=None ):
     if unquotable:
         print( f"REFUSED: {len( unquotable )} seeded span(s) cannot be quoted under the extractor's floors, so the run could not catch them: {', '.join( unquotable )}", file=sys.stderr )
         return 4
-    try:
+    if args.transport == "agy":
+        try:
+            binding = model_transport.configure_agy( args.agy_bin if args.agy_bin is not None else agy_runtime.DEFAULT_AGY_BIN, runner=agy_runner )
+        except ValueError as e:
+            print( f"REFUSED: {e}", file=sys.stderr )
+            return 2
+    else:
         binding = f"claude_cli={args.claude_cli_path}|version={model_transport.cli_version( args.claude_cli_path )}"
+    try:
         results = asyncio.run( harness_runner.run_all( pairs, config, harness_runner.Ledger( args.ledger, binding=binding ), query_fn=query_fn, judge_backend=backend,
                                                        on_unreadable=raw_failure_sink( args.raw_failures ), parallel=args.parallel ) )
-    except ( jev_transport.JevConfigError, harness_runner.LedgerBindingError ) as e:
+    except ( jev_transport.JevConfigError, harness_runner.LedgerBindingError, agy_runtime.AgyBinaryChanged ) as e:
         print( f"REFUSED: {e}", file=sys.stderr )
         return 2
     report  = harness_report.build_report( results, config, judge_prompt_version=judge_version, jev_run=backend is not None )
     report[ "pairs_sha" ] = pairs_sha
+    report[ "transport" ] = args.transport
+    if args.transport == "agy":
+        report[ "agy_binding" ] = binding
+        report[ "agy_usage" ]   = model_transport.agy_usage_summary()
     report[ "claude_cli" ]         = args.claude_cli_path
     report[ "claude_cli_version" ] = model_transport.cli_version( args.claude_cli_path )
     report[ "call_budget" ]        = model_transport.budget_summary()
