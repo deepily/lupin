@@ -11,6 +11,11 @@ Usage:
     submit-test-suite.py --test-types e2e_b --pytest-args "-v -k 'name_a or name_b'"
     submit-test-suite.py --test-types e2e_a --scheduled-at 2026-09-28T19:00:00-04:00
     submit-test-suite.py --test-types unit --dry-run
+    submit-test-suite.py --test-types integration --env LUPIN_TEST_V2_EVAL_LIMIT=20
+
+--env KEY=VALUE (repeatable) sets an environment variable for that run's pytest process only.
+The server keeps only names with a test-scoped prefix and drops the rest with a log line the
+submitter never sees, so this script refuses such a name here, before anything is sent.
 
 Credentials: LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL / _PASSWORD (the shared tester account).
 auto_fix_on_failure defaults to FALSE (landing-run convention, bug 67473d91); pass --auto-fix
@@ -32,6 +37,7 @@ if _src_path not in sys.path: sys.path.insert( 0, _src_path )
 import requests
 
 from cosa.agents.test_suite.v2_client import submit_body, read_reply
+from cosa.agents.test_suite.job import TestSuiteJob
 
 
 def parse_args( argv ):
@@ -49,7 +55,38 @@ def parse_args( argv ):
     p.add_argument( "--base-url",     default=os.environ.get( "LUPIN_SCHEDULE_BASE_URL", "http://localhost:8000" ) )
     p.add_argument( "--auto-fix",     action="store_true", help="enable TFE auto-dispatch for this run" )
     p.add_argument( "--dry-run",      action="store_true", help="queue the job but skip the pytest subprocess" )
+    p.add_argument( "--env",          action="append", default=[], metavar="KEY=VALUE",
+                    help="environment variable for this run's pytest process; repeatable; "
+                         f"the name must start with one of {', '.join( TestSuiteJob._ENV_VAR_ALLOWED_PREFIXES )}" )
     return p.parse_args( argv )
+
+
+def parse_env( pairs ):
+    """
+    Turn the --env values into the env_vars dict the suite job takes.
+
+    Requires:
+        - pairs is a list of strings from --env
+
+    Ensures:
+        - returns a dict of name to value; an empty list gives an empty dict
+        - a value may be empty and may itself contain "="; only the first "=" splits
+        - a later pair for the same name wins
+
+    Raises:
+        - ValueError naming the pair when it has no "=", has an empty name, or has a name
+          the suite job's own filter would drop. The filter is asked, not restated
+    """
+    env_vars = {}
+    for pair in pairs:
+        name, sep, value = pair.partition( "=" )
+        if not sep or not name:
+            raise ValueError( f"--env takes KEY=VALUE, got {pair!r}" )
+        if name not in TestSuiteJob._filter_env_vars( { name: value } ):
+            raise ValueError( f"--env {name}: the server keeps only names starting with one of "
+                              f"{', '.join( TestSuiteJob._ENV_VAR_ALLOWED_PREFIXES )} and would drop this one" )
+        env_vars[ name ] = value
+    return env_vars
 
 
 def build_payload( args ):
@@ -59,6 +96,10 @@ def build_payload( args ):
 
     Ensures:
         - returns the JSON body for /api/v2/submit, omitting unset optional fields
+        - --env pairs travel as args.env_vars; with none given the field is absent
+
+    Raises:
+        - ValueError from parse_env for a malformed or refused --env pair
         - auto_fix_on_failure is always sent (False unless --auto-fix), per the landing-run convention
     """
     return submit_body(
@@ -66,6 +107,7 @@ def build_payload( args ):
         pytest_args         = args.pytest_args,
         dry_run             = args.dry_run,
         auto_fix_on_failure = args.auto_fix,
+        env_vars            = parse_env( args.env ),
         scheduled_at        = args.scheduled_at,
     )
 
@@ -79,6 +121,11 @@ def main( argv ):
         - prints the server's response and returns an exit code per the module docstring
     """
     args     = parse_args( argv )
+    try:
+        payload = build_payload( args )
+    except ValueError as e:
+        print( f"ERROR: {e}", file=sys.stderr )
+        return 1
     email    = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" )
     password = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
     if not email or not password:
@@ -91,7 +138,6 @@ def main( argv ):
         return 2
     token = login.json()[ "tokens" ][ "access_token" ]
 
-    payload = build_payload( args )
     print( f"POST {args.base_url}/api/v2/submit {json.dumps( payload )}" )
     resp = requests.post( f"{args.base_url}/api/v2/submit",
                           headers={ "Authorization": f"Bearer {token}" }, json=payload, timeout=10 )

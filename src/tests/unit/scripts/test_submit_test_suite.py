@@ -75,3 +75,52 @@ def test_missing_credentials_exit_one( monkeypatch ):
 def test_a_failed_login_exits_two( monkeypatch, wired ):
     monkeypatch.setattr( sts.requests, "post", lambda url, **kw: _Resp( 401, { }, text="no" ) )
     assert sts.main( [ "--test-types", "unit" ] ) == 2
+
+
+# --env (row 4cbd4858): the scheduled full eval run raises the per-command sample this way.
+
+def test_env_pairs_reach_the_args_as_env_vars( wired ):
+    assert sts.main( [ "--test-types", "integration", "--env", "LUPIN_TEST_V2_EVAL_LIMIT=20",
+                       "--env", "LUPIN_TEST_INTEGRATION_FILE_TIMEOUT_MINUTES=40" ] ) == 0
+    args = wired[ "posts" ][ -1 ][ 1 ][ "args" ]
+    assert args[ "env_vars" ] == { "LUPIN_TEST_V2_EVAL_LIMIT": "20", "LUPIN_TEST_INTEGRATION_FILE_TIMEOUT_MINUTES": "40" }
+
+
+def test_without_env_the_field_is_absent( wired ):
+    sts.main( [ "--test-types", "unit" ] )
+    assert "env_vars" not in wired[ "posts" ][ -1 ][ 1 ][ "args" ]
+
+
+def test_env_splits_on_the_first_equals_only_keeps_an_empty_value_and_lets_the_last_pair_win():
+    assert sts.parse_env( [ "LUPIN_TEST_A=x=y", "LUPIN_TEST_B=", "LUPIN_TEST_A=z" ] ) == { "LUPIN_TEST_A": "z", "LUPIN_TEST_B": "" }
+    assert sts.parse_env( [] ) == {}
+
+
+@pytest.mark.parametrize( "pair, says", [
+    ( "LUPIN_TEST_X",      "takes KEY=VALUE" ),
+    ( "=5",                "takes KEY=VALUE" ),
+    ( "PATH=/tmp",         "would drop this one" ),
+    ( "lupin_test_x=1",    "would drop this one" ),
+    ( "MY_LUPIN_TEST_X=1", "would drop this one" ),
+] )
+def test_a_bad_env_pair_exits_one_before_anything_is_sent( wired, capsys, pair, says ):
+    assert sts.main( [ "--test-types", "unit", "--env", pair ] ) == 1
+    assert wired[ "posts" ] == [ ], "nothing may be posted, not even the login"
+    assert says in capsys.readouterr().err
+
+
+def test_every_prefix_the_suite_job_allows_is_accepted_here():
+    # The script asks the job's own filter, so a prefix added there is accepted here with no edit.
+    from cosa.agents.test_suite.job import TestSuiteJob
+    prefixes = TestSuiteJob._ENV_VAR_ALLOWED_PREFIXES
+    assert len( prefixes ) >= 3
+    for prefix in prefixes:
+        assert sts.parse_env( [ f"{prefix}X=1" ] ) == { f"{prefix}X": "1" }
+
+
+def test_a_name_the_job_filter_stops_allowing_is_refused_here_too( monkeypatch ):
+    from cosa.agents.test_suite.job import TestSuiteJob
+    monkeypatch.setattr( TestSuiteJob, "_ENV_VAR_ALLOWED_PREFIXES", ( "TFE_", ) )
+    assert sts.parse_env( [ "TFE_X=1" ] ) == { "TFE_X": "1" }
+    with pytest.raises( ValueError ):
+        sts.parse_env( [ "LUPIN_TEST_X=1" ] )
