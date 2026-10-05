@@ -77,6 +77,7 @@ from cosa.rest.running_fifo_queue import RunningFifoQueue
 import cosa.utils.util as du
 from cosa.agents.two_word_id_generator import TwoWordIdGenerator
 from cosa.rest.websocket_manager import WebSocketManager
+from cosa.rest import task_store_change_notifier
 from cosa.rest.notification_fifo_queue import NotificationFifoQueue
 
 # Import routers
@@ -126,6 +127,9 @@ commons_activity_watcher = None
 
 # WebSocket connection management
 websocket_manager = WebSocketManager()
+# Task-store pane push (row 8796333b): a commit that appended task events emits ONE
+# task_store_changed invalidation. Only THIS process installs the sink; other processes no-op.
+task_store_change_notifier.install_websocket_sink( websocket_manager )
 # Background task tracking for cleanup
 active_tasks = {}
 # Clock update background task

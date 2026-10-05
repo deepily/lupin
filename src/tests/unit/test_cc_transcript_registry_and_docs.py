@@ -73,7 +73,11 @@ COMMITTED_EVENTS_BEFORE = frozenset( [
     "tts_job_request", "update_subscriptions",
 ] )
 
-EXPECTED_EVENTS = COMMITTED_EVENTS_BEFORE | CC_TRANSCRIPT_EVENTS
+# Row 8796333b slice 1 (2026-10-03): the task panes' invalidation push. Declared, not derived —
+# a name arriving in the INI must still be reviewed here, as the assertion below insists.
+TASK_STORE_EVENTS = frozenset( [ "task_store_changed" ] )
+
+EXPECTED_EVENTS = COMMITTED_EVENTS_BEFORE | CC_TRANSCRIPT_EVENTS | TASK_STORE_EVENTS
 
 
 # ── A2.6 ──────────────────────────────────────────────────────────────────────
@@ -161,7 +165,8 @@ def test_the_four_names_are_not_already_among_the_committed_twenty_five():
         f"the pinned literal holds {len( COMMITTED_EVENTS_BEFORE )} names, not the 25 it "
         f"was read as. Re-read lupin-app.ini and date the change."
     )
-    assert len( EXPECTED_EVENTS ) == 29
+    assert not ( TASK_STORE_EVENTS & ( COMMITTED_EVENTS_BEFORE | CC_TRANSCRIPT_EVENTS ) )
+    assert len( EXPECTED_EVENTS ) == 30
 
 
 # ── A2.7 ──────────────────────────────────────────────────────────────────────

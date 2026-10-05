@@ -41,6 +41,7 @@ The allow-list is the `websocket available events` key in `lupin-app.ini` (`src/
 | `cc_transcript_unwatch` | CC transcript console | Client → Server | N/A (admin-gated) |
 | `cc_transcript_append` | CC transcript console | Server → Client | No — per **watching browser session**, via `emit_to_session` |
 | `cc_transcript_state` | CC transcript console | Server → Client | No — per **watching browser session**, via `emit_to_session` |
+| `task_store_changed` | Task store | Server → Client | No — broadcast to every connected session subscribed to it, via `emit` |
 | `sys_time_update` | System | Server → Client | No (broadcast) |
 | `status` | System | Server → Client | Varies |
 | `error` | System | Server → Client | Varies |
@@ -309,6 +310,35 @@ Real-time notification when the SWE Team decision proxy logs a new pending ratif
   "timestamp": "2026-03-20T10:30:00Z"
 }
 ```
+
+---
+
+## Task Store Events
+
+### `task_store_changed` (Server → Client)
+
+Row 8796333b, slice 1. An **invalidation**, not a delta: it says "the task store committed a change, re-read", and carries just enough to see what moved. The Task List pane (`TaskListStore`) re-reads on it, waiting out a read already in flight; the 60-second poll stays as the safety net, so a missed frame costs a late refresh, never a wrong board.
+
+**When**: once per database session that **commits** after appending one or more `TaskEvent` rows through `TaskRepository._append_event`. Three events in one commit are one frame. A rolled-back session emits nothing. Emitter: `src/cosa/rest/task_store_change_notifier.py`, wired in `lupin_app/main.py`.
+
+**Payload** (the commit's **last** event, plus a count):
+```json
+{
+  "type"       : "task_store_changed",
+  "event_id"   : 48213,
+  "item_id"    : "4288dd53-6779-460a-88bd-a7365fb734b2",
+  "transition" : "queued->in_progress",
+  "to_status"  : "in_progress",
+  "ts"         : "2026-10-03T21:40:00+00:00",
+  "count"      : 1
+}
+```
+`to_status` is `null` for a label without `->` (`patched`, `amended`, `chased`).
+The frame on the wire also carries a `timestamp` field, added to every event by `WebSocketManager`; the web client strips it.
+
+**What the web client does with it**: the Task List store waits out any read already in flight and then starts one more, so the read it shows began after the push. A burst of pushes shares that one read. The 60-second poll continues as the fallback.
+
+**Subscribers**: any session subscribed to it (default `"*"`); the web `QueueTransport` subscribes. **Not covered**: writers in a process that does not run the websocket manager (the `:8001` arbiter's straggler-ticket and follow-through writes) emit nothing; their rows show up on the next poll. Delivery is to **all** connected sessions, like the unscoped task poll; scoping by role is an open design question.
 
 ---
 

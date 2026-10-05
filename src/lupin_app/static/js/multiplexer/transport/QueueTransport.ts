@@ -437,6 +437,8 @@ const QUEUE_SUBSCRIBED_EVENTS: ReadonlyArray<string> = [
   // carry console traffic (B4.9, the legacy half asserts the same split).
   "cc_transcript_append",
   "cc_transcript_state",
+  // Row 8796333b slice 1: task panes re-read when the store commits a change.
+  "task_store_changed",
   "auth_success",
   "auth_error",
   "connect",
