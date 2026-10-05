@@ -824,3 +824,98 @@ def test_env_file_supplies_never_prints_the_secret( tmp_path ):
     r = _run( f"pfv_env_file_supplies '{f}' JWT_SECRET_KEY" )
     assert "super-secret-value" not in r.stdout
     assert "super-secret-value" not in r.stderr
+
+
+# ═════════════════════════════════════════════════════════════
+# pfv_mcp_registration_env (row c9252819)
+# ═════════════════════════════════════════════════════════════
+
+_VOICE_VAR = "LUPIN_CONFIG_MGR_CLI_ARGS"
+
+
+def _registration( tmp_path, body ):
+    f = tmp_path / "claude.json"
+    f.write_text( body )
+    return f
+
+
+def _registration_env( f ):
+    return _run( f"pfv_mcp_registration_env '{f}' cosa-voice {_VOICE_VAR}" )
+
+
+def test_registration_env_prints_the_value_when_present( tmp_path ):
+    import json
+    f = _registration( tmp_path, json.dumps( { "mcpServers": { "cosa-voice": {
+        "command" : "/venv/bin/python",
+        "env"     : { "LUPIN_ROOT": "/r", _VOICE_VAR: "config_block_id=Lupin:+Development" },
+    } } } ) )
+    r = _registration_env( f )
+    assert r.returncode == 0, r.stderr
+    assert r.stdout == "config_block_id=Lupin:+Development"
+
+
+def test_registration_env_is_1_when_the_server_is_registered_without_the_variable( tmp_path ):
+    # The defect itself: PYTHONPATH and LUPIN_ROOT only, as the VM's registration was.
+    import json
+    f = _registration( tmp_path, json.dumps( { "mcpServers": { "cosa-voice": {
+        "env": { "PYTHONPATH": "/r/src", "LUPIN_ROOT": "/r" },
+    } } } ) )
+    r = _registration_env( f )
+    assert r.returncode == 1
+    assert r.stdout == ""
+
+
+@pytest.mark.parametrize( "entry", [
+    '{ "env": { "LUPIN_CONFIG_MGR_CLI_ARGS": "" } }',
+    '{ "env": { "LUPIN_CONFIG_MGR_CLI_ARGS": "   " } }',
+    '{ "env": { "LUPIN_CONFIG_MGR_CLI_ARGS": 7 } }',
+    '{ "env": [ ] }',
+    '{ }',
+] )
+def test_registration_env_is_1_for_an_empty_blank_or_non_string_value( tmp_path, entry ):
+    f = _registration( tmp_path, '{ "mcpServers": { "cosa-voice": ' + entry + ' } }' )
+    assert _registration_env( f ).returncode == 1
+
+
+@pytest.mark.parametrize( "body", [
+    '{ "mcpServers": { "some-other-server": { "env": { "LUPIN_CONFIG_MGR_CLI_ARGS": "x" } } } }',
+    '{ "mcpServers": { "cosa-voice": "not an object" } }',
+    '{ "mcpServers": [ ] }',
+    '{ }',
+    '[ ]',
+    'this is not json',
+] )
+def test_registration_env_is_2_when_the_server_is_not_registered_or_the_file_is_not_json( tmp_path, body ):
+    r = _registration_env( _registration( tmp_path, body ) )
+    assert r.returncode == 2
+    assert r.stdout == ""
+
+
+def test_registration_env_is_2_for_a_missing_file( tmp_path ):
+    assert _registration_env( tmp_path / "absent.json" ).returncode == 2
+
+
+def test_the_preflight_asks_the_registration_and_blocks_only_on_a_broken_one():
+    # Wiring, read from the script text: bash cannot be line-instrumented here, and the
+    # preflight itself only runs on a VM. This pins that the check is called with the
+    # server and variable names, that a registered-but-broken host BLOCKS, that a host
+    # with no registration only WARNs, and that both print the installer as the remedy.
+    text = open( os.path.join( PROJECT_ROOT, "src/scripts/preflight-vm.sh" ), encoding="utf-8" ).read()
+    start = text.index( "# A3b" )
+    block = text[ start : text.index( "# A4/A5", start ) ]
+    assert f'pfv_mcp_registration_env "$CLAUDE_JSON" cosa-voice {_VOICE_VAR}' in block
+    assert "1) report fail BLOCK" in block
+    assert "*) report unknown WARN" in block
+    assert block.count( '"$VOICE_INSTALL"' ) == 2
+    assert "install-cosa-voice.sh" in block
+
+
+def test_the_vm_script_has_a_dry_runnable_step_that_runs_the_installer_on_the_vm():
+    vm = os.path.join( PROJECT_ROOT, "src/scripts/lupin-vm.sh" )
+    r  = subprocess.run( [ "bash", vm, "--dry-run", "install-voice" ], capture_output=True, text=True,
+                         env=dict( os.environ, LUPIN_GCP_PROJECT_ID="example-project" ) )
+    out = r.stdout + r.stderr
+    assert r.returncode == 0, out
+    assert "bash /mnt/lupin-data/lupin/src/scripts/install-cosa-voice.sh" in out
+    assert "export LUPIN_ROOT=/mnt/lupin-data/lupin" in out
+    assert "gcloud" not in out, "a dry run must not show or run the ssh call"

@@ -247,6 +247,20 @@ else
     report unknown BLOCK "CC venv $CC_VENV does not exist" "lupin-vm.sh push-env, then install-cosa-voice.sh on the VM"
 fi
 
+# A3b — the voice server's registration carries the settings pointer (row c9252819).
+# Without it a spawned worker gets no model and runs on the user's default, silently.
+# No registration at all is a WARN: a host nobody runs Claude Code on has none.
+CLAUDE_JSON="${PREFLIGHT_VM_CLAUDE_JSON:-$HOME/.claude.json}"
+VOICE_INSTALL="LUPIN_ROOT=$REPO_ROOT bash $REPO_ROOT/src/scripts/install-cosa-voice.sh"
+reg_args="$( pfv_mcp_registration_env "$CLAUDE_JSON" cosa-voice LUPIN_CONFIG_MGR_CLI_ARGS )"; rc=$?
+case $rc in
+    0) report pass BLOCK "cosa-voice registration carries LUPIN_CONFIG_MGR_CLI_ARGS ($reg_args)" ;;
+    1) report fail BLOCK "cosa-voice is registered in $CLAUDE_JSON without LUPIN_CONFIG_MGR_CLI_ARGS — spawned workers get no model and run on the user default" \
+                    "$VOICE_INSTALL" ;;
+    *) report unknown WARN "no readable cosa-voice registration in $CLAUDE_JSON" \
+                      "$VOICE_INSTALL" ;;
+esac
+
 # A4/A5 — the CC session-bridge surface (persona-404's two halves).
 SESSIONS_DIR="${LUPIN_HOST_SESSIONS_DIR:-$HOME/.claude/sessions}"
 if [ -d "$SESSIONS_DIR" ]; then

@@ -148,6 +148,9 @@ Dev-box CLI parity (make the VM host feel like your dev box) — RUN FROM THE DE
                           install Python 3.13 (matches the dev box + image), builds the SDK venv on
                           it, symlinks the bundled 'claude'. One-time OAuth is a manual 'claude' run
                           you do afterward. Idempotent.
+  install-voice           register the cosa-voice MCP server in the VM user's Claude Code config by
+                          running src/scripts/install-cosa-voice.sh there. Needs install-cli and a
+                          checkout first. Sessions pick it up when they next start. Idempotent.
   push-env                sync your shell env: SCP ~/.bash_aliases + ~/.bash_aliases_to_uc.py to
                           the VM, regenerate ~/.bash_aliases_uc there, wire ~/.bashrc to source
                           both AND export VM-correct LUPIN_ROOT + PLANNING_IS_PROMPTING_ROOT +
@@ -984,6 +987,26 @@ echo 'NEXT (manual, interactive): open a fresh shell, run  claude  once, complet
         fi
         ;;
 
+    install-voice)
+        # Register the cosa-voice MCP server in the VM user's Claude Code config by running the
+        # repo's own installer there (row c9252819). The registration is per user and per host,
+        # so a bundle push does not deliver it. The installer is safe to re-run.
+        require_project
+        RCMD_VOICE="set -e
+export PATH=\"\$HOME/.local/bin:\$PATH\"
+export LUPIN_ROOT=$VM_ROOT
+export LUPIN_CC_VENV=\"\$HOME/.venv-lupin-mcp\"
+bash $VM_ROOT/src/scripts/install-cosa-voice.sh"
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log "(dry-run) register cosa-voice on VM:"
+            printf '%s\n' "$RCMD_VOICE" >&2
+        else
+            log "registering cosa-voice on $VM_NAME host"
+            gcloud compute ssh "$VM_NAME" \
+                --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
+                --command "$RCMD_VOICE"
+        fi
+        ;;
     push-env)
         # Sync your dev-box shell environment to the VM host so both feel identical. SCPs your alias
         # file + the uppercase generator, REGENERATES the uppercase aliases ON the VM (from the just-

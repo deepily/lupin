@@ -1192,3 +1192,40 @@ pfv_roster_declares() {
 pfv_cc_project_dirname() {
     printf '%s' "$1" | sed -E 's/[^A-Za-z0-9]/-/g'
 }
+
+# ── pfv_mcp_registration_env ──────────────────────────────────
+# Read one environment variable out of an MCP server's user-scope registration.
+#
+# The cosa-voice server reads the worker-model setting through LUPIN_CONFIG_MGR_CLI_ARGS.
+# A registration without it spawns every worker on the user's default model, and nothing
+# reports it (row c9252819). The container's own copy of that variable is a different
+# surface and is checked elsewhere.
+#
+# Requires:
+#   - $1 = path to the Claude Code user config (~/.claude.json)
+#   - $2 = MCP server name, $3 = environment variable name
+# Ensures:
+#   - returns 0 and prints the value when the server is registered and the variable is
+#     a non-empty string
+#   - returns 1 when the server is registered and the variable is absent or empty
+#   - returns 2 when the file is unreadable, is not JSON, or does not register the
+#     server. Could-not-determine is never folded into a pass
+pfv_mcp_registration_env() {
+    local file="$1" server="$2" name="$3"
+    [ -r "$file" ] || return 2
+    python3 - "$file" "$server" "$name" <<'PFV_PY'
+import json, sys
+path, server, name = sys.argv[ 1 ], sys.argv[ 2 ], sys.argv[ 3 ]
+try:
+    with open( path, encoding="utf-8" ) as f: doc = json.load( f )
+except ( OSError, ValueError ):
+    sys.exit( 2 )
+servers = doc.get( "mcpServers" ) if isinstance( doc, dict ) else None
+entry   = servers.get( server ) if isinstance( servers, dict ) else None
+if not isinstance( entry, dict ): sys.exit( 2 )
+env   = entry.get( "env" )
+value = env.get( name ) if isinstance( env, dict ) else None
+if not isinstance( value, str ) or not value.strip(): sys.exit( 1 )
+sys.stdout.write( value )
+PFV_PY
+}

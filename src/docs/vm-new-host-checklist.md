@@ -68,6 +68,22 @@ Not preflight checks: they happen before the preflight can run, or are an instan
 | `lupin-vm.sh` stops with "LUPIN_GCP_PROJECT_ID is not set" | Every subcommand that calls gcloud needs the project id in the shell; the script does not fall back to `gcloud config`, which may name a different project | `export LUPIN_GCP_PROJECT_ID=<your-project-id>`, then re-run. `--dry-run` prints a placeholder instead of stopping |
 | Preflight C11 warns "no roster line for `COSA_VOICE_MANAGERS__WEIL_PARALLEL_SEARCH`" | A project is worked on the VM (it has a Claude Code project dir) but `~/.claude/fleet-roster.env` has no line for it | Add `COSA_VOICE_MANAGERS__WEIL_PARALLEL_SEARCH="<Persona>"` to `~/.claude/fleet-roster.env`. This is the C11 fix above applied to that project; the persona is Rick's choice, so the check cannot supply it |
 
+## The voice-server registration (found 2026-10-02, row `c9252819`)
+
+| check | what must exist | level | symptom when missing |
+|---|---|---|---|
+| **A3b** | the `cosa-voice` entry in `~/.claude.json` has `LUPIN_CONFIG_MGR_CLI_ARGS` in its `env` | block when the entry exists without it; warn when there is no entry | Every spawned worker gets no `--model` and runs on the user's default model. The spawn result shows `"model": null`. No error anywhere |
+
+**How it is fixed.** The entry is written by `src/scripts/install-cosa-voice.sh`, which is safe to
+re-run. It is per user and per host, so a bundle push does not deliver it. From the dev box:
+
+```bash
+src/scripts/lupin-vm.sh install-voice
+```
+
+Run it after `install-cli` and after the first checkout. A session picks the new entry up when
+it next starts; a session already running keeps the entry it started with.
+
 ## Adding a new item to this list
 
 When a host turns out to be missing configuration that git does not carry:
