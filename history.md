@@ -19,7 +19,8 @@
 - **Row `2af2c387`, multi-user transcript direction**: Rick ruled yes; plan committed `d4e39a17a`; plan row `8385316c` held on his word.
 - **Dev box**: the user-scope cosa-voice registration now carries `LUPIN_CONFIG_MGR_CLI_ARGS`, on Rick's yes. The installer was not run here: it would drop three live hooks (row `ea27d263`, holding area).
 - **Corrections of mine today**: the 17:03 memento said the fleet cap was 2 for the whole day; the ini line read 8 at 18:46 · six review sub-agents ran on Opus, not Sonnet, because no model was passed.
-- **Owed**: Rick's two provision commands for `80513825` (`pg_roles` showed only `lupin_dev` at 19:29 EDT) · read `ts-04fb21c3` after 11:45 EDT on 10-06 · rows `fae0bc51` and `ea27d263` await approval · the first full unit tier over `57a98244f`..`3172e5123` is Cheech's run on `ed303beb8`, not read at this writing · post-game.
+- **Owed**: Rick's two provision commands for `80513825` (`pg_roles` showed only `lupin_dev` at 19:29 EDT) · read `ts-04fb21c3` after 11:45 EDT on 10-06 · rows `fae0bc51` and `ea27d263` await approval · post-game.
+- **First full tiers over `57a98244f`..`3172e5123`**: Cheech's run on `ed303beb8`, as he reported it by DM at 19:54 EDT: unit 29,970 passed, 0 failed; cosa 9,114 passed, 0 failed.
 - **Files**: history.md; code via four reviewed merges and three direct commits on the working branch. Not pushed.
 
 ### 2026.10.04 - Session 93ec0919 → acd9cc5f (Mr. Radio 🦉, manager; crew Tiberius 👑, Sam 🎙️, Rio ⚡) | Pilot finished and summarized; fast-check trial shows thinking-off loses real losses; Gemini comparison plan and bundle
