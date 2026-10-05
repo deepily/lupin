@@ -62,10 +62,15 @@ BASE_URL  = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
 _EMAIL    = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" )
 _PASSWORD = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
 
-# Utterances-per-command cap. Small default keeps an ad-hoc run cheap; the scheduled
-# submission tunes it up via the LUPIN_TEST_ env allowlist (e.g. LUPIN_TEST_V2_EVAL_LIMIT=60
-# for the pre-declared n=60/command sample). None = full corpus.
-_LIMIT_RAW = os.environ.get( "LUPIN_TEST_V2_EVAL_LIMIT", "20" )
+# Utterances-per-command cap. The default is the SHORT PROXY Rick ruled on 2026-10-05
+# (row 4cbd4858): 5 per command, so 5 commands x 5 x 2 passes = 50 asks inside the
+# integration suite. At 20 per command (200 asks) the file ran into its 15-minute cap:
+# measured that day at about 7.4 s per ask. The full sample is a separate scheduled
+# run, which raises the cap through the LUPIN_TEST_ env allowlist
+# (LUPIN_TEST_V2_EVAL_LIMIT=20, or 60 for the pre-declared n=60/command sample).
+# None = full corpus.
+PROXY_LIMIT_PER_COMMAND = "5"
+_LIMIT_RAW = os.environ.get( "LUPIN_TEST_V2_EVAL_LIMIT", PROXY_LIMIT_PER_COMMAND )
 _LIMIT     = None if _LIMIT_RAW.strip().lower() in ( "", "none", "all" ) else int( _LIMIT_RAW )
 
 
