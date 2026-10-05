@@ -6,6 +6,7 @@ Every docstring here is made up for this file. No dev, gate or reserve data is r
 """
 
 import json
+import random
 
 import pytest
 
@@ -539,6 +540,85 @@ def test_redraw_never_redraws_the_span_that_failed():
         s.redraw_pairs( plan, {"p000"}, { "delete": [ doc( "when the pool is closed" ) ] }, {"u"}, __import__( "random" ).Random( 1 ) )
     got = s.redraw_pairs( plan, {"p000"}, { "delete": [ doc( "when the pool is closed", "if the pool is open" ) ] }, {"u"}, __import__( "random" ).Random( 1 ) )
     assert got[ "p000" ][ 2 ][ "span_text" ] == "if the pool is open"
+
+
+# ---- redraw --failed: replace the pairs a second reader failed, whatever rule 1 says ------------------------------
+
+def test_redraw_failed_replaces_a_pair_rule_1_passes_of_every_kind_keeps_its_id_and_every_floor( written, capsys ):
+    tmp_path, pool = written
+    gate   = tmp_path / "gate-store"
+    before = load( gate, "gate" )
+    assert s.check_set( str( gate ), "gate" )[ 0 ] == {}
+    for kind in s.KINDS:
+        target = tmp_path / ( "redrawn" if kind == s.KINDS[ 0 ] else "redrawn-" + kind )
+        pair   = next( p for p in before[ "pairs" ] if p[ "kind" ] == kind )
+        args   = redraw_args( tmp_path, pool, failed=write_accept( tmp_path, [ pair[ "id" ] ], f"failed-{kind}.json" ) )
+        args[ args.index( "--out" ) + 1 ] = str( target )
+        assert s.main( args ) == 0, kind
+        after  = json.loads( ( target / "gate" / "plan.json" ).read_text() )
+        s.check_plan_hash( after )
+        assert floors_of( after ) == floors_of( before ), kind
+        assert [ p[ "id" ] for p in after[ "pairs" ] ] == [ p[ "id" ] for p in before[ "pairs" ] ]
+        assert [ p[ "id" ] for p, q in zip( before[ "pairs" ], after[ "pairs" ] ) if p != q ] == [ pair[ "id" ] ], kind
+        new = next( p for p in after[ "pairs" ] if p[ "id" ] == pair[ "id" ] )
+        assert new[ "kind" ] == kind and ( new[ "pool_id" ], new[ "x_span_in_old" ] ) != ( pair[ "pool_id" ], pair[ "x_span_in_old" ] ), kind
+        pool_ids = [ p[ "pool_id" ] for p in after[ "pairs" ] ]
+        assert len( set( pool_ids ) ) == len( pool_ids ), kind
+        tasks = 2 if kind == "relocate" else 1
+        assert f"1 failed pair(s) {pair[ 'id' ]} are replaced; {tasks} new writer call(s) needed, up to {2 * tasks} with one retry each" in capsys.readouterr().out, kind
+        done = { r[ "task_id" ] for r in s.read_jsonl( str( target / "gate" / "writer_ledger.jsonl" ) ) }
+        assert len( [ t for t in after[ "tasks" ] if t not in done ] ) == tasks, kind
+
+
+def test_redraw_failed_adds_to_the_rule_1_failures_and_a_pair_named_twice_is_replaced_once( written, capsys ):
+    tmp_path, pool = written
+    gate   = tmp_path / "gate-store"
+    broken = break_outputs( gate, "gate", 1 )
+    other  = next( p[ "id" ] for p in load( gate, "gate" )[ "pairs" ] if p[ "kind" ] == "paraphrase" )
+    failed = write_accept( tmp_path, [ other, broken[ 0 ], other ] )
+    assert s.main( redraw_args( tmp_path, pool, failed=failed ) ) == 0
+    ids = sorted( [ other, broken[ 0 ] ] )
+    assert f"2 failed pair(s) {' '.join( ids )} are replaced; 2 new writer call(s) needed" in capsys.readouterr().out
+    assert load( tmp_path / "redrawn", "gate" )[ "redrawn" ][ "pairs" ] == ids
+
+
+@pytest.mark.parametrize( "content, message", [
+    ( "{\"p000\": 1}", "must hold a JSON list of pair ids" ), ( "[1, 2]", "must hold a JSON list of pair ids" ),
+    ( "[\"p000\", \"p999\", \"p998\"]", "names pairs that are not in the plan: p998 p999" ), ( "[", "Expecting value" ) ] )
+def test_redraw_failed_refuses_a_file_that_is_not_a_list_of_strings_or_names_an_unknown_pair_and_writes_nothing( written, capsys, content, message ):
+    tmp_path, pool = written
+    path = tmp_path / "failed.json"
+    path.write_text( content )
+    assert s.main( redraw_args( tmp_path, pool, failed=str( path ) ) ) == 2
+    err = capsys.readouterr().err
+    assert "REFUSED" in err and message in err and not ( tmp_path / "redrawn" ).exists()
+
+
+def test_redraw_failed_refuses_a_file_that_is_not_there_and_writes_nothing( written, capsys ):
+    tmp_path, pool = written
+    assert s.main( redraw_args( tmp_path, pool, failed=str( tmp_path / "nowhere.json" ) ) ) == 2
+    assert "REFUSED" in capsys.readouterr().err and not ( tmp_path / "redrawn" ).exists()
+
+
+def test_redraw_failed_with_an_empty_list_and_no_rule_1_failure_changes_nothing( written, capsys ):
+    tmp_path, pool = written
+    assert s.main( redraw_args( tmp_path, pool, failed=write_accept( tmp_path, [] ) ) ) == 0
+    assert "nothing to redraw" in capsys.readouterr().out and not ( tmp_path / "redrawn" ).exists()
+
+
+def test_redraw_never_redraws_the_relocate_sentence_or_the_paraphrase_docstring_that_failed():
+    doc   = lambda pool_id, cands: { "pool_id": pool_id, "unit": "u", "stratum": "S", "cands": cands }
+    pair  = lambda kind, span: { "pairs": [ { "id": "p000", "kind": kind, "weaken_class": None, "short": False, "stratum": "S", "pool_id": "d1", "x_span_in_old": span } ] }
+    wait  = { "sentence": "Callers wait here.", "cut": "x" }
+    retry = { "sentence": "Callers retry here.", "cut": "y" }
+    with pytest.raises( s.Shortfall, match="nothing in scope replaces p000" ):
+        s.redraw_pairs( pair( "relocate", "Callers wait here." ), { "p000" }, { "relocate": [ doc( "d1", [ wait ] ) ] }, { "u" }, random.Random( 1 ) )
+    got = s.redraw_pairs( pair( "relocate", "Callers wait here." ), { "p000" }, { "relocate": [ doc( "d1", [ wait, retry ] ) ] }, { "u" }, random.Random( 1 ) )
+    assert got[ "p000" ][ 2 ] is retry
+    with pytest.raises( s.Shortfall, match="nothing in scope replaces p000" ):
+        s.redraw_pairs( pair( "paraphrase", "" ), { "p000" }, { "paraphrase": [ doc( "d1", [ { "text": "t" } ] ) ] }, { "u" }, random.Random( 1 ) )
+    got = s.redraw_pairs( pair( "paraphrase", "" ), { "p000" }, { "paraphrase": [ doc( "d1", [ { "text": "t" } ] ), doc( "d2", [ { "text": "u" } ] ) ] }, { "u" }, random.Random( 1 ) )
+    assert got[ "p000" ][ 1 ][ "pool_id" ] == "d2"
 
 
 def capture_scope( monkeypatch ):
