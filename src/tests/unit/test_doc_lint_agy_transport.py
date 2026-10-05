@@ -145,7 +145,32 @@ def test_configure_claude_forgets_the_agy_pin( agy_bin ):
 
     mt.configure_claude()
 
-    assert ( mt.TRANSPORT, mt.AGY_BIN, mt.AGY_PIN, mt.AGY_VERSION, mt.AGY_RUNNER ) == ( "claude", None, None, None, None )
+    assert ( mt.TRANSPORT, mt.AGY_BIN, mt.AGY_PIN, mt.AGY_VERSION, mt.AGY_RUNNER, mt.AGY_STOP ) == ( "claude", None, None, None, None, None )
+
+
+def test_the_pin_is_taken_after_the_version_call_so_an_update_it_starts_is_the_pinned_binary( agy_bin ):
+    class UpdatesOnVersion( FakeAgy ):
+        def __call__( self, argv, **kwargs ):
+            if argv[ 1: ] == [ "--version" ]:
+                with open( agy_bin, "wb" ) as handle: handle.write( b"#!/bin/sh\n# the updater replaced me\n" )
+            return super().__call__( argv, **kwargs )
+
+    fake = UpdatesOnVersion( answer="ok" )
+    mt.configure_agy( agy_bin, runner=fake )
+
+    assert mt.AGY_PIN[ "size" ] == len( b"#!/bin/sh\n# the updater replaced me\n" ) != 10
+    assert complete( "m", "s", "u" ) == "ok"
+
+
+def test_calls_overlap_instead_of_waiting_for_each_other( agy_bin ):
+    mt.configure_agy( agy_bin, runner=FakeAgy( answer="ok", on_call=lambda cwd: time.sleep( 0.3 ) ) )
+
+    async def four_at_once():
+        started = time.monotonic()
+        await asyncio.gather( *[ mt.complete( "m", "s", "u" ) for _ in range( 4 ) ] )
+        return time.monotonic() - started
+
+    assert asyncio.run( four_at_once() ) < 0.9
 
 
 def test_the_transports_are_claude_and_agy_and_claude_is_the_default():
@@ -207,6 +232,25 @@ def test_a_token_field_agy_does_not_report_counts_as_zero( agy_bin ):
     complete( "m", "s", "u" )
 
     assert mt.agy_usage_summary() == { "m" : { "calls" : 1, "input_tokens" : 5, "output_tokens" : 0, "thinking_tokens" : 0, "cache_read_tokens" : 0, "total_tokens" : 6 } }
+
+
+@pytest.mark.parametrize( "odd", [ None, "12", True, 1.5 ] )
+def test_a_token_count_that_is_not_a_whole_number_adds_nothing_and_does_not_fail_the_call( agy_bin, odd ):
+    mt.configure_agy( agy_bin, runner=FakeAgy( answer="ok", usage={ "input_tokens" : odd, "total_tokens" : 6 } ) )
+
+    assert complete( "m", "s", "u" ) == "ok"
+    assert mt.agy_usage_summary()[ "m" ] == { "calls" : 1, "input_tokens" : 0, "output_tokens" : 0, "thinking_tokens" : 0, "cache_read_tokens" : 0, "total_tokens" : 6 }
+
+
+@pytest.mark.parametrize( "given, sent", [ ( 45.9, "45s" ), ( 0.2, "1s" ), ( 600, "600s" ) ] )
+def test_the_time_limit_reaches_agy_as_whole_seconds( agy_bin, given, sent ):
+    fake = FakeAgy( answer="ok" )
+    mt.configure_agy( agy_bin, runner=fake )
+
+    complete( "m", "s", "u", timeout_seconds=given )
+
+    argv = fake.calls[ 0 ][ "argv" ]
+    assert argv[ argv.index( "--print-timeout" ) + 1 ] == sent
 
 
 def test_thinking_off_is_refused_before_any_charge_or_call( agy_bin, tmp_path ):
@@ -317,6 +361,46 @@ def test_a_binary_that_changed_after_the_pin_stops_the_call_and_is_not_a_model_c
 
     assert not isinstance( raised.value, mt.ModelCallError )
     assert fake.calls == []
+    assert mt.AGY_STOP.startswith( "agy binary changed since the run began: pinned " )
+
+
+def test_calls_refused_for_a_changed_binary_are_not_charged_and_the_disk_is_read_once( agy_bin, tmp_path, monkeypatch ):
+    mt.configure_agy( agy_bin, runner=FakeAgy( answer="ok" ) )
+    mt.set_budget( str( tmp_path / "calls.jsonl" ), { "m" : 5 } )
+    with open( agy_bin, "wb" ) as handle: handle.write( b"#!/bin/sh\n# agy updated itself\n" )
+
+    with pytest.raises( agy_runtime.AgyBinaryChanged ):
+        complete( "m", "s", "u" )
+
+    def no_more_reads( agy_bin ):
+        pytest.fail( "the binary was fingerprinted again after the run had stopped", pytrace=False )
+
+    monkeypatch.setattr( agy_runtime, "binary_fingerprint", no_more_reads )
+    for _ in range( 2 ):
+        with pytest.raises( agy_runtime.AgyBinaryChanged, match="agy binary changed since the run began" ):
+            complete( "m", "s", "u" )
+
+    assert mt.calls_used( "m" ) == 0
+
+
+def test_a_binary_that_disappeared_counts_as_changed( agy_bin ):
+    mt.configure_agy( agy_bin, runner=FakeAgy( answer="ok" ) )
+    os.remove( agy_bin )
+
+    with pytest.raises( agy_runtime.AgyBinaryChanged, match="now None" ):
+        complete( "m", "s", "u" )
+
+
+def test_a_change_run_agy_reports_during_a_call_is_kept_as_the_stop_reason( agy_bin ):
+    def update_itself( cwd ):
+        with open( agy_bin, "wb" ) as handle: handle.write( b"#!/bin/sh\n# agy updated itself mid-call\n" )
+
+    mt.configure_agy( agy_bin, runner=FakeAgy( answer="ok", on_call=update_itself ) )
+
+    with pytest.raises( agy_runtime.AgyBinaryChanged, match="while the call ran" ):
+        complete( "m", "s", "u" )
+
+    assert "while the call ran" in mt.AGY_STOP
 
 
 def test_on_claude_the_agy_runner_is_never_used_and_the_query_function_is( agy_bin ):
@@ -387,6 +471,8 @@ def test_the_command_line_runs_the_pairs_through_agy_and_reports_it( tmp_path, a
     binding = f"agy={os.path.realpath( agy_bin )}|size=10|mtime_ns={info.st_mtime_ns}|version=1.2.17"
     assert report[ "transport" ]   == "agy"
     assert report[ "agy_binding" ] == binding
+    assert report[ "call_profile" ]          == mt.AGY_CALL_PROFILE == "agy-print-1|new-project|disable-slash-commands|stream-json|empty-scratch-cwd|no-edit-grant"
+    assert report[ "call_residual_context" ] == mt.AGY_RESIDUAL_CONTEXT
     assert report[ "lists" ][ 0 ][ "positives" ] == 1 and report[ "lists" ][ 0 ][ "misses" ] == 0
 
     # Two pairs, two extractor lists each, three judge runs per list: 4 extractor and 12 judge calls.
@@ -417,6 +503,8 @@ def test_the_default_transport_is_claude_and_its_report_has_no_agy_fields( tmp_p
     report = json.loads( ( tmp_path / "out.json" ).read_text() )
     assert report[ "transport" ] == "claude"
     assert "agy_binding" not in report and "agy_usage" not in report
+    assert report[ "call_profile" ]          == mt.CALL_PROFILE
+    assert report[ "call_residual_context" ] == mt.RESIDUAL_CONTEXT
     assert json.loads( ( tmp_path / "ledger.jsonl" ).read_text().splitlines()[ 0 ] ) == { "binding" : "claude_cli=None|version=None" }
 
 
@@ -489,9 +577,61 @@ def test_a_ledger_written_under_one_agy_binary_is_refused_under_another( tmp_pat
     assert second.calls == []
 
 
-def test_a_ledger_written_under_claude_is_refused_under_agy( tmp_path, agy_bin, capsys ):
+def test_a_run_stopped_by_a_binary_change_says_to_use_a_new_ledger_and_the_old_one_stays_refused( tmp_path, agy_bin, capsys ):
     write_pairs( tmp_path )
-    ( tmp_path / "ledger.jsonl" ).write_text( json.dumps( { "binding" : "claude_cli=None|version=None" } ) + "\n" )
+    argv = cli_args( tmp_path, "--transport", "agy", "--agy-bin", agy_bin )
+
+    def update_itself( cwd ):
+        with open( agy_bin, "wb" ) as handle: handle.write( b"#!/bin/sh\n# agy updated itself mid-run\n" )
+
+    assert cli.main( argv, agy_runner=FakeAgy( on_call=update_itself ) ) == 2
+    assert "rerun with a new --ledger" in capsys.readouterr().err
+    again = FakeAgy()
+
+    assert cli.main( argv, agy_runner=again ) == 2
+
+    assert "use a new ledger" in capsys.readouterr().err
+    assert again.calls == []
+
+
+def test_with_pairs_in_flight_a_binary_change_is_the_refusal_even_when_an_earlier_pair_failed_first( tmp_path, agy_bin, capsys ):
+    write_pairs( tmp_path )
+
+    class FailsThenUpdates( FakeAgy ):
+        def __call__( self, argv, **kwargs ):
+            if argv[ 1: ] == [ "--version" ]: return super().__call__( argv, **kwargs )
+            prompt = json.loads( kwargs[ "input" ] )[ "message" ][ "content" ]
+            # The seeded pair is first in the file; its extractor call fails outright, slowly.
+            # The clean pair's call swaps the binary under the run in the meantime.
+            if "blank.\n" + L3 in tagged( prompt, "old_text" ) and prompt.count( L2 ) == 1 and self.is_first_pair( prompt ):
+                time.sleep( 0.3 )
+                return Done( returncode=3, stderr="AGY_ERROR" )
+            with open( agy_bin, "wb" ) as handle: handle.write( b"#!/bin/sh\n# agy updated itself mid-run\n" )
+            return super().__call__( argv, **kwargs )
+
+        def is_first_pair( self, prompt ):
+            self.seen = getattr( self, "seen", 0 ) + 1
+            return self.seen == 1
+
+    code = cli.main( cli_args( tmp_path, "--transport", "agy", "--agy-bin", agy_bin, "--parallel", "2", "--extractor-lists", "1" ), agy_runner=FailsThenUpdates() )
+
+    assert code == 2
+    assert "REFUSED: agy binary changed" in capsys.readouterr().err
+    assert mt.TRANSPORT == "claude"
+
+
+def test_a_failure_that_is_not_a_binary_change_still_surfaces_as_itself( tmp_path, agy_bin ):
+    write_pairs( tmp_path )
+
+    with pytest.raises( mt.ModelCallError ):
+        cli.main( cli_args( tmp_path, "--transport", "agy", "--agy-bin", agy_bin, "--parallel", "2" ), agy_runner=FakeAgy( exit_code=3 ) )
+
+    assert mt.TRANSPORT == "claude"
+
+
+def test_a_ledger_holding_claude_calls_is_refused_under_agy( tmp_path, agy_bin, capsys ):
+    write_pairs( tmp_path )
+    ( tmp_path / "ledger.jsonl" ).write_text( json.dumps( { "binding" : "claude_cli=None|version=None" } ) + "\n" + json.dumps( { "key" : "k", "value" : "v" } ) + "\n" )
     fake = FakeAgy()
 
     assert cli.main( cli_args( tmp_path, "--transport", "agy", "--agy-bin", agy_bin ), agy_runner=fake ) == 2

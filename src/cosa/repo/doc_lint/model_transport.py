@@ -79,6 +79,17 @@ AGY_PIN     = None
 AGY_VERSION = None
 AGY_RUNNER  = None
 
+# Why the agy run stopped, once the binary is seen to differ from the pin; None while it matches.
+# harness_runner.run_all raises the failure of the earliest pair, which under --parallel can be
+# an ordinary failed call from another pair, so the command line reads the reason from here.
+AGY_STOP = None
+
+# What an agy call runs under, for a report. It is not the Claude isolation profile above.
+AGY_CALL_PROFILE     = "agy-print-1|new-project|disable-slash-commands|stream-json|empty-scratch-cwd|no-edit-grant"
+AGY_RESIDUAL_CONTEXT = [ "agy's own agent instructions and tool definitions, about 13,000 input tokens a call on agy 1.2.17" ]
+
+AGY_USAGE_FIELDS = ( "input_tokens", "output_tokens", "thinking_tokens", "cache_read_tokens", "total_tokens" )
+
 # Tokens agy reported, summed per model id for this process. Calls run in worker threads.
 AGY_USAGE       = {}
 _AGY_USAGE_LOCK = threading.Lock()
@@ -283,7 +294,7 @@ def configure_agy( agy_bin=agy_runtime.DEFAULT_AGY_BIN, runner=None ):
     Raises:
         - ValueError if the binary cannot be found or does not report a version
     """
-    global TRANSPORT, AGY_BIN, AGY_PIN, AGY_VERSION, AGY_RUNNER
+    global TRANSPORT, AGY_BIN, AGY_PIN, AGY_VERSION, AGY_RUNNER, AGY_STOP
     try:
         version = agy_runtime.agy_version( agy_bin, runner=runner )
         pin     = agy_runtime.binary_fingerprint( agy_bin )
@@ -294,6 +305,7 @@ def configure_agy( agy_bin=agy_runtime.DEFAULT_AGY_BIN, runner=None ):
     AGY_PIN     = pin
     AGY_VERSION = version
     AGY_RUNNER  = runner
+    AGY_STOP    = None
     with _AGY_USAGE_LOCK: AGY_USAGE.clear()
     return f"agy={pin[ 'path' ]}|size={pin[ 'size' ]}|mtime_ns={pin[ 'mtime_ns' ]}|version={version}"
 
@@ -303,14 +315,39 @@ def configure_claude():
     Send every later call through bounded Claude Code again, and forget the agy pin.
 
     Ensures:
-        - the transport is "claude", the default, and the agy binary, pin, version and runner are None
+        - the transport is "claude", the default, and the agy binary, pin, version, runner and stop
+          reason are None
     """
-    global TRANSPORT, AGY_BIN, AGY_PIN, AGY_VERSION, AGY_RUNNER
+    global TRANSPORT, AGY_BIN, AGY_PIN, AGY_VERSION, AGY_RUNNER, AGY_STOP
     TRANSPORT   = "claude"
     AGY_BIN     = None
     AGY_PIN     = None
     AGY_VERSION = None
     AGY_RUNNER  = None
+    AGY_STOP    = None
+
+
+def _require_pinned_binary():
+    """
+    Refuse the next agy call when the binary on disk is not the one configure_agy pinned.
+
+    Ensures:
+        - returns None while the binary matches the pin
+        - the first mismatch is kept as the stop reason, and every later call is refused with it
+          without reading the disk again
+        - a binary that can no longer be found counts as changed
+
+    Raises:
+        - AgyBinaryChanged carrying the stop reason
+    """
+    global AGY_STOP
+    if AGY_STOP is None:
+        try:
+            now = agy_runtime.binary_fingerprint( AGY_BIN )
+        except agy_runtime.AgyCallError:
+            now = None
+        if now != AGY_PIN: AGY_STOP = f"agy binary changed since the run began: pinned {AGY_PIN}, now {now}"
+    if AGY_STOP is not None: raise agy_runtime.AgyBinaryChanged( AGY_STOP )
 
 
 def agy_usage_summary():
@@ -325,9 +362,6 @@ def agy_usage_summary():
     with _AGY_USAGE_LOCK: return { model: dict( tally ) for model, tally in AGY_USAGE.items() }
 
 
-AGY_USAGE_FIELDS = ( "input_tokens", "output_tokens", "thinking_tokens", "cache_read_tokens", "total_tokens" )
-
-
 def _agy_call( model, prompt, timeout_seconds ):
     """
     Make one agy call in a fresh, empty scratch directory and return the answer text.
@@ -337,7 +371,10 @@ def _agy_call( model, prompt, timeout_seconds ):
 
     Ensures:
         - agy runs with an empty temporary directory as its working directory, removed afterwards
-        - returns the answer stripped, and adds the call's tokens to the tally for model
+        - returns the answer stripped, and adds the call's tokens to the tally for model; a token
+          field agy leaves out, or reports as something other than a whole number, adds nothing
+        - the time limit is passed to agy as whole seconds, one at the least
+        - a binary change run_agy itself reports is kept as the stop reason
         - an answer is refused when agy tried a tool action or left anything in the scratch
           directory: the Claude path runs with no tools, and a tool attempt is not a text answer
 
@@ -346,12 +383,16 @@ def _agy_call( model, prompt, timeout_seconds ):
         - AgyBinaryChanged if the binary differs from the pin; it is not a ModelCallError, so a
           caller that retries failed calls does not retry under another binary
     """
+    global AGY_STOP
     with tempfile.TemporaryDirectory( prefix="agy-call-" ) as scratch:
         try:
-            result = agy_runtime.run_agy( prompt, model=model, workspace_dir=scratch, timeout_seconds=timeout_seconds,
+            result = agy_runtime.run_agy( prompt, model=model, workspace_dir=scratch, timeout_seconds=max( 1, int( timeout_seconds ) ),
                                           agy_bin=AGY_BIN, pinned_fingerprint=AGY_PIN, runner=AGY_RUNNER )
         except agy_runtime.AgyCallError as e:
             raise ModelCallError( f"model call to {model} failed: {e}" ) from e
+        except agy_runtime.AgyBinaryChanged as e:
+            if AGY_STOP is None: AGY_STOP = str( e )
+            raise
         left_behind = sorted( os.listdir( scratch ) )
     if result.denied_actions:
         raise ModelCallError( f"model call to {model} tried tool actions and was refused them: {result.denied_actions}" )
@@ -360,7 +401,9 @@ def _agy_call( model, prompt, timeout_seconds ):
     with _AGY_USAGE_LOCK:
         tally = AGY_USAGE.setdefault( model, dict( { field: 0 for field in AGY_USAGE_FIELDS }, calls=0 ) )
         tally[ "calls" ] += 1
-        for field in AGY_USAGE_FIELDS: tally[ field ] += result.usage.get( field, 0 )
+        for field in AGY_USAGE_FIELDS:
+            count = result.usage.get( field )
+            if isinstance( count, int ) and not isinstance( count, bool ): tally[ field ] += count
     return result.response.strip()
 
 
@@ -443,7 +486,8 @@ async def complete( model, system_prompt, user_prompt, query_fn=None, timeout_se
     Raises:
         - ValueError if model is empty, thinking is not one of THINKING_SETTINGS, or thinking resolves
           to "off" under agy; nothing is charged or contacted
-        - AgyBinaryChanged, under agy, if the binary differs from the one configure_agy pinned
+        - AgyBinaryChanged, under agy, if the binary differs from the one configure_agy pinned; the
+          check comes before the charge, so a call refused for it costs nothing against a cap
         - CallBudgetExceeded if the model has used its cap; nothing is contacted
         - ModelCallError if the call raises, times out, ends in an error result, or returns no text
     """
@@ -456,6 +500,7 @@ async def complete( model, system_prompt, user_prompt, query_fn=None, timeout_se
         if thinking == "default": thinking = planned
     if TRANSPORT == "agy":
         if thinking != "default": raise ValueError( "thinking 'off' has no agy setting: choose the model id with the reasoning level wanted, such as one ending in -low" )
+        _require_pinned_binary()
         _charge( model )
         started = time.monotonic()
         text    = await asyncio.to_thread( _agy_call, model, system_prompt + AGY_PROMPT_JOIN + user_prompt, timeout_seconds )

@@ -103,8 +103,11 @@ def main( argv, query_fn=None, agy_runner=None ):
           and the report carries transport, agy_binding and agy_usage (tokens per model id)
         - returns 2 when --transport agy is given with --claude-cli-path or with --judge-thinking off, when
           --agy-bin is given without --transport agy, or when the agy binary is not usable
-        - returns 2 when the agy binary changes during the run; finished calls stay in the ledger, which then
-          resumes only under the binary it was written with
+        - returns 2 when the agy binary changes during the run, whichever pair's failure run_all raised;
+          finished calls stay in the ledger, which resumes only under the binary it was written with,
+          and the refusal says to rerun with a new --ledger
+        - with --transport agy the report's call_profile and call_residual_context describe the agy call,
+          not the Claude isolation profile
         - the transport is set back to Claude before returning, whatever the outcome
     """
     args   = parse_args( argv )
@@ -151,6 +154,7 @@ def run_after_checks( args, config, query_fn, agy_runner ):
 
     Requires:
         - args and config are main's parsed arguments and harness configuration
+        - query_fn and agy_runner are main's test stand-ins, or None
 
     Ensures:
         - returns main's exit code; main sets the transport back to Claude afterwards
@@ -209,8 +213,14 @@ def run_after_checks( args, config, query_fn, agy_runner ):
     try:
         results = asyncio.run( harness_runner.run_all( pairs, config, harness_runner.Ledger( args.ledger, binding=binding ), query_fn=query_fn, judge_backend=backend,
                                                        on_unreadable=raw_failure_sink( args.raw_failures ), parallel=args.parallel ) )
-    except ( jev_transport.JevConfigError, harness_runner.LedgerBindingError, agy_runtime.AgyBinaryChanged ) as e:
+    except ( jev_transport.JevConfigError, harness_runner.LedgerBindingError ) as e:
         print( f"REFUSED: {e}", file=sys.stderr )
+        return 2
+    except Exception:
+        # With pairs in flight together, run_all raises the earliest pair's failure, which can be an
+        # ordinary failed call while another pair saw the binary change. The change is the reason.
+        if model_transport.AGY_STOP is None: raise
+        print( f"REFUSED: {model_transport.AGY_STOP}; the ledger is bound to the binary the run began with, so rerun with a new --ledger", file=sys.stderr )
         return 2
     report  = harness_report.build_report( results, config, judge_prompt_version=judge_version, jev_run=backend is not None )
     report[ "pairs_sha" ] = pairs_sha
@@ -221,8 +231,8 @@ def run_after_checks( args, config, query_fn, agy_runner ):
     report[ "claude_cli" ]         = args.claude_cli_path
     report[ "claude_cli_version" ] = model_transport.cli_version( args.claude_cli_path )
     report[ "call_budget" ]        = model_transport.budget_summary()
-    report[ "call_profile" ]       = model_transport.CALL_PROFILE
-    report[ "call_residual_context" ] = model_transport.RESIDUAL_CONTEXT
+    report[ "call_profile" ]       = model_transport.AGY_CALL_PROFILE if args.transport == "agy" else model_transport.CALL_PROFILE
+    report[ "call_residual_context" ] = model_transport.AGY_RESIDUAL_CONTEXT if args.transport == "agy" else model_transport.RESIDUAL_CONTEXT
     with open( args.out, "w", encoding="utf-8" ) as f: json.dump( report, f, indent=2 )
     print( f"report written to {args.out}: default_gate_pass={report[ 'default_gate_pass' ]}" )
     print( f"parse_failed_pairs={report[ 'parse_failed_pairs' ]} retry_calls={report[ 'retry_calls' ]}" )
