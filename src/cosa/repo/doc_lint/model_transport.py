@@ -87,8 +87,8 @@ AGY_RUNNER  = None
 AGY_STOP = None
 
 # Seconds to wait before each further try when agy answers that the service is unavailable (503).
-# Three waits make four tries at the most. On 2026-10-05 a 130-pair run was ended seven times by
-# this answer, and each time the next attempt, 45 seconds or more later, went through.
+# Three waits make four tries at the most. A 130-pair run was ended seven times by this answer
+# in half an hour, and each time the next attempt, 45 seconds or more later, went through.
 AGY_UNAVAILABLE_WAITS = ( 15, 45, 90 )
 AGY_SLEEP             = time.sleep
 
@@ -414,7 +414,7 @@ def _agy_whole_seconds( timeout_seconds ):
 
 def _agy_call( model, prompt, timeout_seconds ):
     """
-    Make one agy call, trying again after a wait when agy answers that the service is unavailable.
+    Make one agy call, trying again after a wait when agy answers unavailable.
 
     Requires:
         - configure_agy has run; prompt is the joined system and user prompt

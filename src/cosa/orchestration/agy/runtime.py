@@ -49,7 +49,7 @@ OUTER_TIMEOUT_HEADROOM_SECONDS = 60
 
 STDERR_TAIL_CHARS = 2000
 
-# What agy prints when the service refuses a call for now. Seen on agy 1.2.17, 2026-10-05, as
+# What agy prints when the service refuses a call for now. agy 1.2.17 prints it as
 # "Eligibility check failed: UNAVAILABLE (code 503): The service is currently unavailable."
 UNAVAILABLE_MARK = "(code 503)"
 
@@ -60,7 +60,9 @@ class AgyCallError( Exception ):
 
 class AgyUnavailable( AgyCallError ):
     """
-    Raised when agy exits non-zero and its error text carries `(code 503)`: the service refused this call for now.
+    Raised when agy exits non-zero with `(code 503)` in its error text.
+
+    The service refused this call for now.
 
     It is an AgyCallError, so a caller that does not ask for the distinction is unchanged. A caller
     that retries can tell it from a failure a retry cannot cure, such as a quota that is used up.
