@@ -555,8 +555,14 @@ def test_the_recorded_seconds_are_those_of_the_try_that_answered_and_leave_the_w
             if argv[ 1: ] != [ "--version" ]: clock[ 0 ] += 2.0
             return super().__call__( argv, **kwargs )
 
+    # A refused try takes time too, and that time is not the answering try's.
+    class SlowToRefuse( Unavailable ):
+        def __call__( self, argv, **kwargs ):
+            if argv[ 1: ] != [ "--version" ] and self.left > 0: clock[ 0 ] += 3.0
+            return super().__call__( argv, **kwargs )
+
     monkeypatch.setattr( mt, "AGY_SLEEP", a_long_wait )
-    mt.configure_agy( agy_bin, runner=Unavailable( 2, Slow( answer="ok" ) ) )
+    mt.configure_agy( agy_bin, runner=SlowToRefuse( 2, Slow( answer="ok" ) ) )
 
     async def one_call():
         with mt.record_calls( [ ( "judge", "default" ) ] ) as calls:
@@ -564,7 +570,7 @@ def test_the_recorded_seconds_are_those_of_the_try_that_answered_and_leave_the_w
         return calls
 
     assert asyncio.run( one_call() ) == [ ( "judge", 2.0 ) ]
-    assert clock[ 0 ] == 1000.0 + 15 + 45 + 2.0
+    assert clock[ 0 ] == 1000.0 + 3.0 + 15 + 3.0 + 45 + 2.0
 
 
 def test_an_agent_definition_replaced_by_a_link_to_the_same_text_is_rejected( agy_bin, tmp_path ):
