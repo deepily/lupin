@@ -1015,3 +1015,34 @@ def test_r9_delete_candidates_leave_out_each_shape_and_count_it_by_code():
         assert text not in [ c[ "span_text" ] for c in cands ], code
         assert refused.get( code, 0 ) >= 1, code
         assert all( rules.lead_in_rejection( old, c[ "span" ] ) is None for c in cands ), code
+
+
+# ---- review of e2d510af1 (Rio): two redraw --failed cases the first tests did not pin ------------------------------
+
+def test_redraw_failed_replaces_all_three_pairs_named_on_a_set_rule_1_passes( written, capsys ):
+    tmp_path, pool = written
+    gate   = tmp_path / "gate-store"
+    before = load( gate, "gate" )
+    assert s.check_set( str( gate ), "gate" )[ 0 ] == {}
+    ids    = sorted( next( p[ "id" ] for p in before[ "pairs" ] if p[ "kind" ] == kind ) for kind in ( "delete", "weaken", "paraphrase" ) )
+    assert len( ids ) == 3
+    assert s.main( redraw_args( tmp_path, pool, failed=write_accept( tmp_path, ids ) ) ) == 0
+    assert f"3 failed pair(s) {' '.join( ids )} are replaced; 3 new writer call(s) needed" in capsys.readouterr().out
+    after = load( tmp_path / "redrawn", "gate" )
+    assert after[ "redrawn" ][ "pairs" ] == ids
+    assert sorted( p[ "id" ] for p, q in zip( before[ "pairs" ], after[ "pairs" ] ) if p != q ) == ids
+    assert floors_of( after ) == floors_of( before )
+
+
+def test_redraw_failed_wins_over_accept_for_a_pair_named_in_both( written, capsys ):
+    tmp_path, pool = written
+    gate = tmp_path / "gate-store"
+    pid  = synonym_pair( gate, "gate" )
+    accept = write_accept( tmp_path, [ pid ], "accept.json" )
+    failures, accepted, _ = s.rule1_status( str( gate ), "gate", accept )
+    assert failures == {} and list( accepted ) == [ pid ]                                  # --accept alone leaves nothing to redraw
+    assert s.main( redraw_args( tmp_path, pool, accept=accept ) ) == 0
+    assert "nothing to redraw" in capsys.readouterr().out and not ( tmp_path / "redrawn" ).exists()
+    assert s.main( redraw_args( tmp_path, pool, accept=accept, failed=write_accept( tmp_path, [ pid ], "failed.json" ) ) ) == 0
+    assert f"1 failed pair(s) {pid} are replaced" in capsys.readouterr().out
+    assert load( tmp_path / "redrawn", "gate" )[ "redrawn" ][ "pairs" ] == [ pid ]
