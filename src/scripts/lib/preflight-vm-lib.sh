@@ -1192,3 +1192,124 @@ pfv_roster_declares() {
 pfv_cc_project_dirname() {
     printf '%s' "$1" | sed -E 's/[^A-Za-z0-9]/-/g'
 }
+
+# ── pfv_mcp_registration_env ──────────────────────────────────
+# Read one environment variable out of every registration of an MCP server in one file.
+#
+# The cosa-voice server reads the worker-model setting through LUPIN_CONFIG_MGR_CLI_ARGS.
+# A registration without it spawns every worker on the user's default model, and nothing
+# reports it (row c9252819). The container's own copy of that variable is a different
+# surface and is checked elsewhere.
+#
+# One file can register a server more than once: ~/.claude.json holds the user-scope
+# entry at the top level and a local-scope entry under projects.<path>, and a project's
+# .mcp.json has the same top-level shape. Every entry found is reported, because a session
+# started in a project directory may run the local one.
+#
+# Requires:
+#   - $1 = path to a Claude Code config (~/.claude.json or a project .mcp.json)
+#   - $2 = MCP server name, $3 = environment variable name
+#   - $4 = optional name for the file's top-level entry, default "user". A project
+#     .mcp.json has the same shape and its top-level entry is project scope
+# Ensures:
+#   - returns 0 when every registration of the server carries the variable as a usable
+#     string, and prints one line per registration: scope, a tab, the value, unchanged.
+#     Scope is the top-level name or "local:<path>". The caller judges each value
+#   - returns 1 and prints one scope per line for each registration where the variable
+#     is absent, empty, not a string, or holds whitespace other than single spaces
+#     between words. The settings reader splits the value on single spaces only, so a
+#     tab or a doubled space gives it a word it cannot use; such a line ends with
+#     " (value has whitespace other than single spaces)"
+#   - returns 2 when the file does not exist or registers the server nowhere
+#   - returns 3 when the file is not a JSON object, or a registration is not an object
+#   - returns 4 when the file exists and cannot be read, or the reader itself fails
+#     (the cause goes to stderr). Only 2 means "nothing to check"
+pfv_mcp_registration_env() {
+    local file="$1" server="$2" name="$3" top="${4:-user}"
+    [ -e "$file" ] || return 2
+    [ -r "$file" ] || return 4
+    python3 - "$file" "$server" "$name" "$top" <<'PFV_PY'
+import json, sys
+path, server, name, top = sys.argv[ 1 ], sys.argv[ 2 ], sys.argv[ 3 ], sys.argv[ 4 ]
+try:
+    try:
+        with open( path, encoding="utf-8" ) as f: doc = json.load( f )
+    except OSError:
+        sys.exit( 4 )
+    except ValueError:
+        sys.exit( 3 )
+    if not isinstance( doc, dict ): sys.exit( 3 )
+    found   = []
+    servers = doc.get( "mcpServers" )
+    if isinstance( servers, dict ) and server in servers:
+        found.append( ( top, servers[ server ] ) )
+    projects = doc.get( "projects" )
+    if isinstance( projects, dict ):
+        for project in sorted( projects ):
+            settings = projects[ project ]
+            local    = settings.get( "mcpServers" ) if isinstance( settings, dict ) else None
+            if isinstance( local, dict ) and server in local:
+                found.append( ( "local:" + project, local[ server ] ) )
+    if not found: sys.exit( 2 )
+    lacking, carried = [], []
+    for scope, entry in found:
+        if not isinstance( entry, dict ): sys.exit( 3 )
+        env   = entry.get( "env" )
+        value = env.get( name ) if isinstance( env, dict ) else None
+        if not isinstance( value, str ) or not value.strip(): lacking.append( scope )
+        elif value != " ".join( value.split() ): lacking.append( scope + " (value has whitespace other than single spaces)" )
+        else: carried.append( scope + "\t" + value )
+    if lacking:
+        sys.stdout.write( "\n".join( lacking ) )
+        sys.exit( 1 )
+    sys.stdout.write( "\n".join( carried ) )
+except Exception as e:
+    sys.stderr.write( "pfv_mcp_registration_env: reader failed: %r\n" % ( e, ) )
+    sys.exit( 4 )
+PFV_PY
+}
+
+# ── pfv_config_mgr_args_resolve ───────────────────────────────
+# Does a LUPIN_CONFIG_MGR_CLI_ARGS value name two settings files and a block that exist?
+#
+# A value that is present but names nothing fails the same way as an absent one: the
+# server cannot build its settings reader, and a spawned worker gets no model. The reader
+# needs all three words: it reads config_path and splainer_path, and looks the block up.
+#
+# Requires:
+#   - $1 = the value (space-separated key=value words)
+#   - $2 = the repo root that a path starting /src/ is joined to
+# Ensures:
+#   - returns 0 when config_path and splainer_path each name a readable file under the
+#     root and the config file has a section header for config_block_id ("+" in the id
+#     stands for a space). A header is matched as a whole line that starts in the first
+#     column, ignoring trailing spaces, tabs and a carriage return. The settings reader
+#     reads an indented line as the continuation of the option above it, not as a
+#     header, so an indented header does not count. It would also accept text after
+#     the closing bracket; this check does not, and so refuses a file that reader
+#     takes. The character list is spelled out because the VM's awk may not know
+#     [[:space:]]
+#   - returns 1 and prints the reason otherwise
+pfv_config_mgr_args_resolve() {
+    local value="$1" root="$2" word config_path="" splainer_path="" block=""
+    local -a words
+    read -r -a words <<< "$value"
+    for word in "${words[@]}"; do
+        case "$word" in
+            config_path=*)     config_path="${word#config_path=}" ;;
+            splainer_path=*)   splainer_path="${word#splainer_path=}" ;;
+            config_block_id=*) block="${word#config_block_id=}" ;;
+        esac
+    done
+    [ -n "$config_path" ]   || { printf 'no config_path= in the value'; return 1; }
+    [ -n "$splainer_path" ] || { printf 'no splainer_path= in the value'; return 1; }
+    [ -n "$block" ]         || { printf 'no config_block_id= in the value'; return 1; }
+    [ -f "$root$config_path" ] && [ -r "$root$config_path" ] \
+        || { printf 'config_path %s is not a readable file under %s' "$config_path" "$root"; return 1; }
+    [ -f "$root$splainer_path" ] && [ -r "$root$splainer_path" ] \
+        || { printf 'splainer_path %s is not a readable file under %s' "$splainer_path" "$root"; return 1; }
+    PFV_HEADER="[${block//+/ }]" awk '
+        { sub( /[ \t\r]+$/, "" ); if ( $0 == ENVIRON[ "PFV_HEADER" ] ) found = 1 }
+        END { exit !found }' "$root$config_path" \
+        || { printf 'no [%s] block in %s' "${block//+/ }" "$config_path"; return 1; }
+}

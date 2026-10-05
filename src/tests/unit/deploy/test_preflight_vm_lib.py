@@ -824,3 +824,427 @@ def test_env_file_supplies_never_prints_the_secret( tmp_path ):
     r = _run( f"pfv_env_file_supplies '{f}' JWT_SECRET_KEY" )
     assert "super-secret-value" not in r.stdout
     assert "super-secret-value" not in r.stderr
+
+
+# ═════════════════════════════════════════════════════════════
+# pfv_mcp_registration_env (row c9252819)
+# ═════════════════════════════════════════════════════════════
+#
+# Every test here asserts stderr is empty beside the return code. The reader exits 4
+# with a message on stderr when it fails internally, so a crash can no longer pass for
+# the return code a test expected.
+
+_VOICE_VAR  = "LUPIN_CONFIG_MGR_CLI_ARGS"
+_GOOD_VALUE = "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Development"
+
+
+def _registration( tmp_path, body ):
+    f = tmp_path / "claude.json"
+    f.write_text( body )
+    return f
+
+
+def _registration_env( f ):
+    return _run( f"pfv_mcp_registration_env '{f}' cosa-voice {_VOICE_VAR}" )
+
+
+def test_registration_env_prints_the_value_when_present( tmp_path ):
+    import json
+    f = _registration( tmp_path, json.dumps( { "mcpServers": { "cosa-voice": {
+        "command" : "/venv/bin/python",
+        "env"     : { "LUPIN_ROOT": "/r", _VOICE_VAR: "config_block_id=Lupin:+Development" },
+    } } } ) )
+    r = _registration_env( f )
+    assert r.returncode == 0, r.stderr
+    assert r.stdout == "user\tconfig_block_id=Lupin:+Development"
+    assert r.stderr == ""
+
+
+def test_registration_env_is_1_when_the_server_is_registered_without_the_variable( tmp_path ):
+    # The defect itself: PYTHONPATH and LUPIN_ROOT only, as the VM's registration was.
+    import json
+    f = _registration( tmp_path, json.dumps( { "mcpServers": { "cosa-voice": {
+        "env": { "PYTHONPATH": "/r/src", "LUPIN_ROOT": "/r" },
+    } } } ) )
+    r = _registration_env( f )
+    assert r.returncode == 1
+    assert r.stdout == "user"
+    assert r.stderr == ""
+
+
+@pytest.mark.parametrize( "entry", [
+    '{ "env": { "LUPIN_CONFIG_MGR_CLI_ARGS": "" } }',
+    '{ "env": { "LUPIN_CONFIG_MGR_CLI_ARGS": "   " } }',
+    '{ "env": { "LUPIN_CONFIG_MGR_CLI_ARGS": 7 } }',
+    '{ "env": [ ] }',
+    '{ }',
+] )
+def test_registration_env_is_1_for_an_empty_blank_or_non_string_value( tmp_path, entry ):
+    f = _registration( tmp_path, '{ "mcpServers": { "cosa-voice": ' + entry + ' } }' )
+    r = _registration_env( f )
+    assert r.returncode == 1
+    assert r.stdout == "user"
+    assert r.stderr == ""
+
+
+@pytest.mark.parametrize( "body", [
+    '{ "mcpServers": { "some-other-server": { "env": { "LUPIN_CONFIG_MGR_CLI_ARGS": "x" } } } }',
+    '{ "mcpServers": [ ] }',
+    '{ "projects": { "/p": { "mcpServers": { "some-other-server": { } } } } }',
+    '{ }',
+] )
+def test_registration_env_is_2_when_the_server_is_registered_nowhere( tmp_path, body ):
+    r = _registration_env( _registration( tmp_path, body ) )
+    assert r.returncode == 2
+    assert r.stdout == ""
+    assert r.stderr == ""
+
+
+def test_registration_env_is_2_for_a_missing_file( tmp_path ):
+    r = _registration_env( tmp_path / "absent.json" )
+    assert r.returncode == 2
+    assert r.stderr == ""
+
+
+def test_registration_env_is_4_for_a_file_that_exists_and_cannot_be_read( tmp_path ):
+    # Wrong owner or mode is the VM's usual defect. It is not "nothing registered".
+    # Two guards give this answer, the shell's -r test and the reader's own OSError arm;
+    # this test cannot tell which ran, and either alone is enough.
+    if os.geteuid() == 0: pytest.skip( "root reads a mode-000 file, so the case cannot be built" )
+    f = _registration( tmp_path, '{ "mcpServers": { "cosa-voice": { "env": { } } } }' )
+    f.chmod( 0 )
+    try:
+        r = _registration_env( f )
+    finally:
+        f.chmod( 0o600 )
+    assert r.returncode == 4
+    assert r.stdout == ""
+    assert r.stderr == ""
+
+
+@pytest.mark.parametrize( "body", [
+    'this is not json',
+    '[ ]',
+    '{ "mcpServers": { "cosa-voice": "not an object" } }',
+    '{ "projects": { "/p": { "mcpServers": { "cosa-voice": 7 } } } }',
+] )
+def test_registration_env_is_3_when_the_file_or_an_entry_is_not_the_expected_shape( tmp_path, body ):
+    r = _registration_env( _registration( tmp_path, body ) )
+    assert r.returncode == 3
+    assert r.stdout == ""
+    assert r.stderr == ""
+
+
+def test_registration_env_checks_a_local_scope_entry_as_well_as_the_user_one( tmp_path ):
+    # A good user-scope entry does not excuse a local-scope one without the variable:
+    # a session started in that project directory may run the local entry.
+    import json
+    good = { "env": { _VOICE_VAR: "v" } }
+    bad  = { "env": { "LUPIN_ROOT": "/r" } }
+    f = _registration( tmp_path, json.dumps( {
+        "mcpServers" : { "cosa-voice": good },
+        "projects"   : { "/mnt/b": { "mcpServers": { "cosa-voice": bad } },
+                         "/mnt/a": { "mcpServers": { "cosa-voice": bad } },
+                         "/mnt/c": { "mcpServers": { "cosa-voice": good } },
+                         "/mnt/d": { "allowedTools": [] } },
+    } ) )
+    r = _registration_env( f )
+    assert r.returncode == 1
+    assert r.stdout.split( "\n" ) == [ "local:/mnt/a", "local:/mnt/b" ]
+    assert r.stderr == ""
+
+
+def test_registration_env_finds_a_server_registered_only_at_local_scope( tmp_path ):
+    import json
+    f = _registration( tmp_path, json.dumps( {
+        "projects": { "/mnt/a": { "mcpServers": { "cosa-voice": { "env": { _VOICE_VAR: "local-value" } } } } },
+    } ) )
+    r = _registration_env( f )
+    assert r.returncode == 0, r.stderr
+    assert r.stdout == "local:/mnt/a\tlocal-value"
+
+
+def test_registration_env_prints_every_scope_and_value_when_all_carry_the_variable( tmp_path ):
+    # The caller judges each value, so none may be dropped: the local one is the one a
+    # session in that directory runs. Each value is printed as it is stored.
+    import json
+    f = _registration( tmp_path, json.dumps( {
+        "mcpServers" : { "cosa-voice": { "env": { _VOICE_VAR: "user-value" } } },
+        "projects"   : { "/mnt/b": { "mcpServers": { "cosa-voice": { "env": { _VOICE_VAR: "b value two" } } } },
+                         "/mnt/a": { "mcpServers": { "cosa-voice": { "env": { _VOICE_VAR: "a-value" } } } } },
+    } ) )
+    r = _registration_env( f )
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.split( "\n" ) == [ "user\tuser-value", "local:/mnt/a\ta-value", "local:/mnt/b\tb value two" ]
+
+
+@pytest.mark.parametrize( "value", [ "a=1\tb=2", "a=1  b=2", " a=1 b=2", "a=1 b=2 ", "a=1\nb=2" ] )
+def test_registration_env_is_1_for_a_value_the_settings_reader_cannot_split( tmp_path, value ):
+    # ConfigurationManager splits the value on single spaces only. A tab, a doubled
+    # space or a space at either end gives it a word with no usable key, so such a
+    # value is reported with the others that cannot be used, never tidied and passed.
+    import json
+    f = _registration( tmp_path, json.dumps( { "mcpServers": { "cosa-voice": { "env": { _VOICE_VAR: value } } } } ) )
+    r = _registration_env( f )
+    assert r.returncode == 1
+    assert r.stdout == "user (value has whitespace other than single spaces)"
+    assert r.stderr == ""
+
+
+def test_registration_env_names_the_top_level_entry_as_the_caller_says( tmp_path ):
+    # A project .mcp.json has the same shape as the user file; its entry is project scope.
+    import json
+    f = _registration( tmp_path, json.dumps( { "mcpServers": { "cosa-voice": { "env": { _VOICE_VAR: "v" } } } } ) )
+    r = _run( f"pfv_mcp_registration_env '{f}' cosa-voice {_VOICE_VAR} project" )
+    assert r.returncode == 0 and r.stdout == "project\tv"
+    f.write_text( json.dumps( { "mcpServers": { "cosa-voice": { "env": {} } } } ) )
+    r = _run( f"pfv_mcp_registration_env '{f}' cosa-voice {_VOICE_VAR} project" )
+    assert r.returncode == 1 and r.stdout == "project"
+
+
+def test_registration_env_reports_its_own_failure_as_4_with_the_cause_on_stderr( tmp_path ):
+    # No input file makes the reader fail unexpectedly, so the failure is planted in the
+    # interpreter: a json module on PYTHONPATH whose load raises an error the reader does
+    # not expect. Without the shim this file ("{}") is a plain 2, registered nowhere.
+    shim = tmp_path / "shim"; shim.mkdir()
+    ( shim / "json.py" ).write_text( "def load( f ): raise RuntimeError( 'planted' )\n" )
+    f = _registration( tmp_path, "{}" )
+    r = _run( f"PYTHONPATH='{shim}' pfv_mcp_registration_env '{f}' cosa-voice {_VOICE_VAR}" )
+    assert r.returncode == 4
+    assert r.stdout == ""
+    assert "reader failed" in r.stderr and "planted" in r.stderr
+    assert _registration_env( f ).returncode == 2
+
+
+# ═════════════════════════════════════════════════════════════
+# pfv_config_mgr_args_resolve (row c9252819)
+# ═════════════════════════════════════════════════════════════
+
+def _resolve( value, root=PROJECT_ROOT ):
+    return _run( f"pfv_config_mgr_args_resolve '{value}' '{root}'" )
+
+
+def test_the_value_the_installer_writes_resolves_against_the_real_settings_file():
+    # The value is read from the installer, not retyped, so the two cannot drift apart.
+    text  = open( os.path.join( PROJECT_ROOT, "src/scripts/install-cosa-voice.sh" ), encoding="utf-8" ).read()
+    lines = [ l for l in text.split( "\n" ) if l.startswith( "CONFIG_MGR_CLI_ARGS=" ) ]
+    assert len( lines ) == 1, lines
+    value = lines[ 0 ].split( "=", 1 )[ 1 ].strip( '"' ).replace( "$LUPIN_MCP_CONFIG_BLOCK", "Lupin:+Development" )
+    assert value == _GOOD_VALUE
+    r = _resolve( value )
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert r.stdout == ""
+
+
+_INI, _SPL = "config_path=/src/conf/lupin-app.ini", "splainer_path=/src/conf/lupin-app-splainer.ini"
+
+
+@pytest.mark.parametrize( "value, reason", [
+    ( "x",                                                     "no config_path= in the value" ),
+    ( f"{_SPL} config_block_id=Lupin:+Development",            "no config_path= in the value" ),
+    ( f"{_INI} config_block_id=Lupin:+Development",            "no splainer_path= in the value" ),
+    ( f"{_INI} {_SPL}",                                        "no config_block_id= in the value" ),
+    ( f"config_path=/src/conf/absent.ini {_SPL} config_block_id=Lupin:+Development",
+                                                               "config_path /src/conf/absent.ini is not a readable file" ),
+    ( f"config_path=/src/conf {_SPL} config_block_id=Lupin:+Development",
+                                                               "config_path /src/conf is not a readable file" ),
+    ( f"{_INI} splainer_path=/src/conf/absent.ini config_block_id=Lupin:+Development",
+                                                               "splainer_path /src/conf/absent.ini is not a readable file" ),
+    ( f"{_INI} {_SPL} config_block_id=Lupin:+No-Such",         "no [Lupin: No-Such] block in /src/conf/lupin-app.ini" ),
+    ( f"{_INI} {_SPL} config_block_id=Lupin:",                 "no [Lupin:] block in /src/conf/lupin-app.ini" ),
+] )
+def test_a_value_that_names_nothing_does_not_resolve_and_says_why( value, reason ):
+    r = _resolve( value )
+    assert r.returncode == 1
+    assert reason in r.stdout
+    assert r.stderr == ""
+
+
+def _tree( tmp_path, ini_text ):
+    ( tmp_path / "src" / "conf" ).mkdir( parents=True )
+    ( tmp_path / "src" / "conf" / "a.ini" ).write_bytes( ini_text )
+    ( tmp_path / "src" / "conf" / "s.ini" ).write_text( "" )
+    return lambda block: _resolve( f"config_path=/src/conf/a.ini splainer_path=/src/conf/s.ini config_block_id={block}", tmp_path ).returncode
+
+
+def test_the_block_must_match_a_whole_header_line( tmp_path ):
+    # "Lupin: Dev" is a prefix of a real header and must not pass for it; nor may a
+    # header that only appears inside a longer line.
+    rc = _tree( tmp_path, b"[Lupin: Development]\nk = [Lupin: Inline]\n" )
+    assert rc( "Lupin:+Development" ) == 0
+    assert rc( "Lupin:+Dev" ) == 1
+    assert rc( "Lupin:+Inline" ) == 1
+
+
+def test_a_header_with_trailing_whitespace_or_windows_line_ends_still_matches( tmp_path ):
+    # The settings reader takes these, so this check must not block them.
+    rc = _tree( tmp_path, b"[Lupin: Development] \t \r\nk = v\r\n[Lupin: Testing]\r\nk = v\r\n" )
+    assert rc( "Lupin:+Development" ) == 0
+    assert rc( "Lupin:+Testing" ) == 0
+
+
+def test_an_indented_header_is_not_a_block_here_because_it_is_not_one_to_the_settings_reader( tmp_path ):
+    # The claim about the reader is checked against the reader's own parser, in the
+    # same test, on the same bytes.
+    import configparser
+    text = b"[Lupin: Development]\nk = v\n  [Lupin: Testing]\n"
+    rc = _tree( tmp_path, text )
+    parser = configparser.ConfigParser()
+    parser.read_string( text.decode() )
+    assert parser.sections() == [ "Lupin: Development" ]
+    assert rc( "Lupin:+Development" ) == 0
+    assert rc( "Lupin:+Testing" ) == 1
+
+
+def test_resolve_does_not_expand_a_word_of_the_value_against_the_working_directory( tmp_path ):
+    # An unquoted loop over the value would turn "*" into the names in the cwd. One of
+    # those names is planted to look like the missing word; a quoted read never sees it.
+    rc = _tree( tmp_path, b"[B]\n" )
+    ( tmp_path / "config_block_id=B" ).write_text( "" )
+    r = _run( "pfv_config_mgr_args_resolve 'config_path=/src/conf/a.ini splainer_path=/src/conf/s.ini config_block_id*' "
+              f"'{tmp_path}'", cwd=str( tmp_path ) )
+    assert r.returncode == 1 and "no config_block_id= in the value" in r.stdout
+    assert rc( "B" ) == 0
+
+
+# ═════════════════════════════════════════════════════════════
+# lupin-vm.sh install-voice (row c9252819)
+# ═════════════════════════════════════════════════════════════
+#
+# Check A3b itself is driven end to end, through the real preflight script, in
+# test_preflight_vm_host_test_fixes.py beside A8 and A9.
+
+def _install_voice_dry_run( **extra ):
+    vm = os.path.join( PROJECT_ROOT, "src/scripts/lupin-vm.sh" )
+    env = { k: v for k, v in os.environ.items() if k != "LUPIN_MCP_CONFIG_BLOCK" }
+    env.update( LUPIN_GCP_PROJECT_ID="example-project", **extra )
+    return subprocess.run( [ "bash", vm, "--dry-run", "install-voice" ], capture_output=True, text=True, env=env )
+
+
+def test_the_vm_script_has_a_dry_runnable_step_that_runs_the_installer_on_the_vm():
+    r   = _install_voice_dry_run()
+    out = r.stdout + r.stderr
+    assert r.returncode == 0, out
+    lines = out.split( "\n" )
+    # Each line the installer cannot run without, as a whole line: the PATH that finds
+    # `claude`, the tree, and the venv (its default is the arbiter's and is refused).
+    assert 'export PATH="$HOME/.local/bin:$PATH"' in lines
+    assert "export LUPIN_ROOT=/mnt/lupin-data/lupin" in lines
+    assert 'export LUPIN_CC_VENV="$HOME/.venv-lupin-mcp"' in lines
+    assert "bash /mnt/lupin-data/lupin/src/scripts/install-cosa-voice.sh" in lines
+    assert "gcloud" not in out, "a dry run must not show or run the ssh call"
+    assert "LUPIN_MCP_CONFIG_BLOCK" not in out, "unset on the dev box means the installer's default applies"
+
+
+def _readback( tmp_path, claude_json ):
+    """
+    Run the part of the remote command that follows the installer, here.
+
+    Requires:
+        - claude_json is the text of the fake home's .claude.json, or None for no file
+
+    Ensures:
+        - takes the lines after the installer line from the real dry run, points the VM
+          tree at this checkout, and runs them under set -e with a fake HOME
+        - returns the CompletedProcess
+    """
+    lines     = _install_voice_dry_run().stderr.rstrip( "\n" ).split( "\n" )
+    installer = lines.index( "bash /mnt/lupin-data/lupin/src/scripts/install-cosa-voice.sh" )
+    assert lines[ 0 ] == "set -e"    # the remote command is the whole of stderr; the log line goes to stdout
+    tail = "\n".join( lines[ installer + 1 : ] )
+    assert tail.count( "/mnt/lupin-data/lupin" ) == 2, tail
+    script = "set -e\n" + tail.replace( "/mnt/lupin-data/lupin", PROJECT_ROOT ) + "\necho REACHED-THE-END\n"
+    home = tmp_path / "home"; home.mkdir()
+    if claude_json is not None: ( home / ".claude.json" ).write_text( claude_json )
+    return subprocess.run( [ "bash", "-c", script ], capture_output=True, text=True, env=dict( os.environ, HOME=str( home ) ) )
+
+
+def _entry( value ):
+    return { "env": { _VOICE_VAR: value } }
+
+
+def test_the_readback_after_the_installer_prints_every_scope_and_value_and_carries_on( tmp_path ):
+    import json
+    r = _readback( tmp_path, json.dumps( { "mcpServers": { "cosa-voice": _entry( _GOOD_VALUE ) },
+                                           "projects": { "/p": { "mcpServers": { "cosa-voice": _entry( _GOOD_VALUE ) } } } } ) )
+    assert r.returncode == 0, r.stderr
+    assert f"user\t{_GOOD_VALUE}" in r.stdout.split( "\n" )
+    assert f"local:/p\t{_GOOD_VALUE}" in r.stdout.split( "\n" )
+    assert r.stdout.rstrip().endswith( "REACHED-THE-END" )
+
+
+def test_the_readback_stops_and_names_a_stale_local_entry_the_installer_does_not_remove( tmp_path ):
+    import json
+    r = _readback( tmp_path, json.dumps( { "mcpServers": { "cosa-voice": _entry( _GOOD_VALUE ) },
+                                           "projects": { "/old": { "mcpServers": { "cosa-voice": { "env": {} } } } } } ) )
+    assert r.returncode == 1
+    assert "READBACK FAILED (reader rc=1" in r.stderr and "local:/old" in r.stderr
+    assert "REACHED-THE-END" not in r.stdout
+
+
+def test_the_readback_stops_and_says_why_when_a_registered_value_names_no_block( tmp_path ):
+    import json
+    bad = _GOOD_VALUE.replace( "Lupin:+Development", "Lupin:+Testing-GSC" )
+    r = _readback( tmp_path, json.dumps( { "mcpServers": { "cosa-voice": _entry( _GOOD_VALUE ) },
+                                           "projects": { "/p": { "mcpServers": { "cosa-voice": _entry( bad ) } } } } ) )
+    assert r.returncode == 1
+    assert "READBACK FAILED: the local:/p registration does not resolve: no [Lupin: Testing-GSC] block" in r.stderr
+    assert "REACHED-THE-END" not in r.stdout
+
+
+@pytest.mark.parametrize( "claude_json, rc", [ ( None, 2 ), ( "{}", 2 ), ( "{oops", 3 ) ] )
+def test_the_readback_stops_with_the_readers_code_when_nothing_was_registered( tmp_path, claude_json, rc ):
+    r = _readback( tmp_path, claude_json )
+    assert r.returncode == rc
+    assert f"READBACK FAILED (reader rc={rc}" in r.stderr
+    assert "REACHED-THE-END" not in r.stdout
+
+
+def test_install_voice_accepts_each_block_this_checkouts_settings_file_has():
+    # The refusal below is only worth something if real names get through.
+    text   = open( os.path.join( PROJECT_ROOT, "src/conf/lupin-app.ini" ), encoding="utf-8" ).read()
+    blocks = [ l.strip()[ 1:-1 ] for l in text.split( "\n" ) if l.startswith( "[Lupin: " ) ]
+    assert len( blocks ) >= 5, blocks
+    for block in blocks:
+        r = _install_voice_dry_run( LUPIN_MCP_CONFIG_BLOCK=block.replace( " ", "+" ) )
+        assert r.returncode == 0, ( block, r.stderr )
+
+
+def test_install_voice_refuses_a_block_name_this_checkouts_settings_file_does_not_have():
+    # A transposed letter passes the character check and would be registered as typed.
+    r = _install_voice_dry_run( LUPIN_MCP_CONFIG_BLOCK="Lupin:+Testing-GSC" )
+    assert r.returncode == 1
+    assert "names no block in" in r.stderr and "[Lupin: Testing-GSC]" in r.stderr
+    assert "install-cosa-voice.sh" not in r.stdout + r.stderr
+
+
+def test_install_voice_passes_the_settings_block_through_when_the_dev_box_sets_one():
+    r = _install_voice_dry_run( LUPIN_MCP_CONFIG_BLOCK="Lupin:+Testing-GCS" )
+    lines = ( r.stdout + r.stderr ).split( "\n" )
+    assert r.returncode == 0
+    block = lines.index( "export LUPIN_MCP_CONFIG_BLOCK=Lupin:+Testing-GCS" )
+    assert block < lines.index( "bash /mnt/lupin-data/lupin/src/scripts/install-cosa-voice.sh" )
+
+
+@pytest.mark.parametrize( "block", [ "x; touch /tmp/owned", "a b", "$(id)", "a'b", 'a"b' ] )
+def test_install_voice_refuses_a_settings_block_that_could_break_out_of_the_remote_command( block ):
+    r = _install_voice_dry_run( LUPIN_MCP_CONFIG_BLOCK=block )
+    assert r.returncode == 1
+    assert "LUPIN_MCP_CONFIG_BLOCK may hold only" in r.stderr
+    assert "install-cosa-voice.sh" not in r.stdout + r.stderr
+
+
+def test_the_usage_text_and_the_checklist_name_what_install_voice_needs_and_changes():
+    usage = subprocess.run( [ "bash", os.path.join( PROJECT_ROOT, "src/scripts/lupin-vm.sh" ), "--help" ],
+                            capture_output=True, text=True )
+    text  = usage.stdout + usage.stderr
+    start = text.index( "  install-voice" )
+    entry = " ".join( text[ start : text.index( "  push-env  ", start ) ].split() )
+    doc   = open( os.path.join( PROJECT_ROOT, "src/docs/vm-new-host-checklist.md" ), encoding="utf-8" ).read()
+    doc   = " ".join( doc[ doc.index( "## The voice-server registration" ) : doc.index( "## Adding a new item" ) ].split() )
+    for needed in ( "install-cli", "push-env (writes ~/.lupin/config)", "push-unversioned (delivers the notification key)",
+                    "LUPIN_MCP_CONFIG_BLOCK", "defaults to Lupin:+Development", ".bak-<epoch>", "reading" ):
+        assert needed in entry, needed
+        assert needed in doc.replace( "`", "" ), needed
+    assert "any hand-added env on that entry is dropped" in entry
+    assert "any `env` added to it by hand is dropped" in doc

@@ -68,6 +68,50 @@ Not preflight checks: they happen before the preflight can run, or are an instan
 | `lupin-vm.sh` stops with "LUPIN_GCP_PROJECT_ID is not set" | Every subcommand that calls gcloud needs the project id in the shell; the script does not fall back to `gcloud config`, which may name a different project | `export LUPIN_GCP_PROJECT_ID=<your-project-id>`, then re-run. `--dry-run` prints a placeholder instead of stopping |
 | Preflight C11 warns "no roster line for `COSA_VOICE_MANAGERS__WEIL_PARALLEL_SEARCH`" | A project is worked on the VM (it has a Claude Code project dir) but `~/.claude/fleet-roster.env` has no line for it | Add `COSA_VOICE_MANAGERS__WEIL_PARALLEL_SEARCH="<Persona>"` to `~/.claude/fleet-roster.env`. This is the C11 fix above applied to that project; the persona is Rick's choice, so the check cannot supply it |
 
+## The voice-server registration (found 2026-10-02, row `c9252819`)
+
+| check | what must exist | level | symptom when missing |
+|---|---|---|---|
+| **A3b** | every `cosa-voice` entry in `~/.claude.json` (the user-scope one and any local-scope one under `projects`) has `LUPIN_CONFIG_MGR_CLI_ARGS` in its `env`, and each value is words separated by single spaces that name a settings file, a splainer file and a block that exist under the preflight's `LUPIN_ROOT`. A `cosa-voice` entry in the repo's `.mcp.json` is held to the same rule | block when an entry exists without it or with a value that does not resolve; block when a file is the wrong shape or cannot be read; warn when `~/.claude.json` has no entry; silent when `.mcp.json` is absent or has none | Every spawned worker gets no `--model` and runs on the user's default model. The spawn result shows `"model": null`. No error anywhere |
+
+**How it is fixed.** The entry is written by `src/scripts/install-cosa-voice.sh`. It is per user and
+per host, so a bundle push does not deliver it. From the dev box:
+
+```bash
+src/scripts/lupin-vm.sh install-voice
+```
+
+It needs these first, in this order: a checkout, `install-cli`, `push-env` (writes
+`~/.lupin/config`) and `push-unversioned` (delivers the notification key). Without one of them the
+installer stops and names what is missing.
+
+It is safe to re-run, and a re-run does more than register:
+
+- It removes and re-adds the entry, so any `env` added to it by hand is dropped.
+- The settings block defaults to `Lupin:+Development`. To register another, set it on the dev box:
+  `LUPIN_MCP_CONFIG_BLOCK=Lupin:+Testing-GCS src/scripts/lupin-vm.sh install-voice`.
+- It overwrites the `hooks` key of `~/.claude/settings.json` from `src/conf/claude-code-hooks.json`
+  and keeps a `.bak-<epoch>` copy of the old file each run.
+- It may build `~/.venv-lupin-mcp`, add its export to `~/.bashrc`, and send one test notification.
+
+It ends by reading every entry back and printing each scope and value. If a scope lacks the
+variable, or a value names no settings block, it stops and says which. A block name that is not in
+this checkout's `src/conf/lupin-app.ini` is refused on the dev box, before anything is sent.
+
+`install-voice` rewrites the user-scope entry only. A local-scope entry is removed with
+`claude mcp remove cosa-voice -s local`, run in that project directory; an entry in a project
+`.mcp.json` is removed by hand. The preflight prints all three when it blocks.
+
+Not checked: the values are resolved against the preflight's own `LUPIN_ROOT` (its checkout when
+that is unset), not against the `LUPIN_ROOT` in the entry's `env`. An entry that points at another
+tree is judged against the preflight's.
+
+Also not the same as the settings reader: a header followed by other text on its line is a block
+to that reader and not to this check, so this check can refuse a file the reader takes.
+
+A session picks the new entry
+up when it next starts; a session already running keeps the entry it started with.
+
 ## Adding a new item to this list
 
 When a host turns out to be missing configuration that git does not carry:

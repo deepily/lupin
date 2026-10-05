@@ -148,6 +148,19 @@ Dev-box CLI parity (make the VM host feel like your dev box) — RUN FROM THE DE
                           install Python 3.13 (matches the dev box + image), builds the SDK venv on
                           it, symlinks the bundled 'claude'. One-time OAuth is a manual 'claude' run
                           you do afterward. Idempotent.
+  install-voice           run src/scripts/install-cosa-voice.sh on the VM, then read the registration
+                          back. It removes and re-adds the cosa-voice entry in the VM user's Claude
+                          Code config, so any hand-added env on that entry is dropped. It also
+                          overwrites the "hooks" key of ~/.claude/settings.json from the repo's
+                          template (a .bak-<epoch> copy is kept each run), may build ~/.venv-lupin-mcp and
+                          add its export to ~/.bashrc, and sends one test notification when the
+                          server is up. Needs, in order: a checkout, install-cli, push-env (writes
+                          ~/.lupin/config) and push-unversioned (delivers the notification key).
+                          The settings block defaults to Lupin:+Development; set
+                          LUPIN_MCP_CONFIG_BLOCK here to register another, e.g. Lupin:+Testing-GCS.
+                          It ends by reading the entry back and stops, saying why, if any scope
+                          lacks the variable or carries a value that names no settings block.
+                          Sessions pick the entry up when they next start. Safe to re-run.
   push-env                sync your shell env: SCP ~/.bash_aliases + ~/.bash_aliases_to_uc.py to
                           the VM, regenerate ~/.bash_aliases_uc there, wire ~/.bashrc to source
                           both AND export VM-correct LUPIN_ROOT + PLANNING_IS_PROMPTING_ROOT +
@@ -984,6 +997,54 @@ echo 'NEXT (manual, interactive): open a fresh shell, run  claude  once, complet
         fi
         ;;
 
+    install-voice)
+        # Register the cosa-voice MCP server in the VM user's Claude Code config by running the
+        # repo's own installer there (row c9252819). The registration is per user and per host,
+        # so a bundle push does not deliver it. The installer removes and re-adds the entry, so
+        # the settings block must be passed through or a re-run resets it to the default.
+        require_project
+        VOICE_BLOCK_EXPORT=""
+        if [ -n "${LUPIN_MCP_CONFIG_BLOCK:-}" ]; then
+            case "$LUPIN_MCP_CONFIG_BLOCK" in
+                *[!A-Za-z0-9:+_-]*) die "LUPIN_MCP_CONFIG_BLOCK may hold only letters, digits and : + _ - (got '$LUPIN_MCP_CONFIG_BLOCK')" ;;
+            esac
+            # A misspelled block passes the character check and would be registered as typed.
+            # This checkout's settings file is the one the bundle ships, so ask it first.
+            VOICE_LOCAL_INI="$( cd "$( dirname "${BASH_SOURCE[0]}" )/../.." && pwd )/src/conf/lupin-app.ini"
+            # The same header match the preflight uses on the VM, so the two cannot disagree.
+            PFV_HEADER="[${LUPIN_MCP_CONFIG_BLOCK//+/ }]" awk '
+                { sub( /[ \t\r]+$/, "" ); if ( $0 == ENVIRON[ "PFV_HEADER" ] ) found = 1 }
+                END { exit !found }' "$VOICE_LOCAL_INI" \
+                || die "LUPIN_MCP_CONFIG_BLOCK names no block in $VOICE_LOCAL_INI: [${LUPIN_MCP_CONFIG_BLOCK//+/ }]"
+            VOICE_BLOCK_EXPORT="export LUPIN_MCP_CONFIG_BLOCK=$LUPIN_MCP_CONFIG_BLOCK"
+        fi
+        # After the installer, the entry is read back with the preflight's own reader and each
+        # value is checked to resolve: the installer hides the CLI's stderr and its own verify
+        # step is a notification, not a readback. A failed read says why before it stops; a
+        # bare non-zero exit after the installer's "complete" banner explains nothing.
+        RCMD_VOICE="set -e
+export PATH=\"\$HOME/.local/bin:\$PATH\"
+export LUPIN_ROOT=$VM_ROOT
+export LUPIN_CC_VENV=\"\$HOME/.venv-lupin-mcp\"
+$VOICE_BLOCK_EXPORT
+bash $VM_ROOT/src/scripts/install-cosa-voice.sh
+. $VM_ROOT/src/scripts/lib/preflight-vm-lib.sh
+registered=\"\$( pfv_mcp_registration_env \"\$HOME/.claude.json\" cosa-voice LUPIN_CONFIG_MGR_CLI_ARGS )\" || { rc=\$?; echo \"READBACK FAILED (reader rc=\$rc; 1 = these scopes lack the variable, 2 = not registered, 3 = wrong shape, 4 = unreadable): \$registered\" >&2; exit \$rc; }
+echo \"registered LUPIN_CONFIG_MGR_CLI_ARGS, as scope then value:\"
+echo \"\$registered\"
+echo \"\$registered\" | while IFS=\$'\\t' read -r scope value; do
+    why=\"\$( pfv_config_mgr_args_resolve \"\$value\" $VM_ROOT )\" || { echo \"READBACK FAILED: the \$scope registration does not resolve: \$why\" >&2; exit 1; }
+done"
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log "(dry-run) register cosa-voice on VM:"
+            printf '%s\n' "$RCMD_VOICE" >&2
+        else
+            log "registering cosa-voice on $VM_NAME host"
+            gcloud compute ssh "$VM_NAME" \
+                --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
+                --command "$RCMD_VOICE"
+        fi
+        ;;
     push-env)
         # Sync your dev-box shell environment to the VM host so both feel identical. SCPs your alias
         # file + the uppercase generator, REGENERATES the uppercase aliases ON the VM (from the just-
