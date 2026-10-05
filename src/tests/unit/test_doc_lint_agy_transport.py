@@ -383,6 +383,19 @@ def test_calls_refused_for_a_changed_binary_are_not_charged_and_the_disk_is_read
     assert mt.calls_used( "m" ) == 0
 
 
+def test_configuring_agy_again_after_a_stop_pins_the_new_binary_and_calls_work( agy_bin ):
+    fake = FakeAgy( answer="ok" )
+    mt.configure_agy( agy_bin, runner=fake )
+    with open( agy_bin, "wb" ) as handle: handle.write( b"#!/bin/sh\n# agy updated itself\n" )
+    with pytest.raises( agy_runtime.AgyBinaryChanged ):
+        complete( "m", "s", "u" )
+
+    mt.configure_agy( agy_bin, runner=fake )
+
+    assert mt.AGY_STOP is None
+    assert complete( "m", "s", "u" ) == "ok"
+
+
 def test_a_binary_that_disappeared_counts_as_changed( agy_bin ):
     mt.configure_agy( agy_bin, runner=FakeAgy( answer="ok" ) )
     os.remove( agy_bin )
