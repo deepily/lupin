@@ -67,8 +67,9 @@ class AgyResult:
         - usage is agy's token report for the call (input_tokens, output_tokens,
           thinking_tokens, cache_read_tokens, total_tokens)
         - denied_actions lists tool actions print mode refused, empty when none
+        - denied_actions is always a list
         - fingerprint is the binary's path, size and modification time, read before the
-          call and unchanged when the call ended
+          call. When the call was pinned, it was also unchanged when the call ended
     """
     response         : str
     model            : str
@@ -100,14 +101,18 @@ def binary_fingerprint( agy_bin=DEFAULT_AGY_BIN ):
           size and modification time; the content is not hashed
 
     Raises:
-        - AgyCallError if agy_bin cannot be found
+        - AgyCallError if agy_bin cannot be found or cannot be read
     """
     resolved = shutil.which( agy_bin )
     if resolved is None:
         raise AgyCallError( f"agy binary not found: {agy_bin!r} is not on PATH and is not an executable path" )
 
     real_path = os.path.realpath( resolved )
-    stat      = os.stat( real_path )
+
+    try:
+        stat = os.stat( real_path )
+    except OSError as error:
+        raise AgyCallError( f"agy binary cannot be read: {error}" )
 
     return {
         "path"     : real_path,
@@ -131,7 +136,8 @@ def agy_version( agy_bin=DEFAULT_AGY_BIN, runner=None ):
         - returns the first line of `agy --version`, stripped
 
     Raises:
-        - AgyCallError if agy exits non-zero, times out, or prints nothing
+        - AgyCallError if agy cannot be started, exits non-zero, times out, or prints
+          nothing
     """
     runner = runner if runner is not None else subprocess.run
 
@@ -139,6 +145,8 @@ def agy_version( agy_bin=DEFAULT_AGY_BIN, runner=None ):
         result = runner( [ agy_bin, "--version" ], capture_output=True, text=True, timeout=60 )
     except subprocess.TimeoutExpired:
         raise AgyCallError( "agy --version timed out after 60s" )
+    except OSError as error:
+        raise AgyCallError( f"agy --version could not be started: {error}" )
 
     lines = ( result.stdout or "" ).strip().splitlines()
     if result.returncode != 0 or not lines:
@@ -226,9 +234,11 @@ def parse_result( stdout ):
     seen  = False
 
     for line in ( stdout or "" ).split( "\n" ):
+        # json.loads raises ValueError for bad JSON and for an over-long integer, and
+        # RecursionError for very deep nesting.
         try:
             event = json.loads( line )
-        except json.JSONDecodeError:
+        except ( ValueError, RecursionError ):
             continue
 
         if isinstance( event, dict ) and event.get( "event" ) == "result":
@@ -263,6 +273,7 @@ def check_success_fields( result ):
 
     Ensures:
         - returns None when every key of RESULT_FIELD_TYPES is present with its type
+        - a boolean is never accepted, although Python counts it as an integer
 
     Raises:
         - AgyCallError naming the first field that is missing or of the wrong type
@@ -271,7 +282,7 @@ def check_success_fields( result ):
         if name not in result:
             raise AgyCallError( f"agy result is missing the field {name!r}" )
 
-        if not isinstance( result[ name ], kind ):
+        if isinstance( result[ name ], bool ) or not isinstance( result[ name ], kind ):
             raise AgyCallError( f"agy result field {name!r} has the wrong type: {result[ name ]!r}" )
 
 
@@ -301,8 +312,9 @@ def run_agy( prompt, *, model, workspace_dir, timeout_seconds=DEFAULT_TIMEOUT_SE
           directory, or timeout_seconds is not a positive integer
         - AgyBinaryChanged if the binary on disk differs from pinned_fingerprint, before
           or after the call
-        - AgyCallError on timeout, a binary that cannot be started, non-zero exit, a
-          missing or malformed result, a status that is not `SUCCESS`, or a blank answer
+        - AgyCallError on timeout, a binary that cannot be started, output that is not
+          UTF-8, non-zero exit, a missing or malformed result, a status that is not
+          `SUCCESS`, or a blank answer
     """
     if not isinstance( prompt, str ):
         raise ValueError( f"prompt is not a string: {prompt!r}" )
@@ -334,6 +346,8 @@ def run_agy( prompt, *, model, workspace_dir, timeout_seconds=DEFAULT_TIMEOUT_SE
         raise AgyCallError( f"agy timed out after {outer_timeout}s (model {model})" )
     except OSError as error:
         raise AgyCallError( f"agy could not be started (model {model}): {error}" )
+    except UnicodeError as error:
+        raise AgyCallError( f"agy input or output is not valid UTF-8 (model {model}): {error}" )
 
     wall_seconds = round( time.monotonic() - started, 3 )
 
@@ -363,6 +377,13 @@ def run_agy( prompt, *, model, workspace_dir, timeout_seconds=DEFAULT_TIMEOUT_SE
     if not response.strip():
         raise AgyCallError( f"agy returned a blank answer (model {model})" )
 
+    # agy includes denied_actions only when print mode refused a tool action.
+    denied_actions = result.get( "denied_actions" )
+    if denied_actions is None: denied_actions = []
+
+    if not isinstance( denied_actions, list ):
+        raise AgyCallError( f"agy result field 'denied_actions' has the wrong type: {denied_actions!r}" )
+
     encoded = response.encode( "utf-8" )
 
     return AgyResult(
@@ -374,8 +395,7 @@ def run_agy( prompt, *, model, workspace_dir, timeout_seconds=DEFAULT_TIMEOUT_SE
         duration_seconds = result[ "duration_seconds" ],
         wall_seconds     = wall_seconds,
         usage            = result[ "usage" ],
-        # agy includes denied_actions only when print mode refused a tool action.
-        denied_actions   = result.get( "denied_actions", [] ),
+        denied_actions   = denied_actions,
         response_bytes   = len( encoded ),
         response_sha     = hashlib.sha256( encoded ).hexdigest(),
         fingerprint      = fingerprint

@@ -114,6 +114,16 @@ def test_fingerprint_changes_when_the_binary_is_replaced( fake_bin ):
     assert after[ "size" ] == 24
 
 
+def test_fingerprint_file_removed_after_it_was_found_raises_call_error( tmp_path, monkeypatch ):
+    removed = str( tmp_path / "agy-removed-after-lookup" )
+
+    # The lookup answers with a path, and the file is gone by the time it is read.
+    monkeypatch.setattr( runtime.shutil, "which", lambda name: removed )
+
+    with pytest.raises( AgyCallError, match="agy binary cannot be read" ):
+        binary_fingerprint( "agy" )
+
+
 def test_fingerprint_missing_binary_raises( tmp_path ):
     with pytest.raises( AgyCallError, match="agy binary not found" ):
         binary_fingerprint( str( tmp_path / "absent" ) )
@@ -157,6 +167,11 @@ def test_version_blank_output_raises( stdout ):
 
     with pytest.raises( AgyCallError, match="agy --version failed: exit=0" ):
         agy_version( runner=runner )
+
+
+def test_version_missing_binary_raises_call_error_with_a_real_process( tmp_path ):
+    with pytest.raises( AgyCallError, match="agy --version could not be started" ):
+        agy_version( str( tmp_path / "no-such-agy" ) )
 
 
 def test_version_timeout_raises():
@@ -242,6 +257,11 @@ def test_parse_takes_the_last_result_and_skips_noise():
     assert parse_result( stdout )[ "response" ] == "second"
 
 
+@pytest.mark.parametrize( "noise", [ "9" * 5000, "[" * 200000 ] )
+def test_parse_skips_a_line_json_refuses_for_size_or_depth( noise ):
+    assert parse_result( noise + "\n" + _result_stdout( response="after the noise" ) )[ "response" ] == "after the noise"
+
+
 def test_parse_keeps_an_answer_holding_unicode_line_separators_on_one_line():
     answer = "first\u2028second\u0085third"
     stdout = json.dumps( { "event" : "result", "result" : { "status" : "SUCCESS", "response" : answer } }, ensure_ascii=False ) + "\n"
@@ -279,6 +299,7 @@ def test_success_fields_names_a_missing_field( name ):
 
 @pytest.mark.parametrize( "name, value", [
     ( "response", None ), ( "conversation_id", 7 ), ( "num_turns", "1" ), ( "duration_seconds", "12.4" ), ( "usage", [] ),
+    ( "num_turns", True ), ( "duration_seconds", False ),
 ] )
 def test_success_fields_names_a_field_of_the_wrong_type( name, value ):
     result         = parse_result( REAL_STDOUT )
@@ -375,6 +396,41 @@ def test_run_reports_denied_actions_when_agy_lists_them( fake_bin, scratch ):
 
     assert result.denied_actions == [ "write_file(/x)" ]
     assert result.effort         == "high"
+
+
+def test_run_null_denied_actions_becomes_an_empty_list( fake_bin, scratch ):
+    runner = _FakeRunner( _Completed( stdout=_result_stdout( denied_actions=None ) ) )
+
+    assert run_agy( "p", model="m", workspace_dir=scratch, agy_bin=fake_bin, runner=runner ).denied_actions == []
+
+
+def test_run_denied_actions_of_the_wrong_type_raises_call_error( fake_bin, scratch ):
+    runner = _FakeRunner( _Completed( stdout=_result_stdout( denied_actions="write_file(/x)" ) ) )
+
+    with pytest.raises( AgyCallError, match="field 'denied_actions' has the wrong type" ):
+        run_agy( "p", model="m", workspace_dir=scratch, agy_bin=fake_bin, runner=runner )
+
+
+@pytest.mark.parametrize( "stream, exit_code", [ ( 1, 0 ), ( 2, 3 ) ] )
+def test_run_with_a_real_process_printing_bytes_that_are_not_utf8_raises_call_error( tmp_path, stream, exit_code ):
+    binary    = tmp_path / "agy"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    binary.write_text( f"#!/bin/sh\ncat > /dev/null\nprintf '\\377' >&{stream}\nexit {exit_code}\n" )
+    binary.chmod( binary.stat().st_mode | stat.S_IXUSR )
+
+    with pytest.raises( AgyCallError, match=r"not valid UTF-8 \(model m\)" ):
+        run_agy( "p", model="m", workspace_dir=str( workspace ), agy_bin=str( binary ) )
+
+
+def test_run_prompt_that_cannot_be_encoded_raises_call_error_with_a_real_process( tmp_path ):
+    binary    = tmp_path / "agy"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    _write_stand_in( binary, "never read" )
+
+    with pytest.raises( AgyCallError, match=r"not valid UTF-8 \(model m\)" ):
+        run_agy( "a\ud800b", model="m", workspace_dir=str( workspace ), agy_bin=str( binary ) )
 
 
 def test_run_accepts_a_matching_pin( fake_bin, scratch ):
