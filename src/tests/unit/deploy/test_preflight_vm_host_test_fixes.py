@@ -164,8 +164,11 @@ def venue( tmp_path ):
     env = { **ambient, "HOME": str( home ), "PATH": f"{bindir}:{os.environ['PATH']}",
             "PREFLIGHT_VM_CONTAINER": "fake-rest", "FAKE_CONTAINER": "fake-rest",
             "FAKE_MOUNTS_SRC": str( msrc ), "FAKE_FR_DIR": "/var/lupin/flow-ratio", "FAKE_FR_FILE": str( fr ),
-            "FAKE_UNSAFE": "", "PREFLIGHT_VM_COMPOSE": COMPOSE, "LUPIN_ROOT": ROOT }
-    return { "home": home, "env": env, "fr": fr, "msrc": msrc }
+            "FAKE_UNSAFE": "", "PREFLIGHT_VM_COMPOSE": COMPOSE, "LUPIN_ROOT": ROOT,
+            # LUPIN_ROOT is the real tree, so the project-scope file is pinned to a path that
+            # does not exist: a .mcp.json added to the repo root must not reach these tests.
+            "PREFLIGHT_VM_PROJECT_MCP_JSON": str( tmp_path / "project.mcp.json" ) }
+    return { "home": home, "env": env, "fr": fr, "msrc": msrc, "project_mcp": tmp_path / "project.mcp.json" }
 
 
 def test_the_override_variables_are_found_at_all():
@@ -225,10 +228,12 @@ def test_A8_unparseable_settings_is_blocking_unknown( venue ):
 
 
 # ── A3b: the voice server's registration (row c9252819) ──────────────────────
-# The venue starts with no ~/.claude.json, which is a host nobody runs Claude Code on.
+# The venue starts with no ~/.claude.json, which is a host nobody runs Claude Code on,
+# and with no project .mcp.json.
 
 VOICE_VAR   = "LUPIN_CONFIG_MGR_CLI_ARGS"
 VOICE_VALUE = "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Development"
+VOICE_BAD   = VOICE_VALUE.replace( "Lupin:+Development", "Lupin:+No-Such" )
 VOICE_VERB  = "from the dev box: src/scripts/lupin-vm.sh install-voice"
 
 
@@ -241,24 +246,25 @@ def _register( venue, user_env=None, local=None ):
 
 def _blocking( out ):
     # The script's own count of blocking results, from its summary line.
-    hits = re.findall( r"(\d+) blocking", out )
+    hits = re.findall( r"blocking=(\d+)", out )
     assert len( hits ) == 1, out
     return int( hits[ 0 ] )
 
 
 def test_A3b_no_registration_warns_and_does_not_block( venue ):
     out = _run( venue )
-    hit = _line( out, "no readable cosa-voice registration" )
-    assert "[UNKN]" in hit and "treated as blocking" not in hit
+    hit = _line( out, "no cosa-voice registration in" )
+    assert "[UNKN]" in hit and "treated as blocking" not in hit and ".claude.json" in hit
     assert VOICE_VERB in out
+    assert "project.mcp.json" not in out, "an absent project file is silent"
 
 
-def test_A3b_good_registration_passes_and_prints_the_value( venue ):
+def test_A3b_good_registration_passes_and_prints_the_scope_and_value( venue ):
     baseline = _blocking( _run( venue ) )
-    _register( venue, { "LUPIN_ROOT": "/r", VOICE_VAR: VOICE_VALUE } )
+    _register( venue, { "LUPIN_ROOT": "/r", VOICE_VAR: VOICE_VALUE }, local={ VOICE_VAR: VOICE_VALUE } )
     out = _run( venue )
-    hit = _line( out, "cosa-voice registration carries" )
-    assert "[OK]" in hit and VOICE_VALUE in hit
+    hit = _line( out, "carries LUPIN_CONFIG_MGR_CLI_ARGS and it resolves" )
+    assert "[OK]" in hit and f"user {VOICE_VALUE};local:/mnt/lupin-data/lupin {VOICE_VALUE}" in hit
     assert VOICE_VERB not in out
     assert _blocking( out ) == baseline
 
@@ -286,36 +292,84 @@ def test_A3b_a_local_scope_entry_without_the_variable_blocks_beside_a_good_user_
 
 @pytest.mark.parametrize( "value, why", [
     ( "x",                                                                  "no config_path= in the value" ),
-    ( "config_path=/src/conf/lupin-app.ini config_block_id=Lupin:+No-Such", "no [Lupin: No-Such] block" ),
+    ( "config_path=/src/conf/lupin-app.ini config_block_id=Lupin:+Development", "no splainer_path= in the value" ),
+    ( VOICE_BAD,                                                            "no [Lupin: No-Such] block" ),
 ] )
 def test_A3b_a_value_that_names_nothing_blocks( venue, value, why ):
     baseline = _blocking( _run( venue ) )
     _register( venue, { VOICE_VAR: value } )
     out = _run( venue )
     hit = _line( out, "does not resolve" )
-    assert "[FAIL]" in hit and why in hit
+    assert "[FAIL]" in hit and f"[user: {why}" in hit
+    assert _blocking( out ) == baseline + 1
+
+
+def test_A3b_a_local_value_that_names_nothing_blocks_beside_a_good_user_value( venue ):
+    # Every value is resolved, not only the first: the local entry is the one a session
+    # started in that directory runs.
+    baseline = _blocking( _run( venue ) )
+    _register( venue, { VOICE_VAR: VOICE_VALUE }, local={ VOICE_VAR: VOICE_BAD } )
+    out = _run( venue )
+    hit = _line( out, "does not resolve" )
+    assert "[FAIL]" in hit and "[local:/mnt/lupin-data/lupin: no [Lupin: No-Such] block" in hit
+    assert "[user:" not in hit
     assert _blocking( out ) == baseline + 1
 
 
 def test_A3b_unparseable_claude_json_is_blocking_unknown( venue ):
+    baseline = _blocking( _run( venue ) )
     ( venue[ "home" ] / ".claude.json" ).write_text( "{oops" )
-    hit = _line( _run( venue ), "the cosa-voice registration is unread" )
-    assert "[UNKN]" in hit and "treated as blocking" in hit
+    out = _run( venue )
+    hit = _line( out, "is not the shape Claude Code writes" )
+    assert "[UNKN]" in hit and "treated as blocking" in hit and "reader rc=3" in hit
+    assert _blocking( out ) == baseline + 1
 
 
-def test_A3b_project_mcp_json_is_held_to_the_same_rule( venue, tmp_path ):
-    # Pointed at through the override so the real tree's root is never written to.
-    project = tmp_path / "project.mcp.json"
-    venue[ "env" ][ "PREFLIGHT_VM_PROJECT_MCP_JSON" ] = str( project )
-    assert "project.mcp.json" not in _run( venue ), "an absent project file is silent"
+@pytest.mark.parametrize( "which", [ "home", "project" ] )
+def test_A3b_a_file_that_exists_and_cannot_be_read_blocks_in_either_place( venue, which ):
+    # Not "nothing registered": a file is there and nobody could say what it registers.
+    if os.geteuid() == 0: pytest.skip( "root reads a mode-000 file, so the case cannot be built" )
+    baseline = _blocking( _run( venue ) )
+    f = venue[ "home" ] / ".claude.json" if which == "home" else venue[ "project_mcp" ]
+    f.write_text( json.dumps( { "mcpServers": { "cosa-voice": { "env": { VOICE_VAR: VOICE_VALUE } } } } ) )
+    f.chmod( 0 )
+    try:
+        out = _run( venue )
+    finally:
+        f.chmod( 0o600 )
+    hit = _line( out, f"the registration reader could not read {f}" )
+    assert "treated as blocking" in hit and "reader rc=4" in hit
+    assert _blocking( out ) == baseline + 1
+
+
+def test_A3b_project_mcp_json_is_held_to_the_same_rule( venue ):
+    project  = venue[ "project_mcp" ]
+    baseline = _blocking( _run( venue ) )
+    def entry( env ): return json.dumps( { "mcpServers": { "cosa-voice": { "env": env } } } )
+
     project.write_text( json.dumps( { "mcpServers": { "other": {} } } ) )
     assert "project.mcp.json" not in _run( venue ), "a project file that does not register cosa-voice is silent"
-    project.write_text( json.dumps( { "mcpServers": { "cosa-voice": { "env": {} } } } ) )
-    assert "[FAIL]" in _line( _run( venue ), f"project.mcp.json registers cosa-voice without {VOICE_VAR}" )
-    project.write_text( json.dumps( { "mcpServers": { "cosa-voice": { "env": { VOICE_VAR: "v" } } } } ) )
-    assert "[OK]" in _line( _run( venue ), "project-scope cosa-voice registration" )
+
+    project.write_text( entry( {} ) )
+    out = _run( venue )
+    assert "[FAIL]" in _line( out, f"project.mcp.json without {VOICE_VAR}" )
+    assert _blocking( out ) == baseline + 1
+
+    project.write_text( entry( { VOICE_VAR: VOICE_BAD } ) )
+    out = _run( venue )
+    hit = _line( out, "project.mcp.json carries" )
+    assert "[FAIL]" in hit and "does not resolve: [user: no [Lupin: No-Such] block" in hit
+    assert _blocking( out ) == baseline + 1
+
+    project.write_text( entry( { VOICE_VAR: VOICE_VALUE } ) )
+    out = _run( venue )
+    assert "[OK]" in _line( out, "project.mcp.json carries LUPIN_CONFIG_MGR_CLI_ARGS and it resolves" )
+    assert _blocking( out ) == baseline
+
     project.write_text( "{oops" )
-    assert "treated as blocking" in _line( _run( venue ), "project.mcp.json is not a JSON object" )
+    out = _run( venue )
+    assert "treated as blocking" in _line( out, "project.mcp.json, or a cosa-voice entry in it, is not the shape" )
+    assert _blocking( out ) == baseline + 1
 
 
 def test_A9_absent_roster_fails( venue ):

@@ -72,7 +72,7 @@ Not preflight checks: they happen before the preflight can run, or are an instan
 
 | check | what must exist | level | symptom when missing |
 |---|---|---|---|
-| **A3b** | every `cosa-voice` entry in `~/.claude.json` (the user-scope one and any local-scope one under `projects`) has `LUPIN_CONFIG_MGR_CLI_ARGS` in its `env`, and the value names a settings file and a block that exist. A `cosa-voice` entry in the repo's `.mcp.json` is held to the same rule | block when an entry exists without it or with a value that does not resolve; block when the file is not JSON; warn when there is no entry | Every spawned worker gets no `--model` and runs on the user's default model. The spawn result shows `"model": null`. No error anywhere |
+| **A3b** | every `cosa-voice` entry in `~/.claude.json` (the user-scope one and any local-scope one under `projects`) has `LUPIN_CONFIG_MGR_CLI_ARGS` in its `env`, and each value names a settings file, a splainer file and a block that exist in this checkout. A `cosa-voice` entry in the repo's `.mcp.json` is held to the same rule | block when an entry exists without it or with a value that does not resolve; block when a file is the wrong shape or cannot be read; warn when `~/.claude.json` has no entry; silent when `.mcp.json` is absent or has none | Every spawned worker gets no `--model` and runs on the user's default model. The spawn result shows `"model": null`. No error anywhere |
 
 **How it is fixed.** The entry is written by `src/scripts/install-cosa-voice.sh`. It is per user and
 per host, so a bundle push does not deliver it. From the dev box:
@@ -91,10 +91,15 @@ It is safe to re-run, and a re-run does more than register:
 - The settings block defaults to `Lupin:+Development`. To register another, set it on the dev box:
   `LUPIN_MCP_CONFIG_BLOCK=Lupin:+Testing-GCS src/scripts/lupin-vm.sh install-voice`.
 - It overwrites the `hooks` key of `~/.claude/settings.json` from `src/conf/claude-code-hooks.json`
-  and keeps a dated `.bak` of the old file each run.
+  and keeps a `.bak-<epoch>` copy of the old file each run.
 - It may build `~/.venv-lupin-mcp`, add its export to `~/.bashrc`, and send one test notification.
 
-Its last line reads the entry back and prints the registered value. A session picks the new entry
+It ends by reading every entry back and printing each scope and value. If a scope lacks the
+variable, or a value names no settings block, it stops and says which. A block name that is not in
+this checkout's `src/conf/lupin-app.ini` is refused on the dev box, before anything is sent.
+
+Not checked: the values are resolved against the checkout the preflight runs from, not against the
+`LUPIN_ROOT` in the entry's own `env`. An entry that points at another tree is judged against this one. A session picks the new entry
 up when it next starts; a session already running keeps the entry it started with.
 
 ## Adding a new item to this list
