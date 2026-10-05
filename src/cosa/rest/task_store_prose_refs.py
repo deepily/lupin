@@ -1,86 +1,44 @@
 """
-Task-store PROSE-REF scanner — the (A) arm of store row 00a6bde2, item 4.
+Prose-reference scanner: flags rows citing a terminal task id in prose with no edge.
 
-WHAT THIS IS FOR
-----------------
-`blocker_terminal` (task_store_owed.blocker_is_terminal) catches a stranded row whose
-dependency was written as a TYPED `blocked_by` edge. It is blind to the far commoner
-shape: a row that names its precondition ONLY IN PROSE. Row 31f6d447 sat blocked for
-days on a precondition that had no row at all — the dependency existed as a sentence,
-so it could never be scheduled, chased, or transitioned, and no edge-scanner could see it.
+`blocker_terminal` (`task_store_owed.blocker_is_terminal`) catches a stranded row whose
+dependency is a typed `blocked_by` edge. It is blind to the commoner shape, a row that names its
+precondition only in prose. Such a dependency cannot be scheduled, chased or transitioned.
 
-Row 00a6bde2's amendments split that prose arm in two, and ONLY ONE HALF IS DETECTABLE:
+The prose arm has two halves, and only one is detectable:
 
-    (A) CITES AN ID IN PROSE  — "blocked on 97c12d68". Scannable: extract the token,
-        resolve it, flag a citation of a TERMINAL id that has no matching edge.
-    (B) CITES A PREMISE       — "until the demos ship", "pending Rick's ruling". NO TOKEN
-        TO RESOLVE. Not a detection problem, an AUTHORING one: no oracle can follow a
-        dependency that was never written as anything a machine can follow.
+    (A) Cites an id in prose, "blocked on <id>". Scannable: extract the token, resolve it,
+        and flag a citation of a terminal id that has no matching edge.
+    (B) Cites a premise, "until the demos ship". There is no token to resolve. This is an
+        authoring problem, because no oracle can follow a dependency never written as an id.
 
-This module implements (A) and NOTHING ELSE. Everything below exists to make that
-boundary impossible to miss.
+This module implements (A) only, and is built so that boundary is impossible to miss.
+It must not produce a false green, an instrument answering a narrower question than its reader believes.
+A clean (A) result reads as "no dangling preconditions" while the unscannable (B) half sits underneath.
+So `scope_disclosure()` is required output: the CLI prints it every run, and `scan_rows` returns it.
 
-🔴 THE FALSE-GREEN THIS MODULE MUST NOT PRODUCE (María 🌸, `fae1bbc4`, 2026-07-25 — the
-load-bearing warning on the row). A scanner over (A) that reports CLEAN reads as "no
-dangling preconditions" while the entire unscannable (B) half sits underneath it. That
-is the SAME SHAPE as the defect this whole class is made of: an instrument answering a
-narrower question than the one its reader believes it answered.
+Counts are never collapsed to one. An 8-hex token may be a task id, a commit sha or a session
+id, and no regex separates them. Shas share the shape and are dense in the bodies. Session ids
+are the largest population: every amendment header is stamped `<persona> <8-hex>`. That count
+grows continuously, which means neither a broken scanner nor a spreading defect.
 
-⇒ `scope_disclosure()` is therefore a REQUIRED part of the output, not a courtesy line.
-   A clean result that does not say what it could not see is a defect, not a pass. The
-   CLI prints it on every run, green or red, and `scan_board` returns it in the report.
+A false positive, a sha reported as a broken id, is visible. A false negative is silent and more
+dangerous: treating every unresolvable token as "not a task id" loses a mistyped id among the shas.
+So the report carries the unresolved bucket as a number, split by tier, and the amendment-stamp
+exclusion as its own count. An unreported exclusion looks like tokens never seen, and an empty-looking
+bucket that is merely unexamined is a false green.
 
-WHY THE COUNTS ARE NEVER COLLAPSED TO ONE
------------------------------------------
-An 8-hex token is not necessarily a task id, and no regex separates the populations:
+Tiers:
+    - Full UUID citation: high confidence, resolved against the task store.
+    - 8-hex citation: low confidence. It lands in unresolved by default and is never resolved
+      by prefix, because a prefix resolve turns an amendment stamp into a finding.
 
-    · TASK IDS      — our own abbreviation of a 36-char UUID
-    · COMMIT SHAs   — identical shape; dense throughout these bodies
-    · SESSION IDS   — the LARGEST population, and SYSTEMATICALLY GENERATED: every
-                      amendment header this store writes is stamped `<persona> <8-hex>`,
-                      so the stamp format is an 8-hex generator firing once per amendment,
-                      forever. A builder who sizes the bucket expecting stray noise will
-                      conclude the scanner is broken; one who watches it grow will conclude
-                      the class is spreading. Neither is true.
+Store ids are 36-char dashed UUIDs, and the 8-hex form is an abbreviation. A dashed UUID cannot
+collide with a 40-hex git sha, but the tier buys nothing against other UUIDs the fleet writes.
+Session ids are one. A resolve therefore means "found in the task store", not "is UUID-shaped".
+The caller injects `status_by_id` from a task-store lookup, and this module has no resolver of its own.
 
-Two failure directions, and the second is the dangerous one:
-
-    · FALSE POSITIVE — a sha resolves to nothing and is reported broken. Noisy, VISIBLE.
-    · FALSE NEGATIVE — the scanner treats every unresolvable token as "not a task id,
-                       skip", and a genuinely deleted or mistyped id vanishes into the
-                       same silent bucket as the shas. THE REAL HAZARD.
-
-⇒ So the report carries the UNRESOLVED bucket as a first-class number, split by
-  confidence tier, and reports the amendment-stamp exclusion as its own count. AN
-  EXCLUSION THAT IS APPLIED BUT NOT REPORTED IS INDISTINGUISHABLE FROM A SCANNER THAT
-  NEVER SAW THOSE TOKENS. A bucket reported as empty when it is merely unexamined is the
-  exact false-green this module exists to prevent.
-
-THE TIER, AND WHY IT IS BUILDABLE TODAY
----------------------------------------
-Store ids are 36-char dashed UUIDs. The 8-hex form is OUR ABBREVIATION, not the id. A
-full dashed UUID cannot collide with a git sha (40 hex, no dashes), so:
-
-    · FULL-UUID citation -> HIGH confidence. Resolve it against the task store.
-    · 8-HEX citation     -> LOW confidence. Lands in UNRESOLVED **by default**, never
-                            guessed at, never resolved by prefix. A prefix resolve is how
-                            an amendment stamp becomes a "finding".
-
-Both forms are already in the data — 31f6d447's edge carries a full UUID while the GCP
-rows cite `97c12d68` abbreviated — so the tier is implementable against what exists, not
-a rewrite proposal.
-
-⚠️ A RESOLVE IS NOT AN IDENTITY PROOF. Session ids and task ids share the UUID space.
-The check is "resolved AGAINST THE TASK STORE SPECIFICALLY", never "is UUID-shaped,
-therefore is a task id". The tier buys collision-freedom with SHAs; it buys nothing
-against every other UUID this fleet writes. That is why `status_by_id` is injected by the
-caller from a task-store lookup and this module never invents a resolver of its own.
-
-THE LONG-RUN FIX IS AUTHORING, NOT CODE
----------------------------------------
-Every body that cites a FULL id shrinks the unresolved bucket. Same shape as the (B)
-remedy — mint the dependency as a row instead of describing it. Tiering makes the bucket
-SMALLER, NEVER ZERO.
+The long-run fix is authoring: full ids shrink the unresolved bucket; a dependency minted as a row leaves it. It never reaches zero.
 """
 
 import re
@@ -109,20 +67,18 @@ AMENDMENT_STAMP_RE = re.compile( r"\[amendment\s*·[^\]]*?\b([0-9a-f]{8})\b[^\]]
 
 def strip_amendment_stamps( body ):
     """
-    Remove amendment header stamps from a body and say how many were removed.
+    Remove amendment header stamps from a body and return how many were removed.
 
-    THE COUNT IS THE POINT, not the strip. An exclusion applied silently is
-    indistinguishable from a scanner that never saw those tokens — and this particular
-    exclusion is the largest population in the 8-hex bucket, growing once per amendment
-    forever. A caller that cannot see the number cannot tell a shrinking bucket from a
-    working filter.
+    The count is the point, more than the strip. A silent exclusion looks like a scanner that never saw those tokens.
+    Without the count a caller cannot tell a shrinking bucket from a working filter.
+    Stamps are the largest 8-hex population and grow once per amendment, indefinitely.
 
     Requires:
         - body is any object (non-str yields ( "", 0 ))
 
     Ensures:
         - returns ( text_with_stamps_removed, n_stamps_removed )
-        - n counts STAMPS, not distinct session ids — two amendments by one seat count 2,
+        - n counts stamps, not distinct session ids. Two amendments by one seat count 2,
           because the question is how much text was withheld from the scan
         - never raises
     """
@@ -141,12 +97,12 @@ def extract_prose_refs( body ):
 
     Ensures:
         - returns { "canonical": [...], "abbreviated": [...], "stamps_excluded": int }
-        - `canonical` holds full 36-char dashed UUIDs, lowercased, DE-DUPLICATED and in
-          first-appearance order — a body citing one id four times is one citation
-        - `abbreviated` holds 8-hex tokens found AFTER canonical UUIDs and amendment
+        - `canonical` holds full 36-char dashed UUIDs, lowercased, de-duplicated and in
+          first-appearance order, so a body citing one id four times is one citation
+        - `abbreviated` holds 8-hex tokens found after canonical UUIDs and amendment
           stamps are removed, de-duplicated, order-preserved
-        - a UUID's own first group NEVER lands in `abbreviated` (canonicals are excised
-          from the text before the abbreviation pass)
+        - a UUID's own first group never lands in `abbreviated`, because canonicals are
+          excised from the text before the abbreviation pass
         - never raises
     """
     text, stamps_excluded = strip_amendment_stamps( body )
@@ -171,28 +127,25 @@ def classify_prose_refs( body, blocked_by, status_by_id ):
     """
     Classify one row's prose citations against resolved task-store statuses.
 
-    THE FINDING IS NARROW ON PURPOSE: a citation of a TERMINAL id that has NO matching
-    `blocked_by` edge. A citation that DOES have an edge is already covered by
-    `blocker_is_terminal` on the read path — reporting it here would double-count the same
-    stranded row under two instruments and inflate the finding count against a board that
-    has not got worse.
+    A finding is a citation of a terminal id with no matching `blocked_by` edge. An edge-covered citation is
+    already covered by `blocker_is_terminal`, and reporting it here double-counts one row, inflating the count.
 
     Requires:
         - body is the row's body (any type)
         - blocked_by is the row's blocked_by value (any type)
         - status_by_id maps id -> status str, or -> None for looked-up-and-absent; an id
-          NOT PRESENT as a key was never looked up, which is a different fact
+          not present as a key was never looked up, which is a different fact
 
     Ensures:
         - returns dict with keys: findings, resolved_live, resolved_terminal,
           unresolved_canonical, unresolved_abbreviated, stamps_excluded, edge_covered
-        - `findings` is a list of { "id", "status", "reason" } — the actionable half
-        - an abbreviated 8-hex token is NEVER resolved and NEVER a finding; it counts
-          into `unresolved_abbreviated` by tier, because a prefix resolve is how a commit
-          sha or an amendment session id becomes a false finding
-        - a canonical id never looked up counts as `unresolved_canonical`, NOT as a
-          finding — absence from the map is a fact about the lookup, not about the row
-        - a canonical id looked-up-and-absent IS a finding ("absent"), because the typed
+        - `findings` is a list of { "id", "status", "reason" }, the actionable half
+        - an abbreviated 8-hex token is never resolved and never a finding. It counts
+          into `unresolved_abbreviated` by tier, because a prefix resolve turns a commit
+          sha or an amendment session id into a false finding
+        - a canonical id never looked up counts as `unresolved_canonical`, not as a
+          finding, because absence from the map is a fact about the lookup, not about the row
+        - a canonical id looked up and absent is a finding ("absent"), because the typed
           tier removes the shape collision that makes an 8-hex absence ambiguous
         - never raises
     """
@@ -247,12 +200,11 @@ def classify_prose_refs( body, blocked_by, status_by_id ):
 
 def scope_disclosure( bodies_scanned, counts ):
     """
-    The mandatory statement of what this scan COULD NOT SEE.
+    Return the text stating what a scan could not see.
 
-    REQUIRED OUTPUT, NOT A COURTESY LINE (row 00a6bde2, María's mandate). A clean (A)
-    result that does not name the unscanned (B) arm reads as "no dangling preconditions"
-    across a board where the larger, unscannable half was never examined. This function
-    exists so a caller cannot report a verdict without also reporting its reach.
+    The disclosure is mandatory output. A clean (A) result that omits the unscanned (B) arm
+    reads as "no dangling preconditions" while the larger, unscannable half was never
+    examined. A caller reports a verdict together with its reach.
 
     Requires:
         - bodies_scanned is an int
@@ -260,7 +212,7 @@ def scope_disclosure( bodies_scanned, counts ):
 
     Ensures:
         - returns a multi-line str naming: the bodies scanned, the three buckets, the
-          amendment-stamp exclusion, and BOTH blind spots (the (B) premise arm and the
+          amendment-stamp exclusion, and both blind spots (the (B) premise arm and the
           low-confidence 8-hex tier)
         - the text is emitted whether the scan was clean or not
         - never raises
@@ -293,7 +245,7 @@ def aggregate_counts( per_row ):
 
     Ensures:
         - returns a dict with the six count keys, all ints, zeroed for an empty input
-        - `findings` is NOT summed here — the caller keeps the rows, not just the number
+        - `findings` is not summed here, because the caller keeps the rows, not just the number
         - never raises
     """
     keys   = ( "resolved_live", "resolved_terminal", "unresolved_canonical",
@@ -315,7 +267,7 @@ def scan_rows( rows, status_by_id ):
     Ensures:
         - returns { "findings": [...], "counts": {...}, "bodies_scanned": int,
                     "scope": str }
-        - each finding carries the CITING row's id and title alongside the cited ref, so
+        - each finding carries the citing row's id and title alongside the cited ref, so
           the report names a row a human can open
         - `scope` is always populated — a caller cannot obtain counts without it
         - never raises
@@ -347,18 +299,17 @@ def scan_rows( rows, status_by_id ):
 
 def candidate_ref_ids( rows ):
     """
-    Every canonical id cited in prose across `rows`, for ONE batch status lookup.
+    Return every canonical id cited in prose across `rows`, for one batch status lookup.
 
-    THE ONLY ids this returns are canonical. That is the tier, expressed as an API: a
-    caller physically cannot resolve the abbreviated bucket through this function, so the
-    prefix-resolve that would manufacture false findings has no seam to enter through.
+    The function returns only canonical ids. A caller cannot resolve the abbreviated bucket
+    through it, so the prefix resolve that manufactures false findings has no entry point.
 
     Requires:
         - rows is an iterable of dicts carrying `body`
 
     Ensures:
         - returns a de-duplicated list of lowercase canonical UUID strings
-        - abbreviated 8-hex tokens are NEVER included
+        - abbreviated 8-hex tokens are never included
         - never raises
     """
     seen = [ ]
