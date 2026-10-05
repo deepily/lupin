@@ -185,3 +185,19 @@ def test_main_reports_explicit_paths_in_path_order( repo ):
     cf.main( [ "--repo-root", str( repo ), "--dry-run", "pkg/loud.py", "loose/script.py" ], out )
     text = out.getvalue()
     assert text.index( "loose/script.py" ) < text.index( "pkg/loud.py" )
+
+
+def test_main_dry_run_leaves_the_files_bytes_unchanged_and_a_real_run_writes_them( repo ):
+    path   = repo / "pkg" / "loud.py"
+    before = path.read_bytes()
+    cf.main( [ "--repo-root", str( repo ), "--dry-run", "pkg/loud.py" ], io.StringIO() )
+    assert path.read_bytes() == before
+    cf.main( [ "--repo-root", str( repo ), "pkg/loud.py" ], io.StringIO() )
+    assert path.read_bytes() != before and b"never" in path.read_bytes()
+
+
+def test_the_first_occurrence_on_a_source_line_is_the_docstring_when_the_text_repeats( repo ):
+    word_list.configure_root( repo )
+    source = '"""NEVER"""; y = "NEVER"\n'
+    result = cf.fix_source( "pkg/twice.py", source, repo )
+    assert result[ "new_source" ] == '"""never"""; y = "NEVER"\n' and result[ "lowered" ] == 1
