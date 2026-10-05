@@ -21,6 +21,7 @@ from cosa.orchestration.agy import runtime as agy_runtime
 from cosa.repo.doc_lint import claim_extractor as ce
 from cosa.repo.doc_lint import claim_judge as cj
 from cosa.repo.doc_lint import harness_cli as cli
+from cosa.repo.doc_lint import harness_runner as hn
 from cosa.repo.doc_lint import model_transport as mt
 
 
@@ -607,30 +608,70 @@ def test_a_run_stopped_by_a_binary_change_says_to_use_a_new_ledger_and_the_old_o
     assert again.calls == []
 
 
-def test_with_pairs_in_flight_a_binary_change_is_the_refusal_even_when_an_earlier_pair_failed_first( tmp_path, agy_bin, capsys ):
-    write_pairs( tmp_path )
+def test_with_pairs_in_flight_a_binary_change_is_the_refusal_even_when_an_earlier_pair_failed_first( tmp_path, agy_bin, capsys, monkeypatch ):
+    late_line = "It logs each retry."
+    first     = { "id" : "first",  "old" : OLD,                    "new" : OLD,                    "design" : None, "seed_span" : None }
+    second    = { "id" : "second", "old" : OLD + "\n" + late_line, "new" : OLD + "\n" + late_line, "design" : None, "seed_span" : None }
+    ( tmp_path / "pairs.json" ).write_text( json.dumps( [ first, second ] ) )
 
-    class FailsThenUpdates( FakeAgy ):
+    class FirstFailsFastSecondSwapsLate( FakeAgy ):
         def __call__( self, argv, **kwargs ):
             if argv[ 1: ] == [ "--version" ]: return super().__call__( argv, **kwargs )
             prompt = json.loads( kwargs[ "input" ] )[ "message" ][ "content" ]
-            # The seeded pair is first in the file; its extractor call fails outright, slowly.
-            # The clean pair's call swaps the binary under the run in the meantime.
-            if "blank.\n" + L3 in tagged( prompt, "old_text" ) and prompt.count( L2 ) == 1 and self.is_first_pair( prompt ):
-                time.sleep( 0.3 )
-                return Done( returncode=3, stderr="AGY_ERROR" )
+            # The first pair's call fails at once with an ordinary error. The second pair's call
+            # is still running when it does, swaps the binary, and then answers.
+            if late_line not in prompt: return Done( returncode=3, stderr="AGY_ERROR" )
+            time.sleep( 0.3 )
             with open( agy_bin, "wb" ) as handle: handle.write( b"#!/bin/sh\n# agy updated itself mid-run\n" )
             return super().__call__( argv, **kwargs )
 
-        def is_first_pair( self, prompt ):
-            self.seen = getattr( self, "seen", 0 ) + 1
-            return self.seen == 1
+    raised   = []
+    real_run = hn.run_all
 
-    code = cli.main( cli_args( tmp_path, "--transport", "agy", "--agy-bin", agy_bin, "--parallel", "2", "--extractor-lists", "1" ), agy_runner=FailsThenUpdates() )
+    async def spy( *args, **kwargs ):
+        try:
+            return await real_run( *args, **kwargs )
+        except Exception as e:
+            raised.append( e )
+            raise
 
+    monkeypatch.setattr( hn, "run_all", spy )
+
+    code = cli.main( cli_args( tmp_path, "--transport", "agy", "--agy-bin", agy_bin, "--parallel", "2", "--extractor-lists", "1" ), agy_runner=FirstFailsFastSecondSwapsLate() )
+
+    # The masked case itself: what run_all raised is the first pair's ordinary failure.
+    assert [ type( e ) for e in raised ] == [ mt.ModelCallError ]
     assert code == 2
-    assert "REFUSED: agy binary changed" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "REFUSED: agy binary changed while the call ran" in err
+    assert "the failure the run raised was ModelCallError: model call to gem-pro failed: agy exited 3" in err
     assert mt.TRANSPORT == "claude"
+
+
+def test_a_stop_reason_left_by_other_code_does_not_turn_a_claude_failure_into_a_refusal( tmp_path ):
+    write_pairs( tmp_path )
+    mt.AGY_STOP = "stale reason from a library caller"
+
+    async def broken( prompt, options ):
+        raise RuntimeError( "a real bug" )
+        yield
+
+    with pytest.raises( mt.ModelCallError, match="a real bug" ):
+        cli.main( cli_args( tmp_path ), query_fn=broken )
+
+
+@pytest.mark.parametrize( "bad", [ None, "600", True, 0, -5, float( "inf" ), float( "nan" ) ] )
+def test_a_time_limit_agy_cannot_take_is_refused_before_any_charge_or_call( agy_bin, tmp_path, bad ):
+    fake   = FakeAgy( answer="ok" )
+    ledger = tmp_path / "calls.jsonl"
+    mt.configure_agy( agy_bin, runner=fake )
+    mt.set_budget( str( ledger ), { "m" : 5 } )
+
+    with pytest.raises( ValueError, match="timeout_seconds must be a finite number above zero under agy" ):
+        complete( "m", "s", "u", timeout_seconds=bad )
+
+    assert fake.calls == []
+    assert not ledger.exists()
 
 
 def test_a_failure_that_is_not_a_binary_change_still_surfaces_as_itself( tmp_path, agy_bin ):

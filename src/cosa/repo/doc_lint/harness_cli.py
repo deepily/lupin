@@ -103,9 +103,10 @@ def main( argv, query_fn=None, agy_runner=None ):
           and the report carries transport, agy_binding and agy_usage (tokens per model id)
         - returns 2 when --transport agy is given with --claude-cli-path or with --judge-thinking off, when
           --agy-bin is given without --transport agy, or when the agy binary is not usable
-        - returns 2 when the agy binary changes during the run, whichever pair's failure run_all raised;
-          finished calls stay in the ledger, which resumes only under the binary it was written with,
-          and the refusal says to rerun with a new --ledger
+        - returns 2 when the agy binary changes during an agy run, whichever pair's failure run_all raised,
+          a cap refusal included; that failure is printed after the refusal. Finished calls stay in the
+          ledger, which resumes only under the binary it was written with, and the refusal says to
+          rerun with a new --ledger
         - with --transport agy the report's call_profile and call_residual_context describe the agy call,
           not the Claude isolation profile
         - the transport is set back to Claude before returning, whatever the outcome
@@ -216,11 +217,13 @@ def run_after_checks( args, config, query_fn, agy_runner ):
     except ( jev_transport.JevConfigError, harness_runner.LedgerBindingError ) as e:
         print( f"REFUSED: {e}", file=sys.stderr )
         return 2
-    except Exception:
+    except Exception as e:
         # With pairs in flight together, run_all raises the earliest pair's failure, which can be an
-        # ordinary failed call while another pair saw the binary change. The change is the reason.
-        if model_transport.AGY_STOP is None: raise
+        # ordinary failed call while another pair saw the binary change. The change is the reason,
+        # and the failure that was raised is printed with it so nothing is hidden.
+        if args.transport != "agy" or model_transport.AGY_STOP is None: raise
         print( f"REFUSED: {model_transport.AGY_STOP}; the ledger is bound to the binary the run began with, so rerun with a new --ledger", file=sys.stderr )
+        print( f"the failure the run raised was {type( e ).__name__}: {e}", file=sys.stderr )
         return 2
     report  = harness_report.build_report( results, config, judge_prompt_version=judge_version, jev_run=backend is not None )
     report[ "pairs_sha" ] = pairs_sha

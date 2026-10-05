@@ -18,6 +18,7 @@ import datetime
 import fcntl
 import hashlib
 import json
+import math
 import os
 import secrets
 import subprocess
@@ -362,18 +363,37 @@ def agy_usage_summary():
     with _AGY_USAGE_LOCK: return { model: dict( tally ) for model, tally in AGY_USAGE.items() }
 
 
+def _agy_whole_seconds( timeout_seconds ):
+    """
+    Turn a time limit into the whole seconds agy takes, one at the least.
+
+    Requires:
+        - timeout_seconds is a finite number above zero; agy reads zero as no limit, so there is no
+          way to ask for none
+
+    Ensures:
+        - returns the limit rounded down to whole seconds, and 1 for anything below one second
+
+    Raises:
+        - ValueError if timeout_seconds is not a number, is a boolean, is not finite, or is not above zero
+    """
+    if isinstance( timeout_seconds, bool ) or not isinstance( timeout_seconds, ( int, float ) ) or not math.isfinite( timeout_seconds ) or timeout_seconds <= 0:
+        raise ValueError( f"timeout_seconds must be a finite number above zero under agy, got {timeout_seconds!r}" )
+    return max( 1, int( timeout_seconds ) )
+
+
 def _agy_call( model, prompt, timeout_seconds ):
     """
     Make one agy call in a fresh, empty scratch directory and return the answer text.
 
     Requires:
         - configure_agy has run; prompt is the joined system and user prompt
+        - timeout_seconds is a whole number of seconds from _agy_whole_seconds
 
     Ensures:
         - agy runs with an empty temporary directory as its working directory, removed afterwards
         - returns the answer stripped, and adds the call's tokens to the tally for model; a token
           field agy leaves out, or reports as something other than a whole number, adds nothing
-        - the time limit is passed to agy as whole seconds, one at the least
         - a binary change run_agy itself reports is kept as the stop reason
         - an answer is refused when agy tried a tool action or left anything in the scratch
           directory: the Claude path runs with no tools, and a tool attempt is not a text answer
@@ -386,7 +406,7 @@ def _agy_call( model, prompt, timeout_seconds ):
     global AGY_STOP
     with tempfile.TemporaryDirectory( prefix="agy-call-" ) as scratch:
         try:
-            result = agy_runtime.run_agy( prompt, model=model, workspace_dir=scratch, timeout_seconds=max( 1, int( timeout_seconds ) ),
+            result = agy_runtime.run_agy( prompt, model=model, workspace_dir=scratch, timeout_seconds=timeout_seconds,
                                           agy_bin=AGY_BIN, pinned_fingerprint=AGY_PIN, runner=AGY_RUNNER )
         except agy_runtime.AgyCallError as e:
             raise ModelCallError( f"model call to {model} failed: {e}" ) from e
@@ -486,8 +506,10 @@ async def complete( model, system_prompt, user_prompt, query_fn=None, timeout_se
     Raises:
         - ValueError if model is empty, thinking is not one of THINKING_SETTINGS, or thinking resolves
           to "off" under agy; nothing is charged or contacted
-        - AgyBinaryChanged, under agy, if the binary differs from the one configure_agy pinned; the
-          check comes before the charge, so a call refused for it costs nothing against a cap
+        - ValueError, under agy, if timeout_seconds is not a finite number above zero; nothing is charged
+        - AgyBinaryChanged, under agy, if the binary differs from the one configure_agy pinned. A change
+          seen before the call costs nothing against a cap; one that happens while the call runs is
+          found after the charge
         - CallBudgetExceeded if the model has used its cap; nothing is contacted
         - ModelCallError if the call raises, times out, ends in an error result, or returns no text
     """
@@ -500,10 +522,11 @@ async def complete( model, system_prompt, user_prompt, query_fn=None, timeout_se
         if thinking == "default": thinking = planned
     if TRANSPORT == "agy":
         if thinking != "default": raise ValueError( "thinking 'off' has no agy setting: choose the model id with the reasoning level wanted, such as one ending in -low" )
+        limit = _agy_whole_seconds( timeout_seconds )
         _require_pinned_binary()
         _charge( model )
         started = time.monotonic()
-        text    = await asyncio.to_thread( _agy_call, model, system_prompt + AGY_PROMPT_JOIN + user_prompt, timeout_seconds )
+        text    = await asyncio.to_thread( _agy_call, model, system_prompt + AGY_PROMPT_JOIN + user_prompt, limit )
         if scope is not None: scope.calls.append( ( stage, time.monotonic() - started ) )
         return text
     _charge( model )
