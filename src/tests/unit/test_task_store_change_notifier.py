@@ -250,3 +250,29 @@ def test_the_event_name_is_in_the_ini_list_the_server_validates_against():
     line = [ l for l in ini.splitlines() if l.startswith( "websocket available events" ) ]
     assert len( line ) == 1
     assert notifier.TASK_STORE_CHANGED_EVENT in [ n.strip() for n in line[ 0 ].split( "=", 1 )[ 1 ].split( "," ) ]
+
+
+# ---------------------------------------------------------------------------
+# The assembled app installs the sink (review of 02990108f, finding 2)
+# ---------------------------------------------------------------------------
+
+def test_the_real_app_installs_the_sink_and_a_commit_reaches_its_websocket_manager( engine, monkeypatch ):
+    # Every test above builds the sink by hand, so each stays green with the install line
+    # deleted from main.py and the feature dead in the running server. This one imports
+    # the real app module and asks the sink IT installed to deliver a real commit to ITS
+    # manager. Only the manager's emit is replaced, at the socket edge.
+    import lupin_app.main as main_module
+
+    installed = notifier.get_sink()
+    assert installed is not None, "lupin_app.main did not install the task-store sink"
+
+    emitted = []
+    monkeypatch.setattr( main_module.websocket_manager, "emit", lambda event, data: emitted.append( ( event, data ) ) )
+    with Session( engine ) as session:
+        _create( session )
+        session.commit()
+
+    assert len( emitted ) == 1, emitted
+    event, payload = emitted[ 0 ]
+    assert event == "task_store_changed"
+    assert payload[ "count" ] == 1

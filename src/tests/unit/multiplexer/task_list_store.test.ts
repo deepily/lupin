@@ -625,7 +625,7 @@ test("refreshAfterWrite: a SECOND writer on the same poll joins the fresh read i
 });
 
 // ---------------------------------------------------------------------------
-// Row 8796333b slice 1 — `task_store_changed` push re-reads through the debounced refresh()
+// Row 8796333b slice 1 — `task_store_changed` push re-reads through refreshAfterWrite()
 // ---------------------------------------------------------------------------
 
 function pushedStore() {
@@ -652,15 +652,55 @@ test("task_store_changed: a push while polling triggers one more read", async ()
   store.stopPolling();
 });
 
-test("task_store_changed: a burst of pushes inside one fetch collapses to one read (refresh() debounce)", async () => {
+test("task_store_changed: a burst of pushes costs two reads, not one per push, and the last read began after the last push", async () => {
   const { store, ctx, push } = pushedStore();
   store.startPolling();
   await tick();
   const before = ctx.getCalls.length;
 
-  push(); push(); push();
+  push(); push(); push(); push(); push();
+  for (let i = 0; i < 6; i++) await tick();
+  // The first push starts a read; the other four wait it out and share ONE read after it.
+  assert.equal(ctx.getCalls.length - before, 2);
+  store.stopPolling();
+});
+
+test("task_store_changed: a push that lands DURING a read is not dropped — a second read starts after the first ends", async () => {
+  // The case refresh() gets wrong: read 1 may have reached the database before the commit
+  // the push announces, and refresh()'s in-flight guard would discard the push outright.
+  const { bus } = makeBus();
+  let release!: () => void;
+  const gate = new Promise<void>((r) => { release = r; });
+  const order: string[] = [];
+  let calls = 0;
+  const api: TaskListApiClient = {
+    get: async <T,>(): Promise<T> => {
+      calls += 1;
+      const n = calls;
+      order.push(`start ${n}`);
+      if (n === 1) await gate;
+      order.push(`end ${n}`);
+      return GOOD as T;
+    },
+    patch: async <T,>(): Promise<T> => null as T,
+    post:  async <T,>(): Promise<T> => null as T,
+  };
+  const timers = makeTimers();
+  const store  = createTaskListStore({
+    bus, api, endpoint: ENDPOINT, nowFn,
+    setIntervalFn: timers.setIntervalFn, clearIntervalFn: timers.clearIntervalFn,
+  });
+  store.startPolling();                         // read 1 starts and is held at the gate
   await tick();
-  assert.equal(ctx.getCalls.length - before, 1);
+  assert.deepEqual(order, ["start 1"]);
+
+  bus.emit({ type: "task_store_changed", payload: { count: 1 } } as never);
+  await tick();
+  assert.equal(calls, 1, "the push must wait for read 1, not race it");
+
+  release();
+  for (let i = 0; i < 6; i++) await tick();
+  assert.deepEqual(order, ["start 1", "end 1", "start 2", "end 2"]);
   store.stopPolling();
 });
 

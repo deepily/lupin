@@ -6,7 +6,8 @@
 // fidelity) — a read-only consumer; this card never touches tasks.py. Like
 // fleet-status it is an autonomous-timer feature (60s). Row 8796333b slice 1 adds one
 // EventBus subscription, `task_store_changed` (a server invalidation push), which calls
-// the same debounced refresh(); the poll stays as the safety net. It emits
+// refreshAfterWrite(), so a push that lands during a read still gets a read that began
+// after it; the poll stays as the safety net. It emits
 // `store_task_list_changed`.
 //
 // Fetch + cache + timer only. The DOM dispatch (auth_required / unreachable /
@@ -247,9 +248,12 @@ class TaskListStoreImpl implements TaskListStore {
     this.stopPolling();
     void this.refresh();
     this.pollHandle      = this.setIntervalFn( () => void this.refresh(), TASK_LIST_POLL_INTERVAL_MS );
-    // Server push: "the store changed, re-read". refresh() is already debounced by its
-    // in-flight guard, so a burst of pushes costs at most one fetch per round trip.
-    this.unsubscribePush = this.bus.on( "task_store_changed", () => void this.refresh() );
+    // Server push: "the store changed, re-read". NOT refresh(): its in-flight guard DROPS a
+    // call that lands during a read, and that read may have reached the database before the
+    // commit this push announces, so the board would stay stale until the 60s poll.
+    // refreshAfterWrite() waits the read out and starts one that began after the push. A burst
+    // of pushes joins that one read, so it costs at most two fetches, never one per push.
+    this.unsubscribePush = this.bus.on( "task_store_changed", () => void this.refreshAfterWrite() );
   }
 
   stopPolling(): void {
