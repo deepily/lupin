@@ -16,8 +16,9 @@ Design:
       `workspace_dir` at a disposable directory, never at a repository.
     - agy replaces its own binary when it finds an update, including in the middle of a
       run. `binary_fingerprint` identifies the binary on disk. Pass the fingerprint taken
-      at the start of a run as `pinned_fingerprint`, and `run_agy` refuses to call a
-      binary that has changed since.
+      at the start of a run as `pinned_fingerprint`. `run_agy` then refuses to call a
+      binary that has changed, and refuses an answer when the binary changed during
+      the call.
     - There is no retry here. A timeout, a non-zero exit, a missing or failed result, and
       an empty answer all raise `AgyCallError`; the caller owns the retry policy.
 
@@ -66,7 +67,8 @@ class AgyResult:
         - usage is agy's token report for the call (input_tokens, output_tokens,
           thinking_tokens, cache_read_tokens, total_tokens)
         - denied_actions lists tool actions print mode refused, empty when none
-        - fingerprint identifies the binary that produced the answer
+        - fingerprint is the binary's path, size and modification time, read before the
+          call and unchanged when the call ended
     """
     response         : str
     model            : str
@@ -94,7 +96,8 @@ def binary_fingerprint( agy_bin=DEFAULT_AGY_BIN ):
     Ensures:
         - returns a dict with the resolved real path, the size in bytes and the
           modification time in nanoseconds
-        - two calls return equal dicts exactly when the file was not replaced between them
+        - a replaced file gives a different dict unless the new file has the same path,
+          size and modification time; the content is not hashed
 
     Raises:
         - AgyCallError if agy_bin cannot be found
@@ -212,25 +215,64 @@ def parse_result( stdout ):
     Ensures:
         - returns the `result` object of the last event whose `event` is "result"
         - lines that are not JSON objects are skipped
+        - lines are split on the newline character only, so an answer holding another
+          Unicode line separator stays on one line
 
     Raises:
-        - AgyCallError if no result event is present
+        - AgyCallError if no result event is present, or the last one carries no
+          result object
     """
     found = None
+    seen  = False
 
-    for line in ( stdout or "" ).splitlines():
+    for line in ( stdout or "" ).split( "\n" ):
         try:
             event = json.loads( line )
         except json.JSONDecodeError:
             continue
 
         if isinstance( event, dict ) and event.get( "event" ) == "result":
-            found = event[ "result" ]
+            seen  = True
+            found = event.get( "result" )
 
-    if found is None:
+    if not seen:
         raise AgyCallError( "agy printed no result event" )
 
+    if not isinstance( found, dict ):
+        raise AgyCallError( f"agy result event carries no result object: {found!r}" )
+
     return found
+
+
+# Each key a successful result must carry, with the type it must have.
+RESULT_FIELD_TYPES = {
+    "response"         : str,
+    "conversation_id"  : str,
+    "num_turns"        : int,
+    "duration_seconds" : ( int, float ),
+    "usage"            : dict
+}
+
+
+def check_success_fields( result ):
+    """
+    Confirm a successful result object carries every field `AgyResult` is built from.
+
+    Requires:
+        - result is a dict
+
+    Ensures:
+        - returns None when every key of RESULT_FIELD_TYPES is present with its type
+
+    Raises:
+        - AgyCallError naming the first field that is missing or of the wrong type
+    """
+    for name, kind in RESULT_FIELD_TYPES.items():
+        if name not in result:
+            raise AgyCallError( f"agy result is missing the field {name!r}" )
+
+        if not isinstance( result[ name ], kind ):
+            raise AgyCallError( f"agy result field {name!r} has the wrong type: {result[ name ]!r}" )
 
 
 def run_agy( prompt, *, model, workspace_dir, timeout_seconds=DEFAULT_TIMEOUT_SECONDS, effort=None,
@@ -243,22 +285,34 @@ def run_agy( prompt, *, model, workspace_dir, timeout_seconds=DEFAULT_TIMEOUT_SE
         - model is an agy model identifier
         - workspace_dir is an existing scratch directory; agy runs with it as its working
           directory and can see what is in it
+        - timeout_seconds is a positive integer; agy reads zero as no limit
         - pinned_fingerprint (optional) is a `binary_fingerprint` taken earlier
         - runner (optional) is a subprocess.run-compatible callable, injected by tests
 
     Ensures:
         - refuses before calling when the binary differs from pinned_fingerprint
-        - the prompt is passed on standard input
+        - with a pin, refuses the answer when the binary changed while the call ran
+        - starts the binary by the resolved path that was fingerprinted
+        - the prompt is passed on standard input, encoded as UTF-8
         - returns an AgyResult only for exit 0 with a `SUCCESS` result and a non-blank answer
 
     Raises:
-        - ValueError if prompt is empty or workspace_dir is not a directory
-        - AgyBinaryChanged if the binary on disk differs from pinned_fingerprint
-        - AgyCallError on timeout, non-zero exit, missing result event, a result whose
-          status is not `SUCCESS`, or a blank answer
+        - ValueError if prompt is not a non-empty string, workspace_dir is not a
+          directory, or timeout_seconds is not a positive integer
+        - AgyBinaryChanged if the binary on disk differs from pinned_fingerprint, before
+          or after the call
+        - AgyCallError on timeout, a binary that cannot be started, non-zero exit, a
+          missing or malformed result, a status that is not `SUCCESS`, or a blank answer
     """
+    if not isinstance( prompt, str ):
+        raise ValueError( f"prompt is not a string: {prompt!r}" )
+
     if not os.path.isdir( workspace_dir ):
         raise ValueError( f"workspace_dir is not a directory: {workspace_dir}" )
+
+    # bool is an int subclass, and True would render as the time limit "Trues".
+    if isinstance( timeout_seconds, bool ) or not isinstance( timeout_seconds, int ) or timeout_seconds <= 0:
+        raise ValueError( f"timeout_seconds is not a positive integer: {timeout_seconds!r}" )
 
     stdin_text  = build_stdin( prompt )
     fingerprint = binary_fingerprint( agy_bin )
@@ -267,17 +321,30 @@ def run_agy( prompt, *, model, workspace_dir, timeout_seconds=DEFAULT_TIMEOUT_SE
         raise AgyBinaryChanged( f"agy binary changed since the run began: pinned {pinned_fingerprint}, now {fingerprint}" )
 
     runner = runner if runner is not None else subprocess.run
-    argv   = build_argv( model=model, timeout_seconds=timeout_seconds, effort=effort, agy_bin=agy_bin )
+    # The resolved path, so the file that was fingerprinted is the file that runs. A
+    # relative agy_bin would otherwise be looked up again from workspace_dir.
+    argv   = build_argv( model=model, timeout_seconds=timeout_seconds, effort=effort, agy_bin=fingerprint[ "path" ] )
 
     outer_timeout = timeout_seconds + OUTER_TIMEOUT_HEADROOM_SECONDS
     started       = time.monotonic()
 
     try:
-        completed = runner( argv, input=stdin_text, capture_output=True, text=True, timeout=outer_timeout, cwd=workspace_dir )
+        completed = runner( argv, input=stdin_text, capture_output=True, text=True, encoding="utf-8", timeout=outer_timeout, cwd=workspace_dir )
     except subprocess.TimeoutExpired:
         raise AgyCallError( f"agy timed out after {outer_timeout}s (model {model})" )
+    except OSError as error:
+        raise AgyCallError( f"agy could not be started (model {model}): {error}" )
 
     wall_seconds = round( time.monotonic() - started, 3 )
+
+    if pinned_fingerprint is not None:
+        try:
+            after = binary_fingerprint( fingerprint[ "path" ] )
+        except AgyCallError:
+            after = None
+
+        if after != fingerprint:
+            raise AgyBinaryChanged( f"agy binary changed while the call ran: was {fingerprint}, now {after}" )
     stderr_tail  = ( completed.stderr or "" )[ -STDERR_TAIL_CHARS: ]
 
     if completed.returncode != 0:
@@ -285,8 +352,12 @@ def run_agy( prompt, *, model, workspace_dir, timeout_seconds=DEFAULT_TIMEOUT_SE
 
     result = parse_result( completed.stdout )
 
-    if result[ "status" ] != "SUCCESS":
-        raise AgyCallError( f"agy result status {result[ 'status' ]} (model {model}): {result.get( 'error', '' )}" )
+    # A result with no status field reads as status None and fails here.
+    status = result.get( "status" )
+    if status != "SUCCESS":
+        raise AgyCallError( f"agy result status {status} (model {model}): {result.get( 'error', '' )}" )
+
+    check_success_fields( result )
 
     response = result[ "response" ]
     if not response.strip():
