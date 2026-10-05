@@ -8,6 +8,20 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.10.05 - Session 83887b6c (Mr. Radio 🦉, manager; no crew, reviews ran as sub-agents of this session on Opus) | Sonnet-on-VM P0, cache fix, create refusals and websocket slice 1 merged; live eval test cut to a short proxy; DB login still waiting on sudo
+
+- **Split, Rick's spoken order**: Cheech takes all pilot work, Mr. Radio the non-pilot rows.
+- **Row `631a812e`, task_create refusals**: merged `f4fdbb70b`. Unit 29,469, cosa 9,014, TypeScript 5,739, e2e_a 463, e2e_b 502 passed; integration 450 passed, 1 failed (the cache defect below). Gap filed as `b5598732`; Rick ruled "leave it as is", closed.
+- **Row `c9252819`, Sonnet workers on the VM (P0)**: merged `12442dd31`. New preflight check A3b, `lupin-vm.sh install-voice`, 16 unit tests, a checklist page. VM tree moved to `12442dd31`, `install-voice` exit 0, A3b OK, app service recreated, all on Rick's yes. Closed without the row's live-spawn step; Rick was told.
+- **Row `1b3ec88f`, cache replayed the opposite unit conversion**: Rick ruled "land it"; merged `ac0f91673`, integration job `ts-3ceb9f6f`.
+- **Row `8796333b`, websocket push, slice 1**: Rick ruled yes; merged `0ec780bf8`. `:7999` bounced 18:47 EDT, live `task_store_changed` frames seen at 18:48. TypeScript job `ts-fc9fe2a8`: 5,744 passed, 0 failed, coverage 100%. Row stays open for three more panes and the legacy task card.
+- **Row `4cbd4858`, live eval test cannot finish**: Rick ruled "short proxy in the suite". Default sample is 5 per command (`57a98244f`); `submit-test-suite.py --env KEY=VALUE` (`c63a91760`) and a guide section (`3172e5123`). Integration job `ts-4f6a7a6c`: 451 passed, 0 failed. Full sample scheduled once, `ts-04fb21c3`, 2026-10-06 11:00 EDT. Row open until that is read.
+- **Row `2af2c387`, multi-user transcript direction**: Rick ruled yes; plan committed `d4e39a17a`; plan row `8385316c` held on his word.
+- **Dev box**: the user-scope cosa-voice registration now carries `LUPIN_CONFIG_MGR_CLI_ARGS`, on Rick's yes. The installer was not run here: it would drop three live hooks (row `ea27d263`, holding area).
+- **Corrections of mine today**: the 17:03 memento said the fleet cap was 2 for the whole day; the ini line read 8 at 18:46 · six review sub-agents ran on Opus, not Sonnet, because no model was passed.
+- **Owed**: Rick's two provision commands for `80513825` (`pg_roles` showed only `lupin_dev` at 19:29 EDT) · read `ts-04fb21c3` after 11:45 EDT on 10-06 · rows `fae0bc51` and `ea27d263` await approval · the first full unit tier over `57a98244f`..`3172e5123` is Cheech's run on `ed303beb8`, not read at this writing · post-game.
+- **Files**: history.md; code via four reviewed merges and three direct commits on the working branch. Not pushed.
+
 ### 2026.10.04 - Session 93ec0919 → acd9cc5f (Mr. Radio 🦉, manager; crew Tiberius 👑, Sam 🎙️, Rio ⚡) | Pilot finished and summarized; fast-check trial shows thinking-off loses real losses; Gemini comparison plan and bundle
 
 - **Morning and afternoon (before the 14:52 EDT self re-spin)**: yesterday's batch finished · pilot claim re-check of the restored rewrite: 300 claims judged missing in 48 of 78 docstrings; two readers, each alone, found 2 real losses, both restored and reviewed (`ab56f9029`, on a keep ref) · results page and process-flow page written (`35bfd8d91` … `00c87dca0`) · María's seeder rule 8 merged (`b5dfb3225`, row `9d3f4562`).
