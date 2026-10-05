@@ -30,6 +30,17 @@ L2  = "Raises ValueError if the id is blank."
 L3  = "The window is ten minutes long."
 OLD = "\n".join( [ L1, L2, L3 ] )
 
+# The call profile written out, hash included, so a change to the agent text has to change this line too.
+PROFILE    = "agy-print-2|new-project|disable-slash-commands|stream-json|scratch-cwd|no-edit-grant|agent=lupin-text-only-d7c8834864"
+AGENT_TEXT = (
+    "---\n"
+    "name: lupin-text-only\n"
+    "description: Answers from the text of the prompt only. Has no tools.\n"
+    "tools: []\n"
+    "---\n"
+    "You answer from the text you are given and nothing else. You have no tools.\n"
+)
+
 USAGE = { "input_tokens" : 100, "output_tokens" : 7, "thinking_tokens" : 3, "cache_read_tokens" : 50, "total_tokens" : 110 }
 
 
@@ -113,7 +124,7 @@ def test_configure_agy_pins_the_binary_and_returns_the_ledger_binding( agy_bin )
     binding = mt.configure_agy( agy_bin, runner=fake )
 
     info = os.stat( agy_bin )
-    assert binding == f"agy={os.path.realpath( agy_bin )}|size=10|mtime_ns={info.st_mtime_ns}|version=1.2.17"
+    assert binding == f"agy={os.path.realpath( agy_bin )}|size=10|mtime_ns={info.st_mtime_ns}|version=1.2.17|profile={PROFILE}"
     assert mt.TRANSPORT   == "agy"
     assert mt.AGY_BIN     == agy_bin
     assert mt.AGY_PIN     == agy_runtime.binary_fingerprint( agy_bin )
@@ -211,8 +222,7 @@ def test_each_call_runs_in_its_own_directory_holding_only_the_no_tools_agent_and
     assert first[ "cwd" ] != second[ "cwd" ]
     assert os.path.basename( first[ "cwd" ] ).startswith( "agy-call-" )
     assert first[ "cwd_listing" ] == [ ".agents/agents/lupin-text-only.md" ] == second[ "cwd_listing" ]
-    assert first[ "agent_text" ] == mt.AGY_AGENT_TEXT
-    assert "\ntools: []\n" in mt.AGY_AGENT_TEXT and mt.AGY_AGENT_TEXT.startswith( "---\nname: lupin-text-only\n" )
+    assert first[ "agent_text" ] == AGENT_TEXT == second[ "agent_text" ]
     assert not os.path.exists( first[ "cwd" ] ) and not os.path.exists( second[ "cwd" ] )
 
 
@@ -385,6 +395,42 @@ def test_an_answer_that_came_with_the_agent_definition_deleted_is_rejected( agy_
         complete( "m", "s", "u" )
 
 
+def test_an_agent_definition_that_cannot_be_written_is_a_model_call_error_and_agy_is_not_called( agy_bin, monkeypatch ):
+    fake = FakeAgy( answer="ok" )
+    mt.configure_agy( agy_bin, runner=fake )
+
+    def no_room( path ): raise OSError( 28, "No space left on device" )
+    monkeypatch.setattr( mt.os, "makedirs", no_room )
+
+    with pytest.raises( mt.ModelCallError, match="model call to m could not write its agent definition: .*No space left on device" ):
+        complete( "m", "s", "u" )
+
+    assert fake.calls == []
+    assert mt.agy_usage_summary() == {}
+
+
+def test_an_agent_definition_left_as_bytes_that_are_not_text_is_a_model_call_error( agy_bin ):
+    def not_text( cwd ):
+        with open( os.path.join( cwd, mt.AGY_AGENT_PATH ), "wb" ) as handle: handle.write( b"\xff\xfe\xff" )
+
+    mt.configure_agy( agy_bin, runner=FakeAgy( answer="looks fine", on_call=not_text ) )
+
+    with pytest.raises( mt.ModelCallError, match="model call to m left an agent definition that cannot be read back: 'utf-8' codec" ):
+        complete( "m", "s", "u" )
+
+    assert mt.agy_usage_summary() == {}
+
+
+def test_an_agent_definition_left_unreadable_is_a_model_call_error( agy_bin ):
+    if os.geteuid() == 0: pytest.skip( "root reads a file whatever its mode" )
+    mt.configure_agy( agy_bin, runner=FakeAgy( answer="looks fine", on_call=lambda cwd: os.chmod( os.path.join( cwd, mt.AGY_AGENT_PATH ), 0 ) ) )
+
+    with pytest.raises( mt.ModelCallError, match="model call to m left an agent definition that cannot be read back: .*Permission denied" ):
+        complete( "m", "s", "u" )
+
+    assert mt.agy_usage_summary() == {}
+
+
 def test_a_binary_that_changed_after_the_pin_stops_the_call_and_is_not_a_model_call_error( agy_bin ):
     fake = FakeAgy( answer="ok" )
     mt.configure_agy( agy_bin, runner=fake )
@@ -483,7 +529,7 @@ def test_with_a_real_process_the_version_is_read_and_the_joined_prompt_arrives_o
 
     binding = mt.configure_agy( str( binary ) )
 
-    assert binding.endswith( "|version=9.9.9" )
+    assert binding.endswith( "|version=9.9.9|profile=" + PROFILE )
     assert complete( "m", "système", "user \"text\"\nline two" ) == "echo: système\n\nuser \"text\"\nline two"
     assert mt.agy_usage_summary()[ "m" ][ "total_tokens" ] == 4
 
@@ -516,11 +562,11 @@ def test_the_command_line_runs_the_pairs_through_agy_and_reports_it( tmp_path, a
     assert code == 0
     report  = json.loads( ( tmp_path / "out.json" ).read_text() )
     info    = os.stat( agy_bin )
-    binding = f"agy={os.path.realpath( agy_bin )}|size=10|mtime_ns={info.st_mtime_ns}|version=1.2.17"
+    binding = f"agy={os.path.realpath( agy_bin )}|size=10|mtime_ns={info.st_mtime_ns}|version=1.2.17|profile={PROFILE}"
     assert report[ "transport" ]   == "agy"
     assert report[ "agy_binding" ] == binding
     assert report[ "call_profile" ]          == mt.AGY_CALL_PROFILE
-    assert re.fullmatch( r"agy-print-2\|new-project\|disable-slash-commands\|stream-json\|scratch-cwd\|no-edit-grant\|agent=lupin-text-only-[0-9a-f]{10}", mt.AGY_CALL_PROFILE )
+    assert mt.AGY_CALL_PROFILE               == PROFILE
     assert all( call[ "argv" ][ -2: ] == [ "--agent", "lupin-text-only" ] for call in fake.calls )
     assert report[ "call_residual_context" ] == mt.AGY_RESIDUAL_CONTEXT
     assert report[ "lists" ][ 0 ][ "positives" ] == 1 and report[ "lists" ][ 0 ][ "misses" ] == 0
@@ -620,6 +666,21 @@ def test_a_ledger_written_under_one_agy_binary_is_refused_under_another( tmp_pat
     assert cli.main( argv, agy_runner=FakeAgy( version="1.2.17" ) ) == 0
     capsys.readouterr()
     second = FakeAgy( version="1.2.18" )
+
+    assert cli.main( argv, agy_runner=second ) == 2
+
+    assert "use a new ledger" in capsys.readouterr().err
+    assert second.calls == []
+
+
+def test_a_ledger_written_under_one_call_profile_is_refused_under_another( tmp_path, agy_bin, capsys, monkeypatch ):
+    write_pairs( tmp_path )
+    argv = cli_args( tmp_path, "--transport", "agy", "--agy-bin", agy_bin )
+    monkeypatch.setattr( mt, "AGY_CALL_PROFILE", "agy-print-1|default-agent" )
+    assert cli.main( argv, agy_runner=FakeAgy() ) == 0
+    capsys.readouterr()
+    monkeypatch.setattr( mt, "AGY_CALL_PROFILE", PROFILE )
+    second = FakeAgy()
 
     assert cli.main( argv, agy_runner=second ) == 2
 

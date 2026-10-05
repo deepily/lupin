@@ -100,7 +100,8 @@ def main( argv, query_fn=None, agy_runner=None ):
         - returns 2 when a cap is not MODEL=N with N an int of zero or more, or caps are given without a ledger
         - a call the cap refuses raises CallBudgetExceeded and ends the run; the ledger keeps the count for the next run
         - with --transport agy the ledger binding is the agy binary's path, size, modification time and version,
-          and the report carries transport, agy_binding and agy_usage (tokens per model id)
+          then the call profile, so a ledger written under another agent definition needs a new --ledger;
+          the report carries transport, agy_binding and agy_usage (tokens per model id)
         - returns 2 when --transport agy is given with --claude-cli-path or with --judge-thinking off, when
           --agy-bin is given without --transport agy, or when the agy binary is not usable
         - returns 2 when the agy binary changes during an agy run, whichever pair's failure run_all raised,

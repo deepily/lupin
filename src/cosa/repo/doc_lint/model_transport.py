@@ -306,8 +306,9 @@ def configure_agy( agy_bin=agy_runtime.DEFAULT_AGY_BIN, runner=None ):
         - later calls to complete go to agy, and the token tally starts empty
         - the version is read first and the fingerprint second, because asking agy for its
           version can start its updater
-        - returns the ledger binding: the binary's path, size, modification time and version.
-          A ledger written under one binary is refused under another
+        - returns the ledger binding: the binary's path, size, modification time and version, then
+          the call profile. A ledger written under one binary, or under another call profile such
+          as another agent definition, is refused
         - a binary that changes later stops the run: complete raises AgyBinaryChanged
 
     Raises:
@@ -326,7 +327,7 @@ def configure_agy( agy_bin=agy_runtime.DEFAULT_AGY_BIN, runner=None ):
     AGY_RUNNER  = runner
     AGY_STOP    = None
     with _AGY_USAGE_LOCK: AGY_USAGE.clear()
-    return f"agy={pin[ 'path' ]}|size={pin[ 'size' ]}|mtime_ns={pin[ 'mtime_ns' ]}|version={version}"
+    return f"agy={pin[ 'path' ]}|size={pin[ 'size' ]}|mtime_ns={pin[ 'mtime_ns' ]}|version={version}|profile={AGY_CALL_PROFILE}"
 
 
 def configure_claude():
@@ -418,15 +419,19 @@ def _agy_call( model, prompt, timeout_seconds ):
           directory, or changed the agent definition: a tool attempt is not a text answer
 
     Raises:
-        - ModelCallError if agy fails, tried a tool action, or wrote into the scratch directory
+        - ModelCallError if agy fails, tried a tool action, wrote into the scratch directory or changed
+          the agent definition, or if the agent definition cannot be written or read back
         - AgyBinaryChanged if the binary differs from the pin; it is not a ModelCallError, so a
           caller that retries failed calls does not retry under another binary
     """
     global AGY_STOP
     with tempfile.TemporaryDirectory( prefix="agy-call-" ) as scratch:
         agent_file = os.path.join( scratch, AGY_AGENT_PATH )
-        os.makedirs( os.path.dirname( agent_file ) )
-        with open( agent_file, "w", encoding="utf-8" ) as f: f.write( AGY_AGENT_TEXT )
+        try:
+            os.makedirs( os.path.dirname( agent_file ) )
+            with open( agent_file, "w", encoding="utf-8" ) as f: f.write( AGY_AGENT_TEXT )
+        except OSError as e:
+            raise ModelCallError( f"model call to {model} could not write its agent definition: {e}" ) from e
         try:
             result = agy_runtime.run_agy( prompt, model=model, workspace_dir=scratch, timeout_seconds=timeout_seconds, agent=AGY_AGENT_NAME,
                                           agy_bin=AGY_BIN, pinned_fingerprint=AGY_PIN, runner=AGY_RUNNER )
@@ -438,7 +443,10 @@ def _agy_call( model, prompt, timeout_seconds ):
         holds  = sorted( os.path.relpath( os.path.join( folder, name ), scratch ) for folder, _, names in os.walk( scratch ) for name in names )
         intact = holds == [ AGY_AGENT_PATH ]
         if intact:
-            with open( agent_file, encoding="utf-8" ) as f: intact = f.read() == AGY_AGENT_TEXT
+            try:
+                with open( agent_file, encoding="utf-8" ) as f: intact = f.read() == AGY_AGENT_TEXT
+            except ( OSError, UnicodeDecodeError ) as e:
+                raise ModelCallError( f"model call to {model} left an agent definition that cannot be read back: {e}" ) from e
     if result.denied_actions:
         raise ModelCallError( f"model call to {model} tried tool actions and was refused them: {result.denied_actions}" )
     if not intact:
