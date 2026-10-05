@@ -1,6 +1,10 @@
 """
 Lowers the capitals that the docstring linter's caps rule flags, and nothing else.
 
+Shelved for the sweep: it also lowers words that should stay capitals, namely SQL keywords, log levels and test-runner
+words. A read of 30 lowered words found 3 wrong in src/cosa/rest/db/repositories and 0 wrong in src/cosa/utils. The
+writers handle capitals themselves, so do not run this over a package without reading every change.
+
 The words are found with the linter's own caps rule, so there is no second word list. A flagged
 word that is also an identifier in the same file's code, such as a constant, is left alone and
 reported. A file is written only when docs_only_diff says the edit changed docstrings alone.
