@@ -240,6 +240,24 @@ authenticated Lupin API.
 command-line wrapper. The suite arguments go in `args`; `scheduled_at` and `websocket_id` are directives
 to the queue and stay top-level.
 
+The wrapper's `--env KEY=VALUE` (repeatable) fills `args.env_vars`, which reach that run's pytest
+process only. The suite job keeps only names that start with `TFE_`, `BFE_` or `LUPIN_TEST_`; the
+wrapper asks the job's own filter and refuses any other name before it logs in.
+
+**The live eval test has two sizes.** Inside the integration suite `test_v2_eval_live.py` runs a
+short proxy, 5 utterances per command (50 asks), ruled by Rick on 2026-10-05 (row `4cbd4858`). The
+full sample is a separate scheduled run in the 10 AM to 1 PM window:
+
+```bash
+src/scripts/submit-test-suite.py --test-types integration \
+  --env LUPIN_TEST_V2_EVAL_LIMIT=20 \
+  --env LUPIN_TEST_INTEGRATION_FILE_TIMEOUT_MINUTES=40 \
+  --scheduled-at 2026-10-06T11:00:00-04:00
+```
+
+At 20 per command the file makes 200 asks. On 2026-10-05 it was measured at about 7.4 seconds per
+ask and was stopped by the default 15-minute per-file cap, which is why the run raises the cap.
+
 | Field | Where | Type | Default | Purpose |
 |-------|-------|------|---------|---------|
 | `test_types` | `args` | string, comma-separated | `"integration,e2e"` | Suite types to run. See [Section 2](#2-supported-suite-types). **An unregistered name is refused at submit**, naming it and the valid list (row 4e8f348e) — `e2e_ui` is the tests' directory, not a suite; use `e2e_a`, `e2e_b` or `e2e`. |
