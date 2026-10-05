@@ -944,3 +944,74 @@ def test_r8_text_with_no_markup_has_no_regions_and_refuses_nothing():
     assert rules.code_regions( old ) == [] and rules.link_regions( old ) == [] and rules.list_item_starts( old ) == []
     assert rules.markup_rejection( old, span_of( old, "before it reads the handle" ) ) is None
     assert rules.cuts_into( [ ( 5, 9 ) ], 0, 5 ) is False and rules.cuts_into( [ ( 5, 9 ) ], 9, 12 ) is False     # touching an edge is not cutting in
+
+
+# ---- rule 9: a delete never leaves a clause's lead-in hanging (row 4cc9cd81) ---------------------------------------
+# Made-up docstrings only. Each shape slipped past bad_cut, delete_rejection and markup_rejection: the cut sentence has a verb, does
+# not start or end on a dangler, has four words or more, and the span is not inside markup.
+
+SHAPE_1 = "Return the cached value for a key. If the cache is empty, the default is used. Throws on failure."
+SHAPE_2 = "Count the items of a list. It returns zero when the list is empty: nothing can be counted, and a negative size would break the sort."
+SHAPE_3 = "Complete the dialog. It completes with the saved value when the form closed itself, and with zero when the user cancelled."
+
+
+def span_in( old, text ):
+    assert old.count( text ) == 1
+    a = old.index( text )
+    return ( a, a + len( text ) )
+
+
+def lead_in( old, text ):
+    return rules.lead_in_rejection( old, span_in( old, text ) )
+
+
+@pytest.mark.parametrize( "old, text, code", [
+    ( SHAPE_1, "the default is used", "HANGING_CONDITION" ),
+    ( SHAPE_2, "when the list is empty: nothing can be counted", "DROPPED_CONDITION" ),
+    ( SHAPE_3, "and with zero", "JOINED_CONDITIONS" ) ] )
+def test_r9_each_of_the_three_shapes_slips_past_every_older_check_and_is_refused_by_its_own_code( old, text, code ):
+    span = span_in( old, text )
+    cut  = s.cut_text( old, span )
+    assert span in s.phrase_units( old ) and s.span_ok( old, span, SL )
+    assert s.bad_cut( old, cut ) is None and rules.delete_rejection( old, span, cut ) is None and rules.markup_rejection( old, span ) is None
+    assert rules.lead_in_rejection( old, span ) == code
+
+
+def test_r9_a_condition_with_its_main_clause_still_standing_is_not_a_hanging_lead_in():
+    assert lead_in( "Return the value. If the cache is empty, the default is used, and a warning is logged.", "and a warning is logged" ) is None
+    assert lead_in( "Return the value. If the cache is empty, the default is used. Throws on failure.", "Throws on failure" ) is None
+    assert lead_in( "Return the value. The default is used, and a warning is logged.", "and a warning is logged" ) is None
+    assert lead_in( "Return the value. If the cache is empty, the default is used by callers.", "the default" ) is None       # text still follows the span
+
+
+def test_r9_a_bullet_in_front_of_the_condition_does_not_hide_it():
+    old = "Return the value.\n\n- If the cache is empty, the default is used.\n- Throws on failure."
+    assert lead_in( old, "the default is used" ) == "HANGING_CONDITION"
+
+
+def test_r9_a_clause_deleted_before_a_conjunction_is_refused_only_when_it_opens_with_a_subordinator():
+    assert lead_in( SHAPE_2, "when the list is empty: nothing can be counted" ) == "DROPPED_CONDITION"
+    assert lead_in( "Count the items. It returns zero when the list is empty. A negative size would break the sort.", "when the list is empty" ) is None
+    assert lead_in( "Count the items. It returns zero for an empty list, and a negative size would break the sort.", "for an empty list" ) is None     # a miss, stated in the docstring
+    assert lead_in( "Count the items. It returns zero when the list is empty, which is a case callers meet.", "when the list is empty" ) is None
+
+
+def test_r9_two_conditions_run_together_are_refused_only_when_the_text_before_the_cut_already_holds_one():
+    assert lead_in( SHAPE_3, "and with zero" ) == "JOINED_CONDITIONS"
+    assert lead_in( "Complete the dialog. It completes with the saved value, and with zero when the user cancelled.", "and with zero" ) is None
+    assert lead_in( "Complete the dialog. It completes with the saved value when the form closed itself and with zero when the user cancelled.", "and with zero" ) is None
+
+
+def test_r9_a_span_in_a_sentence_of_its_own_is_judged_on_that_sentence_alone():
+    old = "Return the value. It is cached. If the cache is empty, the default is used."
+    assert lead_in( old, "the default is used" ) == "HANGING_CONDITION"
+    assert lead_in( old, "It is cached" ) is None
+
+
+def test_r9_delete_candidates_leave_out_each_shape_and_count_it_by_code():
+    for old, text, code in ( ( SHAPE_1, "the default is used", "HANGING_CONDITION" ), ( SHAPE_2, "when the list is empty: nothing can be counted", "DROPPED_CONDITION" ),
+                             ( SHAPE_3, "and with zero", "JOINED_CONDITIONS" ) ):
+        cands, refused = s.delete_candidates( old, SL )
+        assert text not in [ c[ "span_text" ] for c in cands ], code
+        assert refused.get( code, 0 ) >= 1, code
+        assert all( rules.lead_in_rejection( old, c[ "span" ] ) is None for c in cands ), code

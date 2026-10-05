@@ -265,13 +265,13 @@ def delete_candidates( old, stoplist ):
 
     Ensures:
         - spans are phrase units that pass span_ok; cuts that bad_cut, rules.delete_rejection (rules 4 and 5) or
-          rules.markup_rejection (rule 8) refuse are left out and counted by reason code
+          rules.markup_rejection (rule 8) or rules.lead_in_rejection (rule 9) refuse are left out and counted by reason code
     """
     out, refused = [], {}
     for span in phrase_units( old ):
         if not span_ok( old, span, stoplist ): continue
         cut    = cut_text( old, span )
-        reason = bad_cut( old, cut ) or rules.delete_rejection( old, span, cut ) or rules.markup_rejection( old, span )
+        reason = bad_cut( old, cut ) or rules.delete_rejection( old, span, cut ) or rules.markup_rejection( old, span ) or rules.lead_in_rejection( old, span )
         if reason is not None:
             refused[ reason ] = refused.get( reason, 0 ) + 1
             continue

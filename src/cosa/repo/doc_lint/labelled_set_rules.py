@@ -23,8 +23,13 @@ raises Shortfall when a floor cannot be met) and each has a stated blind spot:
                             [reference] link, a weaken when its changed word sits inside one, and a delete when it
                             removes the opening words of a list item (row 9d3f4562, after 5 of 16 Dart deletes came
                             out garbled). Misses: an indented code block with no fence; a fence written with tildes;
-                            a backtick span or a link broken over two lines.
+                            a backtick span or a link broken over two lines; an RST double-backtick span (``x``) is protected only
+                            by the match of its inner single-backtick span, so a cut of one outer backtick is not seen.
                             Over-rejects: plain square brackets such as "[0]" are read as a link.
+    R9  lead_in_rejection   a delete is skipped when it leaves a clause's lead-in hanging: HANGING_CONDITION (a sentence that opens on
+                            a subordinator is left with its condition and no main clause), DROPPED_CONDITION (a clause opening on a
+                            subordinator is cut out before ", and" or ", but"), JOINED_CONDITIONS (a comma and a second condition are
+                            left running straight on from a first). Over-rejects and misses: see lead_in_rejection.
 
 Rule 1 (the mechanical check after the writer) and the redraw path live in labelled_set_seeder.py.
 """
@@ -68,6 +73,10 @@ PROTECTED_RES = (
 CODE_RES     = ( re.compile( r"```.*?(?:```|\Z)", re.DOTALL ), re.compile( r"`[^`\n]+`" ) )
 LINK_RE      = re.compile( r"\[[^\[\]\n]+\](?:\([^()\n]*\)|\[[^\[\]\n]*\])?" )
 LIST_ITEM_RE = re.compile( r"(?m)^[ \t]*(?:[-*+•]|\d+[.)])[ \t]+(?=\S)" )
+
+# Rule 9: words that open a condition, and the conjunctions that join two clauses.
+SUBORDINATORS  = frozenset( "if when unless while although though because once until whenever whereas since after before".split() )
+CONJUNCTION_RE = re.compile( r"\s*,\s*(?:and|or|but|nor|yet|so)\b", re.IGNORECASE )
 
 
 def sentences_of( text ):
@@ -303,4 +312,50 @@ def markup_rejection( old, span, token=None ):
         if cuts_into( regions, span[ 0 ], span[ 1 ] ): return code
         if token is not None and any( a < token[ 1 ] and token[ 0 ] < b for a, b in regions ): return code
     if token is None and any( span[ 0 ] <= at < span[ 1 ] for at in list_item_starts( old ) ): return "LIST_ITEM"
+    return None
+
+
+def lead_words( text ):
+    """Return the lowercase words of text, a leading bullet or list marker not counted and edge punctuation, quotes and brackets stripped."""
+    tokens = text.split()
+    if tokens and ( tokens[ 0 ] in BULLET_MARKERS or LIST_MARKER_RE.match( tokens[ 0 ] ) ): tokens = tokens[ 1: ]
+    return [ w.strip( EDGE_PUNCT + "()\"'`" ).lower() for w in tokens ]
+
+
+def lead_in_rejection( old, span ):
+    """
+    Return the reason code a delete is refused for because it leaves a clause's lead-in hanging (rule 9), or None.
+
+    Requires:
+        - span is the ( start, end ) of the removed text in old, inside one sentence, and holds at least one word
+
+    Ensures:
+        - HANGING_CONDITION: the sentence opens on a subordinator (if, when, unless...), the text kept before the span ends on a comma
+          with no other comma before it, and nothing but end punctuation follows the span, so the sentence is left as a condition
+          with no main clause: "If the cache is empty, [the default is used]."
+        - DROPPED_CONDITION: the span opens on a subordinator and the text after it opens on ", and", ", but", ", or", ", nor", ", yet"
+          or ", so", so the kept clause is left unconditioned and the conjunction now joins it to another claim:
+          "returns zero [when the list is empty], and a negative size would break the sort"
+        - JOINED_CONDITIONS: the text kept before the span ends on a comma and already holds a subordinator, and the text after the
+          span opens on one, so two conditions run together: "... when the form closed itself, [and with zero] when the user cancelled"
+        - the checks run in that order and the first to fire is returned
+
+    Over-rejects:
+        - HANGING_CONDITION when the main clause has no comma of its own ("If empty the default is used, [and a warning is logged]")
+        - DROPPED_CONDITION for every subordinate clause before a coordinator, though most leave a sentence that reads fine
+        - JOINED_CONDITIONS for any comma followed by a subordinator after an earlier one, though some such sentences are well formed
+        - a subordinator word used as a preposition or inside a name ("after", "before", "since", "once")
+
+    Misses:
+        - a lead-in that is a phrase, not a subordinator: "For an empty cache, [the default is used]." or "Given a closed pool, [...]"
+        - a main clause with a comma of its own before the span; a sentence whose condition opens after a semicolon or colon
+        - a coordinator with no comma before it; a subordinator written in a quotation or in code
+        - a cut that leaves a lead-in two sentences back hanging, because only the span's own sentence is read
+    """
+    a, b   = next( ( a, b ) for a, b in sentence_spans( old ) if a <= span[ 0 ] < b )
+    before = old[ a:span[ 0 ] ].rstrip()
+    after  = old[ span[ 1 ]:b ]
+    if lead_words( old[ a:b ] )[ 0 ] in SUBORDINATORS and before.endswith( "," ) and "," not in before[ :-1 ] and not after.strip( EDGE_PUNCT ): return "HANGING_CONDITION"
+    if lead_words( old[ span[ 0 ]:span[ 1 ] ] )[ 0 ] in SUBORDINATORS and CONJUNCTION_RE.match( after ): return "DROPPED_CONDITION"
+    if before.endswith( "," ) and lead_words( after )[ :1 ] and lead_words( after )[ 0 ] in SUBORDINATORS and SUBORDINATORS & set( lead_words( before ) ): return "JOINED_CONDITIONS"
     return None
