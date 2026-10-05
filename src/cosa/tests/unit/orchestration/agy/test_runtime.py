@@ -21,6 +21,7 @@ import cosa.orchestration.agy as agy_package
 import cosa.orchestration.agy.runtime as runtime
 from cosa.orchestration.agy.runtime import (
     AgyBinaryChanged, AgyCallError, AgyResult,
+    AgyUnavailable,
     agy_version, binary_fingerprint, build_argv, build_stdin, check_success_fields, parse_result, run_agy,
 )
 
@@ -604,6 +605,43 @@ def test_run_nonzero_exit_raises_with_the_stderr_tail_even_when_a_result_is_pres
     assert len( message ) == len( "agy exited 3 (model m); stderr: " ) + 2000
 
 
+# The two forms agy 1.2.17 printed on 2026-10-05, copied from the trial130 run log.
+UNAVAILABLE_STDERR = [
+    "error: Eligibility check failed: UNAVAILABLE (code 503): The service is currently unavailable.\n",
+    "error: failed to send message: send failed; already reported to the user: Eligibility check failed: UNAVAILABLE (code 503): The service is currently unavailable.\n"
+]
+
+
+@pytest.mark.parametrize( "stderr", UNAVAILABLE_STDERR )
+def test_run_exit_with_a_503_in_the_error_text_raises_unavailable( fake_bin, scratch, stderr ):
+    runner = _FakeRunner( _Completed( returncode=1, stdout="", stderr=stderr ) )
+
+    with pytest.raises( AgyUnavailable, match=r"agy exited 1 \(model m\); stderr: error: .*\(code 503\)" ) as raised:
+        run_agy( "p", model="m", workspace_dir=scratch, agy_bin=fake_bin, runner=runner )
+
+    assert isinstance( raised.value, AgyCallError )
+
+
+@pytest.mark.parametrize( "returncode, stderr", [
+    ( 3, "error: Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h39m6s.\n" ),
+    ( 3, "AGY_ERROR: {\"status\":\"UNAVAILABLE\"}" ),
+    ( 1, "error: code 503" )
+] )
+def test_run_exit_without_the_503_mark_is_not_unavailable( fake_bin, scratch, returncode, stderr ):
+    runner = _FakeRunner( _Completed( returncode=returncode, stdout="", stderr=stderr ) )
+
+    with pytest.raises( AgyCallError ) as raised:
+        run_agy( "p", model="m", workspace_dir=scratch, agy_bin=fake_bin, runner=runner )
+
+    assert type( raised.value ) is AgyCallError
+
+
+def test_a_successful_exit_is_not_unavailable_whatever_standard_error_says( fake_bin, scratch ):
+    runner = _FakeRunner( _Completed( returncode=0, stdout=REAL_STDOUT, stderr=UNAVAILABLE_STDERR[ 0 ] ) )
+
+    assert run_agy( "p", model="m", workspace_dir=scratch, agy_bin=fake_bin, runner=runner ).response
+
+
 def test_run_nonzero_exit_with_no_stderr_raises( fake_bin, scratch ):
     runner = _FakeRunner( _Completed( returncode=1, stdout="", stderr=None ) )
 
@@ -647,4 +685,4 @@ def test_package_exports_the_runtime_names():
     for name in agy_package.__all__:
         assert getattr( agy_package, name ) is getattr( runtime, name )
 
-    assert len( agy_package.__all__ ) == 9
+    assert len( agy_package.__all__ ) == 10

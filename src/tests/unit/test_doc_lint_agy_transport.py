@@ -12,6 +12,7 @@ import asyncio
 import json
 import os
 import re
+import shutil
 import stat
 import time
 
@@ -222,6 +223,7 @@ def test_each_call_runs_in_its_own_directory_holding_only_the_no_tools_agent_and
     assert first[ "cwd" ] != second[ "cwd" ]
     assert os.path.basename( first[ "cwd" ] ).startswith( "agy-call-" )
     assert first[ "cwd_listing" ] == [ ".agents/agents/lupin-text-only.md" ] == second[ "cwd_listing" ]
+    assert mt.AGY_SCRATCH_ENTRIES == [ ".agents", ".agents/agents", ".agents/agents/lupin-text-only.md" ]
     assert first[ "agent_text" ] == AGENT_TEXT == second[ "agent_text" ]
     assert not os.path.exists( first[ "cwd" ] ) and not os.path.exists( second[ "cwd" ] )
 
@@ -360,7 +362,7 @@ def test_an_answer_that_left_a_file_in_the_scratch_directory_is_rejected( agy_bi
 
     mt.configure_agy( agy_bin, runner=FakeAgy( answer="looks fine", on_call=write_a_file ) )
 
-    with pytest.raises( mt.ModelCallError, match=r"changed its scratch directory, which now holds: \['.agents/agents/lupin-text-only.md', 'notes.txt'\]" ):
+    with pytest.raises( mt.ModelCallError, match=r"changed its scratch directory, which now holds: \['.agents', '.agents/agents', '.agents/agents/lupin-text-only.md', 'notes.txt'\]" ):
         complete( "m", "s", "u" )
 
     assert mt.agy_usage_summary() == {}
@@ -382,7 +384,7 @@ def test_an_answer_that_came_with_a_changed_agent_definition_is_rejected( agy_bi
 
     mt.configure_agy( agy_bin, runner=FakeAgy( answer="looks fine", on_call=give_itself_tools ) )
 
-    with pytest.raises( mt.ModelCallError, match=r"changed its scratch directory, which now holds: \['.agents/agents/lupin-text-only.md'\]" ):
+    with pytest.raises( mt.ModelCallError, match=r"changed its scratch directory, which now holds: \['.agents', '.agents/agents', '.agents/agents/lupin-text-only.md'\]" ):
         complete( "m", "s", "u" )
 
     assert mt.agy_usage_summary() == {}
@@ -391,7 +393,7 @@ def test_an_answer_that_came_with_a_changed_agent_definition_is_rejected( agy_bi
 def test_an_answer_that_came_with_the_agent_definition_deleted_is_rejected( agy_bin ):
     mt.configure_agy( agy_bin, runner=FakeAgy( answer="looks fine", on_call=lambda cwd: os.remove( os.path.join( cwd, mt.AGY_AGENT_PATH ) ) ) )
 
-    with pytest.raises( mt.ModelCallError, match=r"changed its scratch directory, which now holds: \[\]" ):
+    with pytest.raises( mt.ModelCallError, match=r"changed its scratch directory, which now holds: \['.agents', '.agents/agents'\]" ):
         complete( "m", "s", "u" )
 
 
@@ -407,6 +409,163 @@ def test_an_agent_definition_that_cannot_be_written_is_a_model_call_error_and_ag
 
     assert fake.calls == []
     assert mt.agy_usage_summary() == {}
+
+
+def test_an_agent_definition_whose_folder_exists_but_refuses_the_file_is_a_model_call_error( agy_bin, monkeypatch ):
+    if os.geteuid() == 0: pytest.skip( "root writes into a folder whatever its mode" )
+    fake = FakeAgy( answer="ok" )
+    mt.configure_agy( agy_bin, runner=fake )
+    real_makedirs = os.makedirs
+
+    # os.makedirs calls itself for each parent, so only the last folder is made read-only.
+    def read_only_folder( path, **kwargs ):
+        real_makedirs( path, **kwargs )
+        if path.endswith( os.path.join( ".agents", "agents" ) ): os.chmod( path, 0o500 )
+    monkeypatch.setattr( mt.os, "makedirs", read_only_folder )
+
+    with pytest.raises( mt.ModelCallError, match="model call to m could not write its agent definition: .*Permission denied" ):
+        complete( "m", "s", "u" )
+
+    assert fake.calls == []
+
+
+def test_a_scratch_directory_that_cannot_be_made_is_a_model_call_error_and_agy_is_not_called( agy_bin, monkeypatch ):
+    fake = FakeAgy( answer="ok" )
+    mt.configure_agy( agy_bin, runner=fake )
+
+    def no_room( prefix ): raise OSError( 28, "No space left on device" )
+    monkeypatch.setattr( mt.tempfile, "mkdtemp", no_room )
+
+    with pytest.raises( mt.ModelCallError, match="model call to m could not make its scratch directory: .*No space left on device" ):
+        complete( "m", "s", "u" )
+
+    assert fake.calls == []
+
+
+def test_a_scratch_directory_that_cannot_be_removed_does_not_lose_the_answer( agy_bin, monkeypatch ):
+    fake = FakeAgy( answer="the answer" )
+    mt.configure_agy( agy_bin, runner=fake )
+    asked       = []
+    real_rmtree = shutil.rmtree
+
+    def busy( path, ignore_errors=False ):
+        asked.append( ignore_errors )
+    monkeypatch.setattr( mt.shutil, "rmtree", busy )
+
+    try:
+        assert complete( "m", "s", "u" ) == "the answer"
+        assert asked == [ True ]
+    finally:
+        real_rmtree( fake.calls[ 0 ][ "cwd" ] )
+
+
+def test_an_answer_that_left_an_empty_directory_is_rejected( agy_bin ):
+    mt.configure_agy( agy_bin, runner=FakeAgy( answer="looks fine", on_call=lambda cwd: os.mkdir( os.path.join( cwd, "made-by-a-tool" ) ) ) )
+
+    with pytest.raises( mt.ModelCallError, match=r"changed its scratch directory, which now holds: \['.agents', '.agents/agents', '.agents/agents/lupin-text-only.md', 'made-by-a-tool'\]" ):
+        complete( "m", "s", "u" )
+
+    assert mt.agy_usage_summary() == {}
+
+
+def test_an_answer_that_left_a_directory_that_cannot_be_listed_is_rejected( agy_bin ):
+    if os.geteuid() == 0: pytest.skip( "root lists a directory whatever its mode" )
+
+    made = []
+
+    def hide_a_file( cwd ):
+        hidden = os.path.join( cwd, "hidden" )
+        os.mkdir( hidden )
+        with open( os.path.join( hidden, "notes.txt" ), "w" ) as handle: handle.write( "agy used a tool" )
+        os.chmod( hidden, 0 )
+        made.append( cwd )
+
+    mt.configure_agy( agy_bin, runner=FakeAgy( answer="looks fine", on_call=hide_a_file ) )
+
+    try:
+        with pytest.raises( mt.ModelCallError, match="model call to m left a scratch directory that cannot be listed: .*Permission denied" ):
+            complete( "m", "s", "u" )
+
+        assert mt.agy_usage_summary() == {}
+    finally:
+        # The removal the call attempts cannot empty a directory it cannot list, so the test does it.
+        os.chmod( os.path.join( made[ 0 ], "hidden" ), 0o700 )
+        shutil.rmtree( made[ 0 ] )
+
+
+class Unavailable:
+    """Stand-in for subprocess.run that answers 503 a set number of times, then hands over to a FakeAgy."""
+
+    STDERR = "error: Eligibility check failed: UNAVAILABLE (code 503): The service is currently unavailable.\n"
+
+    def __init__( self, times, then ):
+        self.left = times
+        self.then = then
+        self.cwds = []
+
+    def __call__( self, argv, **kwargs ):
+        if argv[ 1: ] == [ "--version" ]: return self.then( argv, **kwargs )
+        self.cwds.append( kwargs[ "cwd" ] )
+        if self.left > 0:
+            self.left -= 1
+            return Done( returncode=1, stderr=self.STDERR )
+        return self.then( argv, **kwargs )
+
+
+def test_a_call_answered_unavailable_is_tried_again_after_each_wait_and_then_answers( agy_bin, monkeypatch ):
+    waits  = []
+    runner = Unavailable( 2, FakeAgy( answer="the answer" ) )
+    monkeypatch.setattr( mt, "AGY_SLEEP", waits.append )
+    mt.configure_agy( agy_bin, runner=runner )
+
+    assert complete( "m", "s", "u" ) == "the answer"
+
+    assert waits == [ 15, 45 ]
+    assert len( runner.cwds ) == 3 and len( set( runner.cwds ) ) == 3
+    assert not any( os.path.exists( cwd ) for cwd in runner.cwds )
+    assert mt.agy_usage_summary()[ "m" ][ "calls" ] == 1
+
+
+def test_a_call_answered_unavailable_on_every_try_is_a_model_call_error_naming_the_tries( agy_bin, monkeypatch ):
+    waits  = []
+    runner = Unavailable( 99, FakeAgy( answer="never reached" ) )
+    monkeypatch.setattr( mt, "AGY_SLEEP", waits.append )
+    mt.configure_agy( agy_bin, runner=runner )
+
+    with pytest.raises( mt.ModelCallError, match=r"model call to m failed, unavailable on each of 4 tries: agy exited 1 \(model m\); stderr: error: Eligibility check failed: UNAVAILABLE \(code 503\)" ) as raised:
+        complete( "m", "s", "u" )
+
+    assert isinstance( raised.value.__cause__, agy_runtime.AgyUnavailable )
+    assert waits == [ 15, 45, 90 ] == list( mt.AGY_UNAVAILABLE_WAITS )
+    assert len( runner.cwds ) == 4
+    assert mt.agy_usage_summary() == {}
+
+
+def test_a_failure_that_is_not_unavailable_is_not_tried_again( agy_bin, monkeypatch ):
+    waits = []
+    fake  = FakeAgy( exit_code=3 )
+    monkeypatch.setattr( mt, "AGY_SLEEP", waits.append )
+    mt.configure_agy( agy_bin, runner=fake )
+
+    with pytest.raises( mt.ModelCallError, match=r"model call to m failed: agy exited 3" ):
+        complete( "m", "s", "u" )
+
+    assert waits == [] and len( fake.calls ) == 1
+
+
+def test_a_capped_model_is_charged_once_for_a_call_that_was_tried_again( agy_bin, tmp_path, monkeypatch ):
+    monkeypatch.setattr( mt, "AGY_SLEEP", lambda seconds: None )
+    mt.configure_agy( agy_bin, runner=Unavailable( 1, FakeAgy( answer="ok" ) ) )
+    mt.set_budget( str( tmp_path / "ledger.jsonl" ), { "m" : 1 } )
+
+    assert complete( "m", "s", "u" ) == "ok"
+
+    with pytest.raises( mt.CallBudgetExceeded ):
+        complete( "m", "s", "u" )
+
+
+def test_the_real_sleep_is_what_waits_by_default():
+    assert mt.AGY_SLEEP is time.sleep
 
 
 def test_an_agent_definition_left_as_bytes_that_are_not_text_is_a_model_call_error( agy_bin ):

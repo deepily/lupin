@@ -49,9 +49,22 @@ OUTER_TIMEOUT_HEADROOM_SECONDS = 60
 
 STDERR_TAIL_CHARS = 2000
 
+# What agy prints when the service refuses a call for now. Seen on agy 1.2.17, 2026-10-05, as
+# "Eligibility check failed: UNAVAILABLE (code 503): The service is currently unavailable."
+UNAVAILABLE_MARK = "(code 503)"
+
 
 class AgyCallError( Exception ):
     """Raised when an agy call produced no usable answer."""
+
+
+class AgyUnavailable( AgyCallError ):
+    """
+    Raised when agy exits non-zero and its error text carries `(code 503)`: the service refused this call for now.
+
+    It is an AgyCallError, so a caller that does not ask for the distinction is unchanged. A caller
+    that retries can tell it from a failure a retry cannot cure, such as a quota that is used up.
+    """
 
 
 class AgyBinaryChanged( Exception ):
@@ -320,9 +333,12 @@ def run_agy( prompt, *, model, workspace_dir, timeout_seconds=DEFAULT_TIMEOUT_SE
           directory, or timeout_seconds is not a positive integer
         - AgyBinaryChanged if the binary on disk differs from pinned_fingerprint, before
           or after the call
+        - AgyUnavailable, an AgyCallError, on a non-zero exit whose error text carries
+          `(code 503)`. The match is on that substring of the last STDERR_TAIL_CHARS
+          characters of standard error, not on the exit code: agy 1.2.17 exits 1 for it
         - AgyCallError on timeout, a binary that cannot be started, output that is not
-          UTF-8, non-zero exit, a missing or malformed result, a status that is not
-          `SUCCESS`, or a blank answer
+          UTF-8, any other non-zero exit, a missing or malformed result, a status that is
+          not `SUCCESS`, or a blank answer
     """
     if not isinstance( prompt, str ):
         raise ValueError( f"prompt is not a string: {prompt!r}" )
@@ -370,7 +386,8 @@ def run_agy( prompt, *, model, workspace_dir, timeout_seconds=DEFAULT_TIMEOUT_SE
     stderr_tail  = ( completed.stderr or "" )[ -STDERR_TAIL_CHARS: ]
 
     if completed.returncode != 0:
-        raise AgyCallError( f"agy exited {completed.returncode} (model {model}); stderr: {stderr_tail}" )
+        failure = AgyUnavailable if UNAVAILABLE_MARK in stderr_tail else AgyCallError
+        raise failure( f"agy exited {completed.returncode} (model {model}); stderr: {stderr_tail}" )
 
     result = parse_result( completed.stdout )
 

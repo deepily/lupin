@@ -21,6 +21,7 @@ import json
 import math
 import os
 import secrets
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -85,6 +86,12 @@ AGY_RUNNER  = None
 # an ordinary failed call from another pair, so the command line reads the reason from here.
 AGY_STOP = None
 
+# Seconds to wait before each further try when agy answers that the service is unavailable (503).
+# Three waits make four tries at the most. On 2026-10-05 a 130-pair run was ended seven times by
+# this answer, and each time the next attempt, 45 seconds or more later, went through.
+AGY_UNAVAILABLE_WAITS = ( 15, 45, 90 )
+AGY_SLEEP             = time.sleep
+
 # The agent every agy call runs as: a custom agent with no tools, written into the call's scratch
 # directory, where agy looks for it. The Claude path runs with tools=[]; this is the same rule for agy.
 # With agy's default agent a model can answer by trying a tool, such as a shell command to look at a
@@ -104,6 +111,10 @@ AGY_AGENT_TEXT = (
 
 # What an agy call runs under, for a report. It is not the Claude isolation profile above. The agent
 # definition is hashed in, so a report made under another agent text names another profile.
+# What a scratch directory holds when an answer left nothing behind: the agent definition and the
+# two directories above it.
+AGY_SCRATCH_ENTRIES = sorted( [ ".agents", os.path.join( ".agents", "agents" ), AGY_AGENT_PATH ] )
+
 AGY_CALL_PROFILE     = "agy-print-2|new-project|disable-slash-commands|stream-json|scratch-cwd|no-edit-grant|agent=" + AGY_AGENT_NAME + "-" + hashlib.sha256( AGY_AGENT_TEXT.encode( "utf-8" ) ).hexdigest()[ :10 ]
 AGY_RESIDUAL_CONTEXT = [ "agy's own framing around the custom agent, about 3,400 input tokens a call on agy 1.2.17" ]
 
@@ -403,6 +414,35 @@ def _agy_whole_seconds( timeout_seconds ):
 
 def _agy_call( model, prompt, timeout_seconds ):
     """
+    Make one agy call, trying again after a wait when agy answers that the service is unavailable.
+
+    Requires:
+        - configure_agy has run; prompt is the joined system and user prompt
+        - timeout_seconds is a whole number of seconds from _agy_whole_seconds
+
+    Ensures:
+        - returns what _agy_call_once returns
+        - an AgyUnavailable is tried again after each wait in AGY_UNAVAILABLE_WAITS, in a new
+          scratch directory each time; no other failure is tried again here
+        - the caller's budget is not charged again: complete charges before calling this
+
+    Raises:
+        - ModelCallError naming the number of tries when every try was answered unavailable
+        - whatever _agy_call_once raises otherwise
+    """
+    waits = list( AGY_UNAVAILABLE_WAITS )
+    tries = len( waits ) + 1
+    while True:
+        try:
+            return _agy_call_once( model, prompt, timeout_seconds )
+        except agy_runtime.AgyUnavailable as e:
+            if not waits:
+                raise ModelCallError( f"model call to {model} failed, unavailable on each of {tries} tries: {e}" ) from e
+            AGY_SLEEP( waits.pop( 0 ) )
+
+
+def _agy_call_once( model, prompt, timeout_seconds ):
+    """
     Make one agy call in a fresh scratch directory that holds only the agent definition.
 
     Requires:
@@ -411,21 +451,30 @@ def _agy_call( model, prompt, timeout_seconds ):
 
     Ensures:
         - agy runs as the no-tools agent, with a temporary directory as its working directory that
-          holds the agent definition and nothing else, removed afterwards
+          holds the agent definition and nothing else
+        - the scratch directory is removed afterwards when it can be; a removal that fails is
+          ignored, so it cannot replace the answer or the failure of the call
         - returns the answer stripped, and adds the call's tokens to the tally for model; a token
           field agy leaves out, or reports as something other than a whole number, adds nothing
         - a binary change run_agy itself reports is kept as the stop reason
-        - an answer is refused when agy tried a tool action, left anything else in the scratch
-          directory, or changed the agent definition: a tool attempt is not a text answer
+        - an answer is refused when agy tried a tool action, left any other file or directory in
+          the scratch directory, or changed the agent definition: a tool attempt is not a text answer.
+          A directory that cannot be listed counts as changed
 
     Raises:
         - ModelCallError if agy fails, tried a tool action, wrote into the scratch directory or changed
-          the agent definition, or if the agent definition cannot be written or read back
+          the agent definition, or if the scratch directory cannot be made or listed, or the agent
+          definition cannot be written or read back
+        - AgyUnavailable if agy answered that the service is unavailable, for _agy_call to try again
         - AgyBinaryChanged if the binary differs from the pin; it is not a ModelCallError, so a
           caller that retries failed calls does not retry under another binary
     """
     global AGY_STOP
-    with tempfile.TemporaryDirectory( prefix="agy-call-" ) as scratch:
+    try:
+        scratch = tempfile.mkdtemp( prefix="agy-call-" )
+    except OSError as e:
+        raise ModelCallError( f"model call to {model} could not make its scratch directory: {e}" ) from e
+    try:
         agent_file = os.path.join( scratch, AGY_AGENT_PATH )
         try:
             os.makedirs( os.path.dirname( agent_file ) )
@@ -435,18 +484,25 @@ def _agy_call( model, prompt, timeout_seconds ):
         try:
             result = agy_runtime.run_agy( prompt, model=model, workspace_dir=scratch, timeout_seconds=timeout_seconds, agent=AGY_AGENT_NAME,
                                           agy_bin=AGY_BIN, pinned_fingerprint=AGY_PIN, runner=AGY_RUNNER )
+        except agy_runtime.AgyUnavailable:
+            raise
         except agy_runtime.AgyCallError as e:
             raise ModelCallError( f"model call to {model} failed: {e}" ) from e
         except agy_runtime.AgyBinaryChanged as e:
             if AGY_STOP is None: AGY_STOP = str( e )
             raise
-        holds  = sorted( os.path.relpath( os.path.join( folder, name ), scratch ) for folder, _, names in os.walk( scratch ) for name in names )
-        intact = holds == [ AGY_AGENT_PATH ]
+        try:
+            holds = _scratch_entries( scratch )
+        except OSError as e:
+            raise ModelCallError( f"model call to {model} left a scratch directory that cannot be listed: {e}" ) from e
+        intact = holds == AGY_SCRATCH_ENTRIES
         if intact:
             try:
                 with open( agent_file, encoding="utf-8" ) as f: intact = f.read() == AGY_AGENT_TEXT
             except ( OSError, UnicodeDecodeError ) as e:
                 raise ModelCallError( f"model call to {model} left an agent definition that cannot be read back: {e}" ) from e
+    finally:
+        shutil.rmtree( scratch, ignore_errors=True )
     if result.denied_actions:
         raise ModelCallError( f"model call to {model} tried tool actions and was refused them: {result.denied_actions}" )
     if not intact:
@@ -458,6 +514,26 @@ def _agy_call( model, prompt, timeout_seconds ):
             count = result.usage.get( field )
             if isinstance( count, int ) and not isinstance( count, bool ): tally[ field ] += count
     return result.response.strip()
+
+
+def _scratch_entries( scratch ):
+    """
+    List every file and directory under a scratch directory, as sorted paths relative to it.
+
+    Requires:
+        - scratch is an existing directory
+
+    Ensures:
+        - directories are listed as well as files, so an empty directory an answer left behind is seen
+        - a symbolic link to a directory is listed and not followed
+
+    Raises:
+        - OSError if any directory under scratch cannot be listed; os.walk would otherwise skip it
+          and report nothing
+    """
+    def refuse( error ): raise error
+    return sorted( os.path.relpath( os.path.join( folder, name ), scratch )
+                   for folder, folders, files in os.walk( scratch, onerror=refuse ) for name in folders + files )
 
 
 def cli_version( cli_path, run_fn=None ):
