@@ -9,7 +9,7 @@ Key Features:
 - Daily aggregation bucketed by (date, file_type)
 - Three output formats: console, JSON, CSV (tidy-long)
 - Reuses branch_analyzer's `FileTypeClassifier` + `GitCommandError`
-- CLI flags: --today (default), --since/--until, --branch [BRANCH], --base, --output, --save-output
+- CLI flags: `--today` (default), `--since`/`--until`, `--branch [BRANCH]`, `--base`, `--output`, `--save-output`
 
 Main Classes:
 - GitLogLocDeltaAnalyzer: orchestrator
@@ -28,8 +28,7 @@ Command Line:
     python -m cosa.repo.run_git_loc_delta --branch     # current branch vs main
     python -m cosa.repo.run_git_loc_delta --branch --output csv
 
-Author: María 🌸 (session 3c9fce51, 2026-05-16)
-Plan: cosa/rnd/2026.05.16-daily-loc-delta-tool.md
+Plan: src/cosa/rnd/2026.05.16-daily-loc-delta-tool.md
 """
 
 from .analyzer        import GitLogLocDeltaAnalyzer

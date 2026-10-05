@@ -1,26 +1,23 @@
 """
 Plotter — branch LoC delta visualization for the Daily LoC Delta tool.
 
-Library-shape rendering layer. Consumes the `daily` + `summary` dicts produced
+A library-shape rendering layer. It takes the `daily` and `summary` dicts produced
 by `DailyAggregator` and emits a two-panel matplotlib PNG:
 
-    Top panel — aggregate per-day insertions / deletions bars + net line
-    Bottom panel — signed per-key net lines (one line per file_type, or per
-                   repo for the future global-aggregator variant)
+- Top panel: aggregate per-day insertions and deletions bars, plus a net line.
+- Bottom panel: signed per-key net lines. There is one line per file_type, or per
+  repo for the future global-aggregator variant.
 
 The `group_by` parameter selects which key drives the bottom panel:
-    "file_type"  — bottom = lines per file_type (default; per-branch use)
-    "repo"       — bottom = lines per repo (global aggregator use)
+- "file_type": lines per file_type (default; per-branch use)
+- "repo": lines per repo (global aggregator use)
 
-The caller passes pre-aggregated dicts — the plotter does no CSV I/O. This
-keeps it reusable by both `run_git_loc_delta.py` (per-branch) and a future
-`run_git_loc_delta_global.py` aggregator (cross-repo daily rollup) that
-builds an equivalent `daily` dict from concat'd per-repo CSVs.
+The caller passes pre-aggregated dicts, and the plotter does no CSV I/O. That keeps
+it reusable by `run_git_loc_delta.py` (per branch) and by a future
+`run_git_loc_delta_global.py` aggregator. The aggregator would do a cross-repo daily
+rollup, building an equivalent `daily` dict from the concatenated per-repo CSVs.
 
-Authored 2026-05-21 by Rachel 🕊️ (session e13fed4f) extending María's
-`git_loc_delta` package per cross-session DM-thread design with María.
-Plan: cosa/rnd/2026.05.16-daily-loc-delta-tool.md (Plot extension section
-to be added in the same pass).
+Plan: src/cosa/rnd/2026.05.16-daily-loc-delta-tool.md
 """
 
 import os
@@ -315,7 +312,7 @@ def quick_smoke_test():
     Ensures:
         - Tests complete with ✓ or ✗ indicators
         - Uses cu.print_banner formatting
-        - Does NOT raise (catches all exceptions)
+        - Does not raise; it catches all exceptions
         - Cleans up the temp output files on success
     """
     import tempfile

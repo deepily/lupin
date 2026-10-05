@@ -1,20 +1,18 @@
 """
 Coverage Guard — reconcile counted commits against an independent git oracle.
 
-Born from bugs `bbff93a3` + `37a8beeb` (2026-07-13). The roll-up had been reporting
-numbers that were **self-consistent and confidently wrong** for weeks: a whole commit
-on `main` was structurally uncountable, and nothing complained — because every internal
+The roll-up once reported numbers that were self-consistent and wrong. A whole commit
+on `main` was structurally uncountable, and nothing complained, because every internal
 cross-check agreed with every other internal cross-check.
 
-The lesson generalizes past this bug: *an aggregate that only ever checks itself cannot
-discover that it is blind.* So after each repo is analyzed, we ask git a SECOND,
-INDEPENDENT question — "how many commits are in this window?" — and assert that the
-number of commits we actually counted matches.
+An aggregate that only checks itself cannot discover that it is blind. So after each
+repo is analyzed, the guard asks git a second, independent question: how many commits
+are in this window? It then checks that the commits actually counted match the answer.
 
-The project workflow already mandates "never silently swallow" for **errors**. This
-extends that rule to **coverage**, which is the failure class that actually bit us.
+The project workflow already says never to swallow errors silently. This guard applies
+the same rule to coverage.
 
-Usage:
+Example:
     from cosa.repo.git_loc_delta.coverage_guard import reconcile_coverage
 
     report = reconcile_coverage(
@@ -47,9 +45,9 @@ def _rev_list_shas(
     """
     Ask git, independently of the numstat walk, which SHAs are in the window.
 
-    Deliberately uses `git rev-list` rather than re-parsing `git log --numstat`
-    output: the guard is worthless if it shares a code path (and therefore a bug)
-    with the thing it is auditing. Different porcelain, same question.
+    Uses `git rev-list` rather than re-parsing `git log --numstat` output. The guard
+    is worthless if it shares a code path, and therefore a bug, with the thing it
+    audits. It is a different git command asking the same question.
 
     Requires:
         - repo_path is a valid git repository
@@ -58,7 +56,7 @@ def _rev_list_shas(
 
     Ensures:
         - Returns the set of commit SHAs git reports for the window
-        - Selection flags mirror GitLogParser._build_command EXACTLY, so any
+        - Selection flags mirror GitLogParser._build_command exactly, so any
           difference in the result is a real coverage gap and not a flag skew
 
     Raises:
@@ -125,32 +123,32 @@ def reconcile_coverage(
     debug:          bool          = False,
 ) -> dict:
     """
-    Reconcile the commits we COUNTED against the commits git says are IN the window.
+    Reconcile the commits counted against the commits git says are in the window.
 
     Requires:
         - counted_shas is the set of unique SHAs the aggregator actually recorded
           (i.e. DailyAggregator.all_shas())
-        - The selection arguments are the SAME ones handed to GitLogParser — a guard
+        - The selection arguments are the same ones handed to GitLogParser. A guard
           run against a different window audits nothing
 
     Ensures:
         - Returns a report dict:
             {
-              "repo":         str,
-              "reconciled":   bool,          # True iff nothing is missing
+              "repo":         str,           # repo_name, or repo_path when repo_name is None
+              "reconciled":   bool,          # True iff nothing is missing and nothing is unexpected
               "expected":     int,           # commits git reports in the window
               "counted":      int,           # commits we recorded a change row for
               "uncounted":    [ sha, ... ],  # in git's set, absent from ours
               "unexpected":   [ sha, ... ],  # in ours, absent from git's — a real alarm
               "warning":      str | None,    # rendered, ready to print to stderr
             }
-        - `uncounted` is NOT automatically a bug: a commit whose only changes are
+        - `uncounted` is not automatically a bug. A commit whose only changes are
           binary files, or an empty commit, legitimately produces zero countable
-          rows. It IS, however, always the operator's business — so we name the SHAs
-          and let a human judge, rather than inferring benignity and staying quiet.
-        - `unexpected` (we counted a commit git says is out of window) is never benign:
-          it means the walk and the filter disagree — the author-date/committer-date
-          class of bug. Surfaced with its own line.
+          rows. It is still always the operator's business, so the warning names the
+          SHAs and lets a human judge rather than assuming it is harmless.
+        - `unexpected` (a counted commit that git says is out of window) is never
+          benign. It means the walk and the filter disagree, as with an author-date
+          versus committer-date mismatch. The warning gives it its own line.
 
     Raises:
         - GitCommandError if the git oracle invocation fails

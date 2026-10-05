@@ -11,7 +11,7 @@ Exception Hierarchy:
     └── (uses sibling) GitCommandError (re-exported from branch_analyzer)
 
 Design Principles:
-- Reuse `GitCommandError` from branch_analyzer (Pass 1 Reuse Map R2)
+- Reuse `GitCommandError` from branch_analyzer instead of defining a second one
 - Add only the date-range failure mode that's specific to per-day analysis
 - Human-readable messages with context preservation
 """
