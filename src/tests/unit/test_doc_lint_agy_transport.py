@@ -67,7 +67,10 @@ class FakeAgy:
         if argv[ 1: ] == [ "--version" ]: return Done( stdout=self.version + "\n" )
         prompt = json.loads( kwargs[ "input" ] )[ "message" ][ "content" ]
         model  = argv[ argv.index( "--model" ) + 1 ]
-        self.calls.append( { "model" : model, "prompt" : prompt, "cwd" : kwargs[ "cwd" ], "cwd_listing" : sorted( os.listdir( kwargs[ "cwd" ] ) ), "argv" : argv } )
+        cwd     = kwargs[ "cwd" ]
+        listing = sorted( os.path.relpath( os.path.join( folder, name ), cwd ) for folder, _, names in os.walk( cwd ) for name in names )
+        agent   = open( os.path.join( cwd, mt.AGY_AGENT_PATH ), encoding="utf-8" ).read() if mt.AGY_AGENT_PATH in listing else None
+        self.calls.append( { "model" : model, "prompt" : prompt, "cwd" : cwd, "cwd_listing" : listing, "agent_text" : agent, "argv" : argv } )
         if self.on_call is not None: self.on_call( kwargs[ "cwd" ] )
         if self.exit_code != 0: return Done( returncode=self.exit_code, stderr="AGY_ERROR: {\"status\":\"UNAVAILABLE\"}" )
         result = { "conversation_id" : "c-1", "status" : "SUCCESS", "response" : self.reply( prompt ), "duration_seconds" : 1.5, "num_turns" : 1, "usage" : self.usage }
@@ -194,10 +197,10 @@ def test_complete_sends_the_joined_prompt_to_the_named_model_and_returns_the_str
     call = fake.calls[ 0 ]
     assert call[ "model" ]  == "gemini-x-high"
     assert call[ "prompt" ] == "SYSTEM TEXT\n\nUSER TEXT"
-    assert call[ "argv" ]   == agy_runtime.build_argv( model="gemini-x-high", timeout_seconds=45, agy_bin=os.path.realpath( agy_bin ) )
+    assert call[ "argv" ]   == agy_runtime.build_argv( model="gemini-x-high", timeout_seconds=45, agent="lupin-text-only", agy_bin=os.path.realpath( agy_bin ) )
 
 
-def test_each_call_runs_in_its_own_empty_directory_which_is_removed_afterwards( agy_bin ):
+def test_each_call_runs_in_its_own_directory_holding_only_the_no_tools_agent_and_removed_afterwards( agy_bin ):
     fake = FakeAgy( answer="ok" )
     mt.configure_agy( agy_bin, runner=fake )
 
@@ -207,7 +210,9 @@ def test_each_call_runs_in_its_own_empty_directory_which_is_removed_afterwards( 
     first, second = fake.calls
     assert first[ "cwd" ] != second[ "cwd" ]
     assert os.path.basename( first[ "cwd" ] ).startswith( "agy-call-" )
-    assert first[ "cwd_listing" ] == [] and second[ "cwd_listing" ] == []
+    assert first[ "cwd_listing" ] == [ ".agents/agents/lupin-text-only.md" ] == second[ "cwd_listing" ]
+    assert first[ "agent_text" ] == mt.AGY_AGENT_TEXT
+    assert "\ntools: []\n" in mt.AGY_AGENT_TEXT and mt.AGY_AGENT_TEXT.startswith( "---\nname: lupin-text-only\n" )
     assert not os.path.exists( first[ "cwd" ] ) and not os.path.exists( second[ "cwd" ] )
 
 
@@ -345,10 +350,39 @@ def test_an_answer_that_left_a_file_in_the_scratch_directory_is_rejected( agy_bi
 
     mt.configure_agy( agy_bin, runner=FakeAgy( answer="looks fine", on_call=write_a_file ) )
 
-    with pytest.raises( mt.ModelCallError, match=r"wrote into its scratch directory: \['notes.txt'\]" ):
+    with pytest.raises( mt.ModelCallError, match=r"changed its scratch directory, which now holds: \['.agents/agents/lupin-text-only.md', 'notes.txt'\]" ):
         complete( "m", "s", "u" )
 
     assert mt.agy_usage_summary() == {}
+
+
+def test_an_answer_that_came_with_a_file_hidden_under_the_agents_folder_is_rejected( agy_bin ):
+    def write_beside_the_agent( cwd ):
+        with open( os.path.join( cwd, ".agents", "agents", "other.md" ), "w" ) as handle: handle.write( "x" )
+
+    mt.configure_agy( agy_bin, runner=FakeAgy( answer="looks fine", on_call=write_beside_the_agent ) )
+
+    with pytest.raises( mt.ModelCallError, match="changed its scratch directory" ):
+        complete( "m", "s", "u" )
+
+
+def test_an_answer_that_came_with_a_changed_agent_definition_is_rejected( agy_bin ):
+    def give_itself_tools( cwd ):
+        with open( os.path.join( cwd, mt.AGY_AGENT_PATH ), "w" ) as handle: handle.write( mt.AGY_AGENT_TEXT.replace( "tools: []", "tools: [run_command]" ) )
+
+    mt.configure_agy( agy_bin, runner=FakeAgy( answer="looks fine", on_call=give_itself_tools ) )
+
+    with pytest.raises( mt.ModelCallError, match=r"changed its scratch directory, which now holds: \['.agents/agents/lupin-text-only.md'\]" ):
+        complete( "m", "s", "u" )
+
+    assert mt.agy_usage_summary() == {}
+
+
+def test_an_answer_that_came_with_the_agent_definition_deleted_is_rejected( agy_bin ):
+    mt.configure_agy( agy_bin, runner=FakeAgy( answer="looks fine", on_call=lambda cwd: os.remove( os.path.join( cwd, mt.AGY_AGENT_PATH ) ) ) )
+
+    with pytest.raises( mt.ModelCallError, match=r"changed its scratch directory, which now holds: \[\]" ):
+        complete( "m", "s", "u" )
 
 
 def test_a_binary_that_changed_after_the_pin_stops_the_call_and_is_not_a_model_call_error( agy_bin ):
@@ -485,7 +519,9 @@ def test_the_command_line_runs_the_pairs_through_agy_and_reports_it( tmp_path, a
     binding = f"agy={os.path.realpath( agy_bin )}|size=10|mtime_ns={info.st_mtime_ns}|version=1.2.17"
     assert report[ "transport" ]   == "agy"
     assert report[ "agy_binding" ] == binding
-    assert report[ "call_profile" ]          == mt.AGY_CALL_PROFILE == "agy-print-1|new-project|disable-slash-commands|stream-json|empty-scratch-cwd|no-edit-grant"
+    assert report[ "call_profile" ]          == mt.AGY_CALL_PROFILE
+    assert re.fullmatch( r"agy-print-2\|new-project\|disable-slash-commands\|stream-json\|scratch-cwd\|no-edit-grant\|agent=lupin-text-only-[0-9a-f]{10}", mt.AGY_CALL_PROFILE )
+    assert all( call[ "argv" ][ -2: ] == [ "--agent", "lupin-text-only" ] for call in fake.calls )
     assert report[ "call_residual_context" ] == mt.AGY_RESIDUAL_CONTEXT
     assert report[ "lists" ][ 0 ][ "positives" ] == 1 and report[ "lists" ][ 0 ][ "misses" ] == 0
 

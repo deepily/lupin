@@ -14,6 +14,11 @@ Design:
       working directory set to a caller-supplied scratch directory. No flag that grants
       edits is passed, so print mode refuses tool actions that need approval. Point
       `workspace_dir` at a disposable directory, never at a repository.
+    - With its default agent, a model can answer a prompt by trying a tool instead of
+      writing text. Print mode refuses the action and the answer comes back blank.
+      `agent` names a custom agent for the call. agy finds custom agents as Markdown
+      files under `.agents/agents/` in the working directory. One whose front matter
+      says `tools: []` has no tools to try.
     - agy replaces its own binary when it finds an update, including in the middle of a
       run. `binary_fingerprint` identifies the binary on disk. Pass the fingerprint taken
       at the start of a run as `pinned_fingerprint`. `run_agy` then refuses to call a
@@ -155,7 +160,7 @@ def agy_version( agy_bin=DEFAULT_AGY_BIN, runner=None ):
     return lines[ 0 ].strip()
 
 
-def build_argv( *, model, timeout_seconds, effort=None, agy_bin=DEFAULT_AGY_BIN ):
+def build_argv( *, model, timeout_seconds, effort=None, agent=None, agy_bin=DEFAULT_AGY_BIN ):
     """
     Build the agy print-mode command line for one call.
 
@@ -163,6 +168,7 @@ def build_argv( *, model, timeout_seconds, effort=None, agy_bin=DEFAULT_AGY_BIN 
         - model is an agy model identifier, for example "gemini-3.1-pro-high"
         - timeout_seconds is a positive integer
         - effort is None or one of agy's reasoning effort names
+        - agent is None or the name of an agent agy can find from its working directory
 
     Ensures:
         - the prompt flag is attached empty (`-p=`); the prompt itself goes on stdin
@@ -170,7 +176,7 @@ def build_argv( *, model, timeout_seconds, effort=None, agy_bin=DEFAULT_AGY_BIN 
         - carries --new-project so calls share no conversation state
         - carries --disable-slash-commands so a prompt beginning with "/" is sent as text
         - never carries --mode accept-edits, --sandbox or --dangerously-skip-permissions
-        - carries --effort only when effort is given
+        - carries --effort only when effort is given, and --agent only when agent is given
     """
     argv = [
         agy_bin,
@@ -184,6 +190,7 @@ def build_argv( *, model, timeout_seconds, effort=None, agy_bin=DEFAULT_AGY_BIN 
     ]
 
     if effort is not None: argv.extend( [ "--effort", effort ] )
+    if agent  is not None: argv.extend( [ "--agent",  agent  ] )
 
     return argv
 
@@ -286,7 +293,7 @@ def check_success_fields( result ):
             raise AgyCallError( f"agy result field {name!r} has the wrong type: {result[ name ]!r}" )
 
 
-def run_agy( prompt, *, model, workspace_dir, timeout_seconds=DEFAULT_TIMEOUT_SECONDS, effort=None,
+def run_agy( prompt, *, model, workspace_dir, timeout_seconds=DEFAULT_TIMEOUT_SECONDS, effort=None, agent=None,
              agy_bin=DEFAULT_AGY_BIN, pinned_fingerprint=None, runner=None ):
     """
     Send one prompt to a model through agy and return its raw answer.
@@ -297,6 +304,7 @@ def run_agy( prompt, *, model, workspace_dir, timeout_seconds=DEFAULT_TIMEOUT_SE
         - workspace_dir is an existing scratch directory; agy runs with it as its working
           directory and can see what is in it
         - timeout_seconds is a positive integer; agy reads zero as no limit
+        - agent (optional) names a custom agent defined under workspace_dir
         - pinned_fingerprint (optional) is a `binary_fingerprint` taken earlier
         - runner (optional) is a subprocess.run-compatible callable, injected by tests
 
@@ -335,7 +343,7 @@ def run_agy( prompt, *, model, workspace_dir, timeout_seconds=DEFAULT_TIMEOUT_SE
     runner = runner if runner is not None else subprocess.run
     # The resolved path, so the file that was fingerprinted is the file that runs. A
     # relative agy_bin would otherwise be looked up again from workspace_dir.
-    argv   = build_argv( model=model, timeout_seconds=timeout_seconds, effort=effort, agy_bin=fingerprint[ "path" ] )
+    argv   = build_argv( model=model, timeout_seconds=timeout_seconds, effort=effort, agent=agent, agy_bin=fingerprint[ "path" ] )
 
     outer_timeout = timeout_seconds + OUTER_TIMEOUT_HEADROOM_SECONDS
     started       = time.monotonic()

@@ -205,6 +205,12 @@ def test_argv_with_effort_and_binary_appends_effort():
     assert argv[ -2: ] == [ "--effort", "high" ]
 
 
+def test_argv_names_the_agent_only_when_one_is_given():
+    assert "--agent" not in build_argv( model="m", timeout_seconds=1 )
+    assert build_argv( model="m", timeout_seconds=1, agent="text-only" )[ -2: ] == [ "--agent", "text-only" ]
+    assert build_argv( model="m", timeout_seconds=1, effort="low", agent="text-only" )[ -4: ] == [ "--effort", "low", "--agent", "text-only" ]
+
+
 @pytest.mark.parametrize( "forbidden", [ "accept-edits", "--sandbox", "--dangerously-skip-permissions", "--mode" ] )
 def test_argv_never_grants_edits_or_skips_permissions( forbidden ):
     assert forbidden not in build_argv( model="m", timeout_seconds=1, effort="max" )
@@ -374,6 +380,14 @@ def test_run_passes_prompt_on_stdin_and_runs_in_the_scratch_dir( fake_bin, scrat
         "timeout"        : 100,
         "cwd"            : scratch
     }
+
+
+def test_run_passes_the_agent_name_to_agy( fake_bin, scratch ):
+    runner = _FakeRunner( _Completed( stdout=REAL_STDOUT ) )
+
+    run_agy( "p", model="m", workspace_dir=scratch, agent="text-only", agy_bin=fake_bin, runner=runner )
+
+    assert runner.calls[ 0 ][ 0 ] == build_argv( model="m", timeout_seconds=300, agent="text-only", agy_bin=os.path.realpath( fake_bin ) )
 
 
 def test_run_defaults_to_subprocess_run( fake_bin, scratch, monkeypatch ):

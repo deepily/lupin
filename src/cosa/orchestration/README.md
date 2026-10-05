@@ -222,7 +222,8 @@ print( result.response, result.usage )
 | Failure | `AgyCallError` on a timeout, a binary that cannot be started, output that is not UTF-8, a non-zero exit, a missing, malformed or failed result, or a blank answer. There is no retry; the caller owns it |
 | Safety | agy is an agent with tools and runs unsandboxed. `workspace_dir` becomes its working directory, so pass a disposable directory, never a repository |
 | Self-update | agy replaces its own binary when it finds an update. Pin `binary_fingerprint()` at the start of a run and `run_agy` raises `AgyBinaryChanged` when the binary differs before the call or changed while it ran. The fingerprint is path, size and modification time, not a content hash |
-| Cost | A one-line prompt measured about 13,000 input tokens and 13 to 15 seconds per call on agy 1.2.17, since agy sends its own agent instructions with every call |
+| Agent | `agent=` names a custom agent, a Markdown file under `.agents/agents/` in `workspace_dir`. One whose front matter says `tools: []` cannot answer by trying a tool. With the default agent a model sometimes tries a shell command instead of writing text; print mode refuses it and the answer comes back blank, which `run_agy` raises as `AgyCallError` |
+| Cost | With the default agent a one-line prompt measured about 13,000 input tokens and 13 to 15 seconds per call on agy 1.2.17, since agy sends its agent instructions and tool definitions with every call. With a no-tools custom agent the same kind of prompt measured about 3,400 input tokens |
 
 Tests: `pytest src/cosa/tests/unit/orchestration/agy/`
 

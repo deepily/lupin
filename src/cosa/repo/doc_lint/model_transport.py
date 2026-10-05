@@ -85,9 +85,27 @@ AGY_RUNNER  = None
 # an ordinary failed call from another pair, so the command line reads the reason from here.
 AGY_STOP = None
 
-# What an agy call runs under, for a report. It is not the Claude isolation profile above.
-AGY_CALL_PROFILE     = "agy-print-1|new-project|disable-slash-commands|stream-json|empty-scratch-cwd|no-edit-grant"
-AGY_RESIDUAL_CONTEXT = [ "agy's own agent instructions and tool definitions, about 13,000 input tokens a call on agy 1.2.17" ]
+# The agent every agy call runs as: a custom agent with no tools, written into the call's scratch
+# directory, where agy looks for it. The Claude path runs with tools=[]; this is the same rule for agy.
+# With agy's default agent a model can answer by trying a tool, such as a shell command to look at a
+# file the docstring names; print mode refuses it and the answer comes back blank. It also carries
+# about 13,000 input tokens of agent instructions and tool definitions a call, against about 3,400 here
+# (both measured on agy 1.2.17 with a one-line prompt).
+AGY_AGENT_NAME = "lupin-text-only"
+AGY_AGENT_PATH = os.path.join( ".agents", "agents", AGY_AGENT_NAME + ".md" )
+AGY_AGENT_TEXT = (
+    "---\n"
+    f"name: {AGY_AGENT_NAME}\n"
+    "description: Answers from the text of the prompt only. Has no tools.\n"
+    "tools: []\n"
+    "---\n"
+    "You answer from the text you are given and nothing else. You have no tools.\n"
+)
+
+# What an agy call runs under, for a report. It is not the Claude isolation profile above. The agent
+# definition is hashed in, so a report made under another agent text names another profile.
+AGY_CALL_PROFILE     = "agy-print-2|new-project|disable-slash-commands|stream-json|scratch-cwd|no-edit-grant|agent=" + AGY_AGENT_NAME + "-" + hashlib.sha256( AGY_AGENT_TEXT.encode( "utf-8" ) ).hexdigest()[ :10 ]
+AGY_RESIDUAL_CONTEXT = [ "agy's own framing around the custom agent, about 3,400 input tokens a call on agy 1.2.17" ]
 
 AGY_USAGE_FIELDS = ( "input_tokens", "output_tokens", "thinking_tokens", "cache_read_tokens", "total_tokens" )
 
@@ -384,19 +402,20 @@ def _agy_whole_seconds( timeout_seconds ):
 
 def _agy_call( model, prompt, timeout_seconds ):
     """
-    Make one agy call in a fresh, empty scratch directory and return the answer text.
+    Make one agy call in a fresh scratch directory that holds only the agent definition.
 
     Requires:
         - configure_agy has run; prompt is the joined system and user prompt
         - timeout_seconds is a whole number of seconds from _agy_whole_seconds
 
     Ensures:
-        - agy runs with an empty temporary directory as its working directory, removed afterwards
+        - agy runs as the no-tools agent, with a temporary directory as its working directory that
+          holds the agent definition and nothing else, removed afterwards
         - returns the answer stripped, and adds the call's tokens to the tally for model; a token
           field agy leaves out, or reports as something other than a whole number, adds nothing
         - a binary change run_agy itself reports is kept as the stop reason
-        - an answer is refused when agy tried a tool action or left anything in the scratch
-          directory: the Claude path runs with no tools, and a tool attempt is not a text answer
+        - an answer is refused when agy tried a tool action, left anything else in the scratch
+          directory, or changed the agent definition: a tool attempt is not a text answer
 
     Raises:
         - ModelCallError if agy fails, tried a tool action, or wrote into the scratch directory
@@ -405,19 +424,25 @@ def _agy_call( model, prompt, timeout_seconds ):
     """
     global AGY_STOP
     with tempfile.TemporaryDirectory( prefix="agy-call-" ) as scratch:
+        agent_file = os.path.join( scratch, AGY_AGENT_PATH )
+        os.makedirs( os.path.dirname( agent_file ) )
+        with open( agent_file, "w", encoding="utf-8" ) as f: f.write( AGY_AGENT_TEXT )
         try:
-            result = agy_runtime.run_agy( prompt, model=model, workspace_dir=scratch, timeout_seconds=timeout_seconds,
+            result = agy_runtime.run_agy( prompt, model=model, workspace_dir=scratch, timeout_seconds=timeout_seconds, agent=AGY_AGENT_NAME,
                                           agy_bin=AGY_BIN, pinned_fingerprint=AGY_PIN, runner=AGY_RUNNER )
         except agy_runtime.AgyCallError as e:
             raise ModelCallError( f"model call to {model} failed: {e}" ) from e
         except agy_runtime.AgyBinaryChanged as e:
             if AGY_STOP is None: AGY_STOP = str( e )
             raise
-        left_behind = sorted( os.listdir( scratch ) )
+        holds  = sorted( os.path.relpath( os.path.join( folder, name ), scratch ) for folder, _, names in os.walk( scratch ) for name in names )
+        intact = holds == [ AGY_AGENT_PATH ]
+        if intact:
+            with open( agent_file, encoding="utf-8" ) as f: intact = f.read() == AGY_AGENT_TEXT
     if result.denied_actions:
         raise ModelCallError( f"model call to {model} tried tool actions and was refused them: {result.denied_actions}" )
-    if left_behind:
-        raise ModelCallError( f"model call to {model} wrote into its scratch directory: {left_behind}" )
+    if not intact:
+        raise ModelCallError( f"model call to {model} changed its scratch directory, which now holds: {holds}" )
     with _AGY_USAGE_LOCK:
         tally = AGY_USAGE.setdefault( model, dict( { field: 0 for field in AGY_USAGE_FIELDS }, calls=0 ) )
         tally[ "calls" ] += 1
