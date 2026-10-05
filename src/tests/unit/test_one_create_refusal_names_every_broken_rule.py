@@ -193,7 +193,7 @@ def test_KNOWN_GAP_a_refused_P0_is_not_told_about_the_live_mint_rule_until_the_r
         holding_on, repo, worker_bridge, client ):
     # P0 is exempt from the live-mint rule by Rick's carve-out, and
     # test_tasks_router.py::test_a_P0_MAY_still_mint_live_at_the_door pins that the
-    # gate's text never appears on a P0 create, refused or not. So this one path
+    # gate's text does not appear on a non-operator's P0 create. So this one path
     # still costs a second call. This arm records that; it is not the wanted end state.
     refused = _create( client, priority="P0", status="queued" )
     assert refused.status_code == 403, refused.text
