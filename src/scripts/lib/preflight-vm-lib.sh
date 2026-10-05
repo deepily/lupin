@@ -1194,22 +1194,30 @@ pfv_cc_project_dirname() {
 }
 
 # ── pfv_mcp_registration_env ──────────────────────────────────
-# Read one environment variable out of an MCP server's user-scope registration.
+# Read one environment variable out of every registration of an MCP server in one file.
 #
 # The cosa-voice server reads the worker-model setting through LUPIN_CONFIG_MGR_CLI_ARGS.
 # A registration without it spawns every worker on the user's default model, and nothing
 # reports it (row c9252819). The container's own copy of that variable is a different
 # surface and is checked elsewhere.
 #
+# One file can register a server more than once: ~/.claude.json holds the user-scope
+# entry at the top level and a local-scope entry under projects.<path>, and a project's
+# .mcp.json has the same top-level shape. Every entry found is checked, because a session
+# started in a project directory may run the local one.
+#
 # Requires:
-#   - $1 = path to the Claude Code user config (~/.claude.json)
+#   - $1 = path to a Claude Code config (~/.claude.json or a project .mcp.json)
 #   - $2 = MCP server name, $3 = environment variable name
 # Ensures:
-#   - returns 0 and prints the value when the server is registered and the variable is
-#     a non-empty string
-#   - returns 1 when the server is registered and the variable is absent or empty
-#   - returns 2 when the file is unreadable, is not JSON, or does not register the
-#     server. Could-not-determine is never folded into a pass
+#   - returns 0 and prints the first entry's value when every registration of the server
+#     carries the variable as a non-empty string
+#   - returns 1 and prints one scope per line ("user", "local:<path>") for each
+#     registration where the variable is absent, empty or not a string
+#   - returns 2 when the file is unreadable or registers the server nowhere, and also
+#     when the reader itself fails (the cause goes to stderr)
+#   - returns 3 when the file is not a JSON object, or a registration is not an object
+#   - could-not-determine is never folded into a pass
 pfv_mcp_registration_env() {
     local file="$1" server="$2" name="$3"
     [ -r "$file" ] || return 2
@@ -1217,15 +1225,66 @@ pfv_mcp_registration_env() {
 import json, sys
 path, server, name = sys.argv[ 1 ], sys.argv[ 2 ], sys.argv[ 3 ]
 try:
-    with open( path, encoding="utf-8" ) as f: doc = json.load( f )
-except ( OSError, ValueError ):
+    try:
+        with open( path, encoding="utf-8" ) as f: doc = json.load( f )
+    except OSError:
+        sys.exit( 2 )
+    except ValueError:
+        sys.exit( 3 )
+    if not isinstance( doc, dict ): sys.exit( 3 )
+    found   = []
+    servers = doc.get( "mcpServers" )
+    if isinstance( servers, dict ) and server in servers:
+        found.append( ( "user", servers[ server ] ) )
+    projects = doc.get( "projects" )
+    if isinstance( projects, dict ):
+        for project in sorted( projects ):
+            settings = projects[ project ]
+            local    = settings.get( "mcpServers" ) if isinstance( settings, dict ) else None
+            if isinstance( local, dict ) and server in local:
+                found.append( ( "local:" + project, local[ server ] ) )
+    if not found: sys.exit( 2 )
+    lacking, values = [], []
+    for scope, entry in found:
+        if not isinstance( entry, dict ): sys.exit( 3 )
+        env   = entry.get( "env" )
+        value = env.get( name ) if isinstance( env, dict ) else None
+        if isinstance( value, str ) and value.strip(): values.append( value )
+        else: lacking.append( scope )
+    if lacking:
+        sys.stdout.write( "\n".join( lacking ) )
+        sys.exit( 1 )
+    sys.stdout.write( values[ 0 ] )
+except Exception as e:
+    sys.stderr.write( "pfv_mcp_registration_env: reader failed: %r\n" % ( e, ) )
     sys.exit( 2 )
-servers = doc.get( "mcpServers" ) if isinstance( doc, dict ) else None
-entry   = servers.get( server ) if isinstance( servers, dict ) else None
-if not isinstance( entry, dict ): sys.exit( 2 )
-env   = entry.get( "env" )
-value = env.get( name ) if isinstance( env, dict ) else None
-if not isinstance( value, str ) or not value.strip(): sys.exit( 1 )
-sys.stdout.write( value )
 PFV_PY
+}
+
+# ── pfv_config_mgr_args_resolve ───────────────────────────────
+# Does a LUPIN_CONFIG_MGR_CLI_ARGS value name a settings file and a block that exist?
+#
+# A value that is present but names nothing fails the same way as an absent one: the
+# server cannot build its settings reader, and a spawned worker gets no model.
+#
+# Requires:
+#   - $1 = the value (space-separated key=value words)
+#   - $2 = the repo root that a config_path starting /src/ is joined to
+# Ensures:
+#   - returns 0 when config_path names a readable file under the root and that file has
+#     a section header for config_block_id ("+" in the id stands for a space)
+#   - returns 1 and prints the reason otherwise
+pfv_config_mgr_args_resolve() {
+    local value="$1" root="$2" word config_path="" block=""
+    for word in $value; do
+        case "$word" in
+            config_path=*)     config_path="${word#config_path=}" ;;
+            config_block_id=*) block="${word#config_block_id=}" ;;
+        esac
+    done
+    [ -n "$config_path" ] || { printf 'no config_path= in the value'; return 1; }
+    [ -n "$block" ]       || { printf 'no config_block_id= in the value'; return 1; }
+    [ -r "$root$config_path" ] || { printf 'config_path %s is not readable under %s' "$config_path" "$root"; return 1; }
+    grep -qxF "[${block//+/ }]" "$root$config_path" \
+        || { printf 'no [%s] block in %s' "${block//+/ }" "$config_path"; return 1; }
 }

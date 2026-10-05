@@ -72,17 +72,30 @@ Not preflight checks: they happen before the preflight can run, or are an instan
 
 | check | what must exist | level | symptom when missing |
 |---|---|---|---|
-| **A3b** | the `cosa-voice` entry in `~/.claude.json` has `LUPIN_CONFIG_MGR_CLI_ARGS` in its `env` | block when the entry exists without it; warn when there is no entry | Every spawned worker gets no `--model` and runs on the user's default model. The spawn result shows `"model": null`. No error anywhere |
+| **A3b** | every `cosa-voice` entry in `~/.claude.json` (the user-scope one and any local-scope one under `projects`) has `LUPIN_CONFIG_MGR_CLI_ARGS` in its `env`, and the value names a settings file and a block that exist. A `cosa-voice` entry in the repo's `.mcp.json` is held to the same rule | block when an entry exists without it or with a value that does not resolve; block when the file is not JSON; warn when there is no entry | Every spawned worker gets no `--model` and runs on the user's default model. The spawn result shows `"model": null`. No error anywhere |
 
-**How it is fixed.** The entry is written by `src/scripts/install-cosa-voice.sh`, which is safe to
-re-run. It is per user and per host, so a bundle push does not deliver it. From the dev box:
+**How it is fixed.** The entry is written by `src/scripts/install-cosa-voice.sh`. It is per user and
+per host, so a bundle push does not deliver it. From the dev box:
 
 ```bash
 src/scripts/lupin-vm.sh install-voice
 ```
 
-Run it after `install-cli` and after the first checkout. A session picks the new entry up when
-it next starts; a session already running keeps the entry it started with.
+It needs these first, in this order: a checkout, `install-cli`, `push-env` (writes
+`~/.lupin/config`) and `push-unversioned` (delivers the notification key). Without one of them the
+installer stops and names what is missing.
+
+It is safe to re-run, and a re-run does more than register:
+
+- It removes and re-adds the entry, so any `env` added to it by hand is dropped.
+- The settings block defaults to `Lupin:+Development`. To register another, set it on the dev box:
+  `LUPIN_MCP_CONFIG_BLOCK=Lupin:+Testing-GCS src/scripts/lupin-vm.sh install-voice`.
+- It overwrites the `hooks` key of `~/.claude/settings.json` from `src/conf/claude-code-hooks.json`
+  and keeps a dated `.bak` of the old file each run.
+- It may build `~/.venv-lupin-mcp`, add its export to `~/.bashrc`, and send one test notification.
+
+Its last line reads the entry back and prints the registered value. A session picks the new entry
+up when it next starts; a session already running keeps the entry it started with.
 
 ## Adding a new item to this list
 
