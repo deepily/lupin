@@ -30,6 +30,7 @@ from cosa.memory.solution_snapshot import CODELESS_AGENT_CLASSES
 from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
 from cosa.agents.runtime_argument_expeditor.expeditor import ArgSpec
 from cosa.rest.v2.executor import Work
+from cosa.rest.v2.near_match_guard import quantities_differ
 from cosa.rest.v2.refusal import SubmitRefused
 from cosa.rest.salutations import parse_salutations
 import difflib
@@ -290,7 +291,7 @@ class AskFlow:
             # Without it, 7b would delete the queue's copy and leave running_fifo_queue's
             # accept-above-the-floor — which is safe ONLY because the upstream ask
             # happened — and a 90-to-99% match would replay an answer nobody confirmed.
-            near_match, near_reason = self._near_match_replay( trace, lookup, ctx, interactive )
+            near_match, near_reason = self._near_match_replay( trace, lookup, ctx, interactive, question )
             if near_match is not None:
                 replayed_id = near_match.id_hash          # same reason as the exact-hit site above
                 work    = Work( "replay", near_match, user_id, user_email, session_id, snapshotable=False )
@@ -1042,7 +1043,7 @@ class AskFlow:
         except Exception as e:
             if self.debug: print( f"[v2] query log write failed: {e}" )
 
-    def _near_match_replay( self, trace: StageTrace, lookup: Any, ctx: tuple, interactive: bool ) -> tuple:
+    def _near_match_replay( self, trace: StageTrace, lookup: Any, ctx: tuple, interactive: bool, question: str ) -> tuple:
         """Decide whether a below-exact candidate may be replayed, and under what reason.
 
         Returns ( snapshot, route_reason ) to replay, or ( None, None ) to route on.
@@ -1080,6 +1081,18 @@ class AskFlow:
             if self.debug: print( f"[v2] refusing a similarity of {score} — out of range; routing" )
             return ( None, None )
         if score < self.confirmation_threshold:
+            return ( None, None )
+
+        # ROW 1b3ec88f — A NEAR MATCH MUST NOT CHANGE THE QUANTITY ASKED ABOUT. Measured on :8000
+        # (job ts-8278f1c5): "Convert 10 miles to kilometers" replayed the stored answer of "How many
+        # miles is 10 kilometers?" at a score of 93.4, because a similarity score reads two questions
+        # that differ only in which unit the 10 belongs to as nearly identical. The check is on the
+        # ORDERED numbers and the word after each (near_match_guard), and it runs BEFORE the ask and
+        # before 9b: a user asked "is that the same?" about a different quantity is asked a question
+        # whose honest answer is no, and the answer is wrong whether or not anyone is asked.
+        if quantities_differ( question, candidate.question ):
+            trace.set( "near_match_refused_quantity", score )
+            if self.debug: print( f"[v2] near match at {score:.1f}% names a different quantity — routing" )
             return ( None, None )
 
         # STEP 9b, ON THIS PATH TOO, AND BEFORE THE ASK. An unconfirmed row is not served
