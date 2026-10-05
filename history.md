@@ -8,6 +8,19 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.10.04 - Session 93ec0919 → acd9cc5f (Mr. Radio 🦉, manager; crew Tiberius 👑, Sam 🎙️, Rio ⚡) | Pilot finished and summarized; fast-check trial shows thinking-off loses real losses; Gemini comparison plan and bundle
+
+- **Morning and afternoon (before the 14:52 EDT self re-spin)**: yesterday's batch finished · pilot claim re-check of the restored rewrite: 300 claims judged missing in 48 of 78 docstrings; two readers, each alone, found 2 real losses, both restored and reviewed (`ab56f9029`, on a keep ref) · results page and process-flow page written (`35bfd8d91` … `00c87dca0`) · María's seeder rule 8 merged (`b5dfb3225`, row `9d3f4562`).
+- **Pilot go or no-go (row `0066a201`)**: six cards timed out. No ruling; nothing merged.
+- **Harness build merged, `a1775c1cf`** (Rio's `dba21e5a2`, Tiberius PASS, whole unit tier 29,455 passed, 0 failed): `--judge-thinking`, `--parallel N`, per-call timing. Row `6df3455e`, closed.
+- **Trial, 130 docstrings in `src/cosa/memory` and `src/cosa/agents/shared`**: written in one pass by one seat in 13 min 13 s (`541b72c40`, keep ref, not merged). Fast check at 8 wide: 2 min 22 s. Reference check (thinking on, three runs): 11 min 7 s. Reader's sort of 102 alarms: 50 history, 48 judge error, 2 moved, 2 real losses.
+- **Finding**: the thinking-off judge missed every known real loss (0 of 4 in single runs; 1 of 10 repeated verdicts against 8 of 10 with thinking on). One claims list and 8 at once held. A daily train's check is about 42 minutes with thinking on, against 11 to 21 hours as the pilot ran it. Both earlier pages corrected (`818ef01c4`).
+- **Gemini comparison plan** (`4e9e240aa`, row `68221701`, closed): for Rick to rerun the trial at work through AGY. Reviewed by Tiberius to a final PASS after five gaps and two script defects were fixed. Bundle outside git: `projects-data/lupin/gemini-comparison-bundle-2026.10.04.tar.gz`. The AGY command door is not built.
+- **Seats**: Sam reaped at 19:04 to make room under the fleet cap of 4; Tiberius re-spun at 51.6% at 20:07; Rio and Tiberius reaped at session end, all with mementos (Rio's 783-byte record tripped the known 1,000-byte floor, row `cc86889e`).
+- **Corrections of mine today**: the judge was slow from hidden thinking, not long answers · "both losses found with thinking off" was one run, not a finding · the pilot's two claims lists agreed on 91% of claims, they were not identical.
+- **Owed**: Rick's pilot verdict · restore the trial rewrite's 2 losses · post-game for today.
+- **Files**: history.md, TODO.md, src/rnd/README.md, three pages under the docs-rewrite plan folder; code via one reviewed merge.
+
 ### 2026.10.03 - Session 6d9a5ad1 (Mr. Radio 🦉, manager; crew Chloé 🗼, Krishna 🦚 from about 16:25 EDT) | Integration 34 → 3 reds; three console-stream server defects fixed; DB login built and waiting on sudo
 
 - **Integration on :8000, four runs**: `ts-11c25f8a` 417 passed / 34 failed · `ts-8584a00b` 445 / 6 · `ts-332ebcf6` 446 / 5 · `ts-3c700544` (head `77f5e626d`) 448 / 3. Causes and fixes are on row `d849a6d9`.

@@ -16,6 +16,32 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 **Timers from the 09-30 skeleton crew** (these clean themselves up; nothing to fold in): `stop-poke-restore-20260930` (dev and test, 17:00 EDT) and `ratio-gate-reenable-20260930` (test, 12:46 EDT).
 **Not mine and uncommitted in the main tree** (left alone): the phase6b `action_required` PNG baseline (dirty since 09-22) and María's three `src/rnd/v0.2.1/` docs (kill-switch design, console-tee plan, cascade handoff).
 
+## 📚 DECISIONS LOG 2026-10-04 (Mr. Radio 🦉 `93ec0919`, then `acd9cc5f` after a self re-spin at 14:52 EDT; crew Tiberius · Sam · Rio) — pilot finished, fast-check trial, Gemini comparison plan
+
+**Rick ruled** (each by keypress or spoken order, 2026-10-04):
+
+- **Finish the pilot so he can decide go or no-go** (voice, about 12:52 EDT; confirmed yes). The summary is done. **The verdict itself is not given**: six cards between 13:45 and 17:10 EDT timed out. The three pilot commits stay on `refs/keep/` (`7f5c619de`, `3da2dd2ec`, `ab56f9029`). Row `0066a201`.
+- **"Build 3 and run 120 today"** (card, about 19:00 EDT): build the thinking-off judge, one claims list and 8 at once, and run a trial. Row `6df3455e`, closed.
+- **Gemini comparison, planning only tonight; he runs it at work** (voice about 19:15, then four cards): the harness calls AGY once per prompt, with agent instructions as the fallback · accuracy scored on tonight's 130 only · data in a bundle outside git · he pushes. Row `68221701`, closed.
+- **"Let's shut it down for the night, give me a push and a backup"** (voice, about 21:50 EDT).
+
+**Not ruled, asked and timed out**: whether the AGY command door is built here (two cards). It is not built; the plan says building it is the first job at work.
+
+**Measured tonight, and what follows from it**:
+
+- A judge with thinking off is fast and unreliable. It missed every known real loss in single runs (pilot 0 of 2, trial 0 of 2) and caught the pilot's two in 1 of 10 repeated verdicts, against 8 of 10 with thinking on. **Keep thinking on.** The earlier rig result "both losses found" was one lucky run; both pages that said so now carry a dated correction (`818ef01c4`).
+- One claims list and 8 at once held: every known loss was still extracted (4 of 4); 7.0 to 7.8 times throughput over about 1,140 calls with no failed or retried call.
+- With thinking on, three judge runs, one list, 8 at once: about 42 minutes of checking for a daily train of about 354 docstrings, about 4.9 hours for the whole job. As the pilot ran it: 11 to 21 hours a train.
+- The labelled set's planted removals (28 of 28 caught by the fast judge) are too blunt to show the weakness that real losses show.
+
+**Backlog, not yet owed** (no row; raise with Rick):
+
+- [ ] Restore the 2 real losses in tonight's trial rewrite (`541b72c40`, `refs/keep/tiberius-trial-rewrite`): the types of `branch`, `wip_committed`, `wip_sha` in `drain_then_remove`'s return description. Then ask Rick whether the 130 merge.
+- [ ] Untested ways to win back judge speed: a capped thinking budget; thinking off with a mandatory quote of the new text for every "present", checked by script; one thinking-on run in place of three (missed each known loss 1 time in 5).
+- [ ] The harness records calls and seconds, not tokens. A cost comparison needs token counts in the ledger.
+- [ ] The pilot card's option "Go, and build the fast judge" is withdrawn; re-ask as plain go or no-go.
+- [ ] Post-game for 2026-10-04 (a crew ran: Tiberius, Sam, Rio). Waived at the 14:52 re-spin as owed at session end; not written tonight.
+
 ## 📚 DECISIONS LOG 2026-10-03 (Mr. Radio 🦉 `6d9a5ad1`; crew Chloé · Krishna from about 16:25 EDT)
 
 - 2026-10-03 — **Where do post-game documents live?** → **`src/docs/post-games/<work-branch version>/`, tracked** (Rick, about 15:25 EDT, direct card, `answered: true`, `default_used: false`, typed: "Let's keep that under src/docs/post-games/v0.2.2 and advance the post games on a per work branch version basis"). María updates the planning-is-prompting workflow docs. Index: `src/docs/post-games/README.md`.
