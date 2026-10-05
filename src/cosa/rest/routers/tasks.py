@@ -875,7 +875,7 @@ def _also_refused( others: list ) -> str:
 
 def _raise_create_refusals( priority_denial, status_errors, live_mint_refusal, epic_refusal ) -> None:
     """
-    Raise ONE refusal carrying every create rule the call broke (row 631a812e).
+    Raise one refusal carrying every create rule the call broke (row 631a812e).
 
     Requires:
         - priority_denial is the priority firewall's refusal string, or None
@@ -886,8 +886,8 @@ def _raise_create_refusals( priority_denial, status_errors, live_mint_refusal, e
 
     Ensures:
         - no-op when priority_denial, status_errors and live_mint_refusal are all
-          empty; an epic-key refusal alone is NOT raised here
-        - the status code and body shape are those of the FIRST broken rule, in the
+          empty; an epic-key refusal alone is not raised here
+        - the status code and body shape are those of the first broken rule, in the
           order the door has always checked them: priority (403, string), then mint
           status (422, {errors: [...]}), then live mint (403, string)
         - every other broken rule rides in the same answer
@@ -1037,7 +1037,7 @@ def create_task(
     # function; it does not preserve a stored record (row 8639d1ad).
     petition_pending   = False
     effective_priority = payload.priority
-    # Row 631a812e: the refusal is HELD, not raised here, so the status and epic-key
+    # Row 631a812e: the refusal is held, not raised here, so the status and epic-key
     # rules below can be asked too and the caller gets every one in a single answer.
     priority_denial    = None
     if priority_refusal is not None:
@@ -1111,7 +1111,7 @@ def create_task(
     live_mint_refusal = approval.refusal_for_live_mint(
         requested_status    = payload.status,
         status_was_explicit = "status" in payload.model_fields_set,
-        # The priority AS SENT, even when the firewall has just refused it. A refused
+        # The priority as sent, even when the firewall has just refused it. A refused
         # P0 is still exempt here (Rick's carve-out, pinned by
         # test_a_P0_MAY_still_mint_live_at_the_door), so a worker who sends P0 with an
         # explicit status is not told about this rule until the retry (row 631a812e).
@@ -1121,11 +1121,11 @@ def create_task(
         # `created_by`, so a seat cannot type its way into the exemption.
         caller_is_operator  = priority_firewall.caller_is_operator( account_email ),
     )
-    # ── ONE ANSWER NAMING EVERY BROKEN RULE (row 631a812e) ──
+    # ── One answer naming every broken rule (row 631a812e) ──
     #
     # A worker seat needed four calls to file one row, because each of these gates
     # raised alone and named only its own rule. All of them are known here, so the
-    # first refusal now carries the rest. The epic-key rule is ASKED here only to be
+    # first refusal now carries the rest. The epic-key rule is asked here only to be
     # reported alongside another refusal; on its own it is still raised where it
     # always was, below the blocked-mint guard.
     _raise_create_refusals(
