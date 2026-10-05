@@ -81,6 +81,11 @@ def test_split_packages_keeps_subpackages_apart_and_reports_loose_files():
     assert sp.split_packages( [ "__init__.py", "m.py" ] ) == ( { "": [ "__init__.py", "m.py" ] }, [] )
 
 
+def test_split_packages_sorts_unsorted_input():
+    paths = [ "c/y.py", "b/z.py", "b/__init__.py", "c/x.py", "b/a.py", "a.py" ]
+    assert sp.split_packages( paths ) == ( { "b": [ "b/__init__.py", "b/a.py", "b/z.py" ] }, [ "a.py", "c/x.py", "c/y.py" ] )
+
+
 def test_measure_file_counts_flagged_docstrings_and_their_words( repo ):
     word_list.configure_root( repo )
     counts = sp.measure_file( "bad/mod.py", BAD_PY, repo )
@@ -118,7 +123,7 @@ def test_sweep_over_a_real_git_repo( repo ):
 def test_unreadable_file_counts_as_one_finding( repo ):
     result = sp.sweep( repo )
     good   = next( r for r in result[ "packages" ] if r[ "package" ] == "good" )
-    assert good[ "files" ] == 3 and good[ "unparsed" ] == 1 and good[ "findings" ] == 1
+    assert good[ "files" ] == 3 and good[ "unreadable" ] == 1 and good[ "unparsed" ] == 0 and good[ "findings" ] == 1
 
 
 def test_ties_break_by_path_and_dirty_tree_is_reported( repo ):
@@ -157,3 +162,71 @@ def test_main_defaults_to_stdout_and_sys_argv( repo, monkeypatch, capsys ):
 def test_git_failure_names_the_error( tmp_path ):
     with pytest.raises( RuntimeError, match="git rev-parse HEAD failed" ):
         sp._git( tmp_path, "rev-parse", "HEAD" )
+
+
+def _make_repo( root, files ):
+    _git( root, "init", "-q" )
+    ( root / "src" / "conf" ).mkdir( parents=True )
+    ( root / "src" / "conf" / "dm-tutor-lowercase-words.txt" ).write_text( "\n".join( WORDS ) + "\n", encoding="utf-8" )
+    for rel, text in files.items():
+        path = root / rel
+        path.parent.mkdir( parents=True, exist_ok=True )
+        path.write_text( text, encoding="utf-8" )
+    _git( root, "add", "." )
+    _git( root, "commit", "-qm", "x" )
+
+
+@pytest.fixture
+def clean_word_list():
+    yield
+    word_list._state[ "root" ]  = None
+    word_list._state[ "words" ] = None
+
+
+def test_order_is_findings_per_docstring_then_path_not_raw_findings( tmp_path, clean_word_list ):
+    _make_repo( tmp_path, {
+        "hi/__init__.py"   : "",
+        "hi/m.py"          : '''"""NEVER VERY."""\n''',
+        "lo/__init__.py"   : "",
+        "lo/m.py"          : '''"""NEVER."""\n\n\ndef f():\n    """NEVER."""\n\n\ndef g():\n    """VERY."""\n\n\ndef h():\n    """Plain."""\n''',
+        "a/__init__.py"    : '''"""NEVER."""\n''',
+        "a-x/__init__.py"  : '''"""NEVER."""\n'''
+    } )
+    rows = sp.sweep( tmp_path )[ "packages" ]
+    assert [ ( r[ "package" ], r[ "findings" ], r[ "docstrings" ] ) for r in rows ] == [ ( "hi", 2, 1 ), ( "a", 1, 1 ), ( "a-x", 1, 1 ), ( "lo", 3, 4 ) ]
+
+
+def test_flagged_docstring_boundaries_are_its_first_and_last_lines( repo ):
+    word_list.configure_root( repo )
+    source = '''def f():
+    """NEVER on the first
+    middle plain
+    """
+
+
+def g():
+    """Plain
+    ends VERY"""
+
+
+def h():
+    """Plain."""
+'''
+    counts = sp.measure_file( "pkg/edge.py", source, repo )
+    assert ( counts[ "docstrings" ], counts[ "flagged" ], counts[ "findings" ] ) == ( 3, 2, 2 )
+    assert counts[ "words_flagged" ] == len( "NEVER on the first middle plain".split() ) + len( "Plain ends VERY".split() )
+
+
+def test_a_root_package_is_labelled_dot( tmp_path, clean_word_list ):
+    _make_repo( tmp_path, { "__init__.py": "", "m.py": '''"""NEVER."""\n''' } )
+    rows = sp.sweep( tmp_path )[ "packages" ]
+    assert [ r[ "package" ] for r in rows ] == [ "." ] and rows[ 0 ][ "files" ] == 2
+
+
+def test_a_tracked_file_deleted_from_the_tree_is_unreadable_not_unparsed( tmp_path, clean_word_list ):
+    _make_repo( tmp_path, { "p/__init__.py": "", "p/gone.py": '''"""Plain."""\n''' } )
+    ( tmp_path / "p" / "gone.py" ).unlink()
+    result = sp.sweep( tmp_path )
+    row    = result[ "packages" ][ 0 ]
+    assert ( row[ "unreadable" ], row[ "unparsed" ], row[ "findings" ] ) == ( 1, 0, 1 )
+    assert result[ "tree_dirty" ] is True

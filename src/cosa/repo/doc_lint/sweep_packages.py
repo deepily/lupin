@@ -17,7 +17,7 @@ from .marker_counts import count_markers
 from .text_rules import Finding
 from .word_list import configure_root
 
-COUNT_KEYS = ( "files", "docstrings", "flagged", "findings", "words_flagged", "unparsed" )
+COUNT_KEYS = ( "files", "docstrings", "flagged", "findings", "words_flagged", "unparsed", "unreadable" )
 
 
 def _git( root, *args ):
@@ -106,7 +106,7 @@ def _read_counts( root, path ):
 
     Ensures:
         - returns measure_file's counts
-        - a file that cannot be read as UTF-8 has one finding and no docstrings
+        - a file that cannot be read, such as one tracked but deleted from the tree, or not UTF-8, has one finding, no docstrings and unreadable 1, never unparsed
 
     Raises:
         - nothing
@@ -115,7 +115,7 @@ def _read_counts( root, path ):
         with open( f"{root}/{path}", encoding="utf-8" ) as handle: source = handle.read()
     except ( OSError, UnicodeDecodeError ):
         counts = dict.fromkeys( COUNT_KEYS, 0 )
-        counts.update( files=1, findings=1, unparsed=1 )
+        counts.update( files=1, findings=1, unreadable=1 )
         return counts
     return measure_file( path, source, root )
 
