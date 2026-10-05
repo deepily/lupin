@@ -853,6 +853,58 @@ def _reject_if_errors( errors: list ) -> None:
         raise HTTPException( status_code=422, detail={ "errors": errors } )
 
 
+def _also_refused( others: list ) -> str:
+    """
+    Render the other rules one create call broke, for appending to a refusal string.
+
+    Requires:
+        - others is a list of refusal strings, possibly empty
+
+    Ensures:
+        - returns "" when others is empty, so a single refusal reads as it always did
+        - otherwise returns a suffix that states the count and numbers each refusal
+          from 2, the primary refusal being the first
+    """
+    if not others: return ""
+    numbered = " ".join( f"[{n}] {text}" for n, text in enumerate( others, start=2 ) )
+    return (
+        f" ALSO REFUSED: this same call breaks {len( others )} more create rule(s). "
+        f"Fix every one before you retry. {numbered}"
+    )
+
+
+def _raise_create_refusals( priority_denial, status_errors, live_mint_refusal, epic_refusal ) -> None:
+    """
+    Raise ONE refusal carrying every create rule the call broke (row 631a812e).
+
+    Requires:
+        - priority_denial is the priority firewall's refusal string, or None
+        - status_errors is the list rules.validate_create_status returned
+        - live_mint_refusal is approval.refusal_for_live_mint's string, or None
+        - epic_refusal is the epic-key refusal string when that rule is enforced and
+          broken, else None
+
+    Ensures:
+        - no-op when priority_denial, status_errors and live_mint_refusal are all
+          empty; an epic-key refusal alone is NOT raised here
+        - the status code and body shape are those of the FIRST broken rule, in the
+          order the door has always checked them: priority (403, string), then mint
+          status (422, {errors: [...]}), then live mint (403, string)
+        - every other broken rule rides in the same answer
+        - a call that broke exactly one rule gets the same body it always got
+
+    Raises:
+        - HTTPException 403 or 422 as described
+    """
+    trailing = [ r for r in ( live_mint_refusal, epic_refusal ) if r ]
+    if priority_denial:
+        raise HTTPException( status_code=403, detail=priority_denial + _also_refused( list( status_errors ) + trailing ) )
+    if status_errors:
+        raise HTTPException( status_code=422, detail={ "errors": list( status_errors ) + trailing } )
+    if live_mint_refusal:
+        raise HTTPException( status_code=403, detail=live_mint_refusal + _also_refused( trailing[ 1: ] ) )
+
+
 def _blocked_mint_denial_detail( reason: str ) -> str:
     """
     Build the 403 detail for a rejected blocked-MINT, keyed on the classifier
@@ -985,6 +1037,9 @@ def create_task(
     # function; it does not preserve a stored record (row 8639d1ad).
     petition_pending   = False
     effective_priority = payload.priority
+    # Row 631a812e: the refusal is HELD, not raised here, so the status and epic-key
+    # rules below can be asked too and the caller gets every one in a single answer.
+    priority_denial    = None
     if priority_refusal is not None:
         if priority_firewall.petition_is_available(
             requested     = payload.priority,
@@ -999,7 +1054,7 @@ def create_task(
             # a petition that never existed (measured 21:31Z: the line, then a 422, and no
             # row and no ticket). It now prints where the ticket is actually minted.
         else:
-            raise HTTPException( status_code=403, detail=priority_refusal )
+            priority_denial = priority_refusal
 
     # Mint-status whitelist (Rick 2026-07-20): a create may mint queued OR blocked.
     # blocked_by persona refs are canonicalized to the store key BEFORE validate +
@@ -1040,7 +1095,7 @@ def create_task(
     if petition_pending:
         mint_status = rules.NOT_APPROVED_STATUS
 
-    _reject_if_errors( rules.validate_create_status( mint_status, blocked_by, payload.next_chase_ts ) )
+    status_errors = rules.validate_create_status( mint_status, blocked_by, payload.next_chase_ts )
     # ── THE CREATE DOOR (Rick's P0, row 0ef62dfd, 2026-09-08) ──
     #
     # The substitution ABOVE applies the holding default only when `status` was
@@ -1056,14 +1111,29 @@ def create_task(
     live_mint_refusal = approval.refusal_for_live_mint(
         requested_status    = payload.status,
         status_was_explicit = "status" in payload.model_fields_set,
+        # The priority AS SENT, even when the firewall has just refused it. A refused
+        # P0 is still exempt here (Rick's carve-out, pinned by
+        # test_a_P0_MAY_still_mint_live_at_the_door), so a worker who sends P0 with an
+        # explicit status is not told about this rule until the retry (row 631a812e).
         priority            = payload.priority,
         # Rick's own New Ticket card names status="queued" for an approved ticket
         # (shared/task-create.js). Proven from the validated account, never from
         # `created_by`, so a seat cannot type its way into the exemption.
         caller_is_operator  = priority_firewall.caller_is_operator( account_email ),
     )
-    if live_mint_refusal is not None:
-        raise HTTPException( status_code=403, detail=live_mint_refusal )
+    # ── ONE ANSWER NAMING EVERY BROKEN RULE (row 631a812e) ──
+    #
+    # A worker seat needed four calls to file one row, because each of these gates
+    # raised alone and named only its own rule. All of them are known here, so the
+    # first refusal now carries the rest. The epic-key rule is ASKED here only to be
+    # reported alongside another refusal; on its own it is still raised where it
+    # always was, below the blocked-mint guard.
+    _raise_create_refusals(
+        priority_denial   = priority_denial,
+        status_errors     = status_errors,
+        live_mint_refusal = live_mint_refusal,
+        epic_refusal      = rules.epic_key_advisory( payload.correlation_key ) if rules.EPIC_KEY_ENFORCEMENT_ACTIVE else None,
+    )
 
 
     # Manager-only guard for a blocked MINT — scoped ENTIRELY to status=="blocked"
