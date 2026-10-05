@@ -68,7 +68,6 @@ class AgyResult:
         - denied_actions lists tool actions print mode refused, empty when none
         - fingerprint identifies the binary that produced the answer
     """
-
     response         : str
     model            : str
     effort           : object
@@ -100,7 +99,6 @@ def binary_fingerprint( agy_bin=DEFAULT_AGY_BIN ):
     Raises:
         - AgyCallError if agy_bin cannot be found
     """
-
     resolved = shutil.which( agy_bin )
     if resolved is None:
         raise AgyCallError( f"agy binary not found: {agy_bin!r} is not on PATH and is not an executable path" )
@@ -132,7 +130,6 @@ def agy_version( agy_bin=DEFAULT_AGY_BIN, runner=None ):
     Raises:
         - AgyCallError if agy exits non-zero, times out, or prints nothing
     """
-
     runner = runner if runner is not None else subprocess.run
 
     try:
@@ -164,7 +161,6 @@ def build_argv( *, model, timeout_seconds, effort=None, agy_bin=DEFAULT_AGY_BIN 
         - never carries --mode accept-edits, --sandbox or --dangerously-skip-permissions
         - carries --effort only when effort is given
     """
-
     argv = [
         agy_bin,
         "-p=",
@@ -195,7 +191,6 @@ def build_stdin( prompt ):
     Raises:
         - ValueError if prompt is empty or whitespace
     """
-
     if not prompt.strip():
         raise ValueError( "prompt is empty" )
 
@@ -221,7 +216,6 @@ def parse_result( stdout ):
     Raises:
         - AgyCallError if no result event is present
     """
-
     found = None
 
     for line in ( stdout or "" ).splitlines():
@@ -263,7 +257,6 @@ def run_agy( prompt, *, model, workspace_dir, timeout_seconds=DEFAULT_TIMEOUT_SE
         - AgyCallError on timeout, non-zero exit, missing result event, a result whose
           status is not `SUCCESS`, or a blank answer
     """
-
     if not os.path.isdir( workspace_dir ):
         raise ValueError( f"workspace_dir is not a directory: {workspace_dir}" )
 
