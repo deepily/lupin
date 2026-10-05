@@ -1,0 +1,410 @@
+"""
+Unit tests for cosa/orchestration/agy/runtime.py.
+
+Isolation contract:
+    - No real agy process: every call goes through an injected `_FakeRunner`.
+    - No network and no model spend.
+    - `binary_fingerprint` reads a stand-in file under tmp_path, never the installed agy.
+
+`REAL_STDOUT` was captured from agy 1.2.17 on 2026-10-05 (model gemini-3.6-flash-low,
+one user message on standard input). Only the long `init` event is shortened.
+"""
+import hashlib
+import json
+import os
+import subprocess
+
+import pytest
+
+import cosa.orchestration.agy as agy_package
+import cosa.orchestration.agy.runtime as runtime
+from cosa.orchestration.agy.runtime import (
+    AgyBinaryChanged, AgyCallError, AgyResult,
+    agy_version, binary_fingerprint, build_argv, build_stdin, parse_result, run_agy,
+)
+
+
+REAL_STDOUT = (
+    '{"event":"init","conversation_id":"fb9042c1-7483-414f-b9d7-172700471998","init":{"model":"gemini-3.6-flash-low","cwd":"/scratch","tools":["ask_permission"],"permission_mode":"request-review"}}\n'
+    '{"event":"step_update","step_update":{"conversation_id":"fb9042c1-7483-414f-b9d7-172700471998","step_index":0,"state":"DONE","step_type":"user_input"}}\n'
+    '{"event":"step_update","step_update":{"conversation_id":"fb9042c1-7483-414f-b9d7-172700471998","step_index":1,"state":"ACTIVE","step_type":"agent_response","text_delta":"PONG 2"}}\n'
+    '{"event":"step_update","step_update":{"conversation_id":"fb9042c1-7483-414f-b9d7-172700471998","step_index":1,"state":"DONE","step_type":"agent_response","text_delta":"\\n","duration_seconds":12.458886899,"usage":{"input_tokens":5140,"output_tokens":203,"thinking_tokens":199,"cache_read_tokens":8138,"total_tokens":5343}}}\n'
+    '{"event":"result","result":{"conversation_id":"fb9042c1-7483-414f-b9d7-172700471998","status":"SUCCESS","response":"PONG 2\\n","duration_seconds":12.488912804,"num_turns":1,"usage":{"input_tokens":5140,"output_tokens":203,"thinking_tokens":199,"cache_read_tokens":8138,"total_tokens":5343}}}\n'
+)
+
+# Captured the same day: the result agy prints when the stdin message is malformed.
+REAL_ERROR_STDOUT = (
+    '{"event":"result","result":{"conversation_id":"2892ed58-1326-47fd-b0a4-0c336c2be369","status":"ERROR","response":"","error":"stream input \\"user\\" message is missing the \\"message\\" field","duration_seconds":0,"num_turns":0,"usage":{"input_tokens":0,"output_tokens":0,"thinking_tokens":0,"cache_read_tokens":0,"total_tokens":0}}}\n'
+)
+
+
+class _Completed:
+    """Stand-in for subprocess.CompletedProcess."""
+    def __init__( self, returncode=0, stdout="", stderr="" ):
+        self.returncode = returncode
+        self.stdout     = stdout
+        self.stderr     = stderr
+
+
+class _FakeRunner:
+    """Records the one call it receives and returns a scripted outcome."""
+    def __init__( self, completed=None, raises=None ):
+        self.completed = completed
+        self.raises    = raises
+        self.calls     = []
+
+    def __call__( self, argv, **kwargs ):
+        self.calls.append( ( argv, kwargs ) )
+        if self.raises is not None: raise self.raises
+        return self.completed
+
+
+def _result_stdout( **overrides ):
+    """One result event with the real event's fields, selectively overridden."""
+    result = json.loads( REAL_STDOUT.splitlines()[ -1 ] )[ "result" ]
+    result.update( overrides )
+    return json.dumps( { "event" : "result", "result" : result } ) + "\n"
+
+
+@pytest.fixture
+def fake_bin( tmp_path ):
+    """An executable stand-in for the agy binary."""
+    path = tmp_path / "agy"
+    path.write_bytes( b"#!/bin/sh\n" )
+    path.chmod( 0o755 )
+    return str( path )
+
+
+@pytest.fixture
+def scratch( tmp_path ):
+    path = tmp_path / "scratch"
+    path.mkdir()
+    return str( path )
+
+
+# =========================================================================== #
+# binary_fingerprint
+# =========================================================================== #
+def test_fingerprint_reports_real_path_size_and_mtime( fake_bin ):
+    stat        = os.stat( fake_bin )
+    fingerprint = binary_fingerprint( fake_bin )
+
+    assert fingerprint == {
+        "path"     : os.path.realpath( fake_bin ),
+        "size"     : 10,
+        "mtime_ns" : stat.st_mtime_ns
+    }
+
+
+def test_fingerprint_follows_a_symlink_to_the_real_file( fake_bin, tmp_path ):
+    link = tmp_path / "agy-link"
+    link.symlink_to( fake_bin )
+
+    assert binary_fingerprint( str( link ) )[ "path" ] == os.path.realpath( fake_bin )
+
+
+def test_fingerprint_changes_when_the_binary_is_replaced( fake_bin ):
+    before = binary_fingerprint( fake_bin )
+
+    with open( fake_bin, "wb" ) as handle: handle.write( b"#!/bin/sh\n# newer build\n" )
+
+    after = binary_fingerprint( fake_bin )
+    assert after != before
+    assert after[ "size" ] == 24
+
+
+def test_fingerprint_missing_binary_raises( tmp_path ):
+    with pytest.raises( AgyCallError, match="agy binary not found" ):
+        binary_fingerprint( str( tmp_path / "absent" ) )
+
+
+# =========================================================================== #
+# agy_version
+# =========================================================================== #
+def test_version_returns_first_line_stripped():
+    runner = _FakeRunner( _Completed( stdout="  1.2.17 \nextra line\n" ) )
+
+    assert agy_version( "agy-x", runner=runner ) == "1.2.17"
+    assert runner.calls[ 0 ][ 0 ] == [ "agy-x", "--version" ]
+
+
+def test_version_defaults_to_subprocess_run( monkeypatch ):
+    seen = []
+
+    def fake_run( argv, **kwargs ):
+        seen.append( argv )
+        return _Completed( stdout="9.9.9\n" )
+
+    monkeypatch.setattr( runtime.subprocess, "run", fake_run )
+
+    assert agy_version() == "9.9.9"
+    assert seen == [ [ "agy", "--version" ] ]
+
+
+def test_version_nonzero_exit_raises():
+    runner = _FakeRunner( _Completed( returncode=2, stdout="1.2.17\n", stderr="boom" ) )
+
+    with pytest.raises( AgyCallError, match="exit=2, stderr=boom" ):
+        agy_version( runner=runner )
+
+
+@pytest.mark.parametrize( "stdout", [ "", "   \n", None ] )
+def test_version_blank_output_raises( stdout ):
+    runner = _FakeRunner( _Completed( stdout=stdout, stderr=None ) )
+
+    with pytest.raises( AgyCallError, match="agy --version failed: exit=0" ):
+        agy_version( runner=runner )
+
+
+def test_version_timeout_raises():
+    runner = _FakeRunner( raises=subprocess.TimeoutExpired( cmd="agy", timeout=60 ) )
+
+    with pytest.raises( AgyCallError, match="agy --version timed out" ):
+        agy_version( runner=runner )
+
+
+# =========================================================================== #
+# build_argv
+# =========================================================================== #
+def test_argv_without_effort_is_exact():
+    assert build_argv( model="gemini-3.1-pro-high", timeout_seconds=300 ) == [
+        "agy",
+        "-p=",
+        "--model", "gemini-3.1-pro-high",
+        "--print-timeout", "300s",
+        "--new-project",
+        "--disable-slash-commands",
+        "--input-format", "stream-json",
+        "--output-format", "stream-json"
+    ]
+
+
+def test_argv_with_effort_and_binary_appends_effort():
+    argv = build_argv( model="m", timeout_seconds=45, effort="high", agy_bin="/opt/agy" )
+
+    assert argv[ 0 ] == "/opt/agy"
+    assert argv[ argv.index( "--print-timeout" ) + 1 ] == "45s"
+    assert argv[ -2: ] == [ "--effort", "high" ]
+
+
+@pytest.mark.parametrize( "forbidden", [ "accept-edits", "--sandbox", "--dangerously-skip-permissions", "--mode" ] )
+def test_argv_never_grants_edits_or_skips_permissions( forbidden ):
+    assert forbidden not in build_argv( model="m", timeout_seconds=1, effort="max" )
+
+
+# =========================================================================== #
+# build_stdin
+# =========================================================================== #
+def test_stdin_is_one_user_message_line_and_round_trips_hard_text():
+    prompt = 'Line one has "quotes" and a backslash \\ .\n/usage on line two, é and 中.'
+    line   = build_stdin( prompt )
+
+    assert line.endswith( "\n" )
+    assert line.count( "\n" ) == 1
+    assert "é and 中" in line
+    assert json.loads( line ) == {
+        "event"   : "user",
+        "message" : { "role" : "user", "content" : prompt }
+    }
+
+
+@pytest.mark.parametrize( "prompt", [ "", "   ", "\n\t" ] )
+def test_stdin_blank_prompt_raises( prompt ):
+    with pytest.raises( ValueError, match="prompt is empty" ):
+        build_stdin( prompt )
+
+
+# =========================================================================== #
+# parse_result
+# =========================================================================== #
+def test_parse_real_capture_returns_the_result_object():
+    result = parse_result( REAL_STDOUT )
+
+    assert result[ "status" ] == "SUCCESS"
+    assert result[ "response" ] == "PONG 2\n"
+    assert result[ "usage" ][ "thinking_tokens" ] == 199
+
+
+def test_parse_takes_the_last_result_and_skips_noise():
+    stdout = (
+        "Fetching...\n"
+        "[1, 2, 3]\n"
+        '"a bare string"\n'
+        + _result_stdout( response="first" )
+        + '{"event":"step_update","step_update":{}}\n'
+        + _result_stdout( response="second" )
+    )
+
+    assert parse_result( stdout )[ "response" ] == "second"
+
+
+@pytest.mark.parametrize( "stdout", [ None, "", "not json\n", '{"event":"init","init":{}}\n' ] )
+def test_parse_without_result_event_raises( stdout ):
+    with pytest.raises( AgyCallError, match="no result event" ):
+        parse_result( stdout )
+
+
+# =========================================================================== #
+# run_agy
+# =========================================================================== #
+def test_run_returns_the_real_answer_with_its_measurements( fake_bin, scratch ):
+    runner = _FakeRunner( _Completed( stdout=REAL_STDOUT ) )
+
+    result = run_agy( "Count the lines.", model="gemini-3.6-flash-low", workspace_dir=scratch, agy_bin=fake_bin, runner=runner )
+
+    assert isinstance( result, AgyResult )
+    assert result.response         == "PONG 2\n"
+    assert result.model            == "gemini-3.6-flash-low"
+    assert result.effort           is None
+    assert result.conversation_id  == "fb9042c1-7483-414f-b9d7-172700471998"
+    assert result.num_turns        == 1
+    assert result.duration_seconds == 12.488912804
+    assert result.usage            == { "input_tokens" : 5140, "output_tokens" : 203, "thinking_tokens" : 199, "cache_read_tokens" : 8138, "total_tokens" : 5343 }
+    assert result.denied_actions   == []
+    assert result.response_bytes   == 7
+    assert result.response_sha     == hashlib.sha256( b"PONG 2\n" ).hexdigest()
+    assert result.fingerprint      == binary_fingerprint( fake_bin )
+    assert result.wall_seconds     >= 0
+
+
+def test_run_passes_prompt_on_stdin_and_runs_in_the_scratch_dir( fake_bin, scratch ):
+    runner = _FakeRunner( _Completed( stdout=REAL_STDOUT ) )
+
+    run_agy( "the prompt text", model="m", workspace_dir=scratch, timeout_seconds=40, effort="low", agy_bin=fake_bin, runner=runner )
+
+    assert len( runner.calls ) == 1
+    argv, kwargs = runner.calls[ 0 ]
+    assert argv == build_argv( model="m", timeout_seconds=40, effort="low", agy_bin=fake_bin )
+    assert "the prompt text" not in " ".join( argv )
+    assert kwargs == {
+        "input"          : build_stdin( "the prompt text" ),
+        "capture_output" : True,
+        "text"           : True,
+        "timeout"        : 100,
+        "cwd"            : scratch
+    }
+
+
+def test_run_defaults_to_subprocess_run( fake_bin, scratch, monkeypatch ):
+    seen = []
+
+    def fake_run( argv, **kwargs ):
+        seen.append( kwargs[ "timeout" ] )
+        return _Completed( stdout=REAL_STDOUT )
+
+    monkeypatch.setattr( runtime.subprocess, "run", fake_run )
+
+    assert run_agy( "p", model="m", workspace_dir=scratch, agy_bin=fake_bin ).response == "PONG 2\n"
+    assert seen == [ 360 ]
+
+
+def test_run_reports_denied_actions_when_agy_lists_them( fake_bin, scratch ):
+    runner = _FakeRunner( _Completed( stdout=_result_stdout( denied_actions=[ "write_file(/x)" ] ) ) )
+
+    result = run_agy( "p", model="m", workspace_dir=scratch, effort="high", agy_bin=fake_bin, runner=runner )
+
+    assert result.denied_actions == [ "write_file(/x)" ]
+    assert result.effort         == "high"
+
+
+def test_run_accepts_a_matching_pin( fake_bin, scratch ):
+    runner = _FakeRunner( _Completed( stdout=REAL_STDOUT ) )
+    pinned = binary_fingerprint( fake_bin )
+
+    assert run_agy( "p", model="m", workspace_dir=scratch, agy_bin=fake_bin, pinned_fingerprint=pinned, runner=runner ).fingerprint == pinned
+
+
+def test_run_refuses_a_replaced_binary_before_calling( fake_bin, scratch ):
+    runner = _FakeRunner( _Completed( stdout=REAL_STDOUT ) )
+    pinned = binary_fingerprint( fake_bin )
+
+    with open( fake_bin, "wb" ) as handle: handle.write( b"#!/bin/sh\n# updated itself\n" )
+
+    with pytest.raises( AgyBinaryChanged, match="agy binary changed since the run began" ):
+        run_agy( "p", model="m", workspace_dir=scratch, agy_bin=fake_bin, pinned_fingerprint=pinned, runner=runner )
+
+    assert runner.calls == []
+
+
+def test_run_missing_workspace_raises_before_calling( fake_bin, tmp_path ):
+    runner = _FakeRunner( _Completed( stdout=REAL_STDOUT ) )
+
+    with pytest.raises( ValueError, match="workspace_dir is not a directory" ):
+        run_agy( "p", model="m", workspace_dir=str( tmp_path / "absent" ), agy_bin=fake_bin, runner=runner )
+
+    assert runner.calls == []
+
+
+def test_run_blank_prompt_raises_before_calling( fake_bin, scratch ):
+    runner = _FakeRunner( _Completed( stdout=REAL_STDOUT ) )
+
+    with pytest.raises( ValueError, match="prompt is empty" ):
+        run_agy( "  ", model="m", workspace_dir=scratch, agy_bin=fake_bin, runner=runner )
+
+    assert runner.calls == []
+
+
+def test_run_timeout_raises_with_the_outer_limit( fake_bin, scratch ):
+    runner = _FakeRunner( raises=subprocess.TimeoutExpired( cmd="agy", timeout=70 ) )
+
+    with pytest.raises( AgyCallError, match=r"agy timed out after 70s \(model m\)" ):
+        run_agy( "p", model="m", workspace_dir=scratch, timeout_seconds=10, agy_bin=fake_bin, runner=runner )
+
+
+def test_run_nonzero_exit_raises_with_the_stderr_tail_even_when_a_result_is_present( fake_bin, scratch ):
+    stderr = "x" * 3000 + "AGY_ERROR: {\"status\":\"UNAVAILABLE\"}"
+    runner = _FakeRunner( _Completed( returncode=3, stdout=REAL_STDOUT, stderr=stderr ) )
+
+    with pytest.raises( AgyCallError ) as raised:
+        run_agy( "p", model="m", workspace_dir=scratch, agy_bin=fake_bin, runner=runner )
+
+    message = str( raised.value )
+    assert message.startswith( "agy exited 3 (model m); stderr: " )
+    assert message.endswith( 'AGY_ERROR: {"status":"UNAVAILABLE"}' )
+    assert len( message ) == len( "agy exited 3 (model m); stderr: " ) + 2000
+
+
+def test_run_nonzero_exit_with_no_stderr_raises( fake_bin, scratch ):
+    runner = _FakeRunner( _Completed( returncode=1, stdout="", stderr=None ) )
+
+    with pytest.raises( AgyCallError, match=r"agy exited 1 \(model m\); stderr: $" ):
+        run_agy( "p", model="m", workspace_dir=scratch, agy_bin=fake_bin, runner=runner )
+
+
+def test_run_exit_zero_without_a_result_event_raises( fake_bin, scratch ):
+    runner = _FakeRunner( _Completed( stdout="warning: ignoring unsupported stream input\n" ) )
+
+    with pytest.raises( AgyCallError, match="no result event" ):
+        run_agy( "p", model="m", workspace_dir=scratch, agy_bin=fake_bin, runner=runner )
+
+
+def test_run_real_error_result_raises_with_agys_own_message( fake_bin, scratch ):
+    runner = _FakeRunner( _Completed( stdout=REAL_ERROR_STDOUT ) )
+
+    with pytest.raises( AgyCallError, match=r'agy result status ERROR \(model m\): stream input "user" message is missing' ):
+        run_agy( "p", model="m", workspace_dir=scratch, agy_bin=fake_bin, runner=runner )
+
+
+def test_run_failed_status_without_an_error_field_raises( fake_bin, scratch ):
+    runner = _FakeRunner( _Completed( stdout=_result_stdout( status="CANCELLED" ) ) )
+
+    with pytest.raises( AgyCallError, match=r"agy result status CANCELLED \(model m\): $" ):
+        run_agy( "p", model="m", workspace_dir=scratch, agy_bin=fake_bin, runner=runner )
+
+
+@pytest.mark.parametrize( "response", [ "", "  \n" ] )
+def test_run_blank_answer_raises( fake_bin, scratch, response ):
+    runner = _FakeRunner( _Completed( stdout=_result_stdout( response=response ) ) )
+
+    with pytest.raises( AgyCallError, match="blank answer" ):
+        run_agy( "p", model="m", workspace_dir=scratch, agy_bin=fake_bin, runner=runner )
+
+
+# =========================================================================== #
+# package surface
+# =========================================================================== #
+def test_package_exports_the_runtime_names():
+    for name in agy_package.__all__:
+        assert getattr( agy_package, name ) is getattr( runtime, name )
+
+    assert len( agy_package.__all__ ) == 9

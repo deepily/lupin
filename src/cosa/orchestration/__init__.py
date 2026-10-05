@@ -26,6 +26,7 @@ Example:
 
 Subpackages:
     claude_code: Claude Code SDK integration (dispatcher, message history)
+    agy: Antigravity CLI runtime (one prompt to a Gemini model, raw answer back)
 """
 
 # Re-export from claude_code subpackage for backwards compatibility

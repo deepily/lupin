@@ -192,6 +192,40 @@ pytest src/tests/integration/test_dispatcher_*.py -v -m "not e2e"
 pytest src/tests/integration/test_dispatcher_*.py -v -m "e2e"
 ```
 
+## Antigravity (agy) runtime
+
+`cosa.orchestration.agy` sends one prompt to a Gemini model through Google's `agy` command-line agent and returns the raw answer.
+
+```python
+import tempfile
+
+from cosa.orchestration.agy import run_agy, binary_fingerprint
+
+pinned = binary_fingerprint()
+
+with tempfile.TemporaryDirectory() as scratch_dir:
+    result = run_agy(
+        "Reply with the word PONG.",
+        model              = "gemini-3.6-flash-low",
+        workspace_dir      = scratch_dir,
+        pinned_fingerprint = pinned
+    )
+
+print( result.response, result.usage )
+```
+
+| Point | Detail |
+|---|---|
+| Prompt | Sent on standard input as one stream-json message, so quotes, newlines and long text are safe |
+| Answer | `AgyResult.response`, unparsed, with token usage, timings, and the byte count and sha256 of the answer |
+| Models | `agy models` lists the identifiers. Reasoning effort is part of the identifier (`-low`, `-medium`, `-high`); `effort=` passes `--effort` as well |
+| Failure | `AgyCallError` on a timeout, a non-zero exit, a missing or failed result, or a blank answer. There is no retry; the caller owns it |
+| Safety | agy is an agent with tools and runs unsandboxed. `workspace_dir` becomes its working directory, so pass a disposable directory, never a repository |
+| Self-update | agy replaces its own binary when it finds an update. Pin `binary_fingerprint()` at the start of a run and `run_agy` raises `AgyBinaryChanged` when the binary has changed |
+| Cost | A one-line prompt measured about 13,000 input tokens and 13 to 15 seconds per call on agy 1.2.17, since agy sends its own agent instructions with every call |
+
+Tests: `pytest src/cosa/tests/unit/orchestration/agy/`
+
 ## Related Documents
 
 - `src/rnd/v0.1.0/2025.12.31-mcp-implementation-plan.md` - Original MCP implementation plan
