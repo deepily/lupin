@@ -82,6 +82,8 @@ def test_code_identifiers_cover_every_kind_and_skip_strings():
     names = cf.code_identifiers( source )
     assert { "AB", "D", "X", "K", "m", "ARG", "KW", "ATTR", "af", "f", "self" } <= names
     assert "DOC" not in names and "c" not in names
+    names = cf.code_identifiers( "h( ONLYKW=1, **d )\n" )
+    assert "ONLYKW" in names and None not in names
 
 
 def test_lower_line_lowers_flagged_words_and_leaves_quotes_code_and_identifiers( repo ):
@@ -90,6 +92,7 @@ def test_lower_line_lowers_flagged_words_and_leaves_quotes_code_and_identifiers(
     assert new == 'This must never fail, "NEVER" and `MUST` and never and DEBUG'
     assert ( lowered, left ) == ( 2, [ "DEBUG" ] )
     assert cf.lower_line( "nothing here", set() ) == ( "nothing here", 0, [] )
+    assert cf.lower_line( 'The `a"b` NEVER fails `c"d`', set() ) == ( 'The `a"b` never fails `c"d`', 1, [] )
 
 
 def test_fix_source_edits_only_docstring_text( repo ):
@@ -175,3 +178,10 @@ def test_main_dry_run_packages_only_and_explicit_paths( repo, monkeypatch, capsy
     monkeypatch.setattr( "sys.argv", [ "x", "--repo-root", str( repo ), "--dry-run" ] )
     assert cf.main() == 0
     assert "would be lowered" in capsys.readouterr().out
+
+
+def test_main_reports_explicit_paths_in_path_order( repo ):
+    out = io.StringIO()
+    cf.main( [ "--repo-root", str( repo ), "--dry-run", "pkg/loud.py", "loose/script.py" ], out )
+    text = out.getvalue()
+    assert text.index( "loose/script.py" ) < text.index( "pkg/loud.py" )
