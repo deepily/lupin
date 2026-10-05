@@ -23,6 +23,7 @@ import os
 import secrets
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -109,12 +110,12 @@ AGY_AGENT_TEXT = (
     "You answer from the text you are given and nothing else. You have no tools.\n"
 )
 
-# What an agy call runs under, for a report. It is not the Claude isolation profile above. The agent
-# definition is hashed in, so a report made under another agent text names another profile.
 # What a scratch directory holds when an answer left nothing behind: the agent definition and the
 # two directories above it.
 AGY_SCRATCH_ENTRIES = sorted( [ ".agents", os.path.join( ".agents", "agents" ), AGY_AGENT_PATH ] )
 
+# What an agy call runs under, for a report. It is not the Claude isolation profile above. The agent
+# definition is hashed in, so a report made under another agent text names another profile.
 AGY_CALL_PROFILE     = "agy-print-2|new-project|disable-slash-commands|stream-json|scratch-cwd|no-edit-grant|agent=" + AGY_AGENT_NAME + "-" + hashlib.sha256( AGY_AGENT_TEXT.encode( "utf-8" ) ).hexdigest()[ :10 ]
 AGY_RESIDUAL_CONTEXT = [ "agy's own framing around the custom agent, about 3,400 input tokens a call on agy 1.2.17" ]
 
@@ -421,9 +422,12 @@ def _agy_call( model, prompt, timeout_seconds ):
         - timeout_seconds is a whole number of seconds from _agy_whole_seconds
 
     Ensures:
-        - returns what _agy_call_once returns
+        - returns ( answer, seconds ): what _agy_call_once returns, and the wall-clock seconds of
+          the try that answered. Waits and refused tries are left out, so a stage's timing is the
+          model's and not the outage's
         - an AgyUnavailable is tried again after each wait in AGY_UNAVAILABLE_WAITS, in a new
           scratch directory each time; no other failure is tried again here
+        - each wait is announced by one line on standard error, naming the model, the try and the wait
         - the caller's budget is not charged again: complete charges before calling this
 
     Raises:
@@ -433,12 +437,16 @@ def _agy_call( model, prompt, timeout_seconds ):
     waits = list( AGY_UNAVAILABLE_WAITS )
     tries = len( waits ) + 1
     while True:
+        started = time.monotonic()
         try:
-            return _agy_call_once( model, prompt, timeout_seconds )
+            text = _agy_call_once( model, prompt, timeout_seconds )
+            return text, time.monotonic() - started
         except agy_runtime.AgyUnavailable as e:
             if not waits:
                 raise ModelCallError( f"model call to {model} failed, unavailable on each of {tries} tries: {e}" ) from e
-            AGY_SLEEP( waits.pop( 0 ) )
+            wait = waits.pop( 0 )
+            print( f"agy unavailable (model {model}), try {tries - len( waits ) - 1} of {tries}; waiting {wait}s", file=sys.stderr )
+            AGY_SLEEP( wait )
 
 
 def _agy_call_once( model, prompt, timeout_seconds ):
@@ -459,7 +467,8 @@ def _agy_call_once( model, prompt, timeout_seconds ):
         - a binary change run_agy itself reports is kept as the stop reason
         - an answer is refused when agy tried a tool action, left any other file or directory in
           the scratch directory, or changed the agent definition: a tool attempt is not a text answer.
-          A directory that cannot be listed counts as changed
+          A directory that cannot be listed counts as changed, and so does an agent definition
+          replaced by a symbolic link, whatever the link points at
 
     Raises:
         - ModelCallError if agy fails, tried a tool action, wrote into the scratch directory or changed
@@ -495,7 +504,7 @@ def _agy_call_once( model, prompt, timeout_seconds ):
             holds = _scratch_entries( scratch )
         except OSError as e:
             raise ModelCallError( f"model call to {model} left a scratch directory that cannot be listed: {e}" ) from e
-        intact = holds == AGY_SCRATCH_ENTRIES
+        intact = holds == AGY_SCRATCH_ENTRIES and not os.path.islink( agent_file )
         if intact:
             try:
                 with open( agent_file, encoding="utf-8" ) as f: intact = f.read() == AGY_AGENT_TEXT
@@ -606,7 +615,8 @@ async def complete( model, system_prompt, user_prompt, query_fn=None, timeout_se
         - a model with a cap (set_budget) is charged one call before the model is contacted
         - thinking "default" sends exactly the options sent before this setting existed; "off" adds
           the SDK's thinking-disabled option
-        - a finished call is added to the enclosing record_calls() list as ( stage, wall-clock seconds )
+        - a finished call is added to the enclosing record_calls() list as ( stage, wall-clock seconds );
+          under agy the seconds are those of the try that answered, without any wait for a 503
         - an enclosing record_calls() block decides the thinking setting when thinking is "default"
         - under agy the system prompt and the user prompt are joined by AGY_PROMPT_JOIN and sent as one
           prompt, query_fn is not used, and the call runs in a worker thread so calls can overlap
@@ -634,9 +644,8 @@ async def complete( model, system_prompt, user_prompt, query_fn=None, timeout_se
         limit = _agy_whole_seconds( timeout_seconds )
         _require_pinned_binary()
         _charge( model )
-        started = time.monotonic()
-        text    = await asyncio.to_thread( _agy_call, model, system_prompt + AGY_PROMPT_JOIN + user_prompt, limit )
-        if scope is not None: scope.calls.append( ( stage, time.monotonic() - started ) )
+        text, seconds = await asyncio.to_thread( _agy_call, model, system_prompt + AGY_PROMPT_JOIN + user_prompt, limit )
+        if scope is not None: scope.calls.append( ( stage, seconds ) )
         return text
     _charge( model )
     query_fn = sdk_query if query_fn is None else query_fn

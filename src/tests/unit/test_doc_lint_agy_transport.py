@@ -15,6 +15,7 @@ import re
 import shutil
 import stat
 import time
+import types
 
 import pytest
 
@@ -512,7 +513,7 @@ class Unavailable:
         return self.then( argv, **kwargs )
 
 
-def test_a_call_answered_unavailable_is_tried_again_after_each_wait_and_then_answers( agy_bin, monkeypatch ):
+def test_a_call_answered_unavailable_is_tried_again_after_each_wait_and_then_answers( agy_bin, monkeypatch, capsys ):
     waits  = []
     runner = Unavailable( 2, FakeAgy( answer="the answer" ) )
     monkeypatch.setattr( mt, "AGY_SLEEP", waits.append )
@@ -521,6 +522,7 @@ def test_a_call_answered_unavailable_is_tried_again_after_each_wait_and_then_ans
     assert complete( "m", "s", "u" ) == "the answer"
 
     assert waits == [ 15, 45 ]
+    assert capsys.readouterr().err == "agy unavailable (model m), try 1 of 4; waiting 15s\nagy unavailable (model m), try 2 of 4; waiting 45s\n"
     assert len( runner.cwds ) == 3 and len( set( runner.cwds ) ) == 3
     assert not any( os.path.exists( cwd ) for cwd in runner.cwds )
     assert mt.agy_usage_summary()[ "m" ][ "calls" ] == 1
@@ -538,6 +540,46 @@ def test_a_call_answered_unavailable_on_every_try_is_a_model_call_error_naming_t
     assert isinstance( raised.value.__cause__, agy_runtime.AgyUnavailable )
     assert waits == [ 15, 45, 90 ] == list( mt.AGY_UNAVAILABLE_WAITS )
     assert len( runner.cwds ) == 4
+    assert mt.agy_usage_summary() == {}
+
+
+def test_the_recorded_seconds_are_those_of_the_try_that_answered_and_leave_the_waits_out( agy_bin, monkeypatch ):
+    # The module's own name for time is swapped, not time.monotonic itself, which the event loop reads.
+    clock = [ 1000.0 ]
+    monkeypatch.setattr( mt, "time", types.SimpleNamespace( monotonic=lambda: clock[ 0 ], sleep=time.sleep ) )
+
+    def a_long_wait( seconds ): clock[ 0 ] += seconds
+
+    class Slow( FakeAgy ):
+        def __call__( self, argv, **kwargs ):
+            if argv[ 1: ] != [ "--version" ]: clock[ 0 ] += 2.0
+            return super().__call__( argv, **kwargs )
+
+    monkeypatch.setattr( mt, "AGY_SLEEP", a_long_wait )
+    mt.configure_agy( agy_bin, runner=Unavailable( 2, Slow( answer="ok" ) ) )
+
+    async def one_call():
+        with mt.record_calls( [ ( "judge", "default" ) ] ) as calls:
+            await mt.complete( "m", "s", "u" )
+        return calls
+
+    assert asyncio.run( one_call() ) == [ ( "judge", 2.0 ) ]
+    assert clock[ 0 ] == 1000.0 + 15 + 45 + 2.0
+
+
+def test_an_agent_definition_replaced_by_a_link_to_the_same_text_is_rejected( agy_bin, tmp_path ):
+    twin = tmp_path / "twin.md"
+    twin.write_text( mt.AGY_AGENT_TEXT, encoding="utf-8" )
+
+    def swap_for_a_link( cwd ):
+        os.remove( os.path.join( cwd, mt.AGY_AGENT_PATH ) )
+        os.symlink( str( twin ), os.path.join( cwd, mt.AGY_AGENT_PATH ) )
+
+    mt.configure_agy( agy_bin, runner=FakeAgy( answer="looks fine", on_call=swap_for_a_link ) )
+
+    with pytest.raises( mt.ModelCallError, match="changed its scratch directory" ):
+        complete( "m", "s", "u" )
+
     assert mt.agy_usage_summary() == {}
 
 

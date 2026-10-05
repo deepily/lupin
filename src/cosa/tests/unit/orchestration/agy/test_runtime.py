@@ -605,7 +605,7 @@ def test_run_nonzero_exit_raises_with_the_stderr_tail_even_when_a_result_is_pres
     assert len( message ) == len( "agy exited 3 (model m); stderr: " ) + 2000
 
 
-# The two forms agy 1.2.17 printed on 2026-10-05, copied from the trial130 run log.
+# The two forms agy 1.2.17 prints, copied from a run log.
 UNAVAILABLE_STDERR = [
     "error: Eligibility check failed: UNAVAILABLE (code 503): The service is currently unavailable.\n",
     "error: failed to send message: send failed; already reported to the user: Eligibility check failed: UNAVAILABLE (code 503): The service is currently unavailable.\n"
