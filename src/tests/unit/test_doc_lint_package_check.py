@@ -178,11 +178,12 @@ def test_only_the_packages_own_files_count( repo, tmp_path ):
 
 
 def test_a_data_file_in_the_package_fails_docs_only_diff( repo, tmp_path ):
-    ( repo / "pkg" / "data.json" ).write_text( "{}\n", encoding="utf-8" )
+    ( repo / "pkg" / "data.json" ).write_text( "{ not python\n", encoding="utf-8" )
     code, _ = _run( repo, tmp_path / "out" )
     result  = _read( tmp_path / "out", "result.json" )
     assert code == 1 and result[ "changed_files" ] == [ "pkg/data.json" ]
     assert "file type not checked" in _check( result, "docs_only_diff" )[ "output" ][ 0 ][ "failure" ]
+    assert _check( result, "contract_diff" )[ "ran" ] is True and _check( result, "contract_diff" )[ "pass" ] is True
 
 
 def test_a_deleted_file_and_an_added_file_are_refused( repo, tmp_path ):
@@ -194,6 +195,7 @@ def test_a_deleted_file_and_an_added_file_are_refused( repo, tmp_path ):
     assert code == 1
     assert reasons[ "pkg/mod.py" ][ "removed" ][ 0 ] == "Module:<module>#0" and reasons[ "pkg/fresh.py" ][ "added" ] == [ "Module:<module>#0" ]
     assert _check( result, "py_compile" )[ "pass" ] is True
+    assert _check( result, "docstring_lint" )[ "ran" ] is True
 
 
 def test_match_docstrings_old_text_that_does_not_parse_is_refused():
@@ -225,3 +227,16 @@ def test_main_defaults_to_stdout_and_sys_argv( repo, tmp_path, monkeypatch, caps
     assert pc.main() == 0
     assert "PASS pkg at base" in capsys.readouterr().out
     assert ( tmp_path / "o" / "result.json" ).exists()
+
+
+def test_a_tag_as_base_resolves_to_the_commit_sha( repo, tmp_path ):
+    _git( repo, "tag", "-a", "v1", "-m", "tag" )
+    _run( repo, tmp_path / "out", base="v1" )
+    assert _read( tmp_path / "out", "result.json" )[ "base" ] == _git( repo, "rev-parse", "HEAD" )
+
+
+def test_a_dead_design_path_is_a_lint_finding_because_the_linter_gets_the_repo_root( repo, tmp_path ):
+    ( repo / "pkg" / "mod.py" ).write_text( CLEAN_MOD.replace( "A box.", "A box.\n\n    Design: src/nowhere.md" ), encoding="utf-8" )
+    _run( repo, tmp_path / "out" )
+    output = _check( _read( tmp_path / "out", "result.json" ), "docstring_lint" )[ "output" ]
+    assert any( "dead-design" in line for line in output )
