@@ -115,7 +115,7 @@ def _run( name, action ):
 
     Ensures:
         - returns { name, pass, ran, output }
-        - an exception from action is a check that did not run: pass False, ran False, and the error named
+        - any exception from action is a check that did not run: pass False, ran False, and the error named
         - a check that did not run is never reported as passed
 
     Raises:
@@ -123,7 +123,7 @@ def _run( name, action ):
     """
     try:
         passed, output = action()
-    except ( OSError, RuntimeError, SyntaxError, ValueError ) as err:
+    except Exception as err:
         return { "name": name, "pass": False, "ran": False, "output": f"did not run: {type( err ).__name__}: {err}" }
     return { "name": name, "pass": bool( passed ), "ran": True, "output": output }
 
@@ -251,8 +251,8 @@ def check_package( root, base, package ):
     for path in sorted( p for p in changed if p.endswith( ".py" ) ):
         try:
             found, refusal = match_docstrings( path, _show( root, base, path ), _show( root, None, path ) )
-        except ValueError as err:
-            found, refusal = [], { "file": path, "reason": f"does not decode as UTF-8: {err}" }
+        except Exception as err:
+            found, refusal = [], { "file": path, "reason": f"could not be compared: {type( err ).__name__}: {err}" }
         pairs += found
         if refusal is not None: refusals.append( refusal )
     docstrings = 0
@@ -288,7 +288,8 @@ def main( argv=None, out=None ):
     Ensures:
         - writes result.json and pairs.json in --out, and nothing else, then prints one line per check
         - returns 0 only when every check passed and nothing was refused, 1 otherwise, result.json written either way
-        - returns 2 and writes nothing when base does not resolve or the package holds no in-scope .py file
+        - a check that raises any exception is recorded as did not run, so a bug in one module never costs the report
+        - returns 2 when base does not resolve or the package holds no in-scope .py file, and then result.json holds pass False and the refusal, and pairs.json is an empty list
 
     Raises:
         - nothing
@@ -303,13 +304,14 @@ def main( argv=None, out=None ):
     try:
         result, pairs = check_package( args.repo_root, args.base, args.package.rstrip( "/" ) )
     except ( RuntimeError, ValueError ) as err:
+        result, pairs = { "base": None, "package": args.package, "pass": False, "refused": str( err ) }, []
         out.write( f"REFUSED: {err}\n" )
-        return 2
     os.makedirs( args.out, exist_ok=True )
     for name, content in ( ( "result.json", result ), ( "pairs.json", pairs ) ):
         with open( f"{args.out}/{name}", "w", encoding="utf-8" ) as handle:
             json.dump( content, handle, indent=2 )
             handle.write( "\n" )
+    if "refused" in result: return 2
     for check in result[ "checks" ]: out.write( f"{'PASS' if check[ 'pass' ] else 'FAIL'} {check[ 'name' ]}{'' if check[ 'ran' ] else ' (did not run)'}\n" )
     for refusal in result[ "refusals" ]:
         keys = f", added {refusal[ 'added' ]}, removed {refusal[ 'removed' ]}" if "added" in refusal else ""

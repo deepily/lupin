@@ -164,7 +164,7 @@ def test_a_file_that_is_not_utf8_cannot_be_linted_and_is_refused( repo, tmp_path
     code, _ = _run( repo, tmp_path / "out" )
     result  = _read( tmp_path / "out", "result.json" )
     assert code == 1 and _check( result, "docstring_lint" )[ "ran" ] is False
-    assert result[ "refusals" ][ 0 ][ "reason" ].startswith( "does not decode as UTF-8" )
+    assert result[ "refusals" ][ 0 ][ "reason" ].startswith( "could not be compared: UnicodeDecodeError" )
 
 
 def test_only_the_packages_own_files_count( repo, tmp_path ):
@@ -196,6 +196,8 @@ def test_a_deleted_file_and_an_added_file_are_refused( repo, tmp_path ):
     assert reasons[ "pkg/mod.py" ][ "removed" ][ 0 ] == "Module:<module>#0" and reasons[ "pkg/fresh.py" ][ "added" ] == [ "Module:<module>#0" ]
     assert _check( result, "py_compile" )[ "pass" ] is True
     assert _check( result, "docstring_lint" )[ "ran" ] is True
+    failures = { row[ "path" ]: row[ "failure" ] for row in _check( result, "docs_only_diff" )[ "output" ] }
+    assert failures == { "pkg/mod.py": "file deleted", "pkg/fresh.py": "file added" }
 
 
 def test_match_docstrings_old_text_that_does_not_parse_is_refused():
@@ -215,11 +217,14 @@ def test_run_records_a_check_that_raises_as_did_not_run():
     assert pc._run( "x", lambda: ( 1, [] ) ) == { "name": "x", "pass": True, "ran": True, "output": [] }
 
 
-def test_a_base_that_does_not_resolve_and_an_empty_package_refuse_and_write_nothing( repo, tmp_path ):
+def test_a_base_that_does_not_resolve_and_an_empty_package_refuse_but_still_write_result_json( repo, tmp_path ):
     code, text = _run( repo, tmp_path / "a", base="no-such-rev" )
-    assert code == 2 and text.startswith( "REFUSED: git rev-parse" ) and not ( tmp_path / "a" ).exists()
+    result = _read( tmp_path / "a", "result.json" )
+    assert code == 2 and text.startswith( "REFUSED: git rev-parse" ) and result[ "pass" ] is False and result[ "refused" ].startswith( "git rev-parse" )
+    assert _read( tmp_path / "a", "pairs.json" ) == []
     code, text = _run( repo, tmp_path / "b", package="nowhere" )
-    assert code == 2 and "no in-scope .py files directly in nowhere" in text and not ( tmp_path / "b" ).exists()
+    result = _read( tmp_path / "b", "result.json" )
+    assert code == 2 and "no in-scope .py files directly in nowhere" in text and result[ "refused" ] == "no in-scope .py files directly in nowhere" and result[ "package" ] == "nowhere"
 
 
 def test_main_defaults_to_stdout_and_sys_argv( repo, tmp_path, monkeypatch, capsys ):
@@ -240,3 +245,48 @@ def test_a_dead_design_path_is_a_lint_finding_because_the_linter_gets_the_repo_r
     _run( repo, tmp_path / "out" )
     output = _check( _read( tmp_path / "out", "result.json" ), "docstring_lint" )[ "output" ]
     assert any( "dead-design" in line for line in output )
+
+
+@pytest.mark.parametrize( "error", [ KeyError( "odd" ), RuntimeError( "git failed" ), AttributeError( "x" ) ] )
+def test_a_check_that_raises_anything_is_did_not_run_and_result_json_is_still_written( repo, tmp_path, monkeypatch, error ):
+    def boom( *args ): raise error
+    monkeypatch.setattr( pc.contract_diff, "diff_contracts", boom )
+    ( repo / "pkg" / "mod.py" ).write_text( CLEAN_MOD, encoding="utf-8" )
+    code, text = _run( repo, tmp_path / "out" )
+    result = _read( tmp_path / "out", "result.json" )
+    check  = _check( result, "contract_diff" )
+    assert code == 1 and result[ "pass" ] is False and check[ "ran" ] is False and check[ "pass" ] is False
+    assert check[ "output" ].startswith( f"did not run: {type( error ).__name__}" )
+    assert all( c[ "ran" ] for c in result[ "checks" ] if c[ "name" ] != "contract_diff" ) and "FAIL contract_diff (did not run)" in text
+
+
+def test_a_comparison_that_raises_is_a_refusal_not_a_crash( repo, tmp_path, monkeypatch ):
+    def boom( *args ): raise KeyError( "odd" )
+    monkeypatch.setattr( pc, "match_docstrings", boom )
+    ( repo / "pkg" / "mod.py" ).write_text( CLEAN_MOD, encoding="utf-8" )
+    code, _ = _run( repo, tmp_path / "out" )
+    assert code == 1 and _read( tmp_path / "out", "result.json" )[ "refusals" ] == [ { "file": "pkg/mod.py", "reason": "could not be compared: KeyError: 'odd'" } ]
+
+
+def test_lint_reads_every_package_file_not_only_the_last_or_the_changed_ones( tmp_path, repo ):
+    ( repo / "pkg" / "a_first.py" ).write_text( '"""A NEVER thing."""\n', encoding="utf-8" )
+    _git( repo, "add", "." )
+    _git( repo, "commit", "-qm", "an unchanged file with a finding" )
+    ( repo / "pkg" / "mod.py" ).write_text( CLEAN_MOD, encoding="utf-8" )
+    code, _ = _run( repo, tmp_path / "out" )
+    check   = _check( _read( tmp_path / "out", "result.json" ), "docstring_lint" )
+    assert code == 1 and check[ "pass" ] is False and check[ "output" ] == [ "pkg/a_first.py:1: caps: ALL-CAPS word NEVER" ]
+
+
+def test_lint_reaches_a_new_untracked_file( repo, tmp_path ):
+    ( repo / "pkg" / "zz_new.py" ).write_text( '"""A NEVER thing."""\n', encoding="utf-8" )
+    _run( repo, tmp_path / "out" )
+    output = _check( _read( tmp_path / "out", "result.json" ), "docstring_lint" )[ "output" ]
+    assert output == [ "pkg/zz_new.py:1: caps: ALL-CAPS word NEVER" ]
+
+
+def test_source_with_a_null_byte_fails_compile_without_crashing( repo, tmp_path ):
+    ( repo / "pkg" / "mod.py" ).write_bytes( b'"""x."""\x00\n' )
+    code, _ = _run( repo, tmp_path / "out" )
+    result  = _read( tmp_path / "out", "result.json" )
+    assert code == 1 and _check( result, "py_compile" )[ "pass" ] is False
