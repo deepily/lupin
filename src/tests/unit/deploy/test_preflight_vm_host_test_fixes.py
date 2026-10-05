@@ -274,8 +274,8 @@ def test_A3b_registration_without_the_variable_blocks_with_the_dev_box_verb( ven
     baseline = _blocking( _run( venue ) )
     _register( venue, { "PYTHONPATH": "/r/src", "LUPIN_ROOT": "/r" } )
     out = _run( venue )
-    hit = _line( out, f"without {VOICE_VAR}" )
-    assert "[FAIL]" in hit and "(scope: user" in hit
+    hit = _line( out, f"without a usable {VOICE_VAR}" )
+    assert "[FAIL]" in hit and "(scope: user)" in hit
     assert VOICE_VERB in out
     assert _blocking( out ) == baseline + 1
 
@@ -284,8 +284,8 @@ def test_A3b_a_local_scope_entry_without_the_variable_blocks_beside_a_good_user_
     baseline = _blocking( _run( venue ) )
     _register( venue, { VOICE_VAR: VOICE_VALUE }, local={ "LUPIN_ROOT": "/r" } )
     out = _run( venue )
-    hit = _line( out, f"without {VOICE_VAR}" )
-    assert "[FAIL]" in hit and "(scope: local:/mnt/lupin-data/lupin" in hit
+    hit = _line( out, f"without a usable {VOICE_VAR}" )
+    assert "[FAIL]" in hit and "(scope: local:/mnt/lupin-data/lupin)" in hit
     assert "claude mcp remove cosa-voice -s local" in out
     assert _blocking( out ) == baseline + 1
 
@@ -313,6 +313,18 @@ def test_A3b_a_local_value_that_names_nothing_blocks_beside_a_good_user_value( v
     hit = _line( out, "does not resolve" )
     assert "[FAIL]" in hit and "[local:/mnt/lupin-data/lupin: no [Lupin: No-Such] block" in hit
     assert "[user:" not in hit
+    # install-voice rewrites the user entry only, so the remedy must say how the local one goes.
+    assert "claude mcp remove cosa-voice -s local" in out
+    assert _blocking( out ) == baseline + 1
+
+
+def test_A3b_a_value_split_by_a_tab_blocks_though_every_word_is_right( venue ):
+    # The settings reader splits on single spaces, so this value gives it no splainer_path.
+    baseline = _blocking( _run( venue ) )
+    _register( venue, { VOICE_VAR: VOICE_VALUE.replace( " ", "\t", 1 ) } )
+    out = _run( venue )
+    hit = _line( out, f"without a usable {VOICE_VAR}" )
+    assert "[FAIL]" in hit and "(scope: user (value has whitespace other than single spaces))" in hit
     assert _blocking( out ) == baseline + 1
 
 
@@ -352,13 +364,16 @@ def test_A3b_project_mcp_json_is_held_to_the_same_rule( venue ):
 
     project.write_text( entry( {} ) )
     out = _run( venue )
-    assert "[FAIL]" in _line( out, f"project.mcp.json without {VOICE_VAR}" )
+    hit = _line( out, f"project.mcp.json without a usable {VOICE_VAR}" )
+    assert "[FAIL]" in hit and "(scope: project)" in hit
+    assert "an entry in a project .mcp.json is removed by hand" in out
     assert _blocking( out ) == baseline + 1
 
     project.write_text( entry( { VOICE_VAR: VOICE_BAD } ) )
     out = _run( venue )
     hit = _line( out, "project.mcp.json carries" )
-    assert "[FAIL]" in hit and "does not resolve: [user: no [Lupin: No-Such] block" in hit
+    assert "[FAIL]" in hit and "does not resolve: [project: no [Lupin: No-Such] block" in hit
+    assert "an entry in a project .mcp.json is removed by hand" in out
     assert _blocking( out ) == baseline + 1
 
     project.write_text( entry( { VOICE_VAR: VOICE_VALUE } ) )

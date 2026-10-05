@@ -1011,7 +1011,10 @@ echo 'NEXT (manual, interactive): open a fresh shell, run  claude  once, complet
             # A misspelled block passes the character check and would be registered as typed.
             # This checkout's settings file is the one the bundle ships, so ask it first.
             VOICE_LOCAL_INI="$( cd "$( dirname "${BASH_SOURCE[0]}" )/../.." && pwd )/src/conf/lupin-app.ini"
-            grep -qxF "[${LUPIN_MCP_CONFIG_BLOCK//+/ }]" "$VOICE_LOCAL_INI" \
+            # The same header match the preflight uses on the VM, so the two cannot disagree.
+            PFV_HEADER="[${LUPIN_MCP_CONFIG_BLOCK//+/ }]" awk '
+                { sub( /[ \t\r]+$/, "" ); if ( $0 == ENVIRON[ "PFV_HEADER" ] ) found = 1 }
+                END { exit !found }' "$VOICE_LOCAL_INI" \
                 || die "LUPIN_MCP_CONFIG_BLOCK names no block in $VOICE_LOCAL_INI: [${LUPIN_MCP_CONFIG_BLOCK//+/ }]"
             VOICE_BLOCK_EXPORT="export LUPIN_MCP_CONFIG_BLOCK=$LUPIN_MCP_CONFIG_BLOCK"
         fi

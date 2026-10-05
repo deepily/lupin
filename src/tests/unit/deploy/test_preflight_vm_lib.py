@@ -908,6 +908,8 @@ def test_registration_env_is_2_for_a_missing_file( tmp_path ):
 
 def test_registration_env_is_4_for_a_file_that_exists_and_cannot_be_read( tmp_path ):
     # Wrong owner or mode is the VM's usual defect. It is not "nothing registered".
+    # Two guards give this answer, the shell's -r test and the reader's own OSError arm;
+    # this test cannot tell which ran, and either alone is enough.
     if os.geteuid() == 0: pytest.skip( "root reads a mode-000 file, so the case cannot be built" )
     f = _registration( tmp_path, '{ "mcpServers": { "cosa-voice": { "env": { } } } }' )
     f.chmod( 0 )
@@ -917,6 +919,7 @@ def test_registration_env_is_4_for_a_file_that_exists_and_cannot_be_read( tmp_pa
         f.chmod( 0o600 )
     assert r.returncode == 4
     assert r.stdout == ""
+    assert r.stderr == ""
 
 
 @pytest.mark.parametrize( "body", [
@@ -963,17 +966,40 @@ def test_registration_env_finds_a_server_registered_only_at_local_scope( tmp_pat
 
 def test_registration_env_prints_every_scope_and_value_when_all_carry_the_variable( tmp_path ):
     # The caller judges each value, so none may be dropped: the local one is the one a
-    # session in that directory runs. Whitespace inside a value is collapsed to single
-    # spaces so a tab in it cannot be read as the field separator.
+    # session in that directory runs. Each value is printed as it is stored.
     import json
     f = _registration( tmp_path, json.dumps( {
         "mcpServers" : { "cosa-voice": { "env": { _VOICE_VAR: "user-value" } } },
-        "projects"   : { "/mnt/b": { "mcpServers": { "cosa-voice": { "env": { _VOICE_VAR: "b\tvalue  two" } } } },
+        "projects"   : { "/mnt/b": { "mcpServers": { "cosa-voice": { "env": { _VOICE_VAR: "b value two" } } } },
                          "/mnt/a": { "mcpServers": { "cosa-voice": { "env": { _VOICE_VAR: "a-value" } } } } },
     } ) )
     r = _registration_env( f )
     assert r.returncode == 0, r.stderr
     assert r.stdout.split( "\n" ) == [ "user\tuser-value", "local:/mnt/a\ta-value", "local:/mnt/b\tb value two" ]
+
+
+@pytest.mark.parametrize( "value", [ "a=1\tb=2", "a=1  b=2", " a=1 b=2", "a=1 b=2 ", "a=1\nb=2" ] )
+def test_registration_env_is_1_for_a_value_the_settings_reader_cannot_split( tmp_path, value ):
+    # ConfigurationManager splits the value on single spaces only. A tab, a doubled
+    # space or a space at either end gives it a word with no usable key, so such a
+    # value is reported with the others that cannot be used, never tidied and passed.
+    import json
+    f = _registration( tmp_path, json.dumps( { "mcpServers": { "cosa-voice": { "env": { _VOICE_VAR: value } } } } ) )
+    r = _registration_env( f )
+    assert r.returncode == 1
+    assert r.stdout == "user (value has whitespace other than single spaces)"
+    assert r.stderr == ""
+
+
+def test_registration_env_names_the_top_level_entry_as_the_caller_says( tmp_path ):
+    # A project .mcp.json has the same shape as the user file; its entry is project scope.
+    import json
+    f = _registration( tmp_path, json.dumps( { "mcpServers": { "cosa-voice": { "env": { _VOICE_VAR: "v" } } } } ) )
+    r = _run( f"pfv_mcp_registration_env '{f}' cosa-voice {_VOICE_VAR} project" )
+    assert r.returncode == 0 and r.stdout == "project\tv"
+    f.write_text( json.dumps( { "mcpServers": { "cosa-voice": { "env": {} } } } ) )
+    r = _run( f"pfv_mcp_registration_env '{f}' cosa-voice {_VOICE_VAR} project" )
+    assert r.returncode == 1 and r.stdout == "project"
 
 
 def test_registration_env_reports_its_own_failure_as_4_with_the_cause_on_stderr( tmp_path ):
@@ -1051,11 +1077,23 @@ def test_the_block_must_match_a_whole_header_line( tmp_path ):
 
 
 def test_a_header_with_trailing_whitespace_or_windows_line_ends_still_matches( tmp_path ):
-    # The settings reader strips a line before reading its header, so this check must
-    # not block a file that reader accepts.
-    rc = _tree( tmp_path, b"[Lupin: Development]  \r\n  [Lupin: Testing]\r\nk = v\r\n" )
+    # The settings reader takes these, so this check must not block them.
+    rc = _tree( tmp_path, b"[Lupin: Development] \t \r\nk = v\r\n[Lupin: Testing]\r\nk = v\r\n" )
     assert rc( "Lupin:+Development" ) == 0
     assert rc( "Lupin:+Testing" ) == 0
+
+
+def test_an_indented_header_is_not_a_block_here_because_it_is_not_one_to_the_settings_reader( tmp_path ):
+    # The claim about the reader is checked against the reader's own parser, in the
+    # same test, on the same bytes.
+    import configparser
+    text = b"[Lupin: Development]\nk = v\n  [Lupin: Testing]\n"
+    rc = _tree( tmp_path, text )
+    parser = configparser.ConfigParser()
+    parser.read_string( text.decode() )
+    assert parser.sections() == [ "Lupin: Development" ]
+    assert rc( "Lupin:+Development" ) == 0
+    assert rc( "Lupin:+Testing" ) == 1
 
 
 def test_resolve_does_not_expand_a_word_of_the_value_against_the_working_directory( tmp_path ):
@@ -1160,6 +1198,16 @@ def test_the_readback_stops_with_the_readers_code_when_nothing_was_registered( t
     assert r.returncode == rc
     assert f"READBACK FAILED (reader rc={rc}" in r.stderr
     assert "REACHED-THE-END" not in r.stdout
+
+
+def test_install_voice_accepts_each_block_this_checkouts_settings_file_has():
+    # The refusal below is only worth something if real names get through.
+    text   = open( os.path.join( PROJECT_ROOT, "src/conf/lupin-app.ini" ), encoding="utf-8" ).read()
+    blocks = [ l.strip()[ 1:-1 ] for l in text.split( "\n" ) if l.startswith( "[Lupin: " ) ]
+    assert len( blocks ) >= 5, blocks
+    for block in blocks:
+        r = _install_voice_dry_run( LUPIN_MCP_CONFIG_BLOCK=block.replace( " ", "+" ) )
+        assert r.returncode == 0, ( block, r.stderr )
 
 
 def test_install_voice_refuses_a_block_name_this_checkouts_settings_file_does_not_have():

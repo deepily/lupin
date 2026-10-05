@@ -256,15 +256,18 @@ fi
 CLAUDE_JSON="${PREFLIGHT_VM_CLAUDE_JSON:-$HOME/.claude.json}"
 PROJECT_MCP_JSON="${PREFLIGHT_VM_PROJECT_MCP_JSON:-$REPO_ROOT/.mcp.json}"
 VOICE_INSTALL="from the dev box: src/scripts/lupin-vm.sh install-voice"
+# install-voice rewrites the user-scope entry only. The other two scopes are fixed by hand.
+VOICE_REMEDY="$VOICE_INSTALL; a local-scope entry is removed with: claude mcp remove cosa-voice -s local (run in that project directory); an entry in a project .mcp.json is removed by hand"
 
-# $1 = file, $2 = what a file with no registration is worth: "warn" or "silent".
+# $1 = file, $2 = what a file with no registration is worth: "warn" or "silent",
+# $3 = the scope name of the file's top-level entry ("user" or "project").
 # A host nobody runs Claude Code on has no ~/.claude.json, and most trees have no
 # .mcp.json, so "nothing registered here" never blocks. Everything else that is not a
 # pass does: a missing variable, a value that names nothing, a file of the wrong shape,
 # and a file or reader that could not be read at all.
 voice_registration_check() {
-    local file="$1" when_none="$2" out rc scope value why bad=""
-    out="$( pfv_mcp_registration_env "$file" cosa-voice LUPIN_CONFIG_MGR_CLI_ARGS )"; rc=$?
+    local file="$1" when_none="$2" top="$3" out rc scope value why bad=""
+    out="$( pfv_mcp_registration_env "$file" cosa-voice LUPIN_CONFIG_MGR_CLI_ARGS "$top" )"; rc=$?
     case $rc in
         0) while IFS=$'\t' read -r scope value; do
                why="$( pfv_config_mgr_args_resolve "$value" "$REPO_ROOT" )" || bad="$bad[$scope: $why] "
@@ -273,21 +276,21 @@ voice_registration_check() {
                report pass BLOCK "cosa-voice registration in $file carries LUPIN_CONFIG_MGR_CLI_ARGS and it resolves ($( printf '%s' "$out" | tr '\t\n' ' ;' ))"
            else
                report fail BLOCK "cosa-voice registration in $file carries LUPIN_CONFIG_MGR_CLI_ARGS but it does not resolve: $bad— spawned workers get no model" \
-                            "$VOICE_INSTALL"
+                            "$VOICE_REMEDY"
            fi ;;
-        1) report fail BLOCK "cosa-voice is registered in $file without LUPIN_CONFIG_MGR_CLI_ARGS (scope: $( printf '%s' "$out" | tr '\n' ' ' )) — spawned workers get no model and run on the user default" \
-                        "$VOICE_INSTALL; a local-scope entry is removed with: claude mcp remove cosa-voice -s local (run in that project directory); an entry in a project .mcp.json is removed by hand" ;;
+        1) report fail BLOCK "cosa-voice is registered in $file without a usable LUPIN_CONFIG_MGR_CLI_ARGS (scope: $( printf '%s' "$out" | tr '\n' ';' )) — spawned workers get no model and run on the user default" \
+                        "$VOICE_REMEDY" ;;
         2) if [ "$when_none" = warn ]; then
                report unknown WARN "no cosa-voice registration in $file" "$VOICE_INSTALL"
            fi ;;
         3) report unknown BLOCK "$file, or a cosa-voice entry in it, is not the shape Claude Code writes (reader rc=3), so the registration is unread" \
-                           "python3 -m json.tool $file" ;;
+                           "python3 -m json.tool $file — if that prints cleanly, a cosa-voice entry in it is not an object; look at mcpServers and projects.*.mcpServers" ;;
         *) report unknown BLOCK "the registration reader could not read $file (reader rc=$rc), so the cosa-voice registration is unread" \
                            "ls -l $file; python3 --version" ;;
     esac
 }
-voice_registration_check "$CLAUDE_JSON" warn
-voice_registration_check "$PROJECT_MCP_JSON" silent
+voice_registration_check "$CLAUDE_JSON" warn user
+voice_registration_check "$PROJECT_MCP_JSON" silent project
 
 # A4/A5 — the CC session-bridge surface (persona-404's two halves).
 SESSIONS_DIR="${LUPIN_HOST_SESSIONS_DIR:-$HOME/.claude/sessions}"
