@@ -413,3 +413,12 @@ def test_a_step_word_in_prose_a_value_or_a_capitalised_key_is_still_a_reference(
     assert [ f.message for f in tr.reference_findings( text, "a.py", 1 ) ] == [
         "bare reference 'Phase 1'", "bare reference 'phase 2'", "bare reference 'phase 3'", "bare reference 'phase 4'"
     ]
+
+
+def test_caps_words_skips_an_enum_member_in_an_example_but_not_prose_after_a_full_stop():
+    assert mc.caps_words( "    type=TaskType.BOUNDED\n    mode = Config.NOT_USED", WORDS ) == []
+    assert mc.caps_words( "It is done.NOT here. It is done. ONLY here.", WORDS ) == [ "ONLY" ]
+
+
+def test_caps_words_still_flags_a_capitalised_word_with_no_identifier_before_the_dot():
+    assert mc.caps_words( "see (1).NOT and ...ONLY", WORDS ) == [ "NOT", "ONLY" ]

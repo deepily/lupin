@@ -17,6 +17,7 @@ MARKER_COLUMNS = ( "em_dash", "caps_words", "section_refs", "id_refs", "tics", "
 
 WORD_REGEX       = re.compile( r"[A-Za-z0-9][\w'’\-]*" )
 CAPS_REGEX       = re.compile( r"\b[A-Z][A-Z0-9]+\b" )
+MEMBER_ACCESS    = re.compile( r"[A-Za-z_][A-Za-z0-9_]*\.$" )
 FRONTMATTER      = re.compile( r"\A---\n.*?\n---\n", re.DOTALL )
 FENCED_BLOCK     = re.compile( r"^(```|~~~).*?^\1[^\n]*$", re.DOTALL | re.MULTILINE )
 INLINE_CODE      = re.compile( r"`[^`\n]*`" )
@@ -128,6 +129,8 @@ def caps_words( text, words=None ):
         - a word counts only when its lowercase form is in words and it is not in
           CAPS_WORD_EXCEPTIONS
         - words inside quotes or backticks, with a digit, next to an underscore or hyphen, are skipped
+        - a word that follows an identifier and a dot with no space, as in TaskType.BOUNDED, is a code member and is skipped
+        - a capitalised word after a period and a space is still read as prose
 
     Raises:
         - OSError when words is None and the vendored list is missing
@@ -140,6 +143,7 @@ def caps_words( text, words=None ):
         before = text[ m.start() - 1 ] if m.start() > 0 else ""
         after  = text[ m.end() ] if m.end() < len( text ) else ""
         if before in ( "_", "-" ) or after in ( "_", "-" ): continue
+        if before == "." and MEMBER_ACCESS.search( text[ : m.start() ] ) is not None: continue
         if any( c.isdigit() for c in word ) or word in CAPS_WORD_EXCEPTIONS: continue
         if word.lower() in words: found.append( word )
     return found
