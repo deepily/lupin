@@ -322,6 +322,26 @@ def lead_words( text ):
     return [ w.strip( EDGE_PUNCT + "()\"'`" ).lower() for w in tokens ]
 
 
+def lead_in_codes( old, span ):
+    """
+    Return every rule 9 code that fires on a span, in the order the checks run.
+
+    Requires:
+        - span is the ( start, end ) of the removed text in old, inside one sentence, and holds at least one word
+
+    Ensures:
+        - a list of 0 or 1 codes today: no two checks can fire together (see lead_in_rejection)
+    """
+    a, b   = next( ( a, b ) for a, b in sentence_spans( old ) if a <= span[ 0 ] < b )
+    before = old[ a:span[ 0 ] ].rstrip()
+    after  = old[ span[ 1 ]:b ]
+    codes  = []
+    if lead_words( old[ a:b ] )[ 0 ] in SUBORDINATORS and before.endswith( "," ) and "," not in before[ :-1 ] and not after.strip( EDGE_PUNCT ): codes.append( "HANGING_CONDITION" )
+    if lead_words( old[ span[ 0 ]:span[ 1 ] ] )[ 0 ] in SUBORDINATORS and CONJUNCTION_RE.match( after ): codes.append( "DROPPED_CONDITION" )
+    if before.endswith( "," ) and lead_words( after )[ :1 ] and lead_words( after )[ 0 ] in SUBORDINATORS and SUBORDINATORS & set( lead_words( before ) ): codes.append( "JOINED_CONDITIONS" )
+    return codes
+
+
 def lead_in_rejection( old, span ):
     """
     Return the reason code a delete is refused for because it leaves a clause's lead-in hanging (rule 9), or None.
@@ -338,26 +358,27 @@ def lead_in_rejection( old, span ):
           "returns zero [when the list is empty], and a negative size would break the sort"
         - JOINED_CONDITIONS: the text kept before the span ends on a comma and already holds a subordinator, and the text after the
           span opens on one, so two conditions run together: "... when the form closed itself, [and with zero] when the user cancelled"
-        - the checks run in that order and the first to fire is returned
+        - the checks run in that order and the first to fire is returned; no two can fire on one span, because their conditions on the
+          text after the span exclude each other, so the order changes nothing today (lead_in_codes lists every code that fires, and a test
+          holds it to one, so an edit that lets two fire shows up there)
 
     Over-rejects:
         - HANGING_CONDITION when the main clause has no comma of its own ("If empty the default is used, [and a warning is logged]")
-        - DROPPED_CONDITION for every subordinate clause before a coordinator, though most leave a sentence that reads fine
+        - DROPPED_CONDITION for every subordinate clause before a coordinator, though most leave a sentence that reads fine; measured on the
+          Dart pool (4,375 entries) at ab3295c8f with 18 subordinators, 2026-10-05: it refuses 56 spans, and 502 kept delete candidates
+          still open on a subordinator
         - JOINED_CONDITIONS for any comma followed by a subordinator after an earlier one, though some such sentences are well formed
         - a subordinator word used as a preposition, a participle or inside a name ("after", "before", "since", "once", "provided by")
 
     Misses:
         - a lead-in that is a phrase, not a subordinator: "For an empty cache, [the default is used]." or "Given a closed pool, [...]"
         - a main clause with a comma of its own before the span; a sentence whose condition opens after a semicolon or colon
+        - a lead-in with a comma of its own, because any earlier comma reads as a main clause: "If a, b or c is missing, [the call fails]."
+          and "If the cache is empty, and the pool is closed, [the call fails]." return None
         - a coordinator with no comma before it; a subordinator written in a quotation or in code
         - "as" and "even" (as in "even if") are left out of SUBORDINATORS on purpose: "as" is mostly a preposition, so a lead-in
           opened by either is not seen
         - a cut that leaves a lead-in two sentences back hanging, because only the span's own sentence is read
     """
-    a, b   = next( ( a, b ) for a, b in sentence_spans( old ) if a <= span[ 0 ] < b )
-    before = old[ a:span[ 0 ] ].rstrip()
-    after  = old[ span[ 1 ]:b ]
-    if lead_words( old[ a:b ] )[ 0 ] in SUBORDINATORS and before.endswith( "," ) and "," not in before[ :-1 ] and not after.strip( EDGE_PUNCT ): return "HANGING_CONDITION"
-    if lead_words( old[ span[ 0 ]:span[ 1 ] ] )[ 0 ] in SUBORDINATORS and CONJUNCTION_RE.match( after ): return "DROPPED_CONDITION"
-    if before.endswith( "," ) and lead_words( after )[ :1 ] and lead_words( after )[ 0 ] in SUBORDINATORS and SUBORDINATORS & set( lead_words( before ) ): return "JOINED_CONDITIONS"
-    return None
+    codes = lead_in_codes( old, span )
+    return codes[ 0 ] if codes else None

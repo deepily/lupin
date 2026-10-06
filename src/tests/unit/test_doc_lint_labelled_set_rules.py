@@ -1092,3 +1092,51 @@ def test_r9_a_word_that_only_starts_like_a_coordinator_is_not_one():
 def test_r9_a_lead_in_opened_by_as_or_even_is_a_documented_miss_and_is_not_refused():
     assert lead_in( "Return the value. As the cache is empty, the default is used.", "the default is used" ) is None
     assert lead_in( "Return the value. Even if the cache is empty, the default is used.", "the default is used" ) is None
+
+
+# ---- review of fd85e299d (Rio), findings 4 to 6: the comma miss, the order of the checks, the weaken scope ----------
+
+def test_r9_a_lead_in_with_a_comma_of_its_own_is_a_documented_miss_and_is_not_refused():
+    assert lead_in( "Return the value. If a, b or c is missing, the call fails.", "the call fails" ) is None
+    assert lead_in( "Return the value. If the cache is empty, and the pool is closed, the call fails.", "the call fails" ) is None
+    assert lead_in( "Return the value. If the cache is empty, the call fails.", "the call fails" ) == "HANGING_CONDITION"      # the same lead-in without the comma is seen
+
+
+def test_r9_no_two_checks_fire_on_one_span_so_the_order_of_the_checks_changes_nothing():
+    openers = ( "If the cache is empty", "It returns zero", "It completes when the form closed itself", "Where the pool is open" )
+    joiners = ( ", ", " ", ", and ", ", when ", ", but if " )
+    tails   = ( "the default is used", "when the list is empty", "and with zero when the user cancelled", "a negative size would break the sort", "and a warning is logged" )
+    seen, spans = set(), 0
+    for o in openers:
+        for j in joiners:
+            for t in tails:
+                for j2, t2 in ( ( "", "" ), ( ", ", "when it is done" ), ( ", and ", "it logs" ), ( " ", "after that" ) ):
+                    old    = f"Return the value. {o}{j}{t}{j2}{t2}."
+                    tokens = list( __import__( "re" ).finditer( r"\S+", old ) )[ 3: ]                    # the words of the second sentence
+                    for i in range( len( tokens ) ):
+                        for k in range( i, len( tokens ) ):
+                            word = tokens[ k ].group( 0 )
+                            for end in { tokens[ k ].end(), tokens[ k ].end() - ( len( word ) - len( word.rstrip( ",.;:" ) ) ) }:       # with and without the comma or full stop
+                                if end <= tokens[ i ].start(): continue
+                                codes = rules.lead_in_codes( old, ( tokens[ i ].start(), end ) )
+                                assert len( codes ) <= 1, ( old, old[ tokens[ i ].start():end ], codes )
+                                seen.update( codes )
+                                spans += 1
+    assert seen == { "HANGING_CONDITION", "DROPPED_CONDITION", "JOINED_CONDITIONS" } and spans > 20000        # the grid finds every code, so a clean result means something
+
+
+def test_r9_a_span_both_rule_8_and_rule_9_refuse_is_counted_under_rule_8s_code_only():
+    old  = "Return the value. When the cache is empty it is reset to `alpha, beta gamma`."
+    span = ( old.index( "beta gamma`" ), len( old ) - 1 )
+    assert rules.markup_rejection( old, span ) == "CODE" and rules.lead_in_rejection( old, span ) == "HANGING_CONDITION"
+    cands, refused = s.delete_candidates( old, SL )
+    assert span not in [ c[ "span" ] for c in cands ]
+    assert refused.get( "CODE" ) == 1 and "HANGING_CONDITION" not in refused
+
+
+def test_r9_a_weaken_whose_span_would_trip_rule_9_as_a_delete_is_still_offered():
+    old   = "Return the value. If the cache is empty, the default must be used."
+    span  = ( old.index( "the default must be used" ), len( old ) - 1 )
+    found = [ c for c in s.weaken_candidates( old, SL ) if c[ "span" ] == span ]
+    assert rules.lead_in_rejection( old, span ) == "HANGING_CONDITION"                        # as a delete this span is refused
+    assert len( found ) == 1 and found[ 0 ][ "class" ] == "modal"                            # as a weaken it is offered
