@@ -1508,6 +1508,7 @@ class PredictionEngine:
         Ensures:
             - writes/updates exactly one organic case; returns
               {case_id, ratification_state, updated}
+            - a first vote inserts the case through the add_decision path
 
         Raises:
             - ValueError if vote is not "up"/"down"
