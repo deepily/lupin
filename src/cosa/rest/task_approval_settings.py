@@ -1,88 +1,43 @@
 """
-Approver allowlist for the holding area — CONFIGURATION, never a constant.
+Approver allowlist and approval-gate settings for the holding area, kept in configuration.
 
-🔨 RICK, 2026-09-02, making exactly this correction about the ratio gate's enforcement
-flag: "Why is this not included as a configuration instead of a constant in the Python
-code file? Put it where it belongs!" He also said the approver set is "either a manager
-or him, FOR NOW" — and "for now" is the whole requirement. A list that needs a code edit
-and a deploy to change is not a "for now" list; it is a permanent one wearing a
-temporary label.
+The allowlist is configuration and never a constant. A list that needs a code edit and a
+deploy to change is a permanent list wearing a temporary label.
 
-WHAT IT GATES. Admission out of `not_approved` — the holding area — onto somebody's
-board. A row nobody approved must not become owed work.
+It gates admission out of `not_approved` (the holding area) onto somebody's board. A row
+nobody approved must not become owed work.
 
-🔴 THE HONEST LIMIT, STATED HERE RATHER THAN LEFT FOR SOMEBODY TO FIND. The actor this
-list is checked against is `payload.actor`, which the CALLER DECLARES. It is not the
-authenticated identity: `require_api_key_or_jwt` proves the caller holds a fleet
-credential, and every seat holds the same one. So this refuses an honest caller who is
-not an approver; it does not stop a dishonest one from typing an approver's name.
+The actor check is a policy control, not a security boundary. The actor it checks is
+`payload.actor`, which the caller declares. `require_api_key_or_jwt` proves only that the
+caller holds a fleet credential, and every seat holds the same one. So the check refuses an
+honest caller who is not an approver. It does not stop a dishonest one typing an approver's name. The authenticated user id is recorded alongside, so a false claim is
+attributable afterwards: accountability rather than prevention.
 
-⇒ That makes it a POLICY control, not a security boundary, and the difference matters
-for what you may conclude from it: it stops a seat approving its own work by habit, and
-it does not stop a seat that decides to. Calling it authorization would overclaim. The
-authenticated user id IS recorded alongside, so a false claim is attributable after the
-fact — accountability rather than prevention.
+File permissions were never a control: the host user and both server containers run as one
+uid, so no file mode can exclude a writer. Only a distinct service uid would give a boundary.
 
-🔴 AND THE SECOND HONEST LIMIT, WHICH IS ABOUT THE FILE RATHER THAN THE ACTOR --
-CORRECTING MY OWN WORDING IN `da6ae6f2`. That commit body says "DO NOT CHMOD THE
-OVERRIDE FILE. It is writable by every seat", and both halves of that sentence are
-wrong in a way that matters. It is NOT world-writable: measured 2026-09-07, the live
-file is `-rw-rw-r-- 1001 1001`, so `other` cannot write it at all.
+The legacy file sat in the flow-ratio directory, not in a mount of its own. A new mount
+resolves at container create. It needs `docker compose up -d --force-recreate` on both
+servers, and a plain restart would not apply it. `LUPIN_FLOW_RATIO_DIR` is already mounted
+in `lupin-rest-dev` and `lupin-rest-test`. The name says flow-ratio and this is not
+flow-ratio; a second env var is the cheap fix for that later.
 
-⇒ The real fact is that PERMISSIONS ARE NOT THE INSTRUMENT HERE, because there is
-nobody for them to discriminate between. Measured the same evening: the host user is
-uid **1001**, and `lupin-rest-dev` and `lupin-rest-test` BOTH run as uid **1001**. Every
-writer on this deployment -- the app in either container, and every Claude seat on the
-host -- is the same UID. A mode change cannot express "someone else may not write this"
-when there is no someone else.
+The live settings are in the `approval_settings` table. The only write path is the
+validated setter (`set_overrides`), and the HTTP door in front of it resolves the operator
+from a signature-checked login token. The old JSON file is read once per database, at boot,
+by `import_legacy_override_file`, and never again, so rewriting it changes nothing.
 
-⇒ SO THE FILE LAYER HAS NO ENFORCEABLE BOUNDARY ON THIS DEPLOYMENT, and no chmod can
-give it one. This is ABSENT PROCESS ISOLATION, not a permissions bug, and the fix is a
-deployment change (a distinct service UID) rather than a mode. María 🌸 made exactly
-this correction; recorded here because a retraction has to reach the artifact, and the
-sentence it corrects is in a commit body nobody can edit.
-
-⚠️ The DO-NOT-CHMOD advice still stands, for its OTHER reason, which was sound: the app
-writes this file at runtime via `set_manager_pull_disabled`, so read-only would break
-the admin endpoint that carries out the operator's order.
-
-⚠️ NOT UNIT-TESTABLE, AND SAID RATHER THAN QUIETLY SKIPPED. Every fact above is a
-property of the deployment -- container UIDs, a mount, a file mode -- not of this
-module. A test asserting them would pass or fail on where it ran, which is the
-wrong-tree defect this repo documents at length. Filed as a defect row instead.
-
-WHY IT REUSES THE FLOW-RATIO DIRECTORY AND DOES NOT MOUNT ITS OWN. A new mount resolves
-at container CREATE, so it would need `docker compose up -d --force-recreate` on both
-servers before a single approval could work — and a plain restart would apply it
-silently-not-at-all. `LUPIN_FLOW_RATIO_DIR` is already mounted in `lupin-rest-dev` and
-`lupin-rest-test`. A sibling FILE in that directory costs nothing and lands the moment
-it is written.
-
-⚠️ The variable's name says flow-ratio and this is not flow-ratio. That mismatch is
-deliberate and cheap to fix later (add a second env var, keep this as the fallback);
-paying a force-recreate on both servers today to avoid a misleading name would be the
-expensive half of the trade.
-
-✅ RESOLVED 2026-09-29 (row 80513825, Rick's ruling: "put the approval settings behind
-login"). Everything above about the FILE is the history of why it was replaced. The live
-settings now live in the `approval_settings` table. The only way to write it is the
-validated setter (`set_overrides`), and the HTTP door in front of that resolves the
-operator from a signature-checked login token. A seat that rewrites the old JSON file
-changes nothing: the file is read exactly ONCE per database, at boot, by
-`import_legacy_override_file`, and never again.
-
-WHICH WAY THIS FAILS WHEN THE DATABASE CANNOT BE READ. The readers fall back to the INI
-defaults and print a loud `[task-approval] 🔴` line (at most once a minute). Per key that
-means:
-    enforcement_active      INI `task approval enforcement active`, else False -> the gate
-                            ADVISES instead of refusing. That fails OPEN, on purpose: a gate
-                            that fails closed on an outage takes the board down for everyone.
-    manager_pull_disabled   INI `task approval manager pull disabled`, else True -> pulling
-                            stays FROZEN. That fails CLOSED, so an outage can never hand a
-                            manager back an access Rick withdrew.
-    approvers / accounts / default_to_holding / sword_of_damocles_active   INI, else the
-                            module fallback, which is today's shipped behaviour.
-A WRITE while the database is down raises OSError, and the router answers 500 saying the
+When the database cannot be read, the readers fall back to the INI defaults and print a
+loud `[task-approval]` line, at most once a minute. Per key:
+    - enforcement_active: INI `task approval enforcement active`, else False. The gate
+      advises instead of refusing. That fails open, because a gate that fails closed on
+      an outage takes the board down for everyone.
+    - manager_pull_disabled: INI `task approval manager pull disabled`, else True. Pulling
+      stays frozen. That fails closed, so an outage never hands a manager back an access
+      the owner withdrew.
+    - approvers, accounts, default_to_holding, sword_of_damocles_active: INI, else the
+      module fallback, which is the shipped behaviour.
+A write while the database is down raises OSError, and the router answers 500 saying the
 live values are unchanged.
 """
 
@@ -198,15 +153,13 @@ def _stamp_secret():
 
     Ensures:
         - returns the JWT signing secret when set, else None
-        - NEVER raises, and never has a default — a hardcoded fallback secret would make
+        - never raises, and never has a default: a hardcoded fallback secret would make
           every stamp forgeable by anyone reading this file, which is worse than no stamp
 
-    ⚠️ REUSING `JWT_SECRET_KEY` ADDS NO NEW FAILURE MODE, and that was checked rather
-    than assumed (Krishna 🦚, 2026-09-08): `env -u JWT_SECRET_KEY` already exits 1 with a
-    ValueError at `jwt_service.py:128-129`, with a positive control importing fine when
-    it is set. A server that cannot sign settings already cannot sign tokens and already
-    refuses to boot — so "absent" is not a state a running server can be in, which is
-    why nothing here has to decide a gate on its absence.
+    Reusing `JWT_SECRET_KEY` adds no new failure mode. Without it, `jwt_service.py` already
+    raises a ValueError at import, so a server that cannot sign settings already cannot
+    sign tokens and already refuses to boot. "Absent" is therefore not a state a running
+    server can be in, so nothing here decides a gate on its absence.
     """
     return os.getenv( "JWT_SECRET_KEY" )
 
@@ -219,7 +172,7 @@ def _expected_stamp( body ):
         - body is the override dict, with or without its own STAMP_KEY
 
     Ensures:
-        - returns a hex HMAC-SHA256 over the canonical JSON of every key EXCEPT the
+        - returns a hex HMAC-SHA256 over the canonical JSON of every key except the
           stamp itself — sorted keys and fixed separators, so re-serialising an
           unchanged file cannot change its stamp
         - returns None when no secret is available, so callers can distinguish
@@ -243,14 +196,14 @@ def _expected_stamp( body ):
 
 def _stamp_is_valid( body ):
     """
-    Whether `body` carries a stamp this process can verify AND that verifies.
+    Whether `body` carries a stamp this process can verify and that verifies.
 
     Ensures:
         - returns True only when a secret exists, a stamp is present, and the two agree
-          under a CONSTANT-TIME comparison
+          under a constant-time comparison
         - returns False when the stamp is absent, wrong, or not a string
-        - returns None when this process cannot check at all (no secret) — deliberately
-          a THIRD value, never False, because "unverifiable" and "forged" would otherwise
+        - returns None when this process cannot check at all (no secret) — a third
+          value, never False, because "unverifiable" and "forged" would otherwise
           be indistinguishable and the caller would treat a keyless dev box as an attack
     """
     expected = _expected_stamp( body )
@@ -297,9 +250,10 @@ def _no_overrides():
 
 class _DbBackend:
     """
-    The real store: rows in `approval_settings`, read and written through a `get_db()`
-    transaction. The unit tier swaps this for an in-memory twin (`tests/conftest`), so
-    nothing in the unit tier needs a database.
+    The real store: `approval_settings` rows, read and written through `get_db()`.
+
+    The unit tier swaps this for an in-memory twin (`tests/conftest`), so nothing in the
+    unit tier needs a database.
     """
 
     def load( self ):
@@ -364,13 +318,13 @@ def _read_overrides():
         - returns a dict with keys "approvers" / "enforcement_active" /
           "default_to_holding" / "approver_accounts" / "manager_pull_disabled" /
           "sword_of_damocles_active", each a value or None
-        - an EMPTY store is the ordinary no-override case and returns every key None
-        - an UNREADABLE store is REPORTED loudly (rate-limited) and answers every key None,
+        - an empty store is the ordinary no-override case and returns every key None
+        - an unreadable store is reported loudly (rate-limited) and answers every key None,
           so each reader falls to its INI default — see the module docstring for which way
           each key fails. It never raises: an unreachable database must not take the board
           down, and silence would leave an operator's write apparently disregarded
-        - a FAILED read is never cached, so the very next call tries the store again
-        - the legacy JSON file is NEVER read here
+        - a failed read is never cached, so the very next call tries the store again
+        - the legacy JSON file is never read here
     """
     global _cache, _cache_loaded_at
 
@@ -391,7 +345,7 @@ def _read_overrides():
 
 def legacy_override_path():
     """
-    The RETIRED override file, named only so the one-time import can find it.
+    The retired override file, named only so the one-time import can find it.
 
     Ensures:
         - returns $LUPIN_FLOW_RATIO_DIR/task-approval-settings.json when set, else
@@ -406,7 +360,7 @@ def legacy_override_path():
 
 def import_legacy_override_file():
     """
-    Copy the retired JSON file's values into the table, ONCE per database, then ignore it.
+    Copy the retired JSON file's values into the table, once per database, then ignore it.
 
     Ensures:
         - returns { "status": ..., "imported": [keys] } where status is one of
@@ -415,20 +369,20 @@ def import_legacy_override_file():
           a JSON object; marker written, nothing copied, reported loudly),
           "refused-unverified" (the stamp did not verify; marker written, nothing copied),
           "imported"
-        - a file whose stamp does not VERIFY imports NOTHING: every key is skipped and the
+        - a file whose stamp does not verify imports nothing: every key is skipped and the
           setting falls to its INI default. Until this first boot import runs the file is
           still writable by every seat, so an unverified `approvers`, `approver_accounts` or
-          `enforcement_active` must not be laundered into the table (María, 2026-09-29).
+          `enforcement_active` must not be laundered into the table.
           "Cannot check" (no signing secret) counts as not verified. The safe direction for
-          enforcement_active is therefore the INI default, chosen deliberately over
+          enforcement_active is therefore the INI default, chosen over
           importing an unverified value
         - only keys in WRITABLE_KEYS whose value passes that key's validator are copied; a
           bad value is reported and skipped
-        - every imported and every skipped key is logged WITH ITS VALUE, so the boot log
+        - every imported and every skipped key is logged with its value, so the boot log
           records exactly what entered the table
         - the marker row is written in the same transaction as the values, so a second boot
           finds it and does nothing — a seat that edits the file afterwards changes nothing
-        - the file is NOT renamed or deleted: `:7999` and `:8000` share the directory but
+        - the file is not renamed or deleted: `:7999` and `:8000` share the directory but
           not the database, and each database needs its own one-time copy
         - the database being unreadable raises: boot must not proceed on a half-known store
 
@@ -503,7 +457,7 @@ def get_approvers():
 
     Ensures:
         - returns a frozenset of canonical persona keys
-        - ALWAYS contains UNCONDITIONAL_APPROVERS, whatever the config says — an empty
+        - always contains UNCONDITIONAL_APPROVERS, whatever the config says — an empty
           or truncated allowlist can never lock the fleet out of its own holding area
         - stored override wins over the INI key; both are tolerated absent
         - a non-list override is ignored rather than raising (same tolerance as a
@@ -523,27 +477,19 @@ def get_approvers():
 
 def get_enforcement_active():
     """
-    Whether the approval gate REFUSES, or merely advises.
+    Whether the approval gate refuses, or merely advises.
 
     Ensures:
         - returns a bool
-        - stored override wins over the INI key
-        - a STRING is PARSED, never coerced: "false" / "no" / "0" / "off" all mean False
-        - an UNPARSEABLE value is REPORTED and falls through to the next layer rather
-          than being read as False — it is not a decision, so it must not make one
-        - FALLBACK IS False — an absent or broken config fails OPEN, deliberately
-
-    🔴 WHY THIS DELEGATES RATHER THAN CARRYING ITS OWN PARSE. `e98659d2` fixed the
-    `bool( "false" )` half here and the string case has been correct since. What it
-    left was the JUNK case: `"banana"` fell through the `in ( "true", ... )` membership
-    test and came out False, silently — indistinguishable from a deliberate "off", and
-    pointing toward enforcement OFF.
-
-    ⇒ Same defect, second half. `_as_bool_or_none` is where it was already solved for
-    the pull toggle, and a THIRD hand-rolled parse in this file is exactly how the
-    first two drifted apart. There is now ONE, and a guard enforces that by PREDICATE
-    rather than by naming today's readers — see
-    `test_one_boolean_parser_for_every_surface.py`.
+        - the stored override wins over the INI key
+        - a string is parsed, never coerced: "false" / "no" / "0" / "off" all mean False
+        - an unparseable value is reported and falls through to the next layer rather
+          than being read as False, because it is not a decision and so must not make one
+        - the fallback is False: an absent or broken config fails open
+        - parsing is delegated to `_as_bool_or_none`, because a third hand-rolled parse
+          would drift from the others. The junk case `"banana"` once fell through a
+          membership test and came out False, silently, which is indistinguishable from a
+          deliberate "off". `test_one_boolean_parser_for_every_surface.py` requires one parser.
     """
     value = _as_bool_or_none( _read_overrides()[ "enforcement_active" ],
                               STORE_LABEL )
@@ -560,13 +506,6 @@ def get_approver_accounts():
     """
     The login-account -> approver-persona map, canonicalized on both sides.
 
-    THE SHAPE, AND WHY IT IS A MAP RATHER THAN A LIST OF EMAILS. The refusal message
-    and the audit trail both speak in personas; an account that grants approval has to
-    say WHICH approver it is, or a reader of either would have to guess. A bare list
-    would also make the two configs disagree in a way nobody could see: an email in the
-    list whose persona is not in `task approval approver personas` would silently grant
-    more than the allowlist does.
-
     Requires:
         - nothing
 
@@ -574,10 +513,15 @@ def get_approver_accounts():
         - returns a dict { lowercased-email : canonical persona key }
         - stored override `approver_accounts` (an object) wins over the INI key
         - INI form is comma-separated `email = persona` pairs; an entry missing its
-          `=`, or blank on either side, is SKIPPED rather than raising — a typo in one
+          `=`, or blank on either side, is skipped rather than raising — a typo in one
           pair must not take the whole map, and with it the browser's door, down
         - returns {} when unconfigured, which is today's behaviour written down
         - never raises
+        - it is a map and not a list of emails because the refusal message and the audit
+          trail speak in personas, so an account must say which approver it is. A bare
+          list could also make the two configs disagree unseen: an email whose persona is
+          not in `task approval approver personas` would silently grant more than the
+          allowlist does
     """
     # `.get`, not `[ ]`: `_cache` is a module global that tests monkeypatch with a
     # dict of their own, and several existing files build it with only the keys they
@@ -609,11 +553,11 @@ def approver_persona_for_account( account_email ):
     The approver persona a logged-in account speaks as, or None.
 
     Requires:
-        - account_email is the email on a VALIDATED access token, or None
+        - account_email is the email on a validated access token, or None
 
     Ensures:
         - returns None for None/blank/non-string, and for an unmapped account
-        - returns None when the mapped persona is NOT currently an approver — the
+        - returns None when the mapped persona is not currently an approver — the
           allowlist stays the single place that says who approves, so revoking a
           persona there revokes its accounts too, with no second edit to remember
         - matching is case-insensitive on the email
@@ -635,7 +579,7 @@ def is_approver( actor ):
 
     Ensures:
         - returns False for None/blank — an unnamed caller is never an approver
-        - matches on the CANONICAL persona key, so "María 🌸 611e3c47", "maria" and
+        - matches on the canonical persona key, so "María 🌸 session3", "maria" and
           "Maria" all resolve to the same entry (the actor string carries a session id
           suffix, so a raw equality test would never match anything)
         - never raises
@@ -707,7 +651,7 @@ def requested_move( from_status, to_status ):
 
     Ensures:
         - returns MOVE_WONT_FIX / MOVE_ADMIT / MOVE_DEMOTE / MOVE_UN_PARK, or None
-        - the `not_approved -> not_approved` no-op is NEITHER an admission nor a
+        - the `not_approved -> not_approved` no-op is neither an admission nor a
           demote and returns None: it is already an illegal edge in the transition
           graph, and answering it with a permission refusal would name the wrong
           defect
@@ -722,18 +666,7 @@ def requested_move( from_status, to_status ):
 
 def move_for_ticket( to_status ):
     """
-    The move a PROMOTION TICKET represents, from the one field it persists.
-
-    🔴 IT IS SHORTER THAN `requested_move` AND THAT IS SOUND RATHER THAN SLOPPY,
-    BECAUSE THE POPULATION IS SMALLER. A ticket is only ever minted for a move in
-    `REQUESTABLE_MOVES`, which is exactly {admit, demote} — a won't-fix never
-    reaches the request door. Within that population `to_status` alone settles it:
-    a demote is the one that lands in the holding area, and everything else is an
-    admission out of it.
-
-    ⚠️ SO DO NOT REACH FOR THIS TO CLASSIFY AN ARBITRARY TRANSITION. Fed a
-    `queued -> wont_fix` it answers MOVE_ADMIT, confidently and wrongly. That is
-    `requested_move`'s job, and it asks the question this one is allowed to skip.
+    The move a promotion ticket represents, from the one field it persists.
 
     Requires:
         - to_status is the `to_status` persisted on a TaskPromotionTicket
@@ -741,6 +674,12 @@ def move_for_ticket( to_status ):
     Ensures:
         - returns MOVE_DEMOTE when to_status is the holding area, else MOVE_ADMIT
         - never raises
+        - it is shorter than `requested_move` because its population is smaller: a ticket
+          is only minted for a move in `REQUESTABLE_MOVES`, which is {admit, demote}, so
+          `to_status` alone settles it. A demote lands in the holding area; everything
+          else is an admission out of it
+        - it never classifies an arbitrary transition: fed `queued -> wont_fix` it answers
+          MOVE_ADMIT, confidently and wrongly. That is `requested_move`'s job
     """
     return MOVE_DEMOTE if to_status == NOT_APPROVED_STATUS else MOVE_ADMIT
 
@@ -749,45 +688,39 @@ def refusal_for_admission( from_status, to_status, actor, account_email=None, cl
     """
     The gate's whole decision, as a pure function: the refusal detail, or None.
 
-    WHY THIS IS NOT INLINE IN THE ROUTER, WHERE IT STARTED. Inline, the only way to
-    watch it refuse is to stand up a database, mint a row in the holding area, and
-    drive a PATCH — so the cheap tests would have had to assert on `is_approver`
-    instead and CALL THAT the control. That is the fixture-that-cannot-discriminate
-    shape this repo keeps finding: a correct predicate wired to nothing passes every
-    such test. Pulled out here, all four clauses are observable directly, and the
-    router test only has to prove the call happens.
+    It is not inline in the router, so every clause is observable without a database. Inline,
+    tests would assert on `is_approver` and call that the control: a predicate wired to nothing.
 
     Requires:
         - from_status / to_status are status strings; actor is the caller-declared
           "persona + session id" string, or None
-        - account_email is the email on the caller's VALIDATED access token, or None
+        - account_email is the email on the caller's validated access token, or None
           when the caller authenticated by API key (which carries no account)
-        - closer_is_manager is the ROUTER's answer to "is this caller a manager
-          seat?", resolved once from the server-side manager check (row adaf7698).
-          It is never a value the caller typed
+        - closer_is_manager is the router's answer to "is this caller a manager seat?",
+          resolved once from the server-side manager check. It is never a value the
+          caller typed
 
     Ensures:
         - returns None for 'not_approved' -> 'done' when closer_is_manager: a manager
-          may CLOSE a held row (Rick, 2026-09-10). Won't-fix, promote, demote, un-park
-          and 'parked' -> 'done' are untouched by it
+          may close a held row. Won't-fix, promote, demote, un-park and 'parked' -> 'done'
+          are untouched by it
         - a refused '->done' says what to do instead: a held row names that a manager
           may close it, a parked row names the park and says to ask Rick
-        - returns None when the transition is none of the three approver-only moves:
-          an admission out of the holding area, a won't-fix close, or a demote back
-          into the holding area (the not_approved -> not_approved no-op is neither an
-          admission nor a demote, and is left to the legal-edge graph to refuse)
-        - returns None when enforcement is off — the config is read at CALL time, so
+        - returns None when the transition is none of the four approver-only moves:
+          an admission out of the holding area, a won't-fix close, a demote back
+          into the holding area, or an un-park (the not_approved -> not_approved no-op is
+          neither an admission nor a demote, and is left to the legal-edge graph to refuse)
+        - returns None when enforcement is off — the config is read at call time, so
           an operator's edit lands on the next request rather than the next deploy
-        - returns None when the AUTHENTICATED ACCOUNT maps to a current approver —
-          the browser's door, and the ONLY approver door on this path
-        - ⚠️ `actor` buys NO approver authority here. It is named in the refusal for
-          legibility, never consulted for permission. An
-          `if is_approver( actor ): return None` clause DID stand here and was removed
-          2026-09-07 (María's ruling ~22:03) — see the long "do not restore this check"
-          comment below, which measures what it allowed. This bullet replaces one that
-          promised the opposite and outlived the behaviour by four days
+        - returns None when the authenticated account maps to a current approver —
+          the browser's door, and the only approver door on this path
+        - `actor` buys no approver authority here. It is named in the refusal for
+          legibility, never consulted for permission. The old `if is_approver( actor )`
+          clause made a caller-declared string the authorization, so a caller holding the
+          shared fleet API key could act as an approver by typing a name. The comment
+          below explains why that check does not come back
         - otherwise returns a non-empty detail string naming the actor, the account it
-          was authenticated as, the current allowlist, and BOTH ways to change each —
+          was authenticated as, the current allowlist, and both ways to change each —
           a refusal that does not say how to proceed is a dead end wearing a 403
         - never raises
     """
@@ -999,13 +932,13 @@ def get_admission_window_seconds():
     """
     How long a non-exempt approver must wait between admissions. 0 disables the rule.
 
-    Read at CALL time, like every other key here, so an operator's edit lands on the next
+    Read at call time, like every other key here, so an operator's edit lands on the next
     request rather than the next deploy.
 
     Ensures:
         - returns a non-negative int; 0 means the rule is off
         - a negative or unparseable value reads as 0 rather than raising, because a
-          malformed throttle must fail OPEN for the same reason the flags above do
+          malformed throttle must fail open for the same reason the flags above do
         - never raises
     """
     raw = _ini_value( INI_KEY_ADMISSION_WINDOW, "int", FALLBACK_ADMISSION_WINDOW_SECONDS )
@@ -1020,22 +953,20 @@ def refusal_for_batch( actor, account_persona, recent_admissions ):
     """
     The batch rule's whole decision, as a pure function: the refusal detail, or None.
 
-    Pure and separate from the count for the same reason `refusal_for_admission` is
-    separate from the router: every clause is observable without standing up a database,
-    so the tests that matter cannot degrade into asserting on a predicate that is wired
-    to nothing.
+    Pure and separate from the count, so every clause is testable without a database.
+    Tests then assert on the decision itself, not on a predicate wired to nothing.
 
     Requires:
         - actor is the caller-declared actor string
-        - account_persona is the approver persona the caller's LOGIN ACCOUNT resolved to,
+        - account_persona is the approver persona the caller's login account resolved to,
           or None
         - recent_admissions is how many rows this caller has already admitted inside the
           window (0 when the rule is off, or when nothing was counted)
 
     Ensures:
         - returns None when the window is 0 (rule off)
-        - returns None when the caller is ask-exempt — Rick may batch; the ruling is that
-          MANAGERS may not, and batch approve is HIS control
+        - returns None when the caller is ask-exempt — Rick may batch; managers
+          may not, and batch approve is the operator's control
         - returns None when recent_admissions is 0 — the first ticket always passes, which
           is what "one ticket at a time" means
         - otherwise a non-empty detail naming the count, the window, and the dial, so a
@@ -1081,43 +1012,19 @@ def default_mint_status():
     """
     The status a create mints when the caller did not ask for one.
 
-    WHY A FUNCTION AND NOT A FIELD DEFAULT. A Pydantic `Field( default=... )` is
-    evaluated at import, so the flag would be frozen at boot and an operator's flip
-    would need a restart — the exact asymmetry Rick objected to in the ratio gate,
-    where the dials he could turn were the ones that changed nothing. Read at CALL
-    time, a flip lands on the next request.
+    It is a function, not a `Field( default=... )`. A Pydantic default is evaluated at import,
+    so the flag would freeze at boot and a flip would need a restart. Read at call time, a
+    flip lands on the next request.
 
     Ensures:
-        - returns "not_approved" when the holding-area default is ON
+        - returns "not_approved" when the holding-area default is on
         - otherwise returns "queued" — today's behaviour, unchanged
-        - a STRING is PARSED, never coerced
-        - an UNPARSEABLE value is REPORTED and falls through rather than deciding
+        - a string is parsed, never coerced
+        - an unparseable value is reported and falls through rather than deciding
         - never raises
-
-    🔴 THIS WAS THE LIVE `bool( "false" )` DEFECT IN THIS MODULE, AND IT WAS NOT THE
-    ONE EVERYBODY WAS LOOKING AT. The override branch read `on = bool( raw )`, and
-    `bool( "false" )` is True — so an operator who hand-wrote
-    `"default_to_holding": "false"` turned the holding-area default ON, the switch
-    doing the opposite of what its own file said.
-
-    MEASURED 2026-09-08 against the shipped reader, the override store pointed at a temp
-    file, cache forced to re-read, WITH a positive control proving the injection moved
-    the answer at all (True -> not_approved, False -> queued):
-
-        'false' -> not_approved        'no' -> not_approved
-          'off' -> not_approved         '0' -> not_approved
-
-    ⚠️ AND MY FIRST PROBE OF THIS MEASURED NOTHING. It injected into `_cache` with a
-    fabricated mtime; the live file exists, so `_read_overrides` re-read from disk and
-    discarded the injection every time. Every row came back identical — which reads as
-    "the defect is everywhere" and actually meant the fixture had no effect. A uniform
-    column is the tell, and the positive control above is why the second probe counts.
-
-    ⚠️ THE FILE'S OWN PROSE POINTED AT THE WRONG FUNCTION WHILE THIS SAT HERE.
-    `get_manager_pull_disabled`'s docstring said the defect was "live TODAY in
-    `get_enforcement_active` directly above" — true when written, fixed by `e98659d2`,
-    never re-aimed. A reader following it landed on correct code 140 lines from the
-    real one. Both notes are corrected in the same commit as this fix.
+        - "false", "no", "off" and "0" in the stored override all read as off:
+          `bool( "false" )` is True, so coercion would turn the holding-area default on
+          while the stored value said off
     """
     on = _as_bool_or_none( _read_overrides()[ "default_to_holding" ],
                            STORE_LABEL )
@@ -1197,46 +1104,7 @@ FALSE_WORDS = ( "false", "0", "no",  "off" )
 
 def _as_bool_or_none( raw, where ):
     """
-    Parse one configured boolean STRICTLY: True, False, or None for "says nothing".
-
-    🔴 WHY AN UNRECOGNIZED VALUE IS `None` AND NOT `False`. This replaces a tail that
-    ended `return bool( raw )` with a membership test above it, and BOTH of those fail
-    OPEN on junk: `"banana"`, `""`, `0`, `[]` and `{}` were every one of them read as
-    False -- i.e. "pulling is allowed". Measured 2026-09-07 against the shipped reader,
-    all five opened the gate. So a hand-edited override file with a typo in the VALUE
-    silently restored the capability Rick rescinded, which is the missing-INI-key defect
-    of row 1ec67228 one layer further in.
-
-    ⚠️ AND IT IS THE MIRROR OF THE `bool( "false" )` TRAP ALREADY NAMED IN
-    `get_manager_pull_disabled`. That one is a string the reader understands BACKWARDS;
-    this is a string it does not understand AT ALL. Fixing the first and leaving the
-    second is how the hole survived -- an unrecognized word fell through the `in (...)`
-    test and came out False, which is indistinguishable from a deliberate "off".
-
-    ⇒ A value nobody can parse is not a decision. Returning None hands the question to
-    the next layer down, ending at that setting's own fallback.
-
-    ⚠️ AND THE FALLBACK IS NOT ONE VALUE ANY MORE, WHICH THIS NOTE USED TO ASSUME.
-    Written for the pull toggle alone, it said the fall-through ends at
-    `FALLBACK_MANAGER_PULL_DISABLED`, "which is closed". Since 2026-09-08 this parser
-    serves THREE keys and their fallbacks point opposite ways:
-
-        FALLBACK_MANAGER_PULL_DISABLED   True    fails CLOSED  (Rick's rescission)
-        FALLBACK_ENFORCEMENT_ACTIVE      False   fails OPEN    (deliberate)
-        FALLBACK_DEFAULT_TO_HOLDING      False   fails OPEN
-
-    ⇒ So "returning None is the safe direction" is TRUE OF THE PULL KEY and is not a
-    property of this function. For the other two, an unparseable value falls through to
-    a gate that is OFF. That is the pre-existing policy for those settings, not a
-    regression introduced here — but a reader must not carry the pull key's reassurance
-    across to them. The corrected sentence is the general one: this parser DECLINES to
-    decide, and what happens next is the caller's fallback, which each caller states.
-
-    ⚠️ STRICT ABOUT NON-STRINGS TOO, including a bare JSON `0` or `1`. An operator who
-    means false and writes `0` gets the toggle left CLOSED and a printed line telling
-    them why -- the safe direction, and a loud one. The validated write path
-    (`set_manager_pull_disabled`) refuses anything but a real bool, so nothing this
-    codebase writes can ever arrive here as a number.
+    Parse one configured boolean strictly: True, False, or None for "says nothing".
 
     Requires:
         - `where` names the source, for the operator who has to go and fix it
@@ -1244,11 +1112,25 @@ def _as_bool_or_none( raw, where ):
     Ensures:
         - returns True / False for a real bool, or for one of TRUE_WORDS / FALSE_WORDS
           (case- and whitespace-insensitive)
-        - returns None for absent, and for ANY other value -- including a truthy one
-        - REPORTS an unparseable value on stdout, the same courtesy a corrupt override
-          file already gets. A setting that is ignored in silence is how an operator
-          concludes the switch itself is broken
+        - returns None for absent, and for any other value -- including a truthy one
+        - reports an unparseable value on stdout. A setting that is ignored in silence is
+          how an operator concludes the switch itself is broken
         - never raises
+        - an unrecognized value is None and never False: both `return bool( raw )` and a
+          membership-test tail fail open on junk (`"banana"`, `""`, `0`, `[]` and `{}` all
+          read as False, meaning pulling is allowed), so a typo in a hand-edited value
+          would restore a capability the owner rescinded
+        - it mirrors the `bool( "false" )` problem named in `get_manager_pull_disabled`: that
+          one is a string read backwards, this one a string not understood at all
+        - None means "decline to decide": the question falls to the next layer and ends at
+          the setting's own fallback. Fallbacks point opposite ways:
+          FALLBACK_MANAGER_PULL_DISABLED is True (fails closed) while
+          FALLBACK_ENFORCEMENT_ACTIVE, FALLBACK_DEFAULT_TO_HOLDING and
+          FALLBACK_SWORD_OF_DAMOCLES_ACTIVE are False (fail open), so None is the safe
+          direction for the pull key only
+        - non-strings are strict too, including a bare JSON `0` or `1`: the toggle is left
+          closed and a printed line says why. The validated write path refuses anything but
+          a real bool, so nothing this codebase writes arrives here as a number
     """
     if raw is None:             return None
     if isinstance( raw, bool ): return raw
@@ -1266,35 +1148,23 @@ def _as_bool_or_none( raw, where ):
 
 def get_manager_pull_disabled():
     """
-    Whether pulling work into `in_progress` is currently switched OFF.
+    Whether pulling work into `in_progress` is currently switched off.
 
     Ensures:
         - returns a bool
         - the stored override wins over the INI key, and is re-read after CACHE_TTL_SECONDS,
-          so an operator's flip lands on the NEXT REQUEST rather than the next deploy
-        - FALLBACK IS True — an absent or broken config fails CLOSED, by the
-          operator's ruling of 2026-09-07 (row 1ec67228). See the constant.
-        - a STRING in the stored override is parsed, never coerced: "false" / "no" / "0"
+          so an operator's flip lands on the next request rather than the next deploy
+        - the fallback is True — an absent or broken config fails closed, as the
+          operator ruled. See `FALLBACK_MANAGER_PULL_DISABLED`.
+        - a string in the stored override is parsed, never coerced: "false" / "no" / "0"
           / "off" all mean False
         - never raises
 
-    🔴 WHY THE STRING CASE IS HANDLED RATHER THAN `bool( raw )`. `bool( "false" )` is
-    True, so a hand-written `"manager_pull_disabled": "false"` would turn the toggle ON
-    while the operator believed they had turned it off — the switch doing the opposite
-    of what its own file says.
-
-    ⚠️ THIS PARAGRAPH USED TO NAME `get_enforcement_active` AS CARRYING THAT DEFECT
-    "TODAY". That was true when written and stopped being true at `e98659d2`, and the
-    sentence was never re-aimed — so for two days it sent a reader to correct code
-    while the REAL live instance sat 140 lines further down in `default_mint_status`,
-    unmentioned. Both are on `_as_bool_or_none` as of 2026-09-08.
-
-    ⇒ The durable lesson is not about this key: a prose pointer at a defect goes stale
-    the moment somebody fixes it, and nothing reddens when it does. That is why the
-    guard for this is now a PREDICATE over the module's own syntax
-    (`test_one_boolean_parser_for_every_surface.py`) rather than a sentence naming
-    today's offenders — a fifth surface written next month trips it; a paragraph
-    listing four names would not.
+    The string case is handled because `bool( "false" )` is True, so a hand-written
+    `"manager_pull_disabled": "false"` would turn the toggle on while the operator believed
+    it was off. All boolean surfaces share `_as_bool_or_none`; the guard
+    (`test_one_boolean_parser_for_every_surface.py`) is a predicate over the module's own
+    syntax, so a new surface trips it where a list of today's readers would not.
     """
     value = _as_bool_or_none( _read_overrides()[ "manager_pull_disabled" ],
                               STORE_LABEL )
@@ -1309,44 +1179,29 @@ def get_manager_pull_disabled():
 
 def actor_is_claiming_their_own_row( actor, item_owner, item_manager ):
     """
-    Whether this pull is a worker picking up work ALREADY ASSIGNED TO THEM.
+    Whether this pull is a worker picking up work already assigned to them.
 
-    🔨 MARÍA 🌸 RULED THIS, 2026-09-07 ~22:02 EDT, and the trigger was the gate refusing
-    her own instruction: she told Sam to move row 1ec67228 into `in_progress` and the
-    store answered 409, because a worker is not an approver and EVERY transition into
-    `in_progress` is a "pull". Rick's order is about a manager PULLING NEW WORK out of
-    the holding area onto the board. A worker starting the row a manager already handed
-    them is a different act, and the toggle could not tell them apart.
-
-    HER RULE, both halves required — she was explicit that the second is not decorative:
-        - the actor IS the row's owner, AND
-        - the row's accountable manager is SOMEBODY ELSE
-
-    🔴 WHY THE SECOND HALF MATTERS. Without it a manager who owns a row is exempt from
-    the switch on that row, which is precisely the self-assignment Rick rescinded — the
-    exemption would let anyone create work for themselves and then start it. Requiring
-    a DIFFERENT manager means somebody else put the row on this actor's board, which is
-    the whole thing the toggle exists to guarantee.
-
-    ⚠️ THIS IS A POLICY CONTROL, NOT A BOUNDARY, AND FOR THE SAME REASON AS EVERYTHING
-    ELSE KEYED ON `actor` IN THIS MODULE: the actor is caller-DECLARED. A caller who
-    types the owner's name claims the exemption. It stops a worker taking someone
-    else's row by habit; it does not stop one who decides to. Rick has ruled the actor
-    door closed for admit / won't-fix / demote (row b8205986); when that lands, this
-    clause should be brought onto whatever identity those three end up using rather
-    than left behind on the weak one.
+    A manager pulling new work out of the holding area is one act. A worker starting a row
+    a manager already handed them is another, and the toggle alone cannot tell them apart.
 
     Requires:
         - actor is the caller-declared "persona + session id" string, or None
         - item_owner / item_manager are persona strings off the row, or None
 
     Ensures:
-        - returns False unless BOTH halves hold — an unowned row, an unmanaged row, a
+        - returns False unless both halves hold: the actor is the row's owner and the
+          row's accountable manager is somebody else — an unowned row, an unmanaged row, a
           row whose owner and manager are the same persona, and a caller who is not the
           owner all get False
-        - matches on the CANONICAL persona key, so "María 🌸 611e3c47" and "maria" are
+        - matches on the canonical persona key, so "María 🌸 session3" and "maria" are
           the same person, exactly as `is_approver` does it
         - never raises
+        - the second half is required: without it a manager who owns a row would be exempt
+          from the switch on that row, which is the self-assignment the owner rescinded.
+          Requiring a different manager means somebody else put the row on this actor's board
+        - the actor is caller-declared, so a caller who types the owner's name claims the
+          exemption. This is a policy control, not a boundary: it stops a worker taking
+          someone else's row by habit, not one who decides to
     """
     if not isinstance( actor, str )        or not actor.strip():        return False
     if not isinstance( item_owner, str )   or not item_owner.strip():   return False
@@ -1369,34 +1224,32 @@ def refusal_for_pull( from_status, to_status, actor, account_email=None,
     """
     The pull toggle's whole decision, as a pure function: the refusal detail, or None.
 
-    Pulled out of the router for the reason `refusal_for_admission` was: inline, the
-    only way to watch it refuse is to stand up a database and drive a PATCH, so the
-    cheap tests would have had to assert on the flag getter instead and call THAT the
-    control — the fixture-that-cannot-discriminate shape. Here every clause is
-    observable directly and the router test only has to prove the call happens.
+    It is separate from the router so every clause is observable directly. Inline, tests
+    would assert on the flag getter and call that the control; now the router test only
+    has to prove the call happens.
 
     Requires:
         - from_status / to_status are status strings; actor is the caller-declared
           "persona + session id" string, or None
-        - account_email is the email on the caller's VALIDATED access token, or None
+        - account_email is the email on the caller's validated access token, or None
 
     Ensures:
-        - returns None when the transition is not INTO `in_progress` — this gate has
+        - returns None when the transition is not into `in_progress` — this gate has
           one edge and takes no interest in any other
         - returns None for the `in_progress -> in_progress` no-op, so a re-PATCH of a
           row already being worked is never refused by a switch flipped after it started
-        - returns None when the toggle is off — read at CALL time
-        - returns None for an APPROVER only by AUTHENTICATED ACCOUNT. The caller-declared
-          `actor` buys no APPROVER authority on this path — it is named in the refusal for
+        - returns None when the toggle is off — read at call time
+        - returns None for an approver only by authenticated account. The caller-declared
+          `actor` buys no approver authority on this path — it is named in the refusal for
           legibility and recorded in the ledger, never consulted for approver permission
-        - ⚠️ but `actor` IS still consulted, below, by the SELF-CLAIM carve-out: a caller
-          claiming their OWN row with a non-blank `reason` is permitted on a typed name
-          alone. That is Rick's "permitted with a receipt" and it is deliberate. So this
-          gate is shut to a typed name claiming to be an APPROVER and open to a typed name
-          claiming to be the row's OWNER — do not read the clause above as "no typed name
-          ever passes here", because that is not what the code does
+        - but `actor` is still consulted, below, by the self-claim carve-out: a caller
+          claiming their own row with a non-blank `reason` is permitted on a typed name
+          alone, which is the owner's term "permitted with a receipt". So this gate is
+          shut to a typed name claiming to be an approver and open to a typed name
+          claiming to be the row's owner. Read the clause above as narrower than "no typed
+          name ever passes here", because that is not what the code does
         - otherwise returns a non-empty detail naming the toggle, the edge it refused,
-          and BOTH ways to turn it back on — a refusal that does not say how to proceed
+          and both ways to turn it back on — a refusal that does not say how to proceed
           is a dead end wearing a 403
         - never raises
     """
@@ -1604,7 +1457,7 @@ def get_sword_of_damocles_active():
     Ensures:
         - returns a bool
         - the stored override wins over the INI key, so Rick's flip lands on the next request
-        - strings are PARSED by `_as_bool_or_none`, never coerced; junk falls through
+        - strings are parsed by `_as_bool_or_none`, never coerced; junk falls through
         - FALLBACK is False (fails open) — see the constant
         - never raises
     """
@@ -1641,12 +1494,11 @@ _BOOLEAN_KEYS = ( "enforcement_active", "default_to_holding", "manager_pull_disa
 
 def _validated_bool( key, raw ):
     """
-    Return `raw` unchanged if it is a REAL bool, else raise ValueError naming the key.
+    Return `raw` unchanged if it is a real bool, else raise ValueError naming the key.
 
-    🔴 A STRING IS REFUSED, NEVER COERCED, AND "false" IS THE WHOLE REASON.
-    `bool( "false" )` is True, so coercing here would switch a gate ON while the caller
-    believed they had turned it off. The READER parses strings, for the operator who
-    hand-edits; nothing should ever ARRIVE at the writer as one.
+    A string is refused, never coerced. `bool( "false" )` is True, so coercing it would switch
+    a gate on while the caller believed they had turned it off. The reader parses strings
+    for the operator who hand-edits, and nothing should arrive at the writer as one.
 
     Requires:
         - key names the setting, for the caller who has to fix their request
@@ -1672,8 +1524,8 @@ def _validated_approvers( raw ):
     Ensures:
         - raises ValueError unless raw is a list of non-blank strings
         - returns each entry stripped
-        - does NOT canonicalize — `get_approvers` does that on read, and storing a
-          canonicalized form would make the file disagree with what the operator sent,
+        - does not canonicalize — `get_approvers` does that on read, and storing a
+          canonicalized form would make the stored value disagree with what the operator sent,
           which is how an operator concludes their own edit did not take
     """
     if not isinstance( raw, list ):
@@ -1731,10 +1583,10 @@ def _write_overrides( updates, updated_by ):
     Persist `updates` to the store, atomically, and drop the cached read.
 
     Requires:
-        - updates is a non-empty dict whose values are ALREADY validated
+        - updates is a non-empty dict whose values are already validated
 
     Ensures:
-        - the other keys are PRESERVED — this is a PATCH, not a replace
+        - the other keys are preserved — this is a PATCH, not a replace
         - the write is one transaction, so a reader sees the old rows or the new ones
         - the cache is invalidated, so the very next read in this process sees the write
         - a failure to reach the store raises OSError, which is what the router already
@@ -1753,11 +1605,11 @@ def current_settings():
 
     Ensures:
         - returns { key: { "value": <live value>, "source": "override"|"config" } }
-        - the VALUE is read through the PUBLIC reader, so it is what the gate will
-          actually use — not the raw file contents. A settings endpoint that echoes the
-          file rather than the effective value is how an operator comes to believe a
+        - the value is read through the public reader, so it is what the gate will
+          actually use — not the raw stored rows. A settings endpoint that echoes the
+          stored rows rather than the effective value is how an operator comes to believe a
           setting is in force while a fallback is overruling it
-        - the SOURCE is included for the reason the ratio endpoint includes its own: a
+        - the source is included for the reason the ratio endpoint includes its own: a
           value alone cannot tell an operator whether the INI is in force or is being
           masked by a saved override, which is the one confusion a two-layer scheme
           reliably creates
@@ -1767,19 +1619,13 @@ def current_settings():
 
     def _source( key ):
         """
-        Which LAYER the effective value actually came from.
+        Which layer the effective value actually came from.
 
-        🔴 PRESENCE IS NOT PROVENANCE, AND MY FIRST VERSION OF THIS CONFLATED THEM. It
-        read `overrides.get( key ) is not None`, which reports "override" for a key
-        that is PRESENT — including one holding a value the reader cannot parse. An
-        unparseable override falls through to the config layer, so that version said
-        "override" about a value the override did not produce. Caught by
-        `test_current_settings_reports_the_EFFECTIVE_value_not_the_FILE`, whose whole
-        subject is that this endpoint must not describe the file.
-
-        ⇒ For a boolean, the question is not "is a key there" but "did it PARSE" — the
-        same distinction `_as_bool_or_none` exists to make. A value nobody can parse is
-        not a decision, so it is not a source either.
+        Presence is not provenance. A key can be present and hold a value the reader cannot
+        parse, and an unparseable override falls through to the config layer. Reporting
+        "override" for it would name a layer that did not produce the value. For a boolean
+        the question is whether the value parsed, which `_as_bool_or_none` exists to answer.
+        A value nobody can parse is not a decision, so it is not a source either.
         """
         raw = overrides.get( key )
         if raw is None: return "config"
@@ -1805,30 +1651,25 @@ def current_settings():
 
 def set_overrides( updated_by=None, **updates ):
     """
-    Persist one or more approval settings through the ONE validated door.
+    Persist one or more approval settings through the one validated door.
 
-    🔴 FOUR OF THE FIVE KEYS IN THIS FILE HAD NO WRITER AT ALL BEFORE THIS. Measured at
-    `2da8896f` with a fixed-string sweep and working positive controls:
-    `manager_pull_disabled` had `set_manager_pull_disabled` and an HTTP door;
-    `enforcement_active`, `approvers`, `approver_accounts` and `default_to_holding` had
-    neither — so hand-editing was the only way in, and it had no validation whatsoever.
-    That is the "guard on the door nobody could open" shape, four times over.
+    Validation for every key lives here, so a bad value is refused before anything is stored.
 
     Requires:
         - every keyword names a key in WRITABLE_KEYS
-        - each value satisfies that key's validator (booleans must be REAL booleans)
+        - each value satisfies that key's validator (booleans must be real booleans)
         - updated_by is the login account the door resolved from a signature-checked token
           (or None); it is recorded beside each written row and never used to decide anything
 
     Ensures:
         - raises ValueError on an unknown key or a bad value, naming the offender
-        - writes NOTHING when any key is bad — validation completes for EVERY key
+        - writes nothing when any key is bad — validation completes for every key
           before the store is touched, so a two-key call cannot half-apply and leave the
           gate in a state the caller never asked for and cannot see
-        - unrelated keys already stored are PRESERVED
+        - unrelated keys already stored are preserved
         - the write is atomic and the read cache is invalidated
-        - returns the live settings READ BACK after the write, never the values asked
-          for, so a caller reports what TOOK EFFECT rather than what it requested
+        - returns the live settings read back after the write, never the values asked
+          for, so a caller reports what took effect rather than what it requested
     """
     if not updates:
         raise ValueError( "set_overrides needs at least one setting to write." )
@@ -1850,39 +1691,31 @@ def set_manager_pull_disabled( disabled, updated_by=None ):
     """
     Persist the pull toggle, atomically, and return the live value after the write.
 
-    🔴 THIS MODULE HAD NO WRITER AT ALL UNTIL NOW, AND THAT IS THE DEFECT THIS CLOSES.
-    Hand-editing the old override file was the ONLY way to flip anything here — which is
-    exactly the "guard on the door nobody could open" shape: `bool( "false" )` could
-    turn a switch on through the only reachable door, while the validated path existed
-    for a request nobody could send. A validated write path is what makes the flag a
-    control rather than a file.
+    A validated write path makes the flag a control rather than a file: with a hand edit,
+    `bool( "false" )` could turn a switch on.
 
     Requires:
-        - disabled is a REAL bool. A string is refused, not coerced — the reader parses
-          strings for the operator who hand-edits, but nothing should ARRIVE as one.
+        - disabled is a real bool. A string is refused, not coerced — the reader parses
+          strings for the operator who hand-edits, but nothing should arrive as one.
 
     Ensures:
         - raises ValueError on any non-bool, naming what it got
-        - the other stored keys are PRESERVED — this is a PATCH of one
+        - the other stored keys are preserved — this is a PATCH of one
           key, not a replace. Clobbering `approvers` while flipping a toggle would take
           the approval gate down as a side effect of an unrelated switch
-        - the write is ATOMIC (temp + os.replace), so a concurrent reader sees the old
-          file or the new one, never a half-written one
-        - the in-process cache is invalidated, so the very next read re-parses. Without
-          this a write-then-read inside one second can return the OLD value: mtime has
-          one-second granularity, the same whole-second trap that defeats .pyc
-          invalidation elsewhere in this repo
+        - the write is atomic (one database transaction), so a concurrent reader sees the
+          old row or the new one, never a half-written one
+        - the in-process cache is invalidated, so the very next read goes back to the
+          store. Without this, a read right after the write could return the old cached
+          value for up to CACHE_TTL_SECONDS
         - returns the value actually in force after the write, read back through
           `get_manager_pull_disabled()` rather than echoed from the argument, so a
-          caller reports what TOOK EFFECT rather than what it asked for
+          caller reports what took effect rather than what it asked for
 
-    ⚠️ THE BODY NOW DELEGATES, AND THE CONTRACT IS UNCHANGED. Validation, the
-    read-modify-write, the atomic replace and the cache invalidation all moved to
-    `_validated_bool` / `_write_overrides` when `set_overrides` was added
-    (2026-09-08) — four keys needed the identical machinery, and a second copy of it is
-    two things to keep in step. This function survives as the NAMED door for the one
-    key that already had callers and tests; those tests are the regression check that
-    the move changed nothing.
+    The body delegates to `_validated_bool` and `_write_overrides`, which `set_overrides`
+    shares, because four keys need the identical machinery and a second copy is two things
+    to keep in step. This function stays as the named door for the one key that already had
+    callers and tests.
     """
     _validated_bool( "manager_pull_disabled", disabled )
     _write_overrides( { "manager_pull_disabled": disabled }, updated_by )
@@ -1915,28 +1748,28 @@ def set_manager_pull_disabled( disabled, updated_by=None ):
 
 def refusal_for_live_mint( requested_status, status_was_explicit, priority, caller_is_operator ):
     """
-    Decide whether a create may mint a LIVE status, or must go to the holding area.
+    Decide whether a create may mint a live status, or must go to the holding area.
 
     Requires:
         - requested_status is a string naming the status the create would mint
-        - status_was_explicit is True iff the caller NAMED `status` on the payload
+        - status_was_explicit is True iff the caller named `status` on the payload
           (the router reads pydantic's `model_fields_set`; an omitted field and an
           explicit "queued" are the same string and only this flag separates them)
         - priority is the create's priority string
         - caller_is_operator is True iff the router proved the caller is Rick from a
-          VALIDATED account (`task_priority_firewall.caller_is_operator`), never
+          validated account (`task_priority_firewall.caller_is_operator`), never
           from a caller-declared string
 
     Ensures:
-        - returns None when the mint is ALLOWED
+        - returns None when the mint is allowed
         - returns a non-empty refusal string when it is not, naming the row's own
           way forward (omit `status`, or carry a P0 Rick set)
-        - returns None whenever the holding-area default is OFF — there is no
+        - returns None whenever the holding-area default is off — there is no
           holding area to bypass on such a deployment, and refusing there would
           break callers who never had a gate
         - returns None for an explicit mint of the holding status itself: asking
           to go where the gate would send you is not a bypass
-        - returns None for the operator: his create IS the approval
+        - returns None for the operator: the operator's create is the approval
         - never raises; an unreadable config leaves the door as it is today
     """
     if not status_was_explicit:                      return None

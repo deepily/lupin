@@ -1,26 +1,18 @@
 """
-Managed-bounce broadcasts for the `:7999` dev server (R4 + R5).
+Managed-bounce broadcasts for the `:7999` dev server: the all-clear and the warning.
 
-Design of record: `src/rnd/v0.1.9/2026.08.01-managed-bounce-review-tiffany.md`
-(Tiffany 💍) + `2026.08.01-managed-bounce-for-7999.md` Rev 2 (María 🌸).
+Two fleet-facing signals ride the server's own process edges so no bounce path can skip them.
+The all-clear is emitted from the FastAPI lifespan startup hook. It fires on every start
+(script, hand-typed `docker restart`, `compose up`, crash-restart, host reboot). The
+just-started server is the one process certain to be alive when "I am up" must be spoken.
+The warning is emitted two ways. A best-effort SIGTERM handler backs up un-sanctioned bounce
+paths, and sometimes loses the race to SIGKILL. The host-side bounce script sends an
+ack-confirmed warning before it restarts, which is the sanctioned path.
 
-Two fleet-facing signals ride the server's own process edges so no bounce
-path can skip them:
-
-  · **All-clear (R5)** — emitted from the FastAPI lifespan STARTUP hook. Fires
-    on EVERY start (script, hand-typed `docker restart`, `compose up`,
-    crash-restart, host reboot), because the just-started server is the one
-    process guaranteed alive at the moment "I am up" must be spoken.
-  · **Warning (R4)** — emitted two ways: (a) best-effort from a SIGTERM handler
-    (backstop for un-sanctioned bounce paths; loses the race to SIGKILL
-    sometimes — see the handler's own comment), and (b) ack-CONFIRMED by the
-    host-side bounce script before it restarts (the sanctioned path).
-
-This module holds the PURE / INJECTABLE logic (message text, boot counter, the
-in-process emit wrapper, and the host-side ack-poll) so all of it unit-tests to
-100% with no live server, no real clock, and no real filesystem waits. The wiring
-that binds it to live singletons lives in `main.py` (all-clear + SIGTERM) and in
-`src/scripts/bounce_dev_warn.py` (the script's ack-confirmed warning).
+This module holds the pure, injectable logic: message text, boot counter, the in-process emit
+wrapper and the host-side ack poll. It unit-tests to 100% with no live server, real clock or
+filesystem waits. The wiring to live singletons lives in `main.py` (all-clear and SIGTERM) and
+`src/scripts/bounce_dev_warn.py` (the ack-confirmed warning).
 """
 
 import sys
@@ -53,10 +45,10 @@ _DIRTY_BROADCAST_CAP = 12
 
 def format_dirty_clause( dirty_files, cap: int = _DIRTY_BROADCAST_CAP ) -> str:
     """
-    Fold a `git status --short` blob into ONE single-line clause naming the dirty
-    paths, so the warning broadcast can carry it to the seat that OWNS those files
-    (row 7de5a09f item 2 — the half of the remedy a TTY prompt can never reach an
-    agent with). Pure.
+    Fold `git status --short` output into one single-line clause naming the dirty paths.
+
+    The warning broadcast carries the clause to the seat that owns those files, which a TTY
+    prompt can never reach an agent with. Pure.
 
     Requires:
         - dirty_files is the raw `git status --short` output (multi-line str), or
@@ -64,9 +56,9 @@ def format_dirty_clause( dirty_files, cap: int = _DIRTY_BROADCAST_CAP ) -> str:
 
     Ensures:
         - returns "" when dirty_files is None / blank / whitespace-only (the
-          warning is then unchanged — a clean bounce carries no clause)
+          warning is then unchanged; a clean bounce carries no clause)
         - otherwise returns a leading-space clause with the status lines joined by
-          "; " (never a raw newline — the message stays single-line), at most `cap`
+          "; " (never a raw newline; the message stays single-line), at most `cap`
           named, the remainder summarised as "; …(+N more)"
         - never raises
     """
@@ -100,19 +92,17 @@ def build_bounce_message(
     Requires:
         - kind is "warning" or "all-clear"
         - for "all-clear", boot_id / boot_started / uptime_seconds are supplied
-          (they make the message SELF-DISTINGUISHING so a crash-loop reads as N
-          distinct all-clears, not one message people learn to ignore — María's
-          R5 delta, 2026-08-01)
+          (they make the message self-distinguishing, so a crash-loop reads as N
+          distinct all-clears, not one message people learn to ignore)
         - dirty_files (warning only) is the raw `git status --short` blob when the
           bouncer's tree is dirty, else None. It names the uncommitted files the
-          bounce will deploy so their OWNER can object during the ack window (row
-          7de5a09f) — the reach a non-interactive caller's skipped prompt cannot.
+          bounce will deploy so their owner can object during the ack window, which
+          a non-interactive caller's skipped prompt cannot reach.
           Ignored for "all-clear".
-        - reason (warning only) is a short phrase saying WHY this bounce is
-          happening, or None. Cheech, 2026-08-21, after three bounces in twenty
-          minutes: the broadcast names the files a bounce deploys but never why it
-          is happening, so a peer holding armed probes cannot tell a needed bounce
-          from a casual one and has to ask. Ignored for "all-clear".
+        - reason (warning only) is a short phrase saying why this bounce is
+          happening, or None. The broadcast names the files a bounce deploys but
+          never why, so a peer holding armed probes cannot tell, after reading it, a
+          needed bounce from a casual one and has to ask. Ignored for "all-clear".
 
     Ensures:
         - returns a non-empty single-line string with no system-reminder framing
@@ -155,21 +145,7 @@ def build_bounce_message(
 
 def boot_counter_path( project_root: Any, server_label: str = DEFAULT_SERVER_LABEL ) -> Path:
     """
-    The boot-counter file for ONE server, derived from that server's label.
-
-    Both containers bind-mount the same `io/` directory, so a single shared
-    counter interleaves their boots: three test-server starts between two dev
-    starts make the dev server look like it flapped five times, and the boot
-    number a watcher is told to expect for a specific bounce is simply wrong.
-    That defeats the counter's entire purpose, which is to make a crash-loop
-    read as N distinct all-clears rather than one line people learn to ignore.
-    Measured 2026-08-01: the shared counter read 3, and boot #3 was the TEST
-    server's — announced to nine sessions as a DEV bounce (bug 652271f3).
-
-    The label is reduced to its alphanumerics, so ":7999" and ":8000" become
-    `boot-counter-7999.txt` and `boot-counter-8000.txt`. A label with no
-    alphanumerics at all falls back to "default" rather than producing a
-    hidden or empty filename.
+    The boot-counter file for one server, derived from that server's label.
 
     Requires:
         - project_root is a path-like to the repository root
@@ -179,6 +155,13 @@ def boot_counter_path( project_root: Any, server_label: str = DEFAULT_SERVER_LAB
         - returns a Path under <project_root>/io/managed-bounce/
         - two different labels never resolve to the same file
         - the filename contains no path separators regardless of the label
+        - the label is reduced to its alphanumerics, so ":7999" and ":8000" become
+          `boot-counter-7999.txt` and `boot-counter-8000.txt`; a label with no
+          alphanumerics falls back to "default" rather than a hidden or empty filename
+        - each server gets its own file because both containers bind-mount the same `io/`
+          directory: a shared counter interleaves their boots, so a watcher is told the
+          wrong boot number for a bounce, and a test-server boot gets announced as a dev
+          bounce, which defeats the counter's purpose
     """
     slug = "".join( c if c in _LABEL_SAFE_CHARS else "-" for c in server_label ).strip( "-" )
     if not slug: slug = "default"
@@ -188,12 +171,11 @@ def boot_counter_path( project_root: Any, server_label: str = DEFAULT_SERVER_LAB
 
 def next_boot_id( counter_path: Any ) -> int:
     """
-    Read-increment-write a persistent boot counter, returning the NEW value.
+    Read, increment and write a persistent boot counter, returning the new value.
 
-    A crash-loop then emits all-clears numbered 41, 42, 43… — five in two minutes
-    read as a flap instead of five identical lines. Fail-SOFT: a missing,
-    unreadable, or garbage counter file restarts the count at 1 rather than
-    blocking the all-clear (the counter is a readability aid, never a gate).
+    A crash-loop then emits all-clears numbered 41, 42, 43 and so on. Five in two minutes read
+    as a flap instead of five identical lines. It fails soft: a bad counter file restarts the
+    count at 1 rather than blocking the all-clear. The counter is a readability aid, never a gate.
 
     Requires:
         - counter_path is a path-like to a small text file
@@ -240,24 +222,20 @@ def emit_bounce_broadcast_in_process(
     require_ack                      : bool            = True,
 ) -> Dict[ str, Any ]:
     """
-    Fire a fleet broadcast from INSIDE the server process, never raising.
+    Fire a fleet broadcast from inside the server process, never raising.
 
-    Used by the lifespan all-clear (R5) and the SIGTERM warning backstop (R4).
-    Wraps the router's pure-logic `execute_broadcast` with the live singletons.
-
-    Two failure modes get a LOUD stderr line, by design (María's R5 delta):
-      · rate-limit 429 — "getting 429'd is acceptable; getting 429'd QUIETLY is
-        not." A silently-eaten all-clear reopens the exact silence-means-nothing
-        hole this feature exists to close.
-      · any exception — this is best-effort edge code; it must degrade to a log,
-        never take down startup or block SIGTERM shutdown.
+    Used by the lifespan all-clear and the SIGTERM warning backstop. Wraps the router's
+    pure-logic `execute_broadcast` with the live singletons.
 
     Ensures:
         - returns None when commons is not wired (store / rate_limiter /
-          ack_watcher is None) — nothing to broadcast through; logs one line
+          ack_watcher is None); nothing to broadcast through, and it logs one line
         - returns the `execute_broadcast` result dict on the happy path, or
           `{"error": <str>}` if it threw
-        - never propagates an exception to the caller
+        - never propagates an exception to the caller: this is best-effort edge code, so it
+          degrades to a log line rather than take down startup or block SIGTERM shutdown
+        - a rate-limit 429 gets a loud stderr line, because a silently eaten all-clear
+          reopens the hole where silence means nothing
     """
     if store is None or rate_limiter is None or ack_watcher is None:
         print( f"[managed-bounce] WARN: {kind} broadcast skipped — commons not wired", file=sys.stderr )
@@ -307,14 +285,11 @@ def count_acked_sessions(
     status       : str = "completed",
 ) -> int:
     """
-    Count DISTINCT recipient sessions that acked `broadcast_id` with `status`.
+    Count distinct recipient sessions that acked `broadcast_id` with `status`.
 
-    Dedupes on `(broadcast_id, sender_session_id, status)` — the same key
-    `_dedupe_broadcast_acks_by_recipient` (`commons.py:640`) uses — because acks
-    duplicate: one recipient can write the identical ack 2-4× within
-    milliseconds (measured 2026-05-15, and again on `22f7a215` this morning). A
-    raw row count OVER-counts and lets the script restart before the warning has
-    actually reached everyone.
+    Dedupes on `(broadcast_id, sender_session_id, status)`, the key `_dedupe_broadcast_acks_by_recipient` uses.
+    One recipient can write the identical ack two to four times within milliseconds.
+    A raw count would let the script restart before the warning reached everyone.
 
     Requires:
         - entries is a list of parsed commons entries (CommonsStore.read shape)
@@ -340,18 +315,17 @@ def count_acked_sessions(
 
 def resolve_ack_timing( config_mgr, *, default_deadline, default_poll ):
     """
-    Read the warning ack deadline + poll interval from an already-built config.
+    Read the warning ack deadline and poll interval from an already-built config.
 
-    Pure given `config_mgr` (just two `.get` lookups), so it lives HERE where the
-    cov denominator measures it — per Rio's ruling that the resolve logic belongs
-    in the module, not in the src/scripts caller (which is outside source=["cosa"]).
-    The fail-soft boundary — BUILDING a ConfigurationManager can raise in a bare
-    host context — stays in the caller's try/except, which is the one genuinely
-    unmeasurable boundary guard.
+    Pure given `config_mgr` (just two `.get` lookups). It lives here so the coverage
+    denominator measures it, rather than in the src/scripts caller, which is outside the
+    measured source.
 
     Ensures:
         - returns (deadline_seconds, poll_interval_seconds) as floats, each the
           configured value or the supplied default when the key is absent
+        - building a ConfigurationManager can raise in a bare host context; that fail-soft
+          boundary stays in the caller's try/except
     """
     deadline = config_mgr.get( "managed bounce warning ack deadline seconds",      default=default_deadline, return_type="float" )
     poll     = config_mgr.get( "managed bounce warning ack poll interval seconds", default=default_poll,     return_type="float" )
@@ -405,35 +379,11 @@ _SHORT_ID_LEN = 8
 
 def socket_match_key( session_id : str ) -> str:
     """
-    Reduce a roster id OR a live-socket key to the SHORT id the two spaces share.
+    Reduce a roster id or a live-socket key to the short id the two spaces share.
 
-    🔴 THE TWO SIDES ARE NOT THE SAME STRINGS, and comparing them raw is a bug that
-    shipped and went unnoticed (found 2026-08-02):
-        roster entry   "0768c103-eb8d-459f-8e0e-0380fba88792"   (full session id,
-                        from the bridge filename)
-        live-socket key "cc-listener-0768c103"                  (the listener
-                        connects to /ws/queue/cc-listener-{short_id})
-    A raw `set(roster) - set(present)` therefore NEVER matches anything: every
-    roster entry reads as missing, on every bounce, no matter who actually came
-    back. That made the named-loss line a CONSTANT dressed as a measurement — it
-    printed the whole roster every time — and it would have made the roster
-    coverage gate unsatisfiable by construction, i.e. a fixed wait to the deadline.
-
-    Both sides reduce to `session_id[:8]`, which is the id the listener is spawned
-    with and the id the bridge filename starts with.
-
-    ⚠️ Browser sessions ("foolish goat") also pass through here and simply fail to
-    match any roster id, which is correct — they are not sessions we are waiting
-    for. A browser id whose first 8 characters happened to equal a real short id
-    would be a false match; short ids are hex, so this is not reachable in practice.
-
-    ⚠️ TWO SESSIONS SHARING THEIR FIRST 8 CHARACTERS WOULD COLLIDE, and one real
-    straggler would be marked covered (Arnold 🪨, review 2026-08-02). Eight is a
-    CEILING here, not a choice: the socket side literally carries no more than that
-    — the listener is spawned with `session_id[:8]` and connects as
-    `cc-listener-{short_id}`, so the extra characters do not exist to compare. The
-    collision therefore lives in how listeners are NAMED, upstream of this gate;
-    widening the match key cannot fix it and would only mask the mismatch again.
+    The two sides are different strings. A roster entry is a full session id from the bridge
+    filename. A live-socket key is `cc-listener-` plus the first 8 characters. Comparing them
+    raw never matches, so every roster entry would read as missing on every bounce.
 
     Requires:
         - session_id is a string
@@ -441,6 +391,13 @@ def socket_match_key( session_id : str ) -> str:
     Ensures:
         - returns the leading short id, with the listener prefix removed first
         - is idempotent: applying it to its own output returns the same value
+        - a raw set difference of roster against present would name the whole roster every
+          time and make the roster coverage gate unsatisfiable, a fixed wait to the deadline
+        - browser sessions fail to match any roster id, which is correct since nobody waits
+          for them; short ids are hex, so a browser id equal to a real short id is not reachable
+        - two sessions sharing their first 8 characters would collide and one straggler would
+          be marked covered; 8 is a ceiling because the socket side carries no more than that,
+          so widening the key cannot fix it and the collision lives in listener naming upstream
     """
     sid = session_id[ len( LISTENER_SID_PREFIX ): ] if session_id.startswith( LISTENER_SID_PREFIX ) else session_id
     return sid[ :_SHORT_ID_LEN ]
@@ -448,23 +405,18 @@ def socket_match_key( session_id : str ) -> str:
 
 def missed_sessions( expected_ids, present_ids ):
     """
-    Sessions expected back (the roster) that have NO live socket — i.e. who never
-    rejoined and therefore got no all-clear.
+    Sessions expected back (the roster) that have no live socket, so never rejoined.
 
-    Named so the delivery LOSS is legible, not a bare count (Rio's requirement).
-    The ROSTER is legitimately the bridge-file session list: bridge files survive a
-    bounce, so they answer "who do we expect back", which is exactly what they
-    cannot answer for "who is back NOW" (that is the live socket set).
-
-    Matching is by `socket_match_key`, NOT by raw string equality — see that
-    function for why raw comparison silently names everyone.
+    Naming them makes the delivery loss legible instead of a bare count. The roster is the
+    bridge-file session list. Bridge files survive a bounce, so they answer "who do we expect
+    back" but not "who is back now". Matching goes through `socket_match_key`, never raw equality.
 
     Requires:
         - expected_ids, present_ids are iterables of session-id strings
 
     Ensures:
-        - returns a sorted, de-duplicated list of the FULL expected ids that have
-          no matching live socket (full ids, because the point is to NAME them)
+        - returns a sorted, de-duplicated list of the full expected ids that have
+          no matching live socket (full ids, so each straggler can be named)
     """
     live = { socket_match_key( p ) for p in present_ids }
     return sorted( { e for e in expected_ids if socket_match_key( e ) not in live } )
@@ -483,72 +435,36 @@ def wait_for_roster_coverage(
     sleep_fn              : Callable[ [ float ], None ],
 ) -> Dict[ str, Any ]:
     """
-    Wait until live sockets COVER the expected roster, then fire — else fire at
-    the deadline.
+    Wait until live sockets cover the expected roster, then fire; else fire at the deadline.
 
-    This is the SOLE delivery path for a live all-clear: there is no durable
-    backstop. `perform_fanout` writes each `broadcasts` entry targeted at the
-    fire-time snapshot, so a straggler who rejoins after the fire has NO entry at
-    all — emitted-≠-heard one layer down. Re-fire/replay is barred (Rick's
-    do-not-implement on the durable-notify-path, 2026-07-28). So the fire must
-    wait until the fleet is actually back.
-
-    🔴 WHY COVERAGE AND NOT A PLATEAU (bug 784d4a2e, Rick's ruling 2026-08-02).
-    Two predicates have now failed here, both because they were FLOORS rather
-    than completion tests:
-      · v1 counted bridge FILES, which survive a bounce → always true → fired at
-        0.0s into sockets that were not back (all-clears 0 acks vs warnings 7).
-      · v2 counted live sockets and waited for a PLATEAU (N equal reads at or
-        above a minimum). Measured on two real bounces, same code:
-            boot #1  curve 0(x17)→7→7   plateau @ 9.0s   8 recipients   3 acks
-            boot #2  curve 0→1→1        plateau @ 1.0s   4 recipients   0 acks
-        Boot #2 is the defect: ONE socket back, two equal reads at the floor of
-        1, and the gate called reconnection settled while three of four targets
-        had no socket. Two equal reads at ANY value above the floor are
-        indistinguishable from two at the true final value — `0→1→1` is not a
-        plateau of reconnection, it is the BEGINNING of one sampled between two
-        arrivals. Boot #1 passed on luck: its batch happened to land all at once.
-
-    The roster answers the question a count cannot: WHO do we expect back. Bridge
-    files survive a bounce, which is exactly why they are useless for "who is back
-    NOW" and correct for "who was here before it". Roster minus live sockets = who
-    we would miss if we fired this instant; the gate holds while that set is
-    non-empty.
-
-    ⚠️ THE ROSTER IS NOW THE LIMITING FACTOR, and this is a KNOWN cost that was
-    put to Rick before he ruled, not a surprise: it is the bridge-file list on an
-    8-hour mtime window, so it can name a session that is gone for good and will
-    never come back. That session holds the gate to the full deadline. Accepted
-    deliberately — riding the window and NAMING the loss beats firing at 1.0s and
-    calling it settled. If this proves too coarse in practice, the better roster
-    is the WARNING phase's ack list (exactly the sessions that were live and heard
-    us), which would have to be carried across the restart in a file; that is a
-    named follow-up, not something this function should guess at.
-
-    Firing conditions:
-      · COVERAGE — every roster id has a live socket. A completion test: it cannot
-        be satisfied by a subset, at any fleet size.
-      · DEADLINE — `deadline_seconds` elapsed first. Accepted delivery LOSS: fire
-        anyway so the fleet that IS back hears it, and return `missing` so the
-        caller names them.
-
-    Fully injectable (`roster_fn`, `present_fn`, `now_fn`, `sleep_fn`) → 100%
-    testable with no real clock and no real sockets.
+    Fully injectable (`roster_fn`, `present_fn`, `now_fn`, `sleep_fn`), so it tests to 100%
+    with no real clock and no real sockets. Firing conditions: coverage (every roster id has a
+    live socket) or the deadline elapsing first (accepted delivery loss; `missing` names them).
 
     Requires:
         - roster_fn returns an iterable of expected session-id strings
-        - present_fn returns an iterable of live session-id strings in the SAME
-          id space as the roster (both are voice-persona session ids)
+        - present_fn returns an iterable of live session-id strings in the same
+          id space as the roster (both go through `socket_match_key`)
 
     Ensures:
         - returns {reason, count, missing, roster_size, elapsed, curve};
           `reason` is "coverage" or "deadline"
-        - `missing` is the roster-minus-live set AT THE FIRING OBSERVATION, so the
-          loss the caller reports is the one the gate actually decided on — not a
-          second, later read that would under-count it
+        - `missing` is the roster-minus-live set at the firing observation, so the
+          loss the caller reports is the one the gate decided on, not a later read
         - `curve` is the per-poll live-socket count series for the log
-        - polls at least once; an EMPTY roster is covered vacuously and fires on
+        - polls at least once; an empty roster is covered vacuously and fires on
           the first poll (nobody is expected, so nobody can be missed)
+        - this is the sole delivery path for a live all-clear: `perform_fanout` targets each
+          entry at the fire-time snapshot, so a straggler who rejoins after the fire gets no
+          entry, and re-fire or replay is barred; the fire must wait until the fleet is back
+        - coverage is a completion test, not a plateau of equal counts: a plateau cannot tell
+          two equal reads at the final value from two sampled between arrivals (0, 1, 1 is the
+          start of reconnection), and counting bridge files always reads true since they
+          survive a bounce
+        - the roster is the limiting factor: it is the bridge-file list on an 8-hour mtime
+          window, so it can name a session gone for good, which holds the gate to the full
+          deadline; this is accepted, and a better roster would be the warning phase's ack list
+          carried across the restart in a file
     """
     start = now_fn()
     curve : List[ int ] = [ ]

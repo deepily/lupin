@@ -40,7 +40,7 @@ def init_watchdogs(
         - DeadQueueWatchdog singleton is constructed via dead_queue_watchdog.init_watchdog
         - TestSuiteCompletionWatchdog singleton is constructed via
           test_suite_completion_watchdog.init_watchdog
-        - Failures in one watchdog do NOT prevent the other from initializing
+        - Failures in one watchdog do not prevent the other from initializing
         - A single summary line is logged showing the enabled state of both
 
     Args:
@@ -48,8 +48,8 @@ def init_watchdogs(
         todo_queue: TodoFifoQueue
         debug: Enable debug output for both watchdogs
         verbose: Enable verbose output (TFE only — BFE has no verbose flag)
-        ask_flow: the v2 AskFlow both watchdogs submit spawned jobs through (step 12).
-            They no longer push onto todo_queue directly; they still read it.
+        ask_flow: the v2 AskFlow both watchdogs submit spawned jobs through .
+            They never push onto todo_queue directly; they still read it.
 
     Returns:
         Tuple of (bfe_watchdog, tfe_watchdog). Either element may be None if

@@ -1,5 +1,5 @@
 """
-Authentication Audit Logging for Lupin (Phase 8).
+Authentication audit logging for Lupin.
 
 Provides security event logging for:
 - Login successes and failures
@@ -44,21 +44,13 @@ def log_auth_event(
         - None (catches all exceptions)
 
     Event Types:
-        - login_success: Successful login
-        - login_failure: Failed login attempt
-        - logout: User logout
-        - register: User registration
-        - user_self_register: Anonymous POST /auth/register created an account
+        - login_success, login_failure, logout, register
+        - user_self_register: anonymous POST /auth/register created an account
         - user_self_register_refused: POST /auth/register refused (roles asked for)
-        - password_change: Password updated
-        - password_reset_request: Password reset requested
-        - password_reset_complete: Password reset completed
-        - email_verify_request: Email verification requested
-        - email_verify_complete: Email verified
-        - token_refresh: Refresh token used
-        - token_revoke: Token revoked
-        - account_lockout: Account locked due to failed attempts
-        - account_unlock: Account unlocked
+        - password_change, password_reset_request, password_reset_complete
+        - email_verify_request, email_verify_complete
+        - token_refresh, token_revoke
+        - account_lockout, account_unlock
 
     Example:
         log_auth_event(

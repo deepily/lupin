@@ -1,52 +1,42 @@
 """
-Follow-through accountability — the aged-escalation watcher (design §4.3 + §4.5).
+Follow-through accountability: the aged-escalation watcher for awaiting:manager items.
 
-The dead-manager BACKSTOP for the manager<->worker mutual-wait deadlock. The
-unified task-store already carries the whole mechanism (REUSE, do not
-re-architect — build plan §2):
+The dead-manager backstop for the manager<->worker mutual-wait deadlock. The unified
+task-store already carries the whole mechanism, so nothing is re-architected:
 
-  * "awaiting:manager" STALL    -> status="blocked" + blocked_by=[{kind:"persona",
-                                    id:<accountable_manager>}] (the ->blocked
-                                    transition already REQUIRES both)
-  * "who must verify"           -> the first-class `accountable_manager` field
-  * "awaited_since_ts"          -> the latest `*->blocked` event's ts (R3 audit log)
-  * the repeating chase nudge   -> TaskChaseConsumer (the sibling daemon; re-arms
-                                    next_chase_ts every pass)
+  * "awaiting:manager" stall -> status="blocked" + blocked_by=[{kind:"persona",
+                                id:<accountable_manager>}] (the ->blocked transition
+                                already requires both)
+  * "who must verify"        -> the first-class `accountable_manager` field
+  * "awaited_since_ts"       -> the latest `*->blocked` event's ts (the audit log)
+  * the repeating chase nudge-> TaskChaseConsumer (the sibling daemon; re-arms
+                                next_chase_ts every pass)
 
-This watcher is the ONE-SHOT complement to that repeating chase: when an
-awaiting:manager item has aged past `T_escalate = live_arbiter_tick x multiplier`
-(the manager-tick has effectively DIED — a normal manager acks within a tick or
-two), it fires EXACTLY ONE escalation poke at the accountable manager and marks
-the item escalated so the alarm never repeats. The interval is NEVER hardcoded —
-it derives from the live `arbiter poll seconds` x the `follow through escalation
-tick multiplier` INI key (build plan §3a).
+This watcher is the one-shot complement to that repeating chase. An awaiting:manager item
+aged past `T_escalate = live_arbiter_tick x multiplier` means the manager tick has died.
+A normal manager acks within a tick or two. The watcher then fires
+exactly one escalation poke at the accountable manager and marks the item escalated, so the
+alarm never repeats. The interval is never hardcoded: it is the live `arbiter poll seconds`
+times the `follow through escalation tick multiplier` INI key.
 
-**§4.5 escalation hygiene (the careful part)** — idempotent + self-clearing:
+Escalation hygiene is idempotent and self-clearing:
 
-  * one-shot:        an aged item escalates at most ONCE per wait (the in-memory
-                     `_escalated` set; mirrors the arbiter's `_manager_down_escalated`
-                     escalate-once idiom — per-daemon-lifetime, resets on restart).
-  * manager-ack clear: when the manager acts, the item leaves `blocked` and so
-                     drops out of the awaiting:manager candidate set -> its marker
-                     clears (the `_escalated &= live` intersect each pass).
-  * worker-hold clear: a validly-parked worker (a fresh, reasoned `.heartbeat-hold-*.json`)
-                     is a DOCUMENTED wait, NOT a silent stall — the watcher reads
-                     the hold BEFORE declaring "blocking" and suppresses + clears.
-                     *Founding evidence: the arbiter over-fired "blocking Maria" 2-3x
-                     while Maria was validly parked — this guard is the fix.*
+  * one-shot: an aged item escalates at most once per wait (the in-memory `_escalated`
+    set, per daemon lifetime, reset on restart).
+  * manager-ack clear: when the manager acts, the item leaves `blocked`, drops out of the
+    candidate set, and its marker clears (`_escalated &= live` each pass).
+  * worker-hold clear: a validly parked worker (a fresh, reasoned `.heartbeat-hold-*.json`)
+    is a documented wait, not a silent stall. The watcher reads the hold before declaring
+    "blocking", suppresses the poke and clears the marker.
 
-**Disabled by default.** Gated on the INI flag `follow through escalation enabled`
-(default False, [Lupin: Baseline]) — defense-in-depth rollout gate, sibling to
-TaskChaseConsumer's posture. With the flag off, `sweep_once` is a no-op and
-`start` refuses to spawn the daemon. Wiring `start()` (or `sweep_once()` onto the
-arbiter poll) is the deliberate activation step.
+Disabled by default: gated on the INI flag `follow through escalation enabled` (default
+False, [Lupin: Baseline]), a rollout gate like TaskChaseConsumer's. With the flag off,
+`sweep_once` is a no-op and `start` refuses to spawn the daemon. Wiring `start()` (or
+`sweep_once()` onto the arbiter poll) is the activation step.
 
-Time, DB access, the repo factory, the escalation sink, and the worker-hold
-oracle are all injectable so the core is unit-testable with no live server, no
-Postgres, no real clock, and no hold files.
-
-Canonical design: planning-is-prompting -> planning-is-prompting/src/rnd/2026.06.16-follow-through-accountability-design.md
-Lupin build plan: src/rnd/v0.1.8/2026.06.16-follow-through-accountability-lupin-build.md
+Time, DB access, the repo factory, the escalation sink and the worker-hold oracle are
+all injectable. The core is therefore unit-testable with no live server, Postgres, clock
+or hold files.
 """
 
 import json
@@ -65,18 +55,18 @@ ESCALATION_ACTOR = "follow-through-escalation-watcher"   # the system actor nami
 
 def is_awaiting_manager( item ) -> bool:
     """
-    Is this item in the "awaiting:manager" STALL convention (build plan §2)?
+    Is this item in the "awaiting:manager" stall convention?
 
-    The convention is a NAMED reading over the existing store shape — no new
-    field: a blocked item whose accountable_manager is set AND whose blocked_by
-    carries a persona-ref pointing at that very manager.
+    The convention is a named reading over the existing store shape, with no new field.
+    It means a blocked item whose accountable_manager is set. Its blocked_by must carry
+    a persona-ref pointing at that very manager.
 
     Requires:
         - item exposes .status, .accountable_manager, .blocked_by
 
     Ensures:
-        - returns True iff status == "blocked" AND accountable_manager is truthy
-          AND blocked_by contains a {kind:"persona", id:<accountable_manager>} ref
+        - returns True iff status == "blocked" and accountable_manager is truthy
+          and blocked_by contains a {kind:"persona", id:<accountable_manager>} ref
         - returns False for any other shape (never raises on a missing/odd ref)
 
     Returns:
@@ -95,8 +85,9 @@ def is_awaiting_manager( item ) -> bool:
 
 class FollowThroughEscalationWatcher:
     """
-    One-shot aged-escalation backstop for awaiting:manager items. Inert unless
-    `follow through escalation enabled` is True.
+    One-shot aged-escalation backstop for awaiting:manager items, inert unless enabled.
+
+    Enabled means the INI flag `follow through escalation enabled` is True.
     """
 
     def __init__(
@@ -118,11 +109,11 @@ class FollowThroughEscalationWatcher:
             - repo_factory( session ) -> a TaskRepository-like object exposing
               query_tasks / get_events
             - escalate_fn( item, manager, worker, awaited_since ) -> None fires the
-              ONE manager poke (default: a structured banner log); injected so
+              one manager poke (default: a structured banner log); injected so
               production supplies the real arbiter/dm poke and tests assert it fired
             - hold_check_fn( persona ) -> bool answers "does this persona hold a
               valid (fresh, reasoned) park right now?" (default: glob
-              .heartbeat-hold-*.json); injected for §4.5 worker-hold hygiene
+              .heartbeat-hold-*.json); injected for worker-hold hygiene
             - now_fn() -> tz-aware datetime (default: datetime.now(utc)); injected
               so tests pin the clock
             - hold_base_dir is the directory holding .heartbeat-hold-*.json (default:
@@ -166,17 +157,17 @@ class FollowThroughEscalationWatcher:
         Run one escalation pass over the awaiting:manager candidates.
 
         Ensures:
-            - flag OFF -> no DB access at all; returns {enabled:False, escalated:0,
+            - flag off -> no DB access at all; returns {enabled:False, escalated:0,
               candidates:0}
-            - flag ON  -> for each blocked item in the awaiting:manager convention:
-                * a validly-parked worker (hold_check_fn True) is SKIPPED (§4.5(b) —
+            - flag on  -> for each blocked item in the awaiting:manager convention:
+                * a validly-parked worker (hold_check_fn True) is skipped (a
                   documented wait, not a silent stall)
-                * an item aged past T_escalate that has NOT already escalated fires
-                  ONE escalate_fn(...) and is marked escalated (one-shot)
+                * an item aged past T_escalate that has not already escalated fires
+                  one escalate_fn(...) and is marked escalated (one-shot)
                 * an already-escalated aged item fires nothing (never re-fire)
             - after the pass, `_escalated` is intersected with the live candidate
-              set so markers clear on manager-ack (item left blocked) OR worker-hold
-              (skipped above) — one-shot-THEN-cleared (§4.5(a)/(b))
+              set so markers clear on manager-ack (item left blocked) or worker-hold
+              (skipped above) — one-shot, then cleared
             - one get_db() transaction (read-only) wraps the whole pass
 
         Returns:
@@ -222,8 +213,9 @@ class FollowThroughEscalationWatcher:
 
     def _awaited_since( self, repo, item ):
         """
-        Derive awaited_since_ts: the ts of the LATEST `*->blocked` transition event
-        (build plan §2 — derived from the R3 audit log, not a new column).
+        Derive awaited_since_ts from the latest `*->blocked` transition event's ts.
+
+        It is derived from the audit log, not stored in a new column.
 
         Requires:
             - repo exposes get_events( item_id ) -> events ordered by id ascending
@@ -249,7 +241,7 @@ class FollowThroughEscalationWatcher:
         return ts
 
     def _default_escalation_signal( self, item, manager, worker, awaited_since ) -> None:
-        """Default escalation sink: a structured banner naming the aged stall + who owes the verification."""
+        """Default escalation sink: a banner naming the aged stall and who owes the verification."""
         du.print_banner(
             f"[follow-through] aged awaiting:manager item {item.id} worker={worker} "
             f"manager={manager} awaited_since={awaited_since.isoformat()} "
@@ -259,12 +251,11 @@ class FollowThroughEscalationWatcher:
 
     def _default_hold_check( self, persona ) -> bool:
         """
-        Default §4.5 worker-hold oracle: is `persona` validly parked right now?
+        Default worker-hold oracle: is `persona` validly parked right now?
 
-        Globs `.heartbeat-hold-*.json` in the hold base dir and returns True iff
-        one belongs to `persona` (normalized match) and is HONORED (fresh +
-        reasoned, per heartbeat_hold.is_honored). A documented park is not a
-        silent stall.
+        True iff an honored `.heartbeat-hold-*.json` in the hold base dir belongs to
+        `persona` (normalized match). Honored means fresh and reasoned, per
+        heartbeat_hold.is_honored. A documented park is not a silent stall.
 
         Requires:
             - persona is a string (the store owner_persona) or None
@@ -312,9 +303,10 @@ class FollowThroughEscalationWatcher:
 
     def _loop( self ) -> None:
         """
-        Daemon loop until stop(); Event.wait(timeout) so shutdown interrupts the
-        nap immediately. Each sweep is exception-guarded so a transient DB error
-        never kills the daemon. Naps the LIVE arbiter tick (sweeps every tick).
+        Daemon loop: sweep, then nap one live arbiter tick, until stop() is called.
+
+        Event.wait(timeout) lets shutdown interrupt the nap immediately. Each sweep is
+        exception-guarded so a transient DB error never kills the daemon.
         """
         while not self._stop_event.is_set():
             try:
@@ -325,9 +317,10 @@ class FollowThroughEscalationWatcher:
 
     def start( self ) -> bool:
         """
-        Spawn the daemon thread — ONLY if the flag is enabled and no thread is
-        already running. Returns True if a thread was started, else False (the
-        no-op rollout gate: a disabled watcher never spawns).
+        Spawn the daemon thread only if the flag is enabled and none is running.
+
+        Returns True if a thread was started, else False (the no-op rollout gate:
+        a disabled watcher never spawns).
         """
         if not self._enabled():
             return False

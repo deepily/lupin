@@ -1,63 +1,34 @@
 """
-The RUNNING PROCESS's code identity, captured ONCE at import — row ce89669e remedy 1.
+The running process's code identity, captured once at import.
 
-THE QUESTION THIS ANSWERS
--------------------------
-"Does the process serving me right now have commit X?"
+The question this answers: "Does the process serving me right now have commit X?"
 
-Every cheap way of asking that reads the FILESYSTEM, and on `:8000` the filesystem
-is not the process:
+Every cheap way of asking reads the filesystem, and on `:8000` the filesystem is not the
+process. `:8000` (lupin-rest-test) bind-mounts ./src and runs `reload=False`, so a
+scheduled run cannot shift underneath itself. Editing a source file on the host changes the
+file inside the container at once, while the module stays as imported at process start.
+The file is new and the process is old, so a grep for a symbol can hit while none of it runs.
 
-    :8000 (lupin-rest-test) bind-mounts ./src and runs `reload=False` by design —
-    snapshot isolation, so a scheduled run cannot shift underneath itself. Editing a
-    source file on the host changes the file inside the container IMMEDIATELY. The
-    module was imported at process start and stays imported.
+Git inside the container gives the same wrong answer. The repo is bind-mounted too, so
+`git rev-parse HEAD` tracks the host working tree, not the loaded code. Checking the sha
+instead of grepping is the grep with extra steps.
 
-    ⇒ The file is new. The process is old.
+So this module captures at import time and never re-reads. A `/health` field that computed
+the sha per request would reproduce the same wrong answer in a new place. The capture
+happens once, when the process loads its code, and the value is frozen from then on.
+`_FROZEN_IDENTITY` below is the whole mechanism; `test_code_identity.py` pins it.
 
-Measured 2026-07-26 while verifying commit `69295c25`::
+``imported_at`` is the authority and ``git_sha`` is a convenience. A caller decides whether
+this process has commit X by comparing X's author date against ``imported_at``. That is the
+comparison `src/scripts/verify-running-code.sh` makes against `docker inspect .State.StartedAt`,
+but available over HTTP to any seat, with no docker socket and no shell. ``git_sha`` is the
+sha the tree carried when this process loaded, but it cannot prove that every other module
+was loaded from that revision. Only the clock gives certainty; the sha makes the common case
+one glance.
 
-    docker exec lupin-rest-test grep -c <symbol> .../job.py  ->  3
-    container started 13:44 UTC · fix committed 16:29 UTC
-
-Three hits, zero of them running.
-
-⚠️ AND `git` INSIDE THE CONTAINER LIES IDENTICALLY — this is the part that kills the
-obvious improvement. The repo is bind-mounted too, so `git rev-parse HEAD` inside the
-container tracks the HOST WORKING TREE, not the loaded code. Re-measured 2026-07-27::
-
-    docker exec lupin-rest-test git -C /var/lupin rev-parse --short HEAD  ->  7f41db3d
-    that commit authored 12:5x EDT   ·   container started 11:37 EDT
-
-"Just check the sha instead of grepping" is the grep with extra steps.
-
-⇒ WHICH IS WHY THIS MODULE CAPTURES AT **IMPORT TIME** AND NEVER RE-READS.
-  A `/health` field that computed the sha PER REQUEST would reproduce that exact lie
-  in a new place, wearing the fix's clothes. The capture happens once, when the
-  process loads its code, and the value is frozen from then on. `_freeze_identity`
-  below is the whole mechanism; `test_code_identity.py` pins it in both directions.
-
-WHICH FIELD IS LOAD-BEARING
----------------------------
-``imported_at`` is the authority. ``git_sha`` is a convenience.
-
-A caller decides "does this process have commit X" by comparing X's AUTHOR DATE
-against ``imported_at`` — the same comparison ``src/scripts/verify-running-code.sh``
-makes against ``docker inspect .State.StartedAt``, but available over HTTP to any
-seat, with no docker socket and no shell.
-
-``git_sha`` is honest as long as it is read at import (it is the sha the tree carried
-when this process loaded), but it cannot prove that every OTHER module in the process
-was loaded from that same revision — nothing can, short of hashing every loaded file.
-A reader who needs certainty uses the clock; the sha is there to make the common case
-one glance instead of two lookups.
-
-WHY UNAVAILABLE IS A NAMED VALUE, NOT AN EMPTY STRING
------------------------------------------------------
-If git cannot be reached, the field says so, in words, with the reason. It never
-falls back to a plausible-looking constant. A version string that identifies nothing
-is what `/health` already served ("0.1.0", hardcoded since 2025) and it is precisely
-the shape of answer this row exists to remove: confident, well-formed, and empty.
+If git cannot be reached, the field says `unavailable` in words, with the reason, and never
+falls back to a plausible-looking constant. A version string that identifies nothing is
+what `/health` once served (a hardcoded "0.1.0"): confident, well-formed, and empty.
 """
 
 import os
@@ -91,7 +62,7 @@ def _run_git( args, project_root, runner ):
 
     Ensures:
         - returns the stripped stdout string on success
-        - returns None on ANY failure (git absent, non-zero exit, timeout, no repo)
+        - returns None on any failure (git absent, non-zero exit, timeout, no repo)
         - never raises, never blocks longer than _GIT_TIMEOUT_SECONDS
 
     Raises:
@@ -116,7 +87,7 @@ def _run_git( args, project_root, runner ):
 
 def capture_code_identity( project_root=None, runner=None, now=None ):
     """
-    Build the code-identity record for THIS process, reading the tree ONCE.
+    Build the code-identity record for this process, reading the tree once.
 
     Requires:
         - project_root resolves to a path (defaults to cu.get_project_root())
@@ -124,11 +95,11 @@ def capture_code_identity( project_root=None, runner=None, now=None ):
         - now is a timezone-aware datetime (defaults to datetime.now(timezone.utc))
 
     Ensures:
-        - returns a NEW dict with keys: git_sha, git_branch, git_sha_source,
+        - returns a new dict with keys: git_sha, git_branch, git_sha_source,
           imported_at, pid
-        - git_sha / git_branch are UNAVAILABLE when git cannot answer; never a
+        - git_sha / git_branch are `UNAVAILABLE` when git cannot answer; never a
           fabricated or defaulted value
-        - git_sha_source states HOW the value was obtained, so a reader can tell a
+        - git_sha_source states how the value was obtained, so a reader can tell a
           measurement from a miss without inspecting the value
         - never raises
 
@@ -174,14 +145,14 @@ _FROZEN_IDENTITY = capture_code_identity()
 
 def get_code_identity():
     """
-    The identity captured at import — a fresh copy, every call.
+    The identity captured at import, returned as a fresh copy on every call.
 
     Requires:
         - the module has been imported (guaranteed by calling this)
 
     Ensures:
         - returns a dict equal to the import-time capture
-        - returns a COPY, so a caller mutating the response cannot corrupt the
+        - returns a copy, so a caller mutating the response cannot corrupt the
           record every later caller reads. A frozen fact that one handler can edit
           is not frozen
         - never re-reads the filesystem, the repo, or the clock

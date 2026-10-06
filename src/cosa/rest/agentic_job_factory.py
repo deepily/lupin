@@ -107,26 +107,17 @@ def _stamp_queue_directives( job, scheduled_at, monopolize, spawned_by_id_hash )
     """
     Put the caller's queue directives on a freshly-built job.
 
-    Only a value the caller actually SET is written, which is what every v1 door did
-    (`if request_body.scheduled_at: job.scheduled_at = ...`). The difference matters:
-    the job's constructor already chose defaults, and writing an unset None or False
-    over them would let a submission that said nothing about scheduling overwrite a
-    job class that had an opinion.
-
-    A NONE JOB IS A REAL CASE ON ONE OF THE TWO CALL PATHS, and it is why this starts
-    with a guard rather than trusting its caller. `resume_job` returns None when the
-    checkpoint read finds no row, or a row with no routing command — so a caller asking
-    to resume a job that is not there gets None back, and stamping a schedule onto None
-    raises AttributeError out of the door instead of the "no such job" the caller can
-    act on. The factory's own contract is that an unknown command returns None; this
-    keeps that answer intact rather than converting it into a crash (Pocholo, reviewing
-    the commit that added the stamping).
+    Only a value the caller actually set is written, as every v1 door did. Writing an unset None
+    or False over the constructor's defaults would let a silent submission overwrite a job class's choice.
 
     Requires:
         - job is a constructed AgenticJobBase subclass instance, or None
 
     Ensures:
         - returns None unchanged when handed None — the caller's "no such job" answer
+        - a None job is a real case: `resume_job` returns None when the checkpoint read finds no
+          row, or a row with no routing command, and stamping a schedule onto None would raise
+          AttributeError instead of the "no such job" answer the caller can act on
         - sets job.scheduled_at only when scheduled_at is truthy
         - sets job.monopolize only when monopolize is truthy
         - sets job.spawned_by_id_hash only when spawned_by_id_hash is truthy
@@ -143,8 +134,7 @@ def _stamp_queue_directives( job, scheduled_at, monopolize, spawned_by_id_hash )
 
 def _finish( job, command, args_dict, scheduled_at, monopolize, spawned_by_id_hash ):
     """
-    Apply the tail every freshly-CONSTRUCTED job takes: record what built it, then stamp
-    the caller's queue directives.
+    Apply the tail every freshly-built job takes: record its origin, then stamp directives.
 
     Requires:
         - job is a constructed AgenticJobBase subclass instance
@@ -153,8 +143,7 @@ def _finish( job, command, args_dict, scheduled_at, monopolize, spawned_by_id_ha
         - sets job.routing_command and job.original_args, which job_history reads to
           reconstruct the original job faithfully (BFE's resubmit path depends on it)
         - returns the job with queue directives stamped
-
-    NOT EVERY BUILDER CALLS THIS, AND THAT IS DELIBERATE -- see FINISH_EXEMPT.
+        - not every builder calls this; the exempt ones are named in FINISH_EXEMPT, each with its reason
     """
     job.routing_command = command
     job.original_args   = dict( args_dict )
@@ -183,8 +172,7 @@ def _build_deep_research( command, args_dict, user_id, user_email, session_id, d
     """
     Build the job for `agent router go to deep research`.
 
-    Body moved VERBATIM from the branch it replaces (phase 5 pass A, row d2e23ecb;
-    Rick's ruling 2: pure refactor, no behaviour change).
+    Body moved verbatim from the branch it replaces: a pure refactor with no behaviour change.
     """
     # DEFERRED, exactly as in the branch this body came from. These imports sat inside
     # the factory function, not at module scope -- keeping them deferred preserves the
@@ -233,8 +221,7 @@ def _build_podcast_generator( command, args_dict, user_id, user_email, session_i
     """
     Build the job for `agent router go to podcast generator`.
 
-    Body moved VERBATIM from the branch it replaces (phase 5 pass A, row d2e23ecb;
-    Rick's ruling 2: pure refactor, no behaviour change).
+    Body moved verbatim from the branch it replaces: a pure refactor with no behaviour change.
     """
     # DEFERRED, exactly as in the branch this body came from. These imports sat inside
     # the factory function, not at module scope -- keeping them deferred preserves the
@@ -277,8 +264,7 @@ def _build_research_to_podcast( command, args_dict, user_id, user_email, session
     """
     Build the job for `agent router go to research to podcast`.
 
-    Body moved VERBATIM from the branch it replaces (phase 5 pass A, row d2e23ecb;
-    Rick's ruling 2: pure refactor, no behaviour change).
+    Body moved verbatim from the branch it replaces: a pure refactor with no behaviour change.
     """
     # DEFERRED, exactly as in the branch this body came from. These imports sat inside
     # the factory function, not at module scope -- keeping them deferred preserves the
@@ -327,8 +313,7 @@ def _build_claude_code( command, args_dict, user_id, user_email, session_id, deb
     """
     Build the job for `agent router go to claude code`.
 
-    Body moved VERBATIM from the branch it replaces (phase 5 pass A, row d2e23ecb;
-    Rick's ruling 2: pure refactor, no behaviour change).
+    Body moved verbatim from the branch it replaces: a pure refactor with no behaviour change.
     """
     # DEFERRED, exactly as in the branch this body came from. These imports sat inside
     # the factory function, not at module scope -- keeping them deferred preserves the
@@ -363,8 +348,7 @@ def _build_presentation_generator( command, args_dict, user_id, user_email, sess
     """
     Build the job for `agent router go to presentation generator`.
 
-    Body moved VERBATIM from the branch it replaces (phase 5 pass A, row d2e23ecb;
-    Rick's ruling 2: pure refactor, no behaviour change).
+    Body moved verbatim from the branch it replaces: a pure refactor with no behaviour change.
     """
     # DEFERRED, exactly as in the branch this body came from. These imports sat inside
     # the factory function, not at module scope -- keeping them deferred preserves the
@@ -403,8 +387,7 @@ def _build_research_to_presentation( command, args_dict, user_id, user_email, se
     """
     Build the job for `agent router go to research to presentation`.
 
-    Body moved VERBATIM from the branch it replaces (phase 5 pass A, row d2e23ecb;
-    Rick's ruling 2: pure refactor, no behaviour change).
+    Body moved verbatim from the branch it replaces: a pure refactor with no behaviour change.
     """
     # DEFERRED, exactly as in the branch this body came from. These imports sat inside
     # the factory function, not at module scope -- keeping them deferred preserves the
@@ -448,8 +431,7 @@ def _build_swe_team( command, args_dict, user_id, user_email, session_id, debug,
     """
     Build the job for `agent router go to swe team`.
 
-    Body moved VERBATIM from the branch it replaces (phase 5 pass A, row d2e23ecb;
-    Rick's ruling 2: pure refactor, no behaviour change).
+    Body moved verbatim from the branch it replaces: a pure refactor with no behaviour change.
     """
     # DEFERRED, exactly as in the branch this body came from. These imports sat inside
     # the factory function, not at module scope -- keeping them deferred preserves the
@@ -484,20 +466,7 @@ def _build_swe_team( command, args_dict, user_id, user_email, session_id, debug,
 
 def _refusing_bad_input( builder ):
     """
-    Wrap a builder so bad caller input becomes a SubmitRefused (rows a3c59f2d, a4014235).
-
-    WHY. The flow degrades any OTHER exception from a builder to the RECEPTIONIST, and the
-    queued executor then puts a real receptionist job on the todo queue: the caller gets
-    status "waiting", a job id and a queue position for a submit that was REFUSED. The two
-    retired doors this replaces answered 400 for the same inputs (an unregistered suite
-    name, malformed or contradictory pytest_args, an inverted mock-job range), so a caller
-    that reads `status` must see "failed" here. SubmitRefused is that: a terminal `failed`
-    carrying the cause in `error`, nothing queued.
-
-    Which errors count: ValueError (pydantic's ValidationError and PytestArgsRejected are both
-    ValueErrors) and TypeError (a wrong-typed argument reaching a constructor) are caller
-    input. AttributeError, KeyError and everything else are code bugs and pass through, so a
-    broken builder is not disguised as a bad request (Mr. Radio's ruling, row a4014235).
+    Wrap a builder so bad caller input becomes a SubmitRefused.
 
     Requires:
         - builder is a job builder with the JOB_BUILDERS signature
@@ -508,6 +477,17 @@ def _refusing_bad_input( builder ):
           builder raised itself, and any other exception, pass through unchanged
         - the returned builder carries `refuses_bad_input = True`, which the registry guard
           reads to find any JOB_BUILDERS entry that was left unwrapped
+        - the wrap exists because the flow degrades any other builder exception to the
+          receptionist, and the queued executor then puts a real receptionist job on the todo
+          queue: the caller gets status "waiting", a job id and a queue position for a submit
+          that was refused. The retired doors answered 400 for the same inputs (an unregistered
+          suite name, malformed or contradictory pytest_args, an inverted mock-job range), so a
+          caller that reads `status` must see "failed". SubmitRefused is that: a terminal
+          `failed` carrying the cause in `error`, with nothing queued
+        - only ValueError (pydantic's ValidationError and PytestArgsRejected are both
+          ValueErrors) and TypeError (a wrong-typed argument reaching a constructor) count as
+          caller input; AttributeError, KeyError and everything else are code bugs and pass
+          through, so a broken builder is not disguised as a bad request
     """
     @functools.wraps( builder )
     def wrapper( *args, **kwargs ):
@@ -524,8 +504,7 @@ def _build_test_suite( command, args_dict, user_id, user_email, session_id, debu
     """
     Build the job for `agent router go to test suite`.
 
-    Body moved VERBATIM from the branch it replaces (phase 5 pass A, row d2e23ecb;
-    Rick's ruling 2: pure refactor, no behaviour change).
+    Body moved verbatim from the branch it replaces: a pure refactor with no behaviour change.
     """
     # DEFERRED, exactly as in the branch this body came from. These imports sat inside
     # the factory function, not at module scope -- keeping them deferred preserves the
@@ -597,21 +576,20 @@ def _build_test_suite( command, args_dict, user_id, user_email, session_id, debu
 def _build_mock_job( command, args_dict, user_id, user_email, session_id, debug, verbose,
                      scheduled_at, monopolize, spawned_by_id_hash ):
     """
-    Build the job for `agent router go to mock job` (rows 432511fd / a3c59f2d).
+    Build the job for `agent router go to mock job`.
 
-    The retired `/api/mock-job/submit` door's two modes, kept as one command:
-    PLAIN builds a MockAgenticJob from the door's argument names; with `voice_command` it
-    is the EXPEDITOR TEST, which runs the RuntimeArgumentExpeditor on the voice command and
-    builds a DRY-RUN job of the command it matched. The logic lives in
-    cosa.agents.test_harness.mock_submit; this only chooses between the two and applies the
-    finishing tail each needs.
+    The retired `/api/mock-job/submit` door's two modes, kept as one command. The logic lives in
+    cosa.agents.test_harness.mock_submit; this builder only chooses between the modes.
 
-    THE TWO TAILS DIFFER, and that is the whole reason this builder branches on the
-    result. A plain mock job is the job the caller asked for, so `_finish` records this
-    command on it. The expeditor-test job is a job of ANOTHER command that its own builder
-    already stamped (routing_command, original_args); running `_finish` over it would
-    rewrite both to the mock command and job_history would then describe a job that never
-    ran, so only the queue directives are stamped.
+    Ensures:
+        - plain mode builds a MockAgenticJob from the door's argument names, and `_finish`
+          records this command on it, because it is the job the caller asked for
+        - with `voice_command` it is the expeditor test: it runs the RuntimeArgumentExpeditor on
+          the voice command and builds a dry-run job of the command it matched
+        - the expeditor-test job gets only the queue directives stamped. It is a job of another
+          command whose own builder already stamped routing_command and original_args, and
+          `_finish` would rewrite both to the mock command, so job_history would then describe
+          a job that never ran
 
     Raises:
         - ValueError (pydantic ValidationError included) for bad args, an inverted range,
@@ -638,8 +616,7 @@ def _build_bug_fix_expediter( command, args_dict, user_id, user_email, session_i
     """
     Build the job for `agent router go to bug fix expediter`.
 
-    Body moved VERBATIM from the branch it replaces (phase 5 pass A, row d2e23ecb;
-    Rick's ruling 2: pure refactor, no behaviour change).
+    Body moved verbatim from the branch it replaces: a pure refactor with no behaviour change.
     """
     # DEFERRED, exactly as in the branch this body came from. These imports sat inside
     # the factory function, not at module scope -- keeping them deferred preserves the
@@ -674,8 +651,7 @@ def _build_test_fix_expediter( command, args_dict, user_id, user_email, session_
     """
     Build the job for `agent router go to test fix expediter`.
 
-    Body moved VERBATIM from the branch it replaces (phase 5 pass A, row d2e23ecb;
-    Rick's ruling 2: pure refactor, no behaviour change).
+    Body moved verbatim from the branch it replaces: a pure refactor with no behaviour change.
     """
     # DEFERRED, exactly as in the branch this body came from. These imports sat inside
     # the factory function, not at module scope -- keeping them deferred preserves the
@@ -720,10 +696,9 @@ def _build_test_fix_expediter_resume( command, args_dict, user_id, user_email, s
     """
     Build the job for `agent router go to test fix expediter resume`.
 
-    Body moved VERBATIM from the branch it replaces (phase 5 pass A, row d2e23ecb;
-    Rick's ruling 2: pure refactor, no behaviour change).
+    Body moved verbatim from the branch it replaces: a pure refactor with no behaviour change.
 
-    EXEMPT FROM _finish BY DESIGN -- reason in FINISH_EXEMPT below.
+    Exempt from _finish; the reason is in FINISH_EXEMPT below.
     """
     # DEFERRED, exactly as in the branch this body came from. These imports sat inside
     # the factory function, not at module scope -- keeping them deferred preserves the
@@ -805,22 +780,10 @@ JOB_BUILDERS = { command: _refusing_bad_input( builder ) for command, builder in
 def create_agentic_job( command, args_dict, user_id, user_email, session_id, debug=False, verbose=False,
                         scheduled_at=None, monopolize=False, spawned_by_id_hash=None ):
     """
-    Build the agentic Job for `command`, or None if nothing owns that command.
+    Build the agentic job for `command`, or None if nothing owns that command.
 
-    PHASE 5 STEP 2 (row d2e23ecb): dispatch is a REGISTRY LOOKUP. The eleven-branch
-    if/elif chain and `_legacy_create_agentic_job` are both gone; step 1 had already
-    moved the branch bodies into one builder each and proved the move by comparison,
-    so this commit changes only HOW a builder is reached.
-
-    Adding an agentic command is now: write a builder, add it to JOB_BUILDERS, list the
-    command in the registry. No branch to hand-edit, and `test_1b2` fails if you do
-    only two of the three.
-
-    THE None CONTRACT IS DELIBERATE AND LOAD-BEARING. The chain ended in an `else` that
-    printed and returned None, and callers rely on it — `todo_fifo_queue` treats None as
-    "not an agentic command" and routes on. A dict lookup that raised KeyError on a miss
-    would be a behaviour change wearing a refactor's clothes, so the miss path is spelled
-    out here rather than left to `[]`.
+    Dispatch is a registry lookup. A new agentic command needs a builder, a JOB_BUILDERS entry
+    and a registry listing; `test_1b2` fails if only two of the three are done.
 
     Requires:
         - command is a routing command string; args_dict carries that job's required args
@@ -829,7 +792,10 @@ def create_agentic_job( command, args_dict, user_id, user_email, session_id, deb
     Ensures:
         - returns the Job the registry's job_factory builds for `command`
         - returns None, and prints, if no registry entry owns `command` or its entry has
-          no job_factory — the same observable behaviour the if/elif chain had
+          no job_factory — the same observable behaviour the old if/elif chain had
+        - the None return is a contract callers rely on: `todo_fifo_queue` treats None as "not an
+          agentic command" and routes on. A dict lookup that raised KeyError on a miss would
+          change that behaviour, so the miss path is spelled out rather than left to `[]`
         - queue directives (scheduled_at / monopolize / spawned_by_id_hash) are stamped by
           the builder, via _finish for ten of them and directly for the exempt one
     """
@@ -850,9 +816,9 @@ def resume_job( job_id_hash, config_mgr=None, args_overrides=None ):
     """
     Reconstruct a stalled job from its checkpoint and original args.
 
-    Reads the checkpoint and original submission args from job_history,
-    reconstructs the job via the normal factory path, and attaches the
-    checkpoint for the orchestrator to load on execution.
+    Reads the checkpoint and original submission args from job_history and reconstructs
+    the job via the normal factory path. It then attaches the checkpoint for the
+    orchestrator to load on execution.
 
     Requires:
         - job_id_hash references a stalled job with checkpoint data in DB

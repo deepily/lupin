@@ -1,14 +1,13 @@
 """
-THE SWORD OF DAMOCLES: which deletion ticket an admit request may pledge (row ab8c5728).
+Which deletion ticket an admit request may pledge (the Sword of Damocles rule).
 
-Rick, 2026-09-14 ~22:32 EDT: a manager asking him to admit one row must name one ticket of
-their own to delete — "tit for tat" — and the rule is switchable at runtime
-(`sword_of_damocles_active`). Plan: src/rnd/v0.2.1/2026.09.14-sword-of-damocles-enforcement-plan.md.
+A manager asking the owner to admit one row must name one ticket of their own to delete,
+one for one. The rule is switchable at runtime (`sword_of_damocles_active`).
+Plan: src/rnd/v0.2.1/2026.09.14-sword-of-damocles-enforcement-plan.md.
 
-⚠️ WHY THIS IS NOT IN `task_request_lifecycle`. That module is structurally forbidden from
-accepting a ticket or a row (`test_nothing_in_this_module_can_touch_a_ticket`), so a denial
-routed through it can never dispose of work. A pledge IS a row, so its rules live here and
-that guard stays whole.
+These rules are not in `task_request_lifecycle`, because that module must never accept a
+ticket or a row (`test_nothing_in_this_module_can_touch_a_ticket`). A denial routed through
+it can then never dispose of work. A pledge is a row, so its rules live here.
 
 Pure: no database, no bridge, no I/O. The router hands it facts read under the lock.
 """
@@ -20,31 +19,29 @@ from lupin_mcp.persona_normalization  import canonical_persona_key
 
 def refusal_for_pledge( move, switch_on, target_id, pledge_id, pledge_row, requester_persona, pledged_on ):
     """
-    Why an admit request may not carry this deletion ticket — the Sword of Damocles rule.
+    Why an admit request may not carry this deletion ticket (the Sword of Damocles rule).
 
-    Rick, 2026-09-14 ~22:32 EDT (row ab8c5728): "if you're asking to add 1 the method for
-    requesting 1 of me then requires that you pass in A ticket ID that belongs to you".
-    Rulings on the plan's open questions (Mr. Radio, 22:39): demote is exempt; no
-    peer-manager agreement. Plan: src/rnd/v0.2.1/2026.09.14-sword-of-damocles-enforcement-plan.md §3.2.
+    An admit request must pass the id of a ticket that belongs to the requester. A demote
+    needs no pledge. The typed actor name is whatever the caller sends, so only the session
+    bridge can say who the requester is. Plan: src/rnd/v0.2.1/2026.09.14-sword-of-damocles-enforcement-plan.md.
 
     Requires:
         - move is the requested move; switch_on is `get_sword_of_damocles_active()`
         - target_id / pledge_id are the row ids as strings, pledge_id None when not sent
-        - pledge_row is the pledged row READ UNDER THE LOCK (anything with `owner_persona`
+        - pledge_row is the pledged row read under the lock (anything with `owner_persona`
           and `status`), or None when no such row exists
-        - requester_persona is what the SESSION BRIDGE resolved for the caller — never the
+        - requester_persona is what the session bridge resolved for the caller — never the
           typed actor name — or None/blank when it resolved nothing
-        - pledged_on is the id of another row whose PENDING admit already names this
+        - pledged_on is the id of another row whose pending admit already names this
           pledge, or None
 
     Ensures:
         - returns None when the request may be filed, else ( status_code, detail )
         - a pledge on a demote is refused, not ignored — a field ignored in silence reads
           as a switch that does not work
-        - with the switch OFF a pledge is optional, but a pledge that IS sent passes every
+        - with the switch off a pledge is optional, but a pledge that is sent passes every
           check it would with the switch on
         - an unresolved requester is refused 403; there is no fallback to the typed name
-          (María, 2026-09-14 22:41 — that name is row b8205986's hole)
         - never raises
     """
     if move != MOVE_ADMIT:
@@ -104,12 +101,9 @@ def pledge_changed_hands( pledge_owner, pledged_by ):
     """
     Whether the pledged row is no longer owned by the manager who pledged it.
 
-    RB-2 (María's review of 06b5a057, 2026-09-15): a pledge admitted at filing and then
-    REASSIGNED was still dropped at the verdict, so approving one manager's admit deleted a
-    ticket another persona now owned. The ownership check ran once, at filing, and nothing
-    re-asked it when the row was dropped. The filing door now records who pledged
-    (`request_pledged_by`), and this compares that to the row's owner at the moment it
-    would be consumed.
+    The ownership check runs at filing, so a pledge reassigned later would be dropped at the
+    verdict and delete a ticket another persona now owns. The filing door records who pledged
+    (`request_pledged_by`); this compares that to the owner when the pledge is consumed.
 
     Requires:
         - pledge_owner is the pledged row's `owner_persona` as read now, or None
@@ -117,7 +111,7 @@ def pledge_changed_hands( pledge_owner, pledged_by ):
 
     Ensures:
         - True when pledged_by is None or blank — a pledge with no recorded pledger cannot
-          show it is still the pledger's, so it FAILS CLOSED rather than being assumed theirs
+          show it is still the pledger's, so it fails closed rather than being assumed theirs
         - True when the canonical persona keys differ; False when they match
         - never raises
     """
@@ -127,13 +121,11 @@ def pledge_changed_hands( pledge_owner, pledged_by ):
 
 def request_is_stranded_by_its_pledge( request_state, request_move, pledge_id, pledge_status, pledge_owner, pledged_by ):
     """
-    Whether a pending admit request may be re-filed because its pledge can no longer pay for it.
+    Whether a pending admit may be re-filed because its pledge can no longer pay for it.
 
-    Mr. Radio's Q2 ruling (2026-09-14 22:40): an approval over a dead pledge is refused 409
-    and the request stays pending, so the manager must be able to re-file it with a live
-    pledge. Without this, the one-request-per-row rule would leave that request stuck on
-    Rick's board with no way to answer it and no way to replace it. RB-2 adds the second way
-    a pledge stops paying — it changed hands — and it strands the request the same way.
+    An approval over a dead pledge is refused 409 and the request stays pending. The manager
+    must be able to re-file it, or the one-request-per-row rule would leave it stuck on the
+    owner's board. A pledge that changed hands strands the request the same way.
 
     Requires:
         - request_state / request_move are the row's request columns
@@ -143,7 +135,7 @@ def request_is_stranded_by_its_pledge( request_state, request_move, pledge_id, p
         - pledged_by is the row's request_pledged_by
 
     Ensures:
-        - True only for a PENDING ADMIT that carries a pledge which `pledge_is_dead` or
+        - True only for a pending admit that carries a pledge which `pledge_is_dead` or
           `pledge_changed_hands`
         - False for a grandfathered admit with no pledge, a demote, or any answered request
         - never raises
@@ -154,22 +146,21 @@ def request_is_stranded_by_its_pledge( request_state, request_move, pledge_id, p
 
 def refusal_for_consuming_pledge( move, pledge_id, pledge_status, pledge_owner, pledged_by ):
     """
-    Why Rick's approval cannot drop the row this request pledged.
+    Why the owner's approval cannot drop the row this request pledged.
 
-    Q2 ruling: approve admits the target AND drops the pledge in one transaction, or neither
-    happens. A pledge that died after filing cannot be dropped, so the approval is refused
-    rather than admitting a row nobody paid for. RB-2: neither can a pledge that changed
-    hands after filing, or the approval would delete a ticket its new owner never offered.
+    Approving admits the target and drops the pledge in one transaction, or neither happens.
+    A dead pledge cannot be dropped, so the approval is refused, not admitted unpaid.
+    A pledge that changed hands is refused too, or its new owner would lose a ticket.
 
     Requires:
         - move is the request's move; pledge_id its request_deletion_id (None when none)
-        - pledge_status / pledge_owner are the pledged row's status and owner READ UNDER THE
-          LOCK, both None when absent
+        - pledge_status / pledge_owner are the pledged row's status and owner read under the
+          lock, both None when absent
         - pledged_by is the request's request_pledged_by
 
     Ensures:
-        - None for a demote, or an admit with no pledge (filed before the switch — María,
-          2026-09-14 22:41, grandfathered), or a live pledge still owned by its pledger
+        - None for a demote, or an admit with no pledge (filed before the switch, so it is
+          grandfathered), or a live pledge still owned by its pledger
         - ( 409, detail ) when the pledge is dead or changed hands; the detail says the
           request stays pending and the manager re-files with a live ticket of their own
         - a dead pledge is reported as dead even if it also changed hands

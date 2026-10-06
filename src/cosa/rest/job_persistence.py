@@ -21,8 +21,6 @@ Usage:
         delete_job_history,
         is_agentic_job_type
     )
-
-Created: 2026-03-14
 """
 from datetime import datetime, timezone, timedelta
 from typing import Optional
@@ -206,8 +204,9 @@ def get_last_available():
 
 def _is_within_downtime( scheduled_at_str, last_available, now ):
     """
-    True if a job's scheduled_at fell within the measured downtime window
-    [last_available, now] — i.e., it was missed because the server was down.
+    True if a job's scheduled_at fell within the measured downtime window.
+
+    The window is [last_available, now]: the slot was missed because the server was down.
 
     Ensures:
         - Returns False if last_available is None (first boot — no known downtime)
@@ -227,14 +226,11 @@ def _is_within_downtime( scheduled_at_str, last_available, now ):
 
 def _downtime_catchup_announcement( job_id, scheduled_at_str, now ):
     """
-    Build the LOUD announcement for a job resurrected by the downtime-restore
-    branch — naming scheduled_at vs actual run time and how many hours late its
-    slot fired (row f0b3f630).
+    Build the loud announcement for a job resurrected by the downtime-restore branch.
 
-    A downtime catch-up run is otherwise SILENT: the job reports as a normal
-    completion with no signal that its requested slot was missed by hours. A
-    seat that submitted into the overnight window and later sees a completed run
-    has no way to know the schedule was ignored. This produces that signal.
+    It names scheduled_at, the actual run time and the hours late. Otherwise a catch-up
+    run is silent and reports as a normal completion. A seat that submitted into the
+    overnight window then cannot tell its requested slot was missed by hours.
 
     Requires:
         - job_id is a non-empty string (the id_hash)
@@ -312,7 +308,7 @@ def _build_metadata_json( metadata ):
 
 def persist_job_created_from_metadata( job_id, user_id, metadata ):
     """
-    INSERT a new job_history row with status='pending'.
+    Insert a new job_history row with status='pending'.
 
     Called on pending->todo transition.
 
@@ -358,12 +354,11 @@ def persist_job_created_from_metadata( job_id, user_id, metadata ):
 
 def persist_job_paused_state( job_id, paused ):
     """
-    Patch a job_history row's metadata_json `paused` flag (row 2817b0f5).
+    Patch a job_history row's metadata_json `paused` flag.
 
-    Pause/resume are in-memory-only state changes on the todo queue; job_history
-    stores every pre-execution job as `pending` and never learned whether it was
-    paused. Without this, the durable-queue restore would bring a user-paused job
-    back ACTIVE (silently un-paused). Recording the flag lets restore re-hold it.
+    Pause and resume change only in-memory state on the todo queue, so job_history
+    never learned that a job was paused. Without the flag, restore would bring a
+    user-paused job back active. Recording it lets restore re-hold the job.
 
     Requires:
         - job_id is a non-empty string (the id_hash)
@@ -372,7 +367,7 @@ def persist_job_paused_state( job_id, paused ):
     Ensures:
         - metadata_json.paused is set to `paused` for the matching row (no-op if the
           row does not exist — e.g. a non-agentic job absent from job_history)
-        - status is NOT touched — a paused job stays `pending` in the ledger
+        - status is not touched — a paused job stays `pending` in the ledger
         - Never raises — logs a warning on failure
     """
     if not _is_persistence_enabled():
@@ -413,28 +408,19 @@ CANCELLABLE_QUEUES = frozenset( { "todo" } )
 
 def persist_job_cancelled( job_id ):
     """
-    Mark a cancelled job CANCELLED in the ledger so a restart cannot resurrect it.
+    Mark a cancelled job `CANCELLED` in the ledger so a restart cannot resurrect it.
 
-    🔴 THE DEFECT THIS CLOSES. Cancelling a queued job called only
-    `delete_by_id_hash`, which mutates the in-memory queue_dict and nothing else.
-    The job_history row stayed `pending`, and `get_restorable_jobs()` selects
-    exactly `status == PENDING` — so the next server start handed the cancelled
-    job back to the queue and it ran.
-
-    Measured 2026-08-28: ts-f679f52c was cancelled at 12:34 with the endpoint's own
-    "Job removed from the queue before it started. No work was lost.", the queue read
-    empty at 12:54, :8000 was bounced at 12:58, and the job was back at 13:00. For a
-    metered ~105-minute eval that is real money spent at a time nobody chose — and
-    that one had been cancelled precisely BECAUSE its slot was wrong.
-
-    So the endpoint's success message was true of the process and false of the
-    system, which is the worst of the three available answers.
+    Cancelling a queued job only calls `delete_by_id_hash`, which mutates the in-memory queue_dict.
+    The row would stay `pending`, and `get_restorable_jobs()` selects exactly `status == PENDING`.
+    The next server start would then hand the cancelled job back to the queue, and it would run.
 
     Requires:
         - job_id is a non-empty string (the id_hash)
 
     Ensures:
-        - status is set to CANCELLED (terminal) for the matching row
+        - status is set to `CANCELLED` (terminal) for the matching row
+        - the endpoint's "Job removed from the queue" message is true of the system, not
+          only of the process, because a restart can no longer bring the job back
         - no-op when the row does not exist — a non-agentic job is absent from
           job_history and cancelling it is still legitimate
         - never raises: a ledger write must not turn a successful cancellation into
@@ -456,7 +442,7 @@ def persist_job_cancelled( job_id ):
 
 def persist_job_started_from_metadata( job_id, metadata ):
     """
-    UPDATE job_history row: status='running', started_at=now().
+    Mark the job_history row as running: status='running', started_at=now().
 
     Called on todo->run transition.
 
@@ -489,7 +475,7 @@ def persist_job_started_from_metadata( job_id, metadata ):
 
 def persist_job_completed_from_metadata( job_id, metadata ):
     """
-    UPDATE job_history row: status='completed', completed_at, duration, metadata_json.
+    Mark the job_history row completed: status, completed_at, duration, metadata_json.
 
     Called on run->done transition.
 
@@ -539,13 +525,11 @@ def persist_job_completed_from_metadata( job_id, metadata ):
 
 def persist_job_stalled_from_metadata( job_id, metadata ):
     """
-    UPDATE job_history row: status='stalled', completed_at, checkpoint in metadata_json.
+    Mark the job_history row stalled, with its checkpoint merged into metadata_json.
 
-    Called on run->done transition when the job reached a valid stalled state
-    (voice gate timeout with checkpoint saved). The row stays resumable — the
-    UI badge (`notifications.js::isStalled`) + Resume button hinge on this
-    status, and the TFE resume resolver (`resume_resolver.py`) requires
-    status='stalled' before it will rehydrate a checkpoint.
+    Called on run->done transition for a valid stalled state (voice gate timeout, checkpoint
+    saved). The row stays resumable: the UI badge (`notifications.js::isStalled`) and Resume
+    button hinge on status='stalled', as does the TFE resume resolver (`resume_resolver.py`).
 
     Requires:
         - job_id is a non-empty string
@@ -591,7 +575,7 @@ def persist_job_stalled_from_metadata( job_id, metadata ):
 
 def persist_job_failed_from_metadata( job_id, metadata ):
     """
-    UPDATE job_history row: status='failed', error, completed_at.
+    Mark the job_history row failed: status='failed', error, completed_at.
 
     Called on run->dead transition.
 
@@ -649,22 +633,18 @@ def mark_interrupted_jobs():
     """
     Mark in-flight jobs as interrupted at server startup.
 
-    Distinguishes between:
-    - RUNNING jobs: legitimately interrupted (were mid-execution) → INTERRUPTED
-    - PENDING jobs with future scheduled_at: preserved for re-enqueue → stays PENDING
-    - PENDING jobs whose scheduled_at fell within the measured downtime window
-      [last_available, now]: preserved for an immediate catch-up run → stays PENDING
-    - PENDING jobs with NO scheduled_at (immediate submits that never ran): preserved
-      for re-enqueue → stays PENDING (row 2817b0f5 — a queued job must survive a bounce)
-    - PENDING jobs scheduled BEFORE the downtime window (anomalous scheduler miss) → INTERRUPTED
-
     Called at server startup by main.py. Reads the last-available marker
     (record_server_available) to compute the exact downtime window.
 
     Ensures:
-        - RUNNING jobs always marked INTERRUPTED
-        - PENDING jobs with future scheduled_at are preserved
-        - PENDING jobs missed during downtime are preserved for catch-up
+        - `RUNNING` jobs always marked `INTERRUPTED` (legitimately interrupted mid-execution)
+        - `PENDING` jobs with future scheduled_at are preserved for re-enqueue
+        - `PENDING` jobs missed during downtime are preserved for catch-up, meaning an
+          immediate run when scheduled_at fell within [last_available, now]
+        - `PENDING` jobs with no scheduled_at (immediate submits that never ran) are
+          preserved for re-enqueue, since a queued job must survive a bounce
+        - `PENDING` jobs scheduled before the downtime window (an anomalous scheduler
+          miss) are marked `INTERRUPTED`
         - Returns dict with counts: { "running", "pending_interrupted", "pending_preserved", "pending_catchup" }
         - Never raises — returns zeroed dict on failure
     """
@@ -781,11 +761,11 @@ def _is_future_scheduled( scheduled_at_str, now=None ):
 
 def get_restorable_jobs():
     """
-    Query PENDING jobs preserved by mark_interrupted_jobs() for re-enqueue at startup.
+    Query `PENDING` jobs preserved by mark_interrupted_jobs() for re-enqueue at startup.
 
     Called after mark_interrupted_jobs(), which has already marked every non-restorable
-    case INTERRUPTED. Every row still PENDING here is meant to come back: future-scheduled,
-    downtime-catch-up, AND immediate (no scheduled_at — row 2817b0f5).
+    case `INTERRUPTED`. Every row still `PENDING` here is meant to come back: future-scheduled,
+    downtime catch-up, and immediate (no scheduled_at).
 
     Ensures:
         - Returns list of dicts with job metadata sufficient for reconstruction
@@ -838,41 +818,37 @@ def get_restorable_jobs():
 
 def restore_pending_jobs( restorable, job_factory, ask_flow, register_scoped_job=None, debug=False ):
     """
-    Rebuild and re-enqueue the jobs get_restorable_jobs() returned (row 2817b0f5).
+    Rebuild and re-enqueue the jobs get_restorable_jobs() returned.
 
-    Extracted from the startup lifespan so the no-resurrect + paused-carry WIRING
-    is unit-testable without a live server: inject a fake factory + fake queue.
+    Extracted from the startup lifespan so the no-resurrect and paused-carry wiring
+    is unit-testable without a live server: inject a fake factory and a fake queue.
 
     Requires:
         - restorable is a list of dicts from get_restorable_jobs()
         - job_factory( command, args_dict, user_id, user_email, session_id, debug )
           returns a job object (or None on failure) — normally create_agentic_job
         - ask_flow exposes submit( job=..., user_id=..., user_email=...,
-          session_id=..., websocket_id=..., speak=... ) — the v2 AskFlow. This used
-          to be the todo queue and the line below used to be `todo_queue.push( job )`.
-          Rick ruled this caller IN by name (step 12): it is the one least likely to
-          be noticed misbehaving — startup, unattended, re-enqueueing work an
-          interruption left behind — so it must not keep a private door onto the
-          queue while every other caller goes through the guarded one. There is no
-          fallback to a direct push: a fallback is how a caller quietly keeps its
-          old door
+          session_id=..., websocket_id=..., speak=... ) — the v2 AskFlow. Startup runs
+          unattended, so it is the caller least likely to be noticed misbehaving, and
+          it must not keep a private door onto the queue while every other caller goes
+          through the guarded one. There is no fallback to a direct push
         - register_scoped_job, if given, is user_job_tracker.register_scoped_job
           (base_hash, user_id, session_id) -> scoped_hash. The user-job tracker is
-          NOT rebuilt at startup, so WITHOUT this a restored job still runs (the
-          consumer reads the queue directly) but is INVISIBLE to /api/get-queue and
+          not rebuilt at startup, so without this a restored job still runs (the
+          consumer reads the queue directly) but is invisible to /api/get-queue and
           unresumable (that view filters by the tracker). Registering makes the
           restored job show up and be resumable; the verb strips + re-appends
           ::user_id, so passing the already-scoped id returns the same id_hash.
 
     Ensures:
         - the job is rebuilt from metadata_json["original_args"] (the exact submit
-          args), so test_types / dry_run / pytest_args survive — NOT from the whole
+          args), so test_types / dry_run / pytest_args survive — not from the whole
           metadata envelope, which loses them to factory defaults
-        - each rebuilt job REUSES its original id_hash, so it re-drives its OWN
+        - each rebuilt job reuses its original id_hash, so it re-drives its own
           durable row (pending -> running -> terminal) and cannot resurrect on a
           later boot (one row, one identity, one restore)
         - scheduled_at rides through verbatim (None => immediate)
-        - a job that was paused before the bounce is re-held (state = PAUSED) BEFORE
+        - a job that was paused before the bounce is re-held (state = `PAUSED`) before
           push, so it is never eligible and comes back paused, not silently running
         - a row missing routing_command, or whose factory returns None, is skipped
           with a logged reason — never a hard failure that strands the rest
@@ -994,12 +970,11 @@ def get_active_job_ids_by_user():
 
 def _count_notifications_for_jobs( session, job_ids ):
     """
-    Bulk-count non-hidden notifications grouped by job_id, using the supplied
-    SQLAlchemy session. Single batched query — no N+1.
+    Bulk-count non-hidden notifications grouped by job_id in one batched query.
 
-    Defined here (rather than calling NotificationRepository.count_by_job_ids)
-    to reuse the active session and avoid pulling the repository class into a
-    pure persistence module's import surface.
+    Uses the supplied SQLAlchemy session, so there is no N+1. It is defined here rather
+    than calling NotificationRepository.count_by_job_ids, to reuse the active session and
+    keep the repository class out of this persistence module's import surface.
 
     Requires:
         - session: active SQLAlchemy session
@@ -1065,12 +1040,10 @@ def _unpack_metadata_json( md ):
 
 def _build_history_row( row, has_interactions ):
     """
-    Convert a JobHistory ORM row into the flat dict shape returned by
-    /api/job-history, matching the field set returned by /api/get-queue/done.
+    Convert a JobHistory ORM row into the flat dict shape returned by /api/job-history.
 
-    `metadata_json` is retained in the response as an additive backward-compat
-    measure so any code still reading from it continues to work; new top-level
-    fields are the canonical source going forward.
+    The field set matches /api/get-queue/done. `metadata_json` stays in the response for
+    code that still reads it; the top-level fields are the canonical source.
 
     Requires:
         - row: JobHistory ORM instance
@@ -1128,7 +1101,7 @@ def query_job_history( user_id=None, status=None, job_type=None,
         - days is None or a positive integer (time window in days)
         - exclude_ids is None or a list of id_hash strings to exclude
         - exclude_user_id is None or the user_id whose jobs to leave out (an admin's
-          "Not Mine" view, row 83c3ff74)
+          "Not Mine" view)
 
     Ensures:
         - Returns dict with 'jobs' list and 'total' count

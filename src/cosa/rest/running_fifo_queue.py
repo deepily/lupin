@@ -34,10 +34,9 @@ def compute_duration_seconds( started_at: Any, completed_at: Any ) -> Optional[ 
     """
     Elapsed seconds between two timestamps, or None when either is absent.
 
-    The single place that knows a timestamp may arrive as an ISO string OR a
-    datetime. Fast-lane jobs and agentic jobs disagree on which they carry
-    (row 4a9ebc4b), so callers must not have to guess — six copies of this
-    logic used to, and two of them forgot to require completed_at.
+    The single place that knows a timestamp may arrive as an ISO string or a datetime.
+    Fast-lane jobs and agentic jobs disagree on which they carry, so callers must not
+    have to guess. Separate copies of this logic drifted, and some forgot to require completed_at.
 
     Requires:
         - started_at / completed_at are each an ISO-8601 string, a datetime,
@@ -180,23 +179,20 @@ class RunningFifoQueue( FifoQueue ):
 
     def enter_running_loop( self ) -> None:
         """
-        DEPRECATED: Enter the main job execution loop.
-        
-        This method is deprecated in favor of the producer-consumer pattern
-        using start_todo_producer_run_consumer_thread() which eliminates
-        the inefficient polling with time.sleep(1).
-        
-        Use _process_job() for individual job processing instead.
-        
+        Deprecated: enters the main job execution loop.
+
+        Use start_todo_producer_run_consumer_thread() instead; it replaces the polling time.sleep(1).
+        Use _process_job() for individual job processing.
+
         Requires:
             - All queue instances are initialized
             - websocket_mgr is connected
-            
+
         Ensures:
             - Continuously processes jobs from todo queue
             - Emits socket updates for queue states
             - Never returns (infinite loop)
-            
+
         Raises:
             - Exceptions handled internally
         """
@@ -439,31 +435,22 @@ class RunningFifoQueue( FifoQueue ):
 
     def _submit_agentic_job( self, job: AgenticJobBase ) -> None:
         """
-        Submit an agentic job to the pool; track Future + register callback.
-
-        **Consumer integration note**: In Lupin's current architecture, the
-        consumer thread (`queue_consumer.py::consumer_worker`) already does
-        `emit_job_state_transition(QUEUED→RUNNING)` and `running_queue.push(job)`
-        BEFORE invoking `_process_job` → this method. So the job is already in
-        running_queue and the UI has already seen the transition by the time
-        we submit to the pool. We ONLY do the atomic submit+track+callback here.
-
-        Design-doc 3-step ordering (push → emit → submit+track) is preserved
-        system-wide across consumer + this method; don't duplicate.
-
-        Ordering invariant (atomic-under-lock, load-bearing):
-          submit() + _agentic_futures[id_hash] assignment + add_done_callback
-          ALL inside _agentic_futures_lock — closes the sub-microsecond race
-          where a fast-completing Future fires its callback before
-          _agentic_futures has the key.
+        Submit an agentic job to the pool; track its Future and register the callback.
 
         Requires:
             - job implements AgenticJobBase
-            - job is ALREADY in running_queue (consumer pushed it)
+            - job is already in running_queue (consumer pushed it)
 
         Ensures:
             - job.id_hash is a key in _agentic_futures with the pool Future
             - Future has _on_agentic_complete registered as done_callback
+            - the consumer thread (`queue_consumer.py::consumer_worker`) has already emitted
+              the `QUEUED` to `RUNNING` transition and pushed the job before calling _process_job,
+              so only the atomic submit, track and callback happen here (the push, emit, submit
+              ordering is kept system-wide, so never duplicate it)
+            - submit(), the _agentic_futures[id_hash] assignment and add_done_callback all run
+              inside _agentic_futures_lock, which closes the race where a fast-completing
+              Future fires its callback before _agentic_futures has the key
         """
         with self._agentic_futures_lock:
             # Shape-B (bug fe375cf6): route a monopolize job to the DEDICATED
@@ -492,34 +479,30 @@ class RunningFifoQueue( FifoQueue ):
 
     def _execute_agentic_in_pool( self, job: AgenticJobBase ) -> Any:
         """
-        Runs inside a pool worker thread. Blocks on job.do_all() and returns
-        whatever do_all() returns (fed to _on_agentic_complete via future.result()).
+        Runs job.do_all() on a pool worker thread and returns what it returns.
 
-        do_all() creates its own asyncio event loop via asyncio.run() internally;
-        safe here because each call is on a distinct pool thread with no
-        pre-existing loop.
+        The result reaches _on_agentic_complete through future.result(). do_all() creates its
+        own asyncio event loop via asyncio.run(). That is safe because each call runs on a
+        distinct pool thread with no existing loop.
         """
         return job.do_all()
 
     def _on_agentic_complete( self, job: AgenticJobBase, future ) -> None:
         """
-        Future callback — runs on a pool thread after do_all() returns or raises.
-        Moves job from running_queue to done_queue or dead_queue.
+        Future callback on a pool thread; moves the job to the done or dead queue.
 
-        INVARIANT (load-bearing, see design doc 03 §Step 2.1): pop from
-        _agentic_futures BEFORE transitioning. The Phase-3 ghost-sweeper uses
-        "still in _agentic_futures AND Future.done()" as the signal that a
-        transition never happened; reversing these two ops opens a race window
-        where the sweeper dead-letters a job that was just moved to done_queue.
+        It runs after do_all() returns or raises. Pop from _agentic_futures before
+        transitioning. The ghost sweeper reads "still in _agentic_futures and Future.done()" as
+        proof that a transition never happened. Reversing the two steps lets the sweeper
+        dead-letter a job that was just moved to done_queue.
 
         Defensive:
-          - Outer `except BaseException`: KeyboardInterrupt / SystemExit /
-            GeneratorExit survivors are LOGGED and left for the Phase-3 sweeper
-            rather than pushed through _transition_to_dead (which can itself
-            raise). Never re-raise — ThreadPoolExecutor treats callback
-            exceptions as fatal and can deadlock the pool.
-          - Inner `except Exception`: failures during dead-letter are logged;
-            job left in _agentic_futures for the sweeper as last resort.
+          - The outer `except BaseException` logs KeyboardInterrupt, SystemExit and
+            GeneratorExit survivors and leaves them for the sweeper. It does not push them
+            through _transition_to_dead, which can itself raise. It never re-raises, because
+            ThreadPoolExecutor treats callback exceptions as fatal and can deadlock the pool.
+          - The inner `except Exception` logs failures during dead-letter and leaves the job in
+            _agentic_futures for the sweeper as last resort.
         """
         try:
             # INVARIANT: pop from futures dict BEFORE transitioning
@@ -592,21 +575,15 @@ class RunningFifoQueue( FifoQueue ):
 
     def _transition_to_done( self, job: Any, formatted_output: Any = None ) -> None:
         """
-        Canonical success transition. Thread-safe (callable from consumer OR
-        pool-callback threads). Reads derived values (answer_conversational,
-        artifacts, etc.) directly from job.* set by do_all() as side-effects;
-        formatted_output is the return value used for I/O logging only.
+        Canonical success transition, thread-safe for consumer and pool-callback threads.
 
-        Extracted from the agentic-success block historically at
-        running_fifo_queue.py lines 409-480. Phase 2 scope: shared with the
-        pool callback only. Phase 3 cleanup can migrate fast-lane paths
-        (_handle_base_agent success, _format_cached_result, etc.) to call
-        this helper too.
+        Reads derived values (answer_conversational, artifacts, etc.) directly from job.* set
+        by do_all() as side effects. formatted_output is the return value, used for I/O
+        logging only. Only the pool callback uses it so far; the fast-lane paths
+        (_handle_base_agent success, _format_cached_result, etc.) may migrate to it.
 
-        Order:
-          TTS → build metadata → emit RUNNING → COMPLETED → delete from
-          running_queue → push to done_queue → TFE watchdog evaluate →
-          I/O table insert.
+        Order: TTS, build metadata, emit `RUNNING` then `COMPLETED`, delete from running_queue,
+        push to done_queue, TFE watchdog evaluate, I/O table insert.
         """
         # Leg (c) P3 — close the done->dead sweeper race: claim the SAME terminal
         # marker _transition_to_dead uses, so a racing ghost-sweep that dead-letters
@@ -687,31 +664,23 @@ class RunningFifoQueue( FifoQueue ):
 
     def _transition_to_stalled( self, job: Any, formatted_output: Any = None ) -> None:
         """
-        Stalled-terminal transition for agentic jobs that hit a voice-gate
-        timeout and saved a checkpoint. Routes the job to Done with
-        status='stalled' so the UI badge + Resume button activate; persistence
-        dispatch in queue_util.emit_job_state_transition routes
-        `to_state == JobState.STALLED` to persist_job_stalled_from_metadata,
-        which writes status='stalled' to job_history and preserves the
-        checkpoint blob in metadata_json for later resume.
+        Stalled-terminal transition for an agentic job that saved a checkpoint.
 
-        Mirrors _transition_to_done's structure, but emits JobState.STALLED
-        with `checkpoint` + `plan_path` in the metadata blob, instead of
-        JobState.COMPLETED with no checkpoint.
+        It serves jobs that hit a voice-gate timeout. The job goes to Done with status='stalled'
+        so the UI badge and Resume button activate. Persistence dispatch in
+        queue_util.emit_job_state_transition routes `to_state == JobState.STALLED` to
+        persist_job_stalled_from_metadata. That writes status='stalled' to job_history and
+        keeps the checkpoint blob in metadata_json for a later resume.
 
-        Bug 11 (2026-04-15) added the equivalent stall handling in the legacy
-        serial path (_handle_agentic_job, ~line 898). Phase 2's pool refactor
-        moved agentic dispatch to _on_agentic_complete but did not port the
-        stall check, leaving status='completed' as the unconditional outcome
-        for ALL agentic jobs going through the pool — including TFE and BFE
-        voice-gate stalls. This helper closes that gap.
+        It mirrors _transition_to_done but emits `JobState.STALLED` with `checkpoint` and
+        `plan_path` in the metadata blob, instead of `JobState.COMPLETED` with no checkpoint.
+        Without the stall check, every agentic job through the pool would end as
+        status='completed', including TFE and BFE voice-gate stalls.
 
-        Order:
-          TTS (informational, not urgent) → build metadata WITH checkpoint →
-          emit RUNNING → STALLED → delete from running_queue → push to
-          done_queue → I/O table insert. Does NOT invoke the dead-queue /
-          auto-repair watchdog — the checkpoint IS the repair path; BFE would
-          just swallow it on its own DB lookup.
+        Order: TTS (informational, not urgent), build metadata with checkpoint, emit
+        `RUNNING` then `STALLED`, delete from running_queue, push to done_queue, I/O table
+        insert. It never invokes the dead-queue / auto-repair watchdog: the checkpoint is the
+        repair path, and BFE would just swallow it on its own DB lookup.
         """
         # Leg (c) P3 — claim the SAME terminal marker so a racing ghost-sweep
         # dead-letter no-ops instead of stalling-then-dead double-transitioning.
@@ -785,18 +754,7 @@ class RunningFifoQueue( FifoQueue ):
 
     def _claim_terminal_reclaim( self, job: Any ) -> bool:
         """
-        Leg (c) — atomically claim a job's single terminal transition.
-
-        Returns True exactly once per job OBJECT (first caller wins) and False on
-        every subsequent call, so a terminal primitive can no-op a
-        double-transition. The marker is `job.brake_terminal_claimed`, a
-        QueueableJob protocol member every job class carries from construction
-        (default False) and the push gate enforces — read directly, no getattr
-        fallback (row cdfedc41). It lives on the job OBJECT, so a resubmitted
-        repair-chain job (a NEW object) is never falsely blocked.
-        Checked+set under _agentic_futures_lock (an RLock, already re-entrant for
-        the callback-on-same-thread case) so the read and the write are atomic
-        against a racing ghost-sweep / completion callback.
+        Atomically claim a job's single terminal transition.
 
         Requires:
             - job is a queue job object (attribute-settable)
@@ -804,6 +762,14 @@ class RunningFifoQueue( FifoQueue ):
         Ensures:
             - First call for a given job object returns True and marks it
             - Every later call for the same object returns False
+            - the marker is `job.brake_terminal_claimed`, a QueueableJob protocol member every
+              job class carries from construction (default False), read directly with no
+              getattr fallback
+            - it lives on the job object, so a resubmitted repair-chain job (a new object) is
+              never falsely blocked
+            - check and set run under _agentic_futures_lock (an RLock, re-entrant for the
+              callback-on-same-thread case), so they are atomic against a racing ghost sweep or
+              completion callback
         """
         with self._agentic_futures_lock:
             if job.brake_terminal_claimed:
@@ -813,41 +779,34 @@ class RunningFifoQueue( FifoQueue ):
 
     def _release_terminal_reclaim( self, job: Any ) -> None:
         """
-        Leg (c) rollback — release a claim taken by _claim_terminal_reclaim when
-        the transition it guarded did NOT complete (raised mid-flight).
-
-        Without this, a claim set at the top of _transition_to_dead would stick
-        True even though emit/delete/push failed, leaving the job in
-        running_queue with every later retry no-op'd — a slot that never frees,
-        the exact runaway this brake exists to prevent (Tiberius P1, 2026-08-13).
-        Releasing lets the ghost-sweeper's next tick re-attempt the transition.
-        Idempotent; taken under _agentic_futures_lock so it is atomic against a
-        concurrent claim.
+        Release a claim taken by _claim_terminal_reclaim when the guarded transition failed.
 
         Requires:
             - job is a queue job object (attribute-settable)
 
         Ensures:
             - job's terminal claim is cleared (a subsequent claim can succeed)
+            - a claim set at the top of _transition_to_dead would otherwise stay True even
+              though emit, delete or push raised, leaving the job in running_queue with every
+              later retry a no-op: a slot that never frees, which the brake exists to prevent
+            - releasing lets the ghost sweeper's next tick re-attempt the transition
+            - idempotent, and taken under _agentic_futures_lock so it is atomic against a
+              concurrent claim
         """
         with self._agentic_futures_lock:
             job.brake_terminal_claimed = False
 
     def _transition_to_dead( self, job: Any, cause: Any ) -> None:
         """
-        Canonical failure transition. Thread-safe. `cause` may be an Exception
-        instance OR a string (status-check-failure paths set running_job.error
-        as a string). The body normalises both.
+        Canonical failure transition, thread-safe.
 
-        Extracted from agentic failure paths at running_fifo_queue.py lines
-        482-532 (status-check fail) + 534-592 (exception). Phase 2 scope:
-        shared with the pool callback only; fast-lane paths (_handle_error_case
-        et al.) may migrate in Phase 3 cleanup.
+        `cause` may be an Exception instance or a string (status-check-failure paths set
+        running_job.error as a string). The body normalises both. Only the pool callback uses
+        it so far; fast-lane paths (_handle_error_case et al.) may migrate to it.
 
-        Leg (c) idempotency: no-ops on a second entry for the SAME job object so a
-        late completion callback, or a ghost-sweep that snapshotted
-        _agentic_futures before _on_agentic_complete popped the future, cannot
-        double-transition a row already declared dead.
+        A second entry for the same job object is a no-op. A late completion callback, or a
+        ghost sweep that snapshotted _agentic_futures before _on_agentic_complete popped the
+        future, therefore cannot double-transition a row already declared dead.
         """
         # Leg (c) — status-guarded idempotent reclaim (design §Leg c). Claim
         # atomically so a concurrent ghost-sweep / completion callback cannot
@@ -1057,37 +1016,30 @@ class RunningFifoQueue( FifoQueue ):
 
     def get_non_test_inflight_agentic_jobs( self, exclude_id_hash: Optional[ str ] = None ) -> List[ Dict ]:
         """
-        List inflight (submitted-but-not-done) agentic jobs whose backing job is
-        NOT a test_suite job. Backs the merge-gate sweep exclusivity preflight
-        (bug caf58f71 — concurrent-writer contamination).
-
-        A monopolize-mode test_suite sweep and ANY other agentic job share the
-        same lupin_db_test on :8000; a concurrent non-test writer corrupts the
-        in-flight suite's DB expectations (the refresh_tokens duplicate-jti
-        flood). `monopolize` is ENFORCED (bug 30398595): the consumer's Gate A
-        (drain-before-dispatch) uses this classifier as its drain oracle and
-        Gate B holds foreign intake for the sweep's duration. This method
-        surfaces the FOREIGN concurrent writers — it EXEMPTS the sweep's own
-        lineage children (bug 3a14292b): a job whose `spawned_by_id_hash` equals
-        `exclude_id_hash` was spawned BY the sweep and is part of its exclusive
-        window, not a contaminant. Exemption is keyed on explicit lineage, never
-        on `job_type`, so a future monopolizer spawning non-swe children is
-        covered too.
+        List inflight agentic jobs whose backing job is not a test_suite job.
 
         Requires:
             - _agentic_futures / queue_dict initialised (always true post-__init__)
 
         Ensures:
-            - returns one { "id_hash", "job_type" } dict per inflight FOREIGN
-              agentic job (Future present AND not done)
+            - returns one { "id_hash", "job_type" } dict per inflight foreign
+              agentic job (Future present and not done)
             - the future named by exclude_id_hash (the sweep's own) is skipped
             - a job whose spawned_by_id_hash == exclude_id_hash (a lineage child
-              of the sweep) is skipped — spawned BY the sweep is not foreign TO it
+              of the sweep) is skipped — spawned by the sweep is not foreign to it
             - a future whose backing job is absent from queue_dict is reported
               with job_type "unknown" — fail-loud on the unclassifiable, it is
               still a writer we cannot vouch for
-            - inflight snapshot is taken under _agentic_futures_lock; classifi-
-              cation never raises
+            - inflight snapshot is taken under _agentic_futures_lock; classification
+              never raises
+            - this backs the merge-gate sweep exclusivity preflight: a monopolize-mode test_suite
+              sweep and any other agentic job share one test database on :8000, and a concurrent
+              non-test writer corrupts the suite's expectations (the refresh_tokens duplicate-jti
+              flood); monopolize is enforced by the consumer's Gate A (drain-before-dispatch,
+              which uses this classifier as its drain oracle) and Gate B (which holds foreign
+              intake for the sweep's duration)
+            - the exemption is keyed on explicit lineage, never on `job_type`, so a future
+              monopolizer spawning non-swe children is covered too
 
         Args:
             exclude_id_hash: id_hash of the calling sweep, excluded from the count
@@ -1118,13 +1070,11 @@ class RunningFifoQueue( FifoQueue ):
 
     def _is_monopolize_enabled( self ) -> bool:
         """
-        Read the master true-monopoly kill-switch FRESH each call (bug 30398595).
+        Read the master true-monopoly kill-switch fresh on each call.
 
-        Read at gate-time — NOT cached at __init__ — so an INI-only flip of
-        `cj flow monopolize enabled` takes effect via hot config reload without a
-        server bounce. Gates all three surfaces atomically (the _submit set, Gate
-        A, Gate B all consult this one source), so no half-state (hold set while
-        gates disabled, or vice versa) is possible by construction.
+        It is read at gate time, not cached, so an INI-only flip of `cj flow monopolize
+        enabled` takes effect through hot config reload. The _submit set, Gate A and Gate B
+        all consult this one source, so no half-state is possible.
 
         Ensures:
             - returns the current `cj flow monopolize enabled` boolean
@@ -1138,20 +1088,18 @@ class RunningFifoQueue( FifoQueue ):
 
     def _release_monopolize_hold( self, id_hash: str ) -> None:
         """
-        Clear the monopolize intake hold iff `id_hash` owns it (bug 30398595).
+        Clear the monopolize intake hold only when `id_hash` owns it.
 
-        Called from EVERY terminal path a monopolize job can exit by —
-        _on_agentic_complete (done/exception/stalled/failed) AND _ghost_job_sweep
-        (dead-letter of a wedged job). If the hold were cleared only in the
-        normal callback, a ghost-swept monopolize job would freeze ALL intake
-        permanently (Tiberius's added hazard).
+        Called from every terminal path: _on_agentic_complete and _ghost_job_sweep.
+        Clearing the hold only in the normal callback would let a ghost-swept job freeze
+        all intake permanently.
 
         Requires:
             - id_hash is the terminating job's pool key
 
         Ensures:
             - _monopolize_active is set to None iff it currently equals id_hash
-            - a no-op when a DIFFERENT (or no) job holds the hold — idempotent,
+            - a no-op when a different (or no) job holds the hold — idempotent,
               safe to call from any terminal path more than once
         """
         with self._agentic_futures_lock:
@@ -1161,10 +1109,10 @@ class RunningFifoQueue( FifoQueue ):
     def await_monopolize_pool_drain( self, job: Any, timeout_seconds: float,
                                      poll_seconds: float = 1.0, heartbeat_fn=None ) -> List[ Dict ]:
         """
-        Gate A (bug 30398595): block until the agentic pool has no foreign
-        (non-test) inflight writers, or until timeout_seconds elapses. Reuses the
-        caf58f71 classifier (get_non_test_inflight_agentic_jobs) as the drain
-        oracle — the sweep's own future is excluded via job.id_hash.
+        Gate A: block until the pool has no foreign inflight writers, or the timeout ends.
+
+        It reuses the get_non_test_inflight_agentic_jobs classifier as the drain oracle, and
+        excludes the sweep's own future via job.id_hash.
 
         Requires:
             - job.id_hash is the monopolize sweep's pool key (excluded)
@@ -1174,7 +1122,7 @@ class RunningFifoQueue( FifoQueue ):
             - returns [] when the pool drained clean (safe to dispatch)
             - returns the offender list (get_non_test_inflight_agentic_jobs shape)
               when the timeout expired with foreign writers still inflight — the
-              caller MUST fail loud (dead-letter the sweep), never dispatch onto
+              caller must fail loud (dead-letter the sweep), never dispatch onto
               a contaminated DB
             - ticks heartbeat_fn (when supplied) once per poll so a healthy drain
               wait never trips consumer-stall detection; sleeps poll_seconds
@@ -1200,21 +1148,18 @@ class RunningFifoQueue( FifoQueue ):
 
     def _ghost_job_sweep( self ) -> None:
         """
-        Scan _agentic_futures for entries whose Future is done but whose job
-        is still in running_queue. Dead-letter them (suspenders to Phase 2's
-        defensive callback belt).
+        Dead-letter jobs whose Future is done but which are still in running_queue.
 
-        INVARIANT DEPENDENCY (from 03-phase-2-*.md Step 2.1): relies on
-        _on_agentic_complete popping from _agentic_futures BEFORE transitioning.
-        The sweeper's "still in _agentic_futures AND Future.done()" check is
-        the signal that a transition never happened. If the callback is ever
-        re-ordered to pop-after-transition, the sweeper would dead-letter
-        jobs that just moved to done_queue.
+        It scans _agentic_futures as a second line of defence behind the callback in
+        _on_agentic_complete. That callback must pop from _agentic_futures before
+        transitioning. The signal "still in _agentic_futures and Future.done()" then means a
+        transition never happened. If the callback were reordered to pop after the transition,
+        the sweeper would dead-letter jobs that just moved to done_queue.
 
-        Second safeguard — get_by_id_hash None-check: the sweeper iterates a
-        SNAPSHOT of _agentic_futures (not held lock). If a completion
-        callback fires during iteration and transitions the job to done,
-        get_by_id_hash returns None → skip. No double-transition.
+        A second safeguard is the get_by_id_hash None-check. The sweeper iterates a snapshot
+        of _agentic_futures without holding the lock. A completion callback may move a job
+        to done during iteration. Then get_by_id_hash returns None and the job is skipped,
+        so there is no double transition.
         """
         with self._agentic_futures_lock:
             futures_snapshot = dict( self._agentic_futures )
@@ -1253,11 +1198,11 @@ class RunningFifoQueue( FifoQueue ):
 
     def _ghost_job_sweep_loop( self ) -> None:
         """
-        Main loop for the GhostJobSweeper daemon thread. Runs until
-        _ghost_job_sweeper_stop_event is set (at shutdown).
+        Main loop of the GhostJobSweeper daemon thread, until the stop event is set.
 
-        Uses Event.wait(timeout) instead of time.sleep so shutdown can
-        interrupt the nap immediately without waiting up to interval_seconds.
+        It runs until _ghost_job_sweeper_stop_event is set at shutdown. It uses
+        Event.wait(timeout) instead of time.sleep so shutdown interrupts the wait at once,
+        instead of waiting up to interval_seconds.
         """
         interval_seconds = 30 if self._config_mgr is None else self._config_mgr.get(
             "cj flow ghost job sweep interval seconds", default=30, return_type="int"
@@ -1274,17 +1219,14 @@ class RunningFifoQueue( FifoQueue ):
 
     def shutdown_pool( self, wait: bool = True, timeout: float = 30.0 ) -> None:
         """
-        Stop the pool from accepting new work. If wait=True, block up to
-        `timeout` seconds for in-flight jobs to finish. Survivors after timeout
-        are dead-lettered so we don't leave phantom `running` rows on restart.
+        Stop the pool from accepting new work, optionally waiting for in-flight jobs.
 
-        Ordering note (per design doc 03 §Step 2.2): shutdown_pool must run
-        BEFORE the consumer thread exits AND BEFORE the HTTP socket closes,
-        so in-flight pool workers can still emit WebSocket state transitions
-        as they finish.
+        If wait=True, block up to `timeout` seconds for in-flight jobs to finish. Survivors
+        after the timeout are dead-lettered so no phantom `running` rows remain on restart.
 
-        Phase 3: Stop the ghost-job sweeper FIRST (before pool drain) so it
-        doesn't race against drain dead-lettering.
+        Run it before the consumer thread exits and before the HTTP socket closes.
+        In-flight pool workers can then still emit WebSocket state transitions.
+        It stops the ghost-job sweeper first, so the sweeper does not race the drain.
         """
         # Phase 3: stop sweeper before pool drain
         self._ghost_job_sweeper_stop_event.set()
@@ -1330,11 +1272,8 @@ class RunningFifoQueue( FifoQueue ):
         """
         Handle execution of AgenticJobBase instances (Deep Research, Podcast, etc.).
 
-        Agentic jobs are long-running background tasks that:
-        - Run for minutes (not seconds)
-        - Send progress notifications during execution
-        - Don't cache results (each run is unique)
-        - Generate artifacts (reports, audio files, etc.)
+        Agentic jobs run for minutes, send progress notifications during execution, cache no
+        results (each run is unique) and generate artifacts (reports, audio files, etc.).
 
         Requires:
             - running_job is an AgenticJobBase instance
@@ -1344,7 +1283,7 @@ class RunningFifoQueue( FifoQueue ):
         Ensures:
             - Executes job's do_all() method
             - Moves job to done queue on success, dead queue on failure
-            - NO snapshot caching (is_cacheable = False)
+            - no snapshot caching (is_cacheable = False)
             - Emits speech with conversational answer
             - Returns the job instance
 
@@ -1805,48 +1744,30 @@ class RunningFifoQueue( FifoQueue ):
 
     def _confirm_correctness( self, snapshot: SolutionSnapshot, truncated_question: str, truncated_answer: str, suite_lineage: bool=None ) -> None:
         """
-        Ask the user whether the answer was correct — INLINE, on the calling thread.
+        Ask the user whether the answer was correct, inline on the calling thread.
 
-        WHY THIS IS NOT A DAEMON THREAD ANY MORE (Rick, 2026-09-04, row fe1c0d3f): "It's a
-        part of the transaction. A question is asked, a question is answered, the follow-up
-        'is this correct' is fired. 1 2 3. It runs in the same thread." The answer has
-        ALREADY been pushed to the requester over the WebSocket by the time this is
-        reached, so the person who asked is not kept waiting — what waits is the pipeline
-        behind them, and that was the trade he made explicitly.
-
-        WHAT THE OLD SHAPE COST, MEASURED RATHER THAN ASSERTED. It fired into a daemon
-        thread with a 60s window and, on any non-response, wrote NOTHING — leaving
-        answer_is_correct as None with the row already persisted. Measured 2026-09-04 on
-        lupin_db_dev: 12 of 17 rows null, 5 true, ZERO false. Not one user ever said an
-        answer was wrong; they simply were not there inside the window. The read guard then
-        refused every one of those rows forever — 103 refusals across the trace corpus,
-        every one reading `exact_hit:None`. A confirmation nobody is reliably asked is not a
-        weaker guard, it is a permanent one.
-
-        THE DEFAULT IS NOW "yes" AND IT IS WRITTEN, WHICH IS THE OTHER HALF. Timing out used
-        to leave the field untouched, so a row could only ever be confirmed on the single
-        run that created it and a missed 60 seconds made it unservable for good. Recording
-        the default breaks that: silence now means "no complaint", not "unknown forever".
-
-        ⚠️ A DELIBERATE NARROWING OF RICK'S EARLIER RULING, NOT A DRIFT FROM IT.
-        `_may_serve`'s docstring quotes him: "we want to keep unconfirmed answers from
-        replaying until they are confirmed." He was shown that reading and restated this
-        one on 2026-09-04. Recorded here so the next reader files it as a decision rather
-        than a regression.
+        The question is part of the transaction: a question is asked, answered, and the
+        follow-up "is this correct" is fired, all in the same thread. The answer has already
+        reached the requester over the WebSocket, so what waits is the pipeline behind them.
 
         Requires:
             - snapshot is a SolutionSnapshot that has already been saved to the store
             - truncated_question and truncated_answer are short strings for the prompt
             - suite_lineage is None (decide from the snapshot's own stamp, as replay and agentic
-              jobs do) or the verdict already reached on the job BEFORE it was recast into a
-              snapshot, which carries no stamp (row 4cbd4858)
+              jobs do) or the verdict already reached on the job before it was recast into a
+              snapshot, which carries no stamp
 
         Ensures:
             - blocks the calling thread for at most the request's timeout
-            - writes answer_is_correct on EVERY path — the user's verdict when they answer,
+            - writes answer_is_correct on every path — the user's verdict when they answer,
               the "yes" default when they do not — and never leaves it None
+            - the "yes" default is written because leaving the field untouched on a missed 60
+              second window stranded the row at None, and the read guard then refused it for good;
+              silence now means "no complaint", not "unknown forever"
+            - this narrows the rule quoted in `_may_serve` ("keep unconfirmed answers from
+              replaying until they are confirmed"); it is a recorded decision, not a drift
             - emits `answer_verified` over the WebSocket when a manager is wired
-            - NEVER raises: a confirmation failure must not turn a delivered answer into a
+            - never raises: a confirmation failure must not turn a delivered answer into a
               failed job, so every exception is caught and reported
 
         Raises:
@@ -1956,38 +1877,30 @@ class RunningFifoQueue( FifoQueue ):
 
     def _may_serve_cached( self, cached_snapshot: Any, why: str ) -> bool:
         """
-        The READ guard for the QUEUE layer. A cached row is served only if its answer was
-        CONFIRMED correct. Deliberately mirrors `AskFlow._may_serve` (v2/flow.py:1099) —
-        same tri-state, same `is True`, same fail-closed — so the two layers cannot drift.
+        The read guard for the queue layer: serve a cached row only if its answer was confirmed.
 
-        WHY THIS EXISTS ON THIS LAYER AT ALL (row 54589356). The v2 door already had a
-        guard, and it was the only one. `_may_serve` has exactly two call sites, both on
-        the `ask` path, so `/api/v2/submit` never consulted it — and on the `ask` path a
-        refusal falls through to routing, which enqueues the work that lands HERE. With
-        `v2 similarity floor = 100.0` matching this layer's `score >= 100.0`, the exact row
-        v2 refused was the exact row this layer then matched and replayed. The guard was
-        not merely missing from a second door; on the first door it was undone one step
-        after it fired.
-
-        THREE STATES, STARTING AT UNKNOWN, SO IT FAILS CLOSED. `None` (never answered),
-        `False` (the user said no) and `True` are all possible, and only `True` serves.
-        `is True`, not truthiness: the verdict rides a nullable column, and a value that
-        arrives as the string "true", or as 1, must not be read as consent.
-
-        `None` IS THE COMMON CASE, NOT AN EDGE. Confirmation comes from the end-of-run
-        "was this answer correct?" prompt, which needs a live human and lands on a daemon
-        thread that does not block. Every unattended run therefore deposits an unconfirmed
-        row. Rick accepted that cost explicitly when he ruled: it turns a real number of
-        today's exact-match hits into misses.
+        It mirrors `AskFlow._may_serve` (same tri-state, same `is True`, same fail-closed)
+        so the two layers cannot drift.
 
         Requires:
             - cached_snapshot is a hydrated SolutionSnapshot (never a raw DB row)
             - why is a short string naming the call site, for the refusal log
 
         Ensures:
-            - returns True ONLY when answer_is_correct is exactly True
+            - returns True only when answer_is_correct is exactly True
             - returns False for None, False, and any non-True value
             - prints a refusal line naming the call site and the verdict
+            - this layer needs its own guard: the v2 guard runs only on the `ask` path, so
+              `/api/v2/submit` never consulted it, and an `ask` refusal falls through to routing,
+              which enqueues the work that lands here; with `v2 similarity floor = 100.0` matching
+              this layer's `score >= 100.0`, the row v2 refused was the row this layer replayed
+            - three states, starting at unknown, so it fails closed: `None` (never answered),
+              `False` (the user said no) and `True`, and only `True` serves; the test is
+              `is True`, not truthiness, because the verdict rides a nullable column and a value
+              arriving as the string "true", or as 1, must not be read as consent
+            - `None` is the common case, not an edge: confirmation needs a live human, so every
+              unattended run deposits an unconfirmed row, a cost that turns some exact-match
+              hits into misses
 
         Raises:
             - None
@@ -2178,10 +2091,10 @@ class RunningFifoQueue( FifoQueue ):
 
 def quick_smoke_test():
     """
-    Critical smoke test for RunningFifoQueue - validates active queue management functionality.
-    
-    This test is essential for v000 deprecation as running_fifo_queue.py is critical
-    for active job processing and queue management in the REST system.
+    Smoke test for RunningFifoQueue covering active queue management.
+
+    The file carries active job processing and queue management in the REST system,
+    so this test is needed for the v000 deprecation.
     """
     import cosa.utils.util as du
     

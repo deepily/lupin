@@ -1,28 +1,18 @@
 """
-Promotion out of the holding area: manager-only, and Rick is asked from inside
-the method.
+Gate for promoting a row out of the holding area: managers only, then the owner is asked.
 
-Rick, by voice 2026-09-04 (spec: src/rnd/2026.09.04-gated-promotion-out-of-the-
-holding-area.md):
+The caller's credentials are checked first. If the caller is a manager, the method itself
+asks the owner, on the caller's behalf, whether the row may leave the holding area.
 
-    "the caller's credentials are checked to make sure they're actually a
-     manager. And if they are, the next thing that happens is that the method
-     you call asks, on your behalf, me, if you can take a task out of the
-     holding area and promote it into the queue."
+The ask lives inside the method, so a promotion cannot happen without the owner being asked.
+A worker is refused on credentials. A manager causes the owner to be asked. No path skips the
+owner quietly, so the policy never depends on anyone remembering it.
 
-🔴 THE ASK LIVES INSIDE THE METHOD, AND THAT IS THE WHOLE DESIGN. Not "the
-manager should ask Rick" but "the promotion cannot happen without Rick being
-asked". A worker is refused on credentials; a manager causes Rick to be asked on
-their behalf. There is no path that quietly skips him, so the policy stops
-depending on anyone remembering it.
-
-WHY A MODULE AND NOT INLINE IN THE ROUTER — the same reason `refusal_for_admission`
-was pulled out of `tasks.py`. Inline, the only way to watch this refuse is to
-stand up a database, mint a row in the holding area and drive a POST, so the
-cheap tests would assert on the predicate instead and call THAT the control.
-That is the fixture-that-cannot-discriminate shape: a correct predicate wired to
-nothing passes every such test. Out here, every clause is observable directly and
-the router test only has to prove the call happens.
+This is a module, not inline code in the router. Inline, the only way to watch a refusal is to
+stand up a database, mint a row in the holding area and drive a POST. Cheap tests would then
+assert on the predicate and call that the control, and a correct predicate wired to nothing
+would pass them all. Here every clause is observable directly, and the router test only has
+to prove the call happens.
 """
 from cosa.rest.task_approval_settings import _ini_value, approver_persona_for_account
 from cosa.rest import task_approval_settings as approval
@@ -78,26 +68,20 @@ FALLBACK_ASK_TIMEOUT_SECONDS = 120
 
 def get_ask_timeout_seconds():
     """
-    How long Rick has to answer before the ask times out and takes its default.
+    How long the owner has to answer the promotion ask before it takes its default.
 
-    WHY A FUNCTION AND NOT A CONSTANT — María's ruling 2026-09-03. Read at CALL
-    time, so an operator's edit lands on the next promotion rather than the next
-    deploy. The same two-layer behaviour as every other `task approval *` key.
-
-    ⚠️ THIS DIAL DOES NOT DECIDE WHETHER RICK IS ASKED, ONLY HOW LONG HE HAS.
-    The ask is unconditional for a manager and there is no value here that skips
-    it — turning it to 1 makes him effectively absent, it does not make the gate
-    dark. The dial for the gate itself is `task approval enforcement active`.
-
-    ⚠️ AND IT IS A THREADPOOL WORKER, NOT A FREE WAIT. `transition_task` is a sync
-    handler, so FastAPI runs it in a threadpool and a promotion holds one worker
-    for up to this long. That is affordable for a human gate on a rare action and
-    would not be for a hot path — which is why it is bounded and configurable
-    rather than left to the caller.
+    Read at call time, so an operator's edit lands on the next promotion, not the next deploy.
+    Same two-layer behaviour as every other `task approval *` key.
 
     Ensures:
         - returns the configured int, or the fallback when absent/unreadable
         - never raises
+        - decides only how long the owner has to answer, never whether the owner is asked: the ask is
+          unconditional for a manager, and setting this to 1 makes the owner effectively absent without
+          turning the gate off (the gate's own switch is `task approval enforcement active`)
+        - a promotion holds one threadpool worker for up to this long, because `transition_task` is a
+          sync handler; that is affordable for a human gate on a rare action and would not be on a
+          hot path, which is why the wait is bounded and configurable
     """
     return _ini_value( INI_KEY_ASK_TIMEOUT, int, FALLBACK_ASK_TIMEOUT_SECONDS )
 
@@ -114,28 +98,21 @@ FALLBACK_ASYNCHRONOUS = False
 
 def get_asynchronous_enabled():
     """
-    Whether an OPERATOR has switched the asynchronous promotion path on at all.
+    Whether an operator has switched the asynchronous promotion path on at all.
 
-    Read at CALL time, not at import — the same two-layer behaviour as
-    `get_ask_timeout_seconds` and for María's reason: an operator's edit lands on the
-    next promotion rather than the next deploy.
-
-    🔴 FALLBACK IS False, AND THAT IS THE OPPOSITE OF `get_enforcement_active`'S
-    FAIL-OPEN. That one fails open because an absent config must not start REFUSING
-    promotions. This one fails CLOSED because an absent config must not start handing
-    out 202s: today's synchronous answer is the one every existing caller can read, and
-    a broken config must land on the behaviour that is already understood.
-
-    ⚠️ THE LENIENT PARSE HERE IS DELIBERATE AND IS NOT A CONTRADICTION OF THE STRICT
-    PARSE ON THE WIRE FIELD — see `promotion_is_asynchronous`. An INI value was typed by
-    an OPERATOR, so "yes" and "on" should mean what they obviously mean. A request field
-    was sent by a CLIENT, where a coerced string is how an unintended opt-in gets in.
-    Two trust contexts, two parsing rules, on purpose.
+    Read at call time, not at import, so an operator's edit lands on the next promotion.
+    The fallback is False, the opposite of `get_enforcement_active`, which fails open so that an
+    absent config never starts refusing promotions.
 
     Ensures:
         - returns a bool
         - returns False when the key is absent or unreadable
         - never raises
+        - fails closed: an absent config must not start handing out 202 answers, because the
+          synchronous answer is the one every existing caller can read
+        - parses leniently ("true", "1", "yes", "on") because an operator typed the value; the request
+          field is parsed strictly in `promotion_is_asynchronous`, since a client could otherwise opt
+          in by accident with a coerced string
     """
     raw = _ini_value( INI_KEY_ASYNCHRONOUS, "string", None )
     if raw is None: return FALLBACK_ASYNCHRONOUS
@@ -144,39 +121,10 @@ def get_asynchronous_enabled():
 
 def promotion_is_asynchronous( requested, enabled_fn=get_asynchronous_enabled ):
     """
-    Whether THIS promotion returns a ticket instead of blocking on Rick.
+    Whether this promotion returns a ticket instead of blocking on the owner.
 
-    🔴 BOTH GATES MUST HOLD, AND THE CALLER'S IS THE ONE THAT MATTERS FOR SAFETY.
-    Measured 2026-09-06 (Tiffany 💍, in review — the finding is hers): a 202 is a FALSE
-    GREEN in every browser client. `fetch`'s `response.ok` is `status >= 200 && < 300`,
-    so a 202 is `ok === true`; `ApiClient.request` only throws on `!ok`, and
-    `TaskListStore.transitionTask` writes its optimistic "approved" row state BEFORE the
-    call and restores only on failure. A 202 never fails, so the row would read APPROVED
-    for a promotion Rick has not been asked about yet — a false FACT, not a false red,
-    which is the species nobody investigates.
-
-    ⇒ SO THE NEW STATUS CODE GOES ONLY TO A CALLER THAT ASKED FOR IT. A client that
-    reads 2xx as success is CORRECT — that is the HTTP contract as nearly all code uses
-    it — so changing an endpoint's status code is a breaking change to every caller
-    present AND FUTURE. Repairing the three known call sites would leave the trap armed
-    for the fourth one somebody writes next month. Opt-in removes it by construction.
-
-    🔴 `requested` MUST ARRIVE AS A REAL BOOL, AND THE MODEL FIELD IS `StrictBool` FOR
-    THAT REASON — this is the correction that makes the argument above actually hold.
-    The first version of it reasoned that a browser could never opt in because `extras`
-    is typed `Record<string, string>` and a boolean cannot go in one. TRUE ABOUT THE
-    TYPE AND IRRELEVANT: the map carries the STRING "true" perfectly well. Measured on
-    pydantic 2.13.3 — a plain `bool` field ACCEPTS "true", "True", "1", 1 and "yes" and
-    coerces every one of them; `StrictBool` rejects all five with a 422.
-    ⇒ A truthiness test here would re-open the door the type argument only appeared to
-    close, which is why this compares against `True` itself rather than testing truthy.
-
-    ⚠️ AND THE GUARANTEE HAD TO MOVE LAYERS, WHICH IS THE PART WORTH REMEMBERING. The
-    first argument lived in the CLIENT'S type system — and `notifications.js` is vanilla
-    JS with no type system at all, so that defence covered one of the two client layers
-    and left the other bare. Validation at the SERVER covers both identically. A
-    guarantee belongs where every caller must pass, never where only one kind of caller
-    is checked.
+    Both gates must hold: the operator flag is on, and the caller passed exactly True.
+    The caller's gate is the one that matters for safety, as the last bullets explain.
 
     Requires:
         - requested is the caller's `asynchronous` field: True, False, or None when the
@@ -184,11 +132,19 @@ def promotion_is_asynchronous( requested, enabled_fn=get_asynchronous_enabled ):
         - enabled_fn is the injectable operator-flag seam
 
     Ensures:
-        - returns True IFF the operator flag is on AND the caller passed exactly True
+        - returns True exactly when the operator flag is on and the caller passed exactly True
         - a caller that said nothing gets today's synchronous behaviour
         - a non-bool that reached here anyway (the model should have refused it) is
-          treated as NOT a request — the safe answer, never the new one
+          treated as not a request, the safe answer, never the new one
         - never raises
+        - a 202 is a false green in every browser client: `response.ok` is true for any 2xx,
+          `ApiClient.request` throws only on a failed response, and `TaskListStore.transitionTask`
+          writes its optimistic approved state before the call and restores it only on failure
+        - so the new status code goes only to a caller that asked for it; changing a status code
+          breaks every present and future caller that reads 2xx as success, and opt-in removes that trap
+        - the comparison is against True itself, not truthiness: on pydantic 2.13.3 a plain `bool`
+          field accepts and coerces "true", "True", "1", 1 and "yes", while `StrictBool` rejects all
+          five with a 422, so the guarantee sits at the server and covers every client layer
     """
     # `is not True` rather than `not requested`: None, False, "" and 0 must all mean the
     # same thing here, and so must the string "true" if the model's StrictBool were ever
@@ -200,18 +156,16 @@ def promotion_is_asynchronous( requested, enabled_fn=get_asynchronous_enabled ):
 @dataclass( frozen=True )
 class AskOutcome:
     """
-    One yes/no answer plus HOW it arrived.
+    One yes/no answer plus how it arrived.
 
-    `default_used` is a real boolean here rather than the `"[default used] "`
-    string prefix the MCP `ask_yes_no` verb returns. That verb returns a STRING,
-    so its flag has nowhere to live except inside the text; this gate talks to
-    `notify_user_sync` directly and gets `NotificationResponse.default_used`, so
-    it keeps the flag as a flag. Parsing a marker back out of a sentence would be
-    re-deriving something we were handed.
+    `default_used` is a real boolean, unlike the `"[default used] "` string prefix the MCP
+    `ask_yes_no` verb returns. That verb returns a string, so its flag can only live in the text.
+    This gate calls `notify_user_sync` directly and gets `NotificationResponse.default_used`.
+    So it keeps the flag as a flag instead of parsing a marker back out of a sentence.
 
-    `answered_by` is who the SERVER saw post the answer (row e20e249a): the answer door's
-    { user_id, account_email, method } stamp, carried through `notify_user_sync`. None when
-    nobody posted one — a timed-out default — or when the server predates the stamp.
+    `answered_by` is who the server saw post the answer: the answer door's
+    { user_id, account_email, method } stamp, carried through `notify_user_sync`.
+    It is None when nobody posted one (a timed-out default) or when the server predates the stamp.
     """
     answer       : str
     default_used : bool
@@ -226,13 +180,14 @@ class PromotionApproval:
 
     def authority_suffix( self ):
         """
-        The fragment stamped onto the transition's `authority` so the row itself
-        records which way the answer came.
+        The fragment stamped onto a transition's `authority` to record how the answer came.
 
         Ensures:
             - returns "" when the promotion was not allowed (nothing was blessed)
-            - otherwise names BOTH Rick and the source, in words a reader can
+            - otherwise names both Rick and the source, in words a reader can
               understand without knowing this module's constants
+            - a self promotion has its own wording, never "keypress": a keypress means the owner answered
+              a question, while here the owner was never asked because the owner was the caller
         """
         if not self.allowed: return ""
         if self.approval_source == APPROVAL_DEFAULT:
@@ -247,23 +202,18 @@ class PromotionApproval:
 
     def reason_with_suffix( self, caller_reason ):
         """
-        The transition `reason` that records both the operator's words and Rick's.
+        The transition `reason` that records both the operator's words and the approval note.
 
-        🔴 A METHOD RATHER THAN A LINE AT EACH DOOR, BECAUSE THERE ARE NOW TWO DOORS.
-        The synchronous handler composed this inline; the asynchronous resolver needs
-        the identical string minutes later in another call stack. Two places composing
-        one value is the defect this row has spent its afternoon correcting, and a
-        string that differs by a separator between the two paths would make an
-        asynchronous promotion distinguishable from a synchronous one on the row —
-        for no reason a reader could ever guess.
+        One method instead of a line at each door, because two doors need the identical string.
+        Those are the synchronous handler and the asynchronous resolver, which composes it minutes
+        later in another call stack. Two places composing one value can drift, for example by a separator.
 
         Requires:
             - caller_reason is the operator's own `reason`, or None
 
         Ensures:
-            - APPENDED, never assigned over. A caller-supplied reason is the operator's
-              own words; dropping them to make room for ours would trade one attribution
-              defect for another
+            - appended, never assigned over: a caller-supplied reason is the operator's own words,
+              and dropping them to make room for ours would trade one attribution defect for another
             - returns the caller's reason unchanged when nothing was blessed, since
               `authority_suffix` is empty then and appending it would leave a dangling
               separator on a refusal
@@ -305,56 +255,34 @@ def manager_refusal( session_id, actor, is_manager_fn=is_manager_figure,
     """
     The credential half: the refusal detail, or None if the caller is a manager.
 
-    🔴 NOT FOOLPROOF, AND RICK CHOSE THAT DELIBERATELY. His words:
-
-        "Just 'is a manager' is sufficient for right now. This is not like we're
-         dealing with finances or editing genomes — we're simply promoting a task
-         from one list to another. So document that just 'is a manager' is not
-         quite foolproof. And then let's keep moving."
-
-    ⚠️ WHY IT IS NOT FOOLPROOF, AT THE CHECK ITSELF SO THE NEXT READER MEETS A
-    DELIBERATE DEFERRAL RATHER THAN ASSUMING NOBODY THOUGHT OF IT. A credential
-    check is only as strong as the identity underneath it, and `is_manager_figure`
-    reads the SESSION BRIDGE. On 2026-09-03 a detached process was measured
-    silently resolving as another seat's identity — no error, no alert (row
-    `54a43bcf`, made visible and refused at write time by `13014bd1`). A gate
-    asking "are you a manager?" answers YES for a BORROWED manager identity,
-    because the borrowed bridge supplies the role along with everything else.
-
-    🔨 FAIL CLOSED ON AN UNREADABLE BRIDGE — María's ruling 2026-09-03, in her
-    words: "this gate exists to stop an unauthorised promotion. An unreadable
-    bridge is precisely the condition under which we cannot tell who is asking.
-    Falling back to the allowlist there means the gate opens widest exactly when
-    it knows least — which is the shape of every defect we found tonight."
-
-    So an unreadable bridge is REFUSED, not waved through to the allowlist. The
-    cost is paid in the message rather than the policy: the refusal says which
-    failure it is and how to clear it.
-
-    `13014bd1` already refuses a GUESSED identity at every identity-bearing write,
-    so the hardening exists and wiring it here would be wiring, not new work.
-    Rick has deferred it on a proportionality judgement.
-
-    ⚠️ AND THE ALLOWLIST IN FRONT OF THIS CHECK AGREES WITH IT BY COINCIDENCE,
-    NOT BY CONSTRUCTION. The approver allowlist (`task_approval_settings`) runs
-    first and today reads ['cheech', 'maria', 'mr radio', 'rick'] — which happens
-    to be the managers plus Rick. Nothing keeps the two in step: a NEW manager
-    who is not added to that list is refused by the allowlist before this check
-    is ever reached. Two predicates answering one question by different routes
-    agree until the day their inputs diverge.
+    The check is "is a manager", which is enough for moving a task between lists but not foolproof.
+    It reads the session bridge. A borrowed manager identity (a detached process resolving as
+    another seat) passes it, because the borrowed bridge supplies the role with everything else.
 
     Requires:
         - session_id is the caller's session id (full or 8-char), or None
         - actor is the caller-declared "persona + session id" string
         - move is a key of `MANAGER_ONLY_SENTENCES` naming the manager-only act being
-          judged, for the refusal text. The close door (row adaf7698) asks the same
-          question about a different act, `MOVE_MANAGER_CLOSE`
+          judged, for the refusal text. The close door asks the same question about a
+          different act, `MOVE_MANAGER_CLOSE`
 
     Ensures:
         - returns None iff the caller resolves as a manager-figure
-        - otherwise a non-empty detail naming the ACTOR and the CREDENTIAL, and
+        - otherwise a non-empty detail naming the actor and the credential, and
           distinguishing "resolved and not a manager" from "nothing resolved"
         - never raises
+        - an unreadable bridge fails closed: it is refused, not waved through to the allowlist, because
+          that is the moment the caller cannot be identified and a fallback would open the gate widest
+          when least is known; the message names which failure it is and how to clear it
+        - the three causes (no session id, stale bridge, resolved but not a manager) read differently,
+          so a locked-out manager is not sent hunting the wrong problem; the stale-bridge message names
+          the recovery, a re-spin or session restart that mints a fresh bridge
+        - a caller with an `account_persona` passes first: it derives from a signature-validated token,
+          the stronger credential, and a browser has no session bridge at all
+        - the approver allowlist in `task_approval_settings` runs before this check and agrees with it
+          only by coincidence (today it lists the managers plus the owner); a new manager missing from
+          that list is refused before this check, so the two predicates agree until their inputs diverge
+        - the refusal names the move being judged, so a demote refusal never describes a promotion
     """
     # 🔴 THE ACCOUNT DOOR (row 998c7529, Rick's shape (b), 2026-09-04). CHECKED FIRST
     # because it is the STRONGER credential, not merely another one: `account_persona`
@@ -441,7 +369,7 @@ TRUNCATION_SPOKEN_AS = ", title truncated"
 
 def _spoken_title( title ):
     """
-    A row's title, made safe to SAY.
+    A row's title, made safe to say aloud.
 
     Requires:
         - title is a string, or None
@@ -450,7 +378,7 @@ def _spoken_title( title ):
         - returns a single-line string
         - every hex identifier is replaced by HEX_SPOKEN_AS, because a sha read aloud
           is character-by-character gibberish
-        - a title longer than the budget is cut and the cut is ANNOUNCED IN WORDS, not
+        - a title longer than the budget is cut and the cut is announced in words, not
           with a glyph that may be silent
         - a missing or blank title yields a phrase that still reads as a sentence,
           never an empty gap the listener cannot place
@@ -521,35 +449,20 @@ ASK_WORDING = {
 
 def promotion_ask_text( actor, task_id, title, move=approval.MOVE_ADMIT ):
     """
-    The question Rick hears and the card he reads — pure, so the wording has
-    exactly one definition and every word of it is pinnable.
+    The spoken question and the card abstract for a promotion or demotion ask.
 
-    🔴 THE QUESTION NAMES THE ROW (row 218f139c, Rick raised it to P0). It used to
-    read "{actor} wants to promote a row out of the holding area. Allow it?" — WHO
-    and nothing about WHAT. Every promotion he approved before 2026-09-09 told him a
-    persona name only, so the only thing he could weigh was the identity of the
-    asker, which is the one thing this module's own gate says proves nothing. A gate
-    that cannot say what it is gating is asking for a rubber stamp.
+    Pure, so the wording has one definition and every word of it can be pinned by a test.
 
-    ⚠️ THE ABSTRACT CARRIED THE ID, THE TITLE AND THE REQUESTER, AND THAT MUCH WAS
-    ALREADY CORRECT — but this note used to go on to call the whole abstract correct
-    and unchanged, and that half is WITHDRAWN (row 73d41df0, measured 2026-09-09). The
-    line directly beneath those three read "Defaults to YES if you are away", which
-    stopped being true on 2026-09-07 when `approval_from_the_ask` began REFUSING on
-    `default_used`. A wrong instruction gets caught the first time somebody follows it;
-    a wrong reassurance disarms the reader who would have caught it, which is why the
-    sentence survived a pass that was looking at this very function.
-
-    🔴 THE FOOTER NOW STATES THE CONSEQUENCE THAT ACTUALLY HAPPENS, and it is a single
-    module-level constant rather than a literal here, so the guard can pin the words to
-    the behaviour instead of to a string somebody has to remember to update.
-
-    🔴 THE ID STAYS OUT OF THE SPOKEN LINE, DELIBERATELY, AND THIS IS A DEPARTURE FROM
-    THE ROW'S OWN ACCEPTANCE ("title and the short id, at minimum"). A hash verbalizes
-    as character-by-character gibberish, and "I have no idea what that hash means" is
-    Rick's own complaint — the thing this row exists to fix. Speaking an id would
-    reproduce the defect one layer over while appearing to satisfy the acceptance.
-    The id is in the abstract, where it can be read and clicked.
+    Ensures:
+        - returns a (question, abstract) pair
+        - the question names the row by its title, not only the asker: an ask that says who and
+          nothing about what invites a rubber stamp, since the asker's identity proves nothing
+        - the spoken question never carries the row id, because a hash is read out character by
+          character as gibberish; the id, title and requester are in the abstract, where they can
+          be read and clicked
+        - the abstract ends with `UNANSWERED_MEANS`, a module constant rather than a literal, so a
+          test can pin the words to the refusal the gate really returns on silence
+        - the wording follows `move` through `ASK_WORDING`, so a demote ask never reads as a promotion
     """
     spoken, heading = ASK_WORDING[ move ]
     question = (
@@ -575,35 +488,24 @@ NO_SESSION_SUFFIX = "promotion-gate"
 
 def promotion_ask_sender_id( session_id=None ):
     """
-    Who the promotion ask says it is (row b48e231f).
+    The sender id a promotion ask is stamped with, so the source of an ask can be traced.
 
-    🔴 WHY THIS EXISTS. `NotificationRequest` carries a `sender_id` field and this ask never
-    set it. Server-side `resolve_sender_id` then falls through -- explicit sender, then a
-    `[PREFIX]` regex on the message, then the literal `claude.code@unknown.deepily.ai` -- and
-    the promotion ask supplies neither of the first two. Measured 2026-09-04: EVERY promotion
-    ask ever recorded, 29 of them across two days and several worktrees, carries `unknown`,
-    while ordinary seats in the same table in the same minute stamp real senders. So the
-    column discriminates; this path simply never filled it.
-
-    ⚠️ THAT IS AN ATTRIBUTION HOLE, NOT A COSMETIC ONE. During the 2026-09-04 incident five
-    tiers were live and the one field that would have named the source read `unknown` for
-    every candidate at once. A stamp identical across all suspects is not a weak clue, it is
-    no clue.
-
-    ⚠️ AND IT WAS ORIGINALLY MIS-DIAGNOSED AS AN UNREGISTERED-`/tmp`-root defect. It is not:
-    the root is not an input here, and an ask at 19:48:56 carried `unknown` an hour after the
-    `/tmp` process died. Do not "fix" this by widening project detection.
+    An ask that sets no sender resolves server-side to the literal `claude.code@unknown.deepily.ai`.
+    The `sender_id` column does discriminate for ordinary seats, so this path must fill it.
 
     Requires:
         - session_id is a session identifier string, or None
 
     Ensures:
-        - returns a fully-qualified sender_id naming the requesting SESSION when there is one
+        - returns a fully-qualified sender_id naming the requesting session when there is one
         - returns a sender suffixed `promotion-gate` when there is not, which names the path
           rather than degrading to `unknown`
         - a blank or whitespace-only session_id is treated as absent, so a falsy-but-present
           value cannot produce a sender ending in a bare `#`
         - never raises
+        - a stamp identical across all suspects names no source, which is the hole this closes; the
+          cause is not an unregistered `/tmp` root (the root is not an input here), so widening
+          project detection would not fix it
     """
     from cosa.agents.utils.sender_id import build_sender_id
 
@@ -614,23 +516,18 @@ def promotion_ask_sender_id( session_id=None ):
 def promotion_ask_kwargs( actor, task_id, title, session_id=None,
                           move=approval.MOVE_ADMIT ):
     """
-    EVERY argument the ask is fired with — pure, so all of it is pinnable.
+    Every argument the promotion ask is fired with, kept pure so all of it can be pinned.
 
-    ⚠️ WHY THIS IS SEPARATE FROM THE BOUNDARY BELOW. The boundary is
-    `# pragma: no cover` because it is a live notification call; anything left
-    inside it is BY CONSTRUCTION the part of this feature no test can see. Three
-    of these values are behaviour, not decoration:
+    Separate from the boundary because the boundary is `# pragma: no cover` (a live notification
+    call). Anything left inside it is the part no test can see. Three values are behaviour:
 
-      · `response_default="no"` — INERT FOR THE OUTCOME since 675a1415:
-        `approval_from_the_ask` REFUSES on `default_used` whatever this value is,
-        and a defaulted "no" is refused as a timeout, never recorded as Rick's no.
-        It was "yes" (Rick's earlier rule that his absence must not block) and
-        reached the multiplexer's read-only card as "Default: yes"; Rick ruled it
-        "no" on 2026-09-10 so the label matches the refusal (see UNANSWERED_MEANS).
-      · `human_only=True` — LOAD-BEARING, the same reason self_respin carries it
-        (row 804afce6). The auto-answer proxy must not answer for Rick; a gate he
-        asked for, answered by a robot, is not the gate he asked for.
-      · `timeout_seconds` — how long "away" takes to mean away.
+      - `response_default="no"` does not decide the outcome: `approval_from_the_ask` refuses on
+        `default_used` whatever this value is, and a defaulted "no" is refused as a timeout, never
+        recorded as the owner's no. It only makes the card's "Default" label match the refusal
+        (see `UNANSWERED_MEANS`).
+      - `human_only=True` keeps the auto-answer proxy from answering for the owner, the same reason
+        `self_respin` carries it. A gate answered by a robot is not the gate that was asked for.
+      - `timeout_seconds` is how long "away" takes to mean away.
     """
     question, abstract = promotion_ask_text( actor, task_id, title, move=move )
     return {
@@ -691,14 +588,12 @@ def _default_ask( **kwargs ):
     """
     Fire the ask on the human surface and return an AskOutcome.
 
-    Goes at `notify_user_sync` DIRECTLY rather than at the MCP `ask_yes_no` verb.
-    Two reasons, both measured: importing `lupin_mcp.cosa_voice_mcp` into the web
-    server pulls the MCP server — including its stdout-watcher daemon thread —
-    into a process that has no business hosting it; and `ask_yes_no` returns a
-    STRING whose default-flag survives only as a `"[default used] "` prefix,
-    which this gate would then have to parse back out. The queues already use
-    `notify_user_sync` server-side (todo_fifo_queue, running_fifo_queue), so this
-    is the established path, not a new one.
+    Calls `notify_user_sync` directly rather than the MCP `ask_yes_no` verb, for two reasons.
+    Importing `lupin_mcp.cosa_voice_mcp` into the web server would pull the MCP server, with its
+    stdout-watcher daemon thread, into a process that has no business hosting it. And `ask_yes_no`
+    returns a string whose default flag survives only as a `"[default used] "` prefix, which this
+    gate would have to parse back out. The queues already use `notify_user_sync` server-side, so
+    this is the established path.
     """
     from lupin_cli.notifications.notify_user_sync import notify_user_sync
     from lupin_cli.notifications.notification_models import (
@@ -768,31 +663,28 @@ def _default_ask( **kwargs ):
 def promotion_precheck( session_id, actor, is_manager_fn=is_manager_figure,
                         account_persona=None, move=approval.MOVE_ADMIT ):
     """
-    Everything the gate can decide WITHOUT putting a question in front of Rick.
+    Everything the gate can decide without putting a question in front of the owner.
 
-    🔴 IT EXISTS BECAUSE TWO CALLERS NEED THIS HALF AND ONLY ONE OF THEM NEEDS THE
-    OTHER HALF (row `3493ae9b`, the asynchronous path). The synchronous door runs both
-    halves in one breath. The asynchronous door must run THIS half inside the request —
-    a non-manager still gets an immediate 403, which is Rick's own sentence order — and
-    then hand the ASK to a worker, because the ask is the part that takes 120 seconds.
-
-    ⚠️ SO THE SPLIT IS NOT A TIDY-UP, IT IS THE THING THAT KEEPS ONE DECISION FROM
-    BEING MADE IN TWO PLACES. The alternative was for the asynchronous handler to
-    re-implement "is this caller a manager, and is he exempt?" beside this module's
-    copy. Two derivations of one value agree right up until their inputs diverge, and
-    this file already carries that warning about the allowlist above it.
+    It exists because two callers need this half and only one needs the other. The synchronous door
+    runs both halves together. The asynchronous door runs this half inside the request.
+    So a non-manager still gets an immediate 403, and only the slow ask goes to a worker.
 
     Requires:
         - session_id / actor identify the caller
         - is_manager_fn is the injectable credential seam
 
     Ensures:
-        - returns a REFUSING PromotionApproval when the caller is not a manager
-        - returns an ALLOWING PromotionApproval stamped `self` when the caller is
-          ask-exempt — he is looking at the row, so there is nobody to ask
-        - returns None when, and only when, THE ASK MUST FIRE — no other outcome
+        - returns a refusing PromotionApproval when the caller is not a manager
+        - returns an allowing PromotionApproval stamped `self` when the caller is
+          ask-exempt, since the caller is looking at the row and there is nobody to ask
+        - returns None when, and only when, the ask must fire: no other outcome
           means that, so a caller can branch on None without re-reading the reasons
         - fires no ask of its own under any input
+        - the split keeps one decision from being made in two places: a second copy of "is this
+          caller a manager, and are they exempt?" would agree with this one until their inputs diverge
+        - the asynchronous door must not mint a ticket for an ask-exempt caller, because a ticket
+          promises an answer is coming and no ask fires; the resolver never re-runs this half, so the
+          caller's account identity is not stored, and a stored authorization replayed later could be forged
     """
     refusal = manager_refusal( session_id, actor, is_manager_fn=is_manager_fn,
                                account_persona=account_persona, move=move )
@@ -829,22 +721,20 @@ def answer_posted_by_the_operator( answered_by ):
     """
     Whether an ask's answer was posted by the operator's own login.
 
-    Row e20e249a. The answer door now records WHO posted an answer, and this is the one
-    place the promotion gate reads it: a yes counts as the operator's approval only when
-    the server saw it arrive on a login whose account maps to an ask-exempt persona.
-
-    ⚠️ NO NAME IS WRITTEN HERE (Mr. Radio's review, 2026-09-10). The account-to-persona map
-    is `approver_persona_for_account` and the persona list is ASK_EXEMPT_PERSONAS, so who
-    the operator is stays configuration and one rule.
+    The answer door records who posted an answer. This is the one place the promotion gate reads it.
+    A yes counts as the operator's approval only when the server saw it arrive on a login whose
+    account maps to an ask-exempt persona.
 
     Requires:
         - answered_by is the server-stamped dict from /api/notify/response, or None
 
     Ensures:
-        - True iff method is "jwt" and the account maps to a persona in ASK_EXEMPT_PERSONAS
+        - True iff method is "jwt" and the account maps to a persona in `ASK_EXEMPT_PERSONAS`
         - False for None, a non-dict, an API-key answer, an account with no mapping, and a
           mapped account whose persona is not ask-exempt
         - never raises
+        - no name is written here: the account-to-persona map is `approver_persona_for_account` and
+          the persona list is `ASK_EXEMPT_PERSONAS`, so who the operator is stays configuration
     """
     if not isinstance( answered_by, dict ):  return False
     if answered_by.get( "method" ) != "jwt": return False
@@ -876,33 +766,37 @@ def describe_who_answered( answered_by ):
 def approval_from_the_ask( session_id, actor, task_id, title, ask_fn=_default_ask,
                            move=approval.MOVE_ADMIT ):
     """
-    The ask half: put the question to Rick and read his answer, credentials ALREADY
-    settled by `promotion_precheck`.
+    The ask half: ask the owner and read the answer, with credentials already settled.
 
-    🔴 THIS FUNCTION ASSUMES THE CALLER MAY PROMOTE AND DELIBERATELY DOES NOT CHECK.
-    That is not an omission to be closed by a defensive re-check — a second credential
-    check here would be a SECOND DERIVATION of the one in `promotion_precheck`, and
-    worse, the asynchronous caller cannot supply the same inputs: the account identity
-    that reached the precheck came off a signature-validated token inside the request
-    and is deliberately NOT persisted onto the ticket. A re-check fed weaker inputs
-    would refuse callers the real check passed, which is a defect wearing a belt.
-
-    ⇒ Both doors run the precheck FIRST. The synchronous one does it one line above;
-    the asynchronous one does it inside the request, before the 202 is sent.
+    Both doors run `promotion_precheck` first: the synchronous one a line above, the asynchronous
+    one inside the request before the 202 is sent.
 
     Requires:
         - the caller has already passed `promotion_precheck` and it returned None
-        - ask_fn is the injectable ask seam (None is not accepted — a silently-absent
+        - ask_fn is the injectable ask seam (None is not accepted: a silently-absent
           ask is the one failure this gate exists to prevent)
 
     Ensures:
         - returns a PromotionApproval
         - an answer the server did not see arrive on the operator's own login refuses,
-          and the refusal names who posted it (row e20e249a)
-        - a real "no" refuses; an UNRECOGNISED answer refuses; only yes allows
-        - approval_source distinguishes a keypress from a timed-out default
-        - never raises: an ask that BLOWS UP is caught and becomes a refusal, and
+          and the refusal names who posted it
+        - a real "no" refuses; an unrecognised answer refuses; only yes allows
+        - approval_source is keypress on an allow; a timed-out default is refused rather than allowed
+        - never raises: an ask that blows up is caught and becomes a refusal, and
           the refusal names the exception rather than swallowing it
+        - never re-checks credentials: a second check would be a second derivation of the one in
+          `promotion_precheck`, and the asynchronous caller cannot supply the same inputs (the account
+          identity came off a signature-validated token inside the request and is not persisted onto
+          the ticket), so a re-check would refuse callers the real check passed
+        - the poster is judged before the content, so the gate never puts the owner's name on a
+          decision the owner did not make; an unrecognised or empty answer is refused for the same reason
+        - a "no" is a veto only when a human said it: the default is "no", so a timed-out ask arrives
+          as "no" with `default_used` True, and reading the flag, not the word, sends it to the
+          timed-out refusal
+        - a timed-out ask refuses because being asked and not answering is not approving; its wording
+          differs from the broken-ask refusal, so a broken notifier is told apart from an absent operator
+        - a broken ask refuses rather than allows: not knowing whether the owner was asked is
+          different from the owner not answering, and the gate must not open widest when it knows least
     """
     # 🔴 THE ASK IS WRAPPED BECAUSE IT REACHES A LIVE SERVICE, AND THIS DOCSTRING
     # USED TO PROMISE "never raises" WHILE RAISING. Found by Maya in adversarial
@@ -1027,31 +921,28 @@ def approval_for_promotion( session_id, actor, task_id, title,
                             is_manager_fn=is_manager_figure, ask_fn=_default_ask,
                             account_persona=None, move=approval.MOVE_ADMIT ):
     """
-    The gate's whole decision: credentials, then Rick, in that order.
+    The gate's whole decision: credentials first, then the owner, in that order.
 
-    ORDER IS RICK'S SENTENCE ORDER AND IT IS NOT ARBITRARY — "credentials are
-    checked... and if they are, the NEXT thing that happens is that the method
-    asks me". A caller who cannot promote never puts a question in front of him;
-    otherwise every worker's mistaken click costs him an interruption.
-
-    ⚠️ THIS IS NOW A COMPOSITION OF TWO NAMED HALVES AND HOLDS NO LOGIC OF ITS OWN,
-    which is deliberate: the asynchronous door (row `3493ae9b`) runs the same two
-    halves at two different MOMENTS, and the one thing that must not happen is each
-    door growing its own copy of either half.
+    The order follows the owner's own sentence: credentials are checked, and if they pass, the next
+    step is asking. A caller who cannot promote never puts a question in front of the owner,
+    otherwise every worker's mistaken click would cost an interruption.
 
     Requires:
         - session_id / actor identify the caller; task_id + title describe the row
-        - is_manager_fn and ask_fn are the injectable seams (None is not accepted —
+        - is_manager_fn and ask_fn are the injectable seams (None is not accepted:
           a silently-absent ask is the one failure this gate exists to prevent)
 
     Ensures:
         - returns a PromotionApproval
-        - a non-manager is refused and NO ask is fired
-        - a manager ALWAYS causes the ask to fire — there is no branch that skips it
-        - a real "no" refuses; an UNRECOGNISED answer refuses; only yes allows
-        - approval_source distinguishes a keypress from a timed-out default
-        - never raises: an ask that BLOWS UP is caught and becomes a refusal, and
+        - a non-manager is refused and no ask is fired
+        - a manager always causes the ask to fire: there is no branch that skips it
+        - a real "no" refuses; an unrecognised answer refuses; only yes allows
+        - approval_source is keypress on an allow; a timed-out default is refused rather than allowed
+        - never raises: an ask that blows up is caught and becomes a refusal, and
           the refusal names the exception rather than swallowing it
+        - holds no logic of its own: it composes `promotion_precheck` and `approval_from_the_ask`, and
+          the asynchronous door runs the same two halves at different moments, so neither half may be
+          copied into a door
     """
     settled = promotion_precheck( session_id, actor, is_manager_fn=is_manager_fn,
                                   account_persona=account_persona, move=move )

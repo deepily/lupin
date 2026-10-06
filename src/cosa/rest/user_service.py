@@ -160,7 +160,7 @@ def get_user_by_id( user_id: str ) -> Optional[Dict]:
 
     Ensures:
         - Returns user data dictionary or None
-        - Password hash is NOT included in result
+        - Password hash is not included in result
         - Returns: id, email, roles, email_verified, is_active, created_at
 
     Raises:
@@ -209,7 +209,7 @@ def get_user_by_email( email: str ) -> Optional[Dict]:
 
     Ensures:
         - Returns user data dictionary or None
-        - Password hash is NOT included in result
+        - Password hash is not included in result
         - Returns: id, email, roles, email_verified, is_active, created_at
 
     Raises:
@@ -247,7 +247,7 @@ def get_user_by_email( email: str ) -> Optional[Dict]:
 
 def update_user_password( user_id: str, old_password: str, new_password: str ) -> Tuple[bool, str]:
     """
-    Update user password with validation.
+    Change a user's password after validating the old and new ones.
 
     Requires:
         - user_id is a valid UUID string
@@ -353,7 +353,7 @@ def deactivate_user( user_id: str ) -> Tuple[bool, str]:
 
 def mark_email_verified( user_id: str ) -> Tuple[bool, str]:
     """
-    Mark user email as verified (Phase 7).
+    Mark user email as verified.
 
     Requires:
         - user_id is a valid UUID string
@@ -400,7 +400,7 @@ def mark_email_verified( user_id: str ) -> Tuple[bool, str]:
 
 def reset_password_with_token( user_id: str, new_password: str ) -> Tuple[bool, str]:
     """
-    Reset user password using password reset token (Phase 7).
+    Reset user password using password reset token.
 
     Requires:
         - user_id is a valid UUID string

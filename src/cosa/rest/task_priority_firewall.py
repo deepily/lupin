@@ -1,74 +1,42 @@
 """
-THE PRIORITY FIREWALL — who may set which priority, and on what evidence.
+The priority firewall: who may set which priority, and on what evidence.
 
-Rick's broadcast e254ec7d, 2026-09-07, quoted rather than paraphrased so the next
-reader can check the rules against the source:
+Only the operator or a manager may raise a ticket from P5 up through P1. Only the
+operator may ever establish a ticket as P0. Workers may file tickets only at P5; a
+worker who wants more escalates through a manager, who petitions the operator.
 
-  - "the only way a ticket gets an upgrade from P5 to P4 through P1 is through a me
-     or a manager. I can update them at any time."
-  - "The only way a ticket will ever get upgraded to P0 is through me. Full stop. I
-     don't give a fuck if the server is on fire I am the only person allowed to
-     establish that a ticket is P0."
-  - "workers can file tickets, but they can only file a P5 ticket. That's the only
-     kind. If they want that to be a higher priority, they need to escalate through
-     the manager who will petition me."
+There are three rules and three separate checks. Never collapse them into one
+predicate: they key on different evidence.
 
-THREE RULES, AND THEY ARE THREE SEPARATE CHECKS — do not collapse them into one
-predicate. Row b8205986 says so in its own body, and the reason is that they key on
-different evidence:
+  1. Setting priority P0: the operator only. No manager, no emergency path.
+  2. Raising priority to P1-P4: the operator or a manager.
+  3. Creating above P5: the operator or a manager. A worker's create is P5,
+     whatever it asks for.
 
-  | # | rule                        | who                                        |
-  |---|-----------------------------|--------------------------------------------|
-  | 1 | set priority = P0           | Rick ONLY. No manager, no emergency path.  |
-  | 2 | RAISE priority to P1-P4     | Rick or a manager.                         |
-  | 3 | CREATE above P5             | Rick or a manager. A worker's create is P5,|
-  |   |                             | whatever it asks for.                      |
+A fourth rule, "pull from holding must take the highest priority", is superseded and
+absent here. Manager pulling from holding was rescinded and defaults to off, so a
+highest-priority-first refusal would target a shape that has moved.
+`task_approval_settings.refusal_for_pull` owns that surface.
 
-  Rule 4 of the original four — "pull from holding must take the highest priority" —
-  is SUPERSEDED and is deliberately absent from this module. Rick rescinded manager
-  pulling entirely (broadcast c43a29c5, 2026-09-07 ~21:26): "I want to rescind the
-  feature that allows you to pull from the holding area into the queue and it must
-  default to NO." A highest-priority-first refusal now sits under a switch that is
-  off, so building it here would be building to a shape that has already moved.
-  `task_approval_settings.refusal_for_pull` owns that surface.
+Two sources of evidence, ruled separately. Role comes from the persona session bridge,
+not the User.roles column. Identity comes from a validated account; a typed `actor`
+string is not sufficient authorization. The bridge says what role a caller claims; the
+account says whether the caller is who they say.
 
-TWO SOURCES OF EVIDENCE, AND THE SECOND IS WHAT MAKES THE FIRST MEAN ANYTHING
------------------------------------------------------------------------------
-Rick ruled both hinges, separately, by keypress:
+Rule 1 is strong and rules 2-3 are advisory, and that asymmetry is intended. Rule 1
+keys on `approver_persona_for_account( account_email )`, which resolves a
+signature-validated token to a persona, so a caller cannot forge it. Rules 2-3 key on
+the bridge role, which the child session's own SessionStart writes. A session declares
+its own role, so this module cannot refuse one that claims to be a manager. It stops
+mistakes and misroutes, not forgery.
 
-  ROLE     comes FROM THE PERSONA SESSION BRIDGE (2026-09-07 ~20:55). Not the
-           User.roles column, which was the recommended option and which he declined.
-  IDENTITY comes FROM A VALIDATED ACCOUNT (2026-09-07 ~21:47, "Close it — require a
-           real account"). A typed `actor` string is not sufficient authorization.
+Never test rules 2-3 as though they were a firewall. A test asserting that a worker's
+P1 is refused must drive the door with a bridge that says worker. Only rule 1 can carry
+a forgery claim, because its evidence is a validated account.
 
-⇒ They answer different questions and must never be summarised together. The bridge
-  says WHAT ROLE a caller claims; the account says WHETHER THE CALLER IS WHO THEY SAY.
-
-🔴 SO RULE 1 IS STRONG AND RULES 2-3 ARE ADVISORY-BY-CONSTRUCTION, AND THAT ASYMMETRY
-IS DELIBERATE RATHER THAN AN OVERSIGHT. Build to it knowingly; the row's own warning
-is that four checks on top of a partly-typed identity have the strength of that string.
-
-  Rule 1 keys on `approver_persona_for_account( account_email )`, which resolves a
-  SIGNATURE-VALIDATED token to a persona. A caller cannot forge it. This is the same
-  door the PROMOTE path's ask exemption already uses, and it is the working shape —
-  brought here rather than a new mechanism being invented.
-
-  Rules 2-3 key on the bridge role, which the child session's own SessionStart writes.
-  A session therefore DECLARES its own role, and this module cannot refuse a session
-  that declares itself a manager. It stops mistakes and misroutes, not forgery.
-
-⚠️ AND DO NOT TEST RULES 2-3 AS THOUGH THEY WERE A FIREWALL. A test asserting that a
-worker's P1 is refused must drive the door with a bridge that SAYS worker; it cannot
-prove refusal against an actor who says otherwise, and a test claiming that would be
-asserting something this design does not deliver. Rule 1 is the one that can carry a
-forgery claim, because its evidence is a validated account.
-
-WHAT WOULD UPGRADE RULES 2-3, surveyed on row b8205986 and NOT built here: User.roles
-is a JSONB column defaulting to ["user"] (postgres_models.py:93-97), has_role() and
-is_admin() are already written (auth_middleware.py:289, :336), roles already ride in
-the JWT (auth.py:202), and both auth paths resolve to a real user row. It needs two
-new role VALUES — "manager" and "worker" — and nothing else. Short path, deliberately
-not taken, because Rick chose the bridge knowing this consequence.
+A stronger source for rules 2-3 was surveyed and not built. User.roles is a JSONB
+column, has_role() and is_admin() exist, roles ride in the JWT, and both auth paths
+resolve to a real user row. It needs two new role values, "manager" and "worker".
 """
 from cosa.rest.task_approval_settings import (
     approver_persona_for_account,
@@ -107,10 +75,10 @@ def normalize_priority( value ):
         - returns None for None, blank, non-string, and any unknown value
         - never raises
 
-    ⚠️ AN UNKNOWN VALUE RETURNS None RATHER THAN RAISING, and the callers below treat
-    None as "no priority stated". Rejecting an unknown value is `task_store_rules`'
-    job (VALID_PRIORITIES), and doing it in two places means two rules that agree
-    until they do not.
+    An unknown value returns None rather than raising, and the callers below treat None
+    as "no priority stated". Rejecting an unknown value is the job of `task_store_rules`
+    (VALID_PRIORITIES); doing it in two places means two rules that agree until they
+    do not.
     """
     if not isinstance( value, str ): return None
     candidate = value.strip().upper()
@@ -119,10 +87,10 @@ def normalize_priority( value ):
 
 def caller_is_operator( account_email ):
     """
-    Whether the caller is Rick himself, proven by a validated account.
+    Whether the caller is Rick, proven by a validated account.
 
     Requires:
-        - account_email is the email on a VALIDATED access token, or None
+        - account_email is the email on a validated access token, or None
 
     Ensures:
         - returns True only when the account maps to an unconditional approver
@@ -130,14 +98,14 @@ def caller_is_operator( account_email ):
         - never consults a caller-declared string
         - never raises
 
-    🔴 THIS IS THE ONE PREDICATE IN THIS MODULE A CALLER CANNOT FORGE, and rule 1
+    This is the one predicate in the module that a caller cannot forge, and rule 1
     rests on it alone. `approver_persona_for_account` resolves a signature-validated
-    token; there is deliberately no `actor` parameter here, so there is no typed-name
-    path to leave open by accident.
+    token. There is no `actor` parameter here, so no typed-name path can be left open
+    by accident.
 
-    ⚠️ IT REUSES `UNCONDITIONAL_APPROVERS` RATHER THAN NAMING RICK AGAIN. He is
-    already identified there as the standing authority the allowlist delegates from,
-    and a second spelling of "who is Rick" is a second thing to keep in step.
+    It reuses `UNCONDITIONAL_APPROVERS` instead of naming Rick again. That list already
+    identifies the standing authority the allowlist delegates from, and a second
+    spelling of who the operator is would be a second thing to keep in step.
     """
     persona = approver_persona_for_account( account_email )
     if persona is None: return False
@@ -148,11 +116,11 @@ def caller_is_operator( account_email ):
 
 def caller_is_manager( bridge_role, account_email=None ):
     """
-    Whether the caller holds a manager seat, per the bridge role Rick ruled on.
+    Whether the caller holds a manager seat, per the bridge role.
 
     Requires:
         - bridge_role is the role string the caller's session bridge declares, or None
-        - account_email is the email on a VALIDATED access token, or None
+        - account_email is the email on a validated access token, or None
 
     Ensures:
         - returns True when the bridge role is "manager" (case/space-insensitive)
@@ -160,14 +128,13 @@ def caller_is_manager( bridge_role, account_email=None ):
         - returns False for None/blank/any other role
         - never raises
 
-    ⚠️ THE BRIDGE IS SELF-DECLARED AND THIS FUNCTION CANNOT REFUSE A LIAR. Said out
-    loud at the predicate rather than only in the module docstring, because this is
-    the line somebody will read in isolation while writing a test. Rick chose this
-    source with the consequence written into the option he clicked.
+    The bridge is self-declared, so this function cannot refuse a liar. That is stated
+    here, not only in the module docstring, because this is the line somebody reads in
+    isolation while writing a test. The bridge was chosen as the source knowing this.
 
-    ⚠️ `account_email` IS ACCEPTED AND USED ONLY FOR THE OPERATOR SHORT-CIRCUIT. It is
-    NOT a second gate on manager-ness — adding one would quietly change who counts as
-    a manager, which is a rule Rick has not been asked about.
+    `account_email` is accepted and used only for the operator short-circuit. It is not
+    a second gate on manager-ness: adding one would quietly change who counts as a
+    manager, a rule nobody has been asked about.
     """
     if caller_is_operator( account_email ): return True
     if not isinstance( bridge_role, str ):  return False
@@ -182,19 +149,18 @@ def session_id_from_actor( actor ):
         - actor is the caller-declared "persona words + session id" string, or None
 
     Ensures:
-        - returns the LAST whitespace-separated token when it looks like a session id
+        - returns the last whitespace-separated token when it looks like a session id
           (hex-ish, 8 or more characters), else None
         - returns None for None/blank/non-string and for a bare persona name
         - never raises
 
-    ⚠️ THE SESSION ID IS CALLER-DECLARED LIKE THE REST OF `actor`, so this buys a
-    LOOKUP, not a proof. It is the input to the bridge read Rick ruled for, and the
-    bridge is itself self-written — the chain is advisory end to end. Rule 1 does not
-    touch any of this, which is why rule 1 is the one that can carry a forgery claim.
+    The session id is caller-declared like the rest of `actor`, so this buys a lookup,
+    not a proof. It feeds the bridge read, and the bridge is itself self-written, so the
+    chain is advisory end to end. Rule 1 touches none of this, which is why rule 1 is
+    the one that can carry a forgery claim.
 
-    ⚠️ IT TAKES THE LAST TOKEN, NOT A FIXED POSITION. A persona may be one word or
-    three ("mr radio", "maria"), so counting from the front is an enumeration that
-    goes wrong the first time somebody has a longer name.
+    It takes the last token, not a fixed position. A persona may be one word or three
+    ("mr radio", "maria"), so counting from the front goes wrong for a longer name.
     """
     if not isinstance( actor, str ) or not actor.strip(): return None
     tail = actor.strip().split()[ -1 ]
@@ -213,7 +179,7 @@ def caller_is_manager_by_bridge( actor, account_email=None, manager_fn=None ):
 
     Requires:
         - actor is the caller-declared "persona + session id" string, or None
-        - account_email is the email on a VALIDATED access token, or None
+        - account_email is the email on a validated access token, or None
         - manager_fn is an injectable ( session_id ) -> bool, or None for the live one
 
     Ensures:
@@ -223,19 +189,18 @@ def caller_is_manager_by_bridge( actor, account_email=None, manager_fn=None ):
         - returns False rather than raising if the bridge cannot be read
         - never raises
 
-    🔴 IT DELEGATES TO `is_manager_figure` RATHER THAN RE-DERIVING MANAGER-NESS. That
-    predicate is the ratified one for exactly this question: it gates store WRITES,
-    it is correct SERVER-SIDE (it reads the implicit flag stamped at registration,
-    because the persona-chain env is empty server-side), and it fails CLOSED on any
-    doubt. Writing a second manager rule here would be two pieces of code deciding one
-    rule — they agree until they do not, and the copy is usually the one that is wrong.
+    It delegates to `is_manager_figure` instead of re-deriving manager-ness. That
+    predicate is the ratified one for this question: it gates store writes, it works
+    server-side (it reads the implicit flag stamped at registration, because the
+    persona-chain env is empty server-side), and it fails closed on any doubt. A second
+    manager rule here would be two pieces of code deciding one rule, and they agree
+    until they do not.
 
-    ⚠️ NOT TO BE CONFUSED WITH THE COUNTING PREDICATE. `fleet_size_cap` deliberately
-    does NOT use `is_manager_figure`, because for a CAP the question is "how many
-    seats exist" and the name rule mis-classifies there (measured 2026-09-04: Cheech
-    carried role="author" with a lineage and counted as a manager while John carried
-    the identical role and counted as a worker). For AUTHORIZATION the name rule is
-    ratified and the fail-closed degrade is wanted. Same words, two questions.
+    This is not the counting predicate. `fleet_size_cap` does not use `is_manager_figure`,
+    because a cap asks how many seats exist and the name rule mis-classifies there: one
+    seat with role="author" and a lineage counted as a manager while another with the
+    identical role counted as a worker. For authorization the name rule is ratified and
+    the fail-closed degrade is wanted. Same words, two questions.
     """
     if caller_is_operator( account_email ): return True
 
@@ -259,35 +224,32 @@ def caller_is_manager_by_bridge( actor, account_email=None, manager_fn=None ):
 def refusal_for_priority_change( current, requested, bridge_role=None, account_email=None,
                                  actor=None, manager_fn=None ):
     """
-    Rules 1 and 2: may this caller move an EXISTING row to `requested`?
+    Rules 1 and 2: whether the caller may move an existing row to `requested`.
 
     Requires:
         - current is the row's present priority string, or None
         - requested is the priority being asked for, or None
         - bridge_role is the caller's declared session role, or None
-        - account_email is the email on a VALIDATED access token, or None
+        - account_email is the email on a validated access token, or None
 
     Ensures:
         - returns None (allowed) when `requested` is None or unknown — this module
           does not police values, only authority
-        - returns None when the change is a LOWERING or a no-op, at any priority
-        - RULE 1: returns a refusal for any non-operator setting P0, INCLUDING a
+        - returns None when the change is a lowering or a no-op, at any priority
+        - rule 1: returns a refusal for any non-operator setting P0, including a
           manager, with no override and no emergency path
-        - RULE 2: returns a refusal for a non-manager RAISING into P1-P4
+        - rule 2: returns a refusal for a non-manager raising into P1-P4
         - the refusal string names the rule, the requested priority and what the
           caller was seen as
         - never raises
 
-    🔴 RULE 1 IS CHECKED BEFORE RULE 2 AND THE ORDER IS LOAD-BEARING. A manager passes
-    rule 2, so evaluating rule 2 first would let a manager set P0 — the exact thing
-    Rick said "full stop" about. The P0 check is therefore unconditional on role and
-    consults only the account.
+    Rule 1 is checked before rule 2 and the order matters. A manager passes rule 2, so
+    evaluating rule 2 first would let a manager set P0, which only the operator may do.
+    The P0 check therefore ignores role and consults only the account.
 
-    ⚠️ A LOWERING IS ALWAYS ALLOWED HERE, and that is a deliberate boundary rather
-    than an omission. Rick ruled demotion separately ("it is me and me alone... that
-    gets to promote and demote", 2026-09-08 ~11:58) and that rule lands on the
-    admission path, not here. Two rules about priority in two modules would be two
-    rules that disagree; this one owns RAISING.
+    A lowering is always allowed here. Demotion is ruled separately and lands
+    on the admission path, not here. Two rules about priority in two modules would
+    disagree, so this one owns raising.
     """
     wanted = normalize_priority( requested )
     if wanted is None: return None
@@ -334,26 +296,25 @@ def refusal_for_priority_change( current, requested, bridge_role=None, account_e
 def refusal_for_priority_create( requested, bridge_role=None, account_email=None,
                                  actor=None, manager_fn=None ):
     """
-    Rule 3: may this caller CREATE a row above the worker floor?
+    Rule 3: whether the caller may create a row above the worker floor.
 
     Requires:
         - requested is the priority the create asks for, or None
         - bridge_role is the caller's declared session role, or None
-        - account_email is the email on a VALIDATED access token, or None
+        - account_email is the email on a validated access token, or None
 
     Ensures:
         - returns None when `requested` is None or unknown, or is at/below the worker
           floor — a worker filing P5 is the normal case and is never refused
-        - RULE 1 still applies on create: only the operator creates at P0
+        - rule 1 still applies on create: only the operator creates at P0
         - returns a refusal when a non-manager asks to create above the floor
         - never raises
 
-    ⚠️ THIS REFUSES RATHER THAN SILENTLY DOWNGRADING, and the choice is worth stating.
-    Rick's wording — "they can only file a P5 ticket" — reads either way, and a quiet
-    downgrade is the friendlier behaviour. It is also the one that lets a worker
-    believe they filed a P1 for a week. A refusal is loud, and loud is what a rule
-    about authority should be. If he wants the downgrade instead, that is a one-line
-    change here and a NEW question for him, not a design choice to take quietly.
+    A worker above the floor is refused rather than silently downgraded. The wording
+    "they can only file a P5 ticket" reads either way, and a quiet downgrade is
+    friendlier, but it lets a worker believe a P1 was filed for a week. A refusal is
+    loud, which suits a rule about authority. Switching to a downgrade is a one-line
+    change here and a new question for the operator, not a quiet design choice.
     """
     wanted = normalize_priority( requested )
     if wanted is None: return None
@@ -421,7 +382,7 @@ PETITION_HOLDING_PRIORITY = "P1"
 def petition_is_available( requested, authority, bridge_role=None, account_email=None,
                            actor=None, manager_fn=None ):
     """
-    May this REFUSED P0 be carried to Rick as a petition, rather than returned?
+    Whether a refused P0 may be carried to Rick as a petition instead of returned.
 
     Requires:
         - requested is the priority the call asks for, or None
@@ -430,19 +391,19 @@ def petition_is_available( requested, authority, bridge_role=None, account_email
           them
 
     Ensures:
-        - returns False unless the requested priority is exactly OPERATOR_ONLY_PRIORITY
-          — a petition exists to reach P0 and nothing else. P1-P4 already have a door
+        - returns False unless the requested priority is exactly OPERATOR_ONLY_PRIORITY —
+          a petition exists to reach P0 and nothing else. P1-P4 already have a door
           (a manager sets them directly), so petitioning for one would be a second way
           to do something already permitted
         - returns False unless `authority` is exactly PETITIONABLE_AUTHORITY — a caller
-          exercising its OWN judgement gets the flat refusal, unchanged. Only a caller
+          exercising its own judgement gets the flat refusal, unchanged. Only a caller
           claiming to relay the operator is escalated
-        - returns False for a NON-manager. Rick's sentence order is "a worker escalates
-          through their manager, who petitions the operator", so the worker's escalation
-          path is their manager and not this
+        - returns False for a non-manager. A worker escalates through their manager,
+          who petitions the operator, so the worker's escalation path is their manager
+          and not this
         - returns False for the operator's own account — they are never refused in the
           first place, so there is nothing to petition
-        - returns a BOOL, never a permission and never a token. The caller still has no
+        - returns a bool, never a permission and never a token. The caller still has no
           authority it did not have; it has a route to somebody who does
         - never raises
     """
@@ -466,20 +427,19 @@ def _is_manager( bridge_role, account_email, actor, manager_fn ):
         - manager_fn is an injectable ( session_id ) -> bool, or None
 
     Ensures:
-        - returns True if EITHER source says manager (an explicit role, or the bridge)
+        - returns True if either source says manager (an explicit role, or the bridge)
         - returns True for the operator via either source
         - returns False when neither source is supplied
         - never raises
 
-    ⚠️ TWO SOURCES, OR'D, AND THE EXPLICIT ONE IS FOR TESTS. A door passes `actor` and
-    the bridge answers; a unit test passes `bridge_role` and needs no bridge on disk.
-    They are OR'd rather than ranked because there is no case where one should
-    OVERRIDE the other — a caller supplies one or the other, never both in anger.
+    There are two sources, combined by "or". A door passes `actor` and the bridge
+    answers; a unit test passes `bridge_role` and needs no bridge on disk. They are
+    combined rather than ranked because a caller supplies one or the other, so neither
+    needs to override the other.
 
-    🔴 THE EXPLICIT PATH IS WHY A TEST CANNOT PROVE THIS IS A FIREWALL. A test that
-    passes bridge_role="manager" has SAID the caller is a manager; it has not shown
-    that a real caller could not say the same. That limitation is the design's, not
-    the test's — see this module's docstring.
+    The explicit path is why a test cannot prove this is a firewall. A test that passes
+    bridge_role="manager" has said the caller is a manager; it has not shown that a real
+    caller could not say the same. See the module docstring.
     """
     if caller_is_manager( bridge_role, account_email ): return True
     if actor is not None:
@@ -489,7 +449,7 @@ def _is_manager( bridge_role, account_email, actor, manager_fn ):
 
 def _seen_as( bridge_role, account_email ):
     """
-    How the refusal describes the caller back to them.
+    Describes the caller back to them in a refusal message.
 
     Requires:
         - bridge_role is a role string or None
@@ -498,12 +458,11 @@ def _seen_as( bridge_role, account_email ):
     Ensures:
         - names the validated account when there is one, else says there is none
         - names the declared role when there is one, else says none was declared
-        - never raises, and never echoes a caller-declared persona NAME
+        - never raises, and never echoes a caller-declared persona name
 
-    ⚠️ IT DELIBERATELY DOES NOT ECHO THE `actor` STRING. A refusal that repeats a
-    typed name back teaches the reader that the name was consulted, and here it was
-    not — the account was. Saying "no login account (API-key caller)" is the sentence
-    that tells somebody how to actually get through the door.
+    The `actor` string is never echoed. A refusal that repeats a typed name back suggests
+    the name was consulted, and it was not; the account was. Saying "no login account (API-key caller)" tells the reader how to
+    get through the door.
     """
     account = account_email if isinstance( account_email, str ) and account_email.strip() \
               else "no login account (API-key caller)"

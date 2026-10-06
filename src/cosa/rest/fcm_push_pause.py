@@ -1,11 +1,12 @@
 """
 Global mobile-push pause — an in-memory override of `fcm wake push enabled`.
 
-Row 7df08e59 (Rick, 2026-09-29, design: src/rnd/v0.2.1/2026.09.29-mobile-push-kill-switch-design.md
-§ Revision 1). The ConfigurationManager is a process-wide singleton and `set_config()` changes
-memory only, never the INI file. So a pause is: set the key False in memory, and (optionally)
-arm a timer that puts it back. Nothing is written to disk and nothing survives a restart —
-Rick RULED that in R1.4: the next boot reads the file and pushes resume.
+Design: src/rnd/v0.2.1/2026.09.29-mobile-push-kill-switch-design.md
+
+The ConfigurationManager is a process-wide singleton and `set_config()` changes memory only,
+never the INI file. So a pause sets the key False in memory and optionally arms a timer that
+puts it back. Nothing is written to disk and nothing survives a restart: the next boot
+reads the file and pushes resume.
 
 The other half of the mechanism lives in `FcmWakeService.maybe_send_wake`, which re-reads the
 live key on every call. Without that, setting the key would change nothing the service looks at.
@@ -29,15 +30,17 @@ class PushPauseController:
 
     Ensures:
         - the INI file is never written: every change goes through set_config (memory only)
-        - at most ONE resume timer is armed at any moment
-        - a resume restores the value the key had at CONSTRUCTION (the boot-time INI value),
+        - at most one resume timer is armed at any moment
+        - a resume restores the value the key had at construction (the boot-time INI value),
           never a hard-coded True, so a server configured off in the file stays off
     """
 
     def __init__( self, config_mgr, clock: Optional[Callable[[], datetime]]=None ) -> None:
         """
+        Capture the key's boot-time value and start un-paused.
+
         Requires:
-            - constructed at startup, before any pause, so the value captured IS the INI value
+            - constructed at startup, before any pause, so the value captured is the INI value
 
         Ensures:
             - self.boot_value holds the key's value now; the state starts un-paused
@@ -61,7 +64,7 @@ class PushPauseController:
             - loop is the server's running event loop (call_later is not thread-safe)
 
         Ensures:
-            - the previous resume timer, if any, is cancelled BEFORE the new state is set,
+            - the previous resume timer, if any, is cancelled before the new state is set,
               so an old timer cannot fire in the middle of a newer pause
             - with minutes: exactly one timer is armed for minutes * 60 seconds
             - returns status()
@@ -100,9 +103,11 @@ class PushPauseController:
 
     def status( self ) -> dict:
         """
+        Report the pause state and the live push-enabled value.
+
         Ensures:
             - returns { paused, resumes_at (iso|None), set_by, set_at (iso|None), push_enabled }
-              where push_enabled is the LIVE key, so the read-back is never a guess
+              where push_enabled is the live key, so the read-back is never a guess
         """
         with self._lock:
             return {
@@ -115,8 +120,10 @@ class PushPauseController:
 
     def shutdown( self ) -> None:
         """
-        Cancel the timer; log a line when a pause is still active (R1.4: nothing is persisted,
-        so a restart ends it, and the log is the only record that it ended early).
+        Cancel the resume timer and log a line when a pause is still active.
+
+        Nothing is persisted, so a restart ends the pause. The log line is the only
+        record that it ended early.
 
         Ensures:
             - no timer remains armed

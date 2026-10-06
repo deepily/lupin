@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """
-Reject an oversized /api/docs/upload BEFORE its body is read, then count the streamed bytes.
+Reject an oversized /api/docs/upload before reading its body, then count streamed bytes.
 
-Why this exists (row from Mr. Radio, 2026-09-30): the 100 MB cap in `docs_files.upload_docs_file`
-is checked inside the handler's chunk loop. By the time that loop runs, FastAPI has already parsed
-the multipart body and spooled all of it to a temp file, and the handler then copies it to a second
-one. A 5 GB request therefore costs ~10 GB of disk before the 413. A dependency cannot fix it
-either: FastAPI reads the body before it solves dependencies.
+The 100 MB cap in `docs_files.upload_docs_file` is checked inside the handler's chunk loop.
+By then FastAPI has parsed the multipart body and spooled all of it to a temp file.
+The handler then copies it to a second one. A 5 GB request would cost about 10 GB of disk before the 413.
+A dependency cannot fix that, because FastAPI reads the body before it solves dependencies.
 
 Two checks, because Content-Length alone is a claim the client can omit (chunked) or understate:
   1. a declared Content-Length over the limit is refused at once, without reading a byte;
@@ -30,7 +29,7 @@ class _BodyTooLarge( Exception ):
 
 
 def _cap_bytes() -> int:
-    """The handler's own cap, read at CALL time so a test (or an operator) can change it."""
+    """The handler's own cap, read at call time so a test (or an operator) can change it."""
     from cosa.rest.routers import docs_files
     return docs_files.UPLOAD_MAX_BYTES
 

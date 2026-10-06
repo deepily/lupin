@@ -216,7 +216,7 @@ class WebSocketManager:
               auth_request (the mobile app sends "mobile"; web clients send nothing)
             - device_id (if provided) is the `device_id` value from the same
               auth_request — a stable per-install id. It is only consulted for a
-              MOBILE session (row dc446601)
+              mobile session
 
         Ensures:
             - Adds connection to active_connections dictionary
@@ -225,19 +225,18 @@ class WebSocketManager:
             - Sets up event subscriptions (defaults to "*" for all events)
             - Records connection timestamp
             - Validates subscribed events against available_events
-            - Claims the ( user_id, device_key ) slot for a MOBILE session, closing
-              and FULLY deregistering whichever session held it, with
-              CLOSE_CODE_SUPERSEDED (row dc446601). A web session claims no slot and
+            - Claims the ( user_id, device_key ) slot for a mobile session, closing
+              and fully deregistering whichever session held it, with
+              CLOSE_CODE_SUPERSEDED. A web session claims no slot and
               so can neither displace nor be displaced
             - Records the session's client type in session_client_types — "mobile"
-              iff client_type == "mobile", any other EXPLICIT value ⇒ "web"; an
-              ABSENT client_type writes "web" only for an unmapped session_id and
-              never downgrades an established "mobile" entry (the MOBILE APP's
-              audio-WS connect reuses the queue-WS session id without a marker —
-              F-S6-1, Rachel R1). This reuse is NOT universal: the web app
-              notifications.js opens its audio socket on a SEPARATE session id,
-              so there it lands as its own "web" entry rather than meeting an
-              existing one.
+              iff client_type == "mobile", any other explicit value means "web"; an
+              absent client_type writes "web" only for an unmapped session_id and
+              never downgrades an established "mobile" entry (the mobile app's
+              audio-WS connect reuses the queue-WS session id without a marker).
+              This reuse is not universal: the web app notifications.js opens its
+              audio socket on a separate session id, so there it lands as its own
+              "web" entry rather than meeting an existing one.
 
         Raises:
             - Exception if closing old WebSocket connections fails (handled gracefully)
@@ -354,9 +353,9 @@ class WebSocketManager:
         Requires:
             - session_id is a string (may or may not exist in connections)
             - close_code / close_reason are the frame this socket should receive.
-              The supersede path (row dc446601) passes CLOSE_CODE_SUPERSEDED here
+              The supersede path passes CLOSE_CODE_SUPERSEDED here
               rather than closing the socket itself and then calling in, so there
-              is exactly ONE close and its code cannot lose a race to the default
+              is exactly one close and its code cannot lose a race to the default
 
         Ensures:
             - Removes connection from active_connections if present
@@ -364,7 +363,7 @@ class WebSocketManager:
             - Removes event subscription mappings
             - Cleans up user-to-session associations
             - Removes empty user session lists
-            - Releases this session's device slot, and ONLY this session's — a
+            - Releases this session's device slot, and only this session's — a
               displaced socket's late cleanup must never evict its successor
 
         Raises:
@@ -447,14 +446,14 @@ class WebSocketManager:
         Register one browser session as a watcher of one Claude Code seat.
 
         Requires:
-            - cc_session_id is a SEAT's stable_session_id
-            - session_id is a BROWSER session id
+            - cc_session_id is a seat's stable_session_id
+            - session_id is a browser session id
 
         Ensures:
             - the watcher is recorded, idempotently — a re-watch from the same session does
               not double-count, so a reconnect cannot make a seat look busier than it is
-            - returns True iff this was the seat's FIRST watcher, which is the caller's
-              signal to START the tailer
+            - returns True iff this was the seat's first watcher, which is the caller's
+              signal to start the tailer
         """
         watchers = self.cc_transcript_watchers.setdefault( cc_session_id, set() )
         was_empty = not watchers
@@ -471,10 +470,10 @@ class WebSocketManager:
         Ensures:
             - the watcher is removed if present; removing an absent one is a no-op, never
               an error, because an unwatch can race a disconnect that already swept it
-            - an emptied seat's KEY IS DELETED, so the registry does not accumulate empty
+            - an emptied seat's key is deleted, so the registry does not accumulate empty
               sets for every seat ever watched
-            - returns True iff the seat now has NO watchers, which is the caller's signal
-              to STOP the tailer
+            - returns True iff the seat now has no watchers, which is the caller's signal
+              to stop the tailer
         """
         watchers = self.cc_transcript_watchers.get( cc_session_id )
         if watchers is None: return False
@@ -487,18 +486,18 @@ class WebSocketManager:
 
     def drop_all_cc_transcript_watches( self, session_id: str ) -> List[str]:
         """
-        Remove one browser session from EVERY seat it was watching.
+        Remove one browser session from every seat it was watching.
 
         This is the disconnect path, and the only reliable end of a watch — a closed tab
         never sends cc_transcript_unwatch.
 
         Requires:
-            - session_id is a BROWSER session id
+            - session_id is a browser session id
 
         Ensures:
             - the session is removed from every seat's watcher set
             - seats left with no watchers have their keys deleted
-            - returns the seats that are now UNWATCHED, so the caller can stop their
+            - returns the seats that are now unwatched, so the caller can stop their
               tailers; an empty list means this session was watching nothing
             - never raises, and is safe to call for a session that never watched anything
         """
@@ -517,7 +516,7 @@ class WebSocketManager:
         The browser sessions currently watching one seat.
 
         Ensures:
-            - returns a COPY, so a caller iterating it cannot be tripped by a concurrent
+            - returns a copy, so a caller iterating it cannot be tripped by a concurrent
               watch or disconnect mutating the live set underneath
             - returns an empty set for a seat nobody is watching
         """
@@ -571,39 +570,27 @@ class WebSocketManager:
         """
         The ( user_id, device_key ) slot a session claims, or None for no slot.
 
-        A slot is the UNIT OF SUPERSESSION, so a session only gets one when the
-        server can actually tell its device apart from another: a MOBILE session
-        that sent a real device_id. Web clients get none, and neither does a mobile
-        client that sent no device_id.
-
-        Both exclusions are MECHANISMS rather than policies to remember, and each
-        answers a specific failure:
-
-        WEB (Mr. Radio, 2026-09-28). The multiplexer, the legacy client and the
-        console page (a fresh session id per load) can all be open for one user, and
-        a console tab must not kick the multiplexer off. A web session never gets a
-        slot, so it never enters the supersession path at all — there is no arm that
-        could be reached with the wrong input.
-
-        NO DEVICE ID (Tiffany, 2026-09-28, revising the client_type fallback this
-        first shipped with). Two phones on one account are indistinguishable without
-        a device id, so they would share one slot and displace each other. The mobile
-        app IGNORES close codes today and reconnects after ANY close, so that is not
-        one bump — it is two phones knocking each other off forever. Holding NO slot
-        is strictly better than holding a wrong one: the sockets simply coexist, the
-        way web tabs do, until the app ships device_id.
+        A slot is the unit of supersession. A session only gets one when the server can tell its
+        device apart from another: a mobile session that sent a real device_id.
 
         Requires:
-            - client_type is the NORMALIZED marker from session_client_types
+            - client_type is the normalized marker from session_client_types
               ("mobile" | "web"), never the raw auth_request value — callers read the
               marker so the slot and the FCM wake trigger cannot disagree about what
               counts as mobile
 
         Ensures:
-            - returns None unless user_id is truthy AND client_type is exactly
-              "mobile" AND device_id is truthy
+            - returns None unless user_id is truthy and client_type is exactly
+              "mobile" and device_id is truthy
             - otherwise returns ( user_id, device_id )
             - a session holding no slot can neither displace nor be displaced
+            - web clients get no slot: the multiplexer, the legacy client and the console page (a
+              fresh session id per load) can all be open for one user, and a console tab must not
+              kick the multiplexer off. A web session never enters the supersession path
+            - a mobile client that sent no device_id gets no slot: two phones on one account would
+              share one slot and displace each other, and the mobile app ignores close codes and
+              reconnects after any close, so they would knock each other off forever. Holding no
+              slot is strictly better than a wrong one, since the sockets then coexist like web tabs
 
         Raises:
             - None
@@ -631,19 +618,17 @@ class WebSocketManager:
         """
         The session currently holding `slot`, or None.
 
-        Scans one user's sessions rather than consulting a slot→session index, and
-        that is the design rather than a shortcut: a reverse index is a second place
-        the truth lives, and the failure it invites is the displaced socket's late
-        cleanup evicting its successor. One user's socket list is a handful.
-
         Requires:
             - slot is a value returned by resolve_device_slot
 
         Ensures:
             - returns a session_id whose recorded slot equals `slot`, else None
-            - only sessions holding a LIVE connection are considered — a
+            - only sessions holding a live connection are considered — a
               register_session_user pre-registration holds no socket and so cannot
               be displaced or block a claim
+            - it scans one user's sessions rather than consulting a slot→session index: a reverse
+              index would be a second place the truth lives, and it invites a displaced socket's
+              late cleanup to evict its successor. One user's socket list is a handful
 
         Raises:
             - None
@@ -657,22 +642,22 @@ class WebSocketManager:
 
     def buffer_frame_for_slot( self, slot, message: dict ) -> dict:
         """
-        Assign this slot's next seq, retain a stamped COPY, and return that copy.
+        Assign this slot's next seq, retain a stamped copy, and return that copy.
 
         Requires:
             - slot is a value returned by resolve_device_slot (never None)
             - message is the frame about to go on the wire
 
         Ensures:
-            - returns a NEW dict carrying "seq"; the caller's message is not mutated.
-              emit_to_user builds ONE message and fans it out, so stamping in place
+            - returns a new dict carrying "seq"; the caller's message is not mutated.
+              emit_to_user builds one message and fans it out, so stamping in place
               would give every device the last writer's number — a bug invisible with
-              one device connected, which is how it would ship
+              one device connected
             - the retained frame is byte-identical to the returned one, so a replay
               cannot silently rewrite history
             - the slot's buffer holds at most device_buffer_size frames (oldest
               dropped) and at most device_buffer_max_slots buffers exist, the least
-              recently emitted-to slot WITH NO LIVE HOLDER being evicted
+              recently emitted-to slot with no live holder being evicted
             - a slot with a connected holder is never evicted: when every slot beyond the
               ceiling is live, the map exceeds device_buffer_max_slots by at most the
               number of connected holders, one warning is printed per crossing, and the
@@ -725,7 +710,7 @@ class WebSocketManager:
 
     def _stamp_for_session( self, session_id: str, message: dict ) -> dict:
         """
-        Stamp and retain a frame IF this session holds a device slot, else pass it through.
+        Stamp and retain a frame if this session holds a device slot, else pass it through.
 
         Requires:
             - message is the frame about to be sent to session_id
@@ -745,7 +730,7 @@ class WebSocketManager:
 
     def frames_since( self, slot, last_seq: int ):
         """
-        The retained frames after `last_seq`, and whether continuity is PROVEN.
+        The retained frames after `last_seq`, and whether continuity is proven.
 
         Requires:
             - last_seq is the client's highest received seq; 0 or absent means a
@@ -753,17 +738,16 @@ class WebSocketManager:
 
         Ensures:
             - returns ( frames_after_last_seq, gap ) with frames in seq order
-            - gap is True exactly when the server CANNOT PROVE continuity from
+            - gap is True exactly when the server cannot prove continuity from
               last_seq — frames were evicted by the cap, or nothing is held for a
               client claiming a non-zero last_seq (what a server restart looks like
               from the client's side)
             - gap is False for last_seq 0 against an unknown slot: a fresh client has
               missed nothing, and reporting a gap there would send every device's
               first-ever connection to a pointless full refetch
-
-        🔴 A PARTIAL REPLAY THAT DOES NOT ANNOUNCE ITSELF IS WORSE THAN NO REPLAY:
-        the client believes it is current and stops asking. That is why this returns
-        the flag rather than just the frames.
+            - returns the gap flag, not just the frames: a partial replay that does not
+              announce itself is worse than no replay, since the client believes it is
+              current and stops asking
 
         Raises:
             - None
@@ -790,12 +774,13 @@ class WebSocketManager:
 
     def begin_resume( self, session_id: str ) -> bool:
         """
-        Start HOLDING a slot holder's live frames until replay_and_resume drains them
-        (María's F2: a live frame sent before the replay finishes overtakes it, and a
-        client deduping on seq then discards the replayed frames as already seen).
+        Hold a slot holder's live frames until replay_and_resume drains them.
+
+        A live frame sent before the replay finishes would overtake it. A client deduping on
+        seq would then discard the replayed frames as already seen.
 
         Requires:
-            - called right after connect(), with NO await in between — that adjacency
+            - called right after connect(), with no await in between — that adjacency
               is what leaves no window for a frame to go out unheld
 
         Ensures:
@@ -813,8 +798,9 @@ class WebSocketManager:
 
     async def replay_and_resume( self, session_id: str, last_seq: int, send ) -> Optional[ dict ]:
         """
-        Replay a slot holder's backlog after `last_seq`, announce where it ends, then
-        release the frames held since connect — all in seq order.
+        Replay a slot holder's backlog after `last_seq`, then release the frames held.
+
+        Everything goes out in seq order, and a resume_complete frame announces where the replay ends.
 
         Requires:
             - session_id was connected by connect() and held by begin_resume(); send
@@ -828,17 +814,17 @@ class WebSocketManager:
               meanwhile — and only then stops holding live frames. The final check for
               held frames and the release happen with no await between them, so no
               frame can be emitted into the gap
-            - seq is the server's CURRENT seq for the slot (María's F1), not the
+            - seq is the server's current seq for the slot, not the
               client's last_seq: after a restart the client must re-base on it, or it
               would discard every new frame as already seen
-            - returns the resume_complete frame it sent (the FIRST one, when a second follows)
-            - a HOLE is announced, never papered over (row c044d46f, María's follow-up a): the
+            - returns the resume_complete frame it sent (the first one, when a second follows)
+            - a hole is announced, never papered over: the
               buffer is bounded, so frames emitted while the replay is on the wire can be
               evicted before they are sent. When the next frame's seq is not cursor + 1,
               seqs in between are gone, and the client must not believe it is current.
               Found during the replay proper, it turns `gap` True on the resume_complete
               that closes it. Found after resume_complete has already gone out with
-              gap False, it is followed by a SECOND resume_complete { gap: True } — sent
+              gap False, it is followed by a second resume_complete { gap: True } — sent
               before the frames that lie past the hole, so the client refetches rather
               than trusting them
             - a send failure propagates, and the session stays held; its disconnect()
@@ -896,7 +882,7 @@ class WebSocketManager:
 
         Ensures:
             - returns the number of frames dropped
-            - a session holding NO slot is a silent no-op, so an ack cannot reach a
+            - a session holding no slot is a silent no-op, so an ack cannot reach a
               buffer that is not its own device's
             - an ack beyond the newest frame simply empties the buffer
 
@@ -918,23 +904,22 @@ class WebSocketManager:
 
     def has_live_mobile_session( self, user_id: str ) -> bool:
         """
-        Report whether the user has a LIVE WebSocket session marked `client_type: "mobile"`.
+        Report whether the user has a live WebSocket session marked `client_type: "mobile"`.
 
-        This is the FCM wake-trigger input (S6 §3.3): the wake push fires only when
-        the user has NO live mobile session — a live web/desktop session must NOT
-        suppress the phone's wake (the "one listening channel" goal, F-S6-1).
-        Liveness keys on the QUEUE WS: only the queue-WS auth path records "mobile"
-        in session_client_types, and a session must hold an active connection —
-        `register_session_user` pre-registrations without a socket don't count.
+        This is the FCM wake-trigger input: the wake push fires only when the user has no live
+        mobile session. A live web or desktop session must not suppress the phone's wake.
 
         Requires:
             - user_id is a string (may have no sessions)
 
         Ensures:
-            - Returns True iff at least one of the user's sessions is BOTH present
-              in active_connections AND marked "mobile" in session_client_types
+            - Returns True iff at least one of the user's sessions is both present
+              in active_connections and marked "mobile" in session_client_types
             - Returns False for unknown users, connectionless pre-registrations,
               and users whose only live sessions are web/audio/listener
+            - liveness keys on the queue WS: only the queue-WS auth path records "mobile" in
+              session_client_types, and `register_session_user` pre-registrations without a socket
+              don't count
 
         Raises:
             - None
@@ -1120,23 +1105,8 @@ class WebSocketManager:
         """
         Thread-safe synchronous wrapper for emit_to_user.
 
-        This method is called by COSA queues which expect synchronous emit.
-        Uses asyncio.run_coroutine_threadsafe to safely schedule the coroutine
-        on the main event loop from any thread.
-
-        WARNING — broadcast scope:
-            This method delivers ONLY to the named user's sessions. It is the
-            right primitive for events that should remain private to that user
-            (notification queue updates, response payloads — anything that
-            another admin should NOT see). For queue or job state events that
-            admins watching the system-wide view should also see — job_created,
-            job_removed, job_paused, job_resumed, job_state_transition — use
-            `emit_to_user_and_admins_sync` instead. The Session 248e740e bug
-            (admin browser stuck with 14 stale mock job cards from an E2E test
-            run) was caused by emitting `job_removed` only via this method,
-            which reached the test user's zero browser sessions and never told
-            the admin browser to remove the cards. The canonical dual-emit
-            method removes that discipline burden.
+        COSA queues call this because they expect a synchronous emit. It uses
+        asyncio.run_coroutine_threadsafe to schedule the coroutine on the main event loop.
 
         Requires:
             - user_id is a non-empty string
@@ -1149,6 +1119,13 @@ class WebSocketManager:
             - Does not block calling thread
             - Prints error messages if event loop unavailable
             - Prints confirmation when successfully scheduled
+            - delivers only to the named user's sessions, so it is the right primitive for events
+              private to that user (notification queue updates, response payloads, anything another
+              admin should not see)
+            - queue or job state events that admins watching the system-wide view should also see
+              (job_created, job_removed, job_paused, job_resumed, job_state_transition) go through
+              `emit_to_user_and_admins_sync` instead: emitting `job_removed` only here reaches the
+              owner's browser sessions and never tells the admin browser, which keeps stale job cards
 
         Raises:
             - None (errors logged but not raised)
@@ -1261,21 +1238,8 @@ class WebSocketManager:
         """
         Canonical dual-emit for queue and job state events.
 
-        Delivers the event to the owning user AND every admin session watching
-        the global queue, deduplicating so the owner is never sent the event
-        twice (when the owner happens to also be an admin).
-
-        This is the right method to call for ANY event that signals a queue or
-        job mutation that admins watching the system-wide view should see:
-        job created, job removed, job paused, job resumed, job state
-        transitions, etc. Use this instead of calling emit_to_user_sync followed
-        by emit_to_admins_sync separately — that pattern was the source of the
-        Session 248e740e bug where pause/resume/delete events stranded cards in
-        admin browsers because callers forgot the second call.
-
-        Use emit_to_user_sync directly only for events that admins should NOT
-        see (private notifications, response payloads). Use emit() only for
-        truly system-wide events (notification sounds, time updates).
+        Delivers the event to the owning user and every admin session watching the global queue.
+        The owner is deduplicated, so an owner who is also an admin gets the event once.
 
         Requires:
             - user_id is the owning user UUID (non-empty string)
@@ -1291,6 +1255,12 @@ class WebSocketManager:
             - Both underlying calls are thread-safe via run_coroutine_threadsafe
             - Errors in either call are logged but never raised
             - No-op if main_loop is missing or stopped (matches existing primitives)
+            - this is the method for any event that signals a queue or job mutation admins should
+              see (created, removed, paused, resumed, state transitions). Calling emit_to_user_sync
+              and emit_to_admins_sync separately lets a caller forget the second call, which stranded
+              cards in admin browsers
+            - emit_to_user_sync alone is for events admins should not see (private notifications,
+              response payloads), and emit() is only for system-wide events (sounds, time updates)
 
         Raises:
             - None (errors logged by underlying methods but not raised)
@@ -1308,32 +1278,8 @@ class WebSocketManager:
         """
         Canonical dual-emit for notifications that may target a CC listener.
 
-        Always tries the primary user emit (via emit_to_user_sync) when the
-        user has any active sessions. If `job_id` is provided AND a session
-        named `cc-listener-{job_id}` is active in active_connections
-        (regardless of which user_id owns it), ALSO emits to that session.
-        The two emits are independent — both fire if both targets are
-        reachable, neither blocks the other, errors are logged but never
-        raised.
-
-        Use this for ANY notification dispatch where:
-        - The primary target is identified by user_id (email-resolved or owner)
-        - The notification is associated with a specific agentic-job / CC
-          session via job_id, and a CC listener may need to receive it
-          cross-user (CC listeners authenticate as a shared service-account
-          user_id, so emit_to_user_sync alone won't reach them).
-
-        Use emit_to_user_sync directly only for events with no job_id concept
-        (auth lifecycle, system events). Use emit_to_user_and_admins_sync for
-        queue/job state events admins should see.
-
-        Background: Bug filed 2026-04-27 (session 49c27830) — 3 user-initiated
-        messages from the LookML CC notifications panel were dropped because
-        notify_user short-circuited on is_user_connected(target_system_id)=False
-        even though cc-listener-{job_id} was right there in active_connections
-        under a different shared service-account user_id. The narrow fix
-        added an inline fallback to one branch; this helper extracts the
-        pattern so all 6 dispatch sites can call it consistently.
+        Tries the primary user emit when the user has any active sessions. When `job_id` is given
+        and a session named `cc-listener-{job_id}` is active, it also emits to that session.
 
         Requires:
             - user_id is None or a non-empty string (UUID for connected users)
@@ -1346,14 +1292,20 @@ class WebSocketManager:
             - Returns dict {"user_delivered": bool, "listener_delivered": bool,
                             "any_delivered": bool}
             - user_delivered is True iff user_id had at least one active session
-              AND the underlying emit_to_user_sync did not fail
-            - listener_delivered is True iff job_id was provided AND
-              cc-listener-{job_id} was in active_connections AND the
+              and the underlying emit_to_user_sync did not fail
+            - listener_delivered is True iff job_id was provided and
+              cc-listener-{job_id} was in active_connections and the
               underlying emit_to_session_sync did not fail
             - any_delivered is True iff at least one of the two delivered
             - Errors in either underlying call are caught, logged, and never
               re-raised (consistent with sibling sync helpers)
             - No-op (returns all-False) if main_loop is missing or stopped
+            - the two emits are independent: both fire if both targets are reachable, and neither
+              blocks the other. The listener is reached whichever user_id owns it, because CC
+              listeners authenticate as a shared service-account user_id, so emit_to_user_sync alone
+              will not reach them
+            - use emit_to_user_sync directly only for events with no job_id concept (auth lifecycle,
+              system events), and emit_to_user_and_admins_sync for queue/job state events
 
         Raises:
             - None (consistent with sibling sync helpers)

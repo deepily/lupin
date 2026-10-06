@@ -1,37 +1,36 @@
 #!/usr/bin/env python3
 """
-The console-tee tailer: one async poller per WATCHED seat, pushing append frames.
+The console-tee tailer: one async poller per watched seat, pushing append frames.
 
-Plan: `src/rnd/v0.2.1/2026.09.27-console-tee-live-stream-plan.md` §2 items 1–8.
-Names per ruling OSQ-6. Events: cc_transcript_append · cc_transcript_state.
+Plan: `src/rnd/v0.2.1/2026.09.27-console-tee-live-stream-plan.md`.
+Events: cc_transcript_append, cc_transcript_state.
 
 What this owns
 --------------
-- resolving a seat's transcript from the session bridge, on EVERY poll
+- resolving a seat's transcript from the session bridge, on every poll
 - a byte offset per seat, and the `file_epoch` that scopes it
-- mapping new records to display blocks, coalesced per ruling Q7
+- mapping new records to display blocks, coalesced into one frame per coalesce window
 - a byte-bounded ring so a brief reconnect need not go to REST
 - starting on the first watcher and stopping a grace period after the last leaves
 
-🔴 A `/clear` SWAPS THE PATH — IT NEVER SHRINKS THE FILE
--------------------------------------------------------
-`register_session.py` runs on every SessionStart, `/clear` fires SessionStart, and the hook
-rewrites the bridge with the NEW `transcript_path` while PRESERVING `stable_session_id`.
-The old JSONL does not shrink; it stops growing, and a different file appears elsewhere.
+A `/clear` swaps the path; it never shrinks the file
+----------------------------------------------------
+`register_session.py` runs on every SessionStart, and `/clear` fires SessionStart. The hook
+rewrites the bridge with the new `transcript_path` and preserves `stable_session_id`. The old
+JSONL does not shrink. It stops growing, and a different file appears elsewhere.
 
-⇒ A tailer that watches only for a shrink sits on the dead file forever: no epoch bump, no
-state frame, no new blocks — the pane silently freezes at the moment of the clear, which is
-the precise failure `file_epoch` exists to prevent. So **re-resolving the bridge is the
-PRIMARY detector and a changed path is the `/clear` signal**; the shrink is only the
-secondary detector, for genuine in-place truncation.
+A tailer that watches only for a shrink would sit on the dead file forever: no epoch bump, no
+state frame, no new blocks. The pane would freeze at the moment of the clear, which is the
+failure `file_epoch` exists to prevent. So re-resolving the bridge is the primary detector
+and a changed path is the `/clear` signal. The shrink is the secondary detector, for
+in-place truncation.
 
-🔴 THE PATH IS OPENED VERBATIM
-------------------------------
-Never rejoin `transcript_path` against `LUPIN_ROOT` or any other root. The container binds
-the host sessions directory to the SAME absolute path inside the container, which is why a
-verbatim open works. And `tail_jsonl` never raises — a missing file returns no records — so
-a rewritten path is not an error, it is an empty stream: a blank pane while every status
-frame says `live`. Constraint raised by Tiberius from his integration fixture.
+The path is opened verbatim
+---------------------------
+Never rejoin `transcript_path` against `LUPIN_ROOT` or any other root. The container binds the
+host sessions directory to the same absolute path inside the container, so a verbatim open
+works. `tail_jsonl` never raises, and a missing file returns no records. A rewritten path is
+therefore not an error but an empty stream: a blank pane while every status frame says `live`.
 """
 
 import asyncio
@@ -73,9 +72,8 @@ def load_settings( config_mgr=None ):
     """
     Read the six dials from the INI, falling back to the defaults above.
 
-    The plan is explicit that unresolved VALUES are acceptable at this stage but unresolved
-    HOMES are not (T8) — so all six are INI keys from the start and can be moved without a
-    code change.
+    All six are INI keys so their values can change without a code change, even where the
+    values themselves are still unsettled.
 
     Requires:
         - config_mgr is a ConfigurationManager or None (None → resolve the shared singleton;
@@ -129,7 +127,7 @@ def epoch_for_path( transcript_path ):
     """
     Derive the `file_epoch` from a transcript path.
 
-    The epoch NAMES THE FILE: a `/clear` swaps the path, so the path's own identity is the
+    The epoch names the file: a `/clear` swaps the path, so the path's own identity is the
     epoch. The basename without its extension is the per-session uuid Claude Code writes.
 
     Requires:
@@ -147,7 +145,7 @@ def resolve_transcript_path( cc_session_id, bridge_reader=None ):
     """
     Resolve a seat's transcript path from the session bridge.
 
-    `session_bridge.get_session_metadata()` resolves only the CALLING process and cannot
+    `session_bridge.get_session_metadata()` resolves only the calling process and cannot
     answer for another seat, so the per-seat read is `find_session_by_id`.
 
     Requires:
@@ -155,19 +153,16 @@ def resolve_transcript_path( cc_session_id, bridge_reader=None ):
         - bridge_reader is a callable( cc_session_id ) -> dict|None, or None for the real
           session-bridge read (injected so a unit test needs no live seat)
 
-    🔴 TWO PROPERTIES OF THE REAL READ, both measured 2026-09-28 against lupin-rest-dev:
-      · EXACT id only. The bridge lookup's default also matches on an 8-character prefix,
-        so two seats sharing one would hand back the wrong seat's transcript — the very
-        case the clients refuse to guess at.
-      · NO pid liveness. This runs inside the container, whose /proc cannot see host
-        seats, so a pid check skipped every live bridge and the roster marked every seat
-        unwatchable. Liveness is answered by the file instead: a path that does not exist
-        here is not watchable here.
-
     Ensures:
-        - returns the bridge's `transcript_path` VERBATIM when that file exists, or "" when
+        - returns the bridge's `transcript_path` verbatim when that file exists, or "" when
           the seat, the field, or the file is absent — never a path rejoined against any root
         - never raises
+        - the real read matches the exact id only: the bridge lookup's default also matches an
+          8-character prefix, so two seats sharing one would hand back the wrong seat's transcript
+        - the real read makes no pid liveness check: this runs inside the container, whose /proc
+          cannot see host seats, so a pid check skipped every live bridge and the roster marked
+          every seat unwatchable. The file answers liveness instead: a path that does not
+          exist here is not watchable here.
     """
     if bridge_reader is None:
         try:
@@ -188,13 +183,12 @@ def resolve_transcript_path( cc_session_id, bridge_reader=None ):
 
 class SeatRing:
     """
-    A BYTE-bounded ring of recently-sent blocks, carrying the offset span it holds.
+    A byte-bounded ring of recently-sent blocks, carrying the offset span it holds.
 
-    🔴 Bounded in BYTES, not records. `arbiter_state.FleetEventAccumulator` is the right
-    SHAPE — session id → bounded per-session tail — but it is bounded in RECORDS
-    (`DEFAULT_TAIL_MAXLEN = 50`), and a record-count ring cannot answer a byte-offset
-    question: the server could not say which `from_offset` values it is able to serve.
-    That unit mismatch is the finding (plan P7), not the value.
+    Bounded in bytes, not records. `arbiter_state.FleetEventAccumulator` has the right shape
+    (session id to bounded per-session tail) but is bounded in records (`DEFAULT_TAIL_MAXLEN = 50`).
+    A record-count ring cannot answer a byte-offset question, because the server could not say
+    which `from_offset` values it is able to serve.
     """
 
     def __init__( self, max_bytes ):
@@ -219,7 +213,7 @@ class SeatRing:
 
         Ensures:
             - the ring holds at most max_bytes of transcript span
-            - a chunk larger than the whole budget leaves the ring EMPTY rather than
+            - a chunk larger than the whole budget leaves the ring empty rather than
               over-full, so `span()` never claims more than it can serve
         """
         if self.max_bytes <= 0: return
@@ -273,30 +267,26 @@ class SeatRing:
 
 class CcTranscriptTailer:
     """
-    Polls ONE watched seat and pushes coalesced append frames to its watchers.
+    Polls one watched seat and pushes coalesced append frames to its watchers.
 
-    WHO OWNS THE LIFECYCLE, stated precisely because an earlier version of this docstring got
-    it wrong. The WATCHER COUNT lives in `WebSocketManager.cc_transcript_watchers`, not here:
-    the caller starts a tailer when a seat gains its first watcher and stops it when the seat
-    loses its last. This class has no concept of a watcher.
+    The watcher count lives in `WebSocketManager.cc_transcript_watchers`, not here. The caller
+    starts a tailer when a seat gains its first watcher and stops it when the seat loses its last.
+    This class has no concept of a watcher.
 
-    What it DOES own is self-termination: given a `has_watchers` predicate it polls the count
-    itself and stops after `grace_seconds` with none. That is not a nicety — `disconnect()` is
-    SYNCHRONOUS and called from threads, so it can drop registry entries but cannot await a
-    stop. Without a self-check, a watcher removed on that path would leave this tailer polling
-    a seat nobody is watching, forever, with no error anywhere.
+    It does own self-termination: given a `has_watchers` predicate it polls the count itself and
+    stops after `grace_seconds` with none. `disconnect()` is synchronous and called from threads,
+    so it can drop registry entries but cannot await a stop. Without a self-check, a watcher
+    removed on that path would leave this tailer polling a seat nobody is watching, with no error.
 
-    (Rio caught the earlier docstring asserting "starts on the first watcher, stops after the
-    last" while NO code implemented it, 2026-09-27. A claim in a docstring is not a mechanism,
-    and it is worse than an outright gap: an auditor reads the sentence and stops looking.)
-
-    The grace period is about WATCHERS, never about the seat — which is exactly why `ended`
-    needs its own producer (see `mark_seat_ended`).
+    The grace period is about watchers, never about the seat, so `ended` needs its own producer
+    (see `mark_seat_ended`).
     """
 
     def __init__( self, cc_session_id, emit, settings=None, bridge_reader=None,
                   has_watchers=None ):
         """
+        Create a tailer for one seat; nothing runs until `start()`.
+
         Requires:
             - cc_session_id is the seat's stable_session_id
             - emit is an async callable( cc_session_id, event_name, payload )
@@ -330,7 +320,7 @@ class CcTranscriptTailer:
 
     def start( self, from_offset=0 ):
         """
-        Begin polling, starting WHERE THE CLIENT ASKED.
+        Begin polling, starting where the client asked.
 
         Requires:
             - from_offset is a non-negative byte offset
@@ -338,7 +328,7 @@ class CcTranscriptTailer:
         Ensures:
             - resolves the path and epoch, sets the offset to from_offset, and schedules the
               poll loop; a second call while running is a no-op
-            - NEVER silently starts at the current end of the file — doing so opens a gap
+            - never silently starts at the current end of the file — doing so opens a gap
               between the client's REST backlog fetch and its live watch
         """
         if self._running: return
@@ -379,7 +369,7 @@ class CcTranscriptTailer:
         Poll, coalesce, emit — until stopped.
 
         Ensures:
-            - one append frame at most per coalesce window, per ruling Q7
+            - one append frame at most per coalesce window
             - an exception inside one poll does not kill the loop; the stream degrades to a
               retry rather than dying silently
         """
@@ -454,11 +444,11 @@ class CcTranscriptTailer:
         Ensures:
             - returns None when there is nothing new
             - returns { offset, next_offset, blocks, rotated } when there is
-            - a CHANGED `transcript_path` is treated as the `/clear` signal: the epoch is
+            - a changed `transcript_path` is treated as the `/clear` signal: the epoch is
               rebuilt from the new path, the offset resets to 0, and `rotated` is True.
-              THIS IS THE PRIMARY DETECTOR — the file never shrinks on a clear
-            - a shrink is the SECONDARY detector: the epoch is bumped and the replayed
-              records are NOT emitted
+              this is the primary detector, because the file never shrinks on a clear
+            - a shrink is the secondary detector: the epoch is bumped and the replayed
+              records are not emitted
             - never raises
         """
         current_path = resolve_transcript_path( self.cc_session_id, self.bridge_reader )
@@ -522,19 +512,16 @@ class CcTranscriptTailer:
         Tell watchers the epoch moved, so they clear their buffer and re-fetch.
 
         Ensures:
-            - emits cc_transcript_state with state `rotated` and the CURRENT epoch
+            - emits cc_transcript_state with state `rotated` and the current epoch
         """
         await self.emit( self.cc_session_id, STATE_EVENT, self._state_payload( STATE_ROTATED ) )
 
     async def mark_seat_ended( self ):
         """
-        Tell watchers the SEAT exited — not merely that it went quiet.
+        Tell watchers the seat exited, not merely that it went quiet.
 
-        The grace period stops the tailer when the last WATCHER leaves, never when the seat
-        leaves, so without this producer a viewer watching a seat that exits sees a pane
-        that merely stops: indistinguishable from a quiet seat (plan P6). The signal is the
-        existing SessionEnd hook, with a staleness fallback for a seat that dies without
-        firing it.
+        The grace period tracks watchers, not the seat, so an exit would look like a quiet seat.
+        The signal is the SessionEnd hook, with a staleness fallback for a seat that dies silently.
 
         Ensures:
             - emits cc_transcript_state with state `ended`
@@ -560,8 +547,8 @@ def read_backlog( transcript_path, tail_bytes=None, before_offset=None, since_of
     """
     Serve the REST backlog in one of three directions.
 
-    Ruling Q6 wants the LAST ~64 KB with a load-earlier page, and a forward-only contract
-    cannot express that: `since_offset=0&max_bytes=65536` returns the FIRST 64 KB (plan P4).
+    The last ~64 KB with a load-earlier page cannot be expressed by a forward-only contract:
+    `since_offset=0&max_bytes=65536` returns the first 64 KB.
 
     Requires:
         - transcript_path is a path-like (it need not exist)

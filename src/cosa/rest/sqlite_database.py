@@ -30,7 +30,7 @@ def get_auth_db_path() -> Path:
         - auth database path wo root configured
 
     Ensures:
-        - Returns test database only if BOTH safety checks pass
+        - Returns test database only if both safety checks pass
         - Raises ValueError if safety violation detected
         - Creates parent directories if needed
 
@@ -113,11 +113,8 @@ def init_auth_database() -> None:
     """
     Initialize authentication database with schema.
 
-    Creates tables if they don't exist:
-    - users
-    - refresh_tokens
-    - email_verification_tokens (Phase 7)
-    - password_reset_tokens (Phase 7)
+    Creates the users, refresh_tokens, email_verification_tokens and
+    password_reset_tokens tables if they don't exist.
 
     Requires:
         - Database path accessible and writable

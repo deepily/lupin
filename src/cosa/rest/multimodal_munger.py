@@ -369,8 +369,9 @@ class MultiModalMunger:
 
     def _tokenize( self, text: str ) -> list[str]:
         """
-        Split text into tokens: words (with apostrophes), spaces, and punctuation.
-        Preserves everything for exact reconstruction when joined.
+        Split text into word, space and punctuation tokens that rejoin to the original.
+
+        Words keep their apostrophes, and nothing is dropped.
 
         Requires:
             - text is a string
@@ -671,7 +672,7 @@ class MultiModalMunger:
         """
         Process text with proper punctuation while preserving original case.
 
-        Uses TOKENIZATION approach for reliable word-level replacement without
+        Uses a tokenizing approach for reliable word-level replacement without
         fragile regex boundary handling.
 
         Requires:
@@ -690,28 +691,20 @@ class MultiModalMunger:
         Raises:
             - None
 
-        Implementation Notes (2024.11.30):
-            TOKENIZATION APPROACH:
-                Instead of regex patterns on continuous text (which fails at boundaries),
-                we tokenize first, match tokens against dictionaries, then rejoin.
+        Implementation notes:
+            The text is tokenized first, the tokens are matched against the dictionaries,
+            then the tokens are rejoined:
 
                 "What's five plus five?" → ["What's", " ", "five", " ", "plus", " ", "five", "?"]
                                         → ["What's", " ", "5",    " ", "+",    " ", "5",    "?"]
                                         → "What's 5 + 5?"
 
-            Benefits:
-                - Word boundaries are implicit (tokens are pre-separated)
-                - Works at sentence start/end (no space boundary issues)
-                - Case preservation is natural (check lowercase, keep/replace original)
-                - No complex regex patterns to maintain
-                - The `|` space-delimiter in .map files is now irrelevant - just strip keys
-
-            Previous approaches (regex-based) failed because:
-                - ` five ` pattern couldn't match "five?" at end of sentence
-                - ` five ` pattern couldn't match "Five" at start of sentence
-                - Order of operations mangled spacing around punctuation
-
-            To rollback: See commented OLD APPROACHES below.
+            Regex patterns on continuous text fail at boundaries: a ` five ` pattern cannot
+            match "five?" at the end of a sentence or "Five" at the start, and the order of
+            operations mangles spacing around punctuation. Tokens are pre-separated, so word
+            boundaries are implicit and case is kept by checking the lowercase form. The `|`
+            space-delimiter in .map files no longer matters, because the keys are stripped.
+            The old regex approaches stay commented out below, for rollback.
         """
 
         # ============================================================================
@@ -782,12 +775,9 @@ class MultiModalMunger:
         """
         Process broadcast-context speech while preserving @-mention syntax.
 
-        Mirrors munge_text_punctuation's tokenize-and-lookup pipeline but:
-          - Phrase-preprocesses literal "at sign" → "@" BEFORE tokenization
-            (the per-token tokenizer cannot match the multi-token map entry)
-          - OMITS the comma/period strip that munge_text_punctuation applies
-            (broadcast preserves '.' and ',' so URLs, versions, decimals, and
-             @user.name patterns survive intact)
+        Mirrors munge_text_punctuation's pipeline, but replaces "at sign" with "@" first,
+        because the per-token tokenizer cannot match that multi-token map entry. It omits
+        the comma and period strip, so URLs, versions and @user.name patterns survive.
 
         Requires:
             - raw_transcription is a string
@@ -807,16 +797,14 @@ class MultiModalMunger:
         Raises:
             - None
 
-        Design notes (2026-05-13):
-            Decision Q2 (verbose) explicitly limits @-conversion to the literal
-            phrase "at sign". Whisper produces this phrase reliably when the
-            user dictates the symbol; bare "at" is ambiguous and would break
-            ordinary English in non-mention contexts.
+        Design notes:
+            The @-conversion is limited to the literal phrase "at sign". Whisper produces
+            this phrase reliably when the user dictates the symbol. A bare "at" is
+            ambiguous and would break ordinary English in non-mention contexts.
 
-            The line-757 [,.] strip in munge_text_punctuation is intentionally
-            absent here. That strip is a separate prose-mode bug filed under
-            its own TODO entry — fixing it in this mode is out of scope and
-            would risk regressing the default punctuation path.
+            The [,.] strip in munge_text_punctuation is absent here. Changing that strip
+            is out of scope for this mode, because it would risk regressing the default
+            punctuation path.
         """
 
         prose = raw_transcription
@@ -1419,11 +1407,9 @@ class MultiModalMunger:
         """
         Load the contact-information map, tolerating its absence.
 
-        This map is gitignored (personal data), so it is legitimately missing on
-        a fresh deploy. Absence must NOT take down transcription, which is what
-        it did on the GCP VM 2026-07-25 — but absence must also never be papered
-        over, so this WARNS at load and munge_text_contact() refuses outright
-        rather than serving "N/A" from an empty dict.
+        The map is gitignored (personal data), so a fresh deploy lacks it. Its absence
+        must not take down transcription. It is never papered over: this warns at load,
+        and munge_text_contact() refuses rather than serving "N/A" from an empty dict.
 
         Requires:
             - nothing
@@ -1431,12 +1417,12 @@ class MultiModalMunger:
         Ensures:
             - returns the parsed map when the file is present
             - returns {} when the file is absent or unreadable, after printing a
-              warning that names the file AND the capability that is degraded
+              warning that names the file and the capability that is degraded
             - never raises
 
         Raises:
             - nothing; a missing optional map is a degraded capability, not an
-              error, and the error belongs at the point of USE
+              error, and the error belongs at the point of use
         """
         path = du.get_project_root() + self.CONTACT_INFO_PATH
         try:

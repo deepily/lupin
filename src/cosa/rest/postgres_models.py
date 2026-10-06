@@ -1,10 +1,9 @@
 """
-SQLAlchemy ORM Models for PostgreSQL Authentication Database.
+SQLAlchemy ORM models for the PostgreSQL authentication database.
 
 Maps to the PostgreSQL schema defined in src/scripts/sql/schema.sql.
 Uses SQLAlchemy 2.0 declarative syntax with proper relationships and indexes.
 
-Created: 2025-11-17
 Database: lupin_auth
 """
 
@@ -243,13 +242,12 @@ class ApiKey( Base ):
 
     Requires:
         - user_id: Valid user UUID
-        - key_hash: BCRYPT hash of the API key (cost 12), NOT a SHA-256 digest.
-          This line said SHA-256 until 2026-08-24 (row 323049bb) and was wrong in
-          a way that reads plausible: the column is String(64) and a SHA-256 hex
-          digest is exactly 64 characters, so the claim looked self-consistent.
+        - key_hash: bcrypt hash of the API key (cost 12), not a SHA-256 digest.
           It is written by src/scripts/create_service_account_postgres.py via
           bcrypt.hashpw(..., gensalt(rounds=12)) and verified by bcrypt.checkpw
-          in middleware/api_key_auth.py. A bcrypt hash is 60 characters.
+          in middleware/api_key_auth.py. A bcrypt hash is 60 characters. The column is
+          String(64), which also fits a SHA-256 hex digest, so the width says nothing
+          about the algorithm.
 
     Ensures:
         - id is automatically generated UUID
@@ -1261,19 +1259,16 @@ class ServerLifecycle( Base ):
     """
     Single-row server-lifecycle marker for downtime-aware scheduled-job catch-up.
 
-    Records when this server was last known to be available — stamped periodically
-    by the clock-loop heartbeat (survives hard kills / OOM) and once more in the
-    clean-shutdown ritual (exact final stamp). On startup, mark_interrupted_jobs()
-    reads last_available_at to compute the exact downtime window [last_available_at,
-    now] and CATCH UP scheduled jobs whose fire time fell inside it, instead of
-    dropping them as interrupted (the missed-window bug).
+    The clock-loop heartbeat stamps it periodically, which survives hard kills and OOM, and
+    shutdown stamps it once more. On startup, mark_interrupted_jobs() reads it to find the downtime
+    window and catches up the scheduled jobs that fell inside it, instead of dropping them.
 
     Requires:
         - key is the fixed singleton string "singleton" (exactly one row per database)
 
     Ensures:
         - last_available_at is timezone-aware UTC
-        - dev (lupin_db_dev) and test (lupin_db_test) are SEPARATE databases, so the
+        - dev (lupin_db_dev) and test (lupin_db_test) are separate databases, so the
           single row is naturally per-server with no cross-contamination
     """
     __tablename__ = "server_lifecycle"
@@ -1302,12 +1297,7 @@ class ServerLifecycle( Base ):
 
 class ApprovalSetting( Base ):
     """
-    One approval-policy setting, stored behind the server (row 80513825).
-
-    WHY A TABLE. The settings used to live in a JSON file that every process on the host —
-    the server containers and every Claude seat — could rewrite, all running as one UID, so
-    the file could not express "someone else may not write this". A row here can be reached
-    only through the server's validated setter, which sits behind a signature-checked login.
+    One approval-policy setting, stored behind the server.
 
     Requires:
         - key is one of `task_approval_settings.WRITABLE_KEYS`, or the migration marker
@@ -1315,6 +1305,10 @@ class ApprovalSetting( Base ):
 
     Ensures:
         - one row per key; a write replaces the value and records who wrote it and when
+        - the settings live in a table rather than a JSON file because every process on the
+          host (the server containers and every Claude seat) runs as one UID and could rewrite
+          a file, so the file could not express "someone else may not write this"; a row can be
+          reached only through the server's validated setter, behind a signature-checked login
     """
     __tablename__ = "approval_settings"
 
@@ -1327,20 +1321,16 @@ class ApprovalSetting( Base ):
 
 class TaskItem( Base ):
     """
-    Task-store item — one row per obligation (unified task store, Phase 1).
+    Task-store item: one row per obligation in the unified task store.
 
-    The single source of truth for fleet owed-work state: arbiter, managers,
-    workers, and Rick all read the same rows (design R1/R4). Structural rules
-    (receipts on done, chase-ts on blocked) are enforced by task_store_rules
-    at the API layer; this model carries the belt-and-suspenders CHECK.
-
-    Canonical design: planning-is-prompting ->
-    planning-is-prompting/src/rnd/2026.06.11-unified-task-store-design.md (v0.4) §2.1.
+    The single source of truth for fleet owed-work state; every reader sees the same rows.
+    The API layer enforces the structural rules through task_store_rules (receipts on done,
+    chase timestamp on blocked). This model also carries a `CHECK` as a second defence.
 
     Requires:
         - item_class: one of task|decision|review_request|bug|gate
-          (named item_class at EVERY layer — `class` is a Python reserved
-          word; one-name rule, gate-ruled by Tiberius qid c8c73fde)
+          (named item_class at every layer, because `class` is a Python reserved
+          word; one name everywhere)
         - title: non-empty item title
         - project: repo scope (lupin, planning-is-prompting, ...)
         - created_by: persona + session id of the creator
@@ -1348,9 +1338,9 @@ class TaskItem( Base ):
     Ensures:
         - id is automatically generated UUID
         - status defaults to 'queued' (creation event stamps "->queued")
-        - blocked_by is a JSONB list of TYPED refs [{kind: item|persona|user, id}]
-        - next_chase_ts is non-null whenever status='blocked' (I3, CHECK-enforced)
-        - correlation_key is indexed (C1 — poured Phase 1, writer arrives Phase 2)
+        - blocked_by is a JSONB list of typed refs [{kind: item|persona|user, id}]
+        - next_chase_ts is non-null whenever status='blocked' (CHECK-enforced)
+        - correlation_key is indexed (its writer arrives in a later phase)
         - events cascade-delete with the item
     """
     __tablename__ = "task_items"
@@ -1680,12 +1670,11 @@ class TaskItem( Base ):
 
 class TaskEvent( Base ):
     """
-    Task-store event — append-only per-item audit trail (design R3/T2).
+    Task-store event: append-only per-item audit trail.
 
-    Every state change writes exactly one event row in the same transaction
-    that updates the item. Receipts are first-class: a ->done transition's
-    receipt_refs must pass task_store_rules.validate_receipt_refs (T3 — the
-    mechanical no-confabulation enforcement).
+    Every state change writes one event row in the same transaction as the item update.
+    A ->done transition's receipt_refs must pass task_store_rules.validate_receipt_refs,
+    the mechanical check against confabulated receipts.
 
     Requires:
         - item_id: valid task_items UUID
@@ -1765,63 +1754,38 @@ class TaskPromotionTicket( Base ):
     """
     One promotion out of the holding area, and how it resolved.
 
-    Design of record: `src/rnd/v0.2.1/2026.09.06-asynchronous-promotion-approval-
-    and-its-observable-resolution.md` (row `3493ae9b`, Mr. Radio's conditional ruling
-    of 2026-09-06: option (b) ships ONLY with a resolution path the caller can observe).
-
-    🔴 WHY A ROW AND NOT FOUR COLUMNS ON `task_items`, NOR A FIELD ON THE NOTIFICATION.
-    The notification record knows THAT a human was asked; it does not know which task,
-    which `to_status`, or who asked — and the resolver needs all three to apply the
-    transition. Putting them there would make one record answer two owners' questions.
-    Columns on `task_items` were the other candidate: four columns on the hot table for a
-    state that is rare and short-lived, carried forever by every reader of that table.
-
-    🔴 AND IT IS THE VISIBILITY SURFACE, WHICH THE TASK ROW CANNOT BE. A row awaiting
-    promotion is still `not_approved`, and `task_store_rules.BOARD_INVISIBLE_STATUSES`
-    puts that status outside every board query BY DESIGN. So a pending marker on the task
-    row would be visible only to somebody who already knows the id — the one person who
-    does not need telling. Design §4.
-
-    ⚠️ THE STATE VOCABULARY IS ENFORCED AT THE API LAYER, NOT BY A CHECK, which is the
-    same choice `TaskItem.status` already makes (`task_store_rules.VALID_STATUSES`, with
-    no enum constraint in the schema). The two CHECKs below are STRUCTURAL invariants —
-    facts about a resolved ticket — not a membership test:
-
-        pending     the ask is out; nothing has been applied
-        approved    Rick said yes, or was away and the default stood; the row moved
-        refused     Rick said no, or the ask failed / returned an unrecognised status
-        superseded  the transition was no longer legal when the answer landed
-        stalled     the process was bounced mid-ask — the ONE true orphan (design §6.3)
-
-    ⚠️ `ask_status` CARRIES THE CLIENT'S RAW WORD ON PURPOSE. The allow/refuse decision is
-    made against `task_promotion_gate.THE_NOTIFICATION_SYSTEM_ANSWERED`, an ALLOWLIST of
-    four of the client's eleven statuses (row `96d2341c`) — an unknown status refuses
-    rather than being stamped as Rick's keypress. Storing the raw status keeps that
-    decision AUDITABLE afterwards; storing only the verdict would leave a reader unable to
-    tell a `no` from an `unknown`.
-
-    🔴 `response_body` IS WHAT MAKES THE CALLER'S ANSWER BYTE-IDENTICAL TO TODAY'S, AND IT
-    EXISTS BECAUSE THE FIRST DRAFT CLAIMED THAT WITHOUT IT (design §5.4.1). Today's 200 is
-    serialized INSIDE the transaction that wrote it. If the caller's poll re-read the row
-    instead, `updated_ts` would have moved, the event would have to be looked up rather
-    than handed over, and a concurrent writer could leave a returned item describing a
-    LATER state than the event beside it. The resolver serializes the response ONCE, here,
-    so equality holds by construction rather than by hope.
+    It is a row, not four columns on `task_items` or a field on the notification. The notification
+    lacks the task, the `to_status` and the asker, which the resolver needs. Four columns on the hot
+    task table would burden every reader for a rare, short-lived state.
 
     Requires:
         - item_id: the task_items row being promoted
         - to_status: the status the caller asked for
         - requested_by: the caller-declared actor
-        - resolves_by: when this ticket must have resolved by — `requested_at` plus the
+        - resolves_by: when this ticket must have resolved by, `requested_at` plus the
           ask timeout plus grace. Past it and still `pending` means the ask died.
-        - answer_by: when Rick's answer window closes — `requested_at` plus the ask
-          timeout. Earlier than resolves_by, and a different fact (row dbe42964).
+        - answer_by: when the operator's answer window closes, `requested_at` plus the ask
+          timeout. Earlier than resolves_by, and a different fact.
 
     Ensures:
         - id is an automatically generated UUID
-        - a non-`pending` ticket carries `resolved_at` (CHECK)
-        - a `refused` ticket carries its refusal text (CHECK)
+        - a non-`pending` ticket carries `resolved_at` (`CHECK`)
+        - a `refused` ticket carries its refusal text (`CHECK`)
+        - answer_by is null or not later than resolves_by (`CHECK`)
         - cascades delete with the task item, like task_events
+        - it is the visibility surface the task row cannot be: a row awaiting promotion is still
+          `not_approved`, which `task_store_rules.BOARD_INVISIBLE_STATUSES` keeps out of every
+          board query, so a marker on the task row would show only to someone who knows the id
+        - state is enforced at the API layer, not by a check, as `TaskItem.status` is: pending
+          (ask out, nothing applied), approved (yes, or away and the default stood; row moved),
+          refused (no, or the ask failed or returned an unrecognised status), superseded
+          (transition no longer legal when the answer landed), stalled (process bounced mid-ask)
+        - `ask_status` carries the client's raw word: the allow/refuse decision uses the allowlist
+          `task_promotion_gate.THE_NOTIFICATION_SYSTEM_ANSWERED`, so an unknown status refuses,
+          and the raw value keeps that decision auditable (a `no` differs from an `unknown`)
+        - `response_body` is the response serialized once inside the resolving transaction, so the
+          caller's answer is byte-identical to the direct path; re-reading the row would show a
+          moved `updated_ts` and could pair an item with a later state than its event
     """
     __tablename__ = "task_promotion_tickets"
 
@@ -1944,16 +1908,10 @@ class TaskPromotionTicket( Base ):
 
 class FcmToken( Base ):
     """
-    Registered FCM device token for the mobile silent-relay wake channel (S6).
+    Registered FCM device token for the mobile silent-relay wake channel.
 
-    One row per device token. The token string is the upsert key (S6 §3.1):
-    re-registering an existing token refreshes its user binding and
-    last_registered_at instead of duplicating it. Multiple devices per user
-    are allowed (multiple rows sharing user_id).
-
-    Durability requirement (F-S6-S2-1a): this table IS the wake channel's
-    survival across parent restarts — the registry must rehydrate from here
-    with zero in-memory carryover (AC-S6.1).
+    One row per device token. The token string is the upsert key: re-registering a token refreshes
+    its user binding and last_registered_at instead of duplicating it. A user may have many devices.
 
     Requires:
         - token is the unique FCM registration token string from the device
@@ -1963,6 +1921,8 @@ class FcmToken( Base ):
         - token is unique (upsert key)
         - user_id is indexed (the wake trigger resolves tokens by user)
         - timestamps are timezone-aware UTC
+        - the table is the wake channel's survival across parent restarts, so the registry
+          rehydrates from it with zero in-memory carryover
     """
     __tablename__ = "fcm_tokens"
 

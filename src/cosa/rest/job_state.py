@@ -2,8 +2,8 @@
 CJ Flow Unified Job State Machine.
 
 Provides a single JobState enum as the authoritative source of truth for job
-lifecycle state, replacing the previous mix of status strings, queue container
-names, and a paused boolean flag.
+lifecycle state. It stands in for status strings, queue container names and a
+paused boolean flag.
 
 Requires:
     - No external dependencies (stdlib only)
@@ -22,8 +22,8 @@ class JobState( str, Enum ):
     """
     Unified lifecycle state for all CJ Flow jobs.
 
-    Inherits from str so that ``JobState.PENDING == "pending"`` and
-    ``json.dumps( job.state )`` produce the bare string automatically.
+    Inherits from str, so a member equals its lowercase string value
+    and json.dumps( job.state ) writes the bare string.
     """
 
     PENDING     = "pending"       # Created, not yet in todo queue

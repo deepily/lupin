@@ -1,85 +1,28 @@
 """
-Sweeper for ORPHANED response-required notifications.
+Sweeper that marks orphaned response-required notifications expired after a grace delay.
 
-THE DEFECT THIS CLOSES (row bf4f65c3)
--------------------------------------
-A response-required notification is marked `state='expired'` by exactly ONE
-writer: the SSE generator's `except asyncio.TimeoutError` branch in
-routers/notifications.py. That branch fires only when the generator reaches
-its own deadline.
+Only one writer marks such a notification `state='expired'`. It is the `except asyncio.TimeoutError`
+branch of the SSE generator in routers/notifications.py, and it fires when the generator reaches
+its own deadline. When the asking client walks away, the close raises `asyncio.CancelledError`
+at the generator's `await asyncio.wait_for( ... )`. That is not an `Exception` subclass.
+So the router's `except Exception` cannot catch it. The `finally` clears the in-memory entry and leaves
+the row `delivered` past its `expires_at`, forever. `get_expired_notifications()` had no caller
+to sweep them; this module is that caller.
 
-When the asking client WALKS AWAY, it never does. Measured at the real layer
-(real uvicorn, real Starlette StreamingResponse, real TCP close): the
-generator is suspended at `await asyncio.wait_for( ... )`, and the close
-raises `asyncio.CancelledError` there ~1 ms later. `CancelledError` is not a
-subclass of `Exception`, so the router's `except Exception` clause cannot
-catch it either. The `finally` runs, clears the in-memory pending entry, and
-does NOT touch the row.
+The grace delay is the /respond contract, not a safety margin. `expires_at` is not when the
+human stopped caring. Of 58 answers that landed after it, 57 came within 300s (highest 298s).
+None came between 301s and 600s, and one came 1,109s late from a 600s ask. A row marked expired the
+instant `expires_at` passes would turn a real answer into a 400.
+`POST /api/notifications/{id}/respond` accepts a late answer against an `expired` row for
+`notification grace period seconds` past `expires_at`, and against a `delivered` row forever.
+So this sweeper narrows the honoured window from forever to expires_at plus grace, which costs
+one keypress in that population. The lever is that one key, which the caller passes as
+`grace_seconds`; a second delay knob would eventually disagree with it.
 
-Result: the row stays `delivered` past its `expires_at` FOREVER. Nothing
-swept them, because `get_expired_notifications()` — which has existed and
-been correct the whole time — had ZERO callers. This module is its caller.
-
-🔴 THE GRACE DELAY IS NOT A SAFETY MARGIN — IT IS THE /respond CONTRACT
--------------------------------------------------------------------
-`expires_at` IS NOT WHEN THE HUMAN STOPPED CARING. 58 real keypresses landed
-after it. A sweeper that marks a row expired the instant `expires_at` passes
-would convert a genuine human answer into a 400 — manufacturing a non-answer
-out of an answer, which is the exact inverse of the e5f21fff defect this
-whole epic exists for. Meet that sentence before you simplify this away.
-
-The mechanism: `POST /api/notifications/{id}/respond` accepts a LATE answer
-against an `expired` row for `notification grace period seconds` past
-`expires_at` (routers/notifications.py, the `state == "expired"` branch).
-Against a `delivered` row it accepts one FOREVER. So marking early NARROWS
-the window in which a keypress is honoured.
-
-THE MEASUREMENT, WITH ITS POPULATION AND ITS MOMENT
----------------------------------------------------
-Taken 2026-09-05 ~22:00 UTC against lupin_db_dev, named explicitly via
-`docker exec lupin-postgres psql -d lupin_db_dev` rather than a host shell
-inheriting the dev config. Population: every response-required notification
-that reached state='responded' with a non-null expires_at.
-
-    answers landing AFTER expires_at            58
-    answers landing BEFORE it (CONTROL)      3,070   <- the scan reaches the population
-
-    of the 58, by how late:
-        <= 300s  (inside the grace window)       57      highest of them: 298s
-        301-600s                                  0      <- THE GAP
-        >  600s                                   1      1,109s
-
-⚠️ THE 58th, NAMED RATHER THAN AVERAGED AWAY — because 57-of-58 must not be
-read as if it were 58-of-58. It is notification 33311818, created 2026-07-13,
-`response_value.source = "ui"` (a real keypress, not a default), answered
-1,109s after an expires_at set by a 600s ask timeout — the longest ask in the
-set, where every other late answer came from a 60s or 300s ask.
-
-⇒ IT IS NOT 301s, SO THE WINDOW IS NOT ARBITRARY. The dense cluster tops out
-at 298s and NOTHING sits between 301s and 600s. 300 lands in a real gap in
-the data rather than cutting through a cluster.
-
-⇒ AND IT IS NOT FREE, SAID PLAINLY: this sweeper narrows the honoured window
-from FOREVER to expires_at + grace, and on this population that costs exactly
-one keypress in 58 — that one. It is a cost, not a rounding error, and the
-right lever for a reader who wants it back is `notification grace period
-seconds` itself, which widens the sweeper and /respond TOGETHER. Do not add a
-second delay knob: two numbers that must agree will eventually not.
-
-This module reads that SAME key, so the sweeper closes a row at precisely the
-moment /respond would refuse it anyway, and the two cannot drift apart when
-somebody retunes it.
-
-WHY IT DOES NOT APPLY response_default
---------------------------------------
-`NotificationRepository.mark_expired()` applies `response_default` as a
-`response_value` stamped `source: "timeout_default"`. On the TIMEOUT path
-that default is real — it is returned to the caller that was waiting. On the
-SWEEP path nobody is waiting and nothing consumes it, so writing it would
-assert that an answer was supplied when none ever reached anyone. The
-sweeper passes `apply_default=False` and leaves `response_value` NULL, which
-is also what distinguishes a swept row from a timed-out one with no schema
-change.
+The sweeper never applies `response_default`. On the timeout path that default is returned to
+a waiting caller. On the sweep path nobody is waiting, so writing it would assert an answer
+that never reached anyone. The sweeper passes `apply_default=False` and leaves `response_value`
+NULL, which also tells a swept row from a timed-out one with no schema change.
 """
 
 import uuid
@@ -91,12 +34,12 @@ def _partition( candidates, grace_seconds, now ):
     """
     Split candidate rows into (sweepable ids, count still inside grace).
 
-    The SINGLE place the grace rule is expressed, so the pure helper and the
-    live pass can never disagree about it.
+    This is the single place the grace rule is expressed, so the dry run and the live pass
+    cannot disagree about it.
 
     Requires:
         - candidates is an iterable of rows carrying .id and .expires_at
-        - now is an AWARE datetime
+        - now is an aware datetime
 
     Ensures:
         - a row is sweepable iff expires_at <= now - grace_seconds
@@ -105,8 +48,7 @@ def _partition( candidates, grace_seconds, now ):
           here is a contract change rather than a normal case
 
     Raises:
-        - TypeError on a NAIVE expires_at, rather than silently comparing it
-          wrong — row 3b4002fe was exactly that comparison going unnoticed
+        - TypeError on a naive expires_at, rather than silently comparing it wrong
     """
     cutoff    = now - timedelta( seconds=grace_seconds )
     sweepable = []
@@ -128,44 +70,31 @@ def _partition( candidates, grace_seconds, now ):
 
 def find_sweepable_ids( repo, grace_seconds, now=None ):
     """
-    The rows this sweeper is allowed to close, as id strings. READ-ONLY.
+    The rows this sweeper is allowed to close, as id strings. Read-only.
 
-    🔴 THIS HAS NO PRODUCTION CALLER, DELIBERATELY, AND THE FACT IS STATED HERE
-    SO THE NEXT READER DOES NOT GO LOOKING FOR ONE. Measured 2026-09-06 at
-    23782c08: the only caller is
-    src/tests/unit/test_the_orphan_sweeper_never_shortens_a_human_answer_window.py.
-    A grep for `sweep_once` turns up a dozen hits and none of them reach this
-    module — they are the heartbeat arbiter's unrelated `sweep_once`, which is
-    "a hit is not a use" firing on this very file.
-
-    WHY IT IS KEPT RATHER THAN DELETED. The sweeper ships DISABLED behind its
-    INI flag and arming it is a separate, human decision. This is the DRY-RUN
-    form of that decision: it answers "which rows WOULD this close right now"
-    without writing anything, which is the question somebody has to be able to
-    ask before turning the flag on. Deleting it would leave that question
-    answerable only by running the writer.
-
-    IT CANNOT DRIFT FROM THE LIVE PASS. Both this and `sweep_once` express the
-    grace rule through `_partition` and nowhere else, so the dry run and the
-    real run cannot disagree about which rows qualify. That is the property
-    that makes an uncalled helper safe to keep; without it this would be a
-    second implementation of the rule and should go.
+    It has no production caller; only a unit test calls it. A search for `sweep_once` finds
+    unrelated hits from the heartbeat arbiter's own `sweep_once`.
 
     Requires:
         - repo exposes get_expired_notifications() -> list of Notification
         - grace_seconds is a non-negative number
-        - now is an AWARE datetime, or None to read the wall clock
+        - now is an aware datetime, or None to read the wall clock
 
     Ensures:
+        - kept despite having no caller: the sweeper ships disabled behind its INI flag, and this
+          is the dry-run form of the decision to arm it, answering "which rows would this close
+          right now" without writing anything
+        - cannot drift from the live pass, because both express the grace rule through
+          `_partition` and nowhere else; without that it would be a second copy and should go
         - returns only rows whose expires_at is at least grace_seconds in the
-          past — a row still inside its /respond grace window is NEVER
+          past; a row still inside its /respond grace window is never
           returned, however far past expires_at it is
         - returns ids as strings, in the repository's own order
         - returns [] when nothing qualifies (an empty list is a finding here,
           not an error)
 
     Raises:
-        - TypeError if a candidate row carries a NAIVE expires_at
+        - TypeError if a candidate row carries a naive expires_at
     """
     if now is None: now = datetime.now( timezone.utc )
     sweepable, _ = _partition( repo.get_expired_notifications(), grace_seconds, now )
@@ -183,14 +112,14 @@ def sweep_once( session_factory, grace_seconds, batch_limit=200, now=None, debug
 
     Ensures:
         - marks at most batch_limit rows per call, oldest expiry first
-        - NEVER applies response_default — see this module's docstring
-        - NEVER overwrites a row that stopped being 'delivered' between the
+        - never applies response_default; see this module's docstring
+        - never overwrites a row that stopped being 'delivered' between the
           scan and the mark; that row is counted under "refused", never
           under "swept"
         - returns {"scanned", "swept", "refused", "skipped_in_grace"} so the
-          caller has the sweeper's OWN account of what it touched, rather
+          caller has the sweeper's own account of what it touched, rather
           than having to read a return code
-        - "swept" counts rows actually WRITTEN, not rows attempted
+        - "swept" counts rows actually written, not rows attempted
         - a pass that finds nothing returns swept=0 and is not an error
 
     Raises:

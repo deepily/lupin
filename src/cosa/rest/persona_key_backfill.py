@@ -1,39 +1,34 @@
 #!/usr/bin/env python3
 """
-Guarded persona-key backfill probe (Phase 2 straggler sweep).
+Guarded persona-key backfill probe (the straggler sweep).
 
-Phase 2 routes every WRITE seam through `canonical_persona_key`, so newly-stored
-`owner_persona` / `accountable_manager` values are ALWAYS canonical. This module
-handles the historical tail: any row written BEFORE the cutover whose persona
-value is non-canonical (uppercase / accent / punctuation / double-space) — e.g.
-a "María" or "Mr. Radio" stored by the bare-`.lower()` write seam — would never
-match a canonical READ query and would silently drop out of that persona's
-owed-row set.
+Every write seam routes through `canonical_persona_key`, so newly-stored
+`owner_persona` / `accountable_manager` values are always canonical. This module
+handles the historical tail. That means a row written before the cutover whose persona
+value is non-canonical (uppercase, accent, punctuation, double-space), such as a "María"
+or "Mr. Radio" from the bare-`.lower()` write seam. Such a row never matches a
+canonical read query. It silently drops out of that persona's owed-row set.
 
-The probe scans the two persona-typed columns, finds every value that is NOT
-already equal to its `canonical_persona_key`, and (with `--apply`) UPDATEs each
-straggler in place. It is:
+The probe scans the two persona-typed columns, finds every value not already equal
+to its `canonical_persona_key`, and (with `--apply`) updates each straggler in place:
 
-    - IDEMPOTENT — a value already equal to its canonical key is skipped; a
+    - Idempotent: a value already equal to its canonical key is skipped, so a
       second run after `--apply` is a clean no-op.
-    - DRY-RUN BY DEFAULT — without `--apply` it only REPORTS the planned
-      updates (no write), so it is safe to run for inspection at any time.
-    - DEGRADE-SAFE on a single bad value — a value that canonicalizes to "" (an
-      all-punctuation persona, which should not exist) is REPORTED and SKIPPED
+    - Dry-run by default: without `--apply` it only reports the planned updates
+      (no write), so it is safe to run for inspection at any time.
+    - Degrade-safe on a single bad value: a value that canonicalizes to "" (an
+      all-punctuation persona, which should not exist) is reported and skipped
       rather than blanking the column.
 
-Per the 2026-06-18 store probe (`"maria"`→22 rows, `"maría"`→0; `"mr radio"`→54,
-`"mr. radio"`→0) the store was ALREADY canonical on the live path, so the
-expected straggler set is near-empty — this is belt-and-suspenders for any row
-the earlier bare-`.lower()` write seam may have left behind.
+A store probe (`"maria"`→22 rows, `"maría"`→0; `"mr radio"`→54, `"mr. radio"`→0)
+showed the live path already canonical, so the expected straggler set is near-empty.
+The probe is a safety net for rows the earlier bare-`.lower()` write seam may have left.
 
 Run:
     python -m cosa.rest.persona_key_backfill            # DRY-RUN preview
     python -m cosa.rest.persona_key_backfill --apply    # perform the updates
 
-Design authority: lupin ->
-    src/rnd/v0.1.9/2026.06.19-persona-name-normalization/01-centralized-persona-normalization-plan.md
-    (Phase 2 — "Backfill probe (guarded)").
+Design: src/rnd/v0.1.9/2026.06.19-persona-name-normalization/01-centralized-persona-normalization-plan.md
 """
 import sys
 
@@ -58,9 +53,9 @@ def scan_stragglers( items ):
     Ensures:
         - returns a list of plans, one per (item, column) that needs a change:
           { "id": item.id, "column": <name>, "old": <current>, "new": <canon> }
-        - a column that is None / "" / already-canonical produces NO plan entry
+        - a column that is None / "" / already-canonical produces no plan entry
         - a column that canonicalizes to "" (all-punctuation — should not occur)
-          is reported with new="" and a "skip" flag so the caller does NOT blank
+          is reported with new="" and a "skip" flag so the caller does not blank
           the column; it is surfaced, never silently applied
         - pure (no DB access) — the IO boundary lives in the caller
     """
@@ -85,7 +80,7 @@ def scan_stragglers( items ):
 
 def backfill_persona_keys( session, apply=False ):
     """
-    Scan + (optionally) UPDATE non-canonical persona keys in the task store.
+    Scan for non-canonical persona keys in the task store and optionally rewrite them.
 
     Requires:
         - session is an open SQLAlchemy Session (caller owns commit/rollback)
@@ -94,10 +89,10 @@ def backfill_persona_keys( session, apply=False ):
     Ensures:
         - returns { "scanned": <int>, "stragglers": [ <plan>, ... ],
           "applied": <int> } where each plan is a scan_stragglers entry
-        - apply=False: `applied` is 0 and NO row is mutated (dry-run)
+        - apply=False: `applied` is 0 and no row is mutated (dry-run)
         - apply=True: every non-skip plan is written via setattr on its row;
           `applied` counts the writes performed; the caller commits
-        - a plan with skip=True is NEVER applied (an all-punctuation value is
+        - a plan with skip=True is never applied (an all-punctuation value is
           surfaced for human attention, never used to blank a column)
     """
     from cosa.rest.postgres_models import TaskItem

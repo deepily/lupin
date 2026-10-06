@@ -3,16 +3,14 @@ Notify backpressure — lever E of the messaging-coordination plane.
 
 A per-source (per-`sender_id`) sliding-window rate limiter: at most N sends per
 window; over that, the caller is told to back off (429 + Retry-After). Paired with
-the durable outbox (Phase 1), which honors `retry-after` on its flush — so a
-throttled send is queued + retried, never lost.
+the durable outbox, which honors `retry-after` on its flush — so a
+throttled send is queued and retried, never lost.
 
-Why per-session: under fleet load many sessions each hammer the shared :7999;
-per-`sender_id` caps throttle the noisy worker WITHOUT touching the user's
-interactive session (which also rides the express lane). Decision: Rick 2026-06-02.
+Why per-session: under fleet load many sessions each hammer the shared :7999.
+Per-`sender_id` caps throttle the noisy worker without touching the user's
+interactive session (which also rides the express lane).
 
-Design: src/rnd/v0.1.8/2026.06.02-messaging-coordination-plane-design.md (lever E1).
-
-The cap VALUE / window / retry-after live in lupin-app.ini and are read mtime-gated
+The cap value, window and retry-after live in lupin-app.ini and are read mtime-gated
 (runtime-tunable, no restart — same pattern as the TTS spoken-brevity cap).
 """
 
@@ -25,9 +23,11 @@ from typing import Optional, Tuple
 
 class NotifyRateLimiter:
     """
-    Per-source sliding-window limiter. The cap + window are passed in per call so
-    they can be tuned at runtime without rebuilding the limiter (state = timestamps).
-    Thread-safe (a single lock; the DB/loop work happens elsewhere).
+    Per-source sliding-window limiter, thread-safe behind a single lock.
+
+    The cap and window are passed in per call, so they can be tuned at runtime
+    without rebuilding the limiter. The state is a list of timestamps per source.
+    The DB and loop work happens elsewhere.
     """
 
     def __init__( self ):
@@ -45,7 +45,7 @@ class NotifyRateLimiter:
         Ensures:
             - prunes timestamps older than the window first
             - if the window already holds >= max_per_window hits → returns
-              (False, retry_after_seconds) and does NOT record
+              (False, retry_after_seconds) and does not record
             - otherwise records `now` and returns (True, None)
 
         Returns:
@@ -87,7 +87,7 @@ def _backpressure_config():
     Ensures:
         - returns { enabled, max, window, retry_after }
         - re-reads via ConfigurationManager only when the INI mtime changes
-        - fails SAFE to the last good value / defaults on any error
+        - fails safe to the last good value / defaults on any error
     """
     try:
         import cosa.utils.util as cu

@@ -82,10 +82,8 @@ async def verify_token(token: str) -> Dict:
     """
     Unified token verification supporting both JWT and mock tokens.
 
-    Behavior based on 'auth mode' configuration:
-    - 'mock': Accepts mock_token_* format (legacy development mode)
-    - 'jwt': Validates real JWT tokens (production mode)
-    - 'firebase': Firebase ID tokens (future support)
+    The 'auth mode' setting picks the verifier: 'mock' accepts mock_token_* (development),
+    'jwt' validates real JWT tokens (production), 'firebase' is a mocked placeholder.
 
     Requires:
         - token is a non-empty string
@@ -404,9 +402,8 @@ def identity_or_401( current_user: Dict ) -> tuple:
     """
     The user id and email a v2 door acts as, or a 401 naming which one is missing.
 
-    Written once here rather than inline in every door (F1 of the spoken-ask plan):
-    /api/v2/ask, /submit and /resume each carried the same four lines, and
-    /api/v2/ask-audio would have been a fourth copy.
+    Written once here rather than inline in every door. /api/v2/ask, /submit,
+    /resume and /ask-audio all need the same four lines.
 
     Requires:
         - current_user is the dict get_current_user returned

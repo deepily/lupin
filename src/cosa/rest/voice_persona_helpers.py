@@ -1,24 +1,22 @@
 """
 Pure-function helpers for per-session voice persona allocation.
 
-This module composes (a) ConfigurationManager reads of the [Voice Personas]
-INI block and (b) bridge-file scans from session_bridge.find_active_voice_persona_sessions
-into the higher-level allocation primitives used by the voice_persona router:
+This module composes ConfigurationManager reads of the [Voice Personas] INI block and
+bridge-file scans from session_bridge.find_active_voice_persona_sessions into the
+allocation primitives used by the voice_persona router:
 
-    - load_persona_pool_from_config()  → list of persona dicts (Sam excluded)
-    - pick_unallocated_persona()       → uniform random draw, falls back to borrow
+    - load_persona_pool_from_config()  → list of persona dicts (overflow persona excluded)
+    - pick_unallocated_persona()       → uniform random draw, falls back to overflow or borrow
     - borrowed_persona_for_sid()       → deterministic hash-modulo fallback
     - allocate_persona_for_session()   → end-to-end composition (config → scan → pick → return)
 
-The router holds the asyncio.Lock; this module is purely functional and
-synchronous. The bridge file is the single source of truth — no in-memory
-registry, no separate sweeper. Pool occupancy is freshly computed per call by
-scanning live-PID bridge files.
+The router holds the asyncio.Lock; this module is purely functional and synchronous. The
+bridge file is the single source of truth, with no in-memory registry and no separate
+sweeper. Pool occupancy is computed fresh per call by scanning live-PID bridge files.
 
-Sam is intentionally NOT in the pool. He is the system-wide TTS default
-voice (see `elevenlabs tts default voice id` in lupin-app.ini), used by the
-speech router for any request lacking a voice_id. Treat him as permanently
-allocated to the server itself.
+The overflow persona (INI key `cc session voice persona overflow name`, default sam) is not
+in the pool. Sam is also the system-wide TTS default voice (`elevenlabs tts default voice id`
+in lupin-app.ini). The speech router uses that voice for any request lacking a voice_id.
 
 See: src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md
 """
@@ -63,10 +61,8 @@ def display_name_for( pool_name: str ) -> str:
     """
     Convert pool key form (lowercase, no punctuation) to display form.
 
-    Pool names are stored lowercase with no punctuation per project convention
-    so that they double as ConfigParser-safe key fragments. Anywhere the name
-    is shown to the user — badge label, tooltip, debug print — call this
-    helper to produce the proper-noun display string.
+    Pool names are lowercase with no punctuation, so they double as ConfigParser-safe key
+    fragments. Every user-facing display of a name goes through this helper.
 
     Requires:
         - pool_name is a string (may be empty, may already be capitalized)
@@ -163,24 +159,8 @@ def load_overflow_persona_from_config( config_mgr ) -> Optional[ PoolPersona ]:
     """
     Read the pool-exhaustion overflow persona from config.
 
-    The overflow persona is allocated when every member of the main pool is
-    occupied, so a new session doesn't have to hash-borrow another live
-    session's voice. Multiple sessions may legitimately receive the overflow
-    persona (multi-overflow is permitted; multi-pool-member is not).
-
-    Generalized 2026-05-19 from the prior Sam-hardcoded loader: reads a new
-    `cc session voice persona overflow name` INI key (default "sam" for
-    backward compat) and looks up that persona's pool-style INI keys. Any
-    persona with `cc session voice persona <name> {voice id, icon, color,
-    profile}` keys can act as the overflow — config-driven, no code change
-    required to rotate which persona occupies the overflow slot.
-
-    Backward compat: when overflow_name resolves to "sam" AND no explicit
-    `cc session voice persona sam voice id` key is present, falls back to
-    sourcing voice_id from `elevenlabs tts default voice id` (the legacy
-    non-explicit path that predated 2026-05-19 — Sam historically had no
-    pool-style voice_id key because his identity was conflated with the
-    system TTS default).
+    The overflow persona is allocated when the whole pool is occupied, so a new session need
+    not hash-borrow a live session's voice. Several sessions may hold it; a pool member has one.
 
     Requires:
         - config_mgr is an initialized ConfigurationManager instance
@@ -196,15 +176,18 @@ def load_overflow_persona_from_config( config_mgr ) -> Optional[ PoolPersona ]:
           explicitly set to empty/whitespace (disabling the overflow slot)
         - Never raises — missing icon/color/profile/display_name keys fall
           back to documented defaults
+        - the persona is named by `cc session voice persona overflow name` (default "sam"); any
+          persona with `cc session voice persona <name> {voice id, icon, color, profile}` keys can
+          be the overflow, so rotating it needs no code change
+        - when the name is "sam" and no explicit `cc session voice persona sam voice id` key is
+          present, voice_id comes from `elevenlabs tts default voice id`, so legacy configs
+          without the explicit key still load
 
     Args:
         config_mgr: ConfigurationManager (already constructed by caller)
 
     Returns:
         dict or None: Overflow persona dict, or None if unresolvable
-
-    See: src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md
-         (original Sam-as-overflow design) and the 2026-05-19 generalization.
     """
     overflow_name = config_mgr.get( "cc session voice persona overflow name", default="sam", silent=True )
     if not overflow_name or not overflow_name.strip():
@@ -244,12 +227,8 @@ def _lowest_free_extra_n( occupied_names: Set[ str ] ) -> int:
     """
     Smallest N ≥ 1 such that "extra N" is not in occupied_names.
 
-    Used by the Arnold-first→Extra-N overflow path: once the configured
-    overflow persona ("arnold") is itself occupied, additional concurrent
-    overflow sessions get a numbered "Extra N" identity. The number is derived
-    statelessly from the live occupancy set (which is freshly computed from
-    bridge files per allocation), so a dead Extra session frees its number for
-    re-use on the next allocation — gaps are reused rather than skipped.
+    Once the overflow persona is occupied, further concurrent overflow sessions get a numbered
+    "Extra N" identity, and this picks the number.
 
     Requires:
         - occupied_names is a set of name strings (may be empty)
@@ -258,12 +237,13 @@ def _lowest_free_extra_n( occupied_names: Set[ str ] ) -> int:
         - Returns the smallest integer N ≥ 1 for which f"extra {N}" is absent
           from occupied_names
         - Returns 1 when no "extra K" names are occupied
-        - Reuses gaps: occupied={"extra 2"} → returns 1 (not 3)
+        - Reuses gaps: occupied={"extra 2"} → returns 1 (not 3), because the number is derived
+          statelessly from the live occupancy set, so a dead Extra session frees its number
         - Never raises
 
     Args:
         occupied_names: Names currently allocated to live sessions (pool members,
-            "arnold", and any "extra K" already in use)
+            the overflow persona, and any "extra K" already in use)
 
     Returns:
         int: Lowest free Extra index ≥ 1
@@ -282,14 +262,8 @@ def _make_extra_persona(
     """
     Build a uniquified "Extra N" overflow persona from the base overflow persona.
 
-    Extras share the base overflow persona's voice_id and icon (so they all
-    speak in Arnold's voice and carry his 🪨 badge) but carry a distinct name,
-    display_name, and color so they are visually distinguishable in the chorus
-    UI. The number lives in the display_name ("Extra 1"); the icon is reused.
-
-    Honest limitation: Extras disambiguate the EYE, not the EAR — every Extra
-    speaks in the base overflow voice. Distinct voices require widening the
-    named pool with real ElevenLabs voices, which is tracked separately.
+    Extras share the base overflow persona's voice_id and icon but carry a distinct name,
+    display_name and color, so they look different in the chorus UI. The number lives in the display_name.
 
     Requires:
         - base_overflow is a persona dict with at least voice_id, icon, color
@@ -303,9 +277,11 @@ def _make_extra_persona(
           non-empty, else falls back to base_overflow["color"]
         - Never aliases base_overflow (returns an independent dict)
         - Never raises on valid inputs
+        - Extras disambiguate sessions by eye, not by ear: every Extra speaks in the base overflow
+          voice (distinct voices need a wider named pool with real ElevenLabs voices, tracked separately)
 
     Args:
-        base_overflow: The configured overflow persona (Arnold) — voice/icon source
+        base_overflow: The configured overflow persona — voice/icon source
         n: The Extra index (1-based)
         extra_colors: Green-rule-compliant palette, cycled by (n-1) % len
 
@@ -337,26 +313,20 @@ def borrowed_persona_for_sid(
     """
     Deterministic hash-modulo persona pick for the pool-exhausted case.
 
-    When all personas are allocated to live sessions, fall back to a
-    deterministic borrowed slot keyed on stable_session_id. Determinism
-    means the same session always borrows the same voice across server
-    restarts and across pool-exhaustion events.
-
-    Uses sha256 (not Python's built-in hash()) because the latter is
-    non-deterministic across processes by default (PYTHONHASHSEED).
+    The pick is keyed on stable_session_id, so a session borrows the same voice across restarts.
+    It uses sha256, not hash(), because hash() varies across processes (PYTHONHASHSEED).
 
     Requires:
         - pool is a non-empty list
         - stable_session_id is a non-empty string
 
     Ensures:
-        - Returns a NEW dict with keys: name, voice_id, icon, color, profile, borrowed=True
+        - Returns a new dict with keys: name, voice_id, icon, color, profile, borrowed=True
         - Never raises on valid inputs
         - Returns None when pool is empty or stable_session_id is empty
 
     Args:
-        pool: The full pool (NOT pool minus occupied — borrowing intentionally
-            reuses an in-use voice)
+        pool: The whole pool, not the pool minus occupied — borrowing always reuses an in-use voice
         stable_session_id: Session id used as deterministic seed
 
     Returns:
@@ -389,25 +359,10 @@ def pick_unallocated_persona(
     declared_manager_names : Optional[ Set[ str ] ]   = None
 ) -> Optional[ PoolPersona ]:
     """
-    Uniform random draw from (pool − occupied − declared managers), falling
-    back to Arnold-first→Extra-N overflow (preferred) or hash-borrow (legacy)
-    on exhaustion.
+    Uniform random draw from (pool − occupied − declared managers), with overflow fallback.
 
-    Reserve-from-random (Rick, 2026-06-11): names in `declared_manager_names`
-    (the COSA_VOICE_MANAGERS__<PROJECT> roster, already resolved to POOL-KEY
-    form) are excluded from the random draw — a random allocation must never
-    squat a declared manager's identity. They remain claimable through the
-    strict requested-persona path, which never calls this function. A free
-    set emptied BY this exclusion lands in the existing exhaustion branch
-    (overflow → Extra-N → legacy borrow) byte-unchanged.
-
-    Overflow identity model (Option A, 2026-05-28): when the named pool is
-    exhausted, the FIRST overflow session gets the configured overflow persona
-    verbatim (Arnold). Once Arnold is itself occupied, additional concurrent
-    overflow sessions get numbered "Extra N" identities — distinct names +
-    distinct colors, all sharing Arnold's voice_id and icon. This fixes the
-    prior collision where 2+ overflow sessions received the identical Arnold
-    dict and were indistinguishable in the chorus UI.
+    Names in `declared_manager_names` never come out of the random draw, so a random allocation
+    cannot squat a declared manager's identity. They stay claimable through the strict path.
 
     Requires:
         - pool is a list (may be empty)
@@ -420,38 +375,21 @@ def pick_unallocated_persona(
 
     Ensures:
         - Returns a fresh dict with borrowed=False when
-          (pool − occupied − declared_manager_names) is non-empty, chosen
-          uniformly at random
-        - declared_manager_names constrains ONLY the random draw — the
-          exhaustion fallbacks (overflow/Extra-N/borrow) evaluate against
-          occupied_names exactly as before
-        - When the pool is fully occupied AND overflow_persona is non-None:
-          * if overflow_persona's name is NOT occupied → returns a copy of
-            overflow_persona with borrowed=False (preserving overflow=True) — the
-            common single-overflow case, unchanged from prior behavior
-          * if overflow_persona's name IS occupied → returns an "Extra N" persona
-            (lowest free N), sharing the overflow voice_id/icon with a distinct
-            name/display_name/color (see _make_extra_persona)
-        - When the pool is fully occupied AND overflow_persona is None: falls back
+          (pool − occupied − declared_manager_names) is non-empty, chosen uniformly at random
+        - declared_manager_names constrains only the random draw — the exhaustion fallbacks
+          (overflow/Extra-N/borrow) evaluate against occupied_names exactly as before
+        - When the pool is fully occupied and overflow_persona is non-None:
+          * if overflow_persona's name is not occupied → returns a copy of overflow_persona with
+            borrowed=False (preserving overflow=True), the common single-overflow case
+          * if overflow_persona's name is occupied → returns an "Extra N" persona (lowest free N),
+            sharing the overflow voice_id/icon with a distinct name/display_name/color
+            (see _make_extra_persona), so concurrent overflow sessions stay distinguishable
+        - When the pool is fully occupied and overflow_persona is None: falls back
           to borrowed_persona_for_sid (legacy deterministic hash-borrow); kept as
           defensive fallback for the case where the overflow is unconfigured
         - Returns None only when pool itself is empty (misconfiguration)
         - Never raises
-
-    Args:
-        pool: Full allocatable pool (overflow persona excluded — it's the overflow, not a peer)
-        occupied_names: Names currently allocated to live sessions (pool members,
-            the overflow name, and any "extra K" already in use)
-        stable_session_id: Used both as anti-collision seed and for legacy borrow determinism
-        overflow_persona: Arnold (or any other dict marked overflow=True) returned when
-            the main pool is exhausted; None falls through to the legacy borrow path
-        extra_colors: Green-rule-compliant palette for Extra-N personas, cycled by
-            (n-1) % len; None/empty → Extras inherit the overflow persona's color
-        declared_manager_names: Pool-key names reserved out of the random draw
-            (declared-manager roster); None/empty → no reservation
-
-    Returns:
-        dict or None: Allocated persona, or None if pool is empty
+        - extra_colors is cycled by (n-1) % len; None/empty → Extras inherit the overflow color
     """
     if not pool:
         return None
@@ -492,23 +430,10 @@ def allocate_persona_for_session(
     declared_managers: Optional[ List[ str ] ] = None
 ) -> Optional[ PoolPersona ]:
     """
-    End-to-end allocation: read pool, scan occupied, pick free (or borrow),
-    reserving declared-manager names out of the random draw.
+    End-to-end allocation: read pool, scan occupied, pick a free persona or borrow one.
 
-    This is the function the voice_persona router endpoint calls inside its
-    asyncio.Lock critical section. It composes load_persona_pool_from_config
-    + find_active_voice_persona_sessions (from session_bridge) + pick.
-
-    The returned persona has an `assigned_at` ISO-8601 UTC timestamp added.
-
-    Reserve-from-random (Rick, 2026-06-11): `declared_managers` is the
-    COSA_VOICE_MANAGERS__<PROJECT> roster as user-typed names (e.g.
-    "Mr. Radio"); each is resolved to its pool entry via the same
-    case-insensitive key-form/display-form matching every requested-persona
-    lookup uses (_find_persona_in_pool), and the resolved pool-key names are
-    excluded from the random draw. Roster names that resolve to no pool
-    entry constrain nothing — a typo or renamed pool must not brick
-    allocation.
+    The voice_persona router calls this inside its asyncio.Lock critical section. It composes
+    load_persona_pool_from_config, find_active_voice_persona_sessions and the pick.
 
     Requires:
         - config_mgr is an initialized ConfigurationManager
@@ -523,12 +448,10 @@ def allocate_persona_for_session(
           overflow/Extra-N/borrow exhaustion path unchanged
         - Adds an `assigned_at` field with current UTC ISO-8601 timestamp
         - Never raises on bridge-scan failures (the bridge module catches them)
-
-    Args:
-        config_mgr: ConfigurationManager
-        stable_session_id: Session being allocated
-        declared_managers: Declared-manager roster names to reserve out of
-            the random draw (user-typed forms accepted)
+        - declared_managers is the `COSA_VOICE_MANAGERS__<PROJECT>` roster as user-typed names (e.g.
+          "Mr. Radio"). Each is resolved to its pool entry by the same case-insensitive matching
+          every requested-persona lookup uses (_find_persona_in_pool). Roster names that resolve
+          to no pool entry constrain nothing, since a typo or renamed pool must not brick allocation
 
     Returns:
         dict or None: persona with all 7 fields, or None if pool is empty
@@ -588,8 +511,7 @@ def allocate_persona_for_session(
 
 def _find_persona_in_pool( pool: List[ PoolPersona ], requested_name: str ) -> Optional[ PoolPersona ]:
     """
-    Locate a pool entry by name, case-insensitive on both the pool key form
-    and the derived display_name.
+    Locate a pool entry by name, matching its pool key or its display name.
 
     Requires:
         - pool is a list of pool persona dicts (may be empty)
@@ -599,7 +521,7 @@ def _find_persona_in_pool( pool: List[ PoolPersona ], requested_name: str ) -> O
         - Returns the matching pool entry if found (matching against either
           the pool key form or display_name_for(name), case-insensitive,
           leading/trailing whitespace tolerated)
-        - Returns None when no match found OR when requested_name is empty
+        - Returns None when no match found or when requested_name is empty
           or whitespace-only
         - Never raises
 
@@ -636,19 +558,12 @@ def pick_requested_persona(
     requested_name         : str
 ) -> Dict[ str, Any ]:
     """
-    Look up a requested persona by name and check availability against the
-    caller-supplied occupied map.
-
-    The caller (route handler) MUST exclude the requesting session's own
-    current persona name from `occupied_to_session_id` before calling this
-    helper. This keeps the helper pure (no session_bridge dependency) and
-    makes swap semantics — "I currently hold Arnold; give me María" —
-    work without false-positive occupied collisions.
+    Look up a requested persona by name and check it against the occupied map.
 
     Requires:
         - pool is a list of pool persona dicts (may be empty)
         - occupied_to_session_id maps pool name → holding session_id for all
-          currently occupied personas EXCEPT the requesting session's own
+          currently occupied personas except the requesting session's own
         - requested_name is a non-empty string
 
     Ensures:
@@ -656,11 +571,14 @@ def pick_requested_persona(
           * ok           → persona (fresh dict with borrowed=False), available
           * not_in_pool  → persona=None, available
           * occupied     → persona=None, holding_session_id, holding_persona_name, available
-        - `available` is a list of pool names NOT in occupied_to_session_id, sorted
+        - `available` is a list of pool names not in occupied_to_session_id, sorted
         - Never raises
+        - the caller (route handler) excludes the requester's own persona before calling, which
+          keeps this helper pure (no session_bridge dependency) and lets a swap such as "I hold
+          Arnold; give me María" work without a false occupied collision
 
     Args:
-        pool: Allocatable pool (Sam excluded — he's the overflow, not a peer)
+        pool: Allocatable pool (the overflow persona is excluded; it is not a peer)
         occupied_to_session_id: name → session_id map for occupied personas
             (excluding the requesting session's own current allocation)
         requested_name: Name to look up (case-insensitive)
@@ -708,14 +626,7 @@ def allocate_requested_persona_for_session(
     requested_name   : str
 ) -> Optional[ Dict[ str, Any ] ]:
     """
-    End-to-end requested-persona allocation: read pool, scan occupied
-    (excluding the requesting session's own current allocation), pick
-    requested, stamp `assigned_at` on success.
-
-    The "exclude self" semantics is what makes a swap call work — when the
-    requesting session currently holds Arnold and asks for María, the scan
-    must not count Arnold as occupied (or the caller would falsely conclude
-    "all 6 in use").
+    End-to-end requested-persona allocation: read pool, scan occupied, pick requested.
 
     Requires:
         - config_mgr is an initialized ConfigurationManager
@@ -730,7 +641,8 @@ def allocate_requested_persona_for_session(
           pick_requested_persona, with `assigned_at` (UTC ISO-8601) stamped
           on the persona dict when status is "ok"
         - Excludes the requesting session's own allocation from the occupied
-          scan so a swap works correctly
+          scan so a swap works correctly: when the session holds Arnold and asks for
+          María, counting Arnold as occupied would falsely report every persona in use
         - Never raises on bridge-scan failures
 
     Args:
@@ -781,11 +693,8 @@ def parse_declared_managers( raw ) -> List[ str ]:
     """
     Normalize a declared-manager roster expression into an ordered name list.
 
-    The ONE parser for the roster wherever it travels — the env reader
-    (pick_declared_managers_from_env) and the allocate endpoint's
-    `declared_managers` query param both call this, so the two carriers can
-    never drift. Extracted 2026-06-11 when the roster gained its second
-    carrier (hook→server transport for reserve-from-random).
+    The one parser for the roster wherever it travels. The env reader and the allocate endpoint's
+    `declared_managers` query param both call it, so the two carriers cannot drift.
 
     Requires:
         - raw is a str (comma-separated), a list of strings, or None
@@ -796,10 +705,9 @@ def parse_declared_managers( raw ) -> List[ str ]:
           delimiter)
         - `*` elements are dropped (wildcard is chain syntax, meaningless in
           a manager roster — tolerated so a copy-pasted chain can't poison it)
-        - Duplicates dropped with a normalize-keyed comparison (F-B:
-          "Mr. Radio, mr radio, MR.RADIO" declares ONE manager); the first
-          (verbatim) spelling is emitted, ORDER preserved — roster head =
-          declared fallback manager
+        - Duplicates dropped with a normalize-keyed comparison, so
+          "Mr. Radio, mr radio" declares one manager; the first (verbatim) spelling
+          is emitted, order preserved — roster head = declared fallback manager
         - Non-string items inside a list input are skipped
         - Returns [] for None, empty/whitespace input, or any other type
         - Never raises
@@ -838,24 +746,10 @@ def parse_declared_managers( raw ) -> List[ str ]:
 
 def pick_declared_managers_from_env( project, environ=None ):
     """
-    Read COSA_VOICE_MANAGERS__<PROJECT> — the user's declared-manager roster
-    for a repo (Rick, 2026-06-11: multi-manager-per-repo support).
+    Read `COSA_VOICE_MANAGERS__<PROJECT>`, the declared-manager roster for a repo.
 
-    The value is a comma-separated list of persona names; multi-word names
-    pass through verbatim ("Tiberius, Mr. Radio" → ["Tiberius", "Mr. Radio"]).
-    Declaration is role + reserve-from-random (Rick's D3 ruling, 2026-06-11,
-    superseding the role-only Q2 scope): it marks the personas as managers
-    for fleet-status rendering + escalation fanout, AND reserves their names
-    OUT of random/chain-`*` allocation (see allocate_persona_for_session).
-    It never OCCUPIES a persona — an explicit strict request or named chain
-    element still claims a declared name; that is how managers get theirs.
-
-    (Relocated from heartbeat_arbiter/manager_resolver.py 2026-06-11 when the
-    allocation corridor became its second consumer — sibling of
-    pick_persona_chain_from_env, same `__<PROJECT>` lookup pattern; the LIVE
-    SessionStart hook imports THIS module and must not drag
-    manager_resolver's lupin_mcp.session_spawner import into its chain.
-    Single definition, no re-export shim — one-name rule.)
+    The value is a comma-separated list of persona names; multi-word names pass through
+    verbatim ("Tiberius, Mr. Radio" → ["Tiberius", "Mr. Radio"]).
 
     Requires:
         - project is a project-key string or None
@@ -866,15 +760,19 @@ def pick_declared_managers_from_env( project, environ=None ):
           (parse semantics: see parse_declared_managers)
         - Returns [] when project is None/empty/whitespace, the env var is
           unset, or it parses to zero names
-        - Normalizes project name: strip + UPPER + hyphens→underscores
+        - Normalizes project name: strip + upper-case + hyphens→underscores
         - Never raises
+        - a declaration marks the personas as managers for fleet-status rendering and escalation
+          fanout, and reserves their names out of random and chain-`*` allocation (see
+          allocate_persona_for_session)
+        - a declaration never occupies a persona: an explicit strict request or named chain
+          element still claims a declared name, which is how managers get theirs
+        - this reader lives here, beside pick_persona_chain_from_env, because the live SessionStart
+          hook imports this module and must not pull in manager_resolver's session_spawner import chain
 
     Examples:
         COSA_VOICE_MANAGERS__LUPIN="Tiberius, Mr. Radio" + project="lupin"
             → [ "Tiberius", "Mr. Radio" ]
-
-    See: src/rnd/v0.1.8/2026.06.11-multi-manager-env-var-and-persona-preference-transport-fix.md
-         src/rnd/v0.1.8/2026.06.11-fleet-roster-env-file-and-reserve-from-random.md
     """
     if environ is None:
         environ = os.environ
@@ -894,18 +792,10 @@ PERSONA_CHAIN_WILDCARD = "*"
 
 def pick_persona_chain_from_env( project: Optional[ str ], environ=None ) -> Optional[ str ]:
     """
-    Read COSA_VOICE_PREFERRED_PERSONA__<PROJECT> from the environment.
+    Read `COSA_VOICE_PREFERRED_PERSONA__<PROJECT>` from the environment.
 
-    Resolves a per-repo declarative persona CHAIN from the user's shell
-    environment. The value is a chain expression — an ordered, comma-separated
-    list of persona names with an optional `*` wildcard meaning "then take
-    anything free" — e.g. `COSA_VOICE_PREFERRED_PERSONA__LUPIN="Mr. Radio,Tiberius,*"`.
-    A bare single name remains valid (a strict chain of one). The env var name
-    embeds the project so one universal lookup pattern serves every repo.
-
-    (Renamed from pick_preferred_persona_from_env 2026-06-11 when the value
-    semantics widened from single soft-preference name to ordered chain —
-    one-name rule, all consumers migrated.)
+    The value is a persona chain: ordered, comma-separated names with an optional `*` wildcard
+    meaning "then take anything free". A bare single name is a strict chain of one.
 
     Requires:
         - project is either a non-empty string (e.g., "plan", "lupin",
@@ -913,12 +803,12 @@ def pick_persona_chain_from_env( project: Optional[ str ], environ=None ) -> Opt
 
     Ensures:
         - Returns the chain expression string from the env var if set, verbatim
-          (does NOT parse or validate — parse_persona_chain is the parser;
+          (does not parse or validate — parse_persona_chain is the parser;
           pool validation is the allocator's job)
         - Returns None when project is None, empty, or whitespace-only
         - Returns None when the resolved env var is unset
         - Returns None when the resolved env var is set but empty/whitespace
-        - Normalizes project name: strip + UPPER + hyphens→underscores
+        - Normalizes project name: strip + upper-case + hyphens→underscores
         - Reads from `environ` when supplied (testability), else os.environ
         - Never raises
 
@@ -927,8 +817,6 @@ def pick_persona_chain_from_env( project: Optional[ str ], environ=None ) -> Opt
         project="cosa-voice"  → reads COSA_VOICE_PREFERRED_PERSONA__COSA_VOICE
         project="LUPIN"       → reads COSA_VOICE_PREFERRED_PERSONA__LUPIN
         project=None / ""     → returns None silently
-
-    See: src/rnd/v0.1.8/2026.06.11-multi-manager-env-var-and-persona-preference-transport-fix.md
     """
     if environ is None:
         environ = os.environ
@@ -947,21 +835,7 @@ def pick_persona_chain_from_env( project: Optional[ str ], environ=None ) -> Opt
 
 def resolve_session_start_persona_chain( project: Optional[ str ], environ ) -> Optional[ str ]:
     """
-    Resolve which persona-chain expression (if any) a SessionStart should
-    send to the allocate endpoint, encoding the spawn/user precedence.
-
-    Precedence (Rick, 2026-06-11):
-        1. COSA_VOICE_PERSONA_CHAIN — injected by session_spawner when a
-           manager passed spawn_sessions(persona_preference=...). Wins.
-        2. Headless spawned child (COSA_VOICE_HEADLESS == "1") WITHOUT an
-           explicit chain → None (random). The per-repo default is the
-           USER's claim on manager names ("Mr. Radio,Tiberius,*"); letting
-           a preference-less worker inherit it would squat a manager
-           identity. Matches the de-facto pre-chain behavior (workers
-           always fell through to random).
-        3. COSA_VOICE_PREFERRED_PERSONA__<PROJECT> — the user's per-repo
-           shell default, chain syntax.
-        4. Nothing set → None → server random-allocates (unchanged).
+    Resolve the persona-chain expression a SessionStart sends to the allocate endpoint.
 
     Requires:
         - project is a project-key string or None
@@ -970,6 +844,13 @@ def resolve_session_start_persona_chain( project: Optional[ str ], environ ) -> 
     Ensures:
         - Returns the winning chain expression string, stripped, or None
         - Never raises
+        - first, COSA_VOICE_PERSONA_CHAIN wins; session_spawner injects it when a manager passed
+          spawn_sessions(persona_preference=...)
+        - second, a headless spawned child (COSA_VOICE_HEADLESS == "1") without an explicit chain
+          gets None (random). The per-repo default is the user's claim on manager names, so a
+          worker that inherited it would squat a manager identity
+        - third, `COSA_VOICE_PREFERRED_PERSONA__<PROJECT>`, the user's per-repo shell default in chain syntax
+        - last, with nothing set the result is None and the server random-allocates
 
     Args:
         project: detect_project() result (for the per-repo env var lookup)
@@ -990,10 +871,8 @@ def parse_persona_chain( raw ) -> List[ str ]:
     """
     Normalize a persona-chain expression into an ordered element list.
 
-    A chain expression is either a comma-separated string or a list of
-    strings; each element is a persona name (multi-word names like
-    "Mr. Radio" pass through verbatim — commas are the only delimiter) or
-    the wildcard `*` meaning "then take anything free".
+    A chain is a comma-separated string or a list of strings. An element is a persona name
+    (commas are the only delimiter) or the wildcard `*` meaning "then take anything free".
 
     Requires:
         - raw is a str, a list, or None
@@ -1005,13 +884,15 @@ def parse_persona_chain( raw ) -> List[ str ]:
         - Non-string items inside a list input are skipped
         - Returns [] for None, empty/whitespace input, or any other type
         - Never raises
+        - a string that parses as a JSON list is treated as that list: comma-splitting it would
+          mangle the elements, so the `*` wildcard would never match and the whole chain would read as exhausted
 
     Examples:
         "Rio,Krishna,*"            → [ "Rio", "Krishna", "*" ]
         "Mr. Radio, Tiberius , *"  → [ "Mr. Radio", "Tiberius", "*" ]
         [ "Rio", "Krishna" ]       → [ "Rio", "Krishna" ]
         "rio,Rio,*"                → [ "rio", "*" ]
-        '["arnold","krishna","*"]' → [ "arnold", "krishna", "*" ]   (JSON-array string, row e071e834)
+        '["arnold","krishna","*"]' → [ "arnold", "krishna", "*" ]   (JSON-array string)
         None / "" / ",,,"          → []
     """
     if isinstance( raw, str ):
@@ -1059,25 +940,10 @@ def allocate_persona_chain_for_session(
     declared_managers : Optional[ List[ str ] ] = None
 ) -> Dict[ str, Any ]:
     """
-    Walk an ordered persona chain, allocating the first FREE element.
+    Walk an ordered persona chain, allocating the first free element.
 
-    Strict ordered-fallback semantics (Rick, 2026-06-11): try each named
-    element in order via the strict requested-persona path; an occupied or
-    unknown name records an outcome and falls through to the next element.
-    A `*` element allocates randomly from the free pool ("then take
-    anything"). A chain exhausted without `*` is a LOUD predictable fail —
-    no silent random fallback.
-
-    Reserve-from-random (Rick, 2026-06-11): `declared_managers` reaches ONLY
-    the `*` wildcard's random draw — a NAMED chain element claims a declared
-    name through the strict path exactly like an explicit request (that is
-    how managers get their names); the wildcard, like plain random
-    allocation, must never squat one.
-
-    The caller (router) holds the allocation lock; this function performs
-    the whole walk inside one critical section so sibling sessions racing
-    the same chain serialize cleanly (first claims a name, second falls
-    through to the next).
+    The whole walk runs in one critical section under the router's allocation lock. Sibling
+    sessions racing the same chain therefore serialize (one claims a name, the next falls through).
 
     Requires:
         - config_mgr is an initialized ConfigurationManager
@@ -1100,16 +966,11 @@ def allocate_persona_chain_for_session(
           { "name", "status" ∈ {"occupied","not_in_pool"},
             [ "holding_session_id", "holding_persona_name" ] }
         - Never raises on bridge-scan failures
-
-    Args:
-        config_mgr: ConfigurationManager
-        stable_session_id: Session being allocated
-        chain_raw: Chain expression (see parse_persona_chain)
-        declared_managers: Declared-manager roster names reserved out of the
-            `*` wildcard's random draw (named elements unaffected)
-
-    Returns:
-        Result dict (see Ensures)
+        - each named element is tried in order through the strict requested-persona path; a
+          `*` allocates randomly from the free pool; a chain exhausted without `*` fails loudly
+        - declared_managers reaches only the `*` wildcard's random draw: a named element claims
+          a declared name through the strict path like an explicit request, while the wildcard
+          must never squat one
     """
     chain = parse_persona_chain( chain_raw )
     if not chain:
@@ -1181,12 +1042,10 @@ def quick_smoke_test():
     """
     Self-contained smoke test for the pure functions.
 
-    Tests pick_unallocated_persona and borrowed_persona_for_sid against
-    synthetic pools, covering: empty pool, fully-free, partially-occupied,
-    fully-occupied (borrow path), borrow determinism.
-
-    Does NOT test allocate_persona_for_session (requires bridge files +
-    config_mgr — covered by unit tests with mocks).
+    Tests pick_unallocated_persona and borrowed_persona_for_sid against synthetic pools,
+    covering: empty pool, fully-free, partially-occupied, fully-occupied (borrow path), borrow
+    determinism. It does not test allocate_persona_for_session, which needs bridge files and
+    config_mgr and is covered by unit tests with mocks.
     """
     print( "Voice persona helpers smoke test" )
     print( "================================" )

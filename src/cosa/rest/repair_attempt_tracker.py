@@ -243,7 +243,7 @@ class RepairAttemptTracker:
     def update_attempt( self, original_job_id: str, cost_usd: float = 0.0,
                         outcome: str = "pending", resubmitted_job_id: str = None,
                         fix_gist: str = "", fix_gist_embedding=None ):
-        """Update the latest attempt in a chain with results."""
+        """Record the results on the latest attempt in a chain."""
         chain   = self.get_or_create_chain( original_job_id )
         attempt = chain.get_latest_attempt()
         if attempt is None:

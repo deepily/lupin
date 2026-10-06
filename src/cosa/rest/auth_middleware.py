@@ -189,17 +189,17 @@ def require_roles( required_roles: List[str] ):
 
 def require_all_roles( required_roles: List[str] ):
     """
-    Create dependency that requires ALL specified roles.
+    Create a dependency that requires every specified role.
 
     Factory function that creates a dependency requiring the user
-    to have ALL of the specified roles (not just one).
+    to have all of the specified roles (not just one).
 
     Requires:
         - required_roles is a non-empty list of role strings
 
     Ensures:
         - Returns dependency function
-        - Dependency validates user has ALL required roles
+        - Dependency validates user has all required roles
         - Raises 403 if user lacks any required role
 
     Raises:
@@ -215,7 +215,7 @@ def require_all_roles( required_roles: List[str] ):
         async def sensitive_action(
             user: Dict = Depends(require_admin_and_auditor)
         ):
-            # Only users with BOTH admin AND auditor roles can reach this
+            # Only users with both admin and auditor roles can reach this
             return {"message": "Action performed"}
     """
     if not required_roles:
@@ -223,14 +223,14 @@ def require_all_roles( required_roles: List[str] ):
 
     async def check_all_roles( user: Dict = Depends( get_current_user ) ) -> Dict:
         """
-        Check if user has ALL required roles.
+        Check if user has all required roles.
 
         Requires:
             - user dict from get_current_user dependency
             - user dict contains 'roles' field
 
         Ensures:
-            - Returns user dict if has ALL required roles
+            - Returns user dict if has all required roles
             - Raises 403 if lacks any required role
 
         Raises:
@@ -376,7 +376,7 @@ def has_all_roles( user: Dict, roles: List[str] ) -> bool:
         - roles is a list of role strings
 
     Ensures:
-        - Returns True if user has ALL roles
+        - Returns True if user has all roles
         - Returns False otherwise
 
     Returns:

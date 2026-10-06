@@ -1,26 +1,26 @@
 """
-Task-store chase consumer (Phase 2.1, Item E — the `next_chase_ts` consumer).
+Task-store chase consumer: the consumer of `next_chase_ts`.
 
-Operationalizes design I3 ("blocked items carry next_chase_ts — no 'pending X'
-graves; STALL != QUIET"): a daemon that periodically finds blocked items whose
-chase time has arrived, emits a chase signal (a nudge to the accountable
-manager), re-arms next_chase_ts with a backoff, and stamps a 'chased' audit
-event. It NEVER auto-transitions — chasing is a nudge, not a decision.
+Blocked items carry next_chase_ts, so a stall is never mistaken for quiet and no item
+sits as a "pending X" grave. A daemon periodically finds blocked items whose chase time
+has arrived and emits a chase signal (a nudge to the accountable manager). It re-arms
+next_chase_ts with a backoff and stamps a 'chased' audit event. It never auto-transitions,
+because chasing is a nudge, not a decision.
 
-**Disabled by default.** Gated on the INI flag `task store chase enabled`
+**Disabled by default.** The INI flag `task store chase enabled` gates it
 (default False, [Lupin: Baseline]). With the flag off, `sweep_once` is a no-op
-and `start` refuses to spawn the daemon — so this module is inert in every
-environment until explicitly opted in (the rollout gate, mirroring the
-task-store mirror flag's posture). Wiring `start()` into server boot is the
-deliberate activation step, also behind the flag.
+and `start` refuses to spawn the daemon. So this module is inert in every
+environment until explicitly opted in. That is the rollout gate, mirroring the
+task-store mirror flag. Wiring `start()` into server boot is the activation step,
+also behind the flag.
 
-Mirrors the ghost-job-sweeper daemon idiom on RunningFifoQueue (Event.wait
-loop so shutdown interrupts the nap immediately). Time, DB access, the repo
-factory, and the signal sink are all injectable so the core is unit-testable
-with no live server, no Postgres, and no clock.
+Mirrors the ghost-job-sweeper daemon idiom on RunningFifoQueue: an Event.wait loop,
+so shutdown interrupts the nap immediately. Time, DB access, the repo factory and
+the signal sink are all injectable. The core is unit-testable with no live server,
+no Postgres and no clock.
 
-Canonical design: planning-is-prompting -> planning-is-prompting/src/rnd/2026.06.11-unified-task-store-design.md
-(I3 chase semantics); build plan src/rnd/v0.1.8/2026.06.15-task-store-phase2.1/01-build-plan.md (Item E).
+Design: /mnt/DATA01/include/www.deepily.ai/projects/planning-is-prompting/src/rnd/2026.06.11-unified-task-store-design.md
+Build plan: src/rnd/v0.1.8/2026.06.15-task-store-phase2.1/01-build-plan.md
 """
 
 import threading
@@ -36,8 +36,10 @@ CHASE_ACTOR = "task-chase-consumer"   # the system actor stamped on 'chased' eve
 
 class TaskChaseConsumer:
     """
-    Daemon that chases overdue blocked items (re-arm + audit + signal), never
-    auto-transitioning. Inert unless `task store chase enabled` is True.
+    Daemon that chases overdue blocked items without ever auto-transitioning them.
+
+    A chase re-arms the item, writes an audit event and sends a signal. The
+    consumer is inert unless `task store chase enabled` is True.
     """
 
     def __init__(
@@ -90,10 +92,10 @@ class TaskChaseConsumer:
         Run one chase pass: signal + re-arm every overdue blocked item.
 
         Ensures:
-            - flag OFF  -> no DB access at all; returns {enabled:False, chased:0}
-            - flag ON   -> for each query_chase_due(now) item: signal_fn(item),
+            - flag off  -> no DB access at all; returns {enabled:False, chased:0}
+            - flag on   -> for each query_chase_due(now) item: signal_fn(item),
               then apply_chase(re-armed next_chase_ts = now + backoff); status
-              is NEVER touched; returns {enabled:True, chased:<n>}
+              is never touched; returns {enabled:True, chased:<n>}
             - one get_db() transaction wraps the whole pass (atomic commit)
 
         Returns:
@@ -115,13 +117,11 @@ class TaskChaseConsumer:
 
     def stall_report( self ) -> list:
         """
-        Read-only surfacing of overdue blocked items (the store-derived I4
-        signal: stalls that are visible IN the store). NEVER mutates, NEVER
-        gated — a manager/operator can always ask "what's overdue?".
+        Read-only list of the overdue blocked items.
 
-        Note: the hook-side I4 (sessions that should-write-but-don't) lives in
-        the hook lane's flag-once markers (Phase 2) — that surface is a
-        documented follow-on; this report covers store-internal stalls only.
+        This is the store-derived signal. It never mutates and is never gated, so a manager
+        or operator can always ask "what's overdue?". The hook-side signal (sessions that
+        should write but don't) lives in the hook lane's flag-once markers and is not covered.
 
         Returns:
             list of { id, owner_persona, accountable_manager, title,
@@ -153,9 +153,10 @@ class TaskChaseConsumer:
 
     def _loop( self ) -> None:
         """
-        Daemon loop until stop(); Event.wait(timeout) so shutdown interrupts the
-        nap immediately. Each sweep is exception-guarded so a transient DB error
-        never kills the daemon.
+        Run the daemon loop until stop() is called.
+
+        Event.wait(timeout) lets shutdown interrupt the nap immediately. Each sweep is
+        exception-guarded, so a transient DB error never kills the daemon.
         """
         while not self._stop_event.is_set():
             try:
@@ -166,9 +167,10 @@ class TaskChaseConsumer:
 
     def start( self ) -> bool:
         """
-        Spawn the daemon thread — ONLY if the flag is enabled and no thread is
-        already running. Returns True if a thread was started, else False (the
-        no-op rollout gate: a disabled consumer never spawns).
+        Spawn the daemon thread, only if the flag is enabled and none is running.
+
+        Returns True if a thread was started, else False. A disabled consumer never
+        spawns, which is the no-op rollout gate.
         """
         if not self._enabled():
             return False

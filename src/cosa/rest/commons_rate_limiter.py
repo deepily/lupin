@@ -1,20 +1,19 @@
 """
 In-process sliding-window rate limiter for the commons broadcast endpoint.
 
-Per AC3 + F1 (REUSE) + T4 (Pass 2 Adversarial) of
-src/rnd/v0.1.7/2026.05.09-inter-session-commons/03-phase2-user-broadcast-design.md.
+Design: src/rnd/v0.1.7/2026.05.09-inter-session-commons/03-phase2-user-broadcast-design.md
 
 **Distinct from `src/cosa/rest/rate_limiter.py`** — that module is auth-specific
 (DB-backed `FailedLoginAttemptRepository`, count-based account-lockout). The
 broadcast use case needs a different shape: in-process sliding-window per-user
 "1 broadcast per N seconds" with `Retry-After` header for HTTP 429 responses.
 
-**Single-uvicorn-worker assumption** (per T4): this module's state is held in a
+**Single-uvicorn-worker assumption**: this module's state is held in a
 process-local dict guarded by a `threading.Lock`. If Lupin is ever deployed
 with multiple uvicorn workers, this rate limiter ceases to be a global enforcer
 (each worker has its own state). Lupin currently runs single-worker per
 container — same assumption as `speakerphone.py` `_speakerphone_lock`.
-Phase 4 (Postgres-backed commons) is the natural upgrade path if multi-worker
+A Postgres-backed commons is the natural upgrade path if multi-worker
 becomes a need.
 """
 
@@ -36,7 +35,7 @@ class CommonsBroadcastRateLimiter:
         - `allowed=False` means the window's quota is exhausted; `retry_after_seconds`
           is the seconds remaining until the limiter clears for that user
         - State is held in a process-local dict guarded by `self._lock`
-        - Entries expire LAZILY — only checked + pruned on the next `check_and_record`
+        - Entries expire lazily — only checked + pruned on the next `check_and_record`
           for that user, plus on explicit `reset()` calls
     """
 
@@ -49,12 +48,13 @@ class CommonsBroadcastRateLimiter:
 
     def check_and_record( self, user_id: str ) -> tuple[ bool, Optional[ float ] ]:
         """
-        Atomic check-and-record. If the user is within their window, returns
-        (False, retry_after_seconds). Otherwise records the current time and
-        returns (True, None).
+        Atomically check a user against the window, recording the call if allowed.
 
-        Lazy expiry: stale entries (older than `window_seconds`) are overwritten
-        in place when the user posts again, so the dict size is bounded by the
+        Returns (False, retry_after_seconds) when the user is within their window.
+        Otherwise it records the current time and returns (True, None).
+
+        Stale entries (older than `window_seconds`) are overwritten in place
+        when the user posts again. The dict size is therefore bounded by the
         active-user count, not by the all-time-user count.
         """
         now = time.monotonic()
@@ -70,11 +70,11 @@ class CommonsBroadcastRateLimiter:
 
     def reset( self, user_id: Optional[ str ] = None ) -> None:
         """
-        Test-only hook. When `user_id` is None, clears ALL state (for whole-module
-        isolation between test cases). When `user_id` is supplied, clears that
-        user's entry only.
+        Test-only hook that clears the stored rate-limit state.
 
-        Production code MUST NOT call this. Tests should call it in setup/teardown.
+        With `user_id` None it clears every user (whole-module isolation between
+        test cases). With `user_id` supplied it clears that user's entry only.
+        Production code never calls it. Tests call it in setup and teardown.
         """
         with self._lock:
             if user_id is None:

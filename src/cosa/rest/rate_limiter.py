@@ -1,5 +1,5 @@
 """
-Rate Limiter for Lupin Authentication (Phase 8).
+Rate limiter for Lupin authentication.
 
 Provides failed login tracking and account lockout functionality:
 - Records failed login attempts

@@ -1,8 +1,9 @@
 """
 Abstract base class for commons topic watchers.
 
-Per Phase 3 Q1 (hybrid base class) + F13-fit (template-method pattern) of
-src/rnd/v0.1.7/2026.05.09-inter-session-commons/04-phase3-push-mode-and-llm-fallback-design.md.
+A hybrid base class using the template-method pattern.
+
+Design: src/rnd/v0.1.7/2026.05.09-inter-session-commons/04-phase3-push-mode-and-llm-fallback-design.md
 
 `CommonsTopicWatcher` owns the lifecycle scaffolding shared by all watcher
 subclasses that tail a commons topic and dispatch on matches:
@@ -10,7 +11,7 @@ subclasses that tail a commons topic and dispatch on matches:
 - Daemon thread (start / stop / _run_loop)
 - threading.Lock + in-flight registry dict
 - Protected `_register(record_id, record)` / `_unregister(record_id)` —
-  atomic insert-or-raise (T9 mirror) and silent pop, both lock-guarded.
+  atomic insert-or-raise and silent pop, both lock-guarded.
 - `_prune_expired_locked(now_monotonic)` — caller must hold `self._lock`;
   removes entries past their `expires_at_monotonic` field.
 
@@ -18,16 +19,16 @@ Subclasses (e.g. `CommonsAckWatcher`) provide:
 
 - Domain-typed in-flight record class (must expose `expires_at_monotonic`)
 - Domain-named public API wrapping `_register` / `_unregister`
-  (per F13-fit: `register_broadcast`, `register_question`, etc.)
+  (such as `register_broadcast` and `register_question`)
 - `_initialize_last_seen_ts()` — topic-specific cursor seed at startup
 - `tick()` — topic-specific dispatch logic
 
-**Thread-safety contract** (T6 ratification):
+**Thread-safety contract**:
 - All mutations of `self._in_flight` happen under `with self._lock:`.
 - Lookup happens under lock; dispatch (calling the inject_fn / push_fn) happens
-  OUTSIDE the lock to avoid blocking the lock on network/disk I/O.
-- Race window between lookup and dispatch resolves in favor of in-flight
-  dispatch — semantically acceptable per Pass 2 analysis.
+  outside the lock, so the lock is never held across network or disk I/O.
+- The race window between lookup and dispatch resolves in favor of in-flight
+  dispatch, which is acceptable.
 """
 
 import threading
@@ -84,7 +85,7 @@ class CommonsTopicWatcher:
 
     def _register( self, record_id: str, record: Any ) -> None:
         """
-        Atomic insert-or-raise (T9 mirror).
+        Atomic insert-or-raise.
 
         Raises:
             - ValueError if `record_id` is already in flight — subclass router
@@ -112,7 +113,7 @@ class CommonsTopicWatcher:
         """
         Remove entries past their `expires_at_monotonic` TTL.
 
-        Caller MUST hold `self._lock`. Each record in `_in_flight` MUST expose
+        The caller must hold `self._lock`. Each record in `_in_flight` must expose
         an `expires_at_monotonic: float` attribute.
         """
         expired = [
@@ -156,8 +157,9 @@ class CommonsTopicWatcher:
 
     def _initialize_last_seen_ts( self ) -> None:
         """
-        On first start, seed `self._last_seen_ts` so historical entries
-        don't replay. Subclass reads from its domain topic.
+        Seed `self._last_seen_ts` on first start so historical entries don't replay.
+
+        The subclass reads from its own domain topic.
         """
         raise NotImplementedError(
             "Subclass must implement _initialize_last_seen_ts() to seed cursor "

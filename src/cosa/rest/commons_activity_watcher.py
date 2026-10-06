@@ -1,16 +1,14 @@
 """
-CommonsActivityWatcher — Phase 2.5/3.5 admin-oversight surface.
+CommonsActivityWatcher — the admin-oversight watcher over commons traffic.
 
-Tails ALL commons topics (minus a configurable exclude list) and fires a
+Tails every commons topic (minus a configurable exclude list) and fires a
 `commons_activity` WS notification for each new entry. Powers the live update
-side of the broadcast-card Recent Activity stream.
-
-Per src/rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md (AC3 — WS
-push delivery; AC2 — `commons traffic visibility ws push enabled` INI gate).
+side of the broadcast-card Recent Activity stream. The INI key
+`commons traffic visibility ws push enabled` gates the WS push.
 
 Architecture:
 - Subclasses `CommonsTopicWatcher` for daemon-thread lifecycle (start/stop/_run_loop).
-- Uses ONE global `_last_seen_ts` cursor across all included topics rather than
+- Uses one global `_last_seen_ts` cursor across all included topics rather than
   per-topic cursors — simpler bookkeeping, correct under the "newest-first
   reverse-chrono" UX semantics.
 - Each tick:
@@ -20,7 +18,7 @@ Architecture:
      push per entry.
   4. Advance the cursor to the max ts seen.
 
-Note: this watcher does NOT use the `_in_flight` registry from the base class —
+Note: this watcher does not use the `_in_flight` registry from the base class —
 activity-stream traffic is fire-and-forget, no in-flight correlation needed.
 The base class's `_in_flight` dict remains an empty dict for the watcher's life.
 """
@@ -85,8 +83,8 @@ class CommonsActivityWatcher( CommonsTopicWatcher ):
 
         Walks every non-excluded topic, finds the maximum `ts` across all of them,
         and uses that as the cursor floor. If no topics exist yet, the cursor stays
-        None and the first tick will pick up the first entry (which is the desired
-        behavior for a freshly-initialized commons store).
+        None. The first tick then picks up the first entry, which is the right
+        behavior for a freshly-initialized commons store.
         """
         try:
             topics  = [ t for t in self.store._all_topic_names() if t not in self.excluded_topics ]
@@ -196,26 +194,11 @@ class CommonsActivityWatcher( CommonsTopicWatcher ):
         entries: List[ Dict[ str, Any ] ],
     ) -> List[ Dict[ str, Any ] ]:
         """
-        Collapse per-recipient broadcasts fan-out + write-side ack multiplicity
-        before WS dispatch. Mirrors the HTTP-path helpers in `routers/commons.py`
-        (`_dedupe_broadcasts_by_id` + `_dedupe_broadcast_acks_by_recipient`) but
-        operates on the watcher's decorated-entry shape (each dict carries
-        `_topic` from `tick`'s collection step).
+        Collapse per-recipient broadcast fan-out and duplicate acks before WS dispatch.
 
-        Rules:
-        - `broadcasts` topic: collapse on `metadata.broadcast_id`. The first
-          occurrence (newest after the outer DESC sort) is kept; subsequent
-          per-recipient duplicates are dropped. The kept entry's `metadata`
-          is shallow-copied with `target_session_id` removed so the dispatched
-          row represents the broadcast as a whole, not any one recipient slice.
-        - `broadcast-acks` topic: collapse on `(broadcast_id, sender_session_id,
-          metadata.status)`. Acks that share the same triple (write-side
-          multiplicity bug shape — see Arnold's investigation in the
-          `_dedupe_broadcast_acks_by_recipient` docstring) are collapsed to
-          the first occurrence.
-        - Any other topic: pass through unchanged.
-        - Defensive passthrough on missing / non-string keys (a malformed entry
-          must not silently disappear).
+        Mirrors the HTTP-path helpers in `routers/commons.py` (`_dedupe_broadcasts_by_id`
+        and `_dedupe_broadcast_acks_by_recipient`), but works on the watcher's decorated
+        entries (each dict carries `_topic` from `tick`'s collection step).
 
         Requires:
             - `entries` is the watcher's `new_entries` list (each dict carries
@@ -227,6 +210,15 @@ class CommonsActivityWatcher( CommonsTopicWatcher ):
               outer sort)
             - For `broadcasts` rows kept, `metadata.target_session_id` is removed
               from the dispatched copy
+            - `broadcasts` rows collapse on `metadata.broadcast_id`: the first occurrence
+              (newest after the outer descending sort) is kept and per-recipient duplicates
+              are dropped; the kept metadata is a shallow copy so the row stands for the
+              whole broadcast, not one recipient's slice
+            - `broadcast-acks` rows that share (broadcast_id, sender_session_id,
+              metadata.status) collapse to the first occurrence, because the write side
+              can store the same ack more than once
+            - Any other topic passes through unchanged, and so does an entry with a
+              missing or non-string key, so a malformed entry never silently disappears
         """
         seen_broadcast_ids : Set[ str ]                       = set()
         seen_ack_keys      : Set[ Tuple[ str, str, str ] ]    = set()

@@ -1,27 +1,27 @@
 """
-DM verbosity two-arm pilot — runtime policy object (plan item 3).
+DM verbosity two-arm pilot — runtime policy object.
 
-Loads the immutable 28-slot experiment schedule and the pilot config ONCE, never
+Loads the immutable 28-slot experiment schedule and the pilot config once, never
 per request, and resolves the arm covering an arrival instant. `get_dm_feedback_arm()`
-in dm.py rebuilds a ConfigurationManager on EVERY DM (dm.py:488-505); this module
-exists so the experiment path does NOT copy that anti-pattern — the schedule + config
-are read once into a singleton and every send reads the cached object.
+in dm.py rebuilds a ConfigurationManager on every DM, and this module exists so the
+experiment path does not copy that. The schedule and config are read once into a
+singleton, and every send reads the cached object.
 
-⚠️ assignment_at NEVER reads the clock. The caller (execute_dm_send) resolves the
-arrival instant ONCE and passes it in, so a send that crosses an hour boundary is
-scored against a single arm rather than split across two.
+assignment_at never reads the clock. The caller (execute_dm_send) resolves the
+arrival instant once and passes it in. A send that crosses an hour boundary is
+therefore scored against a single arm, not split across two.
 
 Path indirection mirrors dm.py's `_DM_TRAFFIC_JSONL` / `_DM_TRAFFIC_PRODUCTION_PATH`
-pair (dm.py:351-357): tests patch `_DM_SCHEDULE_PATH` to a fixture while the frozen
+pair. Tests patch `_DM_SCHEDULE_PATH` to a fixture, while the frozen
 `_DM_SCHEDULE_PRODUCTION_PATH` stays the value a future self-guard would compare
-against — a redirect that never blinds the guard to its own failure.
+against. A redirect then never blinds the guard to its own failure.
 
-Fail-safe: a missing or malformed schedule file yields an INACTIVE policy
-(assignment_at always None) — the experiment is simply off and ordinary
-non-experimental DM behaviour applies. This is why the module never raises at import:
+Fail-safe: a missing or malformed schedule file yields an inactive policy
+(assignment_at always None). The experiment is simply off and ordinary
+non-experimental DM behaviour applies. So the module never raises at import:
 before the schedule JSON is committed, or after a bad edit, the fleet keeps sending.
 
-Design: src/rnd/v0.2.0/2026.08.04-dm-verbosity-reduction/2026.08.04-dm-verbosity-pilot-plan.md §3
+Design: src/rnd/v0.2.0/2026.08.04-dm-verbosity-reduction/2026.08.04-dm-verbosity-pilot-plan.md
 """
 
 import json
@@ -43,9 +43,8 @@ def _normalize_exempt( value ):
     Normalize the exempt-sender config into a frozenset of session ids.
 
     The arbiter presents under more than one identity (arbiter-runner, the dead
-    heartbeat-arbiter path, and the lupin-arbiter-app-8001 roster string), so the key
-    is a COMMA-SEPARATED list, not one id — setting all three lets the smoke confirm
-    which fires without a code change (Cheech, 2026-08-03).
+    heartbeat-arbiter path, the lupin-arbiter-app-8001 roster string). So the key is a
+    comma-separated list, not one id, and a smoke run can confirm which fires.
 
     Requires:
         - value is None, a comma-separated string, or an iterable of strings
@@ -69,8 +68,8 @@ def _parse_slots( slot_dicts ):
           `start_utc`, and either `end_utc` or nothing (end defaults to start + 1h)
 
     Ensures:
-        - start/end are timezone-aware UTC datetimes (a naive ISO string is read AS
-          UTC rather than rejected — the generator writes "+00:00", this is belt)
+        - start/end are timezone-aware UTC datetimes (a naive ISO string is read as
+          UTC rather than rejected; the generator writes "+00:00" anyway)
         - `public` is the caller-facing slot dict (slot_id, arm, local_hour, start_utc)
         - preserves input order
 
@@ -97,14 +96,17 @@ def _parse_slots( slot_dicts ):
 
 class ExperimentPolicy:
     """
-    An immutable snapshot of the pilot: the parsed slot table plus the four config
-    values (override arm + reason, reject threshold, exempt sender). Built once and
-    read by every in-window send; never mutated after construction.
+    An immutable snapshot of the pilot: the parsed slot table plus four config values.
+
+    The config values are the override arm and reason, the reject threshold and the
+    exempt sender. It is built once, read by every in-window send, and never mutated.
     """
 
     def __init__( self, *, slots, schedule_id, experiment, override_arm, override_reason,
                   reject_threshold, exempt_sender_session_ids ):
         """
+        Store the parsed slots and the four config values, read-only.
+
         Requires:
             - slots is a list of (start, end, public) tuples from _parse_slots
             - override_arm is one of VALID_ARMS or None
@@ -130,7 +132,7 @@ class ExperimentPolicy:
             - arrival_utc is a timezone-aware datetime
 
         Ensures:
-            - returns a COPY of the slot's public dict inside a declared interval
+            - returns a copy of the slot's public dict inside a declared interval
               (start_utc <= arrival_utc < end_utc)
             - returns None outside every interval — the experiment is inactive there
               and ordinary non-experimental behaviour applies
@@ -155,9 +157,9 @@ def make_policy( *, slots=None, schedule_id="dm-verbosity-two-arm-v1", experimen
     """
     Build an ExperimentPolicy from raw slot dicts + config values.
 
-    The inline/test builder: production goes through load_default_policy (which reads
-    the JSON + ini), tests call this directly with fixture slots and pinned config so
-    a frozen-clock assertion never depends on the wall clock or the ini.
+    The inline/test builder. Production goes through load_default_policy (which reads
+    the JSON and ini). Tests call this directly with fixture slots and pinned config,
+    so a frozen-clock assertion never depends on the wall clock or the ini.
 
     Requires:
         - slots is a list of raw slot dicts (start_utc/end_utc/arm/slot_id) or None
@@ -186,7 +188,7 @@ def make_inactive_policy():
     An empty-schedule policy: assignment_at always None.
 
     Ensures:
-        - returns a policy that puts EVERY instant outside the window — used by the
+        - returns a policy that puts every instant outside the window — used by the
           existing send-path test harness so those baseline tests stay deterministic
           regardless of the wall clock (else a run during the live window would flip
           them into the experiment path)
@@ -200,7 +202,7 @@ def _load_schedule( path ):
 
     Ensures:
         - returns ( slots, schedule_id, experiment ) on success
-        - returns ( [], None, None ) — an INACTIVE schedule — for a missing or
+        - returns ( [], None, None ) — an inactive schedule — for a missing or
           malformed file, so the experiment is simply off and DMs keep flowing
 
     Raises:
@@ -219,7 +221,7 @@ def _load_schedule( path ):
 
 def _load_config():
     """
-    Read the four pilot config values from lupin-app.ini ONCE.
+    Read the four pilot config values from lupin-app.ini once.
 
     Ensures:
         - returns ( override_arm, override_reason, reject_threshold, exempt_session_ids )
@@ -249,21 +251,20 @@ def _load_config():
 
 def is_suspended():
     """
-    True when the two-arm pilot is suspended by config (Rick, 2026-08-13).
+    True when the two-arm pilot is suspended by config.
 
-    SUSPENDED, NOT DELETED. The schedule JSON stays on disk and every row already
-    collected stays analysable — the `blind`-vs-`rejecting` question ("does refusing
-    an over-long DM make senders write shorter") remains its own finished study. This
-    only stops the pilot from RUNNING, so it cannot interact with the tutor now
-    shipping fleet-wide: a rejecting hour would refuse the very messages the tutor
-    exists to shorten, and no row could then say which mechanism did the work.
+    Suspended, not deleted: the schedule JSON stays on disk and every collected row
+    stays analysable. This only stops the pilot from running.
 
     Ensures:
         - returns the `dm experiment suspended` flag, defaulting to True
-        - a config-read failure returns True — the SAFE direction. An experiment that
+        - the pilot stays off beside the fleet-wide tutor because a rejecting hour would
+          refuse the very messages the tutor exists to shorten, and no row could then
+          say which mechanism did the work
+        - a config-read failure returns True — the safe direction. An experiment that
           silently resumed because a config read failed would gate live fleet traffic
           on an arm nobody chose; the tutor is the live treatment now, so the pilot
-          staying off is the state that matches the ruling.
+          staying off is the intended state.
 
     Raises:
         - nothing

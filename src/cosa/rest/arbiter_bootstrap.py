@@ -1,27 +1,26 @@
 #!/usr/bin/env python3
 """
-Heartbeat-Arbiter standing-cadence bootstrap (v2.2 closed-loop, lane B1).
+Heartbeat-Arbiter standing-cadence bootstrap.
 
-The #1 missing piece of v2.1: the arbiter consumer was built + tested as a job
-but never registered to run continuously. This module auto-submits ONE
-`ArbiterConsumerJob` into CJ Flow at server startup so the fleet is observed on a
-standing cadence — mirroring how other startup jobs are pushed in `main.py`'s
-lifespan (the in-process agentic-pool path, per design D-A: NOT cron/out-of-
-process — an in-process job dies WITH the server gracefully).
+This module auto-submits one `ArbiterConsumerJob` into CJ Flow at server startup,
+so the fleet is observed on a standing cadence. It mirrors how other startup jobs
+are pushed in `main.py`'s lifespan, on the in-process agentic-pool path. It is not
+cron or an out-of-process job, because an in-process job dies with the server gracefully.
 
-Two invariants this lane must honor (María's redlines):
-  • **Additive-observer / degrade-safe:** the standing arbiter is NEVER a
-    dependency of the local poke path. The dependency points ONE WAY — the
-    arbiter READS the hook exhaust; no hook calls into the arbiter. If startup
-    submission fails it is swallowed (broad except) so server boot + every local
+Two invariants hold:
+  • **Additive-observer / degrade-safe:** the standing arbiter is never a
+    dependency of the local poke path. The dependency points one way: the
+    arbiter reads the hook exhaust, and no hook calls into the arbiter. If startup
+    submission fails it is swallowed (broad except), so server boot and every local
     hook poke continue unaffected.
-  • **Never-auto-assign:** this module only CONSTRUCTS + ENQUEUES the observer;
-    it performs no spawn / assign / reassign / dismiss. (The job's own outbound
+
+  • **Never-auto-assign:** this module only constructs and enqueues the observer.
+    It performs no spawn / assign / reassign / dismiss. (The job's own outbound
     verbs stay {who, send_to, post}.)
 
-Single-instance guard (D-C): before submitting, scan the todo + run queues for
-an existing `heartbeat_arbiter` job and no-op if one is present — so a restart
-that restores a persisted arbiter job (or a double lifespan) never spawns a
+Single-instance guard: before submitting, scan the todo and run queues for an
+existing `heartbeat_arbiter` job and no-op if one is present. A restart that
+restores a persisted arbiter job (or a double lifespan) then never spawns a
 duplicate observer.
 """
 from typing import Any, Callable, Optional
@@ -52,17 +51,16 @@ def build_arbiter_job( config_mgr ):   # pragma: no cover - production IO bounda
     """
     Construct the standing ArbiterConsumerJob from config + the real gateway.
 
-    IO-boundary (marked no-cover, exercised at the :8000 integration tier, like
-    LupinArbiterGateway.from_environment): wires the file-backed commons gateway
-    and reads tuning params from lupin-app.ini. The guard + submit LOGIC around
-    it is fully unit-tested via an injected job_builder.
+    IO-boundary (marked no-cover, exercised at the :8000 integration tier): wires the
+    file-backed commons gateway and reads tuning params from lupin-app.ini. The guard
+    and submit logic around it is unit-tested via an injected job_builder.
 
     Ensures:
         - returns an ArbiterConsumerJob whose poll cadence + declared
           manager-on-duty fallback + thresholds come from config (with the
           v2.1 defaults when keys are absent)
-        - manager_recipient here is the v2.1-era single fallback; v2.2 per-group
-          routing (B6 resolve_manager) overrides it per stuck worker at tap time
+        - manager_recipient here is the single fallback; per-group routing
+          (resolve_manager) overrides it per stuck worker at tap time
     """
     from cosa.agents.heartbeat_arbiter.arbiter_job import ArbiterConsumerJob, _default_operator_gates_fn
     from cosa.agents.heartbeat_arbiter.arbiter_gateway import LupinArbiterGateway
@@ -163,14 +161,14 @@ def submit_arbiter_if_absent(
     ask_flow    = None,
 ) -> Optional[ Any ]:
     """
-    Standing-cadence startup submission (B1) — guarded + degrade-safe.
+    Standing-cadence startup submission, guarded and degrade-safe.
 
     Requires:
-        - todo_queue / run_queue are the CJ Flow queues — READ here, for the
+        - todo_queue / run_queue are the CJ Flow queues — read here, for the
           single-instance guard; the submission itself goes through ask_flow
         - config_mgr is the ConfigurationManager
         - job_builder( config_mgr ) -> a job (injected for unit testing)
-        - ask_flow is the v2 AskFlow (step 12). Injected like job_builder and log,
+        - ask_flow is the v2 AskFlow. Injected like job_builder and log,
           for the same reason: this function's whole test suite runs on fakes.
           Defaults to None, and a None here is caught by the degrade-safe guard
           below — the arbiter is an additive observer, so a missing flow logs and
@@ -178,9 +176,9 @@ def submit_arbiter_if_absent(
 
     Ensures:
         - if a heartbeat_arbiter job is already present (todo or run) → no-op,
-          returns None (single-instance guard, D-C)
+          returns None (single-instance guard)
         - else builds the arbiter job and submits it through the flow, returns it
-        - NEVER raises: any failure is swallowed + logged so server startup and
+        - never raises: any failure is swallowed + logged so server startup and
           every local hook poke continue unaffected (additive-observer redline)
     """
     try:
@@ -222,16 +220,11 @@ def submit_arbiter_if_enabled(
     ask_flow  = None,
 ) -> Optional[ Any ]:
     """
-    R0 gate (deploy-arch R0 / `2026.06.07-arbiter-r0-inprocess-decommission-spec.md`):
-    submit the IN-PROCESS standing arbiter only when the INI flag
-    `arbiter in-process bootstrap enabled` is True.
+    Submit the in-process standing arbiter only when its INI flag is True.
 
-    Never-two across BOTH mechanisms: this is the in-process mechanism. The
-    standalone :8001 service runs the fleet arbiter via its own single FleetArbiterLoop
-    thread (the :8001-side single-instance). This flag gates the in-process side OFF so only ONE
-    path ever actuates; `arbiter_already_present` (inside submit_fn) remains the belt
-    against a double in-process submission. Cutover is break-before-make (flag False
-    → bounce → enable :8001) — a brief zero-arbiter window is acceptable, never two.
+    The flag is `arbiter in-process bootstrap enabled`. The standalone :8001 service
+    runs the fleet arbiter through its own FleetArbiterLoop thread. This flag gates
+    the in-process side off, so only one path ever actuates.
 
     Requires:
         - todo_queue / run_queue are the CJ Flow queues
@@ -239,12 +232,15 @@ def submit_arbiter_if_enabled(
         - submit_fn( todo, run, cfg, log=... ) -> job|None (injected for testing)
 
     Ensures:
-        - reads the flag ONCE (read-once contract — no mid-run re-read)
+        - reads the flag once (read-once contract — no mid-run re-read)
         - flag True (or absent → default True) → returns submit_fn(...)
-        - flag False → skips submission, logs a greppable DISABLED line, returns None
-        - a MALFORMED (present-but-not-clean-bool) value → coerced to False
-          (in-process OFF — never-two-safe in both regimes) with a LOUD WARNING
+        - flag False → skips submission, logs a greppable `DISABLED` line, returns None
+        - a malformed (present-but-not-clean-bool) value → coerced to False
+          (in-process off — never-two-safe in both regimes) with a loud warning
           (a typo must not silently change fleet vigilance), then returns None
+        - `arbiter_already_present` (inside submit_fn) still guards against a double
+          in-process submission, and cutover is break-before-make (flag False, bounce,
+          enable :8001), so a brief zero-arbiter window is acceptable and two never run
         - mirrors ConfigurationManager's boolean coercion (str(value).lower() == "true")
     """
     raw        = str( config_mgr.get( "arbiter in-process bootstrap enabled", default="true", return_type="string" ) )
@@ -268,8 +264,7 @@ def quick_smoke_test():
         def __init__( self, jobs=None ):
             self.queue_list = list( jobs or [ ] )
     class _Flow:
-        """Step 12: the arbiter submits through the flow; the queue is only READ now,
-        for the single-instance guard."""
+        """Fake flow: the arbiter submits through it; the queue is only read, for the guard."""
         def __init__( self ):
             self.submitted = [ ]
         def submit( self, job=None, **kwargs ):

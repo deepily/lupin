@@ -1,21 +1,22 @@
 #!/usr/bin/env python3
 """
-Arbiter fleet-snapshot store — the server-side cache behind the v2.1
-`/api/arbiter/fleet-snapshot` surface (arbiter design `03` §10.4, redline C2).
+Server-side cache behind the `/api/arbiter/fleet-snapshot` surface.
 
-A tiny thread-safe singleton holding the latest fleet snapshot the Heartbeat
-Arbiter produces, so `:7999` can serve it from a distance — mirroring how
-`RunningFifoQueue.get_pool_status()` backs `GET /api/queue/pool-status`.
+A thread-safe singleton holds the latest fleet snapshot the Heartbeat Arbiter
+produces, so `:7999` can serve it from a distance. It works like
+`RunningFifoQueue.get_pool_status()`, which backs `GET /api/queue/pool-status`.
 
-Two write paths converge here (design §10.4):
+Design: src/rnd/v0.1.8/2026.06.04-heartbeat-hook/03-arbiter-design.md
+
+Two write paths converge here:
     - **in-pool arbiter** (runs inside the :7999 process) updates this singleton
       directly via `set_snapshot()` — no HTTP hop;
     - **standalone arbiter** (separate process) POSTs to
       `POST /api/arbiter/fleet-snapshot`, whose handler calls `set_snapshot()`.
 
 Either way `GET /api/arbiter/fleet-snapshot` reads the cached value via
-`get_snapshot()`. No standalone arbiter HTTP server (redline C2) — one HTTP
-surface, reusing the existing auth.
+`get_snapshot()`. There is no standalone arbiter HTTP server: one HTTP
+surface reuses the existing auth.
 """
 import threading
 from typing import Optional

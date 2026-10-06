@@ -1,11 +1,10 @@
 """
-TestSuiteCompletionWatchdog — auto-dispatches TestFixExpediter when a
-TestSuiteJob completes with failures.
+TestSuiteCompletionWatchdog — dispatches TestFixExpediter on a failed test suite.
 
 Parallel to `DeadQueueWatchdog`, but fires on the DONE-queue push path
-rather than the DEAD-queue push path because TestSuiteJobs complete
-SUCCESSFULLY (from a queue perspective) even when the tests they ran
-failed — they return a result object, not a crash.
+rather than the DEAD-queue push path. A TestSuiteJob completes successfully
+(from a queue perspective) even when its tests failed, because it returns
+a result object and does not crash.
 
 Design: src/rnd/v0.1.6/2026.04.10-test-fix-expediter/09-watchdog-routing-plan.md
 
@@ -26,8 +25,7 @@ logger = logging.getLogger( __name__ )
 
 class TestSuiteCompletionWatchdog:
     """
-    Watchdog that auto-dispatches TestFixExpediter when a TestSuiteJob
-    completes with failures.
+    Auto-dispatches TestFixExpediter when a TestSuiteJob finishes with failures.
 
     Requires:
         - config_mgr is a ConfigurationManager instance
@@ -192,8 +190,9 @@ class TestSuiteCompletionWatchdog:
 
     def _repair_tracker_allows( self, repair_key ) -> bool:
         """
-        Check RepairAttemptTracker. Handles both `allow()` and
-        `is_allowed()`/`check()` method names defensively.
+        Ask the repair tracker whether another attempt is allowed.
+
+        Tries the method names `allow`, `is_allowed`, `check` and `can_attempt` in turn.
         """
         if self.repair_tracker is None:
             return True
@@ -322,8 +321,9 @@ class TestSuiteCompletionWatchdog:
 
     def _repair_tracker_record( self, repair_key ) -> None:
         """
-        Record a repair attempt. Handles both `record_attempt()` and
-        `record()` method names defensively.
+        Record a repair attempt with the repair tracker.
+
+        Tries the method names `record_attempt`, `record` and `track` in turn.
         """
         if self.repair_tracker is None:
             return

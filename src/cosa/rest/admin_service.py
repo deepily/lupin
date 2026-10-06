@@ -117,7 +117,7 @@ def get_user_details( user_id: str ) -> Optional[Dict]:
     Ensures:
         - Returns enhanced user dict or None
         - Includes audit log count and failed login count
-        - Password hash is NOT included
+        - Password hash is not included
 
     Returns:
         Optional[Dict]: Enhanced user data or None if not found
@@ -186,7 +186,7 @@ def update_user_roles(
     admin_ip: str = "unknown"
 ) -> Tuple[bool, str, Optional[Dict]]:
     """
-    Update user roles with self-protection and audit logging.
+    Change a user's roles with self-protection and audit logging.
 
     Requires:
         - admin_user_id is valid UUID of admin performing action
@@ -375,7 +375,7 @@ def admin_reset_password(
         - Generates crypto-secure 16-character password
         - Password meets strength requirements
         - Password is hashed and stored
-        - Password is returned ONCE (not stored plain)
+        - Password is returned once (not stored plain)
         - Logs action to audit trail
         - Returns (success, message, temp_password)
 

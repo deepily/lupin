@@ -1,7 +1,7 @@
 """
-Task-store change notifier (row 8796333b, slice 1).
+Task-store change notifier.
 
-Turns "a database session COMMITTED having appended TaskEvent rows" into ONE
+Turns "a database session committed having appended TaskEvent rows" into one
 `task_store_changed` invalidation event for the web panes. The event carries no
 delta: the client re-reads. A missed frame therefore costs a late refresh, never
 a wrong board, and the 60-second poll stays as the safety net.
@@ -10,7 +10,7 @@ How it works:
     - `TaskRepository._append_event` calls `record_appended_event( session, event )`,
       which parks a small summary of the event on `session.info`.
     - Session-class listeners (registered once, at import) read that list:
-      `after_commit` emits ONE event for the whole commit, `after_rollback`
+      `after_commit` emits one event for the whole commit, `after_rollback`
       throws the list away so a rolled-back session emits nothing.
     - The emit goes through a module-level sink. The `:7999` server installs
       one that calls `websocket_manager.emit`; every other process (the `:8001`
@@ -20,11 +20,11 @@ Known reach limit: a writer in a process that never installs the sink cannot
 push. The arbiter's straggler-ticket and follow-through writes are that case;
 their rows appear on the next poll.
 
-SAVEPOINTS ARE UNSUPPORTED (measured by Krishna on Postgres 16, review of 21d22e889).
+Savepoints are unsupported (measured on Postgres 16).
 Session `after_commit` / `after_rollback` also fire for a savepoint (begin_nested):
-    - a savepoint ROLLBACK discards EVERY parked event on the session, including ones
+    - a savepoint rollback discards every parked event on the session, including ones
       that go on to commit with the outer transaction -> a missed push;
-    - a savepoint RELEASE fires `after_commit` early -> the push can reach a client
+    - a savepoint release fires `after_commit` early -> the push can reach a client
       before the outer commit is durable, and an outer rollback after it still emitted.
 The outcome is a missed or early invalidation, never a wrong board (the poll stays).
 No non-test code takes a savepoint today. The first code that does must first key the
@@ -110,7 +110,7 @@ def record_appended_event( session, task_event ) -> None:
 
 def build_payload( appended ) -> dict:
     """
-    One payload for a commit: the LAST event's identity plus how many there were.
+    One payload for a commit: the last event's identity plus how many there were.
 
     Requires:
         - appended is a non-empty list of summaries from record_appended_event

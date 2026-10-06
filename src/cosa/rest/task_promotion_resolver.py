@@ -1,30 +1,24 @@
 """
-The half of an asynchronous promotion that happens AFTER the caller has been answered.
+Resolves a pending promotion ticket after the caller has already been answered.
 
-Design of record: `src/rnd/v0.2.1/2026.09.06-asynchronous-promotion-approval-and-its-
-observable-resolution.md` (row `3493ae9b`). Mr. Radio's conditional ruling of
-2026-09-06: option (b) ships ONLY with a resolution path the caller can observe. María
-🌸's binding requirement, in her words as relayed: a 202 that leaves the manager unable
-to learn the outcome is the same defect with the waiting moved somewhere nobody looks.
+The caller gets a 202 first. This module then asks the owner, re-validates, applies the
+transition and records an outcome the caller can poll. A 202 that left the manager unable to
+learn the outcome would only move the waiting somewhere nobody looks.
 
-🔴 THE ONE THING THIS MODULE EXISTS TO BUY BACK. Today's synchronous door holds a row
-lock for the WHOLE ask, so the row cannot move between the decision and the apply. That
-is genuinely worth something, and letting go of the lock is what makes the 202 possible.
-So the lock has to be bought back rather than lost: every apply here RE-VALIDATES under
-a fresh lock, and a ticket whose transition is no longer legal resolves `superseded`
-carrying the validator's own words. Replaying a stale intent onto a moved row is the
-defect this design would otherwise introduce.
+The synchronous door holds a row lock for the whole ask, so the row cannot move between the
+decision and the apply. Letting go of that lock is what makes the 202 possible, so the lock is
+bought back here: every apply re-validates under a fresh lock. A ticket whose transition is no
+longer legal resolves `superseded` and carries the validator's own words. Replaying a stale
+intent onto a moved row is the defect this design would otherwise introduce.
 
-⚠️ WHAT IS DELIBERATELY NOT HERE, SAID OUT LOUD SO NOBODY READS IT AS ARMED. Design §6.3
-recovers a bounce-orphaned answer by reading the notification's `responded_at` off the
-stored `notification_id`. **That recovery is NOT built.** `NotificationResponse` does not
-carry the id — `notify_user_sync` captures it off the opening ack frame into a local
-capture dict and never surfaces it, across fifteen construction sites — so the ticket's
-`notification_id` column stays NULL in this landing. The consequence is stated rather
-than hidden: after a bounce, a pending ticket goes `stalled` and fires the urgent notify,
-and a HUMAN is told. Nothing is lost silently. What is missing is the automatic recovery
-of a keypress Rick made just before the bounce, and that is a named follow-up, not an
-omission somebody forgot.
+Not built: recovery of an answer orphaned by a bounce. The design would read the notification's
+`responded_at` off the stored `notification_id`. `NotificationResponse` does not carry the id.
+`notify_user_sync` captures it from the opening ack frame into a local dict and never surfaces
+it. That holds across fifteen construction sites, so the ticket's `notification_id` column
+stays `NULL`.
+After a bounce a pending ticket therefore goes `stalled` and fires the urgent notify. A human
+is told and nothing is lost silently. Automatic recovery of an answer given just before the
+bounce is a named follow-up.
 """
 
 from dataclasses import dataclass
@@ -92,19 +86,14 @@ def get_notification_grace_seconds():
     """
     How long after an ask expires the notification API will still take an answer.
 
-    🔴 THIS IS NOT OURS AND THAT IS THE POINT. It is the notification subsystem's dial,
-    read here so the promotion deadline moves with it. The other reader is
-    `routers/notifications.py:616`. Two readers of ONE key is one decider; two constants
-    that happen to be equal is the arrangement this replaced.
-
-    ⚠️ THE FALLBACK MATCHES THE ROUTER'S OWN `default=300` DELIBERATELY. If the key is
-    unreadable both halves must land on the same assumption, because a config the
-    notification router reads as 300 and this reads as 0 re-creates the exact
-    disagreement the derivation exists to remove.
+    This setting belongs to the notification subsystem. The router reads the same key, so one
+    setting decides both sides, where two constants that happen to be equal would drift apart.
 
     Ensures:
         - returns the configured int, or the fallback when absent/unreadable
         - never raises
+        - the fallback matches the router's own default of 300, so an unreadable key leaves both
+          halves on the same assumption instead of a deadline that disagrees with the late window
     """
     return _ini_value( INI_KEY_NOTIFICATION_GRACE, int, FALLBACK_NOTIFICATION_GRACE_SECONDS )
 
@@ -132,39 +121,9 @@ def resolves_by_for( requested_at, timeout_fn=promotion_gate.get_ask_timeout_sec
     """
     When a ticket minted at `requested_at` must have resolved by.
 
-    Three intervals, none of them interchangeable:
-        ask timeout          how long Rick has to answer          (operator dial)
-      + notification grace   how long a LATE answer is still taken (notification's dial)
-      + apply margin         this module's own re-lock and apply   (ours)
-
-    🔴 READ AT MINT TIME, NOT AT SWEEP TIME, AND THAT IS THE WHOLE REASON IT IS STORED
-    ON THE ROW. Both dials are live; a sweeper that re-derived this deadline would judge
-    a ticket against numbers that may have changed since the ask went out, and an
-    operator lowering either one would retroactively declare in-flight tickets overdue.
-    The row carries the deadline it was actually issued under — the same reason the
-    design serializes the response body once rather than re-reading it.
-
-    🔴 WHAT THIS DOES NOT CLOSE, SAID PLAINLY BECAUSE THE ARITHMETIC LOOKS LIKE A PROOF.
-    The grace check in `routers/notifications.py:618` is GATED on the notification's
-    state being `expired`, and the only thing that sets that state is
-    `_mark_notification_expired_sync`, which fires inside the SSE event generator — in
-    process, held by the live ask. `get_expired_notifications` exists but has NO
-    production caller, so nothing sweeps a `delivered` row past its expiry.
-
-    ⇒ On a BOUNCE — which is the only path a ticket ever actually stalls on, a live
-    resolver having taken the timeout default at t+timeout — the process dies holding
-    that generator, the notification stays `delivered`, and a `delivered` notification is
-    neither responded nor expired, so `/respond` accepts an answer at ANY later time with
-    no check at all. That window is UNBOUNDED and no finite deadline reaches it. Closing
-    it needs the recovery path of design §6.3 (reopen on a late `responded_at`), which is
-    a separate row. This function closes the computable window and is not a proof that
-    none remains.
-
-    ⚠️ AND IT MEASURES FROM `requested_at`, WHILE THE ANSWER WINDOW ACTUALLY RUNS FROM
-    THE MOMENT THE ASK FIRED — phase 1 later. The skew is one short transaction and is
-    absorbed by the apply margin many times over, so the result is conservative in the
-    safe direction; it is named here rather than left for a reader to rediscover as a
-    discrepancy.
+    The deadline adds three intervals. The ask timeout is the operator's setting. The notification
+    grace is how long a late answer is still taken. The apply margin is this module's own re-lock
+    and apply.
 
     Requires:
         - requested_at is a timezone-aware datetime
@@ -175,6 +134,15 @@ def resolves_by_for( requested_at, timeout_fn=promotion_gate.get_ask_timeout_sec
         - returns a timezone-aware datetime strictly after requested_at
         - the result clears the late-answer window the notification API will honour
         - never raises for a well-formed input
+        - the deadline is read at mint time and stored on the row, because both settings are live; a
+          sweeper that re-derived it would judge tickets against changed numbers and declare
+          in-flight tickets overdue
+        - a window remains that no finite deadline closes: the router's grace check applies only once
+          the notification is marked `expired`, and only the live ask sets that; after a bounce the
+          notification stays `delivered` and /respond accepts an answer at any later time; closing
+          it needs the late-answer recovery named in the module docstring
+        - it measures from `requested_at` while the answer window runs from when the ask fires, one
+          short transaction later; the apply margin absorbs that skew, so the result errs safe
     """
     return deadlines_for( requested_at, timeout_fn=timeout_fn, grace_fn=grace_fn,
                           apply_margin_seconds=apply_margin_seconds ).resolves_by
@@ -208,17 +176,11 @@ def deadlines_for( requested_at, timeout_fn=promotion_gate.get_ask_timeout_secon
                    grace_fn=get_notification_grace_seconds,
                    apply_margin_seconds=APPLY_MARGIN_SECONDS ):
     """
-    Both deadlines of a ticket minted at `requested_at`, off ONE read of the ask timeout.
+    Both deadlines of a ticket minted at `requested_at`, from one read of the ask timeout.
 
-    🔴 THE TIMEOUT IS READ ONCE AND BOTH STAMPS ARE BUILT FROM THAT READ (row dbe42964).
-    The dial is live. Two reads — one for the answer window, one for the stall deadline —
-    could straddle an operator's edit and stamp a row whose two deadlines were computed
-    under different timeouts. Deriving `resolves_by` FROM `answer_by` makes their gap
-    exactly grace + margin by construction.
-
-    ⚠️ `answer_by` COUNTS FROM `requested_at`, AND THE ASK FIRES ONE SHORT TRANSACTION
-    LATER. The real window closes that much after the stamp: the stamp is early by the
-    length of the mint transaction, never late. Same skew `resolves_by_for` names.
+    The timeout setting is live. Two reads, one per stamp, could straddle an operator's edit and
+    leave a row with two deadlines computed under different timeouts. Deriving `resolves_by` from
+    `answer_by` makes their gap the notification grace plus the apply margin.
 
     Requires:
         - requested_at is a timezone-aware datetime
@@ -229,6 +191,8 @@ def deadlines_for( requested_at, timeout_fn=promotion_gate.get_ask_timeout_secon
         - answer_by   == requested_at + ask timeout
         - resolves_by == answer_by + notification grace + apply margin
         - timeout_fn is called exactly once
+        - `answer_by` counts from `requested_at` and the ask fires one short transaction later, so
+          the stamp is early by the length of the mint transaction, never late
     """
     answer_by   = requested_at + timedelta( seconds=int( timeout_fn() ) )
     resolves_by = answer_by + timedelta( seconds = int( grace_fn() )
@@ -241,17 +205,14 @@ class TransitionIntent:
     """
     The caller's transition, in the shape the resolver needs to replay it.
 
-    🔴 ONE CLASS THAT KNOWS THE SHAPE IN BOTH DIRECTIONS, WHICH IS THE POINT. The mint
-    site writes this dict and the resolve site reads it, in two different processes-worth
-    of time apart. A writer and a reader that each know the shape independently are two
-    derivations of one value, and they agree until somebody adds a field to one of them.
+    One class knows the shape in both directions. The mint site writes this dict and the resolve
+    site reads it, far apart in time and in another process. A writer and a reader that each know
+    the shape separately agree only until someone adds a field to one of them.
 
-    ⚠️ WHAT IS DELIBERATELY ABSENT: the caller's account identity, and therefore the
-    ask-exempt decision and the manager decision. Those were settled synchronously by
-    `promotion_gate.promotion_precheck` before the 202 was sent. Persisting a resolved
-    authorization decision and replaying it later makes it forgeable by anyone who can
-    write this JSON; not persisting it is cheaper than guarding it, and the resolver
-    never needs it because it never re-decides who may promote.
+    The caller's account identity is absent, and so are the ask-exempt and manager decisions.
+    `promotion_gate.promotion_precheck` settled those before the 202 was sent. A stored
+    authorization decision could be forged by anyone able to write this JSON, so it is not
+    persisted. The resolver never re-decides who may promote.
     """
     to_status     : str
     actor         : str
@@ -335,14 +296,11 @@ def _default_serialize( item, event ):
     """
     The `{ item, event }` body a synchronous 200 would have carried.
 
-    🔴 IMPORTED LAZILY, AND NOT OUT OF TIDINESS. `routers.tasks` imports THIS module to
-    hand off the ask, so a module-level import here would be a cycle. The same shape
-    `task_promotion_gate._default_ask` already uses for `notify_user_sync`.
-
-    ⚠️ IT CALLS THE ROUTER'S OWN SERIALIZERS RATHER THAN REBUILDING THE SHAPE. A second
-    serializer would be a second derivation of the response body, and the whole reason
-    this body is stored at all is that a re-derived answer is not the same answer
-    (design §5.4.1).
+    The router module is imported lazily. `routers.tasks` imports this module to hand off the ask,
+    so a module-level import here would be a cycle. `task_promotion_gate._default_ask` does the
+    same for `notify_user_sync`.
+    It calls the router's own serializers instead of rebuilding the shape. A second serializer
+    would derive the response body twice, and a re-derived answer is not the stored answer.
     """
     from cosa.rest.routers.tasks import _serialize_item, _serialize_event
     return { "item": _serialize_item( item ), "event": _serialize_event( event ) }
@@ -360,48 +318,34 @@ def resolve_ticket( ticket_id,
                     now_fn       = _now,
                     alarm_fn     = None ):
     """
-    Ask Rick about one pending ticket, then apply or refuse it — in THREE phases,
-    and the phase boundaries are the whole design.
+    Ask the owner about one pending ticket, then apply or refuse it, in three phases.
 
-    🔴 PHASE 2 HOLDS NO DATABASE CONNECTION, AND THAT IS THE ENTIRE POINT OF THE ROW.
-    Today's synchronous door opens a transaction, takes `SELECT … FOR UPDATE`, and
-    then asks Rick — holding a threadpool worker AND a pooled connection AND a lock on
-    the row for up to the ask timeout, with no commit in between. Splitting the read
-    from the apply is what puts the human's thinking time outside the transaction. A
-    resolver that kept the session open across the ask would have moved the waiting
-    without removing any of its cost.
-
-    🔴 AND PHASE 3 RE-VALIDATES RATHER THAN REPLAYING. Between the 202 and the answer
-    the row may have moved, gone terminal, or been dropped. The synchronous door cannot
-    have that problem because it never lets the lock go; this one gives the lock up, so
-    it has to buy back the guarantee by checking again under a fresh lock. A ticket
-    whose transition is no longer legal resolves `superseded` carrying the validator's
-    own words, and NOT `refused` — Rick did not refuse anything, the world moved.
-
-    ⚠️ IDEMPOTENT BY CONSTRUCTION, WHICH IS WHAT LETS THE SWEEPER BE SUSPENDERS RATHER
-    THAN A SECOND OPINION. Both phase 1 and phase 3 refuse to act on a ticket that is
-    no longer `pending`, and phase 3 re-reads that state UNDER THE TICKET'S OWN LOCK.
-    So whoever arrives first applies the transition and the other finds it applied.
-    Design §6.2.
+    The first step reads the intent and releases the connection. The ask step holds no connection,
+    lock or transaction, so the human's thinking time stays outside the database. The apply step
+    re-locks and re-validates, because the row may have moved since the 202.
 
     Requires:
         - ticket_id identifies a `task_promotion_tickets` row
-        - the caller has ALREADY passed `promotion_gate.promotion_precheck` — this
-          function never re-decides who may promote, and deliberately cannot (see
-          `TransitionIntent`, which does not persist the account identity)
+        - the caller has already passed `promotion_gate.promotion_precheck`; this function
+          never re-decides who may promote, and cannot (see `TransitionIntent`, which does not
+          persist the account identity)
 
     Ensures:
         - returns the ticket's terminal state, or the state it already held
-        - returns None when no such ticket exists — never a silent success
-        - a ticket that is not `pending` is returned UNCHANGED, no ask fired
-        - `approved` carries `response_body` — the exact `{ item, event }` a
-          synchronous 200 would have returned, serialized inside the transaction that
-          wrote it
-        - `refused` carries `refusal`, satisfying the table's own CHECK
+        - returns None when no such ticket exists, never a silent success
+        - a ticket that is not `pending` is returned unchanged, no ask fired
+        - `approved` carries `response_body`, the exact `{ item, event }` a synchronous 200
+          would have returned, serialized inside the transaction that wrote it
+        - `refused` carries `refusal`, satisfying the table's own `CHECK`
         - `superseded` carries the validator's words in `refusal`
-        - an apply that BLOWS UP marks the ticket `stalled` in a fresh transaction and
-          names the exception, rather than leaving a pending row that looks healthy
+        - an apply that raises marks the ticket `stalled` in a fresh transaction and names the
+          exception, rather than leaving a pending row that looks healthy
         - never leaves a ticket `pending` on any path it completed
+        - a transition no longer legal resolves `superseded`, not `refused`: the owner refused
+          nothing, the row moved
+        - the first and apply steps both skip a ticket that is no longer `pending`, and the apply step re-reads the
+          state under the ticket's own lock, so the first arrival applies and the other finds it
+          applied; that is why the sweeper is a backstop and not a second opinion
     """
     # ── PHASE 1 · read the intent, then LET GO ──────────────────────────────────
     with db_fn() as session:
@@ -464,30 +408,22 @@ def resolve_ticket( ticket_id,
 def _apply_resolution( ticket_id, item_id, intent, approval,
                        db_fn=get_db, serialize_fn=_default_serialize, now_fn=_now ):
     """
-    Phase 3 in one transaction: the ticket's lock, the row's lock, the validator, the
-    apply.
+    The apply step of a promotion, in one transaction: lock, re-validate, apply.
 
-    🔴 THE FRESH SESSION IS THE GUARANTEE, NOT THE LOCK — AND `db_fn` IS INJECTABLE, SO
-    UNTIL THIS REFUSAL EXISTED THE GUARANTEE WAS A PROPERTY OF WHAT CALLERS HAPPENED TO
-    PASS. Pocholo 📣's finding, 2026-09-06. `SELECT ... FOR UPDATE` serializes the row AT
-    THE DATABASE; it does NOT repopulate the Python attributes of an object the session
-    already holds. So a session that has already loaded this ticket or this task would
-    re-validate against a STALE object while wearing a lock that makes it look more
-    careful, not less. That is the single most convincing way to get this wrong.
-
-    ⚠️ THE REFUSAL IS LOUD RATHER THAN DEFENSIVE, and it is checked BEFORE the first read
-    because every read after it legitimately populates the map. `get_db` builds a new
-    `SessionLocal()` per call, so production can never trip this; what trips it is a
-    future caller threading an existing session through for efficiency — the exact
-    "optimisation" this module's header warns would quietly break it.
+    The fresh session is the guarantee, not the lock. `SELECT ... FOR UPDATE` serializes the row
+    at the database but does not refresh objects the session already holds. A session that had
+    loaded this ticket or task would re-validate stale values under a lock that looks careful.
 
     Requires:
-        - db_fn yields a session whose identity map is EMPTY
+        - db_fn yields a session whose identity map is empty
 
     Ensures:
-        - takes the TICKET's lock before the ITEM's, and re-reads the ticket state
-          under it — two resolvers racing cannot both apply
+        - takes the ticket's lock before the item's, and re-reads the ticket state
+          under it, so two resolvers racing cannot both apply
         - returns the resulting ticket state
+        - the identity-map check runs before the first read, because every later read legitimately
+          fills the map; `get_db` builds a new session per call, so production never trips it, but
+          a caller threading an existing session through for efficiency would
 
     Raises:
         - RuntimeError if handed a session that has already loaded objects, naming the
@@ -630,8 +566,8 @@ def _default_alarm( ticket_id, item_id, requested_by, resolves_by, detail, now )
     Ensures:
         - fires at `urgent`, which is the one priority that reaches somebody who is not
           already looking at the screen
-        - never raises — an alarm that takes the sweeper down with it would silence
-          every LATER orphan to report this one
+        - never raises, because an alarm that took the sweeper down with it would silence
+          every later orphan to report this one
     """
     try:
         from lupin_cli.notifications.notify_user_async import notify_user_async
@@ -671,35 +607,31 @@ def _mark_stalled( ticket_id, db_fn=get_db, now_fn=_now, alarm_fn=_default_alarm
     """
     Move one pending ticket to `stalled` and fire the alarm.
 
-    🔴 EVERY WRITER OF `stalled` GOES THROUGH HERE, WHICH IS WHAT KEEPS THEM TO ONE
-    CONTRACT. Pocholo 📣's point, 2026-09-06: the sweeper and startup reconciliation are
-    two callers, and two callers each holding their own idempotency rule are two writers
-    that can disagree about a settled ticket. They do not have their own rule. They have
-    this one, and the ticket's own lock enforces it.
-
-    🔴 `require_overdue` RE-CHECKS THE DEADLINE IN PYTHON, UNDER THE LOCK, AND IT IS NOT
-    REDUNDANT WITH THE SWEEPER'S SQL FILTER. The filter chooses CANDIDATES; this decides.
-    A safety property that lives only in a query is invisible to every reader of this
-    function and untestable without a database — and a third caller added later would
-    inherit the state check and silently NOT inherit the deadline check, which is exactly
-    the shape of defect the paragraph above is about.
-
-    ⚠️ Startup passes False DELIBERATELY, and that is a different claim rather than a
-    weaker one: its evidence is the PROCESS BOUNDARY, not the clock. See
-    `reconcile_on_startup`.
+    Every writer of `stalled` goes through here, so they all share one idempotency rule, enforced
+    by the ticket's own lock. Two callers with rules of their own could disagree about a settled
+    ticket, and the sweeper and startup reconciliation are two callers.
 
     Requires:
         - ticket_id identifies a ticket
 
     Ensures:
-        - a ticket that is not `pending` is left alone and NO alarm fires — this is what
+        - a ticket that is not `pending` is left alone and no alarm fires, which is what
           makes the sweeper safe to run beside a live resolver
-        - with `require_overdue`, a ticket whose deadline has NOT passed is left alone
-          and NO alarm fires
-        - `resolved_at` is stamped, satisfying the table's CHECK
-        - the alarm fires OUTSIDE the transaction, so a slow notification surface cannot
-          hold a connection open, which is the defect this whole row is about
+        - with `require_overdue`, a ticket whose deadline has not passed is left alone
+          and no alarm fires
+        - `resolved_at` is stamped, satisfying the table's `CHECK`
+        - the alarm fires outside the transaction, so a slow notification surface cannot
+          hold a connection open
         - returns True when it stalled a ticket, False when there was nothing to do
+        - `require_overdue` re-checks the deadline in Python under the lock. The sweeper's SQL
+          filter only chooses candidates; a rule living only in the query would be invisible to
+          readers, untestable without a database, and a third caller would inherit the state check
+          but not the deadline check
+        - a `NULL` deadline is not overdue: SQL's `resolves_by < now` is `NULL` for it, so the
+          sweeper's query never selects it, and the Python check agrees; disagreeing would wake a
+          human about a ticket the query treats as out of scope
+        - startup passes False because its evidence is the process boundary, not the clock (see
+          `reconcile_on_startup`)
     """
     now = now_fn()
     with db_fn() as session:
@@ -733,23 +665,19 @@ def _mark_stalled( ticket_id, db_fn=get_db, now_fn=_now, alarm_fn=_default_alarm
 
 def sweep_stalled_tickets( db_fn=get_db, now_fn=_now, alarm_fn=_default_alarm ):
     """
-    The suspenders: find pending tickets past their deadline, stall them, and shout.
+    The backstop: find pending tickets past their deadline, stall them, and raise the alarm.
 
-    🔴 THE DEADLINE COMES OFF THE ROW, NOT OFF TODAY'S CONFIG. `resolves_by` was written
-    when the ticket was minted, under the timeout in force AT THAT MOMENT. Re-deriving
-    it here would let an operator lowering the dial retroactively declare in-flight
-    tickets overdue — see `resolves_by_for`.
-
-    ⚠️ IT MUST DISCRIMINATE, NOT MERELY FIRE. A sweeper that stalled every pending
-    ticket would satisfy "the alarm fires" and be worthless: the in-flight ask is the
-    common case and it is the one that must stay silent. The guard for this carries both
-    arms for that reason — past the deadline fires, inside it says nothing.
+    The deadline comes off the row, not today's config. `resolves_by` was written at mint time
+    under the timeout then in force. Re-deriving it here would let an operator lowering the
+    setting declare in-flight tickets overdue (see `resolves_by_for`).
 
     Ensures:
         - returns the list of ticket ids it stalled (possibly empty)
         - touches no ticket whose `resolves_by` is in the future
         - touches no ticket that is not `pending`
         - one ticket's failure does not abandon the rest of the batch
+        - it discriminates: an in-flight ask is the common case and must stay silent, so a sweeper
+          that stalled every pending ticket would fire the alarm and still be wrong
     """
     now = now_fn()
     with db_fn() as session:
@@ -774,28 +702,20 @@ def sweep_stalled_tickets( db_fn=get_db, now_fn=_now, alarm_fn=_default_alarm ):
 
 def reconcile_on_startup( db_fn=get_db, now_fn=_now, alarm_fn=_default_alarm ):
     """
-    Every ticket left `pending` by a dead process is an orphan, and startup is when we
-    know that for free.
+    Stall every ticket still `pending` at startup, since a dead process left it orphaned.
 
-    🔴 THE PROCESS BOUNDARY IS THE EVIDENCE, AND IT IS STRONGER THAN THE DEADLINE. An
-    ask runs on a background worker inside THIS process. So a ticket that is `pending`
-    while this function runs was minted by a process that no longer exists, and its
-    worker died with it — no timer needs to expire for that to be true. Waiting for
-    `resolves_by` would leave a known-dead ask looking healthy for up to the ask timeout
-    plus the grace.
-
-    ⚠️ THIS IS WHERE THE MISSING RECOVERY BITES, AND IT IS NAMED RATHER THAN HIDDEN.
-    Design §6.3 wanted this function to read the notification's `responded_at` off the
-    ticket's `notification_id` and APPLY an answer Rick gave in the seconds before the
-    bounce. `notification_id` is not populated in this landing — see the module
-    docstring — so that answer cannot be recovered here and the ticket goes `stalled`
-    with a human told. Loud and lossy beats quiet and lossy; it does not beat correct,
-    and this is not claimed to be correct yet.
+    An ask runs on a background worker inside this process. A ticket that is `pending` while this
+    runs was therefore minted by a process that no longer exists. That evidence is stronger than
+    the deadline, which would leave a known-dead ask looking healthy for the ask timeout plus grace.
 
     Ensures:
         - returns the list of ticket ids it stalled
         - fires the same urgent alarm the sweeper does, for the same reason
         - is safe to run when the table is empty, and reports zero rather than nothing
+        - an answer given just before a bounce is not recovered: the design would read the
+          notification's `responded_at` off the ticket's `notification_id`, but this module never
+          populates that column (see the module docstring), so the ticket goes `stalled` and a human
+          is told; that is loud and lossy, not yet correct
     """
     with db_fn() as session:
         orphans = [

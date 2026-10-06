@@ -1,32 +1,29 @@
 """
-Server-side daemon that tails the `broadcast-acks` topic and pushes
-`commons_broadcast_ack` custom notifications to the originating user.
+Daemon that tails `broadcast-acks` and pushes ack notifications to the broadcaster.
 
-Per AC7 + T9 (Pass 2) + F3 (REUSE) of
-src/rnd/v0.1.7/2026.05.09-inter-session-commons/03-phase2-user-broadcast-design.md.
+It pushes `commons_broadcast_ack` custom notifications to the originating user.
+Design: src/rnd/v0.1.7/2026.05.09-inter-session-commons/03-phase2-user-broadcast-design.md.
 
-**Phase 3 refactor (Q1 + F13-fit template-method)**: This class is now a
-subclass of `CommonsTopicWatcher` (see `commons_topic_watcher.py`). The
+The class subclasses `CommonsTopicWatcher` (see `commons_topic_watcher.py`). The
 base owns lifecycle scaffolding, lock, registry primitives, and prune
-logic. This subclass provides domain-typed `_InFlightEntry`, the
+logic. This subclass provides the domain-typed `_InFlightEntry`, the
 `register_broadcast` / `unregister_broadcast` / `is_in_flight` public
-API (preserves Phase 2 naming for 26-test compat), and the
-broadcast-ack-specific `tick()` dispatch.
+API, and the ack-specific `tick()` dispatch.
 
-**In-flight broadcast tracker semantics** (T9 + AC7):
+**In-flight broadcast tracker semantics**:
 - Entries are added by `POST /api/commons/broadcast-to-cc-sessions` via
   `register_broadcast(bid, originating_user_id, expected_recipients)`
 - The check-and-register operation is atomic under `self._lock` (inherited
   from base) — prevents TOCTOU race between concurrent inserts with the
   same caller-supplied UUID
-- TTL: 5 minutes from registration (matches AC9's UI auto-dismiss window).
+- TTL: 5 minutes from registration (matches the UI auto-dismiss window).
   Expired entries are pruned lazily on each `_tick()`
 - Lookup uses `is_in_flight(bid)` — returns False once TTL elapses or after
   explicit `unregister_broadcast(bid)`
 
-**Startup `last_seen_ts`**: initialized to the timestamp of the LAST ack
-entry already in `broadcast-acks` at watcher-start, so historical acks
-don't replay to the UI on every restart.
+**Startup `last_seen_ts`**: set to the timestamp of the last ack entry already
+in `broadcast-acks` at watcher start. Historical acks then do not replay to
+the UI on every restart.
 """
 
 import time
@@ -117,8 +114,9 @@ class CommonsAckWatcher( CommonsTopicWatcher ):
 
     def register_broadcast( self, broadcast_id: str, originating_user_id: str, expected_recipients: int ) -> None:
         """
-        Atomic insert-or-raise (per T9). Raises `ValueError` if `broadcast_id`
-        is already in flight — the endpoint translates this to HTTP 409.
+        Register a broadcast as in flight; raise `ValueError` if its id is already registered.
+
+        The insert is atomic. The endpoint translates the `ValueError` to HTTP 409.
         """
         now = time.monotonic()
         entry = _InFlightEntry(
@@ -137,7 +135,7 @@ class CommonsAckWatcher( CommonsTopicWatcher ):
         self._unregister( broadcast_id )
 
     def is_in_flight( self, broadcast_id: str ) -> bool:
-        """True if the broadcast is registered AND not expired."""
+        """True if the broadcast is registered and not expired."""
         with self._lock:
             self._prune_expired_locked( time.monotonic() )
             return broadcast_id in self._in_flight
@@ -146,9 +144,9 @@ class CommonsAckWatcher( CommonsTopicWatcher ):
 
     def _initialize_last_seen_ts( self ) -> None:
         """
-        On first start, set `_last_seen_ts` to the timestamp of the LAST existing
-        ack entry — so historical acks (from a prior watcher run) don't replay
-        when the server restarts. Per AC7 startup-cursor semantics.
+        Set `_last_seen_ts` to the newest existing ack entry's timestamp on first start.
+
+        Historical acks from a prior watcher run then do not replay when the server restarts.
         """
         try:
             entries = self.store.read( _BROADCAST_ACKS_TOPIC, limit=1 )
@@ -213,11 +211,11 @@ class CommonsAckWatcher( CommonsTopicWatcher ):
         metadata     : Dict[ str, Any ],
     ) -> Dict[ str, Any ]:
         """
-        The ack's identity dict — which broadcast, which seat, what status.
+        The ack's identity dict: which broadcast, which seat, what status.
 
-        ONE definition, read by BOTH the saved row and the live push, so the two can
-        never describe the same ack differently. Splitting them was the whole defect:
-        the push carried the identity and the record carried none.
+        One definition is read by both the saved row and the live push, so the two can
+        never describe the same ack differently. Two definitions would let the record
+        omit the identity the push carries.
         """
         return {
             "broadcast_id"  : broadcast_id,
@@ -231,25 +229,7 @@ class CommonsAckWatcher( CommonsTopicWatcher ):
 
     def _persist_ack_row( self, broadcast_id: str, user_id: str, payload: Dict[ str, Any ] ) -> Optional[ str ]:
         """
-        Save one ack as a `notifications` row addressed to the broadcaster (row
-        4f320c27 S3). NEVER RAISES — a persist failure is loud and is not allowed to
-        cost the live push, which is what the user is actually watching.
-
-        OFF THE EVENT LOOP BY CONSTRUCTION. Every caller reaches here from `tick()`,
-        which runs on `CommonsTopicWatcher`'s own daemon thread (`_run_loop`) and
-        never on the async loop — so this blocking `get_db()` checkout plus two
-        round-trips is the same arrangement `_persist_notification_sync` reaches via
-        a to-thread hop, without needing the hop. Nothing on this path is a coroutine
-        and this module imports no event-loop machinery — if that ever changes, this
-        sentence stops being true and the persist must move onto a worker thread.
-        `test_the_ack_persist_path_never_touches_the_event_loop` is what holds it.
-
-        WHY THE ROW IS MARKED DELIVERED. An ack is a tally element, not a message the
-        user must still be shown. Left in 'created' it would join the AFK undelivered
-        drain and replay on reconnect as a bodiless "missed notification" — the
-        2026-06-03 storm shape. Marked delivered it stays out of that inbox, and S4's
-        read finds it anyway because that read does not filter on state. The mark
-        follows `_persist_notification_sync`'s own connected-path primitive.
+        Save one ack as a `notifications` row addressed to the broadcaster.
 
         Requires:
             - user_id is the broadcast originator's user UUID, as a string
@@ -257,10 +237,18 @@ class CommonsAckWatcher( CommonsTopicWatcher ):
 
         Ensures:
             - returns the new notification id on success, None on any failure
-            - a malformed user_id is refused BEFORE the database is touched
+            - a malformed user_id is refused before the database is touched
             - every failure prints a loud [CommonsAckWatcher] line regardless of
-              self.debug — a silently-unsaved ack is the defect this whole row exists
-              to close, so it must never be swallowed at the default log level
+              self.debug, so a silently-unsaved ack must never be swallowed at the default log level
+            - a persist failure never costs the live push, which is what the user is watching
+            - runs off the event loop: every caller is `tick()` on `CommonsTopicWatcher`'s own
+              daemon thread (`_run_loop`), so the blocking `get_db()` checkout needs no thread hop;
+              the module imports no event-loop machinery, and if that changes the persist must move
+              onto a worker thread (`test_the_ack_persist_path_never_touches_the_event_loop` holds it)
+            - the row is marked delivered: an ack is a tally element, not a message the user
+              must still be shown, so left in 'created' it would join the AFK undelivered drain
+              and replay on reconnect as a bodiless missed notification; the tally read does
+              not filter on state, so it still finds the row
 
         Raises:
             - nothing
@@ -315,10 +303,9 @@ class CommonsAckWatcher( CommonsTopicWatcher ):
         """
         Save the ack, then fire the `commons_broadcast_ack` notification for it.
 
-        ORDER IS DELIBERATE and the two are independent: the save runs first so a
-        crash between the two loses the transient frame rather than the durable
-        record, and `_persist_ack_row` cannot raise, so the push below runs whatever
-        the database did.
+        The save runs first, so a crash between the two loses the transient frame rather
+        than the durable record. `_persist_ack_row` cannot raise, so the push below runs
+        whatever the database did.
         """
         payload = self._ack_payload( entry, broadcast_id, metadata )
         self._persist_ack_row( broadcast_id, user_id, payload )

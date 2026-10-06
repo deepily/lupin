@@ -1,48 +1,30 @@
 """
-Is a Lupin test venue actually free? (row e6b8fe56)
+Is a Lupin test venue actually free? Reads the unfiltered `/api/busy` and decides.
 
-THE DEFECT THIS REPLACES
-    Every procedure that "verified :8000 idle" read `/api/queue/pool-status` and
-    concluded idle from `monopolize_id` being null. MEASURED 2026-08-25 by driving
-    the real `RunningFifoQueue.get_pool_status()` against real queues:
+Reading `/api/queue/pool-status` and concluding idle from a null `monopolize_id` is wrong.
+That field moves for exactly one condition: a monopolize-flagged job that has already started.
+Queued work, inline consumer-thread work and ordinary shared-pool work are all invisible to it.
+The field is honest about what it measures; it cannot answer the idle question.
 
-        state                                    monopolize_id   OLD VERDICT
-        2 jobs QUEUED in todo, none started      null            "IDLE"   <- wrong
-        + 1 job RUNNING INLINE on the consumer   null            "IDLE"   <- wrong
-        + 1 job SCHEDULED for the future         null            "IDLE"   <- wrong
-        + 1 job RUNNING in the shared pool       null            "IDLE"   <- wrong
-        + a MONOPOLIZER holding the slot         "mono-1"        "BUSY"
+Idle means nothing is running and nothing is waiting. Every lane must be empty: the run
+FIFO, the ingress todo FIFO, the shared agentic pool, and the dedicated monopolize slot.
 
-    `monopolize_id` moves for exactly ONE condition: a monopolize-flagged job that
-    has already STARTED. Queued work, inline consumer-thread work (row 99b09840) and
-    ordinary shared-pool work are all invisible to it. The field is honest about what
-    it measures; it was being asked a question it cannot answer.
+Unknown is not idle. A signal that could not be read yields `UNKNOWN`, never `IDLE`.
+The original mistake was reading a signal that did not move as proof of absence. A check
+that answers `IDLE` while missing an input repeats it one level up. A container that
+predates `todo_queue_size` therefore reports `UNKNOWN`, visibly unable to answer.
 
-WHAT IDLE MEANS HERE
-    A venue is free iff NOTHING IS RUNNING and NOTHING IS WAITING, on every lane:
-    the run FIFO, the ingress todo FIFO, the shared agentic pool, and the dedicated
-    monopolize slot.
-
-THE RULE THAT MATTERS MOST: UNKNOWN IS NOT IDLE
-    A signal that could not be read yields UNKNOWN, never IDLE. The original defect
-    is precisely "a signal that did not move was read as proof of absence", so a
-    check that answers IDLE while missing an input reproduces the bug one level up.
-    A container that predates `todo_queue_size` therefore reports UNKNOWN -- visibly
-    unable to answer -- rather than confidently wrong.
-
-WHY NOT /api/get-queue/{todo,run}
-    They are USER-FILTERED. Measured 2026-08-25 with the gate account: the default
-    read is scoped to the caller, and `?user_filter=*` returns 403 because that
-    account is not an admin. A peer's queued job is invisible through that door, so
-    it can add evidence of work but can never prove its absence. `/api/busy` reads
-    the queue objects directly, is unfiltered, and needs no credential.
+`/api/get-queue/{todo,run}` is not used, because it is user-filtered. The default read is
+scoped to the caller, and `?user_filter=*` returns 403 for a non-admin account. A peer's
+queued job is invisible through that door, so it can add evidence of work but never prove
+its absence. `/api/busy` reads the queue objects directly, is unfiltered, and needs no credential.
 
 Stdlib only, and no `cosa` imports, so the gate rig can run it on the host with
 plain `python3` and nothing but PYTHONPATH=src:
 
     PYTHONPATH=src python3 -m cosa.rest.venue_idle --port 8000
 
-Exit codes are the branch a caller reads: 0 IDLE, 1 BUSY, 2 UNKNOWN.
+Exit codes are the branch a caller reads: 0 `IDLE`, 1 `BUSY`, 2 `UNKNOWN`.
 """
 
 import json
@@ -81,12 +63,12 @@ def decide( signals ):
           None means "could not be read"
 
     Ensures:
-        - returns ( verdict, reasons ) with verdict in { IDLE, BUSY, UNKNOWN }
-        - BUSY wins over UNKNOWN: proven occupancy is already a decision, and a
+        - returns ( verdict, reasons ) with verdict in { `IDLE`, `BUSY`, `UNKNOWN` }
+        - `BUSY` wins over `UNKNOWN`: proven occupancy is already a decision, and a
           caller that knows to stay off the venue gains nothing from ambiguity
-        - UNKNOWN whenever any REQUIRED_SIGNALS entry is missing or None and nothing
+        - `UNKNOWN` whenever any REQUIRED_SIGNALS entry is missing or None and nothing
           proved occupancy
-        - IDLE only when every required signal was read AND every one is zero / False
+        - `IDLE` only when every required signal was read and every one is zero / False
         - reasons is a non-empty list of human-readable strings in every arm
 
     Raises:
@@ -128,7 +110,7 @@ def read_signals( port=DEFAULT_PORT, timeout=10, opener=None ):
         - returns a dict carrying every REQUIRED_SIGNALS key, each either the
           observed value or None when it was absent or unreadable
         - a transport failure, non-JSON body, or missing field yields Nones rather
-          than an exception -- the UNKNOWN arm exists to carry exactly that
+          than an exception, because the `UNKNOWN` arm exists to carry exactly that
         - never raises on a server that is down, old, or answering nonsense
 
     Raises:
@@ -162,13 +144,13 @@ def format_report( port, signals, verdict, reasons ):
     Render the verdict a human reads before deciding to recreate a container.
 
     Requires:
-        - verdict is one of IDLE / BUSY / UNKNOWN
+        - verdict is one of `IDLE` / `BUSY` / `UNKNOWN`
         - reasons is a non-empty list of strings
 
     Ensures:
         - returns a multi-line string naming the port, the verdict, every reason,
           and the observed value of every required signal
-        - states the UNKNOWN arm's meaning inline, so a reader who has never seen
+        - states the `UNKNOWN` arm's meaning inline, so a reader who has never seen
           this output does not have to guess whether it is safe
 
     Raises:
@@ -201,7 +183,7 @@ def check( port=DEFAULT_PORT, timeout=10, opener=None ):
 
     Requires:
         - port names a reachable Lupin venue, or does not -- an unreachable venue is
-          a legitimate UNKNOWN, not an error
+          a legitimate `UNKNOWN`, not an error
 
     Ensures:
         - returns ( verdict, report_text, signals )

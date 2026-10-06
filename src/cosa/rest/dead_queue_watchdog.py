@@ -1,11 +1,9 @@
 """
 Dead Queue Watchdog — Automated BFE trigger for failed agentic jobs.
 
-Monitors the dead queue for newly failed jobs, evaluates eligibility
-for automated repair, classifies failures, and triggers the Bug Fix
+Monitors the dead queue for newly failed jobs and evaluates eligibility
+for automated repair. It classifies failures and triggers the Bug Fix
 Expediter on behalf of the original user.
-
-Phase 6A of the Bug Fix Expediter pipeline.
 """
 
 import re
@@ -88,7 +86,7 @@ def classify_failure( error: str, stack_trace: str = "" ) -> str:
         - Returns one of FailureCategory constants
         - Infrastructure patterns checked first (higher priority)
         - Code bug patterns checked second
-        - Falls back to UNKNOWN (which triggers BFE — conservative approach)
+        - Falls back to `UNKNOWN` (which triggers BFE — conservative approach)
 
     Args:
         error: Error message from the failed job
@@ -235,8 +233,8 @@ class DeadQueueWatchdog:
 
         Args:
             config_mgr: ConfigurationManager for reading INI settings
-            todo_queue: TodoFifoQueue — still read for queue inspection; work is no
-                longer pushed onto it directly (step 12)
+            todo_queue: TodoFifoQueue — still read for queue inspection; work is never
+                pushed onto it directly
             debug: Enable debug output
             ask_flow: the v2 AskFlow this watchdog submits through. Injected rather
                 than reached for, because every test of this class builds it with a
@@ -288,7 +286,7 @@ class DeadQueueWatchdog:
         Thread-safe via attempt_count lock.
 
         Requires:
-            - failed_job is a job object that just transitioned to FAILED
+            - failed_job is a job object that just transitioned to `FAILED`
 
         Ensures:
             - Returns BFE job_id if triggered, None if not eligible
@@ -585,7 +583,7 @@ def init_watchdog( config_mgr, todo_queue, debug=False, ask_flow=None ) -> DeadQ
         config_mgr: ConfigurationManager
         todo_queue: TodoFifoQueue
         debug: Enable debug output
-        ask_flow: the v2 AskFlow both submit paths go through (step 12)
+        ask_flow: the v2 AskFlow both submit paths go through
 
     Returns:
         DeadQueueWatchdog: The initialized instance

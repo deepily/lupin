@@ -318,10 +318,8 @@ def rotate_refresh_token(
     """
     Rotate refresh token (revoke old, issue new).
 
-    This implements token rotation security pattern:
-    - Old token is revoked immediately
-    - New token is issued with fresh expiration
-    - Prevents token reuse attacks
+    The old token is revoked at once and the new one gets a fresh expiry,
+    so a stolen old token cannot be reused.
 
     Requires:
         - old_token is a valid refresh token

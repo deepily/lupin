@@ -77,15 +77,6 @@ def validate_password_strength( password: str ) -> Tuple[bool, str]:
     """
     Validate password meets minimum security requirements.
 
-    Requirements:
-    - Minimum 8 characters
-    - At least 3 of 4 character types:
-      * Lowercase letters
-      * Uppercase letters
-      * Digits
-      * Special characters (!@#$%^&*(),.?":{}|<>)
-    - Not in common password list
-
     Requires:
         - password is a string (may be weak or empty)
 
@@ -93,6 +84,9 @@ def validate_password_strength( password: str ) -> Tuple[bool, str]:
         - Returns (True, "") if password acceptable
         - Returns (False, "error message") if password weak
         - Checks length, character types, common passwords
+        - Acceptable means at least 8 characters, at least 3 of 4 character types
+          (lowercase, uppercase, digits, special characters !@#$%^&*(),.?":{}|<>),
+          and not in the common password list
         - Never raises exception
 
     Raises:

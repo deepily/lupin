@@ -30,12 +30,8 @@ def authorize_queue_filter(
         - Returns authorized filter value ("*" or specific user_id)
         - Raises 403 if unauthorized access attempted
         - Uses centralized is_admin() from auth_middleware
-        - Regular users ALWAYS get their own user_id
+        - Regular users always get their own user_id
         - Admin users get their requested filter
-
-    Args:
-        current_user: Authenticated user dict with uid and roles
-        filter_user_id: Requested filter (None=self, "*"=all, or specific user_id)
 
     Returns:
         str: Authorized user_id to filter by ("*" for all, or specific user_id)
@@ -55,23 +51,6 @@ def authorize_queue_filter(
         | Admin   | "*"            | "*"              | ✓ 200  |
         | Admin   | "!self"        | "!<user_id>"     | ✓ 200  |
         | Admin   | other_id       | other_id         | ✓ 200  |
-
-    Examples:
-        # Regular user gets own jobs by default
-        >>> authorize_queue_filter({"uid": "user_123", "roles": ["user"]}, None)
-        "user_123"
-
-        # Regular user cannot request all jobs
-        >>> authorize_queue_filter({"uid": "user_123", "roles": ["user"]}, "*")
-        HTTPException(403, "Only admin users can query all jobs...")
-
-        # Admin can request all jobs
-        >>> authorize_queue_filter({"uid": "admin_1", "roles": ["admin"]}, "*")
-        "*"
-
-        # Admin can exclude own jobs
-        >>> authorize_queue_filter({"uid": "admin_1", "roles": ["admin"]}, "!self")
-        "!admin_1"
     """
     requesting_user_id = current_user["uid"]
 

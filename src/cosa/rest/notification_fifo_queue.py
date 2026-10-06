@@ -25,7 +25,7 @@ def _creation_key( item ) -> float:
           one (get_current_datetime_raw starts from UTC, and the fallback is UTC);
           only a test double writes a naive one, and comparing naive with aware
           would raise
-        - an unparseable stamp sorts LAST, so one bad row cannot fail the listing
+        - an unparseable stamp sorts last, so one bad row cannot fail the listing
         - never raises
     """
     try:
@@ -39,8 +39,7 @@ def _creation_key( item ) -> float:
 
 class NotificationItem:
     """
-    Simple notification item for queue storage.
-    Replaces SolutionSnapshot for lightweight notification management.
+    Lightweight notification item for queue storage, used instead of SolutionSnapshot.
     """
     
     def __init__( self, message: str, type: str = "task", priority: str = "medium",
@@ -73,10 +72,10 @@ class NotificationItem:
 
         Ensures:
             - Creates unique id_hash for queue compatibility (backward compat)
-            - Uses provided id if available (Phase 2.2 database ID)
+            - Uses provided id if available (database ID)
             - Sets timestamp to current time
             - Initializes tracking fields
-            - Stores Phase 2.2 response-required fields
+            - Stores response-required fields
             - Sets sender_id with fallback to unknown sender
             - Stores abstract for supplementary context
 
@@ -283,8 +282,8 @@ class NotificationFifoQueue( FifoQueue ):
         Requires:
             - websocket_mgr is a valid WebSocketManager instance or None
             - emit_enabled is boolean to control auto-emission
-            - fcm_wake_service is an FcmWakeService instance or None (S6 silent
-              relay — None disables the wake trigger entirely)
+            - fcm_wake_service is an FcmWakeService instance or None (None disables
+              the silent-relay wake trigger entirely)
 
         Ensures:
             - Inherits FifoQueue with 'notification' queue name
@@ -310,8 +309,10 @@ class NotificationFifoQueue( FifoQueue ):
     
     def push( self, notification: NotificationItem ) -> None:
         """
-        Override parent's push to emit enhanced notification data.
-        Prevents double emission while including full notification details.
+        Push a notification and emit one enhanced WebSocket event.
+
+        Overrides the parent's push, which prevents double emission while
+        including full notification details.
         
         Requires:
             - notification is a valid NotificationItem instance
@@ -371,7 +372,7 @@ class NotificationFifoQueue( FifoQueue ):
             - Inserts at correct position based on priority
             - Logs to InputAndOutputTable for persistence
             - Auto-emits WebSocket event via parent class
-            - Includes Phase 2.2 response-required fields if provided
+            - Includes response-required fields if provided
             - Sets sender_id for multi-project grouping
             - Includes abstract for supplementary context if provided
 
@@ -486,11 +487,7 @@ class NotificationFifoQueue( FifoQueue ):
         Emit a `notification_queue_update` WebSocket event for a newly-added notification.
 
         Shared by `push()` (normal priority path) and `push_notification()` (urgent/high
-        priority path) so the emission contract is defined in exactly one place.
-
-        Fans out to the target user (if `notification.user_id` is set) or broadcasts to
-        all connected clients, plus a deterministic per-job CC-listener session hand-off
-        so service-account listener processes also receive the payload.
+        priority path), so the emission contract is defined in one place.
 
         Requires:
             - notification is a fully-populated NotificationItem
@@ -565,21 +562,10 @@ class NotificationFifoQueue( FifoQueue ):
 
     def _stamp_manager_persona( self, notification_dict: Dict[str, Any], sender_id: Optional[str] ) -> None:
         """
-        Stamp the spawning-manager persona badge onto an outbound LIVE notification
-        envelope for a CC worker sender, mirroring the senders-visible (full-load)
-        hydration so the focus-bar manager-ownership badge appears on a freshly-spawned
-        worker WITHOUT a page refresh.
+        Stamp the spawning-manager persona badge onto an outbound live notification envelope.
 
-        Background (Rick 2026-06-08 badge; Tiffany 2026-06-17 live-update race fix,
-        root-caused in a16a7281): the full-load path stamps `manager_persona` on every
-        sender via `_manager_persona_for_sender_id`, so a force-refreshed page always
-        shows the badge. The live path previously carried `manager_persona` ONLY inside
-        the `voice_persona_assigned` event's `payload`; if that single event raced to a
-        null resolve at the worker's spawn instant (the worker's `spawned_by` not yet
-        visible to the in-container server through the bind-mount), no later live event
-        re-carried the lineage and the badge waited for a manual refresh. Stamping it on
-        EVERY CC-sender emit makes the live path self-heal: the worker's next notification
-        re-resolves (bridge now settled) and the client patches the badge live.
+        Mirrors the full-load hydration (`_manager_persona_for_sender_id`), so the focus-bar
+        badge appears on a freshly-spawned worker without a page refresh.
 
         Requires:
             - notification_dict is the to_dict() envelope about to be broadcast
@@ -589,7 +575,12 @@ class NotificationFifoQueue( FifoQueue ):
             - adds top-level "manager_persona" (badge dict, or None for a root session)
               for CC senders (sender_id containing '#'); leaves the dict untouched for
               non-CC senders so the per-emit bridge read is skipped
-            - NEVER raises — best-effort, runs inside the WS emit path
+            - never raises — best-effort, runs inside the WS emit path
+            - stamping on every CC-sender emit makes the live path self-heal: the
+              `voice_persona_assigned` event can race to a null resolve at the worker's
+              spawn (its `spawned_by` not yet visible to the in-container server through
+              the bind-mount), and the worker's next notification then re-resolves and
+              the client patches the badge live
 
         Raises:
             - None
@@ -607,12 +598,11 @@ class NotificationFifoQueue( FifoQueue ):
 
     def _maybe_send_fcm_wake( self, notification: NotificationItem ) -> None:
         """
-        Run the S6 §3.3 wake trigger for a newly-enqueued user-targeted notification.
+        Run the wake trigger for a newly-enqueued user-targeted notification.
 
-        The full policy (enabled → no-live-mobile-WS → debounce → ≥1 token →
-        off-thread send) lives in FcmWakeService.maybe_send_wake; this hook only
-        gates on having a service and a target user, so the queue stays decoupled
-        from FCM concerns.
+        The full policy (enabled → no-live-mobile-WS → debounce → ≥1 token → off-thread
+        send) lives in FcmWakeService.maybe_send_wake. This hook only gates on a service
+        and a target user, so the queue stays decoupled from FCM concerns.
 
         Requires:
             - notification is a fully-populated NotificationItem
@@ -620,7 +610,7 @@ class NotificationFifoQueue( FifoQueue ):
         Ensures:
             - Silent no-op when fcm_wake_service is None or user_id is unset
               (broadcast notifications never wake devices)
-            - NEVER raises — the notification path must survive any wake failure
+            - never raises — the notification path must survive any wake failure
 
         Raises:
             - None
@@ -637,7 +627,7 @@ class NotificationFifoQueue( FifoQueue ):
         """
         Emit a WebSocket notification_queue_update event reflecting current queue state.
 
-        Used by state-mutating operations that do NOT add a new notification
+        Used by state-mutating operations that do not add a new notification
         (e.g., mark_played) so connected clients can resync unread-count tracking
         without re-fetching the full inbox.
 
@@ -707,12 +697,12 @@ class NotificationFifoQueue( FifoQueue ):
             - oldest_first is boolean
 
         Ensures:
-            - Returns the user's notifications in QUEUE order by default. That is not
-              time order: urgent and high are inserted at the FRONT, so they come
+            - Returns the user's notifications in queue order by default. That is not
+              time order: urgent and high are inserted at the front, so they come
               first whatever their age
             - Drops played items unless include_played
             - Keeps only the listed priorities when priorities is given, so a caller
-              slicing the result sees just the set it asked for (row e25f8868)
+              slicing the result sees just the set it asked for
             - Orders by creation time, oldest first, when oldest_first; ties keep
               queue order. Timestamps are compared as datetimes, not strings, because
               one may carry a different UTC offset (the UTC fallback)
@@ -813,7 +803,8 @@ class NotificationFifoQueue( FifoQueue ):
 def quick_smoke_test():
     """
     Quick smoke test for NotificationFifoQueue.
-    Tests complete workflow with priority handling and io_tbl logging.
+
+    Tests the complete workflow with priority handling and io_tbl logging.
     """
     import cosa.utils.util as du
     
