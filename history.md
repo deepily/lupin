@@ -8,7 +8,7 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
-### 2026.10.06 - Session 4afec3b4 (Mr. Radio 🦉, manager, no crew; 08:56 to about 10:00 EDT) | Legacy task card re-reads on a push; websocket push row closed; session ended early on Rick's word
+### 2026.10.06 - Session 4afec3b4 (Mr. Radio 🦉, manager, no crew; from 08:56 EDT) | Legacy task card re-reads on a push; websocket push row and eval row closed; a scheduled job lost on :8000; showcase plan for the docstring rewrite
 
 - **Rick's orders**: every seat today is for Cheech's docstring rewrite and Mr. Radio allocates none (broadcast `37434cae`, then voice at about 08:58 EDT). At about 09:57 EDT: checkpoint and exit, to save tokens for that work.
 - **Row `8796333b`, slice 3**: merged `6485fd269` (commits `5f39934ef`, `441ac0fb7`). The legacy page subscribes to `task_store_changed` on its queue socket and re-reads its task list and finished-tasks pane on a frame. Review by a Sonnet sub-agent: pass with fixes, then pass. 16 one-line breaks each reddened a named test.
@@ -16,7 +16,9 @@
 - **Row `8796333b` closed**: Rick ruled "Keep polling" for Fleet Status on a card at 09:53 EDT. TODO.md Decisions Log, `d347fb8f7`.
 - **Row `c2109aa4`**: all 20 uncommitted paths in old tree `seat-cc-author-mr-radio-1` read. 15 match the branch head, 5 match an earlier committed version, and the 5 pinned commits are already on the branch. The tree is still on disk and locked.
 - **Correction of mine**: the row's note of 2026-10-05 said the legacy file had two lists to change. It has one; the second belongs to the audio socket.
-- **Owed, not done today**: read `ts-04fb21c3` (scheduled 11:00 EDT) and close row `4cbd4858` · the post-game card for 2026-10-05 (row `74394bba`) · row `80513825` waits on Rick's two provision commands (`pg_roles` showed only `lupin_dev` at 09:05 EDT).
+- **Afternoon, after Rick kept the session open**: the 11:00 EDT run `ts-04fb21c3` never ran; its job row was gone at the 08:38 EDT boot. Filed as bug `a80630a4`: the integration fixture `clean_test_db` rebuilds the test database, so a job scheduled on `:8000` does not survive an integration run plus a restart. Resubmitted as `ts-0850a838`: integration 451 passed, 0 failed; the eval file passed with 200 asks in about 20 minutes. Rick ruled the full eval run on demand only. Row `4cbd4858` closed.
+- **Showcase plan, row `170cda00`** (Rick's order): R&D page `2026.10.06-before-and-after-showcase-plan.md` in the docs-rewrite plan folder, `7a0e0e80e`. A scratch probe over train 1 (`1419bd54e` to `54a4536d5`): 368 docstrings changed, 3,571 lint findings before, 0 after. Whole tree at `1419bd54e`: 34,408 Python docstrings, 112,466 findings. No tool built.
+- **Owed, not done today**: the post-game card for 2026-10-05 (row `74394bba`) · row `80513825` waits on Rick's two provision commands (`pg_roles` showed only `lupin_dev` at 09:05 EDT).
 - **Files**: history.md, TODO.md; code via one reviewed merge. Not pushed.
 
 ### 2026.10.05 - Session 78067fb5 (Cheech 🌿, manager; crew from 18:43 EDT: Rio ⚡ author, Tiberius 👑 reviewer, both Sonnet) | Gemini measured and ruled out; docs-rewrite pilot merged; Phase 3 signed off; first sweep tools merged

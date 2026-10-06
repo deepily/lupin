@@ -22,6 +22,9 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 
 - **Every seat today is for Cheech's docstring rewrite; Mr. Radio allocates none** (broadcast `37434cae` at session start, then voice at about 08:58 EDT). It holds on a heartbeat poke as well. Mr. Radio works alone on his own rows. Recorded in his memento for session `4afec3b4`.
 - **Fleet Status keeps polling** (card, re-asked at his request, answered 09:53 EDT: "Keep polling (Recommended)"). No websocket push is built for it; the 60 second poll and the arbiter's rule that it never pushes both stand. Row `8796333b`, closed.
+- **Do not exit; wait and read the eval run** (typed, about 10:00 EDT, reversing his checkpoint-and-exit request of a few minutes earlier).
+- **The full eval run is on demand only** (card, answered 14:30 EDT: "On demand only (Recommended)"). No schedule. The 5-per-command run stays in every integration run. Row `4cbd4858`, closed on job `ts-0850a838`.
+- **Before-and-after showcase of the docstring rewrite: plan it, do not build it yet** (voice and two cards, early afternoon). Internal first. A script ranks and Rick hand-picks. Lead with totals, findings by kind, and proof that meaning was kept. Two data sets: a data story and a gallery of the worst. Saved as an R&D page in the docs-rewrite plan folder. Row `170cda00`.
 
 ## 📚 DECISIONS LOG 2026-10-04 (Mr. Radio 🦉 `93ec0919`, then `acd9cc5f` after a self re-spin at 14:52 EDT; crew Tiberius · Sam · Rio) — pilot finished, fast-check trial, Gemini comparison plan
 
