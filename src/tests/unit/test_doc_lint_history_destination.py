@@ -112,7 +112,7 @@ def test_a_fragment_or_the_start_of_a_longer_token_does_not_count( repo, tmp_pat
 
 
 def test_zero_history_claims_is_a_pass_that_says_so_and_needs_no_destination( repo, tmp_path ):
-    code, text, result = _run( repo, tmp_path / "out", sort=[ REAL_SORT[ 3 ] ] )
+    code, text, result = _run( repo, tmp_path / "out", sort=[ REAL_SORT[ 3 ] ], worksheet=[ REAL_WORKSHEET[ 3 ] ] )
     assert code == 0 and result[ "pass" ] is True and result[ "history_claims" ] == 0 and result[ "rows" ] == []
     assert result[ "message" ] == "history_claims: 0, nothing to check" and text == "PASS history_claims: 0, nothing to check\n"
 
@@ -149,13 +149,21 @@ def test_the_design_lines_of_a_package_are_a_second_check( repo, tmp_path ):
     ( "{\"n\": 1, \"class\": \"X\"}\n", REAL_WORKSHEET, [], "class 'X' is not one of H J M L U" ),
     ( "{\"n\": 1, \"class\": \"H\"}\n{\"n\": 1, \"class\": \"J\"}\n", REAL_WORKSHEET, [], "line 2: n 1 appears twice" ),
     ( "{\"n\": 5, \"class\": \"H\"}\n", { "n": 5 }, [], "must hold a JSON list of dicts" ),
+    ( "{\"n\": 5, \"class\": \"H\"}\n", [ 1 ], [], "must hold a JSON list of dicts" ),
+    ( "", [ REAL_WORKSHEET[ 0 ], REAL_WORKSHEET[ 1 ] ], [], "the sort lacks claims of" ),
+    ( "{\"n\": 5, \"class\": \"H\"}\n", REAL_WORKSHEET, [], "the sort lacks claims of" ),
+    ( "{\"n\": 5, \"class\": \"H\", \"old_quote\": [\"a\"]}\n", [ REAL_WORKSHEET[ 0 ] ], [ "--commit", "HEAD" ], "old_quote must be a string" ),
+    ( "{\"n\": 5, \"class\": \"H\", \"id\": 5}\n", [ REAL_WORKSHEET[ 0 ] ], [ "--commit", "HEAD" ], "id must be a string" ),
+    ( "{\"n\": 5, \"class\": \"H\", \"quote\": 3}\n", [ REAL_WORKSHEET[ 0 ] ], [ "--commit", "HEAD" ], "quote must be a string" ),
+    ( "{\"n\": 5, \"class\": \"H\"}\n", [ { "n": 5, "id": "a", "quote": 123 } ], [ "--commit", "HEAD" ], "claim n 5: quote must be a string" ),
+    ( "{\"n\": 5, \"class\": \"H\"}\n", [ { "n": 5, "id": 7, "quote": "q" } ], [ "--commit", "HEAD" ], "claim n 5: id must be a string" ),
     ( "{\"n\": 5, \"class\": \"H\"}\n", [ { "n": "5" } ], [], "must hold a JSON list of dicts" ),
-    ( "{\"n\": 7, \"class\": \"H\"}\n", REAL_WORKSHEET, [ "--commit", "HEAD" ], "history claim n 7 has no quote" ),
+    ( "{\"n\": 7, \"class\": \"H\"}\n", [], [ "--commit", "HEAD" ], "history claim n 7 has no quote" ),
     ( "{\"n\": 5, \"class\": \"H\"}\n", [ { "n": 5, "id": "a", "quote": "  `` " } ], [ "--commit", "HEAD" ], "history claim n 5 has no quote" ),
-    ( "{\"n\": 5, \"class\": \"H\"}\n", REAL_WORKSHEET, [], "no destination" ),
-    ( "{\"n\": 5, \"class\": \"H\"}\n", REAL_WORKSHEET, [ "--commit", "no-such-rev" ], "git log no-such-rev failed" ),
-    ( "{\"n\": 5, \"class\": \"H\"}\n", REAL_WORKSHEET, [ "--design", "/no/such/design.md" ], "FileNotFoundError" ),
-    ( "{\"n\": 5, \"class\": \"H\"}\n", REAL_WORKSHEET, [ "--commit", "HEAD", "--package", "pkg" ], None ),
+    ( "{\"n\": 5, \"class\": \"H\"}\n", [ REAL_WORKSHEET[ 0 ] ], [], "no destination" ),
+    ( "{\"n\": 5, \"class\": \"H\"}\n", [ REAL_WORKSHEET[ 0 ] ], [ "--commit", "no-such-rev" ], "git log no-such-rev failed" ),
+    ( "{\"n\": 5, \"class\": \"H\"}\n", [ REAL_WORKSHEET[ 0 ] ], [ "--design", "/no/such/design.md" ], "FileNotFoundError" ),
+    ( "{\"n\": 5, \"class\": \"H\"}\n", [ REAL_WORKSHEET[ 0 ] ], [ "--commit", "HEAD", "--package", "pkg" ], None ),
 ] )
 def test_a_refusal_writes_a_full_result_and_exits_2( repo, tmp_path, sort_text, worksheet, extra, message ):
     sort_path  = tmp_path / "sort.jsonl"
@@ -170,7 +178,7 @@ def test_a_refusal_writes_a_full_result_and_exits_2( repo, tmp_path, sort_text, 
     result = json.loads( ( tmp_path / "out" / hd.RESULT_NAME ).read_text( encoding="utf-8" ) )
     assert code == 2 and set( result ) == NORMAL_KEYS and result[ "pass" ] is False and message in result[ "refused" ]
     assert ( result[ "history_claims" ], result[ "found" ], result[ "missing" ], result[ "rows" ] ) == ( 0, 0, 0, [] )
-    assert stream.getvalue() == f"REFUSED: {result[ 'refused' ]}\n"
+    assert stream.getvalue() == f"REFUSED: {result[ 'refused' ]}\n" and result[ "message" ] == result[ "refused" ]
 
 
 def test_normalize_folds_case_wraps_and_backticks_and_quote_found_needs_the_whole_quote():
@@ -178,6 +186,8 @@ def test_normalize_folds_case_wraps_and_backticks_and_quote_found_needs_the_whol
     assert hd.quote_found( "a quote wrapped", "x A\n`quote` Wrapped here" ) is True
     assert hd.quote_found( "quote wrap", "a quote wrapped" ) is False and hd.quote_found( "uote wrapped", "a quote wrapped" ) is False
     assert hd.quote_found( "``", "anything" ) is False and hd.quote_found( "", "anything" ) is False
+    assert hd.quote_found( "foo", "foo_bar" ) is False and hd.quote_found( "bar", "foo_bar" ) is False and hd.quote_found( "_x", "a_x" ) is False and hd.quote_found( "_x", "a _x b" ) is True
+    assert hd.quote_found( "foo_", "foo_bar" ) is False and hd.quote_found( "foo_", "a foo_ b" ) is True
     assert hd.quote_found( "(a)", "x(a) y" ) is True and hd.quote_found( "(a)", "see (a)b" ) is True and hd.quote_found( "end.", "the end.5" ) is True
 
 
@@ -202,3 +212,26 @@ def test_two_commits_are_two_destinations_and_an_older_commit_is_read_by_its_own
     assert code == 0 and [ d for d in result[ "destinations" ] if d.startswith( "commit:" ) ][ 1 ] == f"commit:{old}"
     code, _, result = _run( repo, tmp_path / "out2", "--commit", "HEAD", "--design", str( repo / "docs" / "design.md" ) )
     assert code == 1 and result[ "missing" ] == 3
+
+
+def test_a_relative_design_path_is_read_from_the_repo_root_not_the_current_directory( repo, tmp_path, monkeypatch ):
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir( elsewhere )
+    code, _, result = _run( repo, tmp_path / "out", "--commit", "HEAD", "--design", "docs/design.md" )
+    assert code == 0 and result[ "destinations" ][ 0 ] == "design:docs/design.md"
+
+
+def test_the_commit_sha_line_is_not_part_of_the_commit_text( repo, tmp_path ):
+    sha = _git( repo, "rev-parse", "HEAD" )
+    code, _, result = _run( repo, tmp_path / "out", "--commit", "HEAD", sort=[ { "n": 1, "class": "H" } ], worksheet=[ { "n": 1, "id": "x", "quote": sha } ] )
+    assert code == 1 and result[ "missing" ] == 1
+
+
+def test_any_exception_inside_the_check_becomes_a_refusal_with_a_full_result( repo, tmp_path, monkeypatch ):
+    def boom( text ): raise KeyError( "odd" )
+    monkeypatch.setattr( hd, "normalize", boom )
+    sort_path, sheet_path = _files( tmp_path )
+    code = hd.main( [ "--repo-root", str( repo ), "--sort", sort_path, "--worksheet", sheet_path, "--out", str( tmp_path / "out" ), "--commit", "HEAD" ], io.StringIO() )
+    result = json.loads( ( tmp_path / "out" / hd.RESULT_NAME ).read_text( encoding="utf-8" ) )
+    assert code == 2 and set( result ) == NORMAL_KEYS and result[ "refused" ] == "KeyError: 'odd'"

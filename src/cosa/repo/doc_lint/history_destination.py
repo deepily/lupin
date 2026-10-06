@@ -7,7 +7,7 @@ and the destinations and reports, for each H claim, whether its whole quote is t
 
 Present means the claim's quote, normalized, matches the destination text, normalized. Normalizing folds case,
 collapses runs of white space and line wraps, and drops Markdown backticks. The whole quote must match, as a run
-that no letter or digit touches at either end. A fragment of the quote does not count.
+that no letter, digit or underscore touches at either end. A fragment of the quote does not count.
 """
 
 import argparse
@@ -52,8 +52,8 @@ def quote_found( quote, text ):
 
     Ensures:
         - True only when the normalized quote appears whole in the normalized text
-        - a quote that starts or ends on a letter or digit must not touch another letter or digit there, so the beginning
-          of a longer word is not found
+        - a quote that starts or ends on a letter, digit or underscore must not touch one there, so the beginning of a
+          longer word or identifier is not found
         - an empty normalized quote is never found
 
     Raises:
@@ -61,8 +61,8 @@ def quote_found( quote, text ):
     """
     wanted = normalize( quote )
     if not wanted: return False
-    before = r"(?<![^\W_])" if wanted[ 0 ].isalnum() else ""
-    after  = r"(?![^\W_])" if wanted[ -1 ].isalnum() else ""
+    before = r"(?<!\w)" if wanted[ 0 ].isalnum() or wanted[ 0 ] == "_" else ""
+    after  = r"(?!\w)" if wanted[ -1 ].isalnum() or wanted[ -1 ] == "_" else ""
     return re.search( before + re.escape( wanted ) + after, normalize( text ) ) is not None
 
 
@@ -78,7 +78,8 @@ def load_sort( path ):
         - blank lines are skipped
 
     Raises:
-        - ValueError naming the line when a line is not JSON, lacks n or class, repeats an n, or carries a class outside H, J, M, L, U
+        - ValueError naming the line when a line is not JSON, lacks n or class, repeats an n, carries a class outside H, J, M, L, U,
+          or has an id, old_quote or quote that is not a string
         - OSError when the file cannot be read
     """
     rows, seen = [], set()
@@ -92,6 +93,8 @@ def load_sort( path ):
         if not isinstance( row, dict ) or not isinstance( row.get( "n" ), int ) or "class" not in row:
             raise ValueError( f"{path} line {number} needs an integer n and a class" )
         if row[ "class" ] not in LABELS: raise ValueError( f"{path} line {number}: class {row[ 'class' ]!r} is not one of {' '.join( LABELS )}" )
+        for key in ( "id", "old_quote", "quote" ):
+            if key in row and row[ key ] is not None and not isinstance( row[ key ], str ): raise ValueError( f"{path} line {number}: {key} must be a string" )
         if row[ "n" ] in seen: raise ValueError( f"{path} line {number}: n {row[ 'n' ]} appears twice" )
         seen.add( row[ "n" ] )
         rows.append( row )
@@ -109,13 +112,16 @@ def load_worksheet( path ):
         - returns { n: row }
 
     Raises:
-        - ValueError when the file is not a list of dicts that each carry an integer n
+        - ValueError when the file is not a list of dicts that each carry an integer n, or a row has an id or quote that is not a string
         - OSError when the file cannot be read
         - json.JSONDecodeError when the file is not JSON
     """
     with open( path, encoding="utf-8" ) as handle: rows = json.load( handle )
     if not isinstance( rows, list ) or not all( isinstance( r, dict ) and isinstance( r.get( "n" ), int ) for r in rows ):
         raise ValueError( f"{path} must hold a JSON list of dicts, each with an integer n" )
+    for row in rows:
+        for key in ( "id", "quote" ):
+            if key in row and row[ key ] is not None and not isinstance( row[ key ], str ): raise ValueError( f"{path} claim n {row[ 'n' ]}: {key} must be a string" )
     return { r[ "n" ]: r for r in rows }
 
 
@@ -124,7 +130,7 @@ def read_destinations( root, designs, commits ):
     Read every destination text.
 
     Requires:
-        - root is a git working tree; designs are file paths; commits are revisions
+        - root is a git working tree; designs are file paths, a relative one read from root; commits are revisions
 
     Ensures:
         - returns [ { label, text } ], design documents first, labels design:<path> and commit:<full sha>
@@ -136,7 +142,7 @@ def read_destinations( root, designs, commits ):
     """
     found = []
     for path in designs:
-        with open( path, encoding="utf-8" ) as handle: found.append( { "label": f"design:{path}", "text": handle.read() } )
+        with open( os.path.join( root, path ), encoding="utf-8" ) as handle: found.append( { "label": f"design:{path}", "text": handle.read() } )
     for rev in commits:
         res = subprocess.run( [ "git", "-C", str( root ), "log", "-1", "--format=%H%n%B", rev ], capture_output=True, text=True, encoding="utf-8" )
         if res.returncode != 0: raise RuntimeError( f"git log {rev} failed: {res.stderr.strip()}" )
@@ -214,7 +220,8 @@ def check_history( root, sort_path, worksheet_path, designs, commits, package=No
         - a row's quote is the worksheet's quote for its n; a sort row that carries id or old_quote overrides the worksheet
         - pass is True only when nothing was refused, every H claim is found, and no Design: line is dead
         - zero H claims is a pass whose message says history_claims: 0
-        - a refusal returns the empty result with the reason, never a partial one
+        - every claim in the worksheet must be in the sort, or the run is refused naming the missing numbers
+        - a refusal returns the empty result with the reason, never a partial one, and any exception becomes one
 
     Raises:
         - nothing
@@ -223,6 +230,8 @@ def check_history( root, sort_path, worksheet_path, designs, commits, package=No
     try:
         sort      = load_sort( sort_path )
         worksheet = load_worksheet( worksheet_path )
+        unsorted  = sorted( set( worksheet ) - { r[ "n" ] for r in sort } )
+        if unsorted: raise ValueError( f"the sort lacks claims of {worksheet_path}: n {' '.join( str( n ) for n in unsorted )}" )
         history   = [ r for r in sort if r[ "class" ] == HISTORY ]
         rows      = []
         for row in history:
@@ -234,7 +243,7 @@ def check_history( root, sort_path, worksheet_path, designs, commits, package=No
         if rows and not ( designs or commits ): raise ValueError( "there are history claims and no destination: give --design or --commit" )
         destinations = read_destinations( root, designs, commits )
         design_lines = design_lines_check( root, package )
-    except ( ValueError, OSError, RuntimeError, SyntaxError ) as err:
+    except Exception as err:
         return empty_result( sort_path, worksheet_path, f"{type( err ).__name__}: {err}" )
     for row in rows:
         row[ "where" ] = [ d[ "label" ] for d in destinations if quote_found( row[ "quote" ], d[ "text" ] ) ]
