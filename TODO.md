@@ -16,6 +16,13 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 **Timers from the 09-30 skeleton crew** (these clean themselves up; nothing to fold in): `stop-poke-restore-20260930` (dev and test, 17:00 EDT) and `ratio-gate-reenable-20260930` (test, 12:46 EDT).
 **Not mine and uncommitted in the main tree** (left alone): the phase6b `action_required` PNG baseline (dirty since 09-22) and María's three `src/rnd/v0.2.1/` docs (kill-switch design, console-tee plan, cascade handoff).
 
+## 📚 DECISIONS LOG 2026-10-06 (Mr. Radio 🦉 `4afec3b4`, no crew)
+
+**Rick ruled** (2026-10-06):
+
+- **Every seat today is for Cheech's docstring rewrite; Mr. Radio allocates none** (broadcast `37434cae` at session start, then voice at about 08:58 EDT). It holds on a heartbeat poke as well. Mr. Radio works alone on his own rows. Recorded in his memento for session `4afec3b4`.
+- **Fleet Status keeps polling** (card, re-asked at his request, answered 09:53 EDT: "Keep polling (Recommended)"). No websocket push is built for it; the 60 second poll and the arbiter's rule that it never pushes both stand. Row `8796333b`, closed.
+
 ## 📚 DECISIONS LOG 2026-10-04 (Mr. Radio 🦉 `93ec0919`, then `acd9cc5f` after a self re-spin at 14:52 EDT; crew Tiberius · Sam · Rio) — pilot finished, fast-check trial, Gemini comparison plan
 
 **Rick ruled** (each by keypress or spoken order, 2026-10-04):
