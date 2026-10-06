@@ -9,9 +9,9 @@
 // minutes ago sorts below every row created today. `task_events` is
 // append-only, one row per state change, already ordered ts DESC.
 //
-// Like FleetStatusStore and TaskListStore this is an AUTONOMOUS 60s poller: it
-// does not subscribe to the EventBus and rides none of the WS transports. It
-// only emits `store_finished_tasks_changed`.
+// Like FleetStatusStore and TaskListStore this is a 60s poller. Row 8796333b slice 2 adds one
+// EventBus subscription, `task_store_changed` (a server invalidation push), which calls
+// refreshAfterWrite(); the poll stays as the safety net. It emits `store_finished_tasks_changed`.
 
 import type { EventBus } from "../shared/EventBus";
 import type { StoreFinishedTasksChangedPayload } from "../shared/types";
@@ -52,6 +52,11 @@ export interface FinishedTasksStore {
   setWindowDays( days: number ): void;
   /** Fetch every status → cache → emit. Debounced by an in-flight guard. */
   refresh(): Promise<void>;
+  /**
+   * The read to take after a server push or a write: waits out a read in flight, then takes
+   * one that began after this call. Ensures: a burst of callers shares one trailing read.
+   */
+  refreshAfterWrite(): Promise<void>;
   /** Start the 60s poll: one immediate refresh, then the interval. Idempotent. */
   startPolling(): void;
   /** Stop the poll. Idempotent. */
@@ -78,7 +83,9 @@ class FinishedTasksStoreImpl implements FinishedTasksStore {
   private lastError  : string | null = null;
   private days       : number = FINISHED_WINDOW_DEFAULT_DAYS;
   private inFlight   = false;
+  private inFlightRun : Promise<void> | null = null;
   private pollHandle : number | null = null;
+  private unsubscribePush : ( () => void ) | null = null;
 
   constructor( opts: FinishedTasksStoreOptions ) {
     this.bus = opts.bus;
@@ -114,6 +121,19 @@ class FinishedTasksStoreImpl implements FinishedTasksStore {
   async refresh(): Promise<void> {
     if ( this.inFlight ) return;   // a manual ⟳ landing on a tick must not double-fetch
     this.inFlight = true;
+    const run = this.fetchAll();
+    this.inFlightRun = run;
+    return run;
+  }
+
+  async refreshAfterWrite(): Promise<void> {
+    if ( this.inFlightRun !== null ) await this.inFlightRun;
+    // A run in flight now began after this call: join it rather than let refresh() skip it.
+    if ( this.inFlightRun !== null ) return this.inFlightRun;
+    return this.refresh();
+  }
+
+  private async fetchAll(): Promise<void> {
     try {
       const since = windowSinceIso( this.days, this.nowFn() );
       // 🔴 THE RESULT IS BUILT INTO A FRESH OBJECT AND SWAPPED IN AT THE END.
@@ -149,7 +169,8 @@ class FinishedTasksStoreImpl implements FinishedTasksStore {
       this.lastError = failed;
       this.emitChanged( true );
     } finally {
-      this.inFlight = false;
+      this.inFlight    = false;
+      this.inFlightRun = null;
     }
   }
 
@@ -157,12 +178,19 @@ class FinishedTasksStoreImpl implements FinishedTasksStore {
     this.stopPolling();
     void this.refresh();
     this.pollHandle = this.setIntervalFn( () => void this.refresh(), FINISHED_TASKS_POLL_INTERVAL_MS );
+    // Server push: re-read through refreshAfterWrite(), never refresh(), whose in-flight guard
+    // would drop a push that lands during a read.
+    this.unsubscribePush = this.bus.on( "task_store_changed", () => void this.refreshAfterWrite() );
   }
 
   stopPolling(): void {
     if ( this.pollHandle !== null ) {
       this.clearIntervalFn( this.pollHandle );
       this.pollHandle = null;
+    }
+    if ( this.unsubscribePush !== null ) {
+      this.unsubscribePush();
+      this.unsubscribePush = null;
     }
   }
 
