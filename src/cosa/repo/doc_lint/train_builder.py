@@ -3,6 +3,7 @@ Picks the approved packages that go in one day's merge train of the docs-rewrite
 
 A package may go only when its `docs sweep: <package>` store row carries an approval. That is an amendment with one
 `docs-sweep-approval:` line. The line holds the checks directory, its file hashes, the commits and the verdict.
+A later amendment with a `docs-sweep-withdrawal:` line voids every approval before it. A newer approval after it stands.
 
 The row's audit trail must confirm the approval. The approver must be neither the writer, whom the manager names on
 the row, nor its owner. The verdict must be pass, and the checks directory must be durable and hold passing results for
@@ -24,6 +25,7 @@ from .sweep_packages import sweep
 CORRELATION_KEY   = "epic:v022-docs-and-reuse"
 TITLE_REGEX       = re.compile( r"^(?:\[LUPIN\] )?docs sweep: (.+)$" )
 APPROVAL_PREFIX   = "docs-sweep-approval:"
+WITHDRAWAL_PREFIX = "docs-sweep-withdrawal:"
 CLAIM_PREFIX      = "docs-sweep-claim:"
 SKIPPED_STATUSES  = ( "dropped", "parked" )
 EVENT_TRANSITIONS = ( "amended", "amended_post_terminal" )
@@ -110,14 +112,15 @@ def amendments_of( body ):
 
 def approval_of( body ):
     """
-    Find the latest approval line in a row body.
+    Find the latest approval line in a row body that no later withdrawal voided.
 
     Requires:
         - body is a str, or None
 
     Ensures:
         - returns ( actor, ts, approval ) for the last amendment that holds a docs-sweep-approval line, approval being the parsed JSON
-        - returns ( None, None, None ) when no amendment holds one
+        - a docs-sweep-withdrawal line voids every approval before it, in body order and line order, and an approval after it stands
+        - returns ( None, None, None ) when no amendment holds an approval, or the last one was withdrawn
 
     Raises:
         - ValueError when the latest approval line is not a JSON object
@@ -125,6 +128,7 @@ def approval_of( body ):
     found = ( None, None, None )
     for block in amendments_of( body ):
         for line in block[ "note" ].split( "\n" ):
+            if line.startswith( WITHDRAWAL_PREFIX ): found = ( None, None, None )
             if not line.startswith( APPROVAL_PREFIX ): continue
             try:
                 parsed = json.loads( line[ len( APPROVAL_PREFIX ) : ] )
@@ -132,6 +136,29 @@ def approval_of( body ):
                 raise ValueError( f"the approval line is not JSON: {err.msg}" ) from err
             if not isinstance( parsed, dict ): raise ValueError( "the approval line is not a JSON object" )
             found = ( block[ "actor" ], block[ "ts" ], parsed )
+    return found
+
+
+def withdrawal_of( body ):
+    """
+    Find the withdrawal that voided the row's approvals, if one did.
+
+    Requires:
+        - body is a str, or None
+
+    Ensures:
+        - returns ( actor, ts ) of the last docs-sweep-withdrawal line that no approval line follows, in body order and line order
+        - returns None when there is no withdrawal, or an approval came after the last one
+        - a note that only quotes the prefix mid-line is not a withdrawal
+
+    Raises:
+        - nothing
+    """
+    found = None
+    for block in amendments_of( body ):
+        for line in block[ "note" ].split( "\n" ):
+            if line.startswith( WITHDRAWAL_PREFIX ): found = ( block[ "actor" ], block[ "ts" ] )
+            elif line.startswith( APPROVAL_PREFIX ): found = None
     return found
 
 
@@ -260,7 +287,7 @@ def judge_package( row, package, root, data_root ):
     Ensures:
         - returns ( entry, None ) for an approved package, entry being { row_id, approver, checks, commits }, commits full shas
         - returns ( None, reason ) when the row is dropped or parked, has a body that was overwritten, has no claim line or one for another package, has no
-          approval, has an approval whose stamp no amended event confirms, was approved by its writer or its owner, has a
+          approval or one that a later amendment withdrew, has an approval whose stamp no amended event confirms, was approved by its writer or its owner, has a
           verdict that is not pass, has a checks directory that is not durable, whole, passing and for this package, or lists
           a commit that is not a full sha of an existing commit
 
@@ -277,7 +304,9 @@ def judge_package( row, package, root, data_root ):
         return None, str( err )
     if claim is None: return None, "no docs-sweep-claim line naming the writer"
     if claim[ "package" ] != package: return None, f"the claim line names {claim[ 'package' ]!r}, not {package!r}"
-    if approval is None: return None, "no approval amendment"
+    if approval is None:
+        withdrawn = withdrawal_of( row[ "body" ] )
+        return None, f"the approval was withdrawn by {withdrawn[ 0 ]} at {withdrawn[ 1 ]}" if withdrawn else "no approval amendment"
     if not event_agrees( row.get( "events" ) or [], actor, stamp ): return None, f"no amended event by {actor} confirms the approval stamp"
     checks, commits, verdict, hashes = approval.get( "checks" ), approval.get( "commits" ), approval.get( "verdict" ), approval.get( "sha256" )
     if not isinstance( checks, str ) or not isinstance( verdict, str ) or not isinstance( hashes, dict ) or not isinstance( commits, list ) or not commits or not all( isinstance( c, str ) for c in commits ):

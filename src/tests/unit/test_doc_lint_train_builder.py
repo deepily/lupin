@@ -545,3 +545,52 @@ def test_a_checks_file_that_differs_from_the_approved_one_by_a_trailing_newline_
 def test_a_body_with_two_claim_lines_uses_the_first():
     body = claim_line( "pkg/first", "One" ) + "\n" + claim_line( "pkg/second", "Two" )
     assert tb.claim_of( body ) == { "package": "pkg/first", "writer": "One" }
+
+
+WITHDRAWAL = tb.WITHDRAWAL_PREFIX + " reopened after a finding"
+
+
+def test_a_withdrawal_line_voids_every_earlier_approval_and_names_who_and_when( world ):
+    checks, s = checks_dir( world, "w1" ), world.shas
+    good = approval( checks, [ s[ "one" ] ] )
+    row  = claim( "a", [ ( TIB, good ), ( "Maria 1a2b3c4d", good ), ( TIB, WITHDRAWAL ) ] )
+    assert refusal_for( world, row ) == f"the approval was withdrawn by {TIB} at {TS}"
+
+
+def test_a_withdrawal_with_no_approval_line_is_a_withdrawal_not_a_missing_approval( world ):
+    assert refusal_for( world, claim( "a", [ ( TIB, WITHDRAWAL ) ] ) ) == f"the approval was withdrawn by {TIB} at {TS}"
+
+
+def test_an_approval_after_the_withdrawal_stands_and_one_before_it_does_not( world ):
+    checks, s = checks_dir( world, "w2" ), world.shas
+    good = approval( checks, [ s[ "one" ] ] )
+    again = refusal_for( world, claim( "a", [ ( TIB, good ), ( TIB, WITHDRAWAL ), ( "Maria 1a2b3c4d", good ) ] ) )
+    assert again[ 0 ][ "approver" ] == "Maria 1a2b3c4d"
+    assert tb.approval_of( claim( "a", [ ( TIB, good ), ( TIB, WITHDRAWAL ) ] )[ "body" ] ) == ( None, None, None )
+
+
+def test_line_order_inside_one_amendment_decides_which_of_approval_and_withdrawal_wins( world ):
+    checks, s = checks_dir( world, "w3" ), world.shas
+    good = approval( checks, [ s[ "one" ] ] )
+    assert refusal_for( world, claim( "a", [ ( TIB, good + "\n" + WITHDRAWAL ) ] ) ) == f"the approval was withdrawn by {TIB} at {TS}"
+    assert refusal_for( world, claim( "a", [ ( TIB, WITHDRAWAL + "\n" + good ) ] ) )[ 0 ][ "approver" ] == TIB
+
+
+def test_a_note_that_only_quotes_the_withdrawal_prefix_mid_line_voids_nothing( world ):
+    checks, s = checks_dir( world, "w4" ), world.shas
+    row = claim( "a", [ ( TIB, approval( checks, [ s[ "one" ] ] ) ), ( TIB, "to undo, write a line starting " + WITHDRAWAL ) ] )
+    assert refusal_for( world, row )[ 0 ][ "package" ] == "a"
+    assert tb.withdrawal_of( row[ "body" ] ) is None
+
+
+def test_a_withdrawal_needs_no_confirming_event_because_it_only_ever_blocks_a_package( world ):
+    checks, s = checks_dir( world, "w5" ), world.shas
+    row = claim( "a", [ ( TIB, approval( checks, [ s[ "one" ] ] ) ), ( "Maria 1a2b3c4d", WITHDRAWAL ) ], events=[ event( TIB ) ] )
+    assert refusal_for( world, row ) == f"the approval was withdrawn by Maria 1a2b3c4d at {TS}"
+
+
+def test_withdrawal_of_returns_the_last_unanswered_withdrawal_and_none_for_an_empty_body():
+    body = stamped( ( TIB, WITHDRAWAL ), ( "Maria 1a2b3c4d", WITHDRAWAL ) )
+    assert tb.withdrawal_of( body ) == ( "Maria 1a2b3c4d", TS )
+    assert tb.withdrawal_of( None ) is None and tb.withdrawal_of( "" ) is None
+    assert tb.withdrawal_of( stamped( ( TIB, WITHDRAWAL ), ( TIB, tb.APPROVAL_PREFIX + " {}" ) ) ) is None
