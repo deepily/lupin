@@ -8,6 +8,20 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.10.05 - Session 78067fb5 (Cheech 🌿, manager; crew from 18:43 EDT: Rio ⚡ author, Tiberius 👑 reviewer, both Sonnet) | Gemini measured and ruled out; docs-rewrite pilot merged; Phase 3 signed off; first sweep tools merged
+
+- **Gemini through the local AGY tool** (rows `6ade6ad8`, `df3ac022`, `621d38a4`, `da2a6b08`): adapter at `src/cosa/orchestration/agy`, harness transport `--transport agy`, merged `d3e2fccaa`, 503 retry `6402082d7`. As checker on dev70 it caught 28 of 28 planted losses, like Claude; as writer on 30 docstrings it left 18 lint findings (Claude 0) and 100 claims judged absent (Claude 38). Rick ruled Gemini off the table. Numbers: comparison plan, section 13.
+- **Pilot** (rows `18c8a3b2`, `0066a201`, `1002e9c0`): Rick ruled go; 78 rewritten docstrings in the five `task_store_*.py` files merged `21698bef3`.
+- **Phase 3 sign-off** (rows `5c1525c6`, `4395d770`): five rulings in Plan 1 R.11 (`d3f789784`) and the TODO.md Decisions Log (`57d6f32d7`). The ruled checker scored 63 of 63 planted losses and flagged 4 of 86 untouched pairs on the gate half, and raised 4 of 4 known real losses. Phase 4 row `51cd818b` is open.
+- **Sweep tools, row `6ecf9e11`** (Rio; Tiberius reviewed): `sweep_packages`, `package_check`, `caps_fix` merged `ed303beb8`; two `package_check` refusal fixes merged `4c6790a1b`. `caps_fix` is shelved for the sweep: it lowers SQL keywords and log levels. Sweep size by `sweep_packages`: 80 packages, 7,538 docstrings, 3,295 with a finding; 436 more in 123 files of no package.
+- **Tiffany's labelled-set stack, row `4cc9cd81`** (Clayton wrote, Rio reviewed): `redraw --failed` and rule 9 merged `bf1d05d5b`. Rule 9 refuses 89 delete spans on the Dart pool of 4,375 and keeps 2,979; the loss was accepted with the numbers in the rule's note.
+- **Tiers on the final head `4c6790a1b`**: unit 30,058 passed, cosa 9,114 passed, 0 failed. Not run: type check, style check, coverage gate, TypeScript, E2E, integration. Nothing pushed.
+- **One-package trial**: `src/cosa/repo/git_loc_delta` rewritten and checked in about 8.5 minutes, 0 real losses of 21 alarms; commit `ec732f35b`, pinned `refs/keep/cheech-sweep-git-loc-delta`, not merged.
+- **History-destination check, row `168d42ea`** (Rio; Tiberius reviewed): merged `a03c44838`, 37 tests, 100% lines and branches on the module; no whole tier run on that head.
+- **Rick's rulings at 21:41 EDT** (TODO.md Decisions Log, `13ca9932d`): the two finished-phase heading rows closed (`767940f5`, `38cd61eb`), nothing dropped; baseline ticket `232c60fd` promoted to P0; a worker seat reads the Jev key from `~/.bashrc` into its own process; the 436 docstrings in files of no package are swept after the 80 packages.
+- **Dart labelled set** (Tiffany, row `4cc9cd81`): published at `projects-data/lupin/v022-phase2-labelled-dart/`, 80 dev and 175 gate pairs, frozen. The ruled checker runs over it on 2026-10-06, row `3740dd5b`.
+- **Open at close**: the train builder and the package lock are built and in review, not merged (row `168d42ea`; pinned `refs/keep/rio-train-builder-wip` is an earlier commit of it); `dart_pairs.py` writes no pair when a `///` block becomes a `//` comment (Tiffany's row `e19f2d9d`); a phase heading never follows its steps (bug `bb92a34a`); flaky test bug `d52fe948` not started.
+
 ### 2026.10.05 - Session 83887b6c (Mr. Radio 🦉, manager; no crew, reviews ran as sub-agents of this session on Opus) | Sonnet-on-VM P0, cache fix, create refusals and websocket slice 1 merged; live eval test cut to a short proxy; DB login still waiting on sudo
 
 - **Split, Rick's spoken order**: Cheech takes all pilot work, Mr. Radio the non-pilot rows.
