@@ -307,7 +307,7 @@ def main( argv=None, out=None ):
         - writes result.json and pairs.json in --out, and nothing else, then prints one line per check
         - returns 0 only when every check passed and nothing was refused, 1 otherwise, result.json written either way
         - a check that raises any exception is recorded as did not run, so a bug in one module never costs the report
-        - returns 2 when base does not resolve or the package holds no in-scope .py file, and then result.json holds the refusal with every key a normal result has, and pairs.json is not written, so no reader takes a refusal for a run with nothing changed
+        - returns 2 when base does not resolve or the package holds no in-scope .py file, and then result.json holds the refusal with every key a normal result has, and pairs.json is not written and one left in --out by an earlier run is removed, so no reader takes a refusal for a run with nothing changed
 
     Raises:
         - nothing
@@ -327,7 +327,9 @@ def main( argv=None, out=None ):
         out.write( f"REFUSED: {err}\n" )
     os.makedirs( args.out, exist_ok=True )
     for name, content in ( ( "result.json", result ), ( "pairs.json", pairs ) ):
-        if content is None: continue
+        if content is None:
+            if os.path.exists( f"{args.out}/{name}" ): os.remove( f"{args.out}/{name}" )
+            continue
         with open( f"{args.out}/{name}", "w", encoding="utf-8" ) as handle:
             json.dump( content, handle, indent=2 )
             handle.write( "\n" )

@@ -299,3 +299,13 @@ def test_source_with_a_null_byte_fails_compile_without_crashing( repo, tmp_path 
     code, _ = _run( repo, tmp_path / "out" )
     result  = _read( tmp_path / "out", "result.json" )
     assert code == 1 and _check( result, "py_compile" )[ "pass" ] is False
+
+
+def test_a_refusal_removes_the_pairs_file_an_earlier_run_left_in_out( repo, tmp_path ):
+    out = tmp_path / "out"
+    ( repo / "pkg" / "mod.py" ).write_text( CLEAN_MOD, encoding="utf-8" )
+    assert _run( repo, out )[ 0 ] == 0 and len( _read( out, "pairs.json" ) ) == 2
+    ( out / "notes.txt" ).write_text( "mine\n", encoding="utf-8" )
+    code, _ = _run( repo, out, base="no-such-rev" )
+    assert code == 2 and sorted( p.name for p in out.iterdir() ) == [ "notes.txt", "result.json" ]
+    assert _read( out, "result.json" )[ "refused" ].startswith( "git rev-parse" )
