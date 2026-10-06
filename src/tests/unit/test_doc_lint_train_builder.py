@@ -411,3 +411,62 @@ def test_main_reads_the_store_and_runs_a_live_sweep_when_no_files_are_given( wor
     result = json.loads( ( tmp_path / "o" / "train.json" ).read_text( encoding="utf-8" ) )
     assert result[ "bisect_order" ] == [ "a" ] and result[ "size" ] == 3 and result[ "not_claimed" ] == 3
     assert capsys.readouterr().out.startswith( "train of 1 packages" )
+
+
+def test_a_title_that_runs_over_a_second_line_is_not_a_claim( world ):
+    result = train( world, [ claim( "a", title="docs sweep: a\nand a second line" ) ] )
+    assert result[ "refused" ] == [] and result[ "not_claimed" ] == 4
+
+
+@pytest.mark.parametrize( "ts, expected", [
+    ( "2026-10-05T22:04:28.169063+00:00", True ),
+    ( "2026-10-05T22:04:28.169064+00:00", False ),
+    ( "2026-10-05T22:00:28.169063+00:00", True ),
+    ( "2026-10-05T22:00:28.169062+00:00", False ) ] )
+def test_event_agrees_at_the_exact_two_minute_edge_counts_but_one_microsecond_past_it_does_not( ts, expected ):
+    assert tb.event_agrees( [ event( ts=ts ) ], TIB, TS ) is expected
+
+
+def test_persona_of_strips_only_a_whole_trailing_8_hex_session_id_after_trimming_the_edges():
+    assert tb.persona_of( "Tiberius 9f3a1b2c0" ) == "tiberius9f3a1b2c0"
+    assert tb.persona_of( "Tiberius 9f3a1b2c " ) == "tiberius"
+
+
+def test_a_checks_directory_whose_name_only_begins_like_a_temp_root_is_not_under_it( world ):
+    sibling = world.root / "hotel"
+    path    = sibling / "ca"
+    path.mkdir( parents=True )
+    ( path / "result.json" ).write_text( json.dumps( { "pass": True, "package": "a" } ), encoding="utf-8" )
+    ( path / "history-destination.json" ).write_text( json.dumps( { "pass": True } ), encoding="utf-8" )
+    assert tb.checks_problem( str( path ), str( sibling ), "a", hashes_of( path ) ) is None
+
+
+def test_a_data_root_given_as_a_link_is_resolved_before_the_checks_directory_is_compared_to_it( world ):
+    link   = world.root / "datalink"
+    link.symlink_to( world.data )
+    checks = checks_dir( world, "viaLink" )
+    assert tb.checks_problem( str( checks ), str( link ), "a", hashes_of( checks ) ) is None
+
+
+def test_the_data_root_itself_passes_the_location_check_and_fails_only_for_what_it_lacks( world ):
+    assert "cannot be read" in tb.checks_problem( str( world.data ), str( world.data ), "a", {} )
+
+
+def test_a_listed_annotated_tag_is_resolved_to_the_commit_it_names( world ):
+    _git( world.root, "tag", "-a", "v1", "-m", "tag", world.shas[ "one" ] )
+    tag_sha = _git( world.root, "rev-parse", "v1" )
+    assert tag_sha != world.shas[ "one" ]
+    row, _  = approved_row( world, commits=[ tag_sha ] )
+    assert train( world, [ row ] )[ "packages" ][ 0 ][ "commits" ] == [ world.shas[ "one" ] ]
+
+
+def test_main_writes_train_json_into_an_out_directory_that_already_exists( world, tmp_path ):
+    ( tmp_path / "o" ).mkdir()
+    rows = _write( tmp_path / "rows.json", [ claim( "a" ) ] )
+    code = tb.main( [ "--repo-root", str( world.root ), "--out", str( tmp_path / "o" ), "--rows-json", rows, "--data-root", str( world.data ) ], io.StringIO() )
+    assert code == 1 and ( tmp_path / "o" / "train.json" ).is_file()
+
+
+def test_a_run_that_cannot_start_keeps_the_size_it_was_asked_for( world, tmp_path ):
+    code = tb.main( [ "--repo-root", str( world.root ), "--out", str( tmp_path / "o" ), "--rows-json", "/no/such/rows.json", "--size", "5" ], io.StringIO() )
+    assert code == 2 and json.loads( ( tmp_path / "o" / "train.json" ).read_text( encoding="utf-8" ) )[ "size" ] == 5
