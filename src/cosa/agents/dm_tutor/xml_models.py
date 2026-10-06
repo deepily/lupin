@@ -2,54 +2,44 @@
 """
 XML response model for the DM tutor agent.
 
-The tutor receives a whole DM body and returns it distilled into the shape Rick
-specified: one headline — a declaration or a question — two supporting
-statements, and the most relevant file path or URL when the message carries one.
+The tutor receives a whole DM body and returns it distilled into the shape Rick specified.
+That is one headline, which is a declaration or a question, and two supporting statements.
+It also returns the most relevant file path or URL when the message carries one.
 
-WHY FIVE SLOTS AND NOT FOUR. `dm.txt` has always REQUIRED the model to return
-the most relevant path or URL, but until 2026-08-11 the response scaffold gave
-it nowhere to put one. The only way to obey was to smuggle the path into a
-statement slot, which is how a rewrite ends up with a URL wedged mid-sentence.
-The fifth slot closes that gap, and it is OPTIONAL: most DMs carry no path, so
+The prompt requires the model to return that path or URL, so the response has five slots.
+Without the fifth slot the model had to smuggle the path into a statement slot, and a URL
+ended up wedged mid-sentence. The fifth slot is optional. Most DMs carry no path, so
 requiring it would reject messages for following the prompt correctly.
 
-WHY XML AND NOT JSON — inherited from the sibling model and measured on 2,977
-real DMs: 9% need XML escaping against 77% needing JSON escaping, and JSON's
-two hostile characters (double quote 55%, newline 64%) are the most common
-characters in this traffic after letters and spaces. More decisive than the
-ratio: XML has `<![CDATA[ ... ]]>`, which lets us tell the model "this span is
-literal, do not touch it."
+The format is XML and not JSON, as in the sibling model. Measured on 2,977 real DMs, 9% need
+XML escaping and 77% need JSON escaping. JSON's two hostile characters are the double quote
+(55%) and the newline (64%). They are the most common characters in this traffic after
+letters and spaces. More decisive, XML has `<![CDATA[ ... ]]>`, which tells the model a span is literal.
 
-🔴 TWO SILENT FAILURE PATHS THIS FILE IS BUILT AGAINST.
+Two silent failure paths shape this file.
 
-**One — the ampersand repair.** `BaseXMLModel.from_xml()` escapes bare
-ampersands BEFORE parsing (`util_xml_pydantic.py:193`) so an LLM writing "Q&A"
-does not produce invalid XML. Inside CDATA nothing is ever unescaped, so the
-injected `&amp;` survives into the parsed value — the base class's own repair
-step is what corrupts the payload:
+The first is the ampersand repair. `BaseXMLModel.from_xml()` escapes bare ampersands before
+parsing, so an LLM writing "Q&A" does not produce invalid XML. Nothing is ever unescaped
+inside CDATA, so the injected `&amp;` survives into the parsed value. The base class's own
+repair step corrupts the payload:
 
     sent      "Q&A about the queue"
     returned  "Q&amp;A about the queue"
 
-Nothing downstream can see it: a bare `&` in prose is not a structural feature,
-so a body corrupted this way passes every check and gets delivered. 88 corpus
-bodies (3%) carry a bare `&`. The `from_xml` override below is a correctness
-fix, not a tidiness one.
+Nothing downstream can see this, because a bare `&` in prose is not a structural feature.
+A corrupted body passes every check and gets delivered. In the 2,977-body corpus, 88 bodies
+(3%) carry a bare `&`. The `from_xml` override below is a correctness fix.
 
-**Two — the example that must be an instance.** `get_example_for_template()`
-returns an INSTANCE, never a string. `PromptTemplateProcessor` calls `.to_xml()`
-on whatever comes back (`prompt_template_processor.py:99`), and `AgentBase`
-wraps that whole step in a bare `except` (`agent_base.py:159`) — so returning a
-string raises `AttributeError`, the exception is SWALLOWED, and the template
-ships unprocessed: a literal `{{PYDANTIC_XML_EXAMPLE}}` in the prompt and no
-`</stop>` sentinel, with nothing raised anywhere. That is the same broken prompt
-a missing `MODEL_MAPPING` entry produces, by a different road. The construction
-smoke test asserts against both.
+The second is the example, which must be an instance. `get_example_for_template()` returns
+an instance, never a string. `PromptTemplateProcessor` calls `.to_xml()` on whatever comes
+back, and `AgentBase` wraps that whole step in a bare `except`. Returning a string raises
+`AttributeError`, the exception is swallowed, and the template ships unprocessed. The prompt
+then holds a literal `{{PYDANTIC_XML_EXAMPLE}}` and no `</stop>` sentinel, and nothing is
+raised anywhere. A missing `MODEL_MAPPING` entry produces the same broken prompt.
+The construction smoke test asserts against both.
 
-⚠️ Do not build on the base class's `</result>` / `</output>` handling. The
-closing-tag loop's `break` sits outside its `if`, so only `</response>` is ever
-reached — the other two are dead branches. Ours always uses `<response>`.
-(Found by María, 2026-08-07. Not ours to fix here.)
+In the base class's closing-tag loop the `break` sits outside its `if`, so only `</response>`
+is ever reached. This model always uses `<response>`, and the base class is left as it is.
 """
 
 import re
@@ -92,12 +82,9 @@ class DmTutorResponse( BaseXMLModel ):
     """
     The tutor's response: its reasoning, the headline, two supports, one pointer.
 
-    Shaped after `DmCompressionResponse` — every field is `str`, because LLM I/O
-    is always text.
-
-    ⚠️ Hyphenated tag names are not valid Python identifiers, so the fields are
-    declared with underscores and aliased to the hyphenated tags Rick specified.
-    Parsing reads his tags; the code reads attributes it can name.
+    Shaped after `DmCompressionResponse`. Every field is `str`, because LLM I/O is text.
+    Hyphenated tag names are not valid Python identifiers, so the fields use underscores
+    and are aliased to the hyphenated tags Rick specified. Parsing reads his tags.
     """
 
     xml_tag_name: ClassVar[ str ] = "response"
@@ -137,9 +124,8 @@ class DmTutorResponse( BaseXMLModel ):
         """
         Coerce the None that an empty tag parses to into "".
 
-        Both fields this guards are OPTIONAL, and an empty tag is the correct
-        answer for each: a model that skipped its reasoning, and a DM with no
-        path in it.
+        Both guarded fields are optional. An empty tag is the correct answer for each,
+        for a model that skipped its reasoning and for a DM with no path in it.
 
         Requires:
             - v is a string or None
@@ -155,10 +141,9 @@ class DmTutorResponse( BaseXMLModel ):
         """
         Refuse an empty headline or supporting statement.
 
-        These three ARE the delivered message. A blank one is not a terse
-        rewrite, it is a dropped slot, and raising here puts the message on the
-        fail-closed path where the original is delivered — instead of letting a
-        two-line delivery travel as though it were a three-line one.
+        These three slots are the delivered message, so a blank one is a dropped slot, not a terse rewrite.
+        Raising here puts the message on the fail-closed path, where the original is delivered.
+        Otherwise a two-line delivery would travel as though it were a three-line one.
 
         Requires:
             - v is a string
@@ -182,24 +167,16 @@ class DmTutorResponse( BaseXMLModel ):
         """
         The path/URL slot, or "" when it holds nothing worth delivering.
 
-        🔴 A BARE IDENTIFIER IN THIS SLOT IS NOT A POINTER, and it was the last door
-        the banned shape came through (row 56a3c48d). Row a0151611 stopped the prompt
-        ordering hash lists and stopped the restore appending row ids — and a DM still
-        arrived as three sentences and a bare line reading "fb9faba7", because the
-        model had put the id in the PATH slot and `to_delivery` appends this slot as
-        its own line by design. Nothing here checked that the value was a path; the
-        slot only ever stripped null-words like "N/A".
-
-        Rick's rule reads the same whichever door it comes through: "a standalone
-        nonsensical out-of-context hash has no place there." So an id here is treated
-        exactly like "N/A" — the model signalled a pointer it does not have.
+        A bare identifier in this slot is not a pointer. `to_delivery` appends the slot as its own line, so a row id there
+        would arrive as a bare hash line. Rick's rule is that an out-of-context hash has no place there.
+        An id is therefore treated like "N/A": the model signalled a pointer it does not have.
 
         Requires:
             - nothing
 
         Ensures:
             - returns "" for a blank slot or any of the NULL_ISH null-words
-            - returns "" for a bare 8-hex row id, tested DIRECTLY rather than through
+            - returns "" for a bare 8-hex row id, tested directly rather than through
               is_bare_identifier, whose precondition is a token the pointer grammar
               already matched and which on a raw value eats Makefile, README and src
             - returns the stripped value otherwise, so a real path, a bare
@@ -215,16 +192,11 @@ class DmTutorResponse( BaseXMLModel ):
     @property
     def pointer_cleared( self ):
         """
-        The value the pointer slot was REFUSED for holding, or "" when nothing was.
+        The value the pointer slot was refused for holding, or "" when nothing was.
 
-        A SUPPRESSION NOBODY CAN SEE IS AN UNAUDITABLE ONE (María's second requirement
-        on row 56a3c48d). `pointer` above silently drops a bare identifier, which is
-        the right delivery behaviour and the wrong logging behaviour: the next reader
-        asking "why did this DM have no path" would have nothing to read. This names
-        the refused value so the agent can log it.
-
-        Null-words are NOT reported — "N/A" is the model correctly saying it has no
-        path, not a refusal, and reporting it would bury the real case in noise.
+        `pointer` silently drops a bare identifier, which is right for delivery but leaves nothing to audit.
+        This names the refused value so the agent can log it. Null-words are not reported, because "N/A" is
+        the model correctly saying it has no path, and reporting it would bury the real case in noise.
 
         Requires:
             - nothing
@@ -246,8 +218,8 @@ class DmTutorResponse( BaseXMLModel ):
         """
         Assemble the lines a recipient would actually see.
 
-        The path/URL is appended as its own final line rather than folded into a
-        statement — that separation is the whole reason the fifth slot exists.
+        The path/URL is appended as its own final line and never folded into a statement.
+        That separation is the reason the fifth slot exists.
 
         Requires:
             - the three required slots are non-empty (the validators guarantee it)
@@ -269,9 +241,8 @@ class DmTutorResponse( BaseXMLModel ):
         """
         Serialize with every payload slot wrapped in CDATA.
 
-        Hand-built rather than routed through xmltodict, because xmltodict would
-        escape the payloads into entities — and carrying them verbatim is the
-        entire reason for using CDATA. `thoughts` is escaped conventionally: it
+        Hand-built rather than routed through xmltodict, which would escape the payloads into entities.
+        Carrying them verbatim is the reason for CDATA. `thoughts` is escaped conventionally, because it
         is reasoning, never delivered, and never required to survive byte-exact.
 
         Requires:
@@ -301,16 +272,11 @@ class DmTutorResponse( BaseXMLModel ):
     @classmethod
     def from_xml( cls, xml_string ):
         """
-        Parse, holding the base class's ampersand repair OUT of CDATA spans.
+        Parse, keeping the base class's ampersand repair out of CDATA spans.
 
-        The base implementation escapes every bare `&` in the document before
-        parsing. That is right for ordinary tag text and wrong for CDATA, where
-        nothing is ever unescaped, so the injected `&amp;` lands in the value.
-
-        The approach: lift every CDATA span out behind a sentinel, hand the
-        remainder to the base class so all of its OTHER repairs still apply
-        (prefix stripping, suffix stripping, entity fixing), then restore the
-        spans verbatim.
+        The base class escapes every bare `&` before parsing, which is wrong inside CDATA, where nothing is unescaped.
+        This method lifts every CDATA span out behind a sentinel and hands the remainder to the base class.
+        Its other repairs still apply (prefix, suffix and entity fixing), and the spans are restored verbatim.
 
         Requires:
             - xml_string is a string
@@ -352,22 +318,15 @@ class DmTutorResponse( BaseXMLModel ):
         """
         A structural example for `{{PYDANTIC_XML_EXAMPLE}}` injection.
 
-        PLACEHOLDER CONTENT, per the convention every agent here follows. The
-        injected example teaches SHAPE and must not read as an answer, because
-        models copy a plausible-looking answer verbatim.
-
-        The path slot's placeholder states its own emptiness rule in words. That
-        is deliberate: it is the one slot whose correct value is often nothing,
-        and a model shown only filled examples fills it with an invention.
-
-        ⚠️ Returns an INSTANCE, not a string — see the module docstring for what
-        breaks silently otherwise.
+        The content is placeholder text. The example teaches shape and must not read as an answer, because models copy one verbatim.
+        The path slot's placeholder states its own emptiness rule, since its correct value is often nothing and a model shown only
+        filled examples invents one. This returns an instance, not a string; the module docstring says what breaks otherwise.
 
         Requires:
             - nothing
 
         Ensures:
-            - returns a DmTutorResponse instance (NOT a string)
+            - returns a DmTutorResponse instance, not a string
         """
         return cls(
             thoughts                = "Your reasoning about what this DM is actually saying",

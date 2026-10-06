@@ -1,47 +1,41 @@
 #!/usr/bin/env python3
 """
-The DM formatting tutor — renders a long DM into the shape we want agents to copy.
+The DM formatting tutor: renders a long DM into the shape we want agents to copy.
 
-This is NOT the compressor wearing a new name. The compressor chased a ratio and
-died at 3.0% against a 38% need; §2 of the phase-2 findings closed that entire
-class, because naming a target moved 51,854 tokens by 73. This asks for a FORM:
+This is not the compressor under a new name. The compressor chased a ratio, and naming a
+target barely moved the output. This module asks for a form:
 
     headline (the verdict) + two supporting sentences + a canned P.S.
 
-A form is a selection task with a checkable answer. A ratio is an estimation task
-the model cannot verify against itself. That is the whole difference.
+A form is a selection task with a checkable answer. A ratio is an estimation task the model
+cannot verify against itself. That is the whole difference.
 
-🔑 LOSS IS THE DESIGN. The old arm demanded nothing be lost, which is what put
-the freeze protocol and the rewrite in direct opposition — a model asked to carry
-30 opaque placeholders AND shorten is being asked for two incompatible things.
-Here detail is meant to go. The P.S. is the recovery path and the sender still
-holds the original.
+Loss is the design. The old arm demanded that nothing be lost. That put the freeze protocol and
+the rewrite in direct opposition. A model asked to carry 30 opaque placeholders and shorten
+is being asked for two incompatible things. Here detail is meant to go. The P.S. is the
+recovery path, and the sender still holds the original.
 
-WHAT IS PROTECTED, and how it differs from the old design (plan §3.4). Literals
-are checked IN PLACE across every class, not substituted:
+What is protected differs from the old design. Literals are checked in place across every
+class, not substituted:
 
-    Every literal that appears in the output must be byte-exact to how it was
-    sent. Literals may be ABSENT — that is what dropping a sentence means.
-    None may be ALTERED.
+    Every literal that appears in the output must be byte-exact to how it was sent.
+    Literals may be absent, which is what dropping a sentence means.
+    None may be altered.
 
-⚠️ Named limitation, inherited and worse here: this catches omission and
-mutation, never RELOCATION. A sha attached to the wrong claim passes every check
-below. The old design at least confined placeholders to their clause; a
-three-sentence rewrite restructures freely, so relocation risk goes UP.
+Named limitation, inherited and worse here: this catches omission and mutation, never relocation.
+A sha attached to the wrong claim passes every check below. The old design at least confined
+placeholders to their clause. A three-sentence rewrite restructures freely, so relocation risk goes up.
 
-TRANSPORT. The compressor's envelope fails on long inputs — 22 of 186 calls, and
-15 of 50 in the 250+ band. Two mechanisms were measured: a dropped
-`</compressed>` tag on 19 of them, and one runaway repetition to the token
-ceiling. This module answers both structurally rather than by repair:
+Transport. The compressor's envelope failed on long inputs by two measured mechanisms. One was a
+dropped `</compressed>` tag. The other was a runaway repetition to the token ceiling. This module
+answers both structurally rather than by repair:
 
-  * `max_tokens` is sized to the TASK. Three sentences cannot legitimately need
-    hundreds of tokens, so a loop dies in a fraction of a second instead of
-    running to 4,096. It does not stop the loop; it stops the loop being
-    expensive, and a fast failure is one you notice.
-  * There is NO response envelope at all — the reply IS the rewrite. Two
-    wrappers were tried and both failed on ~45% of long messages, so the
-    wrapper itself was the defect. A format you cannot fail to produce beats a
-    repair for one you can.
+  * `max_tokens` is sized to the task. Three sentences cannot legitimately need hundreds of
+    tokens, so a loop dies in a fraction of a second instead of running to 4,096. It does not
+    stop the loop. It stops the loop being expensive, and a fast failure is one you notice.
+  * There is no response envelope at all, because the reply is the rewrite. Two wrappers were
+    tried and both failed on about 45% of long messages, so the wrapper itself was the defect.
+    A format you cannot fail to produce beats a repair for one you can.
 """
 
 import re
@@ -364,16 +358,16 @@ def extract( raw ):
 
 def literal_violations( original, rewrite ):
     """
-    Literals the rewrite ALTERED. Absence is legal; mutation is not.
+    Return the literals the rewrite altered. Absence is legal; mutation is not.
 
     Requires:
         - original and rewrite are strings
 
     Ensures:
         - returns a list of ( literal, sent_count, got_count ) for literals that
-          appear MORE often than sent, and ( literal, 0, n ) for ones never sent
-        - a literal appearing FEWER times is not a violation — dropping a
-          sentence takes its literals with it, and that is the design
+          appear more often than sent, and ( literal, 0, n ) for ones never sent
+        - a literal appearing fewer times is not a violation, because dropping a
+          sentence takes its literals with it
         - a mutation still registers, because the changed value is a literal
           that was never sent
 
@@ -447,34 +441,10 @@ def attribution_bindings( text ):
 
 def attribution_violations( original, rewrite ):
     """
-    Names the rewrite put BEHIND A POSITION that the original never put there.
+    Return the names the rewrite bound to a speech act that the original did not.
 
-    WHY THIS EXISTS (Cheech, 2026-08-15, row 897a8db1). A DM whose body read
-    "My proposal, which matches Rick's instinct: follow the /clear with a
-    SECOND delayed send-keys" was condensed to "María proposes sending a second
-    keystroke with a prompt to address this issue" and delivered to María. She
-    opened her reply with "Check your source before building on it — I did not
-    propose that," correctly rejecting a proposal she had never made and the
-    sender had never attributed to her.
-
-    Note what a presence check cannot catch here: "María" WAS in the original —
-    as the addressee. The condenser did not invent a token, it invented a
-    RELATIONSHIP, moving a name from who-is-being-written-to into who-holds-
-    the-position. So `literal_violations` passes it cleanly; only the binding
-    is new.
-
-    Why it earns a gate rather than a note. `gate` already draws the line at
-    "structurally checkable" and leaves meaning-reversal to the human reader.
-    This sits on the checkable side: who is bound to a speech act is a surface
-    property of the text, and the rule is narrow — a binding present in the
-    rewrite and absent from the original. It stays silent on "María ran the
-    suite", which reports an action rather than manufacturing a stance.
-
-    Why it matters more than an ordinary summarisation slip: it manufactures
-    provenance. A position laundered into a peer's name reads to that peer as
-    something they must own or disown, and to everyone downstream as their
-    settled view — so a condenser free to attribute can synthesise the
-    appearance of peer agreement out of one session's suggestion.
+    A presence check cannot catch this. A name can be in the original as the addressee, and the condenser
+    moves it from who is written to into who holds the position. So `literal_violations` passes it cleanly.
 
     Requires:
         - original and rewrite are strings
@@ -484,6 +454,16 @@ def attribution_violations( original, rewrite ):
           in the original
         - returns [] when the rewrite attributes nothing new
         - never raises
+
+    Only the binding is new, so only the binding is checked. A body reading "My proposal, which matches
+    Rick's instinct" must not become "María proposes..." when it goes to María, who never proposed it.
+    A position put in a peer's name reads to that peer as something to own or disown. To everyone
+    downstream it reads as their settled view, so a condenser free to attribute can manufacture agreement.
+
+    This is a gate and not a note because `gate` draws the line at what is structurally checkable and
+    leaves meaning reversal to the human reader. Who is bound to a speech act is a surface property of
+    the text, and the rule is narrow: a binding present in the rewrite and absent from the original.
+    It stays silent on "María ran the suite", which reports an action and does not manufacture a stance.
     """
     return sorted( attribution_bindings( rewrite ) - attribution_bindings( original ) )
 
@@ -497,7 +477,7 @@ def gate( original, rewrite, ask_outside="lead2" ):
 
     Ensures:
         - returns ( ok, reason ); reason is None only when ok is True
-        - checks the rewrite BEFORE the P.S. is appended
+        - checks the rewrite before the P.S. is appended
         - applies no minimum-gain rule: a message that arrives at three
           sentences has done the job whatever its byte saving
 
@@ -607,30 +587,26 @@ def rewrite_to_form( body, client=None, append_ps=True, retries=1, ask_outside="
     Requires:
         - body is a string
         - client, when given, exposes .run( prompt, **kwargs ) -> str
-        - retries is the number of EXTRA attempts after a gate rejection
+        - retries is the number of extra attempts after a gate rejection
 
     Ensures:
         - returns ( delivered, error, attempted )
-        - `attempted` carries the model's rewrite EVEN WHEN THE GATE REJECTS IT,
+        - `attempted` carries the model's rewrite even when the gate rejects it,
           and is None only when no text was produced at all
         - exactly one of delivered / error is None
         - a body already at or under the limit returns error "under limit: n
           sentences" — the tutor does not touch a message that got it right, and
           such a message carries no P.S., so the P.S. stays an honest signal
-        - the gate runs BEFORE the P.S. is appended
+        - the gate runs before the P.S. is appended
         - `max_tokens` is sized to the task, so a runaway model fails fast
         - never raises
 
     Raises:
         - nothing
 
-    🔴 WHY THE THIRD RETURN VALUE EXISTS. This is the third time today a
-    question could not be answered because the artefact was never kept: the
-    200-run did not persist WHY rewrites were rejected, the first envelope probe
-    read a response the exception had already truncated, and this gate returned
-    a reason with no text attached. Phase 1 is Rick judging what rewrites LOOK
-    like — a rejection that shows him nothing defeats the phase. For this phase
-    the gate observes; it must not suppress. (María, 2026-08-11.)
+    The third return value exists because a rejection that shows nothing defeats the phase of judging
+    what rewrites look like. A reason with no text attached cannot be judged. In this phase the gate
+    observes and must not suppress, so the rejected rewrite is kept and returned.
     """
     if not body or not body.strip():
         return None, "empty body", None
