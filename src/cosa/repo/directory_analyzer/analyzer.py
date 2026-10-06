@@ -1,12 +1,12 @@
 """
 Directory Analyzer - Main Orchestrator
 
-Coordinates all components to analyze directory contents. This is the main
-entry point for programmatic use of the directory analyzer.
+Coordinates all components to analyze directory contents.
+This is the main entry point for programmatic use of the directory analyzer.
 
 Design Principles:
 - Orchestrate without reimplementation (delegates to specialists)
-- Provides simple public API while hiding complexity
+- Provides a simple public API and hides the complexity
 - Full error handling with clear error messages
 - Progress feedback for long-running operations
 - Reuses file_classifier and line_classifier from branch_analyzer
@@ -28,7 +28,10 @@ Usage:
     )
 
     stats = analyzer.analyze( '/path/to/project' )
+
+    # Formats: console, json, markdown
     console_output  = analyzer.format_results( stats, '/path/to/project', format='console' )
+
     json_output     = analyzer.format_results( stats, '/path/to/project', format='json' )
     markdown_output = analyzer.format_results( stats, '/path/to/project', format='markdown' )
 """
@@ -298,13 +301,7 @@ def quick_smoke_test():
     """
     Quick smoke test for Directory Analyzer.
 
-    Tests all major components:
-    - Configuration loading
-    - Directory scanning
-    - File type classification
-    - Line classification (Python/JavaScript)
-    - Statistics collection
-    - Report formatting (console/JSON/markdown)
+    Tests all major components, listed under Notes.
 
     Requires:
         - cosa.utils.util available for print_banner
@@ -317,6 +314,11 @@ def quick_smoke_test():
 
     Raises:
         - Never raises (catches all exceptions)
+
+    Notes:
+        - Components tested: configuration loading, directory scanning, file type classification
+        - Also tested: line classification (Python/JavaScript), statistics collection
+        - Also tested: report formatting (console/JSON/markdown)
     """
     import cosa.utils.util as du
     import tempfile
