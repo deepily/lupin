@@ -22,35 +22,38 @@ class CRUDIntent( BaseXMLModel ):
     """
     CRUD intent extracted from natural language by LLM.
 
-    Handles XML responses for DataFrame CRUD operations:
-    <intent>
-        <operation>add</operation>
-        <target_list>groceries</target_list>
-        <schema_type>todo</schema_type>
-        <confidence>0.95</confidence>
-        <requires_confirmation>false</requires_confirmation>
-        <item_id></item_id>
-        <match_fields>{}</match_fields>
-        <fields>{"todo_item": "buy milk", "priority": "high"}</fields>
-        <filters>{}</filters>
-        <sort_by></sort_by>
-        <limit></limit>
-        <raw_query>add buy milk to my groceries list with high priority</raw_query>
-    </intent>
+    Handles XML responses for DataFrame CRUD operations.
 
-    Fields (all str per BaseXMLModel convention — LLM I/O is always text):
-        operation: CRUD operation (add, delete, update, query, mark_done, create_list, delete_list, list_lists, get_schema_info)
-        target_list: Name of the list to operate on
-        schema_type: Schema type (todo, calendar, generic)
-        confidence: Float-as-string confidence score (0.0-1.0)
-        requires_confirmation: "true" or "false" for destructive ops
-        item_id: UUID8 of specific item (for update/delete)
-        match_fields: JSON string of fields to match for update/delete
-        fields: JSON string of field values to set
-        filters: JSON string of query filter conditions
-        sort_by: Column name to sort results by
-        limit: Max number of results as string
-        raw_query: Original natural language query
+    Example:
+        <intent>
+            <operation>add</operation>
+            <target_list>groceries</target_list>
+            <schema_type>todo</schema_type>
+            <confidence>0.95</confidence>
+            <requires_confirmation>false</requires_confirmation>
+            <item_id></item_id>
+            <match_fields>{}</match_fields>
+            <fields>{"todo_item": "buy milk", "priority": "high"}</fields>
+            <filters>{}</filters>
+            <sort_by></sort_by>
+            <limit></limit>
+            <raw_query>add buy milk to my groceries list with high priority</raw_query>
+        </intent>
+
+    Fields (all str, because LLM input and output is always text):
+        - operation: CRUD operation, one of add, delete, update, query, mark_done,
+          create_list, delete_list, list_lists, get_schema_info.
+        - target_list: Name of the list to operate on.
+        - schema_type: Schema type (todo, calendar, generic).
+        - confidence: Float-as-string confidence score (0.0-1.0).
+        - requires_confirmation: "true" or "false" for destructive ops.
+        - item_id: UUID8 of specific item (for update/delete).
+        - match_fields: JSON string of fields to match for update/delete.
+        - fields: JSON string of field values to set.
+        - filters: JSON string of query filter conditions.
+        - sort_by: Column name to sort results by.
+        - limit: Max number of results as string.
+        - raw_query: Original natural language query.
     """
 
     operation             : str = Field( ..., description="CRUD operation: add, delete, update, query, mark_done, create_list, delete_list, list_lists, get_schema_info" )

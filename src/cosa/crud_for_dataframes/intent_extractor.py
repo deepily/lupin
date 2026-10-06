@@ -3,8 +3,8 @@
 Claude Code headless fallback for CRUD intent extraction.
 
 When the local Phi-4 14B model fails to produce a valid CRUDIntent,
-this module calls `claude -p` (Claude Code headless) as a fallback
-to extract intent from natural language queries.
+this module calls `claude -p` (Claude Code headless) as a fallback.
+It extracts intent from natural language queries.
 
 Functions:
     extract_intent_via_claude_code: Calls claude -p, parses response into CRUDIntent
@@ -27,7 +27,7 @@ def extract_intent_via_claude_code( query, available_lists_text, debug=False ):
     Requires:
         - query is a non-empty string (the user's natural language request)
         - available_lists_text is a string describing user's current lists
-        - claude CLI is available on PATH
+        - claude CLI is available on the executable search path
 
     Ensures:
         - Returns a validated CRUDIntent on success

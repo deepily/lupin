@@ -2,7 +2,7 @@
 """
 CrudForDataFramesAgent — Base agent for voice-driven DataFrame CRUD.
 
-Connects the COSA voice pipeline to Phase 1 CRUD operations via LLM-based
+Connects the COSA voice pipeline to the CRUD operations layer through LLM
 intent extraction. Overrides run_prompt(), run_code(), and run_formatter()
 while leaving do_all() untouched so RunningFifoQueue._handle_base_agent()
 works unchanged.
@@ -31,12 +31,8 @@ class CrudForDataFramesAgent( AgentBase ):
     """
     Base agent for voice-driven CRUD operations on per-user DataFrames.
 
-    Extracts intent from natural language via Phi-4 14B (or configured LLM),
-    dispatches to crud_operations, and formats results for TTS. Falls back to
-    Claude Code headless if the local LLM fails.
-
-    Subclassed by TodoCrudAgent and CalendarCrudAgent for domain-specific
-    prompts, schemas, and voice formatting.
+    Extracts intent via Phi-4 14B (or the configured LLM), dispatches to crud_operations,
+    and formats results for TTS. TodoCrudAgent and CalendarCrudAgent subclass it.
 
     Requires:
         - Configuration keys in lupin-app.ini:
@@ -46,7 +42,7 @@ class CrudForDataFramesAgent( AgentBase ):
 
     Ensures:
         - do_all() works unchanged with RunningFifoQueue._handle_base_agent()
-        - Falls back to Claude Code headless on dispatch errors
+        - Falls back to Claude Code headless on dispatch errors, and when the local LLM fails
         - Raises CodeGenerationFailedException if both paths fail
     """
 
@@ -157,11 +153,8 @@ class CrudForDataFramesAgent( AgentBase ):
         """
         Dispatch CRUDIntent to CRUD operations with error-based fallback.
 
-        Overrides AgentBase.run_code() entirely — no code generation or execution.
-        Instead, dispatches the parsed CRUDIntent to crud_operations functions.
-
-        If dispatch fails, falls back to Claude Code headless for intent extraction.
-        If both paths fail, raises CodeGenerationFailedException.
+        Overrides AgentBase.run_code() entirely: no code is generated or executed.
+        The parsed CRUDIntent goes to crud_operations functions instead.
 
         Requires:
             - self.crud_intent is set from run_prompt()
@@ -169,6 +162,7 @@ class CrudForDataFramesAgent( AgentBase ):
         Ensures:
             - self.code_response_dict is set with return_code and output
             - self.error is None on success
+            - Falls back to Claude Code headless for intent extraction if dispatch fails
             - Raises CodeGenerationFailedException if all paths fail
         """
         # Voice confirmation for destructive operations
@@ -303,9 +297,9 @@ class CrudForDataFramesAgent( AgentBase ):
         Ensures:
             - Returns True if user confirms (says yes)
             - Returns False on denial, timeout, or error (safe default)
-            - Returns False WITHOUT asking when self.lineage_is_test_suite is True (row 4cbd4858,
-              Rick 2026-10-03: the harness's own listener makes the user look online, so every
-              ask sat out its 30 s window); every other job keeps the ask
+            - Returns False without asking when self.lineage_is_test_suite is True (the test
+              harness's own listener makes the user look online, so every ask would sit out
+              its 30 s window); every other job keeps the ask
         """
         operation   = self.crud_intent.operation
         target_list = self.crud_intent.target_list or "your list"

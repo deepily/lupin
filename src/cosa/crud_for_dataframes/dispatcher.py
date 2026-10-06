@@ -223,11 +223,8 @@ def extract_intent_xml( raw_response ):
     """
     Extract <intent>...</intent> XML block from raw LLM response text.
 
-    Handles common LLM response patterns:
-    - Clean XML output
-    - XML wrapped in markdown code fences
-    - XML preceded by preamble text
-    - XML followed by explanation text
+    Handles clean XML, XML in markdown code fences, and XML with
+    preamble or trailing explanation text around it.
 
     Requires:
         - raw_response is a string (may contain noise around XML)

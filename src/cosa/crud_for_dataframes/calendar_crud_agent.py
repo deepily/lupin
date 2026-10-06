@@ -4,7 +4,7 @@ CalendarCrudAgent — Domain-specific CRUD agent for calendar events.
 
 Thin subclass of CrudForDataFramesAgent with:
     - default_schema_type = "calendar"
-    - Calendar-specific routing command (Phase 3 swap target)
+    - Calendar-specific routing command, replaceable through routing_command
     - Calendar-specific voice formatting hints
 """
 
@@ -16,8 +16,8 @@ class CalendarCrudAgent( CrudForDataFramesAgent ):
     CRUD agent specialized for calendar event operations.
 
     Uses the same intent extraction and dispatch pipeline as the base
-    CrudForDataFramesAgent, but defaults to "calendar" schema and will
-    eventually replace CalendaringAgent in Phase 3 queue routing.
+    CrudForDataFramesAgent, but defaults to the "calendar" schema.
+    It is meant to replace CalendaringAgent in queue routing.
 
     Requires:
         - Same config keys as CrudForDataFramesAgent

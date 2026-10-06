@@ -4,7 +4,7 @@ TodoCrudAgent — Domain-specific CRUD agent for todo lists.
 
 Thin subclass of CrudForDataFramesAgent with:
     - default_schema_type = "todo"
-    - Todo-specific routing command (Phase 3 swap target)
+    - Todo-specific routing command, replaceable through routing_command
     - Todo-specific voice formatting hints
 """
 
@@ -16,8 +16,8 @@ class TodoCrudAgent( CrudForDataFramesAgent ):
     CRUD agent specialized for todo list operations.
 
     Uses the same intent extraction and dispatch pipeline as the base
-    CrudForDataFramesAgent, but defaults to "todo" schema and will
-    eventually replace TodoListAgent in Phase 3 queue routing.
+    CrudForDataFramesAgent, but defaults to the "todo" schema.
+    It is meant to replace TodoListAgent in queue routing.
 
     Requires:
         - Same config keys as CrudForDataFramesAgent
