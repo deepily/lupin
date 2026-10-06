@@ -22,7 +22,7 @@
 - **Dart labelled set** (Tiffany, row `4cc9cd81`): published at `projects-data/lupin/v022-phase2-labelled-dart/`, 80 dev and 175 gate pairs, frozen. The ruled checker runs over it on 2026-10-06, row `3740dd5b`.
 - **Open at close**: the train builder and the package lock are built and in review, not merged (row `168d42ea`; pinned `refs/keep/rio-train-builder-wip` is an earlier commit of it); `dart_pairs.py` writes no pair when a `///` block becomes a `//` comment (Tiffany's row `e19f2d9d`); a phase heading never follows its steps (bug `bb92a34a`); flaky test bug `d52fe948` not started.
 
-### 2026.10.05 - Session 83887b6c (Mr. Radio 🦉, manager; no crew, reviews ran as sub-agents of this session on Opus) | Sonnet-on-VM P0, cache fix, create refusals and websocket slice 1 merged; live eval test cut to a short proxy; DB login still waiting on sudo
+### 2026.10.05 - Session 83887b6c (Mr. Radio 🦉, manager; no crew until 20:57 EDT, then Krishna 🦚 and John 🏄🏽 on Sonnet until 22:02) | Sonnet-on-VM P0, cache fix, create refusals and websocket slices 1 and 2 merged; live eval test cut to a short proxy; DB login still waiting on sudo
 
 - **Split, Rick's spoken order**: Cheech takes all pilot work, Mr. Radio the non-pilot rows.
 - **Row `631a812e`, task_create refusals**: merged `f4fdbb70b`. Unit 29,469, cosa 9,014, TypeScript 5,739, e2e_a 463, e2e_b 502 passed; integration 450 passed, 1 failed (the cache defect below). Gap filed as `b5598732`; Rick ruled "leave it as is", closed.
@@ -31,11 +31,14 @@
 - **Row `8796333b`, websocket push, slice 1**: Rick ruled yes; merged `0ec780bf8`. `:7999` bounced 18:47 EDT, live `task_store_changed` frames seen at 18:48. TypeScript job `ts-fc9fe2a8`: 5,744 passed, 0 failed, coverage 100%. Row stays open for three more panes and the legacy task card.
 - **Row `4cbd4858`, live eval test cannot finish**: Rick ruled "short proxy in the suite". Default sample is 5 per command (`57a98244f`); `submit-test-suite.py --env KEY=VALUE` (`c63a91760`) and a guide section (`3172e5123`). Integration job `ts-4f6a7a6c`: 451 passed, 0 failed. Full sample scheduled once, `ts-04fb21c3`, 2026-10-06 11:00 EDT. Row open until that is read.
 - **Row `2af2c387`, multi-user transcript direction**: Rick ruled yes; plan committed `d4e39a17a`; plan row `8385316c` held on his word.
+- **Row `8796333b`, slice 2 (evening)**: Rick's broadcast offered two unused seats; Cheech declined them. Krishna built, John reviewed (pass with fixes, then pass). Merged `6feb5f814`: the Holding Area and Finished Tasks panes re-read on the push, and a new test sends a frame through the real `QueueTransport` into all three stores. Unit tier on `7e10c689a`: 30,058 passed, 0 failed. Row back to queued for the legacy task card and Fleet Status.
+- **Row `4735ec44`, a test that depended on a random draw**: TypeScript job `ts-2963889d` on `6feb5f814` had 1 red of 5,758 in `queue_transport.test.ts`. Forcing `Math.random` to 0 reddened two tests, counted separately by Krishna and John. The file now pins the draw; merged `6fc41b980`. TypeScript job `ts-7c24a471`: 5,759 passed, 0 failed, coverage 100%. Closed. Not measured: that such a draw caused the one red.
+- **Seats**: both released at 22:02 EDT with verified mementos. `:7999` not bounced since the 21:36 bundle rebuild; no pane watched in a browser.
 - **Dev box**: the user-scope cosa-voice registration now carries `LUPIN_CONFIG_MGR_CLI_ARGS`, on Rick's yes. The installer was not run here: it would drop three live hooks (row `ea27d263`, holding area).
 - **Corrections of mine today**: the 17:03 memento said the fleet cap was 2 for the whole day; the ini line read 8 at 18:46 · six review sub-agents ran on Opus, not Sonnet, because no model was passed.
 - **Owed**: Rick's two provision commands for `80513825` (`pg_roles` showed only `lupin_dev` at 19:29 EDT) · read `ts-04fb21c3` after 11:45 EDT on 10-06 · rows `fae0bc51` and `ea27d263` await approval · post-game.
 - **First full tiers over `57a98244f`..`3172e5123`**: Cheech's run on `ed303beb8`, as he reported it by DM at 19:54 EDT: unit 29,970 passed, 0 failed; cosa 9,114 passed, 0 failed.
-- **Files**: history.md; code via four reviewed merges and three direct commits on the working branch. Not pushed.
+- **Files**: history.md, TODO.md; code via six reviewed merges and three direct commits on the working branch. Not pushed.
 
 ### 2026.10.04 - Session 93ec0919 → acd9cc5f (Mr. Radio 🦉, manager; crew Tiberius 👑, Sam 🎙️, Rio ⚡) | Pilot finished and summarized; fast-check trial shows thinking-off loses real losses; Gemini comparison plan and bundle
 
