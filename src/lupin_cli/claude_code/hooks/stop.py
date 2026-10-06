@@ -1524,9 +1524,9 @@ def _user_chase_until_from_store( session_id, now_epoch ):
     """
     Resolve this session's per-user gate-deferral instant from the task store.
 
-    The instant is the soonest future next_chase_ts among this owner's rows blocked by a user
-    (blocked_by kind "user"). While it is in the future, is_user_deferred suppresses this session's
-    hold-file gates, so a store deferral stops re-asking. No key links the two, and none should be added.
+    The instant is the soonest future next_chase_ts among this owner's rows blocked by a user (blocked_by kind "user"), which is what task_transition(blocked) causes.
+    While it is in the future, is_user_deferred suppresses this session's hold-file gates, so a store deferral stops re-asking.
+    No key links the two, and none should be added.
 
     Requires:
         - session_id is the resolved stable session id string
