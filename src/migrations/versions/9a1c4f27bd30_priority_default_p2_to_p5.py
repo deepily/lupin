@@ -4,52 +4,40 @@ Revision ID: 9a1c4f27bd30
 Revises: 8d404f635e84
 Create Date: 2026-09-07
 
-Row `0107c19e`. Authorized by Rick's broadcast e254ec7d, 2026-09-07: "The
-default Priority from here on now will be P5."
+The default priority from here on is P5.
 
-WHY A MIGRATION AND NOT JUST THE MODEL EDIT
---------------------------------------------
-`postgres_models.py` carries TWO defaults on this column and they fire in
-different places:
+Why a migration and not just the model edit
+-------------------------------------------
+`postgres_models.py` carries two defaults on this column, and they fire in different places.
 
-    default        = "P5"   # SQLAlchemy — applies when the ORM builds the INSERT
-    server_default = "P5"   # POSTGRES   — applies when the INSERT omits the column
+Example:
+    default        = "P5"   # SQLAlchemy: applies when the ORM builds the `INSERT`
+    server_default = "P5"   # Postgres: applies when the `INSERT` omits the column
 
-Editing the model moves the first one for the running process and moves the
-second one for a database that has not been created yet. It does NOT touch a
-column that already exists. So a code-only change leaves the LIVE table still
-handing out `'P2'::character varying` to any writer that omits the column —
-raw SQL, a psql session, a future service, an `INSERT` built by anything that
-is not this ORM.
+Editing the model moves the first one for the running process. It moves the second one
+for a database that has not been created yet. It does not touch a column that exists.
+A code-only change leaves the live table handing out `'P2'::character varying` to any
+writer that omits the column. That means raw SQL, a psql session or a future service.
 
-⚠️ Alembic would not have caught this on its own: `src/migrations/env.py` sets
-no `compare_server_default`, which is OFF by default, so autogenerate ignores
-server-default drift entirely. This file is hand-written for that reason.
+Alembic would not catch this on its own. `src/migrations/env.py` sets no
+`compare_server_default`, which is off by default, so autogenerate ignores
+server-default drift. This file is hand-written for that reason.
 
-WHAT THIS DOES AND DELIBERATELY DOES NOT DO
---------------------------------------------
-Changes the column default ONLY. **Existing rows are left exactly as they
-are.** A default governs what a future INSERT gets when it stays silent; it
-has never governed rows already written, and rewriting them would be a
-re-prioritisation of the whole board wearing a migration's clothes.
+What this does and does not do
+------------------------------
+It changes the column default only. Existing rows are left exactly as they are. A default
+governs what a future `INSERT` gets when it stays silent. It has never governed rows
+already written, and rewriting them would re-prioritise the whole board.
 
-⇒ So after this lands the table legitimately holds P0-P3 rows minted under the
-old regime alongside new P5 ones. That is the intended state, not drift.
-Whether the firewall applies retroactively is an OPEN question on row
-`b8205986` and is Rick's to rule, not a migration's to assume.
+After this lands the table holds P0-P3 rows from the old regime beside new P5 ones. That
+is the intended state, not drift. Whether the firewall applies retroactively is an open
+question for Rick to rule, not for a migration to assume.
 
-⚠️ NO WIDTH CHANGE IS NEEDED and none is made: the column is `String( 2 )` and
-every member of the widened `VALID_PRIORITIES` — P0 through P5 — is two
-characters. The value space grew; the storage did not.
+No width change is needed. The column is `String( 2 )`, and every member of the widened
+`VALID_PRIORITIES`, P0 through P5, is two characters. The application-level enum refuses
+`P6`. The column has no `CHECK` constraint, so the database accepts any two characters.
 
-The application-level enum (`task_store_rules.VALID_PRIORITIES`) is what
-actually refuses `P6`; this column is a plain `String( 2 )` with no CHECK
-constraint, so the database will accept any two characters and always would
-have. That is unchanged by this migration and is not a regression it
-introduces.
-
-DOWNGRADE restores `'P2'` — the value that was there, verified against the
-column definition at revision `8d404f635e84`, not assumed.
+The downgrade restores `'P2'`, verified against the column definition at `8d404f635e84`.
 """
 from typing import Sequence, Union
 

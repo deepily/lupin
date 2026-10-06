@@ -4,15 +4,15 @@ Revision ID: a1b2c3d4e5f6
 Revises: f0a1b2c3d4e5
 Create Date: 2026-06-12
 
-Add fcm_tokens table — the DURABLE registry of mobile FCM device tokens for the
-S6 silent-relay wake channel. One row per device token (upsert keyed on token);
-the wake trigger resolves tokens by user_id when a notification is enqueued for
-a user with no live mobile queue-WS. Durability is the F-S6-S2-1a requirement:
-the registry must survive parent restarts (AC-S6.1 rehydration).
+Add the fcm_tokens table, the durable registry of mobile FCM device tokens for
+the silent-relay wake channel. There is one row per device token, upserted on
+token. The wake trigger resolves tokens by user_id when a notification is
+enqueued for a user with no live mobile queue-WS. The registry must survive
+parent restarts, so that rehydration works.
 
-Merge-train note (Tiberius routing, 2026-06-12): down_revision deliberately
-stacks on Krishna's task-store head f0a1b2c3d4e5 — this migration lands AFTER
-his branch merges; never re-point it at e9f0a1b2c3d4 (that forks the head).
+Merge-train note: down_revision stacks on the task-store head f0a1b2c3d4e5.
+This migration lands after that branch merges. Never re-point it at
+e9f0a1b2c3d4, because that forks the head.
 """
 from typing import Sequence, Union
 
@@ -31,11 +31,10 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     """Create the fcm_tokens registry table.
 
-    IDEMPOTENT (hardened 2026-06-22, same bug-class as the b633d12a hotfix for
-    e5f6a7b8c9d0). A create_all-bootstrapped DB stamped BELOW this revision already
-    holds fcm_tokens, so an unguarded ``create_table`` raises ``DuplicateTable`` on
-    ``upgrade head``. Create it only when absent — a safe no-op on a create_all DB,
-    full build on a truly-empty DB.
+    Idempotent. A create_all-bootstrapped DB stamped below this revision already
+    holds fcm_tokens, so an unguarded ``create_table`` raises ``DuplicateTable``
+    on ``upgrade head``. Create the table only when it is absent. That is a safe
+    no-op on a create_all DB, and a full build on a truly-empty DB.
     """
     existing_tables = set( sa.inspect( op.get_bind() ).get_table_names() )
 

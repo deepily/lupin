@@ -4,47 +4,40 @@ Revision ID: 3da5c0d1eee6
 Revises: 38e025169a73
 Create Date: 2026-08-01
 
-Implements §4.1 of src/rnd/v0.1.9/2026.08.01-late-answer-handback.md (store row
-`7bb0a7df`, P1). When a human answers a blocking ask, the answer is persisted
-durably but handed back only by waking an in-memory dict — if that entry is gone
-(server bounce, dropped SSE stream) the answer is stored and never travels, and
-the asking session times out and re-asks. This migration adds the durable
-"owed" mark the handback reads.
+This adds the durable "owed" mark for the late-answer handback
+(src/rnd/v0.1.9/2026.08.01-late-answer-handback.md). A human's answer to a
+blocking ask is persisted durably but handed back only by waking an in-memory
+dict. If that entry is gone (server bounce, dropped SSE stream) the answer is
+stored and never travels, and the asking session re-asks. The handback reads
+the mark this migration adds.
 
-WHAT THIS ADDS
---------------
-1. `answer_delivered_at` TIMESTAMPTZ NULL — the handback mark: simultaneously the
-   "owed" flag and the don't-deliver-twice guard. No default ⇒ PG catalog-only
-   ADD COLUMN, no table rewrite.
-2. `idx_notifications_answer_owed` — a PARTIAL index over the owed set, built
-   `CONCURRENTLY` so the forever-kept `notifications` table (ruling 5) is never
+1. `answer_delivered_at` `TIMESTAMPTZ NULL`, the handback mark. It is both the
+   "owed" flag and the don't-deliver-twice guard. It has no default, so Postgres
+   does a catalog-only `ADD COLUMN` with no table rewrite.
+2. `idx_notifications_answer_owed`, a partial index over the owed set, built
+   `CONCURRENTLY` so the forever-kept `notifications` table is never
    write-locked. Its predicate is the owed predicate, character-identical to the
-   ORM `Index` in postgres_models.py and to §4.4's repo query:
+   ORM `Index` in postgres_models.py and to the repo query:
+```
+response_requested AND responded_at IS NOT NULL AND answer_delivered_at IS NULL
+```
+   The middle term is a design-level invariant. An offline or expired persist
+   carries a machine default with `responded_at` NULL. It must never be served
+   as an owed answer.
 
-       response_requested AND responded_at IS NOT NULL AND answer_delivered_at IS NULL
-
-   The middle term is the §3 design-level invariant: an offline/expired persist
-   carries a machine default with `responded_at` NULL and must NEVER be served as
-   an owed answer.
-
-WHY CONCURRENTLY NEEDS THE AUTOCOMMIT BLOCK
--------------------------------------------
 `CREATE INDEX CONCURRENTLY` cannot run inside a transaction, and Alembic's
-default migration IS a transaction. `op.get_context().autocommit_block()` runs
-the create outside it. Both the ORM declaration AND this migration are mandatory:
-`schema_drift` checks columns only and would never flag a missing index, so the
-ORM `Index` keeps the schema honest against `autogenerate`; this migration is
-what actually builds the index on the server.
+default migration is a transaction. `op.get_context().autocommit_block()` runs
+the create outside it. Both the ORM declaration and this migration are
+mandatory. `schema_drift` checks columns only and would never flag a missing
+index, so the ORM `Index` keeps the schema honest against `autogenerate`. This
+migration is what actually builds the index on the server.
 
-IDEMPOTENT + SAFE TO RE-RUN: the column is added only when missing and the index
-created only when missing (the auto-migrate startup path may reach this on an
-already-migrated DB, and the test DB is built from metadata rather than from
-migrations).
+The migration is idempotent and safe to re-run: the column and the index are
+each created only when missing. The auto-migrate startup path may reach it on an
+already-migrated DB, and the test DB is built from metadata, not migrations.
 
-REVISION ID NOTE: `3da5c0d1eee6` was chosen RANDOMLY (uuid4 hex[:12]), NOT by
-continuing any visual hex pattern (that pattern walks into the absorbed range).
-Verified absent from the repo by grep over `src/`, with the grep first proven
-capable of positives against a known-present id (`38e025169a73`).
+The revision id was chosen randomly (uuid4 hex[:12]), not by continuing a visual
+hex pattern, since that pattern walks into the absorbed range.
 """
 from typing import Sequence, Union
 
@@ -84,8 +77,8 @@ def upgrade() -> None:
 
     Ensures:
         - no-op when notifications is absent (fresh DB built from metadata)
-        - the column is added only when missing (re-run safe); no default ⇒ no rewrite
-        - the partial index is built CONCURRENTLY (no ShareLock, no full scan) and
+        - the column is added only when missing (re-run safe); no default, so no rewrite
+        - the partial index is built `CONCURRENTLY` (no ShareLock, no full scan) and
           only when missing (re-run safe)
     """
     bind      = op.get_bind()
@@ -117,7 +110,7 @@ def downgrade() -> None:
     Ensures:
         - no-op when notifications is absent
         - both drops are guarded, so a partial upgrade downgrades cleanly
-        - the index is dropped CONCURRENTLY (symmetry with the concurrent create)
+        - the index is dropped `CONCURRENTLY` (symmetry with the concurrent create)
     """
     bind      = op.get_bind()
     inspector = inspect( bind )

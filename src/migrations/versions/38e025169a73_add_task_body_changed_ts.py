@@ -4,98 +4,38 @@ Revision ID: 38e025169a73
 Revises: 53835fd51f1a
 Create Date: 2026-07-26
 
-Closes bug `54924128` (María 🌸, 2026-07-26), on Rick's ruling (option a,
-ask_multiple_choice, answered=true, default_used=false): the live-store schema
-migration is AUTHORIZED, and it is the whole reason that bug was a decision
-rather than a build.
+`body_changed_ts TIMESTAMPTZ NULL` is the instant the row's `body` last actually
+changed. The database clock stamps it, from the two paths that write body:
 
-WHAT WAS WRONG — MEASURED, NOT INFERRED
-----------------------------------------
-`park_reason_is_stale` compared `park_reason_captured_at` against `updated_ts`.
-`updated_ts` moves on EVERY write. `task_edit`'s five free-edit fields are
-title / body / priority / gate_class / urgency, and **only `body` can make a
-park quote untrue** — but a priority-only edit bumps `updated_ts` and flips the
-flag anyway. So can any transition, any patch, any amend.
+    `apply_amendment` always stamps it, because an amend only ever appends to body.
+    `apply_patch` stamps it only when `body` is in the payload and its value differs.
 
-Two priority-only edits during a routine board recut on 2026-07-26 produced two
-false STALEs in three minutes. At that moment **every parked row in production
-carried the flag and every one of them was wrong: 0 of 2 correct.**
+Why: `park_reason_is_stale` compared `park_reason_captured_at` against `updated_ts`,
+which moves on every write. Only a change to `body` can make a park quote untrue.
+Yet a priority-only edit bumped `updated_ts` and flipped the flag anyway. Staleness
+is advisory and blocks nothing, so a false stale has nothing to correct it. It
+defames a correct quote and teaches readers to ignore the flag, which disarms the
+feature. A false fresh is only the old behaviour, so the predicate biases every
+ambiguous case toward fresh.
 
-⇒ `updated_ts` was being used as a proxy for "the row's content changed," and it
-is not one. This column is the thing it was standing in for.
+No backfill: every existing row gets NULL, and a NULL third argument reads as fresh
+(the `else: return False` arm of `task_store_owed.park_reason_is_stale`). So the
+flag is inert until each row's body next changes. Backfilling `updated_ts` would
+keep every current false positive. Backfilling `created_ts` would claim the body
+never changed since creation, which is false for most rows. There is no `CHECK`
+and there must not be one. A row whose body never changed legitimately has no
+value, and a `NOT NULL` would assert history nobody recorded. (`d47487369407` had
+to backfill only because its `CHECK` would have rejected live parked rows.)
 
-⚠️ WHY A FALSE *STALE* IS THE ONE DIRECTION THIS FEATURE FORBIDS — its own words
---------------------------------------------------------------------------------
-From `park_reason_is_stale`'s § WHICH WAY THIS INSTRUMENT LIES:
+Why the database clock, not `datetime.now()`: `park_reason_captured_at` comes from
+the database clock (`TaskRepository._db_clock_now`, see `_park_capture_ts`). This
+column is compared against it. An application-clock stamp would make that
+comparison cross-clock, and skew would surface as a false fresh: an expired quote
+quietly going unreported. One clock, one value.
 
-    "Staleness is ADVISORY: it changes no owed-ness and blocks nothing, so a
-    false STALE has no mechanism to correct it — it merely defames a correct
-    quote and teaches readers to ignore the flag, which disarms the feature
-    permanently. A false FRESH is exactly the status quo this change improves
-    on. Silence is recoverable here; a crying wolf is not."
-
-The predicate was built to bias every ambiguous arm toward FRESH for exactly
-this reason — and then read a column that the single most common maintenance
-write on the board moves.
-
-WHAT THIS ADDS
---------------
-`body_changed_ts` TIMESTAMPTZ NULL — the instant the row's `body` last actually
-CHANGED. Stamped from the DATABASE clock by the two paths that write body:
-
-    apply_amendment  -> always (an amend only ever appends to body)
-    apply_patch      -> ONLY when `body` is in the payload AND its value differs
-
-**That second condition is the entire fix.** A patch touching priority /
-gate_class / urgency / title leaves this column alone, so the quote keeps its
-freshness.
-
-⚠️ NO BACKFILL, AND THAT IS A DECISION WITH A CONSEQUENCE
-----------------------------------------------------------
-Every existing row gets NULL, and a NULL third argument returns FRESH
-(`task_store_owed.park_reason_is_stale`, the `else: return False` arm —
-ambiguity → FRESH, §3.3).
-
-**So the flag goes globally inert until each row's body next changes.** That is
-stated here rather than discovered later: it is the honest reading of a column
-whose history genuinely does not exist, and it is the same bias the predicate
-already applies to a row parked before capture-time shipped. The alternative —
-backfilling `updated_ts` — would preserve every current value, and every current
-value is a false positive. Backfilling `created_ts` would fabricate a claim that
-the body has not changed since creation, which is false for most rows.
-
-⇒ Contrast with `d47487369407`, which HAD to backfill because
-`ck_task_items_parked_requires_captured_at` would have rejected live parked rows
-the moment the CHECK was added. **There is no CHECK here and there must not be**:
-a row whose body has never changed since this shipped legitimately has no value,
-forever. A NOT NULL on this column would be a constraint asserting a fact about
-history that nobody recorded.
-
-⇒ Immediate effect: the two live false positives (`76f26f9b`, `dc36ff69` — both
-María's, both from the recut) clear when this lands, without a backfill guessing
-at history it does not have.
-
-WHY THE DB CLOCK AND NOT `datetime.now()` — inherited, not re-derived
-----------------------------------------------------------------------
-`park_reason_captured_at` is written from the DATABASE clock
-(`TaskRepository._db_clock_now`, and see `_park_capture_ts`'s reasoning). This
-column is compared AGAINST it. An application-clock stamp would make the
-comparison cross-clock, and skew would surface as a **false FRESH** — a parked
-row quietly failing to report an expired quote, which is the very defect the
-feature exists to detect, arriving in the silent direction. One clock, one value.
-
-SCOPE: adds one nullable column. No CHECK, no backfill, no other row touched.
-
-IDEMPOTENT + SAFE TO RE-RUN: the column is added only when missing (the
-auto-migrate startup path may reach this on an already-migrated DB, and the test
-DB is built from metadata rather than from migrations).
-
-REVISION ID NOTE: `38e025169a73` was chosen RANDOMLY (uuid4), NOT by continuing
-the visual hex pattern of the neighbouring filenames — that pattern walks into
-the absorbed range, which is how `a3b4c5d6e7f8` collided with a real migration.
-Verified absent from `_ABSORBED_REVISIONS` and from the repo by grep, with the
-grep first proven capable of positives against a known-present id
-(`d47487369407`).
+Scope: one nullable column, no `CHECK`, no backfill. Idempotent and safe to re-run:
+the column is added only when missing. The auto-migrate startup path may reach this
+on an already-migrated DB, and the test DB is built from metadata.
 """
 from typing import Sequence, Union
 
@@ -130,8 +70,8 @@ def upgrade() -> None:
     Ensures:
         - no-op when task_items is absent (fresh DB built from metadata)
         - the column is added only when missing (re-run safe)
-        - NO backfill and NO CHECK — see the module docstring; existing rows keep
-          NULL, which the predicate reads as FRESH
+        - no backfill and no `CHECK` — see the module docstring; existing rows keep
+          NULL, which the predicate reads as fresh
     """
     bind      = op.get_bind()
     inspector = inspect( bind )
@@ -147,8 +87,8 @@ def downgrade() -> None:
     """
     Drop the body_changed_ts column.
 
-    ⚠️ Downgrading RE-ARMS bug `54924128`: the predicate falls back to `updated_ts`
-    and a priority-only edit will defame a correct quote again.
+    Downgrading re-arms the false-stale defect: the predicate falls back to
+    `updated_ts` and a priority-only edit will defame a correct quote again.
 
     Ensures:
         - no-op when task_items is absent

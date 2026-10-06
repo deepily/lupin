@@ -4,19 +4,22 @@ Revision ID: b80513825c02
 Revises: a80513825b01
 Create Date: 2026-10-02
 
-Row 80513825 (option B). `init-db-roles.sql` grants `lupin_host` INSERT/UPDATE/DELETE on
-every app table through `ALTER DEFAULT PRIVILEGES FOR ROLE lupin_app`. A table that is dropped
-and re-created by `lupin_app` therefore comes back writable to `lupin_host`, and the script's own
-REVOKE only ran once, before. This revision repeats the REVOKE on the migration path, so it holds
-whenever the table is created or re-created by a migration run.
+`init-db-roles.sql` grants `lupin_host` `INSERT`/`UPDATE`/`DELETE` on every app
+table through `ALTER DEFAULT PRIVILEGES FOR ROLE lupin_app`. A table that is
+dropped and re-created by `lupin_app` therefore comes back writable to
+`lupin_host`, and the script's own `REVOKE` only ran once, before. This
+revision repeats the `REVOKE` on the migration path, so it holds whenever the
+table is created or re-created by a migration run.
 
-IDEMPOTENT and SAFE WITHOUT THE ROLES: it does nothing when the `lupin_host` role or the
-`approval_settings` table does not exist (every database that has not been provisioned).
+The revision is idempotent and safe without the roles. It does nothing when the
+`lupin_host` role or the `approval_settings` table does not exist (every
+database that has not been provisioned).
 
-NEVER FATAL: every server boot runs migrations, so a role that cannot revoke (not the table's
-owner) must not stop the server. Postgres either answers success without revoking or raises
-insufficient_privilege; the revoke swallows the second, and a check afterwards logs ONE warning
-through alembic's logger when `lupin_host` can still write.
+It never fails the boot. Every server boot runs migrations, so a role that
+cannot revoke (not the table's owner) must not stop the server. Postgres either
+answers success without revoking or raises insufficient_privilege. The revoke
+swallows the second, and a check afterwards logs one warning through alembic's
+logger when `lupin_host` can still write.
 """
 import logging
 from typing import Sequence, Union
@@ -71,9 +74,9 @@ def upgrade() -> None:
 
     Ensures:
         - a no-op when the role or the table is absent
-        - lupin_host keeps SELECT
-        - never raises for want of privilege; logs one WARNING (alembic.runtime.migration)
-          when lupin_host can still INSERT, UPDATE or DELETE afterwards
+        - lupin_host keeps `SELECT`
+        - never raises for want of privilege; logs one `WARNING` (alembic.runtime.migration)
+          when lupin_host can still `INSERT`, `UPDATE` or `DELETE` afterwards
     """
     op.execute( _REVOKE_SQL )
     connection = op.get_bind()

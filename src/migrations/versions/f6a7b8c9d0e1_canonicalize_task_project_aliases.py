@@ -4,28 +4,26 @@ Revision ID: f6a7b8c9d0e1
 Revises: e5f6a7b8c9d0
 Create Date: 2026-06-18
 
-One-time data re-stamp for bug c6751cf8 (alias read/write false-idle).
+One-time data re-stamp for an alias read/write mismatch that made sessions look idle.
 
 The owed-work oracle (stop.py `_owed_count_from_store` -> `resolve_project_name`)
-alias-normalizes the project on READ (e.g. "planning-is-prompting" -> "plan"),
-but the MCP `task_create` write path stored the project RAW. So aliased-repo
-sessions wrote rows under "planning-is-prompting" while the oracle queried
-"plan" -> query_owed == 0 -> every aliased-repo session false-idled while still
-owing work. (Lupin has no alias, so the cutover validation never tripped it.)
+alias-normalizes the project on read, for example "planning-is-prompting" -> "plan".
+The MCP `task_create` write path stored the project raw. Aliased-repo sessions wrote
+rows under "planning-is-prompting" while the oracle queried "plan", so query_owed
+was 0 and every aliased-repo session looked idle while still owing work.
 
 The code fix canonicalizes at the write seam (task_create_impl) going forward.
-This migration re-stamps rows ALREADY written under a raw alias key so the
+This migration re-stamps rows already written under a raw alias key, so the
 back-catalogue becomes queryable too.
 
-SINGLE SOURCE OF THE ALIAS MAP: the canonical-name pairs are imported from the
-ONE `_PROJECT_ALIASES` table in `cosa.agents.utils.sender_id` — never copied
-into this migration. The same table the read seam, the write seam, and
-`resolve_project_name()` all use.
+Single source of the alias map: the canonical-name pairs are imported from the one
+`_PROJECT_ALIASES` table in `cosa.agents.utils.sender_id` and never copied into this
+migration. The read seam, the write seam and `resolve_project_name()` use the same table.
 
-IDEMPOTENT BY DESIGN: each UPDATE re-stamps `project = canonical WHERE project =
-raw`. After it runs, no rows remain under the raw key, so a re-run (or the
-auto-migrate startup path, cosa.rest.db.auto_migrate) updates zero rows. Safe on
-every environment, including a fresh DB whose task_items table is empty.
+It is idempotent: each `UPDATE` re-stamps `project = canonical WHERE project = raw`.
+After it runs, no rows remain under the raw key. A re-run, or the auto-migrate startup
+path (cosa.rest.db.auto_migrate), updates zero rows. It is safe on every environment,
+including a fresh database whose task_items table is empty.
 """
 from typing import Sequence, Union
 
@@ -71,10 +69,10 @@ def downgrade() -> None:
     """
     Intentional no-op.
 
-    This is a lossy canonicalization: after the re-stamp, a row stored as the
+    This is a lossy canonicalization. After the re-stamp, a row stored as the
     canonical short name (e.g. "plan") is indistinguishable from a row that was
-    ALWAYS canonical. Reverse-mapping every canonical row back to a raw alias key
+    always canonical. Reverse-mapping every canonical row back to a raw alias key
     would corrupt rows that never used the alias. The forward direction is the
-    only safe one, so the downgrade deliberately does nothing.
+    only safe one, so the downgrade does nothing.
     """
     pass

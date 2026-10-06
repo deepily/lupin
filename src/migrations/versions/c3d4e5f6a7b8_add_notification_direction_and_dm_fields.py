@@ -6,7 +6,7 @@ Create Date: 2026-06-15 09:00:00.000000
 
 First-class columns for notification-native AI<->AI messaging (cosa-voice token
 reduction). Adds:
-  - direction       (varchar 20, NOT NULL, server_default 'ai_to_human', indexed)
+  - direction       (varchar 20, `NOT NULL`, server_default 'ai_to_human', indexed)
                     human_to_ai | ai_to_ai | ai_to_human — orthogonal to `type`.
   - sender_persona  (varchar 64, nullable) — DM sender persona name (e.g. "Maria").
   - sender_icon     (varchar 16, nullable) — DM sender icon (e.g. an emoji).
@@ -32,11 +32,10 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     """Add direction + DM provenance/threading columns and their indexes.
 
-    IDEMPOTENT (hardened 2026-06-22, same bug-class as the b633d12a hotfix for
-    e5f6a7b8c9d0). A create_all-bootstrapped DB stamped BELOW this revision already
+    Idempotent. A create_all-bootstrapped DB stamped below this revision already
     has all five columns (and their indexes), so unguarded ``add_column`` raises
     DuplicateColumn on ``upgrade head``. Add each column only when absent; the two
-    per-column indexes ship WITH their column under create_all, so column-presence
+    per-column indexes ship with their column under create_all, so column-presence
     gates the index too (mirrors e5f6a7b8c9d0).
     """
     insp       = sa.inspect( op.get_bind() )
@@ -68,7 +67,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Remove the direction + DM provenance/threading columns and indexes.
 
-    IDEMPOTENT (symmetric with upgrade): each column is dropped only when present.
+    Idempotent (symmetric with upgrade): each column is dropped only when present.
     """
     insp       = sa.inspect( op.get_bind() )
     tables     = set( insp.get_table_names() )

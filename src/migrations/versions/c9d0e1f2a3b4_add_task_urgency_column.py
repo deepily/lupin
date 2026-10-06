@@ -1,25 +1,24 @@
-"""Add task_items.urgency column (proactive-manager A2 operator-gate tiering)
+"""Add task_items.urgency column (operator-gate time-sensitivity tiering)
 
 Revision ID: c9d0e1f2a3b4
 Revises: b8c9d0e1f2a3
 Create Date: 2026-06-23
 
-Adds the `urgency` column (proactive-manager mechanism Lane A2, store task
-fcb5dbc0 — design-of-record planning-is-prompting/src/rnd/2026.06.23-proactive-
-manager-doctrine-and-mechanism.md D4). An operator gate carries a TIME-SENSITIVITY
-tier {urgent | normal | low}, DISTINCT from the existing `priority` IMPORTANCE
-field — the arbiter (single pusher) routes a gate by it: urgent → immediate
-interrupt, normal → batched digest, low → queue-until-pulled.
+Adds the `urgency` column. An operator gate carries a time-sensitivity tier, one of
+urgent, normal or low, distinct from the existing `priority` importance field.
+The arbiter, the single pusher, routes a gate by it. Urgent means an immediate
+interrupt, normal a batched digest, and low queue-until-pulled. The design is in
+planning-is-prompting/src/rnd/2026.06.23-proactive-manager-doctrine-and-mechanism.md.
 
-NOT NULL with server_default 'normal' so the add backfills every existing row to
-the low-friction default in one statement (no separate data pass). Indexed to
-mirror the ORM column (the arbiter's per-tier query `task_query(gate_class=
-operator, urgency=urgent)` filters on it). Mirrors the add-column shape of the
+The column is `NOT NULL` with server_default 'normal'. The add therefore backfills every
+existing row to the low-friction default in one statement, with no separate data pass.
+It is indexed to mirror the ORM column. The arbiter's per-tier query filters on it:
+`task_query(gate_class=operator, urgency=urgent)`. The add-column shape mirrors the
 proxy/trust columns migration (e5f6a7b8c9d0).
 
-GUARDED + IDEMPOTENT: skipped when task_items is absent (stamp-before-task-store
-env) and a no-op when the column already exists, so it is safe on a fresh
-create_all DB and on a re-run.
+Guarded and idempotent. It is skipped when task_items is absent (a database stamped
+before the task store existed). It is a no-op when the column already exists, so it is
+safe on a fresh create_all database and on a re-run.
 """
 from typing import Sequence, Union
 

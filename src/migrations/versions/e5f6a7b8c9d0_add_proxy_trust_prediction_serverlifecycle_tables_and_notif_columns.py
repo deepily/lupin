@@ -4,50 +4,40 @@ Revision ID: e5f6a7b8c9d0
 Revises: d4e5f6a7b8c9
 Create Date: 2026-06-17
 
-Close the migration<->ORM drift left open after the L3 "true baseline"
-collapse (baseline 000000000000). Four ORM tables had NO migration anywhere
-in the chain, and five notifications columns were never added by any
-migration -- the empty-DB ``alembic upgrade head`` path silently MISSED them.
-They only ever existed in deployed DBs because the app-boot auto-migrator
-(``auto_migrate.py`` case 2) bootstraps an empty DB via
-``Base.metadata.create_all`` + ``stamp head`` rather than a pure
-``upgrade head``. That create_all mask is exactly what bites a fresh GCP
-Cloud-SQL bring-up that runs migrations directly -- the reproducible-deploy
-mandate requires the migration chain itself to be the single source of truth.
+Close the migration<->ORM drift left open after the "true baseline" collapse (baseline
+000000000000). Four ORM tables had no migration anywhere in the chain, and five
+notifications columns were never added by any migration. The empty-database
+``alembic upgrade head`` path silently missed them. They existed only in deployed
+databases. The app-boot auto-migrator (``auto_migrate.py`` case 2) bootstraps an empty
+database with ``Base.metadata.create_all`` and ``stamp head``, not a pure ``upgrade head``.
+That create_all mask breaks a fresh GCP Cloud-SQL bring-up that runs migrations directly.
+The reproducible-deploy mandate makes the migration chain the single source of truth.
 
-This migration makes ``upgrade head`` on an empty DB build the SAME schema
-``Base.metadata.create_all`` builds for these objects, so the create_all mask
-can be retired with zero behavioral change.
+This migration makes ``upgrade head`` on an empty database build the same schema that
+``Base.metadata.create_all`` builds for these objects. The create_all mask can then be
+retired with no behavioural change.
 
 Tables created (verbatim ORM DDL from src/cosa/rest/postgres_models.py):
-    - proxy_decisions     (ProxyDecision,   models L765)
-    - trust_states        (TrustState,      models L899)
-    - prediction_log      (PredictionLog,   models L993; FK -> notifications.id)
-    - server_lifecycle    (ServerLifecycle, models L1227)
+    - proxy_decisions     (ProxyDecision)
+    - trust_states        (TrustState)
+    - prediction_log      (PredictionLog; FK -> notifications.id)
+    - server_lifecycle    (ServerLifecycle)
 
-notifications columns added (the FIVE not already added by c3d4e5f6a7b8,
-which added direction/sender_persona/sender_icon/reply_to/thread_id):
-    - job_id            (models L527, indexed)
-    - progress_group_id (models L532, indexed)
-    - abstract          (models L547)
-    - response_options  (models L630)
-    - is_hidden         (models L649, indexed, server_default false)
+notifications columns added. These are the five that c3d4e5f6a7b8 did not add. It added
+direction, sender_persona, sender_icon, reply_to and thread_id:
+    - job_id, progress_group_id (both indexed), abstract, response_options
+    - is_hidden (indexed, server_default false)
 
-Index parity note: the ORM declares BOTH the named ``idx_*`` indexes (in each
-model's ``__table_args__``) AND auto ``ix_*`` indexes (from per-column
-``index=True``). create_all emits both, so this migration emits both -- this
-is what makes a post-migration autogenerate report a CLEAN diff for these
-four tables and five columns. The redundant idx_*/ix_* overlap is a
-pre-existing ORM modeling characteristic, not introduced here; deduping it is
-a separate ORM-cleanup concern out of scope for a parity migration.
+Index parity: the ORM declares named ``idx_*`` indexes in each model's ``__table_args__``.
+It also gets auto ``ix_*`` indexes from per-column ``index=True``.
+create_all emits both, so this migration emits both. That keeps a post-migration
+autogenerate diff clean for these tables and columns. The ``idx_*``/``ix_*`` overlap is
+an existing ORM characteristic. Deduping it is a separate ORM cleanup.
 
-server_default note: several NOT NULL integer/float columns on these tables
-carry only a CLIENT-side ``default=`` in the ORM (trust_level,
-total_decisions, successful_decisions, rejected_decisions,
-prediction_confidence, similar_case_count) -- NO server_default. The original
-pre-baseline migrations (c7d8e9f0a1b2 / d8e9f0a1b2c3) DID set server defaults
-on these, but the current ORM does not; this migration matches the ORM (the
-stated source of truth), so create_all parity holds exactly.
+server_default: several `NOT NULL` integer and float columns carry only a client-side
+``default=`` in the ORM (trust_level, total_decisions, successful_decisions,
+rejected_decisions, prediction_confidence, similar_case_count), with no server_default.
+This migration matches the ORM, the source of truth, so create_all parity holds exactly.
 """
 from typing import Sequence, Union
 
@@ -67,14 +57,13 @@ def upgrade() -> None:
     """
     Create the 4 drift tables + add the 5 missing notifications columns.
 
-    IDEMPOTENT (hardened 2026-06-18). A DB bootstrapped by the app-boot
-    auto-migrator's ``Base.metadata.create_all`` + ``stamp <down_revision>``
-    path (auto_migrate.py case 1/2) ALREADY contains every object below, so an
-    unguarded ``upgrade head`` raises ``DuplicateTable`` on the very first
-    ``create_table`` and aborts boot (the live :7999 failure on 2026-06-18).
-    We snapshot the live schema once up front and create each object only when
-    it is absent -- a safe no-op on a create_all-bootstrapped DB (just advances
-    the stamp), while still building the full schema on a truly-empty GCP DB.
+    Idempotent. A database bootstrapped by the app-boot auto-migrator's
+    ``Base.metadata.create_all`` and ``stamp <down_revision>`` path (auto_migrate.py
+    case 1/2) already contains every object below. An unguarded ``upgrade head`` would
+    raise ``DuplicateTable`` on the first ``create_table`` and abort boot.
+    The live schema is snapshotted once up front and each object is created only when
+    it is absent. On a create_all-bootstrapped database that is a safe no-op which
+    advances the stamp. On a truly empty one it builds the full schema.
     """
     bind            = op.get_bind()
     insp            = sa.inspect( bind )
@@ -226,9 +215,8 @@ def downgrade() -> None:
     """
     Reverse upgrade(): drop the 5 notifications columns + the 4 tables.
 
-    IDEMPOTENT (symmetric with upgrade): each object is dropped only when
-    present, so a downgrade over a partially-applied schema is a safe no-op
-    for the already-absent objects.
+    Idempotent, like upgrade. Each object is dropped only when present, so a downgrade
+    over a partially applied schema is a safe no-op for objects already absent.
     """
     bind            = op.get_bind()
     insp            = sa.inspect( bind )

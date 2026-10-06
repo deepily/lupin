@@ -4,14 +4,15 @@ Revision ID: f0a1b2c3d4e5
 Revises: e9f0a1b2c3d4
 Create Date: 2026-06-11
 
-Unified task store, Phase 1 (design: planning-is-prompting ->
-planning-is-prompting/src/rnd/2026.06.11-unified-task-store-design.md v0.4, Rick-ruled F1=Postgres):
+Unified task store in Postgres (design: planning-is-prompting ->
+planning-is-prompting/src/rnd/2026.06.11-unified-task-store-design.md v0.4):
 
-    task_items  — one row per obligation; correlation_key indexed (C1, poured
-                  Phase 1); typed blocked_by JSONB refs; CHECK enforcing
-                  next_chase_ts-required-when-blocked (I3)
-    task_events — append-only per-item audit trail; receipt_refs JSONB
-                  (non-empty REQUIRED for ->done at the API layer, T3)
+    task_items  — one row per obligation. correlation_key is indexed.
+                  blocked_by holds typed JSONB refs. A `CHECK` requires
+                  next_chase_ts when the item is blocked.
+
+    task_events — append-only per-item audit trail. receipt_refs is JSONB,
+                  and the API layer requires it non-empty for ->done.
 """
 from typing import Sequence, Union
 
@@ -31,15 +32,15 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    """Create task_items + task_events with indexes and the I3 CHECK.
+    """Create task_items + task_events with indexes and the blocked-row `CHECK`.
 
-    IDEMPOTENT (hardened 2026-06-22, same bug-class as the b633d12a hotfix for
-    e5f6a7b8c9d0). A DB bootstrapped by ``Base.metadata.create_all`` and stamped
-    BELOW this revision (e.g. at the true baseline ``000000000000``) ALREADY holds
-    both task-store tables, so an unguarded ``upgrade head`` raises ``DuplicateTable``
-    on the first ``create_table`` and aborts boot. Snapshot the live schema once and
-    create each table only when absent — a safe no-op on a create_all DB (just
-    advances the stamp), full build on a truly-empty DB.
+    Idempotent. A DB bootstrapped by ``Base.metadata.create_all`` and stamped
+    below this revision (for example at the true baseline ``000000000000``)
+    already holds both task-store tables. An unguarded ``upgrade head`` then
+    raises ``DuplicateTable`` on the first ``create_table`` and aborts boot.
+    Snapshot the live schema once and create each table only when absent. That
+    is a safe no-op on a create_all DB, where it just advances the stamp, and a
+    full build on a truly-empty DB.
     """
     existing_tables = set( sa.inspect( op.get_bind() ).get_table_names() )
 
@@ -94,7 +95,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Drop both task-store tables symmetrically (children first — FK order).
 
-    IDEMPOTENT (symmetric with upgrade): each table is dropped only when present,
+    Idempotent (symmetric with upgrade): each table is dropped only when present,
     so a downgrade over a partially-applied schema is a safe no-op for the absent.
     """
     existing_tables = set( sa.inspect( op.get_bind() ).get_table_names() )

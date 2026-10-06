@@ -4,54 +4,40 @@ Revision ID: 000000000000
 Revises:
 Create Date: 2026-06-17
 
-TRUE baseline migration ZERO (D7 hybrid ruling — TODO.md "Alembic TRUE baseline
-migration"). This migration ENCODES THE ORIGIN of ``src/scripts/sql/schema.sql``
-as the first link in the chain, so a fresh / empty database is brought fully up
-to head with ``alembic upgrade head`` ALONE — retiring the former bootstrap
-workaround (``schema.sql`` if empty  ->  ``alembic stamp e9f0a1b2c3d4``  ->
-``alembic upgrade head``).
+True baseline migration zero. It encodes the origin of ``src/scripts/sql/schema.sql`` as
+the first link in the chain. A fresh, empty database comes fully up to head with
+``alembic upgrade head`` alone. That retires the former bootstrap workaround: load
+``schema.sql`` if empty, run ``alembic stamp e9f0a1b2c3d4``, then ``alembic upgrade head``.
 
-WHY this migration exists
+Why this migration exists
 -------------------------
-Before this baseline the chain's true base was ``210acf4d54dd`` whose
-``upgrade()`` is a NO-OP (``pass``); the nine base tables were seeded entirely
-by ``schema.sql`` out-of-band. The intermediate migrations between that no-op
-base and ``e9f0a1b2c3d4`` are NOT runnable from an empty DB (e.g.
-``62ec6f256d27`` references ``notifications`` columns — ``is_hidden`` /
-``abstract`` — that no migration in the chain ever creates), which is precisely
-why the stamp-then-upgrade workaround was required. The OFFICIAL bootstrap
-(verified 13 tables on fresh Cloud-SQL, TODO.md) stamps at ``e9f0a1b2c3d4`` —
-which SKIPS that entire pre-baseline span — then runs ``upgrade head``.
+Before this baseline the chain's true base was ``210acf4d54dd``, whose ``upgrade()`` is a
+no-op. The nine base tables were seeded by ``schema.sql`` out of band. The migrations
+between that base and ``e9f0a1b2c3d4`` cannot run from an empty database. For example
+``62ec6f256d27`` references ``notifications`` columns, ``is_hidden`` and ``abstract``,
+that no migration creates. That is why the workaround stamped at ``e9f0a1b2c3d4``.
 
-This baseline reproduces that proven behavior: its ``upgrade()`` emits the exact
-DDL of ``schema.sql`` (the nine tables the stamp recipe leaves in place), and the
-post-baseline chain (``f0a1b2c3d4e5`` -> ... -> head) is rebased directly onto it.
-Net result is BEHAVIORALLY EQUIVALENT to the documented recipe, with no stamp
-step. The eight absorbed pre-baseline revisions (``210acf4d54dd`` ..
-``e9f0a1b2c3d4``) are retired into this single baseline.
+This baseline reproduces that behaviour. Its ``upgrade()`` emits the exact DDL of
+``schema.sql``, the nine tables the stamp recipe leaves in place. The post-baseline chain
+(``f0a1b2c3d4e5`` onward) is rebased onto it and the eight absorbed revisions are retired.
+The DDL is kept inline so the migration never depends on a file path in the image.
 
-The DDL below is a verbatim copy of ``src/scripts/sql/schema.sql`` as of this
-revision (kept inline so the migration is self-contained and never depends on a
-file path being present in the deployment image's bind-mount).
-
-Stamp-compatibility (one-time reconciliation)
+Stamp compatibility (one-time reconciliation)
 ---------------------------------------------
-A steady-state alembic-managed DB is at the head (``d4e5f6a7b8c9``) — its
-``alembic_version`` is unchanged by this rebase, so ``upgrade head`` is a no-op
-and NOTHING needs to be done. The only DB that needs attention is one frozen
-EXACTLY at a now-removed revision (most plausibly ``e9f0a1b2c3d4`` — i.e. it was
-stamped but ``upgrade head`` was never run). For that rare transient case, run
-ONCE before upgrading:
+A steady-state database is at head (``d4e5f6a7b8c9``), so ``upgrade head`` is a no-op
+there. Only a database frozen at a now-removed revision, most plausibly stamped at
+``e9f0a1b2c3d4`` without ``upgrade head``, needs attention. Run this once first:
 
-    UPDATE alembic_version SET version_num = '000000000000'
-        WHERE version_num IN (
-            '210acf4d54dd','275fb8d9c75c','62ec6f256d27','a3b4c5d6e7f8',
-            'b5c6d7e8f9a0','c7d8e9f0a1b2','d8e9f0a1b2c3','e9f0a1b2c3d4'
-        );
+```
+UPDATE alembic_version SET version_num = '000000000000'
+    WHERE version_num IN (
+        '210acf4d54dd','275fb8d9c75c','62ec6f256d27','a3b4c5d6e7f8',
+        'b5c6d7e8f9a0','c7d8e9f0a1b2','d8e9f0a1b2c3','e9f0a1b2c3d4'
+    );
+```
 
-Such a DB already carries the ``schema.sql`` tables, so mapping it to this
-baseline (whose ``upgrade()`` is a no-op against it thanks to ``IF NOT EXISTS``)
-and then running ``upgrade head`` applies only the genuine post-baseline deltas.
+Such a database already carries the ``schema.sql`` tables. The baseline is a no-op
+against it thanks to `IF NOT EXISTS`, so ``upgrade head`` applies only later changes.
 """
 from typing import Sequence, Union
 
@@ -254,7 +240,7 @@ def upgrade() -> None:
           email_verification_tokens, password_reset_tokens,
           failed_login_attempts, notifications, auth_audit_log, job_history)
           and their indexes exist
-        - idempotent: every statement uses IF NOT EXISTS, so re-running against
+        - idempotent: every statement uses `IF NOT EXISTS`, so re-running against
           a DB that already carries these tables is a safe no-op
     """
     op.execute( _SCHEMA_SQL )
@@ -264,7 +250,7 @@ def downgrade() -> None:
     """Drop the baseline schema.
 
     Ensures:
-        - all nine baseline tables are removed (CASCADE clears FK-dependent
+        - all nine baseline tables are removed (`CASCADE` clears FK-dependent
           objects); dropped in reverse FK order for clarity
         - the chain can be walked back to ``base`` cleanly
     """

@@ -4,13 +4,13 @@ Revision ID: a80513825b01
 Revises: 9184990becdf
 Create Date: 2026-09-29
 
-Row 80513825. The approval settings (manager-pull rescission, approver allowlist and
+The approval settings (manager-pull rescission, approver allowlist and
 accounts, enforcement flag, ...) lived in a JSON file every writer on the host could
 rewrite. They now live in this table, reached only through the server's validated setter.
 No backfill here: `task_approval_settings.import_legacy_override_file` copies the old
 file's values in once, at boot, so the copy can check the file's stamp.
 
-IDEMPOTENT: `auto_migrate.run_migrations_to_head` runs on every process start, so the
+Idempotent: `auto_migrate.run_migrations_to_head` runs on every process start, so the
 table is created only when absent.
 """
 from typing import Sequence, Union

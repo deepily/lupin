@@ -4,29 +4,29 @@ Revision ID: d0e1f2a3b4c5
 Revises: c9d0e1f2a3b4
 Create Date: 2026-07-01 16:30:00.000000
 
-Creates the pgvector `vector` extension and the 8 vector-store tables that
-replace the LanceDB backend (7 with `vector(768)` columns + `gist_cache`, which
-is relational-only per the P0 inventory). The 4 ANN-searched columns get an HNSW
-index with the `vector_ip_ops` (dot / inner-product) opclass — mirroring the live
-LanceDB `.metric("dot")` search EXACTLY (NOT cosine; the keystone vectors are not
-L2-normalized). See:
+This creates the pgvector `vector` extension and the 8 vector-store tables that
+replace the LanceDB backend. Seven have `vector(768)` columns. `gist_cache` is
+relational-only per the P0 inventory. The 4 ANN-searched columns get an HNSW
+index with the `vector_ip_ops` (dot / inner-product) opclass. That mirrors the
+live LanceDB `.metric("dot")` search exactly, and not cosine, because the
+keystone vectors are not normalized to unit length. See:
   - src/rnd/v0.1.9/2026.06.30-lancedb-to-postgres-pgvector-migration-design.md §4.2
   - src/rnd/v0.1.9/2026.07.01-lane-a-p0-live-lancedb-schema-inventory.md
 
-Single source of truth: the table + index DDL is driven from the ORM models in
-cosa.rest.db.vector_store_models (registered on Base.metadata), so the migration
-can never drift from the models. Selective `create_all(checkfirst=True)` keeps
-this idempotent — a re-run against a DB already holding the tables is a no-op,
-matching the same idempotency contract as the create_all-bootstrap path.
+Single source of truth: the table and index DDL is driven from the ORM models in
+cosa.rest.db.vector_store_models (registered on Base.metadata). The migration
+can therefore never drift from the models. Selective `create_all(checkfirst=True)` keeps
+this idempotent. A re-run against a DB already holding the tables is a no-op,
+matching the idempotency contract of the create_all-bootstrap path.
 
-HARD PREREQUISITE (shared-infra, gated): the Postgres image MUST bundle pgvector
+Hard prerequisite (shared-infra, gated): the Postgres image must bundle pgvector
 (docker-compose → pgvector/pgvector:pg16; Cloud-SQL supports it natively). On the
-stock postgres:16.3-alpine image `CREATE EXTENSION vector` fails — apply only
+stock postgres:16.3-alpine image `CREATE EXTENSION vector` fails, so apply only
 after the image force-recreate.
 
-Note on HNSW build cost (design §11): these indexes are created on EMPTY tables
-here (fresh-start), so build is cheap. The one-time offline backfill utility
-(Lane D / P4) is where "build index AFTER bulk load + tune maintenance_work_mem"
+Note on HNSW build cost: these indexes are created on empty tables here
+(fresh-start), so the build is cheap. The one-time offline backfill utility
+(Lane D / P4) is where "build index after bulk load + tune maintenance_work_mem"
 applies for the 190k-row input_and_output keystone.
 """
 from typing import Sequence, Union
@@ -61,7 +61,7 @@ def _vector_store_tables():
 def upgrade() -> None:
     """Enable pgvector + create the 8 vector-store tables and their indexes.
 
-    IDEMPOTENT: the extension uses IF NOT EXISTS; table creation is guarded with
+    Idempotent: the extension uses `IF NOT EXISTS`; table creation is guarded with
     checkfirst=True (skips any table already present from a create_all bootstrap).
     """
     bind = op.get_bind()
@@ -79,10 +79,10 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Drop the 8 vector-store tables (reverse order); leave the extension.
 
-    IDEMPOTENT: each table is dropped with checkfirst=True. The `vector` extension
-    is deliberately NOT dropped — other/future objects may depend on it, and
-    DROP EXTENSION is a heavier, riskier operation best left to an explicit
-    operator teardown at end-of-migration-arc.
+    Idempotent: each table is dropped with checkfirst=True. The `vector` extension
+    is left in place: other or future objects may depend on it. `DROP EXTENSION`
+    is a heavier, riskier operation best left to an explicit operator teardown
+    at end-of-migration-arc.
     """
     bind = op.get_bind()
     for table in reversed( _vector_store_tables() ):

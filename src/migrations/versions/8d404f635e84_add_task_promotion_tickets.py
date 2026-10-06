@@ -4,61 +4,36 @@ Revision ID: 8d404f635e84
 Revises: 47513717b7e5
 Create Date: 2026-09-06
 
-Backs STAGE 1 of the asynchronous promotion approval design
-(`src/rnd/v0.2.1/2026.09.06-asynchronous-promotion-approval-and-its-observable-
-resolution.md`, row `3493ae9b`).
+Backs the first stage of the asynchronous promotion approval design: one table, no
+behaviour change, and no status code touched. The observability surface goes in
+place, and is testable, before anything stops blocking. The ruling that authorised
+this work is conditional on a caller being able to observe the outcome.
 
-WHAT IT ADDS, AND WHAT IT DELIBERATELY DOES NOT
-------------------------------------------------
-One table. **No behaviour change whatsoever, and no status code is touched.** Stage 1
-exists so the observability surface is in place and testable BEFORE anything stops
-blocking — the ruling that authorised this work is conditional on a caller being able
-to observe the outcome, and building the observation surface after the behaviour
-change would be shipping the condition last.
+Nothing writes to this table in this revision. That is intended, and it is the thing
+a reader is most likely to mistake for an oversight. The writer arrives with the 202,
+which must not land until the sweeper exists. Once the door returns 202, a caller
+that walks away must not be able to lose the approver's keypress.
 
-⚠️ NOTHING WRITES TO THIS TABLE IN THIS REVISION. That is intended, and it is the one
-thing a reader is most likely to mistake for an oversight. The writer arrives with the
-202 (design stage 2), which does not land until stage 3's sweeper exists — because the
-moment the door returns 202, a caller that walks away must not be able to lose Rick's
-keypress.
+Why a table rather than columns on `task_items`: the full argument is in the model's
+docstring (`cosa/rest/postgres_models.py::TaskPromotionTicket`). In short, the
+notification record knows that a human was asked, not which task, which to_status or
+who asked. Four columns on the hot `task_items` table would be carried forever by
+every reader, for a state that is rare and short-lived.
 
-WHY A TABLE RATHER THAN COLUMNS ON `task_items`
-------------------------------------------------
-Full argument in the model's docstring
-(`cosa/rest/postgres_models.py::TaskPromotionTicket`) and design §5.2. In short: the
-notification record knows THAT a human was asked and not which task, which to_status,
-or who asked; and four columns on the hot `task_items` table would be carried forever
-by every reader of it, for a state that is rare and short-lived.
+The two `CHECK` literals must match the model's verbatim.
+`postgres_models.TaskPromotionTicket.__table_args__` carries the same two strings,
+and a test asserts the pair agree. A schema built by `create_all` and one built by
+migration are two records of one fact, and two records of one fact drift. They are
+structural invariants, not a membership test on `state`.
+The state vocabulary is enforced at the API layer, as `task_items.status` is
+against `task_store_rules.VALID_STATUSES`. A schema enum here would be a third
+record.
 
-⚠️ THE TWO CHECK LITERALS MUST MATCH THE MODEL'S VERBATIM
-----------------------------------------------------------
-`postgres_models.TaskPromotionTicket.__table_args__` carries the same two strings, and
-a test asserts the pair agree. Same reason the I3 chase CHECK already carries the same
-warning in this tree: a schema built by `create_all` (an empty DB, and the test DB) and
-one built by migration are two records of one fact, and two records of one fact drift.
-
-They are STRUCTURAL invariants — facts about a resolved ticket — not a membership test
-on `state`. The state vocabulary is enforced at the API layer, exactly as
-`task_items.status` is against `task_store_rules.VALID_STATUSES`, which likewise has no
-enum constraint in the schema. Adding one here would be a third record of one fact.
-
-IDEMPOTENT + SAFE TO RE-RUN
-----------------------------
-The upgrade inspects the live schema first. The auto-migrate startup path can reach
-this on an already-migrated DB, and the test DB is created from metadata rather than
-from migrations, so `create_all` may have built the table already.
-
-⚠️ NO BACKFILL, AND NOTHING TO BACK-FILL. The table is new and starts empty. There are
-no pre-existing promotions to reconstruct — a promotion that already happened left its
-record on `task_events`, and inventing ticket rows for them would be fabricating a
-history nobody measured.
-
-REVISION ID NOTE: `8d404f635e84` was chosen RANDOMLY (uuid4 hex), NOT by continuing the
-visual hex pattern of neighbouring filenames — that pattern walks into the absorbed
-range, which is how `a3b4c5d6e7f8` once collided with a real migration. Verified absent
-from the repo by grep, with the grep first proven capable of a positive against a
-known-present id; and `47513717b7e5` was confirmed as the single head by
-`ScriptDirectory.get_heads()` rather than by reading down_revisions by eye.
+Idempotent and safe to re-run: the upgrade inspects the live schema first.
+The auto-migrate startup path can reach it on an already-migrated DB, and the test DB
+is built from metadata. No backfill, and nothing to back-fill: the table is new and
+starts empty. A promotion that already happened left its record on `task_events`.
+Inventing ticket rows for it would fabricate history nobody measured.
 """
 from typing import Sequence, Union
 
@@ -97,18 +72,16 @@ def _index_names( inspector ) -> set:
 
 def upgrade() -> None:
     """
-    Create task_promotion_tickets, its two indexes and its two structural CHECKs.
+    Create task_promotion_tickets, its two indexes and its two structural `CHECK`s.
 
-    ⚠️ THE CHECKS ARE DECLARED INSIDE `create_table` RATHER THAN ADDED AFTERWARDS,
-    which is the opposite of the park_reason_captured_at migration and correct for
-    the opposite reason. That one added a constraint to a table holding live rows,
-    so a backfill had to precede it. This table is BORN EMPTY: no row can violate
-    either check at creation, and there is no ordering hazard to manage.
+    The checks are declared inside `create_table`, not added afterwards. The
+    park_reason_captured_at migration did the opposite, because it constrained live
+    rows. This table is born empty, so no row can violate either check.
 
     Ensures:
         - no-op when the table already exists (create_all may have built it, and the
           auto-migrate startup path may reach this on an already-migrated DB)
-        - constraints are created WITH the table, so a half-constrained table is not
+        - constraints are created with the table, so a half-constrained table is not
           representable
     """
     inspector = inspect( op.get_bind() )
@@ -153,7 +126,7 @@ def downgrade() -> None:
         - no-op when the table is already absent, so a partial upgrade downgrades
           cleanly rather than raising
         - each index is dropped by name, guarded individually, before the table
-        - the CHECKs and the FK go with the table; nothing to un-stamp, because
+        - the `CHECK`s and the FK go with the table; nothing to un-stamp, because
           nothing was backfilled
     """
     inspector = inspect( op.get_bind() )

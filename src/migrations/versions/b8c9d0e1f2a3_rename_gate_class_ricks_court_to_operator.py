@@ -4,29 +4,26 @@ Revision ID: b8c9d0e1f2a3
 Revises: a7b8c9d0e1f2
 Create Date: 2026-06-23
 
-Data migration for the `operator` rename (Lane A0, proactive-manager mechanism
-design — planning-is-prompting/src/rnd/2026.06.23-proactive-manager-doctrine-and-
-mechanism.md §Rename). Rick's portability catch: `ricks_court` baked a person's
-name into the gate-class enum — off-putting and non-portable to the next human
-overseer. The role-based `operator` replaces it EVERYWHERE with NO compat
-shim/alias (Rick's one-name-everywhere contract rule).
+Data migration for the `operator` rename. The design is in planning-is-prompting/src/rnd/
+2026.06.23-proactive-manager-doctrine-and-mechanism.md, section Rename. `ricks_court` baked
+a person's name into the gate-class enum, which does not port to the next human overseer.
+The role-based `operator` replaces it everywhere, with no compatibility shim or alias.
 
-The app-side enum (`task_store_rules.VALID_GATE_CLASSES`) and every code filter/
-mint site are renamed in the same commit; this migration heals the BACK-CATALOGUE
-so a row already persisted under the retired `ricks_court` value stays queryable
-and keeps being recognized as user-gated by the arbiter
-(`_item_is_user_gated` now matches `gate_class == "operator"`).
+The app-side enum (`task_store_rules.VALID_GATE_CLASSES`) and every code filter and mint
+site are renamed in the same commit. This migration heals the back-catalogue. A row
+persisted under the retired `ricks_court` value stays queryable. The arbiter keeps
+recognizing it as user-gated, because `_item_is_user_gated` matches `gate_class == "operator"`.
 
-GATE-CLASS-COLUMN-ONLY + IDEMPOTENT: the statement is
-`UPDATE task_items SET gate_class = 'operator' WHERE gate_class = 'ricks_court'`
-— it touches NO other column and NO row whose gate_class is not the retired
-value, so a terminal (done/dropped) row keeps its status untouched. After it runs
-no rows remain under the retired key, so a re-run updates zero rows. Safe on every
-environment, including a fresh DB whose task_items table is empty.
+It touches the gate_class column only, and it is idempotent. The statement is
+`UPDATE task_items SET gate_class = 'operator' WHERE gate_class = 'ricks_court'`.
+It touches no other column and no row whose gate_class is not the retired value, so a
+terminal (done or dropped) row keeps its status. After it runs no rows remain under the
+retired key, so a re-run updates zero rows. It is safe on every environment, including a
+fresh database whose task_items table is empty.
 
-`gate_class` is a free VARCHAR (house style: no PG ENUM — see
-task_store_rules.py §Enums), so there is NO enum type / CHECK constraint to
-alter; the value rename is a pure data UPDATE.
+`gate_class` is a free VARCHAR (house style: no Postgres enum type, see the enums section
+of task_store_rules.py). There is no enum type or `CHECK` constraint to alter, so the
+value rename is a pure data update.
 """
 from typing import Sequence, Union
 
@@ -63,11 +60,11 @@ def downgrade() -> None:
     """
     Reverse the rename: restore every `operator` gate to `ricks_court`.
 
-    This is a FAITHFUL inverse for the value-rename. The downgrade also restores
-    the pre-rename application code, whose `VALID_GATE_CLASSES` accepts ONLY
-    `ricks_court` (never `operator`) for a user gate — so mapping every `operator`
-    row back to `ricks_court` is exactly the value the reverted code expects. Like
-    the upgrade it is gate-class-column-only + idempotent.
+    This is a faithful inverse for the value rename. The downgrade also restores the
+    pre-rename application code. That code's `VALID_GATE_CLASSES` accepts only
+    `ricks_court`, never `operator`, for a user gate. Mapping every `operator` row back
+    to `ricks_court` gives the value the reverted code expects. Like the upgrade it
+    touches the gate_class column only and is idempotent.
     """
     bind = op.get_bind()
     if not _task_items_exists( bind ):

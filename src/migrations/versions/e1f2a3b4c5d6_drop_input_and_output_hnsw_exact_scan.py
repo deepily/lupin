@@ -4,23 +4,23 @@ Revision ID: e1f2a3b4c5d6
 Revises: d0e1f2a3b4c5
 Create Date: 2026-07-07 10:45:00.000000
 
-Rick ruling (2026-07-07 flip-day ask, option A): the keystone `input_and_output`
-knn path serves via EXACT scan, not HNSW. Grounding (swap-chain execution log
-src/rnd/v0.1.9/2026.07.07-pgvector-swap-chain-execution.md §4):
+The keystone `input_and_output` knn path serves via exact scan, not HNSW.
+The grounding is in the swap-chain execution log
+(src/rnd/v0.1.9/2026.07.07-pgvector-swap-chain-execution.md):
 
-  - The live keystone is 97.2% DUPLICATE vectors (202,012 rows, 5,728 distinct
-    embeddings — notification-pipeline texts). HNSW beam search gets trapped in
-    duplicate plateaus: default ef_search returned WRONG neighbors on real-query
-    probes; only the pgvector max ef_search=1000 recovered them, with no
-    guarantee for unprobed queries.
-  - Exact scan is GUARANTEED LanceDB-parity and, at ~481ms median, is 2.7x
-    FASTER than the legacy LanceDB flat scan (~1,293ms) it replaces.
-  - With no vector index on the column, `ORDER BY input_embedding <#> q` planer
-    falls back to exact seq-scan + top-k sort — no dot_topk code change needed.
+  - The live keystone is 97.2% duplicate vectors (202,012 rows, 5,728 distinct
+    embeddings, all notification-pipeline texts). HNSW beam search gets trapped
+    in duplicate plateaus. The default ef_search returned wrong neighbors on
+    real-query probes. Only the pgvector maximum ef_search=1000 recovered them,
+    with no guarantee for unprobed queries.
+  - Exact scan is guaranteed LanceDB-parity. At about 481ms median it is 2.7x
+    faster than the legacy LanceDB flat scan (about 1,293ms) it replaces.
+  - With no vector index on the column, `ORDER BY input_embedding <#> q` falls
+    back to an exact seq-scan plus a top-k sort. No dot_topk code change is
+    needed.
 
-Revisit: re-introduce HNSW AFTER the notification-spam purge/dedup collapses
-the duplicate mass (5,728 distinct vectors index cleanly) — tracked in the
-execution log §4 recommendation.
+Revisit: re-introduce HNSW after the notification-spam purge and dedup collapse
+the duplicate mass, since 5,728 distinct vectors index cleanly.
 
 The solution_snapshots HNSW indexes stay (35 rows; index irrelevant but
 harmless, and the table is not duplicate-pathological).
@@ -42,8 +42,8 @@ _INDEX_NAME = "idx_input_and_output_input_embedding_hnsw"
 def upgrade() -> None:
     """Drop the keystone HNSW index so `<#>` knn serves via exact scan.
 
-    IDEMPOTENT: IF EXISTS — a re-run (or a fresh DB built from the amended
-    models, which no longer declare the index) is a no-op.
+    Idempotent: `IF EXISTS` makes a re-run a no-op, as is a fresh DB built from
+    the amended models, which no longer declare the index.
     """
     op.execute( f"DROP INDEX IF EXISTS {_INDEX_NAME}" )
 

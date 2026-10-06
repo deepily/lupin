@@ -4,40 +4,37 @@ Revision ID: a7b8c9d0e1f2
 Revises: f6a7b8c9d0e1
 Create Date: 2026-06-22
 
-Fix-forward for the project-name canonicalization REQUEST-CHANGES (Tiberius
-review of 8358ce1f). 8358ce1f added the FORWARD fix — server-side write-seam
-canonicalization (routers/tasks.py `_canon_project`) + query-FILTER
-canonicalization — so EVERY row written from now on, and every filter value
-queried, normalizes through the ONE `_PROJECT_ALIASES` map ("planning-is-
+The write seam (routers/tasks.py `_canon_project`) and the query filter both
+canonicalize the project name. Every row written now, and every filter value
+queried, normalizes through the one `_PROJECT_ALIASES` map ("planning-is-
 prompting" -> "plan"). That is correct and stays.
 
-What it did NOT do: heal the BACK-CATALOGUE. The query canonicalizes the
-FILTER value, never the STORED column, so a row already persisted under a RAW
-alias key (e.g. Rick's TODO-archival task, still project="planning-is-
-prompting") stays OUT of `query_owed(project="plan")` — the owning session
-false-idles while genuinely owing work (the alias-axis sibling of the
-2026-06-18 persona-drift P0).
+It did not heal the back-catalogue. The query canonicalizes the filter value,
+never the stored column. A row already persisted under a raw alias key (for
+example the TODO-archival task, still project="planning-is-prompting") stays
+out of `query_owed(project="plan")`. The owning session then false-idles while
+it still owes work.
 
-The earlier re-stamp (revision f6a7b8c9d0e1, 2026-06-18) DID re-stamp — but it
-is ALREADY APPLIED, so alembic will never run it again. Any raw-alias row
-written AFTER that revision was stamped (a non-wrapper POST, a pre-8358ce1f
-write path) is therefore unhealed. A FRESH revision at the head re-runs the
-re-stamp NOW, sweeping up exactly those rows, and runs once more on every
-future fresh-DB stamp.
+The earlier re-stamp (revision f6a7b8c9d0e1) did re-stamp, but it is already
+applied, so alembic will never run it again. Any raw-alias row written after
+that revision was stamped (a non-wrapper POST, an older write path) is therefore
+unhealed. A fresh revision at the head re-runs the re-stamp now, sweeping up
+exactly those rows, and runs once more on every future fresh-DB stamp.
 
-SINGLE SOURCE OF THE ALIAS MAP: the canonical-name pairs are imported from the
-ONE `_PROJECT_ALIASES` table in `cosa.agents.utils.sender_id` — never copied
-here. The same table the read seam, the write seam, `canonicalize_project_name`,
-and `resolve_project_name()` all use (defect D from the review: reuse the SAME
-canonicalize_project_name, no second alias map).
+Single source of the alias map: the canonical-name pairs are imported from the
+one `_PROJECT_ALIASES` table in `cosa.agents.utils.sender_id` and never copied
+here. It is the same table the read seam, the write seam,
+`canonicalize_project_name`, and `resolve_project_name()` all use, so there is
+no second alias map.
 
-PROJECT-COLUMN-ONLY + IDEMPOTENT: each statement is
-`UPDATE task_items SET project = :canonical WHERE project = :raw` — it touches
-NO other column and NO row whose project is not a raw alias key, so a terminal
-(done/dropped) row keeps its status untouched (only its project is canonicalized,
-which is what makes a closed-but-still-relevant row queryable). After it runs no
-rows remain under the raw key, so a re-run updates zero rows. Safe on every
-environment, including a fresh DB whose task_items table is empty.
+The migration touches only the project column and is idempotent. Each statement
+is `UPDATE task_items SET project = :canonical WHERE project = :raw`. It touches
+no other column and no row whose project is not a raw alias key, so a terminal
+(done/dropped) row keeps its status untouched. Only its project is
+canonicalized, which is what makes a closed-but-still-relevant row queryable.
+After it runs no rows remain under the raw key, so a re-run updates zero rows.
+It is safe on every environment, including a fresh DB whose task_items table is
+empty.
 """
 from typing import Sequence, Union
 
@@ -85,8 +82,8 @@ def downgrade() -> None:
 
     This is a lossy canonicalization: after the re-stamp, a row stored as the
     canonical short name (e.g. "plan") is indistinguishable from a row that was
-    ALWAYS canonical. Reverse-mapping every canonical row back to a raw alias key
+    always canonical. Reverse-mapping every canonical row back to a raw alias key
     would corrupt rows that never used the alias. The forward direction is the
-    only safe one, so the downgrade deliberately does nothing.
+    only safe one, so the downgrade does nothing.
     """
     pass

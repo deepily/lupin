@@ -1,33 +1,32 @@
-"""Add task_items.request_deletion_id + its CHECK (a pledge only rides on an admit)
+"""Add task_items.request_deletion_id + its `CHECK` (a pledge only rides on an admit)
 
 Revision ID: ffbf50040d99
 Revises: 525a4ad4067a
 Create Date: 2026-09-14
 
-Step 3 of the Sword of Damocles plan (row ab8c5728; Rick 2026-09-14 ~22:32 EDT: an admit
-request must name one ticket of the requester's own to delete). The request rides on the
-ticket (see 8beada291153), so the pledge rides there too: the verdict reads the row it drops
-from this column rather than parsing an audit string.
+An admit request must name one ticket of the requester's own to delete. The
+request rides on the ticket (see 8beada291153), so the pledge rides there too.
+The verdict reads the row it drops from this column rather than parsing an
+audit string.
 Plan: src/rnd/v0.2.1/2026.09.14-sword-of-damocles-enforcement-plan.md §3.3.
 
-WHAT IT ADDS
+What it adds:
 1. `request_deletion_id` UUID NULL — the ticket pledged on this row's admit request.
-2. CHECK `request_deletion_id IS NULL OR request_move = 'admit'` — a demote carries no
-   pledge (Mr. Radio's ruling on Q3, 22:39).
-3. `request_pledged_by` VARCHAR(64) NULL — the persona that pledged the ticket. Added to THIS
-   revision before it reached any database (head was still 525a4ad4067a on 2026-09-15), after
-   María's RB-2 review: the ownership check ran only at filing, so a pledge reassigned
-   afterwards was still dropped at the verdict. The verdict compares this to the owner.
+2. `CHECK request_deletion_id IS NULL OR request_move = 'admit'` — a demote
+   carries no pledge.
+3. `request_pledged_by` VARCHAR(64) NULL — the persona that pledged the ticket.
+   It is part of this revision because the ownership check ran only at filing.
+   A pledge reassigned afterwards was therefore still dropped at the verdict.
+   The verdict compares this column to the owner.
 
-NO BACKFILL: the column starts NULL on every row, so the CHECK holds vacuously.
-IDEMPOTENT on Postgres: every step inspects the live schema first, because
-`auto_migrate.run_migrations_to_head` runs `upgrade head` on every process start. On SQLite
-`op.create_check_constraint` raises after the column is added, exactly as 8beada291153 does.
+No backfill: the column starts NULL on every row, so the `CHECK` holds vacuously.
+Idempotent on Postgres: every step inspects the live schema first, because
+`auto_migrate.run_migrations_to_head` runs `upgrade head` on every process start.
+On SQLite `op.create_check_constraint` raises after the column is added, exactly
+as 8beada291153 does.
 
-⚠️ THE CHECK LITERAL MUST MATCH `postgres_models.py` VERBATIM —
+The `CHECK` literal must match `postgres_models.py` verbatim.
 `src/tests/unit/test_task_request_deletion_column_migration.py` asserts it.
-
-REVISION ID: minted with uuid4; absent from `src/` by grep before use.
 """
 from typing import Sequence, Union
 
@@ -59,11 +58,11 @@ def _table_exists( inspector ) -> bool:
 
 def upgrade() -> None:
     """
-    Add the pledge column, then its CHECK.
+    Add the pledge column, then its `CHECK`.
 
     Ensures:
         - no-op when task_items is absent (a fresh DB built from metadata)
-        - each column is added only when missing; the CHECK only when absent, by name
+        - each column is added only when missing; the `CHECK` only when absent, by name
     """
     bind      = op.get_bind()
     inspector = inspect( bind )
@@ -84,11 +83,11 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """
-    Drop the CHECK, then both columns.
+    Drop the `CHECK`, then both columns.
 
     Ensures:
         - no-op when task_items is absent; each drop guarded
-        - ⚠️ a pending request's pledge is discarded with the column; the request itself
+        - a pending request's pledge is discarded with the column; the request itself
           (8beada291153's columns) survives without it
     """
     inspector = inspect( op.get_bind() )

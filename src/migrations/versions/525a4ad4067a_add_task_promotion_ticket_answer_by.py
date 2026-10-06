@@ -1,48 +1,39 @@
-"""Add task_promotion_tickets.answer_by + its ordering CHECK
+"""Add task_promotion_tickets.answer_by + its ordering `CHECK`
 
 Revision ID: 525a4ad4067a
 Revises: 8beada291153
 Create Date: 2026-09-10
 
-Backs row dbe42964 (Rick approved ~20:00 EDT 2026-09-10). Design:
-`src/rnd/2026.09.10-petition-answer-by-design.md`.
+What it adds:
+1. `answer_by` TIMESTAMPTZ NULL — when the answer window closes: `requested_at` plus
+   the ask timeout. A ticket already carried `resolves_by`, the stall deadline (ask
+   timeout + notification grace + apply margin, 480 s by default). Nothing said
+   which of the two was the 120 s answer window, and that misled a relay.
+2. `CHECK answer_by IS NULL OR answer_by <= resolves_by` — the schema itself says
+   which of the two comes first.
 
-WHAT IT ADDS
-------------
-1. `answer_by` TIMESTAMPTZ NULL — when Rick's ANSWER WINDOW closes: `requested_at` plus
-   the ask timeout. A ticket already carried `resolves_by`, the STALL deadline (ask
-   timeout + notification grace + apply margin, 480 s by default), and nothing said
-   which of the two was the 120 s window. It misled a relay twice on 2026-09-10.
-2. CHECK `answer_by IS NULL OR answer_by <= resolves_by` — the schema itself says which
-   of the two comes first.
+No backfill: a pre-existing ticket keeps `answer_by` NULL. Its window
+was the ask timeout in force when it was minted, and that number was never stored.
+Computing it from today's timeout would record a guess as a fact. That is the same
+re-derivation `resolves_by_for` forbids for `resolves_by`. NULL means "not
+recorded", which is true. Every `CHECK` clause starts with `answer_by IS NULL OR`,
+so those rows satisfy it vacuously.
 
-NO BACKFILL, ON PURPOSE
------------------------
-A pre-existing ticket keeps `answer_by` NULL. Its window was the ask timeout in force
-when it was minted, and that number was never stored; computing it from today's timeout
-would record a guess as a fact — the same re-derivation `resolves_by_for` forbids for
-`resolves_by`. NULL means "not recorded", which is true. Every CHECK clause starts with
-`answer_by IS NULL OR`, so those rows satisfy it vacuously.
+The `CHECK` literal must match `postgres_models.TaskPromotionTicket` verbatim.
+`src/tests/unit/test_task_promotion_ticket_answer_by_migration.py` asserts it. The
+parity guards in this tree are per-migration, so this revision inherits none from
+8d404f635e84.
 
-⚠️ THE CHECK LITERAL MUST MATCH `postgres_models.TaskPromotionTicket` VERBATIM.
-`src/tests/unit/test_task_promotion_ticket_answer_by_migration.py` asserts it. The parity
-guards in this tree are per-migration, so this revision inherits none from 8d404f635e84.
+Idempotent, and the column and the `CHECK` are guarded separately.
+`auto_migrate.run_migrations_to_head` runs `upgrade head` on every process start,
+so an already-migrated database is the normal case. A database built by
+`create_all` from a model with the column but not the `CHECK` would be skipped
+whole by "column exists, return". That leaves it unconstrained, so each step checks
+for its own object.
 
-IDEMPOTENT, AND THE COLUMN AND THE CHECK ARE GUARDED SEPARATELY
-----------------------------------------------------------------
-`auto_migrate.run_migrations_to_head` runs `upgrade head` on every process start, so an
-already-migrated database is the normal case. A database built by `create_all` from a
-model that had the column but not the CHECK would be skipped whole by "column exists →
-return", leaving it unconstrained — so each step checks for its own object (Mr. Radio's
-condition, 2026-09-10 20:08).
-
-⚠️ POSTGRES ONLY FOR THE CHECK HALF, as for 8beada291153: SQLite cannot
-ALTER TABLE ADD CONSTRAINT. A fresh test database is built from metadata, not by this DDL.
-
-REVISION ID NOTE: `525a4ad4067a` is uuid4 hex. Absent from tracked `src/` by
-`git grep -F` (0 files), with the same grep first finding 7 files for the known
-`8beada291153`. `8beada291153` was the single head by `ScriptDirectory.get_heads()` on
-chloe-request-door `99f9b678`.
+Postgres only for the `CHECK` half, as for 8beada291153: SQLite cannot
+`ALTER TABLE ADD CONSTRAINT`. A fresh test database is built from metadata, not by
+this DDL.
 """
 from typing import Sequence, Union
 
@@ -80,7 +71,7 @@ def _check_names( inspector ) -> set:
 
 def _count_violations( bind ) -> int:
     """
-    Rows that would break the CHECK, counted before it is created.
+    Rows that would break the `CHECK`, counted before it is created.
 
     Requires:
         - bind is a live connection whose task_promotion_tickets has `answer_by`
@@ -101,14 +92,14 @@ def _count_violations( bind ) -> int:
 
 def upgrade() -> None:
     """
-    Add `answer_by`, verify nothing violates, add the CHECK.
+    Add `answer_by`, verify nothing violates, add the `CHECK`.
 
     Ensures:
         - no-op when the table is absent (a fresh DB built from metadata)
         - the column is added only when missing
-        - the CHECK is created only when absent, by name, INDEPENDENTLY of the column
+        - the `CHECK` is created only when absent, by name, independently of the column
         - raises RuntimeError, altering nothing further, when a row already breaks the
-          CHECK — a message about the data rather than about a constraint
+          `CHECK` — a message about the data rather than about a constraint
     """
     bind      = op.get_bind()
     inspector = inspect( bind )
@@ -132,13 +123,13 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """
-    Drop the CHECK, then the column.
+    Drop the `CHECK`, then the column.
 
     Ensures:
         - no-op when the table is absent
-        - the constraint is dropped BEFORE the column it references
+        - the constraint is dropped before the column it references
         - each drop is guarded, so a partial upgrade downgrades cleanly
-        - ⚠️ every stored answer_by goes with the column; there is no other copy
+        - every stored answer_by goes with the column; there is no other copy
     """
     inspector = inspect( op.get_bind() )
     if not _table_exists( inspector ):
