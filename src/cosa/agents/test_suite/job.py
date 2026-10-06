@@ -238,9 +238,8 @@ def unknown_suite_names( test_types: List[ str ] ) -> List[ str ]:
         - returns [] iff every name is a registered suite ("all" included)
         - never mutates the input; duplicates are reported once
 
-    Row 4e8f348e: "e2e_ui" is the DIRECTORY, not a suite. A submit naming it was accepted,
-    took the monopolize slot on :8000, found no script and wrote a zero report — five times
-    since 2026-05-05. The door asks this before the job exists.
+    "e2e_ui" is the directory, not a suite. A submit naming it was accepted, took the monopolize slot on :8000,
+    found no script and wrote a zero report. The door asks this before the job exists.
     """
     unknown = []
     for t in test_types:
@@ -251,8 +250,9 @@ def unknown_suite_names( test_types: List[ str ] ) -> List[ str ]:
 
 def _expand_all( test_types: List[ str ] ) -> List[ str ]:
     """
-    Expand any "all" entry in `test_types` into ALL_SUITE_COMPONENTS, preserving
-    order and deduping. Non-"all" entries pass through unchanged.
+    Expand "all" in `test_types` into ALL_SUITE_COMPONENTS, keeping order and deduping.
+
+    Non-"all" entries pass through unchanged.
 
     Requires:
         - test_types is a list of strings (possibly empty)
@@ -303,16 +303,15 @@ def tables_with_fk_into( metadata, listed ) -> List[ str ]:
 
 class _StdoutReaderCrash:
     """
-    Queue marker meaning THE STDOUT READER THREAD DIED — not end of output.
+    Queue marker meaning the stdout reader thread died, not end of output.
 
-    `None` on the stdout queue means clean EOF. Without a second, distinct
-    marker a reader that crashed posts the same `None` (from its `finally`),
-    and the poll loop reports the run as a clean success: the crashed tier's
-    exit code becomes `process.returncode`, which for a child that already
-    exited 0 is 0. That is a green for a run whose output was never read.
+    `None` on the stdout queue means clean EOF. Without a second, distinct marker, a crashed reader posts the same
+    `None` from its `finally`. The poll loop then reports the run as a clean success. The crashed tier's exit code
+    becomes `process.returncode`, which is 0 for a child that already exited 0. That is a green for a run whose
+    output was never read.
 
-    Carries the traceback text because the exception is re-raised on the main
-    thread, where the original thread's stack is otherwise unrecoverable.
+    Carries the traceback text because the exception is re-raised on the main thread, where the original thread's
+    stack is otherwise unrecoverable.
     """
 
     def __init__( self, exc, tb ):
@@ -380,7 +379,7 @@ class TestSuiteJob( AgenticJobBase ):
                 True  → force-enable TFE auto-dispatch for this run only
                 False → force-disable TFE auto-dispatch for this run only
                 The override is read by TestSuiteCompletionWatchdog Gate 1 and
-                does NOT mutate the INI file.
+                does not mutate the INI file.
             debug: Enable debug output
             verbose: Enable verbose output
         """
@@ -624,36 +623,33 @@ class TestSuiteJob( AgenticJobBase ):
 
         Requires:
             - passed, failed, errors, skipped, not_executed are non-negative ints
-            - collection_error is True only when pytest failed during COLLECTION
-            - coverage_miss is True only when the runner PRINTED a coverage-threshold
-              failure (see _parse_c8_threshold_failures) — never inferred from exit code
+            - collection_error is True only when pytest failed during collection
+            - coverage_miss is True only when the runner printed a coverage-threshold
+              failure (see _parse_c8_threshold_failures), never inferred from exit code
 
         Ensures:
-            - returns "COLLECTION ERROR" when collection_error is set, BEFORE any count
-              is consulted (row bc83f2df). A collection error in a TEST module writes a
-              junit carrying errors=1, which this method used to read as "FAILED" — a
-              string byte-identical to a genuine red. It is not a red: nothing ran. The
-              measured case held 3 tests across 2 files and the junit accounted for 1,
-              so the report also understated its own blast radius while sounding precise.
-              Counts cannot distinguish these cases, which is why the caller passes the
+            - returns "COLLECTION ERROR" when collection_error is set, before any count
+              is consulted. A collection error in a test module writes a junit carrying
+              errors=1, which this method used to read as "FAILED", a string
+              byte-identical to a genuine red. It is not a red, because nothing ran.
+              Counts cannot distinguish these cases, so the caller passes the
               exit-code-derived fact instead of it being re-derived here.
-            - returns "NOT EXECUTED" when nothing was collected (all counts zero)
-              — a zero-count run is NON-EXECUTION, not a failure (bug 89bfcc8f: a
-              harness reporting "FAILED — 0/0/0/0" is trusted as a real red by the
-              next reader; the JUnit XML was never produced or no tests were
-              collected, which is an ERROR condition, not a test failure)
+            - returns "NOT EXECUTED" when nothing was collected (all counts zero).
+              A zero-count run is non-execution, not a failure. A harness reporting
+              "FAILED — 0/0/0/0" is trusted as a real red by the next reader, but the
+              JUnit XML was never produced or no tests were collected, which is an
+              error condition, not a test failure
             - returns "FAILED"  when at least one test failed or errored (a genuine
-              failure dominates — even if some tiers also did not run)
-            - returns "FAILED"  when tests ran and coverage_miss is set (row 1a11fe96).
-              The typescript tier ran 4020/4020 green on 2026-09-14 while c8 printed
-              three threshold ERROR lines and exited 1, and this method said PASSED,
-              because it reads counts only. The counts-only rule stays (the 335/0/0
-              false positive came from trusting the exit code), so the caller passes
-              the printed threshold miss as its own fact, the same way it passes
+              failure dominates, even if some tiers also did not run)
+            - returns "FAILED"  when tests ran and coverage_miss is set. The typescript
+              tier can run every test green while c8 prints threshold `ERROR` lines and
+              exits 1, and a counts-only rule would say "PASSED". The counts-only rule
+              stays, because trusting the exit code gave a false positive. So the caller
+              passes the printed threshold miss as its own fact, the same way it passes
               collection_error
             - returns "NOT EXECUTED" when nothing failed but at least one tier did
               not run (multi-tier runner: a tier that never ran is not a pass and
-              not a failure — it must not read as green)
+              not a failure, and it must not read as green)
             - returns "PASSED"  when tests ran, none failed or errored, and every
               tier ran
         """
@@ -672,9 +668,7 @@ class TestSuiteJob( AgenticJobBase ):
         """
         One suite's line in the completion card the user actually reads.
 
-        Extracted from do_all so it can be tested directly (row 24a85385): the card
-        is the only place most readers ever learn what a run did, and nothing was
-        covering what it says.
+        Extracted from do_all so it can be tested directly. The card is the only place most readers learn what a run did.
 
         Requires:
             - result carries passed / failed / errors / skipped counts.
@@ -682,8 +676,8 @@ class TestSuiteJob( AgenticJobBase ):
         Ensures:
             - always opens with the outcome icon and the counts.
             - appends the startup-crash line when startup_crash_output is present.
-            - appends the FIRST failure's message when failure_details is non-empty,
-              plus an "and N more" tail — the message is the notice, the junit XML
+            - appends the first failure's message when failure_details is non-empty,
+              plus an "and N more" tail; the message is the notice, the junit XML
               stays the receipt.
             - never raises on a missing or malformed failure_details entry; a card
               that cannot be built is worse than a card missing one detail.
@@ -1231,8 +1225,7 @@ class TestSuiteJob( AgenticJobBase ):
     @staticmethod
     def _between_suite_pairs( suites: List[ str ] ) -> List[ tuple ]:
         """
-        Ordered (prev, next) adjacency pairs marking the BETWEEN-suite reset
-        seams (bug 8bd20375).
+        Ordered (prev, next) adjacency pairs marking the between-suite reset seams.
 
         Requires:
             - suites is an ordered list of suite-type strings (possibly empty)
@@ -1240,43 +1233,36 @@ class TestSuiteJob( AgenticJobBase ):
         Ensures:
             - returns one (suites[i-1], suites[i]) pair per gap → len(suites)-1 pairs
             - empty for 0 or 1 suite (single-suite-skip)
-            - NEVER a trailing pair after the last suite (no reset-after-last)
+            - never a trailing pair after the last suite (no reset-after-last)
         """
         return [ ( suites[ i - 1 ], suites[ i ] ) for i in range( 1, len( suites ) ) ]
 
     def _preflight_assert_exclusive_test_db( self ) -> None:
         """
-        Fail loud if a non-test agentic job is inflight on the shared test DB at
-        the moment this merge-gate sweep starts (bug caf58f71 — concurrent-writer
-        contamination).
-
-        The sweep is monopolize-mode. `monopolize` IS enforced now (bug 30398595:
-        the consumer's Gate A drains foreign writers before dispatch and Gate B
-        holds foreign intake for the run; bug 3a14292b exempts the sweep's own
-        lineage children from both). This preflight is the belt to that
-        suspenders — a same-instant DETECTION guard that converts any foreign
-        writer already inflight AT sweep start into an explicit, diagnosable
-        startup failure. It catches writers inflight at start (the shape the
-        evidence shows) but, being a one-shot preflight, cannot see jobs
-        dispatched later in the window — that is Gate B's job.
-
-        SAFETY (mirrors _reset_state_between_suites): gated to lupin_db_test. On
-        any other engine (a sweep aimed at :7999 dev, where coexisting fleet jobs
-        are legitimate) this is a logged NO-OP. If the running-queue singleton is
-        unreachable or not yet initialised (unit context, alternate host) it is
-        also a logged NO-OP — the ONLY raise is the loud-fail.
+        Fail loudly if a non-test agentic job is inflight on the shared test DB at sweep start.
 
         Requires:
             - self.id_hash is this sweep's pool key (excluded from the count)
 
         Ensures:
             - on lupin_db_test with >=1 non-test inflight agentic job: raises
-              RuntimeError naming the offenders — aborts the sweep before any suite
-            - on lupin_db_test with none: logs the PASS and returns
-            - off the test DB, or with no reachable running queue: logged NO-OP
+              RuntimeError naming the offenders, which aborts the sweep before any suite
+            - on lupin_db_test with none: logs the pass and returns
+            - off the test DB, or with no reachable running queue: logged no-op
 
         Raises:
             - RuntimeError when a foreign inflight writer shares lupin_db_test
+
+        The sweep runs in monopolize mode, and `monopolize` is enforced. The consumer's Gate A drains foreign writers
+        before dispatch, and its Gate B holds foreign intake for the run. The sweep's own lineage children are exempt
+        from both. This preflight backs those gates with a same-instant detection guard. It turns any foreign writer
+        already inflight at sweep start into an explicit, diagnosable startup failure. Being a one-shot preflight, it
+        cannot see jobs dispatched later in the window. That is Gate B's job.
+
+        Safety mirrors _reset_state_between_suites: the check is gated to lupin_db_test. On any other engine, such as a
+        sweep aimed at :7999 dev where coexisting fleet jobs are legitimate, it is a logged no-op. If the running-queue
+        singleton is unreachable or not yet initialised (unit context, alternate host), it is also a logged no-op.
+        The only raise is the loud failure.
         """
         from cosa.rest.db import database as db_module
 
@@ -1313,21 +1299,7 @@ class TestSuiteJob( AgenticJobBase ):
 
     def _reset_state_between_suites( self, prev_suite: str, next_suite: str ) -> None:
         """
-        Hard-reset the shared test DB at the seam between two suites (bug 8bd20375).
-
-        The merge-gate sweep runs suites back-to-back on ONE shared :8000 DB
-        (lupin_db_test). Without a reset here, the earlier suite's residue —
-        notably refresh_tokens, whose duplicate jti collides with the login
-        "Token already exists" 500 — survives into the next suite's auth
-        fixtures (the e2e→integration flood, RED ts-2230937c). A literal
-        container bounce is impossible from inside this job (self-kill), so the
-        equivalent isolation is an in-process residue truncate against the
-        hot-swapped test engine.
-
-        SAFETY: mirrors clean_test_db — refuses to touch anything but
-        lupin_db_test. When the live engine is NOT the test DB (e.g. a
-        multi-suite run submitted against the :7999 dev server), this is a
-        logged NO-OP, never a destructive op on dev data.
+        Hard-reset the shared test DB at the seam between two suites.
 
         Requires:
             - prev_suite / next_suite name the adjacent suites (logging only)
@@ -1337,11 +1309,21 @@ class TestSuiteJob( AgenticJobBase ):
               (incl. refresh_tokens); protected companion rows survive
             - on any other DB: no destructive op; logs the skip
             - a reset failure raises BetweenSuiteResetError and stops the sweep: a
-              suite on an unreset database reports on the previous suite's rows
-              (bug 07dde530; before it, the failure was logged and the sweep went on)
+              suite on an unreset database reports on the previous suite's rows, so
+              the sweep stops before the next suite runs
 
         Raises:
             - BetweenSuiteResetError if the delete or the truncate fails
+
+        The merge-gate sweep runs suites back-to-back on one shared :8000 DB (lupin_db_test). Without a reset here, the
+        earlier suite's residue survives into the next suite's auth fixtures. Notably, `refresh_tokens` keeps a
+        duplicate jti that collides with the login "Token already exists" 500, which caused the e2e to integration
+        flood. A literal container bounce is impossible from inside this job, because the job would kill itself. So the
+        equivalent isolation is an in-process residue truncate against the hot-swapped test engine.
+
+        Safety mirrors clean_test_db: it refuses to touch anything but lupin_db_test. When the live engine is not the
+        test DB, for example a multi-suite run submitted against the :7999 dev server, the reset is a logged no-op,
+        never a destructive op on dev data.
         """
         from cosa.rest.db import database as db_module
         from sqlalchemy import text
@@ -1370,26 +1352,24 @@ class TestSuiteJob( AgenticJobBase ):
 
     def _attest_tier_run( self, suite_type: str, result: Dict, started_at: str ) -> None:
         """
-        Append a durable, tamper-evident record that this tier ran (row 691d49db).
+        Append a durable, tamper-evident record that this tier ran.
 
         Requires:
             - result is a `_run_suite` return dict, or None when `_run_suite`
               raised and the exception is escaping
-            - started_at is an ISO timestamp taken BEFORE the run
+            - started_at is an ISO timestamp taken before the run
 
         Ensures:
-            - a None result is attested as an ESCAPED run rather than skipped —
+            - a None result is attested as an escaped run rather than skipped:
               exit_code 1, errors 1, and an `error` naming the escape. A crashed
-              tier that leaves no receipt is the exact hole this row exists to
+              tier that leaves no receipt is the hole this record exists to
               close, and it is the outcome most worth recording.
             - appends one chained record to the ledger under the `io/` bind mount
-            - NEVER raises: a failure to record must not fail the tier it records.
-              The whole point is a receipt for runs that go wrong, so an
-              attestation that can abort the run would delete the evidence in
-              exactly the case it exists for.
-            - prints the failure rather than swallowing it — a silent recorder is
-              indistinguishable from one that was never wired, which is the defect
-              this row was filed about
+            - never raises: a failure to record must not fail the tier it records.
+              An attestation that can abort the run would delete the evidence in
+              the very case it exists for.
+            - prints the failure rather than swallowing it, because a silent recorder is
+              indistinguishable from one that was never wired
         """
         try:
             from cosa.agents.test_suite import attestation
@@ -1432,7 +1412,7 @@ class TestSuiteJob( AgenticJobBase ):
         Run a single test suite via subprocess.
 
         Uses subprocess.Popen with a poll loop to support cancellation.
-        Does NOT use --bg flag (the AgenticJob IS the background runner).
+        Does not use the --bg flag, because the AgenticJob is the background runner.
 
         Requires:
             - suite_type is "integration" or "e2e"
@@ -1948,6 +1928,8 @@ class TestSuiteJob( AgenticJobBase ):
     @classmethod
     def _log_symlink_path( cls, suite_type: str ) -> Optional[ str ]:
         """
+        Canonical latest-log symlink path for a suite.
+
         Ensures:
             - returns the absolute canonical symlink path for a known suite
             - returns None for an unknown suite (callers treat that as a no-op)
@@ -1958,16 +1940,16 @@ class TestSuiteJob( AgenticJobBase ):
     @classmethod
     def _artifact_dir( cls ) -> str:
         """
-        The ONE resolution point for the artifact root.
+        The one place the artifact root is resolved.
 
         Ensures:
             - returns `cls._ARTIFACT_DIR` when a test (or an operator) has pinned it
             - otherwise resolves the durable root via attestation.artifact_root(), which
-              RAISES under pytest when no root was pinned — so a test cannot reach the
+              raises under pytest when no root was pinned, so a test cannot reach the
               real directory through any call path, computed or literal
 
-        ⚠️ Resolved lazily, per call. An eager module- or class-level resolution would
-        trigger that refusal at import and take down every test that imports this file.
+        The root is resolved lazily, per call. An eager module- or class-level resolution would trigger that refusal
+        at import and take down every test that imports this file.
         """
         root = cls._ARTIFACT_DIR
         if root is None:
@@ -2000,8 +1982,9 @@ class TestSuiteJob( AgenticJobBase ):
     @classmethod
     def _write_stdout_log( cls, suite_type: str, stdout_text: str ) -> Optional[ str ]:
         """
-        Persist captured subprocess stdout to a timestamped file and refresh the
-        canonical /tmp/<suite>-latest.log symlink.
+        Persist captured subprocess stdout to a timestamped file and refresh the latest symlink.
+
+        The canonical symlink is /tmp/<suite>-latest.log.
 
         Requires:
             - suite_type is a known SUITE_SCRIPTS key (unknown keys are a no-op)
@@ -2027,10 +2010,10 @@ class TestSuiteJob( AgenticJobBase ):
     @staticmethod
     def _synth_failure_detail( suite_type: str, name: str, elapsed: float, message: str, traceback_text: str ) -> Dict:
         """
-        Build a single failure_details entry for synthesized ERRORs (timeout,
-        caught exception, etc.) so the remediation snapshot's `failures` array
-        is never empty when `errors > 0`. Matches the shape produced by
-        _parse_junit_xml for real testcase <failure>/<error> elements.
+        Build one failure_details entry for a synthesized error (timeout, caught exception).
+
+        It keeps the remediation snapshot's `failures` array from being empty when `errors > 0`. It matches the shape
+        _parse_junit_xml produces for real testcase failure and error elements.
         """
         return {
             "classname" : f"TestSuiteJob.{suite_type}",
@@ -2134,17 +2117,7 @@ class TestSuiteJob( AgenticJobBase ):
     @staticmethod
     def _parse_node_tap_summary( stdout: str ) -> Optional[ Dict ]:
         """
-        Parse `node --test` TAP trailer counts emitted by the typescript suite.
-
-        Row 36e479ed. Without this the typescript suite would land in exactly
-        the state WG-7 found the websocket suite in: a green run classified as
-        a failure with metrics 0/0/0/0, because no junit-xml exists to parse.
-
-        The trailer looks like:
-            # tests 2245
-            # pass 2245
-            # fail 0
-            # skipped 0
+        Parse the `node --test` `TAP` trailer counts emitted by the typescript suite.
 
         Requires:
             - stdout is the captured runner stdout (may be empty)
@@ -2153,8 +2126,17 @@ class TestSuiteJob( AgenticJobBase ):
             - returns passed/failed/skipped/errors when a `# pass` line is present
             - returns None when the trailer is absent, so the caller keeps its
               zero-count default and downstream classification is unchanged
-            - counts the LAST trailer, so a nested `# pass` inside test output
+            - counts the last trailer, so a nested `# pass` inside test output
               cannot shadow the run's real total
+
+        Without this parser the typescript suite would land in the state the websocket suite once did. That is a green
+        run classified as a failure with metrics 0/0/0/0, because no junit-xml exists to parse.
+
+        Example:
+            # tests 2245
+            # pass 2245
+            # fail 0
+            # skipped 0
         """
         import re
 
@@ -2177,20 +2159,19 @@ class TestSuiteJob( AgenticJobBase ):
         """
         Extract c8's coverage-threshold failures from the typescript runner's stdout.
 
-        Row 1a11fe96. run-typescript-tests.sh runs c8 with --check-coverage, and a
-        miss prints lines like
-            ERROR: Coverage for branches (99.75%) does not meet global threshold (100%)
-        and exits 1. The TAP counts stay green, so without this the job reported
-        all_passed=True on 2026-09-14 (ts-0678b4dc) with three of these lines in its log.
-
         Requires:
             - stdout is the captured runner stdout (may be empty)
 
         Ensures:
-            - returns each threshold ERROR line, stripped, in the order printed
-            - returns [] when there is none — including a --report-only run, where
-              c8 does not check thresholds and prints no ERROR line
-            - never keys on the exit code (the 335/0/0 false positive)
+            - returns each threshold `ERROR` line, stripped, in the order printed
+            - returns [] when there is none, including a --report-only run, where
+              c8 does not check thresholds and prints no `ERROR` line
+            - never keys on the exit code, because reading it gave the 335/0/0 false positive
+
+        run-typescript-tests.sh runs c8 with --check-coverage. A miss prints a line like
+        `ERROR: Coverage for branches (99.75%) does not meet global threshold (100%)` and exits 1.
+        The `TAP` counts stay green, so without this parser the job reports all_passed=True with threshold failures in
+        its log.
         """
         import re
 
@@ -2202,14 +2183,7 @@ class TestSuiteJob( AgenticJobBase ):
     @staticmethod
     def _terminate_process_group( process ) -> None:
         """
-        Kill the subprocess AND everything it spawned.
-
-        WHY (bug 8b93bcf5, third defect): the runner is `bash <script>`, and
-        process.terminate() signals that bash alone. A script that does NOT exec
-        into pytest leaves a grandchild holding the inherited stdout pipe, which
-        outlives the kill — so the tier's own budget stops governing the machine.
-        Popen is started with start_new_session=True, giving the child its own
-        process group, so one signal reaches the whole tree.
+        Kill the subprocess and everything it spawned.
 
         Requires:
             - process is a Popen started with start_new_session=True
@@ -2220,6 +2194,11 @@ class TestSuiteJob( AgenticJobBase ):
               is already gone (ProcessLookupError) or the platform has no killpg;
               a cleanup helper must never raise into the caller's error path,
               because the caller is already handling a failure
+
+        The runner is `bash <script>`, and process.terminate() signals that bash alone. A script that does not exec
+        into pytest leaves a grandchild holding the inherited stdout pipe, which outlives the kill. Then the tier's own
+        budget stops governing the machine. Popen is started with start_new_session=True, which gives the child its own
+        process group, so one signal reaches the whole tree.
         """
         def _signal_group( sig ):
             try:
@@ -2245,22 +2224,7 @@ class TestSuiteJob( AgenticJobBase ):
     @staticmethod
     def _parse_deselected( stdout: str ) -> int:
         """
-        Parse pytest's deselect count from captured stdout (row f3beb6d5).
-
-        The junit-xml carries NO deselect information — its `tests` attribute
-        counts only what was selected — so a `-k`/`-m` slice is invisible to
-        _parse_junit_xml, and a 5-of-692 run looks byte-identical to a full
-        green. This recovers the slice size so cost_summary can flag the run
-        as `filtered` and the report header can name the scope.
-
-        ⚠️ Deselection is INTENTIONAL SCOPING, not non-execution (bug 89bfcc8f).
-        The count returned here must NEVER be routed into `not_executed` — that
-        would red every filtered run, including the TFE landing/confirm runs
-        which are filtered BY DESIGN.
-
-        Two pytest forms carry the count; either one suffices:
-            collected 692 items / 687 deselected / 5 selected
-            ============== 5 passed, 687 deselected in 23.08s ==============
+        Parse pytest's deselect count from captured stdout.
 
         Requires:
             - stdout is the captured runner stdout (may be empty)
@@ -2270,6 +2234,21 @@ class TestSuiteJob( AgenticJobBase ):
             - returns 0 when neither is present (an unfiltered run)
             - prefers the collection form (the authoritative "/ M deselected /")
               when both are present; the two forms agree in practice
+
+        The junit-xml carries no deselect information, because its `tests` attribute counts only what was selected.
+        A `-k` or `-m` slice is therefore invisible to _parse_junit_xml, and a 5-of-692 run looks byte-identical to a
+        full green. This recovers the slice size so cost_summary can flag the run as `filtered` and the report header
+        can name the scope.
+
+        Deselection is intentional scoping, not non-execution. The count returned here must never be routed into
+        `not_executed`. That would red every filtered run, including the TFE landing and confirm runs. Those runs
+        are meant to be filtered.
+
+        Two pytest forms carry the count, and either one suffices.
+
+        Example:
+            collected 692 items / 687 deselected / 5 selected
+            ============== 5 passed, 687 deselected in 23.08s ==============
         """
         collected = re.search( r"collected\s+\d+\s+items?\s*/\s*(\d+)\s+deselected", stdout )
         if collected:
@@ -2282,27 +2261,7 @@ class TestSuiteJob( AgenticJobBase ):
     @staticmethod
     def _parse_pytest_progress_stdout( stdout: str ) -> Optional[ Dict ]:
         """
-        Recover per-file result counts from pytest's COMPACT progress output.
-
-        WHY (bug 8b93bcf5): --junit-xml is written only at session end, so a tier
-        killed by the timeout leaves NO junit file, _parse_junit_xml falls back to
-        zeros, and the tier publishes "0 passed, 0 failed, 1 errors" — a string
-        byte-identical to a tier that crashed at import, a tier whose script was
-        missing, and a tier that collected nothing. On 2026-07-26 that erased
-        ~17 failures and 1 error the smoke tier had ALREADY found.
-
-        The progress line survives in captured stdout, so the counts are
-        recoverable even though the junit file is not:
-
-            src/tests/smoke/test_alembic_....py FFF.F                    [  1%]
-
-        ⚠️ THIS IS A MITIGATION, NOT THE FIX. It recovers FILE-level resolution
-        only. Compact mode never emits a test node-id, and a killed run never
-        reaches the "short test summary info" block, so no per-test name and no
-        traceback exist ANYWHERE to recover. A reader learns "4 tests in this
-        file failed" and cannot learn which four or why. Full per-test detail
-        needs incremental capture (pytest-reportlog is NOT installed in the test
-        image), which is a separate change.
+        Recover per-file result counts from pytest's compact progress output.
 
         Requires:
             - stdout is the captured (possibly truncated) subprocess output
@@ -2310,9 +2269,25 @@ class TestSuiteJob( AgenticJobBase ):
         Ensures:
             - returns a dict with passed/failed/skipped/errors counts plus a
               `partial_files` list of ( filename, chars ) for the reader
-            - returns None when NO progress line was recognized — an empty parse
-              must not read as "zero of everything", which is the exact
-              indistinguishable-zeros failure this method exists to end
+            - returns None when no progress line was recognized, because an empty parse
+              must not read as "zero of everything", the indistinguishable-zeros failure
+              this method exists to end
+
+        --junit-xml is written only at session end. A tier killed by the timeout leaves no junit file, so
+        _parse_junit_xml falls back to zeros. The tier would then publish "0 passed, 0 failed, 1 errors". That string is
+        byte-identical to a tier that crashed at import, one whose script was missing, and one that collected nothing.
+        It would hide failures the tier had already found.
+
+        The progress line survives in captured stdout, so the counts are recoverable even though the junit file is not.
+
+        This is a mitigation, not the fix. It recovers file-level resolution only. Compact mode never emits a test
+        node-id, and a killed run never reaches the "short test summary info" block. So no per-test name and no
+        traceback exist anywhere to recover. A reader learns "4 tests in this file failed" and cannot learn which four
+        or why. Full per-test detail needs incremental capture, and pytest-reportlog is not installed in the test image.
+        That is a separate change.
+
+        Example:
+            src/tests/smoke/test_alembic_....py FFF.F                    [  1%]
         """
         # Progress chars pytest emits in compact mode. 'x'/'X' are xfail/xpass and
         # count as neither pass nor failure, matching the junit parser's treatment.
@@ -2355,18 +2330,7 @@ class TestSuiteJob( AgenticJobBase ):
     @staticmethod
     def _parse_non_pytest_stdout( suite_type: str, stdout: str ) -> Optional[ Dict ]:
         """
-        Parse the stdout of a non-pytest suite runner (e.g. the websocket smoke
-        runner) into pytest-compatible counts.
-
-        WG-7 (2026-04-28): the websocket suite's bash-driven runner emits its
-        own log format. _parse_junit_xml returns zero counts because there's
-        no junit-xml file. Without this fallback, the test_suite parser
-        classifies 50/50 PASS as a FAIL with metrics 0/0/0/0.
-
-        Recognized signals (websocket runner today):
-            - "ALL SMOKE TESTS PASSED!" → green
-            - "ALL SMOKE TESTS FAILED" / "tests failed" → red
-            - "Total Tests: N" / "Passed: X" / "Failed: Y" → counts
+        Parse a non-pytest suite runner's stdout into pytest-compatible counts.
 
         Requires:
             - suite_type is a known suite name
@@ -2375,8 +2339,17 @@ class TestSuiteJob( AgenticJobBase ):
         Ensures:
             - Returns a dict with keys passed, failed, skipped, errors when the
               format is recognized.
-            - Returns None when the format isn't recognized — caller keeps the
+            - Returns None when the format isn't recognized, so the caller keeps the
               zero-count default and downstream classification stays unchanged.
+
+        The websocket suite's bash-driven runner emits its own log format, so _parse_junit_xml returns zero counts
+        because there is no junit-xml file. Without this fallback, the test_suite parser classifies 50/50 passing as a
+        failure with metrics 0/0/0/0.
+
+        Recognized signals (websocket runner today):
+            - `ALL SMOKE TESTS PASSED!` means green
+            - `ALL SMOKE TESTS FAILED` or `tests failed` means red
+            - `Total Tests: N`, `Passed: X`, `Failed: Y` give the counts
 
         Args:
             suite_type: Suite name (e.g., "websocket")
