@@ -317,5 +317,6 @@ def test_the_module_docstring_warns_that_a_PER_REQUEST_read_reproduces_the_bug()
     this sentence, and over the test above it.
     """
     text = ci.__doc__
-    assert "IMPORT" in text
-    assert "PER REQUEST" in text
+    assert "import time" in text
+    assert "never re-reads" in text
+    assert "per request" in text
