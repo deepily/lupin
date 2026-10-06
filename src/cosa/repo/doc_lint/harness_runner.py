@@ -70,7 +70,7 @@ def ledger_key( stage, pair, prompt_version, model_id, slot ):
 
 
 class LedgerBindingError( ValueError ):
-    """A ledger was written under a different Claude Code binary than the run now asking to resume it."""
+    """A ledger was written under a different Claude Code binary than the run resuming it."""
 
 
 class Ledger:
@@ -134,11 +134,11 @@ class Ledger:
             os.fsync( f.fileno() )
 
     def timing( self, key ):
-        """Return the recorded { stage: { "seconds", "calls" } } of a finished row, or None when it was written without one."""
+        """Return a finished row's recorded { stage: { "seconds", "calls" } }, or None if absent."""
         return self.timings.get( key )
 
     def put( self, key, value, timing=None ):
-        """Store a finished call durably before returning; timing, when given, is stored in the same line."""
+        """Store a finished call durably before returning; a given timing goes in the same line."""
         record = { "key": key, "value": value }
         if timing is not None: record[ "timing" ] = timing
         self._append( record )
@@ -170,7 +170,7 @@ async def run_pair( pair, config, ledger, query_fn=None, judge_backend=None, on_
         - a list whose first reply was unreadable twice is frozen with parse_failed True (the retry is not
           repeated on resume), no claims, and its whole old text flagged; on_unreadable, when given, is called
           with ( pair id, slot, attempt, raw reply, error ) for each unreadable reply
-        - a frozen entry written before row ed2f9b4e has no discards, flags, reextract_calls, parse_failed or
+        - a frozen entry written before these fields existed has no discards, flags, reextract_calls, parse_failed or
           retry_calls; it reads as none of them, so judge_comparison can still rebuild a report from an old ledger
         - a finished call is never made again
         - with judge_thinking "off" the judge key carries "|thinking=off", so a verdict judged with thinking
@@ -190,7 +190,7 @@ async def run_pair( pair, config, ledger, query_fn=None, judge_backend=None, on_
     untimed = 0
 
     def tally( recorded ):
-        """Add one finished row's recorded timing to the pair's totals; a row with none counts as untimed."""
+        """Add one finished row's recorded timing to the pair's totals; a row with none is untimed."""
         nonlocal untimed
         if recorded is None:
             untimed += 1

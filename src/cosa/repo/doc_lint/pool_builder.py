@@ -1,24 +1,25 @@
 """
 The docstring pool builder: the input of the labelled-set seeder's plan step.
 
-It walks the Python files of ONE git commit and writes one JSON Lines row per docstring, in the
+It walks the Python files of one git commit. It writes one JSON Lines row per docstring, in the
 shape labelled_set_seeder reads: { id, file, symbol, old }. The files come from git at that commit,
-never from the working tree, so the same commit gives the same bytes whatever is checked out.
+never from the working tree. So the same commit gives the same bytes whatever is checked out.
 
 The text of a row is inspect.cleandoc of the docstring: what a reader sees, with the indentation
 that depends on nesting depth removed. The manifest records that choice.
 
 A docstring whose text is the same as another's, after runs of whitespace are collapsed, is kept once.
-The seeder splits whole directories between dev, gate and reserve but never compares text, so a copy
-in two directories could land in dev and in the gate. The first row by id is kept; the manifest lists
-every dropped id under the kept one, and the count.
+The seeder splits whole directories between dev, gate and reserve but never compares text.
+A copy in two directories could therefore land in dev and in the gate. The first row by id is kept;
+the manifest lists every dropped id under the kept one, and the count.
 
-A second file, <out>.manifest.json, records what the pool was built from: the full source sha, the
-sha256 of this builder's own file, the sha256 of the pool, the counts, every file skipped and why, and
-the duplicates dropped. The manifest is a separate file so the pool stays exactly what the seeder
+A second file, <out>.manifest.json, records what the pool was built from. It holds the full source sha
+and the sha256 of this builder's own file and of the pool. It also holds the counts, every file skipped
+and why, and the duplicates dropped. The manifest is a separate file, so the pool stays exactly what the seeder
 reads. Nothing in either file depends on the time or the machine.
 
-The builder has no view on tests or on any other directory: what is read is the run's --include and --exclude.
+The builder has no view on tests or on any other directory.
+What is read is the run's --include and --exclude.
 """
 
 import argparse
@@ -62,13 +63,13 @@ def resolve_commit( repo, sha ):
 
 
 def prefix_of( path ):
-    """Return path as a directory prefix: one trailing slash, so src/cosa never matches src/cosa_x."""
+    """Return path as a directory prefix with one trailing slash, so src/cosa misses src/cosa_x."""
     return path.rstrip( "/" ) + "/"
 
 
 def list_sources( repo, sha, include, exclude ):
     """
-    List the Python blobs of one commit under the include prefixes and outside the exclude prefixes.
+    List the Python blobs of one commit under the include and outside the exclude prefixes.
 
     Requires:
         - sha is a full commit sha; include is a non-empty list of directory prefixes; exclude is a list
@@ -126,7 +127,7 @@ def read_blobs( repo, oids ):
 
 def docstrings_of( tree ):
     """
-    Return ( symbol, docstring ) for the module and every class and function that has one, in source order.
+    Return ( symbol, docstring ) for the module and each class or function with one, in order.
 
     Requires:
         - tree is an ast.Module
@@ -182,7 +183,7 @@ def pool_rows( path, source ):
 
 
 def normalised( text ):
-    """Return text with every run of whitespace collapsed to one space, the form duplicates are compared in."""
+    """Return text with each run of whitespace collapsed to one space, for duplicate comparison."""
     return " ".join( text.split() )
 
 

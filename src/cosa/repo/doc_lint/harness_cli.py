@@ -51,7 +51,7 @@ def parse_args( argv ):
 
 def raw_failure_sink( path ):
     """
-    Return the on_unreadable callback that keeps unreadable extractor replies in a file, or None without a path.
+    Return the on_unreadable callback that files unreadable replies, or None without a path.
 
     Requires:
         - path is None or a writable file path outside the repo
@@ -88,22 +88,18 @@ def main( argv, query_fn=None, agy_runner=None ):
           refuses it): a removal the extractor cannot express would be an unmeasurable miss
         - returns 2 when --claude-cli-path is not an executable file; the report records the path used, or None for the SDK's own
         - returns 2 and opens nothing when a pairs or keys path names the gate split and --gate is not set
-        - returns 3 and runs nothing when --gate is set with the Jev back end and --frozen-thresholds
-          is missing or is not the --t-lo and --t-hi given
+        - returns 3 and runs nothing when --gate is set with the Jev back end and --frozen-thresholds is missing or is not the --t-lo and --t-hi given
         - returns 2 when --t-lo or --t-hi is given with the Claude back end, where they would be ignored
         - returns 3 and runs nothing when --gate is set and --frozen-pairs-sha is missing or is
           not the sha256 of the pairs file, so the gate file cannot change after registration
         - the report carries the sha256 of the pairs file
         - returns 2 when --parallel is below 1, or --judge-thinking off is given with the Jev back end, where it would be ignored
         - the report carries call_timing (seconds and calls per stage) and the judge_thinking setting
-        - --model-cap MODEL=N with --call-ledger caps that model's calls; the report and the last printed lines carry each capped model's count and cap
-        - returns 2 when a cap is not MODEL=N with N an int of zero or more, or caps are given without a ledger
+        - --model-cap `MODEL=N` with --call-ledger caps that model's calls; the report and the last printed lines carry each capped model's count and cap
+        - returns 2 when a cap is not `MODEL=N` with N an int of zero or more, or caps are given without a ledger
         - a call the cap refuses raises CallBudgetExceeded and ends the run; the ledger keeps the count for the next run
-        - with --transport agy the ledger binding is the agy binary's path, size, modification time and version,
-          then the call profile, so a ledger written under another agent definition needs a new --ledger;
-          the report carries transport, agy_binding and agy_usage (tokens per model id)
-        - returns 2 when --transport agy is given with --claude-cli-path or with --judge-thinking off, when
-          --agy-bin is given without --transport agy, or when the agy binary is not usable
+        - with --transport agy the ledger binding is the agy binary's path, size, modification time and version, then the call profile, so a ledger written under another agent definition needs a new --ledger; the report carries transport, agy_binding and agy_usage (tokens per model id)
+        - returns 2 when --transport agy is given with --claude-cli-path or with --judge-thinking off, when --agy-bin is given without --transport agy, or when the agy binary is not usable
         - returns 2 when the agy binary changes during an agy run, whichever pair's failure run_all raised,
           a cap refusal included; that failure is printed after the refusal. Finished calls stay in the
           ledger, which resumes only under the binary it was written with, and the refusal says to

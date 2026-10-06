@@ -1,25 +1,25 @@
 """
 The Dart pool builder: the Dart input of the labelled-set seeder's plan step.
 
-A sibling of pool_builder, not a branch inside it: pool_builder's walk is `.py` files under declared
-directory prefixes and its rows come from the ast module, while a Dart pool is a declared list of
-files and its rows come from the doc-comment lexer. What the two share is imported from pool_builder
-(git access, duplicate removal) and from dart_pairs (the lexer and the "Owner.member" naming); there
-is no second lexer and no second naming rule.
+A sibling of pool_builder, not a branch inside it. pool_builder's walk is `.py` files under declared
+directory prefixes, with rows from the ast module. A Dart pool is a declared list of
+files, with rows from the doc-comment lexer. What the two share is imported from pool_builder
+(git access, duplicate removal) and from dart_pairs (the lexer and the "Owner.member" naming).
+There is no second lexer and no second naming rule.
 
-It reads each listed file from git at ONE commit, never from the working tree, and writes one JSON
+It reads each listed file from git at one commit, never from the working tree. It writes one JSON
 Lines row per doc-comment block in the shape the Python pool has: { id, file, symbol, old }. The text
 is dart_pairs.block_text of the block, with the `///` markers already removed. The seeder reads the
 pool without caring about language.
 
 A block with no readable declaration under it is named "<unattached>" by dart_pairs. It documents
-nothing the seeder could name, so it is left out and counted in the manifest, never silently dropped.
-A block over a library, part, import or export line is kept as "<library>", the Dart counterpart of
-a module docstring.
+nothing the seeder could name. It is left out and counted in the manifest, never silently dropped.
+A block over a library, part, import or export line is kept as "<library>". That is the Dart
+counterpart of a module docstring.
 
-The manifest, <out>.manifest.json, records the full source sha, the file list, the sha256 of this
-builder's own file, the sha256 of the pool, the counts, every file skipped and why, the unattached
-blocks left out, and the duplicates dropped. It is separate so the pool stays exactly what the seeder reads.
+The manifest, <out>.manifest.json, records the full source sha and the file list. It also holds the
+sha256 of this builder's own file and of the pool. Further entries are the counts, every file skipped and why,
+the unattached blocks left out, and the duplicates dropped. It is separate, so the pool stays exactly what the seeder reads.
 """
 
 import argparse
@@ -98,7 +98,7 @@ def list_blobs( repo, sha, files ):
 
 def dart_rows( path, source ):
     """
-    Return the pool rows of one Dart file, the unattached blocks left out, or the reason it was skipped.
+    Return one Dart file's pool rows and its unattached blocks, or the reason it was skipped.
 
     Requires:
         - source is the file's bytes

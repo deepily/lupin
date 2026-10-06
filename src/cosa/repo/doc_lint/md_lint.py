@@ -1,9 +1,9 @@
 """
-Markdown linter: the text rules, the page templates and the link check (plan 1, section 4.1).
+Markdown linter: text rules, page templates and the link check (plan 1, section 4.1).
 
-Structure (heading order, fences, tables) belongs to markdownlint; this module checks what it
-cannot: prose rules 3 to 7, the length caps by page kind, the runbook sections, and whether
-relative links and Design paths resolve.
+Structure (heading order, fences, tables) belongs to markdownlint. This module checks what it
+cannot: prose rules 3 to 7, the length caps by page kind and the runbook sections.
+It also checks whether relative links and Design paths resolve.
 """
 
 import re

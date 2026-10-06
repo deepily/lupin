@@ -1,25 +1,28 @@
 """
-Seeding script for the labelled before/after set (row 13878d1c; build spec on row dad61023, parts 1 to 4).
+Seeding script for the labelled before/after set of docstring pairs.
 
 A script, never a model, chooses what is removed or weakened in a real docstring. A blind writer
 model then rewords the cut text, seeing neither the span nor the original. A second seat checks the
-result. Four phases, each its own command:
+result. Each phase is its own command:
 
-    plan      script only, no model call: unit split, picks, cuts, weak texts, writer tasks
-    write     blind writer calls, one shot each, under a per-model call cap that refuses
-    verify    writes the second seat's input files, and checks nothing is missing
-    assemble  joins writer output and the second seat's file into pairs, keys and a manifest
-    manifest  writes the dev-visible root manifest
+    - plan: script only, no model call: unit split, picks, cuts, weak texts, writer tasks.
+    - write: blind writer calls, one shot each, under a per-model call cap that refuses.
+    - check: rule 1 on a written set, listing the failing seeded pairs.
+    - redraw: replaces the failed pairs in a new folder.
+    - verify: writes the second seat's input files, and checks nothing is missing.
+    - assemble: joins writer output and the second seat's file into pairs, keys and split info.
+    - manifest: writes the dev-visible root manifest.
+    - natural: writes hand-labelled real removals as their own arm.
 
-Re-running plan with the same inputs and seeds gives byte-identical output. Phase 2 outputs are kept
+Re-running plan with the same inputs and seeds gives byte-identical output. Writer outputs are kept
 in a ledger and are never regenerated silently.
 
 Known limits (stated, not hidden):
-    - a weaken tests only the five coded classes; a clean result says nothing about subtler weakening
-    - the writer is still a Claude model, so a family effect is untouched (no human arm is built)
-    - the "has a verb" test in the cut-repair rule is a word-list heuristic, not a parser
-    - phase 2 builds the dev, gate and gate-reserve splits of a pool in any language; a Dart pool (dart_pool_builder) is drawn by the same
-      commands, and its writer calls need their own call-cap figure from Rick
+    - a weaken tests only the five coded classes; a clean result says nothing about subtler weakening.
+    - the writer is still a Claude model, so a family effect is untouched (no human arm is built).
+    - the "has a verb" test in the cut-repair rule is a word-list heuristic, not a parser.
+    - the writer phase builds the dev, gate and gate-reserve splits of a pool in any language.
+    - a Dart pool (dart_pool_builder) is drawn by the same commands, and its writer calls need a call-cap figure of their own.
 """
 
 import argparse
@@ -122,7 +125,7 @@ def load_stoplist( path ):
 
 
 def stratum_of( old ):
-    """Return "S", "M" or "L" by the docstring's line count (S 3-6, M 7-12, L 13+), or None under 3 lines."""
+    """Return "S", "M" or "L" by docstring line count (S 3-6, M 7-12, L 13+), None under 3."""
     lines = len( old.strip().splitlines() )
     for name, low, high in STRATA_BANDS:
         if low <= lines <= high: return name
@@ -130,7 +133,7 @@ def stratum_of( old ):
 
 
 def unit_of( file ):
-    """Return the package directory of a file path: the unit that is never split across dev, gate and reserve."""
+    """Return a file's package directory: the unit never split across dev, gate and reserve."""
     return os.path.dirname( file )
 
 
@@ -141,7 +144,7 @@ def is_short( span_words ):
 
 def phrase_units( old ):
     """
-    Return the phrase units of old as ( start, end ) offsets: clauses, parentheticals and list items.
+    Return phrase units of old as ( start, end ) offsets: clauses, parentheticals, list items.
 
     Requires:
         - old is a str
@@ -190,7 +193,7 @@ def repair( text ):
     Repair spacing and stray punctuation after a cut. Nothing else is edited.
 
     Ensures:
-        - runs of blanks become one space; space before , ; : . ! ? goes; doubled , ; : collapse; a comma before a full stop goes
+        - runs of blanks become one space; space before , ; : . ! ? goes; doubled , ; : collapse; a comma before a sentence end goes
         - empty parentheses go; a line that starts with , ; : loses it; the first letter of a sentence is capitalised
     """
     text = re.sub( r"\(\s*\)", "", text )
@@ -212,7 +215,7 @@ def cut_text( old, span ):
 
 def bad_cut( old, cut ):
     """
-    Return a reason code when a cut leaves broken text, else None. The reasons are logged by count.
+    Return a reason code when a cut leaves broken text, else None; reasons log by count.
 
     Ensures:
         - "EMPTY" when nothing is left; "NO_VERB" when a changed sentence has no verb-like word;
@@ -238,7 +241,7 @@ def bad_cut( old, cut ):
 
 def quotable_once( old, span_text ):
     """
-    Say whether a span passes the harness's own quote test, occurs once in old, and its quote occurs once.
+    Say whether a span passes the harness quote test, and it and its quote occur once.
 
     Ensures:
         - locate_quote is the one imported from the harness, called with the frozen floors
@@ -252,7 +255,7 @@ def quotable_once( old, span_text ):
 
 
 def span_ok( old, span, stoplist ):
-    """Say whether a ( start, end ) span is a seedable span: 2+ words, not all stoplist words, quotable once."""
+    """Say whether a span is seedable: 2+ words, not all stoplist words, quotable once."""
     text = old[ span[ 0 ]:span[ 1 ] ]
     if words_of( text ) < 2: return False
     if all( w.strip( EDGE_PUNCT + "()" ).lower() in stoplist for w in text.split() ): return False
@@ -286,7 +289,7 @@ def _match_case( weak, strong_text ):
 
 def weaken_edits( old ):
     """
-    Return every single-word coded edit of old: { class, changed_token, start, end, replacement }.
+    Return every single-word coded edit of old, with class, token, offsets and replacement.
 
     Ensures:
         - table pairs flagged ambiguous are never produced
@@ -315,7 +318,7 @@ def apply_edit( old, edit ):
 
 def edit_confined_to_token( old, weak, changed_token ):
     """
-    Say whether weak differs from old at exactly one word-level spot, and that spot is the changed token.
+    Say whether weak differs from old at exactly one word spot, the changed token.
 
     Ensures:
         - one differing opcode over whitespace-split words; a replace or delete must remove only the token's words;
@@ -371,7 +374,7 @@ def weaken_candidates( old, stoplist ):
 
 
 def relocate_candidates( old ):
-    """Return the ( sentence, cut text ) choices for a relocate pair: any one sentence of a text of 2+ sentences, cut whole."""
+    """Return relocate choices: each sentence of a 2+ sentence text, with the rest as the cut."""
     sentences = sentences_of( old )
     out = []
     if len( sentences ) < 2: return out
@@ -383,7 +386,7 @@ def relocate_candidates( old ):
 
 
 def candidates_for( kind, old, stoplist ):
-    """Return the candidates of one docstring for one kind; paraphrase has exactly one (the docstring)."""
+    """Return one docstring's candidates for a kind; paraphrase has exactly one, the docstring."""
     if kind == "delete": return delete_candidates( old, stoplist )[ 0 ]
     if kind == "weaken": return weaken_candidates( old, stoplist )
     if kind == "relocate": return relocate_candidates( old )
@@ -404,7 +407,7 @@ class Shortfall( Exception ):
 
 def pick( kind, docs, size, short_need, class_floor, mix, used, rng ):
     """
-    Choose size docstrings and one candidate each for one kind, meeting the short, class and stratum quotas.
+    Pick size docstrings, a candidate each, for a kind, meeting short, class, stratum quotas.
 
     Requires:
         - docs is a list of { pool_id, old, stratum, cands } sorted by pool_id; used is a set of pool ids already taken
@@ -449,7 +452,7 @@ def split_units( units, seed ):
 
 
 def draw_split( docs_by_kind, unit_list, sizes, mix, short_per_kind, used_by_split, rng ):
-    """Draw one split's picks from the docs whose units are in unit_list; returns { kind: [ ( doc, cand ) ] }."""
+    """Draw one split's picks from docs in unit_list, as { kind: [ ( doc, cand ) ] }."""
     units = set( unit_list )
     used  = set()
     out   = {}
@@ -467,7 +470,7 @@ def short_quota( sizes ):
 
 def build_docs( pool, stoplist, exclude=frozenset() ):
     """
-    Return ( docs_by_kind, units ): every usable docstring of the pool with its candidates per kind, and the sorted units.
+    Return ( docs_by_kind, units ): usable docstrings with candidates per kind, plus units.
 
     Requires:
         - pool is a list of { id, file, symbol, old }; ids unique
@@ -487,7 +490,7 @@ def build_docs( pool, stoplist, exclude=frozenset() ):
 
 
 def partition_units( units, seed ):
-    """Return { "dev", "gate", "gate-reserve" } -> the units each split owns for a split seed (thirds of the shuffled units)."""
+    """Return the units each split owns for a split seed, as thirds of the shuffled units."""
     shuffled = split_units( units, seed )
     third    = max( 1, len( shuffled ) // 3 )
     return { "dev": shuffled[ :third ], "gate": shuffled[ third:2 * third ], "gate-reserve": shuffled[ 2 * third: ] }
@@ -597,13 +600,15 @@ def check_writer_model( writer, other_ids ):
 
 
 def task_sha( instruction, text ):
-    """Return the sha256 of one writer task's instruction and text, so an output can be tied to the task it answered."""
+    """Return the sha256 of a writer task's instruction and text, tying an output to its task."""
     return hashlib.sha256( ( instruction + "\0" + text ).encode( "utf-8" ) ).hexdigest()
 
 
 def plan_hash( plan ):
     """
-    Return the sha256 of a split's plan: its units, its picks (file, span, class, stratum) and every task's content sha.
+    Return the sha256 of a split plan: its units, its picks and every task's content sha.
+
+    The picks hashed are file, span, class and stratum.
 
     Ensures:
         - a changed unit, span, class, stratum or task text changes the hash; the same plan gives the same hash
@@ -632,7 +637,7 @@ def check_reserve_plan_hash( base, plan ):
         - plan is the loaded reserve plan
 
     Limit: plan-hashes.json is written by the same plan run and sits beside the plan, so this catches an edit of plan.json that
-    left plan-hashes.json alone, not an edit of both. The independent witness is reserve_plan_sha256 in the repo's MANIFEST.json,
+    left plan-hashes.json alone, not an edit of both. The independent witness is reserve_plan_sha256 in the repo's `MANIFEST.json`,
     which the manifest phase writes after the writer phase, so it does not exist yet when a reserve write runs.
 
     Raises:
@@ -646,10 +651,11 @@ def check_reserve_plan_hash( base, plan ):
 
 def check_sibling_ledgers( base, split, model ):
     """
-    Refuse a write whose writer model or prompt differs from what the other splits under the same base were written with.
+    Refuse a write whose model or prompt differs from the other splits written under base.
 
-    Each split has its own writer ledger and the identity check inside one ledger cannot see another, so a different model id
-    would otherwise get a fresh cap and a different prompt would change what the reserve measures against the gate.
+    Each split has its own writer ledger, and the identity check inside one ledger cannot see another.
+    A different model id would otherwise get a fresh cap.
+    A different prompt would change what the reserve measures against the gate.
 
     Requires:
         - base is the folder holding the split folders; model is the writer model of this write
@@ -666,7 +672,7 @@ def check_sibling_ledgers( base, split, model ):
 
 def check_ledger_identity( rows, model=None ):
     """
-    Refuse a writer ledger whose rows disagree on the writer model or prompt, with each other or with now.
+    Refuse a writer ledger whose rows disagree on model or prompt, among themselves or now.
 
     Requires:
         - rows are writer-ledger rows; model is the writer model expected, or None to take the first row's
@@ -698,7 +704,7 @@ def disjoint( picks_by_split ):
 
 def strata_mix_of( override ):
     """
-    Return the strata mix a plan draws with: STRATA_MIX, or the "strata_mix" a --sizes-json file carries.
+    Return the plan's strata mix: STRATA_MIX, or the "strata_mix" of a --sizes-json file.
 
     Requires:
         - override is the parsed --sizes-json object, or None
@@ -720,7 +726,9 @@ def strata_mix_of( override ):
 
 def cmd_plan( args ):
     """
-    Phase 1: no model call. Writes plan.json and writer_tasks.jsonl per split; gate and reserve go outside the repo.
+    Write plan.json and writer_tasks.jsonl per split, with no model call.
+
+    Gate and reserve files go outside the repo.
 
     Returns the process exit code: 0 done, 2 refused.
     """
@@ -755,7 +763,7 @@ def cmd_plan( args ):
 
 
 def writer_ledger_row( task_id, model, text ):
-    """Return the writer-ledger row of one call: task id, model id, prompt hash, output sha256 (never the text)."""
+    """Return one call's ledger row: task id, model, prompt hash, output sha256, never the text."""
     return { "task_id": task_id, "model": model, "prompt_hash": prompt_hash(), "output_sha256": hashlib.sha256( text.encode( "utf-8" ) ).hexdigest() }
 
 
@@ -763,7 +771,7 @@ REASON_CHARS = 300
 
 
 class WriterStopped( Exception ):
-    """A writer run ended early on purpose; carries the reason and what the run had done by then."""
+    """A writer run that was stopped early; carries the reason and what the run had done."""
 
     def __init__( self, message, called, dropped ):
         super().__init__( message )
@@ -771,7 +779,7 @@ class WriterStopped( Exception ):
 
 
 class CanaryFailed( WriterStopped ):
-    """The one call made before the batch failed; nothing was retried and nothing was marked dropped."""
+    """The one call made before the batch failed; nothing was retried or marked dropped."""
 
 
 class TooManyFailures( WriterStopped ):
@@ -780,7 +788,7 @@ class TooManyFailures( WriterStopped ):
 
 async def run_writer( tasks, model, ledger_path, outputs_path, query_fn=None, *, max_consecutive_failures, cli_path=None, cli_version=None ):
     """
-    Phase 2 body: one blind call per task without a finished row in the ledger, each retried once on failure.
+    Run one blind writer call per task lacking a finished ledger row, retrying each once.
 
     Requires:
         - model_transport.set_budget has been called with a cap for model
@@ -792,7 +800,7 @@ async def run_writer( tasks, model, ledger_path, outputs_path, query_fn=None, *,
         - a task with a finished (not dropped) row is never called again; a dropped row is not final, so a later run calls
           that task again and the ledger keeps both rows
         - the ledger's rows must agree on model and prompt hash with each other and with now, or ValueError
-        - the first pending task is a canary: ONE call, no retry; if it fails, CanaryFailed is raised with the reason and
+        - the first pending task is a canary: one call, no retry; if it fails, CanaryFailed is raised with the reason and
           no ledger row is written for it
         - every other failed call prints its reason to stderr; a failed or empty call is retried once; still failing, the task is
           recorded as dropped with the last reason (first 300 characters) on its row
@@ -842,24 +850,26 @@ async def run_writer( tasks, model, ledger_path, outputs_path, query_fn=None, *,
 
 def cmd_write( args, query_fn=None ):
     """
-    Phase 2: blind writer calls. Refuses without a cap, off the shared ledger, past the approved count, or for reserve.
+    Run the blind writer calls of one split, refusing unless the cap and ledger checks pass.
 
-    Returns the exit code: 0 done, 2 refused, 3 a call cap stopped the run, 4 the first (canary) call failed,
-    5 --max-consecutive-failures tasks in a row failed twice, 6 the run finished but dropped at least one task.
+    Refuses without a cap, off the shared ledger, past the approved count, or for a split the writer does not build.
+
+    Returns the exit code. 0 is done and 2 is refused. 3 means a call cap stopped the run. 4 means the first (canary) call failed.
+    5 means --max-consecutive-failures tasks in a row failed twice. 6 means the run finished but dropped at least one task.
 
     The split may be dev, gate or gate-reserve. Any write is refused when another split's writer ledger under --base shows a
-    different writer model id or prompt hash, so the gate and the reserve are written by one model under one prompt and one cap.
-    A reserve write first compares the reserve plan with
-    reserve_plan_sha256 in plan-hashes.json in --base (the gate output root) and refuses on a mismatch.
-    --call-hold is required: the writer model's cap is lowered by that many calls before the budget is set, so no
-    call can pass cap minus hold, and the run is refused up front when the calls already spent on the ledger plus
-    two calls for each pending task (a retry counted) would pass it.
+    different writer model id or prompt hash. This keeps the gate and the reserve written by one model under one prompt and one cap.
+    A reserve write first compares the reserve plan with reserve_plan_sha256 in plan-hashes.json under --base, the gate output root.
+    It refuses on a mismatch.
+    --call-hold is required. The writer model's cap is lowered by that many calls before the budget is set, so no
+    call can pass the cap minus the hold. The run is refused up front when calls already spent on the ledger, plus two per
+    pending task (a retry counted), would pass that cap.
 
-    --claude-cli-path is required: the binary and its version go on every ledger row and into the printed summary.
-    --approved-calls bounds the pending TASKS (a dropped task is pending again). A task that fails is called a second
+    Option --claude-cli-path is required: the binary and its version go on every ledger row and into the printed summary.
+    Option --approved-calls bounds the pending tasks (a dropped task is pending again). A task that fails is called a second
     time, so calls can reach twice the approved count; --call-hold bounds the calls.
-    A plan edited after it was drawn, a ledger written by another model or prompt, or a ledger row for different
-    task text (a plan redrawn into the same files) is refused with exit 2.
+    Exit 2 refuses a plan edited after it was drawn. It also refuses a ledger written by another model or prompt.
+    A ledger row for different task text (a plan redrawn into the same files) is refused the same way.
     """
     import asyncio
     if args.split not in WRITER_SPLITS:
@@ -925,7 +935,9 @@ NEGATION_CUES = frozenset( "not n't no never cannot without".split() )
 
 def weak_cues( cls, token ):
     """
-    Return the lowercase words that show a weakened token in the writer's output; empty when the weak form is nothing (a deleted qualifier).
+    Return the lowercase cue words that show a weakened token in the writer's output.
+
+    The result is empty when the weak form is nothing, as for a deleted qualifier.
 
     Requires:
         - cls and token are a weaken pair's class and changed token as the plan recorded them
@@ -957,7 +969,7 @@ def token_count( text, token ):
 
 def check_pair( pair, task_text, new_text ):
     """
-    Rule 1: the mechanical check of one seeded pair, from the plan's record and the writer's output. No model.
+    Rule 1: check one seeded pair mechanically against the writer's output, with no model.
 
     Requires:
         - pair is a seeded (delete or weaken) pair record of a plan; task_text is the text the writer was given; new_text is what it returned
@@ -988,7 +1000,9 @@ def check_pair( pair, task_text, new_text ):
 
 def check_set( base, split ):
     """
-    Run rule 1 over every seeded pair of one written split. Reads files only; no model, no ledger, no cap.
+    Run rule 1 over every seeded pair of a written split, reading files only.
+
+    It uses no model, no ledger and no cap.
 
     Ensures:
         - returns ( { pair_id: [ reason ] }, seeded pairs checked ); a pair with no writer output is NO_OUTPUT,
@@ -1053,10 +1067,12 @@ def rule1_status( base, split, accept_path=None ):
 
 def cmd_check( args ):
     """
-    Rule 1 on a written set: list the failing seeded pairs. Makes no model call and touches no ledger.
+    Run rule 1 on a written set and list the failing seeded pairs.
 
-    Returns 0 when every seeded pair passes or is accepted, 1 when any fails (ids and reasons printed), 2 when the plan, the task file or
-    the accept file is refused. --accept FILE names pairs a reader has read and judged fine (see rule1_status).
+    It makes no model call and touches no ledger.
+    Returns 0 when every seeded pair passes or is accepted, and 1 when any fails, printing ids and reasons.
+    Returns 2 when the plan, the task file or the accept file is refused.
+    The --accept option names a file of pairs a reader has read and judged fine (see rule1_status).
     """
     try: failures, accepted, checked = rule1_status( args.base, args.split, args.accept )
     except ( ValueError, OSError ) as e:
@@ -1069,7 +1085,7 @@ def cmd_check( args ):
 
 def candidate_span( kind, c ):
     """
-    Return the text a candidate of this kind removes or moves, the way make_pair records it in x_span_in_old.
+    Return the text a candidate removes or moves, as make_pair records it in x_span_in_old.
 
     Ensures:
         - delete and weaken: the span text; relocate: the sentence; paraphrase: "", because the docstring is the whole candidate
@@ -1080,7 +1096,7 @@ def candidate_span( kind, c ):
 
 def redraw_pairs( plan, failing, docs_by_kind, scope, rng ):
     """
-    Choose a replacement for each failing pair, keeping its kind, weaken class, shortness and stratum.
+    Choose a replacement for each failing pair, keeping its kind, class, shortness, stratum.
 
     Requires:
         - scope is the set of units the split owns; docs_by_kind comes from build_docs under the current rules
@@ -1132,16 +1148,16 @@ def read_failed_ids( path, plan ):
 
 def cmd_redraw( args ):
     """
-    Redraw the failed pairs into a new folder, saying how many writer calls that needs before writing anything.
+    Redraw the failed pairs into a new folder, saying first how many writer calls that needs.
 
-    The failed pairs are those rule 1 fails plus those named by --failed.
+    The failed pairs are those rule 1 fails plus those named by --failed, a file of pairs a second reader failed, of any kind. A pair named in both is replaced once.
 
-    Returns 0 on success (or when nothing fails), 2 when refused: the pool is not the one the plan was drawn from, a
-    replacement is missing for a floor, the output folder already holds this split, or the --failed file is not a list of
-    strings or names a pair that is not in the plan. --failed names a file of pairs a second reader failed, of any kind; they are
-    replaced as well as the rule 1 failures, and a pair named in both is replaced once.
+    Returns 0 on success, or when nothing fails.
 
     Ensures:
+        - returns 2 when the pool is not the one the plan was drawn from, or the output folder already holds this split
+        - returns 2 when a replacement is missing for a floor
+        - returns 2 when the --failed file is not a list of strings, or names a pair that is not in the plan
         - no model call is made; the source set is not changed
         - the new folder holds the plan (replaced pairs keep their ids), the writer tasks (kept ones first), the ledger and
           output rows of the kept tasks, and for a gate split a plan-hashes.json carrying the new hash
@@ -1209,12 +1225,13 @@ def checked_outputs( base, plan ):
 
 def cmd_verify( args ):
     """
-    Phase 3: write the second seat's input (no kind labels) and a separate span file, and report what is missing.
+    Write the second seat's input, without kind labels, and a separate span file.
 
-    Returns 0 when written. Reads writer_outputs.jsonl; refuses (2) while a task has no output, and while rule 1
-    (check_set) fails any seeded pair, so the second seat never reads a pair the script can already see is broken.
-    --accept FILE (a JSON list of pair ids a reader has read) lets a pair past that fails only WEAK_TOKEN_MISSING; the
-    list and its sha256 are recorded in rule1-accepted.json, and the count of accepted pairs is printed.
+    Returns 0 when written. It reads writer_outputs.jsonl and checks that no task output is missing.
+    It refuses (2) while a task has no output. It also refuses (2) while rule 1 (check_set) fails any seeded pair.
+    This way the second seat never reads a pair the script can already see is broken.
+    The --accept option names a JSON file listing pair ids a reader has read. It lets through a pair that fails only WEAK_TOKEN_MISSING.
+    The list and its sha256 are recorded in rule1-accepted.json, and the count of accepted pairs is printed.
     """
     base = os.path.join( args.base, args.split )
     plan = json.loads( open( os.path.join( base, "plan.json" ), encoding="utf-8" ).read() )
@@ -1239,7 +1256,7 @@ def cmd_verify( args ):
 
 def check_verification( plan, rows ):
     """
-    Return the list of problems in the second seat's file: a pair with no row, or any false field.
+    Return the problems in the second seat's file: a pair with no row, or any false field.
 
     Ensures:
         - a seeded pair needs claim_absent_in_new true; an unseeded one needs no_claim_missing true; every pair needs grammar_ok true
@@ -1270,7 +1287,7 @@ def recount( plan ):
 
 def cmd_assemble( args ):
     """
-    Phase 4: join the plan, writer output and the second seat's file into pairs, keys and a split manifest.
+    Join the plan, writer output and the second seat's file into pairs, keys and split info.
 
     Returns 0 done; 2 refused (missing or false verification row, missing writer output, or a loader failure).
     Layout: dev/pairs.jsonl and keys/dev-keys.jsonl; gate files go under --out too (pass --out outside the repo).
@@ -1319,13 +1336,13 @@ def cmd_assemble( args ):
 
 def cmd_manifest( args ):
     """
-    Write the dev-visible root MANIFEST.json.
+    Write the dev-visible root `MANIFEST.json`.
 
-    The gate-hashes file holds gate_pairs_sha256, gate_keys_sha256 and reserve_plan_sha256 (written by plan into the gate
-    store as plan-hashes.json); the reserve pairs and keys hashes are optional.
+    The gate-hashes file must hold gate_pairs_sha256, gate_keys_sha256 and reserve_plan_sha256.
+    The reserve pairs and keys hashes are optional. Plan writes the reserve plan hash into plan-hashes.json in the gate store.
 
-    Holds: the dev files and shas, the dev seed, the writer id, prompt hash, floors, dev counts, the gate and
-    reserve pairs/keys sha256 values, the harness commit, the stoplist sha.
+    Holds: the dev files and shas, the dev seed, the writer id, the prompt hash, the floors and the dev counts.
+    Also holds the gate and reserve pairs and keys sha256 values, the harness commit and the stoplist sha.
     Never holds: the gate seed, the split seed, a gate or reserve file list, a gate sha filename, gate counts by class.
     Returns 0, or 2 when the commit is not 40 hex digits.
     """

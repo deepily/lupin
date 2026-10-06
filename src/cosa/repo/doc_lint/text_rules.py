@@ -256,8 +256,8 @@ def defined_steps( text ):
         - text is a str
 
     Ensures:
-        - returns the lowercase labels, such as "step 1", that start a line or heading and are
-          followed by a colon, dash, period or the end of the line
+        - returns the lowercase labels, such as the word step followed by a number, that start a line or
+          heading and are followed by a colon, dash, period or the end of the line
         - a reference to a label in this set is the page's own structure, not a pointer elsewhere
 
     Raises:
@@ -373,7 +373,7 @@ def do_not_starts( text ):
 
 def history_findings( text, path, first_line, agent_rule=True ):
     """
-    Check rule 7 and the agent-imperative rule: current state only, nothing addressed to a model.
+    Check rule 7 and the agent-imperative rule: current state only, nothing aimed at a model.
 
     Requires:
         - text is a str

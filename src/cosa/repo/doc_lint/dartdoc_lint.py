@@ -1,8 +1,8 @@
 """
 Doc-comment linter for Dart: the same text rules as docstring_lint, over `///` blocks.
 
-A small lexer finds the doc comments, because the analyzer has no hook for custom prose rules
-and a regex would read `///` inside a string literal as a comment. Stdlib only, so it can be
+A small lexer finds the doc comments. The analyzer has no hook for custom prose rules,
+and a regex would read `///` inside a string literal as a comment. It uses the stdlib only, so it can be
 vendored into lupin-mobile's tool/ directory with the rule modules.
 """
 

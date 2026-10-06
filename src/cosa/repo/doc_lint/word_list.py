@@ -3,7 +3,7 @@ The English word list behind the ALL-CAPS predicate (rule 4).
 
 An ALL-CAPS token is emphasis when its lowercase form is a word. The list is the one lupin
 already vendors for the DM tutor. Entry points that run in a bare interpreter (the pre-commit
-gate) call configure_root with the working tree, so this module needs no third-party imports;
+gate) call configure_root with the working tree. So this module needs no third-party imports.
 lupin-mobile's vendored copy passes its own set to the rule functions instead.
 """
 

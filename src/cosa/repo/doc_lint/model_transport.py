@@ -6,9 +6,9 @@ model can only emit text. The firewalled per-token SDK is never used here. Bound
 temperature setting, so callers get determinism from strict parsing and repeat-run checks.
 
 Every call is hermetic. The Claude Code subprocess otherwise loads the operator's CLAUDE.md, MCP
-servers, hooks and memory, so a measured model would answer under instructions that are not
-in the prompt. The isolation profile below turns each of those off, and it is hashed into every
-prompt version so a row made under another profile can never be replayed.
+servers, hooks and memory. A measured model would then answer under instructions that are not
+in the prompt. The isolation profile below turns each of those off. It is hashed into every
+prompt version, so a row made under another profile can never be replayed.
 """
 
 import asyncio
@@ -133,7 +133,7 @@ _SCOPE = contextvars.ContextVar( "model_call_scope", default=None )
 
 
 class _CallScope:
-    """What record_calls() keeps for its block: the finished calls, and which stage and thinking setting the next call has."""
+    """Hold what record_calls() keeps: finished calls, and the next call's stage and thinking."""
 
     def __init__( self, plan ):
         self.plan   = plan
@@ -141,7 +141,7 @@ class _CallScope:
         self.calls  = []
 
     def next_call( self ):
-        """Return ( stage, thinking ) for the next call issued in the block; the last plan entry repeats."""
+        """Return ( stage, thinking ) for the next call in the block; the last plan entry repeats."""
         entry        = self.plan[ min( self.issued, len( self.plan ) - 1 ) ]
         self.issued += 1
         return entry
@@ -150,7 +150,7 @@ class _CallScope:
 @contextlib.contextmanager
 def record_calls( plan=( ( "call", "default" ), ) ):
     """
-    Collect ( stage, seconds ) for every call to complete() made inside the block, in this context only.
+    Collect ( stage, seconds ) for each complete() call in the block, in this context only.
 
     Requires:
         - plan is a non-empty tuple of ( stage, thinking ), one per call in the order the block issues them;
@@ -189,7 +189,7 @@ BUDGET_CAPS   = {}
 
 def set_budget( ledger_path, caps ):
     """
-    Cap the number of calls per model id for this process, counted from a ledger file that outlives it.
+    Cap calls per model id for this process, counted from a ledger file that outlives it.
 
     Requires:
         - ledger_path is a file path in an existing directory, outside the repo; the file may not exist yet
@@ -249,7 +249,7 @@ def budget_summary():
 
 def _charge( model ):
     """
-    Charge one call to a capped model, or refuse it; writes the ledger line before the call is made.
+    Charge one call to a capped model or refuse it; writes the ledger line before the call.
 
     Requires:
         - model is a non-empty model id
@@ -282,7 +282,7 @@ def _charge( model ):
 
 def configure( cli_path=None, cwd=None ):
     """
-    Choose the Claude Code binary and the working directory every later call uses, for this process.
+    Choose the Claude Code binary and working directory that every later call uses.
 
     The SDK ships its own binary, and a newer model id can need a newer binary than the one it
     ships. Run config, not a default: the harness command line sets it once.
@@ -547,7 +547,7 @@ def _scratch_entries( scratch ):
 
 def cli_version( cli_path, run_fn=None ):
     """
-    Return the version string a Claude Code binary reports, so a report names the binary and not just its path.
+    Return the version string a Claude Code binary reports, so a report names the binary.
 
     Requires:
         - cli_path is None or the path of an executable file; run_fn, when given, stands in for subprocess.run
@@ -613,7 +613,7 @@ async def complete( model, system_prompt, user_prompt, query_fn=None, timeout_se
         - returns the concatenated text blocks of the assistant messages, stripped
         - the text is never empty
         - a model with a cap (set_budget) is charged one call before the model is contacted
-        - thinking "default" sends exactly the options sent before this setting existed; "off" adds
+        - thinking "default" sends the same options as before this setting existed; "off" adds
           the SDK's thinking-disabled option
         - a finished call is added to the enclosing record_calls() list as ( stage, wall-clock seconds );
           under agy the seconds are those of the try that answered, without any wait for a 503

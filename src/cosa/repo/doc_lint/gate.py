@@ -2,11 +2,11 @@
 Pre-commit gate for the documentation standard (plan 1, section 4.2).
 
 Lints the staged lines of Python and markdown files with ruff, markdownlint-cli2 and the
-doc_lint rules, prints the findings to stderr and exits 0. It exits 0 on its own crash too,
-because the hook is shared by every worktree and a crashing gate must not block every seat.
+doc_lint rules, prints the findings to stderr and exits 0. It exits 0 on its own crash too.
+The hook is shared by every worktree, and a crashing gate must not block every seat.
 A missing tool prints a loud warning. It does not read PLANNING_IS_PROMPTING_ROOT.
 
-One exception to warn mode: a staged file inside a package listed in BLOCKING_PACKAGES is
+One exception to warn mode applies. A staged file inside a package listed in BLOCKING_PACKAGES is
 refused for a mechanical history finding on any line, touched or not. The gate then exits
 REFUSAL_EXIT. The list starts empty. No package is refused until it is added here.
 """

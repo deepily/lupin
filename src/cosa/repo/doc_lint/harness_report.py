@@ -79,7 +79,7 @@ def caught( claim_list, seed_span ):
 
     Ensures:
         - True when a claim judged dropped has a verified quote that overlaps the seed span, or when
-          a run flagged for a person overlaps it (rule B4 of row dad61023)
+          a run flagged for a person overlaps it (the flagged-run rule)
         - a list whose first reply was unreadable (parse_failed) never catches: its flag covers the whole old
           text, which would overlap every span, so it is its own outcome and a miss here
         - a flagged claim or run elsewhere does not count, and a seeded claim the extractor never
@@ -115,29 +115,29 @@ def run_flagged( claim_list, seed_span ):
 
 
 def discarded_on( claim_list, seed_span ):
-    """Say whether a discarded quote of an extractor list overlaps a seed span: the harness threw the claim away."""
+    """Say whether a discarded quote of an extractor list overlaps a seed span."""
     return any( d[ "start" ] is not None and claim_extractor.spans_overlap( ( d[ "start" ], d[ "end" ] ), seed_span ) for d in claim_list[ "discards" ] )
 
 
 def flagged( claim_list ):
-    """Say whether a judge dropped any claim of an extractor list: the judge's false alarm on an unseeded pair."""
+    """Say whether a judge dropped any claim of an extractor list (a false alarm if unseeded)."""
     return bool( claim_list[ "claims" ] ) and any( final_absent( claim_list[ "runs" ] ) )
 
 
 def run_flagged_pair( claim_list ):
     """
-    Say whether an extractor list has any run of old text flagged for a person, whatever the judge said.
+    Say whether an extractor list has a run of old text flagged for a person, judge aside.
 
     Ensures:
         - a list whose extractor reply was unreadable (parse_failed) is not a flagged-run pair: its whole-text flag
-          is a parse failure, counted apart, so it neither feeds flagged_rate nor flag-only catches (row 35d38e9f)
+          is a parse failure, counted apart, so it neither feeds flagged_rate nor flag-only catches
     """
     return bool( claim_list[ "flags" ] ) and not claim_list[ "parse_failed" ]
 
 
 def call_timing( results ):
     """
-    Sum the recorded model-call time and call counts by stage over every result.
+    Sum recorded model-call time and call counts by stage over every result.
 
     Requires:
         - results come from run_all; a result with no "timing" (a report rebuilt from an older run) adds nothing
@@ -170,39 +170,21 @@ def build_report( results, config, judge_prompt_version=None, jev_run=False ):
         - a result with a seed_span is a seeded-removal pair; the others are unseeded
 
     Ensures:
-        - per extractor list: misses, false alarms, and whether each meets its criterion, so a
-          criterion must hold on every list and not on one lucky draw
-        - agreement is reported over all claims and over claims overlapping a seed span, each with
-          its interval, because an overall figure can hide disagreement on the dropped claims
-        - parse_failed_pairs counts, per list, the pairs whose extractor reply stayed unreadable after one retry
-          (top level: the largest list); retry_calls counts the retries; such a pair is never a catch, never a
-          flag-only catch, and stays out of flagged_pairs, flagged_rate and mean_flag_words; an unseeded one is in review_pairs
+        - per extractor list: misses, false alarms, and whether each meets its criterion, so a criterion must hold on every list and not on one lucky draw
+        - agreement is reported over all claims and over claims overlapping a seed span, each with its interval, because an overall figure can hide disagreement on the dropped claims
+        - parse_failed_pairs counts, per list, the pairs whose extractor reply stayed unreadable after one retry (top level: the largest list); retry_calls counts the retries; such a pair is never a catch, never a flag-only catch, and stays out of flagged_pairs, flagged_rate and mean_flag_words; an unseeded one is in review_pairs
         - reports the escalation count, discarded-claim count (and per code) and mean uncovered fraction
-        - per list: seeded_span_discarded counts seeded pairs where a DISCARDED quote overlaps the span
-          (the harness threw the claim away, the extractor did list it), flagged_pairs and flagged_rate
-          count UNSEEDED pairs with a run flagged for a person, mean_flag_words is the mean length of a flagged run,
-          review_rate is the share of unseeded pairs a person would look at (judge false alarm or flag, no ceiling),
-          and caught_by_flag_only counts seeded pairs caught by a flag alone; the top-level seeded_span_discarded,
-          flagged_rate and review_rate are the largest over the lists
-        - false_alarm_rate counts the judge's false alarms only; a flagged run is counted apart, in flagged_rate,
-          and flagged_ok is True only when every list's flagged_rate is at most FLAGGED_CEILING (provisional)
+        - per list: seeded_span_discarded counts seeded pairs where a discarded quote overlaps the span (the harness threw the claim away, the extractor did list it), flagged_pairs and flagged_rate count unseeded pairs with a run flagged for a person, mean_flag_words is the mean length of a flagged run, review_rate is the share of unseeded pairs a person would look at (judge false alarm or flag, no ceiling), and caught_by_flag_only counts seeded pairs caught by a flag alone; the top-level seeded_span_discarded, flagged_rate and review_rate are the largest over the lists
+        - false_alarm_rate counts the judge's false alarms only; a flagged run is counted apart, in flagged_rate, and flagged_ok is True only when every list's flagged_rate is at most FLAGGED_CEILING (provisional)
         - the model ids and prompt versions used are recorded in the report
-        - history_class carries the class version and, per list, claims_lost (every claim judged dropped: nothing is excused)
-          and the tagged count, the dropped claims that look like history; tagged_claims lists each tagged claim with its
-          pair, list, text, quote and kinds, for a person to read. The gate figures above use every dropped claim, as before
+        - history_class carries the class version and, per list, claims_lost (every claim judged dropped: nothing is excused) and the tagged count, the dropped claims that look like history; tagged_claims lists each tagged claim with its pair, list, text, quote and kinds, for a person to read. The gate figures above use every dropped claim, as before
         - miss_criterion_met is True only for zero misses on at least 60 seeded pairs in every list
-        - false_alarm_ok is True only when every list flags at most FALSE_ALARM_CEILING of the
-          unseeded pairs, so a harness that flags everything cannot pass
+        - false_alarm_ok is True only when every list flags at most FALSE_ALARM_CEILING of the unseeded pairs, so a harness that flags everything cannot pass
         - agreement_ok is True only when both agreement rates are known and at least AGREEMENT_BAR
-        - default_gate_pass is True only when all four hold (miss, false alarm, flagged, agreement), and, on a jev_run, only when no claim
-          went without a Jev answer
-        - judge_unanswered counts the claim verdicts, over all lists and runs, that carry no Jev
-          probability: Jev gave no answer and the escalation model decided under Jev's name. It is
-          None on a run that did not use Jev
-        - call_timing holds per-stage (extractor, judge, escalation) seconds and call counts over the whole run,
-          resumed rows included at their recorded time, and judge_thinking records the setting the judge ran under
-        - identical_list_pairs counts pairs whose extractor lists came out the same, because the
-          SDK has no temperature and two "independent" lists can be one list drawn twice
+        - default_gate_pass is True only when all four hold (miss, false alarm, flagged, agreement), and, on a jev_run, only when no claim went without a Jev answer
+        - judge_unanswered counts the claim verdicts, over all lists and runs, that carry no Jev probability: Jev gave no answer and the escalation model decided under Jev's name. It is None on a run that did not use Jev
+        - call_timing holds per-stage (extractor, judge, escalation) seconds and call counts over the whole run, resumed rows included at their recorded time, and judge_thinking records the setting the judge ran under
+        - identical_list_pairs counts pairs whose extractor lists came out the same, because the SDK has no temperature and two "independent" lists can be one list drawn twice
 
     Raises:
         - nothing

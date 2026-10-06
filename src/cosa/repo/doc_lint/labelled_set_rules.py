@@ -1,35 +1,34 @@
 """
-Selection rules of the labelled-set seeder (row 421963b6): plain-text predicates, no model, no file.
+Selection rules of the labelled-set seeder: text predicates, no model, no file.
 
-The first real dev set had about a third of its seeded pairs fail the second seat: the removed claim was still
-stated elsewhere in the new text, or the cut left broken text. These predicates keep such candidates out of the plan.
+The first real dev set had about a third of its seeded pairs fail the second seat. Either the removed claim was
+still stated elsewhere in the new text, or the cut left broken text. These predicates keep such candidates out.
 
-Every rule here is a HEURISTIC over text. Each over-rejects (a candidate lost is a candidate not drawn; the plan
-raises Shortfall when a floor cannot be met) and each has a stated blind spot:
+Every rule is a heuristic over text. Each over-rejects, so a lost candidate is only one not drawn.
+The plan raises Shortfall when a floor cannot be met. Each rule has a stated blind spot.
 
-    R2  restated_swap       a number or quantifier swap is skipped when the same value or word occurs again anywhere
-                            in the docstring. Misses: a restatement in other words ("a pair" for "two").
-    R3  qualifier_rejected  a qualifier deletion is skipped inside a code fence, backticks, double quotes or an
-                            example block, and when another sentence sharing two content words with it carries an
-                            exclusion cue or the same qualifier. Misses: an exclusion stated with no shared words.
-    R4  delete_rejection    a delete is skipped when it touches the first sentence, leaves a lowercase sentence start,
-                            leaves a sentence under four words, empties a heading or a field, or leaves a paragraph
-                            opening on a pronoun. Misses: a pronoun inside a sentence whose antecedent was cut; a
-                            list item emptied of meaning but not of words.
-    R5  restated_elsewhere  a delete is skipped when another sentence holds 60% of the span's content words.
-                            Misses: a restatement in synonyms; over-rejects a span built from common words.
-    R7  words_of            a leading bullet or list marker is not a word.
-    R8  markup_rejection    a delete or weaken span is skipped when it cuts into inline code, a code fence or a
-                            [reference] link, a weaken when its changed word sits inside one, and a delete when it
-                            removes the opening words of a list item (row 9d3f4562, after 5 of 16 Dart deletes came
-                            out garbled). Misses: an indented code block with no fence; a fence written with tildes;
-                            a backtick span or a link broken over two lines; an RST double-backtick span (``x``) is protected only
-                            by the match of its inner single-backtick span, so a cut of one outer backtick is not seen.
-                            Over-rejects: plain square brackets such as "[0]" are read as a link.
-    R9  lead_in_rejection   a delete is skipped when it leaves a clause's lead-in hanging: HANGING_CONDITION (a sentence that opens on
-                            a subordinator is left with its condition and no main clause), DROPPED_CONDITION (a clause opening on a
-                            subordinator is cut out before ", and" or ", but"), JOINED_CONDITIONS (a comma and a second condition are
-                            left running straight on from a first). Over-rejects and misses: see lead_in_rejection.
+    Rule 2  restated_swap       skips a number or quantifier swap when its value or word occurs again in the docstring.
+                                Misses: a restatement in other words, such as "a pair" for "two".
+    Rule 3  qualifier_rejected  skips a qualifier deletion inside a code fence, backticks, double quotes or an example block.
+                                Also skips it when another sentence shares two content words with it. That sentence must carry an exclusion cue or the same qualifier.
+                                Misses: an exclusion stated with no shared words.
+    Rule 4  delete_rejection    skips a delete that touches the first sentence or leaves a lowercase sentence start. Also skips one that leaves a sentence under four words.
+                                Also skips a delete that empties a heading or a field. Also skips one that leaves a paragraph opening on a pronoun.
+                                Misses: a pronoun inside a sentence whose antecedent was cut. Misses: a list item emptied of meaning but not of words.
+    Rule 5  restated_elsewhere  skips a delete when another sentence holds 60% of the span's content words.
+                                Misses: a restatement in synonyms. Over-rejects: a span built from common words.
+    Rule 7  words_of            a leading bullet or list marker is not a word.
+    Rule 8  markup_rejection    skips a delete or weaken span that cuts into inline code, a code fence or a [reference] link.
+                                Also skips a weaken whose changed word sits inside one.
+                                Also skips a delete that removes the opening words of a list item, because 5 of 16 Dart deletes came out garbled.
+                                Misses: an indented code block with no fence; a fence written with tildes; a backtick span or link broken over two lines.
+                                An RST double-backtick span is protected only by the match of its inner single-backtick span.
+                                So a cut of one outer backtick is not seen. Over-rejects: plain square brackets such as "[0]", read as a link.
+    Rule 9  lead_in_rejection   skips a delete that leaves a clause's lead-in hanging.
+                                HANGING_CONDITION: a sentence that opens on a subordinator is left with its condition and no main clause.
+                                DROPPED_CONDITION: a clause opening on a subordinator is cut out before ", and" or ", but".
+                                JOINED_CONDITIONS: a comma and a second condition are left running straight on from a first.
+                                Over-rejects and misses: see lead_in_rejection.
 
 Rule 1 (the mechanical check after the writer) and the redraw path live in labelled_set_seeder.py.
 """
@@ -96,7 +95,7 @@ def sentence_spans( text ):
 
 def words_of( text ):
     """
-    Count words the way the spec does: split() on whitespace, with a leading bullet or list marker not counted (rule 7).
+    Count words by whitespace split, not counting a leading bullet or list marker (rule 7).
 
     Ensures:
         - "- keep the lock" counts 3; "1. keep the lock" counts 3; a lone "-" counts 0
@@ -112,14 +111,18 @@ def content_words( text ):
 
 
 def first_sentence_end( old ):
-    """Return the offset where the first sentence of old ends (0 for a text with none): the summary line is never a delete candidate."""
+    """
+    Return the offset where the first sentence of old ends, 0 for a text with none.
+
+    The first sentence is the summary line, which is never a delete candidate.
+    """
     spans = sentence_spans( old )
     return spans[ 0 ][ 1 ] if spans else 0
 
 
 def restated_elsewhere( old, span ):
     """
-    Say whether a sentence outside the span's own sentence restates the span by content words (rule 5).
+    Say whether a sentence outside the span's own restates the span by content words (rule 5).
 
     Requires:
         - span is a ( start, end ) pair of offsets into old
@@ -138,7 +141,7 @@ def restated_elsewhere( old, span ):
 
 
 def protected_regions( old ):
-    """Return the ( start, end ) regions of old that are code fences, backtick or double-quoted literals, or example blocks."""
+    """Return the ( start, end ) regions of old holding fences, literals or example blocks."""
     return [ ( m.start(), m.end() ) for pattern in PROTECTED_RES for m in pattern.finditer( old ) ]
 
 
@@ -154,7 +157,7 @@ def number_value( token ):
 
 def restated_swap( old, cls, token, start ):
     """
-    Say whether a number or quantifier swap would leave the same claim standing elsewhere (rule 2).
+    Say whether a number or quantifier swap leaves the same claim standing elsewhere (rule 2).
 
     Requires:
         - token is the changed word as written at offset start in old
@@ -193,7 +196,7 @@ def qualifier_rejected( old, start, end, token ):
 
 
 def sentence_start_before( old, index ):
-    """Say whether a new sentence would begin at index: start of text, after . ! ?, or after a blank line."""
+    """Say whether a sentence would begin at index: at text start, after . ! ? or a blank line."""
     j = index
     while j > 0 and old[ j - 1 ] in " \t\n": j -= 1
     if j == 0: return True
@@ -207,7 +210,7 @@ def paragraphs_of( text ):
 
 def structure_emptied( old, cut ):
     """
-    Return "EMPTY_FIELD" or "EMPTY_HEADING" when the cut left a field or heading that had content with none, else None.
+    Return "EMPTY_FIELD" or "EMPTY_HEADING" when a cut emptied a field or heading, else None.
 
     Ensures:
         - a field is a line "name: text" of old; it is emptied when cut holds the same "name:" with nothing after it
@@ -237,7 +240,7 @@ def structure_emptied( old, cut ):
 
 
 def paragraph_orphan( old, cut ):
-    """Say whether a paragraph of cut now opens on a pronoun, where old had no paragraph opening on that sentence."""
+    """Say whether a paragraph of cut opens on a pronoun that no paragraph of old opened on."""
     firsts = { " ".join( sentences_of( p )[ 0 ].split() ) for p in paragraphs_of( old ) }
     for paragraph in paragraphs_of( cut ):
         first = " ".join( sentences_of( paragraph )[ 0 ].split() )
@@ -247,16 +250,16 @@ def paragraph_orphan( old, cut ):
 
 def delete_rejection( old, span, cut ):
     """
-    Return the reason code a delete is refused for (rules 4 and 5), or None.
+    Return the reason code a delete is refused for (rules 4 and 5), else None.
 
     Requires:
         - span is the ( start, end ) of the removed text in old; cut is old with it removed and the join repaired
 
     Ensures:
-        - SUMMARY: the span starts inside the first sentence
-        - RESTATED: another sentence restates the span by content words
-        - PRONOUN: see paragraph_orphan
-        - LOWERCASE: the text after the cut becomes a sentence start and begins lowercase
+        - `SUMMARY`: the span starts inside the first sentence
+        - `RESTATED`: another sentence restates the span by content words
+        - `PRONOUN`: see paragraph_orphan
+        - `LOWERCASE`: the text after the cut becomes a sentence start and begins lowercase
         - SHORT_SENTENCE: a sentence new to cut has fewer than MIN_SENTENCE_WORDS words
         - EMPTY_FIELD / EMPTY_HEADING: see structure_emptied
         - the checks run in that order and the first to fire is returned
@@ -288,21 +291,21 @@ def cuts_into( regions, start, end ):
 
 
 def list_item_starts( old ):
-    """Return the offsets where the text of each list item begins, just after its bullet or number."""
+    """Return the offsets where each list item's text begins, just after its bullet or number."""
     return [ m.end() for m in LIST_ITEM_RE.finditer( old ) ]
 
 
 def markup_rejection( old, span, token=None ):
     """
-    Return the reason code a span is refused for because of markup (rule 8), or None.
+    Return the reason code a span is refused for because of markup (rule 8), else None.
 
     Requires:
         - span is the ( start, end ) of the span in old
         - token is None for a delete, or the ( start, end ) of the changed word for a weaken
 
     Ensures:
-        - CODE: the span cuts into a code fence or a backtick span, or the changed word overlaps one
-        - LINK: the span cuts into a [reference] link, or the changed word overlaps one
+        - `CODE`: the span cuts into a code fence or a backtick span, or the changed word overlaps one
+        - `LINK`: the span cuts into a [reference] link, or the changed word overlaps one
         - LIST_ITEM: a delete whose span holds the first character of a list item's text, so the item would be
           left as a bare marker or opening on a fragment; never returned for a weaken
         - a span that holds a whole code span or a whole link is not refused for it
@@ -316,7 +319,11 @@ def markup_rejection( old, span, token=None ):
 
 
 def lead_words( text ):
-    """Return the lowercase words of text, a leading bullet or list marker not counted and edge punctuation, quotes and brackets stripped."""
+    """
+    Return the lowercase words of text, minus a leading bullet or list marker.
+
+    Edge punctuation, quotes and brackets are stripped from each word.
+    """
     tokens = text.split()
     if tokens and ( tokens[ 0 ] in BULLET_MARKERS or LIST_MARKER_RE.match( tokens[ 0 ] ) ): tokens = tokens[ 1: ]
     return [ w.strip( EDGE_PUNCT + "()\"'`" ).lower() for w in tokens ]
@@ -344,7 +351,7 @@ def lead_in_codes( old, span ):
 
 def lead_in_rejection( old, span ):
     """
-    Return the reason code a delete is refused for because it leaves a clause's lead-in hanging (rule 9), or None.
+    Return the rule 9 code for a delete that leaves a lead-in hanging, else None.
 
     Requires:
         - span is the ( start, end ) of the removed text in old, inside one sentence, and holds at least one word
@@ -358,15 +365,16 @@ def lead_in_rejection( old, span ):
           "returns zero [when the list is empty], and a negative size would break the sort"
         - JOINED_CONDITIONS: the text kept before the span ends on a comma and already holds a subordinator, and the text after the
           span opens on one, so two conditions run together: "... when the form closed itself, [and with zero] when the user cancelled"
-        - the checks run in that order and the first to fire is returned; no two can fire on one span, because their conditions on the
-          text after the span exclude each other, so the order changes nothing today (lead_in_codes lists every code that fires, and a test
-          holds it to one, so an edit that lets two fire shows up there)
+        - the checks run in that order and the first to fire is returned
+        - no two can fire on one span, because their conditions on the text after the span exclude each other,
+          so the order changes nothing today
+        - lead_in_codes lists every code that fires, and a test holds it to one,
+          so an edit that lets two fire shows up there
 
     Over-rejects:
         - HANGING_CONDITION when the main clause has no comma of its own ("If empty the default is used, [and a warning is logged]")
-        - DROPPED_CONDITION for every subordinate clause before a coordinator, though most leave a sentence that reads fine; measured on the
-          Dart pool (4,375 entries) at ab3295c8f with 18 subordinators, 2026-10-05: it refuses 56 spans, and 502 kept delete candidates
-          still open on a subordinator
+        - DROPPED_CONDITION for every subordinate clause before a coordinator, though most leave a sentence that reads fine
+          (on the Dart pool of 4,375 entries it refuses 56 spans, and 502 kept delete candidates still open on a subordinator)
         - JOINED_CONDITIONS for any comma followed by a subordinator after an earlier one, though some such sentences are well formed
         - a subordinator word used as a preposition, a participle or inside a name ("after", "before", "since", "once", "provided by")
 
@@ -376,8 +384,8 @@ def lead_in_rejection( old, span ):
         - a lead-in with a comma of its own, because any earlier comma reads as a main clause: "If a, b or c is missing, [the call fails]."
           and "If the cache is empty, and the pool is closed, [the call fails]." return None
         - a coordinator with no comma before it; a subordinator written in a quotation or in code
-        - "as" and "even" (as in "even if") are left out of SUBORDINATORS on purpose: "as" is mostly a preposition, so a lead-in
-          opened by either is not seen
+        - "as" and "even" (as in "even if") are left out of SUBORDINATORS, since "as" is mostly a preposition,
+          so a lead-in opened by either is not seen
         - a cut that leaves a lead-in two sentences back hanging, because only the span's own sentence is read
     """
     codes = lead_in_codes( old, span )

@@ -2,7 +2,7 @@
 Runners for ruff, markdownlint-cli2 and the Dart analyzer.
 
 Each runner returns ( findings, warnings ). A tool that is not installed yields no findings and
-one loud warning that names what was not checked; it never passes silently, because a gate
+one loud warning that names what was not checked. It never passes silently. A gate
 that skips quietly looks the same as a gate that passed.
 """
 
