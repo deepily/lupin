@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Standalone diagnostic: reproduce the exact Phi-4 script-matching call
-the notification proxy makes for CRUD delete confirmation.
+Reproduces the notification proxy's Phi-4 script-matching call for CRUD delete.
+
+The call is the exact one the proxy makes for CRUD delete confirmation.
 
 The existing debug_crud_llm_call.py tests CRUD agent *intent extraction*.
 This script tests the proxy's *script matching* path — a completely
