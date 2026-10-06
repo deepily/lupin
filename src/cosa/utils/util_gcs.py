@@ -183,7 +183,7 @@ def write_text_to_gcs(
     Args:
         gcs_uri: Full GCS URI for the file (e.g., 'gs://bucket/path/file.md')
         content: Text content to write
-        content_type: MIME type (default: 'text/plain')
+        content_type: media type string (default: 'text/plain')
         debug: Enable debug output
 
     Returns:

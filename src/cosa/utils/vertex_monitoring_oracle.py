@@ -1,53 +1,40 @@
 """
-The §6a SOUND ORACLE — Cloud Monitoring `PublisherModel`, over REST.
+Cloud Monitoring `PublisherModel` oracle over REST, verifying what Vertex really served.
 
 Design: src/rnd/v0.1.9/2026.07.13-vertex-model-garden-toggle-search-and-logging.md §6a
-Serves: AC-D4, AC-D4b, AC-D8, AC-D9a.
+It backs four acceptance checks: region and model, no leak into the default path, and derived spend.
 
-WHY REST AND NOT `google.cloud.monitoring_v3`
+Why REST and not `google.cloud.monitoring_v3`
 ---------------------------------------------
-THE CLIENT LIBRARY IS NOT INSTALLED ON THIS HOST. Verified 2026-07-13. §6a rests the
-entire pilot on this oracle, and the idiomatic way to write a test against a missing
-library is `pytest.importorskip(...)` — which turns AC-D4, AC-D4b, AC-D8 and AC-D9a into
-SKIPS. A skip is invisible in a 9,289-test run. We would have certified a METERED-BILLING
-pilot with four assertions that never executed: `modules.bats` reincarnated inside the
-acceptance criteria, in the cascade convened to kill that disease.
+The client library is not installed on this host. The usual way to test against a missing
+library is `pytest.importorskip(...)`, which would turn those four checks into skips. A skip is
+invisible in a run of thousands of tests, so a metered-billing pilot would be certified by
+assertions that never ran. `google.auth` and `requests` are installed, so the Monitoring v3 REST
+surface needs no new dependency. The checks can be written unconditionally, and a missing
+instrument fails loudly instead of vanishing into a skip.
 
-`google.auth` and `requests` ARE installed. The Monitoring v3 REST surface is therefore
-reachable with ZERO new dependencies, and the ACs can be written UNCONDITIONALLY — so a
-missing instrument fails LOUD instead of vanishing into a skip.
+Why this oracle at all
+----------------------
+The Vertex serving path emits it. It needs no setPublisherModelConfig, no BigQuery, no logging
+config and no dataset. So it shares no failure mode with the thing it verifies. The BigQuery
+oracle fails toward "nothing happened" while money burns. "The toggle never engaged" and "a
+region trap burned real money" give the same zero-row reading. An oracle that cannot tell two
+opposite worlds apart is not an oracle.
 
-WHY THIS ORACLE AT ALL (§6a)
-----------------------------
-It is emitted by the Vertex SERVING PATH ITSELF: no setPublisherModelConfig, no BigQuery,
-no logging config, no dataset. It shares ZERO failure modes with the thing it verifies.
-The BigQuery row cannot be given that property — and the BQ oracle FAILS TOWARD "nothing
-happened" while money burns (toggle-never-engaged and region-trap-burned-real-money produce
-an IDENTICAL zero-row reading). An oracle that cannot distinguish two opposite worlds is
-not an oracle.
+Three rules this module refuses to break
+-----------------------------------------
+1. Zero rows is not a verdict. It means both "nothing ran" and "it ran and we are blind".
+   So there are three verdicts: `PASS`, `FAIL` and `INADMISSIBLE`. Reporting a blind instrument
+   as a negative result teaches the team something false.
+2. Never spec a latency; spec a canary. Google declares `ingestDelay: None` in the metric
+   descriptor, so any fixed wait is an assumption that can go silently wrong when Google changes
+   the real delay. There is no sleep constant here. The caller supplies a deadline and the clock
+   is injected.
+3. A negative assertion is admissible only inside a window where the instrument has been proven
+   awake. Fire a known canary, poll until it lands, and only then trust the oracle's silence.
 
-THE THREE RULES THIS MODULE REFUSES TO BREAK
---------------------------------------------
-1. ZERO ROWS IS NOT A VERDICT. It means BOTH "nothing ran" AND "it ran and we are blind."
-   So there are THREE verdicts, not two: PASS, FAIL, and INADMISSIBLE. Reporting a blind
-   instrument as a negative result is how a team "learns" something false and rolls back
-   the wrong thing (F-D18).
-
-2. NEVER SPEC A LATENCY. SPEC A CANARY. Arnold fetched the metric descriptor: Google
-   declares `ingestDelay: None`. So ANY hardcoded wait is an assumption wearing a
-   constant's clothing — and a fixed wait can be WRONG FOREVER, SILENTLY: Google changes
-   the real delay and every negative test starts passing for the wrong reason, with nobody
-   notified. There is NO sleep constant in this file. The bound is a deadline supplied by
-   the caller, and the clock is injected.
-
-3. A NEGATIVE ASSERTION IS ADMISSIBLE ONLY INSIDE A WINDOW WHERE THE INSTRUMENT HAS BEEN
-   PROVEN AWAKE. Fire a known canary, poll until THAT lands, and only then may you trust
-   the oracle's SILENCE about anything else. The canary makes the oracle prove it is awake
-   in the same window in which you trust its silence.
-
-NO GCP CALL IS MADE BY IMPORTING OR UNIT-TESTING THIS MODULE. `transport` and `clock` are
-injected; the tests supply fakes. The real transport is built only when a caller explicitly
-asks for it, which is the seat that holds the authority to spend.
+Importing or unit-testing this module makes no GCP call. `transport` and `clock` are injected
+and the tests supply fakes. The real transport is built only on explicit request.
 """
 
 import os
@@ -70,13 +57,11 @@ RESOURCE_TYPE = "aiplatform.googleapis.com/PublisherModel"
 
 class Verdict:
     """
-    THREE verdicts. The third one is the whole point.
+    The three outcomes of a check: `PASS`, `FAIL` and `INADMISSIBLE`.
 
-    PASS / FAIL are what everyone writes. INADMISSIBLE is what this cascade cost four
-    revisions to learn: an observation that cannot distinguish two opposite worlds is not
-    an observation, and reporting it as FAIL teaches the team something false.
-
-        "Search didn't fire" and "we cannot see" are different claims.  (F-D18)
+    `INADMISSIBLE` means the observation cannot tell two opposite worlds apart, so it is not
+    an observation. Reporting it as `FAIL` would teach the team something false.
+    "Search did not fire" and "we cannot see" are different claims.
     """
     PASS         = "PASS"
     FAIL         = "FAIL"
@@ -84,7 +69,7 @@ class Verdict:
 
 
 class OracleInadmissible( RuntimeError ):
-    """The instrument could not be shown to be awake. NOT a failure of the thing under test."""
+    """The instrument could not be shown to be awake. Not a failure of the thing under test."""
 
 
 class MonitoringOracle:
@@ -94,7 +79,7 @@ class MonitoringOracle:
     Requires:
         - project_id is a non-empty string
         - transport( url, params, token ) -> dict, injected (tests pass a fake)
-        - clock() -> float seconds, injected (NO module-level time import in the hot path)
+        - clock() -> float seconds, injected (no module-level time import in the hot path)
 
     Ensures:
         - every method is read-only; this class cannot write, configure, or predict
@@ -113,7 +98,7 @@ class MonitoringOracle:
         Fetch PublisherModel series for `metric` in [start_ts, end_ts].
 
         Ensures:
-            - returns a list of series dicts (possibly EMPTY — and empty is NOT a verdict)
+            - returns a list of series dicts (possibly empty, and empty is not a verdict)
         """
         url    = f"{MONITORING_HOST}/v3/projects/{self.project_id}/timeSeries"
         params = {
@@ -130,27 +115,23 @@ class MonitoringOracle:
 
     def await_canary( self, metric, start_ts, deadline_ts, is_canary, poll ):
         """
-        Poll until a KNOWN-POSITIVE row lands, proving the oracle is AWAKE in this window.
+        Poll until a known-positive series lands, proving the oracle is awake in this window.
 
-        This is the mechanism that makes a NEGATIVE assertion trustworthy. Until the canary
-        is visible, the oracle's silence means nothing, and any "the counter did not
-        increment" claim is INADMISSIBLE rather than passing.
-
-        There is deliberately NO default deadline and NO sleep constant. Google declares no
-        ingest delay, so a hardcoded wait would be an assumption wearing a constant's
-        clothing — wrong forever, silently, the day Google changes the real latency.
+        Until the canary is visible the oracle's silence means nothing, so a negative claim is inadmissible.
+        There is no default deadline and no sleep constant. Google declares no ingest delay, so a fixed
+        wait would go silently wrong the day the real latency changes.
 
         Requires:
             - is_canary( series ) -> bool identifies the known row we fired ourselves
             - poll() advances the caller's own waiting strategy (injected; may be a no-op)
-            - deadline_ts is an absolute bound supplied by the CALLER
+            - deadline_ts is an absolute bound supplied by the caller
 
         Ensures:
             - returns the observed canary series when it lands
 
         Raises:
-            - OracleInadmissible if the canary never lands within the bound. FAIL LOUD.
-              The test is INADMISSIBLE, not PASSING — the instrument was never shown to
+            - OracleInadmissible if the canary never lands within the bound. Fails loudly.
+              The test is inadmissible, not passing: the instrument was never shown to
               speak, so its silence about everything else is worthless.
         """
         while self.clock() < deadline_ts:
@@ -171,16 +152,14 @@ class MonitoringOracle:
 
     def verify_ran_on_vertex( self, expected_region, expected_model, start_ts, end_ts ):
         """
-        AC-D4 + AC-D4b — did it run on Vertex, in the region we CONFIGURED, on the pinned
-        model, billed to our project, and SUCCEED?
+        Check the invocation ran on Vertex in the configured region, on the pinned model.
 
-        AC-D4b is the only assertion in the entire design that checks what HAPPENED rather
-        than what we INTENDED — and "what happened" is exactly what three revisions of
-        confident reasoning got wrong. If a per-model region override fired, the invocation
-        appears under a DIFFERENT `location` and this NAMES THE BUG.
+        This is the only assertion in the design that checks what happened rather than what we
+        intended. If a per-model region override fired, the invocation appears under a different
+        `location` and this check names the bug. A rejected response code also fails it.
 
         Ensures:
-            - returns ( Verdict, detail ) — INADMISSIBLE on zero series, never FAIL
+            - returns ( Verdict, detail ); `INADMISSIBLE` on zero series, never `FAIL`
         """
         series = self.time_series( INVOCATION_METRIC, start_ts, end_ts )
 
@@ -232,45 +211,20 @@ class MonitoringOracle:
 
     def verify_no_leak_into_default_path( self, env, series_before, series_after, canary ):
         """
-        AC-D8 — zero leakage into the Max path. The document's most dangerous assertion,
-        because it is a NEGATIVE against a LAGGING oracle.
+        Check that no Vertex traffic leaked into the default Max path.
 
-        PRIMARY, and the only part trustworthy on its own: a PROCESS-ENV check. It has no
-        ingestion lag and cannot false-pass. Rev. 2's version asserted "the counter did not
-        increment" against a LAGGING oracle — so it passed BECAUSE THE DATA HAD NOT LANDED
-        YET, not because nothing happened. That is the founding bug of this whole cascade,
-        re-committed inside the AC written to fix a bad oracle.
-
-        SECONDARY: the counter comparison is WINDOW-SCOPED, and is admissible ONLY after a
-        canary has proven the oracle awake in THIS window.
-
-        🔴 `canary` IS REQUIRED, AND THAT IS THE WHOLE POINT — IT IS THE FIX FOR A DEFECT
-        THIS FUNCTION SHIPPED WITH.
-
-        The first version took no canary at all. It ENDED with the words "(admissible ONLY
-        because the canary landed first)" — in a PASS it would hand back having verified no
-        such thing. Called with `series_before=0, series_after=0` and no canary ever fired,
-        it returned PASS and TESTIFIED, in its own detail string, to a precondition nobody
-        had established:
-
-            >>> oracle.verify_no_leak_into_default_path( env={}, series_before=0, series_after=0 )
-            ( PASS, "...the windowed counter did not increment (admissible ONLY because the
-                     canary landed first)." )        # <- NO CANARY WAS EVER FIRED
-
-        The canary discipline was a COMMENT, and the comment was doing the work of a
-        MECHANISM. Worse than absent: the function MANUFACTURED AN ATTESTATION. §6a's
-        protocol says "ONLY once the canary is visible may you assert the count did not
-        increment" — so that ordering is now enforced by the SIGNATURE. You cannot reach a
-        PASS on the negative without the receipt that `await_canary()` returns.
+        Primary check: the process environment, which has no ingestion lag and cannot false-pass.
+        Secondary check: the windowed counter, admissible only with a canary receipt from await_canary().
+        The signature requires it because a canary-less version returned `PASS` having verified nothing.
 
         Requires:
-            - canary is the series returned by await_canary() — the PROOF the oracle was
-              awake in this window. Falsy => the silence is INADMISSIBLE, never PASS.
+            - canary is the series returned by await_canary(), the proof the oracle was
+              awake in this window. Falsy => the silence is `INADMISSIBLE`, never `PASS`.
 
         Ensures:
             - returns ( Verdict, detail )
-            - a tainted process env FAILS with or without a canary: a leak is a POSITIVE
-              observation, and a positive needs no proof-of-liveness. Only the SILENCE does.
+            - a tainted process env fails with or without a canary: a leak is a positive
+              observation, and a positive needs no proof of liveness. Only the silence does.
         """
         leaked = [ key for key in ( "CLAUDE_CODE_USE_VERTEX", "CLOUD_ML_REGION",
                                     "ANTHROPIC_VERTEX_PROJECT_ID" ) if env.get( key ) ]
@@ -303,11 +257,11 @@ class MonitoringOracle:
 
     def derived_spend( self, start_ts, end_ts, rate_card ):
         """
-        AC-D9a — derived spend from token-size metrics x rate card.
+        Derive spend from the token-size metrics and a rate card.
 
         Ensures:
-            - returns ( Verdict, usd, detail ). Zero token series is INADMISSIBLE, not $0.00
-              — "we measured zero spend" and "we cannot see the spend" are different claims,
+            - returns ( Verdict, usd, detail ). Zero token series is `INADMISSIBLE`, not $0.00:
+              "we measured zero spend" and "we cannot see the spend" are different claims,
               and only one of them is safe to report to the person paying.
         """
         totals = {}
@@ -332,10 +286,10 @@ class MonitoringOracle:
 
 def build_google_auth_transport():                      # pragma: no cover - constructs a live GCP client; unit tests inject a fake transport and never touch the network
     """
-    The production transport. Deliberately NOT the default: constructing it acquires ADC.
+    Build the production transport, which acquires Google application default credentials.
 
-    Kept out of the unit path entirely — this is the ONE function in this module that can
-    reach GCP, and the seat that calls it is the seat holding the authority to spend.
+    It is not the default, and it is the one function in this module that can reach GCP.
+    The seat that calls it is the seat holding the authority to spend.
     """
     import google.auth
     import google.auth.transport.requests
@@ -373,14 +327,14 @@ def _is_ok( code ):
 
 def resolve_project_and_region( env=None ):
     """
-    Read the project + Vertex region the pilot is configured for. NO fallbacks, no guessing.
+    Read the pilot's project and Vertex region from the environment, with no fallbacks.
 
     Ensures:
         - returns ( project_id, region )
 
     Raises:
-        - KeyError naming the missing variable — guessing either one would point the oracle
-          at the wrong project or the wrong region and produce a confidently wrong verdict
+        - KeyError naming the missing variable. Guessing either one would point the oracle
+          at the wrong project or region and produce a confidently wrong verdict
     """
     env = env if env is not None else os.environ
     return ( env[ "LUPIN_GCP_PROJECT_ID" ], env[ "LUPIN_VERTEX_REGION" ] )

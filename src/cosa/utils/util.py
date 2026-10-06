@@ -528,23 +528,23 @@ import subprocess
 def print_simple_file_list(path: str) -> None:
     """
     Prints a detailed file listing for the specified directory.
-    
-    Preconditions:
+
+    Requires:
         - path must be a string representing a file system path
         - path must exist in the file system
         - Current user must have read permissions for the specified path
-    
-    Postconditions:
+
+    Ensures:
         - Detailed file listing is printed to stdout
         - Each line of output is printed separately
         - Original path remains unchanged
-    
+
     Parameters:
         path (str): The directory path to list files from
-    
+
     Raises:
-        FileNotFoundError: When path does not exist
-        subprocess.CalledProcessError: When shell command execution fails
+        - FileNotFoundError when path does not exist
+        - subprocess.CalledProcessError when shell command execution fails
     """
     # Verify that the path exists
     if not os.path.exists(path):
@@ -645,8 +645,8 @@ def _git_tree_of( path ):
     The git worktree a path belongs to, or None.
 
     Ensures:
-        - walks up looking for a `.git` entry — a DIRECTORY in the main checkout, a
-          FILE in a linked worktree; both count, which is the whole point here
+        - walks up looking for a `.git` entry, which is a directory in the main checkout
+          and a file in a linked worktree; both count, so a worktree is recognised
         - returns the containing directory, or None when there is no git above it
         - never raises
     """
@@ -664,15 +664,14 @@ def _git_tree_of( path ):
 
 def _warn_once_if_caller_is_in_another_tree( root ):
     """
-    Say so — once per calling file — when the caller lives in a different git tree
-    than LUPIN_ROOT points at.
+    Warn once per calling file when the caller lives outside the LUPIN_ROOT git tree.
 
     Requires:
         - root is the LUPIN_ROOT value about to be handed back
 
     Ensures:
-        - FAST PATH FIRST: a caller inside `root` returns after one string compare,
-          which is every ordinary run, the container included
+        - a caller inside `root` returns after one string compare, which is every
+          ordinary run, the container included
         - warns at most once per calling file, to stderr, naming both trees
         - never raises and never refuses — see the note above on volume
     """
@@ -777,7 +776,7 @@ def get_tts_interaction_mode() -> str:
 
     Ensures:
         - returns "solo" or "chorus" (string)
-        - returns "chorus" if key is absent (the operational default per 2026-05-12)
+        - returns "chorus" if key is absent (the operational default)
         - returns "chorus" if key is present but has an invalid value (fail-closed to default)
         - never raises (config errors fall back to "chorus")
 
@@ -808,8 +807,10 @@ SPOKEN_CHAR_CAP_DEFAULT = 500
 
 def get_spoken_char_cap() -> int:
     """
-    Resolve the cosa-voice spoken-char cap (the server reject boundary) from
-    lupin-app.ini at call time, so it is runtime-tunable.
+    Resolve the cosa-voice spoken-char cap from lupin-app.ini at call time.
+
+    The cap is the server's reject boundary, and reading it at call time keeps it
+    tunable at run time.
 
     Requires:
         - ConfigurationManager is importable

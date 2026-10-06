@@ -254,7 +254,7 @@ def _remove_quietly( path: str ) -> None:
 
     Ensures:
         - the file is gone if it was there
-        - NEVER raises — cleanup failure must not mask or replace the execution result the
+        - never raises — cleanup failure must not mask or replace the execution result the
           caller is about to return, which is the actual answer to the user's question
 
     Raises:
@@ -286,7 +286,7 @@ def assemble_and_run_solution( solution_code: list[str], example_code: str, path
         - Captures both stdout and stderr from the execution
         
     Raises:
-        - No exceptions raised directly, errors are captured in return dict
+        - no exception is raised directly; errors are captured in the return dict
     """
     if debug and verbose:
         du.print_banner( "Solution code BEFORE:", prepend_nl=True)

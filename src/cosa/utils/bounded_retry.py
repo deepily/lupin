@@ -1,37 +1,35 @@
 """
 One bounded-retry primitive for the whole codebase, in a sync and an async flavour.
 
-WHY THIS EXISTS (row 3598c1d3, 2026-08-20). At least six independent hand-rolled
-retry loops live in this tree — podcast TTS, embedding fallbacks, speech-to-text,
-two DM judges, the notification-proxy verifier — plus a deadline-based one in
-``cosa.rest.db.auto_migrate``. They agree on the shape and disagree on every
-detail: some bound by attempt count and some by wall-clock deadline, some back
-off exponentially and some linearly, some retry on a raised exception and some on
-a returned 5xx response, some report each retry to the user and some are silent.
-Nothing shared them, so a caller with no retry at all — ``KagiSearch.search_fastgpt``
-— turned one momentary upstream blip into a user-visible weather failure.
+Several independent hand-rolled retry loops lived in this tree. They covered podcast
+TTS, embedding fallbacks, speech-to-text, two DM judges, the notification-proxy
+verifier, and a deadline-based one in ``cosa.rest.db.auto_migrate``. They agree on the shape and
+disagree on every detail. Some bound by attempt count and some by wall-clock deadline.
+Some back off exponentially and some linearly. Some retry on a raised exception and
+some on a returned 5xx response. Some report each retry to the user and some are
+silent. Nothing shared them, so a caller with no retry at all, ``KagiSearch.search_fastgpt``,
+turned one momentary upstream blip into a user-visible weather failure.
 
-The union of those behaviours is what this module implements, deliberately:
+This module implements the union of those behaviours.
 
-    · bound by ATTEMPT COUNT, by WALL-CLOCK DEADLINE, or by both (first one wins)
-    · exponential backoff with a configurable multiplier and a hard ceiling
-    · retry on a raised exception (filtered by TYPE and, optionally, by a
-      predicate — e.g. "an HTTP 503 but never an HTTP 401")
-    · retry on a RETURNED value (e.g. a ``requests.Response`` carrying a 5xx),
+    - bound by attempt count, by wall-clock deadline, or by both (the first one wins)
+    - exponential backoff with a configurable multiplier and a hard ceiling
+    - retry on a raised exception, filtered by type and, optionally, by a predicate
+      such as "an HTTP 503 but never an HTTP 401"
+    - retry on a returned value, such as a ``requests.Response`` carrying a 5xx,
       which is how the embedding and speech-to-text paths are shaped
-    · an ``on_retry`` hook per attempt, so a caller can tell the user it is
-      retrying without owning the loop
+    - an ``on_retry`` hook per attempt, so a caller can tell the user it is retrying
+      without owning the loop
 
-🔴 THE ONE PROPERTY CALLERS DEPEND ON: an exhausted retry RE-RAISES THE LAST
-EXCEPTION UNCHANGED. It is never wrapped, never replaced with a summary, never
-swallowed into a return value. A retry that hides the final failure would make
-the next occurrence undiagnosable, which is the opposite of why the failing call
-was wrapped in the first place (see ``src/tests/unit/test_weather_agent_search_failure.py``,
-where the user-visible refusal is asserted to NAME its status code).
+The one property callers depend on: an exhausted retry re-raises the last exception
+unchanged. It is never wrapped, never replaced with a summary, and never swallowed
+into a return value. A retry that hides the final failure would make the next
+occurrence undiagnosable. That defeats the purpose of wrapping the failing call. See
+``src/tests/unit/test_weather_agent_search_failure.py``, where the user-visible
+refusal is asserted to name its status code.
 
-Testability is a first-class requirement, not an afterthought: ``sleep`` and
-``now`` are injectable, so every branch here is exercised with zero real waiting
-and no clock.
+Testability is a first-class requirement. ``sleep`` and ``now`` are injectable, so
+every branch is exercised with no real waiting and no clock.
 """
 
 import asyncio
@@ -86,8 +84,8 @@ class RetryPolicy:
 
         Requires:
             - at least one of max_attempts / deadline_seconds is not None. A
-              retry with NEITHER bound is an infinite loop wearing a helper's
-              clothes, so it is rejected at construction rather than at 3am
+              retry with neither bound is an infinite loop, so it is rejected at
+              construction rather than discovered at run time
             - max_attempts, when given, is >= 1
             - initial_backoff, max_backoff and deadline_seconds (when given) are
               non-negative
@@ -111,7 +109,7 @@ class RetryPolicy:
             retry_on          : exception classes eligible for retry
             retry_if_error    : optional predicate narrowing retry_on further,
                                 e.g. "an HTTPError, but only for a 5xx status"
-            retry_if_result   : optional predicate that retries a RETURNED value,
+            retry_if_result   : optional predicate that retries a returned value,
                                 e.g. a requests.Response whose status is 503
         """
         if max_attempts is None and deadline_seconds is None:
@@ -157,7 +155,7 @@ class RetryPolicy:
 
     def result_is_retryable( self, result: Any ) -> bool:
         """
-        Decide whether a RETURNED value is worth another attempt.
+        Decide whether a returned value is worth another attempt.
 
         Requires:
             - None
@@ -213,12 +211,11 @@ def retry_call( fn: Callable[[], Any], policy: Optional[RetryPolicy]=None,
 
     Ensures:
         - returns fn's value on the first attempt the policy accepts
-        - a call that succeeds immediately costs ZERO sleeps — the common path
+        - a call that succeeds immediately costs zero sleeps, so the common path
           pays nothing for this guard
-        - re-raises a non-retryable exception IMMEDIATELY, without waiting
-        - 🔴 re-raises the LAST exception UNCHANGED when the bound is spent, so
-          the caller still sees the real error (status line included) and not a
-          wrapper
+        - re-raises a non-retryable exception immediately, without waiting
+        - re-raises the last exception unchanged when the bound is spent, so the
+          caller still sees the real error (status line included) and not a wrapper
         - when the bound is spent on a retry_if_result retry, returns the last
           result — a value-triggered retry never invents an exception
         - calls on_retry( attempt, outcome, delay ) before each wait, where
@@ -270,10 +267,9 @@ async def retry_call_async( fn: Callable[[], Any], policy: Optional[RetryPolicy]
     """
     Await ``fn()`` until it succeeds or the policy's bound is spent (asynchronous).
 
-    Same contract as ``retry_call``, awaiting instead of blocking. ``on_retry``
-    may be a plain function or a coroutine function — an awaitable return value
-    is awaited — because the existing async caller (podcast TTS) reports each
-    retry through an async notification callback.
+    Same contract as ``retry_call``, awaiting instead of blocking. ``on_retry`` may be a
+    plain function or a coroutine function, and an awaitable return value is awaited.
+    The async caller in podcast TTS reports each retry through an async callback.
 
     Requires:
         - fn is a zero-argument callable returning an awaitable

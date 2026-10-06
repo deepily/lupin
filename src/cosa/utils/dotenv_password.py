@@ -1,37 +1,31 @@
 """
-Fill a BLANK ``DB_PASSWORD`` from the untracked, gitignored ``.env``.
+Fill a blank ``DB_PASSWORD`` from the untracked, gitignored ``.env``.
 
-WHY THIS MODULE EXISTS
-----------------------
-Row baac2474 (commit 765e7145, 2026-08-31) removed the plaintext postgres password
-from the tree. The value now lives ONLY in the untracked ``.env`` beside
-``docker-compose.yml``. That commit gave TWO of the three consumers a route to it and
-missed the third:
+The plaintext postgres password was removed from the tree. The value now lives only in
+the untracked ``.env`` beside ``docker-compose.yml``. Three kinds of consumer need a
+route to it, and this module is the route for the third:
 
     containers                    -> docker-compose.yml maps DB_PASSWORD from the
-                                     .env's POSTGRES_PASSWORD                    OK
-    pytest                        -> a seeder added to src/conftest.py            OK
-    host-run long-lived processes -> nothing                                      MISSING
+                                     .env's POSTGRES_PASSWORD
+    pytest                        -> a seeder in src/conftest.py
+    host-run long-lived processes -> this module
 
-The missing one is not hypothetical. Between 2026-08-31 23:58 and 2026-09-05 the CC
-notification listener — a host process, neither a container nor pytest — raised
-``psycopg2.OperationalError … fe_sendauth: no password supplied`` on every gist it
-attempted, 166 times in five days. It does not surface as a database error: the
-listener catches it and emits a five-word prefix of the user's own text, which reads
-in the UI as a short paraphrase rather than as a failure.
+A host process such as the CC notification listener is neither a container nor pytest.
+Without this module every gist fails with a ``psycopg2.OperationalError`` saying no
+password was supplied. It does not surface as a database error. The listener catches it.
+It then emits a five-word prefix of the user's own text. The UI shows that as a short
+paraphrase, not as a failure.
 
-⚠️ THE FIX IS DELIBERATELY IN CODE, NOT IN A SPAWN ENVIRONMENT. Exporting the value
-into each host process's environment would work and would put a live credential into
-spawn payloads and process listings. Seeding it here keeps the secret in the one file
-that already holds it, and means a process picks the fix up by importing the module
-rather than by having its launcher edited.
+The fix is in code and not in a spawn environment. Exporting the value into each host
+process's environment would work, but it would put a live credential into spawn
+payloads and process listings. Seeding it here keeps the secret in the one file that
+already holds it. A process picks the fix up by importing the module, not by having its
+launcher edited.
 
-CONTRACT
---------
-An EXPORTED ``DB_PASSWORD`` always wins — this only ever fills a blank. So a container
-(which is given the variable at create time) reaches the early return and never touches
-the filesystem, and this module cannot change the behaviour of anything that was
-already working.
+An exported ``DB_PASSWORD`` always wins, because this only ever fills a blank. A
+container is given the variable at create time, so it reaches the early return and
+never touches the filesystem. This module cannot change the behaviour of anything that
+already worked.
 """
 
 import os
@@ -39,7 +33,7 @@ import os
 
 def seed_db_password_from_dotenv( root=None ):
     """
-    Fill a blank DB_PASSWORD from the nearest ``.env``'s POSTGRES_PASSWORD.
+    Fill a blank DB_PASSWORD from the nearest ``.env``, preferring a role password.
 
     Requires:
         - root, if given, is a directory path that may contain a .env or a .git marker
@@ -48,7 +42,14 @@ def seed_db_password_from_dotenv( root=None ):
         - Returns immediately, touching no filesystem, if DB_PASSWORD is already
           set to a non-empty value
         - Sets os.environ[ "DB_PASSWORD" ] from the .env's POSTGRES_PASSWORD when that
-          value is present and non-empty
+          value is present and non-empty and no role password applies
+        - Prefers the role password when the .env carries one: LUPIN_TEST_DB_PASSWORD
+          when LUPIN_ENV is "testing", otherwise LUPIN_HOST_DB_PASSWORD. It then also
+          sets DB_USER from the matching user key, falling back to "lupin_test" or
+          "lupin_host", unless DB_USER is already exported
+        - Uses the first line for a key as the one that decides, blank or not
+        - Looks in the worktree's own .env first, then in the main checkout's .env,
+          found through the worktree's ``.git`` file
         - Leaves DB_PASSWORD unset when no .env is found, when the key is absent, or
           when its value is empty
         - Never raises: an unreadable .env or a malformed .git marker is swallowed
@@ -128,7 +129,7 @@ def seed_db_password_from_dotenv( root=None ):
 
 def seed_db_password_from_file():
     """
-    Fill a blank DB_PASSWORD from the file named by DB_PASSWORD_FILE (row 80513825).
+    Fill a blank DB_PASSWORD from the file named by DB_PASSWORD_FILE.
 
     Requires:
         - nothing; DB_PASSWORD_FILE may be unset
@@ -142,9 +143,10 @@ def seed_db_password_from_file():
           raise, and the empty-password announcement then fires downstream as it always has
         - never raises
 
-    WHY A FILE. A password in a container's environment is readable by anyone who can run
-    `docker inspect`; a file mounted as a secret is readable by whoever owns the file. The
-    file is what lets the app's credential live somewhere a seat's `.env` is not.
+    A file is used because a password in a container's environment is readable by anyone
+    who can run `docker inspect`, while a file mounted as a secret is readable only by
+    whoever owns the file. It lets the app's credential live somewhere a seat's `.env`
+    is not.
     """
     if os.environ.get( "DB_PASSWORD" ): return
     path = os.environ.get( "DB_PASSWORD_FILE" )

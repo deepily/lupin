@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-Run-scoped home for visual-snapshot failure PNGs (row d51ffc36).
+Run-scoped home for visual-snapshot failure PNGs.
 
 The stock pytest-playwright-visual-snapshot plugin deletes one shared folder at the start of
-EVERY pytest session that loads it, unit sessions included, so a routine unit run destroyed the
-last E2E run's actual/expected PNGs (measured 2026-09-30: emptied at 16:27:59 by a unit run, 28
-minutes after e2e_b finished). This module holds the two decisions that stop that:
+every pytest session that loads it, unit sessions included. A routine unit run therefore
+destroyed the last E2E run's actual and expected PNGs. This module holds the two decisions
+that stop that:
 
     - a session only touches the failures area when it collects a visual-snapshot test
-    - each such session writes to its OWN run directory (named by the ts- job id when there is
+    - each such session writes to its own run directory (named by the ts- job id when there is
       one) and never deletes a run directory it is not pruning for age
 """
 
@@ -59,14 +59,16 @@ def session_collects_visual( items ):
 
 def prepare_run_dir( base, run_id, keep_days=KEEP_DAYS_DEFAULT, keep_newest=KEEP_NEWEST, now=None ):
     """
+    Create and return the run directory under `base`, pruning old sibling run directories.
+
     Requires:
         - base is a directory path (created if absent), run_id is a plain name (no separators)
 
     Ensures:
-        - returns base/run_id, created if absent and NEVER deleted or emptied: a job that runs
+        - returns base/run_id, created if absent and never deleted or emptied: a job that runs
           two pytest sessions (e2e_a then e2e_b) shares one folder, and the second must not
           destroy the first's evidence
-        - sibling DIRECTORIES are pruned only when they are older than keep_days AND not among
+        - sibling directories are pruned only when they are older than keep_days and not among
           the keep_newest most recently modified; the current run's folder is never a candidate
         - files directly under base, and every younger or newest-N directory, are left as they were
     Raises:

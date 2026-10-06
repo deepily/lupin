@@ -1,37 +1,38 @@
 """
-Turn a pytest collection error into a diagnosis instead of silence — row bc83f2df.
+Turn a pytest collection error into a diagnosis instead of silence.
 
-WHY THIS EXISTS. A collection error is not a failing test. It is the suite never
-running. Cheech hit two of them in one afternoon from different causes, and each was
-diagnosed from scratch, because nothing carried the diagnosis forward. That repetition
-is the defect this module exists to end — not either individual cause, both of which
-were fixed the same day.
+A collection error is not a failing test. It is the suite never running. Two such
+errors with different causes were each diagnosed from scratch because nothing carried
+the diagnosis forward. This module exists to end that repetition, not to fix either
+individual cause.
 
-WHAT WAS MEASURED (2026-08-17, both shapes built deliberately and run):
+Two shapes were measured by building both and running them.
 
-| shape | where the error lands | exit | junit written? | hooks fired | what the tooling said |
-|---|---|---|---|---|---|
-| A | a TEST module (`ModuleNotFoundError`) | 2 | yes, `tests=1 errors=1` | collectreport, collection_finish, sessionfinish, cmdline_main | **"FAILED"** |
-| B | a CONFTEST (`TypeError`, arg count) | 4 | **no** | **none at all** | "NOT EXECUTED" |
+  - Shape A: the error lands in a test module (`ModuleNotFoundError`). Pytest exits 2
+    and writes a junit file with `tests=1 errors=1`. The collectreport,
+    collection_finish, sessionfinish and cmdline_main hooks fire. The tooling said
+    "failed".
+  - Shape B: the error lands in a conftest (`TypeError`, arg count). Pytest exits 4,
+    writes no junit file and fires no hooks. The tooling said "not executed".
 
-Both readings are wrong in their own direction:
+Both readings are wrong in their own direction.
 
-  · Shape A is reported as **FAILED**, byte-identical to a genuine red. It is not a red —
-    nothing ran. Worse, in the measured case the directory held 3 tests across 2 files and
-    the junit accounted for exactly 1. The other 2 never ran and appear NOWHERE, so the
-    report understates its own blast radius while sounding precise.
-  · Shape B reaches the right state by accident — the counts are all zero because nothing
-    could be parsed — but carries no diagnosis at all. And **no pytest hook fires**, not
-    even in the outermost conftest, so a plugin cannot catch it. Only the wrapper can,
-    by reading the exit code.
+  - Shape A is reported as a failure, byte-identical to a genuine red, though nothing ran.
+    In the measured case the directory held 3 tests across 2 files and the junit
+    accounted for exactly 1. The other 2 never ran and appear nowhere, so the report
+    understates its own blast radius while sounding precise.
+  - Shape B reaches the right state by accident, because the counts are all zero when
+    nothing can be parsed, but it carries no diagnosis. No pytest hook fires, not even
+    in the outermost conftest, so a plugin cannot catch it. Only the wrapper can, by
+    reading the exit code.
 
-That asymmetry is why this is a module and not a plugin: shape A is reachable in-process,
-shape B is reachable only from outside, and a fix that handles one shape is a fix that
-still goes quiet on the other.
+That asymmetry is why this is a module and not a plugin. Shape A is reachable
+in-process and shape B only from outside. A fix that handles one shape goes quiet on
+the other.
 
-WHAT THIS MODULE DOES NOT DO. It does not decide anything. It reads an exit code and the
-captured output and returns a description, so both the in-pytest plugin and the scheduled
-job can render the SAME diagnosis. Judgement about pass/fail belongs to the caller.
+This module decides nothing. It reads an exit code and the captured output and returns
+a description, so the in-pytest plugin and the scheduled job render the same diagnosis.
+Judgement about pass or fail belongs to the caller.
 """
 
 import argparse
@@ -98,11 +99,10 @@ def _find_uncommitted_python( project_root: Optional[ str ] = None ) -> List[ st
         - returns repo-relative paths of modified/added/untracked .py files
         - returns [] rather than raising when git is unavailable
 
-    WHY THIS IS PART OF A DIAGNOSIS. One of the two measured incidents was a required
-    parameter added to `make_provenance` in a file that was never committed. `git log`
-    showed nothing, so the change was invisible to everyone except its author, and that
-    is exactly the case where diagnosis is hardest. Naming the uncommitted files turns
-    "nothing in the history explains this" into a short list of suspects.
+    This belongs in a diagnosis because an uncommitted change is invisible to `git log`
+    and to everyone except its author, which is the hardest case to diagnose. Naming
+    the uncommitted files turns "nothing in the history explains this" into a short
+    list of suspects.
     """
     root = project_root or os.environ.get( "LUPIN_ROOT" ) or "."
     try:
@@ -202,24 +202,27 @@ def diagnose( exit_code: int, output: str, project_root: Optional[ str ] = None,
 
     Requires:
         - exit_code is pytest's process exit code
-        - output is the captured stdout+stderr of that run, OR a collect report's
+        - output is the captured stdout+stderr of that run, or a collect report's
           traceback text when `where_hint` is supplied
 
     Ensures:
-        - returns None for exit codes 0 and 1 — a real pass and a real failure are NOT
-          this module's business, and claiming them would be the same over-reach this
-          module exists to prevent
+        - returns None for exit codes 0 and 1, because a real pass and a real failure
+          are not this module's business
         - returns a dict with state / where / cause_class / detail / remedy /
-          uncommitted_suspects for exit codes 2, 4 and 5 when the output corroborates it
+          uncommitted_suspects when `where_hint` is given for any other exit code
+        - without `where_hint`, returns that dict for exit 4 when the output mentions
+          conftest, and for exit 2 when the output carries an "errors during collection"
+          or "Interrupted" banner
+        - returns the dict for exit 5 (nothing collected) whatever the output says
+        - returns None for any other exit code without `where_hint`
         - never raises on malformed input
 
-    ⚠️ WHY `where_hint` EXISTS. The wrapper sees pytest's whole terminal output, which
-    carries the "Interrupted: N errors during collection" banner. An IN-PROCESS caller
-    (the pytest_collectreport hook) sees only a collect report's traceback, and that
-    banner is written by the terminal reporter, not by the report — so inferring from
-    text was silently returning None for the very case the hook exists to catch. A
-    caller that already KNOWS collection failed states it instead of re-deriving it
-    from a string it does not have.
+    `where_hint` exists because the wrapper sees pytest's whole terminal output, which
+    carries the "Interrupted: N errors during collection" banner. An in-process caller
+    such as the pytest_collectreport hook sees only a collect report's traceback. The
+    terminal reporter writes the banner, not the report, so inferring from text would
+    return None for the very case the hook exists to catch. A caller that already
+    knows collection failed states it instead of re-deriving it.
     """
     if exit_code in ( 0, 1 ):
         return None
@@ -260,7 +263,7 @@ def render( diag: Dict ) -> str:
     Render a diagnosis as the block a human should see.
 
     Ensures:
-        - leads with what the result is NOT, because both wrong readings of a collection
+        - leads with what the result is not, because both wrong readings of a collection
           error (a regression, or a quiet pass) are what cost the time
     """
     lines = [
@@ -330,7 +333,7 @@ def _read_tail( path: str, max_bytes: int = _TAIL_BYTES ) -> str:
 
 def main( argv: Optional[ List[ str ] ] = None ) -> int:
     """
-    Command-line entry point for the RUNNER SCRIPTS — the one caller that can see shape B.
+    Print a collection diagnosis for a finished run; the entry point for shell runner scripts.
 
     Requires:
         - --exit-code is pytest's exit code from a run the caller already finished
@@ -338,16 +341,16 @@ def main( argv: Optional[ List[ str ] ] = None ) -> int:
 
     Ensures:
         - prints the diagnosis block when the exit code plus output describe a collection
-          error, and prints NOTHING otherwise — a run that executed is not this tool's
-          business, and a block on every run would make the block meaningless
-        - ALWAYS returns 0. This process's status says whether the DIAGNOSER ran, never
-          whether the SUITE passed; a non-zero here would be read as the run's verdict by
-          the next `$?`, which is the same confusion this module exists to end
+          error, and prints nothing otherwise: a run that executed is not this tool's business, and a block on every run would make the block meaningless
+        - always returns 0. This process's status says whether the diagnoser ran, never
+          whether the suite passed; a non-zero here would be read as the run's verdict by
+          the next `$?`, which is the confusion this module exists to end
         - never raises, whatever the input
 
-    WHY A CLI AND NOT AN IMPORT. A conftest collection error fires no pytest hook and
-    writes no junit, so the exit code — seen from OUTSIDE the process — is the only signal
-    that survives it. A shell runner cannot import Python state; it can call a program.
+    It is a command-line tool and not an import because a conftest collection error
+    fires no pytest hook and writes no junit. The exit code, seen from outside the
+    process, is the only signal that survives it. A shell runner cannot import Python
+    state, but it can call a program, and this is the one caller that can see shape B.
     """
     parser = argparse.ArgumentParser(
         prog="pytest_collection_diagnosis",

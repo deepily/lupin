@@ -1,34 +1,32 @@
 """
-Scrub credential values out of files that already have them on disk (row dba8195c).
+Scrub credential values out of files that already have them on disk, in place.
 
-THE SURFACE. Claude Code transcripts under ~/.claude/projects/ and the hook logs under
-io/claude_code_hooks/logs/ are written by the harness, not by pytest, so the report
-hookwrapper that closed row b0e97156 cannot reach them. A shell probe that echoes a
-credential variable lands the live value in both. Six files carried the current test
-password on 2026-08-19; Rick ruled on 2026-08-21 that they are scrubbed IN PLACE —
-not rotated, not deleted, because a transcript is a diagnostic record.
+Claude Code transcripts under ~/.claude/projects/ and the hook logs under
+io/claude_code_hooks/logs/ are written by the harness, not by pytest. The pytest
+report hook cannot reach them. A shell probe that echoes a credential variable lands
+the live value in both. The files are scrubbed in place, not rotated and not deleted,
+because a transcript is a diagnostic record.
 
-THE VOCABULARY IS NOT REDEFINED HERE. Both rules come from
-`cosa.utils.secret_redaction` — the same helper the pytest hookwrapper uses. A second
-regex would drift from the first, and the point of that module is that there is one.
+Both redaction rules come from `cosa.utils.secret_redaction`, the same helper the
+pytest hook uses. A second regex would drift from the first, so none is defined here.
 
-TWO THINGS THIS MODULE ADDS, neither of which belongs in the redaction vocabulary:
+This module adds two things that do not belong in the redaction vocabulary.
 
-  1. FIND THE FILES BY VALUE, at run time. A file list written two days ago names
-     sessions that have since ended and misses every file written since. So the list is
-     re-derived on every run by grepping the roots for the CURRENT values, with those
-     values handed to grep on STDIN — never in argv, which is row 4996e41c's exact
-     defect (argv is readable through `ps` and `/proc`).
+  1. It finds the files by value, at run time. A stored file list names sessions that
+     have since ended and misses every file written since. So the list is re-derived
+     on every run by grepping the roots for the current values. The values go to
+     grep on stdin, never in argv, because argv is readable through `ps` and `/proc`.
 
-  2. REWRITE IN PLACE, SAFELY. The rewrite goes to a temp file in the same directory,
-     is fsync'd, and is then renamed over the original, so neither a crash mid-write
-     nor a power loss can leave a truncated transcript. File mode is carried across, and a file modified in the last few
-     minutes is SKIPPED and REPORTED rather than rewritten — a live session appends to
-     its transcript, and a rename underneath it would drop whatever it wrote next.
+  2. It rewrites in place, safely. The rewrite goes to a temp file in the same
+     directory, is fsync'd, and is then renamed over the original, so neither a crash
+     nor a power loss can leave a truncated transcript. File mode is carried across.
+     A file modified in the last few minutes is skipped and reported, not rewritten.
+     A live session appends to its transcript, and a rename underneath it would
+     drop whatever it wrote next.
 
-⚠️ NOTHING HERE EVER PRINTS A VALUE. Counts, paths and key names only. A tool that
-reports what it found by showing it would write the leak into the transcript of the run
-that fixed the leak.
+Nothing here ever prints a value. Output is counts, paths and key names only. A tool
+that reports a leak by showing it would write the leak into the transcript of the run
+that fixed it.
 """
 
 import os
@@ -47,14 +45,11 @@ DEFAULT_ACTIVE_WINDOW_SECONDS = 300
 
 def scan_for_values( roots, values ):
     """
-    Every file under `roots` that contains one of `values` verbatim, plus what could
-    not be read.
+    List files under `roots` that contain a value verbatim, plus files that were unreadable.
 
-    ⚠️ THE APERTURE IS PART OF THE RESULT. grep exits 2 when it hits a single unreadable
-    file, and an earlier version of this treated that as a failure and threw the
-    matches away — one permission-denied file in a scratch directory killed a scan of
-    8 GB. The matches it DID find are still findings, and the files it could not open
-    are still a hole in the count. Both come back; the caller reports both.
+    The unreadable list is part of the result. grep exits 2 on any unreadable file.
+    Treating that as failure would discard the matches, so one permission-denied
+    file would kill a whole scan. Both the matches and the holes come back.
 
     Requires:
         - roots is an iterable of directory or file paths (missing paths are skipped)
@@ -138,7 +133,7 @@ def scrub_file( path, values ):
           leave a truncated file
         - the original file mode is preserved
         - the file is left untouched when redaction changes nothing
-        - both rules of cosa.utils.secret_redaction apply — by value AND by
+        - both rules of cosa.utils.secret_redaction apply: by value and by
           credential-shaped key
 
     Raises:
@@ -214,12 +209,12 @@ def scrub_roots( roots, values=None, window_seconds=DEFAULT_ACTIVE_WINDOW_SECOND
     Ensures:
         - returns {"found", "unreadable", "scrubbed", "would_scrub",
           "skipped_active", "skipped_excluded", "total_before", "total_after"} holding
-          PATHS and COUNTS only
+          paths and counts only
         - a file modified inside window_seconds is skipped, not rewritten, and appears
           under skipped_active so the omission is visible
         - files grep could not open come back under "unreadable" — the hole in the
           count is reported, not swallowed
-        - dry_run counts without writing anything and names each file it WOULD have
+        - dry_run counts without writing anything and names each file it would have
           rewritten — a dry run that reports a number and no paths cannot be checked
         - total_after is 0 once every found file has been scrubbed
 

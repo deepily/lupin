@@ -1,14 +1,14 @@
 """
-Provision the three database roles of the approval-settings guard rail (row 80513825).
+Provision the three database roles of the approval-settings guard rail.
 
 Feeds `src/scripts/sql/init-db-roles.sql` to a superuser `psql`. The passwords are read from
-FILES and sent to psql on STDIN as `\\set` lines, so they never appear in an argument list or a
+files and sent to psql on stdin as `\\set` lines. They never appear in an argument list or a
 process listing, and a dry run prints the plan with every password redacted.
 
-⚠️ DRY RUN IS THE DEFAULT. Nothing touches a database unless `--apply` is given. Applying
-needs the three password files to exist, and the files that must be unreadable to a seat
-(the app's) are root-owned, which is a host-administration step this module neither performs
-nor works around.
+A dry run is the default. Nothing touches a database unless `--apply` is given. Applying needs
+the three password files to exist. The app's file must be unreadable to a seat, so it is
+root-owned. Setting that up is host administration, which this module neither performs nor
+works around.
 
     python -m cosa.utils.db_roles --app-pw-file F --host-pw-file F --test-pw-file F \\
         --psql "docker exec -i lupin-postgres psql -U lupin_dev -d lupin_db_dev" [--reassign] [--apply]
@@ -29,7 +29,7 @@ _UNSAFE_CHARS = ( "'", "\\", "\n", "\r", "\x00" )
 
 def read_secret( path ):
     """
-    Read one password file.
+    Read one password file and return its stripped content.
 
     Requires:
         - path names a readable file
@@ -51,10 +51,10 @@ def read_secret( path ):
 
 def build_psql_stdin( app_pw, host_pw, test_pw, sql_text, reassign=False, redact=False ):
     """
-    The text sent to psql on stdin: three `\\set` lines, an optional `\\set reassign 1`, then the SQL.
+    Build the psql stdin: three password `\\set` lines, an optional reassign line, the SQL.
 
-    The SQL travels on stdin rather than as `\\i <path>` because the psql may run INSIDE the
-    postgres container (`docker exec -i ... psql`), where a host path does not exist.
+    The SQL travels on stdin rather than as `\\i <path>`. The psql may run inside the postgres
+    container (`docker exec -i ... psql`), where a host path does not exist.
 
     Requires:
         - the three passwords are non-empty strings free of the unsafe characters

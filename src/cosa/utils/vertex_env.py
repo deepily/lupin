@@ -1,34 +1,29 @@
 """
-Vertex / Model Garden per-session toggle — environment composition and guards.
+Vertex / Model Garden per-session toggle: environment composition and guards.
 
 Design: src/rnd/v0.1.9/2026.07.13-vertex-model-garden-toggle-search-and-logging.md
 
-WHY THIS IS PYTHON AND NOT BASH (§5e): the Lupin coverage mandate is 100% lines
-AND branches AND functions. Bash has no branch-coverage instrument, so testing a
-shell guard via its happy path and reporting "100%" is coverage theatre — it
-walks the success path while the *guards*, the only thing standing between the
-user and a silently mis-billed project, are exactly the branches that go
-unmeasured. An unproven guard is decoration. The guards live here, where every
-failure branch is red-first testable; the shell is a thin wrapper.
+The guards are Python, not bash, because the Lupin coverage mandate is 100% of lines, branches and
+functions. Bash has no branch-coverage instrument. A shell guard tested only on its happy path would
+report full coverage while its failure branches went unmeasured. Those branches are the only thing
+standing between the user and a silently mis-billed project, and an unproven guard is decoration.
+Here every failure branch can be tested red first, and the shell is a thin wrapper.
 
-CERTIFY vs ENFORCE (§5c) — the load-bearing distinction:
+Certifying and enforcing a region are different acts:
 
-    CERTIFY a region  ONCE, out of band   `rawPredict` -> 200.  Costs money.
-    ENFORCE a region  every launch        equality + a calibrated free probe.  $0.
+    Certify a region  once, out of band   `rawPredict` -> 200.  Costs money.
+    Enforce a region  every launch        equality + a calibrated free probe.  $0.
 
-The only truthful region oracle is a real inference call, and it costs money.
-Therefore A FREE LAUNCH-TIME REGION PROBE CANNOT EXIST. This module does NOT
-re-derive the region; it ENFORCES a constant that was certified once. The
-publisher-model metadata endpoint is deliberately NOT used: it returns 200 for
-a region that cannot serve the model and 403 for one that can — the guard built
-to stop the region trap would have opened the gate for it (§7).
+The only truthful region oracle is a real inference call, and that costs money. So a free
+launch-time region probe cannot exist. This module does not re-derive the region. It enforces a
+constant that was certified once. The publisher-model metadata endpoint is not used. It returns 200
+for a region that cannot serve the model and 403 for one that can. A guard built on it would open
+the gate for the very trap it exists to stop.
 
-The set of instruments that may NOT certify a region has grown once already (the
-MaaS OpenAI-compat endpoint, 2026-07-13 — see the certification map below). So the
-certification is no longer a bare tuple of strings that anyone can widen: every
-region must NAME the instrument that proved it, and that instrument is checked at
-IMPORT TIME (assert_region_oracle_is_admissible). A proof is not a guard; the
-paragraph you are reading is a proof, and the import-time call is the guard.
+The set of instruments that may not certify a region has already grown once. The MaaS OpenAI-compat
+endpoint turned out to be region-blind (see the certification map below). So every region must name
+the instrument that proved it, and `assert_region_oracle_is_admissible` checks that instrument at
+import time. A proof written in prose is not a guard. The import-time call is the guard.
 """
 
 import os
@@ -405,23 +400,11 @@ class VertexEnvError( RuntimeError ):
 
 def assert_region_oracle_is_admissible( oracle, evidence ):
     """
-    Refuse a region certification whose INSTRUMENT cannot see regions.
+    Refuse a region certification whose instrument cannot see regions.
 
-    This is the guard for the trap of 2026-07-13: the MaaS OpenAI-compat endpoint
-    returns a BYTE-IDENTICAL 200 for a live region, the dead region, and a region
-    that does not exist — while its own 404 body claims to check "the specified
-    region". An error code answering a question nobody asked.
-
-    The prose above the certification map warns about it. Prose does not run.
-    THIS runs, at import, in every process that touches the toggle — so the honest
-    mistake (certify a region from a 200 that could not have come out otherwise)
-    is impossible rather than merely discouraged.
-
-    Its limit, stated because a guard whose limit is unstated gets over-trusted:
-    it cannot catch a LIE. A seat that runs the OpenAI-compat probe and then types
-    oracle="rawPredict" defeats it. No guard can stop a fabrication; this one makes
-    the mistake structural and forces the fabrication to be an explicit false
-    statement, in a field that exists for no other purpose.
+    The MaaS OpenAI-compat endpoint returns a byte-identical 200 for a live, a dead and a fictional region. Prose warnings do not run, so this check runs at import, in every process that touches the toggle.
+    That makes certifying a region from a 200 that could not have come out otherwise impossible, not just discouraged.
+    It cannot catch a lie. A seat that probes the OpenAI-compat endpoint and then types oracle="rawPredict" defeats it. It makes the mistake structural and the fabrication an explicit false statement.
 
     Requires:
         - oracle and evidence are strings
@@ -472,10 +455,10 @@ def assert_region_oracle_is_admissible( oracle, evidence ):
 
 def assert_certifications_are_provenanced( certifications ):
     """
-    Refuse to LOAD when any certified region lacks admissible provenance.
+    Refuse to load when any certified region lacks admissible provenance.
 
-    Called at import time, below. The allowlist is the surface a future seat will
-    widen, so the guard belongs on the ACT OF WIDENING IT — not in a comment beside it.
+    It is called at import time, below the definition. The allowlist is the surface a future seat will widen.
+So the guard sits on the act of widening it, not in a comment beside it.
 
     Requires:
         - certifications maps a region name to a record with 'oracle' and 'evidence'
@@ -484,7 +467,7 @@ def assert_certifications_are_provenanced( certifications ):
         - returns None when every region's provenance is admissible
 
     Raises:
-        - VertexEnvError naming the offending REGION (the caller's mistake is a
+        - VertexEnvError naming the offending region (the caller's mistake is a
           region, not a dict), with the instrument failure as the cause
     """
     for region, record in certifications.items():
@@ -537,8 +520,7 @@ def assert_no_hostile_env( env ):
     """
     Refuse to launch when any variable that could silently subvert the toggle is present.
 
-    These are PREFLIGHT guards: they run before the first token. A guard that fires
-    after the billing event is not a guard.
+    This is a preflight guard: it runs before the first token, because a guard that fires after the billing event is not a guard.
 
     Requires:
         - env is a mapping of environment variables
@@ -547,8 +529,7 @@ def assert_no_hostile_env( env ):
         - returns None when no hostile key is present
 
     Raises:
-        - VertexEnvError naming EVERY offending key (not just the first — a caller
-          who fixes one and re-runs should not discover the next one serially)
+        - VertexEnvError naming every offending key, not just the first, so a caller who fixes one and re-runs should not discover the next one serially
     """
     offenders = [ key for key in HOSTILE_ENV_KEYS if env.get( key ) ]
     if offenders:
@@ -565,8 +546,7 @@ def assert_project_agreement( env, project_id ):
     """
     Refuse to launch when any variable disagrees with the resolved project.
 
-    GOOGLE_CLOUD_PROJECT / GCLOUD_PROJECT take precedence over
-    ANTHROPIC_VERTEX_PROJECT_ID, so a mismatch bills a DIFFERENT project, silently.
+    GOOGLE_CLOUD_PROJECT and GCLOUD_PROJECT take precedence over ANTHROPIC_VERTEX_PROJECT_ID, so a mismatch silently bills a different project.
 
     Requires:
         - env is a mapping; project_id is a non-empty string
@@ -591,9 +571,7 @@ def assert_region_is_certified( region ):
     """
     Refuse to launch on a region no rawPredict has ever certified.
 
-    C2: the module previously ACCEPTED any string. `LUPIN_VERTEX_REGION=us-central1`
-    composed cleanly and exited 0 — the region where the model is NOT SERVABLE. The
-    word "enforce" in the docstring was doing the work an allowlist should have done.
+    The region check is an allowlist because accepting any string let LUPIN_VERTEX_REGION=us-central1 compose cleanly, in a region where the model is not servable. The word "enforce" cannot do an allowlist's work.
 
     Requires:
         - region is a non-empty string
@@ -603,7 +581,7 @@ def assert_region_is_certified( region ):
 
     Raises:
         - VertexEnvError naming the certified set, because a region that is merely
-          LISTED, or merely has QUOTA, is not a region that RUNS
+          listed, or merely has quota, is not a region that runs
     """
     if region not in CERTIFIED_VERTEX_REGIONS:
         raise VertexEnvError(
@@ -621,11 +599,9 @@ def assert_region_is_certified( region ):
 
 def assert_model_pin_agreement( env ):
     """
-    Refuse to launch when a model override DISAGREES with the pin it would defeat.
+    Refuse to launch when a model override disagrees with the pin it would defeat.
 
-    C4: present-and-AGREEING is harmless (ANTHROPIC_MODEL=claude-opus-4-8 is exactly
-    what the pin asks for). Banning it outright was the same "guard that fires on a
-    valid configuration" bug already fixed one bucket over, for the project variables.
+    An override that agrees with its pin is harmless (ANTHROPIC_MODEL=claude-opus-4-8 is what the pin asks for). Banning it outright would be a guard that fires on a valid configuration, the same defect as for the project variables.
 
     Requires:
         - env is a mapping
@@ -649,26 +625,11 @@ def assert_model_pin_agreement( env ):
 
 def pane_unset_keys( vertex_path ):
     """
-    The keys the PANE must unset before `claude` starts — and the answer DEPENDS ON THE PATH.
+    Return the keys the pane must unset before `claude` starts, which depend on the path.
 
-    MAX path    -> scrub EVERYTHING, the three toggle keys included. A tmux server born
-                   from a Vertex shell freezes CLAUDE_CODE_USE_VERTEX into its env and
-                   hands it to every later session on that socket, Max ones included
-                   (OSQ-6, verified live). That session never asked to be billed.
-
-    VERTEX path -> scrub the HOSTILE / PRECEDENCE set ONLY. The three toggle keys are not
-                   contamination here — THEY ARE THE FEATURE. They arrive via `tmux -e`,
-                   which sets the SESSION environment and therefore outranks the frozen
-                   server env: there is no precedence fight to lose, and nothing to re-add.
-                   Scrubbing them here is what killed `--vertex`.
-
-    The one-line rule this function exists to enforce:
-
-        SCRUB ALWAYS WHAT IS HOSTILE. NEVER SCRUB WHAT YOU JUST FORWARDED.
-
-    The decision lives in Python, not in the shell, for the same reason the guards do
-    (§5e): this is a BRANCH, and bash has no branch-coverage instrument. An unmeasured
-    branch in a billing path is how the last one hid.
+    Max path: scrub everything, toggle keys included. A tmux server born from a Vertex shell freezes CLAUDE_CODE_USE_VERTEX into its env and hands it to every later session on that socket. A Max session never asked to be billed.
+    Vertex path: scrub only the hostile and precedence set. The toggle keys are the feature here. They arrive via `tmux -e`, which sets the session env and outranks the frozen server env, so scrubbing them would kill `--vertex`.
+    The rule is to scrub always what is hostile and never what you just forwarded. The decision is a branch, so it lives in Python, where branch coverage is measured; bash has no such instrument.
 
     Requires:
         - vertex_path is a bool: True on the --vertex path, False on the Max path
@@ -686,23 +647,19 @@ def parse_tmux_global_env( show_environment_output ):
     """
     Parse `tmux show-environment -g` output into a mapping.
 
-    tmux emits exactly two line shapes: `KEY=value` (set in the server's global
-    env) and `-KEY` (marked unset). Anything else is an INSTRUMENT failure — for
-    example a value carrying a newline, which line-parsing cannot attribute — and
-    it fails LOUD rather than silently skipping: a line dropped here is a hostile
-    variable silently waved through the OSQ-6 server check, and "I could not
-    parse" must never be reported as "the server is clean."
+    tmux emits two line shapes: `KEY=value` (set in the server's global env) and `-KEY` (marked unset). Anything else is an instrument failure, for example a value carrying a newline, which line parsing cannot attribute.
+    It fails loud rather than skipping, because a dropped line would let a hostile variable through the server check. "I could not parse" must never be reported as "the server is clean".
 
     Requires:
-        - show_environment_output is a string (possibly empty — an EMPTY string
-          parses to an empty mapping; whether emptiness is trustworthy is the
-          CALLER's burden: it must check the tmux exit status, because a failed
-          command and a clean server both print nothing)
+        - show_environment_output is a string, possibly empty
+        - an empty string parses to an empty mapping; whether emptiness is trustworthy is the
+          caller's burden, because a failed command and a clean server both print nothing, so
+          the caller must check the tmux exit status
 
     Ensures:
-        - returns a dict of the KEY=value entries
+        - returns a dict of the `KEY=value` entries
         - `-KEY` unset markers are excluded (the server saying "unset" is
-          exactly the state the guard wants)
+          the state the guard wants)
 
     Raises:
         - VertexEnvError on a line that is neither `KEY=value` nor `-KEY`
@@ -724,21 +681,10 @@ def parse_tmux_global_env( show_environment_output ):
 
 def assert_server_env_is_vertex_free( server_env ):
     """
-    OSQ-6, the EXISTING-server half: refuse when the tmux server's global env
-    carries any Vertex toggle or hostile key.
+    Refuse when the tmux server's existing global env carries a Vertex toggle or hostile key.
 
-    The pane unset cannot fix this: it cleanses ONE pane's shell, while the
-    server's frozen env keeps handing the same keys to every OTHER session on
-    the socket — including ones not launched through the guarded launcher.
-    Silently scrubbing around a tainted server moves the failure to whoever
-    looks last (C1: the guard was green because it was checking a room the
-    model was never in).
-
-    BLAST RADIUS, deliberate: while the server env is tainted, EVERY launch on
-    this socket refuses — Max ones included — until it is cleansed. That is the
-    point: a tainted server mis-bills sessions that never asked, so the loud
-    failure belongs to the one person who can fix it once, not to the N future
-    sessions that would each inherit it silently.
+    The pane unset cannot fix this. It cleanses one pane's shell, while the server's frozen env keeps handing the same keys to every other session on the socket. Scrubbing around a tainted server moves the failure to whoever looks last.
+    The blast radius is intended: while the server env is tainted, every launch on this socket refuses, Max ones included. A tainted server mis-bills sessions that never asked, so the loud failure belongs to the one person who can fix it once.
 
     Requires:
         - server_env is a mapping (parse_tmux_global_env of the -g output)
@@ -747,10 +693,9 @@ def assert_server_env_is_vertex_free( server_env ):
         - returns None when no refusal key carries a truthy value
 
     Raises:
-        - VertexEnvError naming EVERY offender, with per-key surgical
-          remediation (`tmux set-environment -g -u <KEY>` — never a server
-          kill; this fleet has died five times from a kill that "knew" its
-          target)
+        - VertexEnvError naming every offender, with per-key remediation
+          (`tmux set-environment -g -u <KEY>`), never a server kill, which would
+          take down every session on the socket
     """
     offenders = sorted( key for key in SERVER_TAINT_REFUSAL_KEYS if server_env.get( key ) )
     if offenders:
@@ -769,41 +714,26 @@ def assert_server_env_is_vertex_free( server_env ):
 
 def pane_guard( env=None, vertex_path=False ):
     """
-    §5c guard-table row 2 — the clear-or-assert set, executed IN THE PANE.
+    Verify inside the pane that its env is what its path promises, before `claude` starts.
 
-    C1: every earlier revision ran its checks in the LAUNCHER's shell, and
-    `claude` does not run there — it runs in the pane, on the frozen tmux
-    server env the launcher never saw. A guard that fires in the wrong process
-    is not a guard (F-A10). The launcher writes THIS call into the pane command
-    AFTER the unset and BEFORE `claude` (post `-e`, pre `claude`), so the pane
-    dies non-zero — before the first token — when it is not the environment its
-    banner claims.
-
-    Two jobs, both directions:
-
-    SCRUB VERIFICATION (both paths). Every key the pane was told to unset must
-    actually be GONE. The unset and this check run in the same shell, so the
-    only way to fail is the class Arnold's F4 named: the scrub silently did not
-    happen (an empty derivation, a 2>/dev/null eating the error). The scrub's
-    postcondition is asserted, never assumed.
-
-    TOGGLE VERIFICATION.
-      VERTEX path — the three toggle keys must be PRESENT and exact, the region
-      certified, every model pin exactly the pin. This is the P0 as a runtime
-      guard: a --vertex pane that is not actually on Vertex REFUSES TO START
-      instead of running on Max under a metered-billing banner. The banner can
-      no longer lie quietly.
-      MAX path — covered by scrub verification: MAX_PANE_UNSET_KEYS includes the
-      toggle keys, so a Max pane carrying CLAUDE_CODE_USE_VERTEX dies here
-      instead of being silently billed (OSQ-6's victim, guarded at last).
+    `claude` runs in the pane, on the frozen tmux server env the launcher never saw.
+    A check in the launcher's shell guards the wrong process. The launcher writes this call into the pane command after the unset and before `claude`.
+    The pane dies non-zero, before the first token, when it is not the environment its banner claims.
 
     Requires:
-        - env is a mapping (defaults to os.environ — the pane's REAL env, which
-          is the whole point)
+        - env is a mapping (defaults to os.environ, the pane's real env)
         - vertex_path is a bool: True on the --vertex path, False on the Max path
 
     Ensures:
         - returns None when the pane env matches what its path promises
+        - on both paths, every key the pane was told to unset is gone; the unset and this check run in
+          one shell, so a survivor means the scrub silently did not happen (for example an empty
+          derivation, or an error hidden by 2>/dev/null)
+        - on the Max path that scrub check is the whole guard: MAX_PANE_UNSET_KEYS includes the toggle
+          keys, so a Max pane carrying CLAUDE_CODE_USE_VERTEX dies here instead of being billed
+        - on the --vertex path the three toggle keys are present, CLAUDE_CODE_USE_VERTEX is "1", the
+          region is certified and every model pin equals its pin, so a pane not on Vertex refuses to
+          start instead of running on Max under a metered-billing banner
 
     Raises:
         - VertexEnvError naming every offending key, before `claude` starts
@@ -854,16 +784,15 @@ def pane_guard( env=None, vertex_path=False ):
 
 def compose_vertex_env( env=None, project_id=None, region=None ):
     """
-    Compose the Vertex environment for ONE process, failing loud on any hazard.
+    Compose the Vertex environment for one process, failing loud on any hazard.
 
-    This ENFORCES a region that was CERTIFIED once by a rawPredict (§5c). It does
-    NOT re-derive servability: the only truthful region oracle costs money, so a
-    free launch-time region probe cannot exist, and the metadata endpoint LIES
-    (200 for a region that cannot serve; 403 for one that can).
+    It enforces a region that was certified once by a rawPredict call. It does not re-derive servability: the only truthful region oracle costs money, so a free launch-time probe cannot exist.
+    The publisher-model metadata endpoint is no substitute, because it returns 200 for a region that cannot serve and 403 for one that can.
 
     Requires:
         - env is a mapping (defaults to os.environ)
-        - project_id / region default to the resolver's values via the environment
+        - project_id and region, when not given, are read from env as LUPIN_GCP_PROJECT_ID and
+          LUPIN_VERTEX_REGION; there is no env-file fallback here
 
     Ensures:
         - returns a dict of the exact variables to export for this process only
@@ -872,8 +801,8 @@ def compose_vertex_env( env=None, project_id=None, region=None ):
         - all three model pins present, Haiku in "@"-form
 
     Raises:
-        - VertexEnvError on a missing project/region, a hostile variable, or a
-          project disagreement
+        - VertexEnvError on a missing project or region, an uncertified region, a hostile
+          variable, a project disagreement or a model-pin disagreement
     """
     if env is None:
         env = os.environ
@@ -903,7 +832,7 @@ def format_dry_run( composed ):
         - composed is a mapping of environment variables
 
     Ensures:
-        - returns a newline-joined KEY=VALUE listing, sorted for stable diffing
+        - returns a newline-joined `KEY=VALUE` listing, sorted for stable diffing
     """
     return "\n".join( f"{key}={composed[ key ]}" for key in sorted( composed ) )
 

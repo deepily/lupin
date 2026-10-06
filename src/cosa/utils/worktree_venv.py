@@ -1,35 +1,32 @@
 """
-Give a freshly-created worktree a usable `.venv`, so the unit tier answers the same
-question in every tree (row 9b2abfb7 — part 2 of the f42ac20c remedy).
+Give a new worktree a usable `.venv` by delegating to the link script.
 
-THE DEFECT THIS CLOSES. `.venv` is gitignored, so `git worktree add` never produces
-one. Four unit-test files shell out to `<PROJECT_ROOT>/.venv/bin/{python,pytest}`, so
-they pass in the main checkout and fail in every worktree without one, with no code
-difference between them. Measured on ONE clean tree at ONE sha with only a `.venv`
-symlink added and removed: 14 failed without it, 1 failed with it — and the survivor
-is an unrelated genuine red, not a venue artifact.
+The defect this closes: `.venv` is gitignored, so `git worktree add` never produces one.
+Four unit-test files shell out to `<PROJECT_ROOT>/.venv/bin/{python,pytest}`. They pass in
+the main checkout and fail in every worktree without one, with no code difference between
+them. On one clean tree at one sha, adding and removing only a `.venv` symlink moved the
+unit tier from 14 failures to 1. The survivor was an unrelated genuine failure.
 
-WHY THIS MODULE DOES NOT REIMPLEMENT THE LINKING. `src/scripts/link-worktree-venv.sh`
-(part 1) already refuses the main repo by name, no-ops on a real `.venv`, clears only
-a dangling symlink of its own, and verifies the interpreter resolves before claiming
-success. A second implementation of that predicate is a second thing to keep in sync,
-so this delegates and never re-derives. There is deliberately no "is it already
-provisioned" fast path here for the same reason.
+Why this module does not reimplement the linking: `src/scripts/link-worktree-venv.sh`
+already refuses the main repo by name and does nothing on a real `.venv`. It clears only a
+dangling symlink of its own, and it verifies the interpreter resolves before claiming
+success. A second implementation of that predicate is a second thing to keep in sync, so
+this delegates and never re-derives it. For the same reason it has no "already provisioned"
+fast path.
 
-⚠️ IT CANNOT CROSS-CONTAMINATE REPOS, AND THAT IS STRUCTURAL RATHER THAN CAREFUL.
-`session_spawner` keeps two axes apart on purpose: PLATFORM (venv, PYTHONPATH, hooks,
-MCP) is pinned to lupin always, WORK (cwd, CLAUDE.md, git identity) follows the target
-project. A child booted on another repo's venv cannot import fastmcp, so it cannot DM,
-set a topic, or be reaped (measured by Maria, 2026-08-19). This helper cannot blur
-that: the script asks `git -C "$TARGET" worktree list` for the TARGET's own main
-checkout, so it can only ever link a repo's own venv into that repo's own worktree. A
-foreign repo whose main checkout has no venv exits 4 loudly instead of borrowing one.
+It cannot cross-contaminate repos, and that is structural rather than careful.
+`session_spawner` keeps two axes apart. The platform (venv, PYTHONPATH, hooks, MCP) is
+pinned to lupin always. The work (cwd, CLAUDE.md, git identity) follows the target project.
+A child booted on another repo's venv cannot import fastmcp, so it cannot DM, set a topic,
+or be reaped. This helper cannot blur that. The script asks `git -C "$TARGET" worktree list` for the
+target's own main checkout. So it only links a repo's own venv into that repo's own
+worktree. A foreign repo whose main checkout has no venv exits 4 loudly instead of
+borrowing one.
 
-⚠️ IT NEVER RAISES, DELIBERATELY. A seat without a venv is worse off; a spawn that
-dies because provisioning failed is worse still. Same fail-open shape as
-`stash_guard.py`. Every non-recoverable outcome is logged at WARNING naming the target
-and the exit code, because the failure this whole row exists to kill is the one that
-looks like success.
+It never raises. A seat without a venv is worse off, and a spawn that dies because
+provisioning failed is worse still. This is the same fail-open shape as `stash_guard.py`.
+Every non-recoverable outcome is logged at warning level, naming the target and the exit
+code. The failure this exists to kill is the one that looks like success.
 """
 
 import logging
@@ -65,20 +62,20 @@ def provision_worktree_venv( target, debug=False ):
         - never raises, for any input or any failure of the underlying script
         - returns a dict with keys: provisioned (bool), status (str),
           exit_code (int or None), target (str or None), detail (str)
-        - provisioned is True ONLY when the target now has a usable interpreter
+        - provisioned is True only when the target now has a usable interpreter
           because this call confirmed or created one (script exit 0)
         - a falsy target is a no-op reported as status "no_target", never an error:
           an explicit project=None spawn inherits the caller's own cwd, which this
           helper does not know and must not guess at
         - a target with no part-1 script (a foreign repo, an old checkout) is a
           no-op reported as status "script_absent", never an error
-        - the main checkout is a no-op FOR PROVISIONING, reported as status
-          "main_repo" — the script refuses to replace a real .venv directory with a
-          link to itself — AND logged at WARNING naming the target, because the
-          LOCATION fact riding along with it (this seat is in the shared tree) is
+        - the main checkout is a no-op for provisioning, reported as status
+          "main_repo" (the script refuses to replace a real .venv directory with a
+          link to itself), and logged at warning level naming the target, because the
+          location fact riding along with it (this seat is in the shared tree) is
           not a no-op for whoever is about to work there
-        - every other non-zero exit is reported as status "failed" AND logged at
-          WARNING naming the target and the exit code
+        - every other non-zero exit is reported as status "failed" and logged at
+          warning level naming the target and the exit code
 
     Returns:
         dict

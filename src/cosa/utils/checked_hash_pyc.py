@@ -1,70 +1,42 @@
 """
-The mechanical control for the checked-hash rule (row 866f43ce; decision f313fc2d).
+Mechanical control that rewrites every in-scope bytecode write into checked-hash form.
 
-WHY THIS EXISTS RATHER THAN MORE DOCUMENTATION. The checked-hash mandate is written down,
-prominently, in CLAUDE.md and in two scripts' header comments — and it was broken three times
-in one afternoon by people who had read it, two of whom wrote parts of it. That is the easy
-half of the argument. The hard half is that the tree DRIFTS WITH NOBODY BREAKING ANY RULE: a
-correctly converted tree grew a new timestamp pyc about 2.5 hours after a clean conversion,
-through ordinary first-time imports. No purge discipline addresses that, because no purge
-happened.
-
-THE MECHANISM, read out of CPython 3.13.7's own import machinery rather than recalled
-(`importlib/_bootstrap_external.py`, SourceLoader.get_code ~line 1163):
-
-    if hash_based:  data = _code_to_hash_pyc( code, source_hash, check_source )
-    else:           data = _code_to_timestamp_pyc( code, source_mtime, len( source_bytes ) )
-
-`hash_based` is derived from reading an EXISTING pyc. When no pyc exists there is nothing to
-inherit a mode from, so the branch falls to timestamp — CPython's default. That is not a bug
-and there is no environment variable or flag that changes it: `-B` /
-PYTHONDONTWRITEBYTECODE suppress *writing* a pyc, never the MODE of one that does get
-written, and `_imp.check_hash_based_pycs` governs *validation* of hash pycs that already
-exist, not the mode of new ones.
-
-⇒ SO THE ONLY PLACE TO STAND IS THE WRITE ITSELF. This module patches
-`SourceFileLoader._cache_bytecode`, the single funnel every source-import bytecode write
-passes through, and rewrites a timestamp header into a checked-hash one before it reaches
-disk.
-
-🔴 PATCH THE CONCRETE CLASS, NOT THE BASE — MEASURED, AND THE FIRST CUT GOT IT WRONG.
-`SourceFileLoader` DEFINES ITS OWN `_cache_bytecode` (_bootstrap_external.py:1238), which
-overrides `SourceLoader._cache_bytecode` (:1058). A patch applied to the base class is
-silently never called: the first proof-of-concept did exactly that, reported a clean install,
-and left every pyc timestamp-based. It is the same shape as the `-f` trap in the migration
-script — a command that succeeds while doing nothing.
-
-THE HEADER SWAP IS EXACT, NOT AN APPROXIMATION. Both pyc headers are 16 bytes:
-
-    timestamp     magic(4) flags(4)=0    mtime(4)  source_size(4)  marshalled code
-    checked-hash  magic(4) flags(4)=0b11 source_hash(8)            marshalled code
-
-So bytes 4:16 are replaced and the marshalled code object is passed through untouched. No
-unmarshal/remarshal round trip, so this cannot alter the compiled code — the bytes after
-offset 16 are the ones CPython already produced.
-
-MEASURED, one first-time import of a two-file package, same-size same-second edit after:
-
-    no interceptor    cache=timestamp      source says 9, fresh interpreter sees 3   STALE
-    with interceptor  cache=checked-hash   source says 9, fresh interpreter sees 9   SEEN
-
-🔴 FAIL-OPEN IS NOT DEFENSIVE POLISH HERE, IT IS THE PRICE OF THE PLACEMENT. If this is ever
-installed from a sitecustomize it runs inside EVERY python process in the repo, before
-anything else. An exception escaping this module would take down every interpreter start —
-the test tiers, the servers, the hooks, the scripts. So every path swallows its own errors
-and degrades to CPython's stock behaviour, which is exactly the status quo this control
-improves on. A control that can brick the fleet is worse than the drift it prevents.
+Written rules were broken by people who had read them. A correctly converted tree
+also drifted to timestamp pycs through ordinary first-time imports, with no rule
+broken, so no purge discipline helps. The control therefore sits at the write itself.
 
 Requires:
     - CPython with 16-byte pyc headers and importlib._bootstrap_external.SourceFileLoader
-      (verified against 3.13.7; `install()` refuses and returns False on any interpreter
-      whose machinery does not match, rather than guessing)
+      (verified against 3.13.7); `install()` returns UNSUPPORTED_INTERPRETER on
+      any interpreter whose machinery does not match, rather than guessing
 
 Ensures:
     - `install()` is idempotent and returns True only when it newly took effect
     - after a successful install, every bytecode write for a source file inside the
       configured roots is checked-hash
     - no path in this module raises to its caller
+
+Why the write is the only place to act. CPython derives hash-based from an existing
+pyc. With no pyc there is nothing to inherit a mode from, so it writes a timestamp
+pyc. No flag changes that. `-B` and PYTHONDONTWRITEBYTECODE suppress writing, not
+the mode of a pyc that is written. `_imp.check_hash_based_pycs` governs validation
+of existing hash pycs, not new ones.
+
+So this module patches `SourceFileLoader._cache_bytecode`, the single funnel for
+source-import bytecode writes. It swaps a timestamp header for a checked-hash one
+before the bytes reach disk. It patches the concrete class, not the base:
+SourceFileLoader defines its own `_cache_bytecode`, which overrides the base one.
+A patch on the base is never called and reports a clean install while doing nothing.
+
+The header swap is exact. Both headers are 16 bytes. Timestamp is magic(4),
+flags(4)=0, mtime(4), source_size(4). Checked-hash is magic(4), flags(4)=0b11,
+source_hash(8). Bytes 4:16 are replaced and the marshalled code passes through
+untouched, with no unmarshal round trip.
+
+Every path fails open. Installed from a sitecustomize, this runs inside every python
+process in the repo, so an escaping exception would stop every interpreter start.
+Each path swallows its own errors and degrades to CPython's stock behaviour. A
+control that can brick the fleet is worse than the drift it prevents.
 """
 
 import os
@@ -95,21 +67,18 @@ _LEDGER_RELATIVE = "io/pyc-mode-ledger.jsonl"
 
 class _Outcome( str ):
     """
-    A string that REFUSES to be a boolean, so the question a caller is really
-    asking has to be asked out loud.
+    A string that refuses to be a boolean, so callers must ask the question they mean.
 
-    ⚠️ IT RAISES RATHER THAN ANSWERING, and that is the whole design. `install()`
-    answers "did THIS call newly install the patch?"; `is_installed()` answers "is
-    the patch active?". For a caller who meant the second, ALREADY_INSTALLED is a
-    SUCCESS — so ANY truthiness answer here is wrong for somebody: False re-runs
-    the old conflation one level out, and True is wrong for the caller who meant
-    the first. Ruled by Mr Radio 🦉 2026-08-31, rejecting a quietly-truthy value
-    as "wrong in a new way".
+    `install()` answers "did this call newly install the patch?". `is_installed()`
+    answers "is the patch active?". For a caller who meant the second, `ALREADY_INSTALLED`
+    is a success, so any truthiness answer is wrong for somebody. A falsey value
+    rebuilds the old conflation one level out. A truthy value is wrong for the caller
+    who meant the first question. So the implicit bool raises.
 
     Subclassing str keeps the value printable, comparable and usable in a message;
-    only the implicit bool is refused. `install()` still returns a real `True` on
-    the newly-installed path, so `if install():` works there and fails LOUDLY, with
-    the remedy named, on exactly the paths where its meaning was ambiguous.
+    only the implicit bool is refused. `install()` still returns a real `True` on the
+    newly-installed path, so `if install():` works there. On the ambiguous paths it
+    fails loudly and names the remedy.
     """
     __slots__ = ()
 
@@ -170,7 +139,7 @@ def to_checked_hash( data, source_bytes ):
         - source_bytes is the exact source text the code object was compiled from
 
     Ensures:
-        - returns a bytearray whose bytes past offset 16 are IDENTICAL to the input's,
+        - returns a bytearray whose bytes past offset 16 are identical to the input's,
           so the compiled code object is passed through untouched
         - returns the input unchanged when it is already hash-based or too short to be a pyc
     """
@@ -197,23 +166,18 @@ def _in_scope( source_path, roots ):
     Ensures:
         - returns False for any path under a vendored directory
         - returns True only when the path sits under one of roots
-        - 🔴 AN EMPTY SET READ AS A UNIVERSAL SET, ARRIVING IN A PERMISSION CHECK.
-          That is the shape, and it is worth naming because it is the same ambiguity
-          that bit four other things on 2026-08-31 in four different disguises: an
-          empty search result meaning "wrong population" or "empty population"; a
-          clean exit meaning "did the work" or "never ran"; a bare False meaning "no
-          need" or "impossible". Each time, two opposite facts shared one
-          representation. FAIL CLOSED is the general answer wherever the ambiguous
-          value grants authority — "I was given no roots" must never resolve to "I
-          may rewrite anything".
-        - 🔴 AN EMPTY roots MEANS NOTHING IS IN SCOPE, never everything. It used to
-          mean the opposite, which made the shim UNBOUNDED on any interpreter started
-          without LUPIN_ROOT: _default_roots() returns () there, so the patch owned the
-          whole filesystem and would rewrite stdlib bytecode. Measured 2026-08-31 —
-          _in_scope( "/usr/lib/python3.13/json/decoder.py", () ) answered True, and a
-          scratch package outside any repo came back checked-hash with converted_count 2.
-          Found in review by Tiberius 👑. A control that owns everything by default owns
-          things nobody agreed to give it, so the empty case now fails CLOSED.
+        - an empty set must never be read as a universal set in a permission check. The same
+          ambiguity has hidden behind a bare False meaning "no need" or "impossible", and behind a
+          clean exit meaning "did the work" or "never ran". Each time, two opposite facts shared
+          one representation. Fail closed wherever an
+          empty value would grant authority: "I was given no roots" never resolves to "I may
+          rewrite anything"
+        - an empty roots means nothing is in scope, never everything: it fails closed.
+          Empty once meant everything, which left the shim unbounded on any interpreter
+          started without LUPIN_ROOT, because _default_roots() returns () there. It
+          would then have rewritten stdlib bytecode. A control that owns everything by
+          default owns things nobody agreed to give it. Fail closed wherever an empty
+          value grants authority.
     """
     try:
         resolved = os.path.abspath( source_path )
@@ -235,12 +199,10 @@ def install( roots=None ):
         - returns ALREADY_INSTALLED when the patch is already in place
         - returns UNSUPPORTED_INTERPRETER when the import machinery does not match
           what this module knows how to patch
-        - ⚠️ NEITHER FAILURE VALUE HAS A TRUTH VALUE — using one in a boolean context
-          raises TypeError naming `is_installed()`. They were ONE value (`False`) until
-          2026-08-31 and this docstring stated the conflation as if it were a feature.
-          Making them merely falsey was the first fix and was still wrong: for a caller
-          asking "is the patch ACTIVE?", ALREADY_INSTALLED is a SUCCESS, so a falsey
-          answer rebuilds the same conflation one level out. Ask the question you mean
+        - neither failure value has a truth value: using one in a boolean context
+          raises TypeError naming `is_installed()`. Merely falsey values were still
+          wrong, because for a caller asking "is the patch active?", ALREADY_INSTALLED
+          is a success. Ask the question you mean
         - never raises
     """
     global _installed, _original
@@ -358,13 +320,13 @@ def actor():
 
     Ensures:
         - returns a non-empty string
-        - performs NO file reads — this may run inside sitecustomize on every interpreter
+        - performs no file reads; this may run inside sitecustomize on every interpreter
           start, where reading the session bridge would be both a cost and a failure mode
 
-    NOTE the honesty limit, which the ledger's readers must know: this names the SESSION,
-    not the human, and an action taken outside a Claude session names only the unix user.
-    A raw `rm -rf __pycache__` typed in any shell writes no ledger line at all. That is the
-    point rather than a gap — see `record()`.
+    Honesty limit, which the ledger's readers must know: this names the session, not
+    the human. An action outside a Claude session names only the unix user. A raw
+    `rm -rf __pycache__` typed in any shell writes no ledger line at all. That is by
+    design; see `record()`.
     """
     session = os.environ.get( "CLAUDE_CODE_SESSION_ID", "" )[ :8 ]
     user    = os.environ.get( "USER", "unknown" )
@@ -399,17 +361,13 @@ def record( event, counts=None, note="", root=None ):
         - returns the path written, or None when no ledger location could be resolved
         - never raises
 
-    WHY THIS IS THE POINT AND NOT POLISH. On 2026-08-30 the main tree's invalidation mode
-    changed — 2,416 checked-hash to 66 — and FOUR people investigated. They produced three
-    mutually inconsistent inferences and no answer, and the row records the hunt as
-    deliberately abandoned. Nothing was wrong with anyone's reasoning; there was simply no
-    record to reason from.
-
-    ⇒ THE LEDGER'S VALUE IS IN ITS SILENCES AS MUCH AS ITS ENTRIES. Sanctioned tools write a
-    line. An unsanctioned action — a raw purge, a stray compileall, a tool nobody has
-    identified — writes nothing. So a mode change with no adjacent entry is POSITIVE evidence
-    that no sanctioned tool did it, which is exactly the question four people could not answer.
-    It does not make every actor identifiable, and it should not be sold as if it does.
+    Why it exists: a tree's invalidation mode once changed (2,416 checked-hash pycs
+    to 66) and four people could not agree why, because there was no record to reason
+    from. The ledger's value is in its silences as much as its entries. Sanctioned
+    tools write a line. An unsanctioned action (a raw purge, a stray compileall, an
+    unidentified tool) writes nothing. So a mode change with no adjacent entry is
+    positive evidence that no sanctioned tool did it. It does not make every actor
+    identifiable, and it should not be sold as if it does.
     """
     path = ledger_path( root )
     if path is None: return None
@@ -440,7 +398,7 @@ def census( roots ):
         - roots is an iterable of directory paths
 
     Ensures:
-        - returns ( counts_by_mode, offender_paths ) for THIS interpreter's pycs only
+        - returns ( counts_by_mode, offender_paths ) for this interpreter's pycs only
         - excludes vendored trees, other interpreters' pycs, and pytest's assertion-rewritten
           pycs, which compileall neither owns nor can convert
         - never raises
@@ -478,12 +436,11 @@ def main( argv=None ):
     Ensures:
         - returns 0 when every pyc this interpreter reads is checked-hash, 1 otherwise
         - writes exactly one ledger line per invocation, so an unexplained mode change
-          can later be checked against a record instead of against three inferences
+          can later be checked against a record instead of against inference
         - prints the roots it actually scanned, so the scope is visible beside the verdict
 
-    NOTE this reports and records; it does NOT convert and it does NOT block anything.
-    Placement of a converting or refusing control is Rick's ruling on decision f313fc2d,
-    not this module's to assume.
+    This reports and records. It does not convert and it does not block anything.
+    Where a converting or refusing control belongs is decided elsewhere, not assumed here.
     """
     roots = list( argv ) if argv else list( _default_roots() )
     if not roots:

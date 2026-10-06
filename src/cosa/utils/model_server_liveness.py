@@ -1,24 +1,23 @@
 """
-Refuse a run whose model server is not answering — row b9604f8c.
+Refuse a run whose model server is not answering.
 
-WHY THIS EXISTS. On 2026-08-17 the Ministral-8B router at 192.168.1.21:3000 went down.
-Port 3001 (Phi-4) stayed up, so the box looked alive to any casual check, and the outage
-surfaced only when a THREE-HOUR JOB DIED ON IT — with an API error three layers from the
-cause. The outage was fixed the same day. The DETECTION is what this module is about: a
-dead dependency read as a working one, because only one of two ports was ever checked.
+Why this exists: when one port of a two-port model box went down, the other port stayed up. The
+box looked alive to any casual check. The outage surfaced only when a long job died on it,
+with an API error three layers from the cause. A dead dependency was read as a working one
+because only one of two ports was ever checked.
 
-TWO THINGS IT MUST DO, both taken from the incident:
+Two things it must do:
 
-  · PROBE EVERY PORT THE RUN WILL USE, not one of them. Half-alive read as alive is what
-    made the outage invisible; a probe that checks one port reproduces the defect it was
-    built to prevent.
-  · NAME WHICH PORT DID NOT ANSWER, and how it failed. "The model server is down" at hour
-    three teaches nobody anything; "3000 refused the connection, 3001 answered with
-    Phi-4" at second one is self-diagnosing.
+  - Probe every port the run will use, not one of them. A half-alive box read as alive is what
+    made the outage invisible. A probe that checks one port reproduces the defect it was built
+    to prevent.
+  - Name which port did not answer, and how it failed. "The model server is down" at hour three
+    teaches nobody anything. "3000 refused the connection, 3001 answered with Phi-4" at second
+    one is self-diagnosing.
 
-WHAT IT DELIBERATELY DOES NOT DO. It does not judge whether the right MODEL is loaded, and
-it does not measure latency. It answers one question — did this endpoint answer — because a
-probe that can fail for many reasons is a probe whose refusal has to be diagnosed itself.
+What it leaves out: it does not judge whether the right model is loaded, and it
+does not measure latency. It answers one question, whether this endpoint answered. A probe that
+can fail for many reasons is a probe whose refusal has to be diagnosed itself.
 """
 
 import json
@@ -34,7 +33,7 @@ DEFAULT_TIMEOUT_S = 5.0
 
 
 class ModelServerUnavailable( RuntimeError ):
-    """Raised to REFUSE a run before it spends hours against a dependency that is not there."""
+    """Raised to refuse a run before it spends hours against a dependency that is not there."""
 
 
 def parse_vllm_endpoint( spec: Any ) -> Optional[ str ]:
@@ -57,7 +56,7 @@ def discover_vllm_endpoints( config_mgr ) -> List[ str ]:
     The distinct set of vLLM endpoints this configuration points at.
 
     Ensures:
-        - returns each host:port ONCE, sorted, so a run probes every port it could dial
+        - returns each host:port once, sorted, so a run probes every port it could dial
           without probing the same one thirty times
         - is derived from the config the run itself reads, so a new endpoint added to
           lupin-app.ini is probed without anyone remembering to update a list here
@@ -79,10 +78,11 @@ def probe_endpoint( endpoint: str, timeout_s: float = DEFAULT_TIMEOUT_S,
         - endpoint is "host:port"
 
     Ensures:
-        - returns {endpoint, alive, detail, models} and NEVER raises: a probe that can
+        - returns {endpoint, alive, detail, models}. It never raises on a refused connection,
+          a timeout, a bad HTTP status or an unreadable body, because a probe that can
           throw turns a diagnosis into a second failure to diagnose
-        - `detail` names the failure in the words an operator can act on — refused,
-          timed out, HTTP status, unreadable body — never a bare False
+        - `detail` names the failure in the words an operator can act on (refused,
+          timed out, HTTP status, unreadable body), never a bare False
         - `models` carries what the server said it is serving when it answered, so the
           receipt is "3001 answered with Phi-4", not "3001 answered"
     """
@@ -120,7 +120,7 @@ def probe_endpoints( endpoints: List[ str ], timeout_s: float = DEFAULT_TIMEOUT_
     Probe every endpoint and report on each.
 
     Ensures:
-        - EVERY endpoint is probed even after one fails — stopping at the first dead port
+        - every endpoint is probed even after one fails. Stopping at the first dead port
           would hide a second dead one, which is the half-alive reading all over again
     """
     return [ probe_endpoint( e, timeout_s=timeout_s, url_opener=url_opener ) for e in endpoints ]
@@ -131,7 +131,7 @@ def render_refusal( results: List[ Dict[ str, Any ] ], context: str = "" ) -> st
     Render the refusal an operator reads at second one instead of hour three.
 
     Ensures:
-        - names each dead endpoint AND what it did, first, because that is the action
+        - names each dead endpoint and what it did, first, because that is the action
         - names the live ones too: "3001 is up" is what tells the reader the box is
           half-alive rather than off, which is the state that fooled everyone
     """
@@ -158,19 +158,19 @@ def require_live( endpoints: Optional[ List[ str ] ] = None, config_mgr = None,
                   timeout_s: float = DEFAULT_TIMEOUT_S, context: str = "",
                   url_opener: Optional[ Callable ] = None ) -> List[ Dict[ str, Any ] ]:
     """
-    Refuse the run unless EVERY endpoint answered.
+    Refuse the run unless every endpoint answered.
 
     Requires:
         - either an explicit `endpoints` list, or a config_mgr to discover them from
 
     Ensures:
         - returns the full probe report when every endpoint answered, so a caller can log
-          WHICH tree of models it measured against
+          which models it measured against
         - raises ModelServerUnavailable naming every endpoint that did not answer, and
           what it did, when any did not
         - raises ModelServerUnavailable when there is nothing to probe: an empty endpoint
           list means the discovery found nothing, and silently proceeding would be the
-          same failure wearing a different hat
+          same failure in a different form
     """
     if endpoints is None:
         if config_mgr is None:

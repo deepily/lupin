@@ -1,32 +1,28 @@
 """
-Keep credentials out of pytest's saved artifacts (row b0e97156).
+Keep credentials out of pytest's saved artifacts by redacting them.
 
-THE DEFECT. `pytest.ini` carries `--showlocals`, so a test that fails inside a frame
-holding a credential dumps that frame's locals into the junit XML — and the run log —
-on disk. A paired run failed on a 401 inside `_login` and wrote a live password in
-plaintext under `io/test-suite/artifacts/`.
+`pytest.ini` carries `--showlocals`. A test that fails inside a frame holding a
+credential therefore dumps that frame's locals into the junit XML and the run log on disk. A
+failed login can write a live password in plaintext under `io/test-suite/artifacts/`.
 
-WHY NOT JUST DROP THE FLAG. `--showlocals` is the only reason the v1 arm's metrics
-survived a crashed run: the numbers existed nowhere but a traceback's locals, and they
-are recorded on row d8d019f6 because of it. Removing the flag closes the leak by
-destroying the instrument. So: REDACT, DO NOT REMOVE.
+The flag is redacted, not removed. `--showlocals` is sometimes the only place a crashed
+run's metrics survive, because the numbers exist nowhere but a traceback's locals.
+Removing the flag would close the leak by destroying the instrument.
 
-TWO RULES, and each one covers the other's blind spot. Measured on the 121 artifacts
-on disk 2026-08-19, 18 of which carry an unredacted credential:
+Two rules apply, and each covers the other's blind spot.
 
-  1. BY VALUE — every value of an environment variable whose NAME looks like a
+  1. By value: every value of an environment variable whose name looks like a
      credential is replaced wherever it appears. This catches the secret even when the
      variable holding it is called `data`, or it is buried in a request-body repr.
      Blind spot: a secret that never came from this process's environment.
 
-  2. BY NAME — an assignment or mapping entry whose KEY looks like a credential has its
-     value replaced. This is what catches the eight artifacts carrying 56- and
-     238-character bearer tokens: those were minted by a login response during the run,
-     so rule 1 could never have seen them.
+  2. By name: an assignment or mapping entry whose key looks like a credential has its
+     value replaced. This catches bearer tokens minted by a login response during the
+     run, which rule 1 can never see.
 
-WHAT IS DELIBERATELY KEPT. The key, the quotes, and the surrounding traceback all
-survive — only the value is replaced. An EMPTY value is left alone, because "the
-password was empty" is a diagnosis and hiding it would cost the reader the answer.
+What is kept: the key, the quotes and the surrounding traceback all survive, and only
+the value is replaced. An empty value is left alone, because "the password was empty"
+is a diagnosis and hiding it would cost the reader the answer.
 """
 
 import os
@@ -70,17 +66,17 @@ _ASSIGNED_SECRET = re.compile(
 
 def credential_env_values( environ=None ):
     """
-    Every environment value worth hunting for by value.
+    List the environment values worth hunting for by value, longest first.
 
     Requires:
         - environ is a mapping of name -> value, or None for os.environ
 
     Ensures:
-        - returns values of variables whose NAME matches the credential vocabulary
-        - skips empty values and values shorter than _MIN_VALUE_LEN (see the module
-          docstring: a short value replaced everywhere destroys the traceback)
-        - LONGEST FIRST, so a value that contains another value is replaced first and
-          cannot be left as a recognisable fragment
+        - returns values of variables whose name matches the credential vocabulary
+        - skips empty values and values shorter than _MIN_VALUE_LEN, because a short
+          value replaced everywhere destroys the traceback
+        - is sorted longest first, so a value that contains another value is replaced first
+          and cannot be left as a recognisable fragment
         - returns a list, never None
 
     Raises:
@@ -107,10 +103,10 @@ def redact_text( text, values=None ):
 
     Ensures:
         - every value in `values` is replaced by REDACTED wherever it appears
-        - every credential-KEYED quoted value is replaced by REDACTED, key and quotes
-          intact
+        - every quoted value under a credential-looking key is replaced by REDACTED, key
+          and quotes intact
         - an already-redacted value is left alone rather than nested
-        - an EMPTY quoted value is left alone — that it was empty is the diagnosis
+        - an empty quoted value is left alone, because that it was empty is the diagnosis
 
     Raises:
         - nothing
@@ -132,17 +128,21 @@ def redact_text( text, values=None ):
 
 
 def _redact_lines( holder, values ):
-    """Rewrite a `.lines` list in place. Interfacing with pytest's repr objects, whose
-    shape varies by version — hence the hasattr, which is the sanctioned exception to
-    this codebase's no-defensive-attribute-fishing rule."""
+    """Rewrite a `.lines` list in place. The shape of pytest's repr objects varies by version.
+
+    That is why this uses hasattr, the sanctioned exception to the rule against
+    defensive attribute fishing.
+    """
     if holder is None or not hasattr( holder, "lines" ):
         return
     holder.lines = [ redact_text( line, values ) for line in holder.lines ]
 
 
 def _redact_traceback( reprtraceback, values ):
-    """Rewrite every entry of one traceback repr: its source lines, its locals, AND its
-    function-arguments header — three separate surfaces, not one."""
+    """Rewrite every entry of one traceback repr: source lines, locals and the arguments header.
+
+    These are three separate surfaces, not one.
+    """
     if reprtraceback is None or not hasattr( reprtraceback, "reprentries" ):
         return
     for entry in reprtraceback.reprentries:
@@ -155,15 +155,13 @@ def _redact_traceback( reprtraceback, values ):
 
 def _redact_func_args( reprfuncargs, values ):
     """
-    Rewrite the FUNCTION-ARGUMENTS header — `email = '...', password = '...'` — which
-    pytest renders above a frame's source.
+    Rewrite the function-arguments header, such as `email = '...', password = '...'`.
 
-    ⚠️ THIS IS ITS OWN SURFACE, and it is the one that survived the first fix. It is not
-    part of `.lines` and not part of `.reprlocals`: pytest keeps it in `reprfuncargs.args`
-    as (name, value-repr) pairs, so a redactor that walked the lines and the locals
-    scrubbed both and left the credential sitting in the header one line above them.
-    Found by a test reading the artifact off disk, which is why the acceptance arms do
-    that instead of asserting on this module.
+    Pytest renders this header above a frame's source. It is its own surface, not part
+    of `.lines` and not part of `.reprlocals`. Pytest keeps it in `reprfuncargs.args` as
+    (name, value-repr) pairs. A redactor that walked only the lines and the locals would
+    leave the credential in the header one line above them. Acceptance tests
+    therefore read the artifact off disk rather than assert on this module.
     """
     if reprfuncargs is None or not hasattr( reprfuncargs, "args" ):
         return
@@ -179,7 +177,7 @@ def _redact_func_args( reprfuncargs, values ):
 
 
 def _redact_crash( reprcrash, values ):
-    """Rewrite the one-line crash message — a 401 body often carries the credential."""
+    """Rewrite the one-line crash message, since a 401 body often carries the credential."""
     if reprcrash is None or not hasattr( reprcrash, "message" ):
         return
     reprcrash.message = redact_text( reprcrash.message, values )
@@ -193,10 +191,11 @@ def redact_longrepr( longrepr, values ):
         - longrepr is pytest's repr object, a plain string, or None
 
     Ensures:
-        - a STRING is returned redacted (the caller must assign it back — strings are
-          immutable, which is exactly why this returns rather than only mutating)
-        - an OBJECT is mutated in place and returned, covering its traceback entries,
-          their locals, its crash message, and every link of a chained exception
+        - a string is returned redacted (the caller must assign it back, because strings
+          are immutable, which is why this returns rather than only mutating)
+        - an object is mutated in place and returned
+        - an object's traceback entries, their locals, its crash message and every
+          link of a chained exception are all covered
         - None returns None
 
     Raises:
@@ -229,10 +228,10 @@ def redact_report( report, values=None ):
 
     Ensures:
         - the long representation is redacted (see redact_longrepr)
-        - CAPTURED OUTPUT is redacted too. `report.sections` holds captured stdout,
+        - captured output is redacted too. `report.sections` holds captured stdout,
           stderr and logging, and a test that prints its own request payload leaks
-          through that surface with the traceback untouched — so redacting only the
-          traceback would be a fix that reads as complete and is not.
+          through that surface with the traceback untouched. Redacting only the
+          traceback would read as complete and would not be.
         - the report object is returned for convenience
 
     Raises:

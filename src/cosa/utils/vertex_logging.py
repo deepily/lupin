@@ -1,57 +1,38 @@
 """
-Vertex request-response logging — the verification harness (design §4 / cascade §C).
+Vertex request-response logging verification harness.
 
-WHAT THIS MODULE IS FOR
------------------------
-`setPublisherModelConfig` has already been written and read back (2026-07-13, LRO
-847218789178146816 -> done, no error). We know the CONFIG READS BACK. We do NOT know
-that DATA ARRIVES. Those are different claims, and this module exists to prove the
-second one — or to refuse to render a verdict at all.
+Design: src/rnd/v0.1.9/2026.07.13-vertex-model-garden-toggle-search-and-logging.md
 
-THE LAW THIS MODULE ENCODES
----------------------------
-BigQuery ingest LAGS. A "not found" is therefore NOT evidence of "not logged" — it may
-merely be early. So:
+`setPublisherModelConfig` has been written and read back, so we know the config reads back.
+We do not know that data arrives. Those are different claims. This module exists to prove the
+second one, or to refuse to render a verdict at all.
 
-    A NULL IS NOT EVIDENCE UNTIL THE INSTRUMENT IS PROVEN.
-    And a null that CONFIRMS a suspicion sails through the checkpoint a contradicting
-    one never would.
+The law: BigQuery ingest lags, so a "not found" is not evidence of "not logged". It may merely be
+early. A null is not evidence until the instrument is proven. A null that confirms a suspicion also
+sails through a checkpoint that a contradicting one never would. So no function here returns
+"not logged" from a bare `SELECT`.
+Every negative verdict is gated on a canary having been seen in the same window in which the
+silence is trusted. A canary is a known-good write carrying a unique greppable sentinel.
+If the canary does not land, the verdict is `INADMISSIBLE`, never `REFUTED`.
+An observation is evidence only if it could have come out otherwise.
 
-Consequently NO function here will ever return "not logged" from a bare SELECT. Every
-negative verdict is gated on a CANARY — a known-good write, carrying a unique greppable
-sentinel — having been SEEN in the SAME WINDOW in which the silence is trusted. If the
-canary does not land, the verdict is INADMISSIBLE, never REFUTED. Fail loud, not quiet.
+A positive needs no canary. Presence proves itself, and only absence needs a calibrated instrument.
 
-    An observation is evidence only if it could have come out otherwise.  (Rio)
+The sentinel search is schema-agnostic. `requestResponseLoggingSchemaVersion` is output-only and
+versioned (v1/v2), so the row shape is not knowable pre-flight. Naming a column would turn a schema
+bump into a false failure, so assertions use row counts and never a column.
+`TO_JSON_STRING(t)` serializes the whole row whatever its schema. The query below names no column
+and still finds our own row, not somebody else's traffic:
 
-A POSITIVE NEEDS NO CANARY. Presence proves itself; only ABSENCE needs a calibrated
-instrument. That asymmetry is load-bearing throughout.
+    `SELECT COUNT(*) FROM p.d.t AS t WHERE STRPOS( TO_JSON_STRING( t ), @sentinel ) > 0`
 
-THE §4f TENSION, DISSOLVED
---------------------------
-§4f mandates: assert on the ROW COUNT, never on a COLUMN — because
-`requestResponseLoggingSchemaVersion` is output-only and versioned (v1/v2), so the row
-shape is NOT knowable pre-flight, and naming a column turns a schema bump into a false
-failure. But a sentinel needs to be FOUND, which sounds like it needs a column.
+Residual limit: if the payload lands bytes-encoded or compressed, `TO_JSON_STRING` base64-encodes
+it and the sentinel will not match. That yields `INADMISSIBLE` (canary unseen), not a false
+`REFUTED`, so the instrument fails safe.
 
-It does not. `TO_JSON_STRING(t)` serializes the WHOLE ROW whatever its schema, so
-
-    SELECT COUNT(*) FROM `p.d.t` AS t WHERE STRPOS( TO_JSON_STRING( t ), @sentinel ) > 0
-
-is simultaneously schema-agnostic (names ZERO columns — survives a v1 -> v2 bump) and
-attributable (finds MY row, not somebody else's traffic). Sentinel attribution and the
-no-columns rule were never in conflict.
-
-Residual, stated rather than buried: if the payload lands BYTES-encoded or compressed,
-TO_JSON_STRING base64s it and the sentinel will not match. That failure mode yields
-INADMISSIBLE (canary unseen), NOT a false REFUTED. The instrument fails SAFE.
-
-NO LIVE CALLS FROM THIS MODULE
-------------------------------
-Nothing here reaches the network. Every outbound edge is an injected callable
-(`query_fn`, `clock`, `sleeper`). The default query function REFUSES. A live run is
-composed by the caller, under explicit authorization, and the set of live calls it needs
-is enumerable in advance — see `describe_live_calls()`.
+Nothing here reaches the network. Every outbound edge is an injected callable (`query_fn`, `clock`,
+`sleeper`), and the default query function refuses. A live run is composed by the caller under
+explicit authorization. The live calls it needs are listed by `describe_live_calls()`.
 """
 
 import re
@@ -119,9 +100,8 @@ def mint_sentinel():
     """
     Mint a unique, greppable, PII-free sentinel to carry through a probe call.
 
-    The sentinel is embedded in the PROMPT TEXT of a probe request, so it appears in the
-    logged request payload (and typically the response), making the landed row
-    ATTRIBUTABLE to this probe rather than to ambient traffic.
+    The sentinel is embedded in the prompt text of a probe request, so it appears in the logged request payload (and typically the response).
+    That makes the landed row attributable to this probe rather than to ambient traffic.
 
     Requires:
         - nothing
@@ -138,9 +118,8 @@ def assert_sentinel_wellformed( sentinel ):
     """
     Refuse to run a probe on a sentinel that cannot be trusted to be unique.
 
-    A short, guessable, or ambient string ("test", "hello") could MATCH A ROW SOMEBODY
-    ELSE WROTE — turning an unrelated row into a false PROVEN. The instrument would then
-    be lying in the SAFE-looking direction, which is the direction nobody audits.
+    A short, guessable or ambient string ("test", "hello") could match a row somebody else wrote and turn it into a false `PROVEN`.
+    The instrument would then lie in the safe-looking direction, which nobody audits.
 
     Requires:
         - sentinel is a string
@@ -168,11 +147,9 @@ def assert_bigquery_location_legal( bq_location ):
     """
     Refuse a BigQuery dataset location that cannot exist.
 
-    "location" means THREE different things in this design (§4a-quinquies): the Vertex
-    serving/config location, the BigQuery dataset location, and the Monitoring `location`
-    resource label. Only the first may be `global`. BigQuery has no `global` location at
-    all — so a rule comparing the two for equality is unsatisfiable BY CONSTRUCTION, and
-    it broke SILENTLY the moment the Vertex SSOT moved to `global`.
+    "Location" means three different things here: the Vertex serving/config location, the BigQuery dataset location, and the Monitoring `location` resource label. Only the first may be `global`.
+    BigQuery has no `global` location. A rule comparing the two for equality can never be satisfied,
+    and it broke silently once the Vertex location became `global`.
 
     Requires:
         - bq_location is a non-empty string
@@ -199,13 +176,10 @@ def assert_bigquery_location_legal( bq_location ):
 
 def assert_location_pairing_certified( vertex_location, bq_location ):
     """
-    Refuse a (Vertex config location, BigQuery dataset location) pair that has never been
-    observed to work.
+    Refuse a (Vertex config location, BigQuery dataset location) pair never observed to work.
 
-    OSQ C-5 asked which dataset location pairs with a `global`-scoped logging config. It is
-    CLOSED for ("global", "US") — observed, not inferred. Every other pair is UNCERTIFIED,
-    and an uncertified pair is refused rather than guessed: a guess here produces a config
-    that reads back beautifully and logs nothing.
+    Only ("global", "US") is certified, and it was observed, not inferred. An uncertified pair is refused rather than guessed,
+    because a guess produces a config that reads back correctly and logs nothing.
 
     Requires:
         - vertex_location is a non-empty string
@@ -216,6 +190,7 @@ def assert_location_pairing_certified( vertex_location, bq_location ):
 
     Raises:
         - VertexLoggingError when the pair is not in CERTIFIED_LOCATION_PAIRINGS
+        - VertexLoggingError when bq_location is not a legal BigQuery location
     """
     assert_bigquery_location_legal( bq_location )
 
@@ -232,22 +207,14 @@ def assert_location_pairing_certified( vertex_location, bq_location ):
 
 def assert_traffic_config_coupling( cloud_ml_region, config_location ):
     """
-    Assert the ONE coupling that actually burns money: the region traffic goes to must equal
-    the location the logging config was written at.
+    Assert that the traffic region equals the location the logging config was written at.
 
-    The config is scoped to a (project, location, model) triple. Write it at one location
-    and the other has NOTHING: the session runs perfectly, bills real money, and silently
-    logs nothing — a false "logging is on", with every dashboard green. This is not a
-    hypothetical: on 2026-07-13 the first two real Vertex calls in this project's history
-    served at `global` while the design still froze the config at `us-central1`. They were
-    ALREADY invisible to the config we were about to write.
-
-    An UNCONFIGURED client lands on `global`. So this must be ASSERTED at runtime, never
-    assumed from an env default (`REGION="${LUPIN_GCP_REGION:-us-central1}"` is a default,
-    not a constant — a parent shell can re-arm the trap).
+    The config is scoped to a (project, location, model) triple. Written at one location, the other has nothing.
+    The session then runs, bills real money and logs nothing, while the config reads back as on. This has happened on real traffic.
+    An unconfigured client lands on `global`, so assert the coupling at run time, never from an env default, which a parent shell can change.
 
     Requires:
-        - cloud_ml_region is a string (possibly empty — that is itself the bug)
+        - cloud_ml_region is a string (possibly empty; an empty value is itself the bug)
         - config_location is a non-empty string
 
     Ensures:
@@ -255,6 +222,7 @@ def assert_traffic_config_coupling( cloud_ml_region, config_location ):
 
     Raises:
         - VertexLoggingError when they disagree, naming both values
+        - VertexLoggingError when cloud_ml_region is empty
     """
     if not cloud_ml_region:
         raise VertexLoggingError(
@@ -277,8 +245,7 @@ def assert_traffic_config_coupling( cloud_ml_region, config_location ):
 
 def _deep_merge( base, mutation ):
     """
-    Recursively overlay `mutation` onto a copy of `base`, PRESERVING every key of `base`
-    that `mutation` does not mention.
+    Recursively overlay `mutation` onto a copy of `base`, keeping unmentioned `base` keys.
 
     Requires:
         - base is a dict
@@ -317,22 +284,14 @@ def _leaf_paths( obj, prefix=() ):
 
 def build_full_config_write_body( fetched_config, mutation ):
     """
-    Build a COMPLETE `setPublisherModelConfig` request body by read-modify-write, so that a
-    partial write is impossible BY CONSTRUCTION rather than by discipline (OSQ C-2).
+    Build a complete `setPublisherModelConfig` request body by read-modify-write.
 
-    `setPublisherModelConfig` has NO `updateMask`. EVERY WRITE IS A FULL-OBJECT SET, so a
-    partial write SILENTLY WIPES the rest: logging-off wipes the search gate; search-on
-    wipes logging. Nothing errors. You lose a feature you believe is on.
-
-    This trap is LIVE, not theoretical. Before 2026-07-13 there was nothing to clobber.
-    THERE IS NOW: a config exists, with loggingConfig enabled at samplingRate 1 pointing at
-    bq://<project>.vertex_logging. The next hand-rolled partial body destroys it.
-
-    So this function REFUSES to build a body it was not handed a fetched object for. You
-    cannot construct a write here without having read first.
+    The API has no `updateMask`, so every write is a full-object set, and a partial write silently wipes the rest. Logging-off wipes the search gate, and search-on wipes logging. Nothing errors.
+    A config now exists (logging enabled, sampling rate 1, pointing at the log dataset), so the next hand-rolled partial body would destroy it.
+    This function refuses to build a body without a fetched object, so a partial write is structurally impossible, not a matter of discipline.
 
     Requires:
-        - fetched_config is the dict returned by fetchPublisherModelConfig (NOT None, NOT {})
+        - fetched_config is the dict returned by fetchPublisherModelConfig (not None, not {})
         - mutation is a dict of the fields to change
 
     Ensures:
@@ -343,10 +302,8 @@ def build_full_config_write_body( fetched_config, mutation ):
 
     Raises:
         - VertexLoggingError if fetched_config is None or empty (a write with no prior read)
-        - VertexLoggingError if the merge would drop any field that was present (belt to
-          the read-modify-write suspenders — this should be unreachable, and it is checked
-          anyway, because "should be unreachable" is how the last five defects introduced
-          themselves)
+        - VertexLoggingError if the merge would drop any field that was present; this check should
+          be unreachable and is kept anyway, as a second guard behind the read-modify-write
     """
     if not fetched_config:
         raise VertexLoggingError(
@@ -375,10 +332,9 @@ def build_full_config_write_body( fetched_config, mutation ):
 
 def _refusing_query_fn( sql, params ):
     """
-    The default query function: it REFUSES.
+    The default query function: it refuses.
 
-    A harness that reaches the network by DEFAULT is a harness that fires a live call the
-    first time somebody imports it to look around. The live edge is opt-in, always.
+    A harness that reaches the network by default fires a live call the first time somebody imports it to look around. The live edge is always opt-in.
 
     Raises:
         - VertexLoggingError, always
@@ -393,14 +349,11 @@ class LoggingReadout:
     """
     Read-only view of the Vertex log sink dataset.
 
-    Every statement it issues is a COUNT — it NEVER names a payload column (§4f), because
-    `requestResponseLoggingSchemaVersion` is output-only and versioned, so the row shape is
-    not knowable pre-flight and naming a column turns a schema bump into a false failure.
-    Attribution is done with TO_JSON_STRING over the whole row, which is schema-agnostic.
-
-    It never writes. The one write this harness can make (the readout positive control) is
-    emitted as SQL for a caller to execute under authorization — see
-    `readout_positive_control_sql()`.
+    Every statement it issues is a `COUNT`, and it never names a payload column.
+    The row shape is not knowable pre-flight, because `requestResponseLoggingSchemaVersion` is output-only and versioned.
+    Naming a column would turn a schema bump into a false failure.
+    Attribution uses `TO_JSON_STRING` over the whole row, which is schema-agnostic.
+    It never writes. The one write this harness can make, the readout positive control, is emitted as SQL for a caller to run under authorization (see `readout_positive_control_sql()`).
     """
 
     def __init__( self, project_id, dataset=DEFAULT_LOG_DATASET, query_fn=None, debug=False ):
@@ -425,16 +378,10 @@ class LoggingReadout:
 
     def list_tables( self ):
         """
-        Discover the tables Vertex actually created, rather than assuming the documented name.
+        Discover the tables Vertex created, rather than assuming the documented name.
 
-        The outputUri is DATASET-level (§4d), so VERTEX names the table, not us. And a
-        per-publisher config could land rows in a table we never guessed — a bare
-        `SELECT ... FROM request_response_logging` would miss them and report a null we would
-        have believed. Discovery is not a nicety here; it is the difference between "no rows"
-        and "no rows IN THE ONE TABLE I THOUGHT TO LOOK IN".
-
-        An ABSENT table is itself a finding: Vertex creates the table on first write, so
-        table-absent means it has NEVER written a row.
+        The outputUri is dataset-level, so Vertex names the table, not us. A per-publisher config could land rows in a table we never guessed. A bare `SELECT ... FROM request_response_logging` would miss them and report a null we would have believed.
+        Discovery separates "no rows" from "no rows in the one table I thought to look in". An absent table is itself a finding: Vertex creates the table on first write, so an absent table means it has never written a row.
 
         Requires:
             - the injected query_fn can read INFORMATION_SCHEMA
@@ -453,7 +400,7 @@ class LoggingReadout:
 
     def count_rows( self, table ):
         """
-        Count every row in a table. Names NO column (§4f).
+        Count every row in a table, naming no column.
 
         Requires:
             - table is a non-empty string naming a table in this dataset
@@ -467,12 +414,10 @@ class LoggingReadout:
 
     def count_sentinel( self, table, sentinel ):
         """
-        Count rows ANYWHERE in which the sentinel appears — schema-agnostically.
+        Count the rows in which the sentinel appears anywhere, without naming a column.
 
-        TO_JSON_STRING( t ) serializes the WHOLE ROW whatever its schema, so this names no
-        column and survives a v1 -> v2 schema bump, while still attributing the row to THIS
-        probe rather than to ambient traffic. The §4f rule and sentinel attribution were
-        never in conflict.
+        `TO_JSON_STRING( t )` serializes the whole row whatever its schema.
+        So this survives a v1 to v2 schema bump and still attributes the row to this probe, not to ambient traffic.
 
         Requires:
             - table is a non-empty string
@@ -491,7 +436,7 @@ class LoggingReadout:
 
     def find_sentinel( self, sentinel, tables=None ):
         """
-        Search EVERY table in the dataset for the sentinel.
+        Search every table in the dataset for the sentinel.
 
         Requires:
             - sentinel is a minted sentinel
@@ -516,28 +461,19 @@ class LoggingReadout:
 
 def readout_positive_control_sql( project_id, dataset, sentinel ):
     """
-    Emit the SQL that proves OUR READOUT IS AWAKE, independently of whether Vertex has ever
-    written anything.
+    Emit the SQL that proves our readout is awake, whether or not Vertex has written anything.
 
-    This is the calibration that upgrades a null from "we cannot see ANYTHING" to "our query
-    path, auth, and dataset are demonstrably working, and the VERTEX WRITE PIPELINE produced
-    nothing in this window." Those are different claims, and only the second one is worth
-    reporting to anybody.
-
-    It does NOT eliminate ingest lag as an explanation — nothing can, short of a same-publisher
-    positive control. It eliminates the OTHER explanations, which is the whole of what a
-    positive control is for.
-
-    This emits SQL; it does not run it. The insert is a GCP WRITE (into our own dataset, no
-    model spend, ~$0) and therefore requires authorization like any other.
+    This upgrades a null from "we cannot see anything" to "our readout works and Vertex wrote nothing in this window". Only the second claim is worth reporting.
+    It does not rule out ingest lag, which nothing can short of a same-publisher positive control. It rules out the other explanations.
+    It emits SQL and does not run it. The insert is a GCP write into our own dataset (no model spend, about $0), so it needs authorization.
 
     Requires:
         - project_id and dataset are non-empty strings
         - sentinel is a minted sentinel
 
     Ensures:
-        - returns ( create_and_insert_sql, verify_sql ) — the second reads the first back
-          through the SAME query path the real probe uses
+        - returns ( create_and_insert_sql, verify_sql ); the second reads the first back
+          through the same query path the real probe uses
     """
     assert_sentinel_wellformed( sentinel )
 
@@ -559,27 +495,18 @@ def readout_positive_control_sql( project_id, dataset, sentinel ):
 
 class ProbePlan:
     """
-    The declared shape of a probe, validated BEFORE any live call is fired.
+    The declared shape of a probe, validated before any live call is fired.
 
-    Two calls, each carrying its own sentinel:
-
-      - the CANARY: a call we are confident IS logged (Anthropic publisher, at the location
-        the config was written at). Its job is to prove the instrument is AWAKE. It is the
-        positive control for the READ side.
-
-      - the SUBJECT: the call whose logging status is the QUESTION (e.g. a Model Garden MaaS
-        publisher — openai / deepseek-ai). Its silence is the finding.
-
-    ORDERING IS EVIDENCE. The subject MUST be fired at or before the canary, so the subject's
-    payload has had at least as long to be ingested as the canary's. If the LATER call lands
-    and the EARLIER one does not, "it was just slow" is a materially weaker explanation than
-    it would be if we had fired them the other way round. This is cheap rigor and the plan
-    REFUSES to be built without it.
+    Two calls, each carrying its own sentinel. The canary is a call we are confident is logged (Anthropic publisher, at the location the config was written at). It proves the instrument is awake and is the positive control for the read side.
+    The subject is the call whose logging status is the question, for example a Model Garden MaaS publisher such as openai or deepseek-ai. Its silence is the finding.
+    Ordering is evidence. The subject must be fired at or before the canary, so its payload has had at least as long to be ingested. If the later call lands and the earlier one does not, "it was just slow" is a weaker explanation. The plan refuses to be built without this.
     """
 
     def __init__( self, canary_sentinel, canary_fired_at, subject_sentinel=None,
                   subject_fired_at=None, max_wait_s=1800, poll_interval_s=30 ):
         """
+        Validate and store the sentinels, fire times and polling bounds of a probe.
+
         Requires:
             - canary_sentinel is a minted sentinel; canary_fired_at is a monotonic timestamp
             - subject_sentinel/subject_fired_at are both given, or both omitted
@@ -590,7 +517,8 @@ class ProbePlan:
 
         Raises:
             - VertexLoggingError on a malformed sentinel, a half-specified subject, a
-              non-positive bound, or a subject fired AFTER the canary
+              non-positive bound, a subject that shares the canary's sentinel, or a subject
+              fired after the canary
         """
         assert_sentinel_wellformed( canary_sentinel )
 
@@ -624,7 +552,9 @@ class ProbePlan:
 
 
 class ProbeResult:
-    """The verdict, plus everything a reader needs to distrust it."""
+    """
+    The verdict, plus everything a reader needs to distrust it.
+    """
 
     def __init__( self, verdict, canary_seen_at=None, canary_tables=(), subject_tables=(),
                   readout_state=READOUT_NO_MATCH, polls=0, elapsed_s=0, residual_assumptions=() ):
@@ -638,7 +568,10 @@ class ProbeResult:
         self.residual_assumptions = tuple( residual_assumptions )
 
     def is_admissible( self ):
-        """Ensures: returns False exactly when the verdict is INADMISSIBLE."""
+        """
+        Ensures:
+            - returns False exactly when the verdict is VERDICT_INADMISSIBLE
+        """
         return self.verdict != VERDICT_INADMISSIBLE
 
     def __repr__( self ):
@@ -651,28 +584,10 @@ class ProbeResult:
 
 def run_probe( readout, plan, clock, sleeper=None, debug=False ):
     """
-    Run the canary law to a verdict — PROVEN, REFUTED, or INADMISSIBLE. Never anything else.
+    Run the canary law to a verdict: proven, refuted or inadmissible, and never anything else.
 
-    The loop, and WHY each line is the way it is:
-
-      1. A POSITIVE NEEDS NO CANARY. If the SUBJECT is found, return PROVEN immediately —
-         presence proves itself. (For the MaaS coverage question this is the ALARM branch:
-         PROVEN means openai/deepseek chain-of-thought IS being persisted to BigQuery at 100%
-         sampling. The caller must halt and escalate, NOT dump the row.)
-      2. Poll for the CANARY. Record when it first becomes visible.
-      3. NEVER a fixed sleep as a substitute for evidence: Google declares NO ingest delay for
-         this pipeline (`metadata.ingestDelay: None`), so any hardcoded wait is an assumption
-         wearing a constant's clothing — wrong forever, silently, the day the real delay
-         changes. We poll to a BOUND and let the canary, not the clock, license the verdict.
-      4. At the bound: if the canary WAS seen, the subject's silence happened inside a window
-         where the instrument DEMONSTRABLY spoke => REFUTED, an admissible null.
-      5. If the canary was NEVER seen: INADMISSIBLE. NOT "logging is broken." NOT a pass. The
-         instrument never proved it was awake, so its silence says nothing at all.
-
-    With no subject, this is the AC-D7 shape: does logging work? Note the asymmetry it
-    inherits — the canary IS the subject there, so nothing else can calibrate the null.
-    AC-D7 can therefore return PROVEN or INADMISSIBLE and NEVER REFUTED. "No rows" is NOT
-    "logging is broken", and this function will not let anyone report it as such.
+    It polls to a bound and lets the canary, not the clock, license the verdict. Google declares no ingest delay (`metadata.ingestDelay: None`), so a hardcoded sleep would go silently wrong when it changes.
+    With no subject the canary is the subject, so the null cannot be calibrated and the result is never VERDICT_REFUTED. "No rows" is not "logging is broken".
 
     Requires:
         - readout is a LoggingReadout
@@ -681,9 +596,17 @@ def run_probe( readout, plan, clock, sleeper=None, debug=False ):
         - sleeper is a one-arg callable (seconds) or None to not sleep between polls
 
     Ensures:
-        - returns a ProbeResult whose verdict is one of the three admissible values
-        - never returns REFUTED unless the canary was OBSERVED in this window
-        - never returns REFUTED for a subject-less plan
+        - returns a ProbeResult whose verdict is one of the three verdict values
+        - a found subject returns VERDICT_PROVEN at once, because presence proves itself and needs no canary;
+          for the Model Garden MaaS coverage question this is the alarm branch, meaning
+          chain-of-thought is persisted to BigQuery at 100% sampling, and the caller must halt
+          and escalate rather than dump the row
+        - a canary seen but a subject silent at the bound returns VERDICT_REFUTED, an admissible null,
+          because the silence fell inside a window where the instrument demonstrably spoke
+        - a canary never seen returns VERDICT_INADMISSIBLE, which is neither "logging is broken" nor a pass,
+          because an instrument that never proved it was awake says nothing
+        - never returns VERDICT_REFUTED unless the canary was observed in this window
+        - never returns VERDICT_REFUTED for a subject-less plan
     """
     sleeper  = sleeper if sleeper is not None else ( lambda seconds: None )
     started  = clock()
@@ -785,22 +708,11 @@ AC_D5_INDETERMINATE = "INDETERMINATE"  # logging is not proven, so we are BLIND.
 
 def classify_ac_d5( logging_verdict, search_block_found ):
     """
-    Decide what a web-search observation MEANS, given what we know about the instrument it rode in on.
+    Decide what a web-search observation means, given whether logging is proven.
 
-    AC-D5 (did web search fire?) necessarily rides the BigQuery log — legitimate, because the logged
-    request/response is the ONLY place a tool-use block is visible. But that makes it DEPENDENT on
-    AC-D7 (does logging work?), and the dependency is dangerous:
-
-        If AC-D7 is not PROVEN, then AC-D5 does NOT read "search didn't fire."
-        It reads "WE CANNOT SEE."
-
-    Reporting a blind instrument as a negative result is how a team "learns" something false and rolls
-    back the wrong thing. So a search-block absence is only ever a NEGATIVE when the log it was read
-    from is PROVEN to be carrying rows.
-
-    Note the asymmetry, which is the same one that governs the canary: a FOUND block is FIRED
-    regardless of the logging verdict. A positive needs no calibration — if we can SEE the block, the
-    log was demonstrably working for that row. Only the ABSENCE needs a proven instrument.
+    The question is whether web search fired. It rides the BigQuery log, the only place a tool-use block is visible, so it depends on whether logging works. If logging is not proven, an absent block reads "we cannot see", not "search did not fire".
+    Reporting a blind instrument as a negative is how a team learns something false and rolls back the wrong thing.
+    A found block is `FIRED` whatever the logging verdict: a positive needs no calibration, and only absence needs a proven instrument.
 
     Requires:
         - logging_verdict is one of VERDICT_PROVEN / VERDICT_REFUTED / VERDICT_INADMISSIBLE
@@ -808,8 +720,8 @@ def classify_ac_d5( logging_verdict, search_block_found ):
 
     Ensures:
         - returns AC_D5_FIRED when the block was found (whatever the logging verdict)
-        - returns AC_D5_NOT_FIRED ONLY when logging is PROVEN and the block is absent
-        - returns AC_D5_INDETERMINATE when the block is absent and logging is not PROVEN
+        - returns AC_D5_NOT_FIRED only when logging is VERDICT_PROVEN and the block is absent
+        - returns AC_D5_INDETERMINATE when the block is absent and logging is not VERDICT_PROVEN
 
     Raises:
         - VertexLoggingError on a verdict this module did not produce
@@ -830,18 +742,11 @@ def classify_ac_d5( logging_verdict, search_block_found ):
 
 def assert_double_write_retry_safe( first_lro, second_lro, config_before, config_after ):
     """
-    Judge the OSQ C-4 double-write proof: does re-applying the config succeed once the table EXISTS?
+    Judge the double-write proof: re-applying the config must succeed and change nothing.
 
-    §4d adopted a DATASET-level outputUri and called it "retry-safe by construction." That was an
-    INFERENCE FROM A GAP IN THE SCHEMA: the schema documents the project-only form ("the Dataset and
-    Table is created") and the full-table form ("the Dataset must exist and table must not exist"). It
-    says NOTHING about the dataset-level form. Silence was read as permission — the disease this whole
-    design exists to cure, committed inside one of its own fixes.
-
-    Retry-safety is a claim about the SECOND write. So this judges the SECOND write: set once, poll the
-    LRO to done with no error, then set AGAIN with the table now existing, and require the second write
-    to succeed AND to leave the config unchanged. A second write that 200s while silently mangling the
-    config is not retry-safety; it is the clobber trap wearing a green tick.
+    The schema documents the project-only and full-table outputUri forms. It is silent on the dataset-level form, so retry-safety cannot be read from the docs.
+    Retry-safety is a claim about the second write. Set once, poll the LRO to done with no error, then set again with the table now existing.
+    The second write must succeed and leave the config unchanged. One that returns 200 while mangling the config is the clobber trap with a green tick.
 
     Requires:
         - first_lro and second_lro are dicts as returned by the LRO poll (done / error)
@@ -849,11 +754,12 @@ def assert_double_write_retry_safe( first_lro, second_lro, config_before, config
           second write
 
     Ensures:
-        - returns True when both writes completed cleanly and the config is byte-identical across the
+        - returns True when both writes completed cleanly and the config is equal across the
           second write
 
     Raises:
-        - VertexLoggingError naming which of the four conditions failed
+        - VertexLoggingError naming which condition failed: a write whose LRO is not done or carries
+          an error, or a config that changed across the second write
     """
     for label, lro in ( ( "first", first_lro ), ( "second", second_lro ) ):
         if not lro.get( "done" ):
@@ -878,17 +784,19 @@ def assert_double_write_retry_safe( first_lro, second_lro, config_before, config
 
 def describe_live_calls( project_id, vertex_location, bq_location, include_maas_probe=True ):
     """
-    Enumerate every live call an authorized run would make, what it costs, and what it PROVES.
+    Enumerate every live call an authorized run would make, what it costs, and what it proves.
 
-    This exists so authorization can be granted against a specific, bounded list rather than a
-    vibe. Nothing in this module fires any of these; this returns data.
+    This lets authorization be granted against a specific, bounded list. Nothing in this module fires any of these calls; this returns data.
 
     Requires:
         - project_id, vertex_location, bq_location are non-empty strings
 
     Ensures:
-        - returns a tuple of dicts, each with id / call / write / spend / proves / and, for the
-          ones that answer a question, what the two possible outcomes would MEAN
+        - returns a tuple of dicts, each with id / call / write / spend / proves; the MaaS subject
+          entry also carries if_yes, if_no and if_no_mechanism, saying what each outcome would mean
+
+    Raises:
+        - VertexLoggingError when the (vertex_location, bq_location) pair is not certified
     """
     assert_location_pairing_certified( vertex_location, bq_location )
 
@@ -954,9 +862,9 @@ def describe_live_calls( project_id, vertex_location, bq_location, include_maas_
 
 class _FakeReadout:
     """
-    A readout whose row lands only after `lands_on_poll` polls — i.e. it LAGS, like the real
-    one. Used by the smoke test to prove the harness survives the lag that makes a bare SELECT
-    a liar.
+    A readout whose row lands only after `lands_on_poll` polls, so it lags like the real one.
+
+    The smoke test uses it to prove the harness survives the lag that makes a bare `SELECT` a liar.
     """
 
     def __init__( self, lands_on_poll ):
@@ -964,11 +872,17 @@ class _FakeReadout:
         self.polls         = 0
 
     def list_tables( self ):
-        """Ensures: returns the documented default table, always."""
+        """
+        Ensures:
+            - returns the documented default table, always
+        """
         return ( DOCUMENTED_DEFAULT_TABLE, )
 
     def find_sentinel( self, sentinel, tables=None ):
-        """Ensures: returns a MATCH only once `lands_on_poll` polls have elapsed."""
+        """
+        Ensures:
+            - returns READOUT_MATCH only once `lands_on_poll` polls have elapsed
+        """
         self.polls += 1
         if self.polls >= self.lands_on_poll: return ( READOUT_MATCH, ( DOCUMENTED_DEFAULT_TABLE, ) )
         return ( READOUT_NO_MATCH, () )
@@ -978,8 +892,7 @@ def _expect_raises( exception_type, fn, *args, **kwargs ):
     """
     Assert that `fn` fails loud with `exception_type`.
 
-    A guard that is never seen to FIRE is not a proven guard. The smoke test uses this so that
-    "the trap is disarmed" is an observation, not a claim.
+    A guard never seen to fire is not a proven guard. The smoke test uses this so that "the guard works" is an observation, not a claim.
 
     Requires:
         - exception_type is an exception class; fn is callable
@@ -988,7 +901,7 @@ def _expect_raises( exception_type, fn, *args, **kwargs ):
         - returns the raised exception when fn raises exception_type
 
     Raises:
-        - AssertionError when fn does NOT raise — a guard that stayed silent is a FAILURE
+        - AssertionError when fn does not raise; a guard that stayed silent is a failure
     """
     try:
         fn( *args, **kwargs )

@@ -7,25 +7,25 @@ Why this lives in `cosa/utils/` and not beside its sibling
 `cosa/agents/heartbeat_arbiter/events_tail.py` already carries `tail_session_file`, and
 the console-tee tailer needs the same partial-line-safe read. But the tailer lives in
 `cosa/rest/`, and a `cosa/rest/` module importing from an agent package is a layering
-surprise (plan T12). So the primitive has a home here, where both layers may reach it.
+surprise. So the primitive has a home here, where both layers may reach it.
 
 Why this is not a thin wrapper over `tail_session_file`
 ------------------------------------------------------
-`tail_session_file` treats `offset > size` as rotation and SILENTLY resets to 0, re-reading
-the whole file and returning it as new bytes — a full replay with nothing in the return
-value saying anything rotated. For the fleet-events use that is harmless. For the console
-it is not: the pane would re-render the entire transcript as fresh output, and the client
-would have no signal to reset its epoch.
+`tail_session_file` treats `offset > size` as rotation and silently resets to 0. It
+re-reads the whole file and returns it as new bytes. That is a full replay, and nothing
+in the return value says anything rotated. For the fleet-events use that is harmless. For
+the console it is not. The pane would re-render the entire transcript as fresh output.
+The client would have no signal to reset its epoch.
 
-⇒ `tail_jsonl` returns rotation as a THIRD VALUE and returns NO records on the rotating
-call. The caller bumps its epoch, tells the client, and reads the new file on the next
-poll. The difference is the whole point of the module; see plan §2 item 5 and A2.3(b).
+So `tail_jsonl` returns rotation as a third value and returns no records on the
+rotating call. The caller bumps its epoch, tells the client, and reads the new file on
+the next poll. That difference is the reason this module exists.
 
-⚠️ This function NEVER RAISES, which makes a silent-empty failure possible: a path that
-does not exist returns `( [], offset, False )`, exactly like a file with nothing new. That
-is deliberate — a tailer must not die because a seat vanished mid-poll — and it is why the
-caller is responsible for knowing whether it ever resolved a real path. A path rewritten
-against the wrong root reads as "quiet seat" forever.
+The tailing functions never raise, which makes a silent-empty failure possible. A path
+that does not exist returns `( [], offset, False )`, exactly like a file with nothing
+new. That is intended, because a tailer must not die when a seat vanishes mid-poll.
+The caller is therefore responsible for knowing whether it ever resolved a real path.
+A path rewritten against the wrong root reads as a quiet seat forever.
 """
 
 import json
@@ -43,13 +43,13 @@ def tail_jsonl( path, offset=0 ):
     Ensures:
         - returns ( records, new_offset, rotated )
         - records    = parsed dict records appended since `offset`, in file order
-        - new_offset = the byte position of the end of the LAST COMPLETE line consumed;
+        - new_offset = the byte position of the end of the last complete line consumed;
                        a partial trailing line is left for the next poll
-        - rotated    = True iff the file is now SHORTER than `offset`, i.e. it was
+        - rotated    = True iff the file is now shorter than `offset`, i.e. it was
                        truncated or replaced in place
-        - on rotation: returns ( [], 0, True ) — NO records. The replayed bytes are
-                       deliberately withheld so the caller can bump its epoch and start
-                       clean, rather than re-emitting the whole file as new output
+        - on rotation: returns ( [], 0, True ) with no records. The replayed bytes are
+                       withheld so the caller can bump its epoch and start clean,
+                       rather than re-emitting the whole file as new output
         - a missing or unreadable file returns ( [], offset, False ) with offset unchanged
         - blank, malformed and non-object JSON lines are skipped, never fatal
         - never raises
@@ -99,11 +99,11 @@ def tail_jsonl( path, offset=0 ):
 
 def read_tail_bytes( path, tail_bytes ):
     """
-    Read the LAST `tail_bytes` bytes of `path`, landing on a complete-line boundary.
+    Read the last `tail_bytes` bytes of `path`, landing on a complete-line boundary.
 
-    Ruling Q6 wants the last ~64 KB of a transcript, and a forward read cannot express
-    that: `since_offset=0&max_bytes=65536` returns the FIRST 64 KB. This is the backward
-    open (plan §2 item 4, P4).
+    The console wants the last 64 KB or so of a transcript, and a forward read cannot
+    express that: `since_offset=0&max_bytes=65536` returns the first 64 KB. This is the
+    backward open.
 
     Requires:
         - path is a path-like to a JSONL file (it need not exist)
@@ -112,8 +112,8 @@ def read_tail_bytes( path, tail_bytes ):
     Ensures:
         - returns ( records, start_offset, next_offset )
         - start_offset is advanced past any partial first line, so the first record is
-          whole — a naive seek to `size - tail_bytes` lands mid-line and the first record
-          would be silently dropped as malformed
+          whole. A naive seek to `size - tail_bytes` lands mid-line, and the first record
+          would be dropped as malformed without a sign
         - next_offset is the end of the last complete line, i.e. the file's end when the
           file ends with a newline
         - the byte cap is a target, not a hard limit: when the last record is larger than
@@ -135,26 +135,25 @@ def read_tail_bytes( path, tail_bytes ):
 
 def read_window_before( path, before_offset, max_bytes ):
     """
-    Page BACKWARDS from `before_offset` — the "load earlier" verb of ruling Q6.
+    Page backwards from `before_offset`, the "load earlier" verb of the console.
 
     Requires:
         - path is a path-like to a JSONL file (it need not exist)
-        - before_offset is a non-negative byte offset; records END before it
+        - before_offset is a non-negative byte offset; records end before it
         - max_bytes is a non-negative int; 0 means "everything before before_offset"
 
     Ensures:
-        - returns ( records, start_offset, next_offset ) covering the window that ENDS at
+        - returns ( records, start_offset, next_offset ) covering the window that ends at
           `before_offset`, never crossing it
         - start_offset is advanced past a partial first line unless the window starts at 0
         - next_offset <= before_offset
-        - EVERY PAGE MAKES PROGRESS: the byte cap is a target, not a hard limit. When the
+        - every page makes progress: the byte cap is a target, not a hard limit. When the
           window holds no complete record (the record ending at the boundary is larger than
           `max_bytes`), that one record is returned whole, so start_offset < before_offset
           whenever a complete record exists before it. A page that came back empty at the
-          same offset left "load earlier" stuck behind a 75 KB record in a real transcript
-          (:8000 job ts-11c25f8a, 2026-10-03; ruled by the plan owner the same day)
+          same offset would leave "load earlier" stuck behind one large record
         - a before_offset of 0, a missing file, or no complete record before the bound
-          returns ( [], 0, 0 ) — which is how the client learns it has reached the top and
+          returns ( [], 0, 0 ), which is how the client learns it has reached the top and
           stops asking
         - never raises
     """
@@ -176,7 +175,7 @@ def read_window_before( path, before_offset, max_bytes ):
 
 def read_window_from( path, since_offset, max_bytes ):
     """
-    Read FORWARD from `since_offset` — the gap-repair verb.
+    Read forward from `since_offset`, the gap-repair verb.
 
     Requires:
         - path is a path-like to a JSONL file (it need not exist)
@@ -191,7 +190,8 @@ def read_window_from( path, since_offset, max_bytes ):
         - the same progress rule as the backward verbs: when the record at `since_offset`
           is larger than `max_bytes`, the window is widened to the end of that one record.
           A record whose newline has not been written yet is still left for the next read
-        - a missing file or a since_offset past the end returns ( [], since_offset', since_offset' )
+        - a missing file returns ( [], since_offset, since_offset )
+        - a since_offset past the end returns ( [], size, size ), the offset clamped to the file size
         - never raises
     """
     try:
@@ -270,14 +270,15 @@ def _whole_record_ending_before( path, end ):
     """
     The one complete line that ends at or before `end`, however long it is.
 
-    The progress rule's backward half: called when a byte-capped window held no complete
-    record, which means the record ending at the boundary is larger than the cap.
+    This is the backward half of the progress rule. It is called when a byte-capped
+    window held no complete record. That means the record ending at the boundary is
+    larger than the cap.
 
     Requires:
         - path is a path-like; end is a positive int no larger than the file size
 
     Ensures:
-        - returns ( records, start_offset, next_offset ) for exactly ONE line: the last one
+        - returns ( records, start_offset, next_offset ) for exactly one line: the last one
           whose newline sits below `end`. records is empty when that line is blank or not
           a JSON object, and the offsets still span it, so the caller still moves
         - returns ( [], 0, 0 ) when no newline sits below `end`: there is no complete
@@ -295,8 +296,8 @@ def _read_window( path, start, span, skip_partial_first ):
     """
     Read `span` bytes from `start` and parse the complete lines inside.
 
-    The one place the complete-line rule is implemented, so the three public verbs cannot
-    disagree about it.
+    This is the one place the complete-line rule is implemented, so the three public
+    verbs cannot disagree about it.
 
     Requires:
         - path is a path-like; start and span are non-negative ints

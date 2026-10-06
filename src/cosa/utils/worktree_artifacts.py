@@ -1,33 +1,30 @@
 """
-Give a freshly-created worktree the UNTRACKED, NON-SECRET artifacts it needs to run a
-whole tier — the members `provision_worktree_venv` does not cover (row dde8b87a).
+Give a new worktree the untracked, non-secret artifacts it needs to run a whole tier.
 
-THE DEFECT THIS CLOSES. The spawn path provisioned a `.venv` and nothing else, so a
-spawned seat passed `INTERPRETER OK` and was still unable to run its own tier.
-`INTERPRETER OK` and a TIER-CAPABLE TREE are different claims, and the spawn path only
-ever made the first. Measured 2026-09-04: a freshly spawned worktree had `.venv` and no
-`node_modules`, so every `.test.ts` in it died with `Cannot find package 'tsx'` — which
-reads as a broken test rather than as a missing tree, and is why this member went
-unfound while the two that fail loudly were already documented.
+These are the artifacts `provision_worktree_venv` does not cover. The spawn path used
+to provision a `.venv` and nothing else. A spawned seat passed the interpreter check
+and still could not run its own tier. A working interpreter and a tier-capable
+tree are different claims. A spawned worktree with `.venv` and no `node_modules` made
+every `.test.ts` die with `Cannot find package 'tsx'`. That reads as a broken test
+rather than a missing tree.
 
-⚠️ THIS IS A SECOND HELPER, NOT A REWRITE OF THE FIRST. `provision_worktree_venv` has
+This is a second helper and not a rewrite of the first. `provision_worktree_venv` has
 its own script, its own exit-code vocabulary, and a `main_repo` verdict that carries a
-LOCATION fact (`placement_alarm`) nothing else surfaces. Folding a second concern into
-it would put two answers behind one status field, which is the shape this repo keeps
-paying for. The two run side by side and are read side by side.
+location fact (`placement_alarm`) that nothing else surfaces. Folding a second concern
+into it would put two answers behind one status field. The two run and are read side
+by side.
 
-⚠️ IT NEVER RAISES, DELIBERATELY. Same fail-open shape as `provision_worktree_venv` and
-`stash_guard.py`: a seat without `node_modules` is worse off; a spawn that DIES because
-provisioning failed is worse still. Every non-recoverable outcome is logged at WARNING
-naming the target and the exit code, because the failure this row exists to kill is the
-one that looks like success.
+It never raises. This is the same fail-open shape as `provision_worktree_venv` and
+`stash_guard.py`. A seat without `node_modules` is worse off, and a spawn that dies
+because provisioning failed is worse still. Every non-recoverable outcome is logged at
+`WARNING` naming the target and the exit code. The failure to avoid is the one that
+looks like success.
 
-🔴 WHAT IT WILL NEVER PROVISION, and this is a ruling rather than a preference: nothing
-under `src/conf/keys/**` (Mr. Radio, 2026-09-01, overturning earlier advice that said to
-symlink one), not the repo-root `.env` (JWT_SECRET_KEY, POSTGRES_PASSWORD), and no build
-OUTPUT such as `src/lupin_app/static/dist/` — a symlinked output directory means a build
-run in a throwaway tree writes into the shared checkout. The allow list lives in the
-script, next to the reasoning for each member.
+It never provisions anything under `src/conf/keys/**`, nor the repo-root `.env`
+(JWT_SECRET_KEY, POSTGRES_PASSWORD), nor build output such as `src/lupin_app/static/dist/`.
+A symlinked output directory would let a build run in a throwaway tree write into the
+shared checkout. The allow list lives in the script, next to the reasoning for each
+member.
 """
 
 import logging
@@ -92,16 +89,16 @@ def provision_worktree_artifacts( target, debug=False ):
         - never raises, for any input or any failure of the underlying script
         - returns a dict with keys: provisioned (bool), status (str), exit_code
           (int or None), target (str or None), detail (str), artifacts (dict)
-        - provisioned is True ONLY on script exit 0 — meaning every borrowable artifact
+        - provisioned is True only on script exit 0, meaning every borrowable artifact
           is now present, or the main checkout had none to lend
         - a falsy target is a no-op reported as status "no_target", never an error
         - a target with no script (a foreign repo, an old checkout) is a no-op reported
           as status "script_absent", never an error
-        - the main checkout is a no-op reported as status "main_repo" — it owns the real
-          artifacts — and is NOT logged here, because `provision_worktree_venv` already
-          carries the location warning for that same target and a second copy of it
-          would read as two seats in the shared tree rather than one
-        - every other non-zero exit is reported as status "failed" AND logged at WARNING
+        - the main checkout is a no-op reported as status "main_repo", because it owns the
+          real artifacts. It is not logged here: `provision_worktree_venv` already
+          carries the location warning for that target, and a second copy would read as
+          two seats in the shared tree rather than one
+        - every other non-zero exit is reported as status "failed" and logged at `WARNING`
           naming the target and the exit code
         - artifacts maps each artifact the script reported to its outcome, so a caller
           can tell "linked node_modules" from "the main checkout has none to lend"

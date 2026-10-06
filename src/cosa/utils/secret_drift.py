@@ -1,28 +1,25 @@
 """
 Detect drift between an app-side API key file and its Secret Manager copy.
 
-WHY THIS EXISTS (2026-07-25): the model server's X-API-Key lives in TWO
-hand-synced places — `src/conf/keys/{key_name}` (what every client sends) and
-Secret Manager `{secret_id}` (what the Cloud Run model server mounts and
-validates against). Nothing compared them. The app-side key was re-minted at
-some point; Secret Manager kept version 1 from 2025-11-12; and the mismatch
-stayed INVISIBLE for ~8 months until a user pressed the microphone button and
-got a 401. Full record: task-store row 30198303.
+The model server's X-API-Key lives in two hand-synced places. One is
+`src/conf/keys/{key_name}`, which every client sends. The other is Secret Manager
+`{secret_id}`, which the Cloud Run model server mounts and validates against. Nothing
+compared them. If the app-side key is re-minted while Secret Manager keeps an old
+version, the mismatch stays invisible until a user presses the microphone button.
+The user then gets a 401.
 
-The failure mode this guards is specifically a SILENT one: both authorities
-are individually well-formed, both look healthy in isolation, and only their
-EQUALITY is the invariant. That is exactly the shape a routine check catches
-and a human reading either side alone never will.
+The failure is a silent one. Both authorities are individually well-formed and look
+healthy in isolation, and only their equality is the invariant. A routine check
+catches that, and a human reading either side alone never will.
 
-DESIGN — hash comparison, not a live auth probe. A live probe (call the model
-server with the key, assert 200) tests a strictly stronger property and would
-catch more causes. It is deliberately NOT the default: the model server is a
-scale-to-zero L4 GPU service, so probing it cold-starts real billable
-hardware. A routine guard must be free to run. The live probe belongs in a
-deliberate, opt-in deep check.
+The check compares hashes and does not make a live auth probe. A live probe (call the
+model server with the key, assert 200) tests a stronger property and would catch more
+causes. It is not the default, because the model server is a scale-to-zero GPU
+service, and probing it cold-starts real billable hardware. A routine guard must be
+free to run. The live probe belongs in an opt-in deep check.
 
-Plaintext is NEVER returned or logged — only sha256 digests. A drift report
-is safe to print, paste into a ticket, or attach to a notification.
+Plaintext is never returned or logged, only sha256 digests. A drift report is safe to
+print, paste into a ticket, or attach to a notification.
 """
 
 import hashlib
@@ -56,13 +53,10 @@ def sha256_of( text: str ) -> str:
 
 def fingerprint_key_file( key_path: str ) -> Optional[ str ]:
     """
-    Hash the app-side key file's STRIPPED contents.
+    Hash the app-side key file's stripped contents.
 
-    Stripping is not cosmetic — it mirrors the two readers exactly:
-    `du.get_api_key()` returns `get_file_as_string( path ).strip()`, and the
-    model server does `f.read().strip()` (lupin_model_server/main.py:123). A
-    fingerprint that did not strip would report drift on a trailing newline
-    that neither consumer can observe.
+    Stripping mirrors both readers: `du.get_api_key()` and the model server each strip
+    the file. Without it, drift would be reported on a trailing newline neither can see.
 
     Requires:
         - key_path is a non-empty string
@@ -87,11 +81,9 @@ def fingerprint_secret_manager(
     runner     : Callable = subprocess.run
 ) -> Optional[ str ]:
     """
-    Hash the Secret Manager copy WITHOUT ever surfacing the plaintext.
+    Hash the Secret Manager copy without ever surfacing the plaintext.
 
-    `runner` is injected so this is unit-testable with no gcloud, no network,
-    and no real secret — the alternative (mocking module globals) is what
-    makes credential code untested in practice.
+    `runner` is injected so this is unit-testable with no gcloud, network or real secret.
 
     Requires:
         - secret_id and project_id are non-empty strings
@@ -106,9 +98,8 @@ def fingerprint_secret_manager(
         - never raises
 
     Raises:
-        - nothing; every failure mode collapses to None by design, because a
-          drift check that crashes the caller is worse than one that reports
-          "could not determine"
+        - nothing; every failure mode collapses to None, because a drift check that
+          crashes the caller is worse than one that reports "could not determine"
     """
     cmd = [
         "gcloud", "secrets", "versions", "access", version,
@@ -146,15 +137,15 @@ def check_key_drift(
           key_path, secret_id, project_id, version, detail
         - status is exactly one of:
             "match"        both readable and equal
-            "drift"        both readable and DIFFERENT — the 30198303 failure
-            "unknown"      one or both sides unreadable; NOT a pass
+            "drift"        both readable and different
+            "unknown"      one or both sides unreadable; not a pass
         - digests in the dict are full 64-char hex, or None when unreadable
-        - `detail` names the remedy on drift, and names WHICH side was
+        - `detail` names the remedy on drift, and names which side was
           unreadable on unknown
         - never returns or logs plaintext
-        - "unknown" is deliberately NOT folded into "match": a check that
-          cannot see one side has not verified anything, and reporting that
-          as a pass is the alarm-gated-on-the-healthy-value defect
+        - "unknown" is never folded into "match": a check that cannot see one side
+          has not verified anything, and reporting that as a pass would hide the
+          very failure the check exists to find
     """
     key_hash    = fingerprint_key_file( key_path )
     secret_hash = fingerprint_secret_manager( secret_id, project_id, version, runner )

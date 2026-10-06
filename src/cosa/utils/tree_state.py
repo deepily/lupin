@@ -1,25 +1,24 @@
 """
-The canonical `[tree-state]` line — ONE implementation, every caller.
+The canonical `[tree-state]` line: one implementation, used by every caller.
 
-A pass is a statement about a TREE, not about a repository. This module renders the line
-that says which tree; see `src/rnd/v0.2.0/2026.08.26-every-green-states-its-tree.md`, and — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.26-every-green-states-its-tree.md
-§6b for why it lives here rather than in `src/conftest.py`.
+A pass is a statement about a tree, not about a repository. This module renders the line
+that says which tree.
 
-WHY A MODULE AND NOT A SHELL FUNCTION. The root conftest reaches every pytest tier and
-nothing else, so the node/c8 runners produced greens carrying no tree at all. The shortcut
-is a shell function re-deriving the line with its own `git` calls — two implementations of
-one contract, which drift. This is the single implementation both callers use:
+Why a module and not a shell function: the root conftest reaches every pytest tier and
+nothing else. The node and c8 runners therefore produced results with no tree at all.
+A shell function would re-derive the line with its own `git` calls. That is two
+implementations of one contract, and they drift. Both callers use this one:
 `src/conftest.py` imports it, and `src/scripts/lib/tree-state.sh` runs
 `python3 -m cosa.utils.tree_state`.
 
-`_coarse_age` lives here too because it has THREE call sites, not one (Rio ⚡, 2026-08-26):
-the fetch age, the coverage-file age, and this module. Leaving it behind would have split a
-shared helper away from two of its callers.
+`_coarse_age` lives here too because it has three call sites: the fetch age, the
+coverage-file age, and this module. Leaving it behind would split a shared helper away
+from two of its callers.
 
-Kept deliberately dependency-free — standard library only. conftest imports it early, and
-already imports `cosa.utils.secret_redaction`, so the precedent and the cost are both known.
+Standard library only, so the module stays dependency-free. conftest imports it early,
+and already imports `cosa.utils.secret_redaction`.
 
-Venue: :7999-eligible — read-only git, no network, no mutation.
+Venue: :7999-eligible. Read-only git, no network, no mutation.
 """
 import hashlib
 import os
@@ -33,30 +32,22 @@ def _git_reader( repo_root ):
     A callable running one read-only git command, returning stdout or None.
 
     Ensures:
-        - returns None for ANY failure, including a decode failure. `text=True`
-          decodes stdout, and a ref name carrying invalid bytes raises
-          UnicodeDecodeError — which is neither an OSError nor a SubprocessError, so
-          the first version of this let it escape the reader AND `tree_state_line`
-          (Rio's audit, 2026-08-26, measured with an injected reader). The caller's
-          `except Exception` did contain it, but that net carries `pragma: no cover`,
-          so the only thing holding it up was the one line nobody tests.
-        - CROSSES FILESYSTEM BOUNDARIES while discovering the repository, because in
-          the `:8000` test container it must. Every `e2e-*.log` artifact carried
-          `[tree-state] UNKNOWN — cannot read HEAD`, so no E2E result could be tied to
-          a sha at all. The cause is not git and not the repo: `docker-compose.yml`
-          bind-mounts `/var/lupin/src` and `/var/lupin/.git` as SEPARATE mounts, and
-          both callers hand this reader a path under `src/` — conftest passes
-          `/var/lupin/src`, the module entry point passes `/var/lupin/src/cosa/utils`.
-          Discovery walks up, reaches the `/var/lupin/src` mount root, and stops one
-          directory short of the `.git` it was looking for:
-          `fatal: not a git repository (or any parent up to mount point /var/lupin)
-          Stopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).`
-          Measured in `lupin-rest-test`, one variable: bare -> exit 128, with the flag
-          -> `c7f2e804`, `--show-toplevel` -> `/var/lupin`.
-        - DOES NOT WEAKEN THE WALK-UP HEDGE the module already carries. Crossing a
-          mount can in principle land on some OTHER repository — which is exactly the
-          case `root=` was added for (Rio's audit, 2026-08-26). The reader stays
-          permissive and the LINE stays honest: whatever it finds, it names.
+        - returns None for any failure, including a decode failure. `text=True` decodes
+          stdout, and a ref name carrying invalid bytes raises UnicodeDecodeError, which is
+          neither an OSError nor a SubprocessError. The reader catches it so it cannot
+          escape the reader or `tree_state_line`.
+        - crosses filesystem boundaries while discovering the repository, because in the
+          `:8000` test container it must. Without it every end-to-end log read
+          `UNKNOWN - cannot read HEAD`, so no result could be tied to a sha at all. The cause is
+          not git and not the repo: `docker-compose.yml` bind-mounts `/var/lupin/src` and
+          `/var/lupin/.git` as separate mounts, and both callers hand this reader a path under
+          `src/`. Discovery walks up, reaches the `/var/lupin/src` mount root, and stops one
+          directory short of the `.git`: "not a git repository (or any parent up to mount point
+          /var/lupin)", with `GIT_DISCOVERY_ACROSS_FILESYSTEM` not set. Measured in the test
+          container: bare -> exit 128, with the flag -> the sha, `--show-toplevel` -> `/var/lupin`.
+        - does not weaken the walk-up hedge the module already carries. Crossing a mount can
+          in principle land on some other repository, which is why the line carries `root=`.
+          The reader stays permissive and the line stays honest: whatever it finds, it names.
     """
     # Inherit the caller's environment so a hostile or unusual git config is still the
     # one the run actually used; add the one variable, rather than building an env from
@@ -91,12 +82,12 @@ def _coarse_age( seconds ):
 
 def _fetch_age( git ):
     """
-    How long ago this repo last FETCHED, as a coarse string, or None.
+    How long ago this repo last fetched, as a coarse string, or None.
 
-    `behind=` is computed against `@{upstream}` — the last-FETCHED ref — so a bare
-    `behind=0` reads as "up to date" when it means "up to date AS OF whenever I last
-    fetched" (Rio's audit). The ref's own tip age does not answer this: an untouched
-    ref looks fresh forever. FETCH_HEAD's mtime is the moment a fetch actually ran.
+    `behind=` is computed against `@{upstream}`, the last-fetched ref. A bare `behind=0`
+    therefore means "up to date as of the last fetch", not "up to date". The ref's own tip
+    age does not answer this, because an untouched ref looks fresh forever. The mtime of
+    FETCH_HEAD is the moment a fetch actually ran.
     """
     # `--git-path` returns a path relative to the git process's CWD, which is the
     # reader's directory and NOT this process's — resolving it here reported a real
@@ -128,26 +119,22 @@ BUNDLE_SERVED_SUFFIXES = ( ".js", ".json" )
 
 def capture_start_sha( git ):
     """
-    The sha a run is ABOUT to start on — ONE git call, deliberately.
+    The sha a run is about to start on, read with a single git call.
 
     Requires:
         - git is a reader as built by `_git_reader`.
 
     Ensures:
-        - returns a short sha, or `START_SHA_UNKNOWN` when it cannot be read. NEVER
-          None, because None is the caller's way of saying "no start was captured"
-          (the node runners) and that is a different claim from "I looked and could
-          not read it". Collapsing the two would let a failed probe read as a
-          point-in-time report, which is the shape of defect this whole module exists
-          to catch.
+        - returns a short sha, or `START_SHA_UNKNOWN` when it cannot be read. Never None,
+          because None is the caller's way of saying "no start was captured" (the node
+          runners), which is a different claim from "I looked and could not read it".
+          Collapsing the two would let a failed probe read as a point-in-time report, the
+          shape of defect this module exists to catch.
 
-    WHY ONE CALL AND NOT THE WHOLE PROBE (row 11253df9, gap 1). The gap is that a
-    commit landing mid-run goes undetected — a SHA question. `branch`, `behind`,
-    `ahead`, `fetched` and `tracked-dirty` at start answer questions nobody asked, at
-    eight times the cost of the one that was. The row left this gap open with the
-    reason attached — "the second probe's cost was not obviously worth it" — so the
-    ceiling moves 45s to 50s rather than 45s to 90s. Design:
-    `src/rnd/v0.2.0/2026.08.28-tree-state-gap-1-start-and-end-sha.md` §2. — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.28-tree-state-gap-1-start-and-end-sha.md
+    Why one call and not the whole probe: the gap being closed is that a commit landing
+    mid-run goes undetected, which is a sha question. `branch`, `behind`, `ahead`, `fetched`
+    and `tracked-dirty` at start answer questions nobody asked, at eight times the cost. One
+    call moves the time ceiling from 45 to 50 seconds rather than from 45 to 90.
     """
     return git( "rev-parse", "--short", "HEAD" ) or START_SHA_UNKNOWN
 
@@ -157,51 +144,34 @@ def _run_span( start_sha, end_sha ):
     The `run-span=` suffix, or "" when no start was captured.
 
     Ensures:
-        - "" ONLY when start_sha is None, so a caller that captured no start gets a
-          line byte-identical to the pre-gap-1 one. The node/c8 runners emit BEFORE
-          their run, so their line IS the start: there is no span to describe, and
-          asserting `unmoved` there would be a claim about a run that has not happened
-        - STATES `unmoved` RATHER THAN SAYING NOTHING when the tree held still. A
-          missing field would be indistinguishable from a probe that never ran, and
-          this module's own contract already rules on that: a silent instrument reads
-          as "nothing to report". `unmoved` is a measurement; silence is not
-        - does not repeat the sha in the unmoved case — `sha=` already carries it, and
-          by definition it equals the start
+        - "" only when start_sha is None, so a caller that captured no start gets a line
+          byte-identical to the one printed before the span existed. The node and c8 runners
+          emit before their run, so their line is the start. Asserting `unmoved` there would
+          be a claim about a run that has not happened.
+        - states `unmoved` rather than saying nothing when the tree held still. A missing
+          field would be indistinguishable from a probe that never ran. `unmoved` is a
+          measurement; silence is not.
+        - does not repeat the sha in the unmoved case, because `sha=` already carries it and
+          by definition it equals the start.
 
-    🔴 READING THIS FIELD: THE VALUE SPACE IS NOT ONE CHARACTER CLASS, AND A NAIVE PATTERN
-    FAILS ONLY IN THE CASE THE FIELD EXISTS FOR. Three of the four values are lowercase
-    words; the fourth is `<sha>..<sha>`, which contains digits. Measured 2026-09-01
-    (Tiberius 👑): `grep -o 'run-span=[a-z-]*'` over a real tier truncated
-    `run-span=0768a8b2..ec0bf947` at the `0`, so the field READ AS ABSENT — and it was
-    reported as a silent failure of this module before the regex was checked.
+    Reading this field: the value is not one character class. Three of the four values are
+    lowercase words, and the fourth is `<start>..<end>`, which contains digits. The pattern
+    `grep -o 'run-span=[a-z-]*'` truncates that value at its first digit, so the field reads as
+    absent. A pattern tuned while the tree is still reports `unmoved` forever and goes blind
+    exactly when the tree moves. Match to end-of-field (`run-span=[^ ]*`) or read the whole
+    line. This is a note to readers, not a defect here: no emitted value can protect a pattern
+    that assumes a narrower alphabet than the field uses.
 
-    ⇒ **The asymmetry is the whole hazard**: a pattern tuned while the tree is still
-    reports `unmoved` perfectly, forever, and goes blind at exactly the moment the tree
-    moves. It is the same shape as the second-run trap and the narrowed-population rule —
-    an instrument returning a plausible partial answer with nothing saying so.
+    Two instruments print `run-span=` and their predicates differ:
 
-    ⇒ Match to end-of-field, e.g. `grep -o 'run-span=[^ ]*'`, or read the whole line. This
-    is a note to READERS rather than a defect here: no emitted value can protect a pattern
-    that assumes a narrower alphabet than the field promises.
+        this one (pytest, every tier)   compares HEAD shas only
+        run-coverage-gate.sh            hashes HEAD, `git status --porcelain` and `git diff HEAD`
 
-    🔴 TWO INSTRUMENTS NOW PRINT `run-span=` AND THEIR PREDICATES ARE NOT THE SAME.
-    Verified by reading both, 2026-09-05 (row 73ebccb1):
-
-        THIS one (pytest, every tier)   compares HEAD SHAs ONLY — see the returns below
-        run-coverage-gate.sh            hashes HEAD + `git status --porcelain` + `git diff HEAD`
-
-    ⇒ **This field's `unmoved` means "no commit landed". It does NOT mean the working tree
-    held still.** A file becoming dirty, a file becoming clean, or a further edit to an
-    already-dirty file are ALL invisible here and ALL move the gate's fingerprint. So the
-    same word, in the same-named field, is a strictly weaker claim under a tier than under
-    the gate — and a reader who learns one meaning carries it to the other.
-
-    ⚠️ That asymmetry is not a defect in this function: CLAUDE.md § `run-span=unmoved` KEYS
-    ON THE SHA already rules on what this field answers, and this note CONFIRMS that ruling
-    by reading the code rather than discovering anything. What is new is only that a second
-    field now shares the name. If you need "did the working tree move", this is not the
-    instrument — read `tracked-dirty` beside it, and note that a COUNT cannot see one file
-    going clean while another goes dirty.
+    So here `unmoved` means "no commit landed". It does not mean the working tree held still.
+    A file becoming dirty, becoming clean, or an already-dirty file being edited again is
+    invisible here, and each moves the gate's fingerprint. If you need "did the working tree
+    move", this is not the instrument. Read `tracked-dirty` beside it, and note that a count
+    cannot see one file going clean while another goes dirty.
     """
     if start_sha is None:              return ""
     if start_sha == START_SHA_UNKNOWN: return " run-span=UNKNOWN — the start sha could not be read"
@@ -211,23 +181,25 @@ def _run_span( start_sha, end_sha ):
 
 def bundle_hash( root ):
     """
-    A 12-hex digest of the CONTENT of every served .js and manifest.json under <root>/src/lupin_app/static/dist/.
+    The 12-hex content digest of the served bundle under <root>/src/lupin_app/static/dist/.
+
+    `dist/` is gitignored, so every HEAD comparison in this module is blind to a bundle
+    rebuild inside a run. This digest is what sees it.
 
     Requires:
         - root is a directory path (the tree whose served bundle is being named)
 
     Ensures:
-        - hashes file CONTENT, never mtime: the same bytes rewritten is "unmoved", new bytes
-          under an old mtime is "moved". The digest covers (relative path, content sha256) in
-          sorted order, so a new boot.<hash>.js appearing or a harness changing both move it
-        - the served set is .js plus the three manifest.json files (nav, console, multiplexer):
-          the manifest is the POINTER naming which boot.<hash>.js a page loads, so a rebuild
-          moves it even when an old boot file is still on disk. Measured 2026-09-30 on the main
-          tree: 146 .js, 3 .json, 5 .map and nothing else. .map files are never requested by the
-          page and are left out
+        - hashes file content, never mtime: the same bytes rewritten is "unmoved", and new
+          bytes under an old mtime is "moved". The digest covers (relative path, content
+          sha256) in sorted order, so a new boot.<hash>.js appearing or a harness changing
+          both move it
+        - the served set is .js plus the three manifest.json files (nav, console,
+          multiplexer). The manifest is the pointer naming which boot.<hash>.js a page loads, so a rebuild moves it even when an old boot file is still on disk, and nothing else is served. .map files are
+          never requested by the page and are left out
         - returns BUNDLE_NONE when there is no dist/ directory (a worktree that never built)
           and BUNDLE_UNKNOWN when it cannot be read, including a file vanishing mid-walk.
-          NEVER None, for the reason `capture_start_sha` gives
+          Never None, for the reason `capture_start_sha` gives
     """
     dist = os.path.join( root, BUNDLE_REL )
     if not os.path.isdir( dist ): return BUNDLE_NONE
@@ -248,18 +220,19 @@ def bundle_hash( root ):
 
 def capture_start_bundle( git ):
     """
-    The served-bundle hash a run is ABOUT to start on, for `tree_state_line( start_bundle= )`.
+    The served-bundle hash a run is about to start on, for `tree_state_line( start_bundle= )`.
 
     Ensures:
         - returns bundle_hash of the tree `git` reads, or BUNDLE_UNKNOWN when that tree's root
-          cannot be read. NEVER None (None means "no start was captured"; see `capture_start_sha`)
+          cannot be read. Never None (None means "no start was captured"; see
+          `capture_start_sha`)
     """
     root = git( "rev-parse", "--show-toplevel" )
     return bundle_hash( root ) if root else BUNDLE_UNKNOWN
 
 
 def _bundle_where( git, root ):
-    """`main` when root is the repository's first worktree, `seat` for any other, `?` when unknowable."""
+    """`main` when root is the first worktree, `seat` for any other, `?` if unknowable."""
     listing = git( "worktree", "list", "--porcelain" )
     first   = next( ( l.split( " ", 1 )[ 1 ].strip() for l in ( listing or "" ).splitlines() if l.startswith( "worktree " ) ), None )
     if not first: return "?"
@@ -271,14 +244,15 @@ def _bundle_span( git, root, start_bundle ):
     The `bundle=` / `bundle-span=` suffix, or "" when no start was captured.
 
     Ensures:
-        - "" ONLY when start_bundle is None, for the reason `_run_span` gives: the node runners
+        - "" only when start_bundle is None, for the reason `_run_span` gives: the node runners
           emit before their run, so there is no span to describe
-        - names WHICH ROOT was hashed (`@main` or `@seat`): a seat's dist/ and the main tree's
-          are different directories and the :8000 container serves the main one
-        - a moved hash prints `bundle-span=<start>..<end> ⚠️ BUNDLE REBUILT MID-RUN`, one token
-          beside `run-span`, so no reader can miss it
+        - names which root was hashed (`@main` or `@seat`): a seat's dist/ and the main tree's
+          are different directories, and the :8000 container serves the main one
+        - a moved hash prints `bundle-span=<start>..<end>` followed by a rebuilt-mid-run
+          warning, as one token beside `run-span`, so no reader can miss it
         - states `unmoved` rather than saying nothing
-        - an unreadable start prints UNKNOWN: a failed probe must not read as a point-in-time report
+        - an unreadable start prints `UNKNOWN`: a failed probe must not read as a
+          point-in-time report
     """
     if start_bundle is None: return ""
     end   = bundle_hash( root ) if root and root != "?" else BUNDLE_UNKNOWN
@@ -293,74 +267,43 @@ def tree_state_line( git, start_sha=None, start_bundle=None ):
     """
     One line naming the tree a run was earned on.
 
+    It is never the last line of pytest output: the counts line follows every terminal-summary hook.
+
+
     Requires:
-        - git is a callable taking git arguments and returning stdout, or None on
-          any failure. Injected so this is testable without a repository, and so a
-          hostile git can be exercised rather than hoped about.
-        - start_sha is the sha captured BEFORE the run by `capture_start_sha`, or None
-          when the caller took no start reading.
-        - start_bundle is the served-bundle hash captured BEFORE the run by
-          `capture_start_bundle`, or None when the caller took no start reading (row 105ff244).
+        - git returns stdout for git arguments, or None on any failure. Injected so this is testable without a
+          repository, and so a hostile git can be exercised rather than hoped about.
+        - start_sha is the sha captured before the run by `capture_start_sha`, or None if no reading was taken.
+        - start_bundle is the served-bundle hash captured before the run by `capture_start_bundle`, or None if no reading was taken.
 
     Ensures:
-        - returns a single line, always: an UNKNOWN line when the sha cannot be read,
-          never "" and never None. A silent instrument reads as "nothing to report"
-        - DESCRIBES AN INTERVAL, NOT A MOMENT, when a start_sha is given (row 11253df9,
-          gap 1). The pytest hook reports at the END of a run, so a commit landing
-          mid-run went undetected — measured, the branch moved 20+ commits inside one
-          session, and the unit tier alone runs ~13 minutes. `run-span=` closes that
-          window: `unmoved`, or `<start>..<end>` with a warning, or `UNKNOWN` when the
-          start could not be read
-        - is BYTE-IDENTICAL to the pre-gap-1 line when start_sha is None, because the
-          node/c8 runners emit BEFORE their run and their line IS the start
-        - NAMES THE REPOSITORY IT MEASURED (`root=`). `git -C <dir>` walks UP to the
-          nearest ancestor repo, so a directory that is not itself a repo — a worktree
-          whose gitdir pointer was deleted, a scratch dir nested in the tree — yields
-          a fully confident line about a DIFFERENT repository, with no hedge at all
-          (Rio's audit, 2026-08-26: a nested non-repo dir returned the main repo's sha).
-          Printing the resolved toplevel makes a walk-up visible instead of silent
-        - STAMPS FETCH AGE beside the distance, because `@{upstream}` is the last
-          FETCHED ref: a bare `behind=0` reads as "up to date" when it means "up to
-          date as of whenever I last fetched"
-        - names the comparison ref it used, because "behind 88" means nothing without
-          it, and the ref differs between a tracking branch and a detached worktree
-        - reports dirty separately from behind: a clean tree 88 commits back and a
-          dirty tree at the tip are different claims, and both invalidate a quoted
-          figure in different ways
-        - SPLITS `deleted=` OUT OF THE DIRTY COUNT, because inside a container almost
-          all of it is neither dirt nor deletion. Measured 2026-09-01 at sha c7f2e804:
-          the host reported `tracked-dirty=1`, `lupin-rest-test` reported
-          `tracked-dirty=126` on THE SAME COMMIT AND THE SAME `.git`. 125 of those 126
-          are ` D` — `.claude/` (65), `history/` (39), `README.md`, `CLAUDE.md` and the
-          rest of the repo root, none of which `docker-compose.yml` bind-mounts. Git
-          sees a tracked file with nothing on disk and correctly calls it deleted; a
-          reader sees "126 tracked files modified" and concludes the tree is heavily
-          edited when exactly one is. The remaining 1 is the real one and it MATCHES
-          the host — so the two readings reconcile once the field is split
-        - NAMES THE COMPOSITION AND CLAIMS NOTHING ABOUT THE CAUSE. Git cannot tell an
-          un-mounted file from one somebody really deleted, so this does not guess:
-          `deleted=125` is a shape no human working tree has, and a reader recognises a
-          partial mount from it without the line having to assert one
-        - PRINTS `deleted=0` RATHER THAN OMITTING IT, on the same reasoning `_run_span`
-          states `unmoved`: a field that appears only when non-zero is indistinguishable
-          from a field that was never computed, which is this module's own failure shape
-        - performs NO network access: `@{upstream}` reads the last-fetched ref, so a
-          run stays offline and cannot hang on a remote
+        - returns a single line, always: an `UNKNOWN` line when the sha cannot be read, never "" and never None.
+          A silent instrument reads as "nothing to report"
+        - describes an interval, not a moment, when a start_sha is given, since a mid-run commit would otherwise
+          go undetected: `run-span=` is `unmoved`, `<start>..<end>` with a warning, or `UNKNOWN`
+        - is byte-identical to the line without a span when start_sha is None, because the node and c8 runners
+          emit before their run and their line is the start
+        - names the repository it measured (`root=`). `git -C <dir>` walks up to the nearest ancestor repo, so a
+          non-repo directory yields a confident line about another repo
+        - stamps fetch age beside the distance, because `@{upstream}` is the last fetched ref: a bare `behind=0`
+          means "up to date as of the last fetch"
+        - names the comparison ref it used, because "behind 88" means nothing without it, and the ref differs
+          between a tracking branch and a detached worktree
+        - reports dirty separately from behind: a clean tree 88 commits back and a dirty tree at the tip are
+          different claims, and both invalidate a quoted figure in different ways
+        - splits `deleted=` out of the dirty count: in the `:8000` container most tracked files that read as
+          modified are not bind-mounted, so git calls them deleted
+        - names the composition and claims nothing about the cause: git cannot tell an unmounted file from a
+          really deleted one, so this does not guess, and `deleted=125` is a shape no human tree has, so a reader sees a partial mount without the line asserting one
+        - prints `deleted=0` rather than omitting it, as `_run_span` states `unmoved`: a field that appears only
+          when non-zero is indistinguishable from one that was never computed
+        - performs no network access: `@{upstream}` reads the last fetched ref, so a run stays offline and
+          cannot hang on a remote
 
-    THE LINE IS NEVER THE LAST LINE — BY MECHANISM, NOT BY OBSERVATION (Mr Radio,
-    2026-08-26). In `_pytest.terminal`, `TerminalReporter.pytest_sessionfinish` is a
-    hookimpl WRAPPER: it `yield`s, then calls `config.hook.pytest_terminal_summary(...)`
-    — every plugin's line, including this one — and only afterwards calls
-    `self.summary_stats()`, which writes the counts line. So the counts line follows
-    every terminal-summary hook by construction, and this line cannot be last on any
-    run shape without someone changing pytest. After a pytest upgrade, check that one
-    function rather than re-running a fixture and hoping the sample covered your case.
-
-    Raises:
-        - nothing that this module can produce. Every git call goes through a reader
-          that returns None on OSError, SubprocessError, UnicodeDecodeError and
-          ValueError. The earlier "Raises: nothing" was WRONG — a UnicodeDecodeError
-          escaped both the reader and this function until Rio measured it.
+        Raises:
+        - nothing that this module can produce: every git call goes through a reader that returns None on
+          OSError, SubprocessError, UnicodeDecodeError and ValueError, and the outer `except Exception` keeps
+          this function total even if a reader raises.
     """
     try:
         return _tree_state_line( git, start_sha, start_bundle )
@@ -378,57 +321,40 @@ DIRTY_PATH_CAP = 5
 
 def _dirty_paths( tracked ):
     """
-    The `dirty-paths=` value: the edited paths, EDITS FIRST, capped at
-    `DIRTY_PATH_CAP` with a `+N-more` tail.
+    The `dirty-paths=` value: edited paths first, capped at `DIRTY_PATH_CAP`, then `+N-more`.
 
     Requires:
-        - `tracked` is a list of `git status --porcelain` lines with the `??`
-          untracked rows already removed (never None — the failed-read case is
-          handled by the caller, which must render UNKNOWN rather than calling here)
+        - `tracked` is a list of `git status --porcelain` lines with the `??` untracked rows
+          already removed (never None; the caller must render `UNKNOWN` for a failed read rather than calling here)
 
     Ensures:
-        - "none" on a clean tree, PRINTED rather than omitted. A missing field is
-          indistinguishable from a probe that never ran, and this module has already
-          ruled on that twice (`_run_span`'s `unmoved`, and `deleted=0`)
-        - THE CAP BELONGS TO THE EDITS whenever there are any: deletions never take a
-          slot while an edit exists, and are reported instead as a `+N-deleted` tail.
-          With no edits at all the deletions take the slots themselves, because then
-          they are the whole report
+        - "none" on a clean tree, printed rather than omitted. A missing field is
+          indistinguishable from a probe that never ran
+        - the cap belongs to the edits whenever there are any: deletions never take a slot
+          while an edit exists, and are reported as a `+N-deleted` tail. With no edits at all
+          the deletions take the slots, because then they are the whole report
+        - sorting alone is not enough. Inside the `:8000` container about 125 tracked files
+          read ` D` for a bind-mount reason unrelated to anyone's work, while one file is
+          edited. Edits-first ordering still gave four of five slots to those phantom
+          deletions. `+121-more` cannot tell 121 phantom deletions from 121 more edits, so a
+          tail that names its own kind is counted separately, and `+N-deleted` never appears
+          without an edit for it to be relative to
+        - names the destination of a rename (`R old -> new`), because that is the path on
+          disk now
+        - costs no git call: the `git status --porcelain` output the caller already issued
+          carries these paths. The call budget is 8 with an upstream and 9 in the no-upstream
+          worst case, which `test_tree_state_reporting.py` pins. Both are stated because one
+          number would be a fact about one fixture
 
-          🔴 SORTING WAS NOT ENOUGH, AND THE FIRST VERSION OF THIS CONTRACT SAID IT WAS.
-          Inside `lupin-rest-test` 125 tracked files read ` D` for a bind-mount reason
-          that has nothing to do with anybody's work (row 11253df9, pocholo 2026-09-02)
-          while ONE file is genuinely edited. I shipped "sort edits first, then cap" and
-          wrote here that it dissolved the problem. Rachel 🕊️ measured it: the edit does
-          come first, and FOUR OF FIVE SLOTS STILL WENT TO PHANTOM DELETIONS. Ordering
-          SOFTENED it. Saying "dissolved" was the actual cost — it told a reviewer there
-          was nothing left to rule on
+    Reading this field: the quiet value is the lowercase word `none`, and a real value carries
+    `/`, `.`, digits and `_`. A pattern tuned on a clean tree matches forever and goes blind
+    when the field has something to report, the same asymmetry `_run_span` documents. Match to
+    end-of-field (`[^ ]*`) or read the whole line.
 
-          ⇒ `+121-more` CANNOT DISTINGUISH 121 phantom deletions from 121 more edits,
-          and that is the one distinction the container case exists to make. A tail that
-          names its own KIND can, which is why the two tails are counted separately and
-          why `+N-deleted` never appears without an edit for it to be relative to
-        - names the DESTINATION of a rename (`R old -> new`), because that is the path
-          on disk now
-        - costs NO git call. `git status --porcelain` is already issued once by the
-          caller and its output already carries these paths; before this they were
-          counted and thrown away. Neither budget moves — 8 with an upstream, 9 on the
-          no-upstream worst case, which is the one the canonical pin in
-          `test_tree_state_reporting.py` measures. BOTH are stated because a single
-          number here would be a fact about ONE FIXTURE presented as a fact about the
-          module, which is an error I made in a test on this very change
-
-    🔴 READING THIS FIELD — SAME ASYMMETRY `_run_span` DOCUMENTS ONE FUNCTION UP. The
-    quiet value is the lowercase word `none`; a real value carries `/`, `.`, digits and
-    `_`. So a pattern tuned while the tree is clean matches forever and goes blind at
-    exactly the moment the field has something to report. Match to end-of-field
-    (`[^ ]*`) or read the whole line.
-
-    ⚠️ THE FIELD IS COMMA-SEPARATED AND SPACE-FREE FOR ORDINARY PATHS ONLY, and the two
-    exceptions are documented rather than mangled to protect a tidy invariant: git
-    QUOTES a path containing a space (`"a b.py"`), so the field then contains a space;
-    and a rename line carries an arrow, of which only the destination survives here.
-    A reader who takes the WHOLE LINE is correct in every case.
+    The field is comma-separated and space-free for ordinary paths only. Git quotes a path
+    containing a space (`"a b.py"`), so the field then contains a space, and a rename line
+    carries an arrow of which only the destination survives. Reading the whole line is correct
+    in every case.
     """
     if not tracked: return "none"
 
@@ -497,11 +423,11 @@ def _tree_state_line( git, start_sha=None, start_bundle=None ):
 
 def _primary_branch( git ):
     """
-    The branch checked out in the FIRST worktree, used when there is no upstream.
+    The branch checked out in the first worktree, used when there is no upstream.
 
-    A detached worktree has no upstream at all, and it is exactly the tree most
-    likely to be far behind — so falling back to "no comparison" there would leave
-    the case this exists for as the one case it cannot answer.
+    A detached worktree has no upstream at all, and it is the tree most likely to be far
+    behind. Falling back to "no comparison" there would leave the case this function exists
+    for as the one case it cannot answer.
     """
     listing = git( "worktree", "list", "--porcelain" )
     if not listing: return None
