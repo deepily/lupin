@@ -1,39 +1,36 @@
 """
-The paired replay harness for the Phi-4 vs Flash-Lite study (handoff §7 item 2).
+Paired replay harness for the Phi-4 vs Flash-Lite study.
 
-WHAT IT DOES. Reads the FROZEN snapshot, and for each body calls the production
-`_apply_dm_tutor` once per arm, recording the returned `meta` dict VERBATIM.
-Nothing in the tutor changes: the arm is swapped by handing `_apply_dm_tutor` a
-per-arm `rewrite_fn`, a seam the function already exposes at `dm.py:1121`.
+Reads the frozen snapshot and calls the production `_apply_dm_tutor` once per arm
+for each body. The returned `meta` dict is recorded verbatim. Nothing in the tutor
+changes: each arm hands `_apply_dm_tutor` its own `rewrite_fn`, a seam the function
+already exposes in `dm.py`.
 
-⚠️ WHY NOT JUST REPOINT THE INI. The one-line way to run the Flash-Lite arm is to
-change `llm spec key for dm tutor rewrite` at `src/conf/lupin-app.ini:303`. Do not.
-That swaps the model for EVERY DM the whole fleet sends while the arm runs, spends
-on a paid endpoint outside the experiment, and writes those rows into the very
-corpus under study (~5 rows/min). The injection seam costs one function and touches
-no shared state. (Reviewer finding F4.)
+Why the INI is not repointed. The one-line way to run the Flash-Lite arm is to change
+`llm spec key for dm tutor rewrite` in `src/conf/lupin-app.ini`. That would swap the
+model for every DM the whole fleet sends while the arm runs. It would spend on a paid
+endpoint outside the experiment. It would also write those rows (about 5 per minute)
+into the corpus under study. The injection seam costs one function and touches no
+shared state.
 
-⚠️ THREE WAYS THIS HARNESS CAN REPORT A CLEAN RUN THAT MEASURED NOTHING, and what
-stops each. All three exist because `_apply_dm_tutor` is contractually incapable of
-raising — every failure it meets becomes a recorded `meta` field, and a field is
-not an alarm.
+Three ways this harness could report a clean run that measured nothing, and what
+stops each. All three exist because `_apply_dm_tutor` never raises. Every failure it
+meets becomes a recorded `meta` field, and a field is not an alarm.
 
-  1. THE TUTOR WAS OFF. `get_dm_tutor_config()` is fail-closed: without
-     `LUPIN_CONFIG_MGR_CLI_ARGS` in the environment it returns `enabled: False`,
-     prints one line to stdout, and every row comes back `tutor_outcome:
-     "disabled"`. Both arms then agree perfectly and mean nothing.
-     ⇒ `assert_row_is_measurable` ABORTS on the first row whose `tutor_enabled` or
-     `tutor_fired` is not True. (Reviewer finding F2.)
-  2. THE ARM WAS BROKEN. Missing ADC, a dead region, an expired credential — each
-     returns `tutor_outcome: "model_failed"` per row and the run completes. That is
-     the same shape as a model that occasionally refuses.
-     ⇒ a PRE-STATED `model_failed` ceiling, checked on a pre-flight prefix BEFORE
-     the full replay is paid for, and again at the end. (Reviewer finding F3.)
-  3. THE DENOMINATOR WAS GUESSED. The fabrication rate's denominator (narrow vs
-     wide) is an OPEN DECISION owned by Rick, row `76755526`.
-     ⇒ `FABRICATION_DENOMINATOR` is UNSET here and `fabrication_rate` raises until
-     someone passes a real one. A plausible-looking default would close Rick's
-     decision by implementation. (Reviewer finding F1.)
+  1. The tutor was off. `get_dm_tutor_config()` is fail-closed: without
+     `LUPIN_CONFIG_MGR_CLI_ARGS` in the environment it returns `enabled: False` and
+     prints one line to stdout. Every row then comes back `tutor_outcome: "disabled"`.
+     Both arms agree perfectly and mean nothing. `assert_row_is_measurable` aborts on
+     the first row whose `tutor_enabled` or `tutor_fired` is not True.
+  2. The arm was broken. Missing ADC, a dead region or an expired credential each
+     return `tutor_outcome: "model_failed"` per row, and the run completes. That looks
+     like a model that occasionally refuses. A pre-stated `model_failed` ceiling is
+     checked on a preflight prefix before the full replay is paid for, and again at
+     the end.
+  3. The denominator was guessed. The fabrication rate's denominator (narrow or wide)
+     is an open decision owned by Rick. `FABRICATION_DENOMINATOR` is unset here, and
+     `fabrication_rate` raises until someone passes a real one. A plausible default
+     would close that decision by implementation.
 
 Run:
     python -m cosa.research.phi4_flash_lite_study.replay_harness \
@@ -41,10 +38,10 @@ Run:
         --max-model-failed-rate 0.05 --preflight 25 \
         [--sample-size N --seed S] [--arm phi_4|flash_lite]
 
-⚠️ To bound a run's cost, use `--sample-size` (a seeded random draw), NOT `--limit`.
-The frozen set is in corpus order, so the first N rows are a TIME-WINDOW sample —
-whatever the fleet happened to be saying that afternoon — and that is a caveat every
-number coming off the run has to carry.
+To bound a run's cost, use `--sample-size` (a seeded random draw), never `--limit`.
+The frozen set is in corpus order, so the first N rows are a time-window sample of
+whatever the fleet was saying that afternoon. Every number from such a run must
+carry that caveat.
 """
 
 import os
@@ -110,23 +107,18 @@ class DenominatorUnset( RuntimeError ):
 
 def verify_arm_surface( arm, factory=None ):
     """
-    Prove the arm is on the model it claims BEFORE a single row is recorded.
+    Prove the arm is on the model it claims before a single row is recorded.
 
-    Delegates to `arm_markers.check_arm_markers` — Sam's four markers, read off the
-    SDK object the call would ride, kept in ONE place so the harness and the tests
-    cannot drift about what "this arm reached Vertex" means.
-
-    ⚠️ A green here means the arm is WIRED to Vertex, not that flash-lite answered:
-    M2 reads `client.model_name`, which is the descriptor we handed the factory. The
-    genuine read-back is `response.model_version`, which exists only after a paid
-    call. See `arm_markers` for the full note.
+    Delegates to `arm_markers.check_arm_markers`. A pass means the arm is wired to Vertex,
+    not that flash-lite answered; the real read-back, `response.model_version`, exists only
+    after a paid call. See `arm_markers` for the full note.
 
     Requires:
         - arm is one of ARM_SPEC_KEYS
 
     Ensures:
         - returns the observed marker dict for the Flash-Lite arm, None for phi_4
-        - makes NO network call and resolves no credentials — construction only
+        - makes no network call and resolves no credentials, construction only
 
     Raises:
         - ArmNotVerified when a marker does not hold, or when the arms are crossed
@@ -148,13 +140,13 @@ def load_frozen_rows( snapshot_dir, freezer=None ):
 
     Ensures:
         - returns ( rows, manifest )
-        - RAISES rather than reading the live append-only corpus, which would
+        - raises rather than reading the live append-only corpus, which would
           unpair the arms
-        - RAISES when the snapshot's checksum no longer matches its manifest, so a
+        - raises when the snapshot's checksum no longer matches its manifest, so a
           replay never silently runs on an edited set
 
     Raises:
-        - LivePathRefused if snapshot_dir IS the live corpus's directory, or if the
+        - LivePathRefused if snapshot_dir is the live corpus's directory, or if the
           snapshot file within it resolves onto the live corpus file
         - RuntimeError if the snapshot does not verify against its manifest
     """
@@ -183,21 +175,19 @@ def make_arm_rewrite_fn( arm, agent_cls=None ):
     """
     Build the per-arm `rewrite_fn` that `_apply_dm_tutor` will call.
 
-    Constructs the SAME `DmTutorAgent` the production path constructs — same
-    prompt template, same stop sentinel, same parser — then overrides only
-    `model_name`, which `AgentBase.run_prompt` reads at call time
-    (`agent_base.py:305`) to pick the client. That is the entire difference
-    between the arms.
+    Builds the same `DmTutorAgent` as production and overrides only `model_name`, which
+    `AgentBase.run_prompt` reads at call time to pick the client. That is the entire
+    difference between the arms.
 
     Requires:
         - arm is one of ARM_SPEC_KEYS
 
     Ensures:
         - returns a callable taking one body and returning distilled text or None
-        - the callable is FAIL-CLOSED exactly like production `rewrite_dm`: any
-          construction or call failure returns None, which the tutor records as
-          `model_failed` rather than raising into the replay
-        - NOTHING in the tutor, the agent class, or lupin-app.ini is mutated
+        - the callable is fail-closed like production `rewrite_dm`: any construction
+          or call failure returns None, which the tutor records as `model_failed`
+          rather than raising into the replay
+        - nothing in the tutor, the agent class, or lupin-app.ini is mutated
 
     Raises:
         - KeyError if arm is not a known arm
@@ -227,17 +217,17 @@ def make_arm_rewrite_fn( arm, agent_cls=None ):
 
 def assert_row_is_measurable( meta, row_index, arm ):
     """
-    Refuse to record a row on which the tutor never actually ran. (F2.)
+    Refuse to record a row on which the tutor never actually ran.
 
-    A run where `LUPIN_CONFIG_MGR_CLI_ARGS` is unset comes back with every row
-    `tutor_enabled: False`, `tutor_outcome: "disabled"`, both arms in perfect
-    agreement and both empty. Nothing raises and nothing looks wrong.
+    With `LUPIN_CONFIG_MGR_CLI_ARGS` unset, every row comes back `tutor_enabled: False`
+    and `tutor_outcome: "disabled"`. Both arms agree and both are empty. Nothing raises
+    and nothing looks wrong.
 
     Requires:
         - meta is the dict `_apply_dm_tutor` returned
 
     Ensures:
-        - returns None when the tutor was enabled AND fired on this row
+        - returns None when the tutor was enabled and fired on this row
         - names the row index, the arm, and the offending outcome in the message
 
     Raises:
@@ -268,7 +258,7 @@ def model_failed_rate( metas ):
 
     Ensures:
         - returns 0.0 for an empty list rather than raising
-        - counts `model_failed` over ALL rows given, which are all fired rows by
+        - counts `model_failed` over all rows given, which are all fired rows by
           the time this is called
 
     Raises:
@@ -281,10 +271,10 @@ def model_failed_rate( metas ):
 
 def assert_arm_is_alive( metas, ceiling, arm, phase ):
     """
-    Stop an arm whose model is not answering, rather than buying 4,900 nulls. (F3.)
+    Stop an arm whose model is not answering, rather than paying for thousands of nulls.
 
     Requires:
-        - ceiling is a float in [0, 1], PRE-STATED before arm 1 — this function
+        - ceiling is a float in [0, 1], pre-stated before arm 1. This function
           takes it as a parameter and has no default, so the number is always
           someone's stated decision rather than this file's opinion
 
@@ -307,15 +297,15 @@ def assert_arm_is_alive( metas, ceiling, arm, phase ):
 
 def fabrication_rate( metas, denominator=None ):
     """
-    fabrication_blocked over the denominator Rick chose. (F1.)
+    Share of rows blocked for fabrication, over the denominator Rick chose.
 
     Requires:
-        - denominator is "narrow" or "wide" — there is NO default, deliberately
+        - denominator is "narrow" or "wide", with no default
 
     Ensures:
         - "narrow" divides by ( fabrication_blocked + rewritten )
         - "wide"   divides by every fired row
-        - returns None when the denominator is zero, which is honestly "no rate
+        - returns None when the denominator is zero, which means "no rate
           exists" rather than a zero that reads like a clean arm
 
     Raises:
@@ -347,7 +337,7 @@ def fabrication_rate( metas, denominator=None ):
 
 def summarize_arm( metas, denominator=None ):
     """
-    The per-arm counters §2.3 kept, after the pointer-survival metric was dropped.
+    The per-arm counters, after the pointer-survival metric was dropped.
 
     Requires:
         - metas is a list of meta dicts from one arm
@@ -409,11 +399,8 @@ def _percentile( sorted_values, q, method=None ):
     """
     The q-th percentile of an already-sorted list.
 
-    ⚠️ A p99 OVER A SMALL SAMPLE IS NEARLY THE MAXIMUM. With n observations there are
-    only n distinct values, so at n=8 the "p99" IS the slowest row. That is not wrong,
-    but it is not a tail estimate either — say so rather than implying a resolution the
-    sample does not have. The number is still reported, because hiding it would hide
-    the very tail Rick asked to see.
+    A p99 over a small sample is nearly the maximum: at n=8 it is the slowest row. That is
+    not a tail estimate, but it is still reported, because hiding it would hide the tail.
 
     Requires:
         - sorted_values is sorted ascending
@@ -422,7 +409,7 @@ def _percentile( sorted_values, q, method=None ):
 
     Ensures:
         - returns None for an empty list rather than raising
-        - "nearest_rank" returns a value that was ACTUALLY MEASURED — the element at
+        - "nearest_rank" returns a value that was actually measured: the element at
           ceil( q * n ), never an interpolated one
         - "linear" interpolates between neighbours, matching numpy's default
 
@@ -480,14 +467,15 @@ def replay_arm( rows, arm, tutor_fn=None, rewrite_fn=None, config=None,
 
     Requires:
         - rows is the frozen replay set
-        - max_model_failed_rate is a PRE-STATED float — no default, per F3
+        - max_model_failed_rate is a pre-stated float, with no default
 
     Ensures:
         - returns a list of records, one per row, in frozen-set order, each holding
-          the row's identity, the delivered text, and the tutor's `meta` UNCHANGED
-        - PROVES the arm reached the surface it claims before recording row 0
+          the row's identity, the delivered text, and the tutor's `meta` unchanged
+        - when verify_surface is true, proves the arm reached the surface it claims
+          before recording row 0
         - aborts on the first unmeasurable row rather than recording it
-        - checks the model_failed ceiling on the first `preflight` rows BEFORE
+        - checks the model_failed ceiling on the first `preflight` rows before
           paying for the rest, and again over the whole arm
         - never touches the tutor, the agent class, or lupin-app.ini
 
@@ -559,14 +547,9 @@ def draw_seeded_subset( rows, sample_size, seed ):
     """
     Draw a reproducible random subset of the frozen set, keeping each row's origin.
 
-    ⚠️ WHY `--limit` IS NOT THIS. `--limit N` takes the FIRST N rows, and the frozen
-    set is in corpus order — so it is a TIME-WINDOW sample: whatever the fleet
-    happened to be saying that afternoon, not a sample of the study's population.
-    That is a caveat every number coming off it has to carry. A seeded draw does not
-    need the caveat, and costs one line. (Sam 🎙️ raised this mid-run.)
-
-    The official snapshot stays the one frozen set: this samples FROM it rather than
-    re-freezing, so the manifest checksum still describes the population.
+    `--limit N` takes the first N rows, a time-window sample that needs a caveat on every
+    number. A seeded draw needs none. It samples from the snapshot rather than re-freezing,
+    so the manifest checksum still describes the population.
 
     Requires:
         - rows is the loaded frozen set
@@ -575,9 +558,9 @@ def draw_seeded_subset( rows, sample_size, seed ):
 
     Ensures:
         - returns ( subset, drawn_indices ) with drawn_indices sorted ascending and
-          indexing into the ORIGINAL frozen set
+          indexing into the original frozen set
         - the subset is in frozen-set order, so both arms walk it identically
-        - each returned row is a COPY carrying `frozen_index`, so a record can be
+        - each returned row is a copy carrying `frozen_index`, so a record can be
           traced back to its row in the snapshot rather than only to its position
           in the draw
         - same rows + same size + same seed gives the same draw on any machine
@@ -600,23 +583,11 @@ def draw_seeded_subset( rows, sample_size, seed ):
 
 def pair_records( arm_a_records, arm_b_records ):
     """
-    Join the two arms on FROZEN INDEX so every comparison is within one body.
+    Join the two arms on frozen index so every comparison is within one body.
 
-    ⚠️ WHY NOT `row_index`. `row_index` is the position in the DRAW. Two different
-    draws of the same size both produce 0..N-1, so joining on it makes the guard
-    below pass while the function pairs DIFFERENT BODIES — the arms would look
-    perfectly paired and every McNemar cell would compare two populations. That is
-    the exact failure the freeze exists to prevent, and it is reachable without
-    anyone doing anything odd: `--arm` runs one arm at a time, `--seed` has a
-    default, and a re-freeze between two invocations changes the population.
-    `frozen_index` indexes the SNAPSHOT, so it is the only key that means "the same
-    body". (Tiffany 💍 found this by running it, not reading it.)
-
-    ⚠️ THE SNAPSHOT CHECK IS THE OTHER HALF. Matching frozen indices across two
-    DIFFERENT snapshots is still not a pairing — index 25 of one freeze is not
-    index 25 of another. Each record carries the snapshot's sha256, and a mismatch
-    is refused. The old docstring asked for "both lists came from the SAME frozen
-    snapshot" as a precondition nothing checked; now it is enforced.
+    The key is `frozen_index`, never `row_index`: two different draws of one size both
+    give 0..N-1 and would pair different bodies. Indices also mean nothing across two
+    different snapshots, so each record's `snapshot_sha256` must match too.
 
     Requires:
         - both lists came from `replay_arm`, so every record carries frozen_index
@@ -624,8 +595,8 @@ def pair_records( arm_a_records, arm_b_records ):
 
     Ensures:
         - returns a list of { row_index, frozen_index, body, <arm_a>, <arm_b> } dicts
-        - RAISES rather than silently truncating when the arms disagree about which
-          rows they saw, or about which snapshot those rows came from — a zip()
+        - raises rather than silently truncating when the arms disagree about which
+          rows they saw, or about which snapshot those rows came from; a zip()
           would hide both
 
     Raises:
@@ -671,27 +642,24 @@ def pair_records( arm_a_records, arm_b_records ):
 
 def backfill_provenance( records, snapshot_sha256, drawn_frozen_indices=None ):
     """
-    Stamp snapshot + frozen-index provenance onto records written before those fields existed.
+    Stamp snapshot and frozen-index provenance onto records that predate those fields.
 
-    ⚠️ WHY THIS IS NARROW ON PURPOSE. `pair_records` refuses records that do not carry
-    `snapshot_sha256` and `frozen_index`, and that refusal is the guard against joining
-    two different draws. A backfill therefore weakens the guard by exactly as much as it
-    is trusted, so it takes the provenance from the RUN HEADER — which the run itself
-    wrote — and never invents it. Sam 🎙️'s 400-row run predates both fields; its header
-    carries `snapshot_sha256` and the drawn indices, so nothing here is guessed.
+    `pair_records` refuses records without these fields, which guards against joining two
+    different draws. A backfill weakens that guard, so it takes provenance only from the
+    run header and never invents it.
 
     Requires:
-        - records are one arm's rows, IN THE ORDER THE ARM REPLAYED THEM
+        - records are one arm's rows, in the order the arm replayed them
         - snapshot_sha256 comes from the run's own header, not from a later freeze
         - drawn_frozen_indices, when given, is that run's header list and has exactly
           one entry per record
 
     Ensures:
-        - returns NEW dicts; the caller's records are not mutated
-        - a record that already carries a field keeps its own value — a backfill never
+        - returns new dicts; the caller's records are not mutated
+        - a record that already carries a field keeps its own value, so a backfill never
           overwrites real provenance with reconstructed provenance
         - without drawn_frozen_indices, frozen_index falls back to row_index, which is
-          correct ONLY for an unsampled full-population run
+          correct only for an unsampled full-population run
 
     Raises:
         - ValueError when drawn_frozen_indices is given and its length does not match
@@ -720,16 +688,9 @@ def latency_summary( records ):
     """
     Per-arm latency, split by whether the model actually answered.
 
-    ⚠️ THE SPLIT IS THE POINT. `elapsed_seconds` times the WHOLE `_apply_dm_tutor`
-    call, so a `model_failed` row is timed too — and its duration is a different
-    KIND of thing: a fast 404 or a slow timeout, not "how long the model took to
-    answer". Pooling those into one median makes the number mean something other
-    than which model is faster, which is exactly what a tiebreaker must not do.
-
-    `answered` is therefore the tiebreaker figure: rows where a rewrite came back
-    and the tutor then judged it (delivered, or refused for fabricating/rescoping/
-    mislabelling — all of which required an answer to judge). `all_fired` is
-    reported beside it so a big gap between the two is visible rather than hidden.
+    A `model_failed` row is timed too, but that is a fast 404 or a slow timeout.
+    It is not model speed, so pooling it would blur the median. `answered` is the tiebreaker figure: a rewrite
+    came back and the tutor judged it. `all_fired` is reported beside it.
 
     Requires:
         - records came from `replay_arm`, so each carries elapsed_seconds and meta
@@ -768,18 +729,12 @@ def latency_ratio( arm_a_records, arm_b_records, arm_a="phi_4", arm_b="flash_lit
     """
     The tiebreaker: how much slower arm A is than arm B.
 
-    ⚠️ A TIEBREAKER ONLY APPLIES AFTER THE TEST COMES BACK TIED. Statistics are
-    considered first; this decides nothing on its own, and a faster arm that is
-    significantly less honest does not win on speed.
-
-    Two figures, because they answer slightly different questions:
-      · `ratio_of_medians` — the headline. What a reader means by "latency ratio".
-      · `paired_median_ratio` — the median of per-row A/B ratios. The arms are
-        paired, so this is available and is robust to one arm meeting a few very
-        slow bodies. Report it beside the headline rather than instead of it.
+    Applies only after the statistical test comes back tied; a faster but significantly
+    less honest arm does not win on speed. `ratio_of_medians` is the headline, and
+    `paired_median_ratio` (median of per-row ratios) is reported beside it.
 
     Requires:
-        - both lists are PAIRED (same frozen indices, same order) — pass them
+        - both lists are paired (same frozen indices, same order); pass them
           through `pair_records` first if that is not already established
 
     Ensures:
@@ -841,23 +796,21 @@ def discordant_counts( paired, arm_a, arm_b, outcome="fabrication_blocked" ):
     """
     The b / c cells McNemar's test reads, over paired rows.
 
+    Returns a self-describing dict, not a bare ( b, c ) tuple. Authors label the cells in
+    opposite orders, so a bare tuple invites quoting the direction backwards. Arm-named
+    keys carry the meaning with the number; `b` and `c` remain for the arithmetic.
+
     Requires:
         - paired came from pair_records
         - both arm names are keys in every paired entry
-
-    ⚠️ RETURNS A SELF-DESCRIBING DICT, NOT A BARE ( b, c ) TUPLE. Sam 🎙️ and I label
-    the two cells in OPPOSITE orders — my b=0, c=5 is his b=5, c=0 for the same data —
-    so a bare tuple travels without the one fact that makes it readable, and the first
-    person to quote it gets the direction backwards. The arm-named keys carry the
-    meaning with the number; `b` and `c` remain for the arithmetic.
 
     Requires:
         - paired came from pair_records
         - both arm names are keys in every paired entry
 
     Ensures:
-        - returns a dict whose keys NAME the arm each count belongs to
-        - `b` = rows where ONLY arm_a hit the outcome; `c` = only arm_b — kept for
+        - returns a dict whose keys name the arm each count belongs to
+        - `b` = rows where only arm_a hit the outcome; `c` = only arm_b; kept for
           McNemar, which needs an order, and spelled out in `b_means` / `c_means`
         - concordant rows contribute to neither, which is McNemar's whole point
 
@@ -906,7 +859,7 @@ def discordant_counts( paired, arm_a, arm_b, outcome="fabrication_blocked" ):
 
 def main( argv=None, printer=print, runner=None ):
     """
-    Command-line entry point. Tested, not pragma'd.
+    Command-line entry point.
 
     Requires:
         - argv is None (read sys.argv) or a list of arguments
@@ -916,11 +869,11 @@ def main( argv=None, printer=print, runner=None ):
     Ensures:
         - returns 0 on a completed replay
         - writes one JSON record per row per arm to --out
-        - WITHHOLDS the per-arm summary when --denominator is unset, rather than
-          printing a rate under a denominator nobody chose (F1)
+        - withholds the per-arm summary when --denominator is unset, rather than
+          printing a rate under a denominator nobody chose
 
     Raises:
-        - whatever load_frozen_rows / replay_arm raise — a live path, a drifted
+        - whatever load_frozen_rows / replay_arm raise: a live path, a drifted
           snapshot, an unmeasurable row or a dead arm are all hard stops
     """
     parser = argparse.ArgumentParser( description="Paired DM-tutor replay for the Phi-4 vs Flash-Lite study" )

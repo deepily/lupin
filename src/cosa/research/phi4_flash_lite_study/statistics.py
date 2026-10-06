@@ -1,41 +1,37 @@
 """
-Inferential statistics for the Phi-4 vs Flash-Lite study (handoff §7 item 4).
+Inferential statistics for the Phi-4 vs Flash-Lite study.
 
-Two tests, both SCIPY-ONLY:
+Two tests, both using scipy only:
 
-  · McNemar's EXACT test — `scipy.stats.binomtest( min( b, c ), b + c, 0.5 )`.
-    The arms are PAIRED: every body goes through both, so the concordant rows
-    (both blocked, or neither) carry no information about which model is more
-    honest. Only the discordant pairs do, and under the null a discordant pair is
-    a coin flip. The exact binomial test is used rather than the chi-square
-    approximation because the discordant counts here are small, which is exactly
-    where the approximation is worst.
+  - McNemar's exact test, `scipy.stats.binomtest( min( b, c ), b + c, 0.5 )`.
+    The arms are paired, so the concordant rows (both blocked, or neither) say
+    nothing about which model is more honest. Only the discordant pairs do, and
+    under the null a discordant pair is a coin flip. The exact binomial test
+    replaces the chi-square approximation because the discordant counts are small.
 
-  · WILSON score interval — computed CLOSED-FORM from `scipy.stats.norm`.
+  - The Wilson score interval, computed in closed form from `scipy.stats.norm`.
 
-⚠️ `statsmodels` IS NAMED IN THE SPEC ONLY AS THE TRAP TO AVOID. Its
-`proportion_confint` DEFAULTS to the Wald interval, which is forbidden here, and
-the package is neither installed nor pinned in any requirements file — verified on
-this box: `import statsmodels` raises ModuleNotFoundError. Do NOT add it. The
-closed-form Wilson below has no such dependency.
+The `statsmodels` package is named in the spec only as a trap to avoid. Its
+`proportion_confint` defaults to the Wald interval, which is forbidden here. The
+package is neither installed nor pinned, so `import statsmodels` raises
+ModuleNotFoundError. Never add it. The Wilson code below does not use it.
 
-WHY WALD IS FORBIDDEN, in one number: at 6 successes out of 6, Wald's standard
-error is sqrt( 1 * 0 / 6 ) = 0, so its interval collapses to [1.0, 1.0] — it claims
-certainty from six observations. Wilson gives [0.6097, 1.0]. `wald_lower_bound`
-below exists ONLY as that must-fail control, and `must_fail_control()` asserts the
-two disagree. It is never used to report a result.
+Wald is forbidden because at 6 successes out of 6 its standard error is zero.
+Its interval then collapses to [1.0, 1.0], which claims certainty from six
+observations. Wilson gives [0.6097, 1.0]. The function
+`wald_lower_bound` exists only as the must-fail control. `must_fail_control()`
+asserts the two disagree, and the bound is never used to report a result.
 
-⚠️ THE DISCORDANT FLOOR IS NOT SET HERE. The arithmetic minimum is 6 (`b + c = 5`
-gives a best-case p of 0.0625, which cannot clear 0.05 no matter how lopsided;
-`b + c = 6` gives 0.03125). The OPERATIONAL floor — the effect-size-worthy number —
-is Rick's, pre-stated before arm 1. `assert_floor_pre_stated` takes it as a
+The discordant floor is not set here. The arithmetic minimum is 6: `b + c = 5`
+gives a best-case p of 0.0625, which cannot clear 0.05 however lopsided the split.
+`b + c = 6` gives 0.03125. The operational floor is the effect-size-worthy number,
+which the owner states before arm 1. `assert_floor_pre_stated` takes it as a
 required argument and has no default.
 
-SCIPY VERSION. Read from `scipy.__version__` at run time and recorded in every
-result, never copied from the pin: `src/cosa/requirements.txt:210` pins 1.15.2 and
-this box measured 1.17.1. `binomtest` and `norm.ppf` predate both, so the numbers
-are not version-sensitive — but a stats result must never be argued over with the
-library version unknown.
+The scipy version is read from `scipy.__version__` at run time and recorded in
+every result, never copied from the requirements pin. A stats result must never be
+argued over with the library version unknown. The numbers do not depend on it,
+because `binomtest` and `norm.ppf` predate both the pinned and installed versions.
 """
 
 import math
@@ -68,9 +64,9 @@ def scipy_version():
         - nothing
 
     Ensures:
-        - returns the INSTALLED version string, read at run time
-        - is never the pinned version copied from requirements.txt; the two differ
-          on this box (pin 1.15.2, installed 1.17.1)
+        - returns the installed version string, read at run time
+        - is never the pinned version copied from requirements.txt, which can differ
+          from the installed one
 
     Raises:
         - nothing
@@ -82,10 +78,8 @@ def mcnemar_exact( b, c ):
     """
     McNemar's exact test on the two discordant cells.
 
-    `b` and `c` are the counts of pairs where exactly ONE arm hit the outcome.
-    Concordant pairs are deliberately absent: they cannot distinguish the arms, and
-    including them is the classic way to turn a paired comparison into a weaker
-    unpaired one.
+    `b` and `c` count pairs where exactly one arm hit the outcome. Concordant pairs
+    are left out, since including them weakens a paired comparison into an unpaired one.
 
     Requires:
         - b and c are non-negative ints
@@ -93,7 +87,7 @@ def mcnemar_exact( b, c ):
     Ensures:
         - returns a dict with b, c, n_discordant, p_value, statistic, test name,
           and the scipy version that computed it
-        - p_value is the TWO-SIDED exact binomial p under H0: p = 0.5
+        - p_value is the two-sided exact binomial p under the null hypothesis p = 0.5
         - returns p_value 1.0 for b = c = 0 rather than raising — no discordance is
           "no evidence either way", not an error
         - the statistic is min( b, c ), matching the spec's call shape
@@ -123,9 +117,10 @@ def mcnemar_exact( b, c ):
 
 def wilson_interval( successes, trials, confidence=DEFAULT_CONFIDENCE ):
     """
-    Wilson score interval, closed-form from `scipy.stats.norm`.
+    Wilson score interval in closed form, with z from `scipy.stats.norm`.
 
         centre = ( p + z^2/2n ) / ( 1 + z^2/n )
+
         half   = z * sqrt( p(1-p)/n + z^2/4n^2 ) / ( 1 + z^2/n )
 
     Requires:
@@ -135,9 +130,9 @@ def wilson_interval( successes, trials, confidence=DEFAULT_CONFIDENCE ):
 
     Ensures:
         - returns ( lower, upper ), both clamped into [ 0, 1 ]
-        - returns ( 0.0, 1.0 ) for trials = 0 — total ignorance, honestly stated
-        - does NOT collapse to a point at 0 or 100% successes, which is the whole
-          reason Wald is refused here
+        - returns ( 0.0, 1.0 ) for trials = 0, which states total ignorance
+        - does not collapse to a point at 0 or 100% successes, which is the reason
+          Wald is refused here
         - uses scipy.stats.norm.ppf and nothing from statsmodels
 
     Raises:
@@ -163,7 +158,7 @@ def wilson_interval( successes, trials, confidence=DEFAULT_CONFIDENCE ):
 
 def wald_lower_bound( successes, trials, confidence=DEFAULT_CONFIDENCE ):
     """
-    The FORBIDDEN interval's lower bound — the must-fail control, never a result.
+    Lower bound of the forbidden Wald interval, the must-fail control, never a result.
 
     Present so `must_fail_control()` can demonstrate on real numbers that the two
     methods disagree where it matters. `statsmodels.proportion_confint` defaults to
@@ -220,12 +215,12 @@ def assert_floor_pre_stated( n_discordant, operational_floor ):
     Refuse a verdict when too few pairs disagreed, against a floor stated up front.
 
     Requires:
-        - operational_floor is an int stated BEFORE arm 1 ran. There is no default:
+        - operational_floor is an int stated before arm 1 ran. There is no default:
           the arithmetic bound is 6, but the effect-size-worthy number is Rick's,
           and a floor chosen after seeing the data is not a floor
 
     Ensures:
-        - returns n_discordant when it meets both the operational floor AND the
+        - returns n_discordant when it meets both the operational floor and the
           arithmetic bound of 6
         - the message names both numbers, so a refusal is diagnosable
 
@@ -260,19 +255,9 @@ def compare_arms( b, c, operational_floor, arm_a="phi_4", arm_b="flash_lite",
     """
     The study's verdict on one outcome: McNemar exact plus a Wilson interval.
 
-    The proportion the interval covers is b / ( b + c ) — among the pairs where the
-    arms DISAGREED, the share where ARM_A was the one that hit the outcome. That is
-    the quantity McNemar tests, so the interval and the p-value describe the same
-    number.
-
-    ⚠️ "THE SHARE THAT WENT ARM_A'S WAY" IS THE WRONG READING, and this docstring
-    used to say it. For `fabrication_blocked`, hitting the outcome means the guard
-    REFUSED that arm's rewrite — so a high proportion counts AGAINST arm_a, not for
-    it. The same slip named a field `proportion_favouring_a` and inverted the finding
-    in the discordant counts (Sam, 2026-08-17). A raw share carries no merit
-    direction; whether it is good or bad is a property of the OUTCOME being counted,
-    so this reports the fact and leaves the judgement to a reader who knows what the
-    outcome means.
+    The interval covers b / ( b + c ), the share of disagreeing pairs where arm_a hit
+    the outcome, which is what McNemar tests. A high share does not favour arm_a.
+    For `fabrication_blocked` it means the guard refused arm_a's rewrite.
 
     Requires:
         - b, c are the discordant counts from `replay_harness.discordant_counts`
@@ -281,7 +266,7 @@ def compare_arms( b, c, operational_floor, arm_a="phi_4", arm_b="flash_lite",
     Ensures:
         - returns a dict carrying the test result, the Wilson interval, the
           must-fail control, the floor that was applied, and the scipy version
-        - RAISES rather than returning a verdict when the floor is unmet
+        - raises rather than returning a verdict when the floor is unmet
 
     Raises:
         - FloorNotPreStated / DiscordantFloorNotMet / ValueError per the guards

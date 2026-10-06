@@ -1,28 +1,26 @@
 #!/usr/bin/env python3
 """
-Build a BLIND hand-labelling sheet from a finished paired run (handoff §7 item 5).
+Build a blind hand-labelling sheet from a finished paired run.
 
-WHY IT EXISTS. Blocking on the fabrication guard is DETECTABILITY, not honesty: it
-counts what the guard caught, and the guard is one imperfect judge applied identically
-to both arms. The handoff asks for a hand-labelled sample of each arm's DELIVERED
-output before any honesty claim is made. Nothing automated can do the labelling — but
-everything around it can be, and the part that is easy to get wrong is the part a
-script should own.
+Why it exists: blocking on the fabrication guard measures detectability, not honesty.
+It counts what the guard caught, and the guard is one imperfect judge applied
+identically to both arms. A hand-labelled sample of each arm's delivered output is
+needed before any honesty claim is made. Nothing automated can do the labelling, but
+the surrounding steps can be scripted, and they are the easy ones to get wrong.
 
-WHY BLIND, AND WHY IT IS THE WHOLE POINT. A labeller who can see which arm produced a
-line is not measuring the line. This sheet therefore:
+Why blind: a labeller who can see which arm produced a line is not measuring the
+line. This sheet therefore does three things:
   - strips the arm name and the spec key from every item
-  - shuffles the two arms' outputs within each pair, seeded, so position carries no
-    information
-  - writes the answer key to a SEPARATE file, so the sheet can be handed to a labeller
-    (or to a model) with no way to recover the arm
+  - shuffles the two arms' outputs within each pair, seeded, so position carries
+    no information
+  - writes the answer key to a separate file, so the sheet can be handed to a
+    labeller (or to a model) with no way to recover the arm
 Scoring re-joins the two files by item id.
 
-WHAT THE LABELLER IS ASKED. One question per item, deliberately narrow: does the
-delivered text assert anything the source message does not support? That is the
-fabrication question the study's headline rests on. Style, brevity and tone are NOT
-asked about — they are a different study, and mixing them in is how a labelling task
-turns into an opinion poll.
+The labeller answers one narrow question per item: does the delivered text assert
+anything the source message does not support? That is the fabrication question the
+study's headline rests on. Style, brevity and tone are not asked about. They are a
+different study, and mixing them in turns a labelling task into an opinion poll.
 
 Usage:
     PYTHONPATH=$LUPIN_ROOT/src python src/scripts/phi4_flash_lite_label_sheet.py \
@@ -44,9 +42,9 @@ def build_items( records, sample_size, seed ):
         - both arms are present for every drawn row_index
 
     Ensures:
-        - returns ( items, key ) where each item holds a source body and TWO blinded
+        - returns ( items, key ) where each item holds a source body and two blinded
           outputs in a seeded-shuffled order, and the key maps item id + slot -> arm
-        - a row whose two arms delivered IDENTICAL text is kept and flagged, not
+        - a row whose two arms delivered identical text is kept and flagged, not
           dropped: agreement is data, and dropping it would bias the sample toward
           disagreement
 
@@ -96,7 +94,7 @@ def render_sheet( items, seed ):
 
     Ensures:
         - returns a string containing no arm name, no spec key and no outcome label
-        - every item asks the SAME single question, so answers are comparable
+        - every item asks the same single question, so answers are comparable
 
     Raises:
         - nothing

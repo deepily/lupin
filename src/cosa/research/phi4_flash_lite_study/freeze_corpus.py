@@ -1,32 +1,26 @@
 """
-Freeze the DM replay set for the Phi-4 vs Flash-Lite study (handoff §7 item 1).
+Freeze the DM replay set for the Phi-4 vs Flash-Lite study.
 
-WHY A FREEZE AT ALL. `dm_traffic.jsonl` is an APPEND-ONLY log that the live fleet
-is still writing to — it grew from 6,938 rows at cascade review to 8,006 by the
-time this harness was built. Two arms replayed against a moving file are not
-paired: arm 2 sees rows arm 1 never saw, and every per-body comparison silently
-becomes a comparison of two different datasets. The snapshot is what makes
-"same replayed DM bodies" true rather than intended.
+Why freeze at all: `dm_traffic.jsonl` is an append-only log that the live fleet is
+still writing to. Two arms replayed against a moving file are not paired. Arm 2 sees
+rows arm 1 never saw, and every per-body comparison silently compares two different
+datasets. The snapshot is what makes "same replayed DM bodies" true.
 
-WHERE THE CORPUS ACTUALLY IS. Never `/var/lupin/dm-corpus` — that is the
-CONTAINER mount point, which does not exist on the host where this harness runs.
-A guard pointed at a path that never matches passes by default, which is the
-exact failure class the cascade caught in the plan's own §1.2. This module
-resolves the live path by IMPORTING `_resolve_dm_corpus_dir` from
-`src/cosa/rest/routers/dm.py` rather than re-implementing its two-step
-($LUPIN_DM_CORPUS_DIR -> fleet_data_root()/dm-corpus) resolution: a copy is a
-thing that drifts, and a drifted copy is a guard that stops guarding.
+Where the corpus is: never `/var/lupin/dm-corpus`, which is the container mount point
+and does not exist on the host where this harness runs. A guard pointed at a path that
+never matches passes by default. This module resolves the live path by importing
+`_resolve_dm_corpus_dir` from `src/cosa/rest/routers/dm.py` rather than copying its
+two-step resolution ($LUPIN_DM_CORPUS_DIR, then fleet_data_root()/dm-corpus). A copy
+drifts, and a drifted copy stops guarding.
 
-THE GUARD IS THE POINT. `assert_snapshot_is_not_live()` RAISES when the snapshot
-is the same file as the live corpus. It checks TWO ways, because either alone has
-a hole:
+The guard: `assert_snapshot_is_not_live()` raises when the snapshot is the same file
+as the live corpus. It checks two ways, because either alone has a hole:
 
-  1. `os.path.realpath` on both — beats a symlink, a `..` segment, a trailing slash.
-  2. `(st_dev, st_ino)` on both, when both exist — beats a HARD LINK and, the case
-     that actually matters here, a BIND MOUNT. `/var/lupin/dm-corpus` and the host's
-     `projects-data/lupin/dm-corpus` are the same bytes under two different paths;
-     realpath compares equal to neither, and only the inode identity catches it.
-
+  1. `os.path.realpath` on both beats a symlink, a `..` segment and a trailing slash.
+  2. `(st_dev, st_ino)` on both, when both exist, beats a hard link and a bind mount.
+     `/var/lupin/dm-corpus` and the host's `projects-data/lupin/dm-corpus` are the
+     same bytes under two paths. Realpath compares equal to neither, and only the
+     inode identity catches it.
 
 Run:
     python -m cosa.research.phi4_flash_lite_study.freeze_corpus --out-dir <dir>
@@ -74,10 +68,9 @@ def resolve_live_corpus_path():
     """
     The path the running fleet appends DM rows to.
 
-    Delegates to the production resolver so this harness and the writer can never
-    disagree about where the corpus is. Imported lazily: the pure helpers in this
-    module (checksums, guard comparison, sampling) must stay testable without
-    dragging in the FastAPI router.
+    Delegates to the production resolver so the harness and the writer cannot disagree.
+    Imported lazily, so the pure helpers (checksums, guard comparison, sampling) stay
+    testable without the FastAPI router.
 
     Requires:
         - nothing
@@ -85,8 +78,8 @@ def resolve_live_corpus_path():
     Ensures:
         - returns an absolute path ending in dm_traffic.jsonl
         - the value equals what `src/cosa/rest/routers/dm.py` itself writes to
-        - NEVER returns the container mount `/var/lupin/...` unless the host's own
-          $LUPIN_DM_CORPUS_DIR genuinely points there
+        - never returns the container mount `/var/lupin/...` unless the host's own
+          $LUPIN_DM_CORPUS_DIR points there
 
     Raises:
         - ImportError if the production router cannot be imported
@@ -103,14 +96,14 @@ def assert_snapshot_is_not_live( snapshot_path, live_path=None ):
         - snapshot_path is a string path
 
     Ensures:
-        - returns the realpath of snapshot_path when it is NOT the live corpus
+        - returns the realpath of snapshot_path when it is not the live corpus
         - compares realpaths, so a symlink, a "..", or a trailing slash cannot
           smuggle the live file past the check
-        - ALSO compares ( st_dev, st_ino ) when both files exist, so a hard link or
+        - also compares ( st_dev, st_ino ) when both files exist, so a hard link or
           a bind mount — two real paths over one set of bytes — cannot either
 
     Raises:
-        - LivePathRefused when snapshot_path is the live corpus file by EITHER test
+        - LivePathRefused when snapshot_path is the live corpus file by either test
     """
     live     = live_path if live_path is not None else resolve_live_corpus_path()
     snap_rp  = os.path.realpath( snapshot_path )
@@ -140,19 +133,16 @@ def assert_dir_is_not_live_corpus_dir( candidate_dir, live_path=None ):
     """
     Refuse to read a replay set out of, or write one into, the live corpus's dir.
 
-    ⚠️ THIS EXISTS BECAUSE THE FILE-LEVEL GUARD HAS A HOLE, found by its own test.
-    `assert_snapshot_is_not_live` compares SNAPSHOT FILE against LIVE FILE. Point a
-    caller at the live corpus DIRECTORY and the names differ — `dm_replay_frozen.jsonl`
-    is not `dm_traffic.jsonl` — so the guard passes and the caller gets a confusing
-    FileNotFoundError instead of a refusal. Nothing in the live corpus directory is a
-    frozen replay set; that is a property of the directory, not of one filename.
+    The file-level guard compares file names, so a caller aimed at the live directory
+    passes it and gets a confusing FileNotFoundError, not a refusal. Nothing in the live
+    directory is a frozen replay set, so the directory itself is refused.
 
     Requires:
         - candidate_dir is a string path
 
     Ensures:
         - returns the realpath of candidate_dir when it is not the live corpus's dir
-        - catches the directory by realpath AND by ( st_dev, st_ino ), for the same
+        - catches the directory by realpath and by ( st_dev, st_ino ), for the same
           bind-mount reason as the file-level guard
 
     Raises:
@@ -246,7 +236,7 @@ def read_corpus_rows( path ):
 
     Ensures:
         - returns ( rows, skipped ) where skipped counts unparseable non-blank lines
-        - blank lines are ignored and are NOT counted as skipped
+        - blank lines are ignored and are not counted as skipped
         - a truncated final line (the writer appending mid-read) is counted in
           skipped rather than aborting the freeze
 
@@ -268,20 +258,11 @@ def read_corpus_rows( path ):
 
 def count_claims( body_text ):
     """
-    Count the claim-bearing sentences in a body, via the ROUTER'S OWN counter.
+    Count the claim-bearing sentences in a body, via the router's own counter.
 
-    Calls `cosa.rest.routers.dm._count_claims` — the exact function whose result
-    the tutor compares against its trigger — rather than re-implementing the same
-    two lines. This module already makes that argument for the corpus resolver
-    twelve lines up ("a copy is a thing that drifts, and a drifted copy is a guard
-    that stops guarding"); the same reasoning applies here and did not the first
-    time round.
-
-    ⚠️ INHERITED FAIL-OPEN. `_count_claims` catches bare Exception and returns 0,
-    which reads as "no claims" and therefore selects NOTHING as eligible. That is
-    the right behaviour in the send path (never fire the tutor on a broken count)
-    and a study-killer here, because it would silently freeze an empty replay set.
-    `freeze()` refuses a zero-row result for exactly this reason.
+    Imports the router's `_count_claims`, which the tutor compares to its trigger,
+    because a copy drifts. It fails open to 0 (no claims), which would freeze an empty
+    replay set here, so `freeze()` refuses a zero-row result.
 
     Requires:
         - body_text is a string
@@ -305,8 +286,8 @@ def select_eligible( rows, trigger_claims ):
         - trigger_claims is an int
 
     Ensures:
-        - returns rows whose "body" is non-blank AND whose claim count is
-          STRICTLY greater than trigger_claims — the same `>` the router uses at
+        - returns rows whose "body" is non-blank and whose claim count is
+          strictly greater than trigger_claims — the same `>` the router uses at
           the `claims_in <= trigger` early return
         - preserves input order, so the frozen set is deterministic
 
@@ -332,7 +313,7 @@ def sample_rows( rows, sample_size, seed ):
 
     Ensures:
         - returns rows unchanged when sample_size is None or >= len( rows )
-        - otherwise returns a sample of exactly sample_size rows, in the ORIGINAL
+        - otherwise returns a sample of exactly sample_size rows, in the original
           corpus order, chosen by a Random seeded with `seed` — same seed, same
           rows, on any machine
         - never mutates the input list
@@ -403,7 +384,7 @@ def build_manifest( source_path, source_sha, source_rows, source_skipped,
 
     Ensures:
         - returns a dict carrying source path + freeze timestamp + row counts +
-          checksums for BOTH the source file and the written snapshot
+          checksums for both the source file and the written snapshot
         - records the selection parameters (trigger, eligible_only, sample, seed)
           so the same replay set can be rebuilt from the same source
 
@@ -437,14 +418,14 @@ def freeze( out_dir, trigger_claims=4, eligible_only=True, sample_size=None,
     Snapshot the live corpus into a frozen, checksummed replay set.
 
     Requires:
-        - out_dir is a writable directory path that is NOT the live corpus's own
+        - out_dir is a writable directory path that is not the live corpus's own
           directory
 
     Ensures:
         - writes <out_dir>/dm_replay_frozen.jsonl and <out_dir>/manifest.json
         - the manifest records source path, freeze timestamp, row counts and
           checksums for both the source and the snapshot
-        - the source is checksummed BEFORE and AFTER the read, so a digest can
+        - the source is checksummed before and after the read, so a digest can
           never describe bytes other than the ones that were read — the corpus
           grows ~5 rows/min while this runs
         - refuses to record an empty (or under-minimum) replay set as a clean freeze
@@ -514,10 +495,10 @@ def verify_snapshot( snapshot_path, manifest_path ):
 
     Ensures:
         - returns ( ok, detail ) where ok is True only when the file's sha256 and
-          row count both match the manifest AND the snapshot is non-empty
-        - a ZERO-ROW snapshot fails, even when it matches its manifest perfectly —
+          row count both match the manifest and the snapshot is non-empty
+        - a zero-row snapshot fails, even when it matches its manifest perfectly —
           an empty replay set is internally consistent and still measures nothing
-        - detail names WHICH field disagreed, so a mismatch is diagnosable
+        - detail names which field disagreed, so a mismatch is diagnosable
 
     Raises:
         - OSError if either file cannot be read
@@ -545,8 +526,10 @@ def verify_snapshot( snapshot_path, manifest_path ):
 
 def main( argv=None, printer=print ):
     """
-    Command-line entry point. Tested, not pragma'd — `argv` and `printer` are
-    injectable precisely so the exit codes and output are assertable.
+    Command-line entry point.
+
+    It is tested rather than excluded from coverage: `argv` and `printer` are
+    injectable, so the exit codes and output can be asserted.
 
     Requires:
         - argv is None (read sys.argv) or a list of arguments

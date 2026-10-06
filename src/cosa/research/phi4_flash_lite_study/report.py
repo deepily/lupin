@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
 """
-Read a paired-replay results file and print what it can honestly say.
+Read a paired-replay results file and print only what the data can support.
 
-WHY A SEPARATE READER. The replay writes records and stops; turning them into a table
-is a different job that must be re-runnable against a finished run without paying for
-inference again. It is also where the two open rulings bite, so the refusals live here
-in one place rather than being re-argued per reader.
+This is a separate reader because the replay writes records and stops. Turning them into
+a table is a different job, and it must be re-runnable on a finished run without paying
+for inference again. The refusals live here in one place, so no other reader has to
+re-argue them.
 
-WHAT IT REFUSES TO DO:
-  - no fabrication RATE unless --denominator is passed. The denominator is Rick's
-    ruling (narrow vs wide); a reader that picks one silently is publishing his
-    decision under his name.
-  - no p-value unless --floor is passed AND the discordant count clears it. The
-    operational floor is Rick's too, pre-stated before arm 1. The arithmetic minimum
+What it refuses to do:
+  - no fabrication rate unless --denominator is passed. The denominator (narrow or wide)
+    is the owner's ruling, and a reader that picks one silently publishes that decision
+    under his name.
+  - no p-value unless --floor is passed and the discordant count clears it. The
+    operational floor is also the owner's, stated before arm 1. The arithmetic minimum
     is 6: with b+c=5 the best achievable p is 0.0625, which cannot clear 0.05.
-  - no verdict of any kind about which model is more honest. Blocking on the guard is
-    DETECTABILITY; honesty needs the hand-labelled sample (handoff §7 item 5).
+  - no verdict of any kind about which model is more honest. Blocking on the guard shows
+    detectability only; honesty needs the hand-labelled sample.
 
 Usage:
     PYTHONPATH=$LUPIN_ROOT/src python src/scripts/phi4_flash_lite_report.py \
@@ -101,16 +101,11 @@ def load_run( path ):
 
 def backfill_provenance( header, records, printer=print ):
     """
-    Restore `snapshot_sha256` and `frozen_index` on records written before the harness
-    carried them per row.
+    Restore snapshot and frozen-index provenance on records that predate per-row fields.
 
-    WHY THIS IS RECOVERY AND NOT INVENTION. `pair_records` refuses to pair records that
-    do not agree on which freeze they came from — correctly, since matching indices
-    across two different snapshots is not a pairing. Records written by the earlier
-    driver carry that provenance in the RUN HEADER instead of on each row: the header
-    names the snapshot checksum and the exact drawn row indices, so both fields are
-    derivable, not guessed. If the header is absent, nothing is backfilled and the
-    pairing is allowed to fail loudly.
+    This is recovery, not invention. `pair_records` refuses records from different
+    freezes. The earlier driver kept the provenance in the run header, so both fields
+    are derivable, not guessed. With no header, nothing is backfilled and pairing fails loudly.
 
     Requires:
         - header is the run header dict, or None
@@ -118,9 +113,9 @@ def backfill_provenance( header, records, printer=print ):
 
     Ensures:
         - fills `snapshot_sha256` from the header and `frozen_index` from the header's
-          drawn indices, ONLY where the field is missing
-        - says out loud what it backfilled — a silently repaired file is one nobody can
-          audit later
+          drawn indices, only where the field is missing
+        - says out loud what it backfilled, since a silently repaired file cannot be
+          audited later
         - returns the number of records touched
 
     Raises:
@@ -152,14 +147,10 @@ def backfill_provenance( header, records, printer=print ):
 
 def _percentile( sorted_values, fraction ):
     """
-    The package's ONE percentile, rounded for display.
+    Percentile of a sorted list, delegated to the shared harness and rounded.
 
-    ⚠️ THIS USED TO BE A SECOND IMPLEMENTATION. Sam wrote nearest-rank here while
-    Clayton wrote linear interpolation in `replay_harness`, and on the same 8 rows
-    that gave flash_lite a p90 of 24.524 from this module and 14.225 from the other —
-    two readers disagreeing about identical data. Now it delegates, so the method
-    lives in exactly one place (`replay_harness.PERCENTILE_METHOD`, currently
-    nearest-rank, which is this module's original behaviour).
+    Two implementations gave different p90 values on identical data. Delegating keeps
+    the method in one place, `replay_harness.PERCENTILE_METHOD`.
 
     Requires:
         - sorted_values is a non-empty ascending list
@@ -168,9 +159,9 @@ def _percentile( sorted_values, fraction ):
     Ensures:
         - returns the shared percentile, rounded to 3 dp for the printed report
         - preserves this module's prior behaviour while PERCENTILE_METHOD is
-          "nearest_rank": the value returned is one that was actually MEASURED
-        - on a small sample a high percentile collapses onto the maximum — with n=8
-          the p99 IS the max, and saying so beats implying a tail resolution the
+          "nearest_rank": the value returned is one that was actually measured
+        - on a small sample a high percentile collapses onto the maximum: with n=8
+          the p99 is the max, and saying so beats implying a tail resolution the
           sample does not have
 
     Raises:
@@ -182,25 +173,11 @@ def _percentile( sorted_values, fraction ):
 
 def latency_block( records ):
     """
-    Per-arm wall-clock latency, over FIRED rows only, plus the between-arm ratio.
+    Per-arm wall-clock latency over fired rows only, plus the between-arm ratio.
 
-    THIS IS A DEPLOYMENT COMPARISON, NOT A CLAIM ABOUT MODEL SPEED (Rick's ruling,
-    2026-08-17). What is being timed is two whole paths as they are actually wired: a
-    local vLLM on the LAN versus a hosted Vertex endpoint across the public internet.
-    A different deployment of either model — the same weights on other hardware, a
-    closer region, a warmed connection — moves these numbers without changing either
-    model. Nothing here says one model is faster than the other; it says one PATH
-    answered faster on this host, today.
-
-    WHAT THE NUMBER CONTAINS, said before anyone quotes it: `elapsed_seconds` wraps the
-    whole `_apply_dm_tutor` call — claim counting, the model call, the pointer restore
-    and the guards. On a fired row the model dominates; on a row the tutor never fired
-    it is microseconds of counting. Mixing those two populations would drag a median
-    toward zero in whichever arm happened to fire less, so only FIRED rows are counted.
-
-    It is wall clock from one host: the phi_4 arm reaches a LAN vLLM and the flash_lite
-    arm crosses the public internet to Vertex, and the two arms ran SEQUENTIALLY, not
-    under matched load.
+    This compares deployments, not model speed: a LAN vLLM against a hosted Vertex
+    endpoint. An unfired row costs microseconds, so only fired rows count.
+    The arms ran sequentially on one host.
 
     Requires:
         - records carry `arm`, `meta` and `elapsed_seconds`
@@ -209,7 +186,7 @@ def latency_block( records ):
         - returns { arm: {...} } with n / median / mean / p90 / min / max / total, and
           a "ratio" entry giving flash_lite ÷ phi_4 on the median and on the total when
           both arms are present
-        - reports the RATIO, never a verdict about it
+        - reports the ratio, never a verdict about it
 
     Raises:
         - nothing
@@ -259,7 +236,7 @@ def per_arm_table( records ):
         - records carry `arm`, `meta` and `elapsed_seconds`
 
     Ensures:
-        - returns { arm: {...} } with NO rate — rates need a denominator nobody has
+        - returns { arm: {...} } with no rate, since rates need a denominator nobody has
           chosen yet
 
     Raises:
@@ -290,8 +267,8 @@ def main( argv=None, printer=print ):
         - --results names a finished paired run
 
     Ensures:
-        - prints the counts unconditionally; prints rates ONLY with --denominator and
-          a p-value ONLY with --floor, saying out loud when it is withholding and why
+        - prints the counts unconditionally; prints rates only with --denominator and
+          a p-value only with --floor, saying out loud when it is withholding and why
         - returns 0
 
     Raises:
