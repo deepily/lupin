@@ -12,11 +12,8 @@ Design Pattern: Top-Level Orchestrator (same as Podcast Generator)
 - Controllable via pause/stop
 
 Phase progression:
-    INGESTING → ANALYZING → OUTLINING → ELABORATING → SERIALIZING
-    → RENDERING_TEXT → RENDERING_VISUALS → DELIVERING → COMPLETED
-
-Current status: Skeleton with stub phase methods (Phase 2 foundation).
-Real implementations will be added in Phases 3-8.
+    `INGESTING` → `ANALYZING` → `OUTLINING` → `ELABORATING` → `SERIALIZING`
+    → `RENDERING_TEXT` → `RENDERING_VISUALS` → `DELIVERING` → `COMPLETED`
 """
 
 import asyncio
@@ -48,37 +45,19 @@ class VoiceGateNotAnsweredError( RuntimeError ):
     """
     Raised when a presentation gate cannot obtain a human answer.
 
-    A gate exists to stop the pipeline until someone approves. Before
-    2026-08-01 all four gates did the opposite when anything went wrong:
-    each `except Exception` returned True with the comment "auto-approve to
-    not block the pipeline", and each call site defaulted a missing answer
-    to "Approve". So the failure of the approval mechanism was itself
-    treated as approval (rows be8830a3, fef0ed85).
-
-    Failing here is the point. If a gate genuinely must run unattended,
-    that is expressed by passing an explicit `response_default` to
-    voice_io.present_choices — a value somebody chose on purpose — not by
-    swallowing the error that says nobody was reached.
+    A failed approval mechanism or a missing answer must never count as
+    approval. An unattended gate passes an explicit `response_default`
+    to voice_io.present_choices, never by swallowing this error.
     """
 
 
 def _build_auto_continue_disclosure( timeout_seconds: int ) -> str:
     """
-    Build the "silence means keep going" sentence appended to a presentation
-    review-gate question.
+    Build the "silence means keep going" sentence for a review-gate question.
 
-    Kept local (a mirror of podcast_generator.orchestrator.
-    build_auto_continue_disclosure, worded for presentations) rather than
-    imported, so building a gate prompt does not drag the whole
-    podcast_generator package __init__ at load. It is a small duplicated
-    one-liner; de-duping it into a shared helper is tracked separately (same
-    rationale as the label-map decoupling, bug 81040071).
-
-    The four presentation gates FAIL OPEN: if the user does not answer within
-    the review timeout — or the ask cannot be delivered — generation continues
-    on its own via response_default at the gate. The user must be able to
-    hear/read that silence does this, so this sentence rides in the QUESTION
-    text (format_questions_for_tts speaks the question, not the options).
+    Kept local so a gate prompt does not load the podcast_generator package.
+    The four gates fail open: with no answer in time, generation continues.
+    The sentence rides in the question because voice speaks only the question.
 
     Requires:
         - timeout_seconds is a positive int
@@ -105,10 +84,8 @@ class PresentationOrchestratorAgent:
     """
     Top-level orchestrator for presentation generation — single job, multi-phase, async.
 
-    Standalone class (not inheriting from AgentBase) because:
-    - AgentBase is synchronous, this is async
-    - Different execution model (yields on await vs blocking)
-    - Composition over inheritance for COSA integration
+    Standalone, not inheriting from AgentBase: AgentBase is synchronous and
+    blocking while this yields on await, and composition suits COSA integration.
 
     Requires:
         - source_path points to a valid file
@@ -144,17 +121,16 @@ class PresentationOrchestratorAgent:
             source_path: Path to the source document (markdown/text)
             user_id: System user ID for event routing
             config: Presentation configuration (uses defaults if None)
-            offline_mode: OFFLINE / MOCK-LLM mode — NOT a true no-side-effects dry run.
-                It does REAL document ingest and WRITES A REAL YAML to disk (Phase 5
-                _serialize_async runs unguarded); only the LLM-driven steps are mocked
-                (analyze/outline/elaborate return fixtures, visuals use PlaceholderRenderer,
-                and the human review gates auto-approve without voice). No Anthropic/Gemini
-                API calls are made. Production never constructs the orchestrator this way —
-                the job's dry-run path returns its own breadcrumb simulator BEFORE building
-                the orchestrator — so this flag is exercised ONLY by the orchestrator's unit
-                tests to run the pipeline offline. Renamed from dry_run (row ec8ca1ce) so it
-                stops sharing a word with the JOB's dry_run, which writes NOTHING. (For that
-                true writes-nothing dry run see PresentationGeneratorJob._execute_dry_run.)
+            offline_mode: Offline mock-LLM mode, not a true no-side-effects dry run.
+                It does real document ingest and writes a real YAML file to disk, because
+                _serialize_async runs unguarded. Only the LLM-driven steps are mocked:
+                analyze, outline and elaborate return fixtures, visuals use PlaceholderRenderer,
+                and the review gates auto-approve without voice. No Anthropic or Gemini
+                API calls are made. Production never builds the orchestrator this way,
+                because the job's dry-run path returns its own breadcrumb simulator before
+                building it. Only the orchestrator's unit tests use this flag. It is named
+                apart from the job's dry_run, which writes nothing (see
+                PresentationGeneratorJob._execute_dry_run).
             debug: Enable debug output
             verbose: Enable verbose output
         """
@@ -378,17 +354,17 @@ class PresentationOrchestratorAgent:
 
     async def render_from_yaml_async( self, yaml_path: str ) -> Optional[ PresentationModel ]:
         """
-        Render-only mode: load existing YAML intermediate, run Phases 6-8 only.
+        Render-only mode: load a YAML intermediate, run only the render steps.
 
-        Skips content generation (Phases 1-5) and gates 1-3.
+        Skips content generation (ingest through serialize) and gates 1-3.
         Gate 4 (rendered output review) still fires.
 
         Requires:
             - yaml_path is a valid path to a presentation YAML file
-            - File was produced by Phase 5 (PresentationModel.to_yaml())
+            - File was produced by the serialize step (PresentationModel.to_yaml())
 
         Ensures:
-            - Phases 6-8 execute with the loaded PresentationModel
+            - The text render, visuals render and deliver steps execute with the loaded PresentationModel
             - New Marp + visuals output files are generated
             - Returns PresentationModel on success, None if cancelled/failed
         """
@@ -681,7 +657,7 @@ class PresentationOrchestratorAgent:
             - Returns None when no explicit target_slide_count was set (the default
               duration path is expected to drift toward budget-3 and must stay silent)
             - Returns None when produced_count equals budget (target hit exactly)
-            - Otherwise returns a one-line message naming BOTH the requested budget
+            - Otherwise returns a one-line message naming both the requested budget
               and the produced count (soft target — warn only, never fail/retry)
 
         Returns:
@@ -695,23 +671,23 @@ class PresentationOrchestratorAgent:
 
     async def _analyze_async( self, source_content: str ) -> List[ NarrativeSection ]:
         """
-        Phase 2: Analyze narrative structure using Claude.
+        Analyze narrative structure of the source with Claude (analyze step).
 
         Calls Claude API with the source content and narrative extraction prompt.
         Parses the response into NarrativeSection models.
 
         Requires:
             - source_content is a non-empty string
-            - self._presentation_state has raw_sections from Phase 1
+            - self._presentation_state has raw_sections from the ingest step
 
         Ensures:
             - Returns a non-empty list of NarrativeSection models on success
             - Increments metrics["api_calls"]
 
         Raises:
-            - ValueError on parse failure / empty result (D6-STRICT fail-loud) —
-              propagates to do_all_async, which marks the job FAILED
-            - Returns empty list ONLY on a non-parse API/runtime error (e.g. the
+            - ValueError on parse failure / empty result (strict, fails loudly) —
+              propagates to do_all_async, which marks the job `FAILED`
+            - Returns empty list only on a non-parse API/runtime error (e.g. the
               API call itself raised); do_all_async's empty-result guard then
               fails the job loudly
 
@@ -853,9 +829,9 @@ class PresentationOrchestratorAgent:
             - Increments metrics["api_calls"]
 
         Raises:
-            - ValueError on parse failure / empty result (D6-STRICT fail-loud) —
-              propagates to do_all_async, which marks the job FAILED
-            - Returns empty list ONLY on a non-parse API/runtime error
+            - ValueError on parse failure / empty result (strict, fails loudly) —
+              propagates to do_all_async, which marks the job `FAILED`
+            - Returns empty list only on a non-parse API/runtime error
 
         Returns:
             List[SlideOutline]: Slide outline entries
@@ -986,7 +962,7 @@ class PresentationOrchestratorAgent:
 
     async def _elaborate_async( self, slide_outline: List[ SlideOutline ] ) -> List[ SlideModel ]:
         """
-        Phase 4: Elaborate full slide content with presenter notes.
+        Elaborate full slide content with presenter notes (elaborate step).
 
         Calls Claude to produce fully elaborated slides from the outline
         and source document. Uses all-at-once strategy with chunked fallback
@@ -994,19 +970,19 @@ class PresentationOrchestratorAgent:
 
         Requires:
             - slide_outline is a non-empty list of SlideOutline models
-            - self._presentation_state has source_content from Phase 1
+            - self._presentation_state has source_content from the ingest step
 
         Ensures:
             - Returns a non-empty list of SlideModel instances on success
-            - On a TRUNCATED response (stop_reason != "end_turn") that fails to
+            - On a truncated response (stop_reason != "end_turn") that fails to
               parse, attempts the chunked fallback before failing
             - Increments metrics["api_calls"]
 
         Raises:
-            - ValueError on a parse failure of a COMPLETE response, or when the
-              chunked fallback still yields nothing (D6-STRICT fail-loud) —
-              propagates to do_all_async, which marks the job FAILED
-            - Returns empty list ONLY on a non-parse API/runtime error
+            - ValueError on a parse failure of a complete response, or when the
+              chunked fallback still yields nothing (strict, fails loudly) —
+              propagates to do_all_async, which marks the job `FAILED`
+            - Returns empty list only on a non-parse API/runtime error
 
         Returns:
             List[SlideModel]: Fully elaborated slides
@@ -1482,15 +1458,14 @@ class PresentationOrchestratorAgent:
 
     async def _render_visuals_async( self, presentation: Optional[ PresentationModel ] ) -> None:
         """
-        Phase 7: Replace visual placeholders in Marp file with rendered content.
+        Replace visual placeholders in the Marp file with rendered content.
 
-        Reads the Marp Markdown file (from Phase 6), finds all
-        <!-- VISUAL: type | description --> placeholders, dispatches each
-        to the appropriate visual renderer, and rewrites the file.
+        Reads the Marp file from the text render step, finds each `VISUAL` placeholder
+        comment, dispatches it to the matching visual renderer, and rewrites the file.
 
         Requires:
             - presentation is a valid PresentationModel
-            - self._presentation_state[ "marp_path" ] is set by Phase 6
+            - self._presentation_state[ "marp_path" ] is set by the text render step
 
         Ensures:
             - Marp file updated with rendered visuals (Mermaid blocks, placeholders)
@@ -1592,7 +1567,7 @@ class PresentationOrchestratorAgent:
 
     def _build_visual_registry( self ) -> "VisualRendererRegistry":
         """
-        Build the visual renderer registry for Phase 7.
+        Build the visual renderer registry for the visuals render step.
 
         In offline_mode, all types use PlaceholderRenderer (no API calls).
 
@@ -1652,16 +1627,14 @@ class PresentationOrchestratorAgent:
 
     async def _deliver_async( self, presentation: Optional[ PresentationModel ] ) -> None:
         """
-        Phase 8: Verify and summarize all generated artifacts.
+        Verify and summarize all generated artifacts (deliver step).
 
-        The job (job.py) handles artifact collection, cost summary,
-        clickable links, and completion notifications. This method
-        verifies file existence and builds a delivery summary dict
-        for the job to read.
+        The job (job.py) handles artifact collection, cost summary, links and
+        notifications. This method verifies files exist and builds a summary dict.
 
         Requires:
             - presentation is a valid PresentationModel
-            - _presentation_state has yaml_path and marp_path from Phases 5-6
+            - _presentation_state has yaml_path and marp_path from the serialize and text render steps
 
         Ensures:
             - delivery_summary stored in _presentation_state
@@ -1718,13 +1691,11 @@ class PresentationOrchestratorAgent:
 
     async def _export_pptx_async( self, presentation: Optional[ PresentationModel ] ) -> None:
         """
-        Phase 8.5: Build a PowerPoint deck from the PresentationModel via python-pptx.
+        Build a PowerPoint deck from the PresentationModel via python-pptx.
 
-        Row f507034e. Marp's ``--pptx`` rasterized every slide to a PNG, so decks
-        carried zero selectable text. Rick ruled python-pptx (2026-08-16): build
-        the deck from the structured model so every slide gets real, selectable
-        text runs. Genuine raster visuals rendered by Phase 7 into ``visuals/``
-        are embedded as pictures. The look differs from Marp — an accepted trade.
+        Marp's ``--pptx`` rasterizes slides to PNG, leaving no selectable text, so
+        the deck is built from the structured model. Raster visuals in ``visuals/``
+        are embedded as pictures. The look differs from Marp.
 
         Requires:
             - presentation is a valid PresentationModel
@@ -1784,15 +1755,9 @@ class PresentationOrchestratorAgent:
         """
         Read a gate answer, refusing to invent one.
 
-        Before 2026-08-01 every gate did `result.get("answers", {}).get(header,
-        "Approve")` — so a payload missing the header entirely became an
-        approval. Combined with a voice layer that manufactured answers from
-        option ordering, a presentation could approve itself at four
-        consecutive gates without a human present (rows be8830a3, fef0ed85).
-
-        An explicitly-declared `response_default` IS honoured — that is the
-        supported way to run unattended, and the caller chose the value. What
-        is refused is a MISSING answer silently becoming "Approve".
+        A payload missing the header must never become "Approve", or a deck could
+        approve itself with no human present. An explicitly declared
+        `response_default` is honoured, since the caller chose that value.
 
         Requires:
             - result is the dict returned by voice_io.present_choices
@@ -1835,22 +1800,11 @@ class PresentationOrchestratorAgent:
         continue_label: str = "Approve",
     ) -> dict:
         """
-        Present a presentation review gate that FAILS OPEN.
+        Present a presentation review gate that fails open.
 
-        All four presentation gates route through here so their fail-open shape
-        is identical and cannot drift gate-to-gate (a fail-open Gate 1 that dies
-        at Gate 2 is the same failure moved later). Mirrors the podcast
-        script-review gate (podcast_generator/orchestrator.py). Two things make
-        a silent OR undeliverable gate continue instead of dead-lettering the job:
-
-        1. The auto-continue disclosure (synced to the review timeout) is
-           appended to the question, so the user hears/reads that silence keeps
-           generation going — format_questions_for_tts speaks the question, not
-           the options, so the sentence must ride in the question.
-        2. response_default={header: continue_label} + a timeout, so voice_io
-           returns continue_label when no human answers within the timeout OR
-           the ask cannot be dispatched (503) — rather than raising
-           VoiceGateNoDefaultError, which is what dead-lettered job pr-b1ea3708.
+        All four gates route through here so their fail-open shape cannot drift.
+        The disclosure joins the question, which voice speaks. A timeout plus
+        response_default returns continue_label on silence or a 503, not an error.
 
         Requires:
             - self.config.review_timeout_seconds is a positive int
@@ -1894,7 +1848,7 @@ class PresentationOrchestratorAgent:
             - On revise: re-runs analysis with feedback, up to max_revisions
 
         Args:
-            sections: List of NarrativeSection models from Phase 2
+            sections: List of NarrativeSection models from the analyze step
 
         Returns:
             bool: True to proceed, False to stop
@@ -2008,7 +1962,7 @@ class PresentationOrchestratorAgent:
             - On revise: re-runs outline with feedback, up to max_revisions
 
         Args:
-            outline: List of SlideOutline models from Phase 3
+            outline: List of SlideOutline models from the outline step
 
         Returns:
             bool: True to proceed, False to stop
@@ -2121,7 +2075,7 @@ class PresentationOrchestratorAgent:
             - On revise: re-runs elaboration with feedback
 
         Args:
-            slides: List of SlideModel instances from Phase 4
+            slides: List of SlideModel instances from the elaborate step
 
         Returns:
             bool: True to proceed, False to stop

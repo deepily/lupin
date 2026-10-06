@@ -2,34 +2,30 @@
 """
 Claude content-generation client for the Presentation Generator Agent.
 
-BOUNDED-CC MIGRATION (Phase 2 — 2026-06-18)
-===========================================
-This client was migrated from the direct firewalled Anthropic SDK
-(`AsyncAnthropic.messages.create`) to the **in-process Claude Agent SDK**
-(`claude_agent_sdk.query`), matching the shipped BFE/TFE/Podcast bounded-CC
-pattern (ratified D-DR1 Option X). The seven content-phase LLM methods now run
-on the Max-subscription OAuth path.
+Bounded Claude Code content generation
+======================================
+The seven content-phase LLM methods call the in-process Claude Agent SDK
+(`claude_agent_sdk.query`). The BFE, TFE and Podcast agents do the same. They no
+longer use the direct firewalled Anthropic SDK (`AsyncAnthropic.messages.create`)
+and run on the Max-subscription OAuth path.
 
-This is a COST-SHIFT, NOT "free": the SDK still reports `total_cost_usd`
-telemetry per call, but that spend is covered by the fixed Max plan — the
-firewalled Anthropic console balance does not move. See:
-  - Scope:        src/rnd/v0.1.8/2026.06.18-presentation-phase2-bounded-cc-scope.md
-  - Ratification: src/rnd/v0.1.8/2026.06.18-bounded-cc-d1d9-ratification-package.md
+This shifts cost; it is not free. The SDK still reports `total_cost_usd`
+telemetry per call, but the fixed Max plan covers that spend and the firewalled
+Anthropic console balance does not move.
   - Cost model:   src/docs/cost-model-bounded-cc-vs-firewalled-sdk.md
 
-Presentation content generation is PURE TEXT/CODE SYNTHESIS, so the bounded-CC
-shape is: tools=[], no web search, no can_use_tool. The Gemini image/video path
-(`gemini_client.py`, NanoBanana/Veo) is NON-Anthropic and UNTOUCHED. The pptx /
-Marp assembly + diagram rendering phases are untouched.
+Content generation is pure text and code synthesis, so the call shape is
+`tools=[]`, no web search and no `can_use_tool`. The Gemini image and video path
+(`gemini_client.py`) uses a non-Anthropic model and is unchanged. The pptx and
+Marp assembly and the diagram rendering are unchanged.
 
-NOTE: `ClaudeAgentOptions` exposes no per-call `temperature`, so the historical
-per-method creativity steer is folded into the system prompt (see
-`_temperature_to_steer`).
+Note: `ClaudeAgentOptions` exposes no per-call `temperature`, so the per-method
+creativity steer is folded into the system prompt (see `_temperature_to_steer`).
 
-D6 = STRICT for Presentation: `call_with_json_output` (and the prompt-module
-parsers) robustly recover the JSON object from chatty output but FAIL LOUD on
-unrecoverable content — structured slide data is consumed downstream by pptx
-rendering, so an empty/malformed result is a real defect, not cosmetic drift.
+Parsing is strict: `call_with_json_output` and the prompt-module parsers recover
+the JSON object from chatty output but fail loudly on unrecoverable content.
+Downstream pptx rendering consumes the structured slide data, so an empty or
+malformed result is a real defect, not cosmetic drift.
 """
 
 import logging
@@ -78,9 +74,9 @@ def _temperature_to_steer( temperature: float ) -> str:
     """
     Map a legacy per-call temperature into a system-prompt creativity steer.
 
-    `ClaudeAgentOptions` exposes no per-call temperature, so the historical
-    creativity intent — higher temperature meant more creative prose, lower
-    meant more deterministic output (diagram code) — is expressed in the prompt.
+    `ClaudeAgentOptions` exposes no per-call temperature, so the creativity
+    intent is expressed in the prompt. Higher temperature meant more creative
+    prose; lower meant more deterministic output such as diagram code.
 
     Requires:
         - temperature is a float
@@ -119,8 +115,8 @@ class CostEstimate:
     Cost tracking for content-phase LLM calls.
 
     Tracks token usage with a token-based price estimate (`estimated_cost_usd`)
-    AND the SDK-reported telemetry (`total_sdk_cost_usd`). Under the bounded-CC
-    path the SDK telemetry is covered by the fixed Max plan, NOT billed per token.
+    and the SDK-reported telemetry (`total_sdk_cost_usd`). Under bounded Claude
+    Code the SDK telemetry is covered by the fixed Max plan, not billed per token.
     """
     total_input_tokens  : int   = 0
     total_output_tokens : int   = 0
@@ -193,7 +189,7 @@ class PresentationAPIClient:
         - Async, non-blocking content-phase LLM calls via `sdk_query`
         - Max-plan OAuth billing (no API key — see module docstring)
         - Integrated token + SDK-cost tracking
-        - STRICT JSON output support for structured responses
+        - Strict JSON output support for structured responses
 
     No API key is required: `sdk_query` authenticates via the Claude Code /
     Claude Agent SDK Max-subscription OAuth path. The former firewalled-key
@@ -323,7 +319,7 @@ class PresentationAPIClient:
         max_tokens: int = 2048,
         temperature: float = 0.3
     ) -> APIResponse:
-        """Generate D2 diagram code (text output, not JSON)."""
+        """Generate d2 diagram code (text output, not JSON)."""
         return await self._call_api(
             model=self.config.content_model, system_prompt=system_prompt,
             user_message=user_message, max_tokens=max_tokens,
@@ -337,12 +333,12 @@ class PresentationAPIClient:
         max_tokens: int = 4096
     ) -> dict:
         """
-        Call the model expecting JSON output (D6-STRICT).
+        Call the model expecting JSON output, with strict parsing.
 
         Ensures:
             - Robustly recovers a JSON object from chatty output (fence-strip +
               embedded-object extraction)
-            - FAILS LOUD (raises ValueError) if no JSON object can be recovered —
+            - Fails loudly (raises ValueError) if no JSON object can be recovered —
               never substitutes a default (structured output is consumed downstream)
 
         Args:

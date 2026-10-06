@@ -1,30 +1,27 @@
 """
-Presentation deck verdict — the SINGLE authority on whether a presentation run
-produced a real PowerPoint deck.
+Presentation deck verdict: the single authority on whether a run produced a real deck.
 
-Row 63f4d4a6. A prior scratchpad harness reported PASS off the intermediate
-Phase-5 ``.yaml`` and then tried to locate the finished ``.pptx`` by basename.
-The deck's filename timestamp is recomputed at export time (Phase 8.5), minutes
-after the yaml (Phase 5), so the stems differ and the basename match silently
-found nothing while the banner still said PASS. Worse, the affirmative banner
-was printed by a code path separate from the wait loop that knew no deck had
-been found — so a negative finding never reached the verdict.
+An earlier test harness reported success from the intermediate YAML file, then
+looked for the finished `.pptx` by basename. The deck's filename timestamp is
+recomputed at export time, minutes after the YAML is written. The stems
+differ, so the basename match found nothing while the banner still said pass.
+The banner was printed by code separate from the wait loop. That loop knew no
+deck had been found, so a negative finding never reached the verdict.
 
 This module removes both failure modes:
 
   1. It never reconstructs a path by basename. The caller passes the
-     AUTHORITATIVE path the job recorded (``job.pptx_path`` /
-     ``job.artifacts["pptx_path"]`` / the done-queue metadata ``pptx_path``).
-  2. There is exactly ONE verdict: the return value of
-     ``verify_presentation_deck()``. Its truth value derives entirely from the
-     real deck on disk, and a missing / null / unreadable / slideless deck is a
-     hard False with a specific reason — never a silent skip. A caller cannot
-     obtain a truthy verdict without every check having passed.
+     authoritative path the job recorded (`job.pptx_path`,
+     `job.artifacts["pptx_path"]`, or the done-queue metadata `pptx_path`).
+  2. There is exactly one verdict: the return value of
+     `verify_presentation_deck()`. Its truth value derives entirely from the
+     real deck on disk. A missing, null, unreadable or slideless deck is a hard
+     False with a specific reason, never a silent skip. No caller can obtain
+     a truthy verdict unless every check passed.
 
-A ``.pptx`` is an OPC (Open Packaging Conventions) zip; slide parts live at
-``ppt/slides/slideN.xml``. Verification is pure ``zipfile`` (stdlib) — the same
-shape as the manual disk check the tester fell back on ("valid zip, N slide
-XMLs") — so it adds no dependency and inspects the real artifact, not a proxy.
+A `.pptx` is an OPC (Open Packaging Conventions) zip; slide parts live at
+`ppt/slides/slideN.xml`. Verification uses only the stdlib `zipfile`, so it adds
+no dependency and inspects the real artifact, not a proxy.
 """
 
 import os
@@ -44,9 +41,10 @@ _TEXT_RUN_OPEN = re.compile( rb"<a:t[ >]" )
 
 class DeckVerdict:
     """
-    The verdict on one presentation deck. Its truth value IS the verdict, so a
-    caller that writes ``if verify_presentation_deck( path ):`` cannot render a
-    PASS without the underlying checks having passed.
+    The verdict on one presentation deck; its truth value is the verdict.
+
+    A caller that writes ``if verify_presentation_deck( path ):`` cannot report
+    a pass unless the underlying checks passed.
     """
 
     def __init__( self, passed, reason, pptx_path=None, size_bytes=None, slide_count=None, text_run_count=None ):
@@ -71,8 +69,10 @@ class DeckVerdict:
 
 def _count_slide_xmls( zf ):
     """
-    Count ppt/slides/slideN.xml members (N a decimal integer). Excludes
-    non-slide neighbours such as ppt/slides/slideLayoutX.xml-shaped decoys.
+    Count the ppt/slides/slideN.xml members of a deck zip.
+
+    N must be a decimal integer, so non-slide neighbours such as
+    ppt/slides/slideLayoutX.xml-shaped decoys are not counted.
     """
     count = 0
     for name in zf.namelist():
@@ -85,12 +85,11 @@ def _count_slide_xmls( zf ):
 
 def _count_slide_text_runs( zf ):
     """
-    Count DrawingML text runs (<a:t> …) across ppt/slides/slideN.xml parts ONLY.
+    Count DrawingML text runs (<a:t> ...) across ppt/slides/slideN.xml parts only.
 
-    Notes live in ppt/notesSlides/*, NOT ppt/slides/* — they are deliberately
-    excluded. A deck of pure rendered images has notes text but zero slide text
-    runs, and it is exactly that deck this counter exists to catch. Empty runs
-    (<a:t/>) do not count (see _TEXT_RUN_OPEN).
+    Notes live in ppt/notesSlides/*, not ppt/slides/*, so they are excluded.
+    A deck of pure rendered images has notes text but zero slide text runs;
+    this counter exists to catch that deck. Empty runs (<a:t/>) do not count.
 
     Requires:
         - zf is an open zipfile.ZipFile
@@ -113,20 +112,20 @@ def verify_presentation_deck( pptx_path, min_slides=1, min_text_runs=1 ):
     Verify a finished presentation ``.pptx`` on disk.
 
     Requires:
-        - pptx_path is the AUTHORITATIVE absolute path the job recorded for the
+        - pptx_path is the authoritative absolute path the job recorded for the
           finished deck (never a basename reconstructed from the .yaml stem);
-          None / "" means the job produced no deck
+          None or "" means the job produced no deck
         - min_slides is a positive int
         - min_text_runs is a non-negative int; the minimum number of DrawingML
           text runs (<a:t>) that must exist across the slide parts. The default
-          of 1 makes a deck of pure rendered images a hard failure — that is the
-          check that catches row f507034e. Pass 0 to skip the text-layer gate.
+          of 1 makes a deck of pure rendered images a hard failure. Pass 0 to
+          skip the text-layer gate.
 
     Ensures:
         - returns a DeckVerdict whose truth value is the verdict
-        - passed is True ONLY when: pptx_path is non-empty, the file exists, is
+        - passed is True only when pptx_path is non-empty, the file exists, is
           a non-empty valid zip whose members all pass their CRC, contains
-          >= min_slides slide XMLs, AND carries >= min_text_runs text runs on
+          >= min_slides slide XMLs, and carries >= min_text_runs text runs on
           the slides (notes text does not count)
         - every failure mode yields passed=False with a specific reason; a
           missing, slideless, or text-free deck is a hard failure, never a

@@ -88,9 +88,8 @@ class GeminiImageClient:
     """
     Shared client for Gemini image generation APIs.
 
-    Lazy-initializes the google.genai.Client on first use, loading the
-    API key from src/conf/keys/gemini via cu.get_api_key().
-    ⚠️ Not yet moved to Vertex — Imagen 404s there on this project. See _get_client.
+    Creates the google.genai.Client on first use, loading the API key from
+    src/conf/keys/gemini via cu.get_api_key(). It avoids Vertex: see _get_client.
 
     Requires:
         - Gemini API key at src/conf/keys/gemini (or GEMINI_API_KEY env var)
@@ -133,15 +132,9 @@ class GeminiImageClient:
         """
         Lazy-initialize google.genai.Client with API key.
 
-        ⚠️ STILL ON THE API KEY, DELIBERATELY, PENDING RICK'S CALL (2026-08-16).
-        His ruling — "you're not supposed to use an API key for Gemini, you're supposed to use the
-        project ID" — was applied here and REVERTED, because Imagen is not reachable from this
-        project through Vertex: `models.get` returns 404 NOT_FOUND for imagen-4.0-generate-001 AND
-        imagen-3.0-generate-002, in BOTH `global` and `us-central1`. Converting this client would
-        have swapped working image generation for a 404. Text (gemini-3.1-flash-lite) DOES work
-        through Vertex on the same project and credentials.
-        See task b02b2daa. The resolver the conversion needs already exists and is tested:
-        cosa.utils.gcp_project.
+        Stays on the API key: Imagen returns 404 NOT_FOUND on Vertex for this project
+        (imagen-4.0 and imagen-3.0, in `global` and `us-central1`). Text models work there.
+        The resolver a switch would need exists: cosa.utils.gcp_project.
 
         Requires:
             - Gemini API key available via cu.get_api_key("gemini")

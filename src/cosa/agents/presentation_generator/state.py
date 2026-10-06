@@ -48,7 +48,7 @@ class ArcPosition( str, Enum ):
     """
     Position within the narrative arc of a presentation.
 
-    Used during Phase 2 (Analyze) to classify document sections
+    Used during the analyze step to classify document sections
     and map them to the presentation structure.
     """
     SETUP       = "setup"
@@ -63,7 +63,7 @@ class NarrativeSection( BaseModel ):
     """
     A classified section of the source document.
 
-    Produced during Phase 2 (Analyze) when the LLM classifies
+    Produced during the analyze step when the LLM classifies
     each document section into a narrative arc position.
 
     Requires:
@@ -90,8 +90,8 @@ class SlideOutline( BaseModel ):
     """
     Lightweight slide outline entry from outline generation.
 
-    Produced during Phase 3 (Outline), consumed by Gate 2 review
-    and Phase 4 (Elaborate). Carries just enough structure for
+    Produced during the outline step, consumed by Gate 2 review
+    and the elaborate step. Carries just enough structure for
     the "story spine" review without full slide content.
 
     Requires:
@@ -150,7 +150,7 @@ class SlideModel( BaseModel ):
         - title is a non-empty string
 
     Ensures:
-        - visual_type determines which renderer is used in Phase 7
+        - visual_type determines which renderer is used in the render-visuals step
         - visual_description provides natural-language spec for renderer
         - presenter_notes contains the speaking script
     """
@@ -169,8 +169,8 @@ class PresentationModel( BaseModel ):
     """
     The complete presentation — the YAML intermediate contract.
 
-    This model is serialized to YAML after Phase 5 and consumed
-    by the rendering phases (6-8).
+    This model is serialized to YAML after the serialize step and consumed
+    by the three rendering steps (text, visuals, deliver).
 
     Requires:
         - title is a non-empty string
