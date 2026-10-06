@@ -406,7 +406,7 @@ class AgenticJobBase( ABC ):
         """
         Dry-run repair-loop hook that fails the job with the error `force_failure_mode` names.
 
-        `_execute_dry_run()` calls this after the simulated breadcrumbs, so the job lands
+        Subclasses that support the dry-run repair loop accept a `force_failure_mode` constructor parameter. Their `_execute_dry_run()` calls this after the simulated breadcrumbs, so the job lands
         in the dead queue with a realistic error. The watchdog then classifies it and
         starts the Bug Fix Expediter pipeline. It never runs during live execution.
 

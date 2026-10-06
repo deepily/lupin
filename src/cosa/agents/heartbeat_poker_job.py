@@ -339,12 +339,13 @@ class HeartbeatPokerJob( AgenticJobBase ):
         """
         Run the poke loop until cancelled, capped or cleanly terminated.
 
-        Each pass checks cancellation, the hard cap (elapsed >= max_duration_seconds)
-        and a clean signal, in that order. It then scores the previous tick,
-        delivers this tick and sleeps a cadence. Every exit returns normally.
+        Each pass checks, in order: `AgenticJobBase.request_cancel()` exits "cancelled"; the hard cap
+        (elapsed >= max_duration_seconds) exits "hard_cap"; a termination kind seen after start exits "clean".
+        It then scores the previous tick, delivers to every recipient and sleeps one cadence.
 
         Returns:
-            str: the exit summary (also stored on answer_conversational)
+            str: the exit summary (also stored on answer_conversational). All three exits return
+            normally, so the queue marks the job done.
         """
         self._job_start_iso = self._clock.now_iso()
         job_start_monotonic = self._clock.monotonic()
