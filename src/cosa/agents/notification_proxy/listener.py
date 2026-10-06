@@ -36,7 +36,7 @@ _AUTH_LOGIN_TIMEOUT_SECONDS = 30
 
 class WebSocketListener:
     """
-    WebSocket client that logs in, subscribes to events and calls back.
+    Async WebSocket client that logs in, subscribes to events and calls back.
 
     Requires:
         - email is a valid mock test email
