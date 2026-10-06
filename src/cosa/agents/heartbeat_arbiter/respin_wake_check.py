@@ -256,6 +256,7 @@ def describe_block( block ):
           stable, recognisable digest that a not-measured null cannot imitate
         - block_headline is None when the block carries no content line
         - never raises
+        - a produced block can still be lost in transit between the hook's additionalContext and the session; even an echo leaves two states (not received, received and ignored) rather than zero
         - block_headline is found by a predicate, never by position: the first line
           with content other than the horizontal rule, which survives a blank line
           or a second rule being added above it

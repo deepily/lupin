@@ -126,6 +126,7 @@ def list_manager_session_ids( session_dir: Path = SESSION_DIR ):
 
     Ensures:
         - returns a set of manager session-ids (one per round-trip-valid manifest)
+        - the round-trip check is the same guard `find_manager_session_id` uses
         - returns an empty set on OSError / missing dir (degrade-safe)
         - never raises
     """

@@ -1,5 +1,5 @@
 """
-Checks from outside that a manager's self-clear came back as the same seat.
+Self-re-spin liveness observer: checks a manager came back at low context, same seat.
 
 A session that fires a self-clear cannot report its own outcome, because it no
 longer holds the context that knew it was trying. A manager that fires and does

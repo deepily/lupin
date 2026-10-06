@@ -2266,7 +2266,8 @@ class ArbiterConsumerJob( AgenticJobBase ):
             - store corroboration: derived `holding_on: peer:X` cycles are self-reported, so a progressing
               sequencing wait can look like a ring and falsely escalate every poll. A cycle fires only when every
               ring edge is backed by a store `blocked_by` owner-edge (cycle_is_store_backed). A ring with zero
-              store rows is out of scope. When the owed read is unwired or failed, store_edges is empty and nothing
+              store rows is out of scope, because such rings are rare and human-broken and managers should
+              express real waits as store blocked_by. When the owed read is unwired or failed, store_edges is empty and nothing
               fires: deadlock detection fails suppressed, the opposite bias from the stall and manager-down
               detectors, because over-escalation is the defect here
             - dwell: a store-backed ring must persist for deadlock_dwell_seconds before it escalates; a fresh ring
@@ -3085,7 +3086,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
 
         Ensures:
             - emits exactly one `arbiter_manager_ack_diagnostic` line; never raises
-            - the fields tell a label-to-canonical mismatch (fed_label, canonical_label, label_is_canonical) from a
+            - the fields (owed_class among them) tell a label-to-canonical mismatch (fed_label, canonical_label, label_is_canonical) from a
               genuine empty read, from a hold override with work_owed false (hold_work_owed) and from a degraded or
               raised store read (owed_read_ok, store_row_count); last_activity against tapped_at shows whether reads
               were degraded when a manager was falsely marked down
@@ -3134,14 +3135,15 @@ class ArbiterConsumerJob( AgenticJobBase ):
         Ensures:
             - returns the count of new manager-down escalations this poll (advisories are not counted, they are not downs)
             - clears a manager's down/advisory flags once it shows activity (commons or bridge) since its tap
-            - blocked-on-user and done managers never escalate manager-down
+            - `BLOCKED_ON_USER` and `DONE` managers never escalate `MANAGER-DOWN`
             - never raises
             - escalates only after manager_ack_window_seconds have passed with no activity since the tap, once per un-acked tap, and only notifies (never auto-assigns)
-            - a blocked-on-user manager gets at most one awaiting-owner advisory and a done manager at most one consider-reaping advisory; the three escalate-once flags clear together on a re-ack
-            - the owed class decides, not the clock: a manager correctly waiting on Rick makes no tool calls, so it has no bridge or commons liveness and must not be reported down
-            - active and unknown classes escalate manager-down; unknown is the fail-safe class, so nothing is silently suppressed and a hold starting "user:" only changes the wording
+            - a `BLOCKED_ON_USER` manager gets at most one awaiting-owner advisory and a `DONE` manager at most one consider-reaping advisory; the three escalate-once flags clear together on a re-ack
+            - the owed class decides, not the clock: a manager correctly waiting on Rick makes no tool calls, so it has no bridge or commons liveness and must not be reported down; the manager loop must stay below the staleness floor
+            - `ACTIVE` and `UNKNOWN` classes escalate `MANAGER-DOWN`; `UNKNOWN` is the fail-safe class, so nothing is silently suppressed and a hold starting "user:" only changes the wording
             - a degraded owed read this poll suppresses the escalation without setting the once flag, so it re-arms on the next clean read
             - the ack uses the full liveness union (plus who() commons activity) because a narrower set false-escalated a live manager whose only sign was a sent DM or stop event; a manager cannot DM the arbiter back, so liveness is the only possible ack
+            - who() commons activity stays in the union because the view's commons_ts is set to None when the bridge is absent; a DM-only manager is coordination-only, with no Read, Edit or Bash to bump the bridge and nothing to commons
         """
         owed_class = owed_class or { }
         holding    = self._holding_on_by_persona( fleet_view )
@@ -3226,13 +3228,14 @@ class ArbiterConsumerJob( AgenticJobBase ):
 
     def _check_decision_needed( self, now ):
         """
-        Escalates each new post on the fleet-decision-needed topic to Rick.
+        Escalates each new post of a decision the fleet cannot make to Rick.
 
         Reading is pure observation, with no side effects. The first poll sets the cursor to
         `now`, so a backlog from before the arbiter started is not escalated again.
 
         Ensures:
             - returns the count of new decision-needed posts escalated this poll
+            - later polls read only entries strictly newer than the cursor
             - advances the tail cursor to the latest entry ts seen
             - never raises (a read hiccup is swallowed because the observer must not fail)
         """
@@ -3702,6 +3705,8 @@ class ArbiterConsumerJob( AgenticJobBase ):
             - returns True iff 0 <= (now - bridge_mtime) <= manager_stale_poke_threshold_seconds;
               logs one arbiter_stuck_bridge_veto event when it vetoes; never raises
             - the stuck flag derives from the accumulated cap_reached tail (maxlen 50, no recency bound) and cap_reached fires on every turn a session ends while owed and at poke-cap, so a busy manager with a full board stays flagged stuck from stale history; none of the three owed-work suppressors (awaiting-user, awaiting-peer, owed_class) catches that case
+            - owed_class `ACTIVE` is fail-safe and never silences a real stuck poke, which is why it does not catch the false positive above
+            - the bridge is keyed by persona because that key is always present (the session-id keyed activity signal is not) and it also catches a re-spun twin under a new session id
             - every hook fire touches the bridge, the same signal the manager-stale bridge veto reads, so a fresh bridge means a real turn and the session is not wedged
             - at poke-cap the self-poke nudge stops, so a truly wedged or parked session takes no further turns, its bridge goes stale and it is still poked
             - the veto suppresses only on positive liveness evidence and never hides a real stall: a falsy bridge_mtimes (seam unwired, read raised, empty), a persona with no entry and a future mtime (clock skew) all return False, failing toward poking
@@ -3940,7 +3945,8 @@ class ArbiterConsumerJob( AgenticJobBase ):
             - returns the count of staleness pokes fired this poll; never raises
             - the advisory fires on the first threshold crossing, the same poll as poke 1, not after the pokes run out: a poke at a dark session is best effort (it may have no self-wake), so the advisory is the main output; episode state clears when the manager freshens or leaves the roster, which re-arms the cap and the advisory
             - the master auto_poke_enabled gates the whole tier but the manager audience does not: the poke is gated by the manager audience and the advisory by the operator audience, each at its own emission, so silencing the crew never hides a dark manager from Rick
-            - the store class decides first: a blocked-on-user manager gets at most one awaiting-Rick advisory and a done manager at most one consider-reaping advisory, never the repeating poke; the advised flags are shared with `_check_manager_acks`, so a manager both tapped and stale is advised once across both detectors, and a suppressed manager that freshens re-arms; active and unknown classes get the poke (unknown is fail-safe, so an all-stale quota freeze still escalates)
+            - the store class decides first: a `BLOCKED_ON_USER` manager gets at most one awaiting-Rick advisory and a `DONE` manager at most one consider-reaping advisory, never the repeating poke; the advised flags are shared with `_check_manager_acks`, so a manager both tapped and stale is advised once across both detectors, and a suppressed manager that freshens re-arms; `ACTIVE` and `UNKNOWN` classes get the poke (`UNKNOWN` is fail-safe, so an all-stale quota freeze still escalates)
+            - the test for a `MANAGER-STALE` advisory is whether the manager owes work that is not gated on Rick, not whether a signal exists, because there can be no signal while it idles and waits
             - a fresh honored awaiting-user hold (or an open user gate) is defended quiescence, not staleness: the open-gate override makes the store report such a manager as active, so the hold is read directly; it gets one advisory and no poke, and this check runs before the velocity lever
             - a stale row whose persona has a fresh row on another session id is a superseded ghost and is skipped, because the poke is persona-addressed and would reach the live twin; a future (negative-age) mtime never counts as live
             - a fresh persona bridge mtime vetoes the poke, since the union age can read stale while the manager is alive; a degraded owed read this poll suppresses the escalation and starts no episode
