@@ -3228,10 +3228,10 @@ class ArbiterConsumerJob( AgenticJobBase ):
 
     def _check_decision_needed( self, now ):
         """
-        Escalates each new post of a decision the fleet cannot make to Rick.
+        Escalates each worker or manager post on the `fleet-decision-needed` topic to Rick.
 
-        Reading is pure observation, with no side effects. The first poll sets the cursor to
-        `now`, so a backlog from before the arbiter started is not escalated again.
+        The reserved topic carries a decision the fleet cannot make. Reading is pure
+        observation, with no side effects. The first poll sets the cursor to `now`, so a backlog from before the arbiter started is not escalated again.
 
         Ensures:
             - returns the count of new decision-needed posts escalated this poll
