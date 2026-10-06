@@ -277,8 +277,8 @@ class XmlPromptGenerator:
         Order one JSON index's commands by the registry's speakable order.
 
         The registry decides which commands get rows and supplies each row's label string.
-        The guard `_assert_agent_router_json_commands_match_speakable` already pins
-        membership, so this drops nothing; the filter is a safety net.
+        The guard `_assert_agent_router_json_commands_match_speakable` runs at construction
+        and already pins membership, so this drops nothing; the filter is a safety net.
 
         Requires:
             - command_index maps a full routing string to its phrasing-file path or config
