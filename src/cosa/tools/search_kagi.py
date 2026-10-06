@@ -88,13 +88,10 @@ class KagiSearch:
     
     def search_fastgpt( self ) -> dict[str, Any]:
         """
-        Perform FastGPT search with query, retrying a transient upstream failure.
+        Perform a FastGPT search with the query, retrying a transient upstream failure.
 
-        WHY THE RETRY (row 3598c1d3). This was a bare single call. kagiapi ends
-        fastgpt() with response.raise_for_status(), so one momentary blip anywhere in
-        Kagi's stack became a user-visible weather failure with certainty — nothing
-        stood between them. On 2026-08-19 at 18:54 EDT it did exactly that, and what
-        the status was is permanently unknown because the exception died with it.
+        kagiapi ends fastgpt() with response.raise_for_status(). Without a retry, one
+        momentary failure anywhere in Kagi's stack would become a user-visible weather failure.
 
         Requires:
             - self.query is set and non-empty
@@ -103,15 +100,15 @@ class KagiSearch:
         Ensures:
             - Returns dict with 'meta' and 'data' sections
             - 'data' contains 'output' with search results
-            - retries a TRANSIENT failure (transport error, or 408/425/429/5xx) up to
+            - retries a transient failure (transport error, or 408/425/429/5xx) up to
               self.max_attempts times with exponential backoff
-            - raises a non-transient answer (401, 403, 404 ...) on the FIRST attempt —
+            - raises a non-transient answer (401, 403, 404 ...) on the first attempt —
               no waiting for a verdict that will not change
-            - re-raises the LAST exception UNCHANGED when every attempt is spent. The
+            - re-raises the last exception unchanged when every attempt is spent. The
               weather agent's refusal is asserted to name its own status code
-              (src/tests/unit/test_weather_agent_search_failure.py); a retry that
-              summarised the final failure would silently revert that and make the
-              next occurrence undiagnosable again
+              (src/tests/unit/test_weather_agent_search_failure.py). A retry that
+              summarised the final failure would silently revert that. The next
+              occurrence would then be undiagnosable again
             - Prints timing information
 
         Raises:
