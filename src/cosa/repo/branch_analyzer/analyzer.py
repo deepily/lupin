@@ -1,8 +1,7 @@
 """
 Branch Change Analyzer - Main Orchestrator
 
-Coordinates all components to analyze git branch changes. This is the main
-entry point for programmatic use of the branch analyzer.
+Coordinates all components to analyze git branch changes. This is the main entry point for programmatic use.
 
 Design Principles:
 - Orchestrate without reimplementation (delegates to specialists)
@@ -13,48 +12,33 @@ Design Principles:
 - Clear comparison context in all outputs
 
 Default Behavior:
-    By default (no arguments), compares your current branch (HEAD) to main:
-    - repo_path defaults to '.' (current directory)
-    - base_branch defaults to 'main' (from config)
-    - head_branch defaults to 'HEAD' (auto-resolves to actual branch name)
-    - All git operations run in specified repository
+    With no arguments, compares your current branch (HEAD) to main. repo_path is '.',
+    base_branch is 'main' (from config) and head_branch is 'HEAD'. HEAD auto-resolves to the
+    actual branch name. All git operations run in the specified repository.
 
-Usage:
-    from cosa.repo.branch_analyzer import BranchChangeAnalyzer
+Usage, current branch vs main, then a different repository (e.g. COSA from Lupin src):
+    Example:
+        from cosa.repo.branch_analyzer import BranchChangeAnalyzer
+        analyzer = BranchChangeAnalyzer()
+        stats    = analyzer.analyze()
+        print( analyzer.format_results( stats ) )
+        analyzer = BranchChangeAnalyzer( repo_path='cosa' )
 
-    # Simple usage - compare current branch to main
-    analyzer = BranchChangeAnalyzer()
-    stats = analyzer.analyze()
-    output = analyzer.format_results( stats )
-    print( output )
-
-    # Analyze different repository (e.g., COSA from Lupin src)
-    analyzer = BranchChangeAnalyzer( repo_path='cosa' )
-    stats = analyzer.analyze()
-
-    # Advanced usage
-    analyzer = BranchChangeAnalyzer(
-        config_path = 'my_config.yaml',
-        base_branch = 'develop',        # What you're comparing FROM
-        head_branch = 'feature-branch', # What you're comparing TO
-        repo_path   = '/path/to/repo',  # Repository to analyze
-        debug       = True,
-        verbose     = True
-    )
-
-    stats = analyzer.analyze()
-    console_output  = analyzer.format_results( stats, format='console' )
-    json_output     = analyzer.format_results( stats, format='json' )
-    markdown_output = analyzer.format_results( stats, format='markdown' )
+Advanced usage, where format is 'console', 'json' or 'markdown':
+    Example:
+        analyzer = BranchChangeAnalyzer(
+            config_path = 'my_config.yaml',
+            base_branch = 'develop',        # What you're comparing from
+            head_branch = 'feature-branch', # What you're comparing to
+            repo_path   = '/path/to/repo',  # Repository to analyze
+            debug       = True,
+            verbose     = True
+        )
+        console_output = analyzer.format_results( analyzer.analyze(), format='console' )
 
 Understanding Outputs:
-    All output formats include:
-    - Resolved branch names (HEAD → actual branch name)
-    - Repository absolute path
-    - Comparison direction indicator
-    - Detailed statistics and breakdowns
-
-    Console format includes helpful explanation when HEAD is used.
+    All output formats include resolved branch names (HEAD -> actual branch name), the repository absolute path and a comparison direction indicator. They also carry detailed statistics and breakdowns.
+    Console format includes a helpful explanation when HEAD is used.
 """
 
 from typing import Dict, Any, Optional
@@ -280,12 +264,8 @@ def quick_smoke_test():
     """
     Quick smoke test for Branch Analyzer.
 
-    Tests all major components:
-    - Configuration loading
-    - File type classification
-    - Line classification (Python/JavaScript)
-    - Statistics collection
-    - Report formatting (console/JSON/markdown)
+    Tests configuration loading, file type classification, line classification (Python/JavaScript),
+    statistics collection and report formatting (console/JSON/markdown).
 
     Requires:
         - cosa.utils.util available for print_banner
