@@ -650,3 +650,11 @@ def test_main_prints_one_line_per_landed_package_and_keeps_it_in_train_json( wor
     result  = json.loads( ( tmp_path / "o" / "train.json" ).read_text( encoding="utf-8" ) )
     assert code == 0 and result[ "landed" ] == [ { "package": "a", "row_ids": [ "r-done" ] } ]
     assert stream.getvalue() == f"LANDED a: r-done\ntrain of 1 packages, 1 commits, 0 refused, 1 landed, 0 deferred, at {result[ 'head' ]}\n"
+
+
+def test_two_done_claim_rows_for_one_package_are_both_listed_as_landed_in_row_order( world ):
+    first, _  = approved_row( world, row_id="r-done-1", status="done" )
+    second, _ = approved_row( world, row_id="r-done-2", name="c2", status="done" )
+    result    = train( world, [ first, second ] )
+    assert result[ "landed" ] == [ { "package": "a", "row_ids": [ "r-done-1", "r-done-2" ] } ]
+    assert result[ "packages" ] == [] and result[ "refused" ] == []
