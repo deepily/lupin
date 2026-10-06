@@ -92,13 +92,13 @@ class DeepResearchJob( AgenticJobBase ):
             dry_run: Simulate execution without API calls
             audience: Target audience level (beginner/general/expert/academic)
             audience_context: Custom audience description
-            source_document: Absolute paths to local documents the research reads FIRST,
+            source_document: Absolute paths to local documents the research reads first,
                 as seed context. Already scope-validated and resolved by the v2 door
                 (cosa/rest/v2/source_document.py) — this constructor receives real paths
                 and does not re-decide whether they may be read. None or [] means the
-                run behaves exactly as it did before, which is Rick's stated requirement.
+                run behaves exactly as it did before, which is required.
             confirm_topics: Show the planned topics as tick-boxes before any research
-                spend, and research only the ticked ones (row b6cfbf8d). The queue's
+                spend, and research only the ticked ones. The queue's
                 factory sets it when source_document is present. Independent of
                 no_confirm, so it never turns on the clarification question.
             debug: Enable debug output
@@ -134,16 +134,14 @@ class DeepResearchJob( AgenticJobBase ):
         self.report       = None
 
     def _query_with_seed_context( self ) -> str:
-        """The query as the RESEARCH sees it — seed documents first, then the question.
+        """The query as the research sees it: seed documents first, then the question.
 
-        DELEGATES to `cosa.agents.deep_research.seed_context`, which is now shared with
-        `research to podcast` and `research to presentation` (row 5726e3c5). Those two
-        construct their own agent and call `run_research` themselves, so they never pass
-        through this class — three call sites, one builder, because three copies of a
-        prompt-assembly rule drift silently rather than loudly.
+        Delegates to `cosa.agents.deep_research.seed_context`, shared with `research to podcast`
+        and `research to presentation`. Those two call `run_research` themselves, so they never
+        pass through this class. Three call sites share one builder, since copies drift silently.
 
         Ensures:
-            - with no source document, returns `self.query` UNCHANGED
+            - with no source document, returns `self.query` unchanged
             - otherwise returns the fenced documents followed by the research question
         """
         return query_with_seed_context( self.query, self.source_document )

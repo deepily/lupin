@@ -2,44 +2,25 @@
 """
 Bounded-CC research client for the COSA Deep Research Agent.
 
-BOUNDED-CC MIGRATION (Phase 3 — 2026-06-18)
-===========================================
-This client was migrated from the direct firewalled Anthropic SDK
-(`AsyncAnthropic.messages.create`) to the **in-process Claude Agent SDK**
-(`claude_agent_sdk.query`), matching the shipped BFE/TFE + Podcast bounded-CC
-pattern (ratified D-DR1 Option X). Every LLM-driven research call now runs on
-the Max-subscription OAuth path.
+Every research call runs through the in-process Claude Agent SDK (`claude_agent_sdk.query`)
+on the Max-subscription OAuth path, not the direct firewalled Anthropic SDK.
+This shifts cost rather than removing it: the SDK still reports `total_cost_usd` per call.
+That spend is covered by the fixed Max plan, so the firewalled console balance does not move.
+See `src/docs/cost-model-bounded-cc-vs-firewalled-sdk.md`.
 
-This is a COST-SHIFT, NOT "free": the SDK still reports `total_cost_usd`
-telemetry per call, but that spend is covered by the fixed Max plan — the
-firewalled Anthropic console balance does not move (D8). See:
-  - Scope:        src/rnd/v0.1.8/2026.06.18-bounded-cc-d1d9-ratification-package.md (§2)
-  - Ratification: src/rnd/v0.1.8/2026.06.18-bounded-cc-d1d9-ratification-package.md (D1–D9)
-  - Cost model:   src/docs/cost-model-bounded-cc-vs-firewalled-sdk.md
+Web search uses Claude Code's built-in WebSearch and WebFetch tools, not the native
+Anthropic `web_search_20250305` server tool. The downstream contract is unchanged because
+the orchestrator and parsers consume only `APIResponse.content` (the model's text).
+They never read `web_search_tool_result` blocks. The subagent is prompted to write its
+sources into its text findings, which `parse_subagent_response` parses.
 
-Web search migration (the DR-specific complexity vs Podcast)
-------------------------------------------------------------
-The native Anthropic `web_search_20250305` server tool is replaced by Claude
-Code's built-in **WebSearch + WebFetch** tools (bounded-CC tool surface). The
-downstream contract is preserved BY CONSTRUCTION: the orchestrator and parsers
-consume ONLY `APIResponse.content` (the model's text) — they never read the
-API's `web_search_tool_result` blocks. The subagent is prompted to write its
-sources/citations INTO its text findings (parsed by `parse_subagent_response`),
-so swapping the search mechanism leaves the consumed contract identical.
+No `ApiResourceManager` acquire or record_call is made on this path. The old
+30,000-tokens-per-minute web-search cap does not apply, since the Max-plan rolling
+window governs instead. The singleton itself is untouched.
 
-ApiResourceManager retirement on the bounded path
--------------------------------------------------
-The legacy `get_arm().acquire/record_call( "anthropic_web_search" )` rate-limit
-dance governed Anthropic's 30,000-tokens/minute web-search cap. On the bounded
-path web search rides CC's WebSearch (Max-plan rolling-window governs instead),
-so that cap no longer applies and the ARM acquire/record_call is dropped from
-the call path. The ARM singleton itself is untouched (no other caller of the
-`anthropic_web_search` provider exists; pool-status reporting is unaffected).
-
-NOTE: `ClaudeAgentOptions` exposes no per-call `temperature`, so the historical
-per-call sampling temperature is folded into the system prompt as a creativity
-steer (see `_temperature_to_steer`). Extended thinking maps 1:1 onto the SDK's
-`max_thinking_tokens` option.
+`ClaudeAgentOptions` has no per-call `temperature`, so the sampling temperature is folded
+into the system prompt as a creativity steer (see `_temperature_to_steer`).
+Extended thinking maps 1:1 onto the SDK's `max_thinking_tokens` option.
 """
 
 import json
@@ -147,14 +128,9 @@ def extract_json_object( text: str ) -> dict:
     """
     Robustly recover a single JSON object from a (possibly chatty) completion.
 
-    D6-STRICT (Deep Research): bounded-CC `sdk_query` may wrap JSON in markdown
-    fences or surround it with prose. This recovers the object robustly but
-    FAILS LOUD — it never silently returns a default. A missing/blank/parse-failed
-    object is a real failure for downstream structured consumers.
-
-    Recovery order:
-        1. Strip ```json / ``` fences, then `json.loads` the remainder.
-        2. Fall back to the first balanced { ... } span and `json.loads` it.
+    Strict parsing: `sdk_query` may wrap JSON in markdown fences or surround it with prose.
+    This recovers the object but fails loudly, and never silently returns a default.
+    A blank or unparseable object is a real failure for downstream structured consumers.
 
     Requires:
         - text is a string
@@ -164,6 +140,10 @@ def extract_json_object( text: str ) -> dict:
 
     Raises:
         - ValueError if text is blank or no valid JSON object can be recovered
+
+    Notes:
+        Recovery order is first to strip ```json fences and `json.loads` the remainder,
+        then to fall back to the first balanced { ... } span and `json.loads` that.
     """
     if text is None or not text.strip():
         raise ValueError( "Cannot extract JSON from empty/blank response" )
@@ -211,11 +191,11 @@ class APIResponse:
     Structured response from a bounded-CC research call.
 
     Contains the response text, token usage, stop reason, and the SDK-reported
-    `sdk_cost_usd` (D8 telemetry — covered by the Max plan, not billed per-token).
+    `sdk_cost_usd` telemetry (covered by the Max plan, not billed per token).
 
-    `tool_use` / `search_results` are retained for shape compatibility with the
-    pre-migration dataclass; they are NOT consumed downstream (the orchestrator
-    reads only `content`) and stay empty on the bounded path.
+    `tool_use` and `search_results` are kept for shape compatibility with the older dataclass.
+    Nothing downstream consumes them (the orchestrator reads only `content`),
+    and they stay empty on the bounded path.
     """
     content        : str
     model          : str
@@ -241,9 +221,8 @@ class ResearchAPIClient:
         - Web access for subagents via CC WebSearch/WebFetch
         - Model-appropriate routing (Opus for lead, Sonnet for subagents)
 
-    No API key is required: `sdk_query` authenticates via the Claude Code /
-    Max-subscription OAuth session, NOT a firewalled API key. This is the
-    zero-per-token bounded path.
+    No API key is required. `sdk_query` authenticates through the Claude Code
+    Max-subscription OAuth session, not a firewalled API key.
     """
 
     def __init__(
@@ -267,7 +246,7 @@ class ResearchAPIClient:
         Args:
             config: Research configuration (uses defaults if None)
             cost_tracker: Cost tracker for usage recording (optional)
-            api_key: Retained for signature compatibility — IGNORED on the
+            api_key: Retained for signature compatibility and ignored on the
                 bounded path (OAuth via sdk_query; no key is read)
             debug: Enable debug output
             verbose: Enable verbose output
@@ -394,9 +373,8 @@ class ResearchAPIClient:
         Call a research subagent (uses Sonnet model).
 
         Subagents handle focused research with live web access via CC's
-        WebSearch + WebFetch tools. (On the bounded path there is no Anthropic
-        30k-tokens/min web-search cap — the Max-plan rolling window governs — so
-        the legacy ApiResourceManager acquire/record_call dance is dropped.)
+        WebSearch and WebFetch tools. No Anthropic web-search rate cap applies here,
+        since the Max-plan rolling window governs, so no `ApiResourceManager` calls are made.
 
         Args:
             system_prompt: System prompt for the subagent
@@ -432,7 +410,7 @@ class ResearchAPIClient:
         max_tokens: int = 4096
     ) -> dict:
         """
-        Call the model expecting a JSON object (D6-STRICT, fail-loud).
+        Call the model expecting a JSON object, with strict, fail-loud parsing.
 
         Ensures:
             - Robustly recovers a JSON object from chatty/fenced output
@@ -489,7 +467,7 @@ class ResearchAPIClient:
               permission, max_turns, optional extended-thinking budget)
             - Folds temperature into the system-prompt creativity steer
             - Concatenates all assistant TextBlocks into the response content
-            - Records token usage (CostTracker estimate) + SDK cost telemetry (D8)
+            - Records token usage (CostTracker estimate) and SDK cost telemetry
 
         Args:
             model: Model to use

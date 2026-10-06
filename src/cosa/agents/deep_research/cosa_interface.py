@@ -7,13 +7,11 @@ bridging the async orchestrator with the blocking notification API.
 
 Uses AgentNotificationDispatcher for shared async dispatch logic.
 
-Per-task isolation (OOS Phase 4 backlog #1, 2026-04-29):
-    Module-level SENDER_ID / SESSION_NAME / TARGET_USER are kept for the CLI
-    path and for backward compatibility, but agentic-pool jobs MUST use
-    `set_dispatch_context()` (defined below) to isolate per-task state via
-    ContextVars. The dispatcher reads ContextVar in priority over instance
-    state, so concurrent DR jobs in the agentic pool no longer leak each
-    other's sender_id through the shared module-global dispatcher instance.
+Per-task isolation:
+    The module-level `SENDER_ID`, `SESSION_NAME` and `TARGET_USER` serve the CLI path.
+    Agentic-pool jobs must use `set_dispatch_context()` (defined below) to keep
+    per-task state in ContextVars. The dispatcher reads a ContextVar before instance
+    state, so concurrent jobs do not leak one sender_id through the shared dispatcher.
 """
 
 import logging
@@ -96,10 +94,9 @@ def set_dispatch_context(
     """
     Set the per-task dispatch context for this asyncio task / thread.
 
-    Use this instead of mutating module-level SENDER_ID / TARGET_USER /
-    SESSION_NAME when running inside the agentic pool — concurrent DR jobs
-    share module globals (and the shared `_dispatcher` instance), so writing
-    to module globals leaks state across jobs. ContextVars isolate per-task.
+    Use this rather than changing module-level `SENDER_ID`, `TARGET_USER` or `SESSION_NAME`
+    inside the agentic pool. Concurrent jobs share those globals and the shared `_dispatcher`,
+    so writing to them leaks state across jobs. ContextVars isolate each task.
 
     Requires:
         - At least one of sender_id, target_user, session_name is provided.

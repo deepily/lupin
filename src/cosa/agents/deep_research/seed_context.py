@@ -2,24 +2,18 @@
 """
 The one place a `source_document` becomes seed context for a research run.
 
-WHY THIS IS A MODULE AND NOT THREE COPIES. Slice 1 (row 14c54c10) built this as two
-private methods on `DeepResearchJob`, which was right when exactly one command took the
-argument. Row 5726e3c5 extends `source_document` to `research to podcast` and
-`research to presentation`, and those two reach the research leg by a DIFFERENT route --
-they construct their own agent, which calls `run_research` itself rather than going
-through `DeepResearchJob` at all (measured 2026-09-08, Sam 🎙️). So three call sites now
-need the same enrichment.
+This is a module, not three copies, because three call sites need the same enrichment.
+The research, podcast and presentation commands all take a source document.
+The last two build their own agent that calls `run_research` directly.
 
-Three copies of a prompt-assembly rule drift, and the drift is invisible: each copy keeps
-working, they simply stop agreeing about what a seed document looks like to the model.
-Row 14c54c10 Q1 made the same call for the scope validator -- one allowlist, not three.
-This applies that decision to the enrichment, for the same reason.
+Copies of a prompt-assembly rule drift invisibly: each keeps working, but they stop
+agreeing about what a seed document looks like to the model.
+The scope validator has one allowlist for the same reason.
 
-⚠️ THE PATHS ARRIVING HERE ARE ALREADY VALIDATED. The v2 door
-(`cosa/rest/v2/source_document.py`) resolves and stat's every path before any job exists
--- Rick's 2026-09-08 ruling that a bad document is refused at the door. Nothing in this
-module re-decides whether a file may be read, and adding such a check here would create a
-second opinion that can disagree with the one that was actually enforced.
+Paths arriving here are already validated. The v2 door (`cosa/rest/v2/source_document.py`)
+resolves and stats every path before any job exists, so a bad document is refused there.
+Nothing here re-decides whether a file may be read, because a second check could
+disagree with the one that was enforced.
 """
 
 from typing import Optional
@@ -29,9 +23,8 @@ def normalize_source_document( source_document ) -> list:
     """
     Turn whatever a caller supplied into a list of paths.
 
-    NORMALIZED AT THE BOUNDARY so nothing downstream has to ask whether it got a string,
-    a list or None. The v2 door hands over a list; a direct in-process caller might hand
-    over a bare string, and one spelling here beats three checks later.
+    Normalized at the boundary so nothing downstream asks what type it got.
+    The v2 door hands over a list, a direct caller may hand over a bare string.
 
     Requires:
         - source_document is None, a string, or an iterable of strings
@@ -39,7 +32,7 @@ def normalize_source_document( source_document ) -> list:
     Ensures:
         - returns [] for None
         - returns [ source_document ] for a single string
-        - returns a NEW list for any other iterable, so the caller's object is not aliased
+        - returns a new list for any other iterable, so the caller's object is not aliased
 
     Raises:
         - TypeError if source_document is not None, a string, or iterable
@@ -53,13 +46,9 @@ def read_seed_documents( source_document ) -> list:
     """
     Read every source document, returning ( path, text ) pairs.
 
-    WHY THIS RAISES INSTEAD OF SKIPPING A BAD FILE. By the time a job exists, the v2 door
-    has already resolved and stat'd these paths -- Rick ruled the refusal happens there,
-    before anything is built. So a file that cannot be read HERE means the world changed
-    under a validated path, and continuing would produce a report that silently rests on
-    less than the caller asked for. That is the exact indistinguishable-from-success
-    failure this feature was careful to avoid at the door; swallowing it one layer down
-    would reintroduce it.
+    This raises instead of skipping a bad file: the door already validated these paths,
+    so an unreadable file means the world changed. Skipping it would give a report
+    resting on less than the caller asked for, hidden behind a success.
 
     Requires:
         - source_document holds absolute paths already validated by the door
@@ -81,32 +70,31 @@ def read_seed_documents( source_document ) -> list:
 
 def query_with_seed_context( query: str, source_document ) -> str:
     """
-    The query as the RESEARCH sees it -- seed documents first, then the question.
+    The query as the research sees it: seed documents first, then the question.
 
-    🔴 THIS IS DELIBERATELY NOT THE BARE QUERY, AND THE DIFFERENCE MATTERS IN FOUR PLACES.
-    The caller's `query` is also used for the session-name gist, the "Starting deep
-    research on..." notification, the saved report's frontmatter, and the job's display
-    title. Folding a document into it would put a whole file into all four -- a session
-    named after the first eighty characters of somebody's notes, and frontmatter nobody
-    can read. So the enrichment lives here, on the one path that feeds the model, and the
-    caller's `query` stays the question the user actually asked.
-
-    Rick ruled NO SIZE CEILING on 2026-09-08, so this does not truncate. A large document
-    reaches the model whole, and the cost of that is a research run with less room to
-    think -- visible in the report rather than hidden by a silent trim.
+    This is not the bare query: the caller's `query` stays the question the user asked.
+    There is no size ceiling, so nothing is truncated.
 
     Requires:
         - query is the user's question
         - source_document is None, a path string, or a list of validated paths
 
     Ensures:
-        - with no source document, returns `query` UNCHANGED -- the whole "works as it did
+        - with no source document, returns `query` unchanged -- the whole "works as it did
           before" requirement rests on this line
         - otherwise returns the documents, each fenced and labelled with its path,
           followed by the user's question under its own heading
 
     Raises:
         - OSError / UnicodeDecodeError when a validated path can no longer be read
+
+    Notes:
+        The caller's `query` also feeds the session-name gist, the "Starting deep
+        research on..." notification, the report frontmatter and the job's display
+        title. Folding a document into it would put a whole file into all four, so the
+        enrichment lives only on the path that feeds the model.
+        A large document reaches the model whole, costing room to think, which shows
+        in the report rather than hiding in a silent trim.
     """
     documents = read_seed_documents( source_document )
     if not documents: return query

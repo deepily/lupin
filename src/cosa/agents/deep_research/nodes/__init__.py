@@ -1,7 +1,7 @@
 """
 Graph nodes for COSA Deep Research Agent.
 
-Phase 2 will add:
+Planned additions:
 - clarify.py: Query clarification node
   - Invokes clarification prompt with LLM
   - Returns ClarificationDecision model

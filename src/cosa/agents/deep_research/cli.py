@@ -3,7 +3,7 @@
 Command-Line Interface for COSA Deep Research Agent.
 
 Provides a voice-first CLI for running research queries. Voice I/O is the
-PRIMARY interaction mode, with CLI text as automatic fallback.
+primary interaction mode, with CLI text as automatic fallback.
 
 Usage:
     python -m cosa.agents.deep_research.cli --query "Your research question"
@@ -253,12 +253,11 @@ async def run_research(
         no_confirm: Skip confirmation prompts
         confirm_topics: Show the planned topics as tick-boxes and research only
             the ticked ones, even when no_confirm is True. Independent of
-            no_confirm on purpose: it does NOT turn on the clarification question
-            or the plan yes/no. Set for a run over a local document (row b6cfbf8d).
+            no_confirm: it does not turn on the clarification question
+            or the plan yes/no. Set for a run over a local document.
             An answer with nothing ticked cancels before any research spend. No
             answer within TOPIC_CONFIRM_TIMEOUT_SECS follows
-            config.cancel_when_no_topics_ticked — cancel unless it is False (Rick's
-            ruling, decision f8fddc8b).
+            config.cancel_when_no_topics_ticked — cancel unless it is False.
         topic_source: Name(s) of the document the topics came from, shown in the ask
         cancel_check: Optional callable returning True if cancellation requested
         debug: Enable debug output
