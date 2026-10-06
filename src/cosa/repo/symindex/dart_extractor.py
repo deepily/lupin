@@ -1,5 +1,5 @@
 """
-Dart extractor for the symbol index: reads a Flutter tree with the Dart analyzer.
+Dart extractor: reads the declarations of a Flutter tree with the Dart analyzer.
 
 Implements the extractor contract in extractor_contract for language "dart". The parse is
 syntactic only (the analyzer's parseString). It is run by dart_extract.dart inside a scratch

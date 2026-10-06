@@ -1,5 +1,5 @@
 """
-Symbol index of Python, TypeScript and Dart code, used for code-reuse review.
+Symbol index for code-reuse review: symbols, routes, duplicates, diff and wiki lint.
 
-It covers symbols, routes, duplicates, diffs between generations and wiki lint.
+It covers Python, TypeScript and Dart code, and diffs between generations.
 """
