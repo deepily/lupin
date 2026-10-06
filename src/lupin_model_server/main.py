@@ -201,7 +201,7 @@ def require_api_key( x_api_key: Annotated[ Optional[ str ], Header() ] = None ) 
     """
     Check that X-API-Key is the `ck_live_*` key hashed at lifespan boot.
 
-    The hash comes from the `notification-api-claude-code-dev` plaintext key file. The model server reuses the Lupin `ck_live_*` namespace and does not fork it.
+    The hash comes from the `notification-api-claude-code-dev` plaintext key file. The FastAPI compute containers send that same plaintext key. The model server reuses the Lupin `ck_live_*` namespace and does not fork it.
     It runs `bcrypt.checkpw` on incoming keys against that hash. This matches the DB-backed `cosa/rest/middleware/api_key_auth.py` validator, but allows one known-good key instead of walking a DB row set.
 
     Requires:
