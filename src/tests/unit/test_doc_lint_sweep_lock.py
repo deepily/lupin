@@ -15,7 +15,7 @@ import pytest
 from cosa.repo.doc_lint import sweep_lock as sl
 
 PKG  = "src/cosa/repo"
-REF  = "refs/sweep-locks/src--cosa--repo"
+REF  = "refs/sweep-locks/src-cosa-repo"
 T0   = datetime( 2026, 10, 5, 12, 0, 0, tzinfo=timezone.utc )
 DAY  = timedelta( hours=24 )
 
@@ -44,13 +44,20 @@ def plant( root, text, ref=REF ):
     return blob
 
 
-def test_slug_of_turns_slashes_into_double_dashes_and_drops_the_trailing_slash():
-    assert sl.slug_of( "src/cosa/repo" ) == "src--cosa--repo"
-    assert sl.slug_of( "src/cosa/repo/" ) == "src--cosa--repo"
+def test_slug_of_joins_the_directory_names_with_a_dash_and_drops_one_trailing_slash():
+    assert sl.slug_of( "src/cosa/repo" ) == "src-cosa-repo"
+    assert sl.slug_of( "src/cosa/repo/" ) == "src-cosa-repo"
     assert sl.slug_of( "docs" ) == "docs"
 
 
-@pytest.mark.parametrize( "bad", [ "", "/", ".hidden", "-lead", "a b", "a..b", "x.lock", "a/b.lock", "a.", "a~b", "a:b", "a\\b" ] )
+def test_slug_of_escapes_dash_and_underscore_so_that_two_paths_never_share_a_slug():
+    assert sl.slug_of( "src/a--b" ) == "src-a_2d_2db" and sl.slug_of( "src/a/b" ) == "src-a-b"
+    assert sl.slug_of( "a_b" ) == "a_5fb" and sl.slug_of( "a-b" ) == "a_2db"
+    paths = [ "src/a--b", "src/a/b", "src/a-b", "src/a_b", "src/a_2db", "src/a_5fb", "src/a/-b", "src/a-/b", "src/a--/b", "src/a/--b", "a/b/c", "a-b-c", "a/b-c", "a-b/c" ]
+    assert len( { sl.slug_of( p ) for p in paths } ) == len( paths )
+
+
+@pytest.mark.parametrize( "bad", [ "", "/", ".hidden", "-lead", "a b", "a..b", "x.lock", "a/b.lock", "a.", "a~b", "a:b", "a\\b", "src//x", "src/./x", "src/../x", "/src", "a//", "./a", "_lead" ] )
 def test_slug_of_refuses_a_package_that_cannot_name_a_ref( bad ):
     with pytest.raises( ValueError, match="cannot name a lock" ):
         sl.slug_of( bad )
@@ -71,6 +78,11 @@ def test_take_by_a_second_seat_is_refused_and_leaves_the_ref_alone( repo ):
     assert ok is False
     assert ( held[ "persona" ], held[ "session" ] ) == ( "Rio", "aaaa1111" )
     assert ref_value( repo ) == before
+
+
+def test_take_of_two_paths_that_used_to_share_a_slug_gives_two_locks( repo ):
+    assert sl.take( repo, "src/a--b", "Rio", "s1", now=T0 )[ 0 ] is True
+    assert sl.take( repo, "src/a/b", "Maya", "s2", now=T0 )[ 0 ] is True
 
 
 def test_take_by_the_same_seat_twice_is_still_refused( repo ):
@@ -336,3 +348,25 @@ def test_take_records_the_time_in_utc_whatever_zone_the_caller_gave( repo ):
     eastern = T0.astimezone( timezone( timedelta( hours=-4 ) ) )
     _, held = sl.take( repo, PKG, "Rio", "s1", now=eastern )
     assert held[ "utc" ] == T0.isoformat()
+
+
+def test_a_lock_stamped_far_in_the_future_can_be_taken_over( repo ):
+    sl.take( repo, PKG, "Rio", "s1", now=T0 + timedelta( days=400 ) )
+    ok, held = sl.takeover( repo, PKG, "Maya", "s2", now=T0 )
+    assert ok is True and held[ "persona" ] == "Maya"
+
+
+@pytest.mark.parametrize( "ahead, expected", [ ( timedelta( minutes=4 ), False ), ( timedelta( minutes=5 ), False ), ( timedelta( minutes=5, seconds=1 ), True ) ] )
+def test_a_lock_stamped_a_little_ahead_is_clock_skew_until_it_passes_five_minutes( repo, ahead, expected ):
+    sl.take( repo, PKG, "Rio", "s1", now=T0 + ahead )
+    assert sl.takeover( repo, PKG, "Maya", "s2", now=T0 )[ 0 ] is expected
+
+
+def test_a_lock_record_that_carries_its_own_blob_field_cannot_override_the_real_one( repo ):
+    real = plant( repo, json.dumps( { "package": PKG, "persona": "Rio", "session": "s1", "utc": T0.isoformat(), "blob": "forged" } ) )
+    assert sl.holder_of( repo, PKG )[ "blob" ] == real
+
+
+def test_the_cli_help_says_the_lock_is_cooperative( capsys ):
+    with pytest.raises( SystemExit ): sl.main( [ "--help" ] )
+    assert "Cooperative" in capsys.readouterr().out
