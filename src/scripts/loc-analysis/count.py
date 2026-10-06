@@ -2,7 +2,7 @@
 """
 Git-tracked line-count + composition analyzer for the Lupin repo.
 
-Counts ONLY files reported by `git ls-files` (so .gitignored build output is
+Counts only files reported by `git ls-files` (so .gitignored build output is
 structurally impossible to include). Classifies every tracked file into exactly
 one bucket, then reports tiered totals.
 """
@@ -158,7 +158,7 @@ def count_python(text):
 
 
 def count_cstyle(text):
-    """Line-based split for TS/JS/CSS. Returns (code, comment, doc, blank).
+    """Line-based split for `TS`/JS/CSS. Returns (code, comment, doc, blank).
 
     'doc' = JSDoc/TSDoc block comments opening with /**.
     """

@@ -2,7 +2,7 @@
 Lupin LoC roll-up: added / deleted / net, two views.
 
 View A — release chain: the 18 squash-merge commits on `main`, one per release.
-View B — authoring: monthly adds/deletes across ALL branches with the squash
+View B — authoring: monthly adds/deletes across all branches with the squash
          merges excluded, so feature-branch work is counted once, not twice.
 
 Writes two PNGs plus a CSV of both series.
@@ -88,12 +88,9 @@ def main():
     """
     Run both views, write the two PNGs and the CSV, and print the summary tables.
 
-    THIS USED TO BE MODULE-LEVEL CODE, so merely IMPORTING this file ran a full
-    `git log` over every branch, rendered two charts and wrote three files into
-    io/git-delta-analysis/. Nothing imported it, so nothing noticed — but it also
-    meant the file could not be unit-tested at all without doing all of that for
-    real, which is a persistent-state mutation and a :8000-class action. Wrapping
-    it changes nothing about running the script; it only makes importing it free.
+    This code used to run at module level, so importing the file ran a full `git log` over every branch.
+    It also rendered two charts and wrote three files into io/git-delta-analysis/.
+    That blocked unit tests, being a persistent-state, :8000-class action. Wrapping makes importing free.
 
     Ensures:
         - writes lupin-loc-by-release.png, lupin-loc-by-month.png and
