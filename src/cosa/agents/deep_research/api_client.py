@@ -16,7 +16,8 @@ sources into its text findings, which `parse_subagent_response` parses.
 
 No `ApiResourceManager` acquire or record_call is made on this path. The old
 30,000-tokens-per-minute web-search cap does not apply, since the Max-plan rolling
-window governs instead. The singleton itself is untouched.
+window governs instead. The singleton itself is untouched: no other caller of the
+`anthropic_web_search` provider exists, and pool-status reporting is unaffected.
 
 `ClaudeAgentOptions` has no per-call `temperature`, so the sampling temperature is folded
 into the system prompt as a creativity steer (see `_temperature_to_steer`).
