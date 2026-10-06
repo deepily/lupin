@@ -279,10 +279,10 @@ async def authenticated_account_email(
     """
     The login-account email on the caller's access token, or None.
 
-    Unlike `require_api_key_or_jwt`, which admits callers, this names the person.
-    It authenticates nothing, so always pair it with `require_api_key_or_jwt` on a route.
-    It returns None instead of raising, so routes that also accept API keys keep working.
-    An unsigned or expired token also gives None, because `decode_and_validate_token` checks both.
+    Unlike `require_api_key_or_jwt`, which admits callers, this names the person, by email, because the gate's configuration names people by email.
+    It authenticates nothing, so always pair it with `require_api_key_or_jwt`; it returns None instead of raising so API-key routes keep working.
+    It never trusts an unverified claim: an unchecked email would let any caller pose as an approver, so `decode_and_validate_token` checks signature and expiry.
+
     Requires:
         - authorization is the raw Authorization header, or None
 

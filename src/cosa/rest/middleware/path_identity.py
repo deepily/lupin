@@ -113,7 +113,7 @@ async def require_query_identity_owner(
     authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ]
 ) -> str:
     """
-    FastAPI dependency: refuse a caller not named in the query string, return their email.
+    Refuse a caller who is not the user named in the query; return the caller's account email.
 
     Requires:
         - authenticated_user_id comes from `require_api_key_or_jwt`, which has already rejected
