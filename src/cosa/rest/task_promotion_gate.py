@@ -490,8 +490,9 @@ def promotion_ask_sender_id( session_id=None ):
     """
     The sender id a promotion ask is stamped with, so the source of an ask can be traced.
 
-    An ask that sets no sender resolves server-side to the literal `claude.code@unknown.deepily.ai`.
-    The `sender_id` column does discriminate for ordinary seats, so this path must fill it.
+    Server-side `resolve_sender_id` tries the explicit sender, then a `[PREFIX]` pattern at the
+    start of the message, then the literal `claude.code@unknown.deepily.ai`. The promotion ask
+    supplies neither of the first two, so this path must fill the `sender_id` column itself.
 
     Requires:
         - session_id is a session identifier string, or None

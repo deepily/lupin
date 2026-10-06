@@ -16,7 +16,8 @@ Not built: recovery of an answer orphaned by a bounce. The design would read the
 `notify_user_sync` captures it from the opening ack frame into a local dict and never surfaces
 it. That holds across fifteen construction sites, so the ticket's `notification_id` column
 stays `NULL`.
-After a bounce a pending ticket therefore goes `stalled` and fires the urgent notify. A human
+After a bounce a pending ticket therefore goes `stalled` and fires the urgent notify. A ticket
+also stalls when its apply raises, or when the sweeper finds it past `resolves_by`. A human
 is told and nothing is lost silently. Automatic recovery of an answer given just before the
 bounce is a named follow-up.
 """
@@ -137,10 +138,12 @@ def resolves_by_for( requested_at, timeout_fn=promotion_gate.get_ask_timeout_sec
         - the deadline is read at mint time and stored on the row, because both settings are live; a
           sweeper that re-derived it would judge tickets against changed numbers and declare
           in-flight tickets overdue
-        - a window remains that no finite deadline closes: the router's grace check applies only once
-          the notification is marked `expired`, and only the live ask sets that; after a bounce the
-          notification stays `delivered` and /respond accepts an answer at any later time; closing
-          it needs the late-answer recovery named in the module docstring
+        - a window remains that this deadline does not close: the router's grace check applies only
+          once the notification is marked `expired`. The live ask sets that, and so does
+          `notification_expiry_sweeper`, which `lupin_app/main.py` runs on an interval. Until a sweep
+          pass reaches an orphaned notification it stays `delivered`, and /respond accepts an answer
+          at any later time; recovering an answer given before a bounce is the follow-up named in
+          the module docstring
         - it measures from `requested_at` while the answer window runs from when the ask fires, one
           short transaction later; the apply margin absorbs that skew, so the result errs safe
     """

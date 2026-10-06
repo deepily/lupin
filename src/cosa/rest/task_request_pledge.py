@@ -21,8 +21,8 @@ def refusal_for_pledge( move, switch_on, target_id, pledge_id, pledge_row, reque
     """
     Why an admit request may not carry this deletion ticket (the Sword of Damocles rule).
 
-    An admit request must pass the id of a ticket that belongs to the requester. A demote
-    needs no pledge. The typed actor name is whatever the caller sends, so only the session
+    With the switch on, an admit request must pass the id of a ticket that belongs to the
+    requester. A demote needs no pledge. The typed actor name is whatever the caller sends, so only the session
     bridge can say who the requester is. Plan: src/rnd/v0.2.1/2026.09.14-sword-of-damocles-enforcement-plan.md.
 
     Requires:
@@ -125,7 +125,7 @@ def request_is_stranded_by_its_pledge( request_state, request_move, pledge_id, p
 
     An approval over a dead pledge is refused 409 and the request stays pending. The manager
     must be able to re-file it, or the one-request-per-row rule would leave it stuck on the
-    owner's board. A pledge that changed hands strands the request the same way.
+    operator's board. A pledge that changed hands strands the request the same way.
 
     Requires:
         - request_state / request_move are the row's request columns
@@ -146,7 +146,7 @@ def request_is_stranded_by_its_pledge( request_state, request_move, pledge_id, p
 
 def refusal_for_consuming_pledge( move, pledge_id, pledge_status, pledge_owner, pledged_by ):
     """
-    Why the owner's approval cannot drop the row this request pledged.
+    Why the operator's approval cannot drop the row this request pledged.
 
     Approving admits the target and drops the pledge in one transaction, or neither happens.
     A dead pledge cannot be dropped, so the approval is refused, not admitted unpaid.

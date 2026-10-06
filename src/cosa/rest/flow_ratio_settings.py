@@ -31,10 +31,13 @@ hours; opens below 1.0), so moving these settings into config cannot change what
 does. Choosing another threshold is the operator's call. "Consistent" means one box and one
 data root; a second host does not share the value.
 
-`task_approval_settings.legacy_override_path()` names `task-approval-settings.json` in the
-same `LUPIN_FLOW_RATIO_DIR`. The fallbacks here are harmless on a host that leaves the
-variable unset because they are the shipped behaviour. Check the other settings file's
-fallbacks before assuming the same.
+`task-approval-settings.json` is retired. `task_approval_settings.legacy_override_path()`
+names it in the same `LUPIN_FLOW_RATIO_DIR` only for the one-time import, and nothing
+reads it live. The fallbacks here are harmless on a host that leaves the variable unset
+because they are the shipped behaviour. The approval settings keep their live values in a
+database table, and `FALLBACK_MANAGER_PULL_DISABLED` there is `True`, the closed side.
+Falling through to it withdraws an access a manager's classification grants, so check
+those fallbacks before assuming the same.
 """
 
 import json

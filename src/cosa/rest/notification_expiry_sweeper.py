@@ -11,7 +11,8 @@ to sweep them; this module is that caller.
 
 The grace delay is the /respond contract, not a safety margin. `expires_at` is not when the
 human stopped caring. Of 58 answers that landed after it, 57 came within 300s (highest 298s).
-None came between 301s and 600s, and one came 1,109s late from a 600s ask. A row marked expired the
+None came between 301s and 600s, and one came 1,109s late from a 600s ask. So the 300s default
+is not arbitrary: it falls in a real gap in the data and does not cut through a cluster. A row marked expired the
 instant `expires_at` passes would turn a real answer into a 400.
 `POST /api/notifications/{id}/respond` accepts a late answer against an `expired` row for
 `notification grace period seconds` past `expires_at`, and against a `delivered` row forever.

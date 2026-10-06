@@ -242,13 +242,15 @@ class CommonsAckWatcher( CommonsTopicWatcher ):
               self.debug, so a silently-unsaved ack must never be swallowed at the default log level
             - a persist failure never costs the live push, which is what the user is watching
             - runs off the event loop: every caller is `tick()` on `CommonsTopicWatcher`'s own
-              daemon thread (`_run_loop`), so the blocking `get_db()` checkout needs no thread hop;
+              daemon thread (`_run_loop`), so the blocking `get_db()` checkout and its two
+              round-trips need no thread hop;
               the module imports no event-loop machinery, and if that changes the persist must move
               onto a worker thread (`test_the_ack_persist_path_never_touches_the_event_loop` holds it)
             - the row is marked delivered: an ack is a tally element, not a message the user
               must still be shown, so left in 'created' it would join the AFK undelivered drain
               and replay on reconnect as a bodiless missed notification; the tally read does
-              not filter on state, so it still finds the row
+              not filter on state, so it still finds the row; the mark follows
+              `_persist_notification_sync`'s own connected-path primitive
 
         Raises:
             - nothing

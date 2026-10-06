@@ -17,10 +17,10 @@ File permissions were never a control: the host user and both server containers 
 uid, so no file mode can exclude a writer. Only a distinct service uid would give a boundary.
 
 The legacy file sat in the flow-ratio directory, not in a mount of its own. A new mount
-resolves at container create. It needs `docker compose up -d --force-recreate` on both
-servers, and a plain restart would not apply it. `LUPIN_FLOW_RATIO_DIR` is already mounted
-in `lupin-rest-dev` and `lupin-rest-test`. The name says flow-ratio and this is not
-flow-ratio; a second env var is the cheap fix for that later.
+resolves at container create, so it needs `docker compose up -d --force-recreate` on both
+servers. `LUPIN_FLOW_RATIO_DIR` is already mounted in `lupin-rest-dev` and `lupin-rest-test`.
+The name says flow-ratio and this is not. Renaming it would cost that force-recreate, the
+expensive half of the trade, so a second env var is the cheap fix for later.
 
 The live settings are in the `approval_settings` table. The only write path is the
 validated setter (`set_overrides`), and the HTTP door in front of it resolves the operator

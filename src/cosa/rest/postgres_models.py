@@ -1773,6 +1773,8 @@ class TaskPromotionTicket( Base ):
         - a `refused` ticket carries its refusal text (`CHECK`)
         - answer_by is null or not later than resolves_by (`CHECK`)
         - cascades delete with the task item, like task_events
+        - the task, `to_status` and requester live here, not on the notification, because putting
+          them there would make one record answer two owners' questions
         - it is the visibility surface the task row cannot be: a row awaiting promotion is still
           `not_approved`, which `task_store_rules.BOARD_INVISIBLE_STATUSES` keeps out of every
           board query, so a marker on the task row would show only to someone who knows the id

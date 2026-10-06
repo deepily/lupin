@@ -809,6 +809,7 @@ def pick_persona_chain_from_env( project: Optional[ str ], environ=None ) -> Opt
         - Returns None when the resolved env var is unset
         - Returns None when the resolved env var is set but empty/whitespace
         - Normalizes project name: strip + upper-case + hyphens→underscores
+        - The env var name embeds the project so one universal lookup pattern serves every repo
         - Reads from `environ` when supplied (testability), else os.environ
         - Never raises
 

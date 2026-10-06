@@ -233,8 +233,8 @@ def emit_bounce_broadcast_in_process(
         - returns the `execute_broadcast` result dict on the happy path, or
           `{"error": <str>}` if it threw
         - never propagates an exception to the caller: this is best-effort edge code, so it
-          degrades to a log line rather than take down startup or block SIGTERM shutdown
-        - a rate-limit 429 gets a loud stderr line, because a silently eaten all-clear
+          degrades to a loud stderr line rather than take down startup or block SIGTERM shutdown
+        - a rate-limit 429 and any exception each get a loud stderr line, because a silently eaten all-clear
           reopens the hole where silence means nothing
     """
     if store is None or rate_limiter is None or ack_watcher is None:

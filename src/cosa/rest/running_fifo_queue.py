@@ -763,8 +763,8 @@ class RunningFifoQueue( FifoQueue ):
             - First call for a given job object returns True and marks it
             - Every later call for the same object returns False
             - the marker is `job.brake_terminal_claimed`, a QueueableJob protocol member every
-              job class carries from construction (default False), read directly with no
-              getattr fallback
+              job class carries from construction (default False), and the push gate enforces
+              its presence; it is read directly with no getattr fallback
             - it lives on the job object, so a resubmitted repair-chain job (a new object) is
               never falsely blocked
             - check and set run under _agentic_futures_lock (an RLock, re-entrant for the

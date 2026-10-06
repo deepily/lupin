@@ -80,7 +80,7 @@ def scan_stragglers( items ):
 
 def backfill_persona_keys( session, apply=False ):
     """
-    Scan for non-canonical persona keys in the task store and optionally rewrite them.
+    Scan the task store for non-canonical persona keys and optionally `UPDATE` them.
 
     Requires:
         - session is an open SQLAlchemy Session (caller owns commit/rollback)

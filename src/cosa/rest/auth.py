@@ -83,7 +83,8 @@ async def verify_token(token: str) -> Dict:
     Unified token verification supporting both JWT and mock tokens.
 
     The 'auth mode' setting picks the verifier: 'mock' accepts mock_token_* (development),
-    'jwt' validates real JWT tokens (production), 'firebase' is a mocked placeholder.
+    'jwt' validates real JWT tokens (production). Mode 'firebase' calls `verify_firebase_token`,
+    which calls this function again, so it recurses until the stack gives out.
 
     Requires:
         - token is a non-empty string
