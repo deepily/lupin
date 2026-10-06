@@ -222,6 +222,7 @@ class HoldingAreaStoreImpl implements HoldingAreaStore {
   private lastComposite : TaskListComposite | null = null;
   private inFlight      : Promise<void> | null = null;
   private pollHandle    : number | null = null;
+  private unsubscribePush : ( () => void ) | null = null;
 
   constructor( opts: HoldingAreaStoreOptions ) {
     this.bus = opts.bus;
@@ -279,12 +280,20 @@ class HoldingAreaStoreImpl implements HoldingAreaStore {
     this.stopPolling();
     void this.refresh();
     this.pollHandle = this.setIntervalFn( () => void this.refresh(), HOLDING_AREA_POLL_INTERVAL_MS );
+    // Server push (row 8796333b slice 2): "the store changed, re-read". refreshAfterWrite(), not
+    // refresh(), so a push landing during a read gets a read that began after it; the poll stays
+    // as the safety net. A burst of pushes costs at most two reads.
+    this.unsubscribePush = this.bus.on( "task_store_changed", () => void this.refreshAfterWrite() );
   }
 
   stopPolling(): void {
     if ( this.pollHandle !== null ) {
       this.clearIntervalFn( this.pollHandle );
       this.pollHandle = null;
+    }
+    if ( this.unsubscribePush !== null ) {
+      this.unsubscribePush();
+      this.unsubscribePush = null;
     }
   }
 

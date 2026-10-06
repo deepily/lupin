@@ -319,3 +319,105 @@ test( "and with NOTHING in flight it takes exactly one read, not two", async () 
     "refreshAfterWrite double-fetched on an idle store" );
   assert.deepEqual( store.composite(), GOOD );
 } );
+
+// ---------------------------------------------------------------------------
+// Row 8796333b slice 2 — `task_store_changed` push re-reads through refreshAfterWrite()
+// ---------------------------------------------------------------------------
+
+function pushedStore() {
+  const bus   = createEventBusForTesting();
+  const ctx   = makeApi();
+  const store = createHoldingAreaStore( {
+    bus, api: ctx.api, setIntervalFn: () => 1, clearIntervalFn: () => { /* noop */ },
+  } );
+  const push = (): void => bus.emit( { type: "task_store_changed", payload: { count: 1 } } as never );
+  return { bus, store, ctx, push };
+}
+
+test( "task_store_changed: a push while polling triggers one more read", async () => {
+  const { store, ctx, push } = pushedStore();
+  store.startPolling();
+  await tick();
+  assert.equal( ctx.calls.length, 1 );
+  push();
+  await tick();
+  assert.equal( ctx.calls.length, 2, "the push re-read the holding area" );
+  store.stopPolling();
+} );
+
+test( "task_store_changed: a burst of pushes costs two reads, not one per push", async () => {
+  const { store, ctx, push } = pushedStore();
+  store.startPolling();
+  await tick();
+  const before = ctx.calls.length;
+  push(); push(); push(); push(); push();
+  for ( let i = 0; i < 6; i++ ) await tick();
+  assert.equal( ctx.calls.length - before, 2, "one read starts, the other four share one trailing read" );
+  store.stopPolling();
+} );
+
+test( "task_store_changed: a push DURING a read is not dropped — a second read starts after the first ends", async () => {
+  const bus = createEventBusForTesting();
+  let release!: () => void;
+  const gate = new Promise<void>( ( r ) => { release = r; } );
+  const order: string[] = [];
+  let calls = 0;
+  const api: HoldingAreaApiClient = {
+    get: async <T,>(): Promise<T> => {
+      const n = ++calls;
+      order.push( `start ${ n }` );
+      if ( n === 1 ) await gate;
+      order.push( `end ${ n }` );
+      return GOOD as unknown as T;
+    },
+  } as HoldingAreaApiClient;
+  const store = createHoldingAreaStore( { bus, api, setIntervalFn: () => 1, clearIntervalFn: () => { /* noop */ } } );
+  store.startPolling();
+  await tick();
+  bus.emit( { type: "task_store_changed", payload: { count: 1 } } as never );
+  await tick();
+  assert.equal( calls, 1, "the push waits for read 1, it does not race it" );
+  release();
+  for ( let i = 0; i < 6; i++ ) await tick();
+  assert.deepEqual( order, [ "start 1", "end 1", "start 2", "end 2" ] );
+  store.stopPolling();
+} );
+
+test( "task_store_changed: ignored before polling starts and after it stops; the poll is still armed", async () => {
+  const bus   = createEventBusForTesting();
+  const ctx   = makeApi();
+  let armed   = 0;
+  const store = createHoldingAreaStore( { bus, api: ctx.api, setIntervalFn: () => { armed++; return 1; }, clearIntervalFn: () => { /* noop */ } } );
+  const push  = (): void => bus.emit( { type: "task_store_changed", payload: { count: 1 } } as never );
+  push();
+  await tick();
+  assert.equal( ctx.calls.length, 0, "not subscribed before startPolling" );
+  store.startPolling();
+  await tick();
+  assert.equal( armed, 1, "the 60s poll is still armed alongside the push" );
+  store.stopPolling();
+  const after = ctx.calls.length;
+  push();
+  await tick();
+  assert.equal( ctx.calls.length, after, "unsubscribed after stopPolling" );
+} );
+
+test( "task_store_changed: restarting polling leaves no second subscription behind", async () => {
+  const bus  = createEventBusForTesting();
+  const ctx  = makeApi();
+  let subscribed = 0, unsubscribed = 0;
+  const realOn = bus.on.bind( bus );
+  ( bus as { on: unknown } ).on = ( type: string, listener: never ) => {
+    const off = realOn( type as never, listener );
+    if ( type === "task_store_changed" ) { subscribed++; return () => { unsubscribed++; off(); }; }
+    return off;
+  };
+  const store = createHoldingAreaStore( { bus, api: ctx.api, setIntervalFn: () => 1, clearIntervalFn: () => { /* noop */ } } );
+  store.startPolling();
+  store.startPolling();
+  assert.equal( subscribed, 2 );
+  assert.equal( unsubscribed, 1 );
+  store.stopPolling();
+  assert.equal( unsubscribed, 2 );
+  await tick();
+} );
