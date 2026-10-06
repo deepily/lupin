@@ -2,9 +2,9 @@
 """
 COSA Voice Interface for Claude Code Agent.
 
-This module provides async wrappers for the cosa-voice notification tools,
-enabling ClaudeCodeJob to send notifications to the UI with proper job_id
-routing for job card display.
+This module provides async wrappers for the cosa-voice notification tools.
+They let ClaudeCodeJob send notifications to the UI, routed by job_id
+so each one lands on the right job card.
 
 Uses AgentNotificationDispatcher for shared async dispatch logic.
 """
