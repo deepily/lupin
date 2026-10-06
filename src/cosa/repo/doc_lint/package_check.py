@@ -278,6 +278,24 @@ def check_package( root, base, package ):
     return result, pairs
 
 
+def refusal_result( package, message ):
+    """
+    Build the result.json content for a run that could not start.
+
+    Requires:
+        - package is the package argument and message says why the run was refused
+
+    Ensures:
+        - returns a dict with every key a normal result has: base None, changed_files and checks and refusals empty, zero counts
+        - pass is False and refused holds the message, so a reader tells it from a run that found nothing
+
+    Raises:
+        - nothing
+    """
+    counts = { "docstrings": 0, "docstrings_changed": 0, "words_before": 0, "words_after": 0 }
+    return { "base": None, "package": package, "changed_files": [], "checks": [], "counts": counts, "refusals": [], "pass": False, "refused": message }
+
+
 def main( argv=None, out=None ):
     """
     Command-line entry point.
@@ -289,7 +307,7 @@ def main( argv=None, out=None ):
         - writes result.json and pairs.json in --out, and nothing else, then prints one line per check
         - returns 0 only when every check passed and nothing was refused, 1 otherwise, result.json written either way
         - a check that raises any exception is recorded as did not run, so a bug in one module never costs the report
-        - returns 2 when base does not resolve or the package holds no in-scope .py file, and then result.json holds pass False and the refusal, and pairs.json is an empty list
+        - returns 2 when base does not resolve or the package holds no in-scope .py file, and then result.json holds the refusal with every key a normal result has, and pairs.json is not written, so no reader takes a refusal for a run with nothing changed
 
     Raises:
         - nothing
@@ -301,13 +319,15 @@ def main( argv=None, out=None ):
     parser.add_argument( "--package", required=True, help="repo-relative package directory" )
     parser.add_argument( "--out", required=True, help="directory to create for result.json and pairs.json" )
     args = parser.parse_args( sys.argv[ 1: ] if argv is None else argv )
+    package = args.package.rstrip( "/" )
     try:
-        result, pairs = check_package( args.repo_root, args.base, args.package.rstrip( "/" ) )
+        result, pairs = check_package( args.repo_root, args.base, package )
     except ( RuntimeError, ValueError ) as err:
-        result, pairs = { "base": None, "package": args.package, "pass": False, "refused": str( err ) }, []
+        result, pairs = refusal_result( package, str( err ) ), None
         out.write( f"REFUSED: {err}\n" )
     os.makedirs( args.out, exist_ok=True )
     for name, content in ( ( "result.json", result ), ( "pairs.json", pairs ) ):
+        if content is None: continue
         with open( f"{args.out}/{name}", "w", encoding="utf-8" ) as handle:
             json.dump( content, handle, indent=2 )
             handle.write( "\n" )

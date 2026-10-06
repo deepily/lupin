@@ -79,6 +79,11 @@ def _run( repo, out, package="pkg", base="HEAD" ):
     return code, stream.getvalue()
 
 
+def _out_of( repo, tmp_path, name ):
+    _run( repo, tmp_path / name )
+    return tmp_path / name
+
+
 def _check( result, name ):
     return next( c for c in result[ "checks" ] if c[ "name" ] == name )
 
@@ -217,14 +222,18 @@ def test_run_records_a_check_that_raises_as_did_not_run():
     assert pc._run( "x", lambda: ( 1, [] ) ) == { "name": "x", "pass": True, "ran": True, "output": [] }
 
 
-def test_a_base_that_does_not_resolve_and_an_empty_package_refuse_but_still_write_result_json( repo, tmp_path ):
+def test_a_base_that_does_not_resolve_and_an_empty_package_refuse_with_a_full_result_and_no_pairs_file( repo, tmp_path ):
+    keys = set( _read( _out_of( repo, tmp_path, "ok" ), "result.json" ) )
     code, text = _run( repo, tmp_path / "a", base="no-such-rev" )
     result = _read( tmp_path / "a", "result.json" )
     assert code == 2 and text.startswith( "REFUSED: git rev-parse" ) and result[ "pass" ] is False and result[ "refused" ].startswith( "git rev-parse" )
-    assert _read( tmp_path / "a", "pairs.json" ) == []
-    code, text = _run( repo, tmp_path / "b", package="nowhere" )
+    assert set( result ) == keys | { "refused" } and result[ "checks" ] == [] and result[ "refusals" ] == [] and result[ "changed_files" ] == []
+    assert result[ "counts" ] == { "docstrings": 0, "docstrings_changed": 0, "words_before": 0, "words_after": 0 } and result[ "base" ] is None
+    assert [ p.name for p in ( tmp_path / "a" ).iterdir() ] == [ "result.json" ]
+    code, text = _run( repo, tmp_path / "b", package="nowhere/" )
     result = _read( tmp_path / "b", "result.json" )
     assert code == 2 and "no in-scope .py files directly in nowhere" in text and result[ "refused" ] == "no in-scope .py files directly in nowhere" and result[ "package" ] == "nowhere"
+    assert set( result ) == keys | { "refused" } and not ( tmp_path / "b" / "pairs.json" ).exists()
 
 
 def test_main_defaults_to_stdout_and_sys_argv( repo, tmp_path, monkeypatch, capsys ):
