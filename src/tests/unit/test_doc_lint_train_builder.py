@@ -1,8 +1,8 @@
 """
 train_builder: which approved packages go in one train, read from sweep claim rows.
 
-The claim rows are plain dicts shaped like the store's rows, with bodies written in the format
-TaskRepository.apply_amendment stamps (the test asserts the repository's own stamp pattern sees them).
+The claim rows are plain dicts shaped like the store's rows. Their bodies use the format
+TaskRepository.apply_amendment stamps, and a test asserts the repository's own stamp pattern sees them.
 Everything else is real: a small git repo in a temp directory, real commits, real checks directories.
 """
 
@@ -33,7 +33,7 @@ def _git( root, *args ):
 
 
 def stamped( *blocks ):
-    """Join ( actor, note ) blocks the way apply_amendment does: a divider line, the note, a blank line between blocks."""
+    """Join ( actor, note ) blocks as apply_amendment does: a divider line, then the note."""
     return "\n\n".join( f"[amendment · {actor} · {TS}]\n{note}" for actor, note in blocks )
 
 
@@ -54,7 +54,7 @@ def event( actor=TIB, transition="amended", ts=TS ):
 
 
 def claim( package, blocks=(), writer=WRITER, owner=OWNER, status="queued", title=None, events=None, row_id=None, claim_text=None ):
-    """A claim row the way the store hands it over: the manager's claim line, then the stamped amendments, and the audit trail."""
+    """A claim row as the store hands it over: claim line, stamped amendments, audit trail."""
     body = ( claim_text if claim_text is not None else claim_line( package, writer ) ) + ( "\n\n" + stamped( *blocks ) if blocks else "" )
     return { "id": row_id or f"id-{package}", "title": title or f"docs sweep: {package}", "owner_persona": owner, "status": status, "body": body,
              "events": [ event( actor ) for actor, _ in blocks ] if events is None else events }
