@@ -5,13 +5,12 @@ Provides singleton pattern for shared services including configuration managemen
 and ID generation. These dependencies are injected into FastAPI endpoints to
 ensure consistent service access across the application.
 
-Snapshot management is deliberately absent. A get_snapshot_manager() lived here
-until step 0 of the brain-integration plan; it constructed the deprecated
-file-based manager with no `path`, which that class's __init__ required, so any
-call raised TypeError. Nothing reached it: routers/admin.py:34 defines its own
-same-named dependency returning main's Postgres singleton, and that is the one
-the app uses. (The class itself was deleted on 2026-08-21, ruling 6791ce47.)
-Ask main for the snapshot manager, not this module.
+Snapshot management is absent here. An earlier get_snapshot_manager() built the
+deprecated file-based manager without the `path` its __init__ required, so every
+call raised TypeError, and nothing used it. That manager class has since been
+deleted. routers/admin.py defines its own same-named dependency returning main's
+Postgres singleton, and the app uses that one. Ask main for the snapshot manager,
+not this module.
 """
 
 from cosa.config.configuration_manager import ConfigurationManager
