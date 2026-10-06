@@ -2,59 +2,44 @@
 """
 Validation for the optional `source_document` argument on the v2 submit door.
 
-WHAT THIS IS FOR. Rick's 2026-09-08 ask: a research run should be able to take a
-document he already has — in the R&D Docs explainer or in IO-Trees — as seed context,
-instead of starting from a bare query. `source_document` is how the caller names those
-documents, and this module is the only thing that decides whether a named document may
-be read.
+A research run can take documents the caller already has as seed context, instead of starting
+from a bare query. The documents come from the R&D Docs explainer or from IO-Trees.
+`source_document` names them. This module is the only place that decides whether a named
+document may be read.
 
-FIVE THINGS HE RULED, AND WHY EACH ONE IS HERE RATHER THAN SOMEWHERE ELSE
--------------------------------------------------------------------------
-· SCOPE — the doc-viewer's registered scopes PLUS `io/`. Not a second allowlist: this
-  resolves through the SAME `ScopeConfig` registry `/api/docs/file` and `/api/io/file`
-  answer with, AND applies the same two per-scope guards they apply — the secrets
-  blocklist and the prefix/manifest whitelist. Two allowlists that disagree is the
-  failure this avoids.
+Design choices, and why each one is here:
 
-  ⚠️ THIS CLAIM WAS FALSE WHEN FIRST WRITTEN, AND THE CORRECTION IS THE POINT. The first
-  cut shared only the scope ROOT and then checked an extension. Everything the browse
-  door refuses INSIDE a permitted root — `.claude/settings.local.json`, `CLAUDE.local.md`,
-  a secret-scan fixture, anything outside a scope's `allowed_prefixes` — this module
-  happily returned, and `.json` is in its own extension list. So the docstring promised a
-  guarantee the code did not implement, which is worse than not promising it: a reader
-  audits the sentence and stops. Found by Krishna in review. Sharing a root is not
-  sharing an allowlist.
-· A LIST, not one path. He ruled it on day one precisely so the shape never has to
-  change from `str` to `str | list` later, which would touch every caller and test.
-  A bare string is still accepted and normalized to a one-element list — a caller
-  handing over one document should not have to know it is a list.
-· REFUSE AT THE DOOR, before the job is created. Every failure here is returned as a
-  message, never raised: the door turns it into a refusal the caller can read, in the
-  same breath as the submit. A job that was accepted and then cannot read its own input
-  has to fail somewhere far less visible, after the caller was told the work started.
-· NO SIZE CEILING. His call, recorded as his — the recommendation was to refuse over a
-  limit and he declined it. There is deliberately no byte check in this module, and
-  adding one is a decision to re-open with him, not a tidy-up.
-· DEEP RESEARCH ONLY, for now. Nothing here is agent-specific, so extending it to the
-  podcast and presentation siblings is a registry edit rather than a second validator
-  (row 5726e3c5).
+- Scope. The allowed scopes are the doc-viewer's registered scopes plus `io/`. This is not
+  a second allowlist. Paths resolve through the same `ScopeConfig` registry that
+  `/api/docs/file` and `/api/io/file` use. The same two per-scope guards apply: the secrets
+  blocklist and the prefix or manifest whitelist. Sharing only the scope root is not enough.
+  The browse door also refuses files inside a permitted root, such as
+  `.claude/settings.local.json`, `CLAUDE.local.md` or anything outside a scope's
+  `allowed_prefixes`. Disagreeing allowlists would let the agent read what the viewer refuses.
+- A list, not one path. The argument is a list from the start, so its shape never has to
+  change from `str` to `str | list`, which would touch every caller and test. A bare string
+  is still accepted and becomes a one-element list.
+- Refuse at the door, before the job is created. Every failure is returned as a message and
+  never raised. The door turns it into a refusal the caller can read in the same response as
+  the submit. A job that was accepted and then cannot read its own input would fail less
+  visibly, after the caller was told the work had started.
+- No size ceiling. There is no byte check in this module. Adding one changes
+  agreed behaviour, so it needs a fresh decision rather than a tidy-up.
+- Deep research only, for now. Nothing here is agent-specific, so extending it to other
+  agents is a registry edit, not a second validator.
 
-REALPATH, NOT NORMPATH — THE ONE PLACE THIS DELIBERATELY DIVERGES FROM ITS NEIGHBOURS
---------------------------------------------------------------------------------------
-`_scope_registry.resolve_in_scope()` and `deep_research.py`'s read-side check both use
-`os.path.normpath`, which collapses `..` TEXTUALLY and does not resolve symlinks. A
-symlink planted inside an allowed root therefore passes a normpath check while pointing
-anywhere on the filesystem. This module resolves with `os.path.realpath` and re-checks
-containment AFTER resolution, so a symlink is followed and then judged on where it
-actually lands. That gap is filed separately as row 0cd3811a; this module does not wait
-for that fix, because an INPUT path is attacker-influenced in a way a report path is not.
+Resolution uses `os.path.realpath`, not `os.path.normpath`. This is the one place the module
+differs from its neighbours. `_scope_registry.resolve_in_scope()` and the
+read-side check in `deep_research.py` use `normpath`, which collapses `..` in the text and
+does not follow symlinks. A symlink planted inside an allowed root passes a `normpath`
+check while pointing anywhere on the filesystem. This module follows the symlink and then
+re-checks containment on the real location. An input path is attacker-influenced in a way a
+report path is not, so the module does not wait for the neighbours to change.
 
-WHY AN INJECTED RESOLVER RATHER THAN AN IMPORT
------------------------------------------------
-`scopes` is passed in rather than imported from the router module. The registry is built
-at FastAPI startup from the INI, so importing it here would make this module — and every
-test of it — depend on a booted application. Injection keeps the rule testable against a
-two-line fake while production passes the real registry.
+The `scopes` mapping is passed in, not imported from the router module. The registry is
+built from the INI at FastAPI startup. Importing it here would make this module, and every
+test of it, depend on a booted application. Injection lets a test use a two-line fake while
+production passes the real registry.
 """
 
 import os
@@ -86,28 +71,28 @@ MAX_SOURCE_DOCUMENTS = 16
 
 def parse_source_documents( raw ) -> tuple:
     """
-    Normalize whatever the caller put under `source_document` into a list of strings.
+    Normalize whatever the caller put under `source_document` into a list of path strings.
 
-    SHAPE ONLY — this asks nothing about the filesystem. Splitting the shape check from
-    the scope check is what lets a caller's typo ("a dict? really?") come back as its own
-    message instead of a confusing path error thirty lines later.
+    This checks the shape only and asks nothing about the filesystem. The shape check is kept
+    apart from the scope check. A caller's typo, such as a dict, then comes back as its own
+    message instead of a confusing path error later.
 
     Requires:
         - raw is whatever arrived in the args dict under SOURCE_DOCUMENT_ARG; any type
 
     Ensures:
         - returns ( paths, error ); exactly one of the two is meaningful
-        - a single string returns a one-element list — a caller naming one document need
+        - a single string returns a one-element list, so a caller naming one document need
           not know the argument is plural
         - a list or tuple of strings returns them stripped, in the caller's order
-        - None or an empty/whitespace-only string returns ( [], None ) — ABSENT, not
-          invalid. The argument is optional; saying nothing is a legal way to say nothing
+        - None or an empty or whitespace-only string returns ( [], None ). That means absent,
+          not invalid, because the argument is optional and saying nothing is legal
         - any other type, an empty list, a non-string element, a blank element, or more
           than MAX_SOURCE_DOCUMENTS entries returns ( [], <message> )
         - never raises
 
     Raises:
-        - None — a caller-shaped mistake is a message, not an exception
+        - None, because a caller-shaped mistake is a message, not an exception
     """
     if raw is None: return ( [ ], None )
 
@@ -138,19 +123,18 @@ def parse_source_documents( raw ) -> tuple:
 
 def split_scope( path: str ) -> tuple:
     """
-    Split a `<scope>/<relative-path>` reference into its two halves.
+    Split a `<scope>/<relative-path>` reference into its scope and its relative path.
 
-    THE FORM IS THE DOC-VIEWER'S, ON PURPOSE. A link the user can already open reads
-    `/app/docs?path=<scope>/<rel>`, so the string he can copy out of the viewer is the
-    string this door accepts. Inventing a second spelling would mean the path he can see
-    is not the path he can paste.
+    The form is the doc-viewer's. A link the user can already open reads
+    `/app/docs?path=<scope>/<rel>`, so the string copied out of the viewer is the string this
+    door accepts.
 
     Requires:
         - path is a non-empty, stripped string
 
     Ensures:
         - returns ( scope, relative_path, error ); error is None on success
-        - a leading slash is tolerated and stripped — pasted paths often carry one
+        - a leading slash is tolerated and stripped, because pasted paths often carry one
         - a reference with no separator, or an empty half, returns an error naming the
           expected form rather than guessing a scope
         - never raises
@@ -173,10 +157,9 @@ def resolve_within_root( root: str, relative_path: str ) -> tuple:
     """
     Resolve `relative_path` under `root`, following symlinks, and refuse any escape.
 
-    THE SYMLINK IS THE POINT. Resolving with `realpath` and THEN testing containment is
-    what separates this from its neighbours: a normpath check judges the path the caller
-    typed, this one judges the file the caller actually reaches. A symlink under an
-    allowed root that points at /etc is caught here and nowhere else in this codebase.
+    The path is resolved with `realpath` first and tested for containment afterwards. A
+    `normpath` check judges the path the caller typed. This check judges the file the caller
+    reaches, so a symlink under an allowed root that points at `/etc` is caught here.
 
     Requires:
         - root is an absolute filesystem path
@@ -184,11 +167,16 @@ def resolve_within_root( root: str, relative_path: str ) -> tuple:
 
     Ensures:
         - returns ( absolute_path, error ); error is None on success
-        - the returned path is the REAL path — symlinks already followed — and is under
+        - the returned path is the real path, with symlinks already followed, and is under
           the real root
         - an absolute or traversing relative_path that lands outside the root returns an
-          error naming the path, never the resolved location (which would leak the
-          layout of a filesystem the caller cannot otherwise see)
+          error naming the path, never the resolved location, which would leak the
+          layout of a filesystem the caller cannot otherwise see
+        - a link that lands outside the root gets the same answer whether or not its target
+          exists, so whoever planted the link cannot probe which outside paths exist
+        - containment is judged by directory identity, not by spelling, because the repo is
+          mounted at two prefixes in the container. A prefix test would refuse live in-scope
+          files reached through the other spelling. The doc-viewer door uses the same test
         - never raises
 
     Raises:
@@ -211,11 +199,11 @@ def resolve_within_root( root: str, relative_path: str ) -> tuple:
 
 def validate_source_documents( raw, scopes: dict ) -> tuple:
     """
-    Turn the caller's `source_document` argument into real, readable, in-scope paths.
+    Turn the caller's `source_document` argument into real, readable, in-scope absolute paths.
 
-    THE WHOLE REFUSAL SURFACE FOR THIS ARGUMENT IS THIS FUNCTION. Everything the door
-    can say no to about a source document is decided here and returned as a message, so
-    there is one place to read to know what is refused and one place to change it.
+    This function is the whole refusal surface for the argument. Everything the door can say no
+    to about a source document is decided here and returned as a message. That gives one place
+    to read to learn what is refused and one place to change it.
 
     Requires:
         - raw is the value found under SOURCE_DOCUMENT_ARG, or None
@@ -224,19 +212,25 @@ def validate_source_documents( raw, scopes: dict ) -> tuple:
 
     Ensures:
         - returns ( paths, error ); error is None on success and paths is the resolved,
-          real, absolute path for each document IN THE CALLER'S ORDER
-        - an absent argument returns ( [], None ) — optional means optional
-        - the FIRST failure returns, naming the offending path. Reporting one refusal a
-          caller can act on beats a list of derived complaints from the same mistake
-        - refuses, each with its own message: a malformed shape · an unscoped reference ·
-          an unknown scope · a path escaping its scope · a path that does not exist · a
-          directory where a file was named · an extension outside
-          ALLOWED_SOURCE_EXTENSIONS · a file that cannot be read
-        - applies NO size limit, by Rick's ruling of 2026-09-08
+          real, absolute path for each document, in the caller's order
+        - an absent argument returns ( [], None ), because optional means optional
+        - the first failure returns, naming the offending path. One refusal a caller can act
+          on beats a list of derived complaints from the same mistake
+        - refuses, each with its own message: a malformed shape, an unscoped reference,
+          an unknown scope, a path escaping its scope, a path that does not exist, a
+          directory where a file was named, an extension outside
+          ALLOWED_SOURCE_EXTENSIONS, and a file that cannot be read
+        - applies the doc-viewer's two per-scope guards, the secrets blocklist and the prefix
+          whitelist, to both the typed relative path and the relative path re-derived from
+          the resolved absolute path. A symlink inside an allowed root could otherwise point
+          at a refused file. The typed path would look clean while the file actually opened
+          is not. Checking both also refuses a path that is dirty as written even if it
+          resolves somewhere clean
+        - applies no size limit
         - never raises
 
     Raises:
-        - None — every failure is a message, because this runs at the door and the door
+        - None, because every failure is a message. This runs at the door, and the door
           answers with a refusal rather than a stack trace
     """
     paths, error = parse_source_documents( raw )

@@ -1,46 +1,40 @@
 """
-Near-match quantity guard — refuse a near match when either question carries a number and the two
-questions do not say the same thing about it.
+Near-match guard: refuse a near match when a number is involved and the questions differ.
 
-WHY (row 1b3ec88f, measured :8000 job ts-8278f1c5, 2026-10-03 21:02:20 EDT). "Convert 10 miles to
-kilometers" was answered "10 kilometers is about 6.21 miles" by replaying the snapshot of "How many
-miles is 10 kilometers?". The embedder scored the pair 93.4, above the 90.0 near-match threshold: the
-two questions share every content word and differ only in which unit the 10 belongs to, which a
-similarity score reads as almost nothing. A replay serves a stored ANSWER, so a near match that
-changes the quantity asked about is a confidently wrong reply.
+Why it exists. "Convert 10 miles to kilometers" was once answered "10 kilometers is about 6.21 miles".
+The cache replayed the snapshot of "How many miles is 10 kilometers?". The embedder scored the pair
+93.4, above the 90.0 near-match threshold. The questions share every content word and differ only in
+which unit the 10 belongs to, and a similarity score reads that as almost nothing. A replay serves a
+stored answer, so a near match that changes the quantity asked about is a confidently wrong reply.
 
-THE PREDICATE (second version, after Rio's review of the first). Build, for each question, the ORDERED
-sequence of its numbers and its content words:
+The predicate. For each question, build the ordered sequence of its numbers and content words.
+Examples:
 
     "Convert 100 degrees fahrenheit to celsius"   -> [ convert, 100, degree, fahrenheit, to, celsius ]
     "How many miles is 10 kilometers?"            -> [ many, mile, 10, kilometer ]
     "Uh... what's 253 plus, uh, 147?"             -> [ 253, plus, 147 ]
 
-When NEITHER question has a number, nothing is refused: the guard is silent and the near match behaves
-as it did before. When EITHER has one, the near match is refused unless the two sequences are
-identical. So a unit that differs ("miles to kilometers" / "miles to feet"), an order that differs
-("fahrenheit to celsius" / "celsius to fahrenheit"), a number that differs, a number's sign or decimal
-point that differs, or a number that moved relative to the words around it, all refuse.
+When neither question has a number, nothing is refused and the near match behaves as before. When
+either has one, the near match is refused unless the two sequences are identical. A different unit,
+order, number, sign or decimal point refuses. So does a number that moved relative to its words.
 
-Content words are lowercase alphabetic tokens with the function words REMOVED, plural-folded, and
-hesitations ("uh", "um", "hmm") dropped. The function-word list is the English stop-word list that ships
-with spaCy, the library the cache's normaliser already uses, MINUS the words that decide an answer
-(more, less, before, after, not, to, from, spelled numbers ...: _MEANING_BEARING); no list of units is kept here, so a unit
-this module has never seen is still compared as a word. A number is a digit run with an optional sign,
-a decimal point, or thousands grouping; the symbols % $ + * x / and = are folded to the words they stand
-for ("percent", "dollar", "plus", "times", "divided", "equal"), and a "-" between two numbers is "minus"
-(a hyphen elsewhere is dropped), so "2 + 2" and "2 plus 2" are the same and "5 - 3" and "5 + 3" are not.
+Content words are lowercase alphabetic tokens, plural-folded, with hesitations ("uh", "um", "hmm")
+dropped. Only a short allowlist of noise words is dropped, in `_NOISE_WORDS`. Every other word is
+compared, so a word nobody has thought of fails closed. No list of units is kept, so an unseen unit
+is still compared as a word. A number is a digit run with an optional sign, decimal point or
+thousands grouping. The symbols % $ + * x / and = become the words they stand for. A "-" between two
+numbers is "minus", and a hyphen elsewhere is dropped. So "2 + 2" and "2 plus 2" match, while
+"5 - 3" and "5 + 3" do not.
 
-FAILS CLOSED, AND THE PRICE IS NAMED. Refusing a near match costs one cache hit (the question is routed
-and answered afresh); allowing a wrong one costs a wrong answer. So wording that only a person would
-call the same is refused when it has a number in it: "What's 5 kilometers in miles?" against "How many
-miles is 5 kilometers?" (the number moved), or "Convert" against "Calculate". The cost on the eval
-corpus is measured in io/findings-1b3ec88f-fix-2.md.
+The guard fails closed, and the price is accepted. Refusing a near match costs one cache hit, because
+the question is routed and answered afresh. Allowing a wrong one costs a wrong answer. Wording that
+only a person would call the same is therefore refused when it has a number in it. Examples are
+"What's 5 kilometers in miles?" against "How many miles is 5 kilometers?", or "Convert" against
+"Calculate".
 
-KNOWN GAPS (named, not bridged): a number spelled as a word ("ten") is not a number to this
-predicate; a conversion with NO number ("convert miles to kilometers" vs "convert kilometers to miles")
-has no numbers on either side, so the guard is silent; and only near matches are guarded here, not
-tier-1 exact hits.
+Known gaps. A number spelled as a word ("ten") is not a number to this predicate. A conversion with
+no number on either side, such as "convert miles to kilometers" against "convert kilometers to
+miles", leaves the guard silent. Only near matches are guarded here, not tier-1 exact hits.
 """
 
 import re
@@ -71,7 +65,10 @@ _SYMBOL_WORD = { "%": "percent", "$": "dollar", "+": "plus", "*": "times", "\u00
 
 def _fold_plural( word: str ) -> str:
     """
-    Reduce a plural noun to its singular, crudely and on purpose.
+    Reduce a plural noun to its singular using simple suffix rules.
+
+    The folding is crude. A word that folds wrongly still fails closed, because two different foldings are
+    different words.
 
     Requires:
         - word is a non-empty lowercase alphabetic string
@@ -174,7 +171,7 @@ def has_number( text: str ) -> bool:
 
 def quantities_differ( asked: Optional[ str ], stored: Optional[ str ] ) -> bool:
     """
-    Whether replaying the answer to `stored` for `asked` could change the quantity asked about.
+    Whether replaying the answer to `stored` for `asked` could change the quantity asked.
 
     Requires:
         - asked and stored are the two questions' text; either may be None

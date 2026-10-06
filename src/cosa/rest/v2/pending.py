@@ -1,25 +1,23 @@
-"""PendingRequests — parked v2 flows awaiting a human's missing argument.
+"""
+PendingRequests: parked v2 flows awaiting a human's missing argument.
 
-When the router gets the intent but a required argument is still missing after
-the phi4 extraction pass, the v2 endpoint does not block: it parks the request,
-returns the first question immediately, and runs the human round-trip on a
-background thread. This module holds those parked requests.
+The router may get the intent while a required argument is still missing after the phi4 extraction
+pass. The v2 endpoint then does not block. It parks the request and returns the first question
+immediately. It runs the human round-trip on a background thread. This module holds those parked
+requests.
 
 Two properties matter and are enforced here rather than left to callers:
 
-    1. Bounded growth. An in-process dict that only ever grows leaks memory
-       across a long eval run, so every entry carries a creation time and
-       sweep() (and every get()) drops entries older than the TTL.
+    1. Bounded growth. An in-process dict that only ever grows leaks memory across a long eval run.
+       Every entry carries a creation time. sweep() and every get() drop entries older than the TTL.
 
-    2. An AI-observable completion seam. The resume thread's only real-world
-       output is TTS to a human, which the AI cannot hear. So each entry has a
-       pollable `status` the resume thread advances (pending -> running ->
-       done/failed); a test — and the /stats surface — can observe completion
-       without ears.
+    2. An AI-observable completion seam. The resume thread's only real-world output is TTS to a
+       human, which the AI cannot hear. So each entry has a pollable `status` that the resume thread
+       advances (pending -> running -> done/failed). A test, or the /stats surface, can observe
+       completion without ears.
 
-The clock is injectable (monotonic nanoseconds) so tests are deterministic, and
-the store is guarded by an RLock because the request thread writes an entry that
-a background resume thread later mutates.
+The clock is injectable (monotonic nanoseconds) so tests are deterministic. The store is guarded by
+an RLock, because the request thread writes an entry that a background resume thread later mutates.
 """
 
 from __future__ import annotations
@@ -163,39 +161,34 @@ class PendingRequests:
 
     def claim( self, pending_id: str ) -> Optional[ PendingEntry ]:
         """
-        Atomically take ownership of a parked entry for one resume TURN.
-
-        This exists because a resume TURN is a read-modify-write spread over
-        several calls: read the entry, fold the answer into its extraction, then
-        either re-ask or run the agent. The RLock keeps the dictionary
-        structurally sound; it does NOT make that sequence atomic.
-
-        Two concurrent resumes on one pending_id could both pass the liveness
-        check and both fold an answer into the SAME extraction object. On a
-        two-argument interview that does not merely lose an answer — it puts the
-        answers in the WRONG SLOTS, because each caller takes `missing[ 0 ]` at a
-        different moment. Measured, not theorised: racing two resumes of a
-        location+date interview produced {"location": "Tuesday", "date":
-        "Boston"} in four runs out of six.
-
-        That race is NOT reachable while the resume handler runs on the event
-        loop — one loop cannot interleave two of them. It becomes reachable the
-        moment the handler moves to a worker thread, which is the change this
-        method ships alongside, so the guard lands with the thing that creates
-        the need for it rather than after.
+        Atomically take ownership of a parked entry for one resume turn.
 
         Requires:
             - pending_id is the id returned by a prior put().
 
         Ensures:
-            - returns the entry with status "answering" iff it was live AND
+            - returns the entry with status "answering" iff it was live and
               still had status "pending"; the whole check-and-set happens under
-              ONE lock acquisition. The caller owns the turn until it either
+              one lock acquisition. The caller owns the turn until it either
               release_turn()s (interview continues) or advances the status
               (the agent runs).
-            - returns None if the entry is missing, expired, or ALREADY claimed —
-              the caller cannot distinguish those, and must not: all three mean
+            - returns None if the entry is missing, expired, or already claimed.
+              The caller cannot distinguish those, and must not: all three mean
               "this resume does not own the conversation".
+
+        A resume turn is a read-modify-write spread over several calls. It reads the entry, folds the answer
+        into its extraction, then either re-asks or runs the agent. The RLock keeps the dictionary
+        structurally sound but does not make that sequence atomic.
+
+        Two concurrent resumes on one pending_id could both pass the liveness check. Both would fold an
+        answer into the same extraction object. On a two-argument interview that puts the answers in the
+        wrong slots, because each caller takes `missing[ 0 ]` at a different moment. Racing two resumes of a
+        location and date interview produced {"location": "Tuesday", "date": "Boston"} in four runs out of
+        six.
+
+        The race cannot happen while the resume handler runs on the event loop, because one loop cannot
+        interleave two handlers. It becomes possible once the handler runs on a worker thread. This guard
+        exists for that case.
         """
         with self._lock:
             entry = self.get( pending_id )

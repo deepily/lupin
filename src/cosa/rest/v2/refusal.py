@@ -1,17 +1,19 @@
 """
-A submit that was understood and then declined by the thing that builds the job.
+A submit that was understood and then declined by the job builder.
 
 `SubmitRefused` is raised by a job builder that has a specific, reportable reason not to
-produce a job — as opposed to a builder that crashed. The flow reports it as a terminal
-`failed` result whose `route_reason` is the reason, with `submit_details` carrying whatever
-the builder learned. It exists so a refusal like "the user cancelled the expeditor
-interview" is not flattened into the generic `agentic_build_error` degrade, which would
-lose the one fact the caller needs.
+produce a job, as opposed to a builder that crashed. The flow reports it as a terminal
+`failed` result. Its `route_reason` is the reason, and `submit_details` carries whatever
+the builder learned. It exists so a refusal such as "the user cancelled the expeditor
+interview" is not flattened into the generic `agentic_build_error` degrade. That degrade
+would lose the one fact the caller needs.
 """
 
 
 class SubmitRefused( Exception ):
     """
+    Refusal carrying a reason code, a message and optional details.
+
     Requires:
         - route_reason is a short snake_case reason
         - message is a human sentence

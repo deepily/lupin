@@ -1,12 +1,13 @@
 """
-Per-request values a v2 door hands DOWN to a job builder without widening every signature.
+Per-request values a v2 door hands down to a job builder without widening every signature.
 
 The one value today is the caller's bearer token. `/api/v2/submit` runs the flow in a worker
-thread; a builder that has to call back into the server AS THE CALLER — the mock-job
-expeditor test, whose notifications authenticate with the user's JWT — needs it, and the
-flow's `submit()` signature (used by a dozen in-process callers) is the wrong place to grow a
-credential parameter. A ContextVar travels into `run_in_threadpool` (anyio copies the
-context), is scoped to the one request, and reads as None when nothing set it.
+thread. A builder that must call back into the server as the caller needs the token. The
+mock-job expeditor test is one such builder, because its notifications authenticate with the
+user's JWT. The flow's `submit()` signature has a dozen in-process callers, so it is the
+wrong place to add a credential parameter. A ContextVar travels into `run_in_threadpool`,
+because anyio copies the context. It is scoped to the one request and reads as None when
+nothing set it.
 """
 
 from contextvars import ContextVar

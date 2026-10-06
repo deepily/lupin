@@ -4,16 +4,16 @@ CJ Flow v2 hands a piece of `Work` to an `Executor` and gets back an `Outcome`.
 `InlineExecutor` runs replay and agents synchronously on the calling thread;
 `QueuedExecutor` hands them to the existing FIFO queue and answers `waiting`.
 Swapping one for the other touches no line of the flow, because the HTTP
-contract already carries `status` and `job_id`. The executor is chosen by the INI key
-`v2 executor` (default `inline`) via `make_executor()`.
+contract already carries `status` and `job_id`. The INI key `v2 executor` (default
+`inline`) picks the executor, through `make_executor()`.
 
-`Work.job` is duck-typed on purpose — this module imports no agent or snapshot
-class, which is exactly the machinery v2 exists to shed. Replay calls
-`for_current_user()` / `run_code()` / `run_formatter()`; agents call `do_all()`.
+`Work.job` is duck-typed. This module imports no agent or snapshot class, because that
+is the machinery v2 exists to shed. Replay calls `for_current_user()`, `run_code()` and
+`run_formatter()`. Agents call `do_all()`.
 
-An agent or replay that throws does **not** propagate out of the executor: it is
-captured as `Outcome(status="failed", error=…)` so the flow can degrade to the
-receptionist rather than letting a 500 abort an eval run.
+An agent or replay that throws does **not** propagate out of the executor. The executor
+captures it as `Outcome(status="failed", error=…)`. The flow can then degrade to the
+receptionist, rather than letting a 500 abort an eval run.
 """
 
 from __future__ import annotations
@@ -49,13 +49,12 @@ class Work:
 class Outcome:
     """The terminal result of an executor.submit() call.
 
-    status is "done" when an answer was produced, "waiting" when a queued
-    executor handed work off (phase 2), "failed" when replay or the agent threw.
+    status is "done" when an answer was produced. It is "waiting" when the queued
+    executor handed work off. It is "failed" when replay or the agent threw.
 
-    "waiting" is deliberately not "parked". A job sitting in the queue is waiting
-    its turn — nobody suspended it and nothing is owed to it. "parked" is kept for
-    the flow's needs-input path, where a request really is suspended pending an
-    answer from the user. Two different situations were reading as one word.
+    "waiting" is not "parked". A job sitting in the queue is waiting its turn.
+    Nobody suspended it and nothing is owed to it. "parked" is kept for the flow's
+    needs-input path, where a request is suspended pending an answer from the user.
     """
 
     status     : Literal[ "done", "waiting", "failed" ]
@@ -83,7 +82,7 @@ class Outcome:
 
 @runtime_checkable
 class Executor( Protocol ):
-    """The one seam phase 2 swaps: submit Work + a trace, get an Outcome."""
+    """The seam to swap: submit Work and a trace, get an Outcome."""
 
     def submit( self, work: Work, trace: StageTrace ) -> Outcome: ...
 
@@ -136,16 +135,15 @@ class InlineExecutor:
     def _generated_code( job: Any ) -> tuple:
         """The (code, example, returns) this agent produced, or three Nones.
 
-        v1's `SolutionSnapshot.create_from_agent` reads exactly these three keys off
-        `prompt_response_dict`, and the v2 write-back read none of them — which is why
-        every v2-written row had empty code and only CalculatorAgent snapshots could
-        ever be replayed.
+        v1's `SolutionSnapshot.create_from_agent` reads these three keys off
+        `prompt_response_dict`. The v2 write-back must read them too. Otherwise the
+        written row has empty code and cannot be replayed.
 
-        `prompt_response_dict` is set by `AgentBase.run_prompt()`, not by `__init__`,
-        so an agent that answered without running a prompt genuinely does not have one.
-        That is a stated condition rather than attribute fishing, and it yields no code
-        instead of turning a successful run into a failed one — reading the attribute
-        unguarded would raise inside the try below and report the agent as broken.
+        `AgentBase.run_prompt()` sets `prompt_response_dict`, not `__init__`. An agent
+        that answered without running a prompt does not have one. The `hasattr` check
+        is that stated condition, not attribute fishing. It yields no code. Reading the
+        attribute unguarded would raise inside the caller's try and report a successful
+        agent as failed.
         """
         if not hasattr( job, "prompt_response_dict" ):
             return ( None, None, None )
@@ -167,21 +165,16 @@ class InlineExecutor:
 class QueuedExecutor:
     """Hands the work to the existing FIFO queue instead of running it here.
 
-    This is the v1 tail of `push_job` (`todo_fifo_queue.py:857-859`) and nothing
-    else: scope the job's id for user filtering, push it onto the todo queue,
-    answer `waiting`. It never runs the job, so it never produces an answer —
-    the queue consumer runs it later and the websocket carries the result.
-
-    `waiting` is a hand-off, not a failure and not a finish. The flow's two
-    status gates treat it as success-in-flight; the write-back guard does NOT,
-    because a job that has not run has no answer to cache.
+    This is the v1 tail of `push_job` in `src/cosa/rest/todo_fifo_queue.py`: scope the id,
+    push onto the todo queue, answer `waiting`. The queue consumer runs the job later.
+    The flow's two status gates treat `waiting` as success; the write-back guard does not.
 
     Requires:
         - todo_queue exposes push( job ) and a user_job_tracker carrying
           register_scoped_job( base_hash, user_id, session_id ).
 
     Ensures:
-        - the job's id_hash is the SCOPED id BEFORE the push, which is v1's
+        - the job's id_hash is the scoped id before the push, which is v1's
           order: a filtering read must never see an unscoped row.
         - returns Outcome( status="waiting", job_id=<scoped id>, queue_position=<the todo
           queue's size right after the push> ) with no answer.
@@ -201,7 +194,7 @@ class QueuedExecutor:
         self.verbose    = verbose
 
     def submit( self, work: Work, trace: StageTrace ) -> Outcome:
-        """Scope the job, push it, and answer waiting — every kind, no exceptions."""
+        """Scope the job, push it, and answer waiting, for every kind of work."""
         try:
             trace.mark( "t_enqueue" )
             job         = work.job

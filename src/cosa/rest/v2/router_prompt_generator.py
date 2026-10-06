@@ -1,30 +1,28 @@
 """
-Generate the agent-router completion prompt from the v2 registry (row 95924f2d;
-design 2026.08.16-generate-router-prompt-and-corpus-from-registry.md §2.2).
+Generate the agent-router completion prompt from the v2 registry.
 
-The serving prompt `src/conf/prompts/agent-router-template-completion.txt` was
-hand-edited and had no writer anywhere in the tree, so nothing PREVENTED it from
-drifting away from the registry. This module is that writer: it emits the file's
-fixed scaffolding plus one `<command>` line per `speakable` command in the
-REGISTRY. The paired test (`test_v2_router_prompt_generator.py`) pins the on-disk
-file to what this emits, converting the drift guard from a detector into a
-preventer.
+The serving prompt `src/conf/prompts/agent-router-template-completion.txt` needs a writer,
+or nothing stops it drifting away from the registry. This module is that writer. It emits
+the file's fixed scaffolding plus one `<command>` line per `speakable` command in the
+registry. The paired test (`test_v2_router_prompt_generator.py`) pins the on-disk file to
+what this emits. That turns the drift guard from a detector into a preventer.
 
-Two invariants, stated so a future editor does not quietly break them:
+Design: `src/rnd/v0.2.0/2026.08.16-generate-router-prompt-and-corpus-from-registry.md`.
 
-  1. This module is a PROVABLE NO-OP on the serving artifact (Rachel's ruling,
-     2026-08-16, superseding design §2.2's "generator owns order"): the generated
-     file equals the current served file byte-for-byte, so the one question this
-     row answers — is the generator correct, or did serving quietly change? — stays
-     answerable. Command MEMBERSHIP comes from `registry.speakable`; `_SERVED_ORDER`
-     fixes only the sequence and is cross-checked against that set (fail-loud on
-     drift), so it is a presentation order, not a second definition. A better
-     emission order is a SEPARATE, MEASURED change with its own probe — never
-     bundled here.
+Two invariants hold, so a future editor does not quietly break them:
 
-  2. The scaffolding (the instruction prose, the `{voice_command}` slot, the
-     response-format block) is NOT registry-derived — no registry can author it.
-     It is held here verbatim as `_HEADER` / `_FOOTER`; only the command list
+  1. This module is a provable no-op on the serving artifact. The generated file equals
+     the current served file byte for byte. That keeps one question answerable: is the
+     generator correct, or did serving quietly change? Command membership comes from
+     `registry.speakable`. `_SERVED_ORDER` fixes only the sequence, and it is checked
+     against that set, failing loudly on drift. It is a presentation order, not a second
+     definition. A better emission order is a separate, measured change with its own
+     probe, never bundled here. The design document's "generator owns order" idea was
+     overruled for this reason.
+
+  2. The scaffolding is not derived from the registry, because no registry can author it.
+     That covers the instruction prose, the `{voice_command}` slot and the response-format
+     block. It is held here verbatim as `_HEADER` and `_FOOTER`. Only the command list
      between the `<agent-routing-commands>` tags is generated.
 
 Regenerate the checked-in file:
@@ -133,14 +131,14 @@ def speakable_commands():
     fixes the sequence for a provable byte-for-byte no-op on the serving artifact.
 
     Requires:
-        - REGISTRY is populated (import side effect)
+        - `REGISTRY` is populated (import side effect)
 
     Ensures:
-        - Returns the FULL routing strings for every spec whose `speakable` field
+        - Returns the full routing strings for every spec whose `speakable` field
           is True, sequenced by _SERVED_ORDER
         - Raises ValueError if _SERVED_ORDER and the registry's speakable set
-          disagree in either direction — a registry change that forgets this list
-          fails LOUD instead of emitting a stale order
+          disagree in either direction, so a registry change that forgets this list
+          fails loudly instead of emitting a stale order
     """
     speakable = { command for command, spec in REGISTRY.items() if spec.speakable }
     ordered   = set( _SERVED_ORDER )
@@ -156,7 +154,7 @@ def speakable_commands():
 
 def render_router_prompt():
     """
-    Render the full agent-router completion prompt from the registry.
+    Render the agent-router completion prompt from the registry.
 
     Requires:
         - _HEADER / _FOOTER hold the verbatim scaffolding
