@@ -1,11 +1,11 @@
 """
 Shared git strategy engine for agentic repair agents.
 
-Extracted from cosa.agents.bug_fix_expediter.orchestrator (Session 1cfcdf73,
-2026-04-10) so BugFixExpediter and TestFixExpediter can share the same
-trust-level → git-strategy mapping and commit/branch/PR execution machinery.
+Shared by BugFixExpediter and TestFixExpediter so both use the same mapping from
+trust level to git strategy and the same commit, branch and PR machinery.
+Extracted from cosa.agents.bug_fix_expediter.orchestrator.
 
-This module is a PEER of the agent packages — it does not import from any
+This module is a peer of the agent packages and does not import from any
 specific agent. The caller (orchestrator) is responsible for:
   - Constructing commit messages, PR titles, PR bodies (agent-specific)
   - Providing an async `notify_fn(message, priority)` callable for voice I/O
@@ -17,7 +17,6 @@ GitStrategist owns:
   - Branch slug generation (fix/YYYY-MM-DD-{words})
   - `commit_and_pr_single` — BFE path (one commit or one branch+PR)
   - `commit_and_pr_multi` — TFE path (one branch, N commits, one PR)
-    — STUB in this commit; full implementation in TFE step 11
 
 See: src/rnd/v0.1.6/2026.04.10-test-fix-expediter/07-phase5-multi-cluster-git-plan.md
 """
@@ -34,13 +33,11 @@ logger = logging.getLogger( __name__ )
 
 class GitStrategist:
     """
-    Shared trust-level → git-strategy engine.
+    Shared engine that maps a trust level to a git strategy.
 
-    Trust-to-git mapping:
-        - L1-L2 (shadow/suggest): commit_only on current branch
-        - L3+ (active): branch_and_pr via gh CLI
-        - gh CLI missing: degrade L3+ → branch_only
-        - Proxy unavailable / error: commit_only (conservative fallback)
+    Trust 1-2 (shadow, suggest): commit_only on the current branch.
+    Trust 3+ (active): branch_and_pr via the gh CLI, or branch_only without gh.
+    A missing or erroring proxy gives commit_only (conservative fallback).
 
     Requires:
         - debug / verbose are bool flags
@@ -61,14 +58,14 @@ class GitStrategist:
     @staticmethod
     def resolve_trust_level( proxy ) -> int:
         """
-        Return trust level 1-5 from the proxy, falling back to L1 on failure.
+        Return trust level 1-5 from the proxy, falling back to level 1 on failure.
 
         Requires:
-            - proxy is None OR has a `trust_tracker` attribute with `get_level()` or `level`
+            - proxy is None or has a `trust_tracker` attribute with `get_level()` or `level`
 
         Ensures:
             - Always returns int between 1 and 5
-            - L1 on any error (conservative default)
+            - Trust level 1 on any error (conservative default)
 
         Args:
             proxy: Optional decision proxy (SWE EngineeringStrategy or equivalent)
@@ -122,7 +119,7 @@ class GitStrategist:
         notify_fn: Callable,
     ) -> dict:
         """
-        Single-fix git strategy: commit_only (L1-L2) OR branch+PR (L3+).
+        Single-fix git strategy: commit_only (trust 1-2) or branch plus PR (trust 3+).
 
         Requires:
             - git_ops is a GitOps instance (async git/gh wrapper)
@@ -136,14 +133,14 @@ class GitStrategist:
             - git_strategy in {"commit_only", "branch_and_pr", "branch_only", None}
             - Any key may be None on failure
             - Never raises
-            - On L3+ error, checks out original branch before returning
+            - On a trust level 3 and above error, checks out original branch before returning
 
         Args:
             git_ops: GitOps instance
             files_changed: List of files modified
             commit_message: Commit message subject+body
-            pr_title: PR title (used only in L3+ path)
-            pr_body: PR body markdown (used only in L3+ path)
+            pr_title: PR title (used only in the trust level 3 and above path)
+            pr_body: PR body markdown (used only in the trust level 3 and above path)
             trust_level: Resolved trust level (from resolve_trust_level)
             notify_fn: Async notification callable
 
@@ -236,13 +233,9 @@ class GitStrategist:
         """
         Multi-cluster git strategy: one branch, N commits (one per cluster), one PR.
 
-        Used by TFE Phase 5 — each selected cluster becomes one commit within
-        a single branch, and the whole batch goes out as one PR.
-
-        Branch strategy (same trust-to-git mapping as commit_and_pr_single):
-          - L1-L2: commit_only — N sequential commits on the current branch
-          - L3+  : branch_and_pr — new fix/... branch, N commits, push, PR via gh
-          - gh missing: degrade L3+ → branch_only (branch + commits + push, no PR)
+        Used by TFE, with the same trust mapping as commit_and_pr_single. Trust 1-2 makes
+        N commits on the current branch; trust 3+ makes a new fix branch, N commits,
+        a push and a PR. Without gh it degrades to branch_only (no PR).
 
         Requires:
             - git_ops is a GitOps instance
@@ -250,8 +243,8 @@ class GitStrategist:
                 (cluster_id, cluster_title, files_list, commit_message)
             - trust_level is 1-5
             - notify_fn is async callable(message, priority)
-            - pr_title and pr_body are non-empty strings (used only in L3+ path)
-            - branch_slug_hint is optional — defaults to "multi-cluster-fix"
+            - pr_title and pr_body are non-empty strings (used only in the trust level 3 and above path)
+            - branch_slug_hint is optional; when absent the slug source is "multi-cluster-" plus the cluster count
 
         Ensures:
             - Returns dict: {git_strategy, branch_name, commit_hashes, pr_url, error}
@@ -261,15 +254,15 @@ class GitStrategist:
             - git_strategy in {"commit_only", "branch_and_pr", "branch_only", None}
             - Any field may be None on failure; error is set
             - Never raises
-            - On L3+ error, checks out original branch before returning
+            - On a trust level 3 and above error, checks out original branch before returning
 
         Args:
             git_ops: GitOps instance (async git/gh wrapper)
             clusters: List of (cluster_id, title, files, commit_message) tuples
             trust_level: Resolved trust level (from resolve_trust_level)
             notify_fn: Async notification callable
-            pr_title: PR title (L3+ path only)
-            pr_body: PR body markdown (L3+ path only)
+            pr_title: PR title (trust level 3 and above path only)
+            pr_body: PR body markdown (trust level 3 and above path only)
             branch_slug_hint: Optional slug hint for branch naming
 
         Returns:

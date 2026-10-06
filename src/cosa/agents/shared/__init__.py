@@ -1,22 +1,19 @@
 """
 COSA Shared Agent Primitives.
 
-Reusable modules extracted from agent-specific packages so multiple agent
-implementations (BugFixExpediter, TestFixExpediter, and future repair agents)
-can share the same fix-application, git-strategy, and plan-writing machinery
-without contaminating each other's agent-specific code paths.
+Reusable modules extracted from agent-specific packages, so BugFixExpediter, TestFixExpediter and future repair agents
+can share fix-application, git-strategy and plan-writing machinery. Their agent-specific code paths stay separate.
 
-This package is a PEER of the agent packages — it does not import from any
-specific agent (e.g., no `cosa.agents.bug_fix_expediter.*` imports). Agent
-packages import from here, not the other way around.
+This package sits beside the agent packages. It does not import from any specific agent (for example, no `cosa.agents.bug_fix_expediter.*` imports).
+Agent packages import from here, not the other way around.
 
 Modules:
-    plan_writer      — Structured markdown plan document writer (agent-agnostic)
-    git_strategist   — Trust-level → git action mapping (Phase 5 of BFE/TFE)
-    fix_executor     — Coder+tester loop with polymorphic prompt registry (Phase 3)
+    `plan_writer`: structured markdown plan document writer (agent-agnostic).
+    `git_strategist`: trust-level to git action mapping (the git phase of BFE/TFE).
+    `fix_executor`: coder+tester loop with polymorphic prompt registry (the fix phase of BFE/TFE).
 
 Future modules (pending extraction):
-    meta_repair_guard — Shared recursion-guard helpers for meta-repair agents
+    meta_repair_guard - Shared recursion-guard helpers for meta-repair agents
 """
 
 from .plan_writer import PlanWriter

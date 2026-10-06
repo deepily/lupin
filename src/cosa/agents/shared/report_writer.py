@@ -7,9 +7,8 @@ post-run outcome as a single self-contained document.
 
 Used by Bug Fix Expediter and Test Fix Expediter to produce the "View Full
 Report" artifact surfaced on completed job cards. Populating
-`self.artifacts["report_path"]` with this file's output path causes the UI's
-`renderReportLinkSection()` (notifications.js) to render a "📋 View Full
-Report" link that opens the report in /app/docs.
+`self.artifacts["report_path"]` with this file's output path makes the UI's
+`renderReportLinkSection()` (notifications.js) render a link that opens the report in /app/docs.
 
 Zero back-dependencies on any specific agent package — `write()` accepts
 plain strings + a slug, so any caller can use it.
@@ -29,10 +28,10 @@ class ReportWriter:
     Writes final-report markdown files to disk.
 
     Path convention:
-        {project_root}/io/swe-team/reports/{email}/YYYY.MM.DD-at-HH:MM-EST-{slug}-{agent}-report.md
+        `{project_root}/io/swe-team/reports/{email}/YYYY.MM.DD-at-HH:MM-EST-{slug}-{agent}-report.md`
 
     The `EST` token in the filename is fixed — it reflects the user's dated-
-    filename convention. Times use America/New_York (handles EST/EDT automatically).
+    filename convention. Times use America/New_York (handles `EST`/`EDT` automatically).
     """
 
     REPORTS_DIR = "io/swe-team/reports"
@@ -92,10 +91,10 @@ class ReportWriter:
         """
         Generate the report file path following the project's dated-filename convention.
 
-        Filename: YYYY.MM.DD-at-HH:MM-EST-{slug}-{agent}-report.md
+        Filename: `YYYY.MM.DD-at-HH:MM-EST-{slug}-{agent}-report.md`
 
         The `EST` token is fixed per the project's filename convention; the actual
-        timestamp uses America/New_York (handles EST/EDT automatically).
+        timestamp uses America/New_York (handles `EST`/`EDT` automatically).
         """
         now_et    = datetime.now( tz=self.TZ )
         date_str  = now_et.strftime( "%Y.%m.%d" )
@@ -112,9 +111,10 @@ class ReportWriter:
     @staticmethod
     def _sanitize_slug( slug: str ) -> str:
         """
-        Coerce a slug candidate to [a-z0-9-]+, max 6 words, non-empty fallback.
-        Underscores are normalized to hyphens so status tokens like
-        `dead_job_not_found_dry_run` become `dead-job-not-found-dry-run`
+        Coerce a slug candidate to [a-z0-9-]+ with at most 6 words.
+
+        An empty result falls back to "unknown". Underscores are normalized to hyphens so
+        status tokens like `dead_job_not_found_dry_run` become `dead-job-not-found-dry-run`
         rather than collapsing to `deadjobnotfounddryrun`.
         """
         normalized = (slug or "").lower().replace( "_", "-" )

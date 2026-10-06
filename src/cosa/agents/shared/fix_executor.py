@@ -1,18 +1,17 @@
 """
 Shared fix executor for agentic repair agents.
 
-Extracted from cosa.agents.bug_fix_expediter.orchestrator.run_fix (Session
-1cfcdf73, 2026-04-10) so BugFixExpediter and TestFixExpediter can share the
-same Coder+Tester retry loop, redelegation logic, SafetyGuard wiring, and
-escalation handling.
+Extracted from cosa.agents.bug_fix_expediter.orchestrator.run_fix so BugFixExpediter
+and TestFixExpediter can share the same Coder+Tester retry loop, redelegation
+logic, SafetyGuard wiring, and escalation handling.
 
-This module is a PEER of the agent packages — it does not import from any
+This module is a peer of the agent packages and does not import from any
 specific agent's prompts. Agent-specific prompt builders and system prompts
 are registered via `FIX_PROMPT_BUILDERS` at import time, keyed by an agent
 string ("bfe", "tfe", etc.).
 
 The caller (agent orchestrator) is responsible for:
-  - State machine transitions (BFEPhase.PROPOSING → FIXING, etc.)
+  - State machine transitions (BFEPhase moving from `PROPOSING` to `FIXING`, etc.)
   - Plan doc update via PlanWriter (user_email source is agent-specific)
   - Completion notification
   - Providing the delegate_to_coder_fn and verify_fix_fn callbacks that do
@@ -47,18 +46,16 @@ logger = logging.getLogger( __name__ )
 
 class BFETimeoutError( Exception ):
     """
-    Raised by the runtime brake (Leg a) when a single agentic SDK call exceeds
-    the wall-clock budget — the non-returning hang the cooperative SafetyGuard
-    cannot catch (SafetyGuard.check_timeout only fires *between* fix-loop
-    iterations; a call hung *inside* one iteration never reaches it).
+    Raised when one agentic SDK call exceeds the wall-clock budget (the runtime brake).
 
-    Deliberately a plain Exception subclass, NOT a SafetyLimitError: a
-    SafetyLimitError is caught-and-softened into a failed FixResult by
-    execute_fix's handler, which would swallow the brake. This exception is
-    instead re-raised past execute_fix so it propagates out of the BFE job's
-    do_all() and is captured by the agentic-pool Future — where
-    _on_agentic_complete transitions the job to dead and releases the pool slot
-    (Leg b). See src/rnd/v0.2.0/2026.08.13-bfe-runtime-brake-design.md. — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.13-bfe-runtime-brake-design.md
+    SafetyGuard.check_timeout only fires between fix-loop iterations, so a call
+    that hangs inside one iteration never reaches it. This brake catches that hang.
+
+    It is a plain Exception subclass and not a SafetyLimitError. The handler in
+    execute_fix softens a SafetyLimitError into a failed FixResult, which would
+    swallow the brake. This exception is re-raised past execute_fix instead, so it
+    propagates out of the BFE job's do_all() and is captured by the agentic-pool Future.
+    There _on_agentic_complete transitions the job to dead and releases the pool slot.
     """
     pass
 
@@ -67,10 +64,9 @@ def _tail_lines( text: Optional[ str ], max_lines: int = 12, max_chars: int = 20
     """
     Return the last `max_lines` of `text`, bounded by `max_chars`.
 
-    Used to distill tester_output (potentially tens of KB of pytest output) into
-    a triage-sized tail that fits in a notification abstract + the end-of-run
-    report abstract. Preserves the FAILED line + traceback tail, which is the
-    signal humans actually read.
+    Distills tester_output (often tens of KB of pytest output) into a triage-sized tail.
+    The tail fits a notification abstract and the end-of-run report abstract.
+    It keeps the `FAILED` line and the traceback tail, the signal humans read.
 
     Requires:
         - max_lines > 0
@@ -78,7 +74,7 @@ def _tail_lines( text: Optional[ str ], max_lines: int = 12, max_chars: int = 20
 
     Ensures:
         - Returns "" if text is None or empty
-        - Returns at most max_lines lines and max_chars characters
+        - Returns at most max_lines lines and at most max_chars characters of input, with an ellipsis line ahead of them when the tail was cut by max_chars
         - Preserves the tail of the input, not the head
     """
     if not text: return ""
@@ -106,15 +102,11 @@ def register_fix_prompts(
     tester_system_prompt: str,
 ) -> None:
     """
-    Register agent-specific prompt builders + system prompts under a key.
+    Register agent-specific prompt builders and system prompts under a key.
 
-    Agent packages call this at import time (e.g., BFE's prompts/fix.py
-    registers under key="bfe"; TFE's prompts/fix.py registers under "tfe").
-
-    The `coder_system_prompt` and `tester_system_prompt` are kept in the
-    registry for any agent that wants to introspect them, even though
-    FixExecutor doesn't use them directly (the agent's options-builder
-    does). Keeping them together simplifies auditing.
+    Agent packages call this at import time: BFE's prompts/fix.py registers under "bfe", TFE's under "tfe".
+    The two system prompts stay in the registry for any agent that wants to introspect them.
+    FixExecutor does not use them directly (the agent's options builder does); keeping them together simplifies auditing.
 
     Requires:
         - key is a non-empty string
@@ -159,7 +151,7 @@ class FixExecutor:
 
     Ensures:
         - execute_fix returns (FixResult, files_changed_list)
-        - Never raises from execute_fix — all failures surface via FixResult
+        - Never raises from execute_fix except BFETimeoutError (the runtime brake, re-raised); all other failures surface via FixResult
         - Respects cancellation via is_cancelled_fn
         - Populates self.last_coder_output and self.last_files_changed for
           caller inspection after the call
@@ -218,20 +210,11 @@ class FixExecutor:
 
     async def _await_with_brake( self, coro, phase_label: str ):
         """
-        Leg (a) — the runtime brake. Await `coro` under a hard wall-clock
-        timeout so a non-returning SDK call raises instead of hanging the pool
-        slot forever.
+        Await a coroutine under a hard wall-clock timeout (the runtime brake).
 
-        Timeout provenance (design §Leg a): reads
-        self.config.wall_clock_timeout_secs — the SAME key the cooperative
-        SafetyGuard reads (bug fix expediter wall clock timeout seconds). No new
-        key, no literal seconds value here, by construction.
-
-        asyncio.wait_for cancels the inner coroutine on timeout (CancelledError,
-        a BaseException — NOT caught by the coder/verify callbacks' own
-        `except Exception`, so cancellation propagates cleanly), then raises
-        asyncio.TimeoutError, which this method converts to BFETimeoutError for
-        the Leg-(b) handler.
+        A non-returning SDK call then raises instead of hanging the pool slot forever.
+        The budget is self.config.wall_clock_timeout_secs, the key the cooperative SafetyGuard reads (bug fix expediter wall clock timeout seconds).
+        There is no new key and no literal seconds value here.
 
         Requires:
             - coro is an awaitable produced by a coder/verify callback
@@ -239,7 +222,9 @@ class FixExecutor:
 
         Ensures:
             - Returns coro's result when it completes within the budget
-            - Raises BFETimeoutError when the budget elapses first
+            - Raises BFETimeoutError when the budget elapses first, converting the asyncio.TimeoutError
+            - On timeout asyncio.wait_for cancels the inner coroutine with CancelledError, a BaseException
+              that the coder and verify callbacks' own `except Exception` does not catch, so it propagates
 
         Raises:
             - BFETimeoutError if the call exceeds wall_clock_timeout_secs

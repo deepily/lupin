@@ -1,41 +1,40 @@
 """
-Worktree drain-then-remove reaper (Worktree Lifecycle Contract, 2026-06-22).
+Worktree drain-then-remove reaper: retire a git worktree without losing work or pushing.
 
-The shared, single-source-of-truth helper that safely retires a git worktree
-WITHOUT ever losing work and WITHOUT ever pushing. It is the one function the
-three reap surfaces all call:
+The shared helper that safely retires a git worktree, without ever losing work and
+without ever pushing. It is the one function the three reap surfaces all call:
 
-    1. WorktreeContext.__aexit__  (clean Agent/TFE/BFE exit — path A/B in-repo)
-    2. session_spawner.dismiss_sessions  (manager-harvest reap — path A in-repo)
-    3. heartbeat_arbiter janitor reconcile  (backstop for hard-killed / harness-
-       spawned workers that never run their own teardown — the ONLY lever for
+    1. WorktreeContext.__aexit__  (clean Agent/TFE/BFE exit, in-repo path A/B)
+    2. session_spawner.dismiss_sessions  (manager-harvest reap, in-repo path A)
+    3. heartbeat_arbiter janitor reconcile  (backstop for hard-killed or harness-
+       spawned workers that never run their own teardown; the only lever for
        worktrees not reachable from repo code)
 
-Anchor principle (Rick's no-push law, 2026-06-22): preservation is PURELY LOCAL.
-A worktree DIRECTORY is disposable (it holds node_modules/.venv/build — the disk
-hog); a BRANCH ref is durable and lives in the shared local object store. So:
+Anchor principle (the no-push law): preservation is purely local.
+A worktree directory is disposable (it holds node_modules/.venv/build, the disk
+hog); a branch ref is durable and lives in the shared local object store. So:
 
     commit any WIP to the branch  ->  git worktree remove (dir gone, branch kept)
-    ->  NEVER push, NEVER delete the branch
+    ->  never push, never delete the branch
 
 This makes "merged or resumed, never lost" true on local refs alone. The branch
 survives `git worktree remove`, so the work is fully resumable later via
 `git worktree add <branch>`, or mergeable locally after review.
 
-Design decisions ratified by Rick (guided walkthrough, 2026-06-22):
-    D2 — this is the shared utility BOTH reap paths + the janitor call.
-    D4 — WIP is ALWAYS auto-committed (labeled), never silently discarded.
-    D5 — branches are KEPT; this util removes DIRS only, never branches.
+Design decisions ratified in the guided walkthrough:
+    D2 - this is the shared utility that both reap paths and the janitor call.
+    D4 - WIP is always auto-committed (labeled), never silently discarded.
+    D5 - branches are kept; drain_then_remove removes directories only, never branches.
 
-AMENDED 2026-09-18 (Rick's ruling on row 129cc96b, P1): D5 left every reaped branch
-behind forever, and 80 piled up in lupin. drain_then_remove still never deletes a
-branch. The JANITOR (reconcile_worktrees), after a successful removal, now hands the
-branch to delete_merged_branch, which deletes it ONLY when it is already an ancestor of
-the repo's current WIP branch, and only with `git branch -d`. An unmerged branch is kept
-and reported. A deleted branch loses nothing: every one of its commits is on the WIP line.
+Amendment: D5 left every reaped branch behind forever, and 80 piled up in lupin.
+drain_then_remove still never deletes a branch. The janitor (reconcile_worktrees),
+after a successful removal, hands the branch to delete_merged_branch. That deletes it
+only when it is already an ancestor of the repo's current WIP branch, and only with
+`git branch -d`. An unmerged branch is kept and reported. A deleted branch loses
+nothing: every one of its commits is on the WIP line.
 
 See: planning-is-prompting -> planning-is-prompting/src/rnd/2026.06.22-worktree-lifecycle-contract.md
-     planning-is-prompting -> src/rnd/2026.09.18-worktree-and-branch-cleanup-proposal.md §4
+     planning-is-prompting -> src/rnd/2026.09.18-worktree-and-branch-cleanup-proposal.md
 """
 
 import os
@@ -60,22 +59,18 @@ CONTAINER_PROJECT_ROOT = "/var/lupin"
 
 def _is_in_container( project_root: str ) -> bool:
     """
-    True when this reaper is running INSIDE a Lupin server container.
+    True when this reaper is running inside a Lupin server container.
 
-    Bug 47ac0e50: the :7999/:8000 containers bind-mount ./.git but NOT
-    lupin-worktrees/, so a `git worktree prune` run in-container reads every
-    host-registered worktree's gitdir as a missing /mnt/DATA01 path and prunes
-    the ENTIRE shared registry — wiping every host lane at once. The container's
-    canonical LUPIN_ROOT is /var/lupin (docker-compose.yml), so
-    project_root == /var/lupin — or an explicit truthy LUPIN_IN_CONTAINER env
-    sentinel — is the discriminator that gates the in-container prune OFF.
+    The :7999/:8000 containers bind-mount ./.git but not lupin-worktrees/, so an in-container
+    prune reads every host worktree's gitdir as missing and wipes the shared registry. The
+    container's LUPIN_ROOT is /var/lupin; it or a truthy LUPIN_IN_CONTAINER sentinel gates it off.
 
     Requires:
         - project_root is the resolved main-repo path a prune would run in
 
     Ensures:
         - returns True iff LUPIN_IN_CONTAINER is set truthy (1/true/yes, case-
-          insensitive) OR project_root == CONTAINER_PROJECT_ROOT
+          insensitive) or project_root == CONTAINER_PROJECT_ROOT
         - never raises
     """
     if os.environ.get( "LUPIN_IN_CONTAINER", "" ).strip().lower() in ( "1", "true", "yes" ):
@@ -260,7 +255,7 @@ def _expand_ignored_directory( worktree_path: str, rel_dir: str ) -> Optional[ l
 
     Ensures:
         - returns tree-relative file paths under rel_dir, not descending into symlinked
-          directories or ARTIFACT_DIR_NAMES; a symlinked FILE is listed (the caller's
+          directories or ARTIFACT_DIR_NAMES; a symlinked file is listed (the caller's
           _is_artifact passes it)
         - returns None when the walk fails or exceeds MAX_EXPANDED_FILES — the caller
           must treat that as "cannot judge" and block on the directory itself
@@ -297,7 +292,7 @@ def _files_identical( a: str, b: str ) -> bool:
 
 def _pointer_names( abs_path: str ) -> Optional[ str ]:
     """
-    The record a memento POINTER names, read from its header.
+    The record a memento pointer names, read from its header.
 
     Ensures:
         - returns the `<!-- current: <record> -->` value when the file's first line is
@@ -329,11 +324,11 @@ def find_ignored_blockers( worktree_path: str, project_root: str, run: Callable 
         - returns { "ok": bool, "blockers": [ rel_path, ... ], "error": str | None }
         - ok=False with error set when git could not list the ignored entries — the
           caller must treat that as "cannot prove it is safe" and refuse
-        - an entry is NOT a blocker when it is a build artifact (_is_artifact), a
-          root-slot memento RECORD whose mirror is byte-identical, or a root-slot
-          memento POINTER whose header names a record that cleared that test (not
-          merely some record for the same persona — Mr. Radio, 2026-09-14)
-        - the mirror is keyed on the MAIN checkout's basename, because memento_io's
+        - an entry is not a blocker when it is a build artifact (_is_artifact), a
+          root-slot memento record whose mirror is byte-identical, or a root-slot
+          memento pointer whose header names a record that cleared that test (not
+          merely some record for the same persona)
+        - the mirror is keyed on the main checkout's basename, because memento_io's
           find_repo_root collapses a worktree to its main checkout before keying the
           mirror; keying on the worktree's own name would find no mirror and refuse
           every reap
@@ -454,8 +449,7 @@ def drain_then_remove(
     evacuation_root : Optional[ str ]    = None,
 ) -> dict:
     """
-    Safely retire a git worktree: commit any WIP locally, then remove the DIR,
-    keeping the branch ref. Never pushes; never deletes a branch.
+    Retire a worktree: commit WIP to its branch, remove the directory, keep the branch.
 
     Requires:
         - worktree_path is the absolute path to the worktree directory
@@ -467,41 +461,28 @@ def drain_then_remove(
     Ensures:
         - if worktree_path does not exist: returns removed=False,
           skipped_reason="path_absent" (nothing to do; caller may prune)
-        - if the tree holds ignored entries a removal would destroy (see
-          find_ignored_blockers): removed=False, skipped_reason=
-          "ignored_files_present", ignored_blockers lists them, and NOTHING is
-          touched — no rescue branch, no WIP commit. If they cannot be listed:
-          skipped_reason="ignored_check_failed" (cannot prove safe ⇒ refuse)
-        - with evacuation_root set, those entries are MOVED there instead (see
-          evacuate_blockers) and the reap goes on; "evacuated_to" names the folder and
-          "evacuated" the entries. If the move fails: removed=False,
-          skipped_reason="evacuation_failed", and the tree stays
+        - if the tree holds ignored entries a removal would destroy (see find_ignored_blockers):
+          removed=False, skipped_reason="ignored_files_present", ignored_blockers lists them,
+          and nothing is touched, so no rescue branch and no WIP commit. If they cannot be listed:
+          skipped_reason="ignored_check_failed" (cannot prove safe, so refuse)
+        - with evacuation_root set, those entries are moved there instead (see evacuate_blockers)
+          and the reap goes on; "evacuated_to" names the folder and "evacuated" the entries.
+          If the move fails: removed=False, skipped_reason="evacuation_failed", and the tree stays
         - detached HEAD whose rescue branch cannot be created: removed=False,
           skipped_reason="rescue_branch_failed" (its commits live only in this tree)
-        - if uncommitted edits exist: they are committed to the worktree's
-          branch as a labeled WIP commit BEFORE removal (D4 — never discarded);
-          a detached HEAD is first given a rescue branch so the commit is
-          reachable after removal
-        - the worktree DIRECTORY is removed (git worktree remove); the BRANCH
-          ref is preserved (D5)
-        - NEVER runs `git push` and NEVER runs `git branch -d/-D`
-        - returns a result dict (below); never raises — every git failure is
-          captured in errors[] so a reaper loop is not derailed by one bad tree
+        - if uncommitted edits exist: they are committed to the worktree's branch as a labeled
+          WIP commit before removal, never discarded; a detached HEAD is first given a rescue
+          branch so the commit is reachable after removal
+        - the worktree directory is removed (git worktree remove); the branch ref is preserved
+        - never runs `git push` and never runs `git branch -d/-D`
+        - returns a result dict (below); never raises, every git failure is captured in errors[]
+          so a reaper loop is not derailed by one bad tree
 
     Returns:
-        {
-          "worktree_path" : str,
-          "branch"        : str | None,   # branch the work is preserved on
-          "wip_committed" : bool,
-          "wip_sha"       : str | None,
-          "rescue_branch" : str | None,   # set iff HEAD was detached
-          "removed"       : bool,         # dir successfully removed
-          "skipped_reason": str | None,
-          "ignored_blockers": [ str, ... ],  # ignored entries that refused removal
-          "evacuated_to"  : str | None,   # folder the ignored data was moved to
-          "evacuated"     : [ str, ... ], # the entries moved there
-          "errors"        : [ str, ... ],
-        }
+        { worktree_path, branch (where the work is preserved, or None), wip_committed (bool),
+          wip_sha, rescue_branch (set iff HEAD was detached), removed (bool, directory removed),
+          skipped_reason, ignored_blockers (ignored entries that refused removal),
+          evacuated_to (folder the ignored data went to), evacuated (the entries moved), errors }
     """
     run          = run if run is not None else _default_run
     project_root = project_root if project_root is not None else cu.get_project_root()
@@ -689,7 +670,7 @@ def _newest_mtime_age_hours( path: str, now_ts: float ) -> float:
 
     Ensures:
         - walks `path` skipping .git / node_modules / .venv / venv / __pycache__
-          (vendored/build noise — a worker's SOURCE edits land outside these)
+          (vendored/build noise; a worker's source edits land outside these)
         - returns float('inf') for an empty/unreadable tree (treated as idle)
     """
     newest = 0.0
@@ -763,7 +744,7 @@ def checked_out_branches( project_root: str, run: Callable ) -> Optional[ set ]:
 
 def main_worktree_branch( records: list ) -> Optional[ str ]:
     """
-    The repo's current WIP branch: whatever the MAIN working tree has checked out.
+    The repo's current WIP branch: whatever the main working tree has checked out.
 
     Requires:
         - records is list_worktrees() output (dicts carrying is_main and branch)
@@ -814,10 +795,10 @@ def delete_merged_branch(
     run          : Optional[ Callable ] = None,
 ) -> dict:
     """
-    Delete a branch ONLY when it is fully merged into the repo's current WIP branch.
+    Delete a branch only when it is fully merged into the repo's current WIP branch.
 
     Requires:
-        - project_root is the MAIN working tree, whose HEAD is `target`
+        - project_root is the main working tree, whose HEAD is `target`
         - branch is the reaped worktree's branch, or None
         - target is main_worktree_branch( ... ), or None
 
@@ -909,7 +890,7 @@ def archive_branch( project_root: str, branch: str, run: Callable, now: Optional
 
     Ensures:
         - returns { archived, archive_ref, sha, error }
-        - the archive ref is written and read back BEFORE the branch ref is removed, and
+        - the archive ref is written and read back before the branch ref is removed, and
           the branch ref is removed only if it still points at the sha that was archived
           (a commit landing in between keeps the branch)
         - when the archive ref already exists at another sha, the new one gets a
@@ -982,7 +963,7 @@ def retire_branch(
 
 
 def _dated_before( name: str, cutoff_day: str ) -> bool:
-    """True when `name` starts with a YYYY-MM-DD day earlier than cutoff_day; False for any other name."""
+    """True when `name` starts with a YYYY-MM-DD day earlier than cutoff_day, otherwise False."""
     hit = DATED_NAME_RE.match( name )
     return hit is not None and hit.group( "day" ) < cutoff_day
 
@@ -1075,25 +1056,22 @@ def sweep_merged_branches(
     now_ts       : Optional[ float ]    = None,
 ) -> dict:
     """
-    Retire every local branch no worktree has checked out: delete the ones fully merged into
-    the main tree's branch, archive the rest (row aec2319f), then expire the archive.
+    Retire every local branch no worktree has checked out, then expire the archive.
 
-    Originally: delete every local branch that is fully merged into the main tree's branch and that no
-    worktree has checked out — the ones a tree reap never reaches (Rick, 2026-09-29,
-    broadcast 766066df: 107 had piled up because the janitor only deleted a branch when it
-    removed that branch's tree).
+    Merged branches are deleted and the rest are archived. This reaches the branches a tree reap
+    never touches, since the janitor otherwise deleted a branch only when it removed that branch's tree.
 
     Requires:
-        - project_root is None (→ cu.get_project_root()) or a repo's MAIN working tree
-        - delete_fn is None (→ delete_merged_branch) or injected with its signature
+        - project_root is None (meaning cu.get_project_root()) or a repo's main working tree
+        - delete_fn is None (meaning retire_branch) or injected with its signature
 
     Ensures:
         - candidates are every `refs/heads` branch, minus protected and checked-out
           branches. An unmerged one is archived by retire_branch, so it leaves the list on
           the first poll after its grace and an ordinary poll reports only real work
         - a branch created less than grace_hours ago (branch_created_ts), or whose age
-          cannot be read, is skipped: a brand-new branch sits at the target's tip and so
-          reads as "merged" before anyone has committed to it (María, 2026-09-29)
+          cannot be read, is skipped. A brand-new branch sits at the target's tip and so
+          reads as "merged" before anyone has committed to it
         - each candidate goes through retire_branch, which re-checks protection, checkout
           and ancestry: a merged branch is deleted with `git branch -d`, an unmerged one
           moves to refs/archive. No commit is lost either way
@@ -1159,7 +1137,7 @@ def _tmux_session_absent( session_name: str ) -> bool:
         - True only when `tmux has-session` exits non-zero with a message saying the
           session or the server is absent
         - False when the session exists, when tmux is not installed, or on any other
-          error (cannot prove absence ⇒ not absent); never raises
+          error (cannot prove absence, so not absent); never raises
     """
     try:
         proc = subprocess.run( [ "tmux", "has-session", "-t", f"={session_name}" ],
@@ -1203,8 +1181,8 @@ def seat_is_alive( session_name: str, path: str ) -> bool:
     The janitor's liveness verdict for a seat-locked tree. Fails closed.
 
     Ensures:
-        - False (the seat is gone) ONLY when tmux positively reports the session absent
-          AND /proc was readable AND no process has its cwd inside `path`
+        - False (the seat is gone) only when tmux positively reports the session absent
+          and /proc was readable and no process has its cwd inside `path`
         - True in every other case, including any error; never raises
     """
     if not _tmux_session_absent( session_name ):
@@ -1228,31 +1206,23 @@ def reconcile_worktrees(
     evacuation_root     : Optional[ str ]      = None,
 ) -> dict:
     """
-    Janitor backstop (Worktree Lifecycle Contract §4b): drain_then_remove every
-    ABANDONED sandbox worktree. This is the ONLY lever for hard-killed / harness-
-    spawned workers that never run their own reap teardown.
+    Janitor backstop: drain_then_remove every abandoned sandbox worktree.
 
-    A worktree is abandoned (safe to retire) iff ALL hold: it lives under
-    sandbox_root, is NOT the main working tree, is NOT git-locked, and has been
-    idle longer than age_threshold_hours (newest non-vendored file older than
-    the threshold).
-
-    Safety (why no dir->session mapping is needed): drain_then_remove commits any
-    WIP to the branch and KEEPS the branch, so even a false-positive retire of a
-    quiet-but-live worktree loses NO work — the branch + WIP survive and the dir
-    is re-addable via `git worktree add <branch>`. The P1 branch delete below cannot
-    undo that: a branch carrying WIP is by definition not merged, so it is kept. Locked worktrees are always
-    skipped (a deliberate protection signal) — EXCEPT a SEAT tree, locked with reason
-    `lupin-seat:<session>`, whose seat is provably gone (see seat_is_alive).
+    Abandoned (safe to retire) means: under sandbox_root, not the main tree, not git-locked, and idle
+    longer than age_threshold_hours. No dir-to-session map is needed: the drain commits WIP and keeps
+    the branch, so retiring a quiet live tree loses no work. A branch carrying WIP is never merged, so it is kept.
 
     Requires:
-        - sandbox_root is None (→ <project_root>/.claude/worktrees), an absolute
+        - sandbox_root is None (meaning <project_root>/.claude/worktrees), an absolute
           path, or a project-root-relative path
         - run / drain_fn / list_fn / age_fn / seat_alive_fn / branch_fn are None (real
           impls) or injected (testing); seat_alive_fn( session_name, path ) -> bool;
           branch_fn( project_root, branch, target, run= ) -> delete_merged_branch's dict
 
     Ensures:
+        - this is the only lever for hard-killed or harness-spawned workers that never reap themselves
+        - locked worktrees are always skipped as a deliberate protection signal, except a seat
+          tree (lock reason `lupin-seat:<session>`) whose seat is provably gone (see seat_is_alive)
         - returns { swept: [ {path, result} ], skipped: [ {path, reason} ],
           errors: [ str ], branches_deleted: [ outcome ], branches_kept: [ outcome ] }
         - a locked tree with any other reason (or none) is skipped as "locked"
@@ -1261,18 +1231,16 @@ def reconcile_worktrees(
           unlocked and drained, and if the drain does not remove it the lock is put
           back with its original reason (an unlocked survivor would lose the
           protection the next poll relies on)
-        - delegates removal to drain_then_remove → NEVER pushes
-        - row aec2319f: the default drain is handed evacuation_root (None →
-          <project_root>/io/worktree-evacuated), so a tree holding ignored data is emptied
-          into a dated folder there and removed instead of refused; and the default
-          branch_fn is retire_branch, so an unmerged branch is archived under refs/archive
-          (kept_reason "archived", listed in branches_kept) instead of staying in the list
-        - P1 (row 129cc96b): after a drain that REMOVED the tree, its branch goes to
-          branch_fn, measured against the main tree's branch (main_worktree_branch).
-          A merged branch is deleted with `git branch -d` and listed in
-          branches_deleted; any other outcome is listed in branches_kept, never forced.
+        - delegates removal to drain_then_remove, so it never pushes
+        - the default drain is handed evacuation_root (None meaning <project_root>/io/worktree-evacuated),
+          so a tree holding ignored data is emptied into a dated folder there and removed instead of
+          refused; the default branch_fn is retire_branch, so an unmerged branch is archived under
+          refs/archive (kept_reason "archived", listed in branches_kept) instead of staying in the list
+        - after a drain that removed the tree, its branch goes to branch_fn, measured against the main
+          tree's branch (main_worktree_branch). A merged branch is deleted with `git branch -d` and
+          listed in branches_deleted; any other outcome is listed in branches_kept, never forced.
           The outcome is also attached to the swept entry's result as branch_outcome.
-          A tree that was NOT removed keeps its branch untouched. The branch name is the
+          A tree that was not removed keeps its branch untouched. The branch name is the
           record's (from the full `refs/heads/` ref) or the drain's rescue branch
         - swallow-safe: one bad worktree is captured in errors[], never raised
           (an observer/poll loop must not die on a single bad tree)

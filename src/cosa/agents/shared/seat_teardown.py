@@ -1,26 +1,24 @@
 """
-Seat teardown — a seat removes its OWN worktree and its merged branch (row 129cc96b, P3).
+Seat teardown: a seat removes its own worktree and its merged branch.
 
-Rick ruled 2026-09-18: workers must not leave trees behind. Two doors call this:
+Workers must not leave trees behind. Two doors call this:
 
-    1. session_spawner.dismiss_sessions — right after the manager's reap kills the seat
-    2. the SessionEnd hook — a detached waiter, launched when a seat exits on its own
+    1. session_spawner.dismiss_sessions, right after the manager's reap kills the seat
+    2. the SessionEnd hook, a detached waiter launched when a seat exits on its own
 
 The arbiter's worktree janitor stays the backstop for seats that get hard-killed.
 
-This is STRICTER than the janitor, on purpose. The janitor auto-commits WIP and removes
-the tree anyway, because it is the last line and a tree left forever is its own failure.
-Teardown runs while somebody is still around to look, so it keeps and REPORTS instead:
+This is stricter than the janitor. The janitor auto-commits WIP and removes the tree anyway.
+It is the last line, and a tree left forever is its own failure. Teardown runs while somebody is still around to look, so it keeps and reports. The outcomes are:
 
-    uncommitted edits             → tree kept, "uncommitted_work"
-    ignored files that are data   → tree kept, "ignored_files_present"
-    commits the WIP line lacks    → tree AND branch kept, "unmerged"
-    clean, and merged             → `git worktree remove` (no --force), then
-                                    `git branch -d` via worktree_reaper.delete_merged_branch
+    Uncommitted edits: tree kept, "uncommitted_work".
+    Ignored files that are data: tree kept, "ignored_files_present".
+    Commits the WIP line lacks: tree and branch kept, "unmerged".
+    Clean and merged: `git worktree remove` (no --force), then `git branch -d` via worktree_reaper.delete_merged_branch.
 
-It touches only a tree locked `lupin-seat:<this seat's tmux name>`, and only once that seat
-is provably gone (worktree_reaper.seat_is_alive: tmux absent AND no process standing in
-the tree). Every uncertainty keeps the tree.
+It touches only a tree locked `lupin-seat:<this seat's tmux name>`, and only once that seat is provably gone.
+Provably gone means worktree_reaper.seat_is_alive reports tmux absent and no process standing in the tree.
+Every uncertainty keeps the tree.
 
 See: planning-is-prompting -> src/rnd/2026.09.18-worktree-and-branch-cleanup-proposal.md §4
 """
@@ -92,7 +90,7 @@ def retire_seat_worktree(
     debug        : bool                 = False,
 ) -> dict:
     """
-    Remove a dead seat's own worktree and its merged branch — or keep both and say why.
+    Remove a dead seat's own worktree and merged branch, or keep both and say why.
 
     Requires:
         - path is the seat's cwd (its worktree or anything inside it), or None
@@ -103,12 +101,12 @@ def retire_seat_worktree(
     Ensures:
         - returns { seat, path, removed, kept_reason, branch, branch_outcome,
           ignored_blockers, errors }
-        - removed=True only when ALL hold: the tree is a linked worktree (not the main
+        - removed=True only when all of these hold: the tree is a linked worktree (not the main
           checkout), it is locked `lupin-seat:<seat_name>`, the seat is gone within
           wait_seconds, `git status --porcelain` is empty, no ignored file is data
           (find_ignored_blockers), and HEAD is an ancestor of the main tree's branch
-        - then: unlock, `git worktree remove` WITHOUT --force, and
-          delete_merged_branch — which runs `git branch -d` only, never -D. A failed
+        - then: unlock, `git worktree remove` without --force, and
+          delete_merged_branch, which runs `git branch -d` only, never -D. A failed
           removal re-locks the tree with its original reason
         - every other case keeps the tree, sets kept_reason, and changes nothing
         - never auto-commits, never pushes, never raises
@@ -204,8 +202,8 @@ def _detached_verdict( tree: str, main_root: str, target: str, run: Callable ) -
     """
     merge_verdict for a detached HEAD: resolve the sha in the tree, measure it in main.
 
-    A seat tree is provisioned detached, and a seat that never made a branch still has
-    commits only the tree anchors if it committed on the detached HEAD.
+    A seat tree is provisioned detached. A seat that never made a branch and committed
+    on the detached HEAD has commits that only the tree anchors.
 
     Ensures:
         - returns merge_verdict's shape; "failed" when the sha cannot be read
@@ -218,7 +216,7 @@ def _detached_verdict( tree: str, main_root: str, target: str, run: Callable ) -
 
 def teardown_notice( outcomes: dict ) -> Optional[ str ]:
     """
-    One sentence naming every seat whose tree teardown KEPT because of work in it.
+    One sentence naming every seat whose tree teardown kept because of work in it.
 
     Requires:
         - outcomes maps seat name -> a retire_seat_worktree result; a non-dict value is
@@ -226,7 +224,7 @@ def teardown_notice( outcomes: dict ) -> Optional[ str ]:
 
     Ensures:
         - returns None when every tree was removed or was never a seat tree
-          (NOT_A_SEAT_TREE) — the quiet case stays quiet
+          (NOT_A_SEAT_TREE), so the quiet case stays quiet
         - otherwise names each kept seat with its reason and path, sorted by seat
     """
     kept = []

@@ -1,30 +1,23 @@
 """
-One store row per worktree the janitor has refused for more than a day — opened once,
-closed by the janitor when the tree is gone.
+Open one store row per worktree refused for over a day; close it when the tree is gone.
 
-Rick's ruling, 2026-09-29 (broadcast 0457564c, relayed by María; the ticket "door" by his
-own keypress): a refusal notify is a card, and a card scrolls away. A straggler that has
-sat refused for 24 hours becomes a ROW with an owner, so the pile is somebody's owed work
-instead of nobody's surprise.
+A refusal notify is a card, and a card scrolls away. A straggler refused for 24 hours becomes a row with an owner,
+so the pile is somebody's owed work instead of nobody's surprise.
 
-  * owner / accountable manager — a seat tree `seat-cc-<role>-<manager>-<n>` records its
-    SPAWNING MANAGER in its name (session_spawner builds it from the manager's persona slug),
-    and the seat's own persona is gone once the seat is reaped. So both fields name that
-    manager. A tree that records no creator goes to NO_CREATOR_OWNER, who triages it
-    (María's ruling), and the body says "no creator recorded".
-  * dedupe — correlation key `worktree:<absolute tree path>`, one row per tree.
-  * door — a DIRECT repository write, not /api/tasks (Rick's keypress, 2026-09-29). The
-    router would mint the row into the holding area, where the arbiter can never move it
-    out again, so it could never close its own tickets. The throughput counter excludes the
-    `worktree:` lane (task_repository.count_created_and_closed) so these rows, which close
-    as `dropped`, never count against anyone else's creates.
-  * close — `dropped`, reason "tree absent at <ts>". A system actor has no honest receipt
-    for `done`.
+  * owner / accountable manager: a seat tree `seat-cc-<role>-<manager>-<n>` records its spawning manager
+    in its name (session_spawner builds it from the manager's persona slug), and the seat's own persona
+    is gone once the seat is reaped. So both fields name that manager. A tree that records no creator goes
+    to NO_CREATOR_OWNER, who triages it, and the body says "no creator recorded".
+  * dedupe: correlation key `worktree:<absolute tree path>`, one row per tree.
+  * door: a direct repository write, not /api/tasks. The router would mint the row into the holding area,
+    where the arbiter can never move it out again, so it could never close its own tickets.
+    The throughput counter excludes the `worktree:` lane (task_repository.count_created_and_closed)
+    so these rows, which close as `dropped`, never count against anyone else's creates.
+  * close: `dropped`, reason "tree absent at <ts>". A system actor has no honest receipt for `done`.
 
-The clock: `first_refused_at` lives in a sidecar beside the refusal ledger. A tree seen
-refused for the first time gets an ESTIMATE — the moment its newest file went idle plus the
-janitor's own idle threshold, the earliest a sweep could have refused it — capped at now,
-and the row body says the time is estimated.
+The clock: `first_refused_at` lives in a sidecar beside the refusal ledger. A tree seen refused for the first time
+gets an estimate, capped at now. The estimate is the moment its newest file went idle plus the janitor's own
+idle threshold, the earliest a sweep could have refused it. The row body says the time is estimated.
 """
 
 import json
@@ -274,8 +267,9 @@ def sync_straggler_tickets(
     exists_fn      : Callable[ [ str ], bool ] = os.path.exists,
 ) -> dict:
     """
-    Open a row for every tree refused longer than `age_hours`; drop the row of every tree
-    that is gone.
+    Open a row per long-refused tree and drop the row of each tree that is gone.
+
+    A tree counts as long-refused once it has been refused for more than `age_hours`.
 
     Requires:
         - refused is refused_set()'s { path: [ blockers ] } for this poll
@@ -366,7 +360,7 @@ class RepositoryStragglerStore:
     """
     The real store: direct TaskRepository writes, one short session per call.
 
-    Rick's keypress (2026-09-29) chose this door over /api/tasks; see the module docstring.
+    This door is chosen over /api/tasks; the module docstring says why.
     Canonicalizes personas itself, because it bypasses the router's _canon_persona.
     """
 

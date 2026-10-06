@@ -1,23 +1,20 @@
 """
-Make a janitor refusal VISIBLE: a ledger of the current refused set, plus one notify
-whenever that set changes.
+Make janitor refusals visible: a refused-set ledger plus a notify on each change.
 
-A reap refuses a tree holding ignored files that are somebody's data (row 033538f6,
-2026-09-14). A refusal nobody sees is just the old pile, moved to `.claude/worktrees/`,
-where nobody looks either (Mr. Radio's review). So each janitor poll:
+A reap refuses a tree holding ignored files that are somebody's data. A refusal nobody sees is just the old pile,
+moved to `.claude/worktrees/`, where nobody looks either. So each janitor poll:
 
   1. computes the refused set { tree path: [ blocking entries ] };
   2. compares it with the set recorded in the ledger file; and
-  3. only when they differ, REPLACES the ledger and sends ONE notify carrying the count
+  3. only when they differ, replaces the ledger and sends one notify carrying the count
      in the message, with each tree and its blockers in the abstract.
 
-An unchanged set sends nothing and writes nothing. The ledger is REPLACED each time, never
+An unchanged set sends nothing and writes nothing. The ledger is replaced each time, never
 appended, so it cannot itself become a pile. A failed notify is logged, never swallowed.
 
-Why not a store row per tree (considered and set aside with Mr. Radio, 2026-09-14): row
-creation is throughput-gated and closing needs a receipt the arbiter cannot mint. Writing
-rows through the repository directly would get around two of the operator's gates. That
-decision is the operator's, and is out of this change.
+Why not a store row per tree: row creation is throughput-gated and closing needs a receipt the arbiter cannot mint.
+Writing rows through the repository directly would get around two of the operator's gates.
+That decision belongs to the operator, and is out of this module's scope.
 """
 
 import json
@@ -48,7 +45,7 @@ def refused_set( reconcile_out: dict, previous: Optional[ dict ] = None ) -> dic
     Ensures:
         - every swept entry whose result has a REFUSAL_REASONS skipped_reason maps to its
           sorted ignored_blockers (or [ UNLISTABLE_MARK ] when they could not be listed)
-        - a tree in `previous` that this poll SKIPPED (so was not re-judged: freshly
+        - a tree in `previous` that this poll skipped (so was not re-judged: freshly
           touched, seat alive, locked) keeps its previous entry, so a set does not flap
           in and out on every mtime change
         - a tree that is gone, or was removed this poll, drops out
@@ -119,7 +116,7 @@ def _compose_message( holding: int, unlistable: int ) -> str:
 
     Ensures:
         - a set that is entirely "ignored files present" says so, and only so
-        - a set that is entirely "could not be listed" NEVER claims anything is held
+        - a set that is entirely "could not be listed" never claims anything is held
         - a mixed set gives both counts rather than picking one cause for all of them
         - the pronoun agrees with the count it belongs to
     """
@@ -179,7 +176,7 @@ def report_refusals(
     now           : Optional[ datetime ] = None,
 ) -> dict:
     """
-    Record the refused set and notify ONLY when it changed.
+    Record the refused set and notify only when it changed.
 
     Requires:
         - notify_fn( message, abstract ) -> list of outcome dicts, or raises
@@ -187,8 +184,8 @@ def report_refusals(
 
     Ensures:
         - returns { changed, count, notified, outcomes }
-        - unchanged set (compared as dicts, order-insensitive) → no ledger write, no notify
-        - changed set → notify_fn called once; the ledger is replaced ONLY when the durable
+        - an unchanged set (compared as dicts, order-insensitive) gives no ledger write and no notify
+        - a changed set calls notify_fn once; the ledger is replaced only when the durable
           post succeeded, so a failed announcement is retried on the next poll
         - a ledger write failure is logged (`worktree_refusal_ledger_write_failed`); the
           notify has already gone out, which matters more than the file
