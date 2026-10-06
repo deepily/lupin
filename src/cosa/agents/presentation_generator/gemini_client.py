@@ -132,9 +132,9 @@ class GeminiImageClient:
         """
         Lazy-initialize google.genai.Client with API key.
 
-        Stays on the API key: Imagen returns 404 NOT_FOUND on Vertex for this project
-        (imagen-4.0 and imagen-3.0, in `global` and `us-central1`). Text models work there.
-        The resolver a switch would need exists: cosa.utils.gcp_project.
+        Stays on the API key: Imagen returns 404 NOT_FOUND on Vertex for this project (imagen-4.0 and
+        imagen-3.0, in `global` and `us-central1`). Text (`gemini-3.1-flash-lite`) does work through Vertex
+        on the same project and credentials. A switch would need the resolver that exists: cosa.utils.gcp_project.
 
         Requires:
             - Gemini API key available via cu.get_api_key("gemini")

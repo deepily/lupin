@@ -55,9 +55,9 @@ def _build_auto_continue_disclosure( timeout_seconds: int ) -> str:
     """
     Build the "silence means keep going" sentence for a review-gate question.
 
-    Kept local so a gate prompt does not load the podcast_generator package.
-    The four gates fail open: with no answer in time, generation continues.
-    The sentence rides in the question because voice speaks only the question.
+    Kept local (a mirror of `podcast_generator.orchestrator.build_auto_continue_disclosure`, worded for
+    presentations) so a gate prompt does not load podcast_generator. The four gates fail open: with no
+    answer in time, generation continues. The sentence rides in the question because voice speaks only the question.
 
     Requires:
         - timeout_seconds is a positive int
@@ -1460,8 +1460,9 @@ class PresentationOrchestratorAgent:
         """
         Replace visual placeholders in the Marp file with rendered content.
 
-        Reads the Marp file from the text render step, finds each `VISUAL` placeholder
-        comment, dispatches it to the matching visual renderer, and rewrites the file.
+        Reads the Marp file from the text render step and finds each
+        `<!-- VISUAL: type | description -->` placeholder. Dispatches it to the matching
+        visual renderer, and rewrites the file.
 
         Requires:
             - presentation is a valid PresentationModel
@@ -1802,9 +1803,9 @@ class PresentationOrchestratorAgent:
         """
         Present a presentation review gate that fails open.
 
-        All four gates route through here so their fail-open shape cannot drift.
-        The disclosure joins the question, which voice speaks. A timeout plus
-        response_default returns continue_label on silence or a 503, not an error.
+        All four gates route through here so their fail-open shape cannot drift. It mirrors the podcast
+        script-review gate (`podcast_generator/orchestrator.py`). The disclosure joins the question, which voice
+        speaks. A timeout plus response_default returns continue_label on silence or a 503, not an error.
 
         Requires:
             - self.config.review_timeout_seconds is a positive int

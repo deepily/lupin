@@ -71,8 +71,9 @@ def source_path_is_inside_the_project( path: str ) -> bool:
 
     Notes:
         - The guard lives on the job, not on a route, so it protects every caller
-          (voice path, `/api/v2/submit`, any later door). A route-level guard
-          protects only its own entry point.
+          (voice path, `/api/v2/submit`, any later door). `/api/v2/submit` takes a command and an args dict and knows nothing about
+          which arguments are file paths, so a route cannot hold the guard. A
+          route-level guard protects only its own entry point.
         - A leading slash means project-relative here (see `resolve_source_path`).
           `/etc/passwd` resolves to `<project>/etc/passwd` and returns True. That
           is no hole: the file does not exist and the existence check refuses it.
