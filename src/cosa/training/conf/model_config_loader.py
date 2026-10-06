@@ -19,8 +19,8 @@ configuration approach allows for:
 3. Separation of model-specific details from the trainer logic
 4. Simplified experiment tracking with standardized configuration format
 
-The relationship between conf files and the PEFT Trainer is defined by the load_model_config() function,
-which the trainer calls to obtain all necessary parameters for initializing and fine-tuning a specific model.
+The load_model_config() function defines the relationship between conf files and the PEFT Trainer.
+The trainer calls it to obtain all necessary parameters for initializing and fine-tuning a specific model.
 """
 
 from importlib import import_module

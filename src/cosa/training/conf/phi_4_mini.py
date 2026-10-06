@@ -28,8 +28,8 @@ fine-tuning process:
    - prompt_template: Formatting template for instructions and responses
    - last_tag_func: Function to properly close the sequence
 
-When the PEFT Trainer imports this configuration via load_model_config(), 
-it uses these parameters to properly initialize the model, tokenizer, and 
+The PEFT Trainer imports this configuration via load_model_config(). 
+It uses these parameters to properly initialize the model, tokenizer, and 
 training process specifically optimized for Phi-4-mini.
 """
 
