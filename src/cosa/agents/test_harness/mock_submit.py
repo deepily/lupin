@@ -1,31 +1,33 @@
 """
-The mock-job command behind POST /api/v2/submit (rows 432511fd, a3c59f2d).
+The mock-job command behind POST /api/v2/submit.
 
-WHY THIS MODULE EXISTS. `/api/mock-job/submit` (door 14) retired to 410, and Rick chose to
-keep what it did rather than lose it: the four test suites that call it (the 12-scenario
-proxy suite, the swe-team proxy suite, the expeditor mock-job smoke, and the CJ Flow
-pause/schedule e2e) have no other way to put a zero-cost job on the queue or to exercise the
-RuntimeArgumentExpeditor without a real agent. So the behaviour moved here, unchanged, and is
-reached as the command `agent router go to mock job` through `/api/v2/submit`.
+This module keeps what the retired `/api/mock-job/submit` door (door 14, now 410) did.
+It is reached as the command `agent router go to mock job` through `/api/v2/submit`.
 
-TWO MODES, ONE COMMAND — the same two the door had, selected the same way:
+Notes:
+    Why this module exists: four test suites call the old door. They are the 12-scenario
+    proxy suite, the swe-team proxy suite, the expeditor mock-job smoke and the CJ Flow
+    pause/schedule e2e. They have no other way to put a zero-cost job on the queue or to
+    exercise the RuntimeArgumentExpeditor without a real agent. So the behaviour moved here, unchanged.
 
-  • PLAIN — no `voice_command`: build a `MockAgenticJob` (sleeps, emits progress, optionally
-    fails) from the door's own argument names. The job's config comes back in
-    `submit_details["config"]`, exactly the dict the door put in `config`.
+    Two modes, one command, selected the same way the door selected them:
 
-  • EXPEDITOR TEST — `voice_command` given: keyword-match the voice command to a real
-    agentic command, run the RuntimeArgumentExpeditor on it (which may interview the user
-    through notifications, so it needs the caller's bearer token — carried by
-    `cosa.rest.v2.request_context`), and build a DRY-RUN job of the matched command. An
-    optional `force_failure_mode` makes that job land in the dead queue so the Phase 6
-    auto-fix loop can be exercised. The resolution comes back in `submit_details` as
-    `command`, `args_resolved`, `dry_run`, `force_failure_mode`, `notification_status`.
-    A user who cancels or times out raises `SubmitRefused`, which the flow reports as
-    status failed / route_reason `expeditor_cancelled` with the same details.
+      - Plain mode, no `voice_command`: build a `MockAgenticJob` (sleeps, emits progress,
+        optionally fails) from the door's own argument names. The job's config comes back
+        in `submit_details["config"]`, the same dict the door put in `config`.
 
-This module never touches HTTP: the flow runs a submit in a worker thread, so the blocking
-expeditor call is fine here.
+      - Expeditor test mode, `voice_command` given: keyword-match the voice command to a
+        real agentic command. Run the RuntimeArgumentExpeditor on it. It may interview the
+        user through notifications, so it needs the caller's bearer token, carried by
+        `cosa.rest.v2.request_context`. Then build a dry-run job of the matched command.
+        An optional `force_failure_mode` makes that job land in the dead queue, so the
+        auto-fix loop can be exercised. The resolution comes back in `submit_details` as
+        `command`, `args_resolved`, `dry_run`, `force_failure_mode`, `notification_status`.
+        A user who cancels or times out raises `SubmitRefused`. The flow reports that as
+        status failed / route_reason `expeditor_cancelled` with the same details.
+
+    This module never touches HTTP: the flow runs a submit in a worker thread, so the
+    blocking expeditor call is fine here.
 """
 
 import uuid
@@ -43,9 +45,13 @@ MOCK_COMMAND = "agent router go to mock job"
 
 
 class MockJobArgs( BaseModel ):
-    """The arguments of `agent router go to mock job` — the door's request body, minus the
-    three fields that travel top-level on /api/v2/submit (websocket_id, scheduled_at,
-    monopolize)."""
+    """
+    The arguments of `agent router go to mock job`, the door's request body.
+
+    Notes:
+        The three fields that travel top-level on /api/v2/submit (websocket_id,
+        scheduled_at, monopolize) are not part of it.
+    """
     iterations_min      : int   = Field( 3, ge=1, le=20, description="Minimum iterations" )
     iterations_max      : int   = Field( 8, ge=1, le=20, description="Maximum iterations" )
     sleep_min           : float = Field( 1.0, ge=0.1, le=30.0, description="Minimum sleep seconds" )
@@ -149,7 +155,7 @@ def build_plain_mock_job( args, user_id, user_email, session_id, debug=False, ve
 
 def build_expeditor_test_job( args, user_id, user_email, bearer_token, debug=True ):
     """
-    Route a voice command through the expeditor and build a dry-run job of the matched command.
+    Route a voice command through the expeditor; build a dry-run job of the match.
 
     Requires:
         - args is a MockJobArgs with voice_command set
@@ -160,7 +166,7 @@ def build_expeditor_test_job( args, user_id, user_email, bearer_token, debug=Tru
         - returns the dry-run job with `submit_details = { "config": {…} }` carrying
           command, voice_command, args_resolved (user_email / session_id / user_id /
           no_confirm elided), dry_run True and force_failure_mode
-        - the job's own routing_command / original_args are those of the MATCHED command,
+        - the job's own routing_command / original_args are those of the matched command,
           not of the mock command, so job_history describes the job that actually runs
 
     Raises:
