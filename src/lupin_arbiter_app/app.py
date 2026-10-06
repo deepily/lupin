@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
 """
-lupin-arbiter-app FastAPI app — the standalone, out-of-band fleet watcher on :8001.
+lupin-arbiter-app FastAPI app, the standalone out-of-band fleet watcher on :8001.
 
-Surface so far:
-    GET /health  (L1) — cheap, always-answer liveness for systemd/cron (deploy §7).
-    GET /state   (L4) — the single-pane composite (health watcher `health_watcher` +
-                 fleet arbiter `fleet_arbiter`) read from the :8001-LOCAL store; the
-                 :7999 reverse-proxy PULLS from here (R3). Read-only, zero outbound HTTP.
-The health watcher (L2) is wired via an INJECTABLE `health_loop` that the app
-lifespan start()s on boot and stop()s on shutdown. The fleet arbiter + R0 (L3) are
-wired via the injectable `fleet_arbiter_loop`.
+Surface:
+    GET /health  - cheap liveness that always answers, for systemd and cron.
+    GET /state   - the single-pane composite (health watcher `health_watcher` and
+                   fleet arbiter `fleet_arbiter`), read from the :8001-local store.
+                   The :7999 reverse-proxy pulls from here. Read-only, no outbound HTTP.
+The health watcher is wired through an injectable `health_loop`. The app lifespan
+calls start() on it at boot and stop() at shutdown. The fleet arbiter is wired
+through the injectable `fleet_arbiter_loop`.
 
-Two design seams (Tiberius + Tiffany):
-    • the :8001-LOCAL section-keyed `snapshot_store` on app.state — the loops
-      (L2/L3) write their own sections, /state (L4) reads the composite; this
-      module imports NOTHING from cosa.rest / the :7999 server and makes ZERO
-      outbound HTTP, so the eventual fleet-stall path stays in-process only (R4).
-    • the injectable `health_loop` — unit tests pass a fake (no real threads /
+Two design seams:
+    - The :8001-local section-keyed `snapshot_store` on app.state. The loops write
+      their own sections and /state reads the composite. This module imports nothing
+      from cosa.rest or the :7999 server and makes no outbound HTTP, so the
+      fleet-stall path stays in-process.
+    - The injectable `health_loop`. Unit tests pass a fake (no real threads or
       docker); production builds the real one in create_production_app().
 """
 import datetime
@@ -55,12 +55,12 @@ def create_app(
           start() / stop()
 
     Ensures:
-        - returns a FastAPI app exposing GET /health
-        - carries an injectable :8001-LOCAL section-keyed snapshot_store on
+        - returns a FastAPI app exposing GET /health and GET /state
+        - carries an injectable :8001-local section-keyed snapshot_store on
           app.state (default: a fresh LocalSnapshotStore)
         - the lifespan start()s every provided background loop on boot and stop()s
           them (in reverse) on shutdown; absent loops are no-ops
-        - this module makes NO :7999/:8000 import or HTTP; /health never raises
+        - this module makes no :7999/:8000 import or HTTP; /health never raises
           (no I/O, no dependency on the monitored servers)
     """
     now_fn     = now_fn if now_fn is not None else _utcnow
@@ -88,24 +88,16 @@ def create_app(
 
     def _loop_liveness() -> dict:
         """
-        Per-loop thread liveness, read from the THREAD ITSELF (2026-08-10).
+        Per-loop thread liveness, read from the thread itself.
 
-        Why this exists: on 2026-08-08 the fleet-arbiter thread died on its first
-        tick (ModuleNotFoundError in the job ctor) and STAYED dead for two days.
-        The process was fine, so `systemctl status` said active(running) and this
-        very endpoint returned {"status":"ok"} the whole time. The only visible
-        symptom was an empty panel three hops downstream. A dead worker thread
-        inside a live process must be reportable AT the process.
-
-        `is_alive()` is asked of the real Thread object, never a "we started it"
-        flag — a flag records an intention, and the intention was true the entire
-        time the loop was dead.
+        A loop thread can die while the process stays up, and then systemctl and
+        /health both look healthy. `is_alive()` is asked of the real Thread, never a
+        "we started it" flag, because a flag stays true after the thread dies.
 
         Ensures:
-            - one entry per WIRED loop; absent loops are omitted (not reported dead)
+            - one entry per wired loop; absent loops are omitted (not reported dead)
             - a loop object without a `_thread` reports "not_started"
-            - never raises — health must answer even when a loop is in a bad state
-        Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
+            - never raises, because health must answer even when a loop is in a bad state
         """
         out = { }
         for name, lp in ( ( "health_watcher",          health_loop ),
@@ -127,12 +119,12 @@ def create_app(
     @app.get( "/health" )
     def health() -> dict:
         """
-        Cheap, always-answer liveness for systemd/cron supervision (deploy §7).
+        Cheap liveness that always answers, for systemd and cron supervision.
 
-        `status` stays "ok" whenever the PROCESS is answering — supervisors key on
-        it and must not be flapped by a worker-thread fault. The new `loops` map
-        and the `degraded` boolean carry the thread-level truth, so a dead loop is
-        greppable in one call instead of invisible (2026-08-10).
+        `status` stays "ok" whenever the process is answering, because supervisors
+        key on it and must not flap on a worker-thread fault. The `loops` map and
+        the `degraded` boolean carry the thread-level truth, so a dead loop shows
+        up in one call.
         """
         now    = now_fn()
         uptime = ( now - started_at ).total_seconds()
@@ -150,20 +142,19 @@ def create_app(
     @app.get( "/state" )
     def state() -> dict:
         """
-        The single-pane composite (L4) — read-only, cheap, 127.0.0.1-bind (R3).
+        The single-pane composite: read-only, cheap, bound to 127.0.0.1.
 
-        Reads the :8001-LOCAL section-keyed store (health watcher `health_watcher` +
-        fleet arbiter `fleet_arbiter`); the :7999 reverse-proxy `GET /api/arbiter/fleet-state`
-        PULLS from here (R3: this service NEVER pushes). Makes ZERO outbound HTTP
-        and reads only the in-process store (R4 independence preserved).
+        Reads the :8001-local section-keyed store (`health_watcher` and `fleet_arbiter`).
+        The :7999 reverse-proxy `GET /api/arbiter/fleet-state` pulls from here; this
+        service never pushes, makes no outbound HTTP, and stays independent of :7999.
 
         Ensures:
-            - top-level `status` is always "ok" — the WATCHER itself is alive and
-              answering (orthogonal to fleet health)
+            - top-level `status` is always "ok", because the watcher itself is alive
+              and answering (orthogonal to fleet health)
             - each section is its real value once its loop has written it, else an
-              explicit per-section "awaiting" placeholder — NEVER a bare null, so a
-              cold loop (not yet written) is distinguishable from a genuinely empty
-              fleet (the §10.4 awaiting idiom, mirrored from /api/arbiter/fleet-snapshot)
+              explicit per-section "awaiting" placeholder, never a bare null, so a
+              cold loop (not yet written) is distinguishable from an empty fleet
+              (the same awaiting idiom as /api/arbiter/fleet-snapshot)
         """
         composite        = store.get()
         health_watcher   = composite.get( "health_watcher" )
@@ -193,11 +184,11 @@ def create_app(
 
 def _announce_reload_blindness( containers, *, env_inspect_fn, assess_fn, reload_decider, notify_fn, log_fn ):
     """
-    Startup pass: for each watched container, decide whether the crash-loop
-    detector is BLIND (uvicorn --reload armed) and ANNOUNCE it loudly if so.
+    Startup pass: flag each watched container whose crash-loop detector is blind.
 
-    A watcher that silently stops watching is this row's exact defect, so a
-    reload-armed container must produce a startup escalation, not a code comment.
+    The detector is blind when uvicorn --reload is armed. A watcher that silently
+    stops watching is a defect, so a reload-armed container produces a startup
+    escalation rather than a code comment.
 
     Requires:
         - assess_fn( container, env_inspect_fn, reload_decider=… ) →
@@ -228,15 +219,15 @@ def _announce_reload_blindness( containers, *, env_inspect_fn, assess_fn, reload
 
 def _make_health_notify_fn( gateway, live_notify_fn, log_fn ):
     """
-    Build the health-watcher (Loop A) escalation notify_fn — Part-6 #1/#2/#3:
-    infra/self-health alerts (container unhealthy / flapping / health-watch BLIND)
-    route to RICK ONLY (durable `fleet-escalations` post + best-effort live push),
-    with NO manager fanout (managers don't act on containers). Keeps the structured
-    `health_escalation` log line too.
+    Build the health-watcher escalation notify_fn for infra and self-health alerts.
+
+    Alerts (unhealthy, flapping, health-watch blind) go to Rick only, as a durable
+    `fleet-escalations` post plus a best-effort live push. There is no manager
+    fanout, because managers do not act on containers.
 
     Ensures:
-        - returns notify( message ) that logs `health_escalation` AND escalates to
-          Rick via the shared escalation sink (durable + deduped live push); never
+        - returns notify( message ) that logs `health_escalation` and escalates to
+          Rick via the shared escalation sink (durable plus deduped live push); never
           raises (the escalation sink is degrade-safe)
     """
     from lupin_arbiter_app.fleet_arbiter_loop import make_escalation_notify_fn
@@ -251,14 +242,11 @@ def _make_health_notify_fn( gateway, live_notify_fn, log_fn ):
 
 def _build_context_pressure_loop( cfg, store, *, clock=None, log_fn=None ):
     """
-    Build the context-headroom writer (the published per-persona service),
-    gated on the Phase-1 master switch `arbiter context watch enabled`.
+    Build the context-headroom writer, gated on `arbiter context watch enabled`.
 
-    Reads the §6 budget-policy keys (1M→0.50, 200K→0.75, default→0.50 — Rick's
-    Decision 5, config-tunable) + the existing Phase-1 leaf knobs, and wires the
-    REAL leaf (`assess_fleet_context_pressure`) into a ContextPressureWriterLoop.
-    Read-only — the writer takes no notify/commons seam by design (Decision 4:
-    the CRITICAL→recommender stays separately gated in the Phase 2/3 lineage).
+    Reads the budget-policy keys (1M window 0.50, 200K window 0.75, default 0.50,
+    config-tunable) and the leaf knobs. The writer is read-only and takes no notify
+    or commons seam. The critical-level recommender stays separately gated.
 
     Requires:
         - cfg exposes .get( key, default, return_type ) (real or fake)
@@ -312,25 +300,25 @@ def assemble_app(
     clock          : Optional[ Any ]                = None,
 ) -> FastAPI:
     """
-    Testable production wiring (Tiberius's principle: a factory that BRANCHES on
-    config is NOT an IO boundary — inject the deps, pragma only literal external
-    construction). Builds the health watcher (gated on `arbiter health watch enabled`)
-    + the fleet arbiter (the standing recycle-supervised v2.2 arbiter) wired to ONE
-    shared :8001-local store, and returns the FastAPI app.
+    Build the production app: health watcher and fleet arbiter over one shared store.
+
+    A factory that branches on config is not an IO boundary, so deps are injected
+    and only literal external construction is excluded from coverage.
+    The fleet arbiter is the standing recycle-supervised arbiter.
 
     Requires:
         - cfg exposes .get( key, default, return_type ) (real or fake)
         - gateway satisfies the ArbiterGateway protocol (who/send_to/post/read)
 
     Ensures:
-        - the fleet arbiter (FleetArbiterLoop) is ALWAYS wired (the service IS the standing arbiter)
+        - the fleet arbiter (FleetArbiterLoop) is always wired, since the service is the standing arbiter
         - the health watcher (HealthWatcherLoop) is wired iff `arbiter health watch enabled`
-          (disabled → health_loop=None + a health_watcher_disabled log)
+          (disabled: health_loop=None plus a health_watcher_disabled log)
         - the context-headroom writer (ContextPressureWriterLoop) is wired iff
-          `arbiter context watch enabled` (disabled → None + a disabled log)
-        - all loops write sections of the SAME store; this function makes NO
-          :7999/:8000 HTTP and builds NO job until the runner starts (testable
-          with a fake cfg + fake gateway)
+          `arbiter context watch enabled` (disabled: None plus a disabled log)
+        - all loops write sections of the same store; this function makes no
+          :7999/:8000 HTTP and builds no job until the runner starts (testable
+          with a fake cfg and fake gateway)
     """
     from lupin_arbiter_app.health_watcher import (
         HealthWatcherLoop, docker_inspect_health, docker_inspect_restart_count,
@@ -611,8 +599,9 @@ def assemble_app(
 
 def _pending_ledger_path( cfg ):
     """
-    Resolve the §3.5 pending-ledger file path: relative INI value combined with
-    the canonical project root at runtime (PATH MANAGEMENT mandate).
+    Resolve the pending-ledger file path from the INI value and the project root.
+
+    The INI value is relative and is combined with the canonical project root at runtime.
 
     Ensures:
         - returns <project_root> + <`arbiter outreach pending ledger path`>
@@ -626,8 +615,9 @@ def _pending_ledger_path( cfg ):
 
 def _lineage_carry_path( cfg ):
     """
-    Resolve the F-A lineage-carry file path (2026.06.11 lineage-persistence
-    design): relative INI value + the canonical project root (PATH MANAGEMENT).
+    Resolve the lineage-carry file path from the INI value and the project root.
+
+    The INI value is relative and is combined with the canonical project root at runtime.
 
     Ensures:
         - returns <project_root> + <`arbiter lineage carry path`>
@@ -641,10 +631,11 @@ def _lineage_carry_path( cfg ):
 
 def _offsets_state_path( cfg ):
     """
-    Resolve the durable event-offset store path (bug 5a1f17f8 (b)): relative INI
-    value + the canonical project root (PATH MANAGEMENT). Persisting the per-session
-    byte offsets here lets a :8001 restart RESUME tailing instead of re-reading every
-    events file from byte 0 — the STUCK-poke replay root cause.
+    Resolve the durable event-offset store path from the INI value and the project root.
+
+    The INI value is relative and is joined to the project root at runtime.
+    Persisting per-session byte offsets lets a :8001 restart resume tailing instead
+    of re-reading events files from byte 0, which would replay stuck-pokes.
 
     Ensures:
         - returns <project_root> + <`arbiter event offsets state path`>
@@ -661,8 +652,8 @@ def resolve_arbiter_project():
     The project this arbiter serves, as every other arbiter surface resolves it.
 
     Ensures:
-        - returns detect_project() (cwd/git), degrading to "lupin" if that raises — this
-          app IS the lupin fleet's arbiter
+        - returns detect_project() (cwd/git), degrading to "lupin" if that raises,
+          because this app is the lupin fleet's arbiter
     """
     try:
         from cosa.agents.utils.sender_id import detect_project
@@ -676,10 +667,10 @@ def build_dm_push_fn( cfg, *, base_url, api_key, timeout ):
     Build the arbiter's DM-push hop, or None when `arbiter outreach dm push enabled` is off.
 
     Ensures:
-        - the hop carries THIS arbiter's project as `sender_project`: the server refuses a
-          DM without one (row 12b5a766 step 2), and before row 97c5bd94 this call passed none,
-          so every arbiter DM push was answered 422 and dropped. It lives here, out of the
-          no-cover IO boundary, precisely so a test can see what it passes.
+        - the hop carries this arbiter's project as `sender_project`, because the server
+          refuses a DM without one (answers 422, and the push is dropped)
+        - the construction lives here, outside the no-cover IO boundary, so a test can
+          see what it passes
     """
     from lupin_arbiter_app.arbiter_live_notify import make_dm_push_fn
     if not cfg.get( "arbiter outreach dm push enabled", default=True, return_type="boolean" ):
@@ -695,31 +686,26 @@ def build_dm_push_fn( cfg, *, base_url, api_key, timeout ):
 
 def _build_arbiter_outreach_hops( cfg, gateway ):   # pragma: no cover - literal external IO boundary (config, env credential, urllib)
     """
-    Build the best-effort outreach hops (2026.06.11 receipts design + Thread C+D):
-    ( live_notify_fn, live_retry_fn, dm_push_fn, tmux_push_fn ) — the first three
-    are the :7999 hops (each None when unavailable); tmux_push_fn is the host-side
-    wake hop, ALWAYS built (independent of the :7999 api_key) and returned in every
-    path.
+    Build the best-effort outreach hops as a 4-tuple, always ending in tmux_push_fn.
 
-    The IO boundary for the :7999 hops: reads the gating INI knobs + the
-    X-API-Key from `~/.lupin/config` (canonical cosa.utils.config_loader) and
-    assembles the outcome-returning transports. The request SHAPES, outcome
-    parsing, dedup guard, misconfig validator, and key resolver are unit-tested;
-    only this wiring + the urllib round-trips are no-cover.
+    The tuple is ( live_notify_fn, live_retry_fn, dm_push_fn, tmux_push_fn ). The
+    first three are :7999 hops, each None when unavailable. tmux_push_fn is the
+    host-side wake hop, always built. This is the IO boundary for the INI knobs and key.
 
     Ensures:
-        - feature disabled or credential unresolvable → ( None, None, None )
-          (logged; escalations stay durable on the commons topic)
-        - §3.6 misconfig guard: an empty / env-skeleton target_user (tonight's
-          R1: literal ${LUPIN_DEV_EMAIL}) logs `live_notify_misconfigured`
-          LOUDLY, best-effort posts the misconfiguration to fleet-escalations,
-          and disables the live hops — no doomed-404 spam, and every subsequent
-          Rick-bound outreach journals outcome "disabled" (visible, not silent)
-        - happy path → live_notify_fn = dedup-guarded transport (first sends,
-          persist=True → one forensic row); live_retry_fn = the RAW persist=False
-          transport (re-announce bypasses content-dedup by design — it re-sends the
-          same text — AND skips the DB insert so retries never mint duplicate rows,
-          bug e1bbe011); dm_push_fn = the §3.3 register-question hop (or None when
+        - feature disabled or credential unresolvable: returns
+          ( None, None, None, tmux_push_fn ) (logged; escalations stay durable on the
+          commons topic)
+        - misconfig guard: an empty or env-skeleton target_user (such as the literal
+          ${LUPIN_DEV_EMAIL}) logs `live_notify_misconfigured` loudly, best-effort
+          posts the misconfiguration to fleet-escalations, and disables the live
+          hops. There is no doomed-404 spam, and every later Rick-bound outreach
+          journals outcome "disabled" (visible, not silent). dm_push_fn is still returned
+        - happy path: live_notify_fn is the dedup-guarded transport (first sends,
+          persist=True, one forensic row). live_retry_fn is the raw persist=False
+          transport: a re-announce re-sends the same text, so it must bypass
+          content-dedup, and it skips the DB insert so retries never mint
+          duplicate rows. dm_push_fn is the register-question hop (None when
           its gate is off)
     """
     from cosa.utils.config_loader import get_api_config, load_api_key
@@ -783,11 +769,12 @@ def _build_arbiter_outreach_hops( cfg, gateway ):   # pragma: no cover - literal
 
 def create_production_app() -> FastAPI:   # pragma: no cover - literal external construction (config, gateway)
     """
-    uvicorn `--factory` target: build the literal externals (ConfigurationManager,
-    the bridge-less commons gateway, the :7999 outreach hops) and delegate ALL
-    wiring/branching to the testable assemble_app. The hops are best-effort,
-    escalation-path only; escalations always land durably on the
-    fleet-escalations commons topic regardless.
+    uvicorn `--factory` target that builds the externals and delegates wiring to assemble_app.
+
+    Builds the literal externals (ConfigurationManager, the bridge-less commons
+    gateway, the :7999 outreach hops). All wiring and branching goes to the
+    testable assemble_app. The hops are best-effort and escalation-path only;
+    escalations always land durably on the fleet-escalations commons topic.
     """
     from cosa.config.configuration_manager import ConfigurationManager
     from cosa.agents.heartbeat_arbiter.arbiter_gateway import LupinArbiterGateway

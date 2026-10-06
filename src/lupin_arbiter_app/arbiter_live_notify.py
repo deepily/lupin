@@ -1,39 +1,33 @@
 #!/usr/bin/env python3
 """
-lupin-arbiter-app — the live-push-to-Rick hop (2b-1), outcome-returning since the
-2026.06.11 outreach-receipts design (Item B §3.2/§3.3).
+lupin-arbiter-app: the best-effort live pushes to the operator and to managers.
 
-The arbiter's escalations land durably on the `fleet-escalations` commons topic;
-this module builds the BEST-EFFORT :7999 hops that fleet_arbiter_loop injects —
-escalation-path ONLY (never per-poll; detection stays :7999-free, R4):
+Every hop returns an outcome dict and never raises.
 
-  • the LIVE notify transport (`make_notify_transport`) — POST /api/notify to
-    Rick. Pre-design, `_http_post` discarded the response BODY, so a
-    `user_not_available` miss (HTTP 200!) was invisible — the latent L1 failure
-    behind the 2026-06-11 21:28/22:01 silent misses. The transport now parses
-    the body's `status` into a structured OUTCOME dict and NEVER raises:
-    failures become outcome values, journaled by the caller under the
-    outreach_id (no hop may fail silently — §1.5).
+The arbiter's escalations land durably on the `fleet-escalations` commons topic.
+This module builds the best-effort :7999 hops that fleet_arbiter_loop injects.
+They run on the escalation path only, never per poll, so detection stays free of :7999 calls.
 
-  • the DM PUSH hop (`make_dm_push_fn`) — POST /api/dm/send with
-    recipient_persona + the outreach body INLINE (notification-native AI↔AI
-    DM, direction='ai_to_ai'): the recipient's listener delivers the body
-    directly via `_handle_peer_dm` → tmux injection → the manager WAKES.
-    Pre-design the arbiter's manager DMs were board-only writes (root-cause
-    R6 — Tiberius never got pushed). Migrated off the legacy
-    register-question / CommonsQuestionWatcher claim-check path 2026-06-15
-    (cosa-voice token-reduction Phase 4) — the durable dm-<persona> board
-    write in `_emit_dm` is unchanged (presence/receipt-polling substrate).
+  - The live notify transport (`make_notify_transport`) POSTs /api/notify to the operator.
+    /api/notify answers HTTP 200 even for `user_not_available`, so the transport parses the
+    body's `status` into a structured outcome dict and never raises. Failures become outcome
+    values, journaled by the caller under the outreach_id. No hop may fail silently.
+
+  - The DM push hop (`make_dm_push_fn`) POSTs /api/dm/send with recipient_persona and the
+    outreach body inline (an AI-to-AI DM, direction='ai_to_ai'). The recipient's listener
+    delivers the body through `_handle_peer_dm` and tmux injection, so the manager wakes.
+    The durable dm-<persona> board write in `_emit_dm` is unchanged. It stays the substrate
+    for presence and receipt polling.
 
 Outcome contract (every hop returns one dict):
     { "channel": "live"|"dm_push", "outcome": <vocabulary>, ...detail fields }
-Delivered outcomes for the live channel: DELIVERED_OUTCOMES — ONLY these enter
-the dedup window (the L2 kill: a user_not_available no longer suppresses
-retries), and only these count as a Rick-side delivery receipt.
+Delivered outcomes for the live channel are DELIVERED_OUTCOMES. Only these enter the dedup
+window, so a user_not_available miss never suppresses a retry. Only these count as a
+delivery receipt on the operator side.
 
-Two seams keep the logic 100% unit-testable — only the literal urllib round
-trips (`_http_post`, `_http_post_json`) and the config/credential read (in
-app.create_production_app) are the IO boundary, pragma'd there.
+Two seams keep the logic fully unit-testable. The urllib round trips (`_http_post`,
+`_http_post_json`) and the config and credential read (in app.create_production_app)
+are the IO boundary and carry the no-cover pragma.
 """
 import datetime
 import json
@@ -73,10 +67,9 @@ def build_notify_request(
     """
     Build the (url, headers) for a POST :7999/api/notify live push.
 
-    PURE — the testable shape of the :7999 hop (the urllib round-trip is the
-    pragma'd IO boundary, `_http_post`). Every notify field is a Query param (the
-    endpoint declares them as Query), so they ride the URL query string even on a
-    POST.
+    Pure function: it is the testable shape of the :7999 hop. The urllib round trip is the
+    no-cover IO boundary, `_http_post`. The endpoint declares every notify field as a
+    Query param, so they ride the URL query string even on a POST.
 
     Requires:
         - message / base_url / target_user / sender_id / api_key are strings
@@ -85,11 +78,11 @@ def build_notify_request(
         - returns (url, headers) where url = <base>/api/notify?<encoded params>
           carrying message + type + priority + target_user + sender_id + title +
           suppress_ding + persist, and headers carries the X-API-Key
-        - persist=False rides as `persist=false` — the re-announce flood-guard
-          (bug e1bbe011): a delivery-only retry must not mint a duplicate DB row
+        - persist=False rides as `persist=false`, the re-announce flood guard:
+          a delivery-only retry must not mint a duplicate DB row
         - base_url's trailing slash is normalised (no double slash)
-        - abstract (the card's detail, not spoken) rides as `abstract` ONLY when given, so
-          every existing caller's URL is byte-identical (row 033538f6)
+        - abstract (the card's detail, not spoken) rides as `abstract` only when given, so
+          every caller that omits it gets a byte-identical URL
         - never raises
     """
     fields = {
@@ -112,9 +105,10 @@ def build_notify_request(
 
 def parse_notify_outcome( http_status: int, body: Any ) -> dict:
     """
-    Map a /api/notify HTTP response (status + parsed JSON body) to the live-
-    channel outcome dict — PURE (§3.2: the body carries the REAL delivery state;
-    all three delivery states ride HTTP 200).
+    Map a /api/notify HTTP response to the live-channel outcome dict.
+
+    Pure function. The body carries the real delivery state, because all three
+    delivery states ride HTTP 200.
 
     Requires:
         - http_status is an int
@@ -123,9 +117,9 @@ def parse_notify_outcome( http_status: int, body: Any ) -> dict:
     Ensures:
         - body status "queued" / "delivered_via_listener" / "user_not_available"
           → that outcome verbatim (+ connection_count when present)
-        - any other body / unparseable body on a 2xx → outcome
-          "unexpected_response" with the body head as detail (visible, never
-          silently assumed delivered)
+        - any other body, or an unparseable body, on a 2xx → outcome
+          "unexpected_response" with the body head as detail (visible, and never
+          assumed delivered)
         - non-2xx http_status → outcome "http_error" (+ http_status)
         - never raises
     """
@@ -153,7 +147,7 @@ def make_notify_transport(
     log_fn          : Optional[ Callable ] = None,
 ) -> Callable[ [ str ], dict ]:
     """
-    Build the live transport: transport( message ) -> live-channel outcome dict.
+    Build the live transport: transport( message ) returns a live-channel outcome dict.
 
     Requires:
         - base_url / target_user / sender_id / api_key are strings
@@ -163,13 +157,13 @@ def make_notify_transport(
     Ensures:
         - POSTs the build_notify_request shape (with this transport's `persist`)
           and returns parse_notify_outcome( status, body )
-        - persist=False builds the re-announce flood-guard transport (bug
-          e1bbe011): every retry re-attempts LIVE delivery WITHOUT re-persisting a
-          forensic row — the first-send transport keeps persist=True
-        - ANY transport exception (HTTPError 4xx/5xx, timeout, refused) becomes
-          { channel: "live", outcome: "http_error", detail } — NEVER raises
-          (failures are outcome VALUES per §1.5; tonight's swallowed 404 becomes
-          a per-outreach journaled result instead)
+        - persist=False builds the re-announce flood-guard transport: every retry
+          re-attempts live delivery without re-persisting a forensic row. The
+          first-send transport keeps persist=True
+        - any transport exception (HTTPError 4xx/5xx, timeout, refused) becomes
+          { channel: "live", outcome: "http_error", detail } and never raises.
+          Failures are outcome values, so a swallowed 404 becomes a per-outreach
+          journaled result
         - logs `live_notify_sent` with the outcome on every attempt (the
           loop-level trace; the per-outreach result event is the caller's)
     """
@@ -203,12 +197,11 @@ def make_live_notify_fn(
     log_fn               : Optional[ Callable ] = None,
 ) -> Callable[ [ str ], dict ]:
     """
-    Wrap an outcome-returning transport with a content+window DEDUP guard.
+    Wrap an outcome-returning transport with a content-and-window dedup guard.
 
-    The arbiter's detectors already escalate-once-per-episode; this is
-    belt-and-suspenders against a recycle re-emit, two detectors emitting the
-    same line, or a retry storm — Rick never gets the same alert twice in a
-    window.
+    The arbiter's detectors already escalate once per episode. This guard is a second
+    layer. It covers a recycle re-emit, two detectors emitting the same line, and a retry
+    storm. The operator never gets the same alert twice in a window.
 
     Requires:
         - transport is a callable taking the message and returning a live-
@@ -216,13 +209,12 @@ def make_live_notify_fn(
         - dedup_window_seconds is a positive int
 
     Ensures:
-        - the FIRST occurrence of a given message calls transport(message) and
+        - the first occurrence of a given message calls transport(message) and
           returns its outcome; an identical message seen again within the window
-          is SKIPPED (logged `live_notify_deduped`, outcome "deduped")
-        - a send is recorded into the window ONLY on a DELIVERED outcome — a
-          user_not_available / http_error / unexpected_response attempt is NOT
-          deduped away (the §1.3 L2 kill: pre-design, ANY non-raising call was
-          recorded, so an offline-Rick miss suppressed retries for 15 min)
+          is skipped (logged `live_notify_deduped`, outcome "deduped")
+        - a send is recorded into the window only on a delivered outcome. A
+          user_not_available, http_error or unexpected_response attempt is not
+          deduped away, so any offline operator's miss never suppresses retries
         - entries older than the window are pruned on each call (bounded memory)
         - never raises; returns the outcome dict
     """
@@ -260,12 +252,11 @@ def make_live_notify_fn(
 
 def validate_live_notify_target( target_user: str ) -> Optional[ str ]:
     """
-    Pre-flight validation of the live-push target_user — the §3.6 misconfig
-    guard (PURE).
+    Pre-flight validation of the live-push target_user, a misconfiguration guard.
 
-    Tonight's root cause R1: the systemd unit env lacked LUPIN_DEV_EMAIL, so
-    `os.path.expandvars` left the LITERAL `${LUPIN_DEV_EMAIL}` in the INI value
-    and every push 404'd, silently, forever. This catches that class at startup.
+    Pure function. If the systemd unit env lacks LUPIN_DEV_EMAIL, `os.path.expandvars`
+    leaves the literal `${LUPIN_DEV_EMAIL}` in the INI value and every push 404s.
+    This catches that class of error at startup.
 
     Ensures:
         - returns None when target_user looks usable (non-empty, no surviving
@@ -285,14 +276,11 @@ def validate_live_notify_target( target_user: str ) -> Optional[ str ]:
 
 def resolve_arbiter_api_key( get_api_config_fn, load_api_key_fn, *, env, log_fn=None ):
     """
-    PURE-SEAM (degrade-safe) resolver for the live-push X-API-Key out of
-    `~/.lupin/config` — the testable branch logic lifted OUT of the app.py
-    no-cover IO boundary (§7.4 of 2026.06.09-arbiter-notify-key-from-lupin-config).
+    Resolve the live-push X-API-Key from `~/.lupin/config`, degrading to None on failure.
 
-    The two `cosa.utils.config_loader` functions are INJECTED (not imported here)
-    so the try/except is unit-testable without touching real files or env: the
-    literal file IO lives inside the injected callables; this seam is purely the
-    branch decision (key-or-None).
+    The testable branch logic, lifted out of the no-cover IO boundary in app.py.
+    The two `cosa.utils.config_loader` functions are injected, not imported here, so the
+    try/except is unit-testable without real files or env.
 
     Requires:
         - get_api_config_fn( env=... ) → dict carrying an "api_key_file" path
@@ -304,10 +292,10 @@ def resolve_arbiter_api_key( get_api_config_fn, load_api_key_fn, *, env, log_fn=
 
     Ensures:
         - happy path → returns the validated api_key string
-        - ANY of FileNotFoundError / ValueError / KeyError → logs
+        - any of FileNotFoundError / ValueError / KeyError → logs
           `live_notify_disabled` (with env + error) and returns None
-        - never raises — a missing/bad credential disables live push (escalations
-          stay durable on the commons topic), it NEVER crashes arbiter startup
+        - never raises. A missing or bad credential disables live push (escalations
+          stay durable on the commons topic) and never crashes arbiter startup
     """
     log_fn = log_fn if log_fn is not None else _default_log_fn
     try:
@@ -330,26 +318,24 @@ def build_dm_send_payload(
     sender_project    : str,
 ):
     """
-    Build the JSON payload for the /api/dm/send DM-push hop — PURE.
+    Build the JSON payload for the /api/dm/send DM-push hop (a pure function).
 
-    Migrated off register-question 2026-06-15: the body rides INLINE (no
-    commons board claim-check). dm/send resolves the recipient persona →
-    active session (same-user scoped) and delivers `body` as a
-    direction='ai_to_ai' notification — the manager WAKES with the text in hand.
+    The body rides inline, with no commons board claim-check. dm/send resolves the
+    recipient persona to its active session (same-user scoped). It delivers `body` as a
+    direction='ai_to_ai' notification, so the manager wakes with the text in hand.
 
     Ensures:
-        - thread_id == the caller's outreach/question id (the dot-connect key:
-          the manager's threaded reply names the outreach via thread_id, and
-          §3.4 board-polling receipts still correlate on the same id)
+        - thread_id == the caller's outreach/question id. The manager's threaded
+          reply names the outreach via thread_id, and board-polling receipts
+          correlate on the same id
         - body travels inline (DmSendRequest.body is required)
         - no topic / question_id / ttl_seconds / expect_reply — dm/send is
           stateless (no tracker), the durable dm-<persona> board write in
           `_emit_dm` remains the receipt-polling substrate
-        - sender_project is REQUIRED here because the server requires it (row
-          12b5a766 step 2): a payload without it is answered 422 before it is
-          stored or pushed. It was omitted here until row 97c5bd94, so every
-          arbiter DM push failed — a required argument makes the omission a
-          TypeError at the call site instead of a quiet 422 at runtime
+        - sender_project is a required argument here because the server requires
+          it: a payload without it is answered 422 before it is stored or pushed.
+          A required argument turns every omission into a TypeError at the call
+          site instead of a quiet 422 at runtime
     """
     return {
         "sender_session_id" : sender_session_id,
@@ -371,8 +357,9 @@ def make_dm_push_fn(
     log_fn            : Optional[ Callable ] = None,
 ) -> Callable[ [ str, str, str ], dict ]:
     """
-    Build the manager DM-push seam: dm_push( recipient_persona, thread_id, body )
-    -> dm_push-channel outcome dict.
+    Build the manager DM-push seam: dm_push( recipient_persona, thread_id, body ).
+
+    The returned function gives a dm_push-channel outcome dict.
 
     Requires:
         - http_post_json_fn (if given) is ( url, headers, payload_dict,
@@ -380,16 +367,16 @@ def make_dm_push_fn(
           default the urllib boundary
 
     Ensures:
-        - POSTs :7999/api/dm/send with the body INLINE; a 201
-          (dm/send always dispatches an ai_to_ai push on resolve) → outcome
-          "dispatched" (the manager's listener delivers the body via
-          _handle_peer_dm → tmux injection — they WAKE with the text in hand)
-        - ANY failure (422 recipient-resolution, timeout, refused, non-2xx) →
-          outcome "push_unavailable" with detail — the caller degrades to the
-          durable board write it already made, VISIBLY (never raises)
+        - POSTs :7999/api/dm/send with the body inline; a 201 (dm/send always
+          dispatches an ai_to_ai push on resolve) → outcome "dispatched". The
+          manager's listener delivers the body via _handle_peer_dm and tmux
+          injection, so the manager wakes with the text in hand
+        - any failure (422 recipient-resolution, timeout, refused, non-2xx) →
+          outcome "push_unavailable" with detail. The caller degrades, visibly,
+          to the durable board write it already made. Never raises
         - logs `dm_push_attempted` with the outcome on every call, and on a failure also
-          the http_status and detail (the response body), so a refusal's REASON survives
-          into the journal instead of only the word "push_unavailable"
+          the http_status and detail (the response body), so the reason for a refusal
+          survives into the journal instead of only the word "push_unavailable"
     """
     http_post_json_fn = http_post_json_fn if http_post_json_fn is not None else _http_post_json
     log_fn            = log_fn            if log_fn            is not None else _default_log_fn
@@ -425,23 +412,25 @@ def make_dm_push_fn(
 # ── the TMUX-push wake hop (Thread C+D — host-side direct injection) ──────────
 
 def _default_tmux_resolve( session_id ):   # pragma: no cover - host-side bridge IO boundary
-    """Real bridge probe: session_id → bridge dict (or None). No-cover; the seam is injected in tests."""
+    """Probe the real bridge: session_id to bridge dict, or None. Tests inject the seam."""
     from lupin_cli.claude_code.hooks.lib.session_bridge import find_session_by_id
     return find_session_by_id( session_id )
 
 
 def _default_tmux_inject( session_id, text, wrap ):   # pragma: no cover - host-side tmux IO boundary
-    """Real wake injector: reuse the existing inject_qualifier_via_tmux primitive (send-keys + Enter)."""
+    """Inject a wake into a tmux pane with inject_qualifier_via_tmux (send-keys and Enter)."""
     from lupin_cli.claude_code.hooks.lib.hook_common import inject_qualifier_via_tmux
     inject_qualifier_via_tmux( session_id, text, wrap=wrap )
 
 
 def _default_peer_dm_reminder( body, persona, icon, msg_id, thread_id ):
-    """Real envelope: reuse the SHARED build_peer_dm_reminder, but framed ONE-WAY
-    (bug 8894e597) — the arbiter is a pure observer with no inbox (bug 9694fb11),
-    so its pokes/advisories must NOT carry a dm_send reply affordance the poked
-    session cannot deliver. one_way=True swaps the false reply-line for the honest
-    signal path (resume work; bridge/hold/store freshness IS the ACK)."""
+    """Frame a peer DM with the shared build_peer_dm_reminder, one-way.
+
+    The arbiter is an observer with no inbox. Its pokes must never carry a dm_send
+    reply line, because the poked session cannot deliver one. one_way=True swaps that
+    line for the real signal path. Resuming work is the acknowledgement. So are fresh
+    bridge, hold and store state.
+    """
     from lupin_cli.claude_code.hooks.lib.hook_common import build_peer_dm_reminder
     return build_peer_dm_reminder( body, persona=persona, icon=icon, msg_id=msg_id, thread_id=thread_id, one_way=True )
 
@@ -456,16 +445,11 @@ def make_tmux_push_fn(
     log_fn         : Optional[ Callable ] = None,
 ) -> Callable[ [ str, str, str ], dict ]:
     """
-    Build the host-side TMUX wake seam: tmux_push( session_id, thread_id, body )
-    -> dm_push-channel outcome dict.
+    Build the host-side tmux wake seam: tmux_push( session_id, thread_id, body ).
 
-    The arbiter app is host-side (systemd --user, same uid as the CC tmux
-    server), so it can reach a dormant pane's tmux socket directly. This seam
-    WAKES that pane by reusing the existing inject_qualifier_via_tmux primitive
-    (resolve tmux from the bridge → send-keys -l … Enter, UNCONDITIONALLY — no
-    EVENT_IDLE gate). That is the whole point of Thread C+D: bypass the
-    listener's buffer-vs-inject gate that drops the arbiter poke for a
-    stale/owed or an idle-but-EVENT_IDLE-never-emitted manager.
+    The arbiter runs on the host with the CC tmux server's uid, so it can reach a dormant
+    pane's tmux socket. The returned function wakes the pane with no EVENT_IDLE gate. So it
+    reaches a stale or owed manager, and an idle one that never emitted EVENT_IDLE.
 
     Requires:
         - resolve_fn (if given) is session_id -> bridge dict | None (test seam;
@@ -476,12 +460,12 @@ def make_tmux_push_fn(
           framed text (test seam; default the real build_peer_dm_reminder)
 
     Ensures:
-        - a resolvable bridge WITH a tmux_session → frame body as a peer-DM
+        - a resolvable bridge with a tmux_session → frame body as a peer-DM
           <system-reminder> (wrap=False, verbatim) + inject → outcome "dispatched"
-        - no bridge / no tmux_session → outcome "push_unavailable" (the
-          degrade-safe signal that lets _emit_dm fall back to dm_push_fn, rider a)
-        - ANY exception (bridge read, framing, inject) → outcome
-          "push_unavailable" with detail — NEVER raises
+        - no bridge / no tmux_session → outcome "push_unavailable", the
+          degrade-safe signal that lets _emit_dm fall back to dm_push_fn
+        - any exception (bridge read, framing, inject) → outcome
+          "push_unavailable" with detail, and never raises
         - logs `tmux_push_attempted` with the outcome on every call
     """
     log_fn   = log_fn   if log_fn   is not None else _default_log_fn
@@ -516,11 +500,10 @@ def _http_post( url, headers, timeout_seconds=30 ):   # pragma: no cover - real 
     """
     POST to `url` with `headers` (empty body); return ( status, parsed_body ).
 
-    The literal urllib round-trip. Marked no-cover; exercised live against
-    :7999, never in unit tests (the request SHAPE is `build_notify_request` and
-    the response MAPPING is `parse_notify_outcome` — both ARE tested). Unlike
-    the pre-design version this READS the body: /api/notify reports the real
-    delivery state there (§1.3 L1).
+    The literal urllib round trip. It is marked no-cover and exercised live against
+    :7999, never in unit tests. The request shape is `build_notify_request` and the
+    response mapping is `parse_notify_outcome`, and both are tested. It reads the body,
+    because /api/notify reports the real delivery state there.
     """
     import urllib.request
     req = urllib.request.Request( url, data=b"", headers=headers, method="POST" )
@@ -545,9 +528,9 @@ def _http_post_json( url, headers, payload, timeout_seconds=30 ):
     """
     POST a JSON payload; return ( status, parsed_body ).
 
-    urllib RAISES on a 4xx/5xx, which is how a 422's reason was lost: the caller saw
-    only "HTTP Error 422: Unprocessable Content". An HTTP error is an ANSWER, not a
-    transport failure, so it is returned as ( status, body ) like a success and the
+    urllib raises on a 4xx/5xx, and the caller would then see only "HTTP Error 422:
+    Unprocessable Content" and lose the reason. An HTTP error is an answer, not a
+    transport failure. It is returned as ( status, body ) like a success, and the
     caller reads the reason out of the body. Only a failure with no HTTP answer
     (refused, timeout) still raises.
     """

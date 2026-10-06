@@ -1,27 +1,25 @@
 #!/usr/bin/env python3
 """
-:8001-LOCAL, SECTION-KEYED in-process snapshot store — the R4 independence linchpin.
+In-process, section-keyed snapshot store for the :8001 service.
 
-The single coherent store behind GET /state (L4). The health watcher (L2) and the
-fleet arbiter (L3) each write their OWN named SECTION of one shared instance — no
-clobber — and /state reads the whole composite:
+This is the single store behind GET /state. The health watcher and the fleet arbiter
+each write their own named section of one shared instance. Neither overwrites the
+other. /state reads the whole composite:
 
-    store.set_section( "health_watcher", { ...health-watch view... } )  # health watcher (L2)
-    store.set_section( "fleet_arbiter", { ...fleet snapshot... } )      # fleet arbiter (L3, via a
-                                                                        # sink-adapter — the
-                                                                        # v2.2 arbiter code is
-                                                                        # left untouched)
-    store.get()  ->  { "health_watcher": {...}, "fleet_arbiter": {...} }  # /state (L4)
+    store.set_section( "health_watcher", { ...health-watch view... } )
+    store.set_section( "fleet_arbiter", { ...fleet snapshot... } )
+    store.get()  ->  { "health_watcher": {...}, "fleet_arbiter": {...} }
 
-It deliberately does NOT import or call `cosa.rest.arbiter_snapshot_store` (the
-in-process :7999 server singleton) and makes ZERO outbound HTTP — so the
-fleet-stall path has no dependency on :7999/:8000 being up (deploy doc R4). The
-:7999 reverse-proxy (R3) PULLS from :8001/state; nothing here pushes to :7999.
+The fleet arbiter writes through a sink adapter, so its own code is left untouched.
 
-This closes the snapshot-sink trap Tiffany (B1 reviewer) flagged pre-build and
-Tiberius ratified: the v2.1 arbiter_job._snapshot_sink DEFAULTS to the :7999
-singleton (arbiter_job.py:53,217,339); on :8001 we point the fleet arbiter's sink at this
-store's `fleet_arbiter` section so the independence invariant holds end-to-end.
+It never imports or calls `cosa.rest.arbiter_snapshot_store` (the in-process :7999
+server singleton) and makes no outbound HTTP calls. The fleet-stall path therefore
+works whether or not :7999 or :8000 is up. The :7999 reverse proxy pulls from
+:8001/state; nothing here pushes to :7999.
+
+The arbiter job's snapshot sink defaults to the :7999 singleton. On :8001 the fleet
+arbiter's sink is pointed at this store's `fleet_arbiter` section. That keeps the
+independence intact from end to end.
 """
 import threading
 from typing import Any, Dict, Optional
@@ -42,7 +40,7 @@ class LocalSnapshotStore:
         - get() returns a shallow copy of the whole composite {section: value}
         - concurrent writes (loop threads) and reads (the /state handler) are
           serialised by an internal lock
-        - performs NO file I/O and NO network calls (R4 independence)
+        - performs no file I/O and no network calls, so :8001 stays independent of :7999
     """
 
     def __init__( self ) -> None:

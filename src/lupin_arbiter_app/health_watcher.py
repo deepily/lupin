@@ -1,35 +1,35 @@
 #!/usr/bin/env python3
 """
-Health watcher — the dev/test health watch (L2 of the :8001 lupin-arbiter-app service).
+Health watcher: the dev and test container health watch of the :8001 arbiter service.
 
-Out-of-band, per-container Docker health observation. Each poll inspects each
-NAMED container's `.State.Health.Status`, tracks status transitions from our OWN
-successive observations (NOT Docker's 5-deep Log, which is probe ExitCodes), and
-escalates two edges via an injected `notify_fn` — V1 is NOTIFY-ONLY (auto-bounce
-remediation is V2):
+Out-of-band, per-container Docker health observation. Each poll inspects the
+`.State.Health.Status` of every named container. It tracks status transitions from its
+own successive observations, not from Docker's 5-deep Log, which holds probe ExitCodes.
+It escalates two edges through an injected `notify_fn`. The first version only notifies;
+automatic bounce remediation is a later refinement.
 
     • enter-unhealthy : (starting|healthy) -> unhealthy  (once per episode)
     • flapping        : >= flap_threshold status transitions / flap_window  (once per episode)
 
-Plus a self-watch: after K consecutive polls in which EVERY container's inspect
-fails, the watcher escalates "health watcher BLIND" — the watcher noticing it has
-gone blind is itself a real signal.
+It also watches itself. After K consecutive polls in which the inspect of every
+container fails, the watcher escalates "health watcher BLIND". A watcher that has gone
+blind is a real signal in its own right.
 
-THREE `/health`-never-blocks guards (Tiberius redline):
-    1. The health watcher runs on its OWN background thread; GET /health never touches docker.
-    2. each `docker inspect` is timeout-bounded at the IO seam (< Docker's probe timeout).
-    3. per-container AND per-poll try/except — one bad inspect never kills the loop.
+Three guards keep `/health` from ever blocking:
+    1. The watcher runs on its own background thread; GET /health never touches docker.
+    2. Each `docker inspect` is timeout-bounded at the IO seam, below Docker's probe timeout.
+    3. Each container and each poll has its own try/except, so one bad inspect never kills the loop.
 
-Dev-bounce reshape (Tiberius): :7999 is bounced routinely, so a bounce-burst can
-read as flapping. Containers on `flap_exclude` are NEVER flap-paged but STILL get
-enter-unhealthy alerts (default excludes `lupin-rest-dev`). Known V1 limitation:
-non-excluded containers can still false-flap on a legitimate restart burst;
-per-container flap thresholds are a V2 refinement.
+The dev server on :7999 is bounced routinely, so a bounce burst can read as flapping.
+Containers on `flap_exclude` are never paged for flapping but still get enter-unhealthy
+alerts. The default excludes `lupin-rest-dev`. Known limitation: containers that are not
+excluded can still false-flap on a legitimate restart burst. Per-container flap
+thresholds would fix that later.
 
-All decision logic is pure + seam-injected (`inspect_fn` / `clock` / `notify_fn`
-/ `log_fn`) → 100% unit-testable on synthetic Status sequences, NO live docker.
-The real `docker inspect` subprocess and the thread spawn/join are the only
-`pragma: no cover` IO boundaries.
+All decision logic is pure and works through injected seams (`inspect_fn`, `clock`,
+`notify_fn`, `log_fn`). Unit tests drive it with synthetic Status sequences and need no
+live docker. The real `docker inspect` subprocess and the thread spawn and join are the
+only `pragma: no cover` IO boundaries.
 """
 import datetime
 import json
@@ -45,7 +45,7 @@ from cosa.agents.heartbeat_arbiter.arbiter_journal import make_log_fn
 # ── seams ───────────────────────────────────────────────────────────────────
 
 class SystemClock:
-    """Default wall-clock + sleep seam (a FakeClock is injected in unit tests)."""
+    """Default wall-clock and sleep seam; unit tests inject a FakeClock instead."""
 
     def now( self ) -> datetime.datetime:
         """Ensures: returns the current aware UTC datetime."""
@@ -65,12 +65,11 @@ _default_log_fn = make_log_fn( loop="health_watcher" )
 
 def _parse_inspect_result( returncode: int, stdout: Optional[ str ] ) -> Optional[ dict ]:
     """
-    PURE: map a `docker inspect … {{json .State.Health}}` (returncode, stdout) to
-    the Health dict, or None.
+    Pure: map a docker health inspect (returncode, stdout) to the Health dict, or None.
 
-    Extracted from docker_inspect_health so the four parse/error arms are unit
-    tested (the SOFT→REQUIRED note: a blanket pragma is a test blind spot — that
-    is literally how the clean-env boot bug hid).
+    The command is `docker inspect … {{json .State.Health}}`. It is split out of
+    docker_inspect_health so that the four parse and error arms are unit tested. A
+    blanket pragma on the whole function would leave them untested.
 
     Ensures:
         - returncode != 0 → None (inspect failed / no such container)
@@ -91,15 +90,17 @@ def _parse_inspect_result( returncode: int, stdout: Optional[ str ] ) -> Optiona
 
 def docker_inspect_health( container: str, timeout_seconds: float ) -> Optional[ dict ]:   # pragma: no cover - real subprocess IO boundary
     """
-    Run `docker inspect <container> --format '{{json .State.Health}}'`, bounded,
-    and delegate parsing to the pure _parse_inspect_result.
+    Run a bounded `docker inspect` for `.State.Health` and parse the result.
+
+    Parsing is delegated to _parse_inspect_result. The command is
+    `docker inspect <container> --format '{{json .State.Health}}'`.
 
     Ensures:
-        - returns the parsed `.State.Health` dict on success — Status may be None
+        - returns the parsed `.State.Health` dict on success; Status may be None
           when the container has no healthcheck (returned as {"Status": None})
-        - returns None on ANY inspect FAILURE (timeout, daemon down, missing
-          container, non-zero exit, unparseable) — None signals failure to the
-          BLIND detector
+        - returns None on any inspect failure (timeout, daemon down, missing
+          container, non-zero exit, unparseable); None signals the failure to the
+          blind detector
         - never raises (every failure mode maps to None)
     """
     try:
@@ -116,14 +117,11 @@ def docker_inspect_health( container: str, timeout_seconds: float ) -> Optional[
 
 def _parse_restart_count( returncode: int, stdout: Optional[ str ] ) -> Optional[ int ]:
     """
-    PURE: map a `docker inspect … {{.RestartCount}}` (returncode, stdout) to the
-    integer RestartCount, or None on any failure.
+    Pure: map a docker RestartCount inspect (returncode, stdout) to an int, or None.
 
-    RestartCount moves ONLY when the container's restart POLICY auto-restarts a
-    crashed container — verified live (2026-08-01, docker 24.0.4): a policy
-    crash-loop climbed 1→7 in 8s, while a manual `docker restart` x2 held it at 0.
-    That demonstrated difference is the whole basis for keying crash-loop
-    detection on this field (a sanctioned bounce never moves it).
+    The command is `docker inspect … {{.RestartCount}}`. Any failure gives None.
+    RestartCount moves only when the restart policy auto-restarts a crashed container.
+    A manual `docker restart` leaves it unchanged, so crash-loop detection keys on it.
 
     Ensures:
         - returncode != 0 → None (inspect failed / no such container)
@@ -144,12 +142,13 @@ def _parse_restart_count( returncode: int, stdout: Optional[ str ] ) -> Optional
 
 def docker_inspect_restart_count( container: str, timeout_seconds: float ) -> Optional[ int ]:   # pragma: no cover - real subprocess IO boundary
     """
-    Run `docker inspect <container> --format '{{.RestartCount}}'`, bounded, and
-    delegate parsing to the pure _parse_restart_count.
+    Run a bounded `docker inspect` for RestartCount, then parse it with _parse_restart_count.
+
+    The command is `docker inspect <container> --format '{{.RestartCount}}'`.
 
     Ensures:
         - returns the integer .State.RestartCount on success
-        - returns None on ANY inspect FAILURE (timeout, daemon down, missing
+        - returns None on any inspect failure (timeout, daemon down, missing
           container, non-zero exit, unparseable)
         - never raises (every failure mode maps to None)
     """
@@ -167,11 +166,11 @@ def docker_inspect_restart_count( container: str, timeout_seconds: float ) -> Op
 
 def _parse_env_value( env_list: Optional[ list ], key: str ) -> Optional[ str ]:
     """
-    PURE: extract KEY's value from a docker `.Config.Env` list of "K=V" strings.
+    Pure: extract one key's value from a docker `.Config.Env` list of "K=V" strings.
 
     Ensures:
-        - None/empty env_list → None
-        - the LAST "KEY=…" occurrence wins (docker's own precedence)
+        - None or empty env_list → None
+        - the last "KEY=…" occurrence wins (docker's own precedence)
         - a matching entry with an empty value → "" (not None)
         - no match → None
     """
@@ -186,8 +185,10 @@ def _parse_env_value( env_list: Optional[ list ], key: str ) -> Optional[ str ]:
 
 def docker_inspect_env( container: str, timeout_seconds: float ) -> Optional[ list ]:   # pragma: no cover - real subprocess IO boundary
     """
-    Run `docker inspect <container> --format '{{json .Config.Env}}'`, bounded;
-    return the env list (or None on any failure). Never raises.
+    Run a bounded `docker inspect` for `.Config.Env`; return the env list, or None on failure.
+
+    The command is `docker inspect <container> --format '{{json .Config.Env}}'`.
+    It never raises.
     """
     try:
         proc = subprocess.run(
@@ -210,27 +211,24 @@ def docker_inspect_env( container: str, timeout_seconds: float ) -> Optional[ li
 def assess_reload_blindness( container: str, env_inspect_fn: Callable[ [ str ], Optional[ list ] ],
                              *, reload_decider: Callable[ [ Optional[ str ], bool ], bool ] ):
     """
-    PURE-SEAM: decide whether crash-loop detection is BLIND to worker-only crashes
-    on `container` because uvicorn --reload is armed there.
+    Decide whether crash-loop detection is blind to worker-only crashes on `container`.
 
-    With --reload ON, uvicorn's supervising reloader is the container's main
-    process; a crashing WORKER is respawned by the reloader WITHOUT the container
-    exiting, so the restart POLICY never fires and RestartCount never moves — the
-    crash-loop detector cannot see it. A watcher that silently stops watching is
-    the exact defect this row is about, so this state must be ANNOUNCED loudly, not
-    left as a code comment.
+    It is blind when uvicorn --reload is armed there. The reloader, not the worker, is
+    then the container's main process, and it respawns a crashed worker while the
+    container stays up. RestartCount never moves, so the state is announced loudly.
 
     Requires:
         - env_inspect_fn( container ) → the docker `.Config.Env` list (or None)
-        - reload_decider( env_value, is_prod_or_test ) → bool (the SHARED R1 gate,
-          lupin_app.bootstrap_helpers.reload_enabled — reused so this cannot drift
-          from main.py's own reload decision)
+        - reload_decider( env_value, is_prod_or_test ) → bool; this is the shared
+          gate lupin_app.bootstrap_helpers.reload_enabled, reused so this check
+          cannot drift from the reload decision in main.py
 
     Ensures:
         - env inspect None / raising → ( "unknown", None ) — no false all-clear
         - reload armed → ( "blind", <loud warning message> )
         - reload off → ( "ok", None )
-        - is_prod_or_test matches main.py:1377-1378 (LUPIN_ENV in production/test/testing)
+        - is_prod_or_test is true when LUPIN_ENV (trimmed, lowercased) is production,
+          test or testing, the same set main.py uses
         - never raises
     """
     try:
@@ -255,11 +253,11 @@ def assess_reload_blindness( container: str, env_inspect_fn: Callable[ [ str ], 
 
 class ContainerHealthTracker:
     """
-    Per-container status-transition + flapping state (PURE — no I/O).
+    Per-container status-transition and flapping state (pure, no I/O).
 
     Tracks the last observed status, a rolling deque of transition timestamps
-    (pruned to flap_window_seconds), and edge-triggered episode flags so each
-    escalation fires ONCE per episode and re-arms on recovery.
+    (pruned to flap_window_seconds), and edge-triggered episode flags. Each
+    escalation fires once per episode and re-arms on recovery.
     """
 
     def __init__( self, flap_window_seconds: int, flap_threshold: int, flap_excluded: bool ) -> None:
@@ -273,18 +271,19 @@ class ContainerHealthTracker:
 
     def observe( self, status: str, now: datetime.datetime ) -> List[ str ]:
         """
-        Feed one observed status; return the escalation events to fire now
-        (subset of {"enter_unhealthy", "flapping"}).
+        Feed one observed status and return the events to fire now.
+
+        The events are a subset of {"enter_unhealthy", "flapping"}.
 
         Requires:
             - status is a non-empty Docker health status (starting|healthy|unhealthy)
             - now is an aware datetime
 
         Ensures:
-            - the FIRST observation is baseline-only (sets last_status, no transition)
+            - the first observation is baseline-only (sets last_status, no transition)
             - a changed status records a transition (pruned to the window)
             - enter-unhealthy fires once on (≠unhealthy)→unhealthy; re-arms on →healthy
-            - flapping fires once when transitions-in-window ≥ threshold AND the
+            - flapping fires once when transitions-in-window ≥ threshold and the
               container is not flap-excluded; re-arms when the window clears
             - never raises
         """
@@ -332,25 +331,21 @@ class ContainerHealthTracker:
 
 class RestartLoopTracker:
     """
-    Per-container crash-loop detector via docker RestartCount (PURE — no I/O).
+    Per-container crash-loop detector based on docker RestartCount (pure, no I/O).
 
-    The crash-loop is the one :7999 failure the health/flap path misses: a fast
-    crash that restarts before the healthcheck ever registers "unhealthy" is
-    invisible to ContainerHealthTracker, and lupin-rest-dev is flap-excluded on
-    top of that. This tracker keys on the docker restart POLICY's RestartCount
-    instead — which a SANCTIONED bounce never moves (a `docker restart` reuses the
-    container; a `compose up --force-recreate` mints a NEW container and RESETS the
-    count to 0). So it fires only on unsanctioned policy restarts, and it is NOT
-    gated on flap-exclusion — a crash-loop must page even for an excluded container.
+    The health and flap path misses a fast crash that restarts before the healthcheck
+    registers "unhealthy". ContainerHealthTracker cannot see it. Also, lupin-rest-dev
+    is flap-excluded. This tracker keys on the restart policy's RestartCount
+    instead. A sanctioned bounce never moves that count. `docker restart` reuses the
+    container. `compose up --force-recreate` makes a new container with the count
+    reset to 0. So it fires only on unsanctioned policy restarts. It is not gated on
+    flap exclusion. A crash-loop must page even for an excluded container.
 
-    Threshold rationale (HONEST — do not round this into a measured baseline): the
-    live containers all read RestartCount 0, but they were recreated ~2h ago and a
-    recreate RESETS the count, so that 0 is consistent with recency, not proven
-    stability. `threshold` is chosen for ONE-OFF-CRASH TOLERANCE — a single crash
-    that recovers is not a loop — NOT because a stable-zero baseline was measured.
-    Default 2: two policy restarts inside the window is a loop.
+    The threshold is chosen to tolerate a one-off crash, since a single crash that
+    recovers is not a loop. It is not a measured baseline. Default 2: two policy
+    restarts inside the window make a loop.
 
-    Fires "crash_loop" ONCE per episode; re-arms when the window clears.
+    Fires "crash_loop" once per episode; re-arms when the window clears.
     """
 
     def __init__( self, window_seconds: int, threshold: int ) -> None:
@@ -362,19 +357,20 @@ class RestartLoopTracker:
 
     def observe( self, restart_count: int, now: datetime.datetime ) -> List[ str ]:
         """
-        Feed one ( RestartCount, now ) observation; return the escalation events to
-        fire now (subset of {"crash_loop"}).
+        Feed one ( RestartCount, now ) observation and return the events to fire now.
+
+        The events are a subset of {"crash_loop"}.
 
         Requires:
             - restart_count is a non-negative int (docker .State.RestartCount)
             - now is an aware datetime
 
         Ensures:
-            - the FIRST observation is baseline-only (sets last_count, no rise)
-            - an INCREASE records one rise timestamp per unit of increase (pruned
+            - the first observation is baseline-only (sets last_count, no rise)
+            - an increase records one rise timestamp per unit of increase (pruned
               to the window); crash_loop fires once when rises-in-window ≥ threshold
-            - a DECREASE (a recreate reset to 0 — same NAME, new container id)
-              fully resets the episode state (rise deque, flag, baseline) — a
+            - a decrease (a recreate reset to 0, same name, new container id)
+              fully resets the episode state (rise deque, flag, baseline); a
               sanctioned recreate is a clean slate, never a negative rise
             - an unchanged count records no rise
             - re-arms (clears the episode flag) when the window drops below threshold
@@ -421,8 +417,9 @@ class RestartLoopTracker:
 
 class HealthWatcherLoop:
     """
-    Health watcher: poll each named container's docker health, track + escalate, expose
-    state. Background-threaded; degrade-safe per-container + per-poll.
+    Poll each named container's docker health, track and escalate, and expose state.
+
+    Runs on a background thread. A failure is contained per container and per poll.
     """
 
     def __init__(
@@ -443,6 +440,8 @@ class HealthWatcherLoop:
         restart_loop_threshold  : int                  = 2,
     ) -> None:
         """
+        Validate the arguments and build one health tracker and one restart tracker per container.
+
         Requires:
             - containers is a non-empty list of container names
             - interval_seconds, flap_window_seconds, blind_threshold_polls are positive
@@ -450,7 +449,7 @@ class HealthWatcherLoop:
 
         Ensures:
             - one ContainerHealthTracker per container (flap-excluded if listed)
-            - one RestartLoopTracker per container (NOT flap-gated — a crash-loop
+            - one RestartLoopTracker per container (not flap-gated: a crash-loop
               pages even for an excluded container); the crash-loop window reuses
               flap_window_seconds
             - crash-loop detection is active iff restart_inspect_fn is provided
@@ -498,11 +497,12 @@ class HealthWatcherLoop:
 
     def poll_once( self ) -> bool:
         """
-        Run ONE poll: inspect each container, track + escalate, update blind +
-        state. Returns True iff at least one inspect succeeded this poll.
+        Run one poll: inspect each container, track and escalate, update blind and state.
+
+        Returns True iff at least one inspect succeeded this poll.
 
         Ensures:
-            - a per-container inspect failure is swallowed + logged (the loop
+            - a per-container inspect failure is swallowed and logged (the loop
               continues to the next container)
             - never raises
         """
@@ -544,10 +544,11 @@ class HealthWatcherLoop:
 
     def _observe_restart_count( self, name: str, now: datetime.datetime ) -> None:
         """
-        Inspect docker RestartCount for `name`, feed the crash-loop tracker, and
-        escalate any events. Degrade-safe: a restart-inspect failure or raise is
-        logged and skipped (never raises, never kills the poll — and it does NOT
-        feed the health-watch BLIND detector, which is a health-inspect concern).
+        Inspect docker RestartCount for `name`, feed the crash-loop tracker, and escalate events.
+
+        A restart-inspect failure or raise is logged and skipped. This method never
+        raises and never kills the poll. It does not feed the blind detector, which
+        concerns health inspects only.
         """
         try:
             count = self._restart_inspect_fn( name )         # int on success, None on failure
@@ -565,8 +566,10 @@ class HealthWatcherLoop:
 
     def _update_blind( self, any_ok: bool ) -> None:
         """
-        Track consecutive all-container inspect failures; escalate ONCE when the
-        watcher has gone blind for ≥ blind_threshold_polls; re-arm on any success.
+        Count consecutive polls where every inspect failed; escalate once at the threshold.
+
+        Escalates once when the watcher has been blind for ≥ blind_threshold_polls
+        polls. Any success re-arms it.
         """
         if any_ok:
             self._consecutive_all_fail = 0
@@ -603,7 +606,7 @@ class HealthWatcherLoop:
         return f"Health watcher: {event} for '{container}' (status={status})."
 
     def _write_state( self, now: datetime.datetime ) -> None:
-        """Write the health-watcher view to section 'health_watcher' of the shared local store (if any)."""
+        """Write the watcher view to the 'health_watcher' section of the local store, if any."""
         if self._store is None:
             return
         view = {
@@ -637,8 +640,9 @@ class HealthWatcherLoop:
 
     def run( self ) -> None:
         """
-        Poll loop until stop(): poll_once → sleep, with a per-POLL guard (one bad
-        poll never exits the loop — the observer invariant).
+        Poll until stop(): poll_once, then sleep, with a guard around each poll.
+
+        One bad poll never exits the loop, because the observer must keep observing.
         """
         while not self._stop.is_set():
             try:

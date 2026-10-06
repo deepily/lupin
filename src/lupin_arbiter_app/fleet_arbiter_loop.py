@@ -1,37 +1,38 @@
 #!/usr/bin/env python3
 """
-Fleet-arbiter loop — the standing fleet-stall arbiter (L3 of the :8001 lupin-arbiter-app service).
+Standing fleet-stall arbiter loop for the :8001 lupin-arbiter-app service.
 
-Reuses the v2.2 `ArbiterConsumerJob` AS-IS (zero logic edits → its invariants carry
-by construction: never-auto-assign · additive-observer one-way · lineage-derived
-routing). The standalone difference is purely WIRING + SUPERVISION:
+Reuses the `ArbiterConsumerJob` unchanged, so its invariants carry over. It never
+auto-assigns, its observer is one-way and additive, and routing comes from lineage.
+This module only wires the job in and supervises it.
 
-  • RECYCLE-WRAPPER (FleetArbiterLoop): the job's `do_all()` returns after the 12h
-    `max_duration` cap; a host-side thread that ran it ONCE would then sit silently
-    dead while uvicorn keeps serving — and systemd's Restart=always only catches
-    PROCESS exit, NOT a clean background-thread return. So FleetArbiterLoop RELAUNCHES a
-    fresh job on every clean cap-exit. SEQUENTIAL by construction (do_all() returns
-    before the next job starts) → exactly one job runs at a time = the :8001-side
-    single-instance (the in-process arbiter is the SEPARATE mechanism, gated OFF by
-    the R0 flag; never two).
+  - Recycle wrapper (FleetArbiterLoop): the job's `do_all()` returns after the 12h
+    `max_duration` cap. A host-side thread that ran it once would then sit dead
+    while uvicorn keeps serving. systemd's Restart=always catches process exit,
+    not a clean thread return. So FleetArbiterLoop launches a fresh job after
+    every clean cap-exit. Runs are sequential, so exactly one job runs at a time.
+    That is the :8001-side single instance. The in-process arbiter is a separate
+    mechanism, switched off by its own flag, and the two never run together.
 
-  • OUT-OF-BAND (R4): the job's snapshot_sink is overridden to write the :8001-LOCAL
-    store section "fleet_arbiter" (NOT the :7999 singleton). The DETECTION path is
-    strictly :7999-free (events_tail / who / manager_resolver / sink are filesystem).
+  - Out-of-band store: the job's snapshot_sink is overridden to write the
+    :8001-local store section "fleet_arbiter", not the :7999 singleton. The
+    detection path never touches :7999 (events_tail, who, manager_resolver and
+    the sink all read the filesystem).
 
-  • ESCALATION (ruling A): notify_fn ALWAYS posts to the durable `fleet-escalations`
-    commons topic (degrade-safe — swallow+log) AND best-effort fires an injected,
-    swallowed live_notify_fn (the ONLY place a :7999 notify may occur — escalation
-    path only, never per-poll; default no-op so escalation never blocks detection).
+  - Escalation: notify_fn always posts to the durable `fleet-escalations` commons
+    topic and swallows and logs any failure. It also makes a best-effort call to
+    an injected, swallowed live_notify_fn. That is the only place a :7999 notify
+    may occur. It happens on the escalation path only, never per poll. The
+    default is a no-op, so escalation never blocks detection.
 
-  • WARM-UP (ruling B): each fresh job's notify_fn suppresses escalations while
-    (now − job_start) < start_period_seconds — per-job-start, so cold boot / restart
-    / recycle never false-fire.
+  - Warm-up: each fresh job's notify_fn suppresses escalations while
+    (now - job_start) < start_period_seconds. The window is per job start, so a
+    cold boot, restart or recycle never fires a false escalation.
 
-All seams are injectable (job_factory / gateway / store / clock / log_fn /
-live_notify_fn) → the recycle, escalation, and warm-up logic are 100% unit-tested
-with fakes; only the literal external construction (gateway.from_environment) is
-pragma'd, in app.create_production_app.
+All seams are injectable (job_factory, gateway, store, clock, log_fn,
+live_notify_fn). The recycle, escalation and warm-up logic are therefore fully
+unit-tested with fakes. Only the literal external construction
+(gateway.from_environment) is excluded from coverage, in app.create_production_app.
 """
 import datetime
 import json
@@ -91,41 +92,27 @@ ESCALATION_TOPIC = "fleet-escalations"
 
 def _default_manager_bridge_mtimes( find_fn=None ):
     """
-    bug 26dd3afb: scan the LIVE persona'd bridge files → { canonical_persona_key :
-    freshest bridge-file mtime (epoch) } — the real reader wired into the MANAGER-
-    STALE bridge-mtime veto on the :8001 deploy.
+    Map each live persona to the freshest mtime of its bridge file.
 
-    Keyed by PERSONA (not session_id) so a re-spun twin's fresh bridge (a NEW
-    session_id) still vetoes the superseded row's stale poke — the always-present
-    analog of the sid-keyed union signal.
-
-    ⚠️ `find_active_voice_persona_sessions` (require_persona=True) is CORRECT HERE,
-    and that is NOT the F-B defect one line down — do not "fix" it to
-    require_persona=False. F-B's victim was the LIVENESS set, where a persona-LESS
-    live session read as positive-dead and lost its hold. This map is keyed BY
-    PERSONA: a persona-less session has no key, contributes nothing, and cannot veto
-    anything. Persona-required is the whole point of the projection, not an oversight.
-    (Same import, opposite ruling — which is exactly why F-B says never let a
-    convenient import decide the semantics. Check the predicate, not the precedent.)
-
-    NOT pragma'd (F-C third instance, bug 3cd0d4c1, fixed 2026-07-16): this carried
-    `# pragma: no cover - production bridge-scan IO boundary` and the claim "unit
-    tests inject a fake, so this boundary is no-cover" — but the function is
-    REACHABLE and cheap: executing it returns the map in ~0.00s. A pragma'd function
-    is EXEMPT FROM THE INSTRUMENT — coverage reports green over code nobody has
-    proven runs, which is this milestone's own defect shape (a mechanism that reports
-    success while doing nothing) sitting inside the module the milestone is about.
-    An IO-boundary LABEL is not a coverage exemption.
+    The real reader behind the manager-stale bridge-mtime veto on the :8001 deploy.
 
     Requires:
-        - find_fn is None (⇒ the real persona'd bridge scan) or
+        - find_fn is None (the real persona'd bridge scan) or
           () -> iterable of ( path, session_id, persona_dict )
 
     Ensures:
         - returns { canonical_persona_key : max bridge mtime } across live persona'd
-          bridges; a persona with several live sessions keeps the FRESHEST mtime
-        - skips bridges with no persona name / unreadable mtime; never raises here
+          bridges; a persona with several live sessions keeps the freshest mtime
+        - keyed by persona, not session id, so a re-spun twin's fresh bridge (a new
+          session id) still vetoes the superseded row's stale poke
+        - uses `find_active_voice_persona_sessions` (require_persona=True), which is right here:
+          a persona-less session has no key, contributes nothing and cannot veto
+          anything, unlike the liveness set where it must count as alive
+        - skips bridges with no persona name or an unreadable mtime; never raises here
           (the arbiter's swallow-safe _read_manager_bridge_mtimes wraps it anyway)
+
+    This function is not excluded from coverage. It is reachable and cheap, and a
+    coverage exclusion would hide it from the instrument.
     """
     if find_fn is None:
         find_fn = _find_active_voice_persona_sessions
@@ -161,21 +148,19 @@ _HOLD_ROOT_SCAN_MAX_DEPTH = 2
 
 def _registry_container_paths( config_mgr ):
     """
-    The `external repo <name> path` values from the registered-project config —
-    verbatim, UNTRANSLATED, exactly as configured.
-
-    ⚠️ Deliberately does NOT reuse `_scope_registry.build_scope_registry`, which
-    DROPS any scope whose path does not exist on disk. Every one of these paths is
-    a CONTAINER path, so on the host that helper returns an EMPTY registry — it
-    would hand back a clean, confident, totally empty answer. This reads the raw
-    keys so the translation layer below gets something to translate.
+    Return the `external repo <name> path` values from the registered-project config.
 
     Requires:
         - config_mgr exposes .get( key, default=..., return_type=... )
 
     Ensures:
-        - returns the configured path strings in `external repos` order
-        - a name with no/blank path key drops out; never raises
+        - returns the configured path strings in `external repos` order, container-side
+          and untranslated, exactly as configured
+        - reads the raw keys and never reuses `_scope_registry.build_scope_registry`,
+          which drops any scope whose path does not exist on disk. Every one of these is
+          a container path, so on the host that helper returns an empty registry that
+          looks like a clean answer
+        - a name with no path key, or a blank one, drops out; never raises
     """
     names = config_mgr.get( "external repos", default=[ ], return_type="list-string" )
     paths = [ ]
@@ -194,28 +179,7 @@ def _registry_container_paths( config_mgr ):
 
 def _derive_container_host_prefix( container_paths, host_root ):
     """
-    Derive the container→host path mapping from a VERIFIED ANCHOR PAIR, rather
-    than hardcoding a string swap.
-
-    THE WHOLE REASON THIS EXISTS: the config's paths are container-side
-    (/var/external-projects/…) and DO NOT EXIST on the host — and the arbiter runs
-    on the HOST. The first ruling ("just reuse the config") reached ZERO of 45 holds
-    for exactly this reason, while looking perfectly reasonable. Translation is the
-    difference between a root list and a root list that reaches something.
-
-    The anchor is not a guess: we already KNOW one (container, host) pair for the
-    same repo — the config entry for THIS project vs `cu.get_project_root()`. Strip
-    the shared trailing component and the prefix mapping falls out
-    (/var/external-projects → <host projects parent>). It self-calibrates: move the
-    projects tree, or re-mount it elsewhere, and the mapping follows with no edit
-    here. The docker-compose bind-mount this reconstructs is the ground truth
-    (`/mnt/DATA01/…/projects:/var/external-projects`, writable since row b84bbf1c).
-
-    The anchor is matched on the trailing component but is NOT trusted on that
-    basis: every translated path is independently confirmed to be a real directory
-    in `_translate_container_root` before it is used, and an unconfirmed one is
-    passed through untranslated so it surfaces as an UNREACHABLE root. Selection
-    here is a hypothesis; existence there is the verification.
+    Derive the container-to-host path prefix from one verified anchor pair.
 
     Requires:
         - container_paths is an iterable of configured path strings
@@ -224,8 +188,17 @@ def _derive_container_host_prefix( container_paths, host_root ):
     Ensures:
         - returns ( container_prefix, host_prefix ) from the first entry whose
           trailing component matches host_root's, or None when no anchor exists
-          (⇒ nothing is translated and every config root reports unreachable —
-          loudly wrong, never silently empty)
+        - None means nothing is translated and every config root reports unreachable,
+          which is loudly wrong and never silently empty
+        - the anchor is the config entry for this project set against
+          `cu.get_project_root()`; stripping the shared trailing component gives the
+          mapping, so it follows if the projects tree moves or is mounted elsewhere
+        - the config paths are container-side (/var/external-projects/...) and do not
+          exist on the host where the arbiter runs; reusing them unchanged reached none
+          of the 45 holds measured
+        - the trailing-component match is a hypothesis, not proof; every translated
+          path is confirmed to be a real directory in `_translate_container_root`, and
+          an unconfirmed one passes through untranslated so it shows as unreachable
     """
     host = Path( host_root )
     for raw in container_paths:
@@ -241,18 +214,18 @@ def _derive_container_host_prefix( container_paths, host_root ):
 
 def _translate_container_root( raw, prefix_pair ):
     """
-    Translate ONE configured container path to its host path — and confirm it.
+    Translate one configured container path to its host path, and confirm it exists.
 
     Requires:
         - raw is a configured path string; prefix_pair is ( container_prefix,
           host_prefix ) or None
 
     Ensures:
-        - returns the host path ONLY when the translation names a real directory
+        - returns the host path only when the translation names a real directory
         - returns None when there is no anchor, the path is outside the mapped
-          prefix, or the translated path is not a directory. The caller passes a
-          None-translated root through UNTRANSLATED so it is REPORTED as
-          unreachable rather than silently dropped.
+          prefix, or the translated path is not a directory
+        - the caller passes a None-translated root through untranslated, so it is
+          reported as unreachable rather than silently dropped
         - never raises
     """
     if prefix_pair is None:
@@ -290,19 +263,7 @@ def _is_repo_root( path ):
 
 def _scan_parent_for_repo_roots( parent, max_depth=_HOLD_ROOT_SCAN_MAX_DEPTH ):
     """
-    THE SAFETY NET half of the Q1 ruling: find repo roots the registry does not
-    enumerate, by scanning the projects parent.
-
-    Verified need, not a hypothetical: `google/harvey-labs` is a git repo, it holds
-    a hold, and it has ZERO mentions anywhere in the config. Without this scan it is
-    unreachable FOREVER — and the registry would never say so, because a registry
-    cannot report what was never written into it. The config is the known-good list;
-    this is what catches what the list forgot.
-
-    Depth 2 is derived from that same case: unregistered repos sit one level under a
-    non-repo grouping directory (`google/`). Descent STOPS at a repo — a repo IS a
-    root, and the hold sweep recurses inside it on its own; walking into it here
-    would only duplicate that work.
+    Find repo roots the registry does not list, by scanning the projects parent.
 
     Requires:
         - parent is a path-like directory; max_depth is a positive int
@@ -311,6 +272,12 @@ def _scan_parent_for_repo_roots( parent, max_depth=_HOLD_ROOT_SCAN_MAX_DEPTH ):
         - returns the repo-root paths found within max_depth of parent
         - follows no symlinked directories; a per-directory OSError skips that
           directory only; never raises
+        - descent stops at a repo, because a repo is a root and the hold sweep recurses
+          inside it on its own; walking in here would duplicate that work
+        - exists because a registry cannot report what was never written into it:
+          `google/harvey-labs` is a git repo with a hold and no mention in the config
+        - the default depth of 2 comes from that case: unregistered repos sit one level
+          under a non-repo grouping directory (`google/`)
     """
     found = [ ]
     stack = [ ( Path( parent ), 0 ) ]
@@ -337,34 +304,25 @@ def _scan_parent_for_repo_roots( parent, max_depth=_HOLD_ROOT_SCAN_MAX_DEPTH ):
 
 def _compute_hold_roots( config_mgr, host_root, scan_fn=None ):
     """
-    Q1's ruled root source: CONFIG + HOST-PATH TRANSLATION + PARENT SCAN, unioned.
-
-    Rick ruled his original (a) PLUS the (c) he had rejected, as a SAFETY NET and
-    not a replacement — so this is a union, and each half covers the other's proven
-    blind spot: the config names repos the scan's depth would miss, and the scan
-    catches repos (harvey-labs) the config never knew about.
-
-    DEDUPE IS ON RESOLVED REALPATH, NOT ON `git --git-common-dir` (ruled 2026-07-16
-    after the git-common-dir instruction was refuted and withdrawn). git-common-dir
-    is the identity of a REPO, not of a TREE: a worktree and its main repo SHARE one
-    while being different directories holding different files, so deduping on it
-    would silently DROP a worktree root — and a hold lives in a worktree today
-    (lupin/.claude/worktrees/cheech-orphan-bridge). It also returns a RELATIVE path
-    (".git"), which naively compared collides every repo into a single identity.
-    Realpath is the honest identity for "the same tree reached two ways", which is
-    the only dupe this union can actually produce.
+    Return the hold-sweep root list: config roots, host translation and parent scan, unioned.
 
     Requires:
         - config_mgr exposes .get(...); host_root is this project's host path
-        - scan_fn is None (⇒ real parent scan) or () -> iterable of root paths
+        - scan_fn is None (the real parent scan) or () -> iterable of root paths
 
     Ensures:
-        - returns the union: translated config roots + scanned repo roots, with
-          host_root always present, deduped on realpath, order-stable
+        - returns the union: translated config roots, then scanned repo roots, with
+          host_root always present, deduped on realpath, in a stable order
           (config order first, then scan order)
-        - a config root that CANNOT be translated/confirmed is emitted UNTRANSLATED
-          on purpose: the sweep then reports it in roots_unreachable, keeping the
-          gap a NUMBER instead of a silence (invariant: never silently skipped)
+        - the scan is a safety net, not a replacement: the config names repos the
+          scan's depth would miss, and the scan catches repos the config never knew
+        - dedupes on resolved realpath, not on `git --git-common-dir`, which identifies
+          a repo and not a tree. A worktree and its main repo share one while holding
+          different files, so it would drop a worktree root. It is also a relative path
+          (".git") that would collide every repo into one identity
+        - a config root that cannot be translated or confirmed is emitted untranslated,
+          so the sweep reports it in roots_unreachable and the gap stays a number
+          instead of a silence (invariant: never silently skipped)
         - never raises
     """
     if scan_fn is None:
@@ -412,18 +370,15 @@ def _compute_hold_roots( config_mgr, host_root, scan_fn=None ):
 
 def _default_hold_roots():
     """
-    The root list the hold sweep is pointed at — Q1's ruled source, wired to the
-    real config and the real host root.
-
-    This is the production wiring ONLY; every decision lives in `_compute_hold_roots`
-    behind injected seams. It is thin BY DESIGN and NOT pragma'd: it is genuinely
-    reachable and executes in the test suite. (Its predecessor carried
-    `# pragma: no cover - production project-root IO boundary` — invalid under the
-    100%-coverage mandate for a function that runs fine when called; an IO-boundary
-    label is not a coverage exemption.)
+    Return the hold-sweep root list from the real config and host root.
 
     Ensures:
-        - returns the unioned config+scan root list (see `_compute_hold_roots`)
+        - returns the unioned config and scan root list (see `_compute_hold_roots`)
+        - is production wiring only; every decision lives in `_compute_hold_roots`
+          behind injected seams
+        - stays thin and is not excluded from coverage: it is reachable and runs in the
+          test suite, and an IO-boundary label is not a coverage exemption under the
+          100% mandate
     """
     import cosa.utils.util as cu
     from cosa.config.configuration_manager import ConfigurationManager
@@ -434,23 +389,23 @@ def _default_hold_roots():
 
 def janitor_repo_roots( config_mgr, host_root=None ):
     """
-    P2 (row 129cc96b): the repos the worktree janitor sweeps, read from the INI.
-
-    `arbiter worktree janitor repos` names repos by their `external repo <name>` entry,
-    so the list of fleet repos lives in one registry. Those paths are container-side, so
-    each is translated to the host with the SAME anchor the hold sweep derives — the
-    arbiter runs on the host, and an untranslated path names nothing there.
+    Return the repos the worktree janitor sweeps, read from the INI.
 
     Requires:
         - config_mgr exposes .get( key, default=, return_type= )
-        - host_root is this project's host path, or None (→ cu.get_project_root())
+        - host_root is this project's host path, or None (then cu.get_project_root())
 
     Ensures:
         - returns { "roots": [ host path, ... ], "unresolved": [ name, ... ] }
+        - `arbiter worktree janitor repos` names repos by their `external repo <name>`
+          entry, so the fleet repo list lives in one registry
+        - those paths are container-side, so each is translated to the host with the
+          anchor the hold sweep derives; an untranslated path names nothing on the host
         - roots follow the configured order, deduped on realpath
         - a name with no path entry, or whose translation is not a real directory, is
           listed in unresolved and never guessed at
-        - a blank or absent key yields roots == [ host_root ] — the pre-P2 behaviour
+        - a blank or absent key yields roots == [ host_root ], the single-repo behaviour
+          from before the repo list existed
         - never raises
     """
     if host_root is None:
@@ -481,37 +436,25 @@ def janitor_repo_roots( config_mgr, host_root=None ):
 
 def _default_live_session_ids( find_fn=None ):
     """
-    The AUTHORITATIVE live-session set for the hold sweep — the belt-and-suspenders
-    that stops a live session's hold from ever being read as positive-dead.
-
-    ⚠️ `find_active_voice_persona_sessions` is imported one line up, it is the
-    obvious choice, and it is the WRONG one. It delegates to
-    find_active_sessions( require_persona=True ) — persona'd sessions ONLY. A LIVE
-    but persona-LESS session (one that booted when the persona pool was exhausted,
-    or whose allocation raced/failed — bug d57dbfea's black hole) would be ABSENT
-    from that set, read as POSITIVE-DEAD, and have its hold reaped at TTL with NO
-    grace. That is the forbidden relaxation of bias-to-keep, and it names its
-    victim: a pool-exhausted worker's live hold.
-
-    require_persona=False is the honest liveness set — d57dbfea's own lesson,
-    applied one layer over.
-
-    NOT pragma'd (F-C, fixed 2026-07-16): this carried
-    `# pragma: no cover - production bridge-scan IO boundary`, but it is REACHABLE —
-    executing it returns the live set in ~0.00s. An IO-boundary label is not a
-    coverage exemption under the 100% mandate, and a bias-to-keep guard is the last
-    thing that should go untested. The `find_fn` seam makes the degrade-safe path
-    testable without monkeypatching a module global.
+    Return the live session ids for the hold sweep, persona-less sessions included.
 
     Requires:
-        - find_fn is None (⇒ the real bridge scan) or
+        - find_fn is None (the real bridge scan) or
           ( require_persona=... ) -> iterable of ( path, session_id, persona )
 
     Ensures:
-        - returns the set of live session ids INCLUDING persona-less sessions
-        - degrade-safe: any scan failure yields None (NO authoritative set) rather
-          than a PARTIAL one — a half-enumerated live-set is worse than none, since
+        - returns the set of live session ids, including persona-less sessions
+        - uses require_persona=False because `find_active_voice_persona_sessions`
+          delegates to require_persona=True. A live persona-less session (one booted
+          when the persona pool was exhausted, or whose allocation failed) would be
+          absent from that set, read as positive-dead and have its hold reaped at TTL
+          with no grace, which breaks the bias to keep
+        - degrade-safe: any scan failure yields None (no authoritative set) rather
+          than a partial one. A half-enumerated live set is worse than none, since
           absence from it is what licenses the no-grace prune
+        - is not excluded from coverage: it is reachable and cheap, and a bias-to-keep
+          guard is the last thing that should go untested; the `find_fn` seam makes the
+          degrade-safe path testable without patching a module global
     """
     if find_fn is None:
         find_fn = _find_active_sessions
@@ -536,20 +479,21 @@ def make_escalation_notify_fn(
     topic          : str                                   = ESCALATION_TOPIC,
 ) -> Callable[ [ str ], list ]:
     """
-    Build the escalation-OUTPUT notify_fn: durable-primary + best-effort live —
-    OUTCOME-RETURNING since the 2026.06.11 receipts design (§3.2: pre-design
-    this swallowed every failure into a lone log line one journal entry before
-    `arbiter_outreach` claimed Rick was reached — root-cause R3/R4).
+    Build the escalation notify_fn: a durable post plus a best-effort live push.
+
+    It returns the outcome of each channel. Swallowing every failure into one log
+    line would let `arbiter_outreach` claim the operator was reached when no
+    channel had delivered.
 
     Ensures:
-        - ALWAYS posts `message` to the durable commons `topic` via the bridge-less
-          gateway; returns [{channel:"durable", outcome:"posted"}] on success,
-          outcome "post_error" (+ detail) on failure — still logged, still
-          non-fatal (the PRIMARY channel must not kill the loop — note 3)
+        - always posts `message` to the durable commons `topic` via the bridge-less
+          gateway; returns [{channel:"durable", outcome:"posted"}] on success, or
+          outcome "post_error" (+ detail) on failure; a failure is still logged and
+          non-fatal, since the primary channel must not kill the loop
         - if live_notify_fn is provided, appends its live-channel outcome dict
-          (a blow-up degrades to outcome "http_error" — logged, never raised);
-          if ABSENT, appends {channel:"live", outcome:"disabled"} — a disabled
-          live hop is a VISIBLE per-outreach fact, not a silent gap (§3.6)
+          (a blow-up degrades to outcome "http_error", logged and never raised);
+          if absent, appends {channel:"live", outcome:"disabled"}, so a disabled
+          live hop is a visible per-outreach fact and not a silent gap
         - never raises; the caller journals one arbiter_outreach_result per
           returned outcome under the outreach_id
     """
@@ -588,16 +532,17 @@ def make_warmup_notify_fn(
     log_fn               : Callable,
 ) -> Callable[ [ str ], list ]:
     """
-    Wrap an escalation notify_fn to SUPPRESS escalations during the warm-up window
-    of a single job (keyed on that job's start time) — outcome-returning (§3.2).
+    Wrap an escalation notify_fn so it suppresses escalations during one job's warm-up.
+
+    The window is keyed on that job's start time. The wrapper returns outcomes, so the
+    caller can journal what happened.
 
     Ensures:
-        - while (clock.now() − job_started_at) < start_period_seconds → suppress
-          (log `escalation_suppressed_warmup`, do NOT call inner) and return
-          [{channel:"all", outcome:"suppressed_warmup"}] — pre-design this
-          returned None and the caller journaled "rick" as reached anyway (the
-          §1.3 L3 leg of the journal-lies bug)
-        - at/after the window → pass through to inner and return its outcomes
+        - while (clock.now() - job_started_at) < start_period_seconds, suppress:
+          log `escalation_suppressed_warmup`, do not call inner, and return
+          [{channel:"all", outcome:"suppressed_warmup"}]; returning None here would
+          let the caller journal the operator as reached anyway
+        - at or after the window, pass through to inner and return its outcomes
         - never raises
     """
     def notify_fn( message: str ) -> list:
@@ -619,18 +564,17 @@ def make_refusal_notify_fn(
     topic          : str                  = ESCALATION_TOPIC,
 ) -> Callable[ [ str, str ], list ]:
     """
-    The janitor's refusal notify: the escalation channel's shape, plus an abstract.
-
-    make_escalation_notify_fn carries a message only, and a refusal notice without its
-    per-tree blockers tells the operator that something is wrong but not what. So this
-    posts message + abstract to the durable topic, and hands the abstract to the live push
-    as the card's detail.
+    Build the janitor's refusal notify: the escalation channel's shape, plus an abstract.
 
     Ensures:
-        - returns notify( message, abstract ) -> [ outcome dicts ], the same outcome
+        - returns notify( message, abstract ) -> [ outcome dicts ], with the same outcome
           vocabulary as make_escalation_notify_fn (durable posted | post_error; live
           outcome | http_error | disabled)
-        - never raises; every failure is an outcome value AND a log line
+        - posts message and abstract to the durable topic and hands the abstract to the
+          live push as the card's detail, because a refusal notice without its per-tree
+          blockers says something is wrong but not what (make_escalation_notify_fn
+          carries a message only)
+        - never raises; every failure is an outcome value and a log line
     """
     log_fn = log_fn if log_fn is not None else _default_log_fn
 
@@ -669,33 +613,28 @@ def make_worktree_janitor_fn(
     branch_sweep_fn : Optional[ Callable ] = None,
 ) -> Callable[ [ ], dict ]:
     """
-    The per-poll janitor the :8001 job calls: reconcile the worktree lane of every fleet
-    repo, then report refusals.
-
-    ⚠️ UNTIL 2026-09-14 THIS WAS NEVER WIRED ON :8001. Only the dead in-process
-    `cosa.rest.arbiter_bootstrap` passed `worktree_janitor_fn`; this factory did not, so
-    the job's seam stayed None and `worktrees_swept` read 0 on every one of 2,521 polls
-    journaled since 2026-08-01, while the INI had said `enabled = True` since July.
+    Build the per-poll janitor the :8001 job calls, covering every fleet repo.
 
     Ensures:
         - returns janitor() -> one reconcile result per poll: the swept / skipped /
           errors / branches_deleted / branches_kept lists of every repo concatenated,
           plus `repos` ([ {root, swept} ]) and `refusals` (report_refusals' summary)
-        - repo_roots None or empty → ONE reconcile at the reconciler's own default root
-          (the pre-P2 behaviour)
-        - P2 (row 129cc96b): one repo raising is recorded in errors and the others are
-          still swept
-        - P1: a poll that deleted or kept a branch logs `worktree_janitor_branches`
-          naming both lists — the report of every unmerged branch the janitor kept
+        - the job's `worktree_janitor_fn` seam must be given this result; when it is
+          not, the seam stays None and `worktrees_swept` reads 0 on every poll
+        - repo_roots None or empty gives one reconcile at the reconciler's own
+          default root (the single-repo behaviour)
+        - one repo raising is recorded in errors and the others are still swept
+        - a poll that deleted or kept a branch logs `worktree_janitor_branches`
+          naming both lists, which reports every unmerged branch the janitor kept
         - a reporting failure never discards the reconcile result, and is logged
-        - straggler_fn (row 747199ef, Rick's ruling 2026-09-29), when given, is called
-          with the merged reconcile result after the refusal report; its summary lands in
-          `stragglers`, and a failure is logged as `worktree_straggler_error`. None → inert
-        - branch_sweep_fn (Rick, 2026-09-29, broadcast 766066df), when given, runs once
-          per repo AFTER that repo's reconcile, as branch_sweep_fn( project_root=root );
-          its deletions join `branches_deleted` / `branches_kept` (so the existing
-          `worktree_janitor_branches` log reports them) and its error lands in `errors`.
-          None → inert
+        - straggler_fn, when given, is called with the merged reconcile result after
+          the refusal report; its summary lands in `stragglers`, and a failure is
+          logged as `worktree_straggler_error`. None means inert
+        - branch_sweep_fn, when given, runs once per repo after that repo's reconcile,
+          as branch_sweep_fn( project_root=root ); its deletions join
+          `branches_deleted` / `branches_kept` (so the existing
+          `worktree_janitor_branches` log reports them) and its error lands in
+          `errors`. None means inert
         - never raises past the job's own swallow-safe seam (which also guards it)
     """
     if reconcile_fn is None:
@@ -802,20 +741,7 @@ def make_follow_through_watcher_factory(
     log_fn : Optional[ Callable ] = None,
 ) -> Callable[ [ Any ], Any ]:
     """
-    Build the eng#7 follow-through-watcher FACTORY: a `(job) -> FollowThroughEscalationWatcher`
-    callable the ArbiterConsumerJob invokes ONCE at construction.
-
-    The factory (not a bare instance) is what resolves the chicken-egg in the job
-    ctor: the watcher's §4.5 hold_check_fn IS `job.session_is_not_owed` — the
-    arbiter's already-built store-owed suppression predicate (Clayton's lane-4
-    primitive). REUSING it means #7 never duplicates the store-read + classification
-    and never contends on the poke path. The escalate_fn fires ONE directed poke at
-    the accountable manager via the bridge-less gateway when an awaiting:manager item
-    has aged past T_escalate.
-
-    Gating lives in the watcher: `follow through escalation enabled` (default False)
-    makes sweep_once() a no-op, so wiring this factory in changes ZERO runtime
-    behavior until a deliberate post-soak flip.
+    Build the factory `(job) -> FollowThroughEscalationWatcher`, called once per job.
 
     Requires:
         - config_mgr exposes .get( key, default=, return_type= ) (the watcher reads
@@ -826,12 +752,20 @@ def make_follow_through_watcher_factory(
         - returns factory( job ) -> a FollowThroughEscalationWatcher wired with
           config_mgr, the directed-manager-poke escalate_fn, and
           hold_check_fn = job.session_is_not_owed
+        - a factory, not a bare instance, resolves the chicken-and-egg in the job
+          constructor: hold_check_fn is the arbiter's already-built store-owed
+          suppression predicate, so the watcher never duplicates the store read
+          and never contends on the poke path
+        - the escalate_fn sends one directed poke to the accountable manager through the
+          bridge-less gateway when an awaiting:manager item has aged past its threshold
+        - gating lives in the watcher: `follow through escalation enabled` (default
+          False) makes sweep_once() a no-op, so wiring this in changes nothing at runtime
         - the escalate_fn is degrade-safe: a gateway.send_to blow-up is logged
-          (follow_through_escalation_error), never raised — escalation must never
-          kill a poll (observer invariant)
-        - construction is pure in-memory (no DB / clock / hold-file IO until the
-          flag is flipped AND sweep_once runs); fully testable with a fake gateway
-          + fake cfg + a stub job exposing session_is_not_owed
+          (follow_through_escalation_error) and never raised, because escalation
+          must never kill a poll (observer invariant)
+        - construction is pure in-memory (no DB, clock or hold-file IO until the
+          flag is flipped and sweep_once runs); testable with a fake gateway,
+          a fake config and a stub job exposing session_is_not_owed
     """
     log_fn = log_fn if log_fn is not None else _default_log_fn
 
@@ -982,15 +916,17 @@ def build_fleet_arbiter_job_factory(
     worktree_janitor_repos      : Optional[ dict ] = None,
 ) -> Callable[ [ ], ArbiterConsumerJob ]:
     """
-    Build the recycle factory: each call returns a FRESH ArbiterConsumerJob wired
-    bridge-less to the :8001-local store + the warm-up-wrapped escalation sink.
+    Build the recycle factory: each call returns a fresh ArbiterConsumerJob.
+
+    The job is wired bridge-less to the :8001-local store and the warm-up-wrapped
+    escalation sink.
 
     Ensures:
         - returned factory() builds an ArbiterConsumerJob whose snapshot_sink writes
-          store section "fleet_arbiter", whose notify_fn = warm-up(escalation(durable
-          + best-effort live)), keyed on a fresh per-call job-start (warm-up resets
-          on each recycle)
-        - construction is pure in-memory (no IO until the job runs) — fully
+          store section "fleet_arbiter", and whose notify_fn is warm-up wrapped around
+          escalation (durable plus best-effort live), keyed on a fresh per-call
+          job start, so warm-up resets on each recycle
+        - construction is pure in-memory (no IO until the job runs), so it is
           testable with a fake gateway
     """
     clock  = clock  if clock  is not None else SystemClock()
@@ -1120,9 +1056,11 @@ def build_fleet_arbiter_job_factory(
 
 class FleetArbiterLoop:
     """
-    The :8001-side fleet-arbiter supervisor: runs one ArbiterConsumerJob at a time on a
-    background thread, RELAUNCHING a fresh job on each clean cap-exit (12h
-    self-perpetuation fix). Single-instance by construction (sequential recycle).
+    The :8001-side fleet-arbiter supervisor.
+
+    Runs one ArbiterConsumerJob at a time on a background thread. It launches a fresh
+    job after each clean cap-exit, which fixes the 12h self-perpetuation gap. Runs are
+    sequential, so only one job runs at a time.
     """
 
     def __init__(
@@ -1199,13 +1137,13 @@ class FleetArbiterLoop:
 
     def run( self ) -> None:
         """
-        Poll-supervisor loop: build a job, run it to its cap/cancel, relaunch.
+        Poll-supervisor loop: build a job, run it to its cap or cancel, relaunch.
 
         Ensures:
             - relaunches a fresh job after each clean cap-exit until stop()
-            - a job blow-up is swallowed+logged (the supervisor outlives one bad job)
-            - a job CONSTRUCTION blow-up is likewise swallowed+logged and retried on
-              the next cycle (2026-08-10) — see the comment at the try below
+            - a job blow-up is swallowed and logged (the supervisor outlives one bad job)
+            - a job construction blow-up is likewise swallowed, logged and retried on
+              the next cycle; see the comment at the try below
             - exits promptly when stop() has been signalled
             - never raises
         """
@@ -1244,62 +1182,36 @@ class FleetArbiterLoop:
 
     def _sweep_hold_files( self ) -> None:
         """
-        REACH and CLASSIFY every `.heartbeat-hold-*` file, then RECLAIM the ones the
-        classification proved prunable.
-
-        Reclamation was wired 2026-07-26 (row 11461241, Rick's direct ruling) after
-        all five preconditions were met. From 2026-07-16 to then this method could
-        not delete at all, and the name `_sweep_hold_files` was chosen precisely
-        because a method whose name promises deletion while its body reports is the
-        kind of false claim that becomes the next reader's ground truth. The name
-        still fits: it sweeps, and now the sweep has teeth.
-
-        **THE EVIDENCE AND THE ACT SHARE ONE CLOCK — this is the design.** The
-        report and the janitor are two functions over ONE decision rule
-        (`classify_hold_file`), which is what lets the emitted tally stand as proof
-        of what was deleted. That guarantee is only real if both passes classify
-        against the SAME instant: a file crossing its TTL boundary between the two
-        calls would otherwise be logged KEPT and deleted anyway, and the log would
-        be wrong in the one direction that matters. So `now` is frozen ONCE here and
-        passed to both. Do not let either call default it.
-
-        **THE CARGO GUARD IS NOT PASSED AND MUST NOT BE.** Both callees default
-        `allow_cargo_deletion=False`, so cargo-bearing holds are KEPT structurally.
-        Omission is the safe state by construction — A0, this milestone's origin
-        bug, was a call site that reached deletion by omitting a guard. Passing
-        `True` from here would be the same bug wearing the fix's clothes.
-
-        Two defects this method used to embody, both fixed here:
-
-        1. **It passed NOTHING.** `self._hold_janitor_fn()` — no base_dir (⇒
-           LUPIN_ROOT ⇒ one directory, non-recursively, blind to every other tree)
-           and no live_session_ids (⇒ `authoritative` always False ⇒ the entire
-           positive-dead branch of the janitor was UNREACHABLE in production —
-           dead code that only ever ran in tests).
-
-        2. **`if pruned:` made failure look like success.** It logged ONLY on a
-           non-empty result, so "I swept zero roots and reached nothing" and "I
-           swept everything and there was nothing to reap" were both SILENT and
-           both indistinguishable from a healthy tick. The sweep report is this
-           milestone's acceptance evidence; built on that line, the evidence for a
-           total-failure sweep was an empty log. A check that cannot fail is not a
-           check. **The emit is now UNCONDITIONAL.**
+        Classify every `.heartbeat-hold-*` file, then reclaim the ones proven prunable.
 
         Ensures:
-            - calls the injected report fn with BOTH the injected roots AND the
-              injected live-set; emits `fleet_arbiter_hold_report` EVERY tick with
-              roots_swept / files_seen / the classification tallies — empty or not
-            - emits `fleet_arbiter_hold_report_no_roots` (distinctly!) when the
-              sweep reached ZERO roots — "swept nothing" is the opposite fact from
-              "found nothing", and a lone zero cannot tell them apart
-            - surfaces skipped-but-hold-bearing dirs + unreachable roots rather
+            - calls the injected report fn with both the injected roots and the
+              injected live set; emits `fleet_arbiter_hold_report` every tick with
+              roots_swept, files_seen and the classification tallies, empty or not
+            - emits `fleet_arbiter_hold_report_no_roots` (a distinct event) when the
+              sweep reached zero roots, because "swept nothing" is the opposite fact
+              from "found nothing" and a lone zero cannot tell them apart
+            - surfaces skipped-but-hold-bearing dirs and unreachable roots rather
               than silently omitting them
-            - deletes ONLY what the same-clock classification marked prunable, and
-              NEVER a cargo-bearing hold; emits `deleted` and `deletion_enabled`
+            - deletes only what the same-clock classification marked prunable, and
+              never a cargo-bearing hold; emits `deleted` and `deletion_enabled`
               every tick so neither is inferred from silence
-            - swallows + logs any exception (the janitor must never kill the
+            - the report and the janitor are two functions over one decision rule
+              (`classify_hold_file`), so the logged tally proves what was deleted only if
+              both classify at the same instant; `now` is frozen once here and passed to
+              both. A file crossing its TTL between two calls would be logged as kept and
+              deleted anyway
+            - never passes the cargo guard: both callees default
+              `allow_cargo_deletion=False`, so cargo-bearing holds are kept structurally.
+              Passing True from here would let a call site reach deletion by omission
+            - always passes the roots and the live set. Without roots the sweep would read
+              one directory non-recursively. Without the live set the positive-dead branch
+              of the janitor would be unreachable in production
+            - reports on every tick, not only a non-empty result, so a total-failure sweep
+              never looks like a healthy tick
+            - swallows and logs any exception (the janitor must never kill the
               supervisor); a deletion failure does not suppress the report, which
-              is emitted BEFORE reclamation is attempted
+              is emitted before reclamation is attempted
         """
         try:
             roots  = list( self._hold_roots_fn() or [ ] )
@@ -1362,37 +1274,28 @@ class FleetArbiterLoop:
 
     def _sweep_hwm_files( self ) -> None:
         """
-        REACH and CLASSIFY every `.dm-inbox-hwm-*` file, then RECLAIM what the
-        classification proved orphaned AND aged — row 8758d0b1.
-
-        Deliberately a SIBLING of _sweep_hold_files rather than an extension of it.
-        The two families share a traversal and nothing else: an HWM file carries no
-        `held_at`, no `ttl_seconds` and no `session_id`, so pointing the hold
-        classifier at one yields KEEP for every file, forever, with a clean green
-        report. Measured before this was written.
-
-        SAME CLOCK, SAME LIVE-SET for the report and the act — one frozen `now_ts`
-        passed to both — so the report's `prunable` tally is a PREDICTION of the
-        deletion count. A disagreement between them is itself the finding. (The
-        pairing, and the frozen-clock discipline, are María's from `d779c7ab`; each
-        family freezes its own clock because their sweeps are independent.)
-
-        ⚠️ THE LIVE-SET IS CORRECTNESS-CRITICAL HERE, not politeness. Reaping a
-        LIVE session's HWM makes its next reconcile read as first-ever activation
-        (`seeded` False), which records the inbox as already-seen and surfaces
-        NOTHING — silently and permanently swallowing every un-surfaced DM. That is
-        `59f355e0` re-created. `_default_live_session_ids` returning None keeps
-        everything; that fail-safe is what makes this affordable at all.
+        Classify every `.dm-inbox-hwm-*` file, then reclaim what is orphaned and aged.
 
         Ensures:
-            - emits `fleet_arbiter_hwm_report` EVERY cycle with roots / files_seen /
-              tallies — empty or not, so "swept nothing" is never inferred from silence
-            - emits `fleet_arbiter_hwm_report_no_roots` distinctly when the sweep
-              reached ZERO roots ("swept nothing" is the opposite fact from "found
+            - emits `fleet_arbiter_hwm_report` every cycle with roots, files_seen and
+              tallies, empty or not, so "swept nothing" is never inferred from silence
+            - emits `fleet_arbiter_hwm_report_no_roots` as a distinct event when the sweep
+              reached zero roots ("swept nothing" is the opposite fact from "found
               nothing", and one zero cannot tell them apart)
-            - deletes ONLY when enable_hwm_deletion is set, and only what the
+            - deletes only when enable_hwm_deletion is set, and only what the
               same-clock classification marked prunable
-            - swallows + logs any exception; a janitor must never kill the supervisor
+            - is a sibling of _sweep_hold_files, not an extension: the two families share
+              a traversal and nothing else. An HWM file has no `held_at`, `ttl_seconds` or
+              `session_id`, so the hold classifier would keep every one forever and report
+              a clean green
+            - passes one frozen `now_ts` to the report and the act, with the same live set,
+              so the report's `prunable` tally predicts the deletion count and a
+              disagreement is itself the finding
+            - treats the live set as correctness-critical: reaping a live session's HWM
+              makes its next reconcile read as first-ever activation (`seeded` False),
+              which records the inbox as seen and silently swallows every un-surfaced DM.
+              `_default_live_session_ids` returning None keeps everything
+            - swallows and logs any exception; a janitor must never kill the supervisor
         """
         try:
             roots  = list( self._hold_roots_fn() or [ ] )     # same roots — same runtime-state family location
@@ -1431,28 +1334,24 @@ class FleetArbiterLoop:
 
     def _sweep_bookmark_files( self ) -> None:
         """
-        REACH and CLASSIFY the three milder bookmark families — `.ask-answer-hwm-*`,
-        `.task-store-map-*`, `.heartbeat-acked-*` — then RECLAIM what the same-clock,
-        same-live-set classification proved orphaned AND aged. Row bd5c27e1.
-
-        A SIBLING of _sweep_hwm_files, deliberately separate from the dm-inbox sweep:
-        that family's mis-deletion silently loses DMs and keeps its own proven module;
-        these three are strictly milder (a benign duplicate, and two that regenerate).
-        The live-set gate still protects every one of them — a live session's bookmark
-        is never reaped, at any age — and a None live-set keeps EVERYTHING, the same
-        fail-safe that makes the dm-inbox sweep affordable.
-
-        SAME CLOCK, SAME LIVE-SET for report and act (one frozen `now_ts`), so the
-        report's `prunable` tally is a PREDICTION of the deletion count; a
-        disagreement is itself the finding.
+        Classify the three milder bookmark families, then reclaim what is orphaned and aged.
 
         Ensures:
-            - emits `fleet_arbiter_bookmark_report` EVERY cycle (per-family tallies), so
+            - covers `.ask-answer-hwm-*`, `.task-store-map-*` and `.heartbeat-acked-*`
+            - emits `fleet_arbiter_bookmark_report` every cycle (per-family tallies), so
               "swept nothing" is never inferred from silence
-            - emits `fleet_arbiter_bookmark_report_no_roots` distinctly on zero roots
-            - deletes ONLY when enable_bookmark_deletion is set, and only what the
-              same-clock classification marked prunable
-            - swallows + logs any exception; a janitor must never kill the supervisor
+            - emits `fleet_arbiter_bookmark_report_no_roots` as a distinct event on zero roots
+            - deletes only when enable_bookmark_deletion is set, and only what the
+              same-clock, same-live-set classification marked prunable
+            - is a sibling of _sweep_hwm_files, kept separate from the dm-inbox sweep:
+              mis-deleting that family silently loses DMs, so it keeps its own proven
+              module, while these three are milder (one yields a benign duplicate and two
+              regenerate)
+            - never reaps a live session's bookmark at any age, and a None live set keeps
+              everything
+            - shares one frozen `now_ts` between report and act, so the report's `prunable`
+              tally predicts the deletion count and a disagreement is itself the finding
+            - swallows and logs any exception; a janitor must never kill the supervisor
         """
         try:
             roots  = list( self._hold_roots_fn() or [ ] )     # same roots — same runtime-state family location

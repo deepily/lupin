@@ -1,37 +1,40 @@
 #!/usr/bin/env python3
 """
-Context-headroom writer — the standing context-pressure publisher on :8001.
+Context-headroom writer, the standing context-pressure publisher on :8001.
 
-Each tick this loop calls the Phase-1 pure leaf (`assess_fleet_context_pressure`,
-src/cosa/agents/heartbeat_arbiter/context_pressure.py — BUILT + LIVE), applies
-Rick's budget-headroom transform, keys the result BY PERSONA, and writes the
-`context_pressure` section of the :8001-LOCAL store. Read-only — a pure sensor
-read: NO commons emission, NO notify (the CRITICAL→recommender half stays in
-Rachel's separately-gated Phase 2/3 lineage).
+Each tick this loop calls the pure leaf `assess_fleet_context_pressure`
+(src/cosa/agents/heartbeat_arbiter/context_pressure.py). It applies the
+budget-headroom transform and keys the result by persona. It then writes the
+`context_pressure` section of the :8001-local store.
+It only reads sensors: it emits nothing to commons and sends no notify.
 
-Design provenance (the 5 decisions are Rick's, locked 2026-06-09):
-    src/rnd/v0.1.8/2026.06.07-managing-context-memory/2026.06.09-context-pressure-published-headroom-service-design.md
-    (folds the writer shape of 2026.06.08-context-pressure-phase2-design.md — ONE writer, ONE section, Decision 4)
+Design: src/rnd/v0.1.8/2026.06.07-managing-context-memory/2026.06.09-context-pressure-published-headroom-service-design.md
 
-The budget transform (§3 of the design):
+The budget transform is below. The policy maps 1M to 0.50, 200K to 0.75, and
+anything else to the default. Headroom is sign-honest and never clamped.
+The current headroom, not the forward one, drives status.
 
-    budget_fraction           = policy[ window_size ]                       # 1M→0.50, 200K→0.75, else default
+    budget_fraction           = policy[ window_size ]
+
     budget_ceiling_tokens     = round( window_size * budget_fraction )
-    headroom_tokens_current   = budget_ceiling_tokens - occupancy_tokens    # SIGN-HONEST — never clamped
+
+    headroom_tokens_current   = budget_ceiling_tokens - occupancy_tokens
+
     headroom_tokens_forward   = budget_ceiling_tokens - next_prompt_estimate
-    status                    = over_budget iff headroom_tokens_current < 0 (Decision 1: current drives status)
 
-Per Decision 1 BOTH occupancy figures are co-equal: `occupancy_tokens` (the
+    status                    = over_budget iff headroom_tokens_current < 0
+
+Both occupancy figures are published side by side: `occupancy_tokens` (the
 calibrated /context total, `last_prompt_size`) and `next_prompt_estimate`
-(forward, conservative) — each with its own headroom; the consumer chooses.
-IDLE/DEAD workers and ACTIVE workers with no assistant turn yet publish
-`occupancy_tokens: null` (no false zero — absence of a fresh measurement is
-explicit, status idle/dead/unknown).
+(forward, conservative). Each has its own headroom, and the consumer chooses.
+Workers whose liveness is "IDLE" or "DEAD" publish `occupancy_tokens: null`.
+So do "ACTIVE" workers with no assistant turn yet. No false zero is written,
+so the absence of a fresh measurement is explicit, and status is idle, dead or unknown.
 
-PURITY: this module imports stdlib only (+ the sibling SystemClock seam). The
-leaf is injected (`assess_fn`), so the transform + loop are 100% unit-testable
-with a fake fleet; liveness/state comparisons ride the leaf's str-Enums by
-string VALUE ("ACTIVE"/"IDLE"/"DEAD", "UNKNOWN"), never by imported type.
+The module imports only stdlib plus the sibling SystemClock seam. The leaf is
+injected (`assess_fn`), so the transform and the loop are fully unit-testable
+with a fake fleet. Liveness and state are compared as plain strings
+("ACTIVE", "IDLE", "DEAD", "UNKNOWN"), never by imported type.
 """
 import datetime
 import json
@@ -53,7 +56,7 @@ _default_log_fn = make_log_fn( loop="context_pressure_writer" )
 
 def _budget_fraction_for( window_size: int, budget_fractions: Dict[ Any, float ] ) -> float:
     """
-    Resolve the soft-budget fraction for a window size (§3 policy lookup).
+    Resolve the soft-budget fraction for a window size (policy lookup).
 
     Requires:
         - budget_fractions maps int window sizes → fraction, plus key "default"
@@ -73,11 +76,11 @@ def _liveness_value( liveness: Any ) -> str:
 
 def _unmeasured_status( liveness_value: str ) -> str:
     """
-    Map an unmeasured worker's liveness to its published status (§4).
+    Map an unmeasured worker's liveness to its published status.
 
     Ensures:
-        - IDLE → "idle"; DEAD → "dead"
-        - anything else (ACTIVE with no assistant turn yet) → "unknown"
+        - "IDLE" → "idle"; "DEAD" → "dead"
+        - anything else ("ACTIVE" with no assistant turn yet) → "unknown"
     """
     if liveness_value == "IDLE":
         return "idle"
@@ -88,11 +91,11 @@ def _unmeasured_status( liveness_value: str ) -> str:
 
 def _persona_record( worker: Any, budget_fractions: Dict[ Any, float ] ) -> Dict[ str, Any ]:
     """
-    Transform ONE WorkerContextPressure into its published persona record (§4).
+    Transform one WorkerContextPressure into its published persona record.
 
-    The record is a superset of Rachel's §3 per-worker facts (tmux_session,
-    pressure_state, pressure_pct, pending_input_estimate, recommendation) plus
-    the budget-headroom fields (§3); the caller keys it by persona.
+    The record carries the per-worker facts (tmux_session, pressure_state,
+    pressure_pct, pending_input_estimate, recommendation) plus the
+    budget-headroom fields. The caller keys it by persona.
 
     Requires:
         - worker duck-types WorkerContextPressure: session_id, tmux_session,
@@ -101,14 +104,14 @@ def _persona_record( worker: Any, budget_fractions: Dict[ Any, float ] ) -> Dict
         - budget_fractions carries a "default" key
 
     Ensures:
-        - ACTIVE + measured (pressure.state != UNKNOWN) → full budget record:
+        - "ACTIVE" + measured (pressure.state != "UNKNOWN") → full budget record:
           both occupancies, both headrooms (sign-honest, never clamped), and
           status over_budget/within_budget driven by headroom_tokens_current
-        - unmeasured (pressure None, or state UNKNOWN = no assistant turn yet)
+        - unmeasured (pressure None, or state "UNKNOWN" = no assistant turn yet)
           → measurement fields null (no false zero), status idle/dead/unknown
         - window_size + budget_fraction + budget_ceiling_tokens are published
           whenever the leaf read the window (pressure present), null otherwise
-          (IDLE/DEAD skip the transcript read, so the window was never resolved)
+          ("IDLE" and "DEAD" skip the transcript read, so the window was never resolved)
     """
     pressure       = worker.pressure
     liveness_value = _liveness_value( worker.liveness )
@@ -169,12 +172,11 @@ def build_context_pressure_section(
     generated_at     : str,
 ) -> Dict[ str, Any ]:
     """
-    Build the published `context_pressure` section (§4): persona-keyed records
-    + the policy echo + the summary block.
+    Build the published `context_pressure` section (personas, policy echo, summary).
 
-    Per Decision 2 personas key the map with NO collision guard — the
-    voice-persona naming system never mints colliding names (uniqueness is an
-    upstream invariant, not re-checked here).
+    Personas key the map with no collision guard. The voice-persona naming
+    system never mints colliding names, so uniqueness is an upstream
+    invariant and is not re-checked here.
 
     Requires:
         - workers is a list of WorkerContextPressure ducks (may be empty)
@@ -183,20 +185,20 @@ def build_context_pressure_section(
 
     Ensures:
         - returns { generated_at, policy, personas, unnamed_seats, summary }
-        - policy echoes budget_fractions with str keys (JSON-stable, §4)
-        - a NAMED worker (truthy persona) keys the persona map, preserving the
-          Decision-2 uniqueness invariant (voice-persona names never collide)
-        - a NAMELESS live worker (persona None/"") does NOT key the map — it is
-          appended to `unnamed_seats` as an explicit row carrying persona=null +
-          its age (row 9c720767). Keying it would collapse every nameless seat
-          under one null key, so silence (no over-budget) and absence (nameless,
-          unmeasured) would look identical. A nameless seat is the one nobody
-          watches; it must be visible AS a row, not missing from the list.
+        - policy echoes budget_fractions with str keys (JSON-stable)
+        - a named worker (truthy persona) keys the persona map, preserving the
+          uniqueness invariant (voice-persona names never collide)
+        - a nameless live worker (persona None or "") does not key the map. It is
+          appended to `unnamed_seats` as an explicit row carrying persona=null
+          and its age. Keying it would collapse every nameless seat under one
+          null key, so silence (no over-budget) and absence (nameless,
+          unmeasured) would look identical. Nobody watches a nameless seat,
+          so it must be visible as a row, not missing from the list.
         - summary counts: personas (named total), unnamed_live_seats,
-          within_budget, over_budget, idle_or_unknown — the status buckets span
-          BOTH named and nameless, so a nameless over-budget seat still alarms
+          within_budget, over_budget, idle_or_unknown. The status buckets span
+          both named and nameless seats, so a nameless over-budget seat still alarms
         - raises KeyError when budget_fractions lacks "default" and an unmapped
-          window appears (fail loudly — the config wiring always provides it)
+          window appears (fail loudly; the config wiring always provides it)
     """
     personas : Dict[ str, Any ]  = { }
     unnamed  : List[ Any ]       = [ ]
@@ -233,10 +235,12 @@ def build_context_pressure_section(
 
 class ContextPressureWriterLoop:
     """
-    The standing context-headroom writer (same shape as the health/fleet loops):
-    each tick → leaf → §3 budget transform → §4 persona-keyed section →
-    store.set_section( "context_pressure", … ). Background-threaded; degrade-safe
-    per tick. Read-only — writes the store, nothing else.
+    The standing context-headroom writer, shaped like the health and fleet loops.
+
+    Each tick runs the leaf, applies the budget transform, builds the
+    persona-keyed section and calls store.set_section( "context_pressure", ... ).
+    It runs on a background thread and is degrade-safe per tick.
+    It only writes the store, nothing else.
     """
 
     def __init__(
@@ -251,6 +255,8 @@ class ContextPressureWriterLoop:
         interval_seconds : int                          = 60,
     ) -> None:
         """
+        Store the injected seams and validate the loop's configuration.
+
         Requires:
             - assess_fn is the fleet leaf (or a fake): assess_fn( **leaf_kwargs )
               → list[ WorkerContextPressure ]
@@ -279,8 +285,9 @@ class ContextPressureWriterLoop:
 
     def poll_once( self ) -> bool:
         """
-        Run ONE tick: assess the fleet, transform, write the section.
-        Returns True iff the section was written this tick.
+        Run one tick: assess the fleet, transform, write the section.
+
+        Returns True only when the section was written this tick.
 
         Ensures:
             - an assess failure is swallowed + logged (`assess_error`); the
@@ -305,8 +312,9 @@ class ContextPressureWriterLoop:
 
     def run( self ) -> None:
         """
-        Tick loop until stop(): poll_once → sleep, with a per-TICK guard (one
-        bad tick never exits the loop — the observer invariant).
+        Tick until stop(): poll_once, then sleep, with a per-tick guard.
+
+        One bad tick never exits the loop (the observer invariant).
         """
         while not self._stop.is_set():
             try:
@@ -329,8 +337,7 @@ class ContextPressureWriterLoop:
 
 def quick_smoke_test():
     """
-    Build + print the live published section from the real leaf (read-only,
-    :7999-safe — same venue rubric as the leaf's own smoke test).
+    Build and print the live section from the real leaf (read-only, :7999-safe).
     """
     from cosa.agents.heartbeat_arbiter.context_pressure import assess_fleet_context_pressure
 
