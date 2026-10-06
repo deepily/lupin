@@ -1252,8 +1252,8 @@ class TFEOrchestrator:
         """
         Apply the selected fixes through the shared FixExecutor, one cluster at a time.
 
-        Each selected fix is matched to its cluster and diagnosis, then run by
-        `FixExecutor.execute_fix(...)` with `prompt_builder_key="tfe"`.
+        Each selected fix is matched to its cluster and diagnosis, and a FixContext (duck-typed pass-through) is built from both.
+        `FixExecutor.execute_fix(...)` then runs it with `prompt_builder_key="tfe"`.
         If `continue_on_cluster_failure == false`, a failed cluster aborts the rest.
 
         Requires:
