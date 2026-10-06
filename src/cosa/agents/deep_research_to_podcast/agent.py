@@ -83,9 +83,9 @@ class DeepResearchToPodcastAgent:
             no_confirm: Skip confirmation prompts in DR
             audience: Expertise level (beginner/general/expert/academic)
             audience_context: Custom audience description
-            source_document: Absolute paths to local documents the RESEARCH LEG reads
-                FIRST, as seed context (row 5726e3c5). Already scope-validated and
-                resolved by the v2 door; this constructor receives real paths.
+            source_document: Absolute paths to local documents the research leg reads
+                first, as seed context. The v2 door has already scope-validated and
+                resolved them; this constructor receives real paths.
 
             # Podcast Generator options
             target_languages: List of ISO language codes (default: ["en"])
@@ -128,7 +128,7 @@ class DeepResearchToPodcastAgent:
 
     def _set_modality( self ) -> None:
         """
-        Set voice/CLI mode on BOTH underlying agents.
+        Set voice/CLI mode on both underlying agents.
 
         Both Deep Research and Podcast Generator have their own voice_io modules.
         We must set cli_mode on both to ensure consistent behavior.

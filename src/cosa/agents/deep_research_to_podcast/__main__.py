@@ -5,7 +5,7 @@ CLI Entry Point for Deep Research → Podcast Generation Pipeline.
 This module provides a command-line interface for running the chained
 Deep Research → Podcast Generation workflow.
 
-Usage:
+Example:
     # Voice-driven mode (default)
     python -m cosa.agents.deep_research_to_podcast \\
         --query "Your research topic" \\

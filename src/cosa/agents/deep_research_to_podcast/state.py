@@ -74,7 +74,7 @@ class ChainedResult:
         return self.state == PipelineState.COMPLETED and self.error is None
 
     def is_partial( self ) -> bool:
-        """Check if pipeline completed partially (DR done, PG failed)."""
+        """Check if pipeline completed partially (Deep Research done, Podcast Generator failed)."""
         return (
             self.state in [ PipelineState.DEEP_RESEARCH_DONE, PipelineState.FAILED ]
             and self.research_path is not None

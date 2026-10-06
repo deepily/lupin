@@ -102,11 +102,11 @@ class DeepResearchToPodcastJob( AgenticJobBase ):
             dry_run: Simulate execution without API calls
             audience: Target audience level (beginner/general/expert/academic)
             audience_context: Custom audience description
-            source_document: Absolute paths to local documents the RESEARCH LEG reads
-                FIRST, as seed context. Already scope-validated and resolved by the v2
-                door ( cosa/rest/v2/source_document.py ) — this constructor receives real
-                paths and does not re-decide whether they may be read. None or [] means
-                the run behaves exactly as it did before.
+            source_document: Absolute paths to local documents the research leg reads
+                first, as seed context. The v2 door ( cosa/rest/v2/source_document.py )
+                has already scope-validated and resolved them. This constructor receives
+                real paths and does not re-decide whether they may be read. None or []
+                means no seed documents.
             debug: Enable debug output
             verbose: Enable verbose output
         """
@@ -192,19 +192,12 @@ class DeepResearchToPodcastJob( AgenticJobBase ):
             raise
 
     def _make_agent( self ):
-        """Build the chained agent this job runs. Extracted so the JOIN can be driven.
+        """
+        Build the chained agent this job runs.
 
-        🔴 WHY THIS IS A METHOD AND NOT AN EXPRESSION INSIDE `_execute` (row 5726e3c5).
-        `_execute` runs the whole pipeline — notifications, research, audio, storage —
-        so a test cannot reach the agent this job actually builds without running all of
-        it against real services. That left the job→agent hand-off provable only by a
-        test that rebuilt the argument list itself, which proves the test's copy and not
-        the job's.
-
-        That is the seam slice 1 died in one layer out: the door and the job were both
-        correct and the factory between them dropped the argument, and every test stopped
-        at a seam. `test_source_document_reaches_the_model_*` drives THIS method on a job
-        the REAL factory built, so nothing between the door and `run_research` is a copy.
+        This is a method, not an inline expression in `_execute`, so a test can reach the agent the job
+        builds without running the whole pipeline. A test that rebuilt the argument list would prove only
+        its own copy. Driving this method on a job from the real factory leaves no copy.
 
         Ensures:
             - returns a fully-configured agent carrying this job's own arguments
