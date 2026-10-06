@@ -33,12 +33,12 @@ whole pipeline can be exercised without addressing the live table at all.
 
 Run from the repo root with PYTHONPATH=src:
 
-    python -m cosa.rest.db.embedding_regeneration plan
-    python -m cosa.rest.db.embedding_regeneration ensure-columns --apply
-    python -m cosa.rest.db.embedding_regeneration plan --table-prefix=regen_probe.
-    python -m cosa.rest.db.embedding_regeneration fill --table-prefix=regen_probe. --limit=500
-    python -m cosa.rest.db.embedding_regeneration verify --table-prefix=regen_probe.
-    python -m cosa.rest.db.embedding_regeneration swap --table-prefix=regen_probe.
+    - python -m cosa.rest.db.embedding_regeneration plan
+    - python -m cosa.rest.db.embedding_regeneration ensure-columns --apply
+    - python -m cosa.rest.db.embedding_regeneration plan --table-prefix=regen_probe.
+    - python -m cosa.rest.db.embedding_regeneration fill --table-prefix=regen_probe. --limit=500
+    - python -m cosa.rest.db.embedding_regeneration verify --table-prefix=regen_probe.
+    - python -m cosa.rest.db.embedding_regeneration swap --table-prefix=regen_probe.
 """
 import os
 import sys
