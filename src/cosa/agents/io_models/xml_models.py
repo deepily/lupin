@@ -1161,8 +1161,8 @@ class CodeBrainstormResponse( BaseXMLModel ):
 
     Handles XML responses for agents that generate code with detailed reasoning.
     Expected XML: a response element with thoughts, brainstorm (idea1, idea2, idea3), evaluation, code,
-    returns, example and explanation. The code element holds one line tag per line: imports first,
-    then an empty line tag as a blank line, then the function, which may take optional arguments.
+    returns, example and explanation. The code element holds one line tag per line.
+    The imports come first, then an empty line tag as a blank line, then the function, which may take optional arguments.
     The function ends with a return of the variable `solution`, followed by another empty line tag.
     The returns element holds the object type of `solution`.
     The example element holds a call that assigns its result to `solution`.
