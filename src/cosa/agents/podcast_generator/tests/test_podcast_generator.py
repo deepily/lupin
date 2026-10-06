@@ -390,10 +390,11 @@ class TestPersonalityPrompts:
 
 class TestLoudFailureOnLLMError:
     """
-    Bug 4c49cde4: when the bounded-CC LLM call fails, the orchestrator must fail
-    LOUDLY (raise PodcastGenerationError) instead of silently returning a fake
-    "Research Topic" / 0-segment placeholder that reaches the review gate looking
-    review-ready.
+    A failed bounded-CC LLM call makes the orchestrator raise, not return a fake script.
+
+    The orchestrator raises PodcastGenerationError instead of silently returning a
+    fake "Research Topic" / 0-segment placeholder. Such a placeholder would reach
+    the review gate looking review-ready.
     """
 
     def _make_orchestrator( self ):
@@ -444,9 +445,10 @@ class TestLoudFailureOnLLMError:
 
 class TestAutoContinueDisclosure:
     """
-    build_auto_continue_disclosure(): the 'silence means keep going' sentence
-    that rides in the podcast script-review question. It must name the wait in
-    whole minutes, track the timeout, and refuse a nonsense timeout.
+    build_auto_continue_disclosure() builds the "silence means keep going" sentence.
+
+    The sentence rides in the podcast script-review question. It must name the
+    wait in whole minutes, track the timeout, and refuse a nonsense timeout.
     """
 
     def test_ten_minutes_plural( self ):
@@ -482,15 +484,16 @@ class TestAutoContinueDisclosure:
 
 class TestPresentScriptReviewFailsOpen:
     """
-    _present_script_review(): the podcast approval gate is wired to FAIL OPEN.
+    _present_script_review() wires the podcast approval gate to fail open.
 
     The gate must (1) append the auto-continue disclosure to the question the
-    user hears, and (2) declare a response_default so a silent gate resolves to
-    the continue label instead of raising (which is what dead-letters the job
-    today). The core-voice_io behaviour that response_default actually produces
-    the continue answer on a dispatch failure is proven in
-    test_voice_io_gate_failure_fallback.py; here we prove the podcast gate is
-    plugged into that seam.
+    user hears. It must (2) declare a response_default so a silent gate resolves
+    to the continue label. Raising instead would dead-letter the job.
+
+    Notes:
+        - That response_default produces the continue answer on a dispatch
+          failure is proven in test_voice_io_gate_failure_fallback.py.
+        - Here the test proves the podcast gate is plugged into that seam.
     """
 
     def _make_orchestrator( self ):
@@ -597,9 +600,10 @@ class TestPresentScriptReviewFailsOpen:
 
 class TestAutoApprovalNotice:
     """
-    auto_approval_notice(): the completion must say when the script went to
-    audio without a human reading it (Clayton's default_used finding). A human
-    approval discloses nothing.
+    auto_approval_notice() says when the script went to audio unread by a human.
+
+    The completion must carry the notice for the default_used case.
+    A human approval discloses nothing.
     """
 
     def test_auto_approved_discloses_plainly( self ):
@@ -617,11 +621,16 @@ class TestAutoApprovalNotice:
 
 class TestDoAllAsyncFailsOpenPastGate:
     """
-    do_all_async(): when the approval gate goes unanswered, generation must
-    CONTINUE past it (Rick's requirement), and the run must record that the
-    approval was automatic. This drives the real orchestrator path with mocked
-    collaborators — no live LLM, no 10-minute wait — and stops it with a
-    sentinel just after the gate so the assertion is about the gate, not audio.
+    do_all_async() continues past an unanswered approval gate and records it.
+
+    Generation must continue past the gate, and the run must record that the
+    approval was automatic.
+
+    Notes:
+        - This drives the real orchestrator path with mocked collaborators:
+          no live LLM, no 10-minute wait.
+        - A sentinel stops the run just after the gate, so the assertion is
+          about the gate, not audio.
     """
 
     @pytest.mark.asyncio
@@ -681,10 +690,12 @@ class TestDoAllAsyncFailsOpenPastGate:
     @pytest.mark.asyncio
     async def test_mixed_human_english_silent_translation_still_discloses( self ):
         """
-        Clayton's gap: English approved by hand, a translation then auto-approves
-        on silence. The run must STILL disclose (script_auto_approved=True) — the
-        per-language gate ORs the flag in, so a silent translation is not hidden
-        behind a hand-approved English.
+        A silent translation still discloses after English was approved by hand.
+
+        English is approved by hand, then a translation auto-approves on silence.
+        The run must still disclose (script_auto_approved=True): the per-language
+        gate ORs the flag in, so a silent translation is not hidden behind a
+        hand-approved English.
         """
         from cosa.agents.podcast_generator import orchestrator as orch_mod
         from cosa.agents.podcast_generator.orchestrator import PodcastOrchestratorAgent

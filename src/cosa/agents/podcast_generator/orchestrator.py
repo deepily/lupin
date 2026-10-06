@@ -11,8 +11,8 @@ Design Pattern: Top-Level Orchestrator
 - Queryable state for external monitoring
 - Controllable via pause/resume/stop
 
-Phase 1 (This File): Script generation from research documents
-Phase 2 (Future): TTS audio generation and stitching
+Script generation from research documents is the first stage, implemented in this file.
+TTS audio generation and stitching is the later stage.
 """
 
 import asyncio
@@ -60,14 +60,11 @@ ELEVENLABS_COST_PER_1K_CHARS = 0.30  # $0.30 per 1000 characters
 
 def build_auto_continue_disclosure( timeout_seconds: int ) -> str:
     """
-    Build the "silence means keep going" sentence appended to a podcast
-    script-review question.
+    Build the sentence appended to a script-review question saying silence keeps going.
 
-    The podcast approval gate FAILS OPEN: if the user does not answer within
-    the review timeout, generation continues on its own (via response_default
-    at the gate). The user must be able to hear/read that this is what silence
-    does, so this sentence rides in the QUESTION text — format_questions_for_tts
-    speaks the question (not the options), so this is the part the user hears.
+    The podcast approval gate fails open. If the user does not answer within the review timeout, generation continues via response_default at the gate.
+    The user must hear that silence does this, so the sentence rides in the question text, because
+    format_questions_for_tts speaks the question, not the options.
 
     Requires:
         - timeout_seconds is a positive int
@@ -94,13 +91,11 @@ def build_auto_continue_disclosure( timeout_seconds: int ) -> str:
 
 def auto_approval_notice( auto_approved: bool ) -> str:
     """
-    One-line completion note stating whether the script reached audio WITHOUT a
-    human reading it.
+    One-line completion note stating whether the script reached audio without review.
 
-    The approval gate fails open, so "Approve script" in the completion can mean
-    either a real approval or a silent timeout. Clayton's review flagged that the
-    two are otherwise indistinguishable to whoever reads the finished podcast, so
-    when the approval came from the timeout default we say so, plainly.
+    The approval gate fails open, so "Approve script" in the completion can mean a real
+    approval or a silent timeout. The two are otherwise indistinguishable to whoever reads
+    the finished podcast, so when the approval came from the timeout default we say so, plainly.
 
     Requires:
         - auto_approved is a bool
@@ -120,26 +115,27 @@ def auto_approval_notice( auto_approved: bool ) -> str:
 
 class PodcastGenerationError( Exception ):
     """
-    Raised when a core LLM-backed generation step (content analysis or script
-    generation) fails, so the job fails LOUDLY instead of silently producing a
-    fake placeholder script that reaches the review gate looking review-ready.
+    Raised when a core LLM-backed generation step fails.
+
+    The steps are content analysis and script generation. The job fails loudly instead of
+    silently producing a fake placeholder script that reaches the review gate looking review-ready.
 
     Requires:
         - message is a non-empty, user-facing string
 
     Ensures:
         - carries a clear user-facing message up to the run() handler, which
-          sets state=FAILED, notifies the user, and re-raises
+          sets state=`FAILED`, notifies the user, and re-raises
     """
     pass
 
 
 def _require_revision_feedback( feedback, script_label="script" ):
     """
-    Guard the explicit-"Revise script" path against a silent drop. Row 936c7ef5.
+    Guard the explicit "Revise script" path against a silent drop.
 
     Requires:
-        - feedback is the value voice_io.get_input returned AFTER the user
+        - feedback is the value voice_io.get_input returned after the user
           actively selected "Revise script"
         - script_label is a short human string naming which script (e.g.
           "script", "French script")
@@ -147,13 +143,13 @@ def _require_revision_feedback( feedback, script_label="script" ):
     Ensures:
         - returns feedback unchanged when it is non-empty
         - raises PodcastGenerationError when feedback is falsy (None on
-          timeout/silence, or empty) so the job DEAD-LETTERS with a reason that
-          names THIS silence — revise-then-silence, where a human asked for a
-          change and then went quiet. It is distinct from the review gate's own
-          fail-open silence (nobody there → auto-approve), which resolves before
-          this branch and never reaches here. Honoring the explicit change
-          request as a visible failure beats silently auto-approving the
-          un-revised draft.
+          timeout/silence, or empty) so the job dead-letters with a reason that
+          names this silence: revise-then-silence, where a human asked for a
+          change and then went quiet.
+        - the review gate's own fail-open silence (nobody there, so auto-approve)
+          is distinct, resolves before this branch, and never reaches here.
+        - the explicit change request is honored as a visible failure rather than
+          silently auto-approving the un-revised draft.
 
     Raises:
         - PodcastGenerationError if feedback is None or empty
@@ -172,10 +168,7 @@ class PodcastOrchestratorAgent:
     """
     Top-level orchestrator for podcast generation - single job, multi-phase, async.
 
-    This is a standalone class (not inheriting from AgentBase) because:
-    - AgentBase is synchronous, this is async
-    - Different execution model (yields on await vs blocking)
-    - Composition over inheritance for COSA integration
+    This is a standalone class that does not inherit from AgentBase; see Notes.
 
     Requires:
         - research_doc_path points to a valid file
@@ -186,6 +179,12 @@ class PodcastOrchestratorAgent:
         - Yields control at I/O boundaries (await points)
         - State is queryable via get_state()
         - Can be paused, resumed, or stopped externally
+
+    Notes:
+        - This is a standalone class (not inheriting from AgentBase) because:
+          AgentBase is synchronous, this is async
+        - The execution model differs (yields on await vs blocking)
+        - Composition over inheritance suits COSA integration
     """
 
     def __init__(
@@ -378,12 +377,7 @@ class PodcastOrchestratorAgent:
         """
         Main execution - yields on I/O, doesn't block other jobs.
 
-        Phase 1 Implementation:
-        1. Load research document
-        2. Analyze content for key topics
-        3. Generate podcast script
-        4. Wait for script review
-        5. Save script to file
+        Runs the script-generation steps listed in Notes.
 
         Requires:
             - Research document exists and is readable
@@ -396,6 +390,14 @@ class PodcastOrchestratorAgent:
 
         Returns:
             PodcastScript or None: Generated script, or None if cancelled
+
+        Notes:
+            Steps, in order:
+            1. Load research document
+            2. Analyze content for key topics
+            3. Generate podcast script
+            4. Wait for script review
+            5. Save script to file
         """
         self.metrics[ "start_time" ] = time.time()
 
@@ -899,7 +901,7 @@ class PodcastOrchestratorAgent:
         Run only the review/revision workflow (skip generation phases).
 
         Used when resuming from a saved script via --edit-script flag.
-        Enters directly at Phase 4 (WAITING_SCRIPT_REVIEW).
+        Enters directly at the WAITING_SCRIPT_REVIEW state.
 
         Requires:
             - Script already loaded via from_saved_script()
@@ -1063,7 +1065,7 @@ class PodcastOrchestratorAgent:
         Run only the audio generation workflow (skip script review).
 
         Used when resuming from a saved script via --generate-audio flag.
-        Enters directly at Phase 5 (GENERATING_AUDIO).
+        Enters directly at the GENERATING_AUDIO state.
 
         Requires:
             - Script already loaded via from_saved_script()
@@ -1563,10 +1565,8 @@ class PodcastOrchestratorAgent:
         """
         Save the script to a markdown file.
 
-        For new scripts, generates a new path and stores it.
-        For revisions, appends version suffix (e.g., -v2.md) to preserve history.
-        For approval (final save), uses original path.
-        For non-English languages, generates separate file with language suffix.
+        For new scripts, generates a new path and stores it. For revisions, appends a version suffix (e.g., -v2.md) to preserve history.
+        For approval (final save), uses original path. For non-English languages, generates a separate file with a language suffix.
 
         Args:
             script: The script to save
@@ -1674,21 +1674,10 @@ class PodcastOrchestratorAgent:
         continue_label: str = "Approve script",
     ) -> dict:
         """
-        Present a podcast script-review choice that FAILS OPEN.
+        Present a podcast script-review choice that fails open.
 
-        Rick's requirement: the demo must not stall if he misses a prompt. So
-        this gate CONTINUES generation when the user is silent, instead of
-        dead-lettering. Two things make that happen, both centralized here:
-
-        1. The auto-continue disclosure (synced to the review timeout) is
-           appended to the question text, so the user hears/reads that silence
-           keeps generation going — format_questions_for_tts speaks the
-           question, not the options, so the sentence must ride in the question.
-        2. A response_default is declared for `header`, so voice_io returns
-           `continue_label` when no human answers within the timeout (rather
-           than raising VoiceGateNoDefaultError, which is what dead-letters the
-           job today). This is the DESIGNED unattended-gate seam, not a change
-           to the shared voice dispatcher.
+        The demo must not stall if the user misses a prompt, so a silent user continues generation.
+        It does not dead-letter the job. Both mechanisms are centralized here; see Notes.
 
         Requires:
             - questions is a one-item list whose dict is keyed under `header`,
@@ -1703,6 +1692,16 @@ class PodcastOrchestratorAgent:
 
         Raises:
             - ValueError if the review timeout is not a positive int
+
+        Notes:
+            - The auto-continue disclosure (synced to the review timeout) is appended to the
+              question text, so the user hears and reads that silence keeps generation going.
+            - format_questions_for_tts speaks the question, not the options, so the sentence
+              must ride in the question.
+            - A response_default is declared for `header`, so voice_io returns `continue_label`
+              when no human answers within the timeout.
+            - Without it, VoiceGateNoDefaultError is raised and dead-letters the job.
+            - This is the designed unattended-gate seam, not a change to the shared voice dispatcher.
         """
         timeout = self.config.script_review_timeout_seconds
         questions[ 0 ][ "question" ] = (

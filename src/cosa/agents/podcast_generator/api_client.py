@@ -2,29 +2,26 @@
 """
 Claude script-generation client for the COSA Podcast Generator Agent.
 
-BOUNDED-CC MIGRATION (Phase 1 — 2026-06-18)
-===========================================
-This client was migrated from the direct firewalled Anthropic SDK
-(`AsyncAnthropic.messages.create`) to the **in-process Claude Agent SDK**
-(`claude_agent_sdk.query`), matching the shipped BFE/TFE bounded-CC pattern
-(ratified D-DR1 Option X). The four script-phase LLM methods now run on the
-Max-subscription OAuth path.
+Bounded-CC script generation
+============================
+This client runs on the **in-process Claude Agent SDK**
+(`claude_agent_sdk.query`), matching the BFE/TFE bounded-CC pattern.
+The four script-phase LLM methods use the Max-subscription OAuth path.
 
-This is a COST-SHIFT, NOT "free": the SDK still reports `total_cost_usd`
-telemetry per call, but that spend is covered by the fixed Max plan — the
-firewalled Anthropic console balance does not move. See:
-  - Scope:        src/rnd/v0.1.8/2026.06.18-podcast-phase1-bounded-cc-scope.md
-  - Ratification: src/rnd/v0.1.8/2026.06.18-bounded-cc-d1d9-ratification-package.md
+This is a cost-shift, not "free". The SDK reports `total_cost_usd` telemetry
+per call. That spend is covered by the fixed Max plan.
+The firewalled Anthropic console balance does not move. See:
   - Cost model:   src/docs/cost-model-bounded-cc-vs-firewalled-sdk.md
 
-Podcast script generation is PURE TEXT SYNTHESIS, so the bounded-CC shape is
-the simplest of the migration candidates: tools=[], no web search, no
-can_use_tool callback, no progress-event translation. The audio (TTS) phase
-is untouched and still uses ElevenLabs.
+Podcast script generation is pure text synthesis, so the bounded-CC shape is
+the simplest candidate: tools=[], no web search, no can_use_tool callback,
+no progress-event translation.
+The audio (TTS) phase uses ElevenLabs.
 
-NOTE: `ClaudeAgentOptions` exposes no per-call `temperature`, so the historical
-per-method creativity steer (e.g. 0.8 for script, 0.5 for JSON) is folded into
-the system prompt instead (see `_temperature_to_steer`).
+Notes:
+    - `ClaudeAgentOptions` exposes no per-call `temperature`, so the per-method
+      creativity steer (e.g. 0.8 for script, 0.5 for JSON) is folded into the
+      system prompt instead (see `_temperature_to_steer`).
 """
 
 import logging
@@ -78,9 +75,9 @@ def _temperature_to_steer( temperature: float ) -> str:
     """
     Map a legacy per-call temperature into a system-prompt creativity steer.
 
-    `ClaudeAgentOptions` exposes no per-call temperature, so the historical
-    creativity intent — higher temperature meant more creative dialogue, lower
-    meant more focused/precise output — is expressed in the prompt instead.
+    `ClaudeAgentOptions` exposes no per-call temperature, so the creativity
+    intent is expressed in the prompt instead. Higher temperature means more
+    creative dialogue; lower means more focused, precise output.
 
     Requires:
         - temperature is a float
@@ -120,9 +117,9 @@ class CostEstimate:
     Cost tracking for script-phase LLM calls.
 
     Tracks token usage with a token-based price estimate (`estimated_cost_usd`,
-    used by the orchestrator's metadata) AND the SDK-reported telemetry
+    used by the orchestrator's metadata) and the SDK-reported telemetry
     (`total_sdk_cost_usd`). Under the bounded-CC path the SDK telemetry is
-    covered by the fixed Max plan and is NOT billed per token.
+    covered by the fixed Max plan and is not billed per token.
     """
     total_input_tokens  : int   = 0
     total_output_tokens : int   = 0
@@ -331,7 +328,7 @@ class PodcastAPIClient:
         max_tokens: int = 4096
     ) -> dict:
         """
-        Call the model expecting JSON output (D6-LENIENT extraction).
+        Call the model expecting JSON output (lenient extraction).
 
         Ensures:
             - Strips markdown code fences

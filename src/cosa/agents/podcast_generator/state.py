@@ -83,7 +83,7 @@ _PROSODY_MARKER_PATTERN = re.compile( r'\*\[([^\]]+)\]\*' )
 
 def extract_prosody_markers( text ):
     """
-    Extract prosody annotations from segment TEXT.
+    Extract prosody annotations from segment text.
 
     Requires:
         - text is a string or None

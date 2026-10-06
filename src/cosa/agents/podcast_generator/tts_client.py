@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-TTS Client for COSA Podcast Generator Agent - Phase 2.
+TTS Client for COSA Podcast Generator Agent.
 
 Handles ElevenLabs WebSocket TTS generation for podcast dialogue segments.
 Uses voice IDs from ConfigurationManager for speaker-to-voice mapping.
@@ -181,13 +181,6 @@ class PodcastTTSClient:
         """
         Get voice configuration for a speaker name in specified language.
 
-        Maps speaker names to voice configurations from config:
-        - "Maria" → podcast voice female config
-        - "Mr. Radio" → podcast voice male config
-
-        For non-English languages, uses language-specific voices if configured,
-        otherwise falls back to English voices with multilingual model.
-
         Requires:
             - speaker is a non-empty string
             - language is a valid ISO language code
@@ -197,6 +190,14 @@ class PodcastTTSClient:
             - Returns VoiceConfig for the speaker and language
             - Falls back to English voices if language-specific not available
             - Sets language_code in returned config
+
+        Notes:
+            - Maps speaker names to voice configurations from config:
+              "Maria" -> podcast voice female config,
+              "Mr. Radio" -> podcast voice male config.
+            - For non-English languages, uses language-specific voices if
+              configured, otherwise falls back to English voices with the
+              multilingual model.
 
         Args:
             speaker: Speaker name from script segment
@@ -483,9 +484,6 @@ class PodcastTTSClient:
         Connects to the streaming API, sends text with voice settings,
         and collects all PCM audio chunks.
 
-        For non-English languages, uses multilingual model and passes
-        language_code in the config message.
-
         Args:
             text: Text to synthesize
             voice_config: Voice configuration (includes language_code)
@@ -495,6 +493,10 @@ class PodcastTTSClient:
 
         Raises:
             Exception: On WebSocket or API errors
+
+        Notes:
+            - For non-English languages, uses the multilingual model and passes
+              language_code in the config message.
         """
         # Select model based on language
         model_id = self._get_model_for_language( voice_config.language_code )
@@ -566,20 +568,23 @@ class PodcastTTSClient:
         """
         Clean text for TTS synthesis.
 
-        Removes ONLY the dead `*[annotation]*` vocabulary (e.g. *[excited]*,
-        *[laughs]*) — those expressive audio tags are Eleven v3 only and render
-        as nothing on our turbo/multilingual models. The pause-only markers the
-        script LLM now emits — SSML `<break time="x.xs"/>`, ellipsis, dashes,
-        CAPS — are DELIBERATELY PRESERVED so they reach synthesis. Pause-only
-        prosody per Rick's 2026-08-15 ruling.
+        Removes only the `*[annotation]*` vocabulary (e.g. *[excited]*,
+        *[laughs]*).
 
         Requires:
             - text is a string
 
         Ensures:
             - every `*[...]*` marker is removed
-            - `<break ...>` tags, ellipsis, dashes, and CAPS survive verbatim
+            - `<break ...>` tags, ellipsis, dashes, and upper-case words survive verbatim
             - internal whitespace is collapsed to single spaces and trimmed
+
+        Notes:
+            - Those expressive audio tags are Eleven v3 only and render as
+              nothing on the turbo/multilingual models.
+            - The pause-only markers the script LLM emits (SSML
+              `<break time="x.xs"/>`, ellipsis, dashes, upper-case words) are
+              preserved so they reach synthesis.
 
         Args:
             text: Raw dialogue text with markers

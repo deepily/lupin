@@ -400,7 +400,7 @@ lenient_json_loads = recover_json_object
 
 def parse_analysis_response( response_content: str ) -> dict:
     """
-    Parse the content analysis response from Claude (D6-LENIENT).
+    Parse the content analysis response from Claude (lenient parse).
 
     Requires:
         - response_content contains JSON (possibly with markdown / prose)
@@ -435,7 +435,7 @@ def parse_analysis_response( response_content: str ) -> dict:
 
 def parse_script_response( response_content: str ) -> dict:
     """
-    Parse the script generation response from Claude (D6-LENIENT).
+    Parse the script generation response from Claude (lenient parse).
 
     Requires:
         - response_content contains a JSON script (possibly with markdown / prose)
@@ -443,16 +443,14 @@ def parse_script_response( response_content: str ) -> dict:
     Ensures:
         - Returns dictionary with title, segments, key_topics
         - Recovers JSON embedded in surrounding prose (bounded-CC tolerant)
-        - RAISES ValueError if no JSON object can be recovered (P0 4317efd1) —
-          the caller (orchestrator initial-generation) dead-letters the job with
-          an honest failure rather than presenting an empty script for approval.
+        - Raises ValueError if no JSON object can be recovered; the caller
+          (orchestrator initial-generation) dead-letters the job with an honest
+          failure rather than presenting an empty script for approval
 
-    Fail-loud posture (P0 4317efd1): a previous version returned a silent
-    "Untitled Podcast" / 0-segment fallback here, which flowed all the way to the
-    human approval gate looking like a normal (if empty) result. That is why the
-    zero-segment failure hid since March. Unrecoverable output now raises; the
-    orchestrator additionally floors a genuinely-empty (parsed-but-0-segment)
-    script BEFORE the approval gate.
+    Fail-loud posture: unrecoverable output raises instead of returning a silent
+    "Untitled Podcast" / 0-segment fallback, which would reach the human approval
+    gate looking like a normal (if empty) result. The orchestrator additionally
+    floors a parsed-but-0-segment script before the approval gate.
 
     Args:
         response_content: Raw response from Claude
