@@ -4,7 +4,7 @@ Generate the immutable, git-tracked DM-verbosity two-arm pilot schedule.
 Writes `src/conf/dm-experiment-schedule.json` from a recorded seed (20260804),
 so a re-run reproduces the file byte for byte.
 
-Design: `src/rnd/v0.2.0/2026.08.04-dm-verbosity-reduction/2026.08.04-dm-verbosity-pilot-plan.md` (item 2).
+Design: `src/rnd/v0.2.0/2026.08.04-dm-verbosity-reduction/2026.08.04-dm-verbosity-pilot-plan.md` (the plan item that designs this schedule).
 Two arms, `blind` and `rejecting`, across 28 hourly slots: 14 per day on
 TUESDAY_DATE and WEDNESDAY_DATE, 09:00-23:00 America/New_York. Each day has
 seven of each arm, Wednesday mirrors Tuesday at every clock hour, and no arm
