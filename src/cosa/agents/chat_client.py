@@ -50,11 +50,11 @@ class ChatClient( LlmClientInterface ):
             - model_name: A valid model identifier for pydantic-ai
             - api_key: If required, a valid API key for the service
             - set_openai_env: True only for OpenAI-protocol vendors (openai, groq,
-              mistralai, local vLLM) whose credentials genuinely belong in
+              mistralai, local vLLM) whose credentials belong in
               OPENAI_API_KEY / OPENAI_BASE_URL
 
         Ensures:
-            - Sets the OpenAI-compat env vars ONLY when set_openai_env is True
+            - Sets the OpenAI-compat env vars only when set_openai_env is True
             - Initializes Agent with the specified model
             - Creates TokenCounter for usage tracking
             - Stores generation parameters for use with LLM calls

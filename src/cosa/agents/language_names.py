@@ -1,14 +1,13 @@
 """
-Canonical language-code → display-label map — the single source of truth.
+Canonical language-code to display-label map: the single source of truth.
 
-Deliberately a LEAF module with NO imports. Importing any submodule of
-`cosa.agents.podcast_generator` first runs that package's __init__, which eagerly
-loads the orchestrator / api_client chain (mcp + pydantic, ~900 modules) — far
-heavier than a label lookup needs, and the cause of an import-order unit-test
-failure that once forced this map to be hand-copied into the DRP job (row
-81040071). Keeping the map here lets both `podcast_generator.config` and
-`deep_research_to_podcast.job` import ONE copy without that weight, so the two
-labels can never drift and mislabel a language in front of an audience.
+This is a leaf module with no imports. Importing any submodule of
+`cosa.agents.podcast_generator` first runs that package's __init__, which loads
+the orchestrator and api_client chain (mcp and pydantic, about 900 modules).
+That is far heavier than a label lookup needs, and it breaks import order in
+unit tests. Keeping the map here lets `podcast_generator.config` and
+`deep_research_to_podcast.job` import one copy without that weight. The two
+labels can then never drift and mislabel a language in front of an audience.
 """
 
 # ISO language code -> human-readable display label. Unknown codes fall back to

@@ -25,9 +25,9 @@ class LlmClientFactory:
     """
     Singleton factory for creating LLM clients.
     
-    This factory provides a unified interface to create clients for different LLM providers
-    (OpenAI, Groq, Anthropic, Google, etc.) while handling the specifics of authentication,
-    API endpoints, and client implementation details.
+    It gives one interface for creating clients for different LLM providers (OpenAI,
+    Groq, Anthropic, Google, etc.) and handles authentication, API endpoints, and
+    client implementation details.
     
     Requires:
         - ConfigurationManager instance to read configuration values
@@ -107,13 +107,9 @@ class LlmClientFactory:
         """
         Get an LLM client for the given model descriptor.
         
-        This method first tries to find the model in the configuration manager.
-        If found, it uses the configuration settings to create the client.
-        If not found, it parses the model descriptor to determine the vendor
-        and creates a vendor-specific client.
-        
-        Now returns ChatClient or CompletionClient instances that implement
-        the LlmClientInterface, ensuring all clients have a run() method.
+        It first looks the model up in the configuration manager and builds the client
+        from those settings. If not found, it parses the descriptor for the vendor and
+        creates a vendor-specific client implementing LlmClientInterface.
         
         Requires:
             - model_config_key: A string identifying the model, which can be either:
@@ -346,11 +342,9 @@ class LlmClientFactory:
     
     class AgentWrapper:
         """
-        A wrapper class that provides a synchronous interface to the async Agent class.
-        This allows the Agent to be used like other LLM clients.
-        
-        The wrapper handles the async/await logic internally, so clients can use
-        a synchronous run() method without worrying about async handling.
+        Synchronous wrapper over the async pydantic_ai Agent, usable like other LLM clients.
+
+        The wrapper handles the async/await logic internally, so callers use a plain run().
         
         Requires:
             - agent: A valid pydantic_ai Agent instance
@@ -435,14 +429,14 @@ class LlmClientFactory:
         Requires:
             - model_descriptor: A non-empty string in one of the following formats:
                 1. "vendor:model-name" (e.g., "groq:llama-3.1-8b-instant")
-                   Colon is the ONLY vendor delimiter.
+                   Colon is the only vendor delimiter.
                 2. "llm_deepily_*" legacy format for Deepily models
                 3. Any other string — treated as a HuggingFace model ID or
                    local model identifier for vLLM (e.g., "Qwen/Qwen3-4B-Base")
 
         Ensures:
             - Returns a tuple of (vendor, model_name)
-            - Slash is NEVER interpreted as a vendor delimiter
+            - Slash is never interpreted as a vendor delimiter
             - Vendor is always lowercased for consistency with VENDOR_CONFIG keys
             - Unknown formats default to vLLM
         """

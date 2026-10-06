@@ -239,13 +239,10 @@ class AgenticJobBase( ABC ):
     @abstractmethod
     def do_all( self ) -> str:
         """
-        Execute the job and return result.
+        Execute the job and return the result; the main entry point called by RunningFifoQueue.
 
-        This is the main entry point called by RunningFifoQueue.
-        Must be overridden by subclasses to implement job logic.
-
-        For async jobs, this method should use asyncio.run() to
-        bridge to the async _execute() method.
+        Subclasses must override it. Async jobs should use asyncio.run() to bridge
+        to the async _execute() method.
 
         Returns:
             str: Conversational answer for the queue system
@@ -268,12 +265,10 @@ class AgenticJobBase( ABC ):
     @property
     def is_cacheable( self ) -> bool:
         """
-        Whether this job type should be cached.
+        Whether this job type should be cached; agentic jobs never are.
 
-        Agentic jobs are never cached because:
-        - Each research query depends on current web content
-        - Podcast content may be updated
-        - Results are inherently time-sensitive
+        Research depends on current web content, podcast content may be updated,
+        and results are time-sensitive.
 
         Returns:
             bool: Always False for agentic jobs
@@ -284,10 +279,8 @@ class AgenticJobBase( ABC ):
         """
         Request graceful cancellation. Thread-safe (boolean assignment under GIL).
 
-        Sets the cancel flag on this job. If an orchestrator reference is stored,
-        also signals the orchestrator to stop at its next checkpoint.
-
-        Subclasses may override to add additional cancellation logic.
+        Sets the cancel flag and signals a stored orchestrator to stop at its next
+        checkpoint. Subclasses may override to add more cancellation logic.
 
         Ensures:
             - self._cancel_requested is set to True
@@ -411,18 +404,11 @@ class AgenticJobBase( ABC ):
 
     async def _raise_forced_failure( self, voice_io ) -> None:
         """
-        Phase 6 dry-run repair-loop hook — deliberately fail the job.
+        Dry-run repair-loop hook that fails the job with the error `force_failure_mode` names.
 
-        Subclasses that support the Phase 6 dry-run repair loop accept a
-        `force_failure_mode` constructor parameter and store it as
-        `self.force_failure_mode`. When that flag is set, their `_execute_dry_run()`
-        path calls this method at the end of the simulated breadcrumbs to raise
-        a matching exception so the job lands in the dead queue with a realistic
-        error signature. The dead-queue watchdog then classifies the failure
-        and triggers the Bug Fix Expediter auto-fix pipeline.
-
-        This method NEVER runs during live execution — it is gated behind
-        `self.dry_run == True` in the caller.
+        `_execute_dry_run()` calls this after the simulated breadcrumbs, so the job lands
+        in the dead queue with a realistic error. The watchdog then classifies it and
+        starts the Bug Fix Expediter pipeline. It never runs during live execution.
 
         Requires:
             - self.force_failure_mode in { "code_bug", "infra_timeout", "rate_limit" }

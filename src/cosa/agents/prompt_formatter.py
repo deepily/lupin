@@ -11,10 +11,8 @@ class PromptFormatter:
     """
     A utility class for formatting prompts according to model-specific requirements.
     
-    This class supports three primary prompt formatting styles:
-    1. instruction_completion: Used by Mistral, Ministral, some LLaMA models
-    2. special_token: Used by Phi-4 and other models with special token formats
-    3. json_message: Used by OpenAI, Claude, Groq API, etc.
+    Styles: instruction_completion (Mistral, Ministral, some LLaMA), special_token
+    (Phi-4 and similar) and json_message (OpenAI, Claude, Groq API, etc.).
     
     Requires:
         - ConfigurationManager instance available via CLI args
@@ -109,8 +107,7 @@ class PromptFormatter:
     
     def _get_prompt_format_best_guess( self, model_name: str ) -> str:
         """
-        Make a best guess at the appropriate prompt format based on model name patterns.
-        Only used as a fallback when no configuration is available.
+        Guess a model's prompt format from its name; a fallback when no config exists.
         
         Requires:
             - model_name is a non-empty string
@@ -148,8 +145,7 @@ class PromptFormatter:
     
     def format_prompt( self, model_name: str, instructions: str, input_text: str, output: str="" ) -> str:
         """
-        Format a prompt according to the appropriate template for the model.
-        Uses template files for consistent formatting across the system.
+        Format a prompt with the template file that matches the model's format.
         
         Requires:
             - model_name is a non-empty string

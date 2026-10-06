@@ -1,30 +1,24 @@
 """
-HeartbeatPokerJob — generic heartbeat-poker agentic job (CJ Flow Layer 1).
+HeartbeatPokerJob: generic heartbeat-poker agentic job (CJ Flow Layer 1).
 
 Wakes N recipient sessions on a fixed cadence and exits on a terminating
-condition. Use-case-agnostic: the poker never branches on recipient role —
-variance lives in per-recipient config + Layer-2 recipient doctrine.
+condition. The poker is use-case-agnostic and never branches on recipient role.
+Variance lives in per-recipient config and in the recipient's own doctrine.
 
-Design doc : src/rnd/v0.1.7/2026.05.20-generic-heartbeat-poker-abstraction-design.md
-Class spec : src/rnd/v0.1.7/2026.05.22-heartbeat-poker-d1d4-class-spec.md
+This module holds the class shape and the three layered exits.
 
-TASK SCOPE — this module is tasks I1 + I2:
-  I1 — the class shape: __init__ + config validation, the cadence / poke
-       loop, recipient routing, poke_body construction, the Clock seam.
-  I2 — the three layered exits (clean-signal / dead-man's-switch / hard-cap)
-       + notify() integration. The dead-man's-switch ESCALATES, never
-       terminates (design doc §4).
+The class shape covers config validation, the cadence and poke loop, recipient
+routing, poke_body construction and the Clock seam.
 
-I1-followup: the production CommonsGateway implementation (CommonsStore-backed)
-is bound separately — see the d1d4 spec §9. The reference pattern (CommonsStore
-.post() + a commons push) was the legacy cascade scheduler's `fire_heartbeat()`,
-retired 2026-06-29 under the ddaa2882 waiver + design-doc I8. For now `commons` is a required
-injected dependency (the agentic-job factory supplies the real gateway in
-production; tests supply a fake).
+The three exits are a clean signal, a dead-man's-switch and a hard cap, plus
+notify() integration. The dead-man's-switch escalates and never terminates.
 
-I2-followup: `_iso_is_after()` assumes SystemClock.now_iso() and the gateway's
-last_post_ts() are timezone-consistent. Verify both are tz-aware UTC during
-integration; the lexical fallback is defensive only.
+`commons` is a required injected dependency. The agentic-job factory supplies
+the real CommonsStore-backed gateway in production, and tests supply a fake.
+
+`_iso_is_after()` assumes SystemClock.now_iso() and the gateway's last_post_ts()
+are timezone-consistent. Both should be tz-aware UTC; the lexical fallback is
+defensive only.
 """
 
 from __future__ import annotations
@@ -48,7 +42,7 @@ RECIPIENT_ROLES            = ( "manager", "observer", "watcher" )
 @dataclass( frozen=True )
 class RecipientSpec:
     """
-    Per-recipient poker config (design doc §3, finding F-Rio-B1).
+    Per-recipient poker config: who to poke, how to address them, and their role.
 
     Requires:
         - identifier is a non-empty string
@@ -59,8 +53,8 @@ class RecipientSpec:
         - immutable after construction (frozen)
         - an invalid identifier / identifier_type / role raises ValueError
 
-    `role` is opaque passthrough — stamped into poke_body.role; the poker
-    never branches on it (design doc §2 structural insight).
+    `role` is opaque passthrough. It is stamped into poke_body.role and the
+    poker never branches on it.
     """
     identifier      : str
     identifier_type : str
@@ -78,11 +72,11 @@ class RecipientSpec:
 @runtime_checkable
 class Clock( Protocol ):
     """
-    Injectable time source — the clock-injection seam (finding F-Rio-E7).
+    Injectable time source: the clock-injection seam.
 
-    Production = SystemClock. Tests = a FakeClock that advances on command,
-    so the cadence / hard-cap loop is exercised without real waiting — the
-    prerequisite for I6's 100% branch-coverage target.
+    Production uses SystemClock. Tests use a FakeClock that advances on command,
+    so the cadence and hard-cap loop is exercised without real waiting. That is
+    what makes full branch coverage of the loop reachable.
     """
     def monotonic( self ) -> float: ...
     def now_iso( self ) -> str: ...
@@ -105,10 +99,10 @@ class SystemClock:
 @runtime_checkable
 class CommonsGateway( Protocol ):
     """
-    Injectable commons-store interaction seam (d1d4 spec §2.3).
+    Injectable commons-store interaction seam.
 
-    The poker runs server-side, in-process — it uses this gateway, NOT the
-    cosa-voice MCP tool surface (that is for CC sessions).
+    The poker runs server-side, in-process. It uses this gateway and never the
+    cosa-voice MCP tool surface, which is for CC sessions.
     """
     def send_to( self, recipient: "RecipientSpec", body: str ) -> None: ...
     def last_post_ts( self, recipient: "RecipientSpec" ) -> Optional[ str ]: ...
@@ -117,16 +111,16 @@ class CommonsGateway( Protocol ):
 
 class HeartbeatPokerJob( AgenticJobBase ):
     """
-    Generic heartbeat poker — CJ Flow Layer-1 agentic job.
+    Generic heartbeat poker: a CJ Flow Layer-1 agentic job.
 
-    Subclasses AgenticJobBase (and so satisfies the QueueableJob protocol by
-    inheritance — see d1d4 spec §5.1). CJ Flow dispatches it to the agentic
-    ThreadPoolExecutor, where it holds one pool slot for its whole lifetime.
+    Subclasses AgenticJobBase, so it satisfies the QueueableJob protocol by
+    inheritance. CJ Flow dispatches it to the agentic ThreadPoolExecutor, where
+    it holds one pool slot for its whole lifetime.
 
-    Exit disposition (d1d4 spec §5.4): clean / hard-cap / cancelled all RETURN
-    normally from do_all() → the queue transitions the job to `done`. Only an
-    unexpected exception raises → `dead`. The dead-man's-switch escalates via
-    notify() and KEEPS poking — it is never a loop exit.
+    Clean, hard-cap and cancelled exits all return normally from do_all(), and
+    the queue moves the job to `done`. Only an unexpected exception raises, and
+    the job goes to `dead`. The dead-man's-switch escalates via notify() and
+    keeps poking. It is never a loop exit.
     """
 
     JOB_TYPE   = "heartbeat_poker"
@@ -169,10 +163,9 @@ class HeartbeatPokerJob( AgenticJobBase ):
             - config stored verbatim; injected seams resolved (clock → SystemClock)
             - any invariant violation raises ValueError with context
 
-        Note: `notify_fn` is an injectable seam over the escalation/exit
-        notifications (d1d4 spec §5.3 specified `notify_progress`; the seam is
-        added so I6 can assert on notifications without emitting real ones).
-        Default None → the parent AgenticJobBase.notify_progress() is used.
+        Note: `notify_fn` is an injectable seam over the escalation and exit
+        notifications, so tests can assert on them without emitting real ones.
+        The default None uses the parent AgenticJobBase.notify_progress().
         """
         super().__init__(
             user_id      = user_id,
@@ -240,7 +233,7 @@ class HeartbeatPokerJob( AgenticJobBase ):
 
     def _build_poke_body( self, recipient: RecipientSpec ) -> dict:
         """
-        Construct the poke_body JSON envelope (design doc §4, finding F-Rio-C2).
+        Construct the poke_body JSON envelope for one recipient.
 
         `kind` is the literal "heartbeat"; `workstream` from the job config;
         `role` stamped per-recipient. The poker never branches on `role`.
@@ -283,9 +276,10 @@ class HeartbeatPokerJob( AgenticJobBase ):
 
     def _clean_termination_seen( self ) -> bool:
         """
-        Clean-exit guard (finding F-Rio-C4): True iff a termination-signal kind
-        was posted to `termination_topic` AFTER `_job_start_iso`. The
-        `since=_job_start_iso` filter excludes stale signals from a prior run.
+        Return True only if a termination-signal kind was posted after job start.
+
+        The signal must be on `termination_topic` and newer than `_job_start_iso`.
+        The `since=_job_start_iso` filter excludes stale signals from a prior run.
         """
         entries = self._commons.read_since( self.termination_topic, self._job_start_iso )
         for entry in entries:
@@ -296,12 +290,12 @@ class HeartbeatPokerJob( AgenticJobBase ):
 
     def _detect_and_escalate( self ) -> None:
         """
-        Detect each recipient's response to the PREVIOUS tick; advance the
-        per-recipient silent streak; fire the dead-man's-switch once per streak.
+        Score each recipient's response to the previous tick and escalate on silence.
 
         A poke is `answered` if the recipient's last_post_ts advanced past that
-        tick's send time; otherwise `silent`. The dead-man's-switch ESCALATES
-        (notify) and KEEPS poking — it never terminates the loop.
+        tick's send time, otherwise `silent`. The silent streak advances per
+        recipient and the dead-man's-switch fires once per streak. It escalates
+        via notify and keeps poking, and it never terminates the loop.
         """
         for recipient in self.recipients:
             last_tick = self._last_tick_iso[ recipient.identifier ]
@@ -343,15 +337,11 @@ class HeartbeatPokerJob( AgenticJobBase ):
 
     async def _execute( self ) -> str:
         """
-        The poke loop. Each iteration, in priority order:
-          1. cancellation  — AgenticJobBase.request_cancel()  → exit "cancelled"
-          2. hard cap      — elapsed >= max_duration_seconds   → exit "hard_cap"
-          3. clean signal  — termination kind seen after start → exit "clean"
-          4. detect + escalate — score the previous tick; dead-man's-switch
-          5. deliver this tick's poke to every recipient
-          6. sleep one cadence
+        Run the poke loop until cancelled, capped or cleanly terminated.
 
-        Clean / hard-cap / cancelled all RETURN normally (→ queue marks `done`).
+        Each pass checks cancellation, the hard cap (elapsed >= max_duration_seconds)
+        and a clean signal, in that order. It then scores the previous tick,
+        delivers this tick and sleeps a cadence. Every exit returns normally.
 
         Returns:
             str: the exit summary (also stored on answer_conversational)

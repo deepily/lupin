@@ -3,20 +3,17 @@ model_window.py
 
 Ask the model server what its context window is, and how many tokens a string costs.
 
-WHY THIS EXISTS — row a203d91d. The completion budget for kaitchup/phi_4_14b was a
-constant 4096 in lupin-app.ini, sent to a server whose window is 8192. The server
-checks prompt + completion against the window, so any prompt over ~4096 tokens was a
-hard 400 before a single token was generated. The receptionist crossed that line and
-died, taking the v2 flow's fallback with it.
+Why this exists: a fixed completion budget in config can exceed what the server allows.
+The server checks prompt plus completion against its window. A long prompt then
+fails with a hard 400 before a single token is generated.
 
-WHY THE WINDOW IS NOT IN CONFIG — Mr Radio's ruling, 2026-08-19: "a number in config
-that the server already knows is a second source of truth that will drift." vLLM
-reports max_model_len on both GET /v1/models and POST /tokenize, so the real value is
-one call away for whatever model is actually loaded.
+The window is not kept in config. A number the server already knows is a second source
+of truth that will drift. vLLM reports max_model_len on GET /v1/models and on
+POST /tokenize. The real value is one call away.
 
-FAIL LOUD, DO NOT ESTIMATE. If the server cannot be reached, these raise. A silent
-character-count fallback would put a guess where a measurement belongs, and the guess
-would be wrong in exactly the place that matters — near the ceiling.
+These functions fail loud and never estimate. If the server cannot be reached, they
+raise. A silent character-count fallback would put a guess where a measurement belongs,
+and the guess would be wrong near the ceiling, where it matters.
 """
 
 import json

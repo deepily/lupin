@@ -13,8 +13,8 @@ class IterativeDebuggingAgent( AgentBase ):
     """
     Agent that iteratively debugs code using multiple LLMs until a solution is found.
     
-    This agent attempts to fix code errors by using different language models in sequence,
-    testing the fixes until the code runs successfully or all models have been tried.
+    It tries different language models in sequence and tests each fix. It stops when
+    the code runs successfully or every model has been tried.
     """
     
     def __init__( self, error_message: str, path_to_code: str, example: Optional[str]=None, returns: Optional[str]=None, minimalist: bool=True, debug: bool=False, verbose: bool=False ) -> None:

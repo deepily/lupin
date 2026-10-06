@@ -15,16 +15,11 @@ _UNBOUNDED_ENTRIES_BUDGET = 10 ** 9
 
 def fit_fragments_to_budget( fragments: list, budget: int, count_tokens ) -> str:
     """
-    Join as many of the NEWEST fragments as fit `budget` tokens, oldest last dropped.
+    Join as many of the newest fragments as fit `budget` tokens, dropping the oldest first.
 
-    Row a203d91d: the memory block was bounded by a ROW COUNT (50), which cannot bound
-    a token budget because rows vary in size — 50 rows measured 3,345 tokens on one
-    night and could be half or double that on another with the same cap. The bound has
-    to be the thing the server actually checks.
-
-    `fragments` arrives newest-first, matching the repository's ORDER BY id DESC. The
-    returned block is chronological, oldest first, because that is how the prompt reads
-    as a conversation.
+    A row count cannot bound a token budget, because rows vary in size. The bound is
+    what the server checks. `fragments` arrives newest-first, matching `ORDER BY id DESC`.
+    The returned block is oldest first, as the prompt reads as a conversation.
 
     Requires:
         - fragments is a list of strings, newest first
@@ -172,11 +167,9 @@ class ReceptionistAgent( AgentBase ):
         """
         How many tokens the memory block may spend.
 
-        Half the model's window, less what the prompt template already costs. Half is
-        not a tuned constant — it is the split that leaves the other half for the
-        completion, so this scales with whatever model is loaded instead of encoding
-        one server's numbers. The clamp in llm_completion then sizes the completion
-        against whatever the prompt actually turned out to be.
+        Half the model's window, less what the prompt template already costs. The other
+        half is left for the completion, so this scales with the loaded model. The clamp
+        in llm_completion then sizes the completion against the actual prompt.
 
         Requires:
             - the agent's llm client exposes base_url and model_name

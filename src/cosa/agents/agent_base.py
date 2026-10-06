@@ -525,7 +525,7 @@ class AgentBase( RunnableCode, abc.ABC ):
 
 def quick_smoke_test():
     """
-    Critical smoke test for AgentBase - validates foundation functionality for all v010 agents.
+    Critical smoke test for AgentBase, the foundation functionality of all v010 agents.
     
     This test is essential for v000 deprecation as AgentBase is the foundation class
     that all v010 agents inherit from.

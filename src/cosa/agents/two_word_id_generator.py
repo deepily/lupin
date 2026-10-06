@@ -123,10 +123,9 @@ class TwoWordIdGenerator:
         """
         Letters appended to the noun to open a fresh name space past the first.
 
-        Letters, not digits, and appended with no separator, so the result is still
-        two lowercase words. Session ids from this generator are validated against
-        ^[a-z]+ [a-z]+$ in cosa/rest/routers/websocket.py before a WebSocket is
-        allowed to connect, and a digit or a third word would be refused.
+        Letters, not digits, appended with no separator, so the result is still
+        two lowercase words. Session ids must match ^[a-z]+ [a-z]+$ (checked in
+        cosa/rest/routers/websocket.py), so a digit or third word is refused.
 
         Requires:
             - cycle is an integer >= 1
@@ -150,11 +149,9 @@ class TwoWordIdGenerator:
         """
         Generate a unique two-word identifier.
 
-        Randomly draws an adjective and a noun and returns the pair the first time
-        it comes up. The pool holds len( adjectives ) * len( nouns ) names; once a
-        cycle is used up the next one opens with letters appended to the noun
-        ("bright liona"), so the generator keeps returning unique, readable ids for
-        the whole life of the process instead of looping forever.
+        Draws a random adjective and noun; the pool holds len( adjectives ) * len( nouns )
+        names. Once a cycle is used up, the next opens with letters appended to the
+        noun ("bright liona"), so ids stay unique instead of looping.
 
         Requires:
             - self.adjectives is a non-empty list
@@ -165,8 +162,8 @@ class TwoWordIdGenerator:
             - Returns a name that has not been returned before by this instance
             - The returned name is added to generated_ids
             - Always terminates, including when every name in the current cycle is taken
-            - The name is always two lowercase words, so it still passes the session-id
-              check in cosa/rest/routers/websocket.py (^[a-z]+ [a-z]+$)
+            - The name is always two lowercase words, so it passes the session-id check
+              in cosa/rest/routers/websocket.py (^[a-z]+ [a-z]+$)
             - Safe to call from multiple threads at once
 
         Raises:

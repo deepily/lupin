@@ -10,11 +10,8 @@ from cosa.agents.io_models.utils.util_xml_pydantic import XMLParsingError
 
 class ConfirmationDialogue:
     """
-    A utility class for confirming yes/no responses using LLMs.
-    
-    This class does not inherit from AgentBase as it's designed to be
-    a lightweight utility for confirmation dialogs rather than a full agent.
-    
+    A utility class for confirming yes/no responses using LLMs; not an AgentBase subclass.
+
     Configuration:
         - "prompt template for confirmation dialog": Path to the prompt template file (required)
         - "llm_spec_key_for_confirmation_dialog": LLM model specification (required when model_name not provided)

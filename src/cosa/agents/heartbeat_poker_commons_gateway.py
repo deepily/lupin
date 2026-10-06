@@ -1,34 +1,23 @@
 """
-LupinCommonsGateway — production CommonsGateway for HeartbeatPokerJob.
+LupinCommonsGateway: production CommonsGateway for HeartbeatPokerJob.
 
 Implements the `CommonsGateway` protocol (defined in `heartbeat_poker_job.py`)
-over the server-side `CommonsStore` plus the `/api/dm/send` notification-native
-push (migrated off the deleted `/api/commons/register-question` route,
-cosa-voice token-reduction Phase 4, 2026-06-15). The reference pattern was the
-legacy cascade scheduler's `fire_heartbeat()`, retired 2026-06-29 (I8 / ddaa2882).
+over the server-side `CommonsStore`. Each poke is also pushed through the
+notification-native `/api/dm/send` route.
 
-ARCHITECTURE — every external dependency (the `CommonsStore`, the HTTP-post
-callable, the API key, the base URL, the sender persona) is constructor-
-injected, so the protocol methods are PURE ADAPTER LOGIC: no disk reads and no
-network. The module is 100%-unit-testable with fakes and carries zero
+Every external dependency is constructor-injected: the `CommonsStore`, the
+HTTP-post callable, the API key, the base URL and the sender persona. The
+protocol methods are therefore pure adapter logic with no disk reads and no
+network. The module is fully unit-testable with fakes and carries no
 `pragma: no cover`.
 
-Two corrections to what this paragraph used to claim, both found by reading the
-code under it (row 1a465fc3). It said "no `lupin_mcp` import at module scope"
-while importing `lupin_mcp.persona_normalization` twelve lines below. And it
-said "zero `pragma: no cover`" while `from_environment` carried one — a reader
-who trusted the header never looked. The import claim is dropped; the pragma
-claim is now true because the pragma was removed and the method tested.
+`from_environment` is the one IO boundary here. It reads the API key from disk
+and constructs the real `CommonsStore`. Its dependencies are imported inside
+the function body, so unit tests monkeypatch them rather than exempting the
+method.
 
-`from_environment` is the one IO boundary here: it reads the API key from disk
-and constructs the real `CommonsStore`. Its dependencies are imported inside the
-function body, so unit tests monkeypatch them rather than exempting the method.
-
-The production-wiring step that constructs the real `CommonsStore`, loads the
-API key, and passes `requests.post` lives at the poker's call-site / the
-agentic-job factory — see the `heartbeat_poker_job.py` module docstring.
-
-Design: `src/rnd/v0.1.7/2026.05.22-heartbeat-poker-d1d4-class-spec.md` §2.3, §9
+The production wiring lives at the poker's call-site and the agentic-job
+factory. See the `heartbeat_poker_job.py` module docstring.
 """
 
 from __future__ import annotations
@@ -61,6 +50,8 @@ class LupinCommonsGateway:
         persona_color     : Optional[ str ] = None,
     ) -> None:
         """
+        Store the injected dependencies for the three protocol methods.
+
         Requires:
             - sender_session_id, api_key, api_base_url are non-empty strings
             - store exposes post() / read() / who() (a CommonsStore)
@@ -83,23 +74,11 @@ class LupinCommonsGateway:
                           persona_icon: Optional[ str ] = None,
                           persona_color: Optional[ str ] = None ) -> "LupinCommonsGateway":
         """
-        Build a production gateway wired to the real `CommonsStore` + `requests`.
+        Build a production gateway wired to the real `CommonsStore` and `requests`.
 
-        The IO-boundary constructor: builds the server-side `CommonsStore`, loads
-        the notification API key from disk, and reads `LUPIN_API_URL` from the
-        environment. The agentic-job factory calls this; the other unit tests
-        construct `LupinCommonsGateway` directly with injected fakes instead,
-        which is the cheaper path for testing the protocol methods.
-
-        This method USED TO carry a `no cover` pragma reading "exercised by the
-        :8000 integration tier, not unit-mockable in isolation". Both halves were
-        false (row 1a465fc3): the integration file it named was three
-        `raise NotImplementedError` stubs behind a module-level skip, so the
-        exemption was bought with tests that did not exist; and every dependency
-        below is imported INSIDE this body, so it resolves at call time and a
-        monkeypatch can replace all of it. The pragma is gone and
-        `src/tests/unit/test_heartbeat_poker_commons_gateway.py` covers this
-        method directly.
+        The agentic-job factory calls this. Its dependencies are imported inside
+        the body, so a monkeypatch can replace all of them and the method needs
+        no `no cover` pragma.
 
         Requires:
             - <project_root>/src/conf/keys/notification-api-claude-code-dev exists
@@ -140,40 +119,34 @@ class LupinCommonsGateway:
         """
         Derive a server-pattern-safe DM topic from a recipient identifier.
 
-        Routes through the shared `persona_slug` root (Phase 4 of the
-        persona-name-normalization plan) so the topic ALWAYS equals
-        `dm-{persona_slug( identifier, sep='_' )}` — byte-identical to the
-        Arbiter gateway, the cascade scheduler, and the MCP DM layer
-        (`_derive_dm_topic`). Accent-proof: `"Mr Radio"` → `"dm-mr_radio"`,
-        `"María"` → `"dm-maria"`. The prior accent-leaky
-        `re.sub( ..., re.UNICODE )` kept accents, regenerating the SPLIT topic
-        `"dm-maría"` (the live bug: both `dm-maría.md` and `dm-maria.md`
-        existed) — this seam now converges on the canonical `"dm-maria"`.
+        Routes through the shared `persona_slug` root, so the topic always equals
+        `dm-{persona_slug( identifier, sep='_' )}`. That is byte-identical to the
+        Arbiter gateway, the cascade scheduler and the MCP DM layer
+        (`_derive_dm_topic`). It is accent-proof: `"Mr Radio"` gives
+        `"dm-mr_radio"` and `"María"` gives `"dm-maria"`. A regex that kept
+        accents would split one persona across two topics.
         """
         return f"dm-{persona_slug( identifier, sep='_' )}"
 
     def send_to( self, recipient: RecipientSpec, body: str ) -> None:
         """
-        Deliver one poke: write the entry to the recipient's DM topic via the
-        `CommonsStore`, then fire the `/api/dm/send` notification-native push so
-        the recipient's CC session receives the body INLINE (a direction
-        'ai_to_ai' DM the listener delivers directly).
+        Deliver one poke: post it to the recipient's DM topic, then push it.
 
-        The disk post is authoritative; the push is best-effort — a recipient
+        The entry is written through the `CommonsStore`, then sent to
+        `/api/dm/send` so the recipient's session receives the body inline as an
+        'ai_to_ai' DM.
+
+        The disk post is authoritative and the push is best-effort. A recipient
         that misses the push still sees the poke on its next commons poll, so a
-        push failure never loses the poke. It is LOGGED, not swallowed: the
-        DM-verbosity pilot's "any arbiter poke fails to send" stopping rule reads
-        this evidence, and a non-2xx RESPONSE (a 413 refusal under the rejecting
-        arm) does NOT raise through requests.post — it must be inspected
-        explicitly or it vanishes exactly as the swallowed exception once let it.
+        push failure never loses the poke. The failure is logged, not swallowed,
+        because the pilot's stopping rule reads that evidence. A non-2xx response
+        does not raise through requests.post, so the status is inspected
+        explicitly.
 
-        Migrated off the now-deleted `/api/commons/register-question` route
-        (cosa-voice token-reduction Phase 4, 2026-06-15) onto `/api/dm/send`,
-        mirroring the arbiter's `make_dm_push_fn` precedent: the body rides
-        INLINE (no commons claim-check), `thread_id` carries the same `qid` as
-        the disk post's metadata so board-polling receipts still correlate, and
-        the durable dm-<persona> board write above remains the receipt-polling
-        substrate.
+        The body rides inline with no commons claim-check. `thread_id` carries
+        the same `qid` as the disk post's metadata so board-polling receipts
+        still correlate. The durable dm-<persona> board write is the
+        receipt-polling substrate.
         """
         qid   = str( uuid.uuid4() )
         topic = self.dm_topic_for( recipient.identifier )
@@ -245,11 +218,10 @@ class LupinCommonsGateway:
         """
         Most-recent commons-post timestamp for `recipient`, or `None`.
 
-        `who()` rows carry `session_id` + `persona_name`; the recipient is
+        `who()` rows carry `session_id` and `persona_name`; the recipient is
         matched on whichever its `identifier_type` names. `who()` is
         newest-first, so for a persona-addressed recipient with duplicate
-        active sessions the first match is the most-recently-active session
-        (d1d4 spec §9 item 2).
+        active sessions the first match is the most-recently-active session.
         """
         for row in self._store.who():
             if recipient.identifier_type == "session_id":
