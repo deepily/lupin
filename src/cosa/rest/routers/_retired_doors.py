@@ -225,8 +225,8 @@ def gone( path: str ) -> None:
         - never returns
 
     Raises:
-        - HTTPException( 410 ) whose detail names the replacement door and the
-          removal date
+        - HTTPException( 410 ) whose detail names the replacement door and carries
+          `REMOVE BY` with the `REMOVE_BY` constant
     """
     raise HTTPException( status_code=410, detail=refusal_detail( path ) )
 

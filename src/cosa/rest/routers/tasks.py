@@ -476,9 +476,11 @@ def _serialize_item_terse( item, blocker_statuses=None ) -> dict:
           next_chase_ts serializes as None
         - park_reason_stale is derived (never stored) and advisory, with identical
           semantics to the full shape's, computed by the same predicate, so the
-          two projections can never disagree about staleness
+          two projections can never disagree about staleness; a row that was never
+          parked reports False
         - blocker_terminal is likewise derived and advisory, computed by the same
-          predicate as the full shape's, for the same reason
+          predicate as the full shape's, for the same reason; every non-blocked row
+          reports False, and so does a blocker that is not resolved
         - title_trimmed is stored and advisory: it is what soft_guard_title did to this
           row's title on its last write, read off the column. It is not re-derived from
           length, so it does not move when the cap moves and it clears when a retitle
@@ -491,8 +493,8 @@ def _serialize_item_terse( item, blocker_statuses=None ) -> dict:
     `project` is here for cost: there is no distinct-project endpoint, and one census pulled
     1,227 full rows to find an orphan alias that had hidden a live row from a scoped partition.
     `title_trimmed` is here because the store trims a title at 60 chars into `body`, which this
-    projection drops, and the trim leaves no mark. Its predicate is length-only, so a title that
-    is naturally 60 chars over-reports. That direction is chosen: a false positive costs one look
+    projection drops, and the trim leaves no mark. The flag reads the stored column, not a length test.
+    Backfilled rows may over-report, a direction chosen because a false positive costs one look
     at a body, while a false negative hides the defect the flag exists to surface.
     """
     return {

@@ -37,7 +37,7 @@ async def submit_mock_job():
 
     Ensures:
         - never returns; raises HTTPException( 410 ) naming /api/v2/submit and the
-          remove-by date
+          `REMOVE BY` text built from the `REMOVE_BY` constant
     """
     gone( "/api/mock-job/submit" )
 

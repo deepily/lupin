@@ -40,7 +40,7 @@ def _run_whisper_with_retry( whisper_pipeline, path, debug=False, **kwargs ):
     """
     Run Whisper inference with CUDA OOM retry (deprecated).
 
-    Retained for any external callers. Use
+    Retained for one release cycle, for any external callers. Use
     `cosa.memory.speech_to_text_provider.SpeechToTextProvider` instead. Its local-mode
     `transcribe()` carries identical OOM-retry semantics and adds the model-server
     HTTP-proxy alternative.

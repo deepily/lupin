@@ -876,7 +876,7 @@ def _resolve_dm_recipient(
 
     A supplied session_id takes precedence over persona. The persona chain is exact, then
     case-insensitive, then punctuation- and whitespace-tolerant (the LLM disambiguator is stubbed).
-    Failures return a 422 with a `RecipientResolutionError` body. Scoping uses `filter_and_project_sessions`.
+    Failures return a 422 with a `RecipientResolutionError` body, rich enough that the AI caller can self-correct. Scoping uses `filter_and_project_sessions`.
 
     Returns:
       {"http_status": 200, "session_id": str, "persona_name": str | None}

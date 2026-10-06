@@ -109,7 +109,7 @@ async def submit_research():
 
     Ensures:
         - never returns; raises HTTPException( 410 ) naming /api/v2/submit and the
-          remove-by date
+          `REMOVE BY` text built from the `REMOVE_BY` constant
     """
     gone( "/api/deep-research/submit" )
 

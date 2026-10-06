@@ -82,7 +82,7 @@ async def submit_podcast_job():
 
     Ensures:
         - never returns; raises HTTPException( 410 ) naming /api/v2/ask and the
-          remove-by date
+          `REMOVE BY` text built from the `REMOVE_BY` constant
     """
     gone( "/api/podcast-generator/submit" )
 

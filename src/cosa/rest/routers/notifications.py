@@ -308,7 +308,11 @@ def _stored_response_dict( response_value, answered_by=None ):
 
 
 def _extract_response_value( response_value ):
-    """Pull the scalar answer out of a stored response_value, as a string; None gives None."""
+    """
+    Pull the scalar answer out of a stored response_value as a string; None gives None.
+
+    The stored value may be dict-wrapped (read from `value`) or bare. A non-string answer is `json.dumps`-ed.
+    """
     if response_value is None:
         return None
     val = response_value.get( "value" ) if isinstance( response_value, dict ) else response_value
