@@ -2,11 +2,11 @@
 """
 Core Orchestrator for COSA SWE Team Agent.
 
-Phase 2: Lead + Coder delegation loop with real Claude Agent SDK.
+Lead + Coder delegation loop with the real Claude Agent SDK.
 Lead decomposes tasks into TaskSpec[], delegates each to a Coder
 subagent via ClaudeSDKClient, and collects DelegationResults.
 
-Supports dry-run mode via MockAgentSDKSession (Phase 1 preserved).
+Supports dry-run mode via MockAgentSDKSession.
 """
 
 import asyncio
@@ -114,11 +114,13 @@ def _service_api_key_headers():
         - returns { "X-API-Key": <key> } when the configured key file is readable
         - returns {} otherwise, logging at warning level
 
-    ⚠️ IT RETURNS AN EMPTY DICT RATHER THAN RAISING, AND THAT IS A TRADE, NOT A FREEBIE. The
-    caller is a fire-and-forget notification path whose contract is "never raise", so a missing
-    key must not take a SWE run down. The cost is that a misconfigured box degrades to the
-    behaviour this row just fixed — a 401 the outer handler swallows — so the warning names the
-    endpoint, which is the only thing that makes that state findable in a log.
+    Notes:
+        - It returns an empty dict rather than raising, which is a trade, not a free choice.
+        - The caller is a fire-and-forget notification path whose contract is "never raise",
+          so a missing key must not take a SWE run down.
+        - The cost is that a misconfigured box gets a 401 that the outer handler swallows.
+        - The warning names the endpoint, which is the only thing that makes that state
+          findable in a log.
 
     Same loader as `cosa.agents.utils.sync_notify`: `get_api_config` honours LUPIN_API_KEY /
     LUPIN_API_KEY_FILE before falling back to ~/.lupin/config.
@@ -142,15 +144,8 @@ class SweTeamOrchestrator:
     """
     Orchestrator for the SWE Team multi-agent engineering system.
 
-    Phase 3 implementation:
-    - Lead decomposes task into TaskSpec[] via SDK
-    - Coder executes each TaskSpec via SDK delegation
-    - Tester verifies coder output with tests (coder-tester loop)
-    - Safety guard enforced at every delegation step
-    - Dry-run mode preserved from Phase 1
-
-    Future phases will add:
-    - Phase 5: Reviewer, Debugger, full CJ Flow
+    Lead decomposes the task into TaskSpec[], Coder executes each one via SDK delegation,
+    and Tester verifies the output in a coder-tester loop. Dry-run mode needs no SDK.
 
     Requires:
         - task_description is a non-empty string
@@ -161,6 +156,10 @@ class SweTeamOrchestrator:
         - Notifications flow through cosa_interface
         - Dry-run mode simulates without API calls
         - Live mode decomposes, delegates, and verifies via SDK
+        - Safety guard enforced at every delegation step
+
+    Notes:
+        - A Reviewer, a Debugger and full CJ Flow integration are not yet implemented.
     """
 
     def __init__(
@@ -304,10 +303,9 @@ class SweTeamOrchestrator:
         """
         Route confirmation through decision proxy with trust feedback recording.
 
-        Always evaluates the proxy (shadow, suggest, active modes) to build
-        trust data. In active mode, may auto-approve. In suggest mode, appends
-        suggestions. In shadow mode, observes only. After user answers, records
-        agreement/disagreement in trust tracker.
+        Always evaluates the proxy (shadow, suggest, active modes) to build trust data.
+        Active mode may auto-approve, suggest mode appends suggestions, shadow mode only observes.
+        After the user answers, agreement or disagreement is recorded in the trust tracker.
 
         Requires:
             - question is a non-empty string
@@ -556,7 +554,7 @@ class SweTeamOrchestrator:
         Ensures:
             - Returns None if check-ins disabled, timeout, or user approves
             - Returns feedback string if user provides substantive input
-            - State transitions: current -> WAITING_FEEDBACK -> DELEGATING
+            - State transitions: current -> `WAITING_FEEDBACK` -> `DELEGATING`
 
         Args:
             team_io: cosa_interface module
@@ -650,9 +648,9 @@ class SweTeamOrchestrator:
         """
         Analyze accumulated user messages using the lead model via SDK.
 
-        Builds a prompt with the accumulated messages and current task context,
-        calls the lead model to produce a concise analysis, and returns the
-        analysis text to be presented at check-in.
+        Builds a prompt from the accumulated messages and current task context.
+        Calls the lead model to produce a concise analysis.
+        Returns the analysis text to be presented at check-in.
 
         Requires:
             - messages is a non-empty list of message dicts
@@ -863,9 +861,9 @@ Keep your response concise (3-5 sentences). Output ONLY the analysis, no preambl
         """
         Execute task with real Agent SDK delegation.
 
-        Phase 3: Lead decomposes task into TaskSpec[], asks user
-        confirmation, delegates each to a Coder subagent, then
-        verifies with a Tester subagent in a retry loop.
+        Lead decomposes the task into TaskSpec[] and asks user confirmation.
+        Each spec is delegated to a Coder subagent, then verified by a Tester subagent
+        in a retry loop.
 
         Requires:
             - SDK_AVAILABLE is True (claude-agent-sdk installed)
@@ -1468,9 +1466,9 @@ Complete this task. When done, summarize what you did and list all files changed
         """
         Verify coder's implementation by delegating to the tester agent.
 
-        Builds a tester prompt with the original task spec and coder's output,
-        delegates to the tester via sdk_query(), and optionally runs independent
-        pytest validation on any test files created.
+        Builds a tester prompt with the original task spec and coder's output.
+        Delegates to the tester via sdk_query().
+        Optionally runs independent pytest validation on any test files created.
 
         Requires:
             - task_spec is a valid TaskSpec
@@ -1479,7 +1477,7 @@ Complete this task. When done, summarize what you did and list all files changed
             - team_io is the cosa_interface module
 
         Ensures:
-            - Sets self.current_state to OrchestratorState.TESTING
+            - Sets self.current_state to `OrchestratorState.TESTING`
             - Returns VerificationResult with pass/fail status
             - Tracks test files created by the tester
             - Never raises — returns failed VerificationResult on error
@@ -1640,7 +1638,7 @@ IMPORTANT:
         Ensures:
             - Returns a new DelegationResult from the coder
             - Prompt includes prior output and failure feedback
-            - Sets current_state to CODING
+            - Sets current_state to `CODING`
 
         Args:
             task_spec: The original task specification

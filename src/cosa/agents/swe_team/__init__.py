@@ -4,7 +4,7 @@ COSA SWE Team Agent Package.
 A multi-agent engineering team powered by Claude Agent SDK,
 integrated with Lupin's notification system and CJ Flow queue.
 
-Phase 1: Foundation
+Foundation modules:
 - config.py: SweTeamConfig dataclass
 - state.py: Pydantic state schemas, OrchestratorState/JobSubState enums
 - safety_limits.py: SAFETY_LIMITS dict, SafetyGuard, DANGEROUS_COMMANDS
@@ -15,31 +15,26 @@ Phase 1: Foundation
 - mock_clients.py: MockAgentSDKSession for dry-run mode
 - __main__.py: CLI entry point
 
-Phase 2: Lead + Coder delegation loop
+Lead + coder delegation loop:
 - hooks.py: SDK hook functions (notification, pre-tool, post-tool)
 - state_files.py: FeatureList + ProgressLog for cross-session persistence
 
-Phase 3 (Current): Tester verification loop
+Tester verification loop (current):
 - test_runner.py: Orchestrator-level pytest validation helper
 - VerificationResult model in state.py
 - Coder-tester retry cycle in orchestrator.py
 
-Phase 4 (Planned): Trust-aware decision proxy
-Phase 5 (Planned): Full team + CJ Flow integration
+Planned: trust-aware decision proxy; full team with CJ Flow integration.
 
 Usage:
     # CLI (dry-run)
     python -m cosa.agents.swe_team "Implement health check endpoint" --dry-run
 
-    # CLI (live - Phase 3 delegation + verification)
+    # CLI (live - delegation + verification)
     python -m cosa.agents.swe_team "Add JWT auth"
 
     # Programmatic
-    from cosa.agents.swe_team import (
-        SweTeamOrchestrator,
-        SweTeamConfig,
-        OrchestratorState,
-    )
+    from cosa.agents.swe_team import SweTeamOrchestrator, SweTeamConfig, OrchestratorState
 
     config = SweTeamConfig( dry_run=True )
     orch = SweTeamOrchestrator( "Implement feature X", config=config )

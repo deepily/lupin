@@ -6,9 +6,9 @@ Thin wrapper around the consolidated voice_io module in
 cosa.agents.utils.voice_io, configured with the SWE Team
 cosa_interface for proper sender identity.
 
-CONTRACT:
+Contract:
     This module is for standalone/CLI usage when the orchestrator is
-    NOT involved. For orchestrator-internal notifications with role-aware
+    not involved. For orchestrator-internal notifications with role-aware
     sender IDs and job_id routing, use cosa_interface.py instead.
 """
 

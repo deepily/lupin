@@ -6,16 +6,16 @@ Connects to the Lupin WebSocket endpoint and queues incoming user messages
 for consumption by the orchestrator at check-in points. Adapted from
 BaseWebSocketListener with key differences:
 
-    - Proxy processes immediately → this client QUEUES for later drain
+    - Proxy processes immediately → this client queues for later drain
     - Auth: generates JWT in-process via JwtService (no REST login)
     - Filter: only queues messages where notification_type == "user_initiated_message"
-              AND job_id matches the target job
+              and job_id matches the target job
               (renamed from "user_message" for semantic clarity)
     - Urgent: if priority == "urgent", sets a threading.Event for interrupt
 
 Dependency Rule:
     This module imports from base_listener (parent class) and jwt_service.
-    It does NOT import from orchestrator, job, or cosa_interface.
+    It does not import from orchestrator, job, or cosa_interface.
 """
 
 import asyncio
@@ -79,7 +79,7 @@ class OrchestratorNotificationClient( BaseWebSocketListener ):
         Ensures:
             - Stores target job_id for message filtering
             - Stores shared queue and event references
-            - Does NOT connect (call start() to begin)
+            - Does not connect (call start() to begin)
 
         Args:
             user_email: Email for JWT authentication

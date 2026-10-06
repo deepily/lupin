@@ -2,7 +2,7 @@
 """
 Pytest Runner for COSA SWE Team Agent.
 
-Orchestrator-level pytest validation helper. NOT an MCP tool — the
+Orchestrator-level pytest validation helper. Not an MCP tool — the
 orchestrator calls this after the tester agent finishes to independently
 confirm test results via subprocess execution.
 
@@ -47,18 +47,16 @@ def _parse_pytest_summary( output: str ) -> dict:
     """
     Parse pytest summary line to extract test counts.
 
-    Handles common pytest summary formats:
-        - "5 passed"
-        - "3 passed, 2 failed"
-        - "1 passed, 1 failed, 1 error"
-        - "no tests ran"
-
     Requires:
         - output is a string containing pytest output
 
     Ensures:
         - Returns dict with passed_count, failed_count, error_count keys
         - Returns zeros if summary line cannot be parsed
+
+    Notes:
+        - Handles common pytest summary formats: "5 passed", "3 passed, 2 failed",
+          "1 passed, 1 failed, 1 error" and "no tests ran".
 
     Args:
         output: Raw pytest stdout/stderr output
