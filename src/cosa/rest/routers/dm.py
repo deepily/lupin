@@ -3066,7 +3066,7 @@ def execute_dm_send(
     Raises:
         - None (DB/push errors propagate to the route)
 
-    The outbound body gets the bracketed EDT stamp `[YYYY.MM.DD at HH:MM:SS] ` from the central formatter in cosa.utils.edt_timestamp, in send and respond alike. Arbiter pings carry the same prefix from the same formatter and are not re-stamped here.
+    The outbound body gets the bracketed EDT stamp `[YYYY.MM.DD at HH:MM:SS] ` from the central formatter in cosa.utils.edt_timestamp, in send and respond alike. Arbiter pings carry the same prefix from the same formatter, but they ride a disjoint path through CommonsStore, not /api/dm/send, which is why `execute_dm_send` does not re-stamp them.
     """
     if new_id_fn is None:
         new_id_fn = lambda: str( uuid.uuid4() )
