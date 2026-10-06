@@ -1,6 +1,5 @@
 """
-Utility module for OpenAI embedding functionality.
-Handles embedding generation with proper error handling and caching.
+Generates and caches text embeddings, with error handling.
 """
 
 import openai
@@ -223,7 +222,7 @@ class EmbeddingManager:
             
         Note:
             - Continues execution even if embedding generation fails
-            - Important: Generates embedding for NORMALIZED text when cache miss occurs
+            - Important: Generates the embedding for the normalized text when cache miss occurs
         """
         # Determine cache key based on normalization setting
         if normalize_for_cache:

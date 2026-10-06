@@ -73,18 +73,11 @@ class SolutionSnapshot( RunnableCode ):
     @staticmethod
     def remove_non_alphanumerics( input: str, replacement_char: str="" ) -> str:
         """
-        ╔══════════════════════════════════════════════════════════════════════════════╗
-        ║  🔥🔥🔥 DEPRECATED - DO NOT USE THIS FUNCTION! 🔥🔥🔥                         ║
-        ║                                                                              ║
-        ║  This function DESTROYS mathematical operators (+, -, *, /) and punctuation! ║
-        ║  It caused HOURS of debugging pain. Use Normalizer.normalize() instead.      ║
-        ║                                                                              ║
-        ║  Example of destruction:                                                     ║
-        ║    "What's 4 + 4?" → "whats 4 4"  (CORRUPTED!)                              ║
-        ║                                                                              ║
-        ║  Use instead: cosa.memory.normalizer.Normalizer.normalize()                  ║
-        ║  The Normalizer preserves MATH_OPERATORS and expands contractions properly.  ║
-        ╚══════════════════════════════════════════════════════════════════════════════╝
+        Deprecated: replace non-alphanumerics with replacement_char and lowercase the text.
+
+        It destroys math operators (+, -, *, /) and punctuation, so "What's 4 + 4?"
+        becomes "whats 4 4". It prints a loud warning and a stack trace on every call.
+        Normalizer.normalize() in cosa.memory.normalizer replaces it.
         """
         # 🚨🚨🚨 SCREAM DEPRECATION WARNING TO CONSOLE 🚨🚨🚨
         print( "" )
@@ -392,15 +385,11 @@ class SolutionSnapshot( RunnableCode ):
     @classmethod
     def from_json_file( cls, filename: str, debug: bool=False ) -> 'SolutionSnapshot':
         """
-        DEPRECATED: Load snapshot from JSON file.
+        Deprecated: load a snapshot from a JSON file.
 
-        This method is deprecated as of 2025.09.17. Deserialization should be handled
-        by the manager, not the snapshot object.
+        The manager should handle deserialization, not the snapshot. Use
+        manager.get_snapshots_by_question() or similar manager methods instead.
 
-        Use: manager.get_snapshots_by_question() or similar manager methods instead.
-
-        Load snapshot from JSON file.
-        
         Requires:
             - filename is a valid file path
             - File contains valid JSON data
@@ -651,10 +640,9 @@ class SolutionSnapshot( RunnableCode ):
     
     def to_jsons( self, verbose: bool=True ) -> str:
         """
-        DEPRECATED: Serialize snapshot to JSON string.
+        Deprecated: serialize the snapshot to a JSON string.
 
-        This method is deprecated as of 2025.09.17. Serialization should be handled
-        by the manager, not the snapshot object.
+        The manager should handle serialization, not the snapshot.
         """
         import warnings
         warnings.warn(
@@ -674,29 +662,9 @@ class SolutionSnapshot( RunnableCode ):
         """
         Create a copy of this snapshot for queue execution.
 
-        Note: user_email and user_id are passed here (not in constructor) because
-        snapshots are loaded from storage without user context. The REQUESTING
-        user's identity is injected at copy time — the email for TTS routing, the
-        id for WebSocket delivery.
-
-        🔴 user_id JOINED user_email HERE ON 2026-08-30 (row `0e7c9214`), and its
-        absence made a WebSocket frame undeliverable, not merely untidy. The copy kept
-        the ORIGINAL creator's id straight through to `_transition_to_done`, which
-        emits with `user_id = job.user_id`, so on a repeat ask the frame was addressed
-        to a stored id nobody holds a session under —
-
-            [WS] emit_to_user: user ricardo_felipe_ruiz_6bdc not in user_sessions
-                 — delivery skipped
-
-        while that browser session was registered under the asker's UUID. The
-        principle was already written in this docstring; only the email obeyed it.
-
-        ⚠️ SCOPE — this closes the DROPPED job_state_transition FRAMES and nothing
-        else. The same row reports the spoken answer never arriving either; that has
-        a SEPARATE cause, upstream of this copy, where `job.user_email` arrives empty
-        (`fifo_queue.py`, the `if not resolved_email ...` branch). An earlier draft of
-        this docstring joined the two with a "because" and that join was never
-        measured — it was inferred from two log lines being adjacent.
+        user_email and user_id come here, not from the constructor, because stored snapshots
+        carry no requester. The email is used for TTS routing and the id for WebSocket
+        delivery; a stale creator id makes the WebSocket frame undeliverable.
 
         Requires:
             - None
@@ -706,7 +674,7 @@ class SolutionSnapshot( RunnableCode ):
             - Shallow copy (references shared)
             - user_email is set on copy if provided
             - user_id is set on copy if provided
-            - the ORIGINAL is never mutated — it is shared and gets saved back
+            - the original is never mutated — it is shared and gets saved back
             - a falsy user_email / user_id means "no requester context" and leaves
               the stored value alone; it never blanks it, since an erased id is as
               undeliverable as a stale one
@@ -723,12 +691,9 @@ class SolutionSnapshot( RunnableCode ):
     
     def write_current_state_to_file( self ) -> None:
         """
-        DEPRECATED: Write snapshot to JSON file.
+        Deprecated: write the snapshot to a JSON file.
 
-        This method is deprecated as of 2025.09.17. Serialization should be handled
-        by the manager, not the snapshot object.
-
-        Use: manager.add_snapshot(snapshot) instead.
+        The manager should handle serialization. Use manager.add_snapshot(snapshot) instead.
 
         Requires:
             - solution_directory is valid path
@@ -784,12 +749,10 @@ class SolutionSnapshot( RunnableCode ):
         
     def delete_file( self ) -> None:
         """
-        DEPRECATED: Delete snapshot file from filesystem.
+        Deprecated: delete the snapshot file from the filesystem.
 
-        This method is deprecated as of 2025.09.17. File management should be handled
-        by the manager, not the snapshot object.
-
-        Use: manager.delete_snapshot(question, delete_physical=True) instead.
+        The manager should handle files. Use manager.delete_snapshot(question,
+        delete_physical=True) instead.
 
         Requires:
             - solution_file and solution_directory are set
@@ -908,20 +871,11 @@ class SolutionSnapshot( RunnableCode ):
 
     def run_code( self, debug: bool=False, verbose: bool=False ) -> dict:
         """
-        Execute stored code, OR replay a codeless agent's cached answer.
+        Execute stored code, or replay a codeless agent's cached answer.
 
-        Most agents (MathAgent, CrudForDataFramesAgent, etc.) generate Python at
-        first-run time and save it on the snapshot's `code` field; replay then
-        re-executes that code. CalculatorAgent and similar deterministic-dispatch
-        agents have no Python to save — their `run_code()` dispatches a parsed
-        intent struct to pure-Python helpers — so their snapshots persist with
-        `code = ['']` BY DESIGN. On replay, those snapshots' answers come from
-        the cached `self.answer` field, not from re-execution.
-
-        2026-04-28 fix: prior to this, replay of a codeless-agent snapshot raised
-        ValueError on the empty-code guard, which the consumer thread caught and
-        dead-lettered. The fix mirrors the existing CalculatorAgent special-case
-        in run_formatter() (lines 943-953 of this file).
+        Most agents save generated Python in `code` and replay re-executes it.
+        CalculatorAgent and similar agents have no Python to save, so their snapshots
+        hold `code = ['']`. Replay returns their cached `self.answer`.
 
         Requires:
             - code, code_example, code_returns are populated for code-generating agents

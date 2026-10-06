@@ -5,7 +5,7 @@ Provides two singleton engines:
 - CodeEmbeddingEngine: Uses SentenceTransformer("nomic-ai/CodeRankEmbed") for code search
 - ProseEmbeddingEngine: Uses raw transformers for nomic-embed-text-v1.5 with Matryoshka support
 
-Both engines support lazy GPU loading, L2-normalized output, and configurable via lupin-app.ini.
+Both engines support lazy GPU loading, unit-length output, and configurable via lupin-app.ini.
 """
 
 import gc
@@ -60,7 +60,7 @@ class CodeEmbeddingEngine:
 
         Ensures:
             - Reads config for model name, device, dtype, prefix
-            - Does NOT load model yet (lazy loading on first encode call)
+            - Does not load model yet (lazy loading on first encode call)
 
         Raises:
             - ConfigurationManager errors if env var not set
@@ -158,7 +158,7 @@ class CodeEmbeddingEngine:
             - queries is a list of non-empty strings
 
         Ensures:
-            - Returns list of 768-dim L2-normalized embeddings
+            - Returns list of 768-dim unit-length embeddings
             - Prepends query prefix to each query
             - Thread-safe: serializes inference via _inference_lock
             - CUDA OOM: gc.collect + empty_cache, retries once
@@ -192,7 +192,7 @@ class CodeEmbeddingEngine:
             - code_snippets is a list of non-empty strings
 
         Ensures:
-            - Returns list of 768-dim L2-normalized embeddings
+            - Returns list of 768-dim unit-length embeddings
             - No prefix applied (asymmetric: documents have no prefix)
             - Thread-safe: serializes inference via _inference_lock
             - CUDA OOM: gc.collect + empty_cache, retries once
@@ -247,7 +247,7 @@ class ProseEmbeddingEngine:
 
     Uses raw transformers (AutoModel + AutoTokenizer) for full Matryoshka
     dimension control. Supports asymmetric search with query/document prefixes.
-    Produces L2-normalized embeddings at configurable dimensions (64-768).
+    Produces unit-length embeddings at configurable dimensions (64-768).
     """
 
     _instance        = None
@@ -282,7 +282,7 @@ class ProseEmbeddingEngine:
 
         Ensures:
             - Reads config for model name, device, dtype, prefixes, Matryoshka dim
-            - Does NOT load model yet (lazy loading on first encode call)
+            - Does not load model yet (lazy loading on first encode call)
 
         Raises:
             - ConfigurationManager errors if env var not set
@@ -375,13 +375,13 @@ class ProseEmbeddingEngine:
 
         Ensures:
             - Returns numpy array of shape (batch_size, matryoshka_dim)
-            - Applies mean pooling, layer norm, Matryoshka truncation, L2 normalization
+            - Applies mean pooling, layer norm, Matryoshka truncation, unit-length normalization
 
         Args:
             texts: List of prefixed text strings
 
         Returns:
-            numpy array of L2-normalized embeddings
+            numpy array of unit-length embeddings
         """
         encoded = self._tokenizer(
             texts, padding=True, truncation=True, max_length=8192, return_tensors="pt"
@@ -434,7 +434,7 @@ class ProseEmbeddingEngine:
             - queries is a list of non-empty strings
 
         Ensures:
-            - Returns list of matryoshka_dim L2-normalized embeddings
+            - Returns list of matryoshka_dim unit-length embeddings
             - Prepends query prefix to each query
             - Thread-safe: serializes inference via _inference_lock
             - CUDA OOM: gc.collect + empty_cache, retries once
@@ -468,7 +468,7 @@ class ProseEmbeddingEngine:
             - documents is a list of non-empty strings
 
         Ensures:
-            - Returns list of matryoshka_dim L2-normalized embeddings
+            - Returns list of matryoshka_dim unit-length embeddings
             - Prepends document prefix to each document
             - Thread-safe: serializes inference via _inference_lock
             - CUDA OOM: gc.collect + empty_cache, retries once

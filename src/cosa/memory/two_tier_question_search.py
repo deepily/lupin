@@ -1,34 +1,30 @@
 """
-Two-tier question search — the Postgres/pgvector solution-snapshot lookup.
+Two-tier question search, the Postgres/pgvector solution-snapshot lookup.
 
-THE PROPERLY-NAMED HOME (Rick's ruling 2026-08-15, decision row 29e98243): this
-Postgres two-tier lookup used to live inside a wrongly-named file, in a class
-named for a store it never touched. So the lookup moved HERE, to a module named
+This Postgres two-tier lookup used to live in a wrongly named file, in a
+class named for a store it never touched. It now lives in a module named
 for what it does. Reuse, not rebuild.
 
-WHAT LIVES HERE, AND WHY TWO SHAPES (not a duplication — a policy difference,
-ratified by Cheech 2026-08-15):
+Two shapes live here. They differ by policy, not by duplication:
 
-    TwoTierQuestionSearch — the v2 flow's READ-ONLY, instrumented lookup. Returns
-        a CacheLookup carrying the tier taken, the timings, and the embed-cache
-        flag the v2 eval reads. It NEVER writes on a lookup (a ghost synonym just
-        falls through), and it stops the ANN tier from ever triggering replay
-        (R-C1: the replay signal is a tier-1 exact hit, never a float score).
+    TwoTierQuestionSearch is the v2 flow's read-only, instrumented lookup.
+        It returns a CacheLookup with the tier taken, the timings, and the
+        embed-cache flag the v2 eval reads. It never writes on a lookup, so a
+        ghost synonym just falls through. The ANN tier never triggers replay.
+        The replay signal is a tier-1 exact hit, never a float score.
         v2's V2Cache extends this with tagged write-back.
 
-    pg_hierarchical_search — the snapshot manager's OWN two-tier lookup, lifted
-        verbatim from `_pg_get_snapshots_by_question`. It has a DIFFERENT contract
-        on purpose: it returns [(pct, snapshot)] tuples, auto-cleans ghost
-        synonyms (a WRITE), and queries the ANN tier with no SQL threshold. The
-        manager's method delegates here so it keeps byte-for-byte behaviour.
-        Forcing both shapes through one core would smuggle a write into v2's read
-        path — which is exactly why they stay two functions with one home.
+    pg_hierarchical_search is the snapshot manager's own two-tier lookup,
+        lifted verbatim from `_pg_get_snapshots_by_question`. Its contract
+        is different. It returns [(pct, snapshot)] tuples, auto-cleans
+        ghost synonyms (a write), and queries the ANN tier with no SQL
+        threshold. The manager's method delegates here, so behaviour is
+        unchanged. One shared core would put a write into v2's read path,
+        which is why they stay two functions with one home.
 
-THIS MODULE'S IMPORT GRAPH: it imports the Postgres repositories, the embedding
-provider, the normalizers, and SolutionSnapshot — nothing else. The guard that
-protects v2 is in tests/unit/test_v2_cache_no_lancedb.py.
-
-Created: 2026-08-15 (CJ Flow v2 · row 29e98243 · Tiberius 👑)
+Import graph: this module imports only the Postgres repositories, the
+embedding provider, the normalizers, and SolutionSnapshot. The guard that
+protects v2 is tests/unit/test_v2_cache_no_lancedb.py.
 """
 
 import json
@@ -73,27 +69,25 @@ class CacheLookup:
     """
     The immutable result of a two-tier lookup.
 
-    Frozen so nothing downstream can rebind a field, and every SolutionSnapshot
-    it carries is freshly marshalled (never aliased to a shared structure) — the
-    lookup hands over copies, not references.
+    Frozen so nothing downstream can rebind a field. Every SolutionSnapshot
+    it carries is freshly marshalled, never aliased to a shared structure.
+    The lookup hands over copies, not references.
 
     Fields:
-        is_replay_hit  : True ONLY on a tier-1 exact hit (R-C1). The ANN tier
-                         never sets this in phase 1.
-        tier           : "exact_verbatim" | "exact_normalized" | "ann" | "miss".
-        snapshot       : replay-ready memory SolutionSnapshot on an exact hit,
-                         else None.
-        best_candidate : the strongest ANN candidate (measurement only), or None.
-        similarity     : 100.0 on an exact hit, else the ANN best score, else None.
-        best_score     : the ANN best score recorded on EVERY request for the
-                         threshold table (None when no candidate came back).
-        question_normalized : the normalized form used for tier-1b and the trace.
-        t_exact_ms     : wall time spent in the exact tier(s).
-        t_embed_ms     : wall time spent embedding for tier 2, or None when the
-                         exact tier short-circuited (the "no embedding" case).
-        t_ann_ms       : wall time spent in the ANN probe, or None when skipped.
-        embed_cached   : True if the query embedding was served from the cache,
-                         False if it was generated, None if no embedding happened.
+        - is_replay_hit: True only on a tier-1 exact hit. The ANN tier never sets it.
+        - tier: "exact_verbatim", "exact_normalized", "ann" or "miss".
+        - snapshot: replay-ready memory SolutionSnapshot on an exact hit, else None.
+        - best_candidate: the strongest ANN candidate (measurement only), or None.
+        - similarity: 100.0 on an exact hit, else the ANN best score, else None.
+        - best_score: the ANN best score recorded on every request for the
+          threshold table. None when no candidate came back.
+        - question_normalized: the normalized form used for tier-1b and the trace.
+        - t_exact_ms: wall time spent in the exact tier(s).
+        - t_embed_ms: wall time spent embedding for tier 2. None when the
+          exact tier short-circuited, so no embedding happened.
+        - t_ann_ms: wall time spent in the ANN probe. None when skipped.
+        - embed_cached: True if the query embedding came from the cache.
+          False if it was generated. None if none was made.
     """
     is_replay_hit       : bool
     tier                : str
@@ -110,13 +104,12 @@ class CacheLookup:
 
 class TwoTierQuestionSearch:
     """
-    Two-tier snapshot lookup (exact SQL → pgvector ANN), READ-ONLY.
+    Two-tier snapshot lookup (exact SQL, then pgvector ANN), read-only.
 
-    Postgres only. Every collaborator is injectable so the whole adapter is
-    exercised by unit tests with fakes — no live Postgres and no model server on
-    the :7999 test path. The repository CLASSES are injectable too, so a caller
-    (e.g. v2's V2Cache) can pass its own module-level names and keep them
-    monkeypatchable in that caller's namespace.
+    Postgres only. Every collaborator is injectable, so unit tests use fakes.
+    They need no live Postgres and no model server on the :7999 test path.
+    The repository classes are injectable too. A caller such as v2's V2Cache
+    can pass its own module-level names and keep them monkeypatchable there.
     """
 
     def __init__( self, embedding_provider: Any=None, snapshot_factory: Callable[ ..., Any ]=SolutionSnapshot,
@@ -167,7 +160,7 @@ class TwoTierQuestionSearch:
         Ensures:
             - tier 1 (exact verbatim, then exact normalized) returns a replay-ready
               SolutionSnapshot with is_replay_hit=True and similarity=100.0, with
-              NO embedding computed
+              no embedding computed
             - a synonym row that points at a missing snapshot (a ghost) is treated
               as a miss for that tier and falls through — the lookup never writes
             - tier 2 embeds the verbatim question, probes ANN, and returns the
@@ -234,22 +227,19 @@ class TwoTierQuestionSearch:
 
     def _exact_probes( self, synonyms: Any, question: str, question_normalized: str ) -> tuple:
         """
-        The tier-1 probes this search runs, in order — (tier name, callable).
+        The tier-1 probes this search runs, in order, as (tier name, callable).
 
-        A SEAM, not a refactor for its own sake: v2's cache adds a gist probe after
-        these two, and the alternative was copying the whole of ``lookup`` into the
-        subclass to insert one line — where the copy would then drift from this one
-        silently. Each probe is a callable so a later probe costs nothing when an
-        earlier one hits.
+        This is an override point. v2's cache adds a gist probe after these two,
+        without copying ``lookup`` into a subclass where the copy could drift.
+        Each probe is a callable, so a later probe costs nothing when an earlier one hits.
 
         Requires:
             - synonyms is an open-session CanonicalSynonymRepository
 
         Ensures:
-            - returns exact-match probes ONLY: each is deterministic and returns a
+            - returns exact-match probes only: each is deterministic and returns a
               snapshot_id or None, never a score. A probe that ranked by similarity
-              would make ``is_replay_hit`` a float comparison, which is what R-C1
-              forbids.
+              would make ``is_replay_hit`` a float comparison, which is forbidden.
             - the base returns verbatim then normalized, in that order
         """
         return (
@@ -301,12 +291,12 @@ class TwoTierQuestionSearch:
 
         Ensures:
             - returns ( embedding, embed_cached, t_embed_ms )
-            - a cache hit (QuestionEmbeddingRepository, keyed by the VERBATIM
+            - a cache hit (QuestionEmbeddingRepository, keyed by the verbatim
               question so the vector matches the question_embedding column's
               space) is returned as-is with embed_cached=True and no model call
             - a miss generates via the provider (content_type="prose", matching
               solution_snapshot.py:319) with embed_cached=False; generation does
-              NOT write the cache — write-back owns cache population
+              not write the cache — write-back owns cache population
         """
         t_embed_start = time.perf_counter_ns()
         cached = self._embedding_repo_cls( session ).get_embedding( question )
@@ -329,7 +319,7 @@ class TwoTierQuestionSearch:
 
         Ensures:
             - JSON Text columns are decoded; all seven pgvector columns are passed
-              to the constructor so it does NOT regenerate them; returns the
+              to the constructor so it does not regenerate them; returns the
               memory SolutionSnapshot (a plain object, safe to return detached)
         """
         decoded    = { column: self._loads_or( getattr( row, column ), {} ) for column in _JSON_TEXT_COLUMNS }
@@ -399,8 +389,9 @@ class TwoTierQuestionSearch:
 
     def _fit_embedding( self, embedding: Any ) -> List[float]:
         """
-        Fit a vector to the embedding dimension so pgvector never sees a
-        NULL/short/long vector: zero-fill an empty, pad a short, truncate a long.
+        Fit a vector to the embedding dimension for pgvector.
+
+        An empty or missing vector becomes zeros, a short one is padded, a long one truncated.
         """
         dim = self._embedding_dim
         if embedding is None or len( embedding ) == 0:
@@ -421,18 +412,11 @@ def pg_hierarchical_search( manager: Any,
                             limit: int = 7,
                             debug: bool = False ) -> List[Tuple[float, Any]]:
     """
-    Hierarchical question search against Postgres, MIRRORING the manager's original
-    hierarchy minus the in-memory cache tier (cache bypass): Level 1 exact-verbatim -> Level 2
-    exact-normalized (both via the already-postgres-routed canonical_synonyms) ->
-    Level 4 pgvector dot similarity.
+    Search Postgres for snapshots by question: exact, normalized, then pgvector.
 
-    Lifted VERBATIM from the manager's `_pg_get_snapshots_by_question` (Rick's
-    ruling 2026-08-15): the manager's own two-tier lookup, which WRITES
-    (auto-cleans ghost synonyms), returns [(pct, snapshot)] tuples, and queries
-    the ANN tier with no SQL threshold — a deliberately different contract from
-    TwoTierQuestionSearch's read-only, instrumented one. ``manager`` is the
-    snapshot manager whose collaborators the search drives; its method is now a
-    one-line delegating shim to this function so behaviour is byte-exact.
+    Lifted verbatim from the manager's `_pg_get_snapshots_by_question`, which
+    delegates here. It skips the in-memory cache tier. Unlike read-only
+    TwoTierQuestionSearch, it cleans ghost synonyms (a write) and applies no SQL threshold.
 
     Requires:
         - manager is initialized; question non-empty; thresholds in [0,100]
@@ -666,7 +650,7 @@ def pg_record_to_snapshot( manager: Any, record: Dict[str, Any] ) -> SolutionSna
         - Returns valid SolutionSnapshot instance
         - Handles JSON deserialization
         - Preserves all original data
-        - CRITICAL: Passes embeddings to constructor to prevent regeneration (977ms savings)
+        - Passes embeddings to constructor to prevent regeneration (977ms savings)
 
     Args:
         record: Postgres record dictionary
@@ -757,7 +741,7 @@ def pg_record_to_snapshot( manager: Any, record: Dict[str, Any] ) -> SolutionSna
 
 def update_canonical_synonyms( manager: Any, snapshot: SolutionSnapshot ) -> None:
     """
-    Update CanonicalSynonyms table with questions from snapshot.
+    Index a snapshot's questions in the CanonicalSynonyms table.
 
     Ensures all three representations (verbatim, normalized, gist) are indexed
     for fast exact-match lookups in hierarchical search (Levels 1-3).
@@ -810,9 +794,9 @@ def pg_similarity_search( manager: Any, exemplar_snapshot, embedding_attr, repo_
     """
     Shared pgvector dot similarity search backing the code + solution similarity paths.
 
-    Fetches WITHOUT a SQL threshold/exclusion (threshold=None) then replicates the
-    original Python-side self-skip + threshold split + ensure_top_result + limit —
-    byte-exact behavior including the best-below-threshold fallback.
+    Fetches without a SQL threshold or exclusion (threshold=None), then replicates the
+    original Python-side self-skip, threshold split, ensure_top_result and limit.
+    Behaviour is byte-exact, including the best-below-threshold fallback.
 
     Requires:
         - manager is initialized; exemplar_snapshot not None; threshold in [0,100]

@@ -199,7 +199,7 @@ class SolutionSnapshotManagerInterface( ABC ):
         """
         Save snapshot to storage backend using upsert semantics.
 
-        Performs INSERT for new snapshots or UPDATE for existing ones.
+        Performs an `INSERT` for new snapshots or an `UPDATE` for existing ones.
 
         Requires:
             - snapshot is a valid SolutionSnapshot instance
@@ -340,14 +340,10 @@ class SolutionSnapshotManagerInterface( ABC ):
         """
         Return every stored snapshot.
         
-        Declared here on 2026-09-23 (row 8631144b) AFTER two endpoints had been
-        calling it for months. `/api/stats/time-saved` and its `/global` sibling
-        both open with `snapshot_mgr.get_all_snapshots()`, and the name existed on
-        no implementation and on no interface — so both answered 500 on every
-        request. It is abstract rather than optional for exactly that reason: the
-        next implementer must be told the stats path needs this, not left to
-        discover it from a traceback.
-        
+        The stats endpoints `/api/stats/time-saved` and `/global` call this method.
+        It is abstract rather than optional so that every implementer knows the
+        stats path needs it, instead of finding out from a 500 error.
+
         Requires:
             - Storage backend is initialized
             

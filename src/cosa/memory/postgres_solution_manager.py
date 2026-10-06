@@ -1,37 +1,20 @@
 """
 Postgres+pgvector solution snapshot manager — the first-class Postgres backend.
 
-This module is the Postgres implementation of SolutionSnapshotManagerInterface,
-lifted out of cosa/memory/lancedb_solution_manager.py where it had been living as
-an `if self._use_postgres:` second path inside a LanceDB-named class.
+This module is the Postgres implementation of SolutionSnapshotManagerInterface. It was
+lifted out of a LanceDB-named class, where it lived as a second code path. The Postgres
+path touches no LanceDB, so it must not live in a LanceDB-named file. Record marshalling
+and the two-tier lookup live in cosa.memory.two_tier_question_search.
 
-WHY IT MOVED (Rick's ruling 29e98243, 2026-08-15): the Postgres path touches no
-LanceDB, so it must not live in a LanceDB-named file. The record marshalling and
-the two-tier lookup were lifted first (into cosa.memory.two_tier_question_search);
-this module completes the move by giving the backend its own class and its own name.
+Cache bypass: this manager builds no in-memory _question_lookup or _id_lookup.
+Every lookup queries pgvector (HNSW) directly. That leans on index latency instead of
+in-memory exact-match hits, which is an accepted trade-off. Caller-visible cache-hit
+semantics (same question gives the same snapshot) are preserved.
 
-CACHE BYPASS (design §9, carried over verbatim from the lifted path): this manager
-DELIBERATELY builds no in-memory _question_lookup / _id_lookup. Every lookup queries
-pgvector (HNSW) directly. That leans on index latency where the LanceDB path leaned
-on in-memory exact-match hits — an expected trade-off of the design, not a surprise.
-Caller-visible cache-hit semantics (same question -> same snapshot) are preserved.
-
-IMPORT-GRAPH NOTE, stated precisely because it is easy to overclaim: this module
-imports NO lancedb at module level, and as of the teardown it is free of lancedb
-transitively as well. The six cache-layer modules that used to drag the package in
-through solution_snapshot.py -> embedding_manager.py -> embedding_cache_table.py
-(and QuestionEmbeddingsTable alongside them) no longer import it.
-
-Measured 2026-08-17, by importing SolutionSnapshot and counting sys.modules:
-55 lancedb package modules resident BEFORE the teardown, 0 after. The package is
-still present in the venv; nothing in the import graph reaches it.
-
-That earlier 55-module measurement is left visible rather than deleted: it was the
-constraint that shaped the whole sweep — it proved the unit of work was the snapshot
-type's import chain, not "the files with lancedb in the name", so a sweep scoped by
-filename would have looked complete while leaving the package resident.
-
-Created: 2026-08-17 (Cheech, store row 5ff7b8f5) · v0.2.0
+Import graph: this module imports no lancedb at module level, and nothing it imports
+reaches lancedb either. The snapshot type's import chain (solution_snapshot.py,
+embedding_manager.py, embedding_cache_table.py) is free of it. The package may still sit
+in the venv, but nothing in the import graph reaches it.
 """
 
 import time
@@ -72,14 +55,13 @@ class PostgresSolutionManager( SolutionSnapshotManagerInterface ):
     """
     Postgres+pgvector solution snapshot manager.
 
-    Routes every operation through SolutionSnapshotRepository. Implements the same
-    interface as the file-based and LanceDB managers, so the factory can swap it in
-    on the `solution snapshots manager type` config key.
+    Routes every operation through SolutionSnapshotRepository. Implements the snapshot
+    manager interface, so the factory builds it from the `solution snapshots manager type`
+    config key.
 
-    The `_pg_*` method names are retained deliberately: cosa.memory.two_tier_question_search
-    drives its collaborator through `manager._pg_get_snapshots_by_question` and
-    `manager._pg_record_from_entity`, so renaming them here would break the lifted
-    helpers this class depends on.
+    The `_pg_*` method names stay as they are. cosa.memory.two_tier_question_search
+    calls `manager._pg_get_snapshots_by_question` and `manager._pg_record_from_entity`,
+    so renaming them would break the helpers this class depends on.
     """
 
     def __init__( self, config: Dict[str, Any], debug: bool = False, verbose: bool = False ) -> None:
@@ -92,9 +74,9 @@ class PostgresSolutionManager( SolutionSnapshotManagerInterface ):
             - debug and verbose are booleans
 
         Ensures:
-            - stores config + flags via the interface base; storage is NOT touched
+            - stores config + flags via the interface base; storage is not touched
             - db_path is None — there is no on-disk location under this backend, and
-              publishing one would advertise a path nothing honors (decision 2b20a6d6)
+              publishing one would advertise a path nothing honors
             - prepares the collaborators the lifted search helpers drive
 
         Raises:
@@ -164,7 +146,7 @@ class PostgresSolutionManager( SolutionSnapshotManagerInterface ):
 
     def _ensure_list( self, value ) -> list:
         """
-        Coerce a value into a list for the ARRAY/JSON columns.
+        Coerce a value into a list for the array and JSON columns.
 
         Requires:
             - value may be any type
@@ -193,7 +175,7 @@ class PostgresSolutionManager( SolutionSnapshotManagerInterface ):
 
         Requires:
             - entity carries all _SNAPSHOT_RECORD_COLUMNS attrs
-            - called INSIDE an open session (attrs read before the row detaches)
+            - called inside an open session (attrs read before the row detaches)
 
         Ensures:
             - returns a dict keyed by every _SNAPSHOT_RECORD_COLUMNS name
@@ -217,7 +199,7 @@ class PostgresSolutionManager( SolutionSnapshotManagerInterface ):
 
     def initialize( self ) -> None:
         """
-        Mark the manager ready — cache BYPASS: builds NO in-memory lookups.
+        Mark the manager ready; builds no in-memory lookups (cache bypass).
 
         Ensures:
             - sets _initialized True; lookups query pgvector per-call (no table scan)
@@ -246,7 +228,7 @@ class PostgresSolutionManager( SolutionSnapshotManagerInterface ):
         """
         Upsert a snapshot via SolutionSnapshotRepository.
 
-        Resolves an existing row by VERBATIM question (reproducing the dedup-by-question
+        Resolves an existing row by verbatim question (reproducing the dedup-by-question
         plus Session-108 base-hash override) without an in-memory cache.
 
         Requires:
@@ -293,7 +275,7 @@ class PostgresSolutionManager( SolutionSnapshotManagerInterface ):
         Fetch a snapshot by id_hash.
 
         Ensures:
-            - returns the SolutionSnapshot if found, else None (marshalled INSIDE the
+            - returns the SolutionSnapshot if found, else None (marshalled inside the
               session to avoid DetachedInstanceError)
         """
         if not self._initialized:
@@ -320,7 +302,7 @@ class PostgresSolutionManager( SolutionSnapshotManagerInterface ):
         """
         Delete a snapshot by verbatim question and cascade its canonical synonyms.
 
-        (delete_physical is accepted for signature parity and IGNORED — there is no
+        (delete_physical is accepted for signature parity and ignored; there is no
         physical file under this backend.)
 
         Requires:
@@ -393,8 +375,9 @@ class PostgresSolutionManager( SolutionSnapshotManagerInterface ):
                                        limit: int = 7,
                                        debug: bool = False ) -> List[Tuple[float, Any]]:
         """
-        Internal name kept because two_tier_question_search drives it by this name
-        (its ghost-cleanup path re-enters the manager through it).
+        Run the two-tier question search; two_tier_question_search calls it by this name.
+
+        Its ghost-cleanup path re-enters the manager through this method.
 
         Ensures:
             - forwards to pg_hierarchical_search, which supplies the whole contract
@@ -497,13 +480,8 @@ class PostgresSolutionManager( SolutionSnapshotManagerInterface ):
         """
         Return every stored snapshot.
 
-        🔴 THIS METHOD DID NOT EXIST UNTIL 2026-09-23 (row 8631144b) AND TWO ENDPOINTS
-        HAD BEEN CALLING IT SINCE THEY WERE WRITTEN. `/api/stats/time-saved` and
-        `/api/stats/time-saved/global` both open with `snapshot_mgr.get_all_snapshots()`,
-        and no such name existed on this class, on the interface, or on the repository —
-        so both 500'd on every request. It went unnoticed because the router's unit test
-        boundary-mocks the manager with a MagicMock, which manufactures any attribute
-        asked of it: the test asserted against a method the production class never had.
+        The stats endpoints `/api/stats/time-saved` and `/api/stats/time-saved/global`
+        call this method at the start of each request.
 
         Requires:
             - manager is initialized
@@ -536,8 +514,9 @@ class PostgresSolutionManager( SolutionSnapshotManagerInterface ):
 
     def get_stats( self ) -> Dict[str, Any]:
         """
-        Return storage statistics. storage_size_mb is 0.0 — a shared Postgres table has
-        no per-manager on-disk footprint to walk.
+        Return storage statistics with storage_size_mb fixed at 0.0.
+
+        A shared Postgres table has no per-manager on-disk footprint to walk.
 
         Requires:
             - manager is initialized

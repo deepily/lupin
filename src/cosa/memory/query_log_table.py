@@ -53,22 +53,11 @@ class QueryLogTable:
     @staticmethod
     def _vector_or_none( embeddings: Optional[Dict[str, list[float]]], key: str ) -> Optional[list[float]]:
         """
-        Translate "this caller supplied no embedding" into the value the storage
-        layer actually accepts.
+        Turn a missing or empty embedding into None for the storage layer.
 
-        QueryLogRepository.log_query states its own contract: the embedding_* args
-        are "dim-768 lists or None". An empty list is neither. pgvector's
-        Vector( 768 ) binds None as SQL NULL and raises
-        `ValueError: expected 768 dimensions, not 0` on `[]`, so passing `[]`
-        killed the whole INSERT — the row was lost and the only trace was a caught
-        exception in the log.
-
-        This is not hypothetical: `v2.flow.FlowEngine._log_query` passes no
-        embeddings at all, deliberately and with its reasons in its docstring
-        (CacheLookup does not return the vectors, and a tier-1 exact hit skips
-        embedding entirely). Every v2 write therefore arrived here with
-        embeddings=None, became `[]`, and died. The dev query_log's newest row is
-        2026-08-21.
+        An empty list is not a valid vector: pgvector raises `ValueError` on `[]` and
+        the whole `INSERT` is lost, while None binds as SQL NULL. Callers such as
+        `v2.flow.FlowEngine._log_query` pass no embeddings, so absent maps to None.
 
         Requires:
             - embeddings is None, or a dict whose values are lists of floats

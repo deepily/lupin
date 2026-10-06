@@ -1,5 +1,5 @@
 """
-CanonicalSynonyms Table backed by Postgres — Three-Level Question Representation Architecture.
+CanonicalSynonyms Table backed by Postgres, with three-level question representation.
 
 Provides fast exact-match lookups for known synonymous questions, eliminating the need
 for similarity search on repeated queries. This table acts as a high-performance cache
@@ -20,32 +20,11 @@ from cosa.memory.embedding_manager import EmbeddingManager
 
 def _vector_or_none( embedding: Optional[list[float]] ) -> Optional[list[float]]:
     """
-    Translate "the embedding API gave us nothing" into the value the storage layer
-    actually accepts.
+    Turn an empty embedding into None, the value the storage layer accepts.
 
-    `EmbeddingManager.generate_embedding` returns an EMPTY LIST on API errors — its
-    own Ensures block says so, and two of its three such paths print
-    "CONTINUING WITHOUT EMBEDDINGS". That is a deliberate keep-going fallback, and
-    it hands this module a value pgvector will not store: `Vector( 768 )` binds
-    None as SQL NULL and raises `ValueError: expected 768 dimensions, not 0` on
-    `[]`. CanonicalSynonymRepository.add_synonym states the contract in its own
-    docstring — "the three embedding_* args are dim-768 lists or None".
-
-    So without this, one embedding API error takes down the entire INSERT, the
-    caught exception reports a bare False, and the synonym is silently lost.
-
-    STORING NULL RATHER THAN REFUSING THE ROW IS THE RIGHT TRADE HERE, and the
-    repository's own module docstring is what settles it: "the 3 embedding columns
-    are stored but NOT ANN-searched." The indexes are on `snapshot_id` and
-    `question_normalized`. This table earns its keep through exact-match lookups on
-    the TEXT columns, so a row with NULL embeddings still does the job it exists
-    for — while losing the row costs that job entirely.
-
-    Twin of `QueryLogTable._vector_or_none`, which fixes the identical defect in
-    the query-log write (row 0e7c9214 symptom 4). Deliberately duplicated rather
-    than shared: that fix is on a separate branch cleared at specific file hashes,
-    and moving its helper would invalidate the clearance. Fold the two together
-    once both have landed.
+    `EmbeddingManager.generate_embedding` returns an empty list on API errors, and
+    pgvector raises `ValueError` on `[]`, losing the whole `INSERT`. Storing NULL is
+    better than refusing the row, since lookups use the text columns.
 
     Requires:
         - embedding is None, or a list of floats

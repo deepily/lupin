@@ -1,20 +1,19 @@
 """
-SpeechToTextProvider — process-aware routing between in-process Whisper
-pipeline and HTTP proxy to lupin-model-server.
+Routes speech-to-text calls to the in-process Whisper pipeline or the model server.
 
-Mirrors `EmbeddingProvider` architecture exactly (singleton + class-level
-in-process-owner flag + INI-key switch + HTTP-fallback path) so the carve-out
-introduces a single, consistent pattern rather than two ad-hoc abstractions.
+Mirrors the `EmbeddingProvider` design: a singleton, a class-level
+in-process-owner flag, an INI-key switch and an HTTP fallback. One pattern
+serves both, rather than two ad-hoc abstractions.
 
 Routing decision (per call):
-    1. INI `speech to text provider = local` AND this process owns the pipeline
-       → call the local `whisper_pipeline(...)` global
-    2. INI `speech to text provider = model-server` OR this process does NOT
-       own the pipeline → POST to model-server `/transcribe`
-    3. INI unset/invalid → defaults to `local` (preserves today's behavior)
+    1. INI `speech to text provider = local` and this process owns the pipeline
+       -> call the local `whisper_pipeline(...)` global
+    2. INI `speech to text provider = model-server`, or this process does not
+       own the pipeline -> POST to model-server `/transcribe`
+    3. INI unset or invalid -> defaults to `local`
 
-The "ownership" flag mirrors `EmbeddingProvider._is_in_process_engine_owner`
-— set by `main.py` lifespan AFTER the Whisper pipeline successfully loads.
+The ownership flag mirrors `EmbeddingProvider._is_in_process_engine_owner`.
+The `main.py` lifespan sets it once the Whisper pipeline has loaded.
 A non-owner process (test, script, subagent, or a remote-mode compute
 container) always routes via HTTP.
 
@@ -42,13 +41,12 @@ LOCAL_WHISPER_DECODE_DEFAULTS = { "return_timestamps": True }
 
 class SpeechToTextProvider:
     """
-    Singleton routing transcription requests between the in-process Whisper
-    pipeline and the lupin-model-server HTTP endpoint.
+    Singleton that routes transcription to Whisper in-process or to the model server.
 
     Architecture mirrors `EmbeddingProvider`:
         - `_instance` + double-checked locking for thread-safe lazy init
-        - `_is_in_process_owner` class flag flipped by main.py lifespan AFTER
-          Whisper successfully loads
+        - `_is_in_process_owner` class flag flipped by main.py lifespan once
+          Whisper has loaded
         - INI key `speech to text provider` selects local vs model-server
         - `LUPIN_MODEL_SERVER_URL` env override mirrors `LUPIN_APP_SERVER_URL`
     """
@@ -80,10 +78,10 @@ class SpeechToTextProvider:
     @classmethod
     def declare_in_process_owner( cls ) -> None:
         """
-        Flip the class flag indicating THIS process owns the Whisper pipeline.
+        Set the class flag saying this process owns the Whisper pipeline.
 
-        Called by `src/lupin_app/main.py` lifespan AFTER `load_stt_model()`
-        returns successfully and `whisper_pipeline` is bound. Mirrors
+        Called by `src/lupin_app/main.py` lifespan once `load_stt_model()`
+        has returned and `whisper_pipeline` is bound. Mirrors
         `EmbeddingProvider.declare_in_process_engine_owner()` semantically and
         in call-site placement.
 
@@ -94,22 +92,21 @@ class SpeechToTextProvider:
     @classmethod
     def declare_remote_only( cls ) -> None:
         """
-        Reset the in-process-owner flag. Used by tests + (in the future) by
-        the Phase 3.6 lifespan remote-mode branch to make process-ownership
-        state explicit when the lifespan SKIPS the Whisper load.
+        Clear the in-process-owner flag.
+
+        Tests use it. A remote-mode lifespan can use it to make ownership
+        explicit when it skips the Whisper load.
         """
         cls._is_in_process_owner = False
 
     @staticmethod
     def _resolve_model_server_url() -> Optional[ str ]:
         """
-        Resolve the lupin-model-server URL at call time. Returns None when
-        unset → caller falls through to local-mode (or raises if local-mode
-        is impossible).
+        Resolve the lupin-model-server URL at call time.
 
-        Reads `LUPIN_MODEL_SERVER_URL` env var first (Phase 3.6 + compose
-        injection), then falls back to the `model server url` INI key with
-        a hardcoded default of `http://lupin-model-server:7998`.
+        Reads the `LUPIN_MODEL_SERVER_URL` env var first, then the
+        `model server url` INI key, then the default
+        `http://lupin-model-server:7998`. It never returns None.
 
         Ensures:
             - Returns the stripped env value when set and non-empty
@@ -130,30 +127,11 @@ class SpeechToTextProvider:
     @staticmethod
     def _model_server_api_key() -> Optional[ str ]:
         """
-        Load the `ck_live_*` plaintext key used to authenticate against
-        lupin-model-server's X-API-Key middleware.
+        Load the `ck_live_*` key for the lupin-model-server X-API-Key middleware.
 
-        ⚠️ SUPERSEDED 2026-07-28 (rows 574fd1dc / 6cc52525). This docstring used
-        to read: *"the model-server reuses the existing
-        `notification-api-claude-code-dev` key — no parallel `ck_internal_*`
-        namespace. Same key the FastAPI HTTP paths use."* That reuse was the
-        defect, not the economy it reads as.
-
-        `notification-api-claude-code-dev` is validated against a PER-DEPLOYMENT
-        `api_keys` table, so its correct value differs on every host. The model
-        server bcrypt-hashes ONE mounted secret version at boot, so its correct
-        value is identical everywhere. One file cannot be both.
-
-        ⚠️ AND THIS PATH WAS COLLATERAL DAMAGE NOBODY REPORTED. The 07-26 outage
-        was filed against `/embeddings/generate` because that path logs loudly.
-        `/transcribe` takes the same key to the same service and had been failing
-        for the same ~38h, silently — found only by grepping for the key name
-        while fixing the other one.
-
-        The name is read from the SAME env var the model server reads
-        (`LUPIN_MODEL_SERVER_API_KEY_NAME`, lupin_model_server/main.py:76) so the
-        two ends cannot drift by editing one of them.
-        src/rnd/v0.1.9/2026.07.28-model-server-api-key-decoupling.md
+        The key differs from the per-host `notification-api-claude-code-dev` key.
+        The model server hashes one mounted secret, identical on every host.
+        The name comes from `LUPIN_MODEL_SERVER_API_KEY_NAME`, which the model server also reads.
 
         Requires:
             - nothing
@@ -171,14 +149,13 @@ class SpeechToTextProvider:
 
     def _should_use_local( self ) -> bool:
         """
-        Decide whether THIS call should run the in-process Whisper pipeline
-        (True) or HTTP-proxy to the model-server (False).
+        Decide whether this call runs the in-process Whisper pipeline or the HTTP proxy.
 
-        Returns True ONLY when both:
+        Returns True only when both hold:
             1. INI `speech to text provider = local`
             2. This process declared itself the in-process owner (lifespan flag)
 
-        Otherwise returns False → HTTP path.
+        Otherwise returns False, which selects the HTTP path.
         """
         return self._provider == "local" and self._is_in_process_owner
 
@@ -188,7 +165,7 @@ class SpeechToTextProvider:
 
         Requires:
             - audio_path is a non-empty string pointing to a readable file
-              OR audio bytes if the in-process path is used differently
+              (or audio bytes, if the in-process path is used differently)
             - whisper_pipeline is the in-process pipeline handle (for local mode)
               — passed in by the caller (typically speech.py via Depends)
             - kwargs are forwarded to the underlying pipeline call (e.g.,
@@ -238,15 +215,8 @@ class SpeechToTextProvider:
         """
         Run `fn()` with exponential-backoff retry on transient HTTP errors.
 
-        Phase 3.4 of the carve-out: lightweight retry wrapper for HTTP calls
-        to lupin-model-server. Retries on:
-            - `requests.Timeout` (network or server-side hang)
-            - `requests.ConnectionError` (target unreachable)
-            - Response 5xx status codes (server-side transient)
-
-        Does NOT retry on:
-            - 4xx status codes (caller's fault; bail immediately)
-            - `RuntimeError` raised by `fn` itself (caller-decided fatal)
+        Retries on timeouts, connection errors and 5xx responses.
+        Does not retry on 4xx responses or on a `RuntimeError` raised by `fn`.
 
         Requires:
             - `fn` is a no-arg callable returning a `requests.Response`-like

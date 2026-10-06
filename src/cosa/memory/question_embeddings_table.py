@@ -9,10 +9,10 @@ class QuestionEmbeddingsTable():
     Manages question embeddings storage in Postgres+pgvector.
 
     Caches embeddings for questions to avoid regenerating them.
-    Supports embedding lookup and storage; storage runs through
-    QuestionEmbeddingRepository on a short-lived get_db() session per call,
-    while embedding generation on a cache miss stays here (the memory layer
-    owns generation).
+    Supports embedding lookup and storage. Storage runs through
+    QuestionEmbeddingRepository on a short-lived get_db() session per call.
+    Embedding generation on a cache miss stays here, because the memory
+    layer owns generation.
     """
     def __init__( self, debug: bool=False, verbose: bool=False, *args, **kwargs ) -> None:
         """
@@ -67,7 +67,7 @@ class QuestionEmbeddingsTable():
 
         Ensures:
             - Returns the cached embedding when present
-            - Generates a new embedding on a miss, and does NOT store it
+            - Generates a new embedding on a miss, and does not store it
 
         Raises:
             - Repository/session errors propagated

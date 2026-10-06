@@ -1,23 +1,21 @@
 """
-Shared bounded embedding pool (bug 81854972).
+Shared bounded embedding pool for all GPU embedding work.
 
-Every InputAndOutputTable.insert_io_row( async_embedding=True ) previously spawned
-a NEW daemon thread to generate GPU embeddings. Under fleet load (many concurrent
-CC-listener sessions hammering /api/notify) the unbounded thread count saturated
-the GPU + GIL and starved the asyncio event loop — /health timed out, docker
-flagged the container "unhealthy" (the intermittent dev-server "hang").
+Every `InputAndOutputTable.insert_io_row( async_embedding=True )` call used to spawn
+its own daemon thread. Under many concurrent listener sessions the unbounded
+thread count saturated the GPU and the GIL. That starved the asyncio event loop,
+so /health timed out and docker flagged the container unhealthy.
 
-This module provides ONE process-wide, bounded, runtime-reconfigurable pool that
-ALL embedding work routes through, so global concurrency is capped (the event loop
-is never starved) and a pending-slot budget bounds the backlog (a sustained burst
-can't grow memory without limit). When the backlog is full the work is dropped
-(backpressure) rather than blocking the caller — the notify path must return
-immediately.
+This module provides one process-wide, bounded, runtime-reconfigurable pool that
+all embedding work routes through. Global concurrency is capped, so the event loop
+is never starved. A pending-slot budget bounds the backlog, so a burst cannot grow
+memory without limit. When the backlog is full the work is dropped. The caller is
+never blocked, because the notify path must return immediately.
 
 Runtime-configurable: pool size is read from config keys
 'io tbl embedding pool max workers' (default 2) and
-'io tbl embedding pool max pending' (default 64), and can be re-tuned live via
-reconfigure_embedding_pool( ... ) without a code change.
+'io tbl embedding pool max pending' (default 64).
+It can be re-tuned live via reconfigure_embedding_pool( ... ) without a code change.
 """
 
 import threading
@@ -73,7 +71,7 @@ class BoundedEmbeddingPool:
 
         Ensures:
             - Returns True and schedules fn when a backlog slot is free
-            - Returns False and increments dropped (WITHOUT running fn) when the
+            - Returns False and increments dropped (without running fn) when the
               backlog is full — non-blocking; the caller never waits
             - The slot is released when fn finishes, whether it returns or raises
 
@@ -133,8 +131,7 @@ def get_embedding_pool( config_mgr: Optional[ Any ] = None, debug: bool = False 
 
 def reconfigure_embedding_pool( max_workers: int, max_pending: int, debug: bool = False ) -> BoundedEmbeddingPool:
     """
-    Runtime knob (bug 81854972): rebuild the shared pool with new bounds so the
-    concurrency / backlog can be re-tuned live without a code change.
+    Rebuild the shared pool with new bounds, so tuning needs no code change.
 
     Requires:
         - max_workers is an int >= 1

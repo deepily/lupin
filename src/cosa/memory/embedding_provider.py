@@ -9,18 +9,18 @@ Routes embedding generation to the configured engine:
 Callers specify content_type="prose" or content_type="code" to route
 to the appropriate engine when provider is "local".
 
-Process-aware routing (added 2026-04-28):
-    Inside the FastAPI process — which loaded the GPU engine singletons at
-    startup — `generate_embedding()` calls those singletons directly. In any
-    OTHER process (scripts, tests, CC subagents, MCP), the same call routes
+Process-aware routing:
+    Inside the FastAPI process, which loaded the GPU engine singletons at
+    startup, `generate_embedding()` calls those singletons directly. In any
+    other process (scripts, tests, CC subagents, MCP), the same call routes
     via HTTP to the FastAPI server's /api/embeddings/{generate,batch}
     endpoints. The server URL is resolved at call time from the
-    LUPIN_APP_SERVER_URL environment variable so a test running on the
-    :8000 test server hits :8000 (not the :7999 dev server).
+    LUPIN_APP_SERVER_URL environment variable. A test running on the
+    :8000 test server therefore hits :8000, not the :7999 dev server.
 
-    The toggle is the class-level flag `_is_in_process_engine_owner`,
-    flipped True by FastAPI's main.py at startup after engines are loaded.
-    Default False everywhere else means no caller accidentally grabs GPU.
+    The toggle is the class-level flag `_is_in_process_engine_owner`.
+    FastAPI's main.py sets it True at startup after the engines are loaded.
+    It defaults to False, so no other caller accidentally grabs the GPU.
 """
 
 import os
@@ -34,24 +34,21 @@ from cosa.config.configuration_manager import ConfigurationManager
 
 class EmbeddingProviderUnreachable( RuntimeError ):
     """
-    The embedding service could not be reached at all — a TRANSPORT failure.
+    The embedding service could not be reached at all, a transport failure.
 
-    Raised only after this module has already spent every configured retry and
-    backoff, so it means the service is definitively not answering: DNS failure,
-    connection refused, unroutable host, or a per-attempt timeout that never
-    completed a request.
+    Raised only after every configured retry and backoff is spent. It means
+    the service is not answering: DNS failure, connection refused,
+    unroutable host, or a timeout that never completed a request.
 
-    Why it is its own type: callers that retry by SHRINKING the request (batch
-    splitters, adaptive budgets) need to tell "the request was too large" — where
-    a smaller retry is the correct remedy — from "nothing is listening", where
-    every retry at every size is guaranteed to fail identically. Without this
-    distinction a batch splitter converts one dead dependency into one doomed
-    retry per row (bug 13b35b37, found 2026-08-17: a 100-row batch split all the
-    way to 100 single-row retries, every one failing on the same dead socket).
+    Callers that shrink the request on retry (batch splitters, adaptive
+    budgets) must tell "request too large" from "nothing is listening".
+    A smaller retry fixes the first. Every retry
+    fails the same way on the second, so a splitter would make one doomed
+    retry per row.
 
-    Subclasses RuntimeError deliberately: every existing `except RuntimeError`
-    and `except Exception` caller keeps working unchanged. Only callers that
-    WANT the distinction have to ask for it.
+    It subclasses RuntimeError so every existing `except RuntimeError` and
+    `except Exception` caller keeps working. Only callers that want the
+    distinction have to ask for it.
     """
 
 
@@ -81,16 +78,11 @@ class EmbeddingProvider:
     @classmethod
     def declare_in_process_engine_owner( cls ):
         """
-        Mark this Python process as the owner of the in-process GPU engine
-        singletons. Called by `src/lupin_app/main.py` AFTER `get_code_engine()`
-        and `get_prose_engine()` have completed their eager warmup.
+        Mark this process as the owner of the in-process GPU engine singletons.
 
-        Effect: subsequent `generate_embedding()` / `generate_embeddings_batch()`
-        calls in this process route directly to the in-process engine
-        singletons. In every other process the flag stays False and routing
-        falls back to HTTP via /api/embeddings/{generate,batch}.
-
-        Idempotent — safe to call multiple times.
+        Called by `src/lupin_app/main.py` after the engines finish warmup.
+        This process then uses the engines directly. Every other process
+        keeps the flag False and routes via HTTP. Idempotent.
 
         Ensures:
             - Class-level flag is True after this call returns
@@ -180,13 +172,11 @@ class EmbeddingProvider:
     @staticmethod
     def _resolve_server_url() -> str:
         """
-        Resolve the FastAPI server URL at call time (NOT at module load).
+        Resolve the FastAPI server URL at call time, not at module load.
 
-        Read fresh from `LUPIN_APP_SERVER_URL` per-call so a test running
-        on the :8000 test server can set the env var and have HTTP routing
-        target :8000 dynamically — without restarting the Python process.
-        Default is `http://localhost:7999` (host targeting dev server,
-        and inside-container targeting the container's own bound port).
+        Reads `LUPIN_APP_SERVER_URL` on every call, so a test on the :8000
+        server can retarget HTTP routing without a restart.
+        The default is `http://localhost:7999`.
 
         Ensures:
             - Returns the env value when set and non-empty (stripped)
@@ -199,21 +189,10 @@ class EmbeddingProvider:
     @staticmethod
     def _resolve_model_server_url() -> Optional[ str ]:
         """
-        Resolve the lupin-model-server URL at call time. Returns None when
-        BOTH env var AND INI key are unset → caller falls through to the
-        legacy FastAPI HTTP-proxy path.
+        Resolve the lupin-model-server URL at call time, or None if neither source is set.
 
-        Priority chain (mirrors SpeechToTextProvider._resolve_model_server_url):
-            1. `LUPIN_MODEL_SERVER_URL` env var (compose-injected at container creation)
-            2. `model server url` INI key (lupin-app.ini default)
-            3. None → caller routes via legacy FastAPI URL
-
-        Why both: `docker restart` doesn't re-read compose, so a fresh INI
-        flip without a `docker compose up -d --force-recreate` would leave
-        the env var unset in running containers. The INI fallback prevents
-        that scenario from causing self-recursion (compute → compute →
-        compute → timeout) on the FastAPI fallback URL.
-
+        Tries the `LUPIN_MODEL_SERVER_URL` env var, then the `model server url` INI key.
+        The INI key covers `docker restart`, which skips compose, so the env var may be unset.
         See: src/rnd/v0.1.7/2026.05.16-model-server-carveout/01-design.md
 
         Ensures:
@@ -236,30 +215,11 @@ class EmbeddingProvider:
     @staticmethod
     def _http_api_key() -> Optional[str]:
         """
-        Load the X-API-Key value used for the MODEL SERVER's embeddings endpoint.
+        Load the X-API-Key value used for the model server's embeddings endpoint.
 
-        ⚠️ THIS IS NOT THE SAME CREDENTIAL AS prediction_engine's, DESPITE THE
-        IDENTICAL READING IDIOM. This docstring used to say it "mirrors the
-        pattern in `prediction_engine._generate_embedding_via_http`", and that
-        sentence is how a shared IDIOM got read as a shared AUTHORITY:
-
-          prediction_engine -> POSTs to localhost/api/embeddings/generate, i.e.
-                               LUPIN'S OWN server, validated against THAT
-                               DEPLOYMENT'S `api_keys` table. Per-host value.
-          this method       -> POSTs to the model server on Cloud Run, which
-                               bcrypt-hashes ONE mounted secret version at boot.
-                               Globally-identical value.
-
-        One file served both until 2026-07-28. On the dev box the two authorities
-        coincide by accident (dev's key was seeded into Secret Manager), so the
-        flaw was invisible there; on the VM they cannot, and /embeddings/generate
-        returned 100% 401 for ~38h with the VM's key matching NEITHER secret
-        version. Rows 574fd1dc / 6cc52525.
-        src/rnd/v0.1.9/2026.07.28-model-server-api-key-decoupling.md
-
-        The name is read from the SAME env var the model server itself reads
-        (`LUPIN_MODEL_SERVER_API_KEY_NAME`, lupin_model_server/main.py:76) so the
-        two ends cannot drift apart by editing one of them.
+        Not prediction_engine's credential: that one goes to Lupin's server and its
+        per-host `api_keys` table. This one goes to the model server, which hashes
+        one mounted secret. The name comes from `LUPIN_MODEL_SERVER_API_KEY_NAME`.
 
         Requires:
             - nothing
@@ -280,15 +240,8 @@ class EmbeddingProvider:
         """
         Pick the HTTP target for embedding fallback calls.
 
-        Priority:
-            1. lupin-model-server (when `LUPIN_MODEL_SERVER_URL` env is set)
-            2. FastAPI server (existing behavior, `LUPIN_APP_SERVER_URL`)
-
-        Both targets accept the SAME `ck_live_*` key from
-        `src/conf/keys/notification-api-claude-code-dev` (per María's
-        2026-05-16 brief — no parallel `ck_internal_*` namespace). So we
-        call `_http_api_key()` for both branches; only the URL + endpoint
-        prefix differ.
+        Uses lupin-model-server when its URL resolves, else the FastAPI server.
+        Both branches call `_http_api_key()`. Only the URL and prefix differ.
 
         Returns:
             tuple[str, Optional[str], str]: (base_url, api_key, endpoint_prefix)
@@ -329,12 +282,9 @@ class EmbeddingProvider:
         """
         POST to an embedding endpoint, retrying transport failures and 5xx/429.
 
-        The defect this exists for (bug `574fd1dc`): the model server is a
-        scale-to-zero Cloud Run GPU service whose cold start was MEASURED at
-        31.5-66.0s across 12 of 12 starts. A single attempt against any
-        timeout below that loses the caller's data every time the service has
-        gone idle. With a retry, the first attempt absorbs the warm-up and a
-        later one lands on the now-warm instance.
+        The model server is a scale-to-zero Cloud Run GPU service with a cold
+        start of 31.5 to 66.0 seconds. Retries let the first attempt absorb
+        the warm-up and a later one reach the warm instance.
 
         Requires:
             - url is the fully-qualified endpoint
@@ -392,15 +342,16 @@ class EmbeddingProvider:
         """
         Single-text embedding via HTTP fallback to /api/embeddings/generate.
 
-        Used when this process is NOT the in-process engine owner — typically
-        a test, script, or CC subagent. Routes through the FastAPI server's
-        already-loaded GPU singleton instead of grabbing GPU here.
+        Used when this process does not own the in-process engine, typically
+        a test, script, or CC subagent. The server's loaded GPU singleton
+        does the work, so this process never takes the GPU.
 
         Requires:
             - text is a non-empty string
             - content_type is "prose" or "code"
             - LUPIN_APP_SERVER_URL is reachable (default http://localhost:7999)
-            - API key file at src/conf/keys/notification-api-claude-code-dev
+            - The model-server API key (`model-server-api` unless
+              `LUPIN_MODEL_SERVER_API_KEY_NAME` names another) is readable
 
         Ensures:
             - Returns list[float] embedding vector on success
@@ -500,15 +451,11 @@ class EmbeddingProvider:
 
     def generate_embedding( self, text, content_type="prose", normalize_for_cache=True ):
         """
-        Route to the appropriate engine based on config, content_type, and
-        whether this process owns the in-process engine singletons.
+        Embed one text with the configured provider, in-process or over HTTP.
 
-        Routing decision:
-            - provider="openai" → OpenAI HTTP client (unchanged regardless of flag)
-            - provider="local" + this process owns engines → in-process engine
-            - provider="local" + this process does NOT own engines → HTTP route
-              to /api/embeddings/generate on the FastAPI server (URL resolved
-              dynamically from LUPIN_APP_SERVER_URL)
+        Provider "openai" uses the OpenAI engine, whatever the flag says.
+        Provider "local" uses the in-process engine if this process owns it,
+        else HTTP to /api/embeddings/generate (URL from LUPIN_APP_SERVER_URL).
 
         Requires:
             - text is a non-empty string
@@ -562,9 +509,9 @@ class EmbeddingProvider:
 
     def generate_embeddings_batch( self, texts, content_type="prose" ):
         """
-        Generate embeddings for a batch of texts. Same process-aware routing
-        as generate_embedding() — non-owner processes round-trip via HTTP
-        to /api/embeddings/batch.
+        Embed a batch of texts, using the same routing as generate_embedding().
+
+        A process that does not own the engines calls /api/embeddings/batch over HTTP.
 
         Requires:
             - texts is a list of non-empty strings

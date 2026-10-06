@@ -192,19 +192,11 @@ class InputAndOutputTable():
 
     def _record_async_failure( self, input_text: str, error: Exception ) -> None:
         """
-        Count one dropped row from the async embedding path (bug `574fd1dc`).
+        Count one dropped row from the async embedding path.
 
-        The row itself is still lost — this does NOT retry or dead-letter it.
-        What it changes is that the loss becomes COUNTABLE. Before this, the
-        handler printed a banner and returned, so the only record of a dropped
-        row was a console line in a container log, and "how many have we lost"
-        was unanswerable by construction.
-
-        Called from the embedding-pool worker thread, so the increment is
-        locked: the pool runs several workers concurrently and a bare `+= 1`
-        on a shared int is a read-modify-write that can silently lose counts —
-        which would make the instrument understate exactly the quantity it
-        exists to measure.
+        The row is still lost: this does not retry or dead-letter it, it only makes the
+        loss countable. Called from pool worker threads, so the increment is locked
+        because a bare `+= 1` can silently lose counts.
 
         Requires:
             - input_text is the row's input string (may be empty)
@@ -213,7 +205,7 @@ class InputAndOutputTable():
         Ensures:
             - async_failure_count increments by exactly one per call
             - last_async_failure holds ( truncated input, exception type, str(error) )
-              for the MOST RECENT failure
+              for the most recent failure
             - never raises — a failure in the failure recorder must not mask
               the original error
         """
