@@ -4,7 +4,7 @@
 // #15), reconnect orchestration via the embedded ConnectionStateMachine,
 // and stop() teardown.
 
-import { test } from "node:test";
+import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 
 import { createEventBusForTesting } from "../../../lupin_app/static/js/multiplexer/shared/EventBus";
@@ -22,6 +22,17 @@ import type { AuthManager } from "../../../lupin_app/static/js/multiplexer/auth/
 // ---------------------------------------------------------------------------
 // Test infrastructure
 // ---------------------------------------------------------------------------
+
+// 🔴 THE BACKOFF DELAY IS `floor( random * min( 1000 * 2^attempt, 30000 ) )`, so an unpinned run
+// arms a near-zero backoff timer about once in a few hundred draws; it fires backoff_expire and
+// the state reads 'reconnecting' where these tests assert 'backoff'. Measured 2026-10-05: with
+// Math.random forced to 0, the getToken-failure and the handshake-timeout tests both go red.
+// The whole file therefore runs on a pinned draw that makes the delay long; the one test that
+// wants the short delay sets its own draw and restores this one.
+const PINNED_DRAW = 0.9;
+const realRandom  = Math.random;
+before( () => { Math.random = () => PINNED_DRAW; } );
+after(  () => { Math.random = realRandom; } );
 
 function makeCloseEvent(code: number, reason: string): CloseEvent {
   if (typeof CloseEvent !== "undefined") {
@@ -671,3 +682,25 @@ test("handshake-timeout: cancelHandshakeTimer() is a no-op when nothing is armed
 
 // Defuse a noisy unused-import warning during type-cast; harmless to runtime.
 void ({} as AuthStateChangePayload);
+
+test("a backoff draw of 0 arms a zero-delay timer: the transport leaves backoff at once and opens a second socket", async () => {
+  // Specifies the behavior the pinned draw hides: the delay is random, and the lowest draw makes
+  // 'backoff' a state the transport passes through, not one it rests in.
+  Math.random = () => 0;
+  try {
+    const Ctor = freshMockCtor();
+    const bus  = createEventBusForTesting();
+    const states: string[] = [];
+    bus.on<ConnectionStateChangePayload>("connection_state_change", (e) => states.push(e.payload.state));
+    const t = createQueueTransport({ authManager: makeMockAuth("ignored", true), bus, baseUrl: "", WebSocketCtor: Ctor });
+    t.start("wise_penguin");
+    MockWebSocket.instances[0]!.fireOpen();
+    await new Promise((r) => setTimeout(r, 10));
+    assert.ok(states.includes("backoff"), `backoff was never entered; saw ${states.join(",")}`);
+    assert.ok(states.indexOf("reconnecting") > states.indexOf("backoff"), `no reconnecting after backoff; saw ${states.join(",")}`);
+    assert.ok(MockWebSocket.instances.length >= 2, "reconnecting opened a new socket");
+    t.stop();
+  } finally {
+    Math.random = () => PINNED_DRAW;
+  }
+});
