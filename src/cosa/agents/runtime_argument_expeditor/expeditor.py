@@ -65,8 +65,7 @@ BATCH_INTERNAL    = "internal"      # setup failed before the user could be aske
 @dataclass
 class ExtractionResult:
     """
-    The non-interactive half of expedite() — everything collect() needs to
-    drive user interaction, with zero prompts issued yet.
+    The non-interactive half of expedite(): everything collect() needs, with no prompt issued.
 
     Requires:
         - final_args is a dict of arg-name -> value already resolved (LORA +
@@ -88,31 +87,22 @@ class ExtractionResult:
 @dataclass
 class ExpediteContext:
     """
-    Everything that belongs to ONE expedite() call, carried as an argument.
+    Everything that belongs to one expedite() call, carried as an argument.
 
-    The expeditor is shared — v2 keeps a single instance on app.state — so a
-    caller's job id, bearer token and failure reason must never live on the
-    instance. They used to (`self._job_id` / `self._bearer_token` /
-    `self._last_expedite_reason` / `self._last_notification_status`), which
-    worked only because v1 built a fresh expeditor per request. Two requests in
-    flight at once shared those four slots, and the second caller's bearer token
-    was the one the first caller's notification went out with (row 10c60712).
+    The expeditor is shared: v2 keeps one instance on app.state. So a caller's job id, bearer token and failure reason must never live on it. v1 built a fresh expeditor per request, hiding that rule.
 
     Requires:
-        - job_id / bearer_token are the CALLER's own, or None
+        - job_id / bearer_token are the caller's own, or None
         - one instance per expedite() call, never reused across calls
 
     Ensures:
-        - Carries values IN (job_id, bearer_token) and results OUT (reason,
+        - Carries values in (job_id, bearer_token) and results out (reason,
           notification_status) for exactly one call
         - Two concurrent calls share nothing
 
-    Note on the helpers' `context=None` default: a helper called without one
-    builds a throwaway, so it sends no token and drops the reason. That is a
-    DEGRADED call, never a crossover — the failure mode of forgetting to pass
-    the context is an unauthenticated notification, not another user's
-    credential. The default exists for direct unit-level calls; every path from
-    expedite()/collect() passes the caller's own.
+    Why: the old instance fields `_job_id`, `_bearer_token`, `_last_expedite_reason` and `_last_notification_status` were shared slots. Two requests in flight shared them, so the second caller's bearer token went out with the first caller's notification.
+
+    Note on the helpers' `context=None` default: a helper called without one builds a throwaway, so it sends no token and drops the reason. That is a degraded call, never a crossover. Forgetting to pass the context gives an unauthenticated notification, not another user's credential. The default exists for direct unit-level calls. Every path from expedite() and collect() passes the caller's own.
     """
     job_id              : str = None
     bearer_token        : str = None
@@ -123,26 +113,24 @@ class ExpediteContext:
 @dataclass
 class ArgSpec:
     """
-    An JOB_ARG_CONTRACTS entry, typed — every field the expeditor's extract() /
-    collect() halves and their helpers read, in one carrier. The expedite() shim
-    builds one from the raw table entry, so the whole pipeline runs off the spec
-    and a v2 caller can drive it (including resolving a display name) with no
-    registry entry at all. Not a minimal slice: it carries the entry's readable
-    surface so nothing downstream has to reach back into the table.
+    A typed JOB_ARG_CONTRACTS entry: every field the expeditor's extract() and collect() read.
+
+    The expedite() shim builds one from the raw table entry, so the whole pipeline runs off the spec. A v2 caller can drive it, including display-name resolution, with no registry entry at all.
+    It is not a minimal slice: it carries the entry's readable surface, so nothing downstream reaches back into the table.
 
     Requires:
         - arg_mapping maps LORA arg names -> CLI arg names
         - system_provided / required_user_args are lists of arg-name strings
         - fallback_questions maps arg-name -> question text
         - fallback_defaults maps arg-name -> default value (may start empty; a
-          COPY of the registry entry's dict per bug 8aa89f42, so extract()'s
-          in-place seeding never leaks one user's default to the next)
+          copy of the registry entry's dict, so extract()'s in-place seeding
+          never leaks one user's default to the next)
         - special_handlers maps arg-name -> handler tag
         - file_args maps arg-name -> its typed declaration ({ kind, search_roots,
           search_paths_key }); empty for an agent with no file-typed argument
         - display_name is the human agent name, or None (derived from cli_module)
-        - cli_module is the agent's CLI module path, or None (test_suite has none
-          by design — invoked via API, not CLI)
+        - cli_module is the agent's CLI module path, or None (test_suite has none:
+          it is invoked via API, not CLI)
 
     Ensures:
         - Holds references (except the copied fallback_defaults); behavior matches
@@ -161,15 +149,14 @@ class ArgSpec:
     @classmethod
     def from_entry( cls, entry ):
         """
-        Build an ArgSpec from a raw JOB_ARG_CONTRACTS entry, preserving the exact
-        reference semantics the expeditor relied on when it read the dict directly.
+        Build an ArgSpec from a raw JOB_ARG_CONTRACTS entry, keeping its reference semantics.
 
         Requires:
             - entry is an JOB_ARG_CONTRACTS registry entry (has arg_mapping,
               system_provided, required_user_args, fallback_questions)
 
         Ensures:
-            - fallback_defaults is a COPY of the entry's dict (bug 8aa89f42): the
+            - fallback_defaults is a copy of the entry's dict: the
               seam is the one place extract() later writes, so copying here keeps
               one user's seeded default from becoming the next user's default for
               the life of the process, while the registry entry stays unmutated
@@ -242,7 +229,7 @@ def user_message_for_expedite_reason( reason ):
 
     Ensures:
         - returns a 2-tuple of non-empty strings ( spoken, log_line )
-        - ONLY BATCH_DECLINED produces a message that attributes the outcome
+        - only BATCH_DECLINED produces a message that attributes the outcome
           to the user; every other reason (including None / unknown) is worded
           as a machine failure the user did not cause
     """
@@ -269,8 +256,9 @@ def user_message_for_expedite_reason( reason ):
 
 class RuntimeArgumentExpeditor:
     """
-    Determines which required arguments a user's voice command provides and
-    asks for any missing ones before creating an agentic job.
+    Finds which required arguments a voice command provides and asks for any missing ones.
+
+    It runs before an agentic job is created.
 
     Requires:
         - config_mgr is a valid ConfigurationManager instance
@@ -324,7 +312,7 @@ class RuntimeArgumentExpeditor:
             - response has .success, .is_timeout attributes
 
         Ensures:
-            - NEVER returns BATCH_DECLINED — a decline is a parsed user answer,
+            - Never returns BATCH_DECLINED: a decline is a parsed user answer,
               detected by the caller, not a failed delivery
             - is_timeout            -> BATCH_TIMEOUT
             - delivered but empty   -> BATCH_MALFORMED (exit 0, no usable value)
@@ -361,7 +349,7 @@ class RuntimeArgumentExpeditor:
             job_id: Optional agentic job ID for routing notifications to job cards
             bearer_token: Optional JWT for authenticating notification requests
             context: Optional ExpediteContext the caller owns. Pass one to read
-                back WHY the call failed (`context.reason`) and the last
+                back why the call failed (`context.reason`) and the last
                 notification status; omit it and that outcome is discarded. It
                 is the caller's object, not the expeditor's — two concurrent
                 calls each read their own.
@@ -389,8 +377,9 @@ class RuntimeArgumentExpeditor:
 
     def extract( self, command, raw_args, original_question, spec ):
         """
-        Non-interactive half of expedite(): resolve known args and compute what
-        is still missing. Issues NO user prompts.
+        Resolve known args and compute which are still missing, with no user prompt.
+
+        This is the non-interactive half of expedite().
 
         Requires:
             - command is a key in JOB_ARG_CONTRACTS
@@ -523,8 +512,9 @@ class RuntimeArgumentExpeditor:
 
     def collect( self, extraction, command, original_question, spec, user_email, session_id, user_id, *, context ):
         """
-        Interactive half of expedite(): prompt the user for the args extract()
-        found missing, run any special handlers, confirm, and inject system args.
+        Prompt the user for the args extract() found missing, then confirm and inject system args.
+
+        This is the interactive half of expedite(). It also runs any special handlers.
 
         Requires:
             - extraction is an ExtractionResult from extract()
@@ -536,7 +526,7 @@ class RuntimeArgumentExpeditor:
             - Returns the complete injected argument dict on success
             - Returns None on user cancel / decline / timeout / transport failure
             - On a non-user-decision failure, records the cause on context.reason
-              and does not report it as a cancellation (bug 2aaab1bf)
+              and does not report it as a cancellation
 
         Args:
             extraction: ExtractionResult carrying final_args + missing + maps
@@ -546,7 +536,7 @@ class RuntimeArgumentExpeditor:
             user_email: Authenticated user's email
             session_id: WebSocket session ID
             user_id: System user ID
-            context: THIS call's ExpediteContext (required — it carries the
+            context: This call's ExpediteContext (required; it carries the
                 caller's bearer token down and the failure reason back up)
 
         Returns:
@@ -709,14 +699,7 @@ class RuntimeArgumentExpeditor:
     @staticmethod
     def _value_is_existing_path( value ):
         """
-        True iff ``value`` names a file/dir that exists on disk.
-
-        Mirrors the podcast job's own research-path check
-        (podcast_generator/job.py:216-223): absolute values are tested as-is;
-        relative values are resolved against the project root. A bare topic word
-        ("KISS") returns False — the signal, used by Fix B (row bd0ce120), that a
-        special-handler arg is present-but-unresolved and must be run through the
-        fuzzy matcher rather than handed downstream as a path.
+        True iff ``value`` names a file or directory that exists on disk.
 
         Requires:
             - value is a string or None
@@ -724,6 +707,9 @@ class RuntimeArgumentExpeditor:
         Ensures:
             - returns False for None/empty
             - returns os.path.exists() of the project-root-resolved value otherwise
+
+        This mirrors the podcast job's own research-path check in podcast_generator/job.py. Absolute values are tested as-is. Relative values are resolved against the project root.
+        A bare topic word ("KISS") returns False. That signals a special-handler arg that is present but unresolved. It must go through the fuzzy matcher, not be handed downstream as a path.
         """
         if not value:
             return False
@@ -739,14 +725,11 @@ class RuntimeArgumentExpeditor:
         ``cli_module`` (e.g. ``cosa.agents.podcast_generator.cli`` →
         "podcast generator"). Returns "agent" if neither is set.
 
-        Bugfix 2026-04-30 (Session b195a160 — Cluster J of 2026.04.29 postmortem):
-        the prior single-expression
-        ``agent_entry.get("display_name", agent_entry["cli_module"].split(...))``
-        eagerly evaluated the default arm even when display_name was present,
-        crashing with "'NoneType' object has no attribute 'split'" for the
-        ``test_suite`` registry entry where ``cli_module=None`` by design
-        (test_suite is invoked directly via API, not via CLI). See
-        src/rnd/v0.1.7/2026.04.30-postmortem-2026.04.29-all-test-run.md §J.
+        The lookup must not be a single expression such as
+        ``agent_entry.get("display_name", agent_entry["cli_module"].split(...))``.
+        That evaluates the default arm even when display_name is present. It would crash
+        with "'NoneType' object has no attribute 'split'" for the ``test_suite`` registry entry.
+        That entry's ``cli_module`` is None, because test_suite is invoked directly via API, not via CLI.
         """
         if spec.display_name:
             return spec.display_name
@@ -780,7 +763,7 @@ class RuntimeArgumentExpeditor:
             spec: ArgSpec for the target agent
             command_key: Key in JOB_ARG_CONTRACTS for user-visible-args lookup
             user_email: Target user for voice prompts
-            context: THIS call's ExpediteContext (see ExpediteContext)
+            context: This call's ExpediteContext (see ExpediteContext)
 
         Returns:
             dict or None: Approved args_dict or None on cancel
@@ -962,10 +945,7 @@ class RuntimeArgumentExpeditor:
         """
         Parse LORA raw argument string into a dictionary.
 
-        Handles formats:
-            - key="value"
-            - key='value'
-            - key=value (no quotes, stops at whitespace or comma)
+        Handles key="value", key='value', and key=value (no quotes, stops at whitespace or comma).
 
         Requires:
             - raw_args_str is a string (may be empty or None)
@@ -1008,16 +988,15 @@ class RuntimeArgumentExpeditor:
 
         Ensures:
             - Returns config override if present, else registry default, else None
-            - A REQUIRED user arg is never looked up in config (row fb49da08).
-              The "expeditor default value" key family covers optional args only
-              — budget / audience / audience_context / languages. Asking it for a
+            - A required user arg is never looked up in config.
+              The "expeditor default value" key family covers optional args only:
+              budget / audience / audience_context / languages. Asking it for a
               required arg like `query` or `prompt` always misses, and the miss
-              is not silent: splain_me then prints
-              "¿WUH? key [expeditor default value for research to podcast query]
-              NOT found in splainer" on every single run. Adding a splainer entry
-              would have documented a key that should never exist, so the fix is
-              to stop asking. A required arg has no default by definition — that
-              is what makes it required.
+              is not silent. splain_me then prints
+              `¿WUH? key [expeditor default value for research to podcast query] NOT found in splainer`
+              on every single run. Adding a splainer entry would document a key that
+              should never exist, so the code does not ask. A required arg has no
+              default by definition; that is what makes it required.
 
         Args:
             command_key: Routing command key (e.g., "agent router go to deep research")
@@ -1120,7 +1099,7 @@ class RuntimeArgumentExpeditor:
             user_email: Target user for notification
             response_default: Optional pre-filled default value for the input
             abstract: Optional markdown context shown in UI but not spoken
-            context: THIS call's ExpediteContext (see ExpediteContext)
+            context: This call's ExpediteContext (see ExpediteContext)
 
         Returns:
             str or None: User's response or None
@@ -1174,19 +1153,15 @@ class RuntimeArgumentExpeditor:
     def _ask_choice_for_arg( self, arg_name, question, options, user_email, abstract=None,
                              card_id=None, *, context=None ):
         """
-        Ask the user to pick a value for a missing arg from a fixed list, using the
-        SAME multiple-choice card the routing confirm uses — no new card, renderer,
-        or response shape. The request envelope is copied from
-        todo_fifo_queue._confirm_agentic_routing (MULTIPLE_CHOICE +
-        response_options={"questions":[…]}); the JSON answer parsing is copied from
-        the same site. Transport params (sender, timeout, token, job) follow the
-        sibling _ask_for_arg so the two asks behave identically.
+        Ask the user to pick a missing arg's value from a fixed list, on the multiple-choice card.
+
+        It uses the same card the routing confirm uses: no new card, renderer, or response shape. The request envelope and the JSON answer parsing are copied from todo_fifo_queue._confirm_agentic_routing (MULTIPLE_CHOICE with response_options={"questions":[...]}). Transport params (sender, timeout, token, job) follow the sibling _ask_for_arg, so the two asks behave identically.
 
         Requires:
             - arg_name is a non-empty string (used verbatim as the answer header)
             - question is the prompt text (spoken + shown)
             - options is a non-empty list of { "label": str, "description": str };
-              labels are unique and are the ONLY values the user can return
+              labels are unique and are the only values the user can return
             - user_email is the target user's email
 
         Ensures:
@@ -1271,9 +1246,9 @@ class RuntimeArgumentExpeditor:
 
     def _describe_candidate( self, rel_path ):
         """
-        Human hint for a candidate document: its folder, plus a yyyy.mm.dd date
-        parsed from the filename prefix when present. Cosmetic only — the label
-        carries the identity.
+        Human hint for a candidate document: its folder, plus its filename date when present.
+
+        The date is a yyyy.mm.dd prefix parsed from the filename. This is cosmetic only; the label carries the identity.
 
         Requires:
             - rel_path is a non-empty relative path string
@@ -1291,10 +1266,7 @@ class RuntimeArgumentExpeditor:
         """
         The spoken question on the document choice card, in the calling agent's terms.
 
-        ⚠️ THE PROXY ANSWER FILES MATCH ON THIS STRING. src/conf/notification-proxy-scripts/
-        keys its entries by question_pattern, so changing the wording here without
-        updating podcast.json / presentation.json makes an automated run hang at the
-        card with nothing able to answer it.
+        The proxy answer files match on this exact string. src/conf/notification-proxy-scripts/ keys its entries by question_pattern. Changing the wording here without updating podcast.json and presentation.json makes an automated run hang at the card, with nothing able to answer it.
 
         Requires:
             - agent_display_name is the registry display name, or None
@@ -1323,17 +1295,9 @@ class RuntimeArgumentExpeditor:
     def _choose_document_from_matches( self, matches, docs_map, user_email,
                                        arg_name="research", agent_display_name=None, *, context=None ):
         """
-        Present 2..MAX_CHOICE_OPTIONS candidate documents as the standard choice
-        card and map the pick back to an absolute path. The doc-choice surface every
-        fuzzy_file_match consumer uses, once the podcast fence came off (row 5bc22180).
+        Show 2..MAX_CHOICE_OPTIONS candidate documents on the choice card; return the pick's path.
 
-        THE CARD SPEAKS AS THE CALLING AGENT. It used to hardcode the arg name
-        "research" and the question "Which document should I use for the podcast?",
-        which was invisible while podcast was the only consumer. Row 5bc22180 gave
-        presentation the card, and the hardcoding immediately became a presentation
-        user being asked about the podcast under a card titled "Missing: research" —
-        the same defect row ea184d06 fixed on the OTHER two asks and never reached
-        here. The defaults keep podcast's wording verbatim, so its card does not move.
+        Every fuzzy_file_match consumer uses this document-choice surface.
 
         Requires:
             - matches is a list of relative-path keys into docs_map (caller has
@@ -1345,7 +1309,7 @@ class RuntimeArgumentExpeditor:
               keep the podcast phrasing
 
         Ensures:
-            - Returns the chosen candidate's ABSOLUTE path on a pick
+            - Returns the chosen candidate's absolute path on a pick
             - Returns None on Cancel/timeout/failure
             - Returns DOC_CHOICE_DESCRIBE_SENTINEL when the user opts to describe
             - Never silently picks a file: a label outside the fixed option set
@@ -1358,6 +1322,8 @@ class RuntimeArgumentExpeditor:
 
         Returns:
             str or None: absolute path, DOC_CHOICE_DESCRIBE_SENTINEL, or None
+
+        The card speaks as the calling agent. It once hardcoded the arg name "research" and the question "Which document should I use for the podcast?". That was invisible while podcast was the only consumer. When presentation got the card, a presentation user was asked about the podcast under a card titled "Missing: research". The other two asks had already been fixed for the same defect. The defaults keep podcast's wording verbatim, so its card does not move.
         """
         context = context if context is not None else ExpediteContext()
         options      = []
@@ -1465,10 +1431,7 @@ class RuntimeArgumentExpeditor:
         """
         Collect multiple missing arguments in a single batch notification.
 
-        Sends all questions at once via OPEN_ENDED_BATCH notification type.
-        User sees all questions on one screen and submits all answers together.
-        When defaults are available, text inputs are pre-filled so the user
-        can accept by simply hitting Submit All.
+        Sends all questions at once via OPEN_ENDED_BATCH notification type. The user sees all questions on one screen and submits all answers together. When defaults are available, text inputs are pre-filled so the user can accept by hitting Submit All.
 
         Requires:
             - batchable_args is a list of arg names (len > 1)
@@ -1476,20 +1439,13 @@ class RuntimeArgumentExpeditor:
             - user_email is the target user's email
 
         Ensures:
-            - Returns ``( answers, reason )`` — ALWAYS a 2-tuple, never a bare value
+            - Returns ``( answers, reason )``, always a 2-tuple and never a bare value
             - answers is a dict of { arg_name: value } with reason BATCH_ANSWERED,
               or None with one of BATCH_DECLINED / BATCH_UNREACHABLE /
               BATCH_MALFORMED / BATCH_INCOMPLETE
             - Questions include default_value when resolved default is not None
 
-        ⚠️ THE REASON IS THE POINT (bug 2aaab1bf). This used to return a bare
-        ``None`` for five structurally different outcomes, and its docstring said
-        so out loud: "Returns None on timeout, error, or cancellation" — three
-        meanings, one value. The caller could not tell them apart, so it printed
-        "User cancelled batch collection" for all of them. A 503 (the prompt could
-        not be delivered, so the user was never asked) killed the job as
-        "cancelled by user". Only BATCH_DECLINED is a human decision; treating any
-        other reason as one asserts an intent the user never expressed.
+        The reason matters. This used to return a bare ``None`` for five structurally different outcomes: three meanings, one value. The caller could not tell them apart, so it printed "User cancelled batch collection" for all of them. A 503 killed the job as "cancelled by user", although the prompt was never delivered and the user was never asked. Only BATCH_DECLINED is a human decision. Treating any other reason as one asserts an intent the user never expressed.
 
         Args:
             batchable_args: List of arg names to collect
@@ -1590,16 +1546,7 @@ class RuntimeArgumentExpeditor:
         """
         Use fuzzy file matching to find a document by user description.
 
-        Searches the user's deep research directory AND additional directories
-        from the agent-specific source search paths config key, falling back
-        to 'podcast generator source search paths'.
-
-        Auto-resolve (row bd0ce120): when the user already named the document in
-        their original request, resolve THAT without a prompt — but ONLY skip the
-        "which document?" ask when it lands on exactly one file. Zero or 2+ matches
-        fall through to the interactive ask, exactly as before. The chosen file is
-        NAMED to the user downstream (the confirmation summary; C's grace window),
-        so a wrong auto-resolve is always visible and vetoable — never silent.
+        Searches the user's deep research directory and the extra directories from the agent-specific source search paths config key. It falls back to 'podcast generator source search paths'.
 
         Requires:
             - user_email is a valid email
@@ -1609,23 +1556,22 @@ class RuntimeArgumentExpeditor:
               auto-resolves to exactly one file
             - Returns None if no matches found or user cancels
 
+        Auto-resolve: when the user already named the document in the original request, resolve that without a prompt. The "which document?" ask is skipped only when it lands on exactly one file. Zero or 2+ matches fall through to the interactive ask. The chosen file is named to the user downstream (the confirmation summary and its grace window), so a wrong auto-resolve is always visible and vetoable, never silent.
+
         Args:
             user_email: User's email (determines research directory)
             agent_display_name: Agent name for agent-specific search paths
             original_question: The user's original voice command; when it resolves to
                 exactly one file, the document prompt is skipped (auto-resolve)
             arg_name: The argument being resolved, used as the prompt card's title
-                ("Missing: <arg_name>"). Defaults to "research" — the podcast
-                field — so existing callers are unchanged.
+                ("Missing: <arg_name>"). Defaults to "research", the podcast field.
             ask_question: The agent's own wording for the "which document?" ask,
                 normally the registry's fallback_questions entry for arg_name.
-                None falls back to the podcast phrasing (row ea184d06: this used
-                to be hardcoded, so a presentation job asked about "the podcast").
+                None falls back to the podcast phrasing, not the calling agent's.
             file_arg: the argument's own typed declaration from the registry
-                ({ kind, search_roots, search_paths_key }) — row a1420538. It says
-                WHERE this argument's files live. None keeps the shared default
-                roots and the podcast config key, which is what every caller got
-                before any argument declared anything.
+                ({ kind, search_roots, search_paths_key }). It says where this
+                argument's files live. None keeps the shared default roots and
+                the podcast config key.
 
         Returns:
             str or None: Full path to selected document
@@ -1822,9 +1768,9 @@ class RuntimeArgumentExpeditor:
 
     def _match_description_to_files( self, description, docs_map, config_mgr, project_root ):
         """
-        Resolve a free-text description to candidate document paths — NO prompts.
+        Resolve a free-text description to candidate document paths, with no prompts.
 
-        The shared matching core used by BOTH the auto-resolve pre-step and the
+        The shared matching core used by both the auto-resolve pre-step and the
         interactive ask in _handle_fuzzy_file_match, so there is one matching
         behaviour instead of two. Never asks the user; pure resolution.
 
@@ -1835,13 +1781,13 @@ class RuntimeArgumentExpeditor:
         Ensures:
             - Returns a 2-tuple ( status, matches ):
                 ( "exact",     [ rel_path ] )   deterministic hit (len 1): a rel-path/
-                                                basename hit, OR a strictly-dominant
-                                                keyword-overlap winner (row 8e70a34d)
+                                                basename hit, or a strictly-dominant
+                                                keyword-overlap winner
                 ( "fuzzy",     [ rel, ... ] )   LLM matches validated against docs_map (0+)
                 ( "too_broad", [] )             candidate set too large + no keyword overlap
                 ( "error",     [] )             LLM/parse failure
             - matches are relative-path keys into docs_map (caller maps to abs)
-            - docs_map is NOT mutated (the keyword prefilter runs on a copy)
+            - docs_map is not mutated (the keyword prefilter runs on a copy)
 
         Args:
             description: The text to resolve (original question, or a typed answer)
@@ -1919,11 +1865,9 @@ class RuntimeArgumentExpeditor:
 
     def _handle_tfe_checkpoint_match( self, user_email, user_description=None, *, context=None ):
         """
-        Fuzzy-match a user's natural-language description of a stalled TFE job
-        to a resume target (job ID or plan doc path).
+        Fuzzy-match a user's description of a stalled TFE job to a resume target.
 
-        Session 9056c113 doc 16 Phase 2. Reuses resume_resolver infrastructure
-        (list_resume_candidates + fuzzy_match_candidates) from doc 15 Phase 2.
+        The target is a job ID or a plan doc path. It reuses the resume_resolver infrastructure (list_resume_candidates and fuzzy_match_candidates).
 
         Requires:
             - user_email is a valid email address (scopes candidate pool)
@@ -2041,7 +1985,7 @@ def quick_smoke_test():
     Quick smoke test for RuntimeArgumentExpeditor.
 
     Tests imports, arg parsing, registry lookup, and help capture.
-    Does NOT require a running server or LLM.
+    Does not require a running server or LLM.
     """
     cu.print_banner( "Runtime Argument Expeditor Smoke Test", prepend_nl=True )
 

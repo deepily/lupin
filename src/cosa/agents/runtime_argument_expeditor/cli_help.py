@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """
-CLI --help surface for agentic packages whose `cli_module` is the PACKAGE
-(2026.08.15-agent-registration-single-source.md §4, phase 3).
+CLI --help surface for agentic packages whose `cli_module` is the package itself.
 
-Three agentic packages named a `cli_module` that had no runnable entry point
-(`cosa.agents.claude_code`, `…bug_fix_expediter`, `…test_fix_expediter`). Because
-`get_cli_help` returns `result.stdout or result.stderr or ""` and CACHES it, the
-string "No module named …__main__" became those agents' cached help text and was
-injected into the phi4 argument-extraction prompt — extraction ran against an error
-message.
+Three agentic packages named a `cli_module` that had no runnable entry point. They were
+`cosa.agents.claude_code`, `cosa.agents.bug_fix_expediter` and `cosa.agents.test_fix_expediter`.
+`get_cli_help` returns `result.stdout or result.stderr or ""` and caches it. So the string
+"No module named ...__main__" became those agents' cached help text. It was injected into the
+phi4 argument-extraction prompt, and extraction ran against an error message.
 
-This builds each package's `python -m <pkg> --help` output FROM its registry entry,
-so the help NAMES the command's declared arguments and stays in sync with the arg
-spec by construction — it cannot drift into a stub that merely exits 0. Each
-package's `__main__.py` is two lines that call `run_help_for_module( __package__ )`.
+This module builds each package's `python -m <pkg> --help` output from its registry entry.
+The help names the command's declared arguments and stays in sync with the argument spec.
+It cannot drift into a stub that merely exits 0. Each package's `__main__.py` is two lines
+that call `run_help_for_module( __package__ )`.
+
+Design: src/rnd/v0.2.0/2026.08.15-agent-registration-single-source.md
 """
 
 import argparse
@@ -29,7 +29,7 @@ def build_parser( command_key ):
         - command_key is a key of JOB_ARG_CONTRACTS
 
     Ensures:
-        - Every declared required_user_arg is a REQUIRED --option whose dest is the
+        - Every declared required_user_arg is a `required` --option whose dest is the
           raw arg name, so `--help` prints the name (as metavar) and its description
         - arg_mapping targets not already required are added as optional --options
         - The parser's --help names each declared required argument

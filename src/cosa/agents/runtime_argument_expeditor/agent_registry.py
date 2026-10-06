@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Agent Registry for Runtime Argument Expeditor.
+Agent registry for the runtime argument expeditor.
 
-Maps agentic routing commands to their CLI modules, required arguments,
-argument name mappings (LORA -> CLI), fallback questions for missing args,
-and fallback default values for pre-populating batch question inputs.
+Maps agentic routing commands to their CLI modules, required arguments and argument name
+mappings (LoRA to CLI). It also holds fallback questions for missing arguments, and fallback
+default values that pre-populate batch question inputs.
 
-Also provides CLI --help capture with per-process-lifetime caching.
+It also provides CLI --help capture with per-process-lifetime caching.
 """
 
 import json
