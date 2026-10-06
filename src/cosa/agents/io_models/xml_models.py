@@ -1162,7 +1162,10 @@ class CodeBrainstormResponse( BaseXMLModel ):
     Handles XML responses for agents that generate code with detailed reasoning.
     Expected XML: a response element with thoughts, brainstorm (idea1, idea2, idea3), evaluation, code,
     returns, example and explanation. The code element holds one line tag per line: imports first,
-    then the function, ending with a return of the variable `solution`.
+    then an empty line tag as a blank line, then the function, which may take optional arguments.
+    The function ends with a return of the variable `solution`, followed by another empty line tag.
+    The returns element holds the object type of `solution`.
+    The example element holds a call that assigns its result to `solution`.
     Used by agents requiring brainstorming workflows:
     - DateAndTimeAgent: Time-based code generation with approach analysis
     - MathAgent: Mathematical code generation with solution exploration
@@ -2890,7 +2893,7 @@ class TFEResumeMatchResponse( BaseXMLModel ):
     TFE resume fuzzy-match response model: ranked job IDs for a described stalled job.
 
     Handles XML responses that match a user's description of a stalled Test Fix Expediter job against candidate job IDs.
-    The matches tag holds comma-separated TFE job IDs, such as tfe-7c25082a::user@example.com, ranked by relevance.
+    The response element holds one matches tag, which holds comma-separated TFE job IDs, such as tfe-7c25082a::user@example.com, ranked by relevance.
     It holds an empty string if nothing matches.
     Used by the TFE resume resolver for voice and natural-language resume path resolution.
     """
