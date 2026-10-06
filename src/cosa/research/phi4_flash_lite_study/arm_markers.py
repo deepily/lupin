@@ -75,9 +75,9 @@ def assert_vertex_arm_markers( client ):
     """
     Assert all four markers by name, raising AssertionError naming the one that failed.
 
-    It raises AssertionError, not ArmNotVerified, because the prove-it-red control in
-    the unit test matches on that type and on the marker name in the message.
-    `check_arm_markers` below is the harness-facing wrapper that converts.
+    It raises AssertionError because the prove-it-red control in the unit test matches on
+    that type and the marker name. `check_arm_markers` below is the harness-facing wrapper
+    that converts it to ArmNotVerified.
 
     Requires:
         - client is the object the factory returned for the Flash-Lite arm

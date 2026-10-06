@@ -594,6 +594,12 @@ def pair_records( arm_a_records, arm_b_records ):
           and snapshot_sha256
 
     Ensures:
+        - pairing on `row_index` would look perfectly paired: the length and index guard
+          passes and nothing raises, yet every McNemar cell would compare two populations.
+          That is the exact failure the freeze exists to prevent
+        - that mispairing is reachable without anyone doing anything odd: `--arm` runs one
+          arm at a time, `--seed` has a default, and a re-freeze between two invocations
+          changes the population
         - returns a list of { row_index, frozen_index, body, <arm_a>, <arm_b> } dicts
         - raises rather than silently truncating when the arms disagree about which
           rows they saw, or about which snapshot those rows came from; a zip()
@@ -696,6 +702,8 @@ def latency_summary( records ):
         - records came from `replay_arm`, so each carries elapsed_seconds and meta
 
     Ensures:
+        - `elapsed_seconds` times the whole `_apply_dm_tutor` call: claim counting, the model
+          call, the pointer restore and the guards
         - returns { answered: {...}, all_fired: {...} }, each with n / median / mean
         - a median of None where no row qualifies, never a 0.0 that reads as "fast"
 
@@ -738,6 +746,8 @@ def latency_ratio( arm_a_records, arm_b_records, arm_a="phi_4", arm_b="flash_lit
           through `pair_records` first if that is not already established
 
     Ensures:
+        - `paired_median_ratio` is reported beside the headline because it is robust to one
+          arm meeting a few very slow bodies
         - returns per-arm summaries plus both ratios, and names which arm is faster
         - `> 1` means arm A took longer; `< 1` means arm B did
         - a ratio of None where it cannot be formed (no qualifying rows, or a zero

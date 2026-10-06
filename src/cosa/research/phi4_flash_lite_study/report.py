@@ -10,7 +10,7 @@ re-argue them.
 What it refuses to do:
   - no fabrication rate unless --denominator is passed. The denominator (narrow or wide)
     is the owner's ruling, and a reader that picks one silently publishes that decision
-    under his name.
+    under the owner's name.
   - no p-value unless --floor is passed and the discordant count clears it. The
     operational floor is also the owner's, stated before arm 1. The arithmetic minimum
     is 6: with b+c=5 the best achievable p is 0.0625, which cannot clear 0.05.
@@ -183,6 +183,8 @@ def latency_block( records ):
         - records carry `arm`, `meta` and `elapsed_seconds`
 
     Ensures:
+        - `elapsed_seconds` wraps the whole `_apply_dm_tutor` call: claim counting, the model
+          call, the pointer restore and the guards. On a fired row the model call dominates
         - returns { arm: {...} } with n / median / mean / p90 / min / max / total, and
           a "ratio" entry giving flash_lite ÷ phi_4 on the median and on the total when
           both arms are present

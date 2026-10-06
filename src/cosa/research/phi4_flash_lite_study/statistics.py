@@ -264,6 +264,8 @@ def compare_arms( b, c, operational_floor, arm_a="phi_4", arm_b="flash_lite",
         - operational_floor was stated before arm 1 ran
 
     Ensures:
+        - reports the fact and leaves the judgement of good or bad to a reader who knows what
+          the outcome means
         - returns a dict carrying the test result, the Wilson interval, the
           must-fail control, the floor that was applied, and the scipy version
         - raises rather than returning a verdict when the floor is unmet

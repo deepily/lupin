@@ -133,14 +133,16 @@ def assert_dir_is_not_live_corpus_dir( candidate_dir, live_path=None ):
     """
     Refuse to read a replay set out of, or write one into, the live corpus's dir.
 
-    The file-level guard compares file names, so a caller aimed at the live directory
-    passes it and gets a confusing FileNotFoundError, not a refusal. Nothing in the live
-    directory is a frozen replay set, so the directory itself is refused.
+    The file-level guard compares the snapshot file with the live file by realpath and
+    ( st_dev, st_ino ). Their names differ (`dm_replay_frozen.jsonl`, `dm_traffic.jsonl`),
+    so a caller aimed at the live directory passes it and gets a confusing FileNotFoundError.
 
     Requires:
         - candidate_dir is a string path
 
     Ensures:
+        - nothing in the live directory is a frozen replay set, so the directory itself is
+          refused, not just the live file
         - returns the realpath of candidate_dir when it is not the live corpus's dir
         - catches the directory by realpath and by ( st_dev, st_ino ), for the same
           bind-mount reason as the file-level guard
