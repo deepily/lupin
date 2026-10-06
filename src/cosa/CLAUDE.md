@@ -161,9 +161,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Script: `src/scripts/backup.sh` - Configured for COSA → DATA02
 - Config: `src/scripts/conf/rsync-exclude.txt` - Exclusion patterns
 
-**Meta-Workflow Tools**:
-- `/plan-workflow-audit` - Execution compliance audit with automatic remediation
-
 **Custom Workflows** (legacy - preserved):
 - `/cosa-session-end` - COSA-specific session end workflow (legacy)
 
