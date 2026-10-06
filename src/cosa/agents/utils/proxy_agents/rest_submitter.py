@@ -6,7 +6,7 @@ Standalone function for POSTing responses to the Lupin notification API.
 Shared by notification proxy, decision proxy, and any future proxy agents.
 
 Dependency Rule:
-    This module NEVER imports from notification_proxy, decision_proxy, or swe_team.
+    This module never imports from notification_proxy, decision_proxy, or swe_team.
 
 References:
     - src/cosa/rest/routers/notifications.py (POST /api/notify/response)
@@ -73,7 +73,7 @@ def submit_notification_response(
     Ensures:
         - POSTs to the specified endpoint
         - sends `Authorization: <authorization>` when one is given. The answer door
-          refuses an uncredentialed caller with 401 (row e20e249a), so a proxy that
+          refuses an uncredentialed caller with 401, so a proxy that
           passes None will have every answer refused
         - Returns True on success (HTTP 200)
         - Returns False on any error

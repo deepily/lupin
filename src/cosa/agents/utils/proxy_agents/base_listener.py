@@ -10,7 +10,7 @@ Subclasses (notification proxy, decision proxy) pass their own
 subscribed_events list and on_event callback.
 
 Dependency Rule:
-    This module NEVER imports from notification_proxy, decision_proxy, or swe_team.
+    This module never imports from notification_proxy, decision_proxy, or swe_team.
 
 References:
     - src/scripts/debug/debug_websocket_auth_validation.py (client pattern)
@@ -43,8 +43,9 @@ _AUTH_LOGIN_TIMEOUT_SECONDS = 30
 
 class BaseWebSocketListener:
     """
-    Async WebSocket client that connects, authenticates, subscribes
-    to events, and dispatches them to a callback.
+    Async WebSocket client that logs in, subscribes to events, and dispatches them.
+
+    Each received event goes to the on_event callback.
 
     Requires:
         - email is a valid user email
@@ -85,7 +86,7 @@ class BaseWebSocketListener:
 
         Ensures:
             - Stores connection parameters
-            - Does NOT connect (call run() to start)
+            - Does not connect (call run() to start)
 
         Args:
             email: User email for JWT authentication
@@ -125,17 +126,18 @@ class BaseWebSocketListener:
         """
         The `Bearer <jwt>` this listener logged in with, or None before its first login.
 
-        Row e20e249a: the answer door requires a credential, and the responder borrows this
-        one so every answer the proxy posts carries the login it already holds.
+        The answer door requires a credential. The responder borrows this one, so every
+        answer the proxy posts carries the login it already holds.
         """
         return self._token
 
     async def _on_connected( self ):
         """
-        Connect hook — fired once per successful connect, after auth_success and
-        before the receive loop. Default no-op; subclasses override to run
-        catch-up on connect (e.g. the CC listener pulls answers owed to its
-        persona that landed while it was disconnected — §4.4).
+        Hook fired once per successful connect, after auth_success and before receive loop.
+
+        The default does nothing. Subclasses override it to run catch-up on connect.
+        For example, the CC listener pulls answers owed to its persona that landed
+        while it was disconnected.
 
         Ensures:
             - default implementation does nothing (pure live subscribers)
@@ -146,23 +148,16 @@ class BaseWebSocketListener:
         """
         Seconds to wait before the next reconnect attempt.
 
-        Exponential backoff, capped, with DOWNWARD-ONLY jitter so that nine listeners
-        dropped by the same bounce do not all wake within milliseconds of each other
-        (measured 2026-08-02: 9 sessions inside 8ms — a thundering herd against
-        /auth/login by construction, because nothing in the delay was random).
-
-        Jitter never lengthens a wait. RECONNECT_MAX_DELAY stays a real maximum, which
-        is what the server-side settle gate depends on: it fires on coverage, so it
-        waits for the SLOWEST session, so its deadline is derived from this cap. A
-        symmetric jitter that could overshoot the cap would silently invalidate that
-        deadline.
+        Backoff is exponential and capped. Jitter is downward only, so listeners dropped by one bounce do not all retry together against /auth/login.
+        Jitter never lengthens a wait, so `RECONNECT_MAX_DELAY` stays a real maximum.
+        The server-side settle gate waits for the slowest session and derives its deadline from that cap.
 
         Requires:
             - self._attempt has already been incremented for this retry
 
         Ensures:
             - returns a float in ( 0, RECONNECT_MAX_DELAY ]
-            - never exceeds RECONNECT_MAX_DELAY, jitter included
+            - never exceeds RECONNECT_MAX_DELAY, jitter included, since overshooting breaks the settle deadline
             - grows exponentially until it reaches the cap
         """
         base = min(
@@ -173,16 +168,11 @@ class BaseWebSocketListener:
 
     def _log( self, message ):
         """
-        Emit one listener line. Overridable so a subclass can route it somewhere
-        durable and TIMESTAMPED.
+        Print one listener line; a subclass overrides it to route lines to a timestamped log.
 
-        The reconnect lines below used bare `print`, which reaches stderr and the
-        per-session log but NOT the timestamped centralized log. That is why the
-        settle-deadline arithmetic could not be closed from the record: a grep for a
-        timestamped reconnect line over the whole 118 MB centralized listener log
-        returns zero matches, so the downtime behind every measured bounce had to be
-        inferred from arrival times instead of read off a clock
-        (src/rnd/v0.1.9/2026.08.02-settle-deadline-arithmetic-30-vs-40.md §4).
+        Bare `print` reaches stderr and the per-session log but not the timestamped
+        centralized log. Reconnect downtime then has to be inferred from arrival times
+        instead of read off a clock, so the settle deadline cannot be checked.
 
         Requires:
             - message is a string
@@ -206,7 +196,7 @@ class BaseWebSocketListener:
             - Stops after RECONNECT_MAX_ATTEMPTS consecutive failures
             - Returns cleanly when stop() is called
             - Every reconnect decision is emitted through _log, so a subclass that
-              timestamps its log records WHEN each backoff wake fired
+              timestamps its log records when each backoff wake fired
         """
         self._running = True
         self._attempt = 0

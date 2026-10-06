@@ -6,7 +6,7 @@ Connection defaults, reconnection parameters, and credential resolution
 used by both the notification proxy and decision proxy.
 
 Dependency Rule:
-    This module NEVER imports from notification_proxy, decision_proxy, or swe_team.
+    This module never imports from notification_proxy, decision_proxy, or swe_team.
 """
 
 import os
@@ -95,7 +95,7 @@ def get_anthropic_api_key():
     Resolve Anthropic API key using the firewalled pattern.
 
     Requires:
-        - ANTHROPIC_API_KEY_FIREWALLED env var is set, OR
+        - ANTHROPIC_API_KEY_FIREWALLED env var is set, or
         - src/conf/keys/anthropic-api-key-firewalled file exists
 
     Ensures:

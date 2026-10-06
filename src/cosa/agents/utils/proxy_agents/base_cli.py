@@ -6,7 +6,7 @@ Provides common argparse arguments used by all proxy agent CLI entry points:
 connection settings, credentials, debugging flags, and dry-run mode.
 
 Dependency Rule:
-    This module NEVER imports from notification_proxy, decision_proxy, or swe_team.
+    This module never imports from notification_proxy, decision_proxy, or swe_team.
 """
 
 from cosa.agents.utils.proxy_agents.base_config import (
@@ -25,7 +25,7 @@ def add_common_args( parser ):
     Ensures:
         - Adds --host, --port, --email, --password, --session-id,
           --debug, --verbose, --dry-run arguments
-        - Does NOT call parse_args() — caller does that
+        - Does not call parse_args(); the caller does that
 
     Args:
         parser: argparse.ArgumentParser to add arguments to

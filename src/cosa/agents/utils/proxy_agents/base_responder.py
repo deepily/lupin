@@ -7,7 +7,7 @@ shared by all proxy agents. Subclasses implement handle_event() with
 domain-specific routing logic.
 
 Dependency Rule:
-    This module NEVER imports from notification_proxy, decision_proxy, or swe_team.
+    This module never imports from notification_proxy, decision_proxy, or swe_team.
 
 References:
     - src/cosa/rest/routers/notifications.py (POST /api/notify/response)
@@ -64,7 +64,7 @@ class BaseResponder( ABC ):
             - Stores connection parameters
             - Initializes empty stats dict
             - authorization_fn starts as None; the proxy's entry point wires it to its
-              listener's login (row e20e249a)
+              listener's login
             - Subclass must add strategies after calling super().__init__()
 
         Args:

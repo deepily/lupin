@@ -7,7 +7,7 @@ Used by both the notification proxy (expediter rules, LLM fallback) and
 the decision proxy (trust-based gating, engineering classifier).
 
 Dependency Rule:
-    This module NEVER imports from notification_proxy, decision_proxy, or swe_team.
+    This module never imports from notification_proxy, decision_proxy, or swe_team.
 """
 
 from typing import Any, Optional, Protocol, runtime_checkable
