@@ -422,3 +422,9 @@ def test_caps_words_skips_an_enum_member_in_an_example_but_not_prose_after_a_ful
 
 def test_caps_words_still_flags_a_capitalised_word_with_no_identifier_before_the_dot():
     assert mc.caps_words( "see (1).NOT and ...ONLY", WORDS ) == [ "NOT", "ONLY" ]
+
+
+def test_an_all_lowercase_prose_line_with_an_equals_sign_is_skipped_as_a_chosen_limit():
+    assert tr.reference_findings( "phase 1 = the first stage.", "a.py", 1 ) == []
+    assert [ f.message for f in tr.reference_findings( "set phase 2 = done before launch", "a.py", 1 ) ] == []
+    assert [ f.message for f in tr.reference_findings( "done before launch, phase 2 = done", "a.py", 1 ) ] == [ "bare reference 'phase 2'" ]

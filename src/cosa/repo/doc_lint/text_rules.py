@@ -276,6 +276,7 @@ def is_config_key_match( text, match ):
     Ensures:
         - True when the match lies wholly within the key of a line shaped like "lowercase key words = value", such as an INI line
         - the key must be all lowercase, so a capitalised step word before an equals sign in prose is still a match
+        - an all-lowercase prose line with " = " is also skipped; that is a chosen limit, since a lowercase key and lowercase prose cannot be told apart
         - a match in the value, or on a line without " = ", gives False
 
     Raises:
@@ -299,7 +300,7 @@ def reference_findings( text, path, first_line ):
         - one Finding per bare reference, at its line
         - a section mark is bare unless a path sits beside it in the same paragraph
         - a case label or step that the text defines itself is not a finding
-        - a match inside the key of a configuration line, is not a finding
+        - a match inside the key of a configuration line is not a finding
         - a bare git sha is reported under the same rule; whether it should be is pending Rick's ruling
         - a sha that sits inside an already reported row, bug or task reference is not reported twice
 
