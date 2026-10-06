@@ -147,7 +147,7 @@ def _resolve_stamp( value, flag ):
     So `--looked-in yesterday` would land under a success banner and leave the manager poked as before. Refuse it at the front door, where the typo is.
 
     A zone-less timestamp is refused rather than assumed to be UTC. `_parse_iso` assumes UTC, but `_iso_age_seconds` calls `.timestamp()` on the naive datetime, which Python resolves in local time.
-    On a UTC-4 host one naive stamp dates 14400 seconds apart depending on the reader, most of a debounce window. A guessed zone gives an error that reads as a plausible timestamp and debounces the wrong way.
+    On a UTC-4 host one naive stamp dates 14400 seconds apart depending on the reader, most of a debounce window. A guessed zone gives an error that reads as a plausible timestamp and debounces the wrong way. A caller who knows the zone can always state it, so the verb should not pick it.
 
     `"now"` resolves through `_now()` to aware UTC, as `write_hold` writes `held_at`, so the house format is offset-bearing and only input that does not meet it is refused.
     One `fromisoformat` call gives both the datable and the offset verdict, because two parsers are how two guards end up disagreeing about one value.
@@ -421,8 +421,8 @@ def cmd_clear( args ):
           to a different file than this id names: the orphan is named, not guessed at
 
     Why exact path only: `read_hold` falls back to a prefix match so a hold written under the short bridge id is still found by a hook reading the full id, but `clear_hold` keys on the exact path.
-    The shipped code let the prefix-tolerant guard wave the call through while the exact-path action unlinked a file that was not there. A session clearing with the short id was told its hold was released while it stayed honored.
-    Clearing whatever the reader resolved is worse than the gap, because it makes a delete decided by a wildcard. An id naming no file could destroy another session's live hold.
+    The shipped code let the prefix-tolerant guard wave the call through while the exact-path action unlinked a file that was not there. A session clearing with the short id was told its hold was released while it stayed honored. That surviving hold is what the janitor later finds as an unaccountable hold file.
+    Clearing whatever the reader resolved is worse than the gap, because it makes a delete decided by a wildcard. An id naming no file could destroy another session's live hold. Its owner would then be poked out of a quiescence it correctly declared, the ping-storm this verb exists to prevent.
     With several prefix matches the longest-then-lexical rule is arbitrary for choosing what to destroy. So when the resolver disagrees the verb names the orphans and exits non-zero: it reports the asymmetry and does not guess.
     After an exact delete it asks the hook's reader again. When the id still resolves to a hold, it prints the survivors and returns `EXIT_STILL_HELD`, deleting nothing else.
     It also names any non-schema fields the delete destroyed, so a deliberate deletion stays allowed but is never silent.

@@ -10,6 +10,7 @@ why they do not follow holds and mementos to /tmp.
 This module owns the three milder families. The fourth, `.dm-inbox-hwm-*`, keeps its
 own janitor (`dm_inbox_hwm_janitor.py`), because deleting a live one silently
 swallows DMs. That correctness-critical path is left untouched here.
+Folding all four families onto this one mechanism is planned as a follow-up once this is proven in production.
 
 Family `.ask-answer-hwm-*` (writer answer_catchup.py): deleting a live one causes a benign duplicate, since owed answers re-surface.
 Family `.task-store-map-*` (writer task_store_map.py): regenerable, recreated on next need.

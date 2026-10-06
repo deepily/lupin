@@ -202,6 +202,7 @@ def emit_idle_prompt( session_id, persona=None, ts=None, base_dir=None ):
         - Creates the fleet dir if missing (parents, idempotent)
         - Returns True on a successful append; False on any write/serialization
           failure, and never raises into the caller (fire-and-forget; TTS unaffected)
+        - The event is the strongest cc-native passive liveness beacon
     """
     try:
         record = {

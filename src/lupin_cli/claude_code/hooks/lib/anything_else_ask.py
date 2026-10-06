@@ -11,7 +11,7 @@ Returns a structured AnythingElseResult that each caller interprets:
     - idle_waiter: tmux-injects qualifier if present, exits on yes, schedules
       successor on no/timeout
 
-Design: src/rnd/v0.1.7/2026.04.29-idle-aware-stop-hook/01-design.md
+Design: src/rnd/v0.1.7/2026.04.29-idle-aware-stop-hook/01-design.md, under the Components section
 """
 
 import subprocess

@@ -170,7 +170,7 @@ def is_user_deferred( now_epoch, user_chase_until_epoch ):
     Return whether the gate's user is deferred to a future scheduled chase right now.
 
     "Rick is unreachable until T" is one fact about a person, not a property of each gate.
-    The IO shell derives `user_chase_until_epoch` from the store (soonest future next_chase_ts among the session's blocked_by user rows).
+    The IO shell derives `user_chase_until_epoch` from the store (soonest future next_chase_ts among the session's blocked_by user rows); a seat can cause it via task_transition.
     While deferred, every open gate to that user inherits it, so no hold-file gate ever needs linking to a store row.
 
     Requires:
@@ -194,7 +194,7 @@ def pokeable_gates( gates, now_epoch, user_chase_until_epoch=None ):
     """
     Return the open gates eligible to be surfaced or re-asked, after relief-valve filtering.
 
-    An open gate is pokeable iff its user is not deferred and it is neither chase-deferred (a future next_chase_ts) nor reask-capped.
+    An open gate is pokeable iff its user is not deferred and it is neither chase-deferred (a future next_chase_ts) nor reask-capped. Reask-capped means the re-ask budget is spent with no scheduled chase.
     The proactive-manager re-surface consults this set; due_gates filters it further by each gate's own re-ask cadence.
 
     Requires:

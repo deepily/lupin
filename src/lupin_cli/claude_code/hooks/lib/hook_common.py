@@ -311,6 +311,7 @@ def _read_email_from_config_file():
 
     The recipient lives at `[<active-env>] global_notification_recipient`, where the active env
     is `[environments] default`. This backstops get_target_email(); env keeps precedence.
+    The file is the host's INI-format Lupin config, the one the cosa-voice tooling also reads.
 
     Requires:
         - (none)

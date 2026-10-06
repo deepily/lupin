@@ -56,7 +56,7 @@ def atomic_write_json( path, data ):
     """
     Write `data` as JSON to `path` so a reader sees only a whole old or whole new document.
 
-    Two racing writers can splice a file. Both fds truncate at open and keep their own offsets, leaving one valid document plus a longer one's tail.
+    Two racing writers can splice a file. Both fds truncate at open and keep their own offsets, leaving one valid document plus a longer one's tail. A new document shorter than the old one is routine, since every bridge write is a read-modify-write that can shrink it.
     A spliced bridge will not parse, so every persona resolver ignores it. The seat then becomes unaddressable by `dm_send`; the racers are often one seat.
     `os.replace` is atomic on POSIX, so concurrent writers degrade to last-writer-wins, and no writer has to remember anything: a mechanism, not a rule.
 
@@ -84,6 +84,7 @@ def atomic_write_json( path, data ):
           write leaves no log, no counter and no exit code, and the seat looks healthy while blind
         - The exception is swallowed because a raising SessionStart hook leaves a seat with no bridge at all; the silence
           was what needed a witness, and stderr is the channel that does not pollute Claude's context
+        - The server call sites already turn a False return into an HTTPException(500)
 
     Args:
         path: destination file
@@ -631,7 +632,7 @@ def resolve_project_name( environ=None ) -> str:
 
     Its consumers are the task-store write gate's manager-figure predicate, the per-repo persona-chain env-key lookup and hook credential resolution; it replaced two duplicate derivers.
     It is not the only resolver: `build_sender_id_for_cc`, which stamps identity onto every peer DM, calls `_resolve_project_from_bridge_cwd()` and falls through to `detect_project()` and the live cwd.
-    The two disagree when a seat's cwd and `LUPIN_ROOT` name different repos. Merging them is deferred because it could mask the `@lupin` DM stamp, so no layer should be assumed to share one name.
+    The two disagree when a seat's cwd and `LUPIN_ROOT` name different repos. Merging them is deferred because it could mask the `@lupin` DM stamp, so no layer should be assumed to share one name. Converging them is a real piece of work, which is also why it was not done here.
 
     Requires:
         - environ is a Mapping or None (None means os.environ)
@@ -1339,7 +1340,7 @@ def set_manager_figure_implicit( session_id, flag ):
     """
     Stamp the implicit manager-figure answer onto the bridge.
 
-    Read-modify-write of the bridge JSON to set `MANAGER_FIGURE_BRIDGE_FIELD`, preserving all other fields; it does not create a missing bridge. The SessionStart hook of register_session calls it after voice-persona allocation, using the caller's real environment.
+    Read-modify-write of the bridge JSON to set `MANAGER_FIGURE_BRIDGE_FIELD`, preserving all other fields; it does not create a missing bridge. The SessionStart hook of register_session calls it after voice-persona allocation, using the caller's real environment. It follows the same read-modify-write pattern as `set_speakerphone`.
     That is the only place the `COSA_VOICE_PREFERRED_PERSONA__<PROJECT>` chain is visible. The server-side is_manager_figure() reads this static field instead of re-deriving it from the container env, where the chain is empty.
 
     Requires:
@@ -1883,11 +1884,11 @@ def find_active_sessions( stale_threshold_seconds: int = 43200, require_persona:
           `unreadable_out` when one is supplied, because a live seat we cannot read still occupies a seat
         - Skips bridge files whose stat() fails
         - PID liveness is checked first, when host pids can be trusted: a bridge whose host PID is dead is skipped. Inside a container the check is bypassed.
-        - The mtime TTL is a fallback only: a bridge older than `stale_threshold_seconds` is skipped unless its PID is proven alive.
+        - The mtime TTL is a fallback only: a bridge older than `stale_threshold_seconds` is skipped unless its PID is proven alive. It guards the case where the host-side prune at SessionStart did not fire, and inside a container it is the only liveness signal.
         - PID liveness outranks mtime. An unconditional TTL once hid live but idle seats from every roster, and raising the constant only moves the cliff.
         - A dead-PID bridge, or an aged-out bridge whose liveness cannot be confirmed, is free, and its slot is reclaimed.
         - `stale_out`, a list, receives every aged-out bridge including kept ones, each saying why. A monitor that returns fewer sessions than exist is a monitor that lies.
-        - `unreadable_out`, a list, receives the path of every live bridge that could not be identified (unparseable JSON, or no session id).
+        - `unreadable_out`, a list, receives the path of every live bridge that could not be identified (unparseable JSON, or no session id). It follows the `stale_out` idiom, so a caller counting them does not walk the directory a second time and get a disagreeing count.
         - Liveness is decided first, so a dead corrupt bridge appears in neither the results nor `unreadable_out`. An unreadable ghost counted against the fleet cap could never be reaped.
 
     Returns:

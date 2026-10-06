@@ -601,6 +601,7 @@ class CCNotificationListener( BaseWebSocketListener ):
         Ensures:
             - A recipient observed idle at its prompt is woken via tmux; a busy, dialog-blocked or unclassifiable recipient is buffered
             - Never raises (both downstream paths are self-isolating)
+            - Buffered messages are framed by the ai_to_ai branch of format_voice_context
         """
         if self._recipient_is_injectable():
             self._handle_peer_dm( notification )
@@ -699,6 +700,7 @@ class CCNotificationListener( BaseWebSocketListener ):
         Inject a peer-DM envelope into an idle pane via tmux to wake it.
 
         This is the idle branch of _deliver_peer_dm, and a peer DM is not human voice.
+        The voice rider it skips tells the agent to call notify() to speak its reply aloud and carries TTS brevity guidance.
         See: src/rnd/v0.1.8/2026.06.13-cosa-voice-token-reduction/02-notification-native-aixai-design.md
 
         Requires:

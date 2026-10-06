@@ -32,6 +32,8 @@ live-set gate is correctness-critical: it is the only thing between this janitor
 and the DM-loss defect it tidies up after. This is why `live_session_ids is None`
 keeps everything instead of degrading to age-only. A short grace window makes a
 live-but-unlisted session more likely to still be inside it, so keep it long.
+HWM files are safer in kind than hold files, being regenerable and carrying no hand-written cargo, yet their failure is silent and so not lesser.
+The grace window follows the operator's last ruling and must not be quietly re-tuned.
 
 Venue: pure filesystem + mtime. No network, no DB, no container.
 """

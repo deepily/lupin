@@ -21,10 +21,14 @@ Schema, the public interface (hold to it exactly):
     `work_owed` (bool): False means done, so never poke.
     `reason` (str): Why the session is holding.
     `awaiting` (str): "user:<name>", "peer:<persona>", "commons:<topic>", "cadence:<what>" or "none".
-    `pending_user_gates` (list): Structured open or answered direct-user-gate rows.
+    `pending_user_gates` (list): Structured open or answered direct-user-gate rows. They promote the free-text
+        "awaiting: user:rick" to re-askable rows.
     `last_looked_in_on_workers_ts` (str or None): Manager's latest worker look-in; None means never.
-    `last_spinup_check_ts` (str or None): Manager's latest spin-up self-check; None means never.
-    `last_surfaced_questions_ts` (str or None): Latest operator-gate re-surface; None means never.
+        The agent stamps it when it verifies workers.
+    `last_spinup_check_ts` (str or None): Manager's latest spin-up self-check, a debounce clock; None means never.
+        The agent stamps it after considering a crew.
+    `last_surfaced_questions_ts` (str or None): Latest operator-gate re-surface, a debounce clock; None means never.
+        The agent stamps it after re-firing its open asks.
 
 The "cadence:<what>" form marks an observation or timer cadence: work is owed but nobody owes this
 session anything, and it re-polls at its own ttl. Use it instead of "peer:" when no peer owes a

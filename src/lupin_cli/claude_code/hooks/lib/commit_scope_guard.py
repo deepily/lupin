@@ -17,9 +17,9 @@ and any large file. Re-run with the acknowledgement prefix to proceed.
   - A missing manifest fails open: no file, no section for this session, or an unreadable
     one allows. A seat that never adopted the manifest must not be wedged by it.
   - Residual: a stale section gives a false refusal, since a touched file left unrecorded reads
-    as foreign. That direction is recoverable; the opposite silently commits a peer's work.
+    as foreign. That direction is recoverable; the opposite silently commits a peer's work. If false refusals bite more often than contamination does, re-measure the trade rather than defend it.
   - Size is an independent trigger. A rotated 196 MB `voice-commands-xml-train.jsonl.prev`
-    escaped the ignore pattern `**/voice-commands-xml-*.jsonl`, leaving 246 MB committable.
+    escaped the ignore pattern `**/voice-commands-xml-*.jsonl`, leaving 246 MB committable. A bare path list reads as harmless, so the refusal shows a size beside the path, such as `196.0 MB`.
 
 Threat model: accident, not evasion. A miss costs a missing reminder, not a broken repo,
 unlike stash_guard, where a miss lets through a command that had to be refused.
@@ -33,7 +33,7 @@ Safety, in the hot-path PreToolUse hook:
     unrecognised long option, optional-argument option, magic) is allowed with a notice naming
     what went unreviewed. A guard that refuses honest commits gets switched off.
   - No guard here can close this: a pathspec commit takes each path's working-tree content, so
-    a claimed file still commits what a peer left in it. The refusal points at `git diff -- <path>`.
+    a claimed file still commits what a peer left in it. The refusal points at `git diff -- <path>`. Only a private working tree closes the per-hunk gap, and reading the diff is the only existing control.
   - Fail-open: any error allows (returns None); the `git diff --cached` read is bounded by a timeout.
   - Escape hatch `LUPIN_COMMIT_SCOPE_ACK=1 git commit ...` is a prefix carve-out, not an env
     read. A hook is a separate process with its own environment.

@@ -418,7 +418,7 @@ def query_owed( settings, api_key, owner_persona, project=None, timeout=None,
           the socket timeout is aggressive because the Stop hook fires every turn and a slow `:7999` must never stall turn-end
         - The breakdown is computed server-side on the same admitted set in one `GROUP BY`; without it the caller invented in_progress
           for every row. It is no license to reinstate the per-status loop; test_task_store_client.py asserts exactly one request
-        - The connection is always closed
+        - The connection is always closed; the reused connection carries a single request, costs one handshake either way, and keeps timeout and close discipline in one place
         - never raises
     """
     if timeout is None:

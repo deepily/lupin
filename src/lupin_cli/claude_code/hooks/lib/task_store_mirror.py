@@ -34,6 +34,8 @@ MCP/REST transitions only, so the arbiter-oracle `blocked_by {kind:user}` contra
 Invariants: never raises; never blocks the hook beyond the client's bounded timeout;
 a session that cannot write flags once and never fakes.
 
+Pipeline when the write path is live: gate (settings enabled, then the manager-figure check), then opportunistic spool drain. Next map the event to a store op, execute it, and update the correlation map. On transport failure or a 5xx the event is spooled and flagged once. On a 4xx server verdict it is dropped and flagged once, because it will never succeed.
+
 Design authority: lupin ->
     src/rnd/v0.1.8/2026.06.12-task-store-phase2-write-paths/01-build-plan.md
 """

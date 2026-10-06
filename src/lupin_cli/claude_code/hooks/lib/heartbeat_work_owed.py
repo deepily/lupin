@@ -235,9 +235,9 @@ def format_owed_summary( status_breakdown, priority_breakdown ):
     """
     Render the poke's owed line: total, status split, priority split, and where to start.
 
-    For example "12 owed: 2 in progress, 10 queued", followed by a priority clause and a start-with pointer.
+    For example "12 owed: 2 in progress, 10 queued", followed by a priority clause and a start-with pointer. The priority clause reads "6 at P1, 5 at P2, and 1 at P3".
     It replaces a two-line form that made the reader add counts and never named a priority, while the standing order is descending priority.
-    Empty buckets are omitted, not zeroed: a printed 0 is noise on every poke, and an absent bucket and a zero bucket are different claims.
+    Empty buckets are omitted, not zeroed: a printed 0 is noise on every poke. An absent bucket and a zero bucket are different claims. The source `GROUP BY` omits them already.
 
     Requires:
         - status_breakdown is { store_status: count } or falsy
@@ -289,7 +289,7 @@ def is_heartbeat_poke_prompt( prompt ):
     Return True if prompt is an injected liveness poke (heartbeat or arbiter), not user input.
 
     UserPromptSubmit must not treat either synthetic prompt as user re-engagement: that reset the per-session poke cap on every poke, so the cap never halted.
-    A heartbeat self-poke is re-submitted via tmux send-keys, so `POKE_PROMPT_SENTINEL` leads the prompt: matched by prefix after left-strip.
+    A heartbeat self-poke is re-submitted via tmux send-keys, so `POKE_PROMPT_SENTINEL` leads the prompt: matched by prefix after left-strip. The left-strip is needed because tmux or the console may prepend whitespace.
     An arbiter poke (stuck or manager-stale) arrives wrapped in a peer-DM system-reminder envelope, so `ARBITER_POKE_SENTINEL` sits mid-prompt: matched by substring.
 
     Requires:

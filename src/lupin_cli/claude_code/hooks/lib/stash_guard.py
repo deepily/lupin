@@ -31,6 +31,8 @@ Ensures:
     - examples here carry a zero-width space inside the verb so reading this file through a shell is not itself refused
     - if the guard refuses authoring text, put the script in a file and run the file rather than a heredoc
     - the acceptance test is unchanged: all thirteen mutating forms stay denied
+    - trading a false deny for a possible false allow is the wrong direction for a deny-by-default control, and that option stays refused
+    - the hatch suits a session that needs the stack, such as an owner clearing their own entry after verifying its content is preserved elsewhere
 """
 import os
 import re
