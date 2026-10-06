@@ -265,13 +265,13 @@ def delete_candidates( old, stoplist ):
 
     Ensures:
         - spans are phrase units that pass span_ok; cuts that bad_cut, rules.delete_rejection (rules 4 and 5) or
-          rules.markup_rejection (rule 8) refuse are left out and counted by reason code
+          rules.markup_rejection (rule 8) or rules.lead_in_rejection (rule 9) refuse are left out and counted by reason code
     """
     out, refused = [], {}
     for span in phrase_units( old ):
         if not span_ok( old, span, stoplist ): continue
         cut    = cut_text( old, span )
-        reason = bad_cut( old, cut ) or rules.delete_rejection( old, span, cut ) or rules.markup_rejection( old, span )
+        reason = bad_cut( old, cut ) or rules.delete_rejection( old, span, cut ) or rules.markup_rejection( old, span ) or rules.lead_in_rejection( old, span )
         if reason is not None:
             refused[ reason ] = refused.get( reason, 0 ) + 1
             continue
@@ -1067,15 +1067,28 @@ def cmd_check( args ):
     return 1 if failures else 0
 
 
+def candidate_span( kind, c ):
+    """
+    Return the text a candidate of this kind removes or moves, the way make_pair records it in x_span_in_old.
+
+    Ensures:
+        - delete and weaken: the span text; relocate: the sentence; paraphrase: "", because the docstring is the whole candidate
+    """
+    if kind in SEEDED_KINDS: return c[ "span_text" ]
+    return c[ "sentence" ] if kind == "relocate" else ""
+
+
 def redraw_pairs( plan, failing, docs_by_kind, scope, rng ):
     """
-    Choose a replacement for each failing pair that keeps every floor: same kind, weaken class, shortness and stratum.
+    Choose a replacement for each failing pair, keeping its kind, weaken class, shortness and stratum.
 
     Requires:
         - scope is the set of units the split owns; docs_by_kind comes from build_docs under the current rules
+        - failing holds ids of pairs of the plan, of any kind
 
     Ensures:
         - returns { pair_id: ( kind, doc, candidate ) }; a doc used by a kept pair is never reused; the failed span is never redrawn
+          (for a relocate pair the sentence, for a paraphrase pair the docstring)
         - the split's class floors, short floor and strata quotas hold afterwards, because each replacement matches what it replaces
 
     Raises:
@@ -1085,39 +1098,66 @@ def redraw_pairs( plan, failing, docs_by_kind, scope, rng ):
     used  = { p[ "pool_id" ] for p in plan[ "pairs" ] if p[ "id" ] not in failing }
     picks = {}
     for pair_id in sorted( failing ):
-        pair = by_id[ pair_id ]
-        options = [ ( d, c ) for d in docs_by_kind[ pair[ "kind" ] ] if d[ "unit" ] in scope and d[ "pool_id" ] not in used and d[ "stratum" ] == pair[ "stratum" ]
-                    for c in d[ "cands" ] if c.get( "class" ) == pair[ "weaken_class" ] and is_short( words_of( c[ "span_text" ] ) ) == pair[ "short" ]
-                    and not ( d[ "pool_id" ] == pair[ "pool_id" ] and c[ "span_text" ] == pair[ "x_span_in_old" ] ) ]
-        if not options: raise Shortfall( f"redraw: nothing in scope replaces {pair_id} ({pair[ 'kind' ]}, class {pair[ 'weaken_class' ]}, stratum {pair[ 'stratum' ]}, short {pair[ 'short' ]})" )
+        pair, kind = by_id[ pair_id ], by_id[ pair_id ][ "kind" ]
+        options = [ ( d, c ) for d in docs_by_kind[ kind ] if d[ "unit" ] in scope and d[ "pool_id" ] not in used and d[ "stratum" ] == pair[ "stratum" ]
+                    for c in d[ "cands" ] if c.get( "class" ) == pair[ "weaken_class" ]
+                    and ( kind not in SEEDED_KINDS or is_short( words_of( c[ "span_text" ] ) ) == pair[ "short" ] )
+                    and not ( d[ "pool_id" ] == pair[ "pool_id" ] and candidate_span( kind, c ) == pair[ "x_span_in_old" ] ) ]
+        if not options: raise Shortfall( f"redraw: nothing in scope replaces {pair_id} ({kind}, class {pair[ 'weaken_class' ]}, stratum {pair[ 'stratum' ]}, short {pair[ 'short' ]})" )
         d, c = options[ rng.randrange( len( options ) ) ]
         used.add( d[ "pool_id" ] )
-        picks[ pair_id ] = ( pair[ "kind" ], d, c )
+        picks[ pair_id ] = ( kind, d, c )
     return picks
+
+
+def read_failed_ids( path, plan ):
+    """
+    Read the pair ids a second reader failed.
+
+    Requires:
+        - path is a JSON file holding a list of pair ids, written by the person who read those pairs
+
+    Ensures:
+        - returns the set of ids; the pairs may be of any kind and may pass rule 1
+
+    Raises:
+        - ValueError if the file is not a list of strings, or names a pair that is not in the plan
+    """
+    ids = json.loads( open( path, encoding="utf-8" ).read() )
+    if not isinstance( ids, list ) or not all( isinstance( i, str ) for i in ids ): raise ValueError( f"{path} must hold a JSON list of pair ids" )
+    unknown = sorted( set( ids ) - { p[ "id" ] for p in plan[ "pairs" ] } )
+    if unknown: raise ValueError( f"{path} names pairs that are not in the plan: {' '.join( unknown )}" )
+    return set( ids )
 
 
 def cmd_redraw( args ):
     """
-    Redraw the pairs rule 1 fails, into a new folder, and say how many writer calls that needs BEFORE writing anything.
+    Redraw the failed pairs into a new folder, saying how many writer calls that needs before writing anything.
+
+    The failed pairs are those rule 1 fails plus those named by --failed.
 
     Returns 0 on success (or when nothing fails), 2 when refused: the pool is not the one the plan was drawn from, a
-    replacement is missing for a floor, or the output folder already holds this split.
+    replacement is missing for a floor, the output folder already holds this split, or the --failed file is not a list of
+    strings or names a pair that is not in the plan. --failed names a file of pairs a second reader failed, of any kind; they are
+    replaced as well as the rule 1 failures, and a pair named in both is replaced once.
 
     Ensures:
         - no model call is made; the source set is not changed
         - the new folder holds the plan (replaced pairs keep their ids), the writer tasks (kept ones first), the ledger and
           output rows of the kept tasks, and for a gate split a plan-hashes.json carrying the new hash
-        - `write --base <out>` then calls only the new tasks; --approved-calls and --call-hold bound that run as for any write
+        - `write --base <out>` then calls only the new tasks (a relocate pair is two); --approved-calls and --call-hold bound that run as for any write
+        - the "new writer call(s) needed" line counts the new tasks, not the pairs
     """
     try:
         failures, _, _ = rule1_status( args.base, args.split, args.accept )
         source = os.path.join( args.base, args.split )
         plan   = json.loads( open( os.path.join( source, "plan.json" ), encoding="utf-8" ).read() )
         if plan.get( "pool_sha" ) != sha256_file( args.pool ): raise ValueError( "the pool is not the one this plan was drawn from" )
+        failing = set( failures ) | ( read_failed_ids( args.failed, plan ) if args.failed else set() )
         if args.split in GATE_SPLITS: refuse_gate_out_in_repo( args.out )
         target = os.path.join( args.out, args.split )
         if os.path.exists( target ): raise ValueError( f"{target} already exists" )
-        if not failures:
+        if not failing:
             print( f"redraw {args.split}: no seeded pair fails; nothing to redraw" )
             return 0
         exclude = frozenset( json.loads( open( args.exclude, encoding="utf-8" ).read() ) ) if args.exclude else frozenset()
@@ -1125,14 +1165,14 @@ def cmd_redraw( args ):
         split_seed = args.split_seed if args.split_seed is not None else plan.get( "split_seed" )
         scope = set( partition_units( units, split_seed )[ args.split ] ) if split_seed is not None else set( plan[ "units" ] )
         rng   = random.Random( f"{args.seed}|{args.split}|redraw" )
-        picks = redraw_pairs( plan, set( failures ), docs_by_kind, scope, rng )
+        picks = redraw_pairs( plan, failing, docs_by_kind, scope, rng )
     except ( ValueError, OSError, Shortfall ) as e:
         print( f"REFUSED: {e}", file=sys.stderr )
         return 2
-    calls = len( picks )
-    print( f"redraw {args.split}: {calls} failed pair(s) {' '.join( sorted( picks ) )} are replaced; {calls} new writer call(s) needed, up to {2 * calls} with one retry each; no model call made" )
     tasks, new_rows = { tid: meta for tid, meta in plan[ "tasks" ].items() if meta[ "pair_id" ] not in picks }, []
     pairs = [ make_pair( p[ "id" ], *picks[ p[ "id" ] ], rng, tasks, new_rows ) if p[ "id" ] in picks else p for p in plan[ "pairs" ] ]
+    calls = len( new_rows )
+    print( f"redraw {args.split}: {len( picks )} failed pair(s) {' '.join( sorted( picks ) )} are replaced; {calls} new writer call(s) needed, up to {2 * calls} with one retry each; no model call made" )
     new_plan = dict( plan, pairs=pairs, tasks=tasks, units=sorted( { unit_of( p[ "file" ] ) for p in pairs } ), redrawn={ "pairs": sorted( picks ), "from_plan_sha256": plan[ "plan_sha256" ] } )
     new_plan[ "plan_sha256" ] = plan_hash( new_plan )
     write_json( os.path.join( target, "plan.json" ), new_plan )
@@ -1361,6 +1401,7 @@ def build_parser():
     r = sub.add_parser( "redraw" )
     r.add_argument( "--base", required=True ); r.add_argument( "--split", required=True ); r.add_argument( "--pool", required=True ); r.add_argument( "--out", required=True )
     r.add_argument( "--seed", type=int, required=True ); r.add_argument( "--split-seed", type=int ); r.add_argument( "--stoplist", default=DEFAULT_STOPLIST ); r.add_argument( "--exclude" ); r.add_argument( "--accept" )
+    r.add_argument( "--failed", help="a JSON list of pair ids a second reader failed; they are replaced as well as the rule 1 failures" )
     n = sub.add_parser( "natural" )
     n.add_argument( "--natural", required=True ); n.add_argument( "--out", required=True )
     m = sub.add_parser( "manifest" )

@@ -6,6 +6,7 @@ Every docstring here is made up for this file. No dev, gate or reserve data is r
 """
 
 import json
+import random
 
 import pytest
 
@@ -541,6 +542,85 @@ def test_redraw_never_redraws_the_span_that_failed():
     assert got[ "p000" ][ 2 ][ "span_text" ] == "if the pool is open"
 
 
+# ---- redraw --failed: replace the pairs a second reader failed, whatever rule 1 says ------------------------------
+
+def test_redraw_failed_replaces_a_pair_rule_1_passes_of_every_kind_keeps_its_id_and_every_floor( written, capsys ):
+    tmp_path, pool = written
+    gate   = tmp_path / "gate-store"
+    before = load( gate, "gate" )
+    assert s.check_set( str( gate ), "gate" )[ 0 ] == {}
+    for kind in s.KINDS:
+        target = tmp_path / ( "redrawn" if kind == s.KINDS[ 0 ] else "redrawn-" + kind )
+        pair   = next( p for p in before[ "pairs" ] if p[ "kind" ] == kind )
+        args   = redraw_args( tmp_path, pool, failed=write_accept( tmp_path, [ pair[ "id" ] ], f"failed-{kind}.json" ) )
+        args[ args.index( "--out" ) + 1 ] = str( target )
+        assert s.main( args ) == 0, kind
+        after  = json.loads( ( target / "gate" / "plan.json" ).read_text() )
+        s.check_plan_hash( after )
+        assert floors_of( after ) == floors_of( before ), kind
+        assert [ p[ "id" ] for p in after[ "pairs" ] ] == [ p[ "id" ] for p in before[ "pairs" ] ]
+        assert [ p[ "id" ] for p, q in zip( before[ "pairs" ], after[ "pairs" ] ) if p != q ] == [ pair[ "id" ] ], kind
+        new = next( p for p in after[ "pairs" ] if p[ "id" ] == pair[ "id" ] )
+        assert new[ "kind" ] == kind and ( new[ "pool_id" ], new[ "x_span_in_old" ] ) != ( pair[ "pool_id" ], pair[ "x_span_in_old" ] ), kind
+        pool_ids = [ p[ "pool_id" ] for p in after[ "pairs" ] ]
+        assert len( set( pool_ids ) ) == len( pool_ids ), kind
+        tasks = 2 if kind == "relocate" else 1
+        assert f"1 failed pair(s) {pair[ 'id' ]} are replaced; {tasks} new writer call(s) needed, up to {2 * tasks} with one retry each" in capsys.readouterr().out, kind
+        done = { r[ "task_id" ] for r in s.read_jsonl( str( target / "gate" / "writer_ledger.jsonl" ) ) }
+        assert len( [ t for t in after[ "tasks" ] if t not in done ] ) == tasks, kind
+
+
+def test_redraw_failed_adds_to_the_rule_1_failures_and_a_pair_named_twice_is_replaced_once( written, capsys ):
+    tmp_path, pool = written
+    gate   = tmp_path / "gate-store"
+    broken = break_outputs( gate, "gate", 1 )
+    other  = next( p[ "id" ] for p in load( gate, "gate" )[ "pairs" ] if p[ "kind" ] == "paraphrase" )
+    failed = write_accept( tmp_path, [ other, broken[ 0 ], other ] )
+    assert s.main( redraw_args( tmp_path, pool, failed=failed ) ) == 0
+    ids = sorted( [ other, broken[ 0 ] ] )
+    assert f"2 failed pair(s) {' '.join( ids )} are replaced; 2 new writer call(s) needed" in capsys.readouterr().out
+    assert load( tmp_path / "redrawn", "gate" )[ "redrawn" ][ "pairs" ] == ids
+
+
+@pytest.mark.parametrize( "content, message", [
+    ( "{\"p000\": 1}", "must hold a JSON list of pair ids" ), ( "[1, 2]", "must hold a JSON list of pair ids" ),
+    ( "[\"p000\", \"p999\", \"p998\"]", "names pairs that are not in the plan: p998 p999" ), ( "[", "Expecting value" ) ] )
+def test_redraw_failed_refuses_a_file_that_is_not_a_list_of_strings_or_names_an_unknown_pair_and_writes_nothing( written, capsys, content, message ):
+    tmp_path, pool = written
+    path = tmp_path / "failed.json"
+    path.write_text( content )
+    assert s.main( redraw_args( tmp_path, pool, failed=str( path ) ) ) == 2
+    err = capsys.readouterr().err
+    assert "REFUSED" in err and message in err and not ( tmp_path / "redrawn" ).exists()
+
+
+def test_redraw_failed_refuses_a_file_that_is_not_there_and_writes_nothing( written, capsys ):
+    tmp_path, pool = written
+    assert s.main( redraw_args( tmp_path, pool, failed=str( tmp_path / "nowhere.json" ) ) ) == 2
+    assert "REFUSED" in capsys.readouterr().err and not ( tmp_path / "redrawn" ).exists()
+
+
+def test_redraw_failed_with_an_empty_list_and_no_rule_1_failure_changes_nothing( written, capsys ):
+    tmp_path, pool = written
+    assert s.main( redraw_args( tmp_path, pool, failed=write_accept( tmp_path, [] ) ) ) == 0
+    assert "nothing to redraw" in capsys.readouterr().out and not ( tmp_path / "redrawn" ).exists()
+
+
+def test_redraw_never_redraws_the_relocate_sentence_or_the_paraphrase_docstring_that_failed():
+    doc   = lambda pool_id, cands: { "pool_id": pool_id, "unit": "u", "stratum": "S", "cands": cands }
+    pair  = lambda kind, span: { "pairs": [ { "id": "p000", "kind": kind, "weaken_class": None, "short": False, "stratum": "S", "pool_id": "d1", "x_span_in_old": span } ] }
+    wait  = { "sentence": "Callers wait here.", "cut": "x" }
+    retry = { "sentence": "Callers retry here.", "cut": "y" }
+    with pytest.raises( s.Shortfall, match="nothing in scope replaces p000" ):
+        s.redraw_pairs( pair( "relocate", "Callers wait here." ), { "p000" }, { "relocate": [ doc( "d1", [ wait ] ) ] }, { "u" }, random.Random( 1 ) )
+    got = s.redraw_pairs( pair( "relocate", "Callers wait here." ), { "p000" }, { "relocate": [ doc( "d1", [ wait, retry ] ) ] }, { "u" }, random.Random( 1 ) )
+    assert got[ "p000" ][ 2 ] is retry
+    with pytest.raises( s.Shortfall, match="nothing in scope replaces p000" ):
+        s.redraw_pairs( pair( "paraphrase", "" ), { "p000" }, { "paraphrase": [ doc( "d1", [ { "text": "t" } ] ) ] }, { "u" }, random.Random( 1 ) )
+    got = s.redraw_pairs( pair( "paraphrase", "" ), { "p000" }, { "paraphrase": [ doc( "d1", [ { "text": "t" } ] ), doc( "d2", [ { "text": "u" } ] ) ] }, { "u" }, random.Random( 1 ) )
+    assert got[ "p000" ][ 1 ][ "pool_id" ] == "d2"
+
+
 def capture_scope( monkeypatch ):
     seen = {}
     real = s.redraw_pairs
@@ -864,3 +944,199 @@ def test_r8_text_with_no_markup_has_no_regions_and_refuses_nothing():
     assert rules.code_regions( old ) == [] and rules.link_regions( old ) == [] and rules.list_item_starts( old ) == []
     assert rules.markup_rejection( old, span_of( old, "before it reads the handle" ) ) is None
     assert rules.cuts_into( [ ( 5, 9 ) ], 0, 5 ) is False and rules.cuts_into( [ ( 5, 9 ) ], 9, 12 ) is False     # touching an edge is not cutting in
+
+
+# ---- rule 9: a delete never leaves a clause's lead-in hanging (row 4cc9cd81) ---------------------------------------
+# Made-up docstrings only. Each shape slipped past bad_cut, delete_rejection and markup_rejection: the cut sentence has a verb, does
+# not start or end on a dangler, has four words or more, and the span is not inside markup.
+
+SHAPE_1 = "Return the cached value for a key. If the cache is empty, the default is used. Throws on failure."
+SHAPE_2 = "Count the items of a list. It returns zero when the list is empty: nothing can be counted, and a negative size would break the sort."
+SHAPE_3 = "Complete the dialog. It completes with the saved value when the form closed itself, and with zero when the user cancelled."
+
+
+def span_in( old, text ):
+    assert old.count( text ) == 1
+    a = old.index( text )
+    return ( a, a + len( text ) )
+
+
+def lead_in( old, text ):
+    return rules.lead_in_rejection( old, span_in( old, text ) )
+
+
+@pytest.mark.parametrize( "old, text, code", [
+    ( SHAPE_1, "the default is used", "HANGING_CONDITION" ),
+    ( SHAPE_2, "when the list is empty: nothing can be counted", "DROPPED_CONDITION" ),
+    ( SHAPE_3, "and with zero", "JOINED_CONDITIONS" ) ] )
+def test_r9_each_of_the_three_shapes_slips_past_every_older_check_and_is_refused_by_its_own_code( old, text, code ):
+    span = span_in( old, text )
+    cut  = s.cut_text( old, span )
+    assert span in s.phrase_units( old ) and s.span_ok( old, span, SL )
+    assert s.bad_cut( old, cut ) is None and rules.delete_rejection( old, span, cut ) is None and rules.markup_rejection( old, span ) is None
+    assert rules.lead_in_rejection( old, span ) == code
+
+
+def test_r9_a_condition_with_its_main_clause_still_standing_is_not_a_hanging_lead_in():
+    assert lead_in( "Return the value. If the cache is empty, the default is used, and a warning is logged.", "and a warning is logged" ) is None
+    assert lead_in( "Return the value. If the cache is empty, the default is used. Throws on failure.", "Throws on failure" ) is None
+    assert lead_in( "Return the value. The default is used, and a warning is logged.", "and a warning is logged" ) is None
+    assert lead_in( "Return the value. If the cache is empty, the default is used by callers.", "the default" ) is None       # text still follows the span
+
+
+def test_r9_a_bullet_in_front_of_the_condition_does_not_hide_it():
+    old = "Return the value.\n\n- If the cache is empty, the default is used.\n- Throws on failure."
+    assert lead_in( old, "the default is used" ) == "HANGING_CONDITION"
+
+
+def test_r9_a_clause_deleted_before_a_conjunction_is_refused_only_when_it_opens_with_a_subordinator():
+    assert lead_in( SHAPE_2, "when the list is empty: nothing can be counted" ) == "DROPPED_CONDITION"
+    assert lead_in( "Count the items. It returns zero when the list is empty. A negative size would break the sort.", "when the list is empty" ) is None
+    assert lead_in( "Count the items. It returns zero for an empty list, and a negative size would break the sort.", "for an empty list" ) is None     # a miss, stated in the docstring
+    assert lead_in( "Count the items. It returns zero when the list is empty, which is a case callers meet.", "when the list is empty" ) is None
+
+
+def test_r9_two_conditions_run_together_are_refused_only_when_the_text_before_the_cut_already_holds_one():
+    assert lead_in( SHAPE_3, "and with zero" ) == "JOINED_CONDITIONS"
+    assert lead_in( "Complete the dialog. It completes with the saved value, and with zero when the user cancelled.", "and with zero" ) is None
+    assert lead_in( "Complete the dialog. It completes with the saved value when the form closed itself and with zero when the user cancelled.", "and with zero" ) is None
+
+
+def test_r9_a_span_in_a_sentence_of_its_own_is_judged_on_that_sentence_alone():
+    old = "Return the value. It is cached. If the cache is empty, the default is used."
+    assert lead_in( old, "the default is used" ) == "HANGING_CONDITION"
+    assert lead_in( old, "It is cached" ) is None
+
+
+def test_r9_delete_candidates_leave_out_each_shape_and_count_it_by_code():
+    for old, text, code in ( ( SHAPE_1, "the default is used", "HANGING_CONDITION" ), ( SHAPE_2, "when the list is empty: nothing can be counted", "DROPPED_CONDITION" ),
+                             ( SHAPE_3, "and with zero", "JOINED_CONDITIONS" ) ):
+        cands, refused = s.delete_candidates( old, SL )
+        assert text not in [ c[ "span_text" ] for c in cands ], code
+        assert refused.get( code, 0 ) >= 1, code
+        assert all( rules.lead_in_rejection( old, c[ "span" ] ) is None for c in cands ), code
+
+
+# ---- review of e2d510af1 (Rio): two redraw --failed cases the first tests did not pin ------------------------------
+
+def test_redraw_failed_replaces_all_three_pairs_named_on_a_set_rule_1_passes( written, capsys ):
+    tmp_path, pool = written
+    gate   = tmp_path / "gate-store"
+    before = load( gate, "gate" )
+    assert s.check_set( str( gate ), "gate" )[ 0 ] == {}
+    ids    = sorted( next( p[ "id" ] for p in before[ "pairs" ] if p[ "kind" ] == kind ) for kind in ( "delete", "weaken", "paraphrase" ) )
+    assert len( ids ) == 3
+    assert s.main( redraw_args( tmp_path, pool, failed=write_accept( tmp_path, ids ) ) ) == 0
+    assert f"3 failed pair(s) {' '.join( ids )} are replaced; 3 new writer call(s) needed" in capsys.readouterr().out
+    after = load( tmp_path / "redrawn", "gate" )
+    assert after[ "redrawn" ][ "pairs" ] == ids
+    assert sorted( p[ "id" ] for p, q in zip( before[ "pairs" ], after[ "pairs" ] ) if p != q ) == ids
+    assert floors_of( after ) == floors_of( before )
+
+
+def test_redraw_failed_wins_over_accept_for_a_pair_named_in_both( written, capsys ):
+    tmp_path, pool = written
+    gate = tmp_path / "gate-store"
+    pid  = synonym_pair( gate, "gate" )
+    accept = write_accept( tmp_path, [ pid ], "accept.json" )
+    failures, accepted, _ = s.rule1_status( str( gate ), "gate", accept )
+    assert failures == {} and list( accepted ) == [ pid ]                                  # --accept alone leaves nothing to redraw
+    assert s.main( redraw_args( tmp_path, pool, accept=accept ) ) == 0
+    assert "nothing to redraw" in capsys.readouterr().out and not ( tmp_path / "redrawn" ).exists()
+    assert s.main( redraw_args( tmp_path, pool, accept=accept, failed=write_accept( tmp_path, [ pid ], "failed.json" ) ) ) == 0
+    assert f"1 failed pair(s) {pid} are replaced" in capsys.readouterr().out
+    assert load( tmp_path / "redrawn", "gate" )[ "redrawn" ][ "pairs" ] == [ pid ]
+
+
+# ---- review of fd85e299d (Rio): every subordinator and every coordinator is read by a test --------------------------
+# The word lists below are literals on purpose: a test that read rules.SUBORDINATORS would pass whatever the set held.
+
+SUBORDINATOR_WORDS = "if when unless while although though because once until whenever whereas since after before where wherever whether provided".split()
+COORDINATOR_WORDS  = "and or but nor yet so".split()
+
+
+def test_r9_the_word_lists_are_exactly_these_and_leave_out_as_and_even():
+    assert set( rules.SUBORDINATORS ) == set( SUBORDINATOR_WORDS ) and "as" not in rules.SUBORDINATORS and "even" not in rules.SUBORDINATORS
+    assert rules.CONJUNCTION_RE.pattern.count( "|" ) == len( COORDINATOR_WORDS ) - 1
+    assert all( rules.CONJUNCTION_RE.match( f", {w} x" ) for w in COORDINATOR_WORDS )
+
+
+@pytest.mark.parametrize( "word", SUBORDINATOR_WORDS )
+def test_r9_every_subordinator_opens_a_hanging_condition( word ):
+    assert lead_in( f"Return the value. {word.capitalize()} the cache is empty, the default is used.", "the default is used" ) == "HANGING_CONDITION"
+
+
+@pytest.mark.parametrize( "word", SUBORDINATOR_WORDS )
+def test_r9_every_subordinator_opens_a_dropped_condition_before_a_conjunction( word ):
+    old = f"Count the items. It returns zero {word} the list is empty, and a negative size would break the sort."
+    assert lead_in( old, f"{word} the list is empty" ) == "DROPPED_CONDITION"
+
+
+@pytest.mark.parametrize( "word", SUBORDINATOR_WORDS )
+def test_r9_every_subordinator_counts_as_the_earlier_and_as_the_following_condition_of_two_run_together( word ):
+    earlier   = f"Complete the dialog. It completes {word} the form closed itself, and with zero when the user cancelled."
+    following = f"Complete the dialog. It completes when the form closed itself, and with zero {word} the user cancelled."
+    assert lead_in( earlier, "and with zero" ) == "JOINED_CONDITIONS" and lead_in( following, "and with zero" ) == "JOINED_CONDITIONS"
+
+
+@pytest.mark.parametrize( "word", COORDINATOR_WORDS )
+def test_r9_every_coordinator_after_the_comma_makes_the_dropped_condition( word ):
+    assert lead_in( f"Count the items. It returns zero when the list is empty, {word} a negative size would break the sort.", "when the list is empty" ) == "DROPPED_CONDITION"
+
+
+def test_r9_a_word_that_only_starts_like_a_coordinator_is_not_one():
+    for word in ( "order", "android", "sooner", "yetis", "nori", "button" ):
+        assert lead_in( f"Count the items. It returns zero when the list is empty, {word} a negative size would break the sort.", "when the list is empty" ) is None, word
+
+
+def test_r9_a_lead_in_opened_by_as_or_even_is_a_documented_miss_and_is_not_refused():
+    assert lead_in( "Return the value. As the cache is empty, the default is used.", "the default is used" ) is None
+    assert lead_in( "Return the value. Even if the cache is empty, the default is used.", "the default is used" ) is None
+
+
+# ---- review of fd85e299d (Rio), findings 4 to 6: the comma miss, the order of the checks, the weaken scope ----------
+
+def test_r9_a_lead_in_with_a_comma_of_its_own_is_a_documented_miss_and_is_not_refused():
+    assert lead_in( "Return the value. If a, b or c is missing, the call fails.", "the call fails" ) is None
+    assert lead_in( "Return the value. If the cache is empty, and the pool is closed, the call fails.", "the call fails" ) is None
+    assert lead_in( "Return the value. If the cache is empty, the call fails.", "the call fails" ) == "HANGING_CONDITION"      # the same lead-in without the comma is seen
+
+
+def test_r9_no_two_checks_fire_on_one_span_so_the_order_of_the_checks_changes_nothing():
+    openers = ( "If the cache is empty", "It returns zero", "It completes when the form closed itself", "Where the pool is open" )
+    joiners = ( ", ", " ", ", and ", ", when ", ", but if " )
+    tails   = ( "the default is used", "when the list is empty", "and with zero when the user cancelled", "a negative size would break the sort", "and a warning is logged" )
+    seen, spans = set(), 0
+    for o in openers:
+        for j in joiners:
+            for t in tails:
+                for j2, t2 in ( ( "", "" ), ( ", ", "when it is done" ), ( ", and ", "it logs" ), ( " ", "after that" ) ):
+                    old    = f"Return the value. {o}{j}{t}{j2}{t2}."
+                    tokens = list( __import__( "re" ).finditer( r"\S+", old ) )[ 3: ]                    # the words of the second sentence
+                    for i in range( len( tokens ) ):
+                        for k in range( i, len( tokens ) ):
+                            word = tokens[ k ].group( 0 )
+                            for end in { tokens[ k ].end(), tokens[ k ].end() - ( len( word ) - len( word.rstrip( ",.;:" ) ) ) }:       # with and without the comma or full stop
+                                if end <= tokens[ i ].start(): continue
+                                codes = rules.lead_in_codes( old, ( tokens[ i ].start(), end ) )
+                                assert len( codes ) <= 1, ( old, old[ tokens[ i ].start():end ], codes )
+                                seen.update( codes )
+                                spans += 1
+    assert seen == { "HANGING_CONDITION", "DROPPED_CONDITION", "JOINED_CONDITIONS" } and spans > 20000        # the grid finds every code, so a clean result means something
+
+
+def test_r9_a_span_both_rule_8_and_rule_9_refuse_is_counted_under_rule_8s_code_only():
+    old  = "Return the value. When the cache is empty it is reset to `alpha, beta gamma`."
+    span = ( old.index( "beta gamma`" ), len( old ) - 1 )
+    assert rules.markup_rejection( old, span ) == "CODE" and rules.lead_in_rejection( old, span ) == "HANGING_CONDITION"
+    cands, refused = s.delete_candidates( old, SL )
+    assert span not in [ c[ "span" ] for c in cands ]
+    assert refused.get( "CODE" ) == 1 and "HANGING_CONDITION" not in refused
+
+
+def test_r9_a_weaken_whose_span_would_trip_rule_9_as_a_delete_is_still_offered():
+    old   = "Return the value. If the cache is empty, the default must be used."
+    span  = ( old.index( "the default must be used" ), len( old ) - 1 )
+    found = [ c for c in s.weaken_candidates( old, SL ) if c[ "span" ] == span ]
+    assert rules.lead_in_rejection( old, span ) == "HANGING_CONDITION"                        # as a delete this span is refused
+    assert len( found ) == 1 and found[ 0 ][ "class" ] == "modal"                            # as a weaken it is offered
