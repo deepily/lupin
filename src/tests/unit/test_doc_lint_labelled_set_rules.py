@@ -1046,3 +1046,49 @@ def test_redraw_failed_wins_over_accept_for_a_pair_named_in_both( written, capsy
     assert s.main( redraw_args( tmp_path, pool, accept=accept, failed=write_accept( tmp_path, [ pid ], "failed.json" ) ) ) == 0
     assert f"1 failed pair(s) {pid} are replaced" in capsys.readouterr().out
     assert load( tmp_path / "redrawn", "gate" )[ "redrawn" ][ "pairs" ] == [ pid ]
+
+
+# ---- review of fd85e299d (Rio): every subordinator and every coordinator is read by a test --------------------------
+# The word lists below are literals on purpose: a test that read rules.SUBORDINATORS would pass whatever the set held.
+
+SUBORDINATOR_WORDS = "if when unless while although though because once until whenever whereas since after before where wherever whether provided".split()
+COORDINATOR_WORDS  = "and or but nor yet so".split()
+
+
+def test_r9_the_word_lists_are_exactly_these_and_leave_out_as_and_even():
+    assert set( rules.SUBORDINATORS ) == set( SUBORDINATOR_WORDS ) and "as" not in rules.SUBORDINATORS and "even" not in rules.SUBORDINATORS
+    assert rules.CONJUNCTION_RE.pattern.count( "|" ) == len( COORDINATOR_WORDS ) - 1
+    assert all( rules.CONJUNCTION_RE.match( f", {w} x" ) for w in COORDINATOR_WORDS )
+
+
+@pytest.mark.parametrize( "word", SUBORDINATOR_WORDS )
+def test_r9_every_subordinator_opens_a_hanging_condition( word ):
+    assert lead_in( f"Return the value. {word.capitalize()} the cache is empty, the default is used.", "the default is used" ) == "HANGING_CONDITION"
+
+
+@pytest.mark.parametrize( "word", SUBORDINATOR_WORDS )
+def test_r9_every_subordinator_opens_a_dropped_condition_before_a_conjunction( word ):
+    old = f"Count the items. It returns zero {word} the list is empty, and a negative size would break the sort."
+    assert lead_in( old, f"{word} the list is empty" ) == "DROPPED_CONDITION"
+
+
+@pytest.mark.parametrize( "word", SUBORDINATOR_WORDS )
+def test_r9_every_subordinator_counts_as_the_earlier_and_as_the_following_condition_of_two_run_together( word ):
+    earlier   = f"Complete the dialog. It completes {word} the form closed itself, and with zero when the user cancelled."
+    following = f"Complete the dialog. It completes when the form closed itself, and with zero {word} the user cancelled."
+    assert lead_in( earlier, "and with zero" ) == "JOINED_CONDITIONS" and lead_in( following, "and with zero" ) == "JOINED_CONDITIONS"
+
+
+@pytest.mark.parametrize( "word", COORDINATOR_WORDS )
+def test_r9_every_coordinator_after_the_comma_makes_the_dropped_condition( word ):
+    assert lead_in( f"Count the items. It returns zero when the list is empty, {word} a negative size would break the sort.", "when the list is empty" ) == "DROPPED_CONDITION"
+
+
+def test_r9_a_word_that_only_starts_like_a_coordinator_is_not_one():
+    for word in ( "order", "android", "sooner", "yetis", "nori", "button" ):
+        assert lead_in( f"Count the items. It returns zero when the list is empty, {word} a negative size would break the sort.", "when the list is empty" ) is None, word
+
+
+def test_r9_a_lead_in_opened_by_as_or_even_is_a_documented_miss_and_is_not_refused():
+    assert lead_in( "Return the value. As the cache is empty, the default is used.", "the default is used" ) is None
+    assert lead_in( "Return the value. Even if the cache is empty, the default is used.", "the default is used" ) is None

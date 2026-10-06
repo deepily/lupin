@@ -75,7 +75,7 @@ LINK_RE      = re.compile( r"\[[^\[\]\n]+\](?:\([^()\n]*\)|\[[^\[\]\n]*\])?" )
 LIST_ITEM_RE = re.compile( r"(?m)^[ \t]*(?:[-*+•]|\d+[.)])[ \t]+(?=\S)" )
 
 # Rule 9: words that open a condition, and the conjunctions that join two clauses.
-SUBORDINATORS  = frozenset( "if when unless while although though because once until whenever whereas since after before".split() )
+SUBORDINATORS  = frozenset( "if when unless while although though because once until whenever whereas since after before where wherever whether provided".split() )
 CONJUNCTION_RE = re.compile( r"\s*,\s*(?:and|or|but|nor|yet|so)\b", re.IGNORECASE )
 
 
@@ -344,12 +344,14 @@ def lead_in_rejection( old, span ):
         - HANGING_CONDITION when the main clause has no comma of its own ("If empty the default is used, [and a warning is logged]")
         - DROPPED_CONDITION for every subordinate clause before a coordinator, though most leave a sentence that reads fine
         - JOINED_CONDITIONS for any comma followed by a subordinator after an earlier one, though some such sentences are well formed
-        - a subordinator word used as a preposition or inside a name ("after", "before", "since", "once")
+        - a subordinator word used as a preposition, a participle or inside a name ("after", "before", "since", "once", "provided by")
 
     Misses:
         - a lead-in that is a phrase, not a subordinator: "For an empty cache, [the default is used]." or "Given a closed pool, [...]"
         - a main clause with a comma of its own before the span; a sentence whose condition opens after a semicolon or colon
         - a coordinator with no comma before it; a subordinator written in a quotation or in code
+        - "as" and "even" (as in "even if") are left out of SUBORDINATORS on purpose: "as" is mostly a preposition, so a lead-in
+          opened by either is not seen
         - a cut that leaves a lead-in two sentences back hanging, because only the span's own sentence is read
     """
     a, b   = next( ( a, b ) for a, b in sentence_spans( old ) if a <= span[ 0 ] < b )
