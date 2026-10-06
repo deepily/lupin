@@ -192,7 +192,7 @@ class EmbeddingProvider:
         Resolve the lupin-model-server URL at call time, or None if neither source is set.
 
         Tries the `LUPIN_MODEL_SERVER_URL` env var, then the `model server url` INI key.
-        The INI key covers `docker restart`, which skips compose, so the env var may be unset.
+        The INI key covers `docker restart`, which skips compose, so the env var may be unset. Without that fallback the compute path would call itself on the FastAPI fallback URL, compute to compute to compute, until it timed out.
         See: src/rnd/v0.1.7/2026.05.16-model-server-carveout/01-design.md
 
         Ensures:
@@ -219,7 +219,7 @@ class EmbeddingProvider:
 
         Not prediction_engine's credential: that one goes to Lupin's server and its
         per-host `api_keys` table. This one goes to the model server, which hashes
-        one mounted secret. The name comes from `LUPIN_MODEL_SERVER_API_KEY_NAME`.
+        one mounted secret. The name comes from `LUPIN_MODEL_SERVER_API_KEY_NAME`, the same variable the model server reads, so the two ends cannot drift apart when only one is edited.
 
         Requires:
             - nothing

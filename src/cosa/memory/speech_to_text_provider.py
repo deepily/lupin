@@ -131,7 +131,7 @@ class SpeechToTextProvider:
 
         The key differs from the per-host `notification-api-claude-code-dev` key.
         The model server hashes one mounted secret, identical on every host.
-        The name comes from `LUPIN_MODEL_SERVER_API_KEY_NAME`, which the model server also reads.
+        The name comes from `LUPIN_MODEL_SERVER_API_KEY_NAME`, which the model server also reads, so the two ends cannot drift apart when only one is edited.
 
         Requires:
             - nothing

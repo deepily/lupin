@@ -1,5 +1,5 @@
 """
-Generates and caches text embeddings, with error handling.
+Generates and caches text embeddings through the OpenAI client, with error handling.
 """
 
 import openai

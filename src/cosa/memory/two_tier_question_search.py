@@ -415,11 +415,11 @@ def pg_hierarchical_search( manager: Any,
     Search Postgres for snapshots by question: exact, normalized, then pgvector.
 
     Lifted verbatim from the manager's `_pg_get_snapshots_by_question`, which
-    delegates here. It skips the in-memory cache tier. Unlike read-only
+    delegates here. Levels 1 and 2 are served through the already postgres-routed canonical_synonyms. It skips the in-memory cache tier. Unlike read-only
     TwoTierQuestionSearch, it cleans ghost synonyms (a write) and applies no SQL threshold.
 
     Requires:
-        - manager is initialized; question non-empty; thresholds in [0,100]
+        - manager is the initialized snapshot manager whose collaborators the search drives; question non-empty; thresholds in [0,100]
 
     Ensures:
         - returns [(similarity_pct, snapshot)] sorted descending; exact matches
