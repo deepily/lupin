@@ -3,9 +3,9 @@
 Migrate Mock Authentication Users to JWT Database.
 
 Migrates mock users to JWT authentication system:
-- ricardo.felipe.ruiz@gmail.com → ['user', 'admin'] ⭐ SUPERUSER
-- alice@example.com → ['user']
-- bob@example.com → ['user']
+- ricardo.felipe.ruiz@gmail.com gets roles ['user', 'admin'] and is the superuser
+- alice@example.com gets roles ['user']
+- bob@example.com gets roles ['user']
 
 Generates secure random passwords and stores them in migration_results.json
 for initial login.
