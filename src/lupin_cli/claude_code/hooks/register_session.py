@@ -787,8 +787,8 @@ def _allocate_voice_persona_via_http(
     """
     Allocate a voice persona for a session through the cosa-voice HTTP allocate endpoint.
 
-    The server atomically picks a free persona, writes the bridge file, and broadcasts
-    voice_persona_assigned. Failure is soft but never silent: it returns ( None, failure_dict ).
+    The server picks a free persona atomically, writes the bridge file and broadcasts voice_persona_assigned.
+    Failure is soft but never silent: it returns ( None, failure_dict ).
 
     Requires:
         - server_url is a non-empty string (e.g. http://localhost:7999)
@@ -797,22 +797,22 @@ def _allocate_voice_persona_via_http(
 
     Ensures:
         - Returns ( persona_dict, None ) on success
-        - Returns ( None, failure_dict ) on any failure, where failure_dict
-          carries stage / exception / message / attempts / server_url
+        - Returns ( None, failure_dict ) on any failure; failure_dict carries stage / exception / message / attempts / server_url
         - persona is None if and only if failure is not None
-        - Never raises exceptions
+        - On failure the session goes on persona-less; the speech router falls back to Sam
+          (the global default voice). Never raises exceptions
         - Retries transport failures on the _ALLOCATE_TIMEOUT_LADDER_SECONDS budget
-          (5s, 10s, 15s per rung). Each attempt makes two calls, login then /allocate,
-          both on the rung's timeout, so the worst case is 60s. A wrong or empty answer is not retried
+          (5s, 10s, 15s per rung). Each attempt makes two calls, login then /allocate, both
+          on the rung's timeout, so the worst case is 60s. A wrong or empty answer is not retried
         - When previous_persona_name is non-empty, sends it as a query param so the
           server announces the re-assignment after the assigned broadcast
         - When persona_chain is non-empty, sends it as a query param so the server
           walks the chain strictly: the first free element wins, `*` means take anything free,
           and exhaustion without `*` is a 409 that the fail-soft except path turns into None (persona-less).
           The chain is mutually exclusive with the strict swap endpoint
-        - When declared_managers is a non-empty list, sends it as a CSV query param
-          on every allocate call, with or without a chain, so the server reserves
-          those names out of random and `*` draws; named elements still claim them
+        - When declared_managers is a non-empty list, sends it as a CSV query param on every
+          allocate call, with or without a chain, so the server reserves those names out of random and
+          `*` draws; named elements still claim them
 
     Args:
         server_url: Lupin server URL
@@ -1257,8 +1257,8 @@ def _resolve_memento_path( stable_session_id, persona_name, repo_root ):
         - Returns a memento path, or None when nothing resolves
         - The session-id match uses `session_id=<sid8>` in the header or a `-<sid8>.md`
           filename suffix. It needs no header and does not check persona; the id is the identity
-        - Never returns a record belonging to a different persona: handing a seat
-          another persona's state is worse than handing it none
+        - Never returns a record belonging to a different persona, except by session-id match,
+          where the id is the identity: handing a seat another persona's state is worse than none
         - Those two matches accept a header-less file: real records often start with a
           human heading, and the live slot is a bare name that often has no header
         - The live slot beats any historical sibling, including one with a `written_at` the
@@ -1451,8 +1451,8 @@ def _resolve_repo_root( cwd=None, repo_root_fn=None ):
     Find the repo whose mementos this seat should read, from the session's own cwd.
 
     LUPIN_ROOT is wrong here: the hook runs fleet-wide, so it sent non-lupin seats to lupin's
-    directory, where their memento does not live. A linked worktree's `.git` is a file, so a
-    plain `.git` walk stops at the worktree; git's `repo_root_owning` therefore answers first.
+    directory. A `.git` walk is the codebase's convention for which project am I in (`detect_project`).
+    A linked worktree's `.git` is a file, so git's `repo_root_owning` answers first.
 
     Requires:
         - cwd is the session's working directory, or None
@@ -1903,9 +1903,9 @@ def _resolve_window_tokens():
     """
     Return the context-window size in tokens to pin into the bridge at spawn.
 
-    The context-pressure assessor needs each worker's true window as the denominator.
-    It must not infer it from occupancy: a 1M and a 200k worker at 138k look identical.
-    So it is read from LUPIN_CC_WINDOW_TOKENS (set per worker at spawn), defaulting to 1M.
+    The assessor needs the true window as its denominator; occupancy cannot show it (a 1M and a
+    200k worker at 138k look identical). So it reads LUPIN_CC_WINDOW_TOKENS, set at spawn, default 1M.
+    See: src/rnd/v0.1.8/2026.06.07-managing-context-memory/2026.06.08-context-pressure-revised-plan.md, section 4.
 
     Ensures:
         - returns a positive int (never raises — defensive: this runs inside the

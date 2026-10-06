@@ -263,9 +263,9 @@ def _stop_hook_idle_behavior() -> str:
     """
     Read the three-way setting that decides what the Stop hook does on an idle stop.
 
-    The setting is the lupin-app.ini key "stop hook idle behavior", read through ConfigurationManager
-    under redirect_stdout, because its banners would corrupt the JSON on stdout. The hook runs
-    once per turn, so the parse cost is acceptable.
+    The setting is the lupin-app.ini key "stop hook idle behavior" in the [Lupin: Baseline] section.
+    It is read through ConfigurationManager under redirect_stdout, because its banners would
+    corrupt the JSON on stdout. The hook runs once per turn, so the parse cost is acceptable.
 
     Ensures:
         - returns one of _VALID_IDLE_BEHAVIORS
@@ -1125,7 +1125,7 @@ def _extract_narratable_text( assistant_msg ):
 
 def _try_auto_narrate( session_id, payload ):
     """
-    Speak the last assistant turn through send_tts when it ended without a notify call.
+    In conversation mode, speak the last assistant turn via send_tts if it had no notify call.
 
     This is the third-layer safety net for conversation mode.
     See: src/rnd/v0.1.7/2026.04.30-conv-mode-three-layer-enforcement/01-design.md
@@ -1525,8 +1525,8 @@ def _user_chase_until_from_store( session_id, now_epoch ):
     Resolve this session's per-user gate-deferral instant from the task store.
 
     The instant is the soonest future next_chase_ts among this owner's rows blocked by a user
-    (blocked_by kind "user"), which is what task_transition(blocked) causes. While it is in the future,
-    is_user_deferred suppresses this session's hold-file gates, so a gate deferred in the store stops re-asking.
+    (blocked_by kind "user"). While it is in the future, is_user_deferred suppresses this session's
+    hold-file gates, so a store deferral stops re-asking. No key links the two, and none should be added.
 
     Requires:
         - session_id is the resolved stable session id string
@@ -1580,7 +1580,7 @@ def _synthesize_owed_items( count, breakdown=None ):
     Build synthetic owed todo items that carry their real status.
 
     The store seam yields a count, but evaluate_work_owed consumes a list of owned dicts in the shape
-    owed_items_from_state emits ({ status, owned_by_me }). Status is carried from the server's group-by.
+    owed_items_from_state emits ({ status, owned_by_me }). Status is carried from the server's `GROUP BY`.
     Stamping every item in progress would misreport queued rows and make the unstarted-todo signal unreachable.
 
     Requires:

@@ -136,7 +136,7 @@ def _release_voice_persona( session_id ):
 
     The endpoint is /api/cosa-voice/voice-persona/{stable_session_id}/release.
     It uses the stable id from the bridge file, so the release matches the
-    allocation. A failure logs to stderr; later /allocate calls reclaim the slot.
+    allocation. It resolves credentials through hook_credentials and gets a JWT for the endpoint. A failure logs to stderr; later /allocate calls reclaim the slot.
 
     Requires:
         - session_id is a non-empty string
