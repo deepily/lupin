@@ -17,17 +17,19 @@ class OpenEndedSynthesisResponse( BaseXMLModel ):
     """
     LLM-synthesized prediction for open-ended notification responses.
 
-    Handles XML responses for prediction synthesis:
+    Handles XML responses for prediction synthesis.
+
     <open_ended_synthesis_response>
         <predicted_answer>The synthesized prediction text</predicted_answer>
         <reasoning>Brief explanation of synthesis logic</reasoning>
         <confidence>0.85</confidence>
     </open_ended_synthesis_response>
 
-    Fields (all str per BaseXMLModel convention — LLM I/O is always text):
-        predicted_answer: Synthesized prediction of user's response
-        reasoning: Brief explanation of synthesis logic
-        confidence: Float-as-string confidence score (0.0-1.0)
+    Fields (all str per BaseXMLModel convention, because LLM I/O is always text):
+
+    - predicted_answer: Synthesized prediction of user's response.
+    - reasoning: Brief explanation of synthesis logic.
+    - confidence: Float-as-string confidence score (0.0-1.0).
     """
 
     predicted_answer : str = Field( ..., description="Synthesized prediction of user's response" )

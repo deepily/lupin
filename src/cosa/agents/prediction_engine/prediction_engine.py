@@ -256,15 +256,16 @@ class PredictionEngine:
 
     def _ratified_weight( self, record ) -> float:
         """
-        Vote weight a retrieved CBR case contributes to its decision_value, by the
-        user's thumbs up/down ratification (human-confirmed training signal).
+        Vote weight a retrieved CBR case adds to its decision_value, by thumbs up/down state.
+
+        The ratification state is the user's human-confirmed training signal.
 
         Requires:
             - record is a dict that may carry a "ratification_state" key
 
         Ensures:
             - "approved" → +hint_vote_approved_weight (human-confirmed up-weight, > 1.0)
-            - "rejected" → -hint_vote_rejected_weight (NEGATIVE vote — engine steers away)
+            - "rejected" → -hint_vote_rejected_weight (negative vote — engine steers away)
             - anything else (pending / not_required / "" / missing) → +1.0 (ordinary case)
         """
         state = ( record.get( "ratification_state" ) or "" ).lower()
@@ -279,7 +280,7 @@ class PredictionEngine:
 
         The classic `winner_votes / total_votes` breaks once rejected cases cast
         negative votes (total can be small, zero, or negative). Normalizing by the
-        POSITIVE mass keeps the result bounded and meaningful.
+        positive mass keeps the result bounded and meaningful.
 
         Requires:
             - votes is a {value: signed_weight} dict, winner is a key in votes
@@ -297,8 +298,8 @@ class PredictionEngine:
         """
         True when the user thumbs-downed this CBR case (ratification_state="rejected").
 
-        A rejected case must never BE the answer in the open-ended retrieval tiers —
-        the engine steers away from it (Stage 3 of the thumbs-vote training signal).
+        A rejected case must never be the answer in the open-ended retrieval tiers.
+        The engine steers away from it, as part of the thumbs-vote training signal.
         """
         return ( record.get( "ratification_state" ) or "" ).lower() == "rejected"
 
@@ -312,7 +313,7 @@ class PredictionEngine:
 
         Ensures:
             - Returns ( candidate_cases, exact_case ):
-              - candidate_cases: cases allowed to BE an answer (rejected cases filtered
+              - candidate_cases: cases allowed to be an answer (rejected cases filtered
                 out — steer-away); [] when the user thumbs-downed every case
               - exact_case: the ( similarity_pct, record ) whose question matches message
                 (normalized), approved cases preferred over ordinary ones, highest
@@ -337,11 +338,9 @@ class PredictionEngine:
         """
         Build a content-bearing CBR key for an open_ended_batch from its per-question texts.
 
-        The batch's notification message is a content-free count preamble
-        ("I have N questions for you.") — correct for TTS, useless as a semantic
-        key, because every N-question batch collides on it and can retrieve an
-        UNRELATED batch's answers at similarity 1.0 (bug cdb5a76f). Keying on the
-        actual question texts ("header: question" per entry) restores batch identity.
+        The message is a content-free count preamble ("I have N questions for you."). Every
+        N-question batch collides on it, so one could retrieve an unrelated batch's answers
+        at similarity 1.0. Keying on each entry's "header: question" text restores identity.
 
         Requires:
             - message is the notification message (the fallback key)
@@ -765,13 +764,11 @@ class PredictionEngine:
     def _tally_multi_select_votes( self, header_option_votes: Dict[str, Dict[str, float]],
                                       positive_case_mass: float ) -> tuple:
         """
-        Tally multi-select votes (ratification-aware): select options whose weighted
-        vote reaches >= 50% of the positive case mass.
+        Tally ratification-aware multi-select votes, keeping options at >= 50% of positive mass.
 
-        Approved cases contribute +approved_weight per option they selected, rejected
-        cases a NEGATIVE weight (steer-away), ordinary cases +1.0 — see _ratified_weight().
-        With no ratified cases this reduces exactly to the original raw-count behavior
-        (all weights 1.0, positive_case_mass == valid_cases).
+        Approved cases add +approved_weight per selected option, rejected cases a negative
+        weight (steer-away), ordinary cases +1.0 (see _ratified_weight()). With no ratified
+        cases this reduces to raw counts: all weights 1.0, positive_case_mass == valid_cases.
 
         Requires:
             - header_option_votes: { "Header": { "OptionA": signed_weight, ... } }
@@ -781,7 +778,7 @@ class PredictionEngine:
             - Returns ( predicted_answers, avg_consistency ) tuple
             - predicted_answers: { "Header": ["OptionA", "OptionB"] } (list values)
             - Options included if weighted_vote / positive_case_mass >= 0.5
-            - Options with non-positive weighted votes are NEVER selected (steered away)
+            - Options with non-positive weighted votes are never selected (steered away)
             - Headers where every option was steered away are omitted entirely —
               predicted_answers may be {} when everything was thumbs-downed
             - Fallback: highest positively-weighted option when none meets the threshold
@@ -1227,9 +1224,9 @@ class PredictionEngine:
     @staticmethod
     def _cosine_similarity( vec_a, vec_b ):
         """
-        Compute cosine similarity between two L2-normalized vectors.
+        Compute cosine similarity between two unit-length vectors.
 
-        For L2-normalized vectors (as produced by EmbeddingProvider),
+        For unit-length (normalized) vectors, as produced by EmbeddingProvider,
         dot product equals cosine similarity.
 
         Requires:
@@ -1500,11 +1497,9 @@ class PredictionEngine:
         """
         Record a user thumbs up/down on a prediction hint as a human-confirmed CBR case.
 
-        up → ratification_state="approved" (reinforce that answer in future retrieval);
-        down → "rejected" (the ratification-aware tally casts a NEGATIVE vote against that
-        value — the engine steers away). The case is keyed deterministically on the
-        notification id so a re-vote flips its state IN PLACE (idempotent) instead of
-        duplicating; first vote inserts via the proven add_decision path.
+        Up sets ratification_state="approved" (reinforces that answer in retrieval).
+        Down sets "rejected" (the tally casts a negative vote, so the engine steers away).
+        The case key comes from the notification id, so a re-vote flips state in place.
 
         Requires:
             - notification_id, question non-empty; vote in {"up","down"}
@@ -1594,9 +1589,9 @@ class PredictionEngine:
         """
         Generate embedding vector for a text string.
 
-        Tries local EmbeddingProvider first (works inside server process),
-        then falls back to HTTP call to /api/embeddings/generate (works
-        from any external process without loading a second GPU model).
+        Tries local EmbeddingProvider first (works inside the server process).
+        Falls back to an HTTP call to /api/embeddings/generate, which works from any
+        external process without loading a second GPU model.
 
         Requires:
             - text is a non-empty string
