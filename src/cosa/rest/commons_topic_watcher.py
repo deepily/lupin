@@ -85,7 +85,7 @@ class CommonsTopicWatcher:
 
     def _register( self, record_id: str, record: Any ) -> None:
         """
-        Atomic insert-or-raise.
+        Insert one record into the in-flight map, or raise if its id is already there.
 
         Raises:
             - ValueError if `record_id` is already in flight — subclass router
