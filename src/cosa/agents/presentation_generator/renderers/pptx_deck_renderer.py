@@ -2,21 +2,21 @@
 """
 PPTX Deck Renderer — builds a PowerPoint deck directly from PresentationModel.
 
-Row f507034e. Marp's ``--pptx`` export rasterizes every slide to a PNG, so
-finished decks carried zero selectable text. Rick ruled python-pptx (2026-08-16):
-build the deck from the structured model instead, so every slide gets REAL,
-selectable, screen-reader-visible text runs — not text painted over an image.
+Marp's ``--pptx`` export rasterizes every slide to a PNG, so finished decks
+would carry no selectable text. This renderer builds the deck with python-pptx
+from the structured model instead. Every slide gets real, selectable,
+screen-reader-visible text runs, not text painted over an image.
 
 This renderer is a pure, synchronous transformation: PresentationModel + theme
 config dict + a visuals directory in, a ``.pptx`` file on disk out. No LLM, no
 async, no network. It mirrors MarpTextRenderer's slide-type dispatch so the two
 paths stay recognizably the same shape.
 
-Genuine content images (matplotlib charts, generated images, video frames) that
-Phase 7 rendered into ``visuals/`` as raster PNGs are embedded as pictures.
-SVG diagrams (d2) and Marp-native mermaid blocks are a known v1 gap — those
-slides keep their text; the diagram is deferred to a follow-up (needs a
-rasterizer / mmdc). See src/rnd/v0.2.0/2026.08.16-pptx-text-layer-python-pptx.md.
+Content images (matplotlib charts, generated images, video frames) that the
+visual rendering phase wrote into ``visuals/`` as raster PNGs are embedded as
+pictures. SVG diagrams (d2) and Marp-native mermaid blocks are a known gap.
+Those slides keep their text, and the diagram needs a rasterizer or mmdc.
+See src/rnd/v0.2.0/2026.08.16-pptx-text-layer-python-pptx.md.
 """
 
 import os
@@ -207,8 +207,9 @@ class PptxDeckRenderer:
     @staticmethod
     def _render_lead_slide( slide, slide_model, presentation, colors ):
         """
-        Render a centered lead slide (title / section_divider): title + subtitle
-        + optional speaker | date line.
+        Render a centered lead slide with title, subtitle, and optional speaker and date.
+
+        Used for the title and section_divider slide types.
         """
         box = slide.shapes.add_textbox(
             Inches( _MARGIN_IN ), Inches( 2.2 ),
@@ -240,8 +241,9 @@ class PptxDeckRenderer:
     @staticmethod
     def _render_content_slide( slide, slide_model, colors, visual_path ):
         """
-        Render a content slide: title, optional subtitle, bullets, and — when a
-        raster visual exists — the picture beside the text.
+        Render a content slide: title, subtitle, bullets, and the picture if any.
+
+        The picture sits beside the text, and only a raster visual is embedded.
         """
         # Title band across the top.
         title_box = slide.shapes.add_textbox(

@@ -6,9 +6,9 @@ Emits visible TODO markers in the Marp Markdown so that unsupported
 visual types (screenshot) are clearly marked for manual completion.
 Always succeeds — never returns None.
 
-Note (Session 248e740e, 2026-04-13): before_after and icon_only were moved
-to NanoBananaRenderer (Imagen) since they can be adequately generated from
-text prompts. Only screenshot remains here as it requires actual screen capture.
+The before_after and icon_only types belong to NanoBananaRenderer (Imagen)
+since they can be adequately generated from text prompts. Only screenshot
+remains here as it requires actual screen capture.
 """
 
 from typing import Optional

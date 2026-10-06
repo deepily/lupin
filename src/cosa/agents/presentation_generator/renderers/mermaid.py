@@ -106,10 +106,7 @@ class MermaidRenderer( VisualRenderer ):
         """
         Extract Mermaid code from Claude's response.
 
-        Handles:
-            - Fenced ```mermaid ... ``` blocks
-            - Fenced ``` ... ``` blocks (no mermaid label)
-            - Bare code starting with known Mermaid directives
+        Handles fenced mermaid blocks, fenced unlabelled blocks, and bare code starting with known directives.
 
         Requires:
             - response_content is a string

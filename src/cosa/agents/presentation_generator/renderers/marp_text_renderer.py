@@ -11,7 +11,7 @@ Marp format reference:
   - Presenter notes: <!-- comment blocks -->
   - Per-slide directives: <!-- _class: lead --> etc.
 
-Phase 7 visual placeholders use: <!-- VISUAL: type | description -->
+Visual placeholders for the later rendering phase use: `<!-- VISUAL: type | description -->`
 """
 
 from typing import Optional
@@ -446,9 +446,9 @@ class MarpTextRenderer:
     @staticmethod
     def _render_visual_placeholder( slide ) -> str:
         """
-        Emit a structured placeholder for Phase 7 visual rendering.
+        Emit a structured placeholder for the later visual rendering phase.
 
-        Phase 7 will find these comments via regex and replace them
+        That phase will find these comments via regex and replace them
         with actual Mermaid blocks, images, or tables.
 
         Returns:

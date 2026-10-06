@@ -2,8 +2,8 @@
 """
 Matplotlib Renderer — LLM-backed chart code generation + sandboxed execution.
 
-Calls Claude API with a natural-language chart description, extracts
-the Python plotting code from the response, injects savefig(), executes
+Calls Claude API with a natural-language chart description and extracts
+the Python plotting code from the response. Injects savefig(), executes
 in a sandboxed subprocess, and returns a markdown image reference.
 
 Produces PNG files in a visuals/ directory alongside the Marp file.
@@ -146,10 +146,7 @@ class MatplotlibRenderer( VisualRenderer ):
         """
         Extract Python code from Claude's response.
 
-        Handles:
-            - Fenced ```python ... ``` blocks
-            - Fenced ``` ... ``` blocks (no python label)
-            - Bare code starting with import statements
+        Handles fenced python blocks, fenced unlabelled blocks, and bare code starting with import.
 
         Requires:
             - response_content is a string

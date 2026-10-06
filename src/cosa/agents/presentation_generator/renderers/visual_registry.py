@@ -5,9 +5,9 @@ Visual Renderer Protocol and Registry for Presentation Generator.
 Defines the abstract renderer interface and a registry that dispatches
 visual_type strings to the appropriate renderer implementation.
 
-Design: Renderers return inline Marp-compatible markdown content
-(e.g., Mermaid code blocks, tables), NOT file paths. Marp handles
-final rendering at export time.
+Design: Renderers return Marp-compatible markdown or HTML content, never
+bare file paths. That content is Mermaid code blocks, tables, or image and
+video references to files they write. Marp handles final rendering at export time.
 """
 
 from abc import ABC, abstractmethod
