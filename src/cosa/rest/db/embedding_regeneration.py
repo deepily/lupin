@@ -1,66 +1,43 @@
 #!/usr/bin/env python3
 """
-Regenerate EVERY stored embedding from its own logged text (row 5e848dd8).
+Regenerate every stored embedding from its own logged text, in three guarded steps.
 
-WHY
+Why
 ---
-The embedding model changed on 2026-05-16 without a data migration. Rows written
-before that date hold OpenAI ``text-embedding-3-small`` vectors; rows written
-after hold local ``nomic-ai`` vectors. Both emit 768 dimensions, so nothing ever
-failed loudly — the table is shape-compatible and scale-incompatible at once.
+The embedding model changed without a data migration. Older rows hold OpenAI
+``text-embedding-3-small`` vectors; newer rows hold local ``nomic-ai`` vectors.
+Both emit 768 dimensions, so nothing failed loudly. The table is shape-compatible
+and scale-incompatible at once.
 
-Measured on the live table 2026-08-02 (read-only survey):
+Every row is regenerated, not only the normalized ones. A norm measures whether a
+vector was normalized, not which model produced it. The norm band separates OpenAI
+from local only because those two differ in normalization. It cannot see a boundary
+inside the local era, such as a model version or endpoint change that left the norm alone.
 
-    input_and_output        288,777 rows   (norm 1.0: 79,318 / norm 17-24: 209,468)
-    prediction_decisions        500 rows   (norm 1.0:     30 / norm 17-24:     469)
+The whole table must live in one space, produced by one model in one pass. Similarity
+is only meaningful between vectors from the same space. Partial regeneration leaves a
+mixed table, and the mix is undetectable. So the selection predicate is "has source
+text", not "looks stale". Every row still has its text, so regeneration is fully grounded.
 
-EVERY ROW IS REGENERATED — not only the normalized ones (Rick, 2026-08-02).
+Safety model
+------------
+Three separate commands, each asked for by name. Nothing overwrites a live vector
+column as a side effect of anything else:
 
-An earlier draft of this script regenerated only the 79,318 norm-1.0 rows, on the
-theory that the rest were "already correct." That was wrong, for a reason worth
-writing down: **a norm measures whether a vector was normalized, not which model
-produced it.** The norm band separates OpenAI from local only because those two
-happen to differ in normalization. It cannot see any boundary INSIDE the local
-era, where a model version, a training set, a service endpoint, or a prose/code
-engine choice could have changed without moving the norm at all. Calling those
-209,468 rows correct asserted a provenance the measurement never established.
-
-The invariant that actually matters is that the whole table live in ONE space,
-produced by ONE model, in ONE pass. Similarity is only meaningful between vectors
-drawn from the same embedding space; a table assembled from two or more spaces
-yields comparisons that are arithmetic without being meaning. Partial
-regeneration leaves exactly that — and leaves it undetectable, which is how the
-original defect survived two and a half months.
-
-So the selection predicate is "has source text", NOT "looks stale". Every row
-still has its text (verified: zero blank ``input``, zero blank ``output_final``),
-so regeneration is fully grounded across the whole table.
-
-SAFETY MODEL — read this before running anything
-------------------------------------------------
-Three separate commands, each of which must be asked for by name. Nothing here
-overwrites a live vector column as a side effect of anything else:
-
-    plan      READ-ONLY. Counts what is in scope and what it would cost. Default.
-    fill      Writes ONLY to shadow columns, never to a live vector column.
+    plan      Read-only. Counts what is in scope and what it would cost. Default.
+    fill      Writes only to shadow columns, never to a live vector column.
     swap      The single destructive step. Refuses unless verification passes.
 
-``--table-prefix`` points every statement at a clone (e.g. a probe schema), so
-the whole pipeline can be exercised end to end without the live table being
-addressed at all.
+``--table-prefix`` points every statement at a clone (e.g. a probe schema), so the
+whole pipeline can be exercised without addressing the live table at all.
 
-Run (from repo root, PYTHONPATH=src):
+Run from the repo root with PYTHONPATH=src:
+
     python -m cosa.rest.db.embedding_regeneration plan
     python -m cosa.rest.db.embedding_regeneration ensure-columns --apply
-    python -m cosa.rest.db.embedding_regeneration plan --table-prefix=regen_probe.
     python -m cosa.rest.db.embedding_regeneration fill --table-prefix=regen_probe. --limit=500
     python -m cosa.rest.db.embedding_regeneration verify --table-prefix=regen_probe.
     python -m cosa.rest.db.embedding_regeneration swap --table-prefix=regen_probe.
-
-Design authority: Rick's ruling 2026-08-02 (regenerate from logged text, shadow
-column then swap, batched/resumable/dry-run, off-peak, refuse-if-busy).
-
-Created: 2026-08-02 (Cheech 🌿) · row 5e848dd8
 """
 import os
 import sys
@@ -162,12 +139,11 @@ EXCLUDED_IDS: Dict[str, frozenset] = {
 # --------------------------------------------------------------------------- #
 def classify_norm( norm: float ) -> str:
     """
-    Classify a vector's L2 norm against the CURRENT model's measured band.
+    Classify a vector's norm against the current model's measured band.
 
-    This is a drift detector for freshly generated vectors, NOT a way to pick
-    which rows to regenerate. A norm says whether a vector was normalized; it
-    does not identify the model that produced it, and two different models can
-    sit in the same band. Selection is by source text — see the module docstring.
+    This detects drift in freshly generated vectors. It never picks which rows to
+    regenerate: a norm does not identify the producing model, and two models can
+    share a band. Selection is by source text.
 
     Requires:
         - norm is a non-negative float
@@ -248,19 +224,14 @@ def excluded_ids_clause( table: str, pk: str ) -> str:
     Build the SQL fragment that removes EXCLUDED_IDS rows from a scope query.
 
     `fill` skips excluded rows in Python via is_excluded(). `verify` counts scope
-    in SQL, and originally had no matching filter — so an excluded row sat in the
-    denominator forever, unfillable by design and uncountable as filled. The
-    decisions spec could therefore NEVER verify clean, and the swap it gates could
-    never run (found live 2026-08-17: `1 of 909 in-scope row(s) have no
-    regenerated vector`, that one row being clamp-001).
-
-    Keeping the fragment here means the two paths share one definition of scope
-    instead of agreeing by coincidence.
+    in SQL with this fragment, so both paths share one definition of scope.
 
     Requires:
         - table is a spec table name; pk is its primary-key column name
 
     Ensures:
+        - without this filter an excluded row would sit in the verify denominator,
+          unfillable and never counted as filled, so the swap could never run
         - returns "" when the table has no excluded ids
         - otherwise returns a leading-AND fragment excluding exactly those ids
         - ids are single-quoted, with embedded quotes doubled
@@ -296,13 +267,9 @@ def plan_batches_by_budget( items: Sequence[Any], size_of, *,
                             char_budget: int = DEFAULT_CHAR_BUDGET,
                             max_count: int = DEFAULT_BATCH_SIZE ) -> List[List[Any]]:
     """
-    Group items into batches bounded by BOTH a total size budget and a count.
+    Group items into batches bounded by both a total size budget and a count.
 
-    A fixed count is not a safe batch bound for embedding. Measured 2026-08-02:
-    256 typical texts (17,850 chars total) embed fine, while EIGHT of the longest
-    texts (~100k chars) return HTTP 500 — `torch.OutOfMemoryError` on a GPU whose
-    23.65 GiB is already ~99% held by two other processes. Cost tracks total text,
-    not row count, so the count alone lets the long tail through.
+    Cost tracks total text, not row count, so a fixed count is not a safe bound.
 
     Requires:
         - items is a sequence
@@ -310,9 +277,12 @@ def plan_batches_by_budget( items: Sequence[Any], size_of, *,
         - char_budget and max_count are positive ints
 
     Ensures:
+        - the size budget exists because 256 typical texts embed fine, while eight
+          of the longest (about 100k chars) run the shared GPU out of memory and
+          the server answers HTTP 500; a count alone lets that long tail through
         - returns batches preserving order and covering every item exactly once
         - no batch exceeds max_count items
-        - no batch exceeds char_budget UNLESS it holds a single item that alone
+        - no batch exceeds char_budget unless it holds a single item that alone
           exceeds it — an oversized row is isolated rather than dropped, so the
           caller can decide, and it can never be silently merged with others
         - returns [] for an empty input
@@ -344,25 +314,22 @@ def plan_batches_by_budget( items: Sequence[Any], size_of, *,
 
 def bulk_update_shadow_sql( table: str, pk: str, shadow_column: str ) -> str:
     """
-    Build the ONE-statement, many-row shadow UPDATE used by the batched write path.
+    Build the single-statement, many-row shadow `UPDATE` used by the batched write path.
 
-    Measured 2026-08-16 (row 5e848dd8): the per-statement Python/SQLAlchemy
-    overhead — NOT Postgres — dominates the write side, and collapsing a chunk
-    into a single round trip roughly doubles throughput (~4,575 -> ~8,940 rows/s
-    on a properly-indexed clone). This is the psycopg2 `execute_values` template
-    that does the collapsing while leaving the commit cadence alone.
-
-    The `%s` placeholder is expanded by execute_values into the VALUES rows; each
-    row is `(id, vec_text)`, and `data.vec::vector` casts the pgvector literal
-    back to a vector on the way in. The target is aliased `t` so a
-    schema-qualified table name still yields a legal `t.<pk>` reference.
+    Per-statement Python/SQLAlchemy overhead, not Postgres, dominates the write
+    side, so one round trip per chunk roughly doubles throughput. This is the
+    psycopg2 `execute_values` template; the commit cadence stays unchanged.
 
     Requires:
         - table, pk, shadow_column are non-empty identifiers (already qualified
           by the caller via qualify(); this function does no quoting)
 
     Ensures:
-        - returns a single UPDATE ... FROM (VALUES %s) ... statement string whose
+        - the `%s` placeholder is expanded into `VALUES` rows of `(id, vec_text)`,
+          and `data.vec::vector` casts the pgvector literal back to a vector
+        - the target is aliased `t` so a schema-qualified table name still gives
+          a legal `t.<pk>` reference
+        - returns a single `UPDATE ... FROM (VALUES %s) ...` statement string whose
           only bind point is the execute_values %s marker
     """
     return (
@@ -374,22 +341,17 @@ def bulk_update_shadow_sql( table: str, pk: str, shadow_column: str ) -> str:
 
 class AdaptiveBudget:
     """
-    A character budget that FINDS its own ceiling instead of being told one.
+    A character budget that finds its own ceiling by trial instead of being told one.
 
-    Why this exists rather than a constant: DEFAULT_CHAR_BUDGET was calibrated
-    against a GPU with 23 MiB free, because a 16.7 GiB vLLM instance was sharing
-    it. Rick's point — the other models can be unloaded for this run — means that
-    number describes a machine that will not exist when the run happens. Measured
-    2026-08-02: GPU 0 is a 24,564 MiB card holding the model server (7,416 MiB)
-    and one vLLM (16,754 MiB). Unloading the vLLM takes free memory from 23 MiB
-    to roughly 17 GiB.
+    DEFAULT_CHAR_BUDGET was calibrated against a GPU with almost no free memory,
+    because another model server shared it. Other models can be unloaded for a run,
+    so that number may describe a machine that will not exist when the run happens.
 
-    But I only have ONE calibrated point — the crowded card. Scaling a budget
-    from it by a made-up chars-per-MiB rate would be inventing the very
-    measurement that is missing. So this grows EMPIRICALLY: start conservative,
-    widen while batches succeed, halve when one is refused. The run discovers the
-    real ceiling on the hardware it actually finds, whether or not anything was
-    unloaded, and no constant has to be re-tuned by hand afterwards.
+    Only one calibrated point exists, the crowded card. Scaling from it by an
+    invented chars-per-MiB rate would make up the missing measurement. So the
+    budget grows by trial: start conservative, widen while batches succeed, halve
+    when one is refused. The run finds the real ceiling on whatever hardware it
+    meets, and no constant needs re-tuning by hand.
 
     Pairs with split_batch(): this sets the target size, that recovers the batch
     that overshot.
@@ -449,10 +411,9 @@ def split_batch( batch: Sequence[Any] ) -> List[List[Any]]:
     """
     Halve a batch that the embedder refused, for retry.
 
-    The recovery half of the OOM story: a batch that fails is not evidence that
-    any row in it is bad, only that the batch was too big for the memory free at
-    that moment. Halving converges on the real culprit — or on success — in
-    log2(n) attempts.
+    A failed batch is not evidence that any row in it is bad. It may only have been
+    too big for the memory free at that moment. Halving converges on the real
+    culprit, or on success, in log2(n) attempts.
 
     Requires:
         - batch is a sequence
@@ -491,9 +452,9 @@ def should_proceed( *, busy: Optional[bool], hour_edt: Optional[int],
     """
     Decide whether a write pass may start right now.
 
-    The queue check is the real gate; the clock is a courtesy. An UNKNOWN busy
-    state (probe unreachable) blocks — the whole point of the check is that we
-    do not guess about a server somebody else is using.
+    The queue check is the real gate; the clock is a courtesy. An unknown busy
+    state (probe unreachable) blocks, because the check exists so that we never
+    guess about a server somebody else is using.
 
     Requires:
         - busy is True/False, or None when the probe could not answer
@@ -503,7 +464,7 @@ def should_proceed( *, busy: Optional[bool], hour_edt: Optional[int],
     Ensures:
         - returns None when the pass may start
         - returns a refusal reason string otherwise
-        - force=True bypasses the clock but NEVER the busy check
+        - force=True bypasses the clock but never the busy check
     """
     if busy is None:
         return "could not determine whether the server is busy — refusing to guess"
@@ -714,19 +675,18 @@ def _embed_with_split_retry( provider, rows, content_type, depth=0, budget=None 
     """
     Embed (id, text) rows, halving the batch on failure until it fits or is one row.
 
-    A batch that 500s is not evidence that any row in it is bad — it is evidence
-    the batch was too big for the GPU memory free at that instant. Halving
-    separates those two cases instead of failing all of them together.
+    A batch that returns HTTP 500 is not evidence that any row in it is bad. It
+    means the batch was too big for the GPU memory free at that instant. Halving
+    separates those two cases instead of failing all rows together.
 
     Returns [ ( row_id, vector_or_None ), ... ]; a None means that single row
-    genuinely could not be embedded on its own.
+    could not be embedded on its own.
 
-    A TRANSPORT failure is not split. `EmbeddingProviderUnreachable` means the
-    service is not answering at all — the provider already spent every retry it
-    has before raising — so a smaller batch would fail on the same dead socket.
-    Splitting there turns one dead dependency into one doomed retry per row and
-    burns the entire run producing nothing (bug 13b35b37). It propagates instead,
-    which stops the run loudly and immediately.
+    A transport failure is not split. `EmbeddingProviderUnreachable` means the
+    service is not answering at all. The provider already spent every retry,
+    so a smaller batch would hit the same dead socket. Splitting would turn one
+    dead dependency into one doomed retry per row. The error propagates instead,
+    which stops the run loudly.
     """
     from cosa.memory.embedding_provider import EmbeddingProviderUnreachable
 
@@ -753,11 +713,11 @@ def _embed_with_split_retry( provider, rows, content_type, depth=0, budget=None 
 
 def _bulk_write_shadow( session, table, pk, shadow_column, pairs ):   # pragma: no cover - live DB boundary
     """
-    Write a whole chunk of (id, vec_text) pairs in ONE psycopg2 execute_values
-    call, inside the session's current transaction (caller still commits).
+    Write a chunk of (id, vec_text) pairs in one psycopg2 execute_values call.
 
-    Reaches through the SQLAlchemy session to the underlying psycopg2 cursor
-    because execute_values is a psycopg2 extension — the write lands in the same
+    The write runs inside the session's current transaction, and the caller still
+    commits. It reaches through the SQLAlchemy session to the psycopg2 cursor
+    because execute_values is a psycopg2 extension. The write lands in the
     transaction the session manages, so the caller's session.commit() covers it.
     """
     from psycopg2.extras import execute_values
@@ -776,7 +736,7 @@ def _bulk_write_shadow( session, table, pk, shadow_column, pairs ):   # pragma: 
 def _fill( session, spec, provider, prefix="", batch_size=DEFAULT_BATCH_SIZE,
            char_budget=DEFAULT_CHAR_BUDGET, limit=None, scratch_dir="/tmp",
            apply=False ):   # pragma: no cover - live DB + embedder boundary
-    """Regenerate one spec's vectors into its SHADOW column. Never writes the live column."""
+    """Regenerate one spec's vectors into its shadow column. Never writes the live column."""
     from sqlalchemy import text as sql_text
 
     table = qualify( spec.table, prefix )
@@ -873,7 +833,7 @@ def _verify( session, spec, prefix="" ):   # pragma: no cover - live DB boundary
 
 
 def _swap( session, spec, prefix="", apply=False ):   # pragma: no cover - live DB boundary
-    """THE destructive step: shadow overwrites live, gated on a clean verify."""
+    """Overwrite live vectors with shadow vectors, the destructive step, gated on a clean verify."""
     from sqlalchemy import text as sql_text
 
     report = _verify( session, spec, prefix )
@@ -895,25 +855,22 @@ def _swap( session, spec, prefix="", apply=False ):   # pragma: no cover - live 
 
 def shadow_column_ddl( specs=None, prefix="" ) -> List[str]:
     """
-    Build the ADD COLUMN statements for every spec's shadow column.
+    Build the `ADD COLUMN` statements for every spec's shadow column.
 
-    The `fill` step writes into shadow columns that nothing in this module used to
-    create — the DDL was simply never written, so the first live fill died on
-    `column "input_embedding_regen" does not exist` (2026-08-17). Generating the
-    statements from REGEN_SPECS keeps them from drifting: add a spec and its column
-    is created, with no second list to remember.
-
-    IF NOT EXISTS makes the result safe to apply repeatedly, which matters because
-    a resumed run should not have to know whether an earlier attempt got this far.
+    The `fill` step writes into shadow columns, so they must exist first. Generating
+    the statements from REGEN_SPECS keeps them from drifting.
 
     Requires:
         - specs is a list of RegenSpec, or None for REGEN_SPECS
         - prefix is a table-name prefix, "" for the live tables
 
     Ensures:
+        - adding a spec creates its column, with no second list to maintain
+        - `IF NOT EXISTS` makes the result safe to apply repeatedly, so a resumed
+          run need not know whether an earlier attempt got this far
         - returns one statement per spec, in spec order
-        - every statement is a nullable ADD COLUMN IF NOT EXISTS at EMBEDDING_DIM
-        - no statement carries a DEFAULT — that is what keeps it metadata-only
+        - every statement is a nullable `ADD COLUMN IF NOT EXISTS` at EMBEDDING_DIM
+        - no statement carries a `DEFAULT`, which is what keeps it metadata-only
     """
     return [
         f"ALTER TABLE {qualify( spec.table, prefix )} "

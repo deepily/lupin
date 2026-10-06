@@ -1,38 +1,35 @@
 """
 Programmatic Alembic auto-migration on application startup.
 
-Runs the equivalent of ``alembic upgrade head`` from WITHIN the process so a
-freshly-booted container always serves against a schema that matches the ORM
-models — the reproducible, hands-off alternative to a human running SQL/ALTER
-by hand.
+Runs the equivalent of ``alembic upgrade head`` inside the process. A freshly booted
+container then always serves a schema that matches the ORM models, with no human
+running SQL or `ALTER` by hand.
 
 Why programmatic (not the ``alembic`` CLI)?
     The deployment image bind-mounts only ``./src`` into the container, so
-    ``alembic.ini`` (which lives at the repo ROOT) is NOT present at any
-    container path. Building the Alembic ``Config`` in code removes that
-    dependency entirely: ``script_location`` is computed from the project root,
-    and the database URL is resolved by the migrations' own ``env.py`` (which
-    reuses the app's ``cosa.rest.db.database.get_database_url`` builder — the
-    single URL-construction source of truth across dev, testing, and the cloud
-    Cloud-SQL socket).
+    ``alembic.ini`` (which lives at the repo root) is absent at every container path.
+    Building the Alembic ``Config`` in code removes that dependency.
+    ``script_location`` is computed from the project root. The migrations' own
+    ``env.py`` resolves the database URL through the app's
+    ``cosa.rest.db.database.get_database_url`` builder, the single URL source for
+    dev, testing and the cloud Cloud-SQL socket.
 
-DB-state handling (so fresh provisioning is automatic, never a hand-step):
-    1. ``alembic_version`` table PRESENT  → plain ``upgrade head`` (idempotent;
-       a DB already at head is a no-op). Individual migrations are written to be
-       idempotent where a baseline ``schema.sql`` may have pre-created columns.
-    2. table ABSENT + NO app tables (truly empty DB) → ``Base.metadata.create_all``
-       then ``stamp head``. Schema == models exactly; stamped at head so future
-       deltas apply cleanly.
-    3. table ABSENT + app tables EXIST (legacy ``schema.sql`` DB never stamped) →
-       FAIL LOUD with an explicit one-time reconcile instruction. Replaying the
-       whole chain over an existing schema would raise ``DuplicateTable``; the
-       correct recovery (``alembic stamp <baseline>`` once) is an operator
-       decision, not something to guess silently.
+DB-state handling (fresh provisioning is automatic, never a hand step):
+    1. ``alembic_version`` table present: plain ``upgrade head``. A DB already at
+       head is a no-op. Migrations are written to be idempotent where a baseline
+       ``schema.sql`` may have pre-created columns.
+    2. Table absent and no app tables (truly empty DB): ``Base.metadata.create_all``
+       then ``stamp head``. The schema equals the models and is stamped at head,
+       so future deltas apply cleanly.
+    3. Table absent but app tables exist (legacy ``schema.sql`` DB never stamped):
+       fail loud with a one-time reconcile instruction. Replaying the whole chain
+       over an existing schema would raise ``DuplicateTable``. The right recovery
+       (``alembic stamp <baseline>`` once) is an operator decision.
 
 Design contract:
     - Idempotent  : re-running against a DB already at head is a no-op.
-    - Fail-loud   : any migration error PROPAGATES. The caller MUST let it abort
-                    boot — never serve a half-migrated database.
+    - Fail-loud   : any migration error propagates. The caller must let it abort
+                    boot, so a half-migrated database is never served.
     - Once-per-process: called exactly once from ``lupin_app.main`` lifespan.
 """
 
@@ -99,10 +96,10 @@ def wait_for_database( probe, timeout=DB_WAIT_TIMEOUT_SECONDS,
 
     Ensures:
         - returns probe's return value on the first success
-        - a probe that succeeds immediately costs ZERO sleeps — the common case
+        - a probe that succeeds immediately costs zero sleeps, so the common case
           pays nothing for this guard
         - retries with exponential backoff until the deadline passes
-        - re-raises the LAST exception unchanged when the budget is spent, so
+        - re-raises the last exception unchanged when the budget is spent, so
           the operator sees the real driver error and not a wrapper
         - never sleeps past the deadline
     """
@@ -130,14 +127,11 @@ def wait_for_database( probe, timeout=DB_WAIT_TIMEOUT_SECONDS,
 
 def resolve_database_url( database_url=None ):
     """
-    Resolve the effective database URL for inspection + migration.
+    Resolve the effective database URL for inspection and migration.
 
-    Resolution order (first hit wins) — mirrors src/migrations/env.py, and
-    delegates URL CONSTRUCTION to the app's single builder so no connection
-    logic is duplicated here:
-        1. explicit ``database_url`` argument (e.g. a throwaway test DB)
-        2. ``DATABASE_URL`` env var (explicit override)
-        3. ``cosa.rest.db.database.get_database_url()`` (the app builder)
+    First hit wins, as in src/migrations/env.py: 1. the ``database_url`` argument,
+    2. the ``DATABASE_URL`` env var, 3. ``cosa.rest.db.database.get_database_url()``.
+    URL construction stays in that one builder, so no connection logic is duplicated.
 
     Args:
         database_url: optional explicit URL
@@ -214,8 +208,8 @@ def _read_current_revision( url ):
     Ensures:
         - returns the stamped revision string, or None when there is none
           (fresh DB) or it could not be read
-        - NEVER raises. This is observability, not a gate: a migration must not
-          fail because the thing that reports on it could not read a revision
+        - never raises. This is observability, not a gate: a migration must not
+          fail because the code that reports on it could not read a revision
 
     Args:
         url: concrete SQLAlchemy URL
@@ -238,8 +232,7 @@ def _read_current_revision( url ):
 
 def run_migrations_to_head( database_url=None, debug=False ):
     """
-    Bring the target database up to the latest migration head (auto-bootstrapping
-    a truly-empty DB), idempotently and fail-loud.
+    Bring the database to the latest migration head, bootstrapping an empty one.
 
     Requires:
         - the target database is reachable with the resolved URL
@@ -251,7 +244,7 @@ def run_migrations_to_head( database_url=None, debug=False ):
           column present, etc.) and stamped accordingly
         - idempotent: a no-op when the database is already at head
         - empty DB: created from Base.metadata + stamped head
-        - FAIL-LOUD: re-raises any Alembic/DBAPI error so the caller aborts boot;
+        - fail-loud: re-raises any Alembic/DBAPI error so the caller aborts boot;
           a legacy-unstamped schema raises RuntimeError with reconcile guidance
 
     Args:
@@ -260,11 +253,9 @@ def run_migrations_to_head( database_url=None, debug=False ):
 
     Returns:
         dict — { "before": str|None, "after": str|None, "applied": bool,
-                 "bootstrapped": bool }. `applied` is True ONLY when the
-        revision actually MOVED, which is what lets a caller distinguish a
-        deploy from a no-op. Every existing caller ignores this and is
-        unaffected; it is added because "did this run change the database?"
-        was previously unanswerable from the outside (row 0aae1a28).
+                 "bootstrapped": bool }. `applied` is True only when the
+        revision actually moved, which lets a caller tell a deploy from a no-op.
+        Existing callers ignore the value and are unaffected.
 
     Raises:
         RuntimeError: app tables exist but the DB was never alembic-stamped
