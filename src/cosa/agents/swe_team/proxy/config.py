@@ -7,7 +7,7 @@ Generic trust config lives in decision_proxy/config.py.
 
 Dependency Rule:
     This module imports from decision_proxy (Layer 3) for base config re-exports.
-    This module NEVER imports from notification_proxy.
+    This module never imports from notification_proxy.
 """
 
 # ============================================================================

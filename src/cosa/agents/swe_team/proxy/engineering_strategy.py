@@ -8,7 +8,7 @@ decision-making.
 
 Dependency Rule:
     This module imports from decision_proxy (Layer 3) for base classes.
-    This module NEVER imports from notification_proxy.
+    This module never imports from notification_proxy.
 """
 
 from scipy.stats import beta as beta_dist
@@ -32,13 +32,7 @@ class EngineeringStrategy( BaseDecisionStrategy ):
     """
     Concrete decision strategy for SWE team engineering decisions.
 
-    Wires together:
-        - EngineeringClassifier for question → category mapping
-        - TrustTracker for per-category trust levels
-        - CircuitBreaker for anomaly detection and auto-demotion
-        - Thompson Sampling for probabilistic gate routing (optional)
-        - Conformal Prediction for coverage-guaranteed deferral (optional)
-        - ICRL for LLM-augmented disambiguation of ambiguous CBR (optional)
+    Wires together a classifier, trust tracker, circuit breaker and optional gate extensions.
 
     Requires:
         - trust_tracker: TrustTracker instance (categories registered at init)
@@ -51,6 +45,15 @@ class EngineeringStrategy( BaseDecisionStrategy ):
         - decide() provides default decision values per category
         - evaluate() runs the full pipeline with trust_tracker integration
         - Thompson Sampling draws from Beta posterior when enabled
+
+    Notes:
+        Components wired together:
+            - EngineeringClassifier for question → category mapping
+            - TrustTracker for per-category trust levels
+            - CircuitBreaker for anomaly detection and auto-demotion
+            - Thompson Sampling for probabilistic gate routing (optional)
+            - Conformal Prediction for coverage-guaranteed deferral (optional)
+            - ICRL for LLM-augmented disambiguation of ambiguous CBR (optional)
     """
 
     def __init__(
@@ -202,8 +205,8 @@ class EngineeringStrategy( BaseDecisionStrategy ):
 
         Ensures:
             - In "shadow" mode: always returns "shadow"
-            - In "suggest" mode: returns "suggest" for L2+, "shadow" for L1
-            - In "active" mode: trust-level gating (L1=shadow, L2=suggest, L3+=act)
+            - In "suggest" mode: returns "suggest" for level 2 and above, "shadow" for level 1
+            - In "active" mode: trust-level gating (level 1 = shadow, level 2 = suggest, level 3 and above = act)
             - Circuit breaker tripped → returns "defer"
 
         Args:
@@ -551,7 +554,7 @@ class EngineeringStrategy( BaseDecisionStrategy ):
         Run the full pipeline with trust tracker integration.
 
         Overrides base evaluate() to use the trust tracker for accurate
-        per-category trust levels instead of the default L1. Enriches
+        per-category trust levels instead of the default level 1. Enriches
         the reason string with CBR metadata when available.
 
         Requires:

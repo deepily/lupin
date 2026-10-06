@@ -10,7 +10,7 @@ Imports from:
     - decision_proxy (Layer 3: base classes, trust tracker, circuit breaker)
     - proxy_agents (Layer 1: shared infra)
 
-NEVER imports from:
+Never imports from:
     - notification_proxy (Layer 2)
 """
 
