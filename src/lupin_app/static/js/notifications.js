@@ -3232,6 +3232,9 @@ class NotificationsUI {
                 // src/tests/unit/notifications_js/the_console_events_reach_the_queue_socket_and_not_the_audio_one.test.ts
                 "cc_transcript_append",
                 "cc_transcript_state",
+                // Row 8796333b: one invalidation push per committed task-store write. The
+                // queue socket only, for the same reason as the two names above.
+                "task_store_changed",
                 "auth_success",
                 "auth_error",
                 "connect",
@@ -3539,6 +3542,10 @@ class NotificationsUI {
 
                 case "notification_queue_update":
                     this.handleNotificationUpdate( envelope );
+                    break;
+
+                case "task_store_changed":
+                    this._handleTaskStoreChanged();
                     break;
 
                 case "notification_responded":
@@ -13378,6 +13385,32 @@ class NotificationsUI {
         await this.refreshTaskList();
     }
 
+    _handleTaskStoreChanged() {
+        /**
+         * Re-read the task panes when the server says the task store changed (row 8796333b).
+         *
+         * The frame is an invalidation and carries no delta, so nothing in it is read here.
+         * The 60s polls stay as the safety net: a write made by the :8001 arbiter emits no
+         * frame and shows on the next tick.
+         *
+         * Ensures:
+         *     - the task list is re-read through `_refreshTaskListAfterWrite`, so a push
+         *       that lands during a tick in flight is not dropped
+         *     - the finished-tasks pane is re-read as well; a push that lands during its read
+         *       in flight is owed one more read when that one ends, however many pushes land
+         *     - a pane whose poll is not running is left alone: no read is started for a
+         *       pane that was never started or has been stopped
+         *     - a failed read is logged and does not reach the socket handler
+         */
+        if ( this.taskListPollIntervalHandle ) {
+            this._refreshTaskListAfterWrite().catch( e => this.error( "task_store_changed: task list refresh failed:", e ) );
+        }
+        if ( this._finishedTasksTimer ) {
+            if ( this._finishedTasksFetchInFlight ) { this._finishedTasksPushPending = true; return; }
+            this.refreshFinishedTasks().catch( e => this.error( "task_store_changed: finished tasks refresh failed:", e ) );
+        }
+    }
+
     // =========================================================================
     // FINISHED TASKS — Rick's P0 (broadcast e254ec7d, 2026-09-07), row 7c616656.
     // Design: src/rnd/2026.09.06-completed-work-accordion-design.md
@@ -13671,6 +13704,12 @@ class NotificationsUI {
             this.renderFinishedTasks( eventsByStatus, error );
         } finally {
             this._finishedTasksFetchInFlight = false;
+        }
+        // Row 8796333b: a push that landed during the read above may describe a write that
+        // read did not see, so it is owed one more read rather than being dropped.
+        if ( this._finishedTasksPushPending ) {
+            this._finishedTasksPushPending = false;
+            await this.refreshFinishedTasks();
         }
     }
 

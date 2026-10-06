@@ -317,7 +317,7 @@ Real-time notification when the SWE Team decision proxy logs a new pending ratif
 
 ### `task_store_changed` (Server → Client)
 
-Row 8796333b, slices 1 and 2. An **invalidation**, not a delta: it says "the task store committed a change, re-read", and carries just enough to see what moved. Three panes re-read on it: Task List (`TaskListStore`), Holding Area (`HoldingAreaStore`) and Finished Tasks (`FinishedTasksStore`), each by waiting out a read already in flight; the 60-second poll stays as the safety net, so a missed frame costs a late refresh, never a wrong board.
+Row 8796333b, slices 1 to 3. An **invalidation**, not a delta: it says "the task store committed a change, re-read", and carries just enough to see what moved. Three panes re-read on it: Task List (`TaskListStore`), Holding Area (`HoldingAreaStore`) and Finished Tasks (`FinishedTasksStore`), each by waiting out a read already in flight; the 60-second poll stays as the safety net, so a missed frame costs a late refresh, never a wrong board.
 
 **When**: once per database session that **commits** after appending one or more `TaskEvent` rows through `TaskRepository._append_event`. Three events in one commit are one frame. A rolled-back session emits nothing. Emitter: `src/cosa/rest/task_store_change_notifier.py`, wired in `lupin_app/main.py`.
 
@@ -338,7 +338,9 @@ The frame on the wire also carries a `timestamp` field, added to every event by 
 
 **What the web client does with it**: each of the three stores waits out any read already in flight and then starts one more, so the read it shows began after the push. A burst of pushes shares that one read. The 60-second poll continues as the fallback.
 
-**Subscribers**: any session subscribed to it (default `"*"`); the web `QueueTransport` subscribes. **Not covered**: writers in a process that does not run the websocket manager (the `:8001` arbiter's straggler-ticket and follow-through writes) emit nothing; their rows show up on the next poll. Delivery is to **all** connected sessions, like the unscoped task poll; scoping by role is an open design question.
+**What the legacy page does with it** (slice 3): `notifications.js` carries the name in its queue-socket list (`_buildQueueAuthMessage`, never the audio one) and `_handleTaskStoreChanged` re-reads its task list through `_refreshTaskListAfterWrite` and its finished-tasks pane through `refreshFinishedTasks`. A pane whose 60-second poll is not running is left alone. A push that lands during a finished-tasks read in flight is owed one more read when that one ends, however many pushes land.
+
+**Subscribers**: any session subscribed to it (default `"*"`); the web `QueueTransport` and the legacy `notifications.js` page subscribe. **Not covered**: writers in a process that does not run the websocket manager (the `:8001` arbiter's straggler-ticket and follow-through writes) emit nothing; their rows show up on the next poll. Delivery is to **all** connected sessions, like the unscoped task poll; scoping by role is an open design question.
 
 ---
 
