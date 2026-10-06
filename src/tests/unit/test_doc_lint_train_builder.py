@@ -7,11 +7,13 @@ Everything else is real: a small git repo in a temp directory, real commits, rea
 """
 
 import contextlib
+import hashlib
 import io
 import json
 import subprocess
 import sys
 import types
+from datetime import datetime, timezone
 
 import pytest
 
@@ -21,6 +23,7 @@ from cosa.rest.task_store_prose_refs import strip_amendment_stamps
 OWNER  = "Cheech"
 TS     = "2026-10-05T22:02:28.169063+00:00"
 WRITER = "Mr. Radio"
+TIB    = "Tiberius 9f3a1b2c"
 
 
 def _git( root, *args ):
@@ -34,8 +37,27 @@ def stamped( *blocks ):
     return "\n\n".join( f"[amendment · {actor} · {TS}]\n{note}" for actor, note in blocks )
 
 
-def approval( checks, commits, verdict="pass" ):
-    return tb.APPROVAL_PREFIX + " " + json.dumps( { "checks": str( checks ), "commits": commits, "verdict": verdict } )
+def hashes_of( checks ):
+    return { name: hashlib.sha256( ( checks / name ).read_bytes() ).hexdigest() for name in tb.CHECK_FILES }
+
+
+def approval( checks, commits, verdict="pass", hashes=None ):
+    return tb.APPROVAL_PREFIX + " " + json.dumps( { "checks": str( checks ), "commits": commits, "verdict": verdict, "sha256": hashes_of( checks ) if hashes is None else hashes } )
+
+
+def claim_line( package, writer=WRITER ):
+    return tb.CLAIM_PREFIX + " " + json.dumps( { "package": package, "writer": writer } )
+
+
+def event( actor=TIB, transition="amended", ts=TS ):
+    return { "actor": actor, "transition": transition, "ts": ts }
+
+
+def claim( package, blocks=(), writer=WRITER, owner=OWNER, status="queued", title=None, events=None, row_id=None, claim_text=None ):
+    """A claim row the way the store hands it over: the manager's claim line, then the stamped amendments, and the audit trail."""
+    body = ( claim_text if claim_text is not None else claim_line( package, writer ) ) + ( "\n\n" + stamped( *blocks ) if blocks else "" )
+    return { "id": row_id or f"id-{package}", "title": title or f"docs sweep: {package}", "owner_persona": owner, "status": status, "body": body,
+             "events": [ event( actor ) for actor, _ in blocks ] if events is None else events }
 
 
 @pytest.fixture
@@ -61,24 +83,25 @@ def world( tmp_path, monkeypatch ):
     word_list._state[ "words" ] = None
 
 
-def checks_dir( world, name, result_pass=True, history_pass=True ):
+def checks_dir( world, name, package="a", result_pass=True, history_pass=True ):
     path = world.data / name
     path.mkdir()
-    ( path / "result.json" ).write_text( json.dumps( { "pass": result_pass } ), encoding="utf-8" )
+    ( path / "result.json" ).write_text( json.dumps( { "pass": result_pass, "package": package } ), encoding="utf-8" )
     ( path / "history-destination.json" ).write_text( json.dumps( { "pass": history_pass } ), encoding="utf-8" )
     return path
 
 
-def claim( package, body, owner=OWNER, row_id=None ):
-    return { "id": row_id or f"id-{package}", "title": f"docs sweep: {package}", "owner_persona": owner, "status": "queued", "body": body }
+def approved_row( world, package="a", name=None, commits=None, **kw ):
+    checks = checks_dir( world, name or "c" + package, package )
+    return claim( package, [ ( TIB, approval( checks, commits or [ world.shas[ "one" ] ] ) ) ], **kw ), checks
 
 
-def train( world, rows, size=11 ):
-    return tb.build_train( world.root, rows, [ "a", "b", "c", "d" ], size, str( world.data ) )
+def train( world, rows, size=11, order=( "a", "b", "c", "d" ) ):
+    return tb.build_train( world.root, rows, list( order ), size, str( world.data ) )
 
 
-def refusal_for( world, body, owner=OWNER ):
-    result = train( world, [ claim( "a", body, owner ) ] )
+def refusal_for( world, row ):
+    result = train( world, [ row ] )
     return result[ "refused" ][ 0 ][ "reason" ] if result[ "refused" ] else result[ "packages" ]
 
 
@@ -101,63 +124,157 @@ def test_persona_of_drops_the_session_id_accents_case_and_punctuation():
     assert tb.persona_of( "Cheech" ) == "cheech" and tb.persona_of( "Agent7 9f3a1b2c" ) == "agent7"
 
 
+def test_the_claim_line_is_read_from_the_text_before_the_first_amendment_and_malformed_ones_are_errors():
+    line = claim_line( "pkg/x", "María" )
+    assert tb.claim_of( "intro\n" + line + "\n\nmore" ) == { "package": "pkg/x", "writer": "María" }
+    assert tb.claim_of( None ) is None and tb.claim_of( "" ) is None and tb.claim_of( "no claim here" ) is None
+    assert tb.claim_of( "x\n\n" + stamped( ( TIB, line ) ) ) is None
+    assert tb.claim_of( "see " + line ) is None
+    for bad, message in ( ( tb.CLAIM_PREFIX + " {nope", "the claim line is not JSON" ), ( tb.CLAIM_PREFIX + " [1]", "the claim line needs a package and a writer" ),
+                          ( tb.CLAIM_PREFIX + ' {"package": "a"}', "the claim line needs a package and a writer" ), ( tb.CLAIM_PREFIX + ' {"package": "a", "writer": 3}', "the claim line needs" ),
+                          ( tb.CLAIM_PREFIX + ' {"package": 3, "writer": "w"}', "the claim line needs" ) ):
+        with pytest.raises( ValueError, match=message ):
+            tb.claim_of( bad )
+
+
+@pytest.mark.parametrize( "events, actor, stamp, expected", [
+    ( [ event() ], TIB, TS, True ),
+    ( [ event( transition="amended_post_terminal" ) ], TIB, TS, True ),
+    ( [ event( ts="2026-10-05T22:03:28.000000+00:00" ) ], TIB, TS, True ),
+    ( [ event( ts="2026-10-05T22:04:29.000000+00:00" ) ], TIB, TS, False ),
+    ( [ event( ts="2026-10-05T22:00:27.000000+00:00" ) ], TIB, TS, False ),
+    ( [ event( actor="Maria 1a2b3c4d" ) ], TIB, TS, False ),
+    ( [ event( transition="queued->in_progress" ) ], TIB, TS, False ),
+    ( [ event( ts="2026-10-05T22:02:28.169063" ) ], TIB, TS, True ),
+    ( [ event() ], TIB, "2026-10-05T22:02:28.169063", True ),
+    ( [ event() ], TIB, "not a time", False ),
+    ( [ event( ts="not a time" ) ], TIB, TS, False ),
+    ( [ { "actor": TIB, "transition": "amended" } ], TIB, TS, False ),
+    ( [ event( ts=None ) ], TIB, TS, False ),
+    ( [], TIB, TS, False ) ] )
+def test_event_agrees_needs_a_real_amended_event_by_that_actor_within_two_minutes( events, actor, stamp, expected ):
+    assert tb.event_agrees( events, actor, stamp ) is expected
+
+
 def test_a_train_holds_the_approved_packages_in_sweep_order_with_commits_and_bisect_order( world ):
-    ca, cc = checks_dir( world, "ca" ), checks_dir( world, "cc" )
     s = world.shas
-    rows = [
-        claim( "c", stamped( ( "Tiberius 9f3a1b2c", approval( cc, [ s[ "three" ], s[ "two" ] ] ) ) ) ),
-        claim( "a", stamped( ( "Tiberius 9f3a1b2c", approval( ca, [ s[ "one" ], s[ "two" ] ] ) ) ) ),
-        claim( "b", "no amendment yet" ),
-        { "id": "stray", "title": "other thing:a", "owner_persona": OWNER, "status": "queued", "body": "not a sweep row" } ]
-    result = train( world, rows )
+    row_c, check_c = approved_row( world, "c", commits=[ s[ "three" ], s[ "two" ] ], title="[LUPIN] docs sweep: c" )
+    row_a, check_a = approved_row( world, "a", commits=[ s[ "one" ], s[ "two" ] ] )
+    stray = [ claim( "a", title=t ) for t in ( "other thing:a", "note: docs sweep: a", "[LUPIN] [LUPIN] docs sweep: a", "docs sweep:a", "docs sweep: " ) ]
+    result = train( world, [ row_c, row_a, claim( "b" ), *stray ] )
     assert [ p[ "package" ] for p in result[ "packages" ] ] == [ "a", "c" ] and result[ "bisect_order" ] == [ "a", "c" ]
     assert result[ "commits" ] == [ s[ "one" ], s[ "two" ], s[ "three" ] ]
     assert result[ "refused" ] == [ { "package": "b", "reason": "no approval amendment" } ] and result[ "not_claimed" ] == 1 and result[ "deferred" ] == []
     assert result[ "head" ] == _git( world.root, "rev-parse", "HEAD" ) and result[ "size" ] == 11
-    assert result[ "packages" ][ 0 ] == { "package": "a", "row_id": "id-a", "approver": "Tiberius 9f3a1b2c", "checks": str( ca ), "commits": [ s[ "one" ], s[ "two" ] ] }
+    assert result[ "packages" ][ 0 ] == { "package": "a", "row_id": "id-a", "approver": TIB, "checks": str( check_a ), "commits": [ s[ "one" ], s[ "two" ] ] }
 
 
 def test_the_size_cut_defers_the_rest_and_takes_only_the_cut_packages_commits( world ):
-    s = world.shas
-    rows = [ claim( p, stamped( ( "Tiberius 9f3a1b2c", approval( checks_dir( world, "c" + p ), [ s[ "one" ] if p == "a" else s[ "three" ] ] ) ) ) ) for p in ( "a", "b", "c" ) ]
+    s    = world.shas
+    rows = [ approved_row( world, p, commits=[ s[ "one" ] if p == "a" else s[ "three" ] ] )[ 0 ] for p in ( "a", "b", "c" ) ]
     result = train( world, rows, size=1 )
-    assert [ p[ "package" ] for p in result[ "packages" ] ] == [ "a" ] and result[ "bisect_order" ] == [ "a" ] and result[ "deferred" ] == [ "b", "c" ] and result[ "commits" ] == [ s[ "one" ] ]
+    assert [ p[ "package" ] for p in result[ "packages" ] ] == [ "a" ] and result[ "bisect_order" ] == [ "a" ]
+    assert result[ "deferred" ] == [ "b", "c" ] and result[ "commits" ] == [ s[ "one" ] ]
+
+
+def test_the_train_keeps_sweep_order_not_alphabetical_order( world ):
+    rows   = [ approved_row( world, p )[ 0 ] for p in ( "a", "c" ) ]
+    result = train( world, rows, order=( "c", "a" ) )
+    assert result[ "bisect_order" ] == [ "c", "a" ] and [ p[ "package" ] for p in result[ "packages" ] ] == [ "c", "a" ]
 
 
 def test_the_latest_approval_wins_and_a_later_failing_verdict_refuses( world ):
     checks, s = checks_dir( world, "c1" ), world.shas
-    good_then_bad = stamped( ( "Tiberius 9f3a1b2c", "reviewed the six checks\n" + approval( checks, [ s[ "one" ] ] ) ), ( "Maria 1a2b3c4d", approval( checks, [ s[ "one" ] ], "fail" ) ) )
-    assert refusal_for( world, good_then_bad ) == "verdict is 'fail', not pass"
-    bad_then_good = stamped( ( "Maria 1a2b3c4d", approval( checks, [ s[ "one" ] ], "fail" ) ), ( "Tiberius 9f3a1b2c", approval( checks, [ s[ "one" ] ] ) ) )
-    assert refusal_for( world, bad_then_good )[ 0 ][ "approver" ] == "Tiberius 9f3a1b2c"
-
-
-def test_the_refusals_each_name_their_reason( world, tmp_path ):
-    checks, s = checks_dir( world, "ok" ), world.shas
     good = approval( checks, [ s[ "one" ] ] )
-    assert refusal_for( world, stamped( ( "Cheech 78067fb5", good ) ) ) == "approved by its author (Cheech 78067fb5)"
-    assert refusal_for( world, stamped( ( "María 78067fb5", good ) ), owner="maria" ) == "approved by its author (María 78067fb5)"
-    assert refusal_for( world, stamped( ( "Tiberius 9f3a1b2c", approval( checks, [ s[ "one" ] ], " PASS " ) ) ) )[ 0 ][ "package" ] == "a"
-    assert refusal_for( world, stamped( ( "Tiberius 9f3a1b2c", approval( checks, [ s[ "one" ] ], "pass with findings" ) ) ) ) == "verdict is 'pass with findings', not pass"
-    assert refusal_for( world, stamped( ( "Tiberius 9f3a1b2c", approval( checks, [ "0" * 40 ] ) ) ) ) == f"commit {'0' * 40} does not exist"
-    assert refusal_for( world, stamped( ( "Tiberius 9f3a1b2c", good ) ), owner=None )[ 0 ][ "package" ] == "a"
+    bad  = approval( checks, [ s[ "one" ] ], "fail" )
+    assert refusal_for( world, claim( "a", [ ( TIB, "reviewed the six checks\n" + good ), ( "Maria 1a2b3c4d", bad ) ] ) ) == "verdict is 'fail', not pass"
+    assert refusal_for( world, claim( "a", [ ( "Maria 1a2b3c4d", bad ), ( TIB, good ) ] ) )[ 0 ][ "approver" ] == TIB
+
+
+def test_an_approval_line_must_start_a_line_a_note_quoting_it_is_not_an_approval( world ):
+    checks = checks_dir( world, "q" )
+    quoted = "the format is " + approval( checks, [ world.shas[ "one" ] ] )
+    assert refusal_for( world, claim( "a", [ ( TIB, quoted ) ] ) ) == "no approval amendment"
+
+
+def test_a_stamp_typed_into_the_body_with_no_amended_event_is_refused_as_forged( world ):
+    row, _ = approved_row( world )
+    row[ "events" ] = []
+    assert refusal_for( world, row ) == f"no amended event by {TIB} confirms the approval stamp"
+    row[ "events" ] = [ event( actor="Somebody 1a2b3c4d" ) ]
+    assert refusal_for( world, row ) == f"no amended event by {TIB} confirms the approval stamp"
+    row[ "events" ] = None
+    assert refusal_for( world, row ) == f"no amended event by {TIB} confirms the approval stamp"
+    del row[ "events" ]
+    assert refusal_for( world, row ) == f"no amended event by {TIB} confirms the approval stamp"
+
+
+def test_the_approver_is_neither_the_writer_named_on_the_row_nor_its_owner( world ):
+    row, _ = approved_row( world, writer="Tiberius" )
+    assert refusal_for( world, row ) == f"approved by its writer ({TIB})"
+    row, _ = approved_row( world, name="c2", writer="María", owner="tiberius" )
+    assert refusal_for( world, row ) == f"approved by its owner ({TIB})"
+    row, _ = approved_row( world, name="c3", writer="Tiberius", owner=None )
+    assert "approved by its writer" in refusal_for( world, row )
+    row, _ = approved_row( world, name="c4", owner=None )
+    assert refusal_for( world, row )[ 0 ][ "package" ] == "a"
+
+
+def test_the_claim_line_is_required_and_must_name_this_package( world ):
+    row, _ = approved_row( world )
+    row[ "body" ] = row[ "body" ].replace( claim_line( "a" ) + "\n\n", "" )
+    assert refusal_for( world, row ) == "no docs-sweep-claim line naming the writer"
+    row, _ = approved_row( world, name="c2", claim_text=claim_line( "other" ) )
+    assert refusal_for( world, row ) == "the claim line names 'other', not 'a'"
+    row, _ = approved_row( world, name="c3", claim_text=tb.CLAIM_PREFIX + " {nope" )
+    assert refusal_for( world, row ).startswith( "the claim line is not JSON" )
+
+
+@pytest.mark.parametrize( "status", [ "not_approved", "queued", "in_progress", "blocked", "done" ] )
+def test_a_claim_row_in_a_live_or_done_status_may_go( world, status ):
+    row, _ = approved_row( world, status=status )
+    assert train( world, [ row ] )[ "bisect_order" ] == [ "a" ]
+
+
+@pytest.mark.parametrize( "status", [ "dropped", "parked" ] )
+def test_a_dropped_or_parked_claim_row_is_refused( world, status ):
+    row, _ = approved_row( world, status=status )
+    assert refusal_for( world, row ) == f"the claim row is {status}"
+
+
+def test_the_approval_line_and_verdict_refusals_each_name_their_reason( world ):
+    checks, s = checks_dir( world, "ok" ), world.shas
+    def refuse( line ): return refusal_for( world, claim( "a", [ ( TIB, line ) ] ) )
+    assert refuse( approval( checks, [ s[ "one" ] ], " PASS " ) )[ 0 ][ "package" ] == "a"
+    assert refuse( approval( checks, [ s[ "one" ] ], "pass with findings" ) ) == "verdict is 'pass with findings', not pass"
     for line in ( tb.APPROVAL_PREFIX + " {nope", tb.APPROVAL_PREFIX + " [1]" ):
-        assert "approval line is not" in refusal_for( world, stamped( ( "Tiberius 9f3a1b2c", line ) ) )
-    for payload in ( { "commits": [ s[ "one" ] ], "verdict": "pass" }, { "checks": str( checks ), "commits": [], "verdict": "pass" }, { "checks": str( checks ), "commits": s[ "one" ], "verdict": "pass" },
-                     { "checks": str( checks ), "commits": [ 1 ], "verdict": "pass" }, { "checks": str( checks ), "commits": [ s[ "one" ] ], "verdict": True } ):
-        body = stamped( ( "Tiberius 9f3a1b2c", tb.APPROVAL_PREFIX + " " + json.dumps( payload ) ) )
-        assert refusal_for( world, body ) == "the approval line needs checks (a path), commits (a non-empty list) and verdict"
-    two = [ claim( "a", stamped( ( "Tiberius 9f3a1b2c", good ) ), row_id="r1" ), claim( "a", stamped( ( "Tiberius 9f3a1b2c", good ) ), row_id="r2" ) ]
-    assert train( world, two )[ "refused" ] == [ { "package": "a", "reason": "2 claim rows for this package" } ]
+        assert "approval line is not" in refuse( line )
+    good = { "checks": str( checks ), "commits": [ s[ "one" ] ], "verdict": "pass", "sha256": hashes_of( checks ) }
+    for key, value in ( ( "checks", None ), ( "commits", [] ), ( "commits", s[ "one" ] ), ( "commits", [ 1 ] ), ( "verdict", True ), ( "sha256", None ), ( "sha256", [ "x" ] ) ):
+        payload = { k: v for k, v in good.items() if k != key } if value is None else { **good, key: value }
+        assert refuse( tb.APPROVAL_PREFIX + " " + json.dumps( payload ) ) == "the approval line needs checks (a path), commits (a non-empty list), verdict and sha256 (a dict)", ( key, value )
 
 
-def test_the_checks_directory_must_be_durable_present_and_passing( world, tmp_path ):
+def test_a_listed_commit_must_be_a_full_sha_that_exists( world ):
+    checks, s = checks_dir( world, "ok" ), world.shas
+    def refuse( commits ): return refusal_for( world, claim( "a", [ ( TIB, approval( checks, commits ) ) ] ) )
+    assert refuse( [ s[ "one" ][ :12 ] ] ) == f"commit {s[ 'one' ][ :12 ]} is not a full 40-character sha"
+    assert refuse( [ "HEAD" ] ) == "commit HEAD is not a full 40-character sha"
+    assert refuse( [ s[ "one" ].upper() ] ) == f"commit {s[ 'one' ].upper()} is not a full 40-character sha"
+    assert refuse( [ s[ "one" ] + "0" ] ).endswith( "is not a full 40-character sha" )
+    assert refuse( [ "0" * 40 ] ) == f"commit {'0' * 40} does not exist"
+    assert refuse( [ s[ "one" ], "0" * 40 ] ) == f"commit {'0' * 40} does not exist"
+
+
+def test_the_checks_directory_must_be_durable_whole_passing_and_this_packages( world, tmp_path ):
     s     = world.shas
     other = tmp_path / "other"
     other.mkdir()
-    hot   = tmp_path / "hot" / "real"
+    sibling = tmp_path / "data-mobile"
+    sibling.mkdir()
+    hot = tmp_path / "hot" / "real"
     hot.mkdir( parents=True )
-    ( hot / "result.json" ).write_text( '{"pass": true}', encoding="utf-8" )
+    ( hot / "result.json" ).write_text( '{"pass": true, "package": "a"}', encoding="utf-8" )
     ( world.data / "link" ).symlink_to( hot )
     broken = world.data / "broken"
     broken.mkdir()
@@ -166,44 +283,72 @@ def test_the_checks_directory_must_be_durable_present_and_passing( world, tmp_pa
     nolist = world.data / "nolist"
     nolist.mkdir()
     ( nolist / "result.json" ).write_text( "[1]", encoding="utf-8" )
-    missing = world.data / "partial"
-    missing.mkdir()
-    ( missing / "result.json" ).write_text( '{"pass": true}', encoding="utf-8" )
+    partial = world.data / "partial"
+    partial.mkdir()
+    ( partial / "result.json" ).write_text( '{"pass": true, "package": "a"}', encoding="utf-8" )
     truthy = world.data / "truthy"
     truthy.mkdir()
-    ( truthy / "result.json" ).write_text( '{"pass": "yes"}', encoding="utf-8" )
+    ( truthy / "result.json" ).write_text( '{"pass": "yes", "package": "a"}', encoding="utf-8" )
     ( truthy / "history-destination.json" ).write_text( '{"pass": true}', encoding="utf-8" )
     cases = [
-        ( truthy, "does not say pass" ),
-        ( hot, "is under a temp directory" ), ( world.data / "link", "is under a temp directory" ), ( other, "is not under" ),
-        ( world.data / "gone", "does not exist" ), ( broken, "result.json in" ), ( nolist, "does not say pass" ), ( missing, "history-destination.json in" ),
-        ( checks_dir( world, "r_fail", result_pass=False ), "result.json in" ), ( checks_dir( world, "h_fail", history_pass=False ), "history-destination.json in" ) ]
+        ( truthy, "does not say pass" ), ( hot, "is under a temp directory" ), ( world.data / "link", "is under a temp directory" ), ( other, "is not under" ), ( sibling, "is not under" ),
+        ( world.data / "gone", "does not exist" ), ( broken, "result.json in" ), ( nolist, "does not say pass" ), ( partial, "history-destination.json in" ),
+        ( checks_dir( world, "r_fail", result_pass=False ), "result.json in" ), ( checks_dir( world, "h_fail", history_pass=False ), "history-destination.json in" ),
+        ( checks_dir( world, "wrongpkg", package="src/cosa/OTHER" ), "is for 'src/cosa/OTHER', not 'a'" ) ]
     for path, fragment in cases:
-        reason = refusal_for( world, stamped( ( "Tiberius 9f3a1b2c", approval( path, [ s[ "one" ] ] ) ) ) )
+        reason = refusal_for( world, claim( "a", [ ( TIB, approval( path, [ s[ "one" ] ], hashes={ n: ( hashlib.sha256( ( path / n ).read_bytes() ).hexdigest() if ( path / n ).exists() else "x" ) for n in tb.CHECK_FILES } ) ) ] ) )
         assert fragment in reason, ( path, reason )
+    row, checks = approved_row( world, name="edited" )
+    ( checks / "history-destination.json" ).write_text( '{"pass": true, "note": "edited later"}', encoding="utf-8" )
+    assert refusal_for( world, row ) == f"history-destination.json in {checks} has changed since it was approved"
+    ( checks / "result.json" ).write_text( '{"pass": true, "package": "a", "extra": 1}', encoding="utf-8" )
+    row2, checks2 = approved_row( world, name="edited2" )
+    row2[ "body" ] = row2[ "body" ].replace( hashes_of( checks2 )[ "result.json" ], "0" * 64 )
+    assert refusal_for( world, row2 ) == f"result.json in {checks2} has changed since it was approved"
+    nohash, _ = approved_row( world, name="nohash" )
+    nohash[ "body" ] = nohash[ "body" ].replace( '"sha256": {', '"sha256": {"x": "y", ' ).replace( '"result.json": "', '"renamed.json": "', 1 )
+    assert "has changed since it was approved" in refusal_for( world, nohash )
 
 
-def test_the_real_temp_roots_are_the_usual_three_and_refuse_a_checks_directory_under_them():
+def test_the_real_temp_roots_and_data_root_are_pinned_and_the_exact_temp_root_is_refused():
     assert tb.TEMP_ROOTS == ( "/tmp", "/var/tmp", "/dev/shm" )
+    assert tb.DEFAULT_DATA_ROOT == "/mnt/DATA01/include/www.deepily.ai/projects-data/lupin" and tb.DEFAULT_SIZE == 11
     for root in tb.TEMP_ROOTS:
-        assert tb.checks_problem( f"{root}/some-checks", root ) == f"checks directory {root}/some-checks is under a temp directory"
+        assert tb.checks_problem( f"{root}/some-checks", root, "a", {} ) == f"checks directory {root}/some-checks is under a temp directory"
+        assert tb.checks_problem( root, root, "a", {} ) == f"checks directory {root} is under a temp directory"
+    assert tb.checks_problem( "/mnt/DATA01/include/www.deepily.ai/projects-data/lupin-mobile/x", tb.DEFAULT_DATA_ROOT, "a", {} ).endswith( f"is not under {tb.DEFAULT_DATA_ROOT}" )
+    assert tb.checks_problem( "/etc", tb.DEFAULT_DATA_ROOT, "a", {} ).endswith( f"is not under {tb.DEFAULT_DATA_ROOT}" )
 
 
-def test_store_rows_reads_the_repository_directly_and_scoped( monkeypatch ):
+def test_a_claim_for_a_package_not_in_the_sweep_list_is_refused_by_name_and_two_rows_are_refused( world ):
+    good, _ = approved_row( world )
+    typo = claim( "a/", title="docs sweep: a/" )
+    result = train( world, [ good, typo, claim( "zzz" ) ] )
+    assert result[ "bisect_order" ] == [ "a" ]
+    assert result[ "refused" ] == [ { "package": "a/", "reason": "a claim for a package that is not in the sweep list" }, { "package": "zzz", "reason": "a claim for a package that is not in the sweep list" } ]
+    two = [ claim( "b", row_id="r1" ), claim( "b", row_id="r2" ) ]
+    assert train( world, two )[ "refused" ] == [ { "package": "b", "reason": "2 claim rows for this package" } ]
+
+
+def test_store_rows_reads_the_repository_directly_scoped_and_with_each_rows_audit_trail( monkeypatch ):
     seen = {}
     item = types.SimpleNamespace( id="uuid-1", title="docs sweep: a", owner_persona="Rio", status="queued", body="b" )
+    when = datetime( 2026, 10, 5, 22, 2, 28, tzinfo=timezone.utc )
     class FakeRepo:
         def __init__( self, session ): seen[ "session" ] = session
         def query_tasks( self, **kwargs ):
             seen[ "kwargs" ] = kwargs
             return [ item ]
+        def get_events( self, item_id ):
+            seen[ "events_for" ] = item_id
+            return [ types.SimpleNamespace( actor=TIB, transition="amended", ts=when ) ]
     @contextlib.contextmanager
     def fake_get_db():
         yield "SESSION"
     monkeypatch.setitem( sys.modules, "cosa.rest.db.database", types.SimpleNamespace( get_db=fake_get_db ) )
     monkeypatch.setitem( sys.modules, "cosa.rest.db.repositories.task_repository", types.SimpleNamespace( TaskRepository=FakeRepo ) )
-    assert tb.store_rows() == [ { "id": "uuid-1", "title": "docs sweep: a", "owner_persona": "Rio", "status": "queued", "body": "b" } ]
-    assert seen[ "session" ] == "SESSION"
+    assert tb.store_rows() == [ { "id": "uuid-1", "title": "docs sweep: a", "owner_persona": "Rio", "status": "queued", "body": "b", "events": [ { "actor": TIB, "transition": "amended", "ts": when.isoformat() } ] } ]
+    assert seen[ "session" ] == "SESSION" and seen[ "events_for" ] == "uuid-1"
     assert seen[ "kwargs" ] == { "project": "lupin", "correlation_key": "epic:v022-docs-and-reuse", "include_terminal": True, "limit": 1000 }
 
 
@@ -213,19 +358,19 @@ def _write( path, content ):
 
 
 def test_main_builds_a_train_json_from_rows_and_a_pinned_sweep_order( world, tmp_path ):
-    s      = world.shas
-    rows   = _write( tmp_path / "rows.json", [ claim( "a", stamped( ( "Tiberius 9f3a1b2c", approval( checks_dir( world, "mc" ), [ s[ "one" ] ] ) ) ) ), claim( "b", "x" ) ] )
+    row, _ = approved_row( world, name="mc" )
+    rows   = _write( tmp_path / "rows.json", [ row, claim( "b" ) ] )
     order  = _write( tmp_path / "order.json", { "packages": [ { "package": "b" }, { "package": "a" } ] } )
     stream = io.StringIO()
     code   = tb.main( [ "--repo-root", str( world.root ), "--out", str( tmp_path / "o" / "deep" ), "--rows-json", rows, "--sweep-json", order, "--data-root", str( world.data ) ], stream )
     result = json.loads( ( tmp_path / "o" / "deep" / "train.json" ).read_text( encoding="utf-8" ) )
-    assert result[ "size" ] == 11 == tb.DEFAULT_SIZE
+    assert result[ "size" ] == 11
     assert code == 0 and result[ "bisect_order" ] == [ "a" ] and result[ "refused_run" ] is None and result[ "refused" ] == [ { "package": "b", "reason": "no approval amendment" } ]
     assert stream.getvalue() == f"REFUSED b: no approval amendment\ntrain of 1 packages, 1 commits, 1 refused, 0 deferred, at {result[ 'head' ]}\n"
 
 
 def test_main_with_no_approved_package_exits_1_and_writes_every_key( world, tmp_path ):
-    rows = _write( tmp_path / "rows.json", [ claim( "a", "x" ) ] )
+    rows = _write( tmp_path / "rows.json", [ claim( "a" ) ] )
     code = tb.main( [ "--repo-root", str( world.root ), "--out", str( tmp_path / "o" ), "--rows-json", rows, "--data-root", str( world.data ) ], io.StringIO() )
     result = json.loads( ( tmp_path / "o" / "train.json" ).read_text( encoding="utf-8" ) )
     assert code == 1 and result[ "packages" ] == [] and result[ "refused" ] == [ { "package": "a", "reason": "no approval amendment" } ]
@@ -235,10 +380,13 @@ def test_main_with_no_approved_package_exits_1_and_writes_every_key( world, tmp_
 @pytest.mark.parametrize( "extra, message", [
     ( [ "--size", "0" ], "ValueError: --size must be at least 1" ),
     ( [ "--rows-json", "/no/such/rows.json" ], "FileNotFoundError" ),
-    ( [ "--sweep-json", "EMPTY" ], "KeyError" ) ] )
+    ( [ "--sweep-json", "EMPTY" ], "KeyError" ),
+    ( [ "--rows-json", "NULLTITLE" ], "TypeError" ),
+    ( [ "--rows-json", "BADROW" ], "KeyError" ) ] )
 def test_a_run_that_cannot_start_exits_2_with_a_full_train_json( world, tmp_path, extra, message ):
     rows  = _write( tmp_path / "rows.json", [] )
-    extra = [ _write( tmp_path / "empty.json", {} ) if x == "EMPTY" else x for x in extra ]
+    swaps = { "EMPTY": _write( tmp_path / "empty.json", {} ), "NULLTITLE": _write( tmp_path / "null.json", [ { "id": "x", "title": None } ] ), "BADROW": _write( tmp_path / "bad.json", [ { "id": "x" } ] ) }
+    extra = [ swaps.get( x, x ) for x in extra ]
     base  = [] if "--rows-json" in extra else [ "--rows-json", rows ]
     stream = io.StringIO()
     code   = tb.main( [ "--repo-root", str( world.root ), "--out", str( tmp_path / "o" ), *base, *extra ], stream )
@@ -247,18 +395,19 @@ def test_a_run_that_cannot_start_exits_2_with_a_full_train_json( world, tmp_path
     assert stream.getvalue() == f"REFUSED: {result[ 'refused_run' ]}\n"
 
 
+def test_any_other_exception_still_writes_a_full_train_json( world, tmp_path, monkeypatch ):
+    def boom( *args ): raise ZeroDivisionError( "odd" )
+    monkeypatch.setattr( tb, "build_train", boom )
+    rows = _write( tmp_path / "rows.json", [] )
+    code = tb.main( [ "--repo-root", str( world.root ), "--out", str( tmp_path / "o" ), "--rows-json", rows ], io.StringIO() )
+    assert code == 2 and json.loads( ( tmp_path / "o" / "train.json" ).read_text( encoding="utf-8" ) )[ "refused_run" ] == "ZeroDivisionError: odd"
+
+
 def test_main_reads_the_store_and_runs_a_live_sweep_when_no_files_are_given( world, tmp_path, monkeypatch, capsys ):
-    s = world.shas
-    monkeypatch.setattr( tb, "store_rows", lambda: [ claim( "a", stamped( ( "Tiberius 9f3a1b2c", approval( checks_dir( world, "live" ), [ s[ "one" ] ] ) ) ) ) ] )
+    row, _ = approved_row( world, name="live" )
+    monkeypatch.setattr( tb, "store_rows", lambda: [ row ] )
     monkeypatch.setattr( "sys.argv", [ "x", "--repo-root", str( world.root ), "--out", str( tmp_path / "o" ), "--data-root", str( world.data ), "--size", "3" ] )
     assert tb.main() == 0
     result = json.loads( ( tmp_path / "o" / "train.json" ).read_text( encoding="utf-8" ) )
     assert result[ "bisect_order" ] == [ "a" ] and result[ "size" ] == 3 and result[ "not_claimed" ] == 3
     assert capsys.readouterr().out.startswith( "train of 1 packages" )
-
-
-def test_the_train_keeps_sweep_order_not_alphabetical_order( world ):
-    s    = world.shas
-    rows = [ claim( p, stamped( ( "Tiberius 9f3a1b2c", approval( checks_dir( world, "k" + p ), [ s[ "one" ] ] ) ) ) ) for p in ( "a", "c" ) ]
-    result = tb.build_train( world.root, rows, [ "c", "a" ], 11, str( world.data ) )
-    assert result[ "bisect_order" ] == [ "c", "a" ] and [ p[ "package" ] for p in result[ "packages" ] ] == [ "c", "a" ]
