@@ -6,7 +6,7 @@ The token rule, stated once.
 A `?v=` token is the first 12 lowercase hex characters of the SHA-256 of the asset's
 bytes. The bytes are read from the working tree. A token is not a date and not a commit.
 
-The hash is `sha256`. `TOKEN_HEX_LEN` is 12 (48 bits: a same-file collision needs ~2**24 edits to that file).
+`ALGORITHM` is `sha256`. `TOKEN_HEX_LEN` is 12 (48 bits: a same-file collision needs ~2**24 edits to that file).
 
 Why not a date: a date token is blind to a second edit on the same day. A squash merge
 or rebase re-dates every file's last commit with no content change. That turns every
