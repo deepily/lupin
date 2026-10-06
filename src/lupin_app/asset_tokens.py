@@ -1,25 +1,23 @@
 """
-Content-keyed cache-bust tokens for the `/static` client (row 80f46993).
+Content-keyed cache-bust tokens for the `/static` client.
 
-THE RULE, in one place so nothing else restates it
---------------------------------------------------
+The token rule, stated once.
+-----------------------
 A `?v=` token is the first 12 lowercase hex characters of the SHA-256 of the asset's
-bytes, read from the WORKING TREE. It is not a date and it is not a commit.
+bytes. The bytes are read from the working tree. A token is not a date and not a commit.
 
-    ALGORITHM     = "sha256"
-    TOKEN_HEX_LEN = 12        (48 bits: a same-file collision needs ~2**24 edits to that file)
+The hash is `sha256`. `TOKEN_HEX_LEN` is 12 (48 bits: a same-file collision needs ~2**24 edits to that file).
 
-WHY NOT A DATE. The old guard compared the token's day to the asset's last-commit day and
-was wrong in both directions: blind to a second edit on the same day, and red wholesale after
-any squash merge or rebase, which re-date every file's last commit with no content change
-(PR #22, 2026-09-30: all 12 guarded assets read stale at once). A content hash has neither
-failure: same bytes always give the same token, and a changed byte always gives a new one.
+Why not a date: a date token is blind to a second edit on the same day. A squash merge
+or rebase re-dates every file's last commit with no content change. That turns every
+guarded asset stale at once. A content hash has neither failure: same bytes always give
+the same token, and a changed byte always gives a new one.
 
-A token therefore records exactly the content it vouches for, and `verify()` recomputes it.
+A token therefore records the content it vouches for, and `verify()` recomputes it.
 
-CASCADE. An asset that embeds another asset's token (notifications.js imports ws-channel.js)
-has that token inside its own bytes, so its hash moves when the import's does. `stamp()`
-iterates to a fixed point; a reference cycle never converges and is reported, not looped.
+Cascade: an asset can embed another asset's token (notifications.js imports ws-channel.js).
+That token sits inside its own bytes, so its hash moves when the import's does.
+`stamp()` iterates to a fixed point. A reference cycle never converges and is reported.
 
 Usage:
     python -m lupin_app.asset_tokens            # verify; exit 1 on drift
@@ -47,6 +45,8 @@ TOKEN_RE = re.compile( r"[0-9a-f]{%d}" % TOKEN_HEX_LEN )
 
 def project_static_root( project_root ):
     """
+    Return the static directory path under the project root.
+
     Requires: project_root is the repo root (or a copy of its `src/lupin_app/static`)
     Ensures:  returns the static directory path under it
     """
@@ -55,6 +55,8 @@ def project_static_root( project_root ):
 
 def content_token( data ):
     """
+    Return the cache-bust token for some bytes.
+
     Requires: data is bytes
     Ensures:  returns the first TOKEN_HEX_LEN hex chars of the SHA-256 of data
     """
@@ -63,6 +65,8 @@ def content_token( data ):
 
 def static_url_to_path( project_root, static_url ):
     """
+    Map a `/static/...` URL to the asset's on-disk path.
+
     Requires: static_url starts with "/static/"
     Ensures:  returns the on-disk path of the asset under project_root
     """
@@ -109,7 +113,7 @@ def verify( project_root ):
 
     Ensures:
         - returns [ ( source_rel, static_url, found_token, expected_token_or_None ), ... ]
-          for each reference that does NOT vouch for its asset's current bytes; empty = clean
+          for each reference that does not vouch for its asset's current bytes; empty = clean
         - expected is None when the named asset does not exist on disk
         - reads working-tree bytes only; git is never consulted
     """
@@ -167,9 +171,12 @@ def stamp( project_root ):
 
 def main( argv, project_root ):
     """
-    Requires: argv is the argument list without the program name
-    Ensures:  prints drift (or the rewritten files) and returns the exit code:
-              0 clean/stamped, 1 drift found by --check, 2 stamp could not converge
+    Run the command-line verify or stamp and return its exit code.
+
+    Requires: argv is the argument list without the program name.
+    Ensures:  prints drift or the rewritten files.
+              returns 0 when clean or stamped, 1 when verify found drift,
+              2 when stamp could not converge
     """
     if "--stamp" in argv:
         try:

@@ -428,12 +428,11 @@ async def websocket_cleanup_loop():
 
 async def notification_expiry_sweep_loop():
     """
-    Background task that closes ORPHANED response-required notifications.
+    Background task that closes orphaned response-required notifications.
 
-    An orphan is a row whose asking client walked away: the SSE generator is
-    cancelled at its `await`, so the only writer of state='expired' never runs
-    and the row sits 'delivered' forever. Measured 2026-09-05: 39 such rows,
-    oldest 2026-05-11, newest that same day. Row bf4f65c3.
+    An orphan is a row whose asking client walked away. The SSE generator is
+    cancelled at its `await`, so the only writer of state='expired' never runs.
+    The row then sits 'delivered' forever.
 
     Requires:
         - config_mgr initialized
@@ -446,8 +445,8 @@ async def notification_expiry_sweep_loop():
         - sweeps at most `notification expiry sweep batch limit` rows a pass
         - a DB error is logged and retried on the next tick rather than
           killing the loop
-        - runs the DB work OFF the event loop via asyncio.to_thread, matching
-          _mark_notification_expired_sync (lever B)
+        - runs the DB work off the event loop via asyncio.to_thread, matching
+          _mark_notification_expired_sync
 
     Raises:
         asyncio.CancelledError: when cancelled during shutdown
@@ -505,14 +504,13 @@ async def notification_expiry_sweep_loop():
 
 def _managed_bounce_server_label():
     """
-    Which server THIS process is, as it should appear in a fleet broadcast.
+    Which server this process is, as it should appear in a fleet broadcast.
 
     The dev and test containers run this same file and differ only by config
-    block (`Lupin: Development` vs `Lupin: Testing`), so without this the test
-    server announces itself as ":7999" — measured 2026-08-01, nine sessions were
-    told the DEV server had bounced when the TEST container restarted (bug
-    652271f3). Resolved ONCE here and passed to every call site so the warning
-    and the all-clear can never disagree about who is speaking.
+    block (`Lupin: Development` vs `Lupin: Testing`). Without this label the
+    test server would announce itself as ":7999", and the fleet would be told
+    the dev server had bounced. It is resolved once here and passed to every
+    call site, so the warning and the all-clear never disagree about the speaker.
     """
     from cosa.rest.managed_bounce_broadcast import DEFAULT_SERVER_LABEL
 
@@ -523,9 +521,9 @@ def _emit_managed_bounce( kind, message, broadcast_id=None ):
     """
     Fire a managed-bounce fleet broadcast in-process, never raising.
 
-    Returns the execute_broadcast result dict, or None when commons is disabled /
-    not yet wired (the not-wired guard + skip-log live in the measured module's
-    emit_bounce_broadcast_in_process, so the branch is tested, not just written).
+    Returns the execute_broadcast result dict, or None when commons is disabled
+    or not yet wired. The not-wired guard and its skip log live in
+    emit_bounce_broadcast_in_process, a measured module, so that branch is tested.
     """
     from cosa.rest.routers.commons import execute_broadcast, BroadcastRequestBody, build_sender_id_for_cc, _load_bridge_fields
     from lupin_cli.claude_code.hooks.lib.session_bridge import find_active_voice_persona_sessions
@@ -552,11 +550,12 @@ def _emit_managed_bounce( kind, message, broadcast_id=None ):
 
 def _managed_bounce_all_clear_blocking( boot_id, boot_started, startup_began ):
     """
-    R5 all-clear, run in a worker thread post-yield (option A: bounded settle gate).
+    All-clear broadcast, run in a worker thread after startup yields (bounded settle gate).
 
-    Waits for cc-listener/browser sockets to reconnect after the restart, then
-    fires ONE boot-stamped all-clear. Blocking (filesystem + queue writes); the
-    async wrapper hands it to a thread so it never touches the event loop.
+    Waits for cc-listener and browser sockets to reconnect after the restart,
+    then fires one boot-stamped all-clear. Blocking (filesystem and queue
+    writes); the async wrapper hands it to a thread so it never touches the
+    event loop.
     """
     from lupin_cli.claude_code.hooks.lib.session_bridge import find_active_voice_persona_sessions
     from cosa.rest.managed_bounce_broadcast import wait_for_roster_coverage, build_bounce_message
@@ -662,12 +661,12 @@ async def lifespan( app: FastAPI ):
     """
     Manages the application lifecycle for FastAPI.
     
-    Preconditions:
+    Requires:
         - Environment variable LUPIN_CONFIG_MGR_CLI_ARGS must be set or empty string
         - Configuration files must exist at specified paths
         - CUDA device must be available if using GPU
     
-    Postconditions:
+    Ensures:
         - All global components are initialized (config_mgr, queues, etc.)
         - Whisper STT model is loaded and ready
         - Application is ready to handle requests
@@ -1435,7 +1434,7 @@ app.add_middleware(
 @app.middleware( "http" )
 async def add_security_headers( request: Request, call_next ):
     """
-    Add security headers to all HTTP responses (Phase 8).
+    Add security headers to all HTTP responses.
 
     Requires:
         - request is FastAPI Request object
@@ -1443,7 +1442,7 @@ async def add_security_headers( request: Request, call_next ):
 
     Ensures:
         - Security headers added to response
-        - X-Content-Type-Options: nosniff (prevent MIME sniffing)
+        - X-Content-Type-Options: nosniff (prevent content-type sniffing)
         - X-Frame-Options: SAMEORIGIN (blocks cross-origin clickjacking, permits
           this app framing its own pages)
         - X-XSS-Protection: 1; mode=block (XSS protection)
@@ -1532,12 +1531,12 @@ async def load_stt_model():
     """
     Load and initialize the speech-to-text model pipeline.
     
-    Preconditions:
+    Requires:
         - config_mgr must be initialized
         - CUDA toolkit installed if using GPU
         - Model files available locally or downloadable
     
-    Postconditions:
+    Ensures:
         - Returns initialized Whisper pipeline ready for transcription
         - Model loaded on specified device (CPU/GPU)
     
