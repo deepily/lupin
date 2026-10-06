@@ -11,14 +11,11 @@ last entry).
 Design: src/rnd/v0.1.7/2026.04.29-idle-aware-stop-hook/01-design.md
 
 Invocation:
-    python -m lupin_cli.claude_code.hooks.lib.idle_waiter \\
-        --session-id  <session-id> \\
-        --cc-pid      <claude-code-pid> \\
-        --backoff-index <int>
+    python -m lupin_cli.claude_code.hooks.lib.idle_waiter --session-id <session-id> --cc-pid <claude-code-pid> --backoff-index <int>
 
 Test mode (override sleep duration for smoke tests):
-    LUPIN_IDLE_WAITER_TEST_SLEEP_SECS=5 python -m ...
-    OR --sleep-secs 5 (CLI flag wins over env)
+    set LUPIN_IDLE_WAITER_TEST_SLEEP_SECS=5, or pass --sleep-secs 5
+    (the CLI flag wins over the environment variable)
 """
 
 import argparse
@@ -102,9 +99,9 @@ def _claim_waiter_slot( session_id: str ) -> bool:
     """
     Atomically claim the bridge waiter_pid slot for this process.
 
-    Returns True if we got the slot (no other waiter was registered, OR the
+    Returns True if we got the slot (no other waiter was registered, or the
     registered one was dead). Returns False if a live waiter already holds
-    the slot — the caller should exit immediately to avoid double-prompts.
+    the slot, and the caller should exit immediately to avoid double-prompts.
     """
     state    = get_idle_detection( session_id ) or { }
     prior    = state.get( "waiter_pid" )
@@ -133,7 +130,7 @@ def _was_reset_during_sleep( session_id: str, started_at_iso: str ) -> bool:
     Return True if `last_interaction_at` advanced past our sleep-start.
 
     A reset means a hook (UserPromptSubmit, Stop, PostToolUse cosa-voice) ran
-    while we were sleeping and bumped the timestamp — we should exit silently
+    while we were sleeping and bumped the timestamp. We then exit silently
     rather than fire a phantom prompt.
     """
     state = get_idle_detection( session_id ) or { }

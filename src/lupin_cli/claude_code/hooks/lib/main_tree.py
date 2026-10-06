@@ -1,16 +1,16 @@
 """
-Resolve the MAIN working tree for a path that may sit inside a seat's worktree.
+Resolve the main working tree for a path that may sit inside a seat's worktree.
 
 Fleet-shared logs (the commons topic files, the janitor's seat-teardown log) belong to
-the repo, not to whichever seat happened to write them. A seat pins LUPIN_ROOT to its own
-tree, so a writer that joins `io/...` onto LUPIN_ROOT leaves the log inside the seat's
-tree — a gitignored file that is not build output, which is exactly what the worktree
-janitor refuses to delete. Measured 2026-10-02 (row aec2319f): 2 of 6 refused trees were
-held only by such files, one of them the janitor's own log.
+the repo, not to whichever seat wrote them. A seat pins `LUPIN_ROOT` to its own tree, so
+a writer that joins `io/...` onto it leaves the log inside the seat's tree. That is a
+gitignored file that is not build output. The worktree janitor refuses to delete exactly
+such files, and they held back trees it could not remove.
 
-Every worktree lives under `<main>/.claude/worktrees/<name>` (CLAUDE.md § Worktrees), so
-the main tree is the part of the path before that lane. No git call: this runs in hooks
-and at import time, and a path rule cannot hang or disagree with itself.
+Every worktree lives under `<main>/.claude/worktrees/<name>` (see CLAUDE.md, section
+Worktrees), so the main tree is the part of the path before that lane. No git call is
+made: this runs in hooks and at import time, and a path rule cannot hang or disagree
+with itself.
 """
 
 import os
@@ -28,9 +28,9 @@ def main_tree_root( path ) -> str:
 
     Ensures:
         - returns str( path ) unchanged when no `/.claude/worktrees/` lane is in it
-        - otherwise returns the part before the OUTERMOST lane, so a tree made inside a
+        - otherwise returns the part before the outermost lane, so a tree made inside a
           tree still resolves to the one main checkout
-        - a path that IS the lane directory resolves to the main tree as well
+        - a path that is the lane directory resolves to the main tree as well
         - never touches the filesystem, never raises
     """
     text = str( path )

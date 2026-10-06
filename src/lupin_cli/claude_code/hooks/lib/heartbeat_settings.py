@@ -5,24 +5,23 @@ Reads `~/.claude/settings.json` and returns a normalized config dict for the
 Branch-C heartbeat self-poke adapter. Falls back to documented defaults if the
 file or keys are missing.
 
-**DEFAULT enabled=False (conservative opt-in).** The heartbeat is a brand-new
-ACTIVE behavior on the shared production Stop hook — it can self-poke (force a
-continuation) on quiescence-with-work-owed. Defaulting OFF when the `heartbeat`
-block is absent means merging the adapter code is a NO-OP until the user
-explicitly opts in via `settings.json`; the settings.json wiring is the
-kill-switch / opt-in (flagged to the manager before it lands). This differs
-from idle_detection (default ON) precisely because idle_detection is a mature,
-passive feature whereas the heartbeat actively forces continuations.
+The default is enabled=False, a conservative opt-in. The heartbeat is a new
+active behavior on the shared production Stop hook: it can self-poke (force a
+continuation) on quiescence-with-work-owed. Defaulting off when the `heartbeat`
+block is absent makes merging the adapter code a no-op until the user opts in
+via `settings.json`. That wiring is the kill-switch and opt-in, flagged to the
+manager before it lands. This differs from idle_detection (default on) because
+idle_detection is a mature, passive feature whereas the heartbeat actively
+forces continuations.
 
-Validates loudly — raises ValueError on a bogus poke_cap (mirrors
-idle_settings; per `feedback_no_defensive_programming`: no silent fallback
-chains). The Stop-hook adapter (`stop.py:_run_heartbeat`) catches that
-ValueError and fails SAFE (treats the heartbeat as disabled — never pokes on a
-malformed config).
+Validation is loud: a bogus poke_cap raises ValueError (mirrors idle_settings),
+with no silent fallback chains. The Stop-hook adapter (`stop.py:_run_heartbeat`)
+catches that ValueError and fails safe, treating the heartbeat as disabled, so
+it never pokes on a malformed config.
 
-Design authority (LOCKED): planning-is-prompting →
-    planning-is-prompting/src/rnd/2026.06.02-stop-hook-natural-heartbeat-poker.md §0 #6.
-Lupin-side seam: lupin →
+Design authority (locked): planning-is-prompting ->
+    planning-is-prompting/src/rnd/2026.06.02-stop-hook-natural-heartbeat-poker.md section 0, sixth decision.
+Lupin-side seam: lupin ->
     src/rnd/v0.1.8/2026.06.04-heartbeat-hook/02-stop-py-seam-factoring-proposal.md
 """
 
@@ -83,51 +82,39 @@ def load_heartbeat_settings() -> dict:
     """
     Load heartbeat settings from ~/.claude/settings.json with defaults.
 
-    Schema in settings.json:
-        {
-          "heartbeat": {
-            "enabled"  : bool,
-            "poke_cap" : int,   # > 0
-            "count_inbound_questions_as_owed" : bool,  # Thread B; default False
-            "owed_source_from_store" : bool,           # Step-2; default False
-            "verification_threshold_seconds" : int,    # 6929f4ac; default 600 (>0)
-            "poke_output_enabled"    : bool,           # mute switch; default True
-            "poke_disabled_message"  : str | None      # substitute text; default ""
-          }
-        }
+    Keys under "heartbeat": enabled, poke_cap, count_inbound_questions_as_owed, owed_source_from_store,
+    verification_threshold_seconds, poke_output_enabled, poke_disabled_message (a string or None).
 
     Requires:
-        - ~/.claude/settings.json is either missing OR valid JSON
+        - ~/.claude/settings.json is either missing or valid JSON
 
     Ensures:
-        - File missing                 → returns defaults (enabled=False)
-        - File unreadable / bad JSON    → returns defaults (shared file; other
+        - File missing → returns defaults (enabled=False)
+        - File unreadable / bad JSON → returns defaults (shared file; other
           features surface the parse error in their own paths)
         - Top-level "heartbeat" missing → returns defaults
-        - "heartbeat" not a dict        → returns defaults
-        - Individual fields missing     → use individual defaults
-        - "enabled" not bool            → coerced to bool (Python truthiness)
+        - "heartbeat" not a dict → returns defaults
+        - Individual fields missing → use individual defaults
+        - "enabled" not bool → coerced to bool (Python truthiness)
         - "poke_cap" not a positive int → raises ValueError (fail-loud)
-        - "count_inbound_questions_as_owed" missing → DEFAULT False; non-bool →
-          coerced to bool (Python truthiness)
-        - "owed_source_from_store" missing → DEFAULT False (the old transcript
-          path); non-bool → coerced to bool (Python truthiness)
-        - "verification_threshold_seconds" missing → DEFAULT 600 (Rick's 10 min);
-          non-positive-int → raises ValueError (fail-loud, like poke_cap)
-        - "poke_output_enabled" missing → DEFAULT True (poke as today); non-bool →
-          coerced to bool (Python truthiness)
+        - "count_inbound_questions_as_owed" missing → default False; non-bool → coerced to bool (Python truthiness)
+        - "owed_source_from_store" missing → default False (the old transcript path); non-bool → coerced to bool
+          (Python truthiness)
+        - "verification_threshold_seconds" missing → default 600 (10 minutes); non-positive-int → raises ValueError
+          (fail-loud, like poke_cap)
+        - "poke_output_enabled" missing → default True (poke as today); non-bool → coerced to bool (Python truthiness)
         - when settings.json leaves the poke on and the fleet switch file
           (heartbeat_poke_mute.read_poke_mute) says muted, "poke_output_enabled" is
           False; "poke_disabled_message" keeps the settings.json text when there is one,
           and otherwise names who muted it and when. A settings.json mute wins outright;
           the switch file is not read then
-        - "poke_disabled_message" missing → DEFAULT "" (no output when muted);
+        - "poke_disabled_message" missing → default "" (no output when muted);
           None → normalized to ""; non-str → raises ValueError (fail-loud: a
           non-string substitute would be emitted verbatim into the worker)
         - Returns dict with exactly seven keys: "enabled" (bool), "poke_cap"
           (int > 0), "count_inbound_questions_as_owed" (bool),
-          "owed_source_from_store" (bool), "verification_threshold_seconds" (int > 0),
-          "poke_output_enabled" (bool), "poke_disabled_message" (str, possibly "")
+          "owed_source_from_store" (bool), "verification_threshold_seconds" (int > 0), "poke_output_enabled" (bool),
+          "poke_disabled_message" (str, possibly "")
 
     Raises:
         ValueError: malformed poke_cap or verification_threshold_seconds
@@ -256,11 +243,9 @@ def _normalize_poke_disabled_message( value: Any ) -> str:
     """
     Normalize the mute-substitute message to a plain string.
 
-    None is the OTHER documented spelling of "emit nothing" (Rick: empty string
-    OR None ⇒ no output), so it normalizes to "" rather than raising. Any other
-    non-string is fail-loud: this text is emitted VERBATIM into the worker's
-    Stop-hook output, and a dict/int/list there would surface as garbage the
-    reader cannot distinguish from a real obligation.
+    None is the other documented spelling of "emit nothing", like an empty string, so it normalizes
+    to "" rather than raising. Any other non-string is fail-loud. The text is emitted verbatim into the
+    worker's Stop-hook output, where a dict, int or list is garbage that looks like a real obligation.
 
     Requires:
         - value is anything (foreign settings data)

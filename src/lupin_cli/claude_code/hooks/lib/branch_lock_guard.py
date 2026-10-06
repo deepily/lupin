@@ -1,49 +1,43 @@
 """
-Branch-lock guard — the readable PreToolUse layer in front of the branch lock (row 3a592920).
+Denies Bash commands that route around the branch lock, before they run.
 
-THE LOCK IT PROTECTS: a git reference-transaction hook (planning-is-prompting f820593,
-installed in lupin, lupin-mobile and planning-is-prompting on 2026-09-29) refuses to
-create a refs/heads/* branch when CLAUDECODE=1, unless BRANCH_GUARD_ALLOW names a
-sanctioned creator (the spawner, the reaper). Rick's ruling, row 0a9b1d68: trust WHO is
-asking, not what the branch is called.
+What the lock is: a git reference-transaction hook, installed in lupin, lupin-mobile and
+planning-is-prompting. It refuses to create a refs/heads/* branch when CLAUDECODE=1,
+unless BRANCH_GUARD_ALLOW names a sanctioned creator (the spawner, the reaper). The
+ruling is to trust who is asking, not what the branch is called.
 
-THE HOLE IT CLOSES: a local hook is a backstop, not a wall. A shell can walk around it
-four ways, and the hook's own header names them. This guard denies each one before the
-command runs:
+A local hook is a backstop, not a wall, and a shell can walk around it four ways.
+The hook's own header names them. This guard denies each one:
 
-  | # | route around the lock                         | what it looks like              |
-  |---|-----------------------------------------------|---------------------------------|
-  | 1 | claim a sanctioned creator's pass             | `BRANCH_GUARD_ALLOW=x git …`    |
-  | 2 | point git at a different hooks directory      | `git -c core.hooksPath=/x …`    |
-  | 3 | edit or remove the hook itself                | `cp x .git/hooks/reference-…`   |
-  | 4 | stop looking like a Claude session            | `env -u CLAUDECODE git …`       |
+  1. Claim a sanctioned creator's pass: `BRANCH_GUARD_ALLOW=x git ...`.
+  2. Point git at a different hooks directory: `git -c core.hooksPath=/x ...`.
+  3. Edit or remove the hook itself: `cp x .git/hooks/reference-...`.
+  4. Stop looking like a Claude session: `env -u CLAUDECODE git ...`.
 
-WHAT STAYS ALLOWED, because every one of these was measured in real fleet commands
-(transcripts, 2026-09-15..29) and a guard that bites reading or writing ABOUT the lock is
-a guard people learn to switch off:
+These stay allowed. Each was seen in real fleet commands.
+A guard that bites reading or writing about the lock is a guard people learn to switch off:
 
-  · reading: `ls .git/hooks`, `head .git/hooks/pre-commit`, `git config core.hooksPath`
-  · text about the lock: quoted strings, commit messages, and heredoc bodies that feed a
+  - reading: `ls .git/hooks`, `head .git/hooks/pre-commit`, `git config core.hooksPath`
+  - text about the lock: quoted strings, commit messages, and heredoc bodies that feed a
     non-shell program (`cat > f <<EOF`, `git commit -F - <<EOF`)
-  · `env -i` probes that run no git (cron-like environment checks)
-  · the spawner and the reaper, which set BRANCH_GUARD_ALLOW in a subprocess env from
-    Python — that is not a Bash command, so this guard never sees it
+  - `env -i` probes that run no git (cron-like environment checks)
+  - the spawner and the reaper, which set BRANCH_GUARD_ALLOW in a subprocess env from
+    Python; that is not a Bash command, so this guard never sees it
 
-THE THREAT MODEL IS ACCIDENT, NOT EVASION, exactly as in stash_guard. Text matching cannot
-resolve `v=BRANCH_GUARD_ALLOW; export $v=1`, an eval, a base64 payload, or a Python heredoc
-that builds a subprocess env without CLAUDECODE. Nobody reaches for those by accident, and
-claiming to catch them would be the defect this module exists to catch. The census
-(`branch_guard.py census`) is what catches whatever gets past both layers.
+The threat model is accident, not evasion, as in stash_guard. Text matching cannot resolve
+`v=BRANCH_GUARD_ALLOW; export $v=1`, an eval, a base64 payload, or a Python heredoc that
+builds a subprocess env without CLAUDECODE. Nobody reaches for those by accident.
+Claiming to catch them would be the defect this module exists to catch.
+The census (`branch_guard.py census`) catches whatever gets past both layers.
 
-ESCAPE HATCH, for Rick only: a flag in the HOOK PROCESS's own environment, which is set
-when a session is launched and which no command typed inside the session can reach. There
-is deliberately NO inline form. An earlier cut honoured the flag written as an assignment
-in the command itself, and María caught it in review (2026-09-29): that made the hatch
-self-service, so any seat could type its way past the lock. The flag's name is also kept
-out of the deny text, so a refusal never teaches the reader the way round it.
+The escape hatch is for the operator only: a flag in the hook process's own environment,
+set when a session is launched. No command typed inside the session can reach it.
+There is no inline form. Honouring the flag written in the command itself made the hatch
+self-service, so any seat could type its way past the lock. The flag's name stays out of
+the deny text, so a refusal never teaches the reader the way round it.
 
-FAIL-OPEN by contract: any unexpected error returns None, so the guard can never break a
-tool call. DEFAULT-ON, for the reason stash_guard gives — a control that has to be switched
+The guard fails open: any unexpected error returns None, so it never breaks a tool call.
+It is on by default, for the reason stash_guard gives: a control that has to be switched
 on is the courtesy version of itself.
 """
 import os
@@ -235,6 +229,8 @@ def _guard_disabled( env=None ) -> bool:
 
 def _blank_preserving( text ) -> str:
     """
+    Blank every balanced quoted span, keeping the text length.
+
     Ensures:
         - returns text with every balanced quoted span replaced by spaces of the same length
         - len( result ) == len( text ), so indices line up
@@ -281,7 +277,7 @@ def _segments( text, blanked ) -> Iterable[ Tuple[ str, str ] ]:
 
     Ensures:
         - yields ( original, blanked ) slices for each simple command, in order
-        - cuts only at separators OUTSIDE quotes
+        - cuts only at separators outside quotes
     """
     start = 0
     for sep in _SEGMENT_SEPARATOR_RE.finditer( blanked ):
@@ -291,7 +287,7 @@ def _segments( text, blanked ) -> Iterable[ Tuple[ str, str ] ]:
 
 
 def _segment_program( blanked_segment ) -> Optional[ str ]:
-    """The basename of a segment's program, past assignments and wrappers, or None."""
+    """Basename of a segment's program, past assignments and wrappers, or None."""
     found = _SEGMENT_PROGRAM_RE.match( blanked_segment )
     if not found:
         return None
@@ -300,7 +296,7 @@ def _segment_program( blanked_segment ) -> Optional[ str ]:
 
 def configured_hooks_dirs( cwd=None, *, runner=None ) -> List[ str ]:
     """
-    The hooks directory core.hooksPath names, when it is NOT the default `.git/hooks`.
+    The hooks directory core.hooksPath names, when it is not the default `.git/hooks`.
 
     Requires:
         - cwd is the session's working directory, or None
@@ -310,7 +306,7 @@ def configured_hooks_dirs( cwd=None, *, runner=None ) -> List[ str ]:
         - returns [] when core.hooksPath is unset, unreadable, or already under `.git/hooks`
           (the default pattern covers it)
         - otherwise returns the configured path, and its realpath when that differs
-        - FAIL-OPEN: any error or timeout returns []
+        - fail-open: any error or timeout returns []
     """
     runner = runner if runner is not None else subprocess.run
     try:
@@ -337,7 +333,7 @@ def _hooks_dir_re( extra_dirs ) -> "re.Pattern":
 
 def _is_hookspath_set( rest ) -> bool:
     """
-    True iff the arguments after `git config` WRITE core.hooksPath.
+    True iff the arguments after `git config` write core.hooksPath.
 
     Requires:
         - rest is the text following `config` within one command
@@ -383,7 +379,7 @@ def _check_text( text, hooks_re, depth ) -> Optional[ str ]:
     Ensures:
         - scans the outer command, then each shell heredoc body and `sh -c` payload as a
           command of its own (to _MAX_DEPTH), and each Python heredoc body for Python forms
-        - returns the FIRST deny reason found, else None
+        - returns the first deny reason found, else None
     """
     if depth > _MAX_DEPTH:
         return None
@@ -472,7 +468,7 @@ def branch_lock_deny_reason(
     hooks_dirs : Optional[ List[ str ] ] = None,
 ) -> Optional[ str ]:
     """
-    Return a deny-reason string iff a Bash call would route around the branch lock.
+    Return a deny reason iff a Bash call would route around the branch lock.
 
     Requires:
         - tool_name is the hook payload's tool_name (str)
@@ -481,12 +477,12 @@ def branch_lock_deny_reason(
         - enabled, env and hooks_dirs are None in production and injected for testing
 
     Ensures:
-        - None unless ALL hold: the guard is enabled, tool_name is Bash, and the command
+        - None unless all hold: the guard is enabled, tool_name is Bash, and the command
           matches one of the four routes
-        - the escape hatch is read ONLY from the hook process's environment; a hatch
+        - the escape hatch is read only from the hook process's environment; a hatch
           written into the command is ignored, so the route is still denied
         - the reason names the route and what to do instead
-        - FAIL-OPEN: any unexpected error returns None
+        - fail-open: any unexpected error returns None
     """
     try:
         if enabled is None:

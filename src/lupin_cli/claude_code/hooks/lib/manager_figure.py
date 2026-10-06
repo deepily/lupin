@@ -1,33 +1,32 @@
 """
-Manager-figure predicate for the task-store write gate (F4 managers-first).
+Manager-figure predicate for the task-store write gate (managers-first).
 
-Implements the ratified two-source predicate from planning-is-prompting ->
-workflow/manager-autonomy.md §2.1 — a session is a manager-figure iff EITHER:
+Implements the ratified two-source predicate: a session is a manager-figure if either holds:
 
-    1. EXPLICIT — the session was spawned INTO a manager role: its bridge
+    1. Explicit: the session was spawned into a manager role, so its bridge
        file carries role == "manager".
-    2. IMPLICIT — the session's allocated voice persona is one of the repo's
-       NAMED standing personas: the `COSA_VOICE_PREFERRED_PERSONA__<PROJECT>`
-       env chain's named entries (the `*` wildcard is "anything free" — a
-       randomly-allocated worker persona, NEVER a manager claim).
+    2. Implicit: the session's allocated voice persona is one of the repo's
+       named standing personas, meaning the named entries of the
+       `COSA_VOICE_PREFERRED_PERSONA__<PROJECT>` env chain. The `*` wildcard
+       is "anything free" (a randomly-allocated worker persona) and is never a manager claim.
 
 Resolution reuses the existing chain machinery
 (`cosa.rest.voice_persona_helpers.pick_persona_chain_from_env` +
 `parse_persona_chain`) and the one canonical identity normalizer
 (`lupin_mcp.persona_normalization.canonical_persona_key`, so "Mr. Radio" ==
-"mr radio") — no duplicated parser, one name at every layer. The declared
-chain entries are display form ("Mr. Radio,Cheech,*") so the keep-spaces
-canonical key matches the persona's "mr radio" bridge name; the swap from the
-space-dropping match-key is symmetric on both compare sides (equivalence
-preserved) and now agrees with the store key.
+"mr radio"). There is no duplicated parser, and a name means the same at every layer.
+The declared chain entries are display form ("Mr. Radio,Cheech,*") so the
+keep-spaces canonical key matches the persona's "mr radio" bridge name.
+The swap from the space-dropping match-key is symmetric on both compare sides,
+so equivalence is preserved, and it now agrees with the store key.
 
-**Degrade direction: fail-CLOSED (False).** F4 is managers-first WRITES — a
-session whose manager-hood cannot be established does NOT write to the store.
-This is the opposite degrade direction from the read-side oracle helpers
-(which fail-open) because the guarded action here is a WRITE.
+Degrade direction: fail-closed (False). The gate is managers-first writes, so a
+session whose manager-hood cannot be established does not write to the store.
+This is the opposite of the read-side oracle helpers, which fail open, because
+the guarded action here is a write.
 
-Design authority: lupin ->
-    src/rnd/v0.1.8/2026.06.12-task-store-phase2-write-paths/01-build-plan.md §1.2.
+See: src/rnd/v0.1.8/2026.06.12-task-store-phase2-write-paths/01-build-plan.md
+See: /mnt/DATA01/include/www.deepily.ai/projects/planning-is-prompting/workflow/manager-autonomy.md
 """
 
 from cosa.rest.voice_persona_helpers import pick_persona_chain_from_env, parse_persona_chain, PERSONA_CHAIN_WILDCARD
@@ -44,9 +43,9 @@ def _read_bridge_fields( session_id, _find_path=find_session_path_by_id ):
     """
     Read ( role, persona_name, implicit_flag ) from the session's bridge file.
 
-    `implicit_flag` is the IMPLICIT manager-figure answer stamped at registration
-    (MANAGER_FIGURE_BRIDGE_FIELD, bug e5d600bd) — a bool on post-fix bridges,
-    None on legacy bridges written before the fix (or when the field is absent).
+    `implicit_flag` is the implicit manager-figure answer stamped at registration
+    (MANAGER_FIGURE_BRIDGE_FIELD). It is a bool on bridges written after the stamp
+    was added, and None on older bridges or when the field is absent.
 
     Requires:
         - session_id is a string (full UUID or 8-char prefix)
@@ -54,8 +53,8 @@ def _read_bridge_fields( session_id, _find_path=find_session_path_by_id ):
 
     Ensures:
         - Returns ( role_or_None, persona_name_or_None, implicit_flag_or_None )
-        - Missing bridge / parse error / missing fields → ( None, None, None ) or
-          partial — DEGRADE-SAFE, never raises
+        - A missing bridge, parse error or missing fields gives ( None, None, None )
+          or a partial result: degrade-safe, never raises
     """
     import json
 
@@ -76,26 +75,27 @@ def _read_bridge_fields( session_id, _find_path=find_session_path_by_id ):
 
 def resolve_implicit_manager_figure( persona_name, environ=None ) -> bool:
     """
-    Compute the IMPLICIT source of the §2.1 predicate: is `persona_name` one of
-    the repo's NAMED standing personas (a named entry of
-    COSA_VOICE_PREFERRED_PERSONA__<PROJECT>, the `*` wildcard excluded)?
+    Compute the implicit source of the predicate: is `persona_name` a named standing persona?
 
-    🔴 THIS RUNS ONLY WHERE THE CALLER'S REAL ENV LIVES. register_session (the
-    SessionStart hook) calls it with `os.environ` after persona allocation and
-    STAMPS the result onto the bridge (bug e5d600bd, Rick's Option A). The
-    server has no COSA_VOICE_PREFERRED_PERSONA__* vars, so it must NOT re-derive
-    this — it reads the stamped bool via is_manager_figure() instead. This
-    function is also the env-based fallback is_manager_figure() uses for legacy
-    (un-stamped) bridges when a caller supplies its own environ.
+    Named means a named entry of `COSA_VOICE_PREFERRED_PERSONA__<PROJECT>`, with the `*` wildcard excluded.
 
     Requires:
         - persona_name is a string or None
-        - environ is a Mapping or None (None → os.environ, via the resolvers)
+        - environ is a Mapping or None (None means os.environ, via the resolvers)
 
     Ensures:
-        - Returns True iff a NAMED chain entry canonically matches persona_name
+        - Returns True iff a named chain entry canonically matches persona_name
         - Returns False for no persona, unset chain, `*`-only chain, or no match
         - Never raises
+
+    Notes:
+        - This runs only where the caller's real env lives. register_session (the
+          SessionStart hook) calls it with `os.environ` after persona allocation and
+          stamps the result onto the bridge.
+        - The server has no `COSA_VOICE_PREFERRED_PERSONA__*` vars, so it must not
+          re-derive this. It reads the stamped bool via is_manager_figure() instead.
+        - This function is also the env-based fallback is_manager_figure() uses for
+          legacy (un-stamped) bridges when a caller supplies its own environ.
     """
     try:
         if not persona_name:
@@ -110,27 +110,27 @@ def resolve_implicit_manager_figure( persona_name, environ=None ) -> bool:
 
 def is_manager_figure( session_id, environ=None, _find_path=find_session_path_by_id ) -> bool:
     """
-    Is this session a manager-figure (the §2.1 two-source predicate)?
+    Return whether this session is a manager-figure (the two-source predicate).
 
     Requires:
         - session_id is a string (full UUID or 8-char prefix)
-        - environ is a Mapping or None (None → os.environ)
+        - environ is a Mapping or None (None means os.environ)
         - _find_path is the bridge locator (injectable for tests)
 
     Ensures:
-        - Returns True iff bridge role == "manager" (EXPLICIT source, checked
-          live), OR the IMPLICIT source is satisfied. The implicit source is
-          read from the STATIC bridge field stamped at registration
-          (MANAGER_FIGURE_BRIDGE_FIELD, bug e5d600bd) — this is what makes the
-          predicate correct SERVER-SIDE, where the persona-chain env is empty and
+        - Returns True iff bridge role == "manager" (explicit source, checked
+          live), or the implicit source is satisfied. The implicit source is
+          read from the static bridge field stamped at registration
+          (MANAGER_FIGURE_BRIDGE_FIELD). This is what makes the
+          predicate correct server-side, where the persona-chain env is empty and
           re-deriving the implicit source would fail closed for every caller
-          (the 403 write gate AND any v2-experiment stratum classifier alike).
-        - Legacy fallback: on a bridge written before this fix (field absent), the
+          (the 403 write gate and any v2-experiment stratum classifier alike).
+        - Legacy fallback: on a bridge written before the stamp existed (field absent), the
           implicit source is computed from `environ` via
-          resolve_implicit_manager_figure — correct when a hook-side caller
-          passes its own env, fail-CLOSED server-side (unchanged pre-fix
-          behavior). A legacy bridge self-heals on its next SessionStart.
-        - Returns False on ANY doubt — fail-CLOSED, this gates WRITES (F4)
+          resolve_implicit_manager_figure. That is correct when a hook-side caller
+          passes its own env, and fail-closed server-side. A legacy bridge
+          self-heals on its next SessionStart.
+        - Returns False on any doubt (fail-closed, this gates writes)
         - Never raises (both helpers below are no-raise, so no outer belt is
           needed here; adding one would be an uncoverable dead branch)
     """
@@ -161,16 +161,10 @@ DENIAL_DENIED        = "denied"
 
 def classify_manager_figure_denial( session_id, environ=None, _find_path=find_session_path_by_id ) -> str:
     """
-    Classify WHY manager-hood was NOT established, for a caller-facing message.
+    Classify why manager-hood was not established, for a caller-facing message.
 
-    Call ONLY on the reject path — i.e. after is_manager_figure() returned False
-    or session_id resolved to None. This is a message-shaping helper, NOT a second
-    permission predicate: is_manager_figure remains the single gate.
-
-    The absent-vs-false distinction (the whole point of dd3b3666): the implicit
-    stamp is a bool on post-fix bridges and ABSENT (→ None via data.get) on
-    bridges written before the field existed. `flag is None` is therefore the
-    reliable "stale bridge" signal, distinct from `flag is False` ("denied").
+    Call it only on the reject path, after is_manager_figure() returned False or session_id resolved to None.
+    It only shapes a message and is not a second permission predicate: is_manager_figure remains the single gate.
 
     Requires:
         - session_id is a string (full UUID or 8-char prefix) or None
@@ -178,12 +172,16 @@ def classify_manager_figure_denial( session_id, environ=None, _find_path=find_se
 
     Ensures:
         - Returns DENIAL_NO_SESSION_ID when session_id is None (no parseable id).
-        - Returns DENIAL_STALE_BRIDGE when the implicit stamp field is ABSENT on
-          the bridge (field never written) — remedy is a session RESTART, which
-          re-stamps it at SessionStart. Also covers a missing/unreadable bridge.
+        - Returns DENIAL_STALE_BRIDGE when the implicit stamp field is absent on
+          the bridge (field never written). The remedy is a session restart, which
+          re-stamps it at SessionStart. It also covers a missing/unreadable bridge.
         - Returns DENIAL_DENIED when the stamp resolved present-and-False (the
-          caller is genuinely not a manager figure).
+          caller is not a manager figure).
         - Never raises (_read_bridge_fields is no-raise).
+
+    Notes:
+        - The stamp is a bool on newer bridges and absent (None via data.get) on bridges written before the field existed.
+        - `flag is None` is therefore the reliable stale-bridge signal, distinct from `flag is False` (denied).
     """
     if session_id is None:
         return DENIAL_NO_SESSION_ID

@@ -1,44 +1,35 @@
 #!/usr/bin/env python3
 """
-Heartbeat Hook — work-owed oracle (pure decision function).
+Heartbeat Hook: work-owed oracle (pure decision function).
 
-Answers §0 decision-logic STEP 3: "determine work-owed." Consulted only when
-there is NO fresh, honored hold (the hold artifact short-circuits steps 1-2).
-If this oracle reports no owed work, the instance is genuinely done → do NOT
-poke. If work is owed and the per-session poke-cap is not exhausted → poke.
+Answers the work-owed decision step, "determine work-owed", consulted only when there is no fresh, honored hold.
+The hold artifact short-circuits the first two steps.
+If this oracle reports no owed work, the instance is done and must not be poked.
+If work is owed and the per-session poke cap is not exhausted, it is poked.
 
-Design authority (LOCKED): planning-is-prompting →
-    planning-is-prompting/src/rnd/2026.06.02-stop-hook-natural-heartbeat-poker.md  §0 #3 + §4.
-Lupin-side seam analysis: lupin →
-    src/rnd/v0.1.8/2026.06.04-heartbeat-hook/01-spike-findings-and-stop-py-seam-analysis.md
+Design: /mnt/DATA01/include/www.deepily.ai/projects/planning-is-prompting/src/rnd/2026.06.02-stop-hook-natural-heartbeat-poker.md (sections 0 and 4).
+See: src/rnd/v0.1.8/2026.06.04-heartbeat-hook/01-spike-findings-and-stop-py-seam-analysis.md
 
-**PURE CORE — by design (María constraint, 2026-06-04):** this module NEVER
-fetches live commons / transcript / TODO data. All state is *injected* as
-already-parsed lists. The live-data plumbing (read TODO.md, scan Pending
-Decisions, query open DMs) belongs to the `stop.py` Branch-C integration
-layer, which is gated on the 3-way Rachel seam review. Same discipline that
-kept the hold-artifact module collision-free: pure core now, live wiring at
-the gated seam later.
+This is a pure core: the module never fetches live commons, transcript or TODO data.
+All state is injected as already-parsed lists.
+The live plumbing (read TODO.md, scan Pending Decisions, query open DMs) belongs to the `stop.py` Branch-C integration layer.
+That keeps the hold-artifact discipline: a collision-free pure core now, live wiring at the gated seam later.
 
-Work-owed signals, strongest-first (§0 #3; the declared-hold-reason signal
-that heads that list is handled by the `heartbeat_hold` module, not here —
-this oracle is the "else" branch after no fresh hold):
-    1. TODO items you own that are in_progress
-    2. TODO items you own that are unstarted (pending)
-    3. Pending-Decisions that are NOT blocked on the user
-    4. Unanswered INBOUND questions (expect_reply DMs addressed to you that
-       you have not yet answered — work you owe a peer)
-    5. Outstanding delegations (2026-06-09, Rick): spawned workers of yours
-       that are STILL ALIVE and not yet reaped — a manager supervising a live
-       crew owes review/reap duty even with zero Task* items filed, so it must
-       never idle-announce while workers are out
+Work-owed signals, strongest first.
+The declared-hold-reason signal that heads the design list is handled by `heartbeat_hold`; this oracle is the else branch after no fresh hold.
+Signal 1: TODO items you own that are in_progress.
+Signal 2: TODO items you own that are unstarted (pending).
+Signal 3: Pending Decisions that are not blocked on the user.
+Signal 4: unanswered inbound questions, meaning expect_reply DMs addressed to you that you have not answered (work you owe a peer).
+Signal 5: outstanding delegations, meaning spawned workers of yours that are still alive and not reaped.
+A manager supervising a live crew owes review and reap duty even with zero Task* items filed.
+So it must never idle-announce while workers are out.
+Later signals arrive as injected bools or lists: needs_verification, open user gates, operator-gate re-surface and spin-up nudge (see evaluate_work_owed).
 
-NOTE on signal #4 interpretation: "open expect_reply DM" (§0 #3) is read here
-as an *inbound* question you owe a reply to (⇒ work owed ⇒ poke). An
-*outbound* expect_reply DM where YOU are awaiting a peer's reply is the
-opposite — a legitimate hold/awaiting signal — and belongs to the hold
-artifact's `awaiting` field, not this oracle. Flagged to María for
-confirmation; cheap to adjust since the list is injected.
+Signal 4 reads "open expect_reply DM" as an inbound question you owe a reply to, which means work owed and a poke.
+An outbound expect_reply DM where you await a peer's reply is the opposite.
+That is a legitimate awaiting signal and belongs to the hold artifact's `awaiting` field, not this oracle.
+It is cheap to adjust, since the list is injected.
 """
 
 import datetime
@@ -225,7 +216,7 @@ _PRIORITY_ORDER = tuple( VALID_PRIORITIES )
 
 def _join_series( parts ):
     """
-    "a" · "a and b" · "a, b, and c" — Rick's 2026-07-27 format, Oxford comma.
+    Join rendered strings into an Oxford-comma series: "a", "a and b", "a, b, and c".
 
     Requires:
         - parts is a list of already-rendered strings
@@ -242,33 +233,24 @@ def _join_series( parts ):
 
 def format_owed_summary( status_breakdown, priority_breakdown ):
     """
-    The poke's owed line: total, status split, priority split, and where to start.
+    Render the poke's owed line: total, status split, priority split, and where to start.
 
-        12 owed: 2 in progress, 10 queued · 6 at P1, 5 at P2, and 1 at P3 — start with the 6 P1s
-
-    Replaces the previous two-line form ("2 in-progress TODO item(s) you own;
-    10 unstarted TODO item(s) you own"), which made the reader ADD to learn their
-    board size and never once named a priority — while the standing instruction is
-    to work in descending priority.
-
-    ⚠️ EMPTY BUCKETS ARE OMITTED, NOT ZEROED (Rick, 2026-07-27: "you can dynamically
-    skip P0, or any priority level, if there are none at that level"). A rendered
-    "P0:0" is noise on every poke for a level that is almost always empty, and it
-    also invites the reader to treat a printed 0 as measured when an absent bucket
-    and a zero bucket are different claims. The GROUP BY already omits them.
+    For example "12 owed: 2 in progress, 10 queued", followed by a priority clause and a start-with pointer.
+    It replaces a two-line form that made the reader add counts and never named a priority, while the standing order is descending priority.
+    Empty buckets are omitted, not zeroed: a printed 0 is noise on every poke, and an absent bucket and a zero bucket are different claims.
 
     Requires:
         - status_breakdown is { store_status: count } or falsy
-        - priority_breakdown is { "P0".."P3": count } or falsy
+        - priority_breakdown is { priority: count } or falsy (priorities come from `VALID_PRIORITIES`)
 
     Ensures:
-        - returns "" when the total is 0 or the status breakdown is empty/unusable —
+        - returns "" when the total is 0 or the status breakdown is empty/unusable;
           the caller then falls back to its own specifics rather than printing "0 owed"
-        - the total is SUMMED from the status breakdown, not taken on faith from a
+        - the total is summed from the status breakdown, not taken on faith from a
           separate count, so the parts and the whole cannot disagree in one sentence
         - the priority clause is omitted entirely when no priority data is available,
           rather than implying every row is unprioritized
-        - "start with the N P1s" names the HIGHEST priority actually present, so it
+        - "start with the N P1s" names the highest priority actually present, so it
           points at P0 when a P0 exists and never invents a level with no rows
         - never raises on malformed input (foreign hook-payload data)
     """
@@ -304,28 +286,18 @@ def format_owed_summary( status_breakdown, priority_breakdown ):
 
 def is_heartbeat_poke_prompt( prompt ):
     """
-    Is `prompt` an injected liveness poke (heartbeat self-poke OR arbiter poke),
-    rather than genuine user input?
+    Return True if prompt is an injected liveness poke (heartbeat or arbiter), not user input.
 
-    UserPromptSubmit must NOT treat either synthetic prompt as user re-engagement —
-    doing so resets the per-session poke-cap on every poke, so the cap never halts
-    (c121037b root cause: poke_count stuck at 1 across 23 consecutive pokes; b33c8e96
-    amplifier: an arbiter poke reopened a fresh budget on top).
-
-    Two shapes are recognized, by two matching modes reflecting how each is delivered:
-        1. Heartbeat SELF-POKE — rides the Stop-hook `reason` field, re-submitted as a
-           prompt via tmux send-keys, so POKE_PROMPT_SENTINEL lands at the START.
-           Matched by PREFIX (after left-strip; tmux/console may prepend whitespace).
-        2. Arbiter POKE (stuck / manager-stale) — delivered WRAPPED in a peer-DM
-           <system-reminder> envelope, so ARBITER_POKE_SENTINEL sits in the MIDDLE.
-           Matched by SUBSTRING (contains).
+    UserPromptSubmit must not treat either synthetic prompt as user re-engagement: that reset the per-session poke cap on every poke, so the cap never halted.
+    A heartbeat self-poke is re-submitted via tmux send-keys, so `POKE_PROMPT_SENTINEL` leads the prompt: matched by prefix after left-strip.
+    An arbiter poke (stuck or manager-stale) arrives wrapped in a peer-DM system-reminder envelope, so `ARBITER_POKE_SENTINEL` sits mid-prompt: matched by substring.
 
     Requires:
         - prompt is a string or None (foreign hook-payload data)
 
     Ensures:
-        - Returns True iff prompt (left-stripped) starts with POKE_PROMPT_SENTINEL
-          OR MUTE_PROMPT_SENTINEL, OR prompt contains ARBITER_POKE_SENTINEL
+        - Returns True iff prompt (left-stripped) starts with `POKE_PROMPT_SENTINEL`
+          or `MUTE_PROMPT_SENTINEL`, or prompt contains `ARBITER_POKE_SENTINEL`
         - Returns False for None / non-string / empty / genuine user prompts
         - Never raises
     """
@@ -367,7 +339,7 @@ def _actionable_todos( todo_items ):
 
 def _actionable_pending_decisions( pending_decisions ):
     """
-    Filter Pending-Decisions to those NOT blocked on the user.
+    Filter Pending-Decisions to those not blocked on the user.
 
     Requires:
         - pending_decisions is an iterable of dicts
@@ -386,9 +358,8 @@ def _iso_age_seconds( ts, now_epoch ):
     """
     Age in seconds of an ISO-8601 timestamp string, or None when undateable.
 
-    The shared, single-source age-of-a-timestamp helper (one descriptive name
-    everywhere): consumed by both _inbound_age_seconds (inbound-DM age-out) and
-    manager_needs_verification (the look-in debounce).
+    The shared, single-source age helper (one descriptive name everywhere).
+    It is consumed by both _inbound_age_seconds (inbound-DM age-out) and manager_needs_verification (the look-in debounce).
 
     Requires:
         - ts is anything (defensive over foreign data); only a str dates
@@ -397,7 +368,7 @@ def _iso_age_seconds( ts, now_epoch ):
     Ensures:
         - Returns ( now_epoch - parsed_ts ) in seconds for a parseable str ts
         - Returns None when ts is missing / non-string / unparseable
-        - PURE: parses the injected string + arithmetic only; reads no clock
+        - Pure: parses the injected string and does arithmetic only; reads no clock
         - Trailing "Z" is normalized to "+00:00" so UTC stamps parse on 3.10
     """
     if not isinstance( ts, str ):
@@ -430,33 +401,29 @@ def manager_needs_verification( outstanding_delegations, last_verification_ts,
                                 now_epoch,
                                 threshold_seconds=VERIFICATION_DEBOUNCE_SECONDS ):
     """
-    Inward twin (6929f4ac §3-§5): does this MANAGER owe a fresh worker-
-    verification receipt right now? The pure debounce predicate.
+    Return whether a manager owes a fresh worker-verification receipt now (pure debounce).
 
-    A manager that merely waits — no fresh look-in — must read as work-owed so
-    the oracle keeps poking it to VERIFY (liveness ≠ progress; being owed ≠ doing
-    the owed thing). It self-clears the instant the manager looks in (stamps
-    `last_looked_in_on_workers_ts`), so a manager who is actually managing resets
-    the clock for free and a manager who sits does not.
+    A manager that merely waits must read as work-owed, so the oracle keeps poking it to verify; liveness is not progress.
+    It self-clears the instant the manager looks in (stamps `last_looked_in_on_workers_ts`); a manager who sits does not reset it.
 
     Requires:
-        - outstanding_delegations is an iterable of (truthy ⇒ alive worker)
-          entries, or None — the SAME list the outstanding_delegation signal
-          consumes (manifest ∩ live bridges, gathered by the IO shell)
+        - outstanding_delegations is an iterable of (truthy means alive worker)
+          entries, or None; the same list the outstanding_delegation signal
+          consumes (manifest intersected with live bridges, gathered by the IO shell)
         - last_verification_ts is the manager's most-recent verification stamp
           (ISO-8601 str) or None (never looked in)
         - now_epoch is the caller's injected "now" (POSIX seconds)
-        - threshold_seconds is the debounce window (Rick: 600 = 10 min)
+        - threshold_seconds is the debounce window (600 = 10 min)
 
     Ensures:
-        - Returns False when NO worker is out (all dead/reaped ⇒ nothing to
-          verify ⇒ never a verification debt) — gates the whole predicate
-        - With ≥1 worker out: True iff there is no datable prior look-in
-          (last_verification_ts None or unparseable ⇒ bias-to-owe a first/again
-          look; the poke cap bounds the cost) OR the look-in age ≥ threshold
-        - Boundary: age EXACTLY == threshold owes (>=) — a 10-min-old look-in is
+        - Returns False when no worker is out (all dead or reaped means nothing to
+          verify, so never a verification debt); this gates the whole predicate
+        - With >= 1 worker out: True iff there is no datable prior look-in
+          (last_verification_ts None or unparseable biases to owe a first or repeat
+          look; the poke cap bounds the cost) or the look-in age >= threshold
+        - Boundary: age exactly == threshold owes (>=), so a 10-min-old look-in is
           due, mirroring "verify at least every 10 min"
-        - PURE: no clock, no IO; never raises on well-formed input
+        - Pure: no clock, no IO; never raises on well-formed input
     """
     workers = [ d for d in ( outstanding_delegations or [ ] ) if d ]
     if not workers:
@@ -472,37 +439,34 @@ def manager_needs_spinup_check( backlog_count, idle_capacity, last_spinup_check_
                                 threshold_seconds=SPINUP_CHECK_DEBOUNCE_SECONDS,
                                 backlog_min_n=SPINUP_BACKLOG_MIN_N ):
     """
-    Face A (item 11, design D1/D2): does this MANAGER owe a crew-spin-up NUDGE
-    right now? The pure debounce predicate, sibling of manager_needs_verification.
+    Return whether a manager owes a crew spin-up nudge now (pure debounce predicate).
 
-    A manager sitting on a backlog with idle crew capacity must read as work-owed
-    so the oracle NAMES "consider spinning up a crew" on its next Stop — the
-    manager then decides + acts of its own accord (D2: nudge, NOT auto-spin). It
-    self-clears the instant the manager stamps last_spinup_check_ts (it considered
-    the nudge), so a manager who just checked is not re-nudged and one who sits is.
+    A manager with a backlog and idle crew capacity must read as work-owed, so the oracle names "consider spinning up a crew" next Stop.
+    The manager then decides and acts itself: this is a nudge, not an auto-spin.
+    It self-clears when the manager stamps `last_spinup_check_ts`, so a manager who just checked is not re-nudged and one who sits is.
 
     Requires:
         - backlog_count is the manager's owed-item count (queued + in_progress,
           gathered by the IO shell via task_query(accountable_manager=me)); any
-          type accepted (foreign data) — only a non-bool int >= backlog_min_n counts
-        - idle_capacity is a bool — True iff the manager has room to spawn another
+          type accepted (foreign data), but only a non-bool int >= backlog_min_n counts
+        - idle_capacity is a bool, True iff the manager has room to spawn another
           worker under the cap-8 fleet bound (live_workers < cap)
         - last_spinup_check_ts is the most-recent spin-up-check stamp (ISO-8601
           str) or None (never checked)
         - now_epoch is the caller's injected "now" (POSIX seconds)
-        - threshold_seconds is the debounce window (Rick: 600 = 10 min)
+        - threshold_seconds is the debounce window (600 = 10 min)
         - backlog_min_n is the backlog floor below which no nudge fires
 
     Ensures:
-        - Returns False unless ALL THREE hold — no idle capacity OR backlog < N
-          short-circuits to False regardless of elapsed (a full crew or a small
+        - Returns False unless all three hold: no idle capacity or backlog < N
+          short-circuits to False regardless of elapsed time (a full crew or a small
           backlog never nudges; the manager's judgment is preserved)
         - bool backlog_count is rejected (True must not slip through as 1)
-        - With capacity AND backlog >= N: True iff there is no datable prior check
-          (None/unparseable ⇒ bias-to-nudge a first check; the poke cap bounds the
-          cost) OR the check age >= threshold_seconds
-        - Boundary: age EXACTLY == threshold owes (>=)
-        - PURE: no clock, no IO; never raises on well-formed input
+        - With capacity and backlog >= N: True iff there is no datable prior check
+          (None or unparseable biases to nudge a first check; the poke cap bounds the
+          cost) or the check age >= threshold_seconds
+        - Boundary: age exactly == threshold owes (>=)
+        - Pure: no clock, no IO; never raises on well-formed input
     """
     if not idle_capacity:
         return False
@@ -520,32 +484,27 @@ def manager_needs_question_surface( open_operator_gates, last_surfaced_questions
                                     now_epoch,
                                     threshold_seconds=SURFACE_QUESTIONS_DEBOUNCE_SECONDS ):
     """
-    Face B (item 1, design D1/D3): does this session owe a RE-SURFACE of its open
-    operator gates right now? The pure per-manager debounce predicate.
+    Return whether a session owes a re-surface of its open operator gates now (pure debounce).
 
-    A session holding ≥1 open (unanswered) operator gate must re-fire those asks
-    every `threshold` seconds so a decision the human owes is never buried under a
-    "ball's in your court" park. This GENERALIZES the per-gate due_gates 10-min
-    hack to ONE per-manager debounce (D3 "retires the N per-session re-ask
-    timers"): instead of N independent per-gate timers, the single
-    last_surfaced_questions_ts gates the whole re-surface. Self-clears when the
-    session stamps last_surfaced_questions_ts after re-firing.
+    A session holding an open operator gate must re-fire those asks every `threshold` seconds, so the human's decision is never buried.
+    It generalizes the per-gate due_gates cadence to one per-manager debounce, replacing N independent per-session re-ask timers.
+    It self-clears when the session stamps `last_surfaced_questions_ts` after re-firing.
 
     Requires:
-        - open_operator_gates is an iterable of truthy gate entries (the OPEN,
+        - open_operator_gates is an iterable of truthy gate entries (the open,
           unanswered operator gates, gathered by the IO shell), or None
         - last_surfaced_questions_ts is the most-recent surface stamp (ISO-8601
           str) or None (never surfaced)
         - now_epoch is the caller's injected "now" (POSIX seconds)
-        - threshold_seconds is the debounce window (Rick: 600 = 10 min)
+        - threshold_seconds is the debounce window (600 = 10 min)
 
     Ensures:
-        - Returns False when there is NO open operator gate (nothing to surface —
-          gates the whole predicate, mirroring the no-workers gate of the inward twin)
-        - With ≥1 open gate: True iff there is no datable prior surface
-          (None/unparseable ⇒ bias-to-surface) OR the surface age >= threshold_seconds
-        - Boundary: age EXACTLY == threshold owes (>=)
-        - PURE: no clock, no IO; never raises on well-formed input
+        - Returns False when there is no open operator gate (nothing to surface);
+          this gates the whole predicate, mirroring the no-workers gate of the inward twin
+        - With >= 1 open gate: True iff there is no datable prior surface
+          (None or unparseable biases to surface) or the surface age >= threshold_seconds
+        - Boundary: age exactly == threshold owes (>=)
+        - Pure: no clock, no IO; never raises on well-formed input
     """
     gates = [ g for g in ( open_operator_gates or [ ] ) if g ]
     if not gates:
@@ -559,7 +518,7 @@ def manager_needs_question_surface( open_operator_gates, last_surfaced_questions
 def partition_inbound_by_age( inbound, now_epoch,
                               stale_after_seconds=INBOUND_STALE_AFTER_SECONDS ):
     """
-    Split inbound entries into (fresh, stale) by age — spec part (e).
+    Split inbound entries into (fresh, stale) by age.
 
     Requires:
         - inbound is an iterable of dicts (each may carry a "ts" ISO string)
@@ -567,13 +526,13 @@ def partition_inbound_by_age( inbound, now_epoch,
         - stale_after_seconds is a positive number
 
     Ensures:
-        - Returns ( fresh, stale ): an entry is STALE iff its age strictly
-          exceeds stale_after_seconds; otherwise FRESH
-        - An undateable entry (missing/unparseable ts) is FRESH — bias-to-owed,
+        - Returns ( fresh, stale ): an entry is stale iff its age strictly
+          exceeds stale_after_seconds; otherwise fresh
+        - An undateable entry (missing/unparseable ts) is fresh, a bias to owed
           consistent with the gatherer's missing-tenure-floor philosophy; the
           poke cap bounds the cost
         - Input order is preserved within each bucket
-        - PURE: no clock, no IO; never raises on well-formed dict input
+        - Pure: no clock, no IO; never raises on well-formed dict input
     """
     fresh = [ ]
     stale = [ ]
@@ -595,58 +554,35 @@ def evaluate_work_owed( todo_items=None, pending_decisions=None,
                         needs_spinup_check=False,
                         owed_summary=None ):
     """
-    Pure work-owed verdict over injected state (§0 step 3).
+    Return the pure work-owed verdict over injected state (the work-owed decision step).
 
     Requires:
         - todo_items, pending_decisions, unanswered_inbound_questions,
           outstanding_delegations and open_user_gates are each an iterable of
           dicts, or None (treated as empty)
-        - needs_verification is a bool — the inward twin's already-computed
-          debounce verdict (manager_needs_verification, the IO shell calls it)
-        - needs_question_surface / needs_spinup_check are bools — the Face B / Face A
-          proactive-manager debounce verdicts (manager_needs_question_surface /
-          manager_needs_spinup_check, the IO shell calls them)
+        - needs_verification is a bool, the inward twin's debounce verdict (computed by the IO shell via manager_needs_verification)
+        - needs_question_surface / needs_spinup_check are bools, the Face B / Face A debounce verdicts
+          (manager_needs_question_surface / manager_needs_spinup_check, computed by the IO shell)
 
     Ensures:
-        - Returns a verdict dict:
-            { "work_owed": bool,
-              "signals":   [str, ...]   # strongest-first, only those that fired
-              "specifics": str }        # human-readable, for the poke reason
+        - Returns a verdict dict: { "work_owed": bool, "signals": [str, ...] strongest-first and only those that fired, "specifics": str for the poke reason }
         - work_owed is True iff at least one signal fired
-        - signals order is fixed strongest-first:
-          todo_in_progress, todo_unstarted, pending_decision,
-          unanswered_inbound_question, outstanding_delegation,
-          needs_verification, outstanding_user_gate, surface_operator_gates,
-          spinup_nudge
-        - outstanding_delegation fires iff ≥1 truthy entry is injected — an
-          ALIVE, un-reaped spawned worker is owed work (the manager still owes
-          review/reap); all-dead/reaped ⇒ empty ⇒ no signal ⇒ idle allowed.
-          The live gathering (manifest ∩ live bridges) is the CALLER's IO, not
-          this oracle's (pure-core discipline unchanged)
-        - needs_verification fires iff the injected bool is truthy — the inward
-          twin (6929f4ac): a manager owes a fresh worker-verification receipt
-          (workers out AND its look-in is stale). The IO shell computes the bool
-          via manager_needs_verification; this oracle only routes it to a signal
-        - outstanding_user_gate fires iff ≥1 truthy open-gate entry is injected —
-          the outward twin (6929f4ac §9): an open direct user-gate is owed work
-          that must be RE-SURFACED (re-asked), never parked. The IO shell filters
-          to the OPEN (unanswered) gates; an answered gate clears it. Its
-          specifics carries the canonical Face-B obligation VERBATIM (manager-
-          autonomy.md §9.2 Face B v1.7 / role-goals.md v1.2, Rick-locked): the
-          manager MUST fire a dedicated HIGH-PRIORITY action-required ask the
-          moment a user-blocker is raised — never buried — AND mint the typed
-          operator gate
-        - surface_operator_gates fires iff the injected bool is truthy — Face B
-          (proactive-manager D3): the per-manager re-surface debounce has elapsed
-          while ≥1 operator gate is open. The IO shell computes the bool via
-          manager_needs_question_surface; this oracle only routes it to a signal.
-          Its specifics carries the same Rick-locked Face-B obligation wording
-          (manager-autonomy.md §9.2 Face B v1.7 / role-goals.md v1.2)
-        - spinup_nudge fires iff the injected bool is truthy — Face A (proactive-
-          manager D2): a backlog ≥ N with idle crew capacity AND the spin-up-check
-          debounce elapsed. The IO shell computes the bool via
-          manager_needs_spinup_check; the manager then decides + acts of its own
-          accord (a NUDGE, never an auto-spin)
+        - signals order is fixed strongest-first: todo_in_progress, todo_unstarted, pending_decision,
+          unanswered_inbound_question, outstanding_delegation, needs_verification, outstanding_user_gate,
+          surface_operator_gates, spinup_nudge
+        - outstanding_delegation fires iff >= 1 truthy entry is injected: an alive, un-reaped spawned worker is owed work.
+          All-dead or reaped means empty, so no signal and idle is allowed. The live gathering is the caller's IO, not this oracle's.
+        - needs_verification fires iff the injected bool is truthy (the inward twin: workers out and its look-in is stale).
+          The IO shell computes the bool; this oracle only routes it to a signal.
+        - outstanding_user_gate fires iff >= 1 truthy open-gate entry is injected (the outward twin). An open direct user gate
+          must be re-surfaced (re-asked), never parked. The IO shell filters to open gates, so an answered gate clears it.
+          Its specifics carries the Face B obligation verbatim (see manager-autonomy.md and role-goals.md): the manager must fire
+          a dedicated high-priority action-required ask the moment a user blocker is raised, never buried, and mint the typed operator gate.
+        - surface_operator_gates fires iff the injected bool is truthy: the per-manager re-surface debounce has elapsed
+          while >= 1 operator gate is open. The IO shell computes the bool; this oracle only routes it.
+          Its specifics carries the same Face B obligation wording.
+        - spinup_nudge fires iff the injected bool is truthy: a backlog >= N with idle crew capacity and the spin-up-check
+          debounce elapsed. The manager then decides and acts of its own accord (a nudge, never an auto-spin).
         - Never fetches live data; never raises on well-formed list input
     """
     todo_items                   = todo_items or [ ]
@@ -733,33 +669,28 @@ def build_poke_reason( verdict, goal_line="", hold_overridden=False, sweep_line=
     """
     Compose the self-poke `reason` string from a work-owed verdict.
 
-    The role-selected north-star goal line (role-goals Phase 2-3) is an INJECTED
-    string — the IO shell (stop.py) reads it from the `heartbeat <role> goal line`
-    configuration-manager key and passes it in; this pure core only APPENDS it
-    (the config read is IO and stays in the shell). Canonical source of the goal
-    text: planning-is-prompting -> workflow/role-goals.md §"Injection: the poke
-    echo".
+    The role-selected goal line is an injected string: the IO shell (stop.py) reads it from the `heartbeat <role> goal line` configuration key.
+    This pure core only appends it, because the config read is IO and stays in the shell.
+    Canonical goal text: planning-is-prompting workflow/role-goals.md, section "Injection: the poke echo".
 
     Requires:
         - verdict is the dict returned by evaluate_work_owed (has "specifics")
-        - goal_line is a string (the role-selected goal echo) or "" — empty ⇒
+        - goal_line is a string (the role-selected goal echo) or "", where empty means
           nothing appended (output byte-identical to the pre-role-goals reason)
         - sweep_line is the per-persona board-sweep progress gate (board_sweep.
-          sweep_progress_line) or "" — Rick's 2026-07-25 order that a sweeping seat
-          may not stop until every owed row has been iterated. Injected like
-          goal_line: the ledger read is IO and stays in the shell
-        - hold_overridden is a bool (bug d0d7f068) — True when the poke fires via
-          the obligation-override while a hold is HONORED (the caller passes
-          obligation_overrides AND is_honored). Selects the honest hold clause so
-          the reason never asserts "no fresh hold" against a fresh honored hold.
-          Default False ⇒ the byte-identical "and no fresh hold" clause.
+          sweep_progress_line) or "": a sweeping seat may not stop until every owed row
+          has been iterated. Injected like goal_line: the ledger read is IO and stays in the shell
+        - hold_overridden is a bool, True when the poke fires via the obligation
+          override while a hold is honored (the caller passes obligation_overrides and
+          is_honored). Selects the honest hold clause so the reason never asserts
+          "no fresh hold" against a fresh honored hold. Default False gives the byte-identical "and no fresh hold" clause.
 
     Ensures:
-        - Returns the POKE_REASON_TEMPLATE filled with verdict["specifics"] and the
-          hold clause (NO_FRESH_HOLD_CLAUSE by default, HOLD_OVERRIDDEN_CLAUSE when
+        - Returns the `POKE_REASON_TEMPLATE` filled with verdict["specifics"] and the
+          hold clause (`NO_FRESH_HOLD_CLAUSE` by default, `HOLD_OVERRIDDEN_CLAUSE` when
           hold_overridden), with goal_line appended as a trailing blank-line-separated
           block when goal_line is non-empty
-        - Rides the top-level Stop-hook `reason` field — NEVER systemMessage
+        - Rides the top-level Stop-hook `reason` field, never systemMessage
     """
     hold_clause = HOLD_OVERRIDDEN_CLAUSE if hold_overridden else NO_FRESH_HOLD_CLAUSE
     reason = POKE_REASON_TEMPLATE.format( specifics=verdict[ "specifics" ], hold_clause=hold_clause )
@@ -776,10 +707,10 @@ def build_poke_reason( verdict, goal_line="", hold_overridden=False, sweep_line=
 
 def quick_smoke_test():
     """
-    Self-contained smoke test of the decision matrix.
+    Run a self-contained smoke test of the decision matrix.
 
     Ensures:
-        - Returns True if owed / not-owed verdicts + ordering + reason text
+        - Returns True if owed / not-owed verdicts, ordering and reason text
           behave as designed; raises AssertionError otherwise.
     """
     # Nothing owed → genuinely done

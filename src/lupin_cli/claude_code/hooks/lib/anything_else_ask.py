@@ -1,9 +1,9 @@
 """
 Shared "Anything else?" ask helper.
 
-Refactored out of `stop.py:_ask_anything_else()` so both the Stop-hook-time
-caller (legacy immediate-ask fallback) and the deferred `idle_waiter.py`
-helper can build and fire the same prompt without code duplication.
+Refactored out of `stop.py:_ask_anything_else()`. The Stop-hook caller (legacy
+immediate-ask fallback) and the deferred `idle_waiter.py` helper can then build
+and fire the same prompt without code duplication.
 
 Returns a structured AnythingElseResult that each caller interprets:
     - Stop hook: builds the emit_json dict (block-stop on yes / qualifier-inject
@@ -11,7 +11,7 @@ Returns a structured AnythingElseResult that each caller interprets:
     - idle_waiter: tmux-injects qualifier if present, exits on yes, schedules
       successor on no/timeout
 
-Design: src/rnd/v0.1.7/2026.04.29-idle-aware-stop-hook/01-design.md §Components
+Design: src/rnd/v0.1.7/2026.04.29-idle-aware-stop-hook/01-design.md
 """
 
 import subprocess
@@ -35,11 +35,11 @@ class AnythingElseResult:
     """
     Structured outcome of a single fire of the "Anything else?" ask.
 
-    answer    : "yes" | "no" | "timeout" | "error"
-                ("error" indicates a transport/parse failure; treat as no-op)
-    qualifier : The "[comment: ...]" text if present, else None
-    raw_value : Full server response_value (for logging / debugging)
-    error     : Exception message on transport failure, else None
+    Field answer is one of "yes", "no", "timeout" or "error".
+    An "error" answer means a transport or parse failure, so treat it as a no-op.
+    Field qualifier is the "[comment: text]" part if present, else None.
+    Field raw_value is the full server response_value, kept for logging and debugging.
+    Field error is the exception message on transport failure, else None.
     """
     answer    : str
     qualifier : Optional[ str ]
@@ -183,10 +183,8 @@ def fire_anything_else_ask(
     """
     Fire one "Anything else?" prompt and return a structured result.
 
-    The single source of truth for the ask: builds the NotificationRequest,
-    invokes the blocking REST call via notify_user_sync, parses the response.
-    Each caller (Stop hook or idle waiter) interprets the result for its own
-    flow without duplicating any of the fire logic.
+    This is the single source of truth for the ask. It builds the NotificationRequest,
+    invokes the blocking REST call via notify_user_sync and parses the response.
 
     Requires:
         - session_id is a non-empty string
@@ -197,7 +195,7 @@ def fire_anything_else_ask(
     Ensures:
         - Returns AnythingElseResult with answer in {"yes", "no", "timeout", "error"}
         - On transport/parse failure: answer="error", error=str(exc)
-        - Never raises — all exceptions handled internally
+        - Never raises, because all exceptions are handled internally
 
     Args:
         session_id     : CC session ID for sender_id resolution
@@ -206,7 +204,8 @@ def fire_anything_else_ask(
         timeout_seconds: Server-side response wait
 
     Returns:
-        AnythingElseResult: Structured outcome
+        AnythingElseResult: Structured outcome. Each caller (Stop hook or idle
+        waiter) interprets it for its own flow without duplicating fire logic.
     """
     try:
         request  = build_ask_request(

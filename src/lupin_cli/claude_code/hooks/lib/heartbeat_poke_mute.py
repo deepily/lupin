@@ -1,25 +1,25 @@
 """
-The fleet-wide on/off switch for the heartbeat Stop poke (row 3526fb95).
+The fleet-wide on/off switch for the heartbeat Stop poke.
 
-One boolean in one small file. The server writes it (PUT /api/heartbeat/poke-mute, admin
-role only) and the Stop hook reads it on every stop, so a flip takes effect on the next
-stop with no restart and with no server needed at stop time.
+One boolean in one small file. The server writes it (PUT /api/heartbeat/poke-mute, admin role only).
+The Stop hook reads it on every stop, so a flip takes effect on the next stop.
+It needs no restart and no server at stop time.
 
-The file lives in the flow-ratio settings folder because both rest containers already
-bind-mount that host folder (docker-compose.yml, LUPIN_FLOW_RATIO_DIR): the server and
-the host hook see the same file with no new mount and no container recreate.
+The file lives in the flow-ratio settings folder.
+Both rest containers already bind-mount that host folder (docker-compose.yml, LUPIN_FLOW_RATIO_DIR).
+So the server and the host hook see the same file with no new mount and no container recreate.
 
     in a container   $LUPIN_FLOW_RATIO_DIR/heartbeat-poke-mute.json
     on the host      <fleet_data_root()>/flow-ratio/heartbeat-poke-mute.json
 
-Fail direction: a missing, unreadable or malformed file means NOT muted. A broken file
+Fail direction: a missing, unreadable or malformed file means not muted. A broken file
 must never silence the fleet.
 
-No timer touches it (Rick's ruling): it stays as set until an admin flips it back.
+No timer touches it: it stays as set until an admin flips it back.
 
-The admin-only rule is enforced at the endpoint. The file itself is plain: every seat on
-the box runs as the same OS user and could write it directly, the same as the settings
-file this replaces as the everyday switch.
+The admin-only rule is enforced at the endpoint. The file itself is plain.
+Every seat on the box runs as the same OS user and could write it directly.
+The settings file this replaces as the everyday switch had the same property.
 """
 
 import json

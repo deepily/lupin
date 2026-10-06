@@ -1,27 +1,30 @@
 """
-Subagent governance (manager-autonomy §2.2 — the worker-creation channel rule).
+Subagent governance: denies crew-manager sessions the Agent/Task tool.
 
-Denies a CREW-MANAGER session's Agent/Task (in-process subagent) tool calls and
+Denies a crew-manager session's Agent/Task (in-process subagent) tool calls and
 redirects to spawn_sessions. An in-process subagent runs under the spawning
-session with NO persona and NO bridge → it never registers in the fleet roster
-or focus bar → invisible + ungovernable. The Agent/Task tool is reserved for a
-WORKER parallelizing its OWN assigned task; a manager staffs a crew via
-spawn_sessions. See planning-is-prompting → workflow/manager-autonomy.md §2.2.
+session with no persona and no bridge. It never registers in the fleet roster
+or focus bar, so it is invisible and ungovernable. The Agent/Task tool is
+reserved for a worker parallelizing its own assigned task. A manager staffs a
+crew via spawn_sessions.
 
-ROLE SIGNAL (no new marker needed): a session is a crew-manager iff it has a
-non-empty spawn manifest at ~/.claude/sessions/spawned-<safe-id>.json — written
-by session_spawner.spawn_sessions when it spawns workers. A session that has not
-spawned anyone (e.g. a solo builder using read-only Explore) has no manifest and
-is NOT blocked — which also resolves the scope question (block crew-managers,
-not all Agent-tool use everywhere).
+Role signals (no new marker needed). A session is a crew-manager if either holds:
+  - it has a non-empty spawn manifest at ~/.claude/sessions/spawned-<safe-id>.json,
+    written by session_spawner.spawn_sessions when it spawns workers;
+  - its voice persona is a standing manager-figure derived from the fleet roster.
+A session that has spawned nobody and has no manager persona (for example a solo
+builder using read-only Explore) is not blocked. So crew-managers are blocked,
+not all Agent-tool use everywhere.
 
-SAFETY — this runs inside the hot-path PreToolUse hook (every tool call, every
-session), so two non-negotiables:
-  • DEFAULT-OFF: gated behind the LUPIN_SUBAGENT_GOVERNANCE env flag (unset →
-    inert → byte-identical to today). Activation = set the flag in the session
-    launch env; no global-config edit.
-  • FAIL-OPEN: ANY error → allow (return None). A governance check must never
-    break a tool call.
+Safety: this runs inside the hot-path PreToolUse hook (every tool call, every
+session), so two requirements apply:
+  - Default-off: gated behind the LUPIN_SUBAGENT_GOVERNANCE env flag (unset means
+    inert and byte-identical to before). Activation is setting the flag in the
+    session launch env, with no global-config edit.
+  - Fail-open: any error allows the call (returns None). A governance check must
+    never break a tool call.
+
+See: /mnt/DATA01/include/www.deepily.ai/projects/planning-is-prompting/workflow/manager-autonomy.md
 """
 import json
 import os
@@ -106,18 +109,20 @@ def _manager_personas( env=None ) -> list:
     """
     Derive the standing manager-figure persona names from the fleet roster.
 
-    Sources (both env-var families are forwarded into every session by
-    start-cc-with-tmux.sh; the hook reads whichever the launch env carries):
-      • every COSA_VOICE_MANAGERS__<PROJECT> var — comma-separated roster, taken
-        as a UNION across all repos (a manager-figure in ANY repo is standing);
-      • every COSA_VOICE_PREFERRED_PERSONA__<PROJECT> var — every NAMED chain
-        element is that repo's standing manager, matching what
-        manager_figure.resolve_implicit_manager_figure reads; the "*" wildcard
-        is not a name and is never a manager.
+    Both env-var families are forwarded into every session by start-cc-with-tmux.sh.
+    The hook reads whichever the launch env carries.
 
     Ensures:
         - returns the de-duplicated names in first-seen order (roster vars first,
-          then preferred heads), empty when neither family is present
+          then preferred-persona chain elements), empty when neither family is present
+
+    Sources:
+      - Every `COSA_VOICE_MANAGERS__<PROJECT>` var is a comma-separated roster, taken
+        as a union across all repos (a manager-figure in any repo is standing).
+      - Every `COSA_VOICE_PREFERRED_PERSONA__<PROJECT>` var contributes every named
+        chain element as that repo's standing manager. This matches what
+        manager_figure.resolve_implicit_manager_figure reads.
+      - The "*" wildcard is not a name and is never a manager.
     """
     env  = env if env is not None else os.environ
     seen = set()
@@ -142,14 +147,10 @@ def _manager_personas( env=None ) -> list:
 
 def _is_manager_persona( session_id, env=None, persona_fn=None, canon_fn=None ) -> bool:
     """
-    True iff this session's voice-persona is a standing manager-figure derived
-    from the fleet roster (see _manager_personas).
+    True iff this session's voice persona is a standing manager-figure from the roster.
 
-    This is the second role signal (besides the spawn manifest): it catches an
-    AD-HOC manager-figure who only ever uses subagents and never spawns (the
-    founding 2026-06-22 case) — the manifest signal can't see that session.
-    Persona names are matched via canonical_persona_key (accent/case-insensitive)
-    on BOTH sides, so "Mr. Radio" / "mr radio" / "María" all resolve correctly.
+    This second role signal catches an ad-hoc manager-figure who only uses subagents and never spawns.
+    Names match via canonical_persona_key (accent/case-insensitive) on both sides: "Mr. Radio", "mr radio", "María".
 
     Ensures:
         - False when the manager list is empty, the persona is unreadable, or no
@@ -186,8 +187,9 @@ def subagent_deny_reason(
     canon_fn    = None,
 ) -> Optional[ str ]:
     """
-    Return a deny-reason string iff a CREW-MANAGER session is invoking the
-    Agent/Task subagent tool while governance is enabled; else None (allow).
+    Return a deny-reason string iff a crew-manager invokes the subagent tool while enabled.
+
+    Returns None (allow) in every other case.
 
     Requires:
         - tool_name is the hook payload's tool_name (str)
@@ -196,9 +198,10 @@ def subagent_deny_reason(
           for testing
 
     Ensures:
-        - None unless ALL hold: governance enabled, tool_name is a subagent tool,
-          and the session is a crew-manager (non-empty spawn manifest)
-        - FAIL-OPEN: any unexpected error → None (a hot-path hook never breaks a
+        - None unless all hold: governance enabled, tool_name is a subagent tool,
+          and the session is a crew-manager (non-empty spawn manifest, or a persona
+          that is a standing manager-figure from the fleet roster)
+        - Fail-open: any unexpected error returns None (a hot-path hook never breaks a
           tool call over a governance check)
     """
     try:
@@ -229,7 +232,7 @@ def build_subagent_deny_response( reason: str ) -> dict:
     Build the PreToolUse deny envelope (mirrors hook_common.build_voice_deny_response).
 
     Ensures:
-        - returns { hookSpecificOutput: { hookEventName: "PreToolUse",
+        - returns a dict of the form { hookSpecificOutput: { hookEventName: "PreToolUse",
           permissionDecision: "deny", permissionDecisionReason: <reason> } }
     """
     return {

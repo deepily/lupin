@@ -4,29 +4,27 @@ Shared Claude Code transcript-JSONL reader.
 
 The `Stop`-hook input carries a `transcript_path` pointing at the session's
 own conversation transcript (`~/.claude/projects/<encoded-project>/<uuid>.jsonl`).
-This module is the ONE place that parses that file, fanned out to two consumers
-(canonical §0.3 + arbiter design §8.1 — "build the reader ONCE"):
+This module is the one place that parses that file. It serves two consumers,
+so the reader is built once:
 
-    (a) the Heartbeat-Hook v2 work-owed oracle (Task* replay — see
+    (a) the Heartbeat-Hook v2 work-owed oracle (Task* replay, see
         heartbeat_task_state.py), and
-    (b) token/context-rate instrumentation (TODO line 11).
+    (b) token and context-rate instrumentation.
 
-**Invariant — NEVER a dependency in the poke path:** every read is wrapped;
-a missing / unreadable / malformed transcript yields an EMPTY iteration
-rather than raising. A consumer that sees no lines simply finds no signal
-(the heartbeat then stays conservative — no false poke). `:7999`-free: this
-is a pure local file read, no MCP / commons / server.
+Invariant: this reader is never a dependency in the poke path. Every read is
+wrapped, so a missing, unreadable or malformed transcript yields an empty
+iteration instead of raising. A consumer that sees no lines finds no signal,
+and the heartbeat then stays conservative, with no false poke. It is a pure
+local file read with no MCP, commons or server call, so it works with `:7999` down.
 
-Transcript shape (empirically confirmed 2026-06-04 — spike in
-04-v2-oracle-livefetch-plan.md §2):
-    - One JSON object per line; line `type` ∈ {user, assistant, system,
-      attachment, file-history-snapshot, last-prompt, queue-operation}.
+Transcript shape:
+    - One JSON object per line; line `type` is one of user, assistant, system,
+      attachment, file-history-snapshot, last-prompt, queue-operation.
     - Tool calls live in `assistant` lines: `message.content` is a list of
       blocks; a tool call is a block with `type=="tool_use"`, plus `name`,
       `input` (dict), and `id`.
 
-Design authority: planning-is-prompting →
-    planning-is-prompting/src/rnd/2026.06.02-stop-hook-natural-heartbeat-poker.md §0.3.
+Design: /mnt/DATA01/include/www.deepily.ai/projects/planning-is-prompting/src/rnd/2026.06.02-stop-hook-natural-heartbeat-poker.md
 """
 import json
 from pathlib import Path
@@ -42,8 +40,8 @@ def read_transcript( transcript_path ):
     Ensures:
         - Yields each line that parses to a JSON object (dict)
         - Skips blank lines, unparseable lines, and non-dict JSON values
-        - Missing / None / unreadable path → yields nothing (empty)
-        - NEVER raises (the poke path must not depend on transcript health)
+        - A missing, None or unreadable path yields nothing (empty)
+        - Never raises (the poke path must not depend on transcript health)
     """
     if not transcript_path:
         return
@@ -68,8 +66,7 @@ def read_transcript( transcript_path ):
 
 def iter_tool_uses( transcript_path, names=None ):
     """
-    Yield (name, input, tool_use_id) for every assistant `tool_use` block,
-    in transcript order.
+    Yield (name, input, tool_use_id) for every assistant tool_use block, in order.
 
     Requires:
         - transcript_path is a path-like / string / None
@@ -81,7 +78,7 @@ def iter_tool_uses( transcript_path, names=None ):
         - input is the block's `input` dict (or {} if absent/non-dict)
         - Non-assistant lines, non-list content, and non-tool_use blocks are
           skipped
-        - NEVER raises
+        - Never raises
     """
     name_filter = set( names ) if names is not None else None
     for obj in read_transcript( transcript_path ):

@@ -1,176 +1,45 @@
 #!/usr/bin/env python3
 """
-heartbeat_hold_io.py — the hold WRITE/READ/CLEAR *verb*.
+The hold write, read and clear verb: a command line front-end over `write_hold`.
 
-    A MECHANISM NOTHING FORCES YOU TO USE IS A RULE WITH EXTRA STEPS.
+A mechanism nothing forces you to use is a rule with extra steps. `write_hold()` in `heartbeat_hold.py` is correct but unreachable from a shell: that module has no argparse, and its `__main__` block only runs `quick_smoke_test()`.
+So an agent asked to declare a hold could only hand-write the JSON, and the fleet did. Of 22 null-TTL hold files measured on disk, none went through `write_hold`.
+Two fingerprints agree: they carry cargo the schema has no fields for, and their ttl key is absent while `write_hold` always emits it.
+The fleet followed doctrine: `planning-is-prompting/workflow/fleet-pause-resume.md` prescribed a filename and a JSON shape, the only `heartbeat-hold-` prescription in `workflow/`.
+A shape can be typed wrong or short with nothing noticing. This file lets doctrine prescribe a verb, the one form of that instruction that carries its own enforcement.
 
-`write_hold()` has existed in `heartbeat_hold.py` since the hold artifact was
-designed, and it is correct. It is also, from a shell, UNREACHABLE: that module
-exposes no argparse, no subcommand, and its `__main__` block runs
-`quick_smoke_test()` and nothing else. An agent asked to declare a hold has
-exactly one act available to it — hand-write the JSON — and so that is what the
-fleet did. Measured on the live corpus (Krishna/Clayton, 2026-07-16→18): of the
-22 null-TTL hold files on disk, ZERO went through `write_hold`. They carry cargo
-the schema has no fields for, and they carry the ttl key ABSENT with zero
-literal nulls while `write_hold` always emits the key. Two independent
-fingerprints, one answer.
+What this file does not do:
+  1. It does not make hand-writing impossible. It makes the correct act cheaper than the incorrect one and gives doctrine something to name: a paved road, not a wall.
+  2. It adds no validation of its own. Every guard is `write_hold`'s, reached by delegation; a re-implemented schema drifts and mints holds that look official and are not.
+  3. The non-numeric ttl branch of `write_hold` is not reachable from here. `--ttl-seconds` is `type=int`, so argparse rejects "abc" at exit 2. Non-positive values (0, -5) do reach it and do raise.
 
-AND THE FLEET WAS NOT BEING SLOPPY — IT WAS FOLLOWING THE DOCTRINE EXACTLY.
-`planning-is-prompting → workflow/fleet-pause-resume.md:77` says *"Write the
-hold file: `.heartbeat-hold-<FULL-session-id>.json` with `work_owed: true`,
-`awaiting: "user:<name>"`, `ttl_seconds: 14400`…"*. That prescribes a FILENAME
-AND A JSON SHAPE, and it is the only `heartbeat-hold-` prescription anywhere in
-`workflow/` — one grep hit, fleet-wide. A shape can be typed wrong, typed short,
-or typed without the ttl key at all, and nothing anywhere notices. The bypass is
-not inferred from the corpus; it is written down, at that line. This file exists
-so doctrine can prescribe a VERB instead — which is the only form of that
-instruction that carries its own enforcement.
+Verify by execution: `write` reads the hold back through the real reader and confirms the hook would honor it before printing success. A hold that lands but cannot defend its session is the four-week silence.
+Every refusal leaves the disk as it found it. A `write_hold` ValueError validates before touching the filesystem, so nothing is left. A verify failure restores the prior hold's bytes and mtime, or unlinks the file when none existed.
+Unlinking is not the fix. The destructive act is `write_hold` overwriting a good hold, and unlinking leaves the same undefended session by a cleaner route. Only restoring the previous hold preserves the defense, so `cmd_write` captures the prior bytes before the write.
 
-WHAT THIS FILE DOES *NOT* DO, stated up front so no later reader over-trusts it:
+Two detectors guard the write: the writer's own guards, and the read-back honored check. They are redundant on every known class, because the empty-reason class moved to the writer.
+The read-back stays as the general net over classes nobody has enumerated: a base_dir that resolves elsewhere, clock or mtime pathology, future schema drift. Its coverage is a synthetic injection plus the rollback tests.
+Keep both detectors isolated, since an unisolated redundancy is the defect. Neutering only the read-back (`if not is_honored( read_back )` to `if False`) and stripping the writer's non-positive arm each redden tests on their own.
+Stripping `write_hold`'s ttl guard trips both detectors, so it shows redundancy and says nothing about isolation. The day the read-back loses its own killing mutation it has become decoration.
 
-  1. IT DOES NOT MAKE HAND-WRITING IMPOSSIBLE. Nothing can; `Write` and `>` are
-     always in reach. This closes the gap by making the CORRECT act CHEAPER than
-     the incorrect one and by giving doctrine something to name. It is a paved
-     road, not a wall — and the 0-for-23 measurement is precisely what a missing
-     road looks like.
-  2. IT ADDS NO VALIDATION OF ITS OWN. Every guard here is `write_hold`'s,
-     reached by delegation. Re-implementing the schema in a second place is how
-     a writer and its front-end drift, and a drifted front-end is worse than no
-     front-end: it mints holds that look official and are not.
-  3. THE NON-NUMERIC ttl BRANCH OF `write_hold` IS NOT REACHABLE FROM HERE.
-     `--ttl-seconds` is `type=int`, so argparse rejects `"abc"` at exit 2 before
-     `write_hold` is ever called. Non-POSITIVE values (`0`, `-5`) DO reach it and
-     DO raise. Both refusals are proven in the suite; the distinction is recorded
-     rather than papered over, because a docstring that claims a guard it does
-     not exercise is the defect this row spent three seats on.
+Cargo: `write_hold` persists exactly `HOLD_SCHEMA_FIELDS` through an `os.replace`, so writing over a hold with non-schema fields (`note_to_my_successor`, `board`, `harvest_state`, `blocked_rows`) destroys them.
+It did so at exit 0 under a success banner.
+Prescribing the verb would have destroyed the payload in each of 56 hand-written holds on first use. So `write` refuses when the existing hold carries cargo, names every field, and exits 6.
+There is no `--force`, because an escape taken silently is not a gate. Move the payload to a memento (`memento_io.py write`), or `clear` first when you are done with it.
+A hold is a liveness artifact with a TTL; a memento is the continuity record, and continuity does not belong behind an expiry. The verb takes no cargo parameter and should not grow one, but refusing loudly keeps that narrowness from costing the caller's data.
 
-VERIFY BY EXECUTION, NOT BY ASSERTION (memento_io's lesson, taken deliberately):
-`write` reads the hold back through the real reader and confirms the hook would
-actually HONOR it before printing a success banner. A hold that lands on disk but
-cannot defend its session is the exact four-week silence this milestone closed —
-so this refuses to report it as a success.
-
-EVERY REFUSAL LEAVES THE DISK AS IT FOUND IT — and that sentence took two tries.
-It first read "A REFUSAL LEAVES NOTHING BEHIND", which was true of the
-`write_hold` ValueError path (it validates before touching the filesystem: no
-file, no `.tmp`, no partial) and FALSE of the verify-by-read path, which exited 3
-and left the unhonorable hold sitting there. Rio ⚡ reproduced it: `write
---reason ""` → exit 3, file present, `is_honored` False. **The verb built to stop
-minting the 22-file corpus minted one, under a docstring claiming it could not.**
-
-AND UNLINKING WOULD NOT HAVE FIXED IT — the obvious repair is a trap, measured:
-
-    before refresh : honored=True    (a live hold, ttl 14400, defending a session)
-    after  refresh : honored=False   (A-1: the bad hold is left)
-    after  UNLINK  : no hold at all  (tidier corpus, SAME undefended session)
-
-The destructive act is `write_hold` overwriting a good hold, and it has already
-happened by the time this verifies. Unlinking reaches the ping-storm outcome by a
-cleaner route. **Only restoring the PREVIOUS hold preserves the defense**, which
-is why `cmd_write` captures the prior bytes BEFORE the write. See ROLLBACK there.
-
-TWO DETECTORS. THEY ARE NOW REDUNDANT-BY-DESIGN ON EVERY KNOWN CLASS, AND THAT IS
-THE HONEST STATEMENT. An earlier version of this paragraph claimed they "fail over
-DIFFERENT evidence" — that claim rested entirely on the empty-`reason` hold, silent
-at the writer and caught only by the read-back. **A-1's fix moved that class to the
-writer, so the divergence is gone by construction: there is now no enumerated class
-detector 2 catches alone.** The sentence is narrowed rather than propped up. The
-alternative was leaving `reason` unguarded to keep a docstring true, and the
-docstring serves the code, not the reverse. If a real divergence is ever found, this
-widens back — with a receipt.
-
-Detector 2 is RETAINED anyway, deliberately, as the general net over classes nobody
-has enumerated yet: a base_dir that resolves elsewhere, clock or mtime pathology, a
-future schema drift. Three findings today were each "the enumerated class is not the
-whole class". Its coverage is therefore a synthetic injection plus the rollback
-tests — a guard against causes not yet named, and no test can name them.
-
-ISOLATION IS STILL PROVEN, BUT NOT BY THE MUTATION THIS DOCSTRING FIRST CITED:
-
-    A  strip `write_hold`'s ttl guard      →  5 red  (BOTH detectors — redundancy)
-    B  neuter detector 2 ONLY              →  5 red  ⇒ detector 2 is load-bearing
-       (`if not is_honored( read_back )` → `if False`)
-    C  strip detector 1's non-positive arm →  5 red, detector 2 silent on survivors
-
-    B killed exactly 1 test before the A-1 work and kills 5 after it: the four
-    rollback arms exercise detector 2 as well. A detector whose killing set GREW
-    while its enumerated divergence class shrank to zero is worth stating plainly
-    — the redundancy note above is about which CAUSES the two share, not about
-    how much of the suite depends on each.
-
-**B and C are the proof; A is not.** Under A, detector 2 fires as a CONSEQUENCE of
-detector 1's failure — one mutation, both detectors, which demonstrates redundancy
-and says nothing about isolation. This docstring previously cited A for both and
-called them "separately provable by exactly the mutation described above". That is
-the over-statement shape this row has now produced four times, committed inside the
-sentence warning about it. B and C were run by the reviewer, not the author.
-
-A redundancy is not the defect — an UNISOLATED redundancy is. Keep both, and keep
-B and C runnable: the day detector 2 stops having its own killing mutation is the
-day it has become decoration.
-
-CARGO — THE VERB REFUSES TO DESTROY WHAT IT CANNOT CARRY (María 🌸, 2026-07-21,
-row 955f7eb4). `write_hold` persists EXACTLY `HOLD_SCHEMA_FIELDS` through an
-`os.replace`, so writing over a hold that carries non-schema fields —
-`note_to_my_successor`, `board`, `harvest_state`, `blocked_rows` — destroys them.
-Measured on this verb before the guard:
-
-    cargo BEFORE : ['blocked_rows', 'note_to_my_successor']
-    $ write --session-id <same> --reason "still holding"
-    HOLD … / honored yes / exit 0          ← success banner
-    cargo AFTER  : []
-
-**Exit 0. A-1 and A-4's shape on the SUCCESS path**, which is the worst of the
-three: nothing signals it, so there is no moment at which the caller could
-notice. And it was found the way the other two were — María ran the prescribed
-command against her own live hold and watched her `blocked_rows` ledger vanish.
-**A remedy that manufactures the thing it replaces**: this verb exists because 56
-hand-written holds accumulated, and prescribing it would have destroyed the
-payload in each one on first use, sending the author straight back to hand-editing.
-
-So `write` REFUSES when the existing hold carries cargo, names every field, and
-exits 6. There is deliberately NO `--force`: an escape you can take silently is
-not a gate, and the payload is irreplaceable. The two ways forward are both acts
-you can point at afterwards — move it to a memento (`memento_io.py write`), or
-`clear` first if you are genuinely done with it.
-
-THE SPLIT IS DOCTRINE, AND IT IS RIGHT: **a hold is a LIVENESS artifact with a
-TTL; a memento is the CONTINUITY record.** Continuity does not belong behind an
-expiry — that is precisely how these files became irreplaceable, and why the
-95b2ed7f rescue was needed. The verb stays narrow; it takes no cargo parameter
-and should not grow one. But narrow is not the same as blind: refusing loudly is
-what keeps the narrowness from being paid for by the caller's data.
-
-WHERE THE HOLD LANDS, SAID OUT LOUD (María, same day). `--base-dir` defaults to
-`write_hold`'s own default, which since the 2026-07-26 relocation is
-`fleet_data_root()` = the `projects-data/<repo>` dir (was `cu.get_project_root()` =
-**LUPIN_ROOT** before that). Historically, measured from a `plan` session:
-`read --session-id <mine>` → "no hold found", while the same id with
-`--base-dir <PIP root>` → "honored yes". Same file, same session, opposite
-verdicts. The default is NOT changed here — diverging from the writer's default
-would mint a second write semantics, which is the drift item 2 above forbids — but
-every path this verb prints now NAMES THE DIRECTORY, and a not-found says WHERE IT
-LOOKED. A null that does not say where it searched is not evidence, and that is
-the form in which this one presented.
-
-Invocation (both forms work; the second needs PYTHONPATH to carry `src`):
-
-    python3 $LUPIN_ROOT/src/lupin_cli/claude_code/hooks/lib/heartbeat_hold_io.py \
-        write --session-id <full-id> --persona "María 🌸" \
-              --reason "holding on the 3-way seam review" \
-              --ttl-seconds 14400 --awaiting "user:rick"
-
-    python3 -m lupin_cli.claude_code.hooks.lib.heartbeat_hold_io read --session-id <id>
-
-Exit codes (distinct, so a caller never has to parse the message):
-    0  success
-    2  usage error, or a value `write_hold` refuses (its ValueError, verbatim)
-    3  the hold landed but would NOT be honored — verify-after-write failed
-    4  `read`/`clear`: no hold found for that session
-    5  `clear`: a hold exists under a MATCHING ID PREFIX but not at this session's
-       own path — named, not deleted (see cmd_clear; row 39219cc1 owns the cure)
-    6  `write`: the existing hold carries non-schema CARGO this verb cannot
-       preserve — named, not destroyed (see the CARGO section below)
+Where the hold lands: `--base-dir` defaults to `write_hold`'s default, `fleet_data_root()` (the `projects-data/<repo>` dir), formerly the project root. From a plan session, `read` without `--base-dir` once said "no hold found" for an id that was honored under another directory.
+The default is not changed, because diverging from the writer would mint a second write semantics. Every printed path names its directory.
+A not-found says where it looked, since a null that does not say where it searched is not evidence.
+Invocation. The second form needs PYTHONPATH to carry `src`:.
+    python3 $LUPIN_ROOT/src/lupin_cli/claude_code/hooks/lib/heartbeat_hold_io.py write --session-id <full-id> --persona <name> --reason <why> .
+    python3 -m lupin_cli.claude_code.hooks.lib.heartbeat_hold_io read --session-id <id> .
+Exit codes are distinct, so a caller never has to parse the message:
+    0 success.
+    2 usage error, or a value `write_hold` refuses (its ValueError, verbatim).
+    3 the hold landed but would not be honored. 4 `read` or `clear` found no hold.
+    5 `clear` found a hold under a matching id prefix but not at this session's own path (named, not deleted).
+    6 `write` found existing non-schema cargo it cannot preserve (named, not destroyed). 7 `clear` deleted the exact file but this id still resolves to a hold through the reader's prefix fallback.
 """
 import argparse
 import datetime
@@ -181,8 +50,9 @@ import sys
 
 def _bootstrap_sys_path():
     """
-    Put `<LUPIN_ROOT>/src` on `sys.path` so this file runs as a PATH, not only as
-    a module (the CLAUDE.md bootstrap exception — env var, never a `__file__` chain).
+    Put `<LUPIN_ROOT>/src` on `sys.path` so this file runs as a path, not only a module.
+
+    This is the CLAUDE.md bootstrap exception: it uses the env var, never a `__file__` chain.
 
     Requires:
         - nothing; a missing LUPIN_ROOT is a normal, non-fatal state (the module
@@ -191,7 +61,7 @@ def _bootstrap_sys_path():
     Ensures:
         - Returns True iff `<LUPIN_ROOT>/src` was inserted at sys.path[0]
         - Returns False when LUPIN_ROOT is unset, or the path is already present
-          (idempotent — importing this module twice never stacks entries)
+          (idempotent, so importing this module twice never stacks entries)
         - Never raises
     """
     lupin_root = os.environ.get( "LUPIN_ROOT" )
@@ -255,56 +125,32 @@ STAMP_NOW = "now"
 
 def _resolve_stamp( value, flag ):
     """
-    Turn one `--looked-in`-family flag value into the ISO string write_hold stores.
+    Turn one `--looked-in` family flag value into the ISO string `write_hold` stores.
 
     Requires:
         - value is None, the literal "now", or an ISO-8601 timestamp string
         - flag is the flag spelling, used only to name the offender in a refusal
 
     Ensures:
-        - Returns None when value is None — the flag was not passed, and the
+        - Returns None when value is None: the flag was not passed, and the
           stamp stays whatever write_hold defaults it to
         - Returns an aware, seconds-precision ISO string for "now" (any case,
-          surrounding whitespace tolerated) — UTC, matching what `write_hold`
-          stamps into `held_at`
-        - Returns the seconds-precision ISO form of an explicit OFFSET-BEARING
+          surrounding whitespace tolerated), in UTC like the `held_at` that `write_hold` stamps
+        - Returns the seconds-precision ISO form of an explicit offset-bearing
           timestamp, offset preserved exactly as the caller wrote it
 
     Raises:
         - ValueError naming the flag and the value when it cannot be dated
-        - ValueError when the timestamp parses but carries NO offset
+        - ValueError when the timestamp parses but carries no offset
 
-    WHY THIS REFUSES INSTEAD OF PASSING THE STRING THROUGH. Every reader of these
-    fields degrades to None on an unparseable stamp — `_iso_age_seconds` returns
-    None, `manager_needs_verification` then reads the manager as never having
-    looked in. So `--looked-in yesterday` would land on disk, print a success
-    banner, and leave the manager poked exactly as before: a stamp that silently
-    means "never ran" is worse than no flag at all, because the caller now
-    believes the poke was cleared. Refuse it at the front door, where the typo is.
+    It refuses instead of passing the string through. Every reader of these fields degrades to None on an unparseable stamp, so `manager_needs_verification` reads the manager as never having looked in.
+    So `--looked-in yesterday` would land under a success banner and leave the manager poked as before. Refuse it at the front door, where the typo is.
 
-    WHY A ZONE-LESS TIMESTAMP IS REFUSED RATHER THAN ASSUMED TO BE UTC (Cheech's
-    call, 2026-08-20). A naive stamp is dated by two readers two different ways:
-    `_parse_iso` assumes UTC, while `_iso_age_seconds` calls `.timestamp()` on the
-    naive datetime, which Python resolves in LOCAL time. Measured on this host
-    (UTC-4): `2026-06-22T12:00:00` dates 14400 seconds apart depending on which
-    reader asks — four hours, which is most of a debounce window.
+    A zone-less timestamp is refused rather than assumed to be UTC. `_parse_iso` assumes UTC, but `_iso_age_seconds` calls `.timestamp()` on the naive datetime, which Python resolves in local time.
+    On a UTC-4 host one naive stamp dates 14400 seconds apart depending on the reader, most of a debounce window. A guessed zone gives an error that reads as a plausible timestamp and debounces the wrong way.
 
-    The first cut here silently normalized naive input to UTC, and that was wrong
-    for a reason worth writing down: it picks a zone THE CALLER DID NOT GIVE. When
-    the guess is wrong the stamp is not rejected and not obviously bad — it is
-    off by the host offset, which is exactly the size of error that reads as a
-    plausible timestamp and debounces the wrong way. A caller who knows the zone
-    can always say it; this verb should not decide it for them.
-
-    `"now"` is unaffected and stays the ordinary path: it resolves through `_now()`
-    to aware UTC, which is precisely what `write_hold` already writes into
-    `held_at` (measured: `2026-08-21T02:38:08+00:00`). So the house format is
-    offset-bearing, and this refuses only input that does not meet it.
-
-    ONE PARSER, NOT TWO. The datable verdict and the offset verdict come from the
-    SAME `fromisoformat` call, because asking one parser whether it can date a
-    string and a second whether that string had an offset is how two guards end up
-    disagreeing about the same value.
+    `"now"` resolves through `_now()` to aware UTC, as `write_hold` writes `held_at`, so the house format is offset-bearing and only input that does not meet it is refused.
+    One `fromisoformat` call gives both the datable and the offset verdict, because two parsers are how two guards end up disagreeing about one value.
     """
     if value is None:
         return None
@@ -340,12 +186,12 @@ def _undo_this_write( path, prior_bytes, prior_times ):
     Put the disk back the way this call found it, and say what that meant.
 
     Requires:
-        - prior_bytes / prior_times were captured BEFORE the write (None when no hold existed)
+        - prior_bytes and prior_times were captured before the write (None when no hold existed)
 
     Ensures:
-        - no prior hold → the artifact is unlinked; returns "nothing was written"
-        - a prior hold → its bytes AND mtime are restored (see cmd_write's ROLLBACK note on
-          why mtime matters); returns the restored wording
+        - with no prior hold, the artifact is unlinked and it returns "nothing was written"
+        - with a prior hold, its bytes and mtime are restored (see cmd_write on
+          why mtime matters) and it returns the restored wording
     """
     if prior_bytes is None:
         path.unlink( missing_ok=True )
@@ -357,84 +203,40 @@ def _undo_this_write( path, prior_bytes, prior_times ):
 
 def cmd_write( args ):
     """
-    Mint (or refresh) this session's hold — the verb doctrine can prescribe.
+    Mint or refresh this session's hold, the verb doctrine can prescribe.
 
     Requires:
         - args carries session_id / persona / reason (all required by the parser)
         - args carries ttl_seconds / awaiting / work_owed / base_dir
-        - args carries looked_in / spinup_check / surfaced_questions — each None,
+        - args carries looked_in / spinup_check / surfaced_questions, each None,
           the literal "now", or an ISO-8601 timestamp
 
     Ensures:
-        - Passes the three debounce stamps straight through to `write_hold`'s
-          existing kwargs, resolving "now" and normalizing an explicit timestamp
-          to its aware form; an undatable value is refused at EXIT_REFUSED before
-          anything is written (bug 1dcaf65c — see `_resolve_stamp`)
+        - Passes the three debounce stamps straight through to `write_hold`'s existing kwargs,
+          resolving "now" and normalizing an explicit timestamp to its aware form;
+          an undatable value is refused at `EXIT_REFUSED` before anything is written
         - Names each stamp that landed in the banner, because the caller's reason
           for passing one is to clear a poke and "ok" does not say whether it is
-        - Delegates to `write_hold` unchanged — no validation is duplicated here,
-          so this front-end can never drift from the writer it fronts
-        - Reads the hold BACK through the real reader and returns EXIT_NOT_HONORED
-          when the hook would not honor it (verify by execution)
-        - AN EXIT_NOT_HONORED REFUSAL LEAVES THE DISK EXACTLY AS IT FOUND IT:
-          bytes AND mtime restored when a prior hold existed, artifact unlinked
-          when none did. See the ROLLBACK table below — which refusal leaves what
-          is stated per path, because a reader who has to infer it will infer
-          wrong.
+        - Delegates to `write_hold` unchanged, so no validation is duplicated here
+          and this front-end can never drift from the writer it fronts
+        - Reads the hold back through the real reader and through the Stop hook's own search from the current
+          directory, and returns `EXIT_NOT_HONORED` when the hook would not honor it or would find a different hold first
+        - An `EXIT_NOT_HONORED` refusal leaves the disk exactly as it found it: bytes
+          and mtime restored when a prior hold existed, artifact unlinked when none did
         - Prints the resolved path, the persisted ttl and the honored verdict on
-          success, so the caller sees WHAT LANDED rather than "ok"
-        - Returns EXIT_OK on success
+          success, so the caller sees what landed rather than "ok"
+        - Returns `EXIT_OK` on success
 
     Raises:
-        - ValueError from `write_hold` for an unusable ttl or an empty reason —
-          caught by main() and surfaced verbatim at EXIT_REFUSED, never swallowed
-          and never re-worded
+        - ValueError from `write_hold` for an unusable ttl or an empty reason,
+          caught by main() and surfaced verbatim at `EXIT_REFUSED`, never swallowed and never re-worded
 
-    ROLLBACK — WHY THIS PATH UNDOES ITS OWN WRITE (finding A-1, Rio ⚡ 2026-07-21).
-    This branch used to print "would NOT be honored" and LEAVE THE ARTIFACT ON
-    DISK. Reproduced: `write --reason ""` exited 3 with the file present and
-    `is_honored` False — the verb built to stop minting unhonorable holds minted
-    one. The empty-reason CAUSE is now refused at the writer, but the PATH is not
-    the cause: it fires for any way a hold can land unhonorable, including ones
-    neither this file nor `write_hold` knows about yet. So the property is
-    enforced here, at the path, rather than patched at the one cause that
-    happened to be found.
-
-    A refusal that leaves debris is not a refusal, it is a failed write wearing a
-    refusal's exit code — and on a REFRESH the debris replaced something live.
-    This is NOT the janitor's bias-to-keep being relaxed: nothing prunes another
-    session's hold here. This undoes THIS call's OWN write.
-
-    WHICH REFUSAL LEAVES WHAT — the table, because "a refusal leaves nothing
-    behind" was a slogan and it was false three separate ways:
-
-        refusal path                     | left on disk
-        ---------------------------------+------------------------------------------
-        write_hold ValueError            | nothing (it validates before touching
-        (bad ttl, unhonorable reason)    | the filesystem — no file, no .tmp)
-        verify-failure, NO prior hold    | nothing (the artifact is unlinked)
-        verify-failure, prior hold       | THE PRIOR, byte-exact and mtime-exact,
-                                         | whatever state it was in
-
-    THE RESTORE PRESERVES mtime, AND THAT IS NOT FASTIDIOUSNESS. `is_fresh`
-    anchors on the FILE MTIME (B1, bug d44b7068), not on `held_at`. Measured: a
-    prior hold whose mtime was forced to epoch 0 read `honored=False`; rewriting
-    its identical bytes back read `honored=TRUE`. A naive restore RESURRECTS A
-    DEAD HOLD — this row's defect inverted, a hold defending a session it should
-    not, and a content-only assertion passes straight over it. Hence `os.utime`
-    with the captured times, and hence a test that compares mtime rather than
-    bytes alone.
-
-    THE PRIOR IS RESTORED WHATEVER ITS STATE — including an already-unhonorable
-    hand-written corpus member (ruling: Mr Radio 🦉 + Rio ⚡, 2026-07-21). This
-    verb must not silently delete something it did not create. Deleting another
-    author's artifact on a failed write is a bigger surprise than leaving it, and
-    this verb exists to stop UNACCOUNTABLE hold files, not to start unaccountably
-    removing them. Reclamation is the janitor's job, gated, after cargo triage.
-
-    CAPTURE HAPPENS BEFORE THE WRITE, and that ordering is the entire fix: by the
-    time the verify runs, `write_hold` has already replaced the original. Read it
-    late and every arm of the table above is unimplementable.
+    When the existing hold carries non-schema cargo it returns `EXIT_CARGO`, naming every field and writing nothing.
+    Rollback fires for any way a hold can land unhonorable, including causes nobody has found, so it is enforced at the path and not patched at one cause. It undoes only this call's own write.
+    Which refusal leaves what: a `write_hold` ValueError leaves nothing, since it validates first. A verify failure with no prior hold unlinks; with a prior hold it leaves the prior, byte-exact and mtime-exact.
+    The restore keeps mtime because `is_fresh` anchors on the file mtime, not `held_at`: a prior hold with mtime forced to epoch 0 read not honored, yet rewriting identical bytes read honored.
+    A naive restore would resurrect a dead hold, hence `os.utime` with the captured times. The prior is restored whatever its state, since this verb must not silently delete what it did not create; reclamation is the janitor's job.
+    Capture happens before the write, because `write_hold` has already replaced the original by the time the verify runs.
     """
     # STAMPS FIRST, BEFORE THE DISK IS TOUCHED AT ALL (bug 1dcaf65c). A mistyped
     # `--looked-in` is a usage error, and refusing it here — ahead of the cargo
@@ -580,8 +382,7 @@ def cmd_read( args ):
 
 def _prefix_siblings( session_id, base_dir=None ):
     """
-    EVERY hold file sharing this session id's 8-char prefix, excluding its own
-    exact path — the full orphan set, not the one the reader happened to pick.
+    Every hold file sharing this session id's 8-char prefix, except its own exact path.
 
     Requires:
         - session_id is a string; base_dir is a path-like / string / None
@@ -591,14 +392,8 @@ def _prefix_siblings( session_id, base_dir=None ):
         - Returns [] for an empty session_id, or when the directory is unreadable
         - Never raises
 
-    WHY EVERY MATCH AND NOT JUST THE RESOLVED ONE (A-4, second instance, Rio ⚡
-    2026-07-21). `_read_hold_path` returns ONE file — longest-then-lexical — which
-    is the right rule for "which should I READ" and no rule at all for "how many
-    orphans are there". A refusal that names one orphan while two exist is the
-    same defect with better manners: the caller fixes the one they were told about
-    and the other keeps defending a session that has moved on. It was found by
-    hardening a count-only assertion — "the count WAS 2, and 2 was what I looked
-    at."
+    It returns every match and not just the resolved one. `_read_hold_path` returns one file, longest-then-lexical, which is right for which to read and no rule for how many orphans exist.
+    A refusal naming one orphan while two exist leaves the other defending a session that has moved on.
     """
     if not session_id:
         return [ ]
@@ -613,72 +408,24 @@ def _prefix_siblings( session_id, base_dir=None ):
 
 def cmd_clear( args ):
     """
-    Remove this session's hold — the explicit "I am no longer holding" act.
+    Remove this session's hold, the explicit "I am no longer holding" act.
 
     Requires:
         - args carries session_id and base_dir
 
     Ensures:
-        - Returns EXIT_NO_HOLD when there is no hold at all (the caller learns its
+        - Returns `EXIT_NO_HOLD` when there is no hold at all (the caller learns its
           hold was already gone rather than being told "cleared")
-        - Deletes ONLY the EXACT path for this session id, never a prefix match
-        - Returns EXIT_ORPHAN, deleting NOTHING, when a hold exists but resolves
-          to a DIFFERENT file than this id names — the orphan is NAMED, not guessed
-          at (finding A-3; see below)
+        - Deletes only the exact path for this session id, never a prefix match
+        - Returns `EXIT_ORPHAN`, deleting nothing, when a hold exists but resolves
+          to a different file than this id names: the orphan is named, not guessed at
 
-    THIS FIXES A FALSE SUCCESS, AND IT REFUSES TO GUESS (A-3 + A-4, Rio ⚡
-    2026-07-21). Both halves are needed and neither is "preserve what it did".
-
-    A-4 — WHAT THE SHIPPED CODE DID, measured:
-
-        on disk : .heartbeat-hold-c121037b-aaaa-1111-2222-333344445555.json
-        $ clear --session-id c121037b
-        CLEARED  …/.heartbeat-hold-c121037b.json    ← a path that never existed
-        exit 0
-        after   : the original file, UNTOUCHED, still honored
-
-    The verb split its resolution across two functions: the GUARD (`read_hold`,
-    prefix-tolerant) found a hold and waved the call through, while the ACTION
-    (`clear_hold` + the banner, exact-path) unlinked a file that was not there.
-    **The guard vouched for a file the action never touched.** A session clearing
-    with the SHORT id — the form `get_session_info()` hands it — was told its hold
-    was released, walked away, and the hold kept defending a session that had
-    moved on. That is A-1's shape one verb over: report success, artifact wrong.
-    And the survivor is exactly what the janitor later finds as an unaccountable
-    hold file — a corpus member minted by a successful-looking call to the
-    sanctioned verb.
-
-    `read_hold` resolves through `_read_hold_path`, which falls back to a PREFIX
-    match so a hold written under the short 8-char bridge id is still found by a
-    hook reading with the full stable id (facet 2, bug c121037b). `clear_hold`
-    keys on the EXACT path. Read is prefix-tolerant; clear is exact — so `clear`
-    can report success while a resolved hold survives, still honored, still
-    defending a session that has moved on.
-
-    THE OBVIOUS FIX — "clear whatever read resolved" — IS WORSE THAN THE GAP, and
-    this is why it is not here. That prefix match is a READ: resolving to the
-    wrong hold costs a missed poke. Wiring `clear` to it makes it A DELETE DECIDED
-    BY A WILDCARD:
-
-        on disk : .heartbeat-hold-c121037b-aaaa-1111-2222-333344445555.json
-                  (Session A, holding, honored)
-        clear --session-id c121037b
-            exact path  : .heartbeat-hold-c121037b.json     (absent)
-            resolves to : …-aaaa-1111-…-5555.json           ← ANOTHER session's hold
-
-    A call naming neither that id nor any existing file would have destroyed a
-    live hold, and its owner would be poked out of a quiescence it correctly
-    declared — the ping-storm this row exists to prevent, caused by the fix for
-    the row. With multiple prefix matches it is worse still: `_read_hold_path`
-    prefers longest-then-lexical, which is the right rule for "which should I
-    READ" and an arbitrary one for "which should I DESTROY".
-
-    So: exact-path deletes only, and when the resolver disagrees, SAY SO and exit
-    non-zero. A silent gap becomes a loud one, and every deletion decision stays
-    on row **39219cc1**, where the write/clear symmetry question belongs. This
-    verb REPORTS the asymmetry; it does not paper over it and does not resolve it.
-    A verb that refuses to guess is the paved road; a verb that guesses at
-    deletion is a new hazard wearing the fix's name.
+    Why exact path only: `read_hold` falls back to a prefix match so a hold written under the short bridge id is still found by a hook reading the full id, but `clear_hold` keys on the exact path.
+    The shipped code let the prefix-tolerant guard wave the call through while the exact-path action unlinked a file that was not there. A session clearing with the short id was told its hold was released while it stayed honored.
+    Clearing whatever the reader resolved is worse than the gap, because it makes a delete decided by a wildcard. An id naming no file could destroy another session's live hold.
+    With several prefix matches the longest-then-lexical rule is arbitrary for choosing what to destroy. So when the resolver disagrees the verb names the orphans and exits non-zero: it reports the asymmetry and does not guess.
+    After an exact delete it asks the hook's reader again. When the id still resolves to a hold, it prints the survivors and returns `EXIT_STILL_HELD`, deleting nothing else.
+    It also names any non-schema fields the delete destroyed, so a deliberate deletion stays allowed but is never silent.
     """
     exact = hold_path( args.session_id, base_dir=args.base_dir )
 
@@ -745,14 +492,16 @@ def cmd_clear( args ):
 
 def build_parser():
     """
+    Build the argparse parser with the write, read and clear subcommands.
+
     Ensures:
         - Returns the argparse parser for every subcommand
         - `--ttl-seconds` is type=int, so a non-numeric ttl is refused by argparse
-          (exit 2) and never reaches `write_hold` — see the module docstring, item 3
+          (exit 2) and never reaches `write_hold`; see the module docstring, third item
         - `--work-owed` / `--no-work-owed` are an explicit pair defaulting to owed:
           a session that bothered to declare a hold is presumed to owe work
-        - `write` carries one flag per STAMP_ARGS row, each defaulting to None so
-          an unpassed flag leaves the stamp to `write_hold` (bug 1dcaf65c)
+        - `write` carries one flag per `STAMP_ARGS` row, each defaulting to None so
+          an unpassed flag leaves the stamp to `write_hold`
     """
     p   = argparse.ArgumentParser(
         prog="heartbeat_hold_io.py",
@@ -797,12 +546,14 @@ def build_parser():
 
 def main( argv=None ):
     """
+    Run the selected subcommand and return its exit code.
+
     Ensures:
         - Dispatches to the selected subcommand and returns its exit code
-        - A `write_hold` ValueError is printed VERBATIM at EXIT_REFUSED — its
+        - A `write_hold` ValueError is printed verbatim at `EXIT_REFUSED`; its
           message explains why an unusable ttl cannot defend a session, and
           re-wording it here would cost the caller that explanation
-        - An OSError (unwritable / missing target dir) is reported at EXIT_REFUSED
+        - An OSError (unwritable or missing target dir) is reported at `EXIT_REFUSED`
           rather than escaping as a traceback
     """
     args = build_parser().parse_args( argv )
@@ -818,7 +569,7 @@ def quick_smoke_test():
     Self-contained, side-effect-free smoke test (uses a temp dir).
 
     Ensures:
-        - Returns True iff BOTH polarities hold — a valid write lands an honored
+        - Returns True iff both polarities hold: a valid write lands an honored
           hold, and an invalid ttl is refused with nothing left on disk; raises
           AssertionError otherwise.
     """

@@ -1,25 +1,23 @@
 #!/usr/bin/env python3
 """
-CC Notification Listener — stateful WebSocket client for Claude Code sessions.
+CC Notification Listener: stateful WebSocket client for one Claude Code session.
 
-Subclasses BaseWebSocketListener to buffer user_initiated_message notifications
-targeted at a specific CC session. Instead of auto-responding (like the
-notification proxy), this listener writes matching messages to a local JSONL
-buffer file that hooks drain atomically.
+Subclasses BaseWebSocketListener to receive `user_initiated_message` notifications targeted at one Claude Code session.
+A matching human message is typed into the session's tmux pane, and a short gist response goes back to the sender.
+A peer DM for a busy recipient, and answers owed to the persona, are appended to a local JSONL buffer file that hooks drain atomically.
 
 Lifecycle:
-    1. SessionStart hook spawns this as a background subprocess
-    2. Authenticates via JWT (credentials from ~/.lupin/config)
-    3. Connects via WebSocket, subscribes to notification_queue_update
-    4. Filters by job_id matching CC session hash
-    5. Appends matching messages to ~/.claude/sessions/cc-buffer-{session_id[:8]}.jsonl
-    6. Hooks call drain_voice_buffer() to atomically consume buffered messages
-    7. SessionEnd hook sends SIGTERM for graceful shutdown
+    1. The SessionStart hook spawns this as a background subprocess.
+    2. It authenticates via JWT (credentials from ~/.lupin/config).
+    3. It connects via WebSocket and subscribes to notification_queue_update.
+    4. It filters by job_id matching the accepted CC session hashes.
+    5. Buffered messages are appended to ~/.claude/sessions/cc-buffer-{session_id[:8]}.jsonl.
+    6. Hooks call drain_voice_buffer() to atomically consume buffered messages.
+    7. The SessionEnd hook sends SIGTERM for graceful shutdown.
+    8. If the owning Claude Code process dies abruptly, an owner watchdog stops the listener itself.
 
 Usage:
-    python -m lupin_cli.claude_code.hooks.lib.cc_notification_listener \\
-        --session-id abc12345 \\
-        --debug
+    python -m lupin_cli.claude_code.hooks.lib.cc_notification_listener --session-id <hash8> --debug
 
     # Or from SessionStart hook:
     subprocess.Popen( [sys.executable, "-m",
@@ -209,11 +207,9 @@ def read_proc_starttime( pid ):
     """
     Read a process's start-time (field 22 of /proc/<pid>/stat) as a string.
 
-    This is the PID-reuse guard. A bare os.kill( pid, 0 ) is not sufficient: if the
-    owner dies and the kernel recycles its PID onto an unrelated process, the naive
-    check reports "alive" forever and the listener never reaps itself — the exact bug
-    this watchdog exists to close. Start-time pins the identity: a recycled PID always
-    carries a different start-time.
+    This is the PID-reuse guard, since a bare os.kill( pid, 0 ) is not sufficient.
+    If the owner dies and its PID is recycled onto an unrelated process, the naive check reports "alive" forever. The listener then never reaps itself.
+    Start-time pins the identity: a recycled PID always carries a different start-time.
 
     Requires:
         - pid is a positive integer
@@ -250,7 +246,7 @@ def read_proc_starttime( pid ):
 
 def owner_is_alive( owner_pid, owner_starttime ):
     """
-    Is the Claude Code process that owns this listener still running?
+    Return whether the Claude Code process that owns this listener is still running.
 
     Requires:
         - owner_pid is a positive integer
@@ -259,9 +255,9 @@ def owner_is_alive( owner_pid, owner_starttime ):
 
     Ensures:
         - Returns False when the PID is gone
-        - Returns False when the PID exists but carries a DIFFERENT start-time
-          (the PID was recycled onto a new process — the owner is still dead)
-        - Returns True only when the PID exists AND its start-time matches
+        - Returns False when the PID exists but carries a different start-time
+          (the PID was recycled onto a new process, so the owner is still dead)
+        - Returns True only when the PID exists and its start-time matches, or when no start-time was pinned (a bare existence check)
 
     Args:
         owner_pid: PID of the owning Claude Code process
@@ -286,8 +282,7 @@ def owner_is_alive( owner_pid, owner_starttime ):
 
 class CCNotificationListener( BaseWebSocketListener ):
     """
-    WebSocket listener that buffers user_initiated_message notifications
-    for a specific Claude Code session.
+    WebSocket listener that buffers user_initiated_message notifications for a CC session.
 
     Requires:
         - email and password are valid credentials
@@ -295,8 +290,8 @@ class CCNotificationListener( BaseWebSocketListener ):
         - buffer_path is a writable file path
 
     Ensures:
-        - Only buffers notifications where job_id matches session_id_hash
-        - Only buffers notifications of type user_initiated_message
+        - Only buffers notifications where job_id matches session_id_hash (or another accepted id)
+        - Only buffers notifications of type user_initiated_message (plus the answer messages it builds for owed answers)
         - Writes one JSON object per line (JSONL format)
         - Flushes after each write for immediate availability
         - Handles SIGTERM for graceful shutdown
@@ -333,7 +328,7 @@ class CCNotificationListener( BaseWebSocketListener ):
             - Stores session hash for job_id filtering
             - Builds accepted_ids set from explicit list or falls back to {session_id_hash}
             - Computes default buffer path if not provided
-            - Does NOT connect (call run() to start)
+            - Does not connect (call run() to start)
 
         Args:
             email: User email for JWT authentication
@@ -349,7 +344,7 @@ class CCNotificationListener( BaseWebSocketListener ):
             log_file_path: Optional path to tee all output to a log file
             centralized_log_path: Path to centralized log (default: CENTRALIZED_LOG)
             owner_pid: PID of the owning Claude Code process. When given, the listener
-                reaps ITSELF once that process dies — the only cleanup path that
+                reaps itself once that process dies, the only cleanup path that
                 survives an abrupt death (tmux kill-server, crash, SIGKILL), because
                 the SessionEnd hook cannot run in those cases. None disables the
                 watchdog and is logged loudly at startup.
@@ -464,19 +459,16 @@ class CCNotificationListener( BaseWebSocketListener ):
 
     async def _on_connected( self ):
         """
-        Catch up on answers OWED to this persona that landed while disconnected
-        (§4.4). Overrides the base no-op; fires on EVERY connect edge (a listener
-        respawn after a bounce IS a first connect, so unlike the browser rehydrator
-        we do NOT gate on the reconnect edge). Owed answers surface as buffered,
-        non-interrupt context drained by the next injecting hook.
+        Catch up on answers owed to this persona that landed while disconnected.
 
-        ⚠️ The fetch reads the X-API-Key lane (resolves to the HUMAN OWNER), NEVER
-        `self._user_id` — which here holds the shared SERVICE-ACCOUNT identity set at
-        auth_success. Catch-up is persona-keyed (ruling 6): surface_owed_answers
-        resolves THIS session's persona from the bridge and is never handed a
-        user_id. Routing the fetch through self._user_id would return a
-        correct-looking, silently EMPTY list — the plan's one silent-failure surface
-        (D-V1 is the negative control). Never raises.
+        Overrides the base no-op and fires on every connect edge.
+        A listener respawn after a bounce is a first connect, so unlike the browser rehydrator it does not gate on the reconnect edge.
+        Owed answers surface as buffered, non-interrupt context drained by the next injecting hook.
+        The fetch reads the X-API-Key lane, which resolves to the human owner, never `self._user_id`.
+        Here `self._user_id` holds the shared service-account identity set at auth_success.
+        Catch-up is persona-keyed: surface_owed_answers resolves this session's persona from the bridge and is never handed a user_id.
+        Routing the fetch through `self._user_id` would return a correct-looking but silently empty list, the one silent-failure surface here.
+        Never raises.
         """
         try:
             context = surface_owed_answers( self.session_id_hash )
@@ -492,14 +484,11 @@ class CCNotificationListener( BaseWebSocketListener ):
 
     def _handle_answer_responded( self, event_data ):
         """
-        Live late-answer handback arm (§4.3, the :481 notification_responded arm).
+        Record a late answer from a notification_responded event and buffer it as context.
 
-        The response endpoint's job_id→asker_hash8 fallback (fact 1) makes the
-        notification_responded event reach THIS asking session's socket. Record the
-        answered notification_id into the shared cross-process side-log (so the
-        hook-side catch-up dedupes against it — the §4.3 one-ledger) and surface the
-        answer as a buffered, non-interrupt message. Routes on job_id ∈ accepted_ids.
-        Never raises.
+        The response endpoint's job_id fallback to the asker hash makes the event reach this session's socket.
+        The handler routes on job_id in accepted_ids and records the answered notification_id in the shared cross-process side-log.
+        The hook-side catch-up dedupes against that log, the one ledger; the answer then surfaces as a buffered, non-interrupt message. Never raises.
 
         Requires:
             - event_data is the notification_responded frame (data carries
@@ -528,18 +517,18 @@ class CCNotificationListener( BaseWebSocketListener ):
 
     async def _handle_event( self, event_type, event_data ):
         """
-        Handle a WebSocket event by filtering and buffering.
+        Handle a WebSocket event by filtering, routing and injecting.
 
         Requires:
             - event_type is a string
             - event_data is a dict
 
         Ensures:
-            - Live late-answer handback: notification_responded is recorded + surfaced
-            - Only processes notification_queue_update events (otherwise)
-            - Only buffers user_initiated_message notifications
-            - Only buffers notifications whose job_id matches session_id_hash
-            - Writes JSONL line to buffer file on match
+            - notification_responded is recorded and surfaced (live late-answer handback), before the queue-update gate
+            - Only processes notification_queue_update events otherwise; action notifications titled "action:<name>" with an accepted job_id go to _handle_action
+            - Only acts on user_initiated_message notifications
+            - Only acts on notifications whose job_id is in accepted_ids
+            - A match with direction ai_to_ai goes to _deliver_peer_dm; any other match is typed into the tmux prompt (no buffer file write) and answered with a gist response
             - Never raises exceptions (logging failure is non-fatal)
 
         Args:
@@ -603,24 +592,14 @@ class CCNotificationListener( BaseWebSocketListener ):
 
     def _deliver_peer_dm( self, notification ):
         """
-        Idle-aware delivery for an inbound notification-native AI↔AI DM
-        (direction=ai_to_ai), per §6 of
-        src/rnd/v0.1.8/2026.06.13-cosa-voice-token-reduction/02-notification-native-aixai-design.md.
+        Deliver an inbound AI-to-AI peer DM (direction=ai_to_ai) by the recipient pane's state.
 
-        Routes by the recipient session's liveness:
-        - ACTIVE → _buffer_message: write to the voice buffer, drained by the
-          next injecting hook (PreToolUse/PostToolUse/Stop) at a clean tool
-          boundary and framed by format_voice_context's ai_to_ai branch. Clean,
-          non-invasive — does NOT type into a live prompt mid-turn.
-        - IDLE → _handle_peer_dm: inject via tmux to WAKE the idle pane (the only
-          path that reaches a pane sitting at an idle prompt).
-
-        Liveness is read from the existing heartbeat_events outcome store; on any
-        read error we fall back to the tmux-wake path (degrades to the always-
-        deliver behavior rather than risk a buffered DM sitting unseen).
+        An idle pane gets the tmux wake via _handle_peer_dm. Any other recipient gets _buffer_message, drained at a clean tool boundary and never typed mid-turn.
+        Idleness comes from the pane-idle probe, and an unclassifiable pane degrades to the buffer.
+        See: src/rnd/v0.1.8/2026.06.13-cosa-voice-token-reduction/02-notification-native-aixai-design.md
 
         Ensures:
-            - Active recipient → buffered; idle (or unknown-state) recipient → tmux
+            - A recipient observed idle at its prompt is woken via tmux; a busy, dialog-blocked or unclassifiable recipient is buffered
             - Never raises (both downstream paths are self-isolating)
         """
         if self._recipient_is_injectable():
@@ -630,27 +609,17 @@ class CCNotificationListener( BaseWebSocketListener ):
 
     def _recipient_is_injectable( self ):
         """
-        Is this CC session safe to tmux-inject / wake an arriving peer DM into
-        right now — i.e. is it PARKED AT AN IDLE PROMPT (not busy mid-turn, not
-        sitting at a permission/AskUserQuestion dialog)?
+        Return True if the recipient pane is parked at an idle prompt, safe to inject a peer DM.
 
-        SOURCE OF TRUTH (bug d1bb1456, Mr. Radio ratified 2026-07-02): a bounded,
-        fail-open tmux PANE-IDLE PROBE (`_pane_is_idle_at_prompt`) that OBSERVES
-        the recipient pane's real state. This REPLACES the prior heartbeat-outcome
-        heuristic, which read `last_emitted_outcome()` and returned False (→ buffer)
-        for a parked pane whose last outcome was None (only `idle_prompt` beacons
-        emitted, or a fresh session) or "poked". A parked pane so misclassified had
-        its DM buffered for drain-at-next-tool-boundary — but a parked pane has NO
-        next tool boundary and no UserPromptSubmit, so the DM never drained (the
-        residual of baf5ea6d; see src/rnd/v0.1.9/2026.07.02-parked-worker-dm-wake-
-        gap-triage.md). The probe reads the pane's ACTUAL state instead of inferring
-        from a possibly-stale outcome log.
+        The source of truth is the bounded, fail-open pane-idle probe (`_pane_is_idle_at_prompt`), which observes the pane's real state.
+        It replaces a heartbeat-outcome heuristic that buffered the DM for a parked pane whose last outcome was None or "poked".
+        A parked pane has no next tool boundary and no UserPromptSubmit, so that buffered DM never drained.
 
         Ensures:
-            - Returns True iff the pane is OBSERVABLY parked at a normal idle prompt
+            - Returns True iff the pane is observably parked at a normal idle prompt
               (delegates to `_pane_is_idle_at_prompt`).
             - Returns False when the pane is busy mid-turn, sitting at a dialog, or
-              the probe cannot positively confirm idle (fail-open → buffer; the
+              the probe cannot positively confirm idle (fail-open to buffer; the
               buffered DM still surfaces via the store reconcile on the next
               UserPromptSubmit, whereas a mis-injected running turn is unrecoverable).
             - Never raises.
@@ -659,19 +628,15 @@ class CCNotificationListener( BaseWebSocketListener ):
 
     def _pane_is_idle_at_prompt( self ):
         """
-        The pane-idle probe (bug d1bb1456). Captures the recipient tmux pane TWICE,
-        ~PANE_PROBE_RECHECK_SECONDS apart, and returns True iff BOTH captures
-        classify as a normal idle prompt (`_classify_capture_idle`).
+        Probe the recipient tmux pane twice and return True iff both captures look idle.
 
-        The double capture is the transition-race guard (Mr. Radio hardening #1): a
-        turn that is STARTING may not have painted "esc to interrupt" yet, so a
-        single capture could momentarily read idle; requiring two consistent reads
-        closes that window.
+        The captures are about `PANE_PROBE_RECHECK_SECONDS` apart, and each is classified by `_classify_capture_idle`.
+        The double capture is the transition-race guard. A starting turn may not yet show "esc to interrupt", so one capture could read idle.
 
         Ensures:
-            - Returns False when the tmux session can't be resolved (can't probe →
+            - Returns False when the tmux session cannot be resolved (cannot probe, so
               fail-open to buffer).
-            - Returns True iff the first AND the (short-)later capture both classify
+            - Returns True iff the first and the (short-)later capture both classify
               idle; False otherwise. Never raises (capture is total).
         """
         tmux_session = self._resolve_tmux_session()
@@ -710,22 +675,16 @@ class CCNotificationListener( BaseWebSocketListener ):
     @staticmethod
     def _classify_capture_idle( captured ):
         """
-        PURE classifier: does a captured pane show a NORMAL IDLE PROMPT — safe to
-        tmux-inject a peer DM into?
+        Classify a captured tmux pane: does it show a normal idle prompt safe to inject into?
 
-        Fail-closed-toward-buffer (Mr. Radio hardening #1 & #2): idle requires a
-        POSITIVE signal, never mere busy-sentinel absence. All must hold:
-          - `captured` is a non-empty string (None ⇒ probe failed ⇒ NOT idle);
-          - no BUSY_STATUS_SENTINELS  (a running turn ⇒ never inject);
-          - no DIALOG_SENTINELS       (permission/AskUserQuestion modal ⇒ typing
-                                        into it could select an option ⇒ never inject);
-          - the IDLE_PROMPT_DIVIDER is present (the normal input-box chrome — the
-                                        positive idle signal; an unknown/blank state
-                                        lacks it ⇒ NOT idle ⇒ buffer).
+        Fail-closed toward the buffer: idle needs a positive signal, never mere absence of the busy sentinel.
+        A permission or AskUserQuestion dialog shows no busy sentinel, and typing into it could select an option.
+        An unknown or blank state lacks the divider, so it is not idle and the DM is buffered.
 
         Ensures:
-            - Returns True iff captured is non-empty AND busy-free AND dialog-free
-              AND carries the idle-prompt divider; False otherwise. Never raises.
+            - Returns True iff captured is non-empty and busy-free (no `BUSY_STATUS_SENTINELS`; a running turn means never inject)
+              and dialog-free (no `DIALOG_SENTINELS`; a modal means never inject) and carries `IDLE_PROMPT_DIVIDER`; False otherwise.
+              A None capture means the probe failed, so not idle. Never raises.
         """
         if not captured:
             return False
@@ -737,23 +696,10 @@ class CCNotificationListener( BaseWebSocketListener ):
 
     def _handle_peer_dm( self, notification ):
         """
-        Inject a peer-DM envelope into an IDLE pane via tmux to wake it (the idle
-        branch of _deliver_peer_dm).
+        Inject a peer-DM envelope into an idle pane via tmux to wake it.
 
-        Per §6a of
-        src/rnd/v0.1.8/2026.06.13-cosa-voice-token-reduction/02-notification-native-aixai-design.md:
-        - A peer DM is NOT human voice. It must NOT receive the speakerphone_wrap
-          voice rider ("the user spoke… call notify() to speak your reply aloud…
-          TTS brevity… chorus") — that would hand an AI peer the human-voice
-          contract, framed as if Rick spoke. Peers reply via dm_send, never TTS.
-        - The body rides the push INLINE (notification["message"]) — no
-          commons_read round-trip (the ~18x token win over the retired commons
-          claim-check DM path).
-        - The envelope (sender persona + icon + message_id + thread_id + dm_send
-          reply affordance) is built by the SHARED build_peer_dm_reminder helper,
-          so the idle (tmux) and active (buffer-drain) paths frame identically.
-        - Injects via _inject_via_tmux( text, wrap=False ): the block is complete
-          and must reach the model verbatim, with NO voice wrapping.
+        This is the idle branch of _deliver_peer_dm, and a peer DM is not human voice.
+        See: src/rnd/v0.1.8/2026.06.13-cosa-voice-token-reduction/02-notification-native-aixai-design.md
 
         Requires:
             - notification is a dict carrying at least "message"; sender_persona,
@@ -761,10 +707,12 @@ class CCNotificationListener( BaseWebSocketListener ):
               NotificationItem.to_dict().
 
         Ensures:
-            - Injects a peer-framed <system-reminder> into the tmux pane
-            - NEVER applies the speakerphone voice rider (wrap=False)
+            - Injects a peer-framed <system-reminder> into the tmux pane via _inject_via_tmux( text, wrap=False ), because the block is complete and must reach the model verbatim.
+              The body rides the push inline (notification["message"]), with no commons_read round trip (about 18x fewer tokens than the retired claim-check path).
+              The envelope (sender persona, icon, message_id, thread_id, dm_send reply affordance) is built by the shared build_peer_dm_reminder, so the idle (tmux) and active (buffer-drain) paths frame identically.
+            - Never applies the speakerphone voice rider (wrap=False): the rider would hand an AI peer the human-voice contract, framed as if Rick spoke. Peers reply via dm_send, never TTS.
             - Skips (logs) when the inline body is empty
-            - Never raises (T7 listener-injection isolation — failure logs + skips)
+            - Never raises (listener-injection isolation: failure logs and skips)
         """
         from lupin_cli.claude_code.hooks.lib.hook_common import build_peer_dm_reminder
 
@@ -811,13 +759,11 @@ class CCNotificationListener( BaseWebSocketListener ):
 
     def _handle_broadcast_received( self, notification ):
         """
-        Handle an `action:broadcast_received` notification from the user-broadcast
-        endpoint (Phase 2 step 6 — see
-        src/rnd/v0.1.7/2026.05.09-inter-session-commons/03-phase2-user-broadcast-design.md AC6).
+        Handle an `action:broadcast_received` notification by delegating to handle_broadcast.
 
-        Delegates to `lupin_mcp.broadcast_handler.handle_broadcast` which is the
-        keystone orchestrator — pure-logic + 100% covered + identical contract
-        whether invoked from this listener or from a future MCP tool path.
+        It delegates to `lupin_mcp.broadcast_handler.handle_broadcast`, the keystone orchestrator.
+        That handler is pure logic, fully covered, with an identical contract whether invoked from this listener or from a future MCP tool path.
+        See: src/rnd/v0.1.7/2026.05.09-inter-session-commons/03-phase2-user-broadcast-design.md
 
         The listener provides:
         - `inject_fn`: lambda wrapping `_inject_via_tmux(text, wrap=False)`
@@ -877,22 +823,11 @@ class CCNotificationListener( BaseWebSocketListener ):
 
     def _inject_exit_conversation_reminder( self ):
         """
-        Inject the deactivation system-reminder into the CC session's tmux
-        prompt. Triggered by an `action:disable_speakerphone` push from
-        the speakerphone router when this session has been displaced by
-        another session entering speakerphone mode (solo) or when this
-        session toggled off itself (solo or chorus).
+        Inject the speakerphone-deactivation system-reminder into the session's tmux prompt.
 
-        The reminder body is generated by hook_common.speakerphone_exit_reminder
-        so the wrapping format stays in lockstep with the entry-side helpers.
-        Mode is read here so the body chooses the right framing (solo
-        includes "displaced or toggled off"; chorus omits the displaced
-        framing since chorus has no displacement).
-
-        Bypasses _inject_via_tmux's bridge-gated wrap path — the reminder is
-        already a complete <system-reminder> block and must be injected
-        verbatim regardless of bridge state (which has, by this point,
-        already flipped to speakerphone_on=false).
+        An `action:disable_speakerphone` push triggers it, when another session displaced this one in solo mode or this session toggled off (solo or chorus).
+        The body comes from hook_common.speakerphone_exit_reminder, keeping its format in lockstep with the entry-side helpers. The mode picks the framing: solo includes "displaced or toggled off", chorus omits displacement.
+        It bypasses the wrap path of _inject_via_tmux. The reminder is a complete <system-reminder> block and must go in verbatim, although the bridge already reads speakerphone_on=false.
 
         Ensures:
             - Tmux pane receives the mode-appropriate reminder followed by Enter
@@ -974,16 +909,15 @@ class CCNotificationListener( BaseWebSocketListener ):
 
     def _inject_via_tmux( self, message_text, wrap=True ):
         """
-        Type the voice message into the CC session's tmux pane, then press Enter.
+        Type a message into the CC session's tmux pane, then press Enter.
 
-        Uses tmux send-keys -l (literal) to avoid key interpretation of special
-        characters. Sends Enter separately after a brief delay — tmux cannot
-        reliably combine literal text + Enter in a single call.
+        It uses tmux send-keys -l (literal), so special characters are not interpreted as keys.
+        Enter goes separately after a brief delay, because tmux cannot reliably combine literal text and Enter in one call.
 
         Requires:
             - message_text is a non-empty string
             - tmux session is resolvable
-            - wrap is a bool — True (default) applies speakerphone_wrap, False
+            - wrap is a bool: True (default) applies speakerphone_wrap, False
               injects the text verbatim. Set False when the caller has
               already produced a complete <system-reminder> block (e.g.
               the disable_speakerphone action handler) that must reach the
@@ -994,9 +928,9 @@ class CCNotificationListener( BaseWebSocketListener ):
             - Presses Enter after 250ms delay
             - CC receives a non-empty prompt and processes it
             - The text+Enter pair is atomic against any other lock-honoring
-              injector on the same tmux session (F4 injection mutex — two
-              racing injectors previously interleaved keystrokes into
-              "text A, text B, Enter, Enter", silently corrupting delivery)
+              injector on the same tmux session (the injection mutex: two racing injectors
+              once interleaved keystrokes into "text A, text B, Enter, Enter", silently corrupting delivery).
+              The lock fails open: when unavailable it logs and injects unlocked.
             - Never raises exceptions (injection failure is non-fatal)
         """
         tmux_session = self._resolve_tmux_session()
@@ -1050,8 +984,9 @@ class CCNotificationListener( BaseWebSocketListener ):
 
     def _send_gist_response( self, notification ):
         """
-        Generate a 3-5 word gist and send it as an immediate auto-response
-        notification back to the browser user. Renders in the session card UI.
+        Send a short gist of a voice message back to the sender as a low-priority notification.
+
+        The gist is 3 to 5 words, sent as an immediate auto-response that renders in the session card UI.
 
         Requires:
             - notification dict contains "message" and "sender_id" keys
@@ -1062,8 +997,8 @@ class CCNotificationListener( BaseWebSocketListener ):
             - Generates gist via Gister with session-title prompt
             - Sends low-priority notification to browser user
             - Falls back to first 5 words if Gister fails, and stamps the
-              notification's `abstract` with a DEGRADED banner naming the cause
-              so the fallback is visible ON THE CARD, not only in the log
+              notification's `abstract` with a degraded banner naming the cause
+              so the fallback is visible on the card, not only in the log
             - Leaves `abstract` None on the healthy path
             - Never raises exceptions (auto-response is non-fatal)
         """
@@ -1199,20 +1134,11 @@ class CCNotificationListener( BaseWebSocketListener ):
 
     def _stamp_user_id_on_bridge( self ):
         """
-        Phase 3 Option 2 — resolve the authenticated user_id and stamp it on
-        this session's bridge file so the inter-session-commons broadcast
-        surface can same-user-scope active sessions correctly.
+        Resolve the authenticated user_id and stamp it on this session's bridge file.
 
-        Per `src/rnd/v0.1.7/2026.05.13-broadcast-ui-no-active-sessions-bug.md`:
-        - Posts to f"http://{host}:{port}/auth/login" with `email` + `password`
-        - Extracts `user.id` from the response (canonical user UUID)
-        - Calls `session_bridge.set_user_id(session_id_hash, user_id)` —
-          set_user_id accepts the 8-char prefix via find_session_path_by_id
-        - Best-effort: any failure (network, auth, parse, missing bridge) is
-          debug-logged and swallowed. Option 1's graceful-degradation filter
-          in `routers/commons.py::filter_and_project_sessions` covers the gap.
-
-        Fires once at `run()` startup, not on each reconnect cycle.
+        This lets the inter-session-commons broadcast surface same-user-scope active sessions correctly.
+        It posts the credentials to /auth/login and reads `user.id` from the response. Then it calls `session_bridge.set_user_id`, which accepts the 8-char prefix.
+        Any failure is logged and swallowed; the graceful-degradation filter `filter_and_project_sessions` in `routers/commons.py` covers the gap. It fires once at run() startup, not on each reconnect.
 
         Ensures:
             - Never raises publicly. All errors caught + logged.
@@ -1250,27 +1176,14 @@ class CCNotificationListener( BaseWebSocketListener ):
 
     def _stamp_owner_user_id_on_bridge( self ):
         """
-        Writer-side follow-up to the 2026-05-14 Option C design. Resolves
-        the HUMAN OWNER's user_id via /auth/login using owner credentials
-        from ~/.lupin/config[owner], then stamps it on the bridge via
-        session_bridge.set_owner_user_id.
+        Resolve the human owner's user_id and stamp it on this session's bridge file.
 
-        Per `src/rnd/v0.1.7/2026.05.17-owner-user-id-stamper-writer-side/01-design.md`.
-
-        Distinct from `_stamp_user_id_on_bridge`: that stamps the listener's
-        OWN service-account identity (`claude.code@lupin.deepily.ai`); this
-        stamps the HUMAN owner's identity, which is what the broadcast UI's
-        same-user filter (`filter_and_project_sessions` in CoSA's
-        `routers/commons.py`) actually compares against.
-
-        Best-effort: any failure (creds missing, network, auth, parse,
-        missing bridge) is logged and swallowed. CoSA-side graceful-
-        degradation filter covers the gap until the stamp succeeds.
-
-        Fires once at run() startup, immediately after _stamp_user_id_on_bridge.
+        It logs in via /auth/login with owner credentials from ~/.lupin/config[owner], then calls session_bridge.set_owner_user_id.
+        Unlike `_stamp_user_id_on_bridge`, which stamps the service account, this stamps the human owner that the broadcast UI's same-user filter compares against.
+        See: src/rnd/v0.1.7/2026.05.17-owner-user-id-stamper-writer-side/01-design.md
 
         Ensures:
-            - Never raises publicly. All errors caught + logged.
+            - Never raises publicly. All errors caught + logged. It fires once at run() startup, right after _stamp_user_id_on_bridge. The graceful-degradation filter covers the gap until a stamp succeeds.
             - Bridge file is mutated only on full success.
         """
         try:
@@ -1331,18 +1244,15 @@ class CCNotificationListener( BaseWebSocketListener ):
         """
         Reap this listener once its owning Claude Code process dies.
 
-        This is the ONLY cleanup path that survives an abrupt session death. The
-        listener is setsid'd (start_new_session=True in register_session.py), so the
-        SIGHUP tmux sends its panes never reaches it, and session_end.py — the only
-        other reaper — runs only on a GRACEFUL exit. A tmux kill-server, a crash, or a
-        SIGKILL therefore left the listener alive forever, reconnecting on a loop and
-        still holding its WebSocket to the notifications UI.
+        This is the only cleanup path that survives an abrupt session death.
+        The listener is setsid'd (start_new_session=True in register_session.py), so the SIGHUP tmux sends its panes never reaches it.
+        The session_end.py hook runs only on a graceful exit, so a kill-server, crash or SIGKILL would leave the listener reconnecting forever on the notifications UI.
 
         Requires:
             - self.owner_pid is a positive integer (no-op when None)
 
         Ensures:
-            - Polls owner liveness every OWNER_WATCHDOG_INTERVAL_SECONDS
+            - Polls owner liveness every `OWNER_WATCHDOG_INTERVAL_SECONDS`
             - Calls self.stop() exactly once when the owner is gone, which unwinds the
               restart loop in run() the same way SIGTERM does
             - Returns immediately (watchdog disabled) when no owner_pid was supplied
@@ -1378,13 +1288,11 @@ class CCNotificationListener( BaseWebSocketListener ):
 
     async def _sample_memory( self ):
         """
-        Opt-in RSS + tracemalloc sampler to catch the next listener memory leak.
+        Run the opt-in RSS and tracemalloc sampler that catches the next listener memory leak.
 
-        Off unless self.memory_trace is set (--memory-trace / LUPIN_CC_LISTENER_MEMTRACE).
-        When on: starts tracemalloc, logs RSS every MEMORY_SAMPLE_INTERVAL_SECONDS, and
-        when RSS has grown by MEMORY_GROWTH_DUMP_THRESHOLD_MB since the last dump, logs a
-        tracemalloc top-N by allocation size — the allocation traceback the 2026-07-14
-        post-mortem lacked because the leaking processes were reaped before profiling.
+        It is off unless self.memory_trace is set (--memory-trace or LUPIN_CC_LISTENER_MEMTRACE).
+        When on, it starts tracemalloc and logs RSS every `MEMORY_SAMPLE_INTERVAL_SECONDS`.
+        When RSS grows by `MEMORY_GROWTH_DUMP_THRESHOLD_MB` since the last dump, it logs a tracemalloc top-N by size. An earlier post-mortem lacked that traceback.
 
         Requires:
             - safe to call always; returns immediately when memory_trace is False
@@ -1434,16 +1342,13 @@ class CCNotificationListener( BaseWebSocketListener ):
 
     async def run( self ):
         """
-        Start the listener with logging setup, shutdown stats, and infinite restart.
+        Run the listener with logging setup, shutdown stats and an infinite restart loop.
 
-        Wraps super().run() in an outer restart loop: if the base listener
-        exhausts its RECONNECT_MAX_ATTEMPTS (10), this method waits 60 seconds
-        and restarts the connection cycle. This prevents voice input from being
-        silently dropped when the Lupin server is temporarily down.
+        Wraps super().run() in an outer restart loop: if the base listener exhausts its `RECONNECT_MAX_ATTEMPTS` (10), this method waits 60 seconds and restarts the connection cycle.
+        This prevents voice input from being silently dropped when the Lupin server is temporarily down.
 
-        The restart loop only exits on explicit shutdown (SIGTERM/SIGINT via
-        self._running = False). It does NOT modify RECONNECT_MAX_ATTEMPTS
-        (other proxy agents use it).
+        The restart loop only exits on explicit shutdown (SIGTERM/SIGINT via self._running = False).
+        It does not modify `RECONNECT_MAX_ATTEMPTS`, because other proxy agents use it.
 
         Overrides base to add log file handling, statistics, and restart resilience.
         """
@@ -1523,8 +1428,8 @@ def parse_args():
     Parse command-line arguments for the CC Notification Listener.
 
     Ensures:
-        - Returns parsed args with session_id, buffer_path, host, port,
-          email, password, debug, verbose, log_file
+        - Returns parsed args with session_id, accepted_ids, buffer_path, tmux_session, owner_pid,
+          memory_trace, host, port, email, password, debug, verbose, log_file, centralized_log
 
     Returns:
         argparse.Namespace: Parsed arguments

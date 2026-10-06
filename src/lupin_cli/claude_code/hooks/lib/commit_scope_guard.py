@@ -1,107 +1,44 @@
 """
-Commit scope guard — `git commit` takes the WHOLE INDEX, not the files you staged.
+Commit scope guard: `git commit` takes the whole index, not the files you staged.
 
-THE MECHANISM. `git add <paths>` adds to a shared index; it does not clear what
-is already there. `git commit` then writes everything the index holds. On a tree
-with several live sessions, a peer's `git add` lands in the same index as yours,
-and your commit carries their files under your name.
+The mechanism: `git add <paths>` adds to a shared index and does not clear what is there.
+With several live sessions, a peer's `git add` lands in your index and `git commit` carries
+their files under your name. Staging five files by name still committed four files of
+another seat's fix, because a `git status` scoped to your own paths cannot show contamination.
+"Run `git diff --cached --name-only` unscoped" depends on remembering, so this installs it as a control.
 
-WHAT IT COST, 2026-08-25. I staged five files BY NAME — no `git add -A`, no bare
-add — and committed four files belonging to another seat's in-flight fix. The
-staging was correct. What failed was the CHECK: I ran `git status --short` scoped
-to my own five paths, and a path-scoped check cannot show you the contamination
-it exists to catch. Nothing was pushed, so the tip was rewritten and the peer's
-work verified byte-identical, but had it been pushed it was theirs, on my row,
-with nothing in the git output naming the owner.
+On a `git commit` it denies once and shows the complete staged set: every path, the count,
+and any large file. Re-run with the acknowledgement prefix to proceed.
+  - It refuses only a contaminated index. The ownership oracle is `.claude-session.md`, the
+    parallel-session manifest: this session's `### Touched Files` plus the sanctioned
+    auto-includes. A staged path claimed only by a peer triggers the refusal naming that peer.
+  - A clean single-seat index commits untouched. Denying once on every commit costs the whole
+    fleet a round trip, and a control everyone pays for gets switched off.
+  - A missing manifest fails open: no file, no section for this session, or an unreadable
+    one allows. A seat that never adopted the manifest must not be wedged by it.
+  - Residual: a stale section gives a false refusal, since a touched file left unrecorded reads
+    as foreign. That direction is recoverable; the opposite silently commits a peer's work.
+  - Size is an independent trigger. A rotated 196 MB `voice-commands-xml-train.jsonl.prev`
+    escaped the ignore pattern `**/voice-commands-xml-*.jsonl`, leaving 246 MB committable.
 
-⇒ THE RULE THAT REPLACED IT WAS STILL A RULE. "Run `git diff --cached
---name-only` UNSCOPED before committing" is correct and depends entirely on
-remembering, which is the property that made the first failure possible. This
-module is that rule installed as a control. (Prompted by mr radio 🦉, who asked
-why it was a note and not a hook.)
+Threat model: accident, not evasion. A miss costs a missing reminder, not a broken repo,
+unlike stash_guard, where a miss lets through a command that had to be refused.
 
-WHAT IT DOES: on a `git commit`, DENY ONCE and put the complete staged set in
-front of the committer — every path, the count, and any file large enough to
-matter. Re-run with the acknowledgement prefix to proceed.
-
-⇒ IT REFUSES ONLY A CONTAMINATED INDEX, not every commit. The ownership oracle
-is `.claude-session.md`, the parallel-session manifest: this session's own
-`### Touched Files` section is what it claims, plus the sanctioned auto-includes.
-A staged path claimed by nobody-but-a-peer is what triggers the refusal, and the
-message names the peer's session.
-
-⇒ A CLEAN SINGLE-SEAT INDEX COMMITS UNTOUCHED — zero friction, and that is a
-REQUIREMENT rather than a nicety (row 53c4900f). My first cut denied once on
-EVERY commit and asked the committer to acknowledge the list. That is
-refuse-always wearing a guard's clothes: it imposes a round trip on every commit
-in the fleet, and a control everyone pays for on every use is a control someone
-eventually switches off. The row's negative control exists precisely to reject
-that shape, and it was right to.
-
-⇒ FAIL-OPEN ON A MISSING MANIFEST, which is most of the fleet. No manifest file,
-no section for this session, or an unreadable one → ALLOW. A seat that never
-adopted the manifest discipline must never be wedged by it.
-
-⚠️ AND THE RESIDUAL, named rather than hidden: a STALE section produces a FALSE
-REFUSAL — the seat touched a file and did not record it, so the guard reads it as
-foreign. That is the recoverable direction (the hatch is one prefix away, and the
-remedy — update your section — is an existing mandate), where the opposite
-direction silently commits a peer's work. But it is real friction, and if it
-turns out to bite more often than contamination does, this trade should be
-re-measured rather than defended.
-
-SIZE IS AN INDEPENDENT TRIGGER, because the second incident was a size incident
-and it had nothing to do with ownership: the files were the committer's own.
-Rotation (row 11390b57)
-wrote `voice-commands-xml-train.jsonl.prev` — 196 MB — and the ignore pattern
-`**/voice-commands-xml-*.jsonl` did not match it, because it ends `.jsonl.prev`.
-246 MB across three files sat committable for about forty minutes. A path list
-alone reads as harmless; a path list with `196.0 MB` beside it does not.
-
-THREAT MODEL — ACCIDENT, NOT EVASION, and the matcher is sized to that. It
-recognises the natural spellings of `git commit` in command position. Somebody
-determined to route around it can, and it does not matter: the failure mode of a
-miss is a MISSING REMINDER, not a broken repo. That is the opposite of
-stash_guard, where a miss lets through a command that had to be refused — which
-is why that module needs total normalisation and this one does not. Claiming
-completeness here would be the same defect this fleet keeps catching.
-
-SAFETY — this runs inside the hot-path PreToolUse hook, so two non-negotiables:
-  • THREE SHAPES, THREE SETS (row 292dd3d8). A `git commit` writes a different set
-    depending on how it is spelled, and the guard reviews whichever one applies:
-      · `git commit`            → the index
-      · `git commit -a`         → the index PLUS every modified tracked file, which
-                                  git stages at commit time, after this hook returns
-      · `git commit -- <paths>` → those paths, taken from the WORKING TREE; the
-                                  index is never read, so reviewing it reviews nothing
-    The pathspec shape is standing practice as of mr radio's 2026-08-25 ruling
-    (it eliminates the shared-index race rather than narrowing it), which is exactly
-    why it could not stay unreviewed: mandating the safe shape would otherwise have
-    made every compliant commit an unexamined one.
-  • ALLOW ON DOUBT, AND SAY SO. Where the pathspec cannot be parsed confidently —
-    unbalanced quoting, a redirection, an unrecognised long option, an option whose
-    argument is optional, pathspec magic — the guard ALLOWS and emits a notice
-    naming what went unreviewed. The argument for that direction is this guard's own
-    false-positive: it refused the commit carrying its own message, because the flag
-    scan walked into the heredoc. A guard that refuses honest commits gets switched
-    off, and an off guard reviews nothing at all.
-  • WHAT NO GUARD HERE CAN CLOSE: a pathspec commit takes each named path's
-    WORKING-TREE content, so naming a file your section legitimately claims still
-    commits whatever a peer has left uncommitted inside it. The manifest is per-FILE,
-    not per-hunk. Only a private working tree closes that one; the refusal text points
-    at `git diff -- <path>` because reading the diff is the only control that exists.
-  • FAIL-OPEN: ANY error → allow (return None). A guard must never break a tool
-    call. The `git diff --cached` read is bounded by a timeout and every failure
-    mode of it — not a repo, git absent, slow disk — returns None.
-  • ESCAPE HATCH / ACK: `LUPIN_COMMIT_SCOPE_ACK=1 git commit ...`.
-
-    🔴 HONOURED BY A PREFIX CARVE-OUT, NOT AN ENV READ, and this is not a
-    shortcut — it is the only thing that can work. A PreToolUse hook is a
-    SEPARATE PROCESS reading its OWN environment, and an inline `VAR=1 cmd`
-    prefix belongs to a command that HAS NOT RUN YET. stash_guard learned this
-    the expensive way: its documented hatch was broken for most of its life and
-    appeared to work only because the env assignment pushed the program out of
-    command position. The carve-out is copied from there deliberately.
+Safety, in the hot-path PreToolUse hook:
+  - A `git commit` writes a different set by spelling, and the guard reviews that set. Plain
+    `git commit` writes the index. `-a` adds every modified tracked file, staged after this hook
+    returns. `git commit -- <paths>` takes those paths from the working tree, never the index.
+    That pathspec shape is standing practice, so leaving it unreviewed would waive review everywhere.
+  - Allow on doubt, and say so. An unparseable pathspec (unbalanced quoting, redirection,
+    unrecognised long option, optional-argument option, magic) is allowed with a notice naming
+    what went unreviewed. A guard that refuses honest commits gets switched off.
+  - No guard here can close this: a pathspec commit takes each path's working-tree content, so
+    a claimed file still commits what a peer left in it. The refusal points at `git diff -- <path>`.
+  - Fail-open: any error allows (returns None); the `git diff --cached` read is bounded by a timeout.
+  - Escape hatch `LUPIN_COMMIT_SCOPE_ACK=1 git commit ...` is a prefix carve-out, not an env
+    read. A hook is a separate process with its own environment.
+    An inline `VAR=1 cmd` prefix belongs to a command that has not run yet.
+    stash_guard's env-based hatch only appeared to work.
 """
 import os
 import re
@@ -163,11 +100,11 @@ _SCOPE_EXPLAINER = {
 
 def _notice_for( why: str ) -> str:
     """
-    The non-blocking "I could not review this one" (mr radio's ruling, 2026-08-25).
+    The non-blocking notice that a commit went unreviewed, and why.
 
     Ensures:
-        - names WHY the pathspec was not parsed and what the seat should do
-        - never refuses — this is the allow path
+        - names why the pathspec was not parsed and what the seat should do
+        - never refuses; this is the allow path
     """
     return (
         f"⚠️ Commit scope guard: NOT REVIEWED — {why}.\n"
@@ -230,37 +167,32 @@ _INLINE_ACK_RE  = re.compile( rf"\b{_ACK_FLAG}=(?P<value>[^\s;&|]*)" )
 
 def _blank_quoted_spans( command: str ) -> str:
     """
-    Blank BALANCED quoted spans so a separator inside a literal is not read as a
-    command position — the over-block stash_guard had to fix (row e062580e).
+    Blank balanced quoted spans so a separator inside a literal is not a command position.
 
     Ensures:
-        - every balanced single- or double-quoted span becomes THE SAME NUMBER OF
-          SPACES, so the blanked string is character-for-character aligned with the
-          original and a match offset taken here still points at the same place there
+        - every balanced single- or double-quoted span becomes the same number of spaces, so
+          the blanked string is character-for-character aligned with the original and a match
+          offset taken here still points at the same place there
         - text with unbalanced quotes is returned unchanged, so nothing can hide
         - never raises
 
-    🔴 LENGTH-PRESERVING IS LOAD-BEARING. It collapsed each span to ONE space until
-    2026-08-25, and then `_pathspec_of` took a match offset from the blanked string
-    and sliced the RAW command with it. Measured: `python3 - "$MSG" <<'EOF' … EOF`
-    followed by `git commit -F "$MSG" -- <paths>` put the offset 12 characters
-    early, the tail began with a newline, the bounded scan saw an EMPTY command, and
-    a pathspec commit was reviewed as though it named nothing — falling back to the
-    index, which is precisely the set a pathspec commit does not write.
+    Length preservation is required. When each span collapsed to one space, `_pathspec_of`
+    sliced the raw command at an offset taken from the blanked string, saw an empty command,
+    and reviewed a pathspec commit as naming nothing, falling back to the index it does not write.
     """
     return _QUOTED_SPAN_RE.sub( lambda m: " " * len( m.group( 0 ) ), command )
 
 
 def _ack_in_prefix( prefix ) -> bool:
     """
-    True iff THIS invocation's own env-assignment prefix carries the ack, truthy.
+    True when this invocation's own env-assignment prefix carries a truthy ack.
 
     Requires:
         - prefix is the matched prefix span, or None
 
     Ensures:
-        - reads the flag from the COMMAND, never from os.environ — see the
-          module docstring for why an env read cannot work here
+        - reads the flag from the command, never from os.environ; see the module
+          docstring for why an env read cannot work here
         - scoped to this invocation's prefix, so an unrelated `echo ACK=1`
           earlier in the line cannot acknowledge a later commit
         - never raises
@@ -290,14 +222,11 @@ def _mentions_git_commit( command: str ):
 
 def git_commit_match( command: str ):
     """
-    THE ONE `git commit` MATCHER IN THIS TREE, made public on purpose.
+    The one `git commit` matcher in this tree, public so other guards share it.
 
-    `merge_head_guard` sits on the SAME trigger surface — a Bash `git commit` —
-    and asks a different question about it. Giving it its own regex would put two
-    spellings of "is this a git commit" into the tree, and the second one drifts
-    the moment either is fixed. Row f3306404's ruling says to model the new guard
-    on an existing reviewed implementation rather than keep two shapes in sync;
-    that reasoning covers the matcher as much as the enforcement point.
+    `merge_head_guard` sits on the same trigger surface, a Bash `git commit`, and asks a
+    different question about it. A second regex would put two spellings of "is this a git
+    commit" in the tree, and the second drifts once either is fixed.
 
     Requires:
         - command is a str
@@ -308,8 +237,7 @@ def git_commit_match( command: str ):
         - quoted literals cannot manufacture a command position
         - never raises
 
-    WARNING: it is NOT exhaustive, deliberately — see this module's threat-model
-    note. Every caller must be able to tolerate a miss.
+    Warning: it is not exhaustive, by the module threat model. Every caller must tolerate a miss.
     """
     return _mentions_git_commit( command )
 
@@ -319,18 +247,11 @@ _HEREDOC_RE = re.compile( r"<<(?P<dash>-?)\s*(?P<q>['\"]?)(?P<tag>[A-Za-z_][A-Za
 
 def _strip_heredoc_bodies( command: str ):
     """
-    Remove every heredoc BODY, so a `git commit` quoted inside one is not mistaken
-    for the command being run (row 292dd3d8).
+    Remove every heredoc body so a quoted `git commit` is not mistaken for the command.
 
-    Measured on this guard's own commit: the message was written with
-    `cat > msg.txt <<'EOF' … EOF` and the body contained the line
-    `git commit  -> the index`. `_mentions_git_commit` searches from the left, so it
-    matched THAT occurrence — inside prose — and the real `git commit -F msg.txt --
-    <paths>` further down was never the thing examined. The guard gave up, which is
-    the safe direction, but it means the newly-mandated `-F <file>` shape goes
-    unreviewed for anyone who writes the message in the same command. It is the same
-    defect as the heredoc false-positive one commit earlier, one level up: text that
-    is DATA was read as COMMAND.
+    `_mentions_git_commit` searches from the left. A `git commit` quoted in a heredoc body
+    matched first, and the real `git commit -F msg.txt -- <paths>` was never examined.
+    That left the standard `-F <file>` shape unreviewed. Data was read as command.
 
     Requires:
         - command is the raw Bash command
@@ -338,8 +259,8 @@ def _strip_heredoc_bodies( command: str ):
     Ensures:
         - returns the command with each heredoc's body and terminator line removed,
           the redirection operator itself left in place
-        - returns None when a heredoc opens and its terminator never appears — an
-          unterminated body could hide anything, so the caller ALLOWS and says so
+        - returns None when a heredoc opens and its terminator never appears; an
+          unterminated body could hide anything, so the caller allows and says so
         - a command with no heredoc is returned unchanged
         - never raises
     """
@@ -366,14 +287,11 @@ def _strip_heredoc_bodies( command: str ):
 
 def _commits_the_whole_worktree( command: str, match ) -> bool:
     """
-    Does this `git commit` carry -a / --all — i.e. will it commit files the index
-    never held? (row 292dd3d8)
+    True when this `git commit` carries -a or --all, so it commits files the index lacks.
 
-    The guard weighs `git diff --cached`. `git commit -a` stages every modified
-    TRACKED file inside git, at commit time — after this hook has already returned.
-    So on a `-a` commit the set this guard reviewed is not the set that gets
-    written, and measured 2026-08-25 a `git commit -am` with an empty index was
-    ALLOWED unconditionally while carrying every peer modification in the tree.
+    The guard weighs `git diff --cached`, but `git commit -a` stages every modified tracked file
+    inside git at commit time, after this hook has returned. On a `-a` commit the reviewed set
+    is not the written set, and a `git commit -am` with an empty index was allowed outright.
 
     Requires:
         - command is the raw Bash command; match is the _mentions_git_commit match
@@ -400,14 +318,14 @@ def _commits_the_whole_worktree( command: str, match ) -> bool:
 
 def _modified_tracked_paths( cwd=None ) -> Optional[ list ]:
     """
-    Every tracked file with unstaged modifications — precisely what `-a` sweeps in.
+    Every tracked file with unstaged modifications, which is what `-a` sweeps in.
 
     Ensures:
         - returns the list of modified tracked paths, possibly empty
-        - `--no-relative` for the same load-bearing reason as _staged_paths: a
+        - `--no-relative` for the same required reason as _staged_paths: a
           relative read from a subdirectory silently returns fewer paths, and
           fewer paths reads to the caller as less to object to
-        - returns None when the read fails for ANY reason (caller then ALLOWS)
+        - returns None when the read fails for any reason (caller then allows)
     """
     try:
         done = subprocess.run(
@@ -462,20 +380,18 @@ _REDIRECTION_RE = re.compile( r"^\d*(?:>>|>|<)&?\d*$" )
 
 def _without_redirections( tokens ):
     """
-    Drop `2>&1`, `> file`, `>> file`, `< file` — a redirection changes where output
-    GOES, never which files a commit carries.
+    Drop `2>&1`, `> file`, `>> file` and `< file` from a commit's token list.
 
-    It used to be a reason to give up entirely, and that was measured wrong the
-    moment it shipped: almost every commit this fleet runs ends `2>&1 | tail -3`,
-    so "any < or > means unsure" made the mandated `git commit -- <paths>` shape
-    unreviewable in practice. A guard that gives up on the common case is off.
+    A redirection changes where output goes, never which files a commit carries. Treating
+    any < or > as unsure made the standard `git commit -- <paths>` shape unreviewable.
+    Nearly every commit here ends `2>&1 | tail -3`. A guard that gives up on the common case is off.
 
     Requires:
         - tokens is the shlex-split token list after `commit`
 
     Ensures:
         - returns the tokens with redirection operators and their targets removed
-        - a BARE operator (`>`, `2>`) also consumes the token after it — that is
+        - a bare operator (`>`, `2>`) also consumes the token after it; that is
           its filename, and reading it as a path would name a file the commit does
           not touch
         - returns None if `<<` survives here: the heredoc stripper should have
@@ -501,32 +417,26 @@ def _without_redirections( tokens ):
 
 def _pathspec_of( command: str, match ):
     """
-    The paths a `git commit <paths>` names — or an "I am not sure" (row 292dd3d8).
+    The paths a `git commit <paths>` names, or a reason the guard is unsure.
 
-    Why it must exist: mr radio's 2026-08-25 ruling makes `git commit -- <paths>`
-    standing practice, because it commits named paths straight from the working
-    tree and never reads the shared index. That closes the race — and it hands the
-    guard an EMPTY index, which read to the guard as nothing to object to. Mandating
-    the safe shape would have made every compliant commit an unreviewed one.
-
-    Why it gives up so readily: the guard's own false-positive on the heredoc that
-    carried its commit message. A guard that refuses honest commits gets switched
-    off, so every ambiguity here resolves to "allow, and say why".
+    A pathspec commit never reads the shared index, so the guard would see an empty index and
+    review nothing. Any ambiguity means allow and say why, since a guard that refuses honest
+    commits gets switched off.
 
     Requires:
         - command is the raw Bash command; match is the _mentions_git_commit match
 
     Ensures:
-        - returns ( paths, None ) when the pathspec is unambiguous — everything
+        - returns ( paths, None ) when the pathspec is unambiguous: everything
           after `--`, or the bare tokens once every option and option-argument is
           accounted for
         - returns ( [], None ) when the command names no paths at all (an ordinary
-          index commit — the caller reviews the index as before)
-        - returns ( None, why ) when ANY doubt remains: quoting that will not parse,
+          index commit; the caller reviews the index as before)
+        - returns ( None, why ) when any doubt remains: quoting that will not parse,
           a heredoc the stripper did not remove, an unrecognised long option, an
-          optional-argument option, or pathspec magic. The caller ALLOWS and says `why`
-        - ordinary redirections (`2>&1`, `> log`) are DROPPED, not a reason to give
-          up — they change where output goes, never what the commit carries
+          optional-argument option, or pathspec magic. The caller allows and says `why`
+        - ordinary redirections (`2>&1`, `> log`) are dropped, not a reason to give
+          up; they change where output goes, never what the commit carries
         - never raises
     """
     tail = command[ match.end(): ]
@@ -597,32 +507,27 @@ def _pathspec_of( command: str, match ):
 
 def _staged_paths( cwd=None ) -> Optional[ list ]:
     """
-    The full staged set, unscoped — the read the rule asked a human to remember.
+    The full staged set, unscoped: the read the rule asked a human to remember.
 
     Requires:
         - cwd is a directory to run in, or None for the process's own
 
     Ensures:
         - returns the list of staged paths, possibly empty
-        - the list is REPO-WIDE regardless of `cwd` or of git config — enforced by
-          `--no-relative`, not assumed (row 0adf242e)
-        - returns None when the read fails for ANY reason (not a repo, git
+        - the list is repo-wide regardless of `cwd` or of git config, enforced by
+          `--no-relative` and not assumed
+        - returns None when the read fails for any reason (not a repo, git
           missing, timeout), which the caller treats as allow
         - never raises
 
-    ⚠️ THE FAIL-OPEN ON THE THIRD LINE IS DELIBERATE AND DECLARED, not incidental:
-    a returncode != 0 or any exception yields None and the caller ALLOWS the commit.
-    That is the correct trade for a PreToolUse hook, which must never wedge a commit
-    because git was momentarily unreadable — but it means this guard cannot be relied
-    on as a security boundary. It catches an honest mistake, not a determined one.
+    The fail-open is declared. A nonzero return code or any exception yields None and the caller
+    allows the commit, since a PreToolUse hook must never wedge a commit because git was briefly
+    unreadable. So this guard cannot serve as a security boundary; it catches an honest mistake.
 
-    🔴 `--no-relative` IS LOAD-BEARING. The first line of this docstring promises the
-    set is "unscoped", and without the flag that promise is only true because
-    `diff.relative` happens to be unset in this repo. With `-c diff.relative=true`,
-    measured: run from src/ with a file staged outside src/, this command returns an
-    EMPTY list — and an empty staged set reads to the caller as "nothing to object
-    to", so the guard would wave through exactly the cross-scope commit it exists to
-    stop. A contract that says "unscoped" must enforce it.
+    `--no-relative` is required. Without it "unscoped" holds only while `diff.relative` is
+    unset. With `-c diff.relative=true`, running from src/ with a file staged outside src/ returned
+    an empty list, which reads as nothing to object to, so the guard waved through the
+    cross-scope commit it exists to stop.
     """
     try:
         done = subprocess.run(
@@ -642,6 +547,8 @@ def _staged_paths( cwd=None ) -> Optional[ list ]:
 
 def _human_size( num_bytes: int ) -> str:
     """
+    Format a byte count as a short human-readable size.
+
     Ensures:
         - returns a short human-readable size, largest unit that fits
         - GB is the last unit, so the loop always returns and there is no
@@ -759,8 +666,7 @@ _ANNOTATED_PATH_RE = re.compile( r"^(?P<bare>\S+)\s+\(.*$" )
 
 def _parse_manifest_report( text: str ):
     """
-    Map each session id to the paths its section claims, and to the Touched Files
-    bullets no form could read.
+    Map each session id to the paths its section claims and to its unreadable bullets.
 
     Requires:
         - text is the manifest file's contents
@@ -768,8 +674,8 @@ def _parse_manifest_report( text: str ):
     Ensures:
         - returns ( claims, unreadable ): claims is { session_id: set(paths) } and
           unreadable is { session_id: [ bullet line, ... ] }, both possibly empty
-        - a section with no touched files maps to an empty set, which is NOT the
-          same as an absent section — absent means "no discipline here, fail
+        - a section with no touched files maps to an empty set, which is not the
+          same as an absent section: absent means "no discipline here, fail
           open", empty means "this seat claims nothing"
         - the documented `- <ts> | <path>` form is read anywhere in a section; the
           drifted forms only under `### Touched Files`
@@ -834,8 +740,7 @@ def _is_mine( session_id, sid ) -> bool:
 
 def _section_report( session_id, cwd=None ):
     """
-    What THIS session claims, what every other section claims, and which of this
-    session's Touched Files bullets claimed nothing.
+    What this session claims, what other sections claim, and its unread Touched Files bullets.
 
     Ensures:
         - returns ( mine, others, unreadable ): mine and others exactly as
@@ -868,7 +773,7 @@ def _section_report( session_id, cwd=None ):
 
 def _claims_for_session( session_id, cwd=None ):
     """
-    What THIS session claims, and what every other section claims.
+    What this session claims, and what every other section claims.
 
     Sections are keyed by the 8-char session prefix while the hook is handed the
     full UUID, so the match is by prefix in either direction.
@@ -878,7 +783,7 @@ def _claims_for_session( session_id, cwd=None ):
 
     Ensures:
         - returns ( mine, others ) where mine is a set of paths or None when this
-          session has NO section — None is the fail-open signal, distinct from an
+          session has no section; None is the fail-open signal, distinct from an
           empty set
         - others maps path -> session id, for naming the apparent owner
         - never raises
@@ -910,12 +815,12 @@ def _deny_reason_for( foreign: dict, large: list, staged: list, cwd=None, *, sco
 
     Ensures:
         - names every offending file, and the peer session where one is known
-        - always prints the FULL set, because the unscoped list is the thing the
+        - always prints the full set, because the unscoped list is the thing the
           original defect was missing
-        - NAMES WHICH SET IT REVIEWED — the index, the index plus everything `-a`
-          sweeps in, or the paths the command itself names — and gives the remedy
+        - names which set it reviewed (the index, the index plus everything `-a`
+          sweeps in, or the paths the command itself names) and gives the remedy
           that fits that set. Telling a seat to `git restore --staged` a file it
-          never staged sends it somewhere the file is not (row 292dd3d8)
+          never staged sends it somewhere the file is not
         - never raises
     """
     lines = []
@@ -968,12 +873,11 @@ _UNREADABLE_SHOWN = 5
 
 def _section_hint( mine: set, unreadable: list ) -> str:
     """
-    The part of a refusal that is about the seat's OWN section, not the files.
+    The part of a refusal about the seat's own section rather than the files.
 
-    Row 22957fe9: a seat whose Touched Files were all in a form the parser does not
-    read was refused three times with "claimed by no session" for a file its own
-    section listed. The refusal was right and its reason sent her looking at the
-    file, not at the section. This names the section as the cause.
+    A seat whose Touched Files were all in an unread form was refused with "claimed by no
+    session" for a file its own section listed.
+    The reason sent it looking at the file. This names the section as the cause.
 
     Requires:
         - mine is this session's claimed set (possibly empty)
@@ -982,7 +886,7 @@ def _section_hint( mine: set, unreadable: list ) -> str:
     Ensures:
         - "" when the section claims something and every bullet was read
         - otherwise a paragraph, ending in a blank line, that says the section
-          claims ZERO paths (when it does), quotes up to _UNREADABLE_SHOWN unread
+          claims zero paths (when it does), quotes up to _UNREADABLE_SHOWN unread
           bullets, and names the forms that are read
         - never raises
     """
@@ -1012,12 +916,10 @@ class CommitScopeVerdict( NamedTuple ):
     """
     What the guard decided, and what it looked at to decide it.
 
-    `deny_reason` is the refusal (None = allow). `notice` is the non-blocking
-    "I allowed this and here is what I could not review" — mr radio's ruling of
-    2026-08-25 requires the seat be TOLD when a commit went unreviewed, because
-    the same ruling makes the unreviewable shape (`git commit -- <paths>`) the
-    standing practice. Silence would have converted every compliant commit into
-    an unexamined one.
+    `deny_reason` is the refusal (None means allow). `notice` is the non-blocking note that a
+    commit was allowed and what could not be reviewed. The seat must be told when a commit
+    went unreviewed, because the standing `git commit -- <paths>` shape is one the guard cannot
+    always parse. Silence would make every compliant commit unexamined.
     """
     deny_reason : Optional[ str ] = None
     notice      : Optional[ str ] = None
@@ -1040,24 +942,22 @@ def evaluate_commit_scope(
         - tool_input is the hook payload's tool_input (dict) carrying "command"
         - session_id is the hook payload's session id (full UUID or 8-char)
         - staged_reader is None (real git) or injected for testing
-        - modified_reader is None (real git) or injected for testing — the
+        - modified_reader is None (real git) or injected for testing; the
           modified-tracked set a `-a` commit sweeps in on top of the index
 
     Ensures:
-        - deny_reason is None unless ALL hold: tool_name is Bash, the command
+        - deny_reason is None unless all hold: tool_name is Bash, the command
           invokes `git commit` in command position, the ack prefix is absent, the
           reviewed set is readable and non-empty, and it contains either a path
           this session's manifest section does not claim or an oversized file
-        - THE REVIEWED SET IS WHATEVER THAT COMMAND WOULD ACTUALLY WRITE, and the
-          refusal names which of the three it was:
-            · the paths the command names          (`git commit -- <paths>`)
-            · the index plus every modified file   (`git commit -a`)
-            · the index                            (everything else)
+        - the reviewed set is whatever that command would actually write, and the refusal
+          names which of the three it was: the paths the command names (`git commit -- <paths>`),
+          the index plus every modified file (`git commit -a`), or the index (everything else)
         - notice is set, with deny_reason None, when the command names paths this
-          guard will not parse confidently — allow, and say what went unreviewed
-        - a CLEAN single-seat index returns both None — not refuse-always
-        - FAIL-OPEN: any unexpected error, and any absence of a manifest section
-          for this session, → both None
+          guard will not parse confidently; allow, and say what went unreviewed
+        - a clean single-seat index returns both None, so it is not refuse-always
+        - fail-open: any unexpected error, and any absence of a manifest section
+          for this session, returns both None
     """
     allow = CommitScopeVerdict()
     try:
@@ -1146,12 +1046,12 @@ def commit_scope_deny_reason( *args, **kwargs ) -> Optional[ str ]:
 
 def build_commit_scope_notice_response( notice: str ) -> dict:
     """
-    Build the ALLOW-with-context envelope for a commit the guard could not review.
+    Build the allow-with-context envelope for a commit the guard could not review.
 
     Ensures:
         - returns { hookSpecificOutput: { hookEventName: "PreToolUse",
-          additionalContext: <notice> } } — NO permissionDecision, so the commit
-          runs; the seat is told, not blocked (mr radio's ruling, 2026-08-25)
+          additionalContext: <notice> } } with no permissionDecision, so the commit
+          runs; the seat is told, not blocked
     """
     return {
         "hookSpecificOutput": {

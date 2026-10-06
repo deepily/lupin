@@ -1,51 +1,34 @@
 """
-The standing tick for `memento_io.py verify` — row 505e5c12.
+The standing tick for `memento_io.py verify`, run once a day from the Stop hook.
 
-WHY THIS EXISTS. `verify` checks that every memento RECORD in this repo is byte-identical
-to its out-of-repo mirror, and that no record content is sitting at a POINTER path where
-the next pointer write would destroy it. Nothing called it. Cheech found it by reading a
-warning the tool prints about itself and running it by hand — after 6 days 14 hours unrun,
-with real findings waiting, including a bare slot, which is a data-loss window rather than
-a tidiness complaint.
+Why it exists: `verify` checks that every memento record in this repo is byte-identical
+to its out-of-repo mirror. It also checks that no record content sits at a pointer path
+where the next pointer write would destroy it. Nothing called it, so findings, including
+a bare slot (a data-loss window), went unseen. A check that cannot fire is
+indistinguishable from a check that passes.
 
-THE SHAPE, in the row's words: a check that cannot fire is indistinguishable from a check
-that passes. The mirror-integrity guarantee had been resting on somebody happening to
-notice a warning.
+Where: the Stop hook, behind a TTL ledger. It is the only surface that already runs
+unattended on every seat with no new infrastructure. A session-scoped cron dies with
+the session that created it, so the check would go quiet when its owner was reaped.
 
-THE THREE DECISIONS THE ROW LEFT OPEN, and how they are answered here — argue with these
-rather than assume they were defaults:
+Cadence: daily, set by the one constant `MEMENTO_VERIFY_TTL_SECONDS`. It is a whole-repo
+scan of a few hundred small files, and mementos are written a handful of times a day.
+Hourly would buy nothing and turn a real finding into wallpaper.
 
-  WHERE. The Stop hook, behind a TTL ledger. It is the only surface that already runs
-  unattended on every seat without new infrastructure — no systemd unit to install, no
-  cron to survive a reboot, nothing to remember. A session-scoped cron was the obvious
-  alternative and it is wrong for exactly the reason this row exists: it dies with the
-  session that created it, so the check would go quiet the moment its owner was reaped
-  and nobody would be told.
+What it does with a finding: it says so. It never restores, never deletes, never migrates.
+An orphan mirror can mean "deleted by choice" as easily as "lost", and those want
+opposite actions. A tick that guesses would eventually resurrect something somebody removed.
 
-  CADENCE. Daily. This is a whole-repo scan of a few hundred small files against their
-  mirrors; hourly buys nothing (mementos are written a handful of times a day) and turns
-  a real finding into wallpaper. `MEMENTO_VERIFY_TTL_SECONDS` is one constant.
+Cross-repo: `memento_io.py` lives in planning-is-prompting and is reached through
+`PLANNING_IS_PROMPTING_ROOT`. The records it verifies live in this repo (`io/mementos/`).
+So a Lupin-side tick over Lupin's mementos is in-lane. If the env var is unset or the
+script is missing, the tick says so and returns. It does not guess a path.
 
-  WHAT IT DOES WITH A FINDING. It SAYS SO. It never restores, never deletes, never
-  migrates. The row flagged auto-restore as "tempting and probably wrong without a human
-  look" and it is right: an orphan mirror can mean "deliberately deleted" exactly as
-  easily as "lost", and those two want opposite actions. A tick that guesses between them
-  will eventually resurrect something somebody removed on purpose.
-
-CROSS-REPO, AND WHY THAT IS FINE HERE. `memento_io.py` lives in planning-is-prompting and
-is reached through `PLANNING_IS_PROMPTING_ROOT`, the env var CLAUDE.md already designates
-for exactly this. The RECORDS it verifies live in THIS repo (`io/mementos/`), so a
-Lupin-side tick over Lupin's own mementos is in-lane. If the env var is unset or the
-script is missing, this reports that plainly and returns — it does not guess a path.
-
-⚠️ IT FAILS SOFT, ALWAYS. Every path returns a string and swallows its own exceptions. A
-memento checker that could take the Stop hook down would be a worse bug than the one it
-was written to catch.
-
-⚠️ AND IT NEVER GOES SILENT ON AN ERROR. A timeout, a missing script, an unreadable
-ledger — each returns a LOUD line, never "". Silence is reserved for the two states that
-genuinely mean nothing-to-say: the TTL has not expired, or the run found nothing. That
-distinction is the entire point of the row.
+It fails soft, always. Every path returns a string and swallows its own exceptions.
+A memento checker that could take the Stop hook down would be worse than the
+bug it catches. It never goes silent on an error: a timeout, a missing script or an
+unreadable ledger each return a loud line, never "". Silence is reserved for two states
+that mean nothing to say: the TTL has not expired, or the run found nothing.
 """
 
 import json
@@ -75,28 +58,18 @@ _LEDGER_NAME = ".memento-verify-tick.json"
 
 def fleet_repo_roots( bridges_dir=None ):
     """
-    The repos the fleet is ACTUALLY sitting in, read from live session bridges
-    (row 890c07d3, Rick's ruling 2026-08-17).
+    Return the repos the fleet is sitting in, read from live session bridges.
 
-    WHY BRIDGES AND NOT CONFIG. heartbeat_hold:86-93 left "where do the fleet's
-    roots come from" open on purpose, and named the trap: a config-derived list
-    "resolves to CONTAINER paths that do not exist on the host, where the arbiter
-    actually runs". A bridge's `cwd` is written BY the session, ON the host, and was
-    correct in 23 of 23 live bridges when this was measured — it is the same ground
-    truth that fixed the reap's slot derivation. So the list is OBSERVED, never
-    declared, and host-side by construction.
-
-    ⚠️ ITS HONEST LIMIT, which callers must not paper over: this sees only repos with
-    a CURRENTLY LIVE seat. A repo whose sessions have all been reaped drops off the
-    list and stops being checked. That is a real gap, stated rather than hidden — the
-    alternative was a declared list that is wrong in a way nobody can see.
+    Bridges are used instead of config because a config-derived list resolves to container paths that do not exist on the host, where the arbiter runs.
+    A bridge's `cwd` is written by the session on the host, so the list is observed, never declared.
+    Its limit: it sees only repos with a currently live seat. A repo whose sessions were all reaped drops off the list and stops being checked.
 
     Requires:
         - bridges_dir is a path-like, or None to use the real sessions dir
 
     Ensures:
-        - returns a SORTED list of distinct existing repo roots that actually contain
-          an io/mementos directory — a repo with no mementos has nothing to verify,
+        - returns a sorted list of distinct existing repo roots that actually contain
+          an io/mementos directory. A repo with no mementos has nothing to verify,
           and reporting on it would be noise, not coverage
         - unreadable / partial / non-JSON bridge files are skipped, never fatal
         - returns [] rather than raising when the sessions dir is missing
@@ -126,7 +99,7 @@ def _ledger_path():
     Where the last-run stamp lives.
 
     Ensures:
-        - returns a Path under the SAME sessions dir the other hook ledgers use, so
+        - returns a Path under the same sessions dir the other hook ledgers use, so
           this one is not a second convention nobody thinks to look for
     """
     return Path( sessions_dir() ) / _LEDGER_NAME
@@ -140,8 +113,8 @@ def _read_last_run( path, now ):
         - path is a Path; now is a timezone-aware datetime
 
     Ensures:
-        - returns None when the file is absent, unparseable, or carries no timestamp —
-          all three mean "never ran as far as anyone can tell", which must trigger a run
+        - returns None when the file is absent, unparseable, or carries no timestamp.
+          All three mean "never ran as far as anyone can tell", which must trigger a run
           rather than suppress one. A ledger that cannot be read is not a ledger that
           says "recently done".
     """
@@ -175,10 +148,10 @@ def _write_last_run( path, now, findings ):
 
 def _script_path():
     """
-    The memento_io.py this tick drives, or None when it cannot be located.
+    Return the memento_io.py this tick drives, or None when it cannot be located.
 
     Ensures:
-        - resolves ONLY from PLANNING_IS_PROMPTING_ROOT — never a guessed relative path.
+        - resolves only from PLANNING_IS_PROMPTING_ROOT, never a guessed relative path.
           A wrong guess would run some other copy of the script against this repo, and
           a checker pointed at the wrong tree is worse than no checker
     """
@@ -190,17 +163,16 @@ def _script_path():
 
 def _parse_findings( stdout ):
     """
-    The finding count from verify's own summary line.
+    Return the finding count from verify's own summary line.
 
     Requires:
         - stdout is the captured text of a verify run
 
     Ensures:
         - returns an int when a `--- FINDINGS : N` line is present
-        - returns None when it is not — and None is NOT zero. A run whose output we
-          cannot read has not been shown to be clean, and rendering it as 0 findings is
-          precisely the "could not measure" wearing "measured, fine" costume this whole
-          area of the codebase keeps getting bitten by
+        - returns None when it is not, and None is not zero. A run whose output we
+          cannot read has not been shown to be clean. Rendering it as 0 findings would
+          report "could not measure" as "measured, fine"
     """
     for line in reversed( stdout.splitlines() ):
         if "FINDINGS" in line and ":" in line:
@@ -213,12 +185,12 @@ def _parse_findings( stdout ):
 
 def _resolve_roots( repo_root ):
     """
-    The repos this tick will check, and nothing else decides it (row 890c07d3).
+    Return the repos this tick will check, and nothing else decides it.
 
     Ensures:
-        - an EXPLICIT repo_root wins outright — one caller, one repo, no discovery
-        - otherwise: every repo the live bridges say the fleet is sitting in, UNIONED
-          with LUPIN_ROOT. The union matters — losing lupin because no lupin seat
+        - an explicit repo_root wins outright: one caller, one repo, no discovery
+        - otherwise: every repo the live bridges say the fleet is sitting in, unioned
+          with LUPIN_ROOT. The union matters, because losing lupin when no lupin seat
           happens to be live right now would trade one blind spot for another
         - returns [] when nothing can be resolved, so the caller can say so loudly
     """
@@ -235,32 +207,24 @@ def verify_tick_line( repo_root=None, now=None, force=False ):
     """
     Run `memento_io.py verify` at most once a day and return one line about it.
 
-    SCOPE (row 890c07d3, Rick's ruling 2026-08-17): with no explicit repo_root this
-    checks EVERY repo the live session bridges say the fleet is sitting in, unioned
-    with LUPIN_ROOT — not lupin alone. Before that ruling only lupin was ever checked,
-    so half the live fleet's mementos (the continuity record a re-spin rehydrates
-    from) were never looked at, and the silence was indistinguishable from a clean
-    result.
-
-    ⚠️ THE REMAINING BLIND SPOT, stated rather than hidden: the bridge-derived list
-    sees only repos with a CURRENTLY LIVE seat. A repo whose sessions have all been
-    reaped drops off and stops being checked. See fleet_repo_roots for why an
-    observed list beats a declared one anyway.
+    With no explicit repo_root it checks every repo the live session bridges say the fleet is sitting in, unioned with LUPIN_ROOT, not lupin alone.
+    Checking lupin alone left the other live repos' mementos (the continuity record a re-spin rehydrates from) unread, and silence looked like a clean result.
+    Remaining blind spot: the bridge-derived list sees only repos with a currently live seat (see fleet_repo_roots).
 
     Requires:
-        - repo_root pins the check to ONE repo (the CLI and the tests use this);
+        - repo_root pins the check to one repo (the CLI and the tests use this);
           None means discover, as above
         - now is a timezone-aware datetime (defaults to real now)
         - force=True bypasses the TTL, for the CLI and for tests
 
     Ensures:
-        - returns "" ONLY when the TTL has not expired, or every checked repo came
-          back clean — the two states that genuinely mean nothing to say
-        - returns a LOUD line on every failure (no env var, missing script, timeout,
+        - returns "" only when the TTL has not expired, or every checked repo came
+          back clean, the two states that mean nothing to say
+        - returns a loud line on every failure (no env var, missing script, timeout,
           unreadable output), never ""
-        - every line NAMES the repo it read, so no verdict can be read wider than its
+        - every per-repo line names the repo it read, so no verdict can be read wider than its
           scope, and one repo's failure never suppresses another's result
-        - NEVER restores, deletes, or migrates anything; it reports
+        - never restores, deletes, or migrates anything; it reports
         - never raises
     """
     try:
@@ -302,11 +266,13 @@ def verify_tick_line( repo_root=None, now=None, force=False ):
 
 def _verify_one_repo( script, repo_root ):
     """
-    Verify ONE repo's mementos; return (line, findings_count).
+    Verify one repo's mementos; return (line, findings_count).
+
+    The line names the repo that was read. An unnamed verdict would leave a reader unable to tell which repo the findings belong to.
 
     Ensures:
         - line is "" only when that repo verified clean; every other outcome is loud
-        - findings_count is None when no count could be read (unknown, NOT zero)
+        - findings_count is None when no count could be read (unknown, not zero)
         - a timeout or crash in one repo is reported and never raised, so one bad repo
           cannot silence the rest of the sweep
     """

@@ -1,59 +1,41 @@
 """
-Task-store mirror — Phase-2 write-path orchestrator (PostToolUse seam).
+Task-store mirror: Phase-2 write-path orchestrator (PostToolUse seam).
 
-⚠️ DEPRECATED (Step-5 stage-1, 2026-06-17) — the mirror NO LONGER WRITES.
-The store-canonical cutover is live (one store, three readers); every session
-now writes its OWN owed work to the store via the MCP `task_create` path, so
-the harness→store auto-mirror is obsolete. As of stage-1 the orchestrator is a
-DEPRECATED, LOGGED NO-OP: `mirror_task_tool_event` emits ONE fire-log line per
-native TaskCreate/TaskUpdate (greppable phase=`task_store_mirror_deprecated_noop`,
-stamped with persona + session + tool + harness id + subject/status) so we can
-watch, fleet-wide, which sessions are STILL using native TaskCreate for owed
-work — then performs no store write at all. Stage-2 (DELETE the mirror + drop
-the dead TASK_STORE_WRITE_TOOLS entries) is evidence-gated on that fire-log
-going quiet fleet-wide and is NOT done here.
+Deprecated: the mirror no longer writes. The store-canonical cutover is live (one store,
+three readers), and every session writes its own owed work via the MCP `task_create` path.
+The orchestrator is a deprecated, logged no-op. `mirror_task_tool_event` emits one fire-log
+line per native TaskCreate/TaskUpdate (greppable phase=`task_store_mirror_deprecated_noop`,
+stamped with persona, session, tool, harness id and subject or status). That shows which
+sessions still use native TaskCreate for owed work. Stage-2 (delete the mirror and drop the
+dead TASK_STORE_WRITE_TOOLS entries) waits for that fire-log to go quiet fleet-wide.
 
-REVERSIBILITY: the entire write pipeline below is intentionally KEPT, not
-deleted. The single module guard `MIRROR_WRITES_DEPRECATED` (below) selects the
-behavior — flip it to False and the orchestrator resumes the exact pre-cutover
-write path verbatim (the bridge for any not-yet-migrated session). Plan:
-src/rnd/v0.1.8/2026.06.17-unified-task-store-followups-plan.md §C.
+Reversibility: the entire write pipeline below is intentionally kept, not deleted. The single
+module guard `MIRROR_WRITES_DEPRECATED` selects the behavior. Flip it to False and the
+orchestrator resumes the exact pre-cutover write path verbatim (the bridge for any
+not-yet-migrated session).
 
-Mirrors the session's harness task list (Task* tool family) into the unified
-task store: "use the harness task list as you always have; the store follows
-you" (task-store-discipline.md §1). One entry point,
-`mirror_task_tool_event`, called by post_tool_use.py for TaskCreate /
-TaskUpdate events only.
+Mirrors the session's harness task list (Task* tool family) into the unified task store.
+Use the harness task list as always, and the store follows you. One entry point,
+`mirror_task_tool_event`, called by post_tool_use.py for TaskCreate / TaskUpdate events only.
 
-Pipeline per invocation (plan §1.6 / §3):
+Status mapping (ruled):
 
-    gate (settings enabled + F4 manager-figure)
-      → opportunistic spool drain (C8 replay)
-        → map the harness event to a store op (plan §2 mapping table)
-          → execute → update the correlation map
-            → transport-failure ⇒ spool + flag-once (I4)
-            → 4xx server verdict ⇒ drop + flag-once (will never succeed)
+    TaskCreate                     → POST /api/tasks (store status queued).
+    TaskCreate w/ metadata.task_store_id → POST /api/tasks/{id}/correlate (respawn adoption).
+    TaskUpdate pending             → ->queued.
+    TaskUpdate in_progress         → ->in_progress.
+    TaskUpdate completed           → ->review (never ->done: the hook cannot
+                                      fabricate receipts; receipted closes stay explicit).
+    TaskUpdate deleted             → ->dropped, reason="harness-deleted (TaskUpdate)".
 
-Status mapping (ruled, Tiberius qid b312b0f1):
+The mirror never writes ->blocked / ->done / ->claimed. Those semantics ride explicit
+MCP/REST transitions only, so the arbiter-oracle `blocked_by {kind:user}` contract is untouched.
 
-    TaskCreate                     → POST /api/tasks (store status queued)
-    TaskCreate w/ metadata.task_store_id → POST /api/tasks/{id}/correlate (respawn adoption)
-    TaskUpdate pending             → ->queued
-    TaskUpdate in_progress         → ->in_progress
-    TaskUpdate completed           → ->review   (NEVER ->done: the hook cannot
-                                      fabricate receipts; receipted closes
-                                      stay explicit — ruling #1)
-    TaskUpdate deleted             → ->dropped, reason="harness-deleted (TaskUpdate)"
-
-The mirror NEVER writes ->blocked / ->done / ->claimed — those semantics ride
-explicit MCP/REST transitions only, so the arbiter-oracle `blocked_by
-{kind:user}` contract (design §2.1) is untouched by construction.
-
-INVARIANTS: never raises; never blocks the hook beyond the client's bounded
-timeout; a session that cannot write FLAGS ONCE (I4) and never fakes.
+Invariants: never raises; never blocks the hook beyond the client's bounded timeout;
+a session that cannot write flags once and never fakes.
 
 Design authority: lupin ->
-    src/rnd/v0.1.8/2026.06.12-task-store-phase2-write-paths/01-build-plan.md.
+    src/rnd/v0.1.8/2026.06.12-task-store-phase2-write-paths/01-build-plan.md
 """
 
 import time
@@ -93,7 +75,7 @@ DROPPED_REASON = "harness-deleted (TaskUpdate)"
 
 def build_correlation_key( stable_session_id, generation, harness_id ):
     """
-    Build the C1 precedence-(a) correlation key for a harness task.
+    Build the highest-precedence correlation key for a harness task.
 
     Requires:
         - stable_session_id / harness_id are non-empty strings
@@ -101,9 +83,9 @@ def build_correlation_key( stable_session_id, generation, harness_id ):
 
     Ensures:
         - Returns "cc-task:<stable_session_id>:g<generation>:<harness_id>" —
-          scoped to the STABLE session id AND the generation (bug 9b23d5bc).
+          scoped to the stable session id and the generation.
           Harness counters restart after /clear, so the generation segment is
-          what makes the post-clear counter "1" yield a DISTINCT key from the
+          what makes the post-clear counter "1" yield a distinct key from the
           pre-clear counter "1" — the server-side idempotency probe then never
           adopts the stale prior-generation row.
     """
@@ -116,11 +98,11 @@ def _entry_key( entry ):
 
     Requires:
         - entry carries "harness_id"; "generation" is present on every op built
-          by _build_op (legacy pre-fix spool lines may lack it ⇒ treated as 0)
+          by _build_op (legacy spool lines may lack it, which is treated as 0)
 
     Ensures:
         - Returns "<generation>:<harness_id>" so order-preservation compares two
-          ops by the SAME identity the correlation map keys them under (a
+          ops by the same identity the correlation map keys them under (a
           post-clear counter never aliases a pre-clear spooled op)
     """
     return task_map.map_key( entry.get( "generation", 0 ), entry.get( "harness_id" ) )
@@ -135,8 +117,8 @@ def _identity( session_id ):
 
     Ensures:
         - Returns ( actor, persona_lower ) — actor is
-          "<persona_lower> <sid8>" per the MCP-wrapper identity convention
-          (spec §2.1); persona falls back to "unknown" when the bridge has
+          "<persona_lower> <sid8>" per the MCP-wrapper identity convention;
+          persona falls back to "unknown" when the bridge has
           no allocation (server still gets a truthful, non-spoofed stamp)
         - Never raises
     """
@@ -158,8 +140,9 @@ def _log( session_id, phase, **extra ):
 
 def _flag_once( session_id, base_dir, detail ):
     """
-    I4 flag-once: record + announce the FIRST write failure since the last
-    success; subsequent failures stay silent (no per-event noise).
+    Record and announce the first write failure since the last success, once per outage.
+
+    Subsequent failures stay silent (no per-event noise).
 
     Ensures:
         - flagged_at set iff it was previously None (one flag per outage)
@@ -177,7 +160,7 @@ def _flag_once( session_id, base_dir, detail ):
 
 def _clear_flag( session_id, base_dir ):
     """
-    Clear the I4 marker on a successful write (so the NEXT outage flags again).
+    Clear the flag-once marker on a successful write so the next outage flags again.
 
     Ensures:
         - flagged_at cleared iff it was set; never raises
@@ -193,7 +176,7 @@ def _clear_flag( session_id, base_dir ):
 
 def _is_transport_or_5xx( status_code ):
     """
-    Is this outcome spool-able (retryable later) per plan §3?
+    Is this outcome spool-able (retryable later)?
 
     Ensures:
         - True for transport loss (None) and 5xx; False for received 2xx-4xx
@@ -203,10 +186,10 @@ def _is_transport_or_5xx( status_code ):
 
 def _execute_create( settings, api_key, session_id, entry, base_dir ):
     """
-    Execute one create op (live or replayed), with the C8 idempotency probe.
+    Execute one create op (live or replayed), with the idempotency probe.
 
     The probe guards the lost-response case: a spooled create whose original
-    POST actually landed must ADOPT the existing item, not duplicate it.
+    POST actually landed must adopt the existing item, not duplicate it.
     Probe failures are treated as transport (spool-able) — never replay blind.
 
     Requires:
@@ -257,7 +240,7 @@ def _execute_transition( settings, api_key, session_id, entry, base_dir ):
 
     Requires:
         - entry carries harness_id / harness_status / payload (sans item id —
-          the item id is resolved HERE from the correlation map, so a
+          the item id is resolved here from the correlation map, so a
           replayed transition picks up the id its replayed create just won)
 
     Ensures:
@@ -285,7 +268,7 @@ def _execute_transition( settings, api_key, session_id, entry, base_dir ):
 
 def _execute_correlate( settings, api_key, session_id, entry, base_dir ):
     """
-    Execute one correlate op — the respawn-adoption seam (ruling #4).
+    Execute one correlate op — the respawn-adoption seam.
 
     Requires:
         - entry carries harness_id / item_id (the inherited store item uuid
@@ -293,7 +276,7 @@ def _execute_correlate( settings, api_key, session_id, entry, base_dir ):
 
     Ensures:
         - Returns ( outcome, status_code ), outcome ∈ { "ok", "spool", "drop" }
-        - "ok": the map records harness_id → the ADOPTED item id
+        - "ok": the map records harness_id → the adopted item id
         - Never raises
     """
     generation = entry.get( "generation", 0 )
@@ -317,14 +300,14 @@ _EXECUTORS = {
 
 def _drain_spool( settings, api_key, session_id, base_dir, now_epoch ):
     """
-    Opportunistic C8 replay: one bounded FIFO pass over the spool.
+    Opportunistic replay: one bounded first-in first-out pass over the spool.
 
     Requires:
         - settings/api_key resolved by the caller (one read per invocation)
 
     Ensures:
         - TTL-expired entries dropped (counted + logged — no silent cap)
-        - Entries replayed FIFO; the FIRST spool-able failure stops the pass
+        - Entries replayed in first-in first-out order; the first spool-able failure stops the pass
           (everything from there stays spooled, order preserved — a
           transition never jumps its create)
         - 4xx verdicts drop the entry + flag (will never succeed)
@@ -364,21 +347,11 @@ def _drain_spool( settings, api_key, session_id, base_dir, now_epoch ):
 
 def _build_op( payload, session_id, actor, persona_lower, base_dir ):
     """
-    Map one Task* hook payload onto a spool-shaped store op (plan §2 table).
+    Map one Task* hook payload onto a spool-shaped store op.
 
-    Resolves the GENERATION for the op (bug 9b23d5bc) — this is the one place
-    that may MUTATE the map (a generation bump on reset detection); every other
-    skip/idempotence decision still lives in the caller. Returns None for events
-    that mirror to nothing (metadata-only TaskUpdate, missing ids, unknown
-    statuses — each logged by the caller via the second tuple slot).
-
-    Generation rules:
-        - CREATE: read the current generation; if this harness counter is
-          ALREADY live in that generation (lookup_task hit), the harness counter
-          has restarted (post-/clear) ⇒ bump to a fresh generation. Sequential
-          NEW counters (2, 3, …) never hit, so they never false-bump.
-        - UPDATE: use the current generation as-is (the create that re-seeded the
-          generation already bumped it; the update resolves the live slot).
+    Resolves the generation for the op. This is the one place that may mutate the map (a generation bump on reset
+    detection). Every other skip or idempotence decision still lives in the caller. Returns None for events that
+    mirror to nothing (metadata-only TaskUpdate, missing ids, unknown statuses), each logged by the caller.
 
     Requires:
         - payload is the PostToolUse hook input dict
@@ -389,6 +362,11 @@ def _build_op( payload, session_id, actor, persona_lower, base_dir ):
         - Returns ( op_dict_or_None, skip_reason_or_None )
         - op_dict carries: op, ts, generation, harness_id, harness_status,
           correlation_key, payload (+ item_id for correlate)
+        - Create: reads the current generation; if this harness counter is already live in that generation
+          (lookup_task hit), the harness counter has restarted (post-/clear), so it bumps to a fresh
+          generation. Sequential new counters (2, 3, ...) never hit, so they never false-bump
+        - Update: uses the current generation as-is (the create that re-seeded the generation already
+          bumped it; the update resolves the live slot)
     """
     tool_name  = payload.get( "tool_name" )
     tool_input = payload.get( "tool_input" ) or { }
@@ -470,22 +448,22 @@ def _build_op( payload, session_id, actor, persona_lower, base_dir ):
 
 def _deprecated_noop_log( payload, session_id ):
     """
-    Stage-1 deprecation path: emit ONE fire-log line for a native Task* event
-    and write NOTHING. The line is the fleet-wide evidence Stage-2 is gated on
-    — "which sessions are STILL using native TaskCreate/TaskUpdate for owed
-    work?" — so it carries the identity needed to answer that.
+    Emit one fire-log line for a native Task* event and write nothing (stage-1 deprecation).
+
+    The line is the fleet-wide evidence Stage-2 is gated on: which sessions still use native
+    TaskCreate/TaskUpdate for owed work. So it carries the identity needed to answer that.
 
     Requires:
         - payload is the PostToolUse hook input dict (tool_name ∈
           {TaskCreate, TaskUpdate})
-        - session_id is the resolved STABLE session id
+        - session_id is the resolved stable session id
 
     Ensures:
         - Emits exactly one stream-log line, phase=task_store_mirror_deprecated_noop,
           stamped with persona, tool, harness_id, and detail (subject for a
           create, status for an update — None when absent, which is itself the
           signal of a benign metadata-only update)
-        - Performs NO store write and NO map/spool mutation
+        - Performs no store write and no map/spool mutation
         - Returns { "action": "deprecated_noop" }
         - Never raises (caller's belt + _identity/_log are no-throw)
     """
@@ -509,22 +487,26 @@ def mirror_task_tool_event( payload, session_id, base_dir=None, environ=None ):
     """
     The PostToolUse entry point: mirror one TaskCreate/TaskUpdate event.
 
+    Pipeline: gate (settings enabled and manager figure), opportunistic spool drain, map the event to a store op,
+    execute and update the correlation map. A transport failure spools and flags once. A 4xx verdict drops and
+    flags once, because it will never succeed.
+
     Requires:
         - payload is the hook input dict (tool_name ∈ {TaskCreate, TaskUpdate})
-        - session_id is the resolved STABLE session id
+        - session_id is the resolved stable session id
 
     Ensures:
-        - DEPRECATED (stage-1): with MIRROR_WRITES_DEPRECATED True (default),
+        - Deprecated (stage-1): with MIRROR_WRITES_DEPRECATED True (default),
           returns { "action": "deprecated_noop" } after emitting one fire-log
-          line — NO store write. Flip the guard False to restore the write path.
+          line — no store write. Flip the guard False to restore the write path.
         - Returns a summary dict { "action": ... } (for tests/logs):
           deprecated_noop | disabled | not_manager | skipped:<reason> |
           mirrored:<op> | spooled:<op> | dropped:<op>
-        - settings malformed (ValueError) → fail SAFE: action=disabled, logged
-        - F4: non-manager-figure sessions NEVER write (fail-closed gate)
-        - C8: spool drained opportunistically BEFORE the new op; transport/5xx
-          failures spool the new op; 4xx verdicts drop + flag-once (I4)
-        - NEVER raises — any unexpected error is caught, logged, and the hook
+        - settings malformed (ValueError) → fail safe: action=disabled, logged
+        - Non-manager-figure sessions never write (fail-closed gate)
+        - Spool drained opportunistically before the new op; transport/5xx
+          failures spool the new op; 4xx verdicts drop + flag-once
+        - never raises — any unexpected error is caught, logged, and the hook
           proceeds untouched
     """
     try:

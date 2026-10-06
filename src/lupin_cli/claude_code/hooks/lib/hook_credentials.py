@@ -3,7 +3,6 @@
 Credential resolution for Claude Code hook infrastructure.
 
 Reads per-project credentials from the unified config file ~/.lupin/config.
-
 Used by the CC Notification Listener and hook scripts that need authenticated
 access to the Lupin API.
 
@@ -24,10 +23,10 @@ INI Format (unified ~/.lupin/config):
     ...
 
 Resolution:
-    1. Derive project name via session_bridge.resolve_project_name (the ONE
-       shared resolver — bridge-cwd-anchored, so a non-lupin session reads
-       its OWN credential section instead of always collapsing to [lupin];
-       see bug 9bf1dc4a)
+    1. Derive project name via session_bridge.resolve_project_name. It is the
+       one shared resolver and is anchored on the bridge cwd, so a non-lupin
+       session reads its own credential section instead of always collapsing
+       to [lupin].
     2. Read ~/.lupin/config (fail hard if missing)
     3. Read matching INI section
     4. Return (email, password) tuple
@@ -79,23 +78,21 @@ _WORKTREES_MARKER = "/.git/worktrees/"
 
 def _main_checkout_name( start ) -> Optional[str]:
     """
-    Name the MAIN checkout of the git tree containing `start`.
+    Name the main checkout of the git tree containing `start`.
 
-    A linked worktree's `.git` is a FILE holding `gitdir: <main>/.git/worktrees/<name>`,
-    and `session_bridge.resolve_project_name()` tests `( parent / ".git" ).exists()`
-    — true for a file — so it names a worktree by the worktree's OWN directory
-    (`lupin-wt-cc-author-maria-1`). `~/.lupin/config` has one section per REPO, so
-    that name never matches and credential resolution raises.
+    A linked worktree's `.git` is a file holding `gitdir: <main>/.git/worktrees/<name>`.
+    `resolve_project_name()` tests `.exists()`, true for a file, so it names the worktree by its own directory (`lupin-wt-cc-author-maria-1`).
+    `~/.lupin/config` has one section per repo, so that name never matches and credential resolution raises.
 
     Requires:
         - start is a path-like (need not exist)
 
     Ensures:
-        - Returns the lowercase basename of the MAIN checkout when `start` is inside
+        - Returns the lowercase basename of the main checkout when `start` is inside
           a linked worktree
         - Returns the lowercase basename of the repo root when `start` is inside an
-          ordinary checkout (`.git` is a directory) — the same answer the caller
-          already has, so the caller must compare before retrying
+          ordinary checkout (`.git` is a directory), which is the same answer the
+          caller already has, so the caller must compare before retrying
         - Returns None when no `.git` ancestor exists, or the `.git` file is
           unreadable or not in `gitdir:` form
         - Never raises
@@ -138,7 +135,7 @@ def _credential_search_roots():
 
     Ensures:
         - Yields the bridge `cwd` that `resolve_project_name()` itself resolved
-          from, when one is available — so the retry asks about the SAME directory
+          from, when one is available, so the retry asks about the same directory
           that produced the failing name
         - Then yields the live cwd, which is the seat's tree for a hook and for
           the listener it spawns
@@ -228,24 +225,10 @@ def get_hook_credentials( project: Optional[str] = None ) -> Tuple[str, str]:
 
 def get_owner_credentials() -> Tuple[str, str]:
     """
-    Resolve the HUMAN OWNER's credentials from ~/.lupin/config [owner] section.
+    Resolve the human owner's credentials from the ~/.lupin/config [owner] section.
 
-    Writer-side follow-up to the 2026-05-14 Option C design. Used by
-    cc_notification_listener._stamp_owner_user_id_on_bridge to resolve the
-    human owner's user_id via /auth/login and stamp it on the bridge file.
-
-    Distinct from `get_hook_credentials()`: that returns the per-PROJECT
-    SERVICE-account credentials used for the listener's OWN login (e.g.,
-    `claude.code@lupin.deepily.ai`). This returns the HUMAN owner's
-    credentials (e.g., `ricardo.felipe.ruiz@gmail.com`), which is what
-    the broadcast UI's same-user filter actually compares against.
-
-    INI section shape:
-        [owner]
-        email = <human_owner_email>
-        password = <human_owner_password>
-
-    See: src/rnd/v0.1.7/2026.05.17-owner-user-id-stamper-writer-side/01-design.md
+    Used by cc_notification_listener._stamp_owner_user_id_on_bridge to resolve the human owner's user_id via /auth/login.
+    Unlike `get_hook_credentials()` (the per-project service account), this returns the human owner's login.
 
     Requires:
         - ~/.lupin/config exists
@@ -262,6 +245,11 @@ def get_owner_credentials() -> Tuple[str, str]:
     Raises:
         FileNotFoundError: If no credentials file exists
         ValueError: If [owner] section or required keys not found
+
+    Notes:
+        - The user_id is stamped on the bridge file, and the broadcast UI's same-user filter compares against it.
+        - The [owner] section holds `email` and `password` keys.
+        - See: src/rnd/v0.1.7/2026.05.17-owner-user-id-stamper-writer-side/01-design.md
     """
     if not CREDENTIALS_FILE.exists():
         raise FileNotFoundError(

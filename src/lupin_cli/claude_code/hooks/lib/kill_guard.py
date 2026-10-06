@@ -1,52 +1,42 @@
 """
-Kill guard — an unscoped process sweep can reach another seat's CLI (row cd332d2b).
+Denies Bash process sweeps that can signal another seat's Claude CLI.
 
-WHAT IT COSTS, measured: on 2026-08-21 at 15:27:03Z a worker ran
-`pkill -f "pytest src/tests/unit"`. The CLI's own shadow-`pkill` shell function
-REFUSED it, verbatim: "this pattern matches the Claude CLI process (PID
-127519)". Ten seconds later the same worker reproduced the sweep by hand as
-`ps -eo pid,args | grep "[p]ytest src/tests/unit" | ... | while read p; do kill
-$p; done` — a shape the shadow function does not see — and its own output names
-the damage: "killed 125491 killed 127519 killed 171103 ..." — eight processes,
-INCLUDING the 127519 the refusal had just named. Three worker seats stopped
-within 612 ms; the author's was one of them. A fourth seat survived only
-because its command line did not happen to match the pattern.
+Why a pattern that looks like a test path matches a seat: a seat launches as
+`claude --model ... <its entire spawn brief>`. So the brief is in its argv.
+Any brief that mentions `src/tests/unit` makes that seat match a grep aimed at pytest.
+The pattern does not have to be careless to be lethal; it only has to be a phrase
+somebody wrote down. The CLI's own shadow-`pkill` function refuses a pattern that
+matches the CLI's own process.
+It does not see a hand-built `ps | grep | while read p; do kill $p; done`.
+One such sweep stopped three worker seats within 612 ms.
 
-⇒ WHY A PATTERN THAT LOOKS LIKE A TEST PATH MATCHES A SEAT: a seat is launched
-as `claude --model … <its entire spawn brief>`, so the brief is in its argv.
-Any brief that so much as mentions `src/tests/unit` makes that seat a match for
-a grep aimed at pytest. The pattern does not have to be careless to be lethal —
-it only has to be a phrase somebody wrote down.
+What is denied, and nothing wider:
+  - Shape A: `kill <pid>` (any signal) naming a PID that /proc says is a live `claude` process.
+    It is checked against /proc at hook time, so it is a fact about the box.
+  - Shape B: a system-wide process listing (`ps -e`, `ps aux`, `pgrep`) feeding a kill
+    downstream in the same command.
+  - Shape C: a `pkill` or `killall` pattern with no own-children scoping.
+    The shadow `pkill` refuses only a pattern matching your own pid.
+    A pattern that matches another seat and not you goes through it untouched.
+  - Shape D: `kill $(pgrep ...)`, identical in behaviour to the piped form B denies.
+    It is refused before any PID is known. That is the only moment it can still be
+    refused, since the PIDs are not in the command text.
 
-WHAT IS DENIED, and nothing wider:
-  · SHAPE A — `kill <pid>` (any signal) naming a PID that /proc says is a LIVE
-    `claude` process. Verified against /proc at hook time, so this is a fact
-    about the box rather than a guess about the string.
-  · SHAPE B — a system-wide process listing (`ps -e`/`ps aux`/`pgrep`) feeding a
-    kill downstream in the same command.
-  · SHAPE C — a `pkill`/`killall` PATTERN with no own-children scoping. The
-    CLI's own shadow-`pkill` refuses only a pattern matching YOUR pid; one
-    that matches another seat and not you goes through it untouched.
-  · SHAPE D — `kill $(pgrep …)`, identical in behaviour to the piped form B
-    already denies. This is the shape above, refused
-    BEFORE any PID is known — which is the only moment it can still be refused,
-    since the PIDs are not in the command text.
+Heredoc bodies are stripped before matching. A file that documents a sweep is data, not a sweep.
+This module's own test file is such a file, and the guard denied it on first wiring.
 
-Heredoc BODIES are stripped before matching — a file that DOCUMENTS a sweep\nis data, not a sweep. (This module's own test file is such a file, and the\nguard denied it on first wiring, which is how the exclusion got written.)\n\nWHAT STAYS ALLOWED: killing your OWN children — `pkill -P $$`, `pgrep -P $$ |
-xargs kill`, `ps --ppid $$`, `kill $!`, `kill %1` — and any listing with no kill
-downstream. Read-only `ps`/`pgrep` are how you find out what is running.
+What stays allowed: any listing with no kill downstream, and killing your own children.
+Own-children forms are `pkill -P $$`, `pgrep -P $$ | xargs kill`, `ps --ppid $$`, `kill $!` and `kill %1`.
+Read-only `ps` and `pgrep` are how you find out what is running.
 
-SAFETY — this runs inside the hot-path PreToolUse hook (every tool call, every
-session), so two non-negotiables:
-  • FAIL-OPEN: ANY error → allow (return None). A guard must never break a tool
-    call.
-  • ESCAPE HATCH: LUPIN_ALLOW_UNSCOPED_KILL=1 disables the guard for a session
-    that genuinely must sweep — after it has read the PIDs and confirmed none is
-    a seat.
+This runs inside the hot-path PreToolUse hook (every tool call, every session), so two
+requirements are not negotiable:
+  - The guard fails open: any error means allow (return None), so it never breaks a tool call.
+  - The escape hatch is LUPIN_ALLOW_UNSCOPED_KILL=1. It disables the guard for a session that
+    must sweep, after it has read the PIDs and confirmed none is a seat.
 
-⚠️ DEFAULT-ON, deliberately. The rule this replaces already existed as advice
-("narrow the pattern"), was delivered to the author ten seconds before the
-event, and did not survive contact with a hurry.
+The guard is on by default. The earlier rule was advice ("narrow the pattern"), and advice
+did not survive a hurry.
 """
 import os
 import re
@@ -186,7 +176,7 @@ _HEREDOC_RE = re.compile( r"<<-?\s*(['\"]?)(?P<tag>[A-Za-z_][A-Za-z0-9_]*)\1" )
 
 def _strip_heredocs( command: str ) -> str:
     """
-    Remove heredoc BODIES, keeping the lines that carry real commands.
+    Remove heredoc bodies, keeping the lines that carry real commands.
 
     Requires:
         - command is the shell command string
@@ -226,7 +216,7 @@ def _sweep_selector( args: str ) -> List[ str ]:
     Ensures:
         - signal flags are dropped — `-9`, `-KILL`, `-TERM`, `-s TERM`,
           `--signal=9`, `--signal 9` — because pgrep rejects them
-        - `--signal`'s and `-s`'s separate VALUE is dropped with it
+        - `--signal`'s and `-s`'s separate value is dropped with it
         - every other token is kept in order, so the selector matches exactly
           what the sweep would have matched
         - the split is SHELL-AWARE, so a quoted pattern containing spaces stays
@@ -293,14 +283,14 @@ def _seats_a_sweep_would_hit( args: str, pgrep_probe, comm_reader ) -> List[ str
 
     Ensures:
         - returns the matching PIDs whose /proc comm is `claude`, in pgrep order
-        - returns [] when the pattern matches no seat — which is the ordinary
-          case and must stay ALLOWED: 21 of 6,492 real fleet commands are this
-          shape, nearly all of them a seat stopping its OWN superseded test run.
+        - returns [] when the pattern matches no seat, which is the ordinary
+          case and must stay allowed: 21 of 6,492 real fleet commands were this
+          shape, nearly all of them a seat stopping its own superseded test run.
           Refusing all of them is how a guard gets routed around, and routing
-          around the refusal is exactly what killed three seats on 2026-08-21.
-        - the reading is a SNAPSHOT: a seat that starts matching between this
-          check and the command running is not covered. That race is accepted —
-          it is far narrower than the hazard, and no PreToolUse check can close it
+          around the refusal is what stopped three seats in the original incident.
+        - the reading is a snapshot: a seat that starts matching between this
+          check and the command running is not covered. That race is accepted;
+          it is far narrower than the risk, and no PreToolUse check can close it
     """
     selector = _sweep_selector( args )
     if not selector:
@@ -338,16 +328,16 @@ _INLINE_FLAG_RE = re.compile(
 
 def _hatch_in_prefix( command ) -> bool:
     """
-    True iff the hatch flag is assigned truthy in a COMMAND-POSITION prefix.
+    True iff the hatch flag is assigned truthy in a command-position prefix.
 
     Requires:
         - command is the raw shell command string
 
     Ensures:
-        - reads the flag from the COMMAND, never from os.environ — see the note
+        - reads the flag from the command, never from os.environ — see the note
           above for why an env read cannot honour an inline prefix
         - only an env-assignment prefix at a command slot counts, so a flag that
-          merely appears elsewhere in the line (`echo FLAG=1; pkill …`) does NOT
+          merely appears elsewhere in the line (`echo FLAG=1; pkill …`) does not
           unlock the sweep that follows it
         - a FALSY value does not open it — the property whose absence proved the
           old "allow" was the matcher rather than the hatch
@@ -436,7 +426,7 @@ def _pipeline_window( tail: str ) -> str:
     Ensures:
         - quoted spans are blanked first, so a `|` inside an argument is not read
           as a pipeline operator
-        - the window ends at the first `;`, newline, or `)` — EXCEPT when a
+        - the window ends at the first `;`, newline, or `)`, except when a
           compound keyword (`while`/`for`/`until`/`do`/`{`) opens before it, in
           which case it runs to `done`/`}` or to the end of the string
     """
@@ -474,12 +464,11 @@ def _loop_variable_fed_by( command: str, listing_end: int ) -> Optional[ str ]:
 
 def _sweeps_unscoped( command: str ) -> bool:
     """
-    True iff the command lists processes fleet-wide and KILLS WHAT IT FINDS.
+    True iff the command lists processes fleet-wide and kills what it finds.
 
-    A kill that merely appears later is not enough — `kill $!` after a `pgrep -c`
-    counter kills a background job the shell already owns, and reading that as a
-    sweep is a false positive against real, safe code. The listing's output must
-    actually reach the kill: down a pipeline, or through a `for … in $(…)` loop.
+    A kill that merely appears later is not enough: `kill $!` after a `pgrep -c` counter kills a job the shell owns.
+    Reading that as a sweep is a false positive against safe code.
+    The listing's output must reach the kill: down a pipeline, or through a `for … in $(…)` loop.
 
     Requires:
         - command is the shell command string
@@ -512,7 +501,7 @@ def _sweeps_unscoped( command: str ) -> bool:
 
 def _sweep_seat_hits( command: str, pgrep_probe, comm_reader ) -> List[ str ]:
     """
-    SHAPE C — the live seats a `pkill`/`killall` in this command would kill.
+    Shape C: the live seats a `pkill`/`killall` in this command would kill.
 
     Requires:
         - command is the shell command string
@@ -587,10 +576,10 @@ def kill_deny_reason(
         - comm_reader is None (real /proc) or injected for testing
 
     Ensures:
-        - None unless the guard is enabled AND tool_name is Bash AND the command
-          matches SHAPE A (kills a PID /proc reports as `claude`) or SHAPE B (an
+        - None unless the guard is enabled and tool_name is Bash and the command
+          matches Shape A (kills a PID /proc reports as `claude`) or Shape B (an
           unscoped listing with a kill downstream)
-        - SHAPE A is reported in preference to SHAPE B — it can name the victims
+        - Shape A is reported in preference to Shape B — it can name the victims
         - None for own-children sweeps and for listings with no kill downstream
         - FAIL-OPEN: any unexpected error → None
     """

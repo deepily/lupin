@@ -1,13 +1,13 @@
 """
-Task-store mirror — C8 write-side failure spool.
+Task-store mirror write-side failure spool.
 
-Design §5 (write-side loss steer): "a hook write that times out against a
-saturated :7999 must not silently drop (that IS dual-write drift reborn):
-short hook timeout + on-disk spool + replay, reusing the existing notify
-spool pattern." This is the hook-cadence analog of the cosa-voice durable
-notify outbox (`lupin-app.ini` § notify outbox): instead of a background
-flusher daemon (too heavy for a hook), the spool is drained OPPORTUNISTICALLY
-at the start of the next mirror invocation.
+A hook write that times out against a saturated :7999 must not be silently
+dropped, because that would be dual-write drift again. The design is a short
+hook timeout, an on-disk spool and replay, reusing the existing notify spool
+pattern. This is the hook-cadence analog of the cosa-voice durable notify
+outbox (`lupin-app.ini` section notify outbox). A background flusher daemon is
+too heavy for a hook, so the spool is drained opportunistically at the start
+of the next mirror invocation.
 
 Artifact: per-session JSONL `.task-store-spool-<session_id>.jsonl`,
 co-located with the map/hold/acked artifacts (same base-dir resolver).
@@ -21,7 +21,7 @@ Appends are single-line writes; the drain rewrites the file atomically
 malformed line is dropped — counted by the caller via the returned shape).
 
 Design authority: lupin ->
-    src/rnd/v0.1.8/2026.06.12-task-store-phase2-write-paths/01-build-plan.md §3.
+    src/rnd/v0.1.8/2026.06.12-task-store-phase2-write-paths/01-build-plan.md section 3.
 """
 
 import json
@@ -58,7 +58,7 @@ def append_entry( session_id, entry, base_dir=None ):
         - entry is a JSON-serializable dict carrying at least "op" and "ts"
 
     Ensures:
-        - entry serialized compactly onto ONE line, appended
+        - entry serialized compactly onto one line, appended
         - Raises OSError on unwritable directory (caller's never-raise belt)
     """
     with open( spool_path( session_id, base_dir ), "a" ) as f:
@@ -67,7 +67,7 @@ def append_entry( session_id, entry, base_dir=None ):
 
 def read_entries( session_id, base_dir=None ):
     """
-    Read the spooled operations, FIFO order.
+    Read the spooled operations in first-in first-out order.
 
     Requires:
         - session_id is a string
@@ -75,7 +75,7 @@ def read_entries( session_id, base_dir=None ):
     Ensures:
         - Returns list[dict] in file (append) order
         - Missing file → []; malformed/non-dict lines silently dropped
-        - DEGRADE-SAFE: never raises
+        - Degrade-safe: never raises
     """
     try:
         with open( spool_path( session_id, base_dir ) ) as f:
@@ -106,7 +106,7 @@ def rewrite_entries( session_id, entries, base_dir=None ):
         - entries is a list of JSON-serializable dicts
 
     Ensures:
-        - Empty entries → spool file REMOVED (a drained spool leaves no
+        - Empty entries → spool file removed (a drained spool leaves no
           artifact; missing-on-empty also makes "is anything spooled?" a
           cheap existence check)
         - Non-empty → atomic tmp-write + rename, FIFO order preserved
@@ -129,11 +129,11 @@ def rewrite_entries( session_id, entries, base_dir=None ):
 
 def partition_expired( entries, now_epoch, ttl_seconds ):
     """
-    Split entries into ( live, expired ) by the C8 TTL.
+    Split entries into ( live, expired ) by the spool TTL.
 
-    PURE — no I/O. An entry with a missing/non-numeric "ts" counts as
-    EXPIRED (untrustworthy age ⇒ drop, never replay blind — bool excluded
-    explicitly since bool is an int subclass).
+    Pure, with no I/O. An entry with a missing or non-numeric "ts" counts as
+    expired, because an untrustworthy age means drop, never replay blind.
+    Bool is excluded explicitly since bool is an int subclass.
 
     Requires:
         - entries is a list of dicts

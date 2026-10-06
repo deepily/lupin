@@ -1,92 +1,37 @@
 """
-Reclaim accumulated `.dm-inbox-hwm-<sid8>.json` files — row 8758d0b1.
+Reclaim accumulated `.dm-inbox-hwm-<sid8>.json` files once their sessions are gone.
 
-WHAT THESE FILES ARE (read this before deciding anything here is disposable)
----------------------------------------------------------------------------
-`.dm-inbox-hwm-<session_id8>.json` is one session's DM-inbox high-water mark: a
-`cursor_ts` plus the `surfaced_ids` already shown to that session. They are the
-durable fix for bug `59f355e0` — a peer DM arriving mid-turn used to land in a
-lossy JSONL voice buffer and was LOST if the session ended before a later hook
-drained it (84 orphaned DMs across 46 stale buffers at triage). This ledger is
-what makes DM surfacing at-least-once.
+What these files are: `.dm-inbox-hwm-<session_id8>.json` is one session's DM-inbox
+high-water mark, a `cursor_ts` plus the `surfaced_ids` already shown to that
+session. The ledger is what makes DM surfacing at-least-once. Without it, a peer DM
+arriving mid-turn lands in a lossy JSONL voice buffer and is lost if the session
+ends first. The files live in the repo root because surviving `/clear`
+is their purpose. Nothing here may tidy them into a directory the reconcile cannot find.
 
-They live in the repo root ON PURPOSE — surviving `/clear` is the entire point.
-Nothing here may "tidy" them into a directory the reconcile cannot find.
+The defect: `surfaced_ids` inside each file is capped (`SURFACED_IDS_CAP = 500`,
+FIFO tail), but the number of files was never bounded. One file exists per
+session and every `/clear` mints a new session id. This is tidiness, not capacity.
 
-THE DEFECT
-----------
-The design bounded the wrong axis. `surfaced_ids` INSIDE each file is capped
-(`SURFACED_IDS_CAP = 500`, FIFO tail); the NUMBER of files was never bounded and
-no cleanup code existed anywhere. 435 files / 1.8 MB / ~18 per day since
-2026-07-02, one per session, and every `/clear` mints a new session id.
+Why this is not `classify_hold_file`: pointing the hold janitor's glob at a second
+family would build a sweeper that deletes nothing and reports success. On a real
+HWM file it answers verdict `keep`, reason `no_provable_age`. Two reasons:
+  1. It keeps any file whose age it cannot prove from `held_at` + `ttl_seconds`,
+     and an HWM body `{cursor_ts, seeded, surfaced_ids}` has neither.
+  2. Its live-session guard reads `hold.get( "session_id" )`. An HWM body has no
+     `session_id`, because the sid8 lives in the filename.
+What is reusable is the traversal (`_iter_hold_paths`, family-parameterized) and the
+reclaim loop. This module supplies the meaning of a file.
 
-⚠️ TIDINESS, NOT CAPACITY. Nothing is at risk. Keep the framing honest.
-
-WHY THIS IS NOT `classify_hold_file`
-------------------------------------
-The obvious remedy — point the existing hold janitor's glob at a second family —
-builds a sweeper that deletes NOTHING and reports success. Measured before
-writing a line of this module:
-
-    classify_hold_file( <a real HWM file> )
-        -> verdict='keep'  reason='no_provable_age'  session_id=None
-
-Two structural reasons, both in `heartbeat_hold.classify_hold_file`:
-
-  1. It keeps any file whose age it cannot prove from `held_at` + `ttl_seconds`.
-     An HWM body is `{cursor_ts, seeded, surfaced_ids}` — it has NEITHER.
-  2. Its live-session guard reads `hold.get( "session_id" )`. An HWM body has NO
-     `session_id` field at all; the sid8 lives in the FILENAME.
-
-So the hold classifier is hold-SHAPED by construction, and correctly so. What is
-reusable is the TRAVERSAL (`_iter_hold_paths`, now family-parameterized) and the
-reclaim loop — not the meaning of a file. This module supplies the meaning.
-
-THE ONE REAL HAZARD — LIVENESS, AND IT IS WORSE THAN THE PLAN SAID
-------------------------------------------------------------------
-🔴 The row's plan (§5) and the first draft of this module both stated that
-deleting a live session's HWM makes it RE-SURFACE its DM history — "worst case a
-duplicate DM, not data loss" — and that asymmetry was the stated justification
-for a simpler rule than the cargo-bearing hold family's.
-
-**It is backwards. Measured 2026-07-26; three predictions, three confirmed:**
-
-    with an existing seeded HWM   ->  the pending DM IS surfaced   (330 chars)
-    after the HWM is deleted      ->  surfaced? False              (0 chars)
-    on the next turn              ->  surfaced? False, ids=['m1']
-
-Mechanism — `dm_inbox_reconcile.surface_dm_inbox:327-328`:
-
-    if not state.get( "seeded", False ):
-        context = ""
-
-A MISSING HWM file reads as `seeded: False` (`read_hwm:187`), which the reconcile
-treats as a first-ever activation: it records the current inbox as already-seen,
-advances the cursor, and surfaces NOTHING — deliberately, so activation never
-replays a live session's backlog (constraint 4).
-
-⇒ **Deleting a live session's HWM SILENTLY SWALLOWS every DM sitting un-surfaced
-in its inbox at that moment, permanently.** Not a duplicate — that is bug
-`59f355e0`, the DM-loss bug this whole file family was built to fix, re-created
-for that session.
-
-⇒ **The live-set gate is CORRECTNESS-CRITICAL, not politeness.** It is the only
-thing standing between this janitor and the defect it is tidying up after.
-
-⇒ The "safer than hold files" argument is RETIRED. These are safer in KIND
-(regenerable, no hand-written cargo) but the failure is SILENT, and a silent
-failure is not a lesser one: a reaped hold loses a note someone can see is
-missing; a reaped live HWM loses a DM nobody ever knew arrived.
-
-⚠️ The 7-day window (Rick's ruling, 2026-07-26) was chosen against the OLD
-duplicate-DM framing. A shorter window leaves a live-but-unlisted session more
-likely to still be inside it, so window length and live-set reliability trade
-against each other on a worse axis than was presented. Re-raised with Rick; this
-module follows whatever he last ruled and does not quietly re-tune itself.
-
-⇒ And it is exactly why `live_session_ids is None` keeps EVERYTHING rather than
-degrading to age-only: a transient live-set failure must never be able to eat
-DMs.
+The one real hazard is liveness. Deleting a live session's HWM does not cause a
+duplicate DM. A missing HWM file reads as `seeded: False` (`read_hwm`), and
+`dm_inbox_reconcile.surface_dm_inbox` treats that as a first-ever activation. It
+records the current inbox as already seen, advances the cursor, and surfaces
+nothing, so activation never replays a live backlog. Deleting a live HWM therefore
+silently swallows every DM sitting un-surfaced in that inbox, permanently. The
+live-set gate is correctness-critical: it is the only thing between this janitor
+and the DM-loss defect it tidies up after. This is why `live_session_ids is None`
+keeps everything instead of degrading to age-only. A short grace window makes a
+live-but-unlisted session more likely to still be inside it, so keep it long.
 
 Venue: pure filesystem + mtime. No network, no DB, no container.
 """
@@ -130,15 +75,8 @@ def hwm_sid8( path ):
     """
     Extract the session-id fragment an HWM filename encodes.
 
-    The sid8 is the FILENAME's business here — an HWM body carries no session_id,
-    which is precisely why the hold classifier's live gate cannot work on this
-    family.
-
-    ⚠️ It is a `[:8]` TRUNCATION of whatever `_hwm_path` was handed
-    (`dm_inbox_reconcile.py:167`), NOT a guaranteed 8-char hex string. A real file
-    in the repo root today is `.dm-inbox-hwm-stable-s.json`. Any gate built on
-    this must compare 8-char prefixes on both sides, must never assume hex, never
-    parse, and never raise on a surprising value.
+    The sid8 lives in the filename, because an HWM body carries no session_id.
+    It is a `[:8]` truncation of whatever `_hwm_path` was handed, not a guaranteed 8-char hex string.
 
     Requires:
         - path is a Path or str
@@ -148,6 +86,11 @@ def hwm_sid8( path ):
         - returns None when the name does not belong to this family, so a caller
           cannot silently treat a foreign file as a zero-length session id
         - never raises
+
+    Notes:
+        - That is why the hold classifier's live gate cannot work on this family.
+        - A real file in the repo root is `.dm-inbox-hwm-stable-s.json`.
+        - Any gate built on this must compare 8-char prefixes on both sides, must never assume hex, never parse, and never raise on a surprising value.
     """
     name = Path( path ).name
     if not name.startswith( HWM_PREFIX ) or not name.endswith( HWM_SUFFIX ):
@@ -160,16 +103,9 @@ def _live_prefixes( live_session_ids ):
     """
     Normalize an authoritative live-set to the 8-char prefixes an HWM name carries.
 
-    ⚠️ THE TRUNCATION IS NOT INJECTIVE, AND THIS GATE DEPENDS ON THAT BEING SAFE.
-    Distinct session ids can share an 8-char prefix — four literals in this repo
-    truncate to `stable-s` alone (María, 2026-07-26). Comparing PREFIXES rather
-    than full ids therefore over-matches, and the over-match is the safe
-    direction: a collision makes MORE files look live, so the gate KEEPS more. It
-    can never make a live session's file look dead.
-
-    ⇒ Do NOT "fix" this into a full-id comparison. Widening the key to full ids
-    would make every truncated filename fail to match any live id, and the gate
-    would start reaping live sessions' cursors. The lossy key is load-bearing.
+    The truncation is not injective, and this gate depends on that being safe.
+    Distinct session ids can share a prefix (several literals truncate to `stable-s`).
+    Comparing prefixes over-matches, which is the safe direction: a collision makes more files look live.
 
     Requires:
         - live_session_ids is an iterable of session-id strings
@@ -178,6 +114,10 @@ def _live_prefixes( live_session_ids ):
         - returns a set of `[:8]` prefixes, so a full uuid in the live set matches
           the truncated fragment in a filename
         - skips non-string / empty entries rather than raising
+
+    Notes:
+        - Do not change this into a full-id comparison. Every truncated filename would then fail to match any live id.
+        - The gate would then start reaping live sessions' cursors, so the lossy key is what keeps the gate safe.
     """
     out = set()
     for sid in live_session_ids:
@@ -189,22 +129,9 @@ def _live_prefixes( live_session_ids ):
 def classify_hwm_file( path, now_ts=None, grace_seconds=DEFAULT_HWM_GRACE_SECONDS,
                        live_session_ids=None ):
     """
-    Decide KEEP vs PRUNABLE for one HWM file — the single rule both the report and
-    the reclaim share, so the dry-run evidence cannot drift from the act.
+    Decide keep or prunable for one HWM file; the report and the reclaim share this rule.
 
-    A file is PRUNABLE iff ALL of:
-      - an AUTHORITATIVE live-set was supplied (not None), AND
-      - its filename sid8 is ABSENT from that set, AND
-      - its mtime age is >= grace_seconds.
-
-    BIAS-TO-KEEP, and the ordering is deliberate: a None live-set keeps EVERYTHING
-    regardless of age. An empty live set must never read as "nothing is alive" —
-    that inversion is how a janitor reaps the fleet it was meant to tidy up after.
-    The caller passes a non-None set ONLY when it has genuinely enumerated live
-    sessions.
-
-    mtime is the ONLY clock an HWM file has (no held_at, no ttl_seconds), so an
-    unreadable mtime is not-provable-age and therefore KEEP.
+    Sharing it means the dry-run evidence cannot drift from the act.
 
     Requires:
         - path is a Path; now_ts is a POSIX timestamp (float) or None
@@ -213,6 +140,14 @@ def classify_hwm_file( path, now_ts=None, grace_seconds=DEFAULT_HWM_GRACE_SECOND
     Ensures:
         - returns a row dict: path / verdict / reason / sid8 / mtime_age_seconds
         - deletes nothing; never raises
+
+    Rule:
+        - A file is prunable iff all three hold: an authoritative live-set was supplied (not None),
+          its filename sid8 is absent from that set, and its mtime age is >= grace_seconds.
+        - It biases to keep. A None live-set keeps everything regardless of age.
+        - An empty set must never read as "nothing is alive", because that inversion is how a janitor reaps the fleet.
+        - The caller passes a non-None set only after enumerating live sessions.
+        - mtime is the only clock an HWM file has, so an unreadable or negative mtime is not provable age and is kept.
     """
     if now_ts is None:
         now_ts = time.time()
@@ -267,12 +202,10 @@ def report_hwm_files( base_dir=None, base_dirs=None, now_ts=None,
                       max_depth=DEFAULT_SWEEP_MAX_DEPTH,
                       skip_dir_names=SWEEP_SKIP_DIR_NAMES ):
     """
-    Dry-run triage over the HWM family — classify, tally, delete NOTHING.
+    Dry-run triage over the HWM family: classify and tally, delete nothing.
 
-    Its `prunable` count is a PREDICTION of what sweep_and_reclaim_hwm_files would
-    delete under the same clock and the same live-set. If the two ever disagree,
-    the disagreement is itself the finding — the same auditable pairing the hold
-    janitor uses.
+    Its `prunable` count predicts what sweep_and_reclaim_hwm_files would delete under the same clock and live-set.
+    If the two ever disagree, the disagreement is itself the finding.
 
     Requires:
         - the traversal args match _iter_hold_paths' contract
@@ -323,13 +256,13 @@ def sweep_and_reclaim_hwm_files( base_dir=None, base_dirs=None, now_ts=None,
                                  max_depth=DEFAULT_SWEEP_MAX_DEPTH,
                                  skip_dir_names=SWEEP_SKIP_DIR_NAMES ):
     """
-    Delete the HWM files classify_hwm_file proves are orphaned AND aged.
+    Delete the HWM files classify_hwm_file proves are orphaned and aged.
 
     Requires:
         - same contract as report_hwm_files
 
     Ensures:
-        - deletes ONLY files whose verdict is PRUNABLE under this exact clock and
+        - deletes only files whose verdict is prunable under this exact clock and
           this exact live-set; returns the sorted list of deleted paths (strings)
         - a per-file OSError (racing delete) skips that file; never raises
     """

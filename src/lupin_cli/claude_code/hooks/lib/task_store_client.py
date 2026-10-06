@@ -1,25 +1,25 @@
 """
-Task-store mirror — hook-side REST client for /api/tasks/* (Phase 2).
+Task-store mirror: hook-side REST client for /api/tasks/* (Phase-2).
 
 Stdlib-urllib only (the hook lane carries no third-party HTTP dependency).
-Auth is the §4.1 AC2 hook-writer lane: `X-API-Key` read from the host key
-file `src/conf/keys/notification-api-claude-code-dev` — the SAME key file
+Auth is the hook-writer lane: `X-API-Key` read from the host key file
+`src/conf/keys/notification-api-claude-code-dev`. It is the same key file
 the cascade heartbeat scheduler uses (`DEFAULT_KEY_PATH`). No new auth scheme.
 
 Every call returns a uniform `( ok, status_code, body_dict )` triple and
-NEVER raises:
+never raises:
 
     - ok          : True iff a 2xx response was received and parsed
     - status_code : int HTTP status, or None on transport failure
-                    (connect refused / timeout / DNS — the C8 spool trigger)
+                    (connect refused / timeout / DNS — the spool trigger)
     - body_dict   : parsed-JSON dict on success; { "error": ... } otherwise
 
-The (status_code is None) case is the ONLY spool trigger — a 4xx/5xx is a
-received server verdict, not a transport loss (the mirror orchestrator
-decides drop-vs-spool from this distinction; plan §3).
+The (status_code is None) case is the only spool trigger. A 4xx/5xx is a
+received server verdict, not a transport loss. The mirror orchestrator
+decides drop-vs-spool from this distinction.
 
 Design authority: lupin ->
-    src/rnd/v0.1.8/2026.06.12-task-store-phase2-write-paths/01-build-plan.md §1.5.
+    src/rnd/v0.1.8/2026.06.12-task-store-phase2-write-paths/01-build-plan.md
 """
 
 import http.client
@@ -69,7 +69,7 @@ def read_api_key( environ=None ) -> str:
     Ensures:
         - Returns the stripped key string
         - Returns "" when LUPIN_ROOT is unset or the file is missing /
-          unreadable (DEGRADE-SAFE — the server will 401 an empty key and
+          unreadable (degrade-safe — the server will 401 an empty key and
           the mirror surfaces that as a non-transport failure; never raises)
     """
     if environ is None:
@@ -97,7 +97,7 @@ def _request( method, url, api_key, timeout, body=None ):
 
     Ensures:
         - Returns ( ok, status_code, body_dict ) per the module contract
-        - NEVER raises: transport errors → ( False, None, {"error": ...} );
+        - never raises: transport errors → ( False, None, {"error": ...} );
           HTTP errors → ( False, <status>, <parsed detail or {"error": ...}> );
           unparseable success body → ( False, <status>, {"error": ...} )
     """
@@ -191,17 +191,11 @@ def query_by_correlation_key( settings, api_key, correlation_key ):
 
 def query_blocked_user_rows( settings, api_key, owner_persona, timeout=None ):
     """
-    GET this owner's `blocked` rows (full fidelity) — the per-USER gate-deferral
-    source (store row be56bff8).
+    GET this owner's `blocked` rows at full fidelity (the per-user gate-deferral source).
 
-    The Stop hook / arbiter derives `user_chase_until` from these: the soonest
-    FUTURE next_chase_ts among the rows whose blocked_by carries any {kind:"user"}
-    ref. `blocked` rows are EXCLUDED from the owed-count query, so they need their
-    own fetch. Full rows (NOT count_only) — the caller needs blocked_by + next_chase_ts.
-
-    Fired ONLY when the session has open hold-file gates (the common zero-gate Stop
-    pays nothing), so the extra round-trip is off the hot path in practice. Still
-    bounded by the aggressive owed-timeout: a slow :7999 must never stall turn-end.
+    The Stop hook / arbiter derives `user_chase_until` from these: the soonest future next_chase_ts among rows whose
+    blocked_by carries any {kind:"user"} ref. `blocked` rows are excluded from the owed-count query, so they need
+    their own fetch. It returns full rows (not count_only) because the caller needs blocked_by and next_chase_ts.
 
     Requires:
         - settings is the load_task_store_settings() dict (provides api_base_url)
@@ -213,10 +207,12 @@ def query_blocked_user_rows( settings, api_key, owner_persona, timeout=None ):
         - Returns ( ok, rows ):
             ok   : True iff a 2xx carried a list under `tasks`
             rows : that list of full row dicts (empty list when ok is False)
-        - ANY transport failure / non-2xx / malformed body / missing-or-non-list
-          `tasks` → ( False, [] )  (§C fail-safe: the caller does NOT suppress on a
+        - any transport failure / non-2xx / malformed body / missing-or-non-list
+          `tasks` → ( False, [] )  (fail-safe: the caller does not suppress on a
           bad read — never silently bury an open user decision on a store outage)
-        - NEVER raises
+        - Fired only when the session has open hold-file gates (the common zero-gate Stop pays nothing), and
+          bounded by the aggressive owed-timeout: a slow :7999 must never stall turn-end
+        - never raises
     """
     if timeout is None:
         timeout = DEFAULT_OWED_TIMEOUT_SECONDS
@@ -233,37 +229,23 @@ def query_blocked_user_rows( settings, api_key, owner_persona, timeout=None ):
 
 def _open_owed_connection( api_base_url, timeout ):
     """
-    Open ONE keep-alive HTTP(S) connection for the owed count request (O3).
+    Open one keep-alive HTTP(S) connection for the owed count request.
 
-    ⚠️ THIS DOCSTRING DESCRIBED A DELETED MECHANISM UNTIL 2026-07-20. It said
-    "`query_owed` issues one `count_only` GET per owed status" — true before the
-    2026-07-19 PARKED-STATUS build, false after it, and stated in the present
-    tense for a day. It sits 77 lines above the `query_owed` docstring that
-    documents the deletion, so a top-down reader met the retired shape FIRST and
-    the correction second. Found while reviewing the plan whose §3 cites that
-    lower docstring to FORBID restoring the loop: the section defended against a
-    reviewer proposing it and not against THIS FILE proposing it.
-
-    `query_owed` now issues ONE `count_only` GET behind `owed_only=true`; the
-    owed status set is server-owned. The previous urllib.urlopen path opened a
-    FRESH socket per request (urllib does no connection pooling) — pure per-Stop
-    latency, paid every turn. A reused http.client connection still amortizes the
-    TCP handshake to once per Stop, which is why this helper survives the loop's
-    deletion (O3, cascade review §D residue). Scheme-aware:
-    an https base resolves to HTTPSConnection (the hook lane is http `:7999`
-    today, but the seam must not silently downgrade an https config).
+    `query_owed` issues one `count_only` GET behind `owed_only=true`; the owed status set is server-owned.
+    Reusing an http.client connection amortizes the TCP handshake to once per Stop, where urllib pays a fresh socket
+    per request. Scheme-aware: https resolves to HTTPSConnection, so an https config is never silently downgraded.
 
     Requires:
         - api_base_url is the Lupin base URL ("http(s)://host:port", no path)
         - timeout is a positive float — the per-operation socket timeout, so the
-          §C ≤1-2s Stop-hot-path budget still bounds each request
+          one-to-two-second Stop-hot-path budget still bounds each request
 
     Ensures:
         - Returns an http.client.HTTP(S)Connection (lazy — it connects on the
           first request, never in the constructor)
-        - Returns None on ANY parse/constructor failure (e.g. a non-numeric port,
+        - Returns None on any parse/constructor failure (e.g. a non-numeric port,
           where urlsplit.port raises ValueError) — the caller fails safe to
-          ( False, 0 ); NEVER raises (degrade-safe IO shell)
+          ( False, 0 ); never raises (degrade-safe IO shell)
     """
     try:
         parts = urllib.parse.urlsplit( api_base_url )
@@ -276,26 +258,24 @@ def _open_owed_connection( api_base_url, timeout ):
 
 def _parse_breakdown( raw_breakdown ):
     """
-    Coerce the response's `breakdown` object to a { status: int } dict (c191be39).
+    Coerce the response's `breakdown` object to a { status: int } dict.
 
-    The breakdown is a REPORTING refinement of a count that is already trusted:
-    the count carries the fail-safe, and by the time this runs the server has
-    answered 2xx with an integer `count`. So a malformed/absent breakdown must
-    NOT fail the read — it degrades to {}, and the caller synthesizes against the
-    count alone (the pre-c191be39 behavior). Failing the whole read here would
-    make a cosmetic regression suppress the poke, which is strictly worse than
-    reporting the right total with a coarse status.
+    The breakdown is a reporting refinement of a count that is already trusted. The count carries the fail-safe,
+    and by the time this runs the server has answered 2xx with an integer `count`. The caller synthesizes against
+    the count alone when the breakdown is unusable.
 
     Requires:
         - raw_breakdown is whatever `breakdown` decoded to (may be absent / any type)
 
     Ensures:
-        - Returns { status: int } keeping ONLY str→non-bool-int pairs
+        - Returns { status: int } keeping only str→non-bool-int pairs
         - Non-dict input → {}
-        - bool values are REJECTED (bool subclasses int — a JSON true must never
+        - A malformed or absent breakdown degrades to {} and must not fail the read, because failing it would let a
+          cosmetic regression suppress the poke, which is worse than a right total with a coarse status
+        - bool values are rejected (bool subclasses int — a JSON true must never
           read as 1), as are negative counts (a count cannot be negative; a
           negative one means the wire is lying, not that a bucket is small)
-        - NEVER raises
+        - never raises
     """
     if not isinstance( raw_breakdown, dict ):
         return { }
@@ -311,10 +291,10 @@ def _parse_breakdown( raw_breakdown ):
 
 def _count_on_connection( connection, path_with_query, api_key ):
     """
-    Issue ONE `count_only` GET on an existing connection; parse count + breakdown.
+    Issue one `count_only` GET on an existing connection; parse count + breakdown.
 
     Reuses `connection`'s socket (HTTP/1.1 keep-alive). The response body is read
-    in FULL so the connection is left in a clean state (an unread response would
+    in full so the connection is left in a clean state (an unread response would
     wedge it as ResponseNotReady).
 
     Requires:
@@ -326,13 +306,13 @@ def _count_on_connection( connection, path_with_query, api_key ):
         - Returns ( ok, count, breakdown ):
             ok        : True iff a 2xx response carried an integer `count`
             count     : that integer (0 when ok is False)
-            breakdown : { status: int } from the response (c191be39), or {} when
+            breakdown : { status: int } from the response, or {} when
                         absent/malformed — see _parse_breakdown for why a bad
                         breakdown degrades instead of failing the read
-        - ANY transport error / non-2xx / unparseable-or-non-dict body / missing
+        - any transport error / non-2xx / unparseable-or-non-dict body / missing
           or non-int `count` (bool rejected — a JSON true/false must never read
-          as 1/0) → ( False, 0, {} )  (the §C fail-safe)
-        - NEVER raises
+          as 1/0) → ( False, 0, {} )  (the fail-safe)
+        - never raises
     """
     try:
         connection.request( "GET", path_with_query, headers={ "X-API-Key": api_key } )
@@ -362,27 +342,21 @@ def _count_on_connection( connection, path_with_query, api_key ):
 
 def _count_on_connection_full( connection, path_with_query, api_key ):
     """
-    `_count_on_connection` plus the PRIORITY breakdown — ONE request, four values.
+    `_count_on_connection` plus the priority breakdown: one request, four values.
 
-    WHY A SIBLING AND NOT A FOURTH RETURN SLOT. `_count_on_connection` / `query_owed`
-    are asserted as 3-tuples in ~30 places. Widening the arity would rewrite every one
-    of those assertions to accommodate a field most of them do not care about, and a
-    mass edit of assertions is how a suite quietly loses the property it was pinning.
-
-    ⚠️ THIS DOES NOT DELEGATE TO `_count_on_connection`. Calling it would issue a
-    SECOND GET on the same connection for a body already read — doubling the request
-    the Stop hook fires every turn, and re-reading a consumed response. The parse is
-    duplicated deliberately; the shape it parses is four lines long and the
-    alternative is an extra round trip on the hot path.
+    A sibling, not a fourth return slot. `_count_on_connection` and `query_owed` are asserted as 3-tuples in
+    about 30 places. A mass edit of assertions is how a suite quietly loses the property it was pinning.
 
     Ensures:
         - returns ( ok, count, breakdown, priority_breakdown )
-        - identical fail-safe contract to `_count_on_connection`: ANY transport error
+        - identical fail-safe contract to `_count_on_connection`: any transport error
           / non-2xx / unparseable body / missing-or-bool `count` → ( False, 0, {}, {} )
         - `priority_breakdown` degrades to {} on absent/malformed data for the same
-          reason `breakdown` does — it is a REPORTING refinement of a count that is
+          reason `breakdown` does — it is a reporting refinement of a count that is
           already trusted, so it must never fail a read that otherwise succeeded
-        - NEVER raises
+        - Does not delegate to `_count_on_connection`: that would issue a second GET on the same connection for a body
+          already read, doubling the request the Stop hook fires every turn, so the four-line parse is duplicated rather than delegated
+        - never raises
     """
     try:
         connection.request( "GET", path_with_query, headers={ "X-API-Key": api_key } )
@@ -410,87 +384,42 @@ def _count_on_connection_full( connection, path_with_query, api_key ):
 def query_owed( settings, api_key, owner_persona, project=None, timeout=None,
                 owner_field="owner_persona" ):
     """
-    GET /api/tasks owed-row COUNT for one owner (Spine Step-2 store-count seam).
+    GET the owed-row count for one owner (store-count seam of the Stop hook).
 
-    ONE request, `owed_only=true` — the server defines the owed set.
-
-    PARKED-STATUS (2026-07-19) REWRITE. This used to take a `statuses` tuple,
-    fire one count_only request PER status, and SUM. That shape is now
-    unbuildable, for two independent reasons:
-
-      1. It CANNOT see a park-expiry rejoin. Park-expiry is computed at READ
-         time and never written back, so an EXPIRED parked row still carries
-         status="parked" in the column — it matches neither "queued" nor
-         "in_progress" and would stay silent forever. Parking would buy
-         PERMANENT silence from the one reader that fires the pokes, which is
-         the exact defect this build exists to kill.
-      2. Server-side admission + a per-status loop DOUBLE-COUNTS: an expired
-         parked row would be admitted on the queued call AND again on the
-         in_progress call. Parking a row and letting it expire would make the
-         board look BUSIER than never parking it — the feature inverts.
-
-    So the status set moved SERVER-side behind a single `owed_only` flag:
-    queued U in_progress U (parked AND NOT park-active). No caller holds a
-    status tuple any more, which is what makes it fail-CLOSED — there is no
-    second thing to remember to pair. STORE_OWED_STATUSES is DELETED from
-    stop.py and task_store_drain.py rather than re-pointed: a constant that no
-    longer exists cannot drift, and it had already forked into 4 copies.
-
-    Membership is UNCHANGED apart from park: blocked / claimed / review are
-    still NOT owed to this reader, exactly as before. Park is legal ONLY from
-    ("queued","in_progress"), so every expired-parked row provably came from
-    the set this reader already counted — exact RESTORATION, not a widening.
-
-    `count_only=true` (O2 / §G) returns a true SQL COUNT(*) without serializing
-    a row, so the count can NEVER saturate at the endpoint's page `limit`.
-    Bounded by an AGGRESSIVE socket timeout (the Stop hook fires every turn — a
-    slow `:7999` must never stall turn-end; cascade review §C). The O3 reused
-    connection is retained but now carries a single request; it costs one
-    handshake either way and keeps the timeout/close discipline in one place.
-
-    PER-STATUS BREAKDOWN (c191be39, 2026-07-20). The response now carries a
-    `breakdown` object beside the count, and this returns it as a THIRD element.
-    That third element is the whole point of the change: the count alone forced
-    the caller to invent a status, and it invented `in_progress` for every row,
-    so a board of `queued` rows reported to its owner as N in-progress items.
-
-    ⛔ THE BREAKDOWN IS COMPUTED SERVER-SIDE, ON THE SAME ADMITTED SET, IN ONE
-    GROUP BY. It is NOT a license to reinstate the per-status loop deleted on
-    2026-07-19 — restoring that shape resurrects both bugs described above (blind
-    to park-expiry rejoin; double-counts expired-parked rows). This function
-    still issues EXACTLY ONE request, and test_task_store_client.py asserts that
-    on the shape, not just the answer.
+    One request, `owed_only=true`: the server owns the owed set (queued, in_progress, and parked rows whose park has
+    expired). No caller holds a status tuple, which makes it fail-closed. A per-status loop is blind to a park-expiry rejoin.
 
     Requires:
         - settings is the load_task_store_settings() dict (provides api_base_url)
         - api_key is a string (may be empty — server 401s it)
-        - owner_persona is the persona string filtered on (lowercased canonical
-          key): by default the row's owner (the PostToolUse mirror stamp), or the
-          accountable_manager when owner_field="accountable_manager"
+        - owner_persona is the persona string filtered on (lowercased canonical key): by default the row's owner
+          (the PostToolUse mirror stamp), or the accountable_manager when owner_field="accountable_manager"
         - project is the resolve_project_name() scope, or None to omit the filter
         - timeout overrides DEFAULT_OWED_TIMEOUT_SECONDS (seconds, per request)
-        - owner_field selects WHICH persona column the value filters: the default
-          "owner_persona" preserves the owed-count behavior; "accountable_manager"
-          counts a manager's chase-list (proactive-manager A1 Face A backlog)
+        - owner_field selects which persona column the value filters: the default "owner_persona" preserves the
+          owed-count behavior; "accountable_manager" counts a manager's chase-list
 
     Ensures:
         - Returns ( ok, count, breakdown ):
-            ok        : True iff the query returned a 2xx whose body carried an
-                        integer `count`
+            ok        : True iff the query returned a 2xx whose body carried an integer `count`
             count     : the server-computed owed-row count (0 when ok is False)
-            breakdown : { status: count } over that same admitted set — under
-                        owed_only the `parked` key IS the expired-parked set.
-                        {} when the server omitted it or it was malformed: a
-                        cosmetic regression must never suppress the poke, so the
-                        breakdown degrades while the count still governs.
-        - sum( breakdown.values() ) == count whenever the server supplied one —
-          two independently computed numbers, asserted rather than derived
-        - ANY transport failure / non-2xx / malformed body (missing or non-int
-          `count`) / unresolvable base URL → ( False, 0, {} ) — the §C fail-safe:
-          the caller does NOT poke on a not-ok read (never guess when the store
-          can't be reached)
-        - The connection is ALWAYS closed
-        - NEVER raises
+            breakdown : { status: count } over that same admitted set (under owed_only the `parked` key is the
+                        expired-parked set), or {} when omitted or malformed: a cosmetic regression must never
+                        suppress the poke, so the breakdown degrades while the count still governs
+        - sum( breakdown.values() ) == count whenever the server supplied one — two independently computed numbers, asserted rather than derived
+        - any transport failure / non-2xx / malformed body (missing or non-int `count`) / unresolvable base URL
+          → ( False, 0, {} ) — the fail-safe: the caller does not poke on a not-ok read (never guess when the store can't be reached)
+        - Why one request and no per-status loop: park-expiry is computed at read time and never written back, so an expired
+          parked row still carries status="parked", matches neither queued nor in_progress and would stay silent forever;
+          a loop also double-counts an expired parked row admitted on both calls, making the board look busier than never parking
+        - Membership is unchanged apart from park: blocked / claimed / review are still not owed to this reader, and park is legal only
+          from ("queued","in_progress"), so every expired-parked row came from the set already counted (restoration, not widening)
+        - count_only=true returns a true SQL `COUNT(*)` without serializing a row, so the count can never saturate at the page `limit`;
+          the socket timeout is aggressive because the Stop hook fires every turn and a slow `:7999` must never stall turn-end
+        - The breakdown is computed server-side on the same admitted set in one `GROUP BY`; without it the caller invented in_progress
+          for every row. It is no license to reinstate the per-status loop; test_task_store_client.py asserts exactly one request
+        - The connection is always closed
+        - never raises
     """
     if timeout is None:
         timeout = DEFAULT_OWED_TIMEOUT_SECONDS
@@ -520,20 +449,18 @@ def query_owed( settings, api_key, owner_persona, project=None, timeout=None,
 def query_owed_breakdowns( settings, api_key, owner_persona, project=None, timeout=None,
                            owner_field="owner_persona" ):
     """
-    `query_owed` plus the PRIORITY breakdown — same ONE request, four values.
+    `query_owed` plus the priority breakdown: the same one request, four values.
 
-    The Stop-hook poke needs to say WHICH rows matter, not only how many (Rick,
-    2026-07-27). `query_owed` keeps its 3-tuple so its ~30 existing assertions stay
-    exactly as written; this is the entry point for the one caller that wants the
-    fourth field.
+    The Stop-hook poke needs to say which rows matter, not only how many. `query_owed` keeps its 3-tuple so its
+    roughly 30 existing assertions stay as written. This is the entry point for the one caller wanting the fourth field.
 
     Ensures:
         - returns ( ok, count, breakdown, priority_breakdown )
         - identical fail-safe contract to `query_owed`: any not-ok read yields
-          ( False, 0, {}, {} ) and the caller does NOT poke
-        - issues exactly ONE HTTP request, like `query_owed`
-        - the connection is ALWAYS closed
-        - NEVER raises
+          ( False, 0, {}, {} ) and the caller does not poke
+        - issues exactly one HTTP request, like `query_owed`
+        - the connection is always closed
+        - never raises
     """
     if timeout is None:
         timeout = DEFAULT_OWED_TIMEOUT_SECONDS

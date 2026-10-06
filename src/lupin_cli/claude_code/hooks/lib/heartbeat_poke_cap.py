@@ -1,18 +1,17 @@
 #!/usr/bin/env python3
 """
-Heartbeat Hook — per-session poke-cap counter.
+Heartbeat Hook: per-session poke-cap counter.
 
-The §0 decision #6 MANDATORY safety budget: a per-session count of how many
-times the heartbeat has self-poked this session. **A SEPARATE budget from the
-voice-driven `MAX_STOP_BLOCKS` counter** (`hook_common.py`) — the two caps
-must never share a file or contaminate each other (María, 2026-06-04).
+The mandatory safety budget: a per-session count of how many times the heartbeat has self-poked.
+It is a separate budget from the voice-driven `MAX_STOP_BLOCKS` counter (`hook_common.py`).
+The two caps must never share a file or contaminate each other.
 
-Mirrors the existing `hook_common` stop-counter pattern (file-backed, keyed
-by the session_id prefix, never-raises on read/reset) but lives in its own
-module and uses its own filename namespace.
+Mirrors the existing `hook_common` stop-counter pattern.
+It is file-backed, keyed by the session_id prefix, and never raises on read or reset.
+It lives in its own module and uses its own filename namespace.
 
-Design authority (LOCKED): planning-is-prompting →
-    planning-is-prompting/src/rnd/2026.06.02-stop-hook-natural-heartbeat-poker.md §0 #6.
+The design authority is decision 6 of section 0 in the planning-is-prompting plan file
+`2026.06.02-stop-hook-natural-heartbeat-poker.md`, under its `src/rnd` directory.
 
 The counter file is ephemeral runtime state in /tmp (like the voice
 stop-counter). `base_dir` is injectable for hermetic tests; production uses

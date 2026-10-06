@@ -1,33 +1,31 @@
 #!/usr/bin/env python3
 """
-Heartbeat Hook v2 — per-session Task* state replay (work-owed source).
+Heartbeat Hook v2 per-session Task* state replay (work-owed source).
 
-The §0.3 (corrected) authoritative work-owed source: the session's OWN `Task*`
-state, reconstructed from its transcript JSONL (`Stop`-hook `transcript_path`).
-`owned_by_me` is TRUE BY CONSTRUCTION — every `Task*` call in that transcript
-belongs to that session, so there is zero cross-session attribution.
+The authoritative work-owed source is the session's own `Task*` state,
+reconstructed from its transcript JSONL (`Stop`-hook `transcript_path`).
+`owned_by_me` is true here because every `Task*` call in that transcript
+belongs to that session, so there is no cross-session attribution.
 
-**Replay model (empirically confirmed — spike in 04 §2, live impl-spike
-2026-06-05):**
-    - `TaskCreate` assigns a SEQUENTIAL ordinal `taskId` ("1", "2", …) in
-      creation order; a created task starts at status `pending` (the tool's
-      own contract: "All tasks are created with status pending"). So the Nth
-      `TaskCreate` tool_use in the transcript ⇒ `taskId = str(N)`, initial
-      status `pending`.
+Replay model (confirmed empirically in a live implementation spike):
+    - `TaskCreate` assigns a sequential ordinal `taskId` ("1", "2", ...) in
+      creation order. A created task starts at status `pending` (the tool's
+      own contract: "All tasks are created with status pending").
+      So the Nth `TaskCreate` tool_use gives `taskId = str(N)`, status `pending`.
     - `TaskUpdate{taskId, status}` sets that task's status; last write wins.
-    - `work_owed = any task whose LATEST status ∈ {in_progress, pending}`;
-      `completed` / `deleted` ⇒ not owed.
+    - `work_owed = any task whose LATEST status is in {in_progress, pending}`;
+      `completed` and `deleted` mean not owed.
 
 This feeds the already-100%-covered pure oracle
-`heartbeat_work_owed.evaluate_work_owed( todo_items=… )` — the Task* statuses
-`in_progress` / `pending` map 1:1 onto its `TODO_IN_PROGRESS` / `TODO_PENDING`.
+`heartbeat_work_owed.evaluate_work_owed( todo_items=... )`. The Task* statuses
+`in_progress` and `pending` map 1:1 onto its `TODO_IN_PROGRESS` and `TODO_PENDING`.
 
-**Invariant:** pure + never-raises (reads via transcript_reader, which never
-raises). A missing/empty transcript ⇒ empty state ⇒ no owed work ⇒
-conservative (no false poke). `:7999`-free.
+Invariant: pure and never raises, because reads go via transcript_reader, which
+never raises. A missing or empty transcript gives an empty state, so no owed work.
+That is conservative, with no false poke. It is `:7999`-free.
 
-Design authority: planning-is-prompting →
-    planning-is-prompting/src/rnd/2026.06.02-stop-hook-natural-heartbeat-poker.md §0.3.
+Design authority: planning-is-prompting ->
+    planning-is-prompting/src/rnd/2026.06.02-stop-hook-natural-heartbeat-poker.md
 """
 from lupin_cli.claude_code.hooks.lib.transcript_reader import iter_tool_uses
 from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import (
@@ -57,7 +55,7 @@ def replay_task_state( transcript_path, _iter=iter_tool_uses ):
         - A TaskUpdate for an unknown taskId is recorded defensively (the task
           exists with that status) — never raises on foreign/partial data
         - Empty / missing transcript → {}
-        - NEVER raises
+        - never raises
     """
     state    = { }
     next_ord = 0
@@ -78,12 +76,9 @@ def replay_task_subjects( transcript_path, _iter=iter_tool_uses ):
     """
     Replay the session's TaskCreate calls into { taskId(str): subject(str) }.
 
-    PURE — no I/O beyond the injected iterator (which never raises). Additive
-    companion to replay_task_state: same SEQUENTIAL-ordinal model (the Nth
-    TaskCreate ⇒ taskId str(N)), so the ids returned here align 1:1 with
-    replay_task_state's keys. Lets the Stop-hook poke breadcrumb name the OWED
-    task items by subject without changing replay_task_state's shape (and thus
-    without touching its consumers / the pure oracle).
+    Pure, with no I/O beyond the injected iterator (which never raises). Companion to replay_task_state
+    with the same sequential-ordinal model: the Nth TaskCreate gives taskId str(N), so ids align 1:1.
+    Lets the poke breadcrumb name owed items by subject without changing replay_task_state's shape or its consumers.
 
     Requires:
         - transcript_path is a path-like / string / None
@@ -95,7 +90,7 @@ def replay_task_subjects( transcript_path, _iter=iter_tool_uses ):
         - A TaskCreate with a missing/blank subject is skipped (its ordinal is
           still consumed, so later ids stay aligned with replay_task_state)
         - Empty / missing transcript → {}
-        - NEVER raises
+        - never raises
     """
     subjects = { }
     next_ord = 0
@@ -111,9 +106,9 @@ def owed_items_from_state( state ):
     """
     Derive the work-owed `todo_items` list from an already-replayed task state.
 
-    PURE — no I/O. Lets the caller replay the transcript ONCE (perf: the Stop
-    hook fires every turn) and derive both the owed-items AND the empty-set
-    signal from the single state dict, instead of replaying twice.
+    Pure, with no I/O. Lets the caller replay the transcript once, because the
+    Stop hook fires every turn. Both the owed-items and the empty-set signal
+    then come from the single state dict, instead of replaying twice.
 
     Requires:
         - state is a { taskId: status } dict (replay_task_state output)
@@ -121,8 +116,8 @@ def owed_items_from_state( state ):
     Ensures:
         - Returns a list of { "status": <status>, "owned_by_me": True } — one
           per task whose status ∈ {in_progress, pending}
-        - owned_by_me is always True (by construction — same transcript =
-          same session)
+        - owned_by_me is always True (the same transcript means the same
+          session)
         - No owed tasks → []
     """
     return [
@@ -134,9 +129,9 @@ def owed_items_from_state( state ):
 
 def is_empty_state( state ):
     """
-    Is the (already-replayed) Task* state genuinely empty (no tasks at all)?
+    Is the (already-replayed) Task* state empty (no tasks at all)?
 
-    PURE companion to owed_items_from_state for the single-replay path.
+    Pure companion to owed_items_from_state for the single-replay path.
 
     Requires:
         - state is a { taskId: status } dict
@@ -158,7 +153,7 @@ def fetch_task_work_owed( transcript_path, _iter=iter_tool_uses ):
     Ensures:
         - Returns owed_items_from_state( replay_task_state( transcript_path ) )
         - No owed tasks (or empty transcript) → []
-        - NEVER raises
+        - never raises
 
     (The single-replay hot path in stop.py calls replay_task_state +
     owed_items_from_state + is_empty_state directly to avoid replaying twice.)
@@ -170,15 +165,15 @@ def is_task_set_empty( transcript_path, _iter=iter_tool_uses ):
     """
     Convenience wrapper: replay the transcript + report the empty-set signal.
 
-    Used by the §6.2 genuine-idle declaration beacon (Rick Option B): a
-    genuine-idle signal requires BOTH no owed work AND an empty task set.
+    Used by the genuine-idle declaration beacon: a genuine-idle signal
+    requires both no owed work and an empty task set.
 
     Requires:
         - transcript_path is a path-like / string / None
 
     Ensures:
         - Returns is_empty_state( replay_task_state( transcript_path ) )
-        - NEVER raises
+        - never raises
     """
     return is_empty_state( replay_task_state( transcript_path, _iter=_iter ) )
 

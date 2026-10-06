@@ -1,155 +1,36 @@
 """
-Stash guard — `git stash` is repo-global, not per-worktree (bug 1ebc9be3).
+Deny mutating `git stash` commands in the PreToolUse hook; the stash stack is repo-global.
 
-THE MECHANISM: the stash stack is a SINGLE repo-global stack shared by every
-worktree and every live session. This repo carries ~50 worktrees and several
-concurrent sessions, so every push races every other session's push and every
-pop races every other session's pop.
+One stash stack is shared by every worktree and every live session, so pushes and pops race.
+A pop can apply another session's held work into your tree, silently when the changesets do not overlap.
+Also `stash@{N}` is a position, not a name: a drop renumbers the stack. Name the commit sha instead.
 
-WHAT IT COSTS: on 2026-08-23 john pushed in his worktree, Tiffany pushed hers
-from a different worktree in between, and john's pop applied TIFFANY'S held
-postgres conversion into HIS tree. The two changesets happened to overlap, so
-it conflicted and he caught it. Had they not overlapped the pop would have
-SUCCEEDED SILENTLY and twelve of Tiffany's files would have been committed
-under john's name, on his row, with nothing in the git output naming the owner.
-
-⇒ SECOND HAZARD, ONE LEVEL DOWN: `stash@{N}` looks like a name and is a
-POSITION. Dropping an entry renumbers the whole stack, so an index written into
-an instruction moves under it between the writing and the running. Name the
-commit sha, never the index.
-
-THE SUBSTITUTES, in the order you should reach for them:
-  · TO HOLD WORK — make a WIP COMMIT ON YOUR OWN BRANCH. A stash is a shared
-    mutable stack pretending to be a private one; a branch is actually yours.
-  · TO INSPECT AN OLD VERSION — a THROWAWAY DETACHED WORKTREE at the old sha.
-    Reach for this FIRST; it is the only form that cannot touch anybody's
-    working tree.
-  · The same job by `git checkout <sha> -- <path>` is a LAST RESORT, and only
-    after `cp <path> <path>.bak`. 🔴 THIS BULLET USED TO SAY IT "touches nothing
-    shared, races nothing", WHICH IS FALSE AND WAS THE MOST DANGEROUS SENTENCE
-    IN THIS FILE. A path-level checkout overwrites the WORKING-TREE copy of that
-    path — including a peer's uncommitted work in a shared checkout — and it
-    moves no HEAD, so it leaves NO REFLOG ENTRY and is invisible to forensics.
-    Measured 2026-09-01: four seats in one checkout, and a census of 96,258
-    commands found 73 such restores in the shared tree across 50 sessions.
-    The restore direction (`git checkout HEAD -- <path>`) is the same hazard.
-  · TO UNDO YOUR OWN EDIT — `cp` from a backup YOU took, IN A WORKTREE OF YOUR
-    OWN. The `cp` fixes only which BYTES come back: your copy holds your edit,
-    where `git checkout HEAD --` holds whatever was committed. 🔴 THE WRITE IS
-    IDENTICAL. A `cp` overwrites the working-tree file exactly as the git form
-    does, so if a peer edited it between your backup and your restore you revert
-    them — silently, no HEAD moved, no reflog. Substituting `cp` narrows the
-    hazard to the window between the two, and does not remove it.
-    ⇒ In a shared checkout the only form with no window at all is a detached
-    worktree, where nobody else can be in the file. Receipt, and it is this
-    file's own author: on 2026-09-02 I ran mutation arms with `cp` restores in a
-    four-seat shared checkout and they came out clean only because the other
-    three happened not to be in those two files.
-
-SCOPE: only the MUTATING subcommands are denied. `git stash list` and
-`git stash show` are read-only and stay allowed — they are how you inspect the
-stack before acting on it.
-
-FIXED OVER-BLOCK, kept here as a record (row e062580e). This matcher is a regex
-over the RAW command string and did not parse shell quoting, so a separator
-appearing INSIDE a quoted literal counted as a command position and a command
-that merely CONTAINED such a snippet was refused, even though no stash would
-run. Measured 2026-08-24 while demonstrating the guard, three false denies: a
-semicolon, a pipe, and a paren, each inside a quoted literal.
-
-⇒ IT IS NOW FIXED, by `_blank_quoted_spans` below: BALANCED quoted spans are
-blanked before matching. The three cases above now pass; all thirteen mutating
-forms still deny.
-
-🔴 AND THAT FIX OPENED A HOLE, WHICH IS THE PART WORTH READING (row 1ebc9be3,
-reported by Rachel, measured 2026-08-24 by running the pre-fix and post-fix
-matchers on the same inputs). Blanking the quoted span ALSO blanked the payload
-of a nested interpreter, so `bash -c 'echo x; git st​ash pop'` DENIED before the
-over-block fix and was ALLOWED after it. A false deny had been traded for a
-false ALLOW — precisely the trade the row said to refuse, made while refusing it.
-It is repaired below by scanning an INTERPRETER'S payload while still blanking
-every other quoted span, so both properties hold at once.
-
-⇒ THE WIDER FINDING, and the reason this module was rewritten rather than
-patched: the matcher recognised ONE SPELLING of the program in one syntactic
-position. Measured against 22 natural forms, TWENTY-ONE walked past it — an
-absolute or relative path, a backslash escape, a quoted program name, the
-env / command / sudo / nohup / time / xargs wrappers, an env-assignment prefix,
-a brace group, `if ...; then`, a line continuation, a nested shell. Every one
-reaches the same repo-global stack.
-
-⇒ THE FIX IS NORMALISATION, NOT A LONGER DENYLIST. Each clause removes a DEGREE
-OF FREEDOM in how the program may be written rather than naming one more thing
-to refuse; adding cases to a denylist is how the original arrived here. 21 of 22
-now deny. 83 tests, 100% lines and branches.
-
-⚠️ THE ONE THAT REMAINS, named on purpose: `g=git; $g st​ash pop`. Text matching
-cannot resolve variable indirection, an eval, or a base64 payload, and no hook
-that sees only text ever will. THE THREAT MODEL IS ACCIDENT, NOT EVASION — this
-fleet has no adversary, it has habits. Nobody reaches for variable indirection
-by accident and everybody reaches for `/usr/bin/git`, so catching every natural
-spelling is the whole job. A test pins that residual as known and accepted, and
-fails if it is ever silently closed, so this paragraph cannot drift out of date.
-This guard is an accident-preventer. It is not a security boundary, and calling
-it one would be the same defect it exists to catch.
-
-⇒ THIS NOTE PREVIOUSLY SAID THE OPPOSITE — "the reason it is not fixed" — and
-that reasoning is worth keeping because it still holds against the fix it
-refused. Making the matcher SHELL-AWARE (shlex) is heavier on a hot path and
-RAISES on unbalanced quotes, where the fail-open backstop below would then ALLOW
-a real mutating command. Trading a false deny for a possible false allow is the
-wrong direction for a control whose whole value is deny-by-default, and that
-option stays refused. What shipped is the cheaper third option: still a regex,
-still total, and it CANNOT hide a real command, because the pattern requires a
-closing quote — an unbalanced span matches nothing and the text is left exactly
-as it was. Measured both ways.
-
-⇒ THE WORKAROUND THIS NOTE USED TO PRESCRIBE — put the script in a FILE and run
-the file rather than a heredoc — is no longer needed for the quoted-separator
-case. It was needed to write this very paragraph's predecessor, and it was needed
-twice more to produce the fix: once for the probe that measured the defect, once
-for the patch that removed it. It remains the right move any time the guard
-refuses authoring text.
-
-(Some examples in this file carry a zero-width space inside the verb so that
-reading THIS FILE through a shell command is not itself refused. That trick is
-kept: the guard still denies genuine command position, which is the point.)
-
-If this is ever revisited, the acceptance test is unchanged: all thirteen
-currently-denied forms stay denied.
-
-SAFETY — this runs inside the hot-path PreToolUse hook (every tool call, every
-session), so two non-negotiables:
-  • FAIL-OPEN: ANY error → allow (return None). A guard must never break a tool
-    call.
-  • ESCAPE HATCH: LUPIN_ALLOW_GIT_STASH=1 disables the guard for a session that
-    genuinely needs the stack — an owner clearing their OWN entry after
-    verifying its content is preserved elsewhere.
-
-    🔴 IT IS HONOURED BY A PREFIX CARVE-OUT (`_hatch_in_prefix`), NOT BY THE ENV
-    READ, AND THAT IS NOT A SHORTCUT — IT IS THE ONLY THING THAT CAN WORK. A
-    PreToolUse hook is a SEPARATE PROCESS reading its OWN environment, and an
-    inline `VAR=1 cmd` prefix belongs to a command that HAS NOT RUN YET. So an
-    env-var hatch can never be honoured through os.environ from a command
-    string, no matter how the read is written.
-
-    Verified independently by Rachel 🕊️ on 2026-08-24: setting the flag in the
-    hook's own process environment produced an IDENTICAL verdict to not setting
-    it, so the allow demonstrably comes from the carve-out. At the same sha a
-    GENERIC env prefix is still denied (`GIT_DIR=.git git st​ash pop` → DENY),
-    which is the split that matters — arbitrary env prefixes refused, the hatch
-    prefix let through.
-
-    ⇒ DO NOT "SIMPLIFY" THE CARVE-OUT AWAY. Deleting it does not fall back to
-    the env read; it silently removes the hatch entirely, and every deny message
-    in this module tells the reader to use it. That is how the hatch spent most
-    of this guard's life broken without anyone noticing: it appeared to work
-    only because an env assignment pushed the program out of command position,
-    making it indistinguishable from the env-assignment BYPASS.
-
-⚠️ Unlike subagent_governance this guard is DEFAULT-ON. A control that must be
-switched on is the courtesy version of itself: the rule this replaces already
-depended on remembering, which is the reason the hazard reached production once.
+Ensures:
+    - only mutating subcommands are denied; read-only `git stash list` and `git stash show` stay allowed
+    - to hold work, use a work-in-progress commit on your own branch, because a branch is yours and a stash is shared
+    - to inspect an old version, use a throwaway detached worktree first; it cannot touch anybody's working tree
+    - `git checkout <sha> -- <path>` is a last resort, only after `cp <path> <path>.bak`, and so is the `HEAD` restore form
+    - that checkout overwrites the working-tree copy, including a peer's uncommitted work, and moves no HEAD, so no reflog entry exists
+    - to undo your own edit, `cp` from a backup you took in a worktree of your own
+    - that `cp` fixes only which bytes come back; the write is identical, so a peer's edit made since the backup is lost
+    - only a detached worktree leaves no such window in a shared checkout
+    - balanced quoted spans are blanked before matching, so a separator inside a quoted literal is not read as a command position
+    - an unbalanced quote matches nothing and cannot hide a real command, which is why shlex was refused: it raises there
+    - blanking hides a nested interpreter's payload, so the payload of `sh -c` is scanned separately
+    - the matcher normalises how the program is spelled instead of extending a denylist; each clause removes one degree of freedom
+    - those spellings are paths, backslash escapes, quoted names, wrappers such as env, sudo, nohup, time and xargs, env-assignment prefixes, brace groups, if-then, line continuations and nested shells
+    - an extended denylist is how the first matcher let 21 of 22 natural spellings through
+    - `g=git; $g st​ash pop` is not caught: text matching cannot resolve variable indirection, eval or a base64 payload
+    - the threat model is accident, not evasion, so this is an accident-preventer and not a security boundary
+    - a test pins that residual as known and fails if it is ever silently closed
+    - `LUPIN_ALLOW_GIT_STASH=1` is the escape hatch, honoured by the prefix carve-out `_hatch_in_prefix`, not by an environment read
+    - the hook is a separate process whose environment never holds an inline prefix, so do not remove that carve-out
+    - removing it silently removes the hatch that every deny message recommends; a generic env prefix is still denied
+    - any error allows (fail-open), because a guard on the hot path must never break a tool call
+    - the guard is default-on, because a control that must be switched on depends on remembering
+    - examples here carry a zero-width space inside the verb so reading this file through a shell is not itself refused
+    - if the guard refuses authoring text, put the script in a file and run the file rather than a heredoc
+    - the acceptance test is unchanged: all thirteen mutating forms stay denied
 """
 import os
 import re
@@ -281,27 +162,16 @@ def _hatch_in_prefix( prefix ) -> bool:
     """
     True iff an env-assignment prefix carries the escape-hatch flag, truthy.
 
-    WHY THIS EXISTS, and it is a correction to a claim I made out loud (row
-    1ebc9be3, 2026-08-24). The deny message has always told the reader to
-    "re-run with LUPIN_ALLOW_GIT_STASH=1". I tested that inline form against the
-    live hook, saw the command go through, and reported the hatch as working.
-    IT WAS NOT WORKING. The hook is a separate process and never sees an inline
-    `VAR=1 cmd` prefix in its os.environ; what actually happened is that the
-    assignment pushed `git` out of command position, so the OLD matcher simply
-    failed to match. The hatch was indistinguishable from bypass #14, and my
-    original prediction — that the inline form could not reach the hook — had
-    been right before I talked myself out of it on bad evidence.
-
-    Closing that bypass therefore closed the documented hatch with it. This
-    reads the flag from the COMMAND instead, so the instruction in the deny
-    message is true rather than accidentally true.
+    The deny message tells the reader to re-run with `LUPIN_ALLOW_GIT_STASH=1` inline.
+    The hook is a separate process, so its os.environ never holds an inline `VAR=1 cmd` prefix.
+    Closing the env-assignment bypass would close that hatch too, so the flag is read from the command.
 
     Requires:
         - prefix is the matched env-assignment / wrapper span, or None
 
     Ensures:
-        - True only when the flag is assigned a truthy value IN THIS INVOCATION'S
-          own prefix — not somewhere else in the line, so `echo FLAG=1` before an
+        - True only when the flag is assigned a truthy value in this invocation's
+          own prefix, not somewhere else in the line, so `echo FLAG=1` before an
           unrelated mutation cannot disable the guard for it
         - never raises
     """
@@ -393,8 +263,10 @@ _QUOTED_SPAN_RE = re.compile( '"[^"]*"' + "|" + "'[^']*'" )
 
 def _blank_quoted_spans( command ):
     """
+    Replace every balanced quoted span of a command with a single space.
+
     Ensures:
-        - returns <command> with every BALANCED single- or double-quoted span
+        - returns <command> with every balanced single- or double-quoted span
           replaced by a single space
         - returns <command> unchanged where quotes are unbalanced
         - never raises
@@ -415,8 +287,7 @@ _LINE_CONTINUATION_RE = re.compile( r"\\\s*\n\s*" )
 
 def _normalise_spelling( command ):
     """
-    Remove degrees of freedom in HOW a command is written, without changing
-    WHICH command it is.
+    Remove degrees of freedom in how a command is written, not which one it is.
 
     Requires:
         - command is a str
@@ -479,8 +350,8 @@ def stash_deny_reason(
         - enabled is None (resolved from env) or injected for testing
 
     Ensures:
-        - None unless ALL hold: the guard is enabled, tool_name is Bash, and the
-          command invokes a MUTATING `git stash` subcommand in command position
+        - None unless all hold: the guard is enabled, tool_name is Bash, and the
+          command invokes a mutating `git stash` subcommand in command position
         - None for read-only `git stash list` / `git stash show`
         - FAIL-OPEN: any unexpected error → None
     """

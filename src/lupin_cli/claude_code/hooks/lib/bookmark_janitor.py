@@ -1,56 +1,43 @@
 """
-Liveness-based expiry for session BOOKMARK files — row bd5c27e1.
+Liveness-based expiry for session bookmark files.
 
-WHAT THESE FILES ARE (read before deciding anything here is disposable)
-----------------------------------------------------------------------
-A session "bookmark" is a per-session high-water mark / ledger co-located with the
-heartbeat hold+acked family in `fleet_data_root()`. Each records what one session
-has already processed, keyed on the session id IN THE FILENAME (the body carries no
-session_id). They are the OPPOSITE of ephemeral — surviving `/clear` is the point —
-which is why they do NOT follow holds/mementos to /tmp.
+A session bookmark is a per-session high-water mark or ledger beside the heartbeat
+hold and acked family in `fleet_data_root()`. Each records what one session has
+processed, keyed on the session id in the filename (the body carries no session_id).
+They are the opposite of ephemeral, since surviving `/clear` is their purpose. That is
+why they do not follow holds and mementos to /tmp.
 
-This module owns the THREE milder families. The fourth — `.dm-inbox-hwm-*` — keeps
-its own proven, already-wired janitor (`dm_inbox_hwm_janitor.py`) because deleting a
-live one SILENTLY SWALLOWS DMs (bug `59f355e0`); that correctness-critical path is
-left untouched here. Folding all four onto this one mechanism is a clean follow-up
-once this is proven in production.
+This module owns the three milder families. The fourth, `.dm-inbox-hwm-*`, keeps its
+own janitor (`dm_inbox_hwm_janitor.py`), because deleting a live one silently
+swallows DMs. That correctness-critical path is left untouched here.
 
-    family                 delete-a-LIVE-one failure mode      writer
-    .ask-answer-hwm-*       benign DUPLICATE (re-surfaces owed)  answer_catchup.py
-    .task-store-map-*       regenerable (recreated on next need) task_store_map.py
-    .heartbeat-acked-*      regenerable (recreated on next need) heartbeat_acked_ledger.py
+Family `.ask-answer-hwm-*` (writer answer_catchup.py): deleting a live one causes a benign duplicate, since owed answers re-surface.
+Family `.task-store-map-*` (writer task_store_map.py): regenerable, recreated on next need.
+Family `.heartbeat-acked-*` (writer heartbeat_acked_ledger.py): regenerable, recreated on next need.
+All three are milder than dm-inbox's silent loss. The live-set gate still
+protects every one: a live session's bookmark is never reaped, at any age.
+Rules inherited from the dm-inbox janitor (they must not be weakened):
+  * Live gate first, bias to keep. `live_session_ids is None` keeps everything,
+    regardless of age, so a failed live-set enumeration never eats a bookmark. An
+    empty but authoritative set differs from a failed one. The caller passes non-None
+    only after it enumerated live sessions.
+  * Classify by session id, never per-file mtime. A live session can hold a stale
+    ledger of one family beside a current one of another, and a per-file rule would
+    reap the first and break it.
+  * Compare [:8] prefixes. The dm-inbox names truncate the id to 8 chars and these
+    three carry the full id. The truncation over-matches (a prefix collision makes
+    more files look live), which is the safe direction. A full-id compare would make
+    a truncated peer name miss every live id.
+  * Negative or unreadable age means not-provable-age, so keep. A future mtime
+    (clock skew, restored backup) is not evidence of youth, so mtime is trusted in
+    neither direction.
+  * Sentinel names are kept. A fragment that is a non-session sentinel (`unknown`
+    from the acked empty-id fallback, `stable-s` for the persistent pseudo-session)
+    has no owning session to be dead. It is never reaped and gets a typed reason.
 
-All three are strictly milder than dm-inbox's silent loss — but the live-set gate
-still protects every one of them: a live session's bookmark is NEVER reaped, at any
-age. The gate is the only thing standing between this janitor and the mess it tidies.
-
-THE RULES, INHERITED FROM THE PROVEN dm-inbox JANITOR (do not weaken)
---------------------------------------------------------------------
-  * LIVE GATE FIRST, BIAS TO KEEP. `live_session_ids is None` keeps EVERYTHING,
-    regardless of age: a transient live-set enumeration failure must never eat a
-    bookmark. An empty-but-authoritative set is different from a failed one — the
-    caller passes non-None ONLY when it genuinely enumerated live sessions.
-  * CLASSIFY BY SESSION ID, NEVER PER-FILE MTIME. A live session can hold a stale
-    ledger of one family beside a current one of another; a per-file rule reaps the
-    first and breaks it. The session id is the unit of liveness.
-  * COMPARE [:8] PREFIXES. The dm-inbox names truncate the id to 8 chars; these
-    three carry the full id. An [:8] prefix of a full id still matches an [:8] live
-    prefix, and the truncation OVER-matches (a prefix collision makes MORE files
-    look live → KEEPS more). Over-match is the safe direction; do not "fix" it into
-    a full-id compare, which would make a truncated peer name miss every live id.
-  * NEGATIVE / UNREADABLE AGE = NOT-PROVABLE-AGE = KEEP. A future mtime (clock skew,
-    restored backup) is not evidence of youth; it means mtime cannot be read as a
-    clock, so it is trusted in NEITHER direction.
-  * SENTINEL NAMES = KEEP. A filename whose fragment is a non-session sentinel
-    (`unknown` from the acked empty-id fallback; `stable-s` for the persistent
-    pseudo-session) has no owning session to be dead — never reaped, typed reason.
-
-⚠️ Grace window: 7 days, uniform with dm-inbox (Rick's ruling 2026-07-26, sibling row
-`8758d0b1`; confirmed applicable here by Cheech 2026-08-16 — these families' failure
-modes are strictly milder than the dm-inbox loss that window was chosen against). With
-a real bridge-file live set the age arm is only a backstop; the live gate does the work.
-
-Venue: pure filesystem + mtime. No network, no DB, no container.
+Grace window: 7 days, uniform with dm-inbox. These families fail milder than the dm-inbox
+loss that window was chosen against. With a real bridge-file live set the age arm
+is only a backstop. Venue: pure filesystem + mtime, with no network, DB or container.
 """
 import time
 from dataclasses import dataclass, field
@@ -82,12 +69,13 @@ KEEP_UNPARSEABLE     = "unparseable_name"      # not this family, or a non-sessi
 @dataclass( frozen=True )
 class BookmarkFamily:
     """
-    One bookmark family's naming, so classify/report/sweep share ONE rule across all
-    three families instead of three copy-paste modules that can drift.
+    One bookmark family's naming, shared so classify, report and sweep use one rule.
+
+    The shared rule replaces three copy-paste modules that could drift.
 
     Requires:
         - prefix / suffix bracket the session-id fragment in the filename
-        - sentinel_ids are filename fragments that name NO session (never reaped)
+        - sentinel_ids are filename fragments that name no session (never reaped)
 
     Ensures:
         - glob is prefix + "*" + suffix, scoped so a loose match cannot reach a
@@ -119,8 +107,7 @@ def family_session_fragment( path, family ):
     """
     Extract the session-id fragment a bookmark filename encodes for `family`.
 
-    The body carries no session_id — the fragment is the filename's business, exactly
-    as for the dm-inbox sibling.
+    The body carries no session_id, so the fragment is the filename's business, as for the dm-inbox sibling.
 
     Requires:
         - path is a Path or str; family is a BookmarkFamily
@@ -142,10 +129,9 @@ def _live_prefixes( live_session_ids ):
     """
     Normalize an authoritative live-set to the 8-char prefixes a bookmark name carries.
 
-    The [:8] truncation is NOT injective, and the gate depends on that being safe: a
-    prefix collision makes MORE files look live, which only ever KEEPS more. Widening
-    to a full-id compare would make a truncated peer filename miss every live id and
-    start reaping live cursors — the lossy key is load-bearing.
+    The [:8] truncation is not injective, and the gate depends on that being safe.
+    A prefix collision makes more files look live, which only ever keeps more.
+    A full-id compare would make a truncated peer filename miss every live id and reap live cursors.
 
     Requires:
         - live_session_ids is an iterable of session-id strings
@@ -164,18 +150,9 @@ def classify_bookmark_file( path, family, now_ts=None,
                             grace_seconds=DEFAULT_BOOKMARK_GRACE_SECONDS,
                             live_session_ids=None ):
     """
-    Decide KEEP vs PRUNABLE for one bookmark file — the single rule report and sweep
-    share, so the dry-run evidence cannot drift from the act.
+    Decide keep or prunable for one bookmark file; report and sweep share this rule.
 
-    A file is PRUNABLE iff ALL of:
-      - an AUTHORITATIVE live-set was supplied (not None), AND
-      - its filename fragment is not a sentinel, AND
-      - its [:8] prefix is ABSENT from the live set, AND
-      - its mtime age is >= grace_seconds.
-
-    BIAS-TO-KEEP, ordering deliberate: a None live-set keeps EVERYTHING regardless of
-    age; an empty set must never read as "nothing is alive". mtime is the ONLY clock a
-    bookmark has, so an unreadable/future mtime is not-provable-age → KEEP.
+    Sharing it means the dry-run evidence cannot drift from the act.
 
     Requires:
         - path is a Path; family is a BookmarkFamily
@@ -185,6 +162,14 @@ def classify_bookmark_file( path, family, now_ts=None,
     Ensures:
         - returns a row dict: path / family / verdict / reason / sid / mtime_age_seconds
         - deletes nothing; never raises
+
+    Rule:
+        - A file is prunable iff all four hold: an authoritative live-set was supplied (not None),
+          its filename fragment is not a sentinel, its [:8] prefix is absent from the live set,
+          and its mtime age is >= grace_seconds.
+        - It biases to keep. A None live-set keeps everything regardless of age.
+        - An empty set must never read as "nothing is alive".
+        - mtime is the only clock a bookmark has, so an unreadable or future mtime is not provable age and is kept.
     """
     if now_ts is None:
         now_ts = time.time()
@@ -230,7 +215,7 @@ def classify_bookmark_file( path, family, now_ts=None,
 
 
 def _families_arg( families ):
-    """Normalize the families argument to a tuple; None → all three owned families."""
+    """Normalize the families argument to a tuple; None means all three owned families."""
     return tuple( families ) if families is not None else BOOKMARK_FAMILIES
 
 
@@ -240,11 +225,10 @@ def report_bookmark_files( base_dir=None, base_dirs=None, now_ts=None,
                            max_depth=DEFAULT_SWEEP_MAX_DEPTH,
                            skip_dir_names=SWEEP_SKIP_DIR_NAMES ):
     """
-    Dry-run triage across the owned families — classify, tally, delete NOTHING.
+    Dry-run triage across the owned families: classify and tally, delete nothing.
 
-    Its `prunable` count is a PREDICTION of what sweep_and_reclaim_bookmark_files
-    would delete under the same clock and live-set; a disagreement is itself the
-    finding, the same auditable pairing the dm-inbox janitor uses.
+    Its `prunable` count predicts what sweep_and_reclaim_bookmark_files would delete under the same clock and live-set.
+    A disagreement is itself the finding, the same auditable pairing the dm-inbox janitor uses.
 
     Requires:
         - traversal args match _iter_hold_paths' contract
@@ -315,13 +299,13 @@ def sweep_and_reclaim_bookmark_files( base_dir=None, base_dirs=None, now_ts=None
                                       max_depth=DEFAULT_SWEEP_MAX_DEPTH,
                                       skip_dir_names=SWEEP_SKIP_DIR_NAMES ):
     """
-    Delete the bookmark files classify_bookmark_file proves are orphaned AND aged.
+    Delete the bookmark files classify_bookmark_file proves are orphaned and aged.
 
     Requires:
         - same contract as report_bookmark_files
 
     Ensures:
-        - deletes ONLY files whose verdict is PRUNABLE under this exact clock and
+        - deletes only files whose verdict is prunable under this exact clock and
           live-set; returns the sorted list of deleted paths (strings)
         - a per-file OSError (racing delete) skips that file; never raises
     """

@@ -1,39 +1,39 @@
 #!/usr/bin/env python3
 """
-Heartbeat Hook — pure decision composition (`decide_heartbeat`).
+Heartbeat Hook pure decision composition (`decide_heartbeat`).
 
-Implements the §0 5-step `Stop`-hook decision logic as a PURE function over
+Implements the five-step `Stop`-hook decision logic as a pure function over
 already-fetched leaf state. Composes the three leaf modules:
     - heartbeat_hold      → is_honored, declared_work_owed   (over the hold dict)
     - heartbeat_work_owed → build_poke_reason                (over the verdict)
-    - heartbeat_poke_cap  → the poke_count / cap VALUES are passed in
+    - heartbeat_poke_cap  → the poke_count and cap values are passed in
 
-**Why this module exists (María, 2026-06-04):** push ALL decision logic into
-pure, exhaustively-tested modules so the Rachel-gated `stop.py` Branch-C
-surface shrinks to a *thin adapter*: read session_id → fetch live TODO/commons
-state + hold file + poke_count → call `decide_heartbeat` → act on the result.
-This module touches NOTHING in `stop.py`.
+Why this module exists: all decision logic lives in pure, exhaustively-tested
+modules, so the gated `stop.py` Branch-C surface shrinks to a thin adapter.
+The adapter reads session_id, fetches live TODO and commons state plus the hold
+file and poke_count, calls `decide_heartbeat`, and acts on the result.
+This module touches nothing in `stop.py`.
 
-§0 decision logic (local):
+Decision logic (local):
     1. (caller reads the hold file)
-    2. Hold present + fresh + reason non-empty → HONOR → {"continue": true}.
+    2. Hold present + fresh + reason non-empty → honor → {"continue": true}.
     3. Else determine work-owed (hold's declared work_owed first, else the
-       oracle verdict). None owed → {"continue": true} (genuinely done).
+       oracle verdict). None owed → {"continue": true} (truly done).
     4. Work owed + poke_count < cap → {"decision":"block","reason": …}; the
-       caller then INCREMENTS the counter.
+       caller then increments the counter.
     5. poke_count >= cap → {"continue": true}; the caller fires a "max
        auto-nudges reached" notify().
 
-**Purity contract:** this function performs NO I/O and NO side effects. The
-counter increment (step 4) and the cap notify (step 5) are SIDE EFFECTS owned
-by the adapter — `decide_heartbeat` only *signals* them via `should_increment`
-/ `should_notify_cap` so the adapter stays trivial and this core stays pure.
+Purity contract: this function performs no I/O and no side effects. The counter
+increment of the poke case and the cap notify of the cap case are side effects
+owned by the adapter. `decide_heartbeat` only signals them via `should_increment`
+and `should_notify_cap`, so the adapter stays trivial and this core stays pure.
 
-**`reason` channel:** the poke rides the top-level Stop-hook `reason` field —
-NEVER `systemMessage` (CC silently ignores it; see 01-…-seam-analysis §ERRATA).
+The `reason` channel: the poke rides the top-level Stop-hook `reason` field,
+never `systemMessage`, because CC silently ignores that (see the seam-analysis errata).
 
-Design authority (LOCKED): planning-is-prompting →
-    planning-is-prompting/src/rnd/2026.06.02-stop-hook-natural-heartbeat-poker.md §0.
+Design authority (locked): planning-is-prompting →
+    planning-is-prompting/src/rnd/2026.06.02-stop-hook-natural-heartbeat-poker.md
 """
 from lupin_cli.claude_code.hooks.lib.heartbeat_hold import is_honored, declared_work_owed
 from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import build_poke_reason, POKE_PROMPT_SENTINEL
@@ -80,7 +80,7 @@ def _result( outcome, hook_output, should_increment=False, should_notify_cap=Fal
     Ensures:
         - Returns a dict with:
             outcome           : one of the OUTCOME_* constants
-            hook_output       : the EXACT dict the adapter should emit to CC
+            hook_output       : the exact dict the adapter should emit to CC
                                 ({"continue": True} or {"decision":"block","reason":…})
             should_increment  : True only for a poke (adapter bumps the counter)
             should_notify_cap : True only at cap (adapter fires the notify)
@@ -95,58 +95,45 @@ def _result( outcome, hook_output, should_increment=False, should_notify_cap=Fal
 
 def decide_heartbeat( hold, oracle_verdict, poke_count, cap, now=None, goal_line="", sweep_line="" ):
     """
-    Pure §0 decision over fetched leaf state.
+    Pure five-step Stop-hook decision over fetched leaf state.
 
     Requires:
         - hold is the hold dict (heartbeat_hold.read_hold) or None
-        - oracle_verdict is the heartbeat_work_owed.evaluate_work_owed dict
-          or None
+        - oracle_verdict is the heartbeat_work_owed.evaluate_work_owed dict or None
         - poke_count is the current heartbeat poke count (int >= 0)
         - cap is the per-session poke cap (int > 0)
         - now is an aware datetime or None (forwarded to freshness check)
-        - goal_line is the role-selected north-star goal echo (role-goals Phase
-          2-3) or "" — an INJECTED string the IO shell reads from config; when
-          non-empty it is appended as a trailing blank-line-separated block to the
-          poke reason (BOTH the oracle-owed and the self-declared paths). Empty ⇒
-          the reason is byte-identical to the pre-role-goals output. Canonical
-          goal text: planning-is-prompting -> workflow/role-goals.md.
-        - sweep_line is the per-persona board-sweep progress gate
-          (board_sweep.sweep_progress_line) or "" — Rick's 2026-07-25 order that a
-          sweeping seat may not stop until every owed row has been iterated.
-          INJECTED like goal_line (the ledger read is IO and stays in the shell) and
-          appended AFTER it, because it is the more specific instruction of the two.
+        - goal_line is the role-selected north-star goal echo (role-goals phases two and three) or "", an
+          injected string the IO shell reads from config; when non-empty it is appended as a trailing
+          blank-line-separated block to the poke reason (both the oracle-owed and the self-declared paths).
+          Empty means the reason is byte-identical to the pre-role-goals output. Canonical goal text:
+          planning-is-prompting -> workflow/role-goals.md.
+        - sweep_line is the per-persona board-sweep progress gate (board_sweep.sweep_progress_line) or "", the
+          order that a sweeping seat may not stop until every owed row has been iterated. Injected like goal_line
+          (the ledger read is IO and stays in the shell) and appended after it, being the more specific of the two.
 
     Ensures:
-        - Returns the _result(...) structure; NO I/O, NO side effects
+        - Returns the _result(...) structure; no I/O, no side effects
         - Honored fresh hold        → OUTCOME_HONORED,    {"continue": True}
         - Hold self-declares done   → OUTCOME_NOT_OWED,   {"continue": True}
         - Nothing owed (no hold + oracle empty) → OUTCOME_NOT_OWED
-        - Owed via a STALE self-declared hold ONLY (declared work_owed=True,
-          is_honored False, oracle empty, no obligation override) →
-          OUTCOME_SUPPRESSED_STALE_DECLARED_OWED, {"continue": True}, NO increment,
-          NO cap-notify. This is Lever A (item 6fc8d78d): the production false-poke
-          — a blocked-waiting session nagged after its hold aged out — is suppressed
-          OBSERVABLY (its own outcome, never OUTCOME_NOT_OWED) so the FP watch can
-          audit the gate. Runs BEFORE the cap gate (a suppressed FP never fires the
-          "max nudges" notify).
+        - Owed via a stale self-declared hold only (declared work_owed=True, is_honored False, oracle empty, no
+          obligation override) → OUTCOME_SUPPRESSED_STALE_DECLARED_OWED, {"continue": True}, no increment, no
+          cap-notify. This is Lever A: the production false-poke (a blocked-waiting session nagged after its hold
+          aged out) is suppressed observably, with its own outcome, never OUTCOME_NOT_OWED, so the false-poke watch
+          can audit the gate. Runs before the cap gate (a suppressed false poke never fires the "max nudges" notify).
         - Oracle-owed + poke_count >= cap  → OUTCOME_CAP_REACHED, {"continue": True},
                                       should_notify_cap=True
-        - Oracle-owed + poke_count <  cap  → OUTCOME_POKE,
-                                      {"decision":"block","reason": …},
-                                      should_increment=True
-        - The poke reason quotes the oracle specifics (build_poke_reason). Lever A
-          retired the self-declared DECLARED_OWED_REASON poke path, so oracle-owed
-          is the ONLY surviving poke
-        - 6929f4ac obligation override (the §9 inversion of hold semantics): when
-          the verdict carries `needs_verification` (the manager owes a worker
-          look-in) or `outstanding_user_gate` (the session owes a re-ask to Rick),
-          BOTH the honored-hold short-circuit (step 2) AND the self-declared-done
-          short-circuit (step 3) are SKIPPED — the obligation is owed work that a
-          declared hold must NOT suppress (a user-gated / verification-owing hold
-          is a standing obligation to act, never a license to go quiet). Every
-          OTHER signal leaves a fresh reasoned hold honored exactly as before.
-          The cap still bounds the poke (an obligation stops nagging at poke_cap;
-          the durable re-ask cadence is the /loop tick + the arbiter backstop).
+        - Oracle-owed + poke_count <  cap  → OUTCOME_POKE, {"decision":"block","reason": …}, should_increment=True
+        - The poke reason quotes the oracle specifics (build_poke_reason). Lever A retired the self-declared
+          DECLARED_OWED_REASON poke path, so oracle-owed is the only surviving poke
+        - Obligation override (an inversion of hold semantics): when the verdict carries `needs_verification` (the
+          manager owes a worker look-in) or `outstanding_user_gate` (the session owes a re-ask to Rick), both the
+          honored-hold short-circuit and the self-declared-done short-circuit are skipped. The obligation is owed
+          work that a declared hold must not suppress (a user-gated or verification-owing hold is a standing
+          obligation to act, never a license to go quiet). Every other signal leaves a fresh reasoned hold honored
+          exactly as before. The cap still bounds the poke (an obligation stops nagging at poke_cap; the durable
+          re-ask cadence is the /loop tick plus the arbiter backstop).
     """
     # 6929f4ac obligation override — does a receipts-of-progress obligation
     # outrank the hold's quiescence this tick?

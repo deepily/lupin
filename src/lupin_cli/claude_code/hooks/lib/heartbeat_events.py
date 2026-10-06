@@ -1,48 +1,37 @@
 #!/usr/bin/env python3
 """
-Heartbeat Hook — poke-outcome event emitter ("EMIT NOW, CONSUME LATER").
+Heartbeat Hook: poke-outcome event emitter ("emit now, consume later").
 
-v1's Stop-hook decision path writes a FIRE-AND-FORGET, per-session JSON Lines
-record of each meaningful heartbeat outcome. The v2 fleet arbiter (deferred)
-lands as a PURE CONSUMER that globs the fleet dir — zero hook retrofit. The
-emit must NEVER raise into / block the poke path: an emission failure leaves
-the poke proceeding unchanged.
+The Stop-hook decision path writes a fire-and-forget JSON Lines record per session for each meaningful heartbeat outcome.
+The v2 fleet arbiter (deferred) is a pure consumer that globs the fleet dir, so it needs no hook retrofit.
+An emit must never raise into or block the poke path: a failed emission leaves the poke proceeding unchanged.
 
-Design authority: canonical schema in planning-is-prompting →
-    planning-is-prompting/src/rnd/2026.06.02-stop-hook-natural-heartbeat-poker.md §0.2 (María, arbiter owner).
-Lupin-side seam: lupin →
-    src/rnd/v0.1.8/2026.06.04-heartbeat-hook/02-stop-py-seam-factoring-proposal.md
+Design: /mnt/DATA01/include/www.deepily.ai/projects/planning-is-prompting/src/rnd/2026.06.02-stop-hook-natural-heartbeat-poker.md section 0.2 (canonical schema).
+See: src/rnd/v0.1.8/2026.06.04-heartbeat-hook/02-stop-py-seam-factoring-proposal.md
 
-**Location — FLEET-WIDE (deliberate divergence from the hold artifact).** The
-events log's consumer is the cross-fleet arbiter, so the files live in ONE
-fleet dir — `~/.claude/heartbeat-events/<session_id>.jsonl` — giving the
-arbiter a single glob across all sessions/projects, durable across reboots.
-This is the ONE place the `cu.get_project_root()` path mandate intentionally
-does NOT apply (the consumer is fleet-wide, not project-local). Per-session
-filename keeps it multi-writer-safe (no append contention). `base_dir` is
-injectable for tests; production uses the fleet dir.
+Location is fleet-wide, a deliberate divergence from the hold artifact.
+The consumer is the cross-fleet arbiter, so files live in one dir, `~/.claude/heartbeat-events/<session_id>.jsonl`.
+That gives the arbiter a single glob across all sessions and projects, durable across reboots.
+This is the one place the `cu.get_project_root()` path mandate does not apply, because the consumer is fleet-wide.
+The per-session filename keeps writers safe from append contention.
+`base_dir` is injectable for tests; production uses the fleet dir.
 
-Record (schema_version 1) — one line per EMITTED heartbeat decision:
-    schema_version · session_id · persona · ts (ISO-8601 UTC)
-    outcome    : "poked" | "honored" | "cap_reached"   (raw decide_heartbeat outcome)
-    poke_count : per-session heartbeat count AFTER this event · cap
-    work_owed  : bool — **null in v1** (oracle_verdict=None); real bool at v2, ZERO schema change
-    awaiting   : str | null   (from the hold artifact, else null)
-    reason     : str          (present ONLY when outcome == "poked")
+Record fields (schema_version 1), one line per emitted heartbeat decision.
+    Fields: schema_version, session_id, persona, ts (ISO-8601 UTC).
+    Outcome    : "poked", "honored" or "cap_reached" (raw decide_heartbeat outcome).
+    Poke_count : per-session heartbeat count after this event, plus cap.
+    Work_owed  : bool, null in v1 (oracle_verdict=None); a real bool at v2 with zero schema change.
+    Awaiting   : str or null (from the hold artifact, else null).
+    Reason     : str, present only when outcome is "poked".
 
-**Emit policy:** ONLY {poked, honored, cap_reached}. `not_owed` is skipped — a
-Stop hook fires after every ordinary turn, so it would be constant per-turn
-noise, not fleet signal. Disabled / malformed-config sessions never reach the
-emit (no decide_heartbeat outcome).
+Emit policy: only poked, honored and cap_reached, plus the v2 "idle" beacon.
+`not_owed` is skipped: a Stop hook fires after every ordinary turn, so it would be constant noise, not fleet signal.
+Disabled or malformed-config sessions never reach the emit, because they have no decide_heartbeat outcome.
 
-**`poke`→`poked` value rename (2026-06-09):** the OUTCOME_POKE VALUE changed
-to "poked" (one-name-everywhere; consumers reference the constant). Per the
-no-migration + no-alias rules there is NO compatibility shim: existing on-disk
-`~/.claude/heartbeat-events/*.jsonl` records carrying the old pre-rename
-outcome value simply age out of the consumers' read windows.
+The `OUTCOME_POKE` value is "poked", one name everywhere; consumers reference the constant.
+There is no compatibility shim: old on-disk records with the pre-rename outcome value age out of the read windows.
 
-**Deferred to v2 (flagged, NOT built):** JSONL rotation / line-cap so the file
-cannot grow unbounded.
+Deferred to v2, not built: JSONL rotation or a line cap, so the file cannot grow unbounded.
 """
 import os
 import json
@@ -110,11 +99,12 @@ EVENT_KIND_TASK_TRANSITION = "task_transition"
 
 def _resolve_base_dir( base_dir ):
     """
+    Return the events directory: base_dir when given, else the fleet dir.
+
     Ensures:
-        - base_dir provided → Path( base_dir )
-        - base_dir is None  → the FLEET dir (~/.claude/heartbeat-events).
-          NOTE: intentionally NOT cu.get_project_root() — the consumer is the
-          cross-fleet arbiter, not a project-local reader.
+        - base_dir provided: Path( base_dir )
+        - base_dir is None: the fleet dir (~/.claude/heartbeat-events), intentionally not
+          cu.get_project_root(), because the consumer is the cross-fleet arbiter, not a project-local reader.
     """
     if base_dir is not None:
         return Path( base_dir )
@@ -123,6 +113,8 @@ def _resolve_base_dir( base_dir ):
 
 def events_path( session_id, base_dir=None ):
     """
+    Return the per-session events file path under the chosen events directory.
+
     Ensures:
         - Returns <base_dir-or-fleet-dir>/<session_id>.jsonl
         - Empty session_id collapses to the literal suffix "unknown".
@@ -132,32 +124,37 @@ def events_path( session_id, base_dir=None ):
 
 
 def _now_iso():
-    """Ensures: returns the current UTC instant as an ISO-8601 string (seconds)."""
+    """
+    Return the current UTC instant as an ISO-8601 string with seconds precision.
+
+    Ensures:
+        - returns the current UTC instant as an ISO-8601 string (seconds)
+    """
     return datetime.datetime.now( datetime.timezone.utc ).isoformat( timespec="seconds" )
 
 
 def emit_outcome( session_id, persona, outcome, poke_count, cap,
                   work_owed=None, awaiting=None, reason=None, ts=None, base_dir=None ):
     """
-    Append one fire-and-forget poke-outcome record. NEVER raises.
+    Append one fire-and-forget poke-outcome record; never raises.
 
     Requires:
         - session_id is a string
-        - persona is a string or None (from the session — known even with no hold)
-        - outcome is a decide_heartbeat OUTCOME_* string
-        - poke_count (AFTER this event's increment) and cap are ints
+        - persona is a string or None (from the session, known even with no hold)
+        - outcome is a decide_heartbeat `OUTCOME_*` string
+        - poke_count (after this event's increment) and cap are ints
         - work_owed is a bool or None (None in v1)
         - awaiting is a string or None (caller passes the hold's awaiting, else None)
-        - reason is the poke text (included ONLY when outcome == "poked")
+        - reason is the poke text (included only when outcome == "poked")
 
     Ensures:
         - Emits for {poked, honored, cap_reached, idle}; any other outcome
-          (incl. not_owed / unknown) → returns False, writes nothing
+          (including not_owed and unknown) returns False and writes nothing
         - Creates the fleet dir if missing (parents, idempotent)
         - Appends exactly one JSON line (schema_version 1 record)
-        - reason key present ONLY for the poke outcome (omitted otherwise)
+        - reason key present only for the poke outcome (omitted otherwise)
         - Returns True on a successful append; False on a skipped outcome or
-          any write / serialization failure — NEVER raises into the caller
+          any write / serialization failure, and never raises into the caller
     """
     try:
         if outcome not in EMITTED_OUTCOMES:
@@ -188,29 +185,23 @@ def emit_outcome( session_id, persona, outcome, poke_count, cap,
 
 def emit_idle_prompt( session_id, persona=None, ts=None, base_dir=None ):
     """
-    Append one kind-tagged `idle_prompt` recency event. NEVER raises.
+    Append one kind-tagged `idle_prompt` recency event; never raises.
 
-    Emitted from the Notification hook's idle_prompt branch (Step 1.3) so the
-    fleet arbiter counts an idling session as ALIVE-by-idle (the 4th union
-    signal). It is an EDGE recency INPUT — fires when CC presents the idle
-    prompt — and is the strongest cc-native passive liveness beacon.
-
-    The record carries `kind="idle_prompt"` and DELIBERATELY OMITS `outcome`:
-    consumers MUST filter on the `kind` discriminator so the record feeds
-    `idle_prompt_age_s` ONLY and never corrupts the ACTIVITY axis (`state`) or
-    `stop_event_age_s`.
+    Emitted from the Notification hook's idle_prompt branch, so the arbiter counts an idling session as alive by idle.
+    It is the fourth union signal, an edge recency input fired when Claude Code presents the idle prompt.
+    The record omits `outcome`; consumers filter on `kind`, so it feeds `idle_prompt_age_s` only, never `state` or `stop_event_age_s`.
 
     Requires:
         - session_id is a string
         - persona is a string or None (the session's voice-persona name, when
-          cheaply resolvable; None is fine — the union backfills from bridges)
+          cheaply resolvable; None is fine, the union backfills from bridges)
 
     Ensures:
-        - Appends exactly one JSON line: schema_version · session_id · persona ·
-          ts (ISO-8601 UTC) · kind="idle_prompt"  (NO `outcome` key)
+        - Appends exactly one JSON line: schema_version, session_id, persona,
+          ts (ISO-8601 UTC), kind="idle_prompt" (no `outcome` key)
         - Creates the fleet dir if missing (parents, idempotent)
         - Returns True on a successful append; False on any write/serialization
-          failure — NEVER raises into the caller (fire-and-forget; TTS unaffected)
+          failure, and never raises into the caller (fire-and-forget; TTS unaffected)
     """
     try:
         record = {
@@ -231,32 +222,25 @@ def emit_idle_prompt( session_id, persona=None, ts=None, base_dir=None ):
 
 def emit_reaped( session_id, persona=None, ts=None, base_dir=None ):
     """
-    Append one kind-tagged `reaped` TOMBSTONE event. NEVER raises.
+    Append one kind-tagged `reaped` tombstone event; never raises.
 
-    Emitted by the host-side reaper (`session_spawner.dismiss_sessions`) for each
-    session it tears down, so the fleet arbiter can force-offline the row in ~1
-    poll instead of waiting ~60 min for the event age to cross `stale_seconds`.
-    The reap deletes the bridge FIRST — destroying the PID the fast kill-0 death
-    path needs — so this authoritative marker is the only fast death signal a
-    reaped session can carry.
-
-    The record carries `kind="reaped"` and DELIBERATELY OMITS `outcome`:
-    consumers filter on the `kind` discriminator so it is kept OFF the activity
-    axis (`state` / `last_event_ts` unaffected) — it is a membership + verdict
-    signal ONLY, mirroring how `idle_prompt` is handled.
+    The host-side reaper (`session_spawner.dismiss_sessions`) emits it per torn-down session, so the arbiter force-offlines the row in one poll.
+    Otherwise the row waits about 60 minutes for its event age to cross `stale_seconds`.
+    The reap deletes the bridge first, destroying the PID the kill-0 death path needs; the record omits `outcome`, so consumers filter on `kind`.
 
     Requires:
         - session_id is a string
         - persona is a string or None (the reaped worker's voice-persona name,
-          already captured by `_capture_reap_identity`; None is fine — the union
+          already captured by `_capture_reap_identity`; None is fine, the union
           backfills from any surviving signal)
 
     Ensures:
-        - Appends exactly one JSON line: schema_version · session_id · persona ·
-          ts (ISO-8601 UTC) · kind="reaped"  (NO `outcome` key)
+        - Appends exactly one JSON line: schema_version, session_id, persona,
+          ts (ISO-8601 UTC), kind="reaped" (no `outcome` key). It stays off the
+          activity axis (`state`, `last_event_ts`) and is a membership and verdict signal only.
         - Creates the fleet dir if missing (parents, idempotent)
         - Returns True on a successful append; False on any write/serialization
-          failure — NEVER raises into the caller (best-effort; a write failure
+          failure, and never raises into the caller (best-effort; a write failure
           must never break the reap)
     """
     try:
@@ -278,33 +262,25 @@ def emit_reaped( session_id, persona=None, ts=None, base_dir=None ):
 
 def emit_task_transition( session_id, persona=None, ts=None, base_dir=None ):
     """
-    Append one kind-tagged `task_transition` PROGRESS event. NEVER raises.
+    Append one kind-tagged `task_transition` progress event; never raises.
 
-    Emitted from the PostToolUse hook on every task-store WRITE (harness
-    TaskCreate/TaskUpdate OR MCP task_create/task_transition) so the fleet
-    arbiter counts a session actively creating/moving task items as PROGRESSING
-    (arbiter signs-of-life fix, 2026-06-16, Fix 2). A task write is unambiguous
-    work-advancement and — unlike commons chatter or idle "still blocked" DMs —
-    can never be idle noise, so it is a SAFE progress source that does NOT
-    re-open the chatty-but-stuck blind spot the progress signature deliberately
-    guards.
-
-    The record carries `kind="task_transition"` and DELIBERATELY OMITS `outcome`:
-    consumers MUST filter on the `kind` discriminator so the record feeds
-    `last_task_transition_ts` ONLY and never corrupts the ACTIVITY axis (`state`)
-    or `stop_event_age_s`. Mirrors emit_idle_prompt / emit_reaped exactly.
+    The PostToolUse hook emits it on every task-store write (TaskCreate, TaskUpdate, task_create or task_transition).
+    A task write is unambiguous work advancement and can never be idle noise, unlike commons chatter or idle DMs.
+    So the arbiter counts it as progress without reopening the chatty-but-stuck blind spot the progress signature guards.
 
     Requires:
         - session_id is a string
         - persona is a string or None (the session's voice-persona name, when
-          cheaply resolvable; None is fine — the union backfills from bridges)
+          cheaply resolvable; None is fine, the union backfills from bridges)
 
     Ensures:
-        - Appends exactly one JSON line: schema_version · session_id · persona ·
-          ts (ISO-8601 UTC) · kind="task_transition"  (NO `outcome` key)
+        - Appends exactly one JSON line: schema_version, session_id, persona,
+          ts (ISO-8601 UTC), kind="task_transition" (no `outcome` key). Mirrors emit_idle_prompt
+          and emit_reaped: consumers filter on `kind`, so it feeds `last_task_transition_ts` only,
+          never `state` or `stop_event_age_s`.
         - Creates the fleet dir if missing (parents, idempotent)
         - Returns True on a successful append; False on any write/serialization
-          failure — NEVER raises into the caller (fire-and-forget; the task tool
+          failure, and never raises into the caller (fire-and-forget; the task tool
           call is unaffected)
     """
     try:
@@ -359,25 +335,20 @@ def read_events( session_id, base_dir=None ):
 
 def last_emitted_outcome( session_id, base_dir=None ):
     """
-    The session's most recent EMITTED OUTCOME value, or None if none exists.
+    Return the session's most recent emitted outcome value, or None if none exists.
 
-    Filters on the `kind` discriminator: the kind-tagged recency/membership
-    records (idle_prompt / task_transition / reaped) DELIBERATELY OMIT the
-    `outcome` key, and their emit_* docstrings mandate that consumers ignore
-    them on the outcome axis. A naive records[-1].get("outcome") let a trailing
-    idle_prompt record mask a genuine `idle` outcome (returning None), which
-    flipped cc_notification_listener._recipient_is_injectable() to False for a parked
-    worker → the manager's peer DM buffered instead of tmux-waking the pane →
-    the worker went dark (bug baf5ea6d). So scan from the tail and return the
-    first record that actually CARRIES an `outcome`.
+    Kind-tagged records (idle_prompt, task_transition, reaped) omit `outcome`; consumers must ignore them on the outcome axis.
+    A trailing idle_prompt masked a real `idle` outcome, so a parked worker's peer DM buffered instead of waking the pane.
+    So the scan runs from the tail and returns the first record that carries an `outcome`.
 
     Requires:
         - session_id is a string
 
     Ensures:
-        - Returns the `outcome` of the most recent record that HAS one, skipping
+        - Returns the `outcome` of the most recent record that has one, skipping
           any trailing kind-tagged records that omit it; None when no emitted
-          outcome exists — never raises (read_events is total).
+          outcome exists, and never raises (read_events is total). A naive records[-1] read returned None
+          here and made `cc_notification_listener._recipient_is_injectable()` False for a parked worker.
     """
     records = read_events( session_id, base_dir=base_dir )
     for record in reversed( records ):
@@ -388,19 +359,17 @@ def last_emitted_outcome( session_id, base_dir=None ):
 
 def should_emit_idle( last_outcome ):
     """
-    PURE edge-trigger predicate for the genuine-idle beacon (§6.2, N4).
+    Return whether the idle beacon should fire, given the last emitted outcome.
 
-    Emit the idle beacon ONLY on the TRANSITION into idle — i.e. when the
-    session's last emitted outcome was not already "idle". Sticky-until-
-    superseded: once idle, repeated idle stops do NOT re-emit; a
-    poke/honored/cap_reached supersedes, after which the next idle is a fresh
-    transition.
+    Pure edge-trigger predicate: emit only on the transition into idle, when the last outcome was not already "idle".
+    It is sticky until superseded: repeated idle stops do not re-emit.
+    A poked, honored or cap_reached outcome supersedes, so the next idle is a fresh transition.
 
     Requires:
         - last_outcome is the prior emitted outcome string, or None (no prior)
 
     Ensures:
-        - Returns True iff last_outcome != "idle" (None → True: the first idle
+        - Returns True iff last_outcome != "idle" (None gives True: the first idle
           is a transition from nothing).
     """
     return last_outcome != EVENT_IDLE
@@ -408,10 +377,9 @@ def should_emit_idle( last_outcome ):
 
 def is_idle_transition( session_id, base_dir=None ):
     """
-    Should an idle beacon be emitted for this session NOW? (the de-dup gate)
+    Return whether an idle beacon should be emitted for this session now (the de-dup gate).
 
-    Composes last_emitted_outcome + should_emit_idle so the caller (Rachel's
-    adapter) can gate the emit on the transition:
+    Composes last_emitted_outcome and should_emit_idle so the caller can gate the emit on the transition:
         if is_idle_transition(session_id): emit_outcome(..., EVENT_IDLE, ...)
 
     Ensures:

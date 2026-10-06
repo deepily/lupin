@@ -11,7 +11,7 @@ from hook scripts and MCP server processes:
 
 CWD fallback safety:
     - PPID/grandparent matches are the definitive session file → cached
-    - CWD fallback is a best-guess from another session → NOT cached
+    - CWD fallback is a best-guess from another session → not cached
     - Dead PIDs (from exited CC processes) are skipped in CWD fallback
 
 Adapted from research at:
@@ -54,64 +54,15 @@ SESSION_DIR = sessions_dir()
 
 def atomic_write_json( path, data ):
     """
-    Write `data` as JSON to `path` so a reader can only ever see the WHOLE old
-    document or the WHOLE new one — never a splice of both.
+    Write `data` as JSON to `path` so a reader sees only a whole old or whole new document.
 
-    🔴 WHY THIS EXISTS — row 49b2c80b, measured from the bytes 2026-07-21.
-    Seat 3's bridge `cc-231749.json` was found on disk as ONE valid 1081-byte
-    document followed by 27 bytes that were the TAIL OF A LONGER, DIFFERENT
-    document. The seat stayed alive and working but became unaddressable by
-    `dm_send` for twenty minutes, because a bridge that will not parse is
-    invisible to every persona resolver (that was row e9822f8d — same bug).
-
-    `open(path,"w")` truncates, so ONE writer can never leave a tail. TWO can,
-    and the byte layout named the interleaving exactly:
-
-        W_long  opens (truncates to 0)
-        W_short opens (truncates to 0)
-        W_long  writes 1108 bytes at its own offset 0
-        W_short writes 1081 bytes at its own offset 0
-        on disk: W_short's 1081 bytes + W_long's bytes[1081:1108]
-
-    Both fds truncate at OPEN, so the second truncate cannot remove the first
-    writer's tail once both are past it, and the two fds keep independent
-    offsets. Every bridge write here is a read-modify-write that CAN shrink the
-    document (dropping `conversation_mode_active`, nulling `voice_persona`), so
-    "the new one is shorter than the old one" is routine, not exotic.
-
-    The bridge path is `cc-{cc_pid}.json` and the pid survives `/clear` while
-    the transient session_id does not — so the two racing writers are usually
-    the SAME SEAT either side of a lifecycle event.
-
-    ⚠️ This is a MECHANISM, not a rule: os.replace() is atomic on POSIX, so
-    concurrent writers degrade to last-writer-wins instead of producing a
-    corrupt hybrid, and no writer has to remember to do anything. A
-    discipline-based fix ("always write carefully") needs every future author
-    to know; this needs none of them to.
-
-    NOTE the temp file is created in the SAME DIRECTORY as the target. A temp
-    elsewhere (/tmp) can land on a different filesystem, where os.replace
-    raises OSError instead of being atomic.
+    Two racing writers can splice a file. Both fds truncate at open and keep their own offsets, leaving one valid document plus a longer one's tail.
+    A spliced bridge will not parse, so every persona resolver ignores it. The seat then becomes unaddressable by `dm_send`; the racers are often one seat.
+    `os.replace` is atomic on POSIX, so concurrent writers degrade to last-writer-wins, and no writer has to remember anything: a mechanism, not a rule.
 
     Requires:
         - path is a str or Path whose parent directory exists and is writable
         - data is JSON-serializable
-
-    🔎 A FAILURE IS WITNESSED ON STDERR, and the witness lives HERE rather than
-    at the call sites. Clayton 😎, reviewing this fix, enumerated all ten
-    consumers: the SERVER sites turn False into an HTTPException(500) and are
-    already loud, but SIX HOOK SITES IGNORE THE RETURN ENTIRELY. Without a line
-    here, a failed bridge write leaves no log, no counter and no exit code — the
-    field silently never persists and the seat looks healthy. That is the same
-    "reports healthy while blind" family as the corruption this function exists
-    to prevent, one layer up. Swallowing the exception is right in a hook (a
-    raising SessionStart is how you get a seat with NO bridge at all, row
-    e9822f8d); the SILENCE is the part that needed a witness.
-
-    One witness at the mechanism beats six at the callers, for the same reason
-    os.replace beats "write carefully" — nobody has to remember it. stderr is
-    the correct channel: hooks emit there without polluting Claude's context
-    (precedent: register_session.py's lockfile-read warning).
 
     Requires:
         - path is a str or Path whose parent directory exists and is writable
@@ -120,13 +71,19 @@ def atomic_write_json( path, data ):
     Ensures:
         - Returns True when the new document is fully in place at path
         - Returns False on any OSError/TypeError/ValueError, leaving whatever
-          was already at path untouched — a failed write never truncates
+          was already at path untouched; a failed write never truncates
         - Names the path and the error on stderr when it returns False, and
-          emits NOTHING on success (a witness that fires on success is noise)
+          emits nothing on success (a witness that fires on success is noise)
         - A concurrent reader sees the complete old or the complete new
           document; it never observes a partial or spliced file
         - Leaves no temp file behind on the failure path
         - Never raises
+        - The temp file is created in the same directory as the target, because a temp file elsewhere may sit on another
+          filesystem, where `os.replace` raises OSError instead of being atomic
+        - The failure witness lives here and not at the call sites: six hook sites ignore the return, so without it a failed
+          write leaves no log, no counter and no exit code, and the seat looks healthy while blind
+        - The exception is swallowed because a raising SessionStart hook leaves a seat with no bridge at all; the silence
+          was what needed a witness, and stderr is the channel that does not pollute Claude's context
 
     Args:
         path: destination file
@@ -195,33 +152,21 @@ DEFINITIVE_SOURCES = ( SOURCE_ENV, SOURCE_PPID, SOURCE_GRANDPARENT )
 
 def canonical_persona_key( name ) -> str:
     """
-    Canonical persona key for cross-seam task-store matching.
+    Return the canonical persona key used to match task-store rows across seams.
 
-    THE single normalizer both the owed-work READ seam (stop hook
-    `_owed_count_from_store`) and the task-store WRITE seam must agree on, so a
-    persona's `owner_persona` rows are ALWAYS found regardless of which surface
-    spelled the name. The store holds names in the form the voice pool defines —
-    accent-stripped + punctuation-stripped + lowercased, INTERNAL SPACES KEPT
-    (e.g. display "María" → "maria", "Mr. Radio" → "mr radio"). This mirrors that
-    transform and is IDEMPOTENT, so it is safe whether the caller passes the
-    display form ("María") or the already-normalized pool form ("maria").
-
-    Drift history (the bug this kills): the READ seam previously used a bare
-    `.lower()`, so a persona whose name carried an accent/period ("María",
-    "Mr. Radio") queried "maría"/"mr. radio" and matched ZERO of the store's
-    "maria"/"mr radio" rows → false "nothing owed". Note this is DISTINCT from
-    `follow_through_escalation_watcher._norm_persona`, which strips spaces too
-    ("mr radio" → "mrradio") and would NOT match the store — do not substitute it.
+    The owed-work read seam (stop hook `_owed_count_from_store`) and the task-store write seam must share this one normalizer, so `owner_persona` rows are always found.
+    The store holds voice-pool names: accent- and punctuation-stripped, lowercased, internal spaces kept ("María" is "maria", "Mr. Radio" is "mr radio"); a bare `.lower()` matched zero rows.
+    `follow_through_escalation_watcher._norm_persona` is no substitute: it also strips spaces ("mrradio") and would not match the store.
 
     Requires:
         - name is a string or None
 
     Ensures:
-        - None / non-string / empty / whitespace-only → "" (unmatchable sentinel)
+        - None, a non-string, an empty string or a whitespace-only string returns "" (unmatchable sentinel)
         - otherwise: NFKD-decomposed, combining marks dropped, lowercased,
           reduced to [a-z0-9 ] (punctuation/emoji removed, single spaces kept),
           internal runs of whitespace collapsed to one space, ends trimmed
-        - IDEMPOTENT: canonical_persona_key( canonical_persona_key( x ) ) == canonical_persona_key( x )
+        - idempotent: canonical_persona_key( canonical_persona_key( x ) ) == canonical_persona_key( x )
 
     Args:
         name: A persona name in display or already-normalized form
@@ -263,17 +208,10 @@ def _is_pid_alive( pid: int ) -> bool:
 
 def _can_trust_host_pids() -> bool:
     """
-    Whether the current process shares its PID namespace with the bridge writers.
+    Say whether this process shares its PID namespace with the bridge writers.
 
-    Bridge files are written by Claude Code hooks running on the host, named
-    cc-{HOST_PID}.json. When the reader runs inside a Docker container, those
-    host PIDs are invisible — every kill(host_pid, 0) raises ProcessLookupError,
-    so a naive _is_pid_alive() filter discards every bridge file as "dead."
-
-    The Lupin FastAPI server reads bridge files for the conversation-mode
-    endpoint while running inside the lupin-rest-dev container; this helper lets
-    that path skip the liveness filter while preserving it for host-side callers
-    (hook scripts, MCP server) that genuinely need staleness pruning.
+    Bridge files are written by hooks on the host and named cc-{host pid}.json. Inside a Docker container those host pids are invisible. Every `kill( host_pid, 0 )` then raises ProcessLookupError, so a naive `_is_pid_alive()` filter discards every bridge as dead.
+    The Lupin FastAPI server reads bridges for the conversation-mode endpoint inside the lupin-rest-dev container, so that path skips the liveness filter. Host-side callers (hook scripts, MCP server) keep it, since they need staleness pruning.
 
     Ensures:
         - Returns False when running inside a Docker container (/.dockerenv exists)
@@ -312,12 +250,10 @@ def clear_cached_session_id():
     """
     Reset the cached session ID, forcing re-resolution on next call.
 
-    Use this when the session bridge file has been overwritten (e.g.,
-    after a context clear) and the MCP server needs to pick up the
-    new session ID.
+    Use this when the session bridge file has been overwritten (for example after a context clear) and the MCP server needs the new session ID.
 
     Ensures:
-        - _cached_session_id is set to None
+        - `_cached_session_id` is set to None
         - Next call to get_claude_session_id() will re-read from file
     """
     global _cached_session_id, _cached_session_source
@@ -329,14 +265,8 @@ def _find_session_file() -> Optional[ Tuple[ Path, str ] ]:
     """
     Find the session file for the current process's parent (Claude Code).
 
-    Strategy: Walk up the process tree to find a cc-{pid}.json file.
-    Hook scripts are spawned by Claude Code, so PPID points to CC.
-    MCP servers may have an intermediate wrapper, so grandparent is checked too.
-
-    Returns a (path, source) tuple where source indicates how the file was
-    found. This distinction is critical for caching safety:
-        - "ppid" / "grandparent": definitive match → safe to cache
-        - "cwd_fallback": best-guess from another session → NOT cached
+    Walks up the process tree for a cc-{pid}.json file. Hooks are spawned by Claude Code, so PPID points to it. MCP servers may have a wrapper, so the grandparent is checked too.
+    Returns ( path, source ). The source matters for caching. "ppid" and "grandparent" are definitive and safe to cache. "cwd_fallback" is a best guess from another session and is not cached.
 
     Requires:
         - SESSION_DIR may or may not exist
@@ -344,7 +274,7 @@ def _find_session_file() -> Optional[ Tuple[ Path, str ] ]:
     Ensures:
         - Returns ( Path, source_str ) if a session file is found
         - Returns None if no matching file exists
-        - Checks: own PPID → grandparent PID → CWD-matching file (fallback)
+        - Checks: own PPID, then grandparent PID, then CWD-matching file (fallback)
         - CWD fallback skips files from dead PIDs
 
     Returns:
@@ -431,15 +361,8 @@ def get_claude_session_id() -> str:
     """
     Get the Claude Code session_id, non-blocking.
 
-    Resolution order:
-        1. Cached value (from previous successful lookup)
-        2. CLAUDE_SESSION_ID env var (future Anthropic implementation)
-        3. Session file from SessionStart hook
-        4. Self-generated fallback UUID
-
-    Caching safety:
-        - Tier 1 (env var) and Tier 2 (PPID/grandparent match) → cached
-        - CWD fallback → NOT cached (could be from another session)
+    Resolution order: the cached value, then the CLAUDE_SESSION_ID env var, then the session file from the SessionStart hook, then a self-generated fallback UUID.
+    Tier 1 (env var) and tier 2 (PPID or grandparent match) are cached. A CWD fallback is not cached, because it could come from another session.
 
     Ensures:
         - Always returns a string (never None)
@@ -453,21 +376,18 @@ def get_claude_session_id() -> str:
 
 def get_claude_session_id_with_source() -> Tuple[ str, str ]:
     """
-    Get the Claude Code session_id AND how it was reached.
+    Get the Claude Code session_id and how it was reached.
 
-    🔴 THE POINT OF THIS FUNCTION. `_find_session_file` computes a `source` and treats
-    `cwd_fallback` as untrustworthy enough to refuse the cache — then `get_claude_session_id`
-    returns a bare `str` and the distinction is gone. A guess and a certainty reached the
-    caller in the same shape, so nothing downstream could refuse one and accept the other.
-    This door keeps them apart; the bare twin above is unchanged for every existing caller.
+    `_find_session_file` computes a source and refuses to cache a `cwd_fallback`. A bare `str` return loses that distinction, so a guess and a certainty reached callers in the same shape.
+    This door keeps them apart so downstream code can refuse one and accept the other. The bare twin above is unchanged for every existing caller.
 
     Requires:
         - nothing
 
     Ensures:
         - Always returns a ( str, str ) pair — never None, never a bare id
-        - source is one of SOURCE_ENV / SOURCE_PPID / SOURCE_GRANDPARENT /
-          SOURCE_CWD_FALLBACK / SOURCE_GENERATED — never empty
+        - source is one of `SOURCE_ENV` / `SOURCE_PPID` / `SOURCE_GRANDPARENT` /
+          `SOURCE_CWD_FALLBACK` / `SOURCE_GENERATED` — never empty
         - Caches definitive matches only; a cwd_fallback is re-resolved every call
         - A cached value reports the source it was cached under
 
@@ -545,11 +465,8 @@ def wait_for_session_id( timeout: float = 10.0, poll_interval: float = 0.5 ) -> 
     """
     Wait for the real Claude Code session_id to become available.
 
-    Blocks until SessionStart hook writes the session file, or timeout.
-    Useful for MCP server initialization where you want the real ID.
-
-    Always bypasses the cache to ensure fresh resolution — this function
-    is specifically for waiting on the real session file to appear.
+    Blocks until the SessionStart hook writes the session file, or until timeout. Useful for MCP server initialization where the real ID is wanted.
+    Always bypasses the cache for fresh resolution, because this function waits for the real session file to appear.
 
     Requires:
         - timeout is a positive float
@@ -574,9 +491,7 @@ def wait_for_session_id_with_source( timeout: float = 10.0, poll_interval: float
     """
     Wait for the real Claude Code session_id, and report how it was reached.
 
-    This is the door the MCP server's session watcher uses. A source exposed only on the
-    non-blocking twin would leave the server exactly as blind as before, which is why both
-    doors carry it rather than one.
+    This is the door the MCP server's session watcher uses. A source exposed only on the non-blocking twin would leave the server as blind as before, so both doors carry it.
 
     Requires:
         - timeout is a positive float
@@ -584,9 +499,9 @@ def wait_for_session_id_with_source( timeout: float = 10.0, poll_interval: float
 
     Ensures:
         - Always returns a ( str, str ) pair
-        - source is never empty; SOURCE_GENERATED when the timeout expires
+        - source is never empty; `SOURCE_GENERATED` when the timeout expires
         - Caches definitive matches only — a cwd_fallback is never cached
-        - Bypasses the cache on entry, exactly as the bare twin always has
+        - Bypasses the cache on entry, as the bare twin always has
 
     Args:
         timeout: Max seconds to wait (default 10)
@@ -623,50 +538,22 @@ def wait_for_session_id_with_source( timeout: float = 10.0, poll_interval: float
 
 def _resolve_project_from_bridge_cwd() -> Optional[str]:
     """
-    Resolve project name from the bridge file's SessionStart cwd field.
+    Resolve the project name from the bridge file's SessionStart cwd field.
 
-    The bridge file is written once at SessionStart and its `cwd` snapshot
-    represents where the `claude` CLI was launched. That value is stable
-    for the lifetime of the CC session. By contrast, `os.getcwd()` inside
-    a hook process can drift across hook invocations because Claude Code
-    preserves the Bash subshell's cwd across tool calls — running
-    `cd src/cosa && git status` once mutates the cwd Claude Code passes
-    to subsequent hook spawns, and `detect_project()` (which uses
-    `os.getcwd()`) starts returning "cosa" instead of "lupin." That
-    pivot duplicates the user's notification UI panes (one per
-    sender_id) for what should be a single session.
-
-    Walks up from the bridge's `cwd` looking for a `.git` ancestor, resolves a
-    gitlink through to its MAIN repo, and returns that basename with the
-    `_PROJECT_ALIASES` normalization applied.
-
-    🔴 THIS PARAGRAPH USED TO SAY "matches `detect_project()` semantics exactly,
-    just sourced from the bridge instead of live cwd" — AND THAT SENTENCE IS WHY
-    THE DIVERGENCE SURVIVED. It was true when written. It stopped being true the
-    day `detect_project()` grew its gitlink branch (the 2026-06-11
-    dangling-gitlink incident) and this helper did not, and nothing anywhere
-    noticed, because a claim of equivalence is exactly the kind of sentence a
-    reader trusts INSTEAD of checking. It cost Rick five duplicated focus-bar
-    rows and took an operator report to find (row 6597cea9).
-
-    ⇒ So the equivalence is no longer ASSERTED here, it is TESTED:
-    `src/tests/unit/test_a_worktree_seat_emits_one_sender_id.py`
-    ::test_it_agrees_with_detect_project_from_the_same_place drives both
-    resolvers over one real `git worktree add` and reddens when they disagree.
-    A docstring cannot notice it has gone stale; a test can.
-
-    ⚠️ AND THE EQUIVALENCE IS NOT SATISFIED BY COPYING THE LOGIC. This calls
-    `detect_project()`'s OWN helpers — `_worktree_owner_basename`, with
-    `_dangling_gitlink_owner_basename` as the fallback when live git cannot
-    answer — so a future change lands in one place rather than needing to be
-    mirrored twice. Two derivations of one value that agree only by careful
-    copying diverge the first time somebody edits one of them.
+    The bridge `cwd` is written once and names where `claude` was launched, so it is stable for the session. `os.getcwd()` in a hook drifts, because Claude Code keeps the Bash subshell's cwd across tool calls. One `cd src/cosa` makes `detect_project()` return "cosa" instead of "lupin".
+    That drift duplicates the notification UI panes, one per sender_id, for a single session. The walk goes up from the bridge `cwd` to a `.git` ancestor, resolves a gitlink to its main repo, and applies `_PROJECT_ALIASES`.
+    It must agree with `detect_project()`. The two once diverged because a docstring claimed equivalence and nobody checked. A unit test now drives both resolvers over one real `git worktree add`.
 
     Ensures:
         - Returns the project name from the bridge file's SessionStart cwd
-        - Returns None if no bridge file resolves, the bridge has no cwd
-          field, the cwd path doesn't exist, or no .git ancestor is found
+        - Returns None if no bridge file resolves or the bridge has no cwd
+          field, and also on a JSON, OS, value or import error
+        - Returns the lowercased cwd basename, alias-normalized, when the cwd path does not exist or no .git ancestor is found
         - Never raises exceptions
+        - A `.git` that is a file (worktree or submodule) is resolved through `_worktree_owner_basename`, falling back to
+          `_dangling_gitlink_owner_basename` when live git cannot answer, because the bare walk named a worktree by its directory
+        - The equivalence with `detect_project()` is reached by calling its own helpers and not by copying its logic, since two
+          derivations that agree only by careful copying diverge the first time someone edits one
     """
     result = _find_session_file()
     if not result:
@@ -740,62 +627,26 @@ def _resolve_project_from_bridge_cwd() -> Optional[str]:
 
 def resolve_project_name( environ=None ) -> str:
     """
-    Resolve the current session's project name — the project-name resolver
-    for the HOOK consumers named below (the task-store write gate's
-    manager-figure predicate, the per-repo persona-chain env-key lookup,
-    and hook credential resolution). The former
-    `manager_figure.derive_project_name` and `hook_credentials.
-    _derive_project_name` duplicates were converged here (bug 9bf1dc4a).
+    Resolve the current session's project name for hook consumers.
 
-    🔴 THIS DOCSTRING USED TO SAY "the ONE project-name resolver … one name at
-    every layer" AND THAT IS FALSE (row 7160b671, corrected 2026-07-25).
-    `build_sender_id_for_cc` — the path that stamps identity onto EVERY peer DM —
-    does NOT call this function. It resolves independently:
-    `_resolve_project_from_bridge_cwd()`, and on None falls through to
-    `build_sender_id( project=None )` → `detect_project()` → `os.getcwd()`.
-
-    ⇒ TWO RESOLVERS, DIFFERENT FALLBACKS. This one falls back to the LUPIN_ROOT
-    basename; that one falls back to the live cwd. They disagree exactly when a
-    seat's cwd and LUPIN_ROOT name different repos.
-
-    ⚠️ THE FALSE CLAIM ALREADY COST A DIAGNOSIS. On 2026-07-21 the heartbeat-hold
-    `--base-dir`-defaults-to-LUPIN_ROOT twin was offered as the mechanism for the
-    `@lupin` DM stamp, and it looked like an excellent match BECAUSE this function
-    — the one you would naturally read, since it advertised itself as THE one —
-    really does carry that fallback. A discriminator (LUPIN_ROOT set, cwd in a
-    non-lupin repo, no bridge) returned `@plan`, proving the lever is
-    `os.getcwd()`. The wrong mechanism had to be struck from P1 row 12b5a766.
-
-    ⇒ A CONVERGENCE THAT ADVERTISES ITSELF AS COMPLETE WHILE A CALL SITE BYPASSES
-    IT SENDS THE NEXT READER TO THE WRONG CODE WITH CONFIDENCE. The claim is
-    corrected here rather than the resolvers merged: converging them is a real
-    refactor and is deliberately deferred, because doing it now could MASK
-    12b5a766 by making the `@lupin` stamp look intentional (that row's own
-    warning). Row 7160b671 carries the convergence.
-
-    Resolution order:
-        1. The bridge file's SessionStart cwd → nearest `.git` ancestor
-           (via `_resolve_project_from_bridge_cwd`, alias-normalized). This
-           is the CORRECT source: it is anchored to where `claude` was
-           actually launched, so a NON-lupin session resolves to its OWN
-           project instead of always collapsing to the `LUPIN_ROOT`
-           basename. The old `LUPIN_ROOT`-basename rule returned "lupin"
-           for EVERY session regardless of where it ran — bug 9bf1dc4a:
-           the persona-chain lookup and credential section both keyed off
-           the wrong project for any non-lupin session.
-        2. Fallback ONLY when no bridge resolves (no bridge file, no `cwd`
-           field, no `.git` ancestor): the `LUPIN_ROOT` basename, then the
-           live cwd basename — the legacy rule, kept as a degraded last
-           resort so callers always get a non-empty name.
+    Its consumers are the task-store write gate's manager-figure predicate, the per-repo persona-chain env-key lookup and hook credential resolution; it replaced two duplicate derivers.
+    It is not the only resolver: `build_sender_id_for_cc`, which stamps identity onto every peer DM, calls `_resolve_project_from_bridge_cwd()` and falls through to `detect_project()` and the live cwd.
+    The two disagree when a seat's cwd and `LUPIN_ROOT` name different repos. Merging them is deferred because it could mask the `@lupin` DM stamp, so no layer should be assumed to share one name.
 
     Requires:
-        - environ is a Mapping or None (None → os.environ)
+        - environ is a Mapping or None (None means os.environ)
 
     Ensures:
         - Returns a lowercase, non-empty project name string
         - Prefers the bridge-cwd-anchored project; only falls back to
-          LUPIN_ROOT/cwd when the bridge cannot resolve one
+          `LUPIN_ROOT`/cwd when the bridge cannot resolve one
         - Never raises
+        - Resolves in order: first the bridge file's SessionStart cwd, taken to the nearest `.git` ancestor through
+          `_resolve_project_from_bridge_cwd` and alias-normalized
+        - That source is anchored to where `claude` was launched, so a non-lupin session resolves to its own project; the
+          old `LUPIN_ROOT` basename rule returned "lupin" for every session and misled the persona-chain and credential lookups
+        - Falls back only when no bridge resolves (no bridge file, no `cwd` field): the `LUPIN_ROOT` basename, then the live
+          cwd basename, a degraded last resort so the name is never empty
     """
     project = _resolve_project_from_bridge_cwd()
     if project:
@@ -812,21 +663,9 @@ def build_sender_id_for_cc( session_id: Optional[str] = None ) -> Optional[str]:
     """
     Build a Claude Code sender_id for notification routing.
 
-    Uses the CC session_id (truncated to first 8 hex chars) as the suffix,
-    producing sender_ids like: claude.code@lupin.deepily.ai#a1b2c3d4
-
-    The project segment is resolved from the bridge file's SessionStart cwd
-    snapshot (via `_resolve_project_from_bridge_cwd`), NOT live `os.getcwd()`.
-    The bridge is stable for the session lifetime; live cwd drifts across
-    hook invocations once the user runs `cd` inside a Bash tool call. Without
-    this stabilization, the same CC session produces sender_ids alternating
-    between e.g. `claude.code@lupin.deepily.ai#abc12345` and
-    `claude.code@cosa.deepily.ai#abc12345` depending on where the bash
-    subshell happens to be standing — which the notifications UI renders
-    as duplicate sender cards for what is logically one session.
-
-    Falls back to live-cwd detection (the legacy behavior) only if the
-    bridge can't be resolved.
+    The suffix is the first 8 hex chars of the CC session_id, giving ids like claude.code@lupin.deepily.ai#a1b2c3d4. The project segment comes from the bridge file's SessionStart cwd snapshot (via `_resolve_project_from_bridge_cwd`), not live `os.getcwd()`.
+    The bridge is stable for the session, but live cwd drifts once the user runs `cd` in a Bash tool call. Without this, one session alternates between the project segments `lupin` and `cosa` under one suffix.
+    The notifications UI renders those as duplicate sender cards. It falls back to live-cwd detection, the legacy behavior, only if the bridge cannot be resolved.
 
     Requires:
         - cosa.agents.utils.sender_id must be importable
@@ -911,25 +750,11 @@ def get_session_metadata() -> dict:
 
 def find_session_by_id( session_id, exact=False, check_pid=True ):
     """
-    Scan ~/.claude/sessions/cc-*.json for a session_id match.
+    Scan ~/.claude/sessions/cc-*.json for a session_id match and return its data.
 
-    ⚠️ PID LIVENESS IS ONLY MEANINGFUL IN THE HOST'S PID NAMESPACE (`check_pid=False`,
-    row 27760534). Inside a container `/proc` holds the container's processes, so every
-    host seat's pid reads dead and EVERY bridge is skipped — measured 2026-09-28 in
-    lupin-rest-dev: pid 25333 alive on the host, absent in the container, and the console
-    roster marked every live seat unwatchable. A caller that may run in a container passes
-    `check_pid=False`; with no pid to tell a stale file from a live one, the NEWEST file
-    (by mtime) among the matches wins.
-
-    Supports both full UUID and 8-char prefix matching. Skips files
-    from dead PIDs to avoid returning stale sessions.
-
-    ⚠️ EXACT MODE (opt-in, `exact=True`): full-UUID compare ONLY — the 8-char
-    prefix fallback is disabled. Callers targeting an IRREVERSIBLE, self-aimed
-    action (self_respin's `/clear`) MUST use this: two live seats whose ids share
-    a first-8-char prefix would otherwise resolve to the wrong pane, aiming the
-    clear at someone else's session. The DEFAULT stays prefix-tolerant so the
-    existing callers (arbiter poke, manager_resolver, arbiter_job) are unchanged.
+    Pid liveness is meaningful only in the host's pid namespace. Inside a container every host seat reads dead and every bridge is skipped, so the console roster marked every live seat unwatchable.
+    A caller that may run in a container passes `check_pid=False`. With no pid to tell stale from live, the newest file by mtime among the matches wins. Matching takes a full UUID or an 8-char prefix.
+    Exact mode (`exact=True`, opt-in) compares full UUIDs only. Callers of an irreversible self-aimed action, such as self_respin's `/clear`, must use it. Two seats sharing a first-8-char prefix would otherwise aim the clear at someone else's session. The default stays prefix-tolerant for existing callers (arbiter poke, manager_resolver, arbiter_job).
 
     Requires:
         - session_id is a non-empty string
@@ -937,14 +762,15 @@ def find_session_by_id( session_id, exact=False, check_pid=True ):
     Ensures:
         - Returns full session data dict if a match is found
         - Returns None if no match or session_id is empty
-        - exact=True: matches ONLY on full-id equality (no prefix fallback)
-        - exact=False (default): full-id OR 8-char-prefix equality (legacy)
-        - Skips bridge files whose PID is dead
+        - exact=True: matches only on full-id equality (no prefix fallback)
+        - exact=False (default): full-id or 8-char-prefix equality (legacy)
+        - Skips bridge files whose PID is dead, unless check_pid is False
         - Never raises exceptions
 
     Args:
         session_id: Full session UUID (or, when exact=False, an 8-char prefix) to match
         exact: when True, require a full-id match — no 8-char prefix fallback
+        check_pid: when False, skip the liveness check and prefer the newest match
 
     Returns:
         dict or None: Session data dict, or None
@@ -1008,19 +834,9 @@ def find_session_path_by_id( session_id, exact=False ):
     """
     Scan ~/.claude/sessions/cc-*.json for a session_id match and return the file path.
 
-    Sibling of find_session_by_id() that returns the Path instead of the data dict,
-    enabling read-modify-write workflows (e.g., speakerphone toggle).
-
-    Supports both full UUID and 8-char prefix matching. Skips files from dead PIDs.
-
-    ⚠️ EXACT MODE (opt-in, `exact=True`): full-UUID compare ONLY — the 8-char prefix
-    fallback is disabled, mirroring find_session_by_id(exact=True). Callers targeting
-    an IRREVERSIBLE, self-aimed action MUST use it: self_respin resolves this seat's
-    bridge to poll its post-/clear rewrite mtime, and a first-8-char prefix collision
-    with another live seat would poll the WRONG pane's bridge — reading its write as
-    "reset proven" and typing the wake into the un-cleared pane. Same reason the
-    sibling tmux resolver uses exact (row 275cb0b9). The DEFAULT stays prefix-tolerant
-    so the existing caller (speakerphone toggle) is unchanged.
+    Sibling of `find_session_by_id()` that returns the Path instead of the data dict, enabling read-modify-write workflows such as the speakerphone toggle. It takes a full UUID or an 8-char prefix.
+    Exact mode (`exact=True`, opt-in) compares full UUIDs only, as in `find_session_by_id`. Callers of an irreversible self-aimed action must use it. self_respin polls this seat's bridge mtime after `/clear`. A prefix collision with another live seat would poll the wrong bridge. It would read that write as reset proven and type the wake into the un-cleared pane.
+    The sibling tmux resolver uses exact for the same reason. The default stays prefix-tolerant so the existing caller (speakerphone toggle) is unchanged.
 
     Requires:
         - session_id is a non-empty string
@@ -1028,9 +844,9 @@ def find_session_path_by_id( session_id, exact=False ):
     Ensures:
         - Returns Path if a match is found
         - Returns None if no match or session_id is empty
-        - exact=True: matches ONLY on full-id equality (no prefix fallback)
-        - exact=False (default): full-id OR 8-char-prefix equality (legacy)
-        - Skips bridge files whose PID is dead
+        - exact=True: matches only on full-id equality (no prefix fallback)
+        - exact=False (default): full-id or 8-char-prefix equality (legacy)
+        - Skips bridge files whose PID is dead, unless host pids cannot be trusted (inside a container)
         - Never raises exceptions
 
     Args:
@@ -1049,19 +865,11 @@ def find_session_path_by_id( session_id, exact=False ):
 
 def iter_live_bridges():
     """
-    Yield every live bridge in SESSION_DIR as ( path, data, all_ids ), lazily.
+    Yield every live bridge in `SESSION_DIR` as ( path, data, all_ids ), lazily.
 
-    🔴 ONE SCAN, SHARED (row 41da77bb). `find_session_path_by_id` scans the whole
-    sessions directory per call, and that directory is mostly NOT bridges — measured
-    2026-09-10 at 7,475 entries, 6,866 of them cc-listener-* leftovers and 2 bridges,
-    3.92 ms per scan inside the container. senders-visible called it 2-3 times per
-    sender for 5,180 senders and blocked the dev server for ~52 s. A caller resolving
-    many ids takes ONE `build_live_bridge_index()` and matches against it instead.
-
-    ⚠️ LAZY ON PURPOSE. `find_session_path_by_id` walks this generator and stops at the
-    first match, exactly as the loop it replaced did, so a single lookup still reads
-    only the files before its hit. The skip rules below are that loop's, moved here so
-    the rule has one definition rather than two that can drift.
+    One scan is shared. The sessions directory is mostly not bridges (thousands of cc-listener leftovers beside a few bridges), so a per-id scan is slow. A caller resolving many ids once blocked the dev server.
+    Such a caller takes one `build_live_bridge_index()` and matches against it instead.
+    It is lazy so that `find_session_path_by_id` stops at the first match and reads only the files before its hit. The skip rules live here once, so they cannot drift between two loops.
 
     Ensures:
         - skips names containing "buffer" or "listener"
@@ -1099,11 +907,11 @@ def iter_live_bridges():
 
 def build_live_bridge_index():
     """
-    Snapshot every live bridge ONCE, for a caller about to resolve many ids.
+    Snapshot every live bridge once, for a caller about to resolve many ids.
 
     Ensures:
         - returns a list of ( path, data, all_ids ), in glob order
-        - returns [] when SESSION_DIR does not exist
+        - returns [] when `SESSION_DIR` does not exist
     """
     if not SESSION_DIR.exists():
         return []
@@ -1135,17 +943,13 @@ def find_in_bridge_index( index, session_id, exact=False ):
 
 def _pid_confirmed_dead( pid ):
     """
-    True ONLY when `pid` is DEFINITIVELY gone (ProcessLookupError on kill -0).
+    Return True only when `pid` is definitively gone (ProcessLookupError on kill -0).
 
-    The bias-to-alive companion to _is_pid_alive: where _is_pid_alive answers
-    "is this signalable by us" (EPERM ⇒ dead), this answers the stricter
-    "is this process CONFIRMED gone". A non-int, an EPERM (exists-but-not-ours),
-    or any other OSError returns False — we never confirm death on ambiguity.
-    Used by the fleet-status force-offline path, where a false-dead is the costly
-    error (it would hide a live session).
+    The bias-to-alive companion to `_is_pid_alive`, which asks whether we can signal the process (EPERM reads as dead); this asks whether the process is confirmed gone.
+    A non-int, an EPERM (exists but not ours) or any other OSError returns False, so death is never confirmed on ambiguity. The fleet-status force-offline path uses it, where a false dead would hide a live session.
 
     Requires:
-        - pid is an int or anything (non-int ⇒ not-confirmed-dead)
+        - pid is an int or anything else (a non-int is not confirmed dead)
 
     Ensures:
         - True iff os.kill( pid, 0 ) raises ProcessLookupError
@@ -1165,22 +969,10 @@ def _pid_confirmed_dead( pid ):
 
 def find_dead_sessions( candidate_ids ):
     """
-    Return the subset of `candidate_ids` whose worker process is CONFIRMED dead.
+    Return the subset of `candidate_ids` whose worker process is confirmed dead.
 
-    Unlike find_session_path_by_id / find_active_voice_persona_sessions (which
-    SKIP dead-PID bridges, so they can never surface a dead session), this scans
-    bridges UNFILTERED and positively confirms death via kill -0. Built for the
-    fleet-status "offline" override (drop a /exit'd session in ~1 poll, not ~1h).
-
-    A candidate is dead iff its bridge file is found AND it carries ≥1 known pid
-    (filename pid, listener_pid, cc_pid) and EVERY known pid is _pid_confirmed_dead.
-
-    BIAS-TO-ALIVE (never over-report death):
-        - host-PID-trust gated — returns empty inside a container (host pids are
-          invisible there, so kill -0 would read the whole fleet as dead)
-        - a candidate with no readable/matching bridge is NOT dead (absence ≠ death)
-        - a bridge with no known int pid is NOT dead (no evidence)
-        - EPERM / ambiguous kill -0 counts as alive (see _pid_confirmed_dead)
+    Unlike `find_session_path_by_id` and `find_active_voice_persona_sessions`, which skip dead-pid bridges and so never surface a dead session, this scans bridges unfiltered and confirms death with kill -0.
+    It serves the fleet-status offline override, which drops an exited session in about one poll instead of about an hour. A candidate is dead iff its bridge is found and it carries at least one known pid. The pids are the filename pid, listener_pid and cc_pid, and every one must be `_pid_confirmed_dead`.
 
     Requires:
         - candidate_ids is an iterable of session-id strings (full uuid or 8-char prefix)
@@ -1188,6 +980,10 @@ def find_dead_sessions( candidate_ids ):
     Ensures:
         - returns a set[str], a subset of the truthy candidate_ids
         - never raises (a bad bridge file is skipped)
+        - biased to alive, so it never over-reports death: it returns empty inside a container, where host pids are
+          invisible and kill -0 would read the whole fleet as dead
+        - a candidate with no readable or matching bridge is not dead, because absence is not death
+        - a bridge with no known int pid is not dead, for lack of evidence, and an EPERM or ambiguous kill -0 counts as alive
     """
     if not _can_trust_host_pids() or not SESSION_DIR.exists():
         return set()
@@ -1248,23 +1044,25 @@ _bridge_touch_failure_logged = False
 
 def get_bridge_touch_failure_count() -> int:
     """
+    Return the count of swallowed `touch_bridge_mtime()` failures in this process.
+
     Ensures:
         - returns the count of swallowed touch_bridge_mtime() failures since
-          process start (observability rider) — meaningful in long-lived
-          processes; resets per-process for the ephemeral hook. Never raises.
+          process start (observability rider); meaningful in long-lived
+          processes, and it resets per process for the ephemeral hook. Never raises.
     """
     return _bridge_touch_failure_count
 
 
 def _record_bridge_touch_failure() -> None:
     """
-    Record a swallowed liveness-stamp failure (counter + one-shot stderr).
+    Record a swallowed liveness-stamp failure (counter plus one-shot stderr).
 
     Ensures:
         - increments the in-memory failure counter (always)
-        - writes a single stderr diagnostic on the FIRST failure of this process
-          only (bounded — no per-call spam); subsequent failures count silently
-        - NEVER raises (it runs inside touch_bridge_mtime's except — it must not
+        - writes a single stderr diagnostic on the first failure of this process
+          only (bounded, no per-call spam); subsequent failures count silently
+        - never raises (it runs inside touch_bridge_mtime's except and must not
           re-break the no-throw guarantee, so the stderr write is itself guarded)
     """
     global _bridge_touch_failure_count, _bridge_touch_failure_logged
@@ -1282,43 +1080,23 @@ def _record_bridge_touch_failure() -> None:
 
 def touch_bridge_mtime() -> bool:
     """
-    Bump THIS session's bridge-file mtime to "now" — the v2.1 direct-state
-    liveness stamp (arbiter design `03` §10.1).
+    Bump this session's bridge-file mtime to now, the direct-state liveness stamp.
 
-    This is the **one host-side liveness clock** (§10.6 redline C4): the same
-    `~/.claude/sessions/cc-*.json` whose mtime the idle-waiter re-arm, the Stop
-    hook, and the cosa-voice server already bump. Adding the tool-use hook as a
-    fourth writer (§10.1) makes a heads-down worker refresh liveness on every
-    tool call. Because the file is written host-side (never through `:7999`),
-    the clock survives a server wedge.
-
-    **REDLINE C1 (load-bearing, §10.6):** this is a BARE metadata-only
-    `os.utime( path, None )` — it touches mtime/atime ONLY. It performs NO
-    content write (a one-byte write would corrupt the bridge JSON — hard gate),
-    NO transcript read, NO server POST, and NO heavy logic. It is called from
-    the PostToolUse hook which fires on every tool call, so anything heavier
-    would degrade every tool call fleet-wide. Path resolution reuses
-    `_find_session_file()` — a single `cc-{ppid}.json` `.exists()` stat in the
-    common (PPID-hit) case.
+    It is the one host-side liveness clock. The idle-waiter re-arm, the Stop hook and the cosa-voice server already bump the same bridge mtime, and this tool-use hook is a fourth writer. A heads-down worker therefore refreshes liveness on every tool call. The clock survives a server wedge because the file is written host-side, never through `:7999`.
+    See: src/rnd/v0.1.8/2026.06.04-heartbeat-hook/03-arbiter-design.md (sections 10.1 and 10.6)
 
     Requires:
         - nothing (resolves the current process's own bridge file)
 
     Ensures:
         - bumps the resolved bridge file's mtime to the current time via
-          os.utime( path, None ) — metadata-only, no content write
+          os.utime( path, None ), metadata-only, no content write
         - returns True if a bridge file was found and successfully touched
         - returns False if no bridge file resolves or the touch fails
-        - NEVER raises (a hook must never break a tool call)
-
-    Fail-safe by design: the catch is broad (`Exception`), not just `OSError`.
-    This runs on the PostToolUse path — every tool call × every fleet session —
-    so design §10.6 mandates it be a no-op on *any* error. The realistic live
-    failures are all OSError subtypes (missing `~/.claude/sessions`, a
-    permission flip, an FS race where the bridge is unlinked/rotated mid-touch,
-    or `os.getcwd()` failing in `_find_session_file`'s cwd-fallback when the cwd
-    was deleted); the broad catch additionally guarantees that no unforeseen
-    error class can ever propagate out of a tool call.
+        - never raises (a hook must never break a tool call)
+        - performs no transcript read, no server POST and no heavy logic, because the PostToolUse hook fires on every tool call. A one-byte content write would also corrupt the bridge JSON.
+        - resolves the path through `_find_session_file()`, a single `cc-{ppid}.json` stat in the common PPID-hit case
+        - the catch is broad (`Exception`), not only OSError, so it is a no-op on any error. Realistic failures are OSError subtypes: a missing sessions directory, a permission flip, a bridge unlinked mid-touch, or a deleted cwd. No unforeseen error class may propagate out of a tool call.
     """
     try:
         result = _find_session_file()
@@ -1334,29 +1112,21 @@ def touch_bridge_mtime() -> bool:
 
 def get_bridge_mtime( session_id ) -> Optional[ float ]:
     """
-    Read the bridge-file mtime (epoch seconds) for a session by id — the
-    arbiter's direct liveness reader (arbiter design `03` §10.1/§10.2).
+    Read a session's bridge-file mtime in epoch seconds, looked up by session id.
 
-    The consumer-side counterpart to `touch_bridge_mtime()`: the arbiter maps
-    each tracked session_id to its bridge file and reads the mtime so the fleet
-    render can show liveness as an honest age (`bridge 4s ago`), never an
-    inferred boolean (§10.2 — state and liveness stay orthogonal columns).
-
-    Resolves the bridge path via `find_session_path_by_id()` (full-uuid or
-    8-char-prefix match; container-PID-aware). Heavier than
-    `touch_bridge_mtime()` (it globs/reads the session dir), but the arbiter
-    calls it ~once per session per ~60s poll — well outside the hot hook path
-    C1 protects.
+    It is the arbiter's direct liveness reader and the consumer-side counterpart to `touch_bridge_mtime()`. The fleet render shows liveness as an honest age (`bridge 4s ago`), never an inferred boolean, so state and liveness stay separate columns.
+    It resolves the path through `find_session_path_by_id()`. That is heavier than the touch, but it runs about once per session per 60 s poll, well outside the hot hook path.
+    See: src/rnd/v0.1.8/2026.06.04-heartbeat-hook/03-arbiter-design.md (sections 10.1 and 10.2)
 
     Requires:
-        - session_id is a string (full UUID or 8-char prefix); empty/None
+        - session_id is a string (full UUID or 8-char prefix); empty or None
           yields None
 
     Ensures:
         - returns the bridge file's mtime in epoch seconds if the session
           resolves to a live bridge file
         - returns None if no bridge file matches or the stat fails
-        - NEVER raises (broad catch — the arbiter poll must survive any single
+        - never raises (broad catch; the arbiter poll must survive any single
           session's bridge-read failure under live FS conditions)
     """
     try:
@@ -1396,15 +1166,10 @@ MANAGER_FIGURE_BRIDGE_FIELD = "manager_figure_implicit"
 
 def _get_default_speakerphone():
     """
-    Return the mode-aware default for `speakerphone_on` when a bridge has no
-    explicit field (i.e., v1 bridges from before the Phase 2 rename, OR
-    freshly-created bridges that haven't been touched by set_speakerphone yet).
+    Return the mode-aware default for `speakerphone_on` when a bridge has no explicit field.
 
-    Solo  → False (today's monopoly-mode default: sessions opt in to TTS render)
-    Chorus → True (at-distance is the default in chorus mode)
-
-    Defers the cosa.utils.util import to break any circular-import risk and to
-    keep this function side-effect-free at import time.
+    That is a v1 bridge from before the speakerphone rename, or a fresh bridge that `set_speakerphone` has not touched. Solo mode gives False (sessions opt in to TTS render) and chorus mode gives True (at-distance is the default).
+    The `cosa.utils.util` import is deferred to avoid circular-import risk and to keep the function free of import-time side effects. Any error returns False, the solo default.
     """
     try:
         from cosa.utils import util as cu
@@ -1415,16 +1180,10 @@ def _get_default_speakerphone():
 
 def find_active_speakerphone_sessions( exclude_session_id=None ):
     """
-    Scan all bridge files for sessions whose speakerphone_on=true.
+    Scan all bridge files for sessions whose speakerphone_on is true.
 
-    Used by the speakerphone HTTP endpoint's SOLO branch to enforce the
-    "at most one active speakerphone session at a time" invariant — when a
-    session activates, all OTHER active sessions are deactivated atomically.
-    In CHORUS mode this scan is not invoked (no displacement enforcement).
-
-    Honors the same staleness filtering as find_session_path_by_id:
-    skips buffer/listener files, skips bridges whose host PID is dead
-    (when host PIDs are trustworthy — see _can_trust_host_pids).
+    The speakerphone HTTP endpoint's solo branch uses it to enforce at most one active speakerphone session at a time. When a session activates, all other active sessions are deactivated atomically. Chorus mode never invokes this scan.
+    It honors the same staleness filtering as `find_session_path_by_id`. It skips buffer and listener files. It also skips bridges whose host PID is dead when host PIDs are trustworthy (see `_can_trust_host_pids`).
 
     Requires:
         - exclude_session_id is None or a non-empty string
@@ -1433,19 +1192,19 @@ def find_active_speakerphone_sessions( exclude_session_id=None ):
         - Returns a list of (Path, session_id) tuples for every bridge with
           speakerphone_on=true (never None; empty list if none)
         - When exclude_session_id is provided, bridges matching that id
-          (full UUID OR 8-char prefix, mirroring find_session_path_by_id)
-          are NOT included in the returned list
+          (full UUID or 8-char prefix, mirroring find_session_path_by_id)
+          are not included in the returned list
         - session_id in each tuple is the canonical id from the bridge file
           (prefers stable_session_id, falls back to session_id)
         - Never raises exceptions
         - Skips bridge files that fail to parse or open
         - v1 bridges (without `speakerphone_on` field) treated as inactive
-          (no destructive discard — Phase 2 uses upgrade-on-write semantics)
+          (no destructive discard; the upgrade to v2 happens on write)
 
     Args:
         exclude_session_id: Optional session id (full UUID or 8-char prefix)
-            to exclude from results — typically the session that's about to
-            be activated, so it isn't displaced by its own enable call
+            to exclude from results, typically the session that is about to
+            be activated, so it is not displaced by its own enable call
 
     Returns:
         list[ tuple[ Path, str ] ]: List of (bridge_path, session_id) tuples
@@ -1500,13 +1259,10 @@ def find_active_speakerphone_sessions( exclude_session_id=None ):
 
 def get_speakerphone( session_id ):
     """
-    Read `speakerphone_on` flag from the bridge file for a given session_id.
+    Read the `speakerphone_on` flag from the bridge file for a given session_id.
 
-    Speakerphone mode is the per-session toggle that, when True, makes Claude
-    auto-call notify(full_text, suppress_ding=True) after every assistant turn.
-    The default state when the bridge has no `speakerphone_on` field is
-    mode-aware: False in solo mode (today's monopoly behavior), True in chorus
-    mode (at-distance default). See _get_default_speakerphone.
+    Speakerphone mode is the per-session toggle that makes Claude auto-call notify(full_text, suppress_ding=True) after every assistant turn when it is True.
+    The default when the bridge has no `speakerphone_on` field is mode-aware: False in solo mode (monopoly behavior), True in chorus mode (at-distance default). See `_get_default_speakerphone`.
 
     Requires:
         - session_id is a non-empty string (full UUID or 8-char prefix)
@@ -1538,17 +1294,10 @@ def get_speakerphone( session_id ):
 
 def set_speakerphone( session_id, on ):
     """
-    Write `speakerphone_on` flag to the bridge file for a given session_id.
+    Write the `speakerphone_on` flag to the bridge file for a given session_id.
 
-    Read-modify-write the bridge JSON to set the flag, preserving all other
-    fields and stamping `format_version=2` on the bridge for future schema
-    evolution. Does NOT create a new bridge file if missing — bridge must
-    already exist (created by SessionStart hook).
-
-    Upgrade-on-write semantics: a v1 bridge (with `conversation_mode_active`
-    but no `speakerphone_on`) gets `speakerphone_on` + `format_version` added
-    on the first set_speakerphone call. The stale `conversation_mode_active`
-    key is removed in the same write to avoid two-source-of-truth confusion.
+    Read-modify-write of the bridge JSON, preserving all other fields and stamping `format_version=2` for future schema evolution. It does not create a missing bridge: the bridge must already exist (created by the SessionStart hook).
+    A v1 bridge (with `conversation_mode_active` but no `speakerphone_on`) gains `speakerphone_on` and `format_version` on the first call. The stale `conversation_mode_active` key is removed in the same write to avoid two sources of truth.
 
     Requires:
         - session_id is a non-empty string (full UUID or 8-char prefix)
@@ -1588,15 +1337,10 @@ def set_speakerphone( session_id, on ):
 
 def set_manager_figure_implicit( session_id, flag ):
     """
-    Stamp the IMPLICIT manager-figure answer onto the bridge (bug e5d600bd).
+    Stamp the implicit manager-figure answer onto the bridge.
 
-    Read-modify-write the bridge JSON to set MANAGER_FIGURE_BRIDGE_FIELD,
-    preserving all other fields. Called from register_session's SessionStart
-    hook AFTER voice-persona allocation, using the caller's real environment —
-    the only place the COSA_VOICE_PREFERRED_PERSONA__<PROJECT> chain is visible.
-    The server-side is_manager_figure() then reads this static field instead of
-    re-deriving it from the container env (where the chain is empty). Mirrors the
-    set_speakerphone read-modify-write pattern; does NOT create a missing bridge.
+    Read-modify-write of the bridge JSON to set `MANAGER_FIGURE_BRIDGE_FIELD`, preserving all other fields; it does not create a missing bridge. The SessionStart hook of register_session calls it after voice-persona allocation, using the caller's real environment.
+    That is the only place the `COSA_VOICE_PREFERRED_PERSONA__<PROJECT>` chain is visible. The server-side is_manager_figure() reads this static field instead of re-deriving it from the container env, where the chain is empty.
 
     Requires:
         - session_id is a non-empty string (full UUID or 8-char prefix)
@@ -1632,9 +1376,7 @@ def get_last_autonarrated_turn_id( session_id ):
     """
     Read last_autonarrated_turn_id from the bridge file for dedup.
 
-    Used by the Stop-hook auto-narrate (Phase 4 of conv-mode-three-layer-
-    enforcement plan) to avoid re-narrating the same assistant turn if the
-    Stop hook fires twice on the same turn (which can happen).
+    The Stop-hook auto-narrate uses it to avoid re-narrating the same assistant turn when the Stop hook fires twice on one turn, which can happen.
 
     Requires:
         - session_id is a non-empty string
@@ -1701,23 +1443,14 @@ def set_owner_user_id( session_id, owner_user_id ):
     """
     Write `owner_user_id` to the bridge file for a given session_id.
 
-    Writer-side follow-up to the 2026-05-14 Option C design. The
-    inter-session-commons broadcast surface filters active sessions by
-    `bridge["owner_user_id"] == authenticated_user_id` after CoSA-side
-    migration shipped 2026-05-14. This setter is called once at listener
-    startup from `_stamp_owner_user_id_on_bridge()` in cc_notification_listener.
-
-    Distinct from `set_user_id`: that stamps the SERVICE-account identity
-    of the listener (`claude.code@lupin.deepily.ai`); this stamps the
-    HUMAN owner's identity (`ricardo.felipe.ruiz@gmail.com`), which is
-    what the broadcast UI's same-user filter actually compares against.
-
+    The inter-session-commons broadcast surface filters active sessions by `bridge["owner_user_id"] == authenticated_user_id`. A listener calls this setter once at startup from `_stamp_owner_user_id_on_bridge()` in cc_notification_listener.
+    It differs from `set_user_id`, which stamps the service-account identity of the listener. This stamps the human owner's identity, which the broadcast UI's same-user filter compares against.
     See: src/rnd/v0.1.7/2026.05.17-owner-user-id-stamper-writer-side/01-design.md
 
     Requires:
         - session_id is a non-empty string (full UUID or 8-char prefix)
         - owner_user_id is a non-empty string (canonical user UUID from
-          /auth/login response at user.id for the HUMAN owner)
+          /auth/login response at user.id for the human owner)
 
     Ensures:
         - Returns True if bridge was found and successfully updated
@@ -1727,7 +1460,7 @@ def set_owner_user_id( session_id, owner_user_id ):
 
     Args:
         session_id:    Session ID to look up (full UUID or 8-char prefix)
-        owner_user_id: Canonical HUMAN owner UUID to stamp on the bridge
+        owner_user_id: Canonical human owner UUID to stamp on the bridge
 
     Returns:
         bool: True on successful write
@@ -1750,19 +1483,9 @@ def set_user_id( session_id, user_id ):
     """
     Write `user_id` to the bridge file for a given session_id.
 
-    Phase 3 — Option 2 fix per
-    `src/rnd/v0.1.7/2026.05.13-broadcast-ui-no-active-sessions-bug.md`. The
-    inter-session-commons broadcast surface filters active sessions by
-    `bridge["user_id"] == authenticated_user_id` (T7 + Q9 same-user scoping).
-    Without this stamp every bridge fails the filter and the broadcast UI
-    shows "no active sessions". Pairs with Option 1's graceful-degradation
-    fallback in `routers/commons.py`: once `set_user_id` lands, the fallback
-    branch becomes inactive for new bridges and full cross-user isolation
-    is enforced.
-
-    Called from `cc_notification_listener._stamp_user_id_on_bridge()` once
-    at listener startup, after the authenticated user_id has been resolved
-    via `/auth/login`.
+    The inter-session-commons broadcast surface filters active sessions by `bridge["user_id"] == authenticated_user_id` (same-user scoping). Without this stamp every bridge fails the filter and the broadcast UI shows no active sessions.
+    It pairs with the graceful-degradation fallback in `routers/commons.py`: once the stamp lands, the fallback goes inactive for new bridges and full cross-user isolation applies.
+    `cc_notification_listener._stamp_user_id_on_bridge()` calls it once at listener startup, after the user_id is resolved via `/auth/login`.
 
     Requires:
         - session_id is a non-empty string (full UUID or 8-char prefix)
@@ -1798,15 +1521,10 @@ def set_user_id( session_id, user_id ):
 
 def get_voice_persona( session_id ):
     """
-    Read voice_persona dict from the bridge file for a given session_id.
+    Read the voice_persona dict from the bridge file for a given session_id.
 
-    The voice_persona is a per-session voice/persona allocation written by the
-    SessionStart hook (via the /api/cosa-voice/voice-persona/{sid}/allocate
-    endpoint). Each new Claude Code session is uniformly randomly assigned a
-    voice from a 6-voice pool so the user can audibly distinguish parallel
-    sessions. Sam (the global default) is reserved as the system-wide voice
-    for any TTS request lacking a voice_id and is NOT in the allocatable pool.
-
+    The voice_persona is a per-session voice allocation written by the SessionStart hook, through the /api/cosa-voice/voice-persona/{sid}/allocate endpoint. Each new session gets a voice picked uniformly at random from a 6-voice pool, so the user can tell parallel sessions apart.
+    Sam, the global default, is reserved as the system-wide voice for any TTS request lacking a voice_id and is not in the allocatable pool.
     See: src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md
 
     Requires:
@@ -1885,17 +1603,8 @@ def get_idle_detection( session_id ):
     """
     Read the idle_detection block from the bridge file for a given session_id.
 
-    The idle_detection block tracks per-session state for the deferred
-    "Anything else?" prompt with exponential backoff. See:
-        src/rnd/v0.1.7/2026.04.29-idle-aware-stop-hook/01-design.md
-
-    Schema:
-        {
-          "last_interaction_at" : ISO8601 with tz,
-          "backoff_index"       : int (index into settings backoff_minutes),
-          "waiter_pid"          : int (detached helper PID) or None,
-          "waiter_started_at"   : ISO8601 (set by waiter on sleep-start)
-        }
+    The block tracks per-session state for the deferred "Anything else?" prompt with exponential backoff.
+    See: src/rnd/v0.1.7/2026.04.29-idle-aware-stop-hook/01-design.md
 
     Requires:
         - session_id is a non-empty string (full UUID or 8-char prefix)
@@ -1906,6 +1615,7 @@ def get_idle_detection( session_id ):
         - Returns None on any failure (missing bridge, parse error, missing
           field, field is null/empty/non-dict)
         - Never raises exceptions
+        - The dict keys are as follows. last_interaction_at is ISO8601 with tz. backoff_index is an int index into settings backoff_minutes. waiter_pid is the int PID of the detached helper, or None. waiter_started_at is ISO8601, set by the waiter on sleep-start.
 
     Args:
         session_id: Session ID to look up
@@ -1932,15 +1642,8 @@ def set_idle_detection_field( session_id, **fields ):
     """
     Merge fields into the idle_detection block on the bridge file.
 
-    Read-modify-write: reads the bridge, merges `fields` into the existing
-    idle_detection sub-dict (creating the sub-dict if absent), writes back.
-    Other top-level fields and other idle_detection sub-fields are preserved.
-
-    Race semantics: same as `set_voice_persona` and other writers in this
-    module — no fcntl, no tmpfile+rename. Two concurrent set_*_field calls
-    on the same bridge could lose one update (read-modify-write window). For
-    the idle-detection use case this is acceptable: resets are idempotent,
-    the worst case is one missed bump that the next event replays.
+    Read-modify-write: reads the bridge, merges `fields` into the existing idle_detection sub-dict (creating it if absent), and writes back through `atomic_write_json`. Other top-level fields and other idle_detection sub-fields are preserved.
+    Two concurrent calls on one bridge can still lose an update, because of the read-modify-write window. That is acceptable here: resets are idempotent, so the worst case is one missed bump that the next event replays.
 
     Requires:
         - session_id is a non-empty string
@@ -1982,12 +1685,9 @@ def set_idle_detection_field( session_id, **fields ):
 
 def clear_idle_waiter_pid( session_id ):
     """
-    Atomically clear the waiter_pid field and return the old PID.
+    Clear the waiter_pid field and return the old PID.
 
-    Used by callers that want to kill the waiter — they get the PID to
-    SIGTERM, AND the bridge field is cleared so a concurrent spawn knows
-    the slot is free. The kill itself is the caller's responsibility (see
-    `kill_idle_waiter` for the convenience wrapper).
+    Callers that want to kill the waiter get the PID to SIGTERM. The bridge field is cleared so a concurrent spawn knows the slot is free. The kill itself is the caller's job; see `kill_idle_waiter` for the convenience wrapper.
 
     Requires:
         - session_id is a non-empty string
@@ -2031,10 +1731,7 @@ def kill_idle_waiter( session_id, signal=None ):
     """
     Kill any live idle-waiter helper for this session.
 
-    Convenience wrapper: calls `clear_idle_waiter_pid` to atomically claim
-    the prior PID, then sends SIGTERM (or the supplied signal) to it. PID
-    liveness is checked first to avoid signaling unrelated processes that
-    may have inherited the PID.
+    A convenience wrapper: it calls `clear_idle_waiter_pid` to claim the prior PID, then sends SIGTERM (or the supplied signal) to it. PID liveness is checked first, to avoid signaling an unrelated process that inherited the PID.
 
     Requires:
         - session_id is a non-empty string
@@ -2072,34 +1769,22 @@ def prune_dead_persona_bridges():
     """
     Null the voice_persona field on any bridge file whose host PID is dead.
 
-    Runs from the SessionStart hook on the host side, where host PIDs are
-    visible and _is_pid_alive() returns a meaningful answer. The function
-    short-circuits to no-op when called from a context where host PIDs are
-    NOT trustworthy (i.e., inside a container) — pruning under that
-    condition would mark every bridge dead and is the opposite of what we
-    want.
-
-    Why this exists: the in-container scan in find_active_voice_persona_sessions
-    intentionally skips the dead-PID filter (host PIDs are invisible inside
-    the container), so leftover personas from prior days accumulate as
-    "occupied" and exhaust the allocation pool at day-start. A host-side
-    prune at every SessionStart hook scrubs those leftovers before /allocate
-    runs.
-
-    See: src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md
+    It runs from the SessionStart hook on the host, where host PIDs are visible. It is a no-op where host PIDs are not trustworthy (inside a container), because pruning there would mark every bridge dead.
+    The in-container scan in `find_active_voice_persona_sessions` skips the dead-PID filter. Leftover personas from prior days therefore pile up as occupied and exhaust the allocation pool at day start. A host-side prune at every SessionStart scrubs them before /allocate runs.
 
     Ensures:
         - Returns 0 when SESSION_DIR doesn't exist, when called from a
           non-host context (_can_trust_host_pids() is False), or when no
           bridges need pruning
         - Bridges with isinstance(voice_persona, dict) == False are left
-          untouched (no spurious writes)
+          untouched (no spurious writes), as are bridges with an empty dict
         - Buffer/listener files (cc-*-buffer.json, cc-*-listener.json) are
           skipped (same convention as find_active_voice_persona_sessions)
         - Returns the count of bridges actually pruned (voice_persona set
           to None)
-        - Never raises — per-file errors are swallowed and the next file
+        - Never raises; per-file errors are swallowed and the next file
           is processed
+        - Bridges whose host PID is alive, or whose filename carries no PID, are skipped
 
     Returns:
         int: Number of bridges pruned
@@ -2145,7 +1830,7 @@ def _append_stale_bridge( stale_out, path, mtime_age, pid_alive ):
 
     Ensures:
         - appends a dict naming the bridge, its age, whether its PID is alive, and
-          whether it was KEPT — so an exclusion is never invisible
+          whether it was kept, so an exclusion is never invisible
         - never raises; a bridge that cannot be read still gets an entry, because a
           silently-dropped unreadable bridge is the same failure this bucket exists
           to prevent
@@ -2180,67 +1865,8 @@ def find_active_sessions( stale_threshold_seconds: int = 43200, require_persona:
     """
     Scan all bridge files for live CC sessions, with an optional persona filter.
 
-    This is the general session-discovery scanner. The same liveness filters
-    always apply; `require_persona` chooses whether persona-less sessions are
-    included:
-
-    - `require_persona=True` (default) — only bridges with a non-null
-      `voice_persona` dict are returned. This is the pool-occupancy semantics
-      the voice-persona HTTP endpoints rely on (`/allocate` excludes occupied
-      persona names; `/pool` snapshots). `find_active_voice_persona_sessions`
-      delegates here with this flag.
-
-    - `require_persona=False` — persona-LESS ("null persona") live sessions are
-      ALSO returned, their persona element projected to `{}` (empty dict) so
-      every existing consumer that does `isinstance( p, dict )` / `p.get(...)`
-      stays safe with zero changes. This is the source the inter-session DM
-      recipient-resolution path uses: a worker that booted when the persona
-      pool was exhausted (or whose allocation raced/failed) has a null persona
-      and is otherwise a BLACK HOLE for inbound DMs — its manager cannot reach
-      it back by session_id because it was filtered out of the candidate list
-      entirely (bug d57dbfea). Including it restores the reachability invariant:
-      any live session addressable by its exact session_id must be reachable.
-
-    Two staleness filters apply, in order:
-
-    1. **PID liveness** (host-side only) — when `_can_trust_host_pids()` is
-       True (host context), bridges whose extracted host PID is dead are
-       skipped. Inside a container this check is bypassed because host PIDs
-       are invisible from the container's PID namespace.
-
-    2. **mtime TTL** (fallback ONLY) — bridges older than
-       `stale_threshold_seconds` are skipped **unless their PID is proven
-       alive**. Belt-and-suspenders against the residual case where the
-       host-side prune at SessionStart didn't fire (e.g., server bounced
-       mid-day with no new sessions), and the only liveness signal available
-       inside a container, where host PIDs are invisible.
-
-    🔴 **PID LIVENESS OUTRANKS mtime (bug 6afc8b3e).** This TTL used to apply
-    unconditionally, which silently deleted LIVE sessions from every roster:
-    a seat whose process was running but whose bridge had not been rewritten
-    in 12h was filtered out as dead and appeared in no bucket at all — not
-    `personas`, not `unnamed_seats`, not any count. Two real seats were
-    invisible for 14h+ while `ps` showed them up. The monitor exists to catch
-    the seat that has been alive longest, and that was the one seat it could
-    not see. The docstring claimed "the cc-notification-listener heartbeat
-    updates bridge mtime periodically"; those listeners were alive and the
-    mtime had not moved, so an IDLE-but-alive seat aged out — and an idle seat
-    still holds context and can be woken.
-
-    Raising the constant is the DIAGNOSTIC, not the fix — a bigger number only
-    moves the cliff.
-
-    A dead-PID bridge, or an aged-out bridge whose liveness cannot be
-    confirmed, is treated as "free" — its slot is implicitly reclaimed by
-    being filtered out here.
-
-    **`stale_out`** — pass a list to receive every aged-out bridge, INCLUDING
-    the ones that were kept, each entry saying which way it went and why.
-    Silent exclusion is the failure this bucket closes: a monitor that returns
-    fewer sessions than exist is a monitor that lies.
-
-    See: src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md
-         src/rnd/v0.1.8/2026.06.17-unified-task-store-followups-plan.md (L4 / d57dbfea)
+    The general session-discovery scanner. `find_active_voice_persona_sessions` delegates here with `require_persona=True`, the pool-occupancy view that `/allocate` and `/pool` rely on.
+    With `require_persona=False` persona-less live sessions are also returned. A worker booted with an exhausted pool then stays reachable by session_id; otherwise it is a black hole for inbound DMs.
 
     Requires:
         - stale_threshold_seconds is a positive integer (default 12 hours)
@@ -2249,24 +1875,20 @@ def find_active_sessions( stale_threshold_seconds: int = 43200, require_persona:
         - When require_persona is True: returns a (Path, session_id, persona)
           tuple for every live bridge with a non-null voice_persona dict;
           persona is the dict as stored in the bridge.
-        - When require_persona is False: ALSO returns live persona-less
-          bridges, with persona projected to `{}`.
+        - When require_persona is False: also returns live persona-less
+          bridges, with persona projected to `{}` so consumers that call p.get( ... ) stay safe.
         - session_id is the canonical id (stable_session_id preferred)
         - Never raises exceptions
-        - Skips bridge files that fail to parse or open — but REPORTS them into
-          `unreadable_out` when one is supplied, because a live seat we cannot read
-          still occupies a seat (row 9c3b817a)
+        - Skips bridge files that fail to parse or open, but reports them into
+          `unreadable_out` when one is supplied, because a live seat we cannot read still occupies a seat
         - Skips bridge files whose stat() fails
-
-    **`unreadable_out`** — pass a list to receive the PATH of every LIVE bridge that
-    could not be identified: unparseable JSON, or parseable with no session id. It
-    follows the `stale_out` idiom deliberately, so a caller that needs to COUNT the
-    unreadable does not walk this directory a second time — a third enumeration over one
-    population is how two counts start disagreeing.
-
-    ⚠️ LIVENESS IS DECIDED FIRST, so a DEAD corrupt bridge appears in NEITHER the results
-    nor `unreadable_out`. That ordering is load-bearing: an unreadable ghost counted
-    against the fleet cap could never be reaped, because there is no process to reap.
+        - PID liveness is checked first, when host pids can be trusted: a bridge whose host PID is dead is skipped. Inside a container the check is bypassed.
+        - The mtime TTL is a fallback only: a bridge older than `stale_threshold_seconds` is skipped unless its PID is proven alive.
+        - PID liveness outranks mtime. An unconditional TTL once hid live but idle seats from every roster, and raising the constant only moves the cliff.
+        - A dead-PID bridge, or an aged-out bridge whose liveness cannot be confirmed, is free, and its slot is reclaimed.
+        - `stale_out`, a list, receives every aged-out bridge including kept ones, each saying why. A monitor that returns fewer sessions than exist is a monitor that lies.
+        - `unreadable_out`, a list, receives the path of every live bridge that could not be identified (unparseable JSON, or no session id).
+        - Liveness is decided first, so a dead corrupt bridge appears in neither the results nor `unreadable_out`. An unreadable ghost counted against the fleet cap could never be reaped.
 
     Returns:
         list[ tuple[ Path, str, dict ] ]: (bridge_path, session_id, persona)
@@ -2353,13 +1975,8 @@ def find_active_voice_persona_sessions( stale_threshold_seconds: int = 43200 ):
     """
     Scan all bridge files for sessions whose voice_persona is non-null.
 
-    Thin delegate over `find_active_sessions( require_persona=True )` — the
-    persona-required projection that the voice-persona HTTP endpoints use to
-    compute pool occupancy (`/allocate` excludes occupied persona names so each
-    session gets a unique voice; `/pool` returns a diagnostics snapshot). The
-    liveness filters and return shape are documented on `find_active_sessions`.
-
-    See: src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md
+    A thin delegate over `find_active_sessions( require_persona=True )`, the persona-required view the voice-persona HTTP endpoints use for pool occupancy. `/allocate` excludes occupied persona names so each session gets a unique voice, and `/pool` returns a diagnostics snapshot.
+    The liveness filters and return shape are documented on `find_active_sessions`.
 
     Returns:
         list[ tuple[ Path, str, dict ] ]: (bridge_path, session_id, persona)
