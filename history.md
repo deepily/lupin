@@ -8,6 +8,17 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.10.06 - Session 4afec3b4 (Mr. Radio 🦉, manager, no crew; 08:56 to about 10:00 EDT) | Legacy task card re-reads on a push; websocket push row closed; session ended early on Rick's word
+
+- **Rick's orders**: every seat today is for Cheech's docstring rewrite and Mr. Radio allocates none (broadcast `37434cae`, then voice at about 08:58 EDT). At about 09:57 EDT: checkpoint and exit, to save tokens for that work.
+- **Row `8796333b`, slice 3**: merged `6485fd269` (commits `5f39934ef`, `441ac0fb7`). The legacy page subscribes to `task_store_changed` on its queue socket and re-reads its task list and finished-tasks pane on a frame. Review by a Sonnet sub-agent: pass with fixes, then pass. 16 one-line breaks each reddened a named test.
+- **Tiers on `6485fd269`**: unit 30,252 passed, 0 failed, head unmoved; TypeScript job `ts-add04554` 5,774 passed, 0 failed, coverage 100%. Not run: E2E, integration. No pane watched in a browser.
+- **Row `8796333b` closed**: Rick ruled "Keep polling" for Fleet Status on a card at 09:53 EDT. TODO.md Decisions Log, `d347fb8f7`.
+- **Row `c2109aa4`**: all 20 uncommitted paths in old tree `seat-cc-author-mr-radio-1` read. 15 match the branch head, 5 match an earlier committed version, and the 5 pinned commits are already on the branch. The tree is still on disk and locked.
+- **Correction of mine**: the row's note of 2026-10-05 said the legacy file had two lists to change. It has one; the second belongs to the audio socket.
+- **Owed, not done today**: read `ts-04fb21c3` (scheduled 11:00 EDT) and close row `4cbd4858` · the post-game card for 2026-10-05 (row `74394bba`) · row `80513825` waits on Rick's two provision commands (`pg_roles` showed only `lupin_dev` at 09:05 EDT).
+- **Files**: history.md, TODO.md; code via one reviewed merge. Not pushed.
+
 ### 2026.10.05 - Session 78067fb5 (Cheech 🌿, manager; crew from 18:43 EDT: Rio ⚡ author, Tiberius 👑 reviewer, both Sonnet) | Gemini measured and ruled out; docs-rewrite pilot merged; Phase 3 signed off; first sweep tools merged
 
 - **Gemini through the local AGY tool** (rows `6ade6ad8`, `df3ac022`, `621d38a4`, `da2a6b08`): adapter at `src/cosa/orchestration/agy`, harness transport `--transport agy`, merged `d3e2fccaa`, 503 retry `6402082d7`. As checker on dev70 it caught 28 of 28 planted losses, like Claude; as writer on 30 docstrings it left 18 lint findings (Claude 0) and 100 claims judged absent (Claude 38). Rick ruled Gemini off the table. Numbers: comparison plan, section 13.
