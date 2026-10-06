@@ -63,7 +63,7 @@ from cosa.config.configuration_manager import ConfigurationManager
 names = ConfigurationManager().get( "websocket available events", return_type="list-string" )
 ```
 
-Added 2026.10.03 (row 8796333b): `task_store_changed`, the task panes' invalidation push. No other key is needed for it; the web client's `QueueTransport` carries it in its subscribed-events list.
+Added 2026.10.03 (row 8796333b): `task_store_changed`, the task panes' invalidation push. No other key is needed for it; the web client's `QueueTransport` carries it in its subscribed-events list. The legacy page's `_buildQueueAuthMessage` in `notifications.js` carries it as well.
 
 ⚠️ **That reader is a bare `value.split( ", " )` with no per-token strip**, so every entry must be separated by a comma **and a space**. A comma alone produces one mangled token — the new name never validates *and neither does the one before it* — and nothing raises, because the list is still non-empty.
 
