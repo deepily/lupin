@@ -23,7 +23,7 @@ Schema, the public interface (hold to it exactly):
     `awaiting` (str): "user:<name>", "peer:<persona>", "commons:<topic>", "cadence:<what>" or "none".
     `pending_user_gates` (list): Structured open or answered direct-user-gate rows. They promote the free-text
         "awaiting: user:rick" to re-askable rows.
-    `last_looked_in_on_workers_ts` (str or None): Manager's latest worker look-in; None means never.
+    `last_looked_in_on_workers_ts` (str or None): Manager's latest worker look-in, a debounce clock; None means never.
         The agent stamps it when it verifies workers.
     `last_spinup_check_ts` (str or None): Manager's latest spin-up self-check, a debounce clock; None means never.
         The agent stamps it after considering a crew.
