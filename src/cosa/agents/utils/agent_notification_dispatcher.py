@@ -1,20 +1,17 @@
 #!/usr/bin/env python3
 """
-Shared Agent Notification Dispatcher for COSA Agents.
+Shared agent notification dispatcher for COSA agents.
 
-Encapsulates the common async wrapper + notification dispatch pattern that
-was previously copy-pasted across every agent's cosa_interface.py. All
-methods use asyncio.to_thread() to bridge the blocking notification API
-with async agent orchestrators.
+Encapsulates the common async wrapper and notification dispatch pattern shared by every agent's cosa_interface module. All methods use asyncio.to_thread() to bridge the blocking notification API with async agent orchestrators.
 
-Usage:
+Example:
     dispatcher = AgentNotificationDispatcher( agent_type="deep.research" )
     await dispatcher.notify_progress( "Starting research..." )
     approved  = await dispatcher.ask_confirmation( "Proceed?" )
     feedback  = await dispatcher.get_feedback( "Any preferences?" )
     selection = await dispatcher.present_choices( questions, timeout=120 )
 
-For role-aware agents (SWE Team):
+    # For role-aware agents (SWE Team):
     dispatcher = AgentNotificationDispatcher(
         agent_type="swe", supports_role=True, default_priority="high"
     )
@@ -72,9 +69,9 @@ ctx_session_name : ContextVar[ Optional[ str ] ] = ContextVar( "agent_dispatcher
 
 def _prepend_operator_routing( abstract: Optional[ str ], original_target: str ) -> str:
     """
-    Prefix an abstract with an 'Operator routing:' context line so the operator
-    answering a voice gate understands they're acting on behalf of a service
-    account. See Bug 10 (2026-04-15).
+    Prefix an abstract with an operator-routing context line.
+
+    The operator answering a voice gate then understands they are acting on behalf of a service account.
     """
     header = f"**Operator routing**: originally owned by `{original_target}`"
     if not abstract:
@@ -150,15 +147,8 @@ class AgentNotificationDispatcher:
         """
         Resolve the sender_id for a notification call.
 
-        Priority order:
-          1. Role-aware agents with a role parameter — build role-specific sender_id
-          2. ContextVar `ctx_sender_id` — per-task isolation, set by job execution
-          3. self.sender_id — instance default (CLI / single-job paths)
-
-        Role-aware path is checked first because it constructs a role-suffixed
-        ID that's orthogonal to the per-job sender. ContextVar takes priority
-        over instance state so concurrent agentic-pool jobs don't see each
-        other's sender_id leaking through the shared dispatcher instance.
+        Priority: a role-aware agent with a role builds a role-specific sender_id. Otherwise the `ctx_sender_id` ContextVar wins (per-task isolation, set by job execution). Otherwise `self.sender_id` applies (the instance default for CLI and single-job paths).
+        The role-aware path comes first because its role-suffixed id is orthogonal to the per-job sender. The ContextVar takes priority over instance state so concurrent agentic-pool jobs never see each other's sender_id leaking through the shared dispatcher instance.
 
         Args:
             role: Optional role name for role-aware agents
@@ -209,14 +199,8 @@ class AgentNotificationDispatcher:
         """
         Resolve the effective target_user for a blocking voice call.
 
-        When target_user is a configured service account AND an operator fallback
-        is configured, swap to the operator so TTS reaches a human. See Bug 10
-        (2026-04-15): service accounts have no WebSocket sessions, causing
-        /api/notify to 503 on blocking calls.
-
-        Reads two INI keys (cached on first call):
-            - voice gate operator email       : str   (blank disables rerouting)
-            - voice gate service accounts     : comma-separated list of emails
+        When target_user is a configured service account and an operator fallback is configured, swap to the operator so TTS reaches a human. Service accounts have no WebSocket sessions, so a blocking call to one would make /api/notify answer 503.
+        It reads two INI keys, cached on first call. `voice gate operator email` is a str, and blank disables rerouting. `voice gate service accounts` is a comma-separated list of emails.
 
         Args:
             target_user: The user the caller originally intended to notify.
@@ -414,7 +398,7 @@ class AgentNotificationDispatcher:
             job_id: Optional job ID for routing to job cards
             role: Optional agent role (for role-aware dispatchers)
             priority: "low"/"medium"/"high"/"urgent" (default: "high" for blocking calls)
-            response_default: If set AND user is offline, /api/notify returns 200
+            response_default: If set and the user is offline, /api/notify returns 200
                               with default rather than 503. Leave None to preserve
                               the 503-for-offline behavior (caller handles stall).
 
@@ -503,7 +487,7 @@ class AgentNotificationDispatcher:
             job_id: Optional job ID for routing to job cards
             role: Optional agent role (for role-aware dispatchers)
             priority: "low"/"medium"/"high"/"urgent" (default: "high" for blocking calls)
-            response_default: If set AND user is offline, /api/notify returns 200
+            response_default: If set and the user is offline, /api/notify returns 200
                               with this default rather than 503. Pass literal "{}"
                               (empty JSON) for the clean-stall path — dispatcher
                               interprets empty answers as timeout via Bug 7
