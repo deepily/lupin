@@ -569,6 +569,8 @@ class ProbeResult:
 
     def is_admissible( self ):
         """
+        Say whether the verdict is admissible, that is, anything but VERDICT_INADMISSIBLE.
+
         Ensures:
             - returns False exactly when the verdict is VERDICT_INADMISSIBLE
         """
@@ -744,7 +746,7 @@ def assert_double_write_retry_safe( first_lro, second_lro, config_before, config
     """
     Judge the double-write proof: re-applying the config must succeed and change nothing.
 
-    The schema documents the project-only and full-table outputUri forms. It is silent on the dataset-level form, so retry-safety cannot be read from the docs.
+    The schema documents two outputUri forms. The project-only form says "the Dataset and Table is created"; the full-table form says "the Dataset must exist and table must not exist". It is silent on the dataset-level form, so retry-safety cannot be read from the docs. The second write, with the table now existing, is the open question.
     Retry-safety is a claim about the second write. Set once, poll the LRO to done with no error, then set again with the table now existing.
     The second write must succeed and leave the config unchanged. One that returns 200 while mangling the config is the clobber trap with a green tick.
 
@@ -873,6 +875,8 @@ class _FakeReadout:
 
     def list_tables( self ):
         """
+        Return the documented default table, whatever the caller asks.
+
         Ensures:
             - returns the documented default table, always
         """
@@ -880,6 +884,8 @@ class _FakeReadout:
 
     def find_sentinel( self, sentinel, tables=None ):
         """
+        Return READOUT_MATCH only after `lands_on_poll` polls have elapsed.
+
         Ensures:
             - returns READOUT_MATCH only once `lands_on_poll` polls have elapsed
         """

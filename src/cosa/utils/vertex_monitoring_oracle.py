@@ -156,7 +156,7 @@ class MonitoringOracle:
 
         This is the only assertion in the design that checks what happened rather than what we
         intended. If a per-model region override fired, the invocation appears under a different
-        `location` and this check names the bug. A rejected response code also fails it.
+        `location` and this check names the bug. The invocation must also be billed to our project, and a rejected response code fails it.
 
         Ensures:
             - returns ( Verdict, detail ); `INADMISSIBLE` on zero series, never `FAIL`

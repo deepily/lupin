@@ -25,7 +25,7 @@ borrowing one.
 
 It never raises. A seat without a venv is worse off, and a spawn that dies because
 provisioning failed is worse still. This is the same fail-open shape as `stash_guard.py`.
-Every non-recoverable outcome is logged at warning level, naming the target and the exit
+Every non-recoverable outcome is logged at `WARNING`, naming the target and the exit
 code. The failure this exists to kill is the one that looks like success.
 """
 
@@ -71,11 +71,10 @@ def provision_worktree_venv( target, debug=False ):
           no-op reported as status "script_absent", never an error
         - the main checkout is a no-op for provisioning, reported as status
           "main_repo" (the script refuses to replace a real .venv directory with a
-          link to itself), and logged at warning level naming the target, because the
+          link to itself), and logged at `WARNING` naming the target, because the
           location fact riding along with it (this seat is in the shared tree) is
           not a no-op for whoever is about to work there
-        - every other non-zero exit is reported as status "failed" and logged at
-          warning level naming the target and the exit code
+        - every other non-zero exit is reported as status "failed" and logged at `WARNING` naming the target and the exit code
 
     Returns:
         dict

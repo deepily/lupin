@@ -267,7 +267,7 @@ def tree_state_line( git, start_sha=None, start_bundle=None ):
     """
     One line naming the tree a run was earned on.
 
-    It is never the last line of pytest output: the counts line follows every terminal-summary hook.
+    It is never the last line of pytest output: the counts line follows every terminal-summary hook. After a pytest upgrade, check that one function (the sessionfinish and terminal-summary ordering) rather than re-running a fixture and hoping the sample covered your case.
 
 
     Requires:
