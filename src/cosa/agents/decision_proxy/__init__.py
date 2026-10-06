@@ -9,18 +9,18 @@ autonomously (at earned trust levels), queued for ratification, or shadowed
 for training data.
 
 Modules:
-    config: Trust thresholds, decay rates, circuit breaker params
-    cosa_interface: Sender ID for decision proxy notifications
-    voice_io: Status notifications (connected, deciding, errors)
-    listener: WebSocket listener for decision events
-    responder: Decision routing with trust-aware strategy chain
-    base_decision_strategy: Abstract base for domain-specific strategies
-    category_classifier: Abstract interface for category classification
-    smart_router: Schedule checking and connectivity probing
-    xml_models: Pydantic XML models for trust decision responses
+    The config module holds trust thresholds, decay rates and circuit breaker params.
+    The cosa_interface module holds the sender ID for decision proxy notifications.
+    The voice_io module sends status notifications (connected, deciding, errors).
+    The listener module is the WebSocket listener for decision events.
+    The responder module routes decisions with a trust-aware strategy chain.
+    The base_decision_strategy module is the abstract base for domain-specific strategies.
+    The category_classifier module is the abstract interface for category classification.
+    The smart_router module checks schedules and probes connectivity.
+    The xml_models module holds Pydantic XML models for trust decision responses.
 
 Dependency Rule:
-    This package imports from proxy_agents (shared infra) but NEVER
+    This package imports from proxy_agents (shared infra) but never
     from notification_proxy or swe_team.
 """
 

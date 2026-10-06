@@ -13,7 +13,7 @@ Algorithm (split conformal inference):
     3. At prediction time: include class if its nonconformity score <= quantile
 
 Dependency Rule:
-    This module NEVER imports from notification_proxy or swe_team.
+    This module never imports from notification_proxy or swe_team.
 """
 
 import math

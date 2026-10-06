@@ -8,7 +8,7 @@ or handle them autonomously. Checks:
   2. WebSocket connectivity (is the user's client connected?)
 
 Dependency Rule:
-    This module NEVER imports from notification_proxy or swe_team.
+    This module never imports from notification_proxy or swe_team.
 """
 
 from datetime import datetime, time
@@ -97,7 +97,7 @@ class SmartRouter:
             - user_connected is a bool indicating WebSocket connectivity
 
         Ensures:
-            - Returns True if user is available (active hours AND connected)
+            - Returns True if user is available (active hours and connected)
             - Returns False if user is unavailable (proxy should handle)
 
         Args:

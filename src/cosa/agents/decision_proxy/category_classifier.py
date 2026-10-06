@@ -7,7 +7,7 @@ engineering_classifier.py). This module defines the abstract interface
 that all classifiers must implement.
 
 Dependency Rule:
-    This module NEVER imports from notification_proxy or swe_team.
+    This module never imports from notification_proxy or swe_team.
 """
 
 from abc import ABC, abstractmethod

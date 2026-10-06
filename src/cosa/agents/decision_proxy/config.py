@@ -7,7 +7,7 @@ circuit breaker parameters, active hours, and timezone. No domain-specific
 constants — those belong in the domain layer (e.g., swe_team/proxy/config.py).
 
 Dependency Rule:
-    This module NEVER imports from notification_proxy or swe_team.
+    This module never imports from notification_proxy or swe_team.
 """
 
 from cosa.agents.utils.proxy_agents.base_config import (   # noqa: F401

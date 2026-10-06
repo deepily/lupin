@@ -8,7 +8,7 @@ connected, deciding, shadowing, errors.
 Delegates to the shared sync_notify helper.
 
 Dependency Rule:
-    This module NEVER imports from notification_proxy or swe_team.
+    This module never imports from notification_proxy or swe_team.
 """
 
 from cosa.agents.decision_proxy.cosa_interface import SENDER_ID

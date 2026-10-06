@@ -7,7 +7,7 @@ Concrete implementations live in domain layers (e.g., swe_team/proxy/
 engineering_strategy.py).
 
 Dependency Rule:
-    This module NEVER imports from notification_proxy or swe_team.
+    This module never imports from notification_proxy or swe_team.
 """
 
 from abc import ABC, abstractmethod

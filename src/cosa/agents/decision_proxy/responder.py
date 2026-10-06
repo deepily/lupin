@@ -8,7 +8,7 @@ levels, and either acts autonomously, queues for ratification, or
 shadows for training data.
 
 Dependency Rule:
-    This module NEVER imports from notification_proxy or swe_team.
+    This module never imports from notification_proxy or swe_team.
 """
 
 import json
@@ -36,9 +36,9 @@ class DecisionResponder( BaseResponder ):
         - Trust mode is one of: shadow, suggest, active
 
     Ensures:
-        - Decisions at L1 are logged but never acted on
-        - Decisions at L2 are queued as provisional
-        - Decisions at L3+ are committed with audit trail
+        - Decisions at level 1 are logged but never acted on
+        - Decisions at level 2 are queued as provisional
+        - Decisions at level 3 and above are committed with audit trail
         - All decisions are logged regardless of action
     """
 
@@ -62,7 +62,7 @@ class DecisionResponder( BaseResponder ):
         Args:
             trust_mode: Operating mode ("shadow", "suggest", "active")
             accepted_senders: Allowlist of sender IDs this proxy will respond to.
-                     FAIL-CLOSED (960a4ec9): an empty/omitted list rejects EVERY
+                     Fails closed: an empty or omitted list rejects every
                      sender, never accepts all. The shipped path populates it with
                      the swe.* bot addresses.
             embedding_provider: Optional EmbeddingProvider for generating question embeddings
@@ -71,8 +71,8 @@ class DecisionResponder( BaseResponder ):
             dry_run: Display decisions without acting
             debug: Enable debug output
             verbose: Enable verbose output
-            enabled: Master run switch (960a4ec9). When False the proxy processes
-                     no decision events and cannot submit — enforcing the
+            enabled: Master run switch. When False the proxy processes
+                     no decision events and cannot submit, which enforces the
                      `decision proxy enabled` INI flag the splainer promises
                      ("when false, the proxy will not run"). Constructor default is
                      True (permissive library default); __main__ passes the INI value.
@@ -153,13 +153,9 @@ class DecisionResponder( BaseResponder ):
         """
         Process a notification_queue_update event through the decision pipeline.
 
-        Steps:
-            1. Extract notification fields
-            2. Check sender ID against accepted list
-            3. Skip non-response-requested notifications
-            4. Classify decision category
-            5. Check trust level and gate action
-            6. Act, suggest, shadow, or defer
+        Steps: extract fields, check the sender against the accepted list, and skip
+        notifications that request no response. Then classify the category, gate
+        on trust level, and act, suggest, shadow, or defer.
 
         Args:
             event_data: notification_queue_update event payload
