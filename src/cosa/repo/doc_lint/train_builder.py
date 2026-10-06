@@ -123,20 +123,21 @@ def approval_of( body ):
         - returns ( None, None, None ) when no amendment holds an approval, or the last one was withdrawn
 
     Raises:
-        - ValueError when the latest approval line is not a JSON object
+        - ValueError when the latest approval line, after withdrawals, is not JSON or not a JSON object; an earlier bad line that a later line voids or replaces is ignored
     """
-    found = ( None, None, None )
+    latest = None
     for block in amendments_of( body ):
         for line in block[ "note" ].split( "\n" ):
-            if line.startswith( WITHDRAWAL_PREFIX ): found = ( None, None, None )
-            if not line.startswith( APPROVAL_PREFIX ): continue
-            try:
-                parsed = json.loads( line[ len( APPROVAL_PREFIX ) : ] )
-            except json.JSONDecodeError as err:
-                raise ValueError( f"the approval line is not JSON: {err.msg}" ) from err
-            if not isinstance( parsed, dict ): raise ValueError( "the approval line is not a JSON object" )
-            found = ( block[ "actor" ], block[ "ts" ], parsed )
-    return found
+            if line.startswith( WITHDRAWAL_PREFIX ): latest = None
+            if line.startswith( APPROVAL_PREFIX ): latest = ( block[ "actor" ], block[ "ts" ], line )
+    if latest is None: return ( None, None, None )
+    actor, ts, line = latest
+    try:
+        parsed = json.loads( line[ len( APPROVAL_PREFIX ) : ] )
+    except json.JSONDecodeError as err:
+        raise ValueError( f"the approval line is not JSON: {err.msg}" ) from err
+    if not isinstance( parsed, dict ): raise ValueError( "the approval line is not a JSON object" )
+    return ( actor, ts, parsed )
 
 
 def withdrawal_of( body ):

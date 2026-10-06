@@ -594,3 +594,33 @@ def test_withdrawal_of_returns_the_last_unanswered_withdrawal_and_none_for_an_em
     assert tb.withdrawal_of( body ) == ( "Maria 1a2b3c4d", TS )
     assert tb.withdrawal_of( None ) is None and tb.withdrawal_of( "" ) is None
     assert tb.withdrawal_of( stamped( ( TIB, WITHDRAWAL ), ( TIB, tb.APPROVAL_PREFIX + " {}" ) ) ) is None
+
+
+BAD_LINE = tb.APPROVAL_PREFIX + ' {"checks": "x",}'
+
+
+def test_a_bad_approval_line_that_a_later_good_approval_replaces_is_ignored( world ):
+    checks, s = checks_dir( world, "w6" ), world.shas
+    row = claim( "a", [ ( TIB, BAD_LINE ), ( TIB, approval( checks, [ s[ "one" ] ] ) ) ] )
+    assert refusal_for( world, row )[ 0 ][ "package" ] == "a"
+
+
+def test_a_bad_approval_line_that_a_later_withdrawal_voids_is_a_withdrawal_not_a_parse_error( world ):
+    row = claim( "a", [ ( TIB, BAD_LINE ), ( TIB, WITHDRAWAL ) ] )
+    assert refusal_for( world, row ) == f"the approval was withdrawn by {TIB} at {TS}"
+    assert tb.approval_of( row[ "body" ] ) == ( None, None, None )
+
+
+def test_a_bad_latest_approval_line_still_refuses_even_after_a_good_one_and_a_withdrawn_one( world ):
+    checks, s = checks_dir( world, "w7" ), world.shas
+    good = approval( checks, [ s[ "one" ] ] )
+    assert "approval line is not JSON" in refusal_for( world, claim( "a", [ ( TIB, good ), ( TIB, BAD_LINE ) ] ) )
+    assert "approval line is not JSON" in refusal_for( world, claim( "a", [ ( TIB, good ), ( TIB, WITHDRAWAL ), ( TIB, BAD_LINE ) ] ) )
+    assert "approval line is not a JSON object" in refusal_for( world, claim( "a", [ ( TIB, good ), ( TIB, tb.APPROVAL_PREFIX + " [1]" ) ] ) )
+
+
+def test_the_literal_withdrawal_string_the_brief_tells_reviewers_to_type_voids_the_approval( world ):
+    checks, s = checks_dir( world, "w8" ), world.shas
+    row = claim( "a", [ ( TIB, approval( checks, [ s[ "one" ] ] ) ), ( TIB, "docs-sweep-withdrawal: found a real loss" ) ] )
+    assert refusal_for( world, row ) == f"the approval was withdrawn by {TIB} at {TS}"
+    assert tb.WITHDRAWAL_PREFIX == "docs-sweep-withdrawal:" and tb.APPROVAL_PREFIX == "docs-sweep-approval:"
