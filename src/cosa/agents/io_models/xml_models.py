@@ -401,29 +401,22 @@ class YesNoResponse( BaseXMLModel ):
 
 class ReceptionistResponse( BaseXMLModel ):
     """
-    Receptionist agent response model.
-    
-    Handles XML responses for receptionist agent conversations.
-    This agent acts as a receptionist, answering questions based on
+    Receptionist agent response model: thoughts, a content category and a short answer.
+
+    Handles XML responses for receptionist agent conversations. The agent answers questions based on
     previous conversations stored in memory.
-    
-    Expected XML format:
-    <response>
-        <thoughts>Analysis of the user query and memory search</thoughts>
-        <category>benign OR humorous OR salacious</category>
-        <answer>Concise conversational response to the query</answer>
-    </response>
-    
+    Expected XML: a response element with thoughts, category (benign, humorous or salacious) and answer tags.
+
     Requires:
         - XML contains <thoughts>, <category>, and <answer> tags
         - category must be one of: benign, humorous, salacious
         - All fields contain non-empty strings
-        
+
     Ensures:
         - Type-safe access to all response components
         - Automatic validation of category enum values
         - Proper XML serialization and deserialization
-        
+
     Raises:
         - ValidationError if category is not in allowed values
         - XMLParsingError if required tags are missing
@@ -637,19 +630,15 @@ class CodeResponse( BaseXMLModel ):
     @classmethod
     def _extract_lines_from_dict( cls, code_dict: dict ) -> List[str]:
         """
-        Extract code lines from xmltodict nested structure.
-        
-        xmltodict converts:
-        <code>
-            <line>import math</line>
-            <line>def func():</line>
-        </code>
-        
-        Into: {'line': ['import math', 'def func():']} or {'line': 'single line'}
-        
+        Extract code lines from the nested structure xmltodict produces for a code element.
+
+        xmltodict turns repeated line tags into {'line': ['a', 'b']} and a single one into {'line': 'a'}.
+        Each entry becomes a string and a None entry becomes an empty string.
+        A dict without a line key gives an empty list.
+
         Args:
             code_dict: Dictionary from xmltodict parsing
-            
+
         Returns:
             List of code lines as strings
         """
@@ -938,23 +927,10 @@ class CodeResponse( BaseXMLModel ):
 
 class CalendarResponse( CodeResponse ):
     """
-    Calendar agent response model.
-    
+    Calendar agent response model: CodeResponse plus the original question.
+
     Extends CodeResponse with an additional 'question' field for calendar agents.
-    
-    Handles XML responses like:
-    <response>
-        <question>What events do I have today?</question>
-        <thoughts>Need to filter events by today's date</thoughts>
-        <code>
-            <line>today_events = df[df['date'] == today]</line>
-            <line>result = today_events['title'].tolist()</line>
-        </code>
-        <returns>list</returns>
-        <example>get_today_events()</example>
-        <explanation>Filters and returns today's events</explanation>
-    </response>
-    
+    XML layout: a response element with question, thoughts, code (line tags), returns, example and explanation.
     Used by calendaring agents that need to preserve the original question context.
     """
     
@@ -1182,30 +1158,11 @@ class BrainstormIdeas( BaseXMLModel ):
 class CodeBrainstormResponse( BaseXMLModel ):
     """
     Code generation response with brainstorming process.
-    
-    Handles XML responses for agents that generate code with detailed reasoning:
-    <response>
-        <thoughts>Your thoughts</thoughts>
-        <brainstorm>
-            <idea1>Your first idea</idea1>
-            <idea2>Your second idea</idea2>
-            <idea3>Your third idea</idea3>
-        </brainstorm>
-        <evaluation>Your evaluation</evaluation>
-        <code>
-            <line>All imports here</line>
-            <line></line>
-            <line>def your_function_name_here( optional_arguments ):</line>
-            <line>    ...</line>
-            <line>    ...</line>
-            <line>    return solution</line>
-            <line></line>
-        </code>
-        <returns>Object type of the variable `solution`</returns>
-        <example>solution = your_function_name_here( optional_arguments )</example>
-        <explanation>Explanation of how the code works</explanation>
-    </response>
-    
+
+    Handles XML responses for agents that generate code with detailed reasoning.
+    Expected XML: a response element with thoughts, brainstorm (idea1, idea2, idea3), evaluation, code,
+    returns, example and explanation. The code element holds one line tag per line: imports first,
+    then the function, ending with a return of the variable `solution`.
     Used by agents requiring brainstorming workflows:
     - DateAndTimeAgent: Time-based code generation with approach analysis
     - MathAgent: Mathematical code generation with solution exploration
@@ -1246,19 +1203,15 @@ class CodeBrainstormResponse( BaseXMLModel ):
     @classmethod
     def _extract_lines_from_dict( cls, code_dict: dict ) -> List[str]:
         """
-        Extract code lines from xmltodict nested structure.
-        
-        xmltodict converts:
-        <code>
-            <line>import math</line>
-            <line>def func():</line>
-        </code>
-        
-        Into: {'line': ['import math', 'def func():']} or {'line': 'single line'}
-        
+        Extract code lines from the nested structure xmltodict produces for a code element.
+
+        xmltodict turns repeated line tags into {'line': ['a', 'b']} and a single one into {'line': 'a'}.
+        Each entry becomes a string and a None entry becomes an empty string.
+        A dict without a line key gives an empty list.
+
         Args:
             code_dict: Dictionary from xmltodict parsing
-            
+
         Returns:
             List of code lines as strings
         """
@@ -1953,24 +1906,10 @@ class IterativeDebuggingMinimalistResponse( BaseXMLModel ):
 class IterativeDebuggingFullResponse( BaseXMLModel ):
     """
     Pydantic model for IterativeDebuggingAgent XML responses in full mode.
-    
-    This model handles comprehensive debugging responses with complete code,
-    examples, return values, and explanations for complex debugging scenarios.
-    
-    Expected XML format:
-    <response>
-        <thoughts>Debugging analysis and reasoning</thoughts>
-        <code>
-            <line>import math</line>
-            <line>def fixed_function():</line>
-            <line>    return corrected_result</line>
-        </code>
-        <example>result = fixed_function()</example>
-        <returns>corrected_return_type</returns>
-        <explanation>Detailed explanation of the fix</explanation>
-    </response>
-    
-    Used by IterativeDebuggingAgent in full mode for comprehensive debugging with complete solutions.
+
+    Handles comprehensive debugging responses with complete code, examples, return values and explanations.
+    Expected XML: a response element with thoughts, code (line tags), example, returns and explanation.
+    Used by IterativeDebuggingAgent in full mode for debugging with complete solutions.
     """
     
     thoughts: str = Field( ..., description="Debugging analysis and reasoning" )
@@ -2837,14 +2776,13 @@ class FuzzyFileMatchResponse( BaseXMLModel ):
     @classmethod
     def coerce_none_to_empty_str( cls, v ):
         """
-        An empty `<matches></matches>` is a REAL answer, not a parse failure (row b2aae1e8).
+        Coerce None to an empty string so an empty matches tag is a valid zero-match answer.
 
-        Zero matches is the correct response to "make me a podcast", which names no
-        document. xmltodict renders an empty tag as None, and without this a required
-        `str` raises — upstream that exception is caught by a blanket `except Exception`
-        in the expeditor, so a legitimate zero-match is reported as status="error" and
-        is indistinguishable from a genuine parse failure. The docstring above already
-        promised "empty string if no matches"; the model could not represent it.
+        A request that names no document, such as "make me a podcast", correctly has zero matches.
+        An empty tag comes out of xmltodict as None, which a required `str` field would reject.
+        The expeditor catches that error broadly.
+        A valid zero match would then be reported as status="error", the same as a real parse failure.
+        The matches field is documented as an empty string if no matches; this validator lets the model hold it.
         """
         if v is None:
             return ""
@@ -2949,19 +2887,12 @@ class FuzzyFileMatchResponse( BaseXMLModel ):
 
 class TFEResumeMatchResponse( BaseXMLModel ):
     """
-    TFE resume fuzzy-match response model.
+    TFE resume fuzzy-match response model: ranked job IDs for a described stalled job.
 
-    Handles XML responses for matching a user's natural-language description
-    of a stalled Test Fix Expediter job against a list of candidate job IDs:
-    <response>
-        <matches>tfe-7c25082a::user@example.com, tfe-3b8c92d1::user@example.com</matches>
-    </response>
-
-    The matches field contains a comma-separated list of TFE job IDs ranked by
-    relevance to the user's description, or an empty string if no matches.
-
-    Used by the TFE resume resolver (session 9056c113) for voice / natural-language
-    resume path resolution.
+    Handles XML responses that match a user's description of a stalled Test Fix Expediter job against candidate job IDs.
+    The matches tag holds comma-separated TFE job IDs, such as tfe-7c25082a::user@example.com, ranked by relevance.
+    It holds an empty string if nothing matches.
+    Used by the TFE resume resolver for voice and natural-language resume path resolution.
     """
 
     matches: str = Field(
