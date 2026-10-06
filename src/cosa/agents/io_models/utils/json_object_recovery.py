@@ -2,23 +2,22 @@
 """
 Shared JSON-object recovery for bounded-CC / SDK completions.
 
-ONE implementation, imported by both the Podcast generator
-(`prompts/script_generation.py`, LENIENT — the parser raises on unrecoverable)
-and the Presentation generator (`prompts/json_recovery.py`, STRICT —
-caller-owns-raise). Their bodies were byte-identical before this de-dup
-(consumer sweep 52cde456); merging them changes no behaviour and follows the
-shared-helper precedent set by Rio's e651bc76 (fuzzy_file_prefilter).
+One implementation, imported by both the Podcast generator and the Presentation generator.
+The Podcast generator (`prompts/script_generation.py`) is lenient: its parser raises on unrecoverable.
+The Presentation generator (`prompts/json_recovery.py`) is strict: the caller owns the raise.
 
-Deep Research keeps its OWN copy for now (it already raises instead of
-returning None; folding it would change a third component's contract during
-demo week — tracked as a separate follow-up).
-
-Fence-preference (P0 4317efd1): the recovery now drops everything at/after the
-CLOSING code fence, so explanatory prose the model appends AFTER a ```json
-block (e.g. "### Explanation: each segment is a {speaker, role, text} object")
-can no longer defeat last-brace extraction. Before this, that trailing brace
-became the "last balanced object", `json.loads` failed on the fragment, and
-recovery returned None — which silently produced an empty (0-segment) podcast.
+Notes:
+    - The two generators' bodies were byte-identical, so merging them changes no behavior.
+      This follows the shared-helper precedent of fuzzy_file_prefilter.
+    - Deep Research keeps its own copy for now. It already raises instead of
+      returning None, and folding it in would change a third component's contract.
+    - Fence preference: recovery drops everything at or after the closing code fence.
+      Explanatory prose appended after a ```json block (for example
+      "### Explanation: each segment is a {speaker, role, text} object")
+      therefore cannot defeat last-brace extraction.
+    - Without that cut, the trailing brace became the "last balanced object",
+      `json.loads` failed on the fragment, and recovery returned None.
+      That silently produced an empty (0-segment) podcast.
 """
 
 import json
@@ -43,14 +42,10 @@ _BENIGN_WHITESPACE_CTRLS = frozenset( "\n\r\t" )
 
 def _loads_whitespace_tolerant( text: str ) -> Any:
     """
-    json.loads(text) with a NARROW recovery gate.
+    json.loads(text) with a narrow recovery gate.
 
-    Strict parsing first. If it fails ONLY because of unescaped benign whitespace
-    control chars (\\n \\r \\t) inside string values, retry with strict=False and
-    log at WARNING which chars were repaired (so a path carrying real volume is
-    countable, not a whisper). Any OTHER control char, or any structural error,
-    still raises — widening what a check accepts is the same disease as defect B,
-    trading a loud failure for a silent wrong answer.
+    Strict parsing first. If it fails only because of unescaped benign whitespace
+    control chars (\\n \\r \\t) inside string values, retry with strict=False.
 
     Requires:
         - text is a string
@@ -59,6 +54,12 @@ def _loads_whitespace_tolerant( text: str ) -> Any:
         - returns the parsed JSON value on success
         - raises json.JSONDecodeError if strict fails for any reason other than
           benign-whitespace control chars, or if strict=False still fails
+
+    Notes:
+        - The retry logs at warning level which chars were repaired, so a path carrying
+          real volume is countable, not a whisper.
+        - Any other control char, or any structural error, still raises.
+        - Widening what a check accepts would trade a loud failure for a silent wrong answer.
     """
     try:
         return json.loads( text )
@@ -84,15 +85,16 @@ def extract_json_object( text: str ) -> Optional[ str ]:
     Recovers a JSON object embedded in surrounding prose (e.g. "Here's the
     outline: { ... }"). Ports the BFE/TFE forensic-parser approach.
 
-    NOTE: last-brace selection is intentional and unchanged — the Presentation
-    STRICT callers depend on it. The P0 fix lives in `recover_json_object`'s
-    fence handling, which cuts trailing prose BEFORE this is ever reached.
-
     Requires:
         - text is a string
 
     Ensures:
         - returns the substring of the last balanced {...} object, or None
+
+    Notes:
+        - Last-brace selection is intentional: the strict Presentation callers depend on it.
+        - Trailing prose is cut by the fence handling in `recover_json_object`,
+          before this function is reached.
     """
     close_idx = text.rfind( "}" )
     if close_idx == -1:
@@ -114,26 +116,23 @@ def recover_json_object( response_content: str ) -> Optional[ Any ]:
     """
     Best-effort recovery of a JSON value from a (possibly chatty) completion.
 
-    Strategy:
-        1. Strip a leading markdown code fence (``` or ```json) AND drop
-           everything at/after the matching CLOSING fence — trailing prose after
-           the code block otherwise defeats last-brace recovery (P0 4317efd1).
-        2. Try a direct `json.loads`.
-        3. On failure, extract the last balanced {...} object from the prose
-           and retry.
-
-    This helper only RECOVERS — it never raises and never substitutes a default.
-    The failure POSTURE is the caller's: Podcast's `parse_script_response`
-    raises on None; Presentation's four call sites raise on None. On an
-    unrecoverable response this logs the FULL raw body at ERROR (contract-neutral
-    — it changes no return value), so the malformed completion is captured
-    permanently without a staged harness.
-
     Requires:
         - response_content is a string
 
     Ensures:
         - returns the parsed JSON value, or None if nothing can be recovered
+        - never raises and never substitutes a default
+
+    Notes:
+        - Strategy: (1) strip a leading markdown code fence (``` or ```json) and drop
+          everything at or after the matching closing fence; (2) try a direct `json.loads`;
+          (3) on failure, extract the last balanced {...} object from the prose and retry.
+        - Trailing prose after the code block would otherwise defeat last-brace recovery.
+        - The failure posture belongs to the caller: Podcast's `parse_script_response`
+          raises on None, and so do Presentation's four call sites.
+        - On an unrecoverable response this logs the full raw body at error level.
+        - That log changes no return value, so the malformed completion is captured
+          permanently without a staged harness.
     """
     content = response_content.strip()
 

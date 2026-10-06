@@ -5,9 +5,9 @@ Prompt Template Processor - Part of the io_models XML utilities.
 Replaces hardcoded XML examples in prompt templates with dynamically
 generated examples from Pydantic models using their get_example_for_template() methods.
 
-This processor maps agent routing commands to their corresponding XML model classes
-and generates template examples using the models' own example methods, eliminating
-redundancy and ensuring single source of truth for XML structures.
+This processor maps agent routing commands to their corresponding XML model classes.
+It generates template examples using the models' own example methods.
+That removes redundancy and keeps a single source of truth for XML structures.
 """
 
 from cosa.agents.io_models.xml_models import (

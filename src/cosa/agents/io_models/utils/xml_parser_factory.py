@@ -5,7 +5,7 @@ XML Parser Factory for CoSA Agents
 This module provides a factory for creating Pydantic-based XML parsing strategies.
 All XML parsing uses strongly-typed Pydantic models for validation and type safety.
 
-NOTE: Legacy baseline and hybrid strategies have been REMOVED as of Session 116.
+Note: the legacy baseline and hybrid strategies have been removed.
       Use only Pydantic XML models for all agent responses.
 """
 
@@ -161,7 +161,7 @@ class XmlParserFactory:
     This factory provides centralized access to XML parsing using strongly-typed
     Pydantic models. All XML parsing uses the PydanticXmlParser class.
 
-    NOTE: Legacy baseline and hybrid strategies have been REMOVED.
+    Note: the legacy baseline and hybrid strategies have been removed.
           Only Pydantic parsing is supported.
     """
 
