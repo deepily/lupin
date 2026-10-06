@@ -121,7 +121,12 @@ class FinishedTasksStoreImpl implements FinishedTasksStore {
   async refresh(): Promise<void> {
     if ( this.inFlight ) return;   // a manual ⟳ landing on a tick must not double-fetch
     this.inFlight = true;
-    const run = this.fetchAll();
+    // Cleared by identity AFTER assignment: fetchAll() can reject before its first await (a
+    // throwing nowFn), and clearing inside it would run before this assignment and leave the
+    // settled rejection parked here for every later refreshAfterWrite() to rethrow.
+    const run: Promise<void> = this.fetchAll().finally( () => {
+      if ( this.inFlightRun === run ) this.inFlightRun = null;
+    } );
     this.inFlightRun = run;
     return run;
   }
@@ -169,8 +174,7 @@ class FinishedTasksStoreImpl implements FinishedTasksStore {
       this.lastError = failed;
       this.emitChanged( true );
     } finally {
-      this.inFlight    = false;
-      this.inFlightRun = null;
+      this.inFlight = false;
     }
   }
 
@@ -179,7 +183,7 @@ class FinishedTasksStoreImpl implements FinishedTasksStore {
     void this.refresh();
     this.pollHandle = this.setIntervalFn( () => void this.refresh(), FINISHED_TASKS_POLL_INTERVAL_MS );
     // Server push: re-read through refreshAfterWrite(), never refresh(), whose in-flight guard
-    // would drop a push that lands during a read.
+    // would drop a push that lands during a read. A burst costs at most two reads.
     this.unsubscribePush = this.bus.on( "task_store_changed", () => void this.refreshAfterWrite() );
   }
 

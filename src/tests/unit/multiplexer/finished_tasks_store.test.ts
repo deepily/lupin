@@ -404,3 +404,35 @@ test( "refreshAfterWrite with nothing in flight takes exactly one read", async (
   await store.refreshAfterWrite();
   assert.equal( f.urls.length, 3 );
 } );
+
+test( "a refresh that throws before its first await does not park the error for later reads", async () => {
+  let throwOnce = true;
+  const f = fakeApi();
+  const store = createFinishedTasksStore( {
+    bus : createEventBusForTesting(), api : f.api,
+    nowFn : () => { if ( throwOnce ) { throwOnce = false; throw new Error( "clock broke" ); } return NOW; },
+  } );
+  await assert.rejects( store.refresh(), /clock broke/ );
+  await store.refreshAfterWrite();   // a stale rejected run left in place would rethrow here
+  assert.equal( f.urls.length, 3, "the read after the failure ran normally" );
+} );
+
+test( "task_store_changed: restarting polling leaves no second subscription behind", async () => {
+  const bus = createEventBusForTesting();
+  let subscribed = 0, unsubscribed = 0;
+  const realOn = bus.on.bind( bus );
+  ( bus as { on: unknown } ).on = ( type: string, listener: never ) => {
+    const off = realOn( type as never, listener );
+    if ( type === "task_store_changed" ) { subscribed++; return () => { unsubscribed++; off(); }; }
+    return off;
+  };
+  const f = fakeApi();
+  const store = createFinishedTasksStore( { bus, api: f.api, nowFn : () => NOW, setIntervalFn : () => 1, clearIntervalFn : () => {} } );
+  store.startPolling();
+  store.startPolling();
+  assert.equal( subscribed, 2 );
+  assert.equal( unsubscribed, 1, "the first subscription was released before the second was taken" );
+  store.stopPolling();
+  assert.equal( unsubscribed, 2 );
+  await settle();
+} );

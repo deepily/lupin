@@ -282,7 +282,7 @@ class HoldingAreaStoreImpl implements HoldingAreaStore {
     this.pollHandle = this.setIntervalFn( () => void this.refresh(), HOLDING_AREA_POLL_INTERVAL_MS );
     // Server push (row 8796333b slice 2): "the store changed, re-read". refreshAfterWrite(), not
     // refresh(), so a push landing during a read gets a read that began after it; the poll stays
-    // as the safety net. A burst of pushes joins one read.
+    // as the safety net. A burst of pushes costs at most two reads.
     this.unsubscribePush = this.bus.on( "task_store_changed", () => void this.refreshAfterWrite() );
   }
 
