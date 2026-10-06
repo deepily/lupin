@@ -29,10 +29,8 @@ class LlmScriptMatcherStrategy:
     """
     LLM-based auto-responder using Q&A scripts and Phi-4 fuzzy matching.
 
-    Loads a Q&A script at construction time and uses Phi-4 to semantically
-    match incoming notification questions to script entries. All response
-    types (YES_NO, OPEN_ENDED, OPEN_ENDED_BATCH, MULTIPLE_CHOICE) go
-    through the LLM.
+    Loads a Q&A script at construction time and uses Phi-4 to match questions to entries.
+    All response types (YES_NO, OPEN_ENDED, OPEN_ENDED_BATCH, MULTIPLE_CHOICE) go through the LLM.
 
     Requires:
         - script_path points to a valid JSON file following the Q&A script format
@@ -365,28 +363,19 @@ class LlmScriptMatcherStrategy:
         """
         The script entry that declares this notification's card_id, if any.
 
-        ⚠️ IT SEARCHES THE ENTRIES IT IS GIVEN, and the caller gives it the
-        AGENT-FILTERED list. This method used to iterate self._entries and return
-        before _filter_entries_by_agent ever ran, so an id-matched entry was never
-        scoped to the calling agent — the `agents` tag was silently ignored on the id
-        path (María, row 0c280989). Nothing broke while every card_id entry happened
-        to be untagged; the first tagged one would have had its scope dropped without
-        a word. An id says WHICH ASK; the tag says WHOSE. Both, or neither is
-        trustworthy.
-
         Requires:
             - notification is a dict; a missing or malformed response_options is
               simply no id, and no id is no match
             - entries is the candidate list, already narrowed to this agent
 
         Ensures:
-            - Returns the FIRST candidate whose card_id equals the notification's,
+            - Returns the first candidate whose card_id equals the notification's,
               compared exactly — an id is a token, and a loose match on one would
               reintroduce the fuzziness the id exists to remove
             - When the notification names an arg_name, an entry that names a
-              DIFFERENT one is skipped. Two asks can share an id and differ by the
-              argument they fill; an entry naming no arg matches any, so this only
-              ever narrows a choice that would otherwise have been made by position.
+              different one is skipped. Two asks can share an id and differ by the
+              argument they fill. An entry naming no arg matches any, so this only
+              narrows a choice that would otherwise have been made by position.
             - Returns None when the card names no id, when no candidate declares it,
               or when the matching entry carries no answer to give. A None sends the
               caller down the ordinary prose-matching path rather than answering with
@@ -395,6 +384,12 @@ class LlmScriptMatcherStrategy:
 
         Raises:
             - nothing
+
+        Notes:
+            - Searches the entries it is given, and the caller gives it the agent-filtered
+              list. An id-matched entry is therefore scoped to the calling agent, and the
+              `agents` tag is honored on the id path.
+            - An id says which ask; the tag says whose. Both, or neither, is trustworthy.
         """
         options = notification.get( "response_options" ) or {}
         card_id = options.get( "card_id" )
