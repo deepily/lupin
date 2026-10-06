@@ -241,7 +241,7 @@ class PptxDeckRenderer:
     @staticmethod
     def _render_content_slide( slide, slide_model, colors, visual_path ):
         """
-        Render a content slide: title, subtitle, bullets, and the picture if any.
+        Render a content slide: title, optional subtitle, bullets, and the picture if any.
 
         The picture sits beside the text, and only a raster visual is embedded.
         """
