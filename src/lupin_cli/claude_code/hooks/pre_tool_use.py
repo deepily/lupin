@@ -2,7 +2,7 @@
 """
 PreToolUse hook: voice buffer drain before tool execution.
 
-Fires before every tool call. Does NOT announce tools via TTS (PostToolUse
+Fires before every tool call. Does not announce tools via TTS (PostToolUse
 handles that). Only drains the voice buffer and acknowledges buffered messages.
 
 Install in ~/.claude/settings.json:

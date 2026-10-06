@@ -38,24 +38,22 @@ from lupin_cli.claude_code.hooks.lib.heartbeat_events import emit_idle_prompt
 
 def beacon_idle_message( owed, owed_unknown, total_owed, idle_msg ):
     """
-    Pure idle-beacon message selection (bug aa403e03). Shared by the idle_prompt
-    branch AND its tests so the test exercises the REAL logic — no hand-mirrored
-    copy that can drift (the SAME anti-duplication lesson as this very bug).
+    Choose the idle-beacon message from the owed state.
 
-    The owed flag / total_owed come from the shared HOLD-AWARE verdict
-    (stop._resolve_owed_state); the phrasing matches the Stop idle-announce
-    (_idle_sentence) for cross-hook consistency.
+    The idle_prompt branch and its tests share this function, so tests hit the
+    real logic. The owed flags come from stop._resolve_owed_state, and the
+    wording matches the Stop idle announcement (_idle_sentence).
 
     Requires:
         - owed, owed_unknown are bools; total_owed is a non-negative int
         - idle_msg is the neutral fallback string (e.g. "Claude is waiting for input")
 
     Ensures:
-        - owed_unknown True  → idle_msg (UNKNOWN ≠ idle; make NO owed claim)
+        - owed_unknown True  → idle_msg (unknown is not idle; make no owed claim)
         - owed True          → "Idle, but N item(s) owed" (or "Idle, but work owed"
           when total_owed is 0 — owed via a referent-less signal)
         - otherwise          → idle_msg (determinate not-owed, incl. an honored hold)
-        - precedence is UNKNOWN → OWED → idle; never raises
+        - precedence is unknown, then owed, then idle; never raises
     """
     if owed_unknown:
         return idle_msg

@@ -2,8 +2,8 @@
 """
 SessionStart hook: registers Claude Code session with the session bridge.
 
-Phase 0 test hook — validates SessionStart payload, writes session bridge file,
-and sends hello-world TTS notification.
+Validates the SessionStart payload, writes the session bridge file,
+and sends a hello-world TTS notification.
 
 Actions:
     1. Extract session_id, transcript_path, cwd from stdin
@@ -179,11 +179,8 @@ def _resolve_owner_pid( session_data, session_file ):
     """
     Resolve the owning Claude Code PID to hand the listener for self-reaping.
 
-    _spawn_listener is called with `session_data if session_id else None`, so on the
-    session_id-less path the in-memory dict is absent — but the bridge file on disk
-    still carries cc_pid. Reading it back closes that hole; without the fallback that
-    path would spawn a listener with NO watchdog, silently preserving the strand bug
-    on exactly the branch nobody looks at.
+    Without a session_id the in-memory dict is absent, but the bridge file still
+    carries cc_pid. Reading it back is required: otherwise the listener has no watchdog.
 
     Requires:
         - session_data is a dict carrying "cc_pid", or None
@@ -215,36 +212,29 @@ def _resolve_owner_pid( session_data, session_file ):
 
 def _spawn_listener( session_id, session_data, session_file, accepted_ids=None ):
     """
-    Spawn the CC Notification Listener as a background subprocess.
+    Spawn the CC Notification Listener as a background subprocess, once per session hash.
 
-    The listener connects via WebSocket and buffers user_initiated_message
-    notifications targeted at this CC session.
-
-    Singleton guard (F1, 2026-06-11): the documented `--continue` double-fire
-    runs two concurrent SessionStart hooks; without a guard BOTH spawned a
-    listener, the bridge remembered only the last PID, and the orphaned
-    duplicate raced tmux injections — the broadcast-miss root cause. The
-    check-then-spawn section is serialized under a per-session-hash flock so
-    the second hook sees the first hook's live listener and reuses it.
-    See: src/rnd/v0.1.8/2026.06.10-broadcast-miss-duplicate-listener-root-cause.md §4
+    The listener buffers user_initiated_message notifications for this session. A
+    `--continue` runs two concurrent hooks; unguarded, both spawn and the orphan races
+    tmux injections. A per-session-hash flock makes the second hook reuse the first.
 
     Requires:
         - session_id is a non-empty string
         - LUPIN_ROOT environment variable is set (for PYTHONPATH)
 
     Ensures:
-        - At most ONE live listener exists per session hash (flock-serialized
-          pgrep guard; an existing live listener is recorded + returned
+        - At most one live listener exists per session hash (flock-serialized
+          pgrep guard; an existing live listener is recorded and returned
           instead of spawning a duplicate)
         - Spawns listener subprocess in background (detached from hook lifecycle)
         - Records listener PID in session bridge file for SessionEnd cleanup
         - Always writes log file to ~/.claude/sessions/cc-listener-{hash}.log
-        - Respects LUPIN_CC_HOOK_LISTENER_DEBUG/VERBOSE env vars
+        - Respects the LUPIN_CC_HOOK_LISTENER_DEBUG and LUPIN_CC_HOOK_LISTENER_VERBOSE env vars
         - Returns listener PID on success, None on failure
         - Never raises exceptions (spawn failure is non-fatal)
 
     Args:
-        session_id: Full CC session ID (stable_session_id after Phase 2)
+        session_id: Full CC session ID (the stable session ID once the bridge is written)
         session_data: Session bridge data dict (updated in-place with listener_pid)
         session_file: Path to session bridge JSON file
         accepted_ids: Comma-separated 8-char hashes for listener filtering (e.g., "stable,transient")
@@ -275,8 +265,7 @@ def _spawn_listener( session_id, session_data, session_file, accepted_ids=None )
 
 def _spawn_listener_locked( session_id, session_data, session_file, accepted_ids ):
     """
-    Spawn the listener subprocess — F1 critical section, caller holds the
-    per-session-hash spawn lock.
+    Spawn the listener subprocess inside the critical section; caller holds the spawn lock.
 
     Requires:
         - session_id is a non-empty string
@@ -288,7 +277,7 @@ def _spawn_listener_locked( session_id, session_data, session_file, accepted_ids
         - Never raises exceptions
 
     Args:
-        session_id: Full CC session ID (stable_session_id after Phase 2)
+        session_id: Full CC session ID (the stable session ID once the bridge is written)
         session_data: Session bridge data dict (updated in-place with listener_pid)
         session_file: Path to session bridge JSON file
         accepted_ids: Comma-separated 8-char hashes for listener filtering
@@ -466,14 +455,11 @@ def _log_session_transition( old_hash, new_hash, stable_hash ):
 
 def _cleanup_old_listener( old_session_data, new_session_id ):
     """
-    Kill old listener and forward buffer messages on context clear.
+    Kill the old listener and forward its buffered messages on context clear.
 
-    When CC performs a context clear, the same PID gets a new session ID.
-    The old listener is still running and filtering for the old session hash.
-    This function:
-        1. Sends SIGTERM to the old listener (3s timeout, then SIGKILL)
-        2. Forwards any remaining messages from old buffer to new buffer
-        3. Deletes the old buffer file
+    A context clear gives the same PID a new session ID; the old listener still
+    filters the old hash. Sends SIGTERM (SIGKILL after 3s), forwards old-buffer
+    messages to the new buffer, then deletes the old buffer file.
 
     Requires:
         - old_session_data is a dict with listener_pid and session_id keys
@@ -596,30 +582,11 @@ _SERVER_TRANSPORT_TIMEOUT_SECONDS = 30
 
 def _classify_server_probe_error( exc, server_url, timeout_seconds ):
     """
-    Map a `/docs` probe exception onto the status string the SessionStart banner
-    shows for the server.
+    Map a `/docs` probe exception onto the server status string for the SessionStart banner.
 
-    🔴 THE WORDING IS THE POINT HERE, NOT DECORATION. The flat "unreachable"
-    string this replaces is what misdirected row 204911ca across two sessions: a
-    reader saw it and concluded the server was DOWN, when `:7999` was mid-reload
-    and would have answered a few seconds later.
-
-    The two conditions are genuinely distinguishable at the client, and they
-    demand opposite fixes:
-
-      - A STOPPED server REFUSES. Nothing holds the port, the kernel replies
-        RST, and urlopen raises URLError(ConnectionRefusedError) essentially
-        instantly. The fix is "start the server."
-      - A RESTARTING server ACCEPTS AND STALLS. `uvicorn --reload` keeps the
-        listening socket bound in the reloader PARENT across the restart, so the
-        kernel completes the handshake and queues a request that nothing is
-        there to answer yet. The probe exhausts its budget and raises
-        TimeoutError. The fix is "wait a few seconds."
-
-    Both behaviours were measured as controls on row 204911ca (§3), which is why
-    this split is observable rather than aspirational: C2 (a genuinely closed
-    port) refused in 0.0003s, and C1 (a blackhole socket — bound and listening,
-    never accept()ing) timed out at 15.02s with a bare TimeoutError.
+    The wording matters: a flat "unreachable" made readers think the server was down
+    when `:7999` was only mid-reload. A stopped server refuses at once (fix: start it).
+    A restarting server accepts and stalls until the probe times out (fix: wait).
 
     Requires:
         - exc is the exception raised by the probe
@@ -627,9 +594,12 @@ def _classify_server_probe_error( exc, server_url, timeout_seconds ):
         - timeout_seconds is the positive budget the probe was given
 
     Ensures:
-        - returns a status string that NAMES the condition whenever this
+        - returns a status string that names the condition whenever this
           function can identify it, never a bare "unreachable"
-        - treats an HTTP error status as REACHABLE — the server answered
+        - a refused connection (nothing holds the port) reads "not running"
+        - a timeout reads "may be restarting", because `uvicorn --reload` keeps the
+          listening socket bound in the reloader parent and the kernel queues requests
+        - treats an HTTP error status as reachable, because the server answered
         - falls back to "unreachable" only for conditions it cannot identify,
           and names the exception type even then
     """
@@ -662,7 +632,7 @@ def _check_cosa_voice_status():
     Ensures:
         - Returns a formatted status block string (never raises)
         - The reachability probe is capped at _BANNER_PROBE_TIMEOUT_SECONDS
-          so it cannot block session start; a reload is LABELLED as a
+          so it cannot block session start; a reload is labelled as a
           possible reload rather than reported as "unreachable"
     """
     checks = []
@@ -815,24 +785,10 @@ def _allocate_voice_persona_via_http(
     declared_managers     = None
 ):
     """
-    Allocate a voice persona for the given session by calling the cosa-voice
-    HTTP endpoint at /api/cosa-voice/voice-persona/{sid}/allocate.
+    Allocate a voice persona for a session through the cosa-voice HTTP allocate endpoint.
 
-    The server endpoint atomically picks an unallocated persona from the pool
-    (under asyncio.Lock), writes it to the bridge file, and broadcasts a
-    voice_persona_assigned WebSocket event.
-
-    Fail-soft, but NEVER SILENT (candidate A, 2026-07-19): any failure returns
-    ( None, failure_dict ) instead of a bare None, so the caller can route the
-    give-up into the session's own boot context rather than leaving it in a
-    stderr line with no reader. The session still continues without a persona;
-    the speech router falls back to Sam (the global default voice).
-
-    Diagnosis this implements: 86aa79ac. The server at localhost:7999 was
-    unreachable at SessionStart, the 2s urlopen budget expired, the broad
-    except swallowed it to one stderr line, and the session ran unattributed
-    for hours. The trigger was a down server; THE DEFECT WAS THAT THE GIVE-UP
-    HAD NO READER.
+    The server atomically picks a free persona, writes the bridge file, and broadcasts
+    voice_persona_assigned. Failure is soft but never silent: it returns ( None, failure_dict ).
 
     Requires:
         - server_url is a non-empty string (e.g. http://localhost:7999)
@@ -843,51 +799,34 @@ def _allocate_voice_persona_via_http(
         - Returns ( persona_dict, None ) on success
         - Returns ( None, failure_dict ) on any failure, where failure_dict
           carries stage / exception / message / attempts / server_url
-        - persona is None IFF failure is not None — there is no silent-None
-          return left in this function
+        - persona is None if and only if failure is not None
         - Never raises exceptions
-        - Retries transport failures on the _ALLOCATE_TIMEOUT_LADDER_SECONDS
-          budget (5s, 10s, 15s per rung). Each attempt makes TWO calls — login
-          then /allocate — and both take the rung's timeout, so the worst-case
-          wall clock is 2x the tuple sum = 60s, not 30s. A server that ANSWERS
-          with a wrong or empty body is NOT retried, because retrying a
-          definite answer is noise
-        - When previous_persona_name is non-empty, threads it as a
-          query-string param so the server pushes a "Voice re-assigned"
-          announcement after the assigned broadcast
-        - When persona_chain is non-empty, threads it as a query-string
-          param so the server walks the chain strictly (first FREE element
-          wins, `*` = "then take anything free", exhaustion without `*` =
-          409 + conflict notify — the fail-soft except path below turns
-          that 409 into a None return, leaving the session persona-less).
-          Mutually exclusive with the strict requested_persona_name swap
-          endpoint.
-        - When declared_managers is a non-empty list, threads it as a CSV
-          `declared_managers` query-string param on EVERY allocate call —
-          with AND without a chain — so the server reserves those names out
-          of the random and chain-`*` draws (reserve-from-random, Rick
-          2026-06-11). Named chain elements and strict requests still claim
-          them.
+        - Retries transport failures on the _ALLOCATE_TIMEOUT_LADDER_SECONDS budget
+          (5s, 10s, 15s per rung). Each attempt makes two calls, login then /allocate,
+          both on the rung's timeout, so the worst case is 60s. A wrong or empty answer is not retried
+        - When previous_persona_name is non-empty, sends it as a query param so the
+          server announces the re-assignment after the assigned broadcast
+        - When persona_chain is non-empty, sends it as a query param so the server
+          walks the chain strictly: the first free element wins, `*` means take anything free,
+          and exhaustion without `*` is a 409 that the fail-soft except path turns into None (persona-less).
+          The chain is mutually exclusive with the strict swap endpoint
+        - When declared_managers is a non-empty list, sends it as a CSV query param
+          on every allocate call, with or without a chain, so the server reserves
+          those names out of random and `*` draws; named elements still claim them
 
     Args:
         server_url: Lupin server URL
         project: Project key (for credential lookup)
         stable_session_id: Stable session ID to allocate for
         previous_persona_name: Optional display_name of the outgoing persona
-            (when /clear preservation failed); causes the server to push a
-            "Voice re-assigned: X → Y" notification on successful allocation
-        persona_chain: Optional ordered persona-chain expression — from the
-            spawn-injected `COSA_VOICE_PERSONA_CHAIN` env var or the user's
-            per-repo `COSA_VOICE_PREFERRED_PERSONA__<PROJECT>` shell default
+        persona_chain: Optional ordered persona-chain expression
         declared_managers: Optional list of declared-manager persona names
-            (the `COSA_VOICE_MANAGERS__<PROJECT>` roster) reserved out of
-            the server's random + chain-`*` draws
 
     Returns:
-        dict or None: The persona dict, or None on failure
+        tuple: ( persona dict or None, failure dict or None )
     """
     def _fail( stage, exception_name, message, attempts ):
-        """Build the structured give-up AND log it to stderr (forensic copy)."""
+        """Build the structured give-up and log it to stderr (forensic copy)."""
         print( f"[register_session] WARNING: voice persona allocate failed ({exception_name}: {message})",
                file=sys.stderr )
         return None, {
@@ -984,18 +923,11 @@ def _allocate_voice_persona_via_http(
 
 def _build_persona_failure_block( failure, stable_session_id ):
     """
-    Render the voice-persona give-up as a block for the SessionStart hook's
-    `additionalContext` — the channel the SESSION ITSELF reads at boot.
+    Render the voice-persona give-up as an additionalContext block the session reads at boot.
 
-    This is the whole point of candidate A. The except path already printed to
-    stderr and had been doing so all along; locating that stderr took a
-    dedicated hunt (it lands as a hook_success attachment inside the session's
-    own transcript, not any file under ~/.claude/sessions). A give-up printed
-    where nobody reads it is not an alarm. This function puts it where the
-    model will read it, at boot, at zero interrupt cost to the user.
-
-    Composes with candidate D (7b2db462): D tells a null session to announce
-    itself; this block is what lets that announcement say WHY.
+    The stderr line lands only in a hook_success attachment inside the session's own
+    transcript, where nobody looks. This block puts the give-up where the model reads it,
+    at no interrupt cost to the user. The session can then announce why it has no persona.
 
     Requires:
         - failure is None, or a dict carrying stage/exception/message/
@@ -1004,7 +936,7 @@ def _build_persona_failure_block( failure, stable_session_id ):
 
     Ensures:
         - Returns "" when failure is None (no alarm when nothing failed)
-        - Otherwise returns a block naming the cause AND the session_id
+        - Otherwise returns a block naming the cause and the session_id
         - Never raises
     """
     if not failure: return ""
@@ -1057,18 +989,9 @@ def _persona_slugs( persona_name ):
     """
     Every slug a persona's mementos might be filed under, best first.
 
-    ACCENTS ARE THE WHOLE REASON THIS RETURNS A LIST. "María" naively slugs to
-    "mar-a", because a non-ASCII letter falls into the punctuation class and
-    becomes a separator. That is not hypothetical: planning-is-prompting holds
-    18 records named `.claude-memento-maria-*.md` and exactly one named
-    `.claude-memento-mar-a-3bd9e86c.md`. A resolver keyed on the naive slug
-    matches the single broken file and misses all 18 good ones — confidently
-    wrong, which is the failure mode this whole block exists to prevent.
-
-    So we fold accents first (María -> maria), which is what writers produce,
-    and ALSO return the mangled form so records already written under it stay
-    reachable. Normalizing on write is the real fix; until every legacy file is
-    renamed, the resolver has to know both.
+    Accents are why this returns a list: "María" naively slugs to "mar-a", which
+    misses the accent-folded files writers produce. The folded form (maria) comes
+    first, and the mangled form is also returned so legacy records stay reachable.
 
     Requires:
         - persona_name is a string or None
@@ -1100,20 +1023,18 @@ def _written_at_of( header ):
     """
     Pull the `written_at=<ISO>` stamp out of a memento-record header.
 
-    This is the honest recency key. mtime is NOT: mementos are mirrored to
-    ~/.claude/mementos/<project>/ and moved around by copies and rsync, every
-    one of which resets mtime, so the newest mtime can easily be the oldest
-    memento. The header stamp travels with the content.
+    This is the honest recency key, unlike mtime: mirroring, copies and rsync reset
+    mtime, so the newest mtime can be the oldest memento. The header stamp travels
+    with the content.
 
     Requires:
         - header is a header line, or None
 
     Ensures:
         - Returns the ISO string when the stamp is present
-        - Returns None when header is None or carries no stamp — NOT an error;
-          real records exist without one (measured: 3 in planning-is-prompting,
-          including .claude-memento-maria-350ac4c2.md). The caller ranks those
-          last rather than crashing or silently dropping them.
+        - Returns None when header is None or carries no stamp; this is not an
+          error, because real records exist without one. The caller ranks those
+          last rather than crashing or dropping them.
         - Never raises
     """
     if not header: return None
@@ -1123,29 +1044,19 @@ def _written_at_of( header ):
 
 def _memento_dirs( repo_root ):
     """
-    Every directory a memento RECORD can live in, for this repo.
+    Every directory a memento record can live in, for this repo.
 
-    FOUR of them, and the first cut knew about one (Rachel 🕊️, 2026-08-15,
-    reproduced against 8b9a10e9). Her record sat at
-    `io/mementos/rachel-9eb9253c.md` — a real 23KB memento whose own header
-    declares `slot=io` — and the resolver never looked there, so she rehydrated
-    blank for the third time tonight on the third distinct cause. She then
-    named a fourth, `~/.claude/mementos/<project>/.claude-memento-<persona>-
-    <sid8>.md`, which holds four more of her records.
-
-    Note the two filename shapes do NOT line up with the two roots: the mirror
-    carries BOTH the dotted repo-root shape at its top level and the bare
-    `<persona>-<sid8>.md` shape under `io/mementos`. So a directory does not
-    tell you its naming convention — enumerate all four and let the header
-    decide, rather than reasoning about which slot is "current". Writers have
-    moved between these over time and old records stay put; a resolver that
-    backs the wrong one rehydrates a seat blank while its state sits on disk.
+    There are four, because writers moved between slots and old records stay put.
+    A directory does not tell you its naming convention, so enumerate all four and
+    let the header decide. A resolver that backs the wrong one rehydrates a seat blank.
 
     Requires:
         - repo_root is a directory path
 
     Ensures:
         - Returns [ repo root, in-repo io slot, mirror root, mirror io slot ]
+        - The mirror carries both the dotted repo-root filename shape at its top
+          level and the bare `<persona>-<sid8>.md` shape under `io/mementos`
         - Never raises
     """
     project = os.path.basename( os.path.normpath( repo_root ) )
@@ -1162,12 +1073,9 @@ def _names_this_seat( name, sid8, slugs ):
     """
     Cheap filename test: could this file belong to this seat at all?
 
-    WHY A PRE-FILTER AND NOT JUST HEADER CONFIRMATION. The io slot holds 337
-    files in the mirror and 338 in the repo. Opening every one to read its
-    header would put ~675 file reads on the boot path of every session in the
-    fleet, to find one record. So the filename decides who is even a candidate,
-    and the header still confirms the survivors — cheap test first, honest test
-    second.
+    A pre-filter, because opening every io-slot header would put hundreds of file
+    reads on every session's boot path. The filename picks the candidates and the
+    header still confirms the survivors: cheap test first, honest test second.
 
     Requires:
         - name is a bare filename; sid8 is an 8-char id or None; slugs is a list
@@ -1191,28 +1099,19 @@ def _names_this_seat( name, sid8, slugs ):
 
 def _stamp_instant( stamp ):
     """
-    The INSTANT an ISO `written_at` names, as epoch seconds.
+    The instant an ISO `written_at` names, as epoch seconds.
 
-    WHY NOT COMPARE THE STRINGS (row f99bed95). The ranking used to sort the raw
-    ISO text, and ISO text only orders chronologically when every stamp shares one
-    UTC offset. The live slot does not: measured 2026-08-29, 214 stamped records
-    carried two offsets (212 at -04:00, 2 at +00:00) and produced **12 inverted
-    pairs** — e.g. `2026-08-16T14:06:48-04:00` (18:06:48Z) sorts BELOW
-    `2026-08-16T17:44:53+0000` (17:44:53Z) as text while being the later moment.
-    Twelve pairs is small today and grows with every writer that stamps in UTC.
-
-    A NAIVE stamp is refused rather than assumed-local — the same call
-    `reap_memento._parse_iso_aware` makes, and for the same reason: ordering it
-    against an aware stamp means guessing a zone, and guessing a zone is what
-    produced the inversion in the first place. The caller demotes it to the mtime
-    tier, so it is ranked low, never dropped.
+    Compare instants, never the strings: ISO text orders chronologically only when every
+    stamp shares one UTC offset, and mixed offsets inverted real pairs. A naive stamp is
+    refused rather than assumed local, as `reap_memento._parse_iso_aware` also does.
 
     Requires:
         - stamp is an ISO-8601 string, or None
 
     Ensures:
-        - returns epoch seconds (float) for an AWARE stamp
-        - returns None for None, a naive stamp, or anything unparseable
+        - returns epoch seconds (float) for an aware stamp
+        - returns None for None, a naive stamp, or anything unparseable; the caller
+          demotes such a stamp to the mtime tier, so it ranks low and is never dropped
         - never raises
     """
     if not stamp: return None
@@ -1228,11 +1127,9 @@ def _recency_key( path, stamp ):
     """
     Rank one memento record: ( tier, instant ), newest first, tier 1 over tier 0.
 
-    Tier 1 is a record whose header carries an orderable `written_at`; tier 0 is
-    everything else, ordered by mtime. The tier split is deliberate and predates
-    this row — the header stamp travels with the content, while mirroring and
-    rsync reset mtime — so a dated record must outrank an undated one even when
-    the undated file is newer on disk.
+    Tier 1 is a record with an orderable `written_at`; tier 0 is the rest, by mtime.
+    The header stamp travels with the content while mirroring resets mtime. So a dated
+    record must outrank an undated one, even when the undated file is newer on disk.
 
     Requires:
         - path is a filesystem path; stamp is an ISO string or None
@@ -1255,19 +1152,11 @@ def _recency_key( path, stamp ):
 
 def _memento_candidates( repo_root, sid8=None, slugs=() ):
     """
-    Memento RECORDS visible to this seat, across both slot families, newest first.
+    Memento records visible to this seat, across both slot families, newest first.
 
-    Deliberately excludes `.claude-memento.md` — that file is a POINTER, not a
-    record, and it is single-occupancy for the entire repo. It currently names
-    whichever seat wrote last, so resolving a seat's memento through it would
-    hand one persona another persona's state. Empty is a safe answer; another
-    seat's held merge and crew is not.
-
-    Ordering key is the INSTANT the header's `written_at` names, falling back to
-    mtime only when a record carries no orderable stamp. A record with neither
-    still appears — it ranks last, but it is never silently dropped. The instant,
-    not the ISO text: mixed UTC offsets make text order disagree with time order
-    (row f99bed95, 12 inverted pairs measured on the live slot).
+    It excludes `.claude-memento.md`: that pointer is single-occupancy and names whichever
+    seat wrote last, so using it would hand one persona another's state. Ordering uses the
+    instant of `written_at`, then mtime; a record with neither ranks last and is never dropped.
 
     Requires:
         - repo_root is a directory path
@@ -1308,6 +1197,8 @@ def _memento_candidates( repo_root, sid8=None, slugs=() ):
 
 def _header_of( path ):
     """
+    Read the first line of a memento file and return it only if it is a record header.
+
     Ensures: returns the memento's first line when it is a memento-record
     header, else None. Never raises.
     """
@@ -1323,14 +1214,9 @@ def _persona_of( path, header ):
     """
     Determine which persona a memento belongs to.
 
-    Two sources, header first. The header's `persona=` field is authoritative
-    when present; when it is absent — and it is absent on real records, e.g.
-    `.claude-memento-maria-350ac4c2.md`, whose first line is a human heading
-    rather than a machine header — the FILENAME carries the persona slug
-    unambiguously. Falling back to the filename keeps those records reachable.
-
-    Both sources are persona-scoped, so neither can leak one seat's memento to
-    another. That is the property that matters here; recency is secondary.
+    The header's `persona=` field is authoritative when present. Real records often lack
+    it, so the filename slug is the fallback and keeps them reachable. Both sources are
+    persona-scoped, so neither can leak one seat's memento to another.
 
     Requires:
         - path is a memento path; header is its header line or None
@@ -1356,61 +1242,11 @@ def _persona_of( path, header ):
 
 def _resolve_memento_path( stable_session_id, persona_name, repo_root ):
     """
-    Find THIS seat's memento at the repo root.
+    Find this seat's memento at the repo root, trying three matches in order.
 
-    Three-step, and the ORDER is the whole design:
-
-      1. Exact session-id match. A self-re-spin types `/clear` into its own
-         pane and keeps its session id, so when a record names this id it is
-         unambiguously ours — the strongest signal available.
-      1.5 The canonical live slot `io/mementos/<slug>.md` in THIS repo. It is
-         where writers put the current record, so an exact-name hit beats any
-         historical sibling — including a sibling that carries a `written_at`
-         the bare slot does not (row f99bed95).
-      2. Newest record for this PERSONA. A re-spin done as dismiss-then-spawn
-         arrives as a brand-new session, so step 1 finds nothing while the
-         memento sits right there named for the OLD id. The persona is what
-         actually carries across that boundary, so it is what we match on.
-         Newest-mtime breaks the tie when a persona has several.
-
-    WHAT IS AND IS NOT CONFIRMED, stated plainly because an earlier version of
-    this docstring claimed more than the code does and cost a reviewer an
-    evening. Only STEP 1 requires the `<!-- memento-record: … -->` header.
-    Steps 1.5 and 2 accept a HEADER-LESS file, and that is correct rather than
-    an oversight: real records frequently carry a human heading as their first
-    line instead of a machine header, and the canonical live slot
-    `io/mementos/<slug>.md` is a bare name that often has none at all. Demanding
-    a header at those steps would reject the very file the writers target.
-
-    What IS enforced at every step is PERSONA. `_persona_of` must agree before a
-    candidate is returned, because handing a seat another persona's state stays
-    worse than handing it none. Identity is the invariant here; the header is
-    corroboration where it exists.
-
-    A SLOT POINTER CAN BE RETURNED, AND THAT IS THE INTENDED ANSWER, NOT A BUG.
-    `_names_this_seat` admits `stem == slug`, which is the pointer's shape in
-    both families — `.claude-memento-<persona>.md` at the repo root and
-    `<persona>.md` in an io slot. It has to: step 1.5 depends on that exact
-    acceptance to prefer the live io slot over a historical sibling (row
-    f99bed95). Measured 2026-09-02 by removing `stem == slug` in-process:
-    resolution went `rio.md` -> `rio-ea46bc1a.md`, i.e. straight back to the
-    2.8-day-stale sibling that row exists to prevent. Refusing pointers by shape
-    is WIDER than it looks, not narrower.
-
-    And a returned pointer is not an empty answer. `memento_io.py` writes a
-    pointer as its header PLUS THE WHOLE RECORD BODY, so a seat that resolves one
-    receives its held state. Measured on the live tree the same day:
-    `.claude-memento-mr-radio.md` is 103 lines whose body is byte-identical to
-    the record it names.
-
-    THE ONE REAL COST, so the next reader does not rediscover it as a defect —
-    which is how this paragraph came to be written. A pointer is regenerated
-    when the record is written, so anything APPENDED to the record afterwards is
-    absent from it. On that same live pair the difference was the two-line
-    SELF-RESPIN-NONCE. So pointer fallback is STALE BY AT MOST ONE AMENDMENT, not
-    stateless. It is reached only when no record is readable at all, and in that
-    situation a full mirror missing its last amendment is the best available
-    answer; refusing it would hand the seat nothing.
+    The order is the design. First comes an exact session-id match, because a self-re-spin
+    keeps its id. Second is the live slot `io/mementos/<slug>.md` in this repo. Third is the
+    best-ranked record for this persona, which survives dismiss-then-spawn.
 
     Requires:
         - stable_session_id is a string (full uuid) or None
@@ -1418,13 +1254,23 @@ def _resolve_memento_path( stable_session_id, persona_name, repo_root ):
         - repo_root is a directory path
 
     Ensures:
-        - Returns a persona-confirmed memento path, or None when nothing
-          resolves. "Confirmed" means the PERSONA agrees; only step 1 also
-          requires the record header (see above)
-        - Never returns a record belonging to a different persona
-        - Prefers this repo's `io/mementos/<slug>.md` over every sibling once an
-          exact session-id match has failed; never prefers the MIRROR's copy of
-          that same bare name
+        - Returns a memento path, or None when nothing resolves
+        - The session-id match uses `session_id=<sid8>` in the header or a `-<sid8>.md`
+          filename suffix. It needs no header and does not check persona; the id is the identity
+        - Never returns a record belonging to a different persona: handing a seat
+          another persona's state is worse than handing it none
+        - Those two matches accept a header-less file: real records often start with a
+          human heading, and the live slot is a bare name that often has no header
+        - The live slot beats any historical sibling, including one with a `written_at` the
+          bare slot lacks, because the persona match ranks an unstamped record below every stamped one
+        - Never prefers the mirror's copy of the live-slot name, which goes stale on its own
+        - The persona match picks the first record in recency order (see _recency_key),
+          trying accent-folded slugs first
+        - A slot pointer can be returned, and that is intended: `_names_this_seat`
+          admits `stem == slug`, and the live-slot match depends on it
+        - A returned pointer is not empty: `memento_io.py` writes the header plus the whole
+          record body. It is stale by at most one amendment, and is reached only when no
+          record is readable at all
         - Never raises
     """
     sid8  = stable_session_id[:8] if stable_session_id and len( stable_session_id ) >= 8 else None
@@ -1482,20 +1328,11 @@ _MEMENTO_PRESENCE_FLOOR_BYTES = 200
 
 def _extract_amendment_tail( content ):
     """
-    Return the memento's whole AMENDMENT TAIL — everything from the FIRST
-    `<!-- memento-amendment:` marker to the end of the file.
+    Return the memento's whole amendment tail, from the first amendment marker to the end.
 
-    Note `find`, not `rfind`, and the reason is empirical: the last marker in a
-    real memento is frequently NOT the substantive one. `self_respin` appends a
-    tiny bookkeeping amendment carrying only the nonce stamp it needs to prove
-    freshness, so "the last block" resolves to four lines of plumbing while the
-    block before it — the held merge, the crew, the correction owed — is
-    dropped. Measured on cheech/80c17315: last-marker yielded 4 lines of nonce;
-    first-marker yielded the 3.5KB that actually mattered.
-
-    So the tail is the unit, not the block. A memento accretes: body written
-    once, then amended before each re-spin. Everything after the first
-    amendment is the part written but not yet acted on.
+    It uses `find`, not `rfind`. `self_respin` appends a tiny nonce amendment, so the last
+    marker is often plumbing. The block before it (held merge, crew) is the content.
+    The tail is the unit: everything after the first amendment is not yet acted on.
 
     Requires:
         - content is the memento text, or None
@@ -1517,24 +1354,11 @@ _MEMENTO_COMMENT_BLOCK = re.compile( r"<!--.*?-->", re.DOTALL )
 
 def _substantive_body( content ):
     """
-    Return the memento's body with HTML comment blocks and blank lines removed —
-    what a READER would actually read, as opposed to what the file weighs.
+    Return the memento body with HTML comment blocks and blank lines removed.
 
-    🔴 WHY THIS EXISTS: the near-blank warning used to key on the AMENDMENT TAIL,
-    which answers a different question than the one it printed. A memento written
-    the way the workflow prescribes — one `write --slot io|root` at prepare-for-
-    re-spin — puts ALL of its state in the BODY and has no tail at all. So a full
-    record was greeted with "MEMENTO FOUND BUT IT CARRIES NO STATE".
-
-    MEASURED 2026-09-05 over `io/mementos/` — 656 records, 517 with no amendment
-    tail, and the warning fired on every one of them:
-
-        strips to ZERO substantive bytes    1   <- `chloe.md`, a POINTER not a record
-        carries real prose                516   <- smallest 1,315 bytes
-
-    A gap of 0 to 1,315 needs no threshold and no judgement call, which is why
-    this is a PREDICATE ("is there prose here at all") rather than a byte cutoff.
-    A cutoff would be a hand-maintained number standing in for the question.
+    This is what a reader would read, not what the file weighs. The near-blank warning must
+    ask whether prose exists at all, not key on the amendment tail, because a body-only
+    memento has no tail. It is a predicate, not a byte cutoff, since no threshold is needed.
 
     Requires:
         - content is the memento text, or None
@@ -1544,7 +1368,6 @@ def _substantive_body( content ):
         - returns "" for None, for empty content, and for a pointer file whose
           entire content is comment lines
         - never raises
-
     """
     if not content: return ""
     stripped = _MEMENTO_COMMENT_BLOCK.sub( "", content )
@@ -1553,17 +1376,11 @@ def _substantive_body( content ):
 
 def _truncate_visibly( text, path, max_bytes=_MEMENTO_MAX_BYTES, keep="tail" ):
     """
-    Cap `text` at max_bytes KEEPING THE END, and say so IN BAND when it bites.
+    Cap `text` at max_bytes, keeping the tail by default, and announce any cut in the text.
 
-    Two decisions, both deliberate:
-
-    - We keep the TAIL and drop the head. Amendments accrete oldest-first, so
-      cutting from the end would discard the newest — precisely the state the
-      seat has not yet acted on. Recency is the whole reason this block exists.
-    - The cut announces itself. A silent cut hands the seat partial state it
-      cannot tell is partial, which is worse than no state at all, because
-      partial state reads as complete. So it counts the bytes it dropped and
-      names the file holding them.
+    The tail is kept because amendments accrete oldest-first, so the newest is the state not
+    yet acted on. A silent cut would hand over partial state that reads as complete, so the
+    cut marker counts the dropped bytes and names the file. `keep="head"` quotes the opening.
 
     Requires:
         - text is a string; path is the memento path the text came from
@@ -1571,8 +1388,9 @@ def _truncate_visibly( text, path, max_bytes=_MEMENTO_MAX_BYTES, keep="tail" ):
 
     Ensures:
         - Returns text unchanged when it fits
-        - Otherwise returns an explicit CUT marker naming the omitted byte
-          count and the full path, followed by the NEWEST max_bytes of text
+        - Otherwise returns an explicit marker naming the omitted byte
+          count and the full path, followed by the newest max_bytes of text
+          (or, when keep is "head", the first max_bytes of text and a trailing marker)
         - Never raises
     """
     raw = text.encode( "utf-8" )
@@ -1613,7 +1431,7 @@ def _repo_root_owning( start ):
     """
     Lazy seam onto lupin_mcp.memento_repo_root.repo_root_owning.
 
-    Imported INSIDE the call rather than at module scope because this hook runs on
+    Imported inside the call rather than at module scope because this hook runs on
     every SessionStart fleet-wide, in repos that may not have lupin_mcp importable.
     An ImportError here must degrade to the walk below, never take SessionStart down.
 
@@ -1630,59 +1448,26 @@ def _repo_root_owning( start ):
 
 def _resolve_repo_root( cwd=None, repo_root_fn=None ):
     """
-    Find the repo whose mementos this seat should read: the nearest `.git`
-    ancestor of the session's own cwd.
+    Find the repo whose mementos this seat should read, from the session's own cwd.
 
-    WHY NOT `LUPIN_ROOT` (María 🌸, 2026-08-15, reproduced against 8ff014e2).
-    This hook is installed fleet-wide, not just in lupin. Reading the root from
-    `LUPIN_ROOT` sent every non-lupin seat looking in lupin's directory, where
-    its memento does not live — so a planning-is-prompting session resolved to
-    nothing and rehydrated blank while its own record sat beside it. Her repro:
-    `_resolve_memento_path(sid, "maria", $LUPIN_ROOT)` -> None, the same call
-    against her repo root -> `.claude-memento-maria-e02f9c93.md`.
-
-    Walking up to the nearest `.git` is the convention this codebase already
-    uses to answer "which project am I in" (`detect_project`), so this follows
-    the house rule rather than inventing a second one. `LUPIN_ROOT` survives
-    only as the last fallback, for the case where cwd is absent or unrooted.
-
-    🔴 AND THE HOUSE RULE IS WRONG IN A WORKTREE — A `.git` FILE IS STILL A `.git`
-    (measured 2026-09-04). `os.path.exists( path/".git" )` does not ask WHAT KIND of
-    `.git` it found, and a linked worktree's `.git` is a FILE containing
-    `gitdir: <main>/.git/worktrees/<name>`. So the walk stops at the WORKTREE, and
-    this returned it — while the memento writer had already been fixed (memento_io
-    row af0c5700, 2026-07-21) to collapse a worktree to its MAIN checkout. The seat
-    then rehydrated from a tree holding none of its records: 623 in the main
-    checkout, 0 in the worktree, and the boot receipt reported `SEED_NOT_CONSUMED`
-    for a memento that was on disk.
-
-    ⚠️ THE SAME `.git`-EXISTS SHAPE TOOK THE SESSION LISTENER DOWN THE SAME DAY
-    (Rio ⚡, `resolve_project_name`), which is why this is a class rather than a
-    typo. A presence test that cannot distinguish a directory from a file agrees
-    with itself and answers about the wrong tree.
-
-    ⇒ `repo_root_owning` now answers FIRST and preserves every other case: a plain
-    repo, a subdirectory, a NESTED repo and a SUBMODULE all still resolve to their
-    OWN root. Repo IDENTITY is never crossed — a lupin-mobile worktree resolves to
-    lupin-mobile, so María's 2026-08-15 finding above stands untouched.
-
-    ⚠️ THE `.git` WALK SURVIVES AS THE FALLBACK, DELIBERATELY. This hook runs on
-    SessionStart fleet-wide, including where `git` is missing, the tree is not a
-    repo, or `lupin_mcp` is not importable — and a hook that raises takes the whole
-    SessionStart down, which is worse than a wrong root. So git answers when it can
-    and the walk answers when it cannot. The ORDER is the fix: the walk was never
-    wrong about a plain repo, only about a worktree, and git is asked before it now.
+    LUPIN_ROOT is wrong here: the hook runs fleet-wide, so it sent non-lupin seats to lupin's
+    directory, where their memento does not live. A linked worktree's `.git` is a file, so a
+    plain `.git` walk stops at the worktree; git's `repo_root_owning` therefore answers first.
 
     Requires:
         - cwd is the session's working directory, or None
         - repo_root_fn( start ) -> the repo root owning `start`, or None
 
     Ensures:
-        - Returns the repo root that OWNS cwd — the MAIN checkout when cwd is in a
-          linked worktree; that tree's own root for a plain repo, a subdirectory, a
-          nested repo or a submodule
-        - When git cannot answer, falls back to the nearest `.git` ancestor of cwd
+        - Returns the repo root that owns cwd: the main checkout when cwd is in a linked
+          worktree, and that tree's own root for a plain repo, subdirectory, nested repo
+          or submodule. Repo identity is never crossed: a lupin-mobile worktree resolves
+          to lupin-mobile
+        - When git cannot answer or raises, falls back to the nearest `.git` ancestor
+          of cwd. The walk stays because the hook runs where git or lupin_mcp may be
+          missing, and a hook that raises takes SessionStart down
         - Falls back to LUPIN_ROOT, then os.getcwd(), when neither resolves
+        - Each fallback prints a warning naming the cause to stderr, never stdout
         - Never raises
     """
     start   = cwd or os.getcwd()
@@ -1736,13 +1521,10 @@ def _stamp_respin_boot_receipt( stable_session_id, persona_name, tmux_session,
                                 memento_path, memento_written_at, repo_root,
                                 memento_persona=None, block=None, block_error=None ):
     """
-    Leave the boot receipt a re-spin's wake check reads (row b0570b67).
+    Leave the boot receipt a re-spin's wake check reads, on every boot.
 
-    THE ONE THING TO GET RIGHT: this fires on EVERY boot, including the boot
-    where no memento resolved. "It woke but consumed nothing" and "it never woke
-    at all" are different failures with different fixes, and skipping the write
-    on the empty path would collapse them into the same silence — which is the
-    bug this receipt exists to end. `memento_path=None` is a finding, not a
+    It fires even when no memento resolved: "woke but consumed nothing" and "never woke"
+    are different failures with different fixes. `memento_path=None` is a finding, not a
     reason to stay quiet.
 
     Requires:
@@ -1751,19 +1533,12 @@ def _stamp_respin_boot_receipt( stable_session_id, persona_name, tmux_session,
 
     Ensures:
         - writes the receipt best-effort; returns the path written, or None
-        - places it under THIS repo_root's fleet data root, never the ambient one
-        - NEVER raises and never blocks the boot — a diagnostic that can break a
+        - places it under this repo_root's fleet data root, never the ambient one:
+          `write_boot_receipt` would otherwise read the ambient project root, and a
+          caller in a temp tree would write real receipts into the live fleet directory
+        - never raises and never blocks the boot; a diagnostic that can break a
           SessionStart is worse than the failure it reports. An unimportable
           module (a partially-installed tree) is swallowed the same way.
-
-    THE DIRECTORY IS PASSED, NOT RESOLVED DOWNSTREAM. `write_boot_receipt` falls
-    back to `fleet_data_root()` with no argument, which reads the AMBIENT project
-    root rather than the repo it was handed — so a caller working in a temp tree
-    still writes into the live fleet directory. Measured 2026-08-23: a green run
-    of the register_session memento-block unit suite planted 4 real receipts in
-    projects-data/lupin, one carrying a real persona, a live memento_slot and a
-    booted_at of that second. A healthy-looking receipt in the directory the wake
-    check reads, written by the test suite, is a false green waiting to happen.
     """
     try:
         from cosa.agents.heartbeat_arbiter.respin_wake_check import write_boot_receipt
@@ -1786,28 +1561,11 @@ def _stamp_respin_boot_receipt( stable_session_id, persona_name, tmux_session,
 
 def _memento_body_after_header( content ):
     """
-    Return the record's substantive body — everything after the header line and
-    before the amendment tail — or None when there is nothing there.
+    Return the record's body after the header line and before the amendment tail, or None.
 
-    🔴 WHY THIS EXISTS. `_build_memento_block` used to branch two ways: a record
-    either had an amendment tail, or it "carried no state". That was measured true
-    in August 2026 for records BORN thin and amended later, which was the only
-    shape then. It has been false since `memento_io.py write` started writing a
-    record WHOLE — all of the state in the body, no amendment marker anywhere —
-    and the block told those seats their full memento was near-blank.
-
-    MEASURED (row 508449b7, Tiberius, re-derived on a second instrument):
-    341 records, 128 with an amendment tail, 213 without — and 210 of those 213
-    are >= 2000 bytes of real state. The smallest is 1,433 bytes. The largest
-    record described as carrying no state was 21,025 bytes.
-
-    ⚠️ THE FLOOR BELOW IS NOT A POPULATION SPLIT AND MUST NOT BE TUNED INTO ONE.
-    At 200 bytes it sits an order of magnitude under the smallest real record
-    (1,433), so it separates "there is nothing here at all" from "there is
-    something" — it does not try to judge whether the something is any good.
-    Picking a number that lands between the two observed clusters would be
-    fitting a threshold to today's corpus, and the next shape of record would
-    land on the wrong side of it silently.
+    A record written whole by `memento_io.py write` keeps its state in the body, with no
+    amendment marker, so it must not be called near-blank. The presence floor only separates
+    nothing from something. Never tune it to split populations, or the next record shape misfiles.
 
     Requires:
         - content is the memento text, or None
@@ -1815,7 +1573,8 @@ def _memento_body_after_header( content ):
     Ensures:
         - Returns the body with the header line and any amendment tail removed
         - Returns None when content is empty, or the remaining body is under the
-          presence floor — the caller then emits the near-blank warning
+          presence floor, which sits an order of magnitude below the smallest real
+          record; the caller then emits the near-blank warning
         - Never raises
     """
     if not content: return None
@@ -1834,27 +1593,11 @@ def _memento_body_after_header( content ):
 def _build_memento_block( stable_session_id, persona_name, repo_root=None, cwd=None,
                           tmux_session=None ):
     """
-    Render this seat's memento pointer + newest amendment as a block for the
-    SessionStart hook's `additionalContext` — the channel the SESSION ITSELF
-    reads at boot.
+    Render this seat's memento pointer and newest amendment as additionalContext for boot.
 
-    WHY THIS EXISTS (2026-08-15, rows cc5477c9 / 9e0678f6). A self-re-spin
-    typed `/clear` into a manager's own pane and nothing else. The seat came
-    back with a fresh context and no idea a memento existed — the boot path had
-    the session id, had the persona, had a derivable filename sitting at the
-    repo root, and walked straight past it. Rick saw it twice in one day; one
-    of those seats lost a held merge, a two-worker crew mid-lane, and a
-    correction it owed a peer. The fix is not to type a reminder at the seat
-    after the fact — it is for the boot path to carry the memento itself, so
-    the state is present before the first turn rather than dependent on someone
-    thinking to ask for it.
-
-    Deliberately NOT gated on `source == "clear"`. The hook's own docstring
-    says source is startup|resume|clear|compact, and a re-spin done as
-    dismiss-then-spawn arrives as a NEW session — i.e. `startup`, not `clear`.
-    Gating on the source would silently skip exactly the paths most likely to
-    need it, so we attempt the lookup on every boot and emit only when one
-    actually resolves. The cost of the miss case is one directory listing.
+    A self-re-spin types `/clear` and must find its memento in boot context, not wait to be
+    reminded. The lookup is not gated on `source == "clear"`: dismiss-then-spawn arrives as a
+    new `startup` session, so gating would skip the paths that need it. A miss costs one listing.
 
     Requires:
         - stable_session_id is a string or None
@@ -1868,8 +1611,8 @@ def _build_memento_block( stable_session_id, persona_name, repo_root=None, cwd=N
           overwhelmingly common boot that has none)
         - Otherwise returns a block naming the path and quoting the newest
           amendment, visibly truncated if it exceeds the byte cap
-        - Stamps the boot receipt EXACTLY ONCE, on every path that reaches the
-          try — including the empty one and every failing one
+        - Stamps the boot receipt exactly once, on every path that reaches the
+          try, including the empty one and every failing one
         - Never raises. Every failure — including a repo-root resolution that
           throws — is recorded in the receipt's `block_error` and returns "".
     """
@@ -2088,18 +1831,11 @@ def _render_memento_block( path ):
 
 def _release_voice_persona_via_http( server_url, project, stable_session_id ):
     """
-    Release the currently-allocated voice persona for the given session by
-    calling the cosa-voice HTTP endpoint at
-    /api/cosa-voice/voice-persona/{sid}/release.
+    Release the session's voice persona through the cosa-voice HTTP release endpoint.
 
-    The server endpoint clears the voice_persona field on the bridge file and
-    broadcasts a voice_persona_released WebSocket event. The frontend uses the
-    event to drop the stale persona from senderPersonaMap so subsequent
-    notifications re-hydrate from the freshly-stamped envelope.
-
-    Fail-soft: any failure (server unreachable, auth failure, no persona to
-    release) logs a warning to stderr and returns False. The hook continues
-    with its bridge write either way.
+    The server clears voice_persona on the bridge file and broadcasts voice_persona_released,
+    so the frontend drops the stale persona. Any failure logs a warning to stderr and returns
+    False; the hook continues with its bridge write either way.
 
     Requires:
         - server_url is a non-empty string (e.g. http://localhost:7999)
@@ -2165,16 +1901,11 @@ def _release_voice_persona_via_http( server_url, project, stable_session_id ):
 
 def _resolve_window_tokens():
     """
-    Context-window size (in tokens) to PIN into the bridge at spawn.
+    Return the context-window size in tokens to pin into the bridge at spawn.
 
-    The out-of-band context-pressure assessor needs each worker's true window as
-    the denominator and MUST NOT infer it from observed occupancy (a 1M worker at
-    138k and a 200k worker at 138k look identical from the transcript — and the
-    200k one is on fire). So we pin it here, as a property of the worker, read
-    from LUPIN_CC_WINDOW_TOKENS (set per-worker by the spawn path for [1m]-beta
-    workers) and falling back to the 1M fleet default.
-
-    See: src/rnd/v0.1.8/2026.06.07-managing-context-memory/2026.06.08-context-pressure-revised-plan.md §4
+    The context-pressure assessor needs each worker's true window as the denominator.
+    It must not infer it from occupancy: a 1M and a 200k worker at 138k look identical.
+    So it is read from LUPIN_CC_WINDOW_TOKENS (set per worker at spawn), defaulting to 1M.
 
     Ensures:
         - returns a positive int (never raises — defensive: this runs inside the
@@ -2192,11 +1923,9 @@ def emit_context_clear_marker( payload ):
     """
     Emit one JSONL context-clear marker when the payload reports source == "clear".
 
-    payload["source"] ∈ startup|resume|clear|compact is the authoritative
-    lifecycle signal the hook already receives but never read — exact where the
-    downstream UUID-rotation heuristic under-reports. The DM-verbosity pilot reads
-    this marker to correlate a session's context reset with a reset in its
-    DM-length behaviour.
+    payload["source"] (startup, resume, clear or compact) is the authoritative lifecycle
+    signal, exact where the UUID-rotation heuristic under-reports. The DM-verbosity pilot
+    reads this marker to match a context reset with a change in DM length.
 
     Requires:
         - payload is a dict (the SessionStart hook input)

@@ -72,18 +72,11 @@ _SERVER_TRANSPORT_TIMEOUT_SECONDS = 30
 
 def _find_all_listener_pids( session_id, session_dir=None ):
     """
-    Find EVERY live listener serving this session — bridge PID + cmdline matches.
+    Find every live listener serving this session, by bridge PID and cmdline match.
 
-    Reap-all fix (F2, 2026-06-11): the bridge remembers only the LAST spawned
-    listener's PID, so when the `--continue` double-fire produced duplicates,
-    killing just the bridge PID orphaned the other listener permanently (the
-    broadcast-miss root cause). This collects the union of:
-        1. The bridge-recorded listener_pid (if any)
-        2. Live processes whose cmdline matches `--session-id <hash>` for ANY
-           hash associated with the session (session_id, stable_session_id,
-           every session_ids[] entry — the listener is started with the STABLE
-           hash while this hook receives the transient ID)
-    See: src/rnd/v0.1.8/2026.06.10-broadcast-miss-duplicate-listener-root-cause.md §4
+    The bridge keeps only the last listener's PID, and a `--continue` double-fire
+    can leave duplicates. So this also matches live cmdlines with `--session-id <hash>`.
+    The hashes are session_id, stable_session_id and every session_ids[] entry.
 
     Requires:
         - session_id is a non-empty string
@@ -139,17 +132,11 @@ def _find_all_listener_pids( session_id, session_dir=None ):
 
 def _release_voice_persona( session_id ):
     """
-    Best-effort POST /api/cosa-voice/voice-persona/{stable_session_id}/release.
+    Release this session's voice persona with a best-effort POST to the server.
 
-    Uses the stable_session_id from the bridge file (not the transient
-    session_id passed to the hook) so the release matches what was
-    originally allocated. Resolves credentials via hook_credentials and
-    obtains a JWT for the auth-gated endpoint.
-
-    Fail-soft: any failure (server unreachable, auth issue, missing
-    credentials, missing bridge) logs to stderr and continues. The
-    background dead-PID filter on subsequent /allocate calls will reclaim
-    the slot anyway.
+    The endpoint is /api/cosa-voice/voice-persona/{stable_session_id}/release.
+    It uses the stable id from the bridge file, so the release matches the
+    allocation. A failure logs to stderr; later /allocate calls reclaim the slot.
 
     Requires:
         - session_id is a non-empty string
@@ -276,10 +263,9 @@ def _schedule_seat_teardown( payload, popen_fn=None, lupin_root=None ):
     """
     Launch a detached waiter that removes this seat's own worktree once the seat is gone.
 
-    The hook cannot remove the tree itself: the seat's process is still standing in it
-    while this hook runs. So it starts `python -m cosa.agents.shared.seat_teardown`,
-    detached and outside the tree, which waits for the seat to be gone and then removes
-    the tree and its merged branch — or keeps them and logs why.
+    The hook cannot remove the tree itself: the seat's process still stands in it.
+    So it starts `python -m cosa.agents.shared.seat_teardown`, detached and outside
+    the tree. The waiter removes the tree and its merged branch, or keeps them and logs why.
 
     Requires:
         - payload is the SessionEnd hook input (reason, cwd)

@@ -9,30 +9,22 @@ Fires after every tool call. Applies smart filtering:
 
 After TTS, drains the voice buffer and acknowledges any buffered messages.
 
-🔴 THIS HOOK ANNOUNCES A LONG BLOCKING ASK AS FINISHED BEFORE IT IS — AND THE
-TIMER IS NOT IN THIS FILE. Row 97ff4426, measured 2026-09-06. A cosa-voice
-blocking verb declaring timeout_seconds well above 120 gets announced COMPLETE
-at roughly 120s, and then reported FAILED at around 660s — after the call had
-already returned and its side effect had landed.
+Known defect: this hook announces a long blocking ask as finished too early.
+A cosa-voice blocking verb can declare a timeout well above 120 seconds. It is
+announced as complete at about 120 seconds. It is later reported as failed,
+after the call has already returned. The server expires asks at their declared value,
+and the client returns the real answer on time. Only this beacon fires early.
 
-  · SERVER      42/42 asks declaring >120s expired at their declared value ±0.1s   INNOCENT
-  · CLIENT      live probe answered at 151.4s and RETURNED at 151.4s, real answer  INNOCENT
-  · THIS BEACON fires at min( answer, ~120s ), 24/24, whatever the declared value  THE DEFECT
+The timer is not in this file. The hook has no timer, sleep or expiry; it works
+whenever the harness invokes it. Why the harness invokes it early is not
+measured here and is not a Lupin question.
 
-⇒ Do not go looking for a deadline in this file. There is none: no timer, no
-   sleep, no expiry. It fires WHEN THE HARNESS INVOKES IT and does its work
-   then. The ~120s decision belongs to the harness, one layer above this repo,
-   and WHY it invokes early is UNMEASURED and is not a Lupin question.
-
-⇒ THE ANSWER IS NOT LOST, AND THE RECOVERY IS ALREADY SHIPPED: re-POST the same
-   ask with the same idempotency_key (every blocking verb stamps one) and it
-   RE-ATTACHES to the original notification instead of minting a second card —
-   cosa/rest/routers/notifications.py:1247-1254. There is no /reattach route
-   and you must not look for one; the idempotency branch is the only door.
-   Full write-up, with the caveats: src/docs/notification-api.md § 6.7.
-
-⚠️ THAT IS A WORKAROUND A CALLER MUST KNOW TO MAKE, NOT A FIX. This beacon
-   still reports the wrong moment.
+The answer is not lost. Re-post the same ask with the same idempotency_key
+(every blocking verb stamps one) and it re-attaches to the original
+notification. There is no /reattach route; the idempotency branch in
+cosa/rest/routers/notifications.py is the only door. See
+src/docs/notification-api.md, section 6.7. This is a workaround a caller must
+know to use, not a fix: the beacon still reports the wrong moment.
 
 Install in ~/.claude/settings.json:
     "hooks": {
