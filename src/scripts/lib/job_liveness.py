@@ -1,34 +1,28 @@
 """
-Is the thing I am watching actually alive? — a liveness check that cannot match itself.
+Is the thing I am watching alive? A liveness check that cannot match itself.
 
-Bug 07786db9. A run monitor decided a paired eval was alive with:
+A run monitor once decided a paired eval was alive with a command like this:
 
-    proc=$(pgrep -af "embedding_cost_live" 2>/dev/null | head -1)
-    if [ -n "$proc" ]; then st="RUNNING ts-c16c33dd"; fi
+    pgrep -af "embedding_cost_live" | head -1
 
-`pgrep -af` matches the FULL COMMAND LINE of every process, and the monitor's own
-command line CONTAINS the pattern — because the pattern is written inside it. The
-monitor matched itself. It reported RUNNING 28 seconds after the job had already died,
-would have kept reporting RUNNING all night including after the box powered off, and
-could never have reported the run's death. Three seats held off `:8000` on that reading.
+and set its status to `RUNNING` whenever the output was non-empty. `pgrep -af` matches the
+full command line of every process. The monitor's own command line contains the pattern,
+because the pattern is written inside it. The monitor matched itself and kept reporting
+`RUNNING` after the job had died. It could never have reported the run's death.
 
-🔴 EXCLUDING YOUR OWN PID IS NOT ENOUGH, AND NEITHER IS YOUR PARENT'S. Measured on this
-host 2026-08-17: a search for a string that existed nowhere on the machine except inside
-the searching command matched the GRANDPARENT shell — the harness wraps commands as
-`bash -c '<the whole thing>'`, so the pattern propagates up the ancestor chain. The row's
-suggested fix ("exclude own-PID and own-PPID") would still have matched. This module
-walks the whole chain.
+Excluding your own PID is not enough, and neither is excluding your parent's. A search for a
+string found only inside the searching command matched the grandparent shell. The harness
+wraps commands as `bash -c '<the whole thing>'`, so the pattern propagates up the ancestor
+chain. This module walks the whole chain.
 
-THE THIRD STATE IS THE POINT. `alive` and `not alive` are not enough, because "I could
-not tell" has to be distinguishable from "it is dead" — a monitor whose failure looks
-like one of its answers is the defect this module exists for. Hence UNKNOWN.
+The third state matters. "I could not tell" must be distinguishable from "it is dead".
+A monitor whose failure looks like one of its answers has the defect this module prevents.
+Hence `UNKNOWN`.
 
 Usage from a shell monitor, replacing the pgrep one-liner:
 
     python3 src/scripts/lib/job_liveness.py "pytest.*embedding_cost_live"
-    # prints RUNNING / DEAD / UNKNOWN, exit 0 / 1 / 2
-
-Generated on: 2026-08-17
+    # prints the state, exit 0 / 1 / 2 for running / dead / unknown
 """
 
 import os
@@ -87,9 +81,9 @@ def read_ppid( pid, proc_root=PROC_ROOT ):
     Raises:
         - nothing
 
-    WHY THE FIELD IS TAKEN AFTER THE LAST ')': the second stat field is the executable
-    name in parentheses and it MAY CONTAIN SPACES AND PARENTHESES itself, so splitting
-    the whole line on whitespace puts ppid somewhere that depends on the program's name.
+    The field is taken after the last closing parenthesis because the second stat field
+    is the executable name in parentheses. It may contain spaces and parentheses itself, so
+    splitting the whole line on whitespace puts ppid somewhere that depends on the program's name.
     """
     try:
         with open( os.path.join( proc_root, str( pid ), "stat" ), "r" ) as handle:
@@ -116,9 +110,9 @@ def ancestor_pids( pid=None, proc_root=PROC_ROOT, max_depth=64 ):
     """
     Return the caller's own PID plus every ancestor up to init.
 
-    THE WHOLE POINT OF THIS MODULE. The watcher's pattern can appear in the command
-    line of any process above it, not just its own — measured on this host, the match
-    was the GRANDPARENT. Anything in this set is the watcher looking at itself.
+    This set is the core of the module. The watcher's pattern can appear in the command
+    line of any process above it, not just its own, and the match was once the grandparent.
+    Anything in this set is the watcher looking at itself.
 
     Requires:
         - pid is an int or None (None → os.getpid())
@@ -169,8 +163,7 @@ def list_pids( proc_root=PROC_ROOT ):
 
 def find_matching_pids( pattern, proc_root=PROC_ROOT, own_pid=None ):
     """
-    Return the PIDs whose command line matches `pattern`, EXCLUDING the watcher's own
-    process and all of its ancestors.
+    Return PIDs whose command line matches `pattern`, minus the watcher and its ancestors.
 
     Requires:
         - pattern is a non-empty regular expression string
@@ -181,9 +174,9 @@ def find_matching_pids( pattern, proc_root=PROC_ROOT, own_pid=None ):
         - Skips processes that exit mid-scan rather than raising
 
     Raises:
-        - re.error when the pattern is not a valid regular expression. Deliberately
-          NOT swallowed: a monitor watching a typo would report DEAD forever, which is
-          the same silent-wrong-answer this module exists to prevent.
+        - re.error when the pattern is not a valid regular expression. It is not swallowed:
+          a monitor watching a typo would report `DEAD` forever, which is the same
+          silent wrong answer this module exists to prevent.
     """
     compiled = re.compile( pattern )
     mine     = ancestor_pids( pid=own_pid, proc_root=proc_root )
@@ -201,22 +194,22 @@ def find_matching_pids( pattern, proc_root=PROC_ROOT, own_pid=None ):
 
 def job_liveness( pattern, proc_root=PROC_ROOT, own_pid=None ):
     """
-    Report RUNNING, DEAD, or UNKNOWN for the process(es) matching `pattern`.
+    Report `RUNNING`, `DEAD`, or `UNKNOWN` for the processes matching `pattern`.
 
     Requires:
         - pattern is a non-empty regular expression string
 
     Ensures:
-        - RUNNING when at least one non-watcher process matches
-        - DEAD when the scan succeeded and nothing matched
-        - UNKNOWN when the scan itself could not be performed (no readable /proc), so
+        - `RUNNING` when at least one non-watcher process matches
+        - `DEAD` when the scan succeeded and nothing matched
+        - `UNKNOWN` when the scan itself could not be performed (no readable /proc), so
           "I could not look" is never returned as "it is not there"
         - Returns ( state, matching_pids )
 
     Raises:
         - ValueError when pattern is empty — an empty pattern matches every process
-          and would report RUNNING unconditionally, which is this bug wearing a
-          different hat
+          and would report `RUNNING` unconditionally, which is this same bug in
+          a different form
         - re.error on an invalid pattern
     """
     if not pattern:
@@ -233,7 +226,7 @@ def job_liveness( pattern, proc_root=PROC_ROOT, own_pid=None ):
 
 def main( argv=None ):
     """
-    CLI entry point: print the state, exit 0 RUNNING / 1 DEAD / 2 UNKNOWN.
+    CLI entry point: print the state, exit 0 for `RUNNING`, 1 for `DEAD`, 2 for `UNKNOWN`.
 
     Requires:
         - argv[1] is the pattern to watch
