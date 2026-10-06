@@ -1867,7 +1867,9 @@ class RuntimeArgumentExpeditor:
         """
         Fuzzy-match a user's description of a stalled TFE job to a resume target.
 
-        The target is a job ID or a plan doc path. It reuses the resume_resolver infrastructure (list_resume_candidates and fuzzy_match_candidates).
+        The target is a job ID or a plan doc path. It reuses the resume_resolver infrastructure (list_resume_candidates and fuzzy_match_candidates), which come from the file-path resume work in the design below.
+
+        Design: src/rnd/v0.1.6/2026.04.10-test-fix-expediter/15-file-path-resume-and-voice-parsing.md
 
         Requires:
             - user_email is a valid email address (scopes candidate pool)
