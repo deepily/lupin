@@ -24,6 +24,7 @@ CONTRACT_HEADER = re.compile( r"^\s*(?:Requires|Ensures|Raises|Args|Arguments|Re
 BULLET_LINE     = re.compile( r"^\s*(?:[-*+]|\d+[.)])\s" )
 FIELD_HEADER    = re.compile( r"^\s*(?:Attributes|Parameters|Params|Examples?)\s*:\s*$" )
 SENTENCE_SPLIT  = re.compile( r"(?<=[.!?])\s+(?=[A-Z0-9`\"'(])" )
+CONFIG_KEY_LINE = re.compile( r"^[ \t]*([a-z][a-z0-9 _.:-]*?)[ \t]=[ \t]" )
 
 
 def line_of_offset( text, offset ):
@@ -265,6 +266,28 @@ def defined_steps( text ):
     return { m.group( 1 ).lower() for m in STEP_DEFINITION.finditer( text ) }
 
 
+def is_config_key_match( text, match ):
+    """
+    Say whether a match sits inside the key of a configuration assignment line.
+
+    Requires:
+        - match is a regex match over text
+
+    Ensures:
+        - True when the match lies wholly within the key of a line shaped like "lowercase key words = value", such as an INI line
+        - the key must be all lowercase, so a capitalised step word before an equals sign in prose is still a match
+        - a match in the value, or on a line without " = ", gives False
+
+    Raises:
+        - nothing
+    """
+    start = text.rfind( "\n", 0, match.start() ) + 1
+    end   = text.find( "\n", match.start() )
+    line  = text[ start : len( text ) if end == -1 else end ]
+    key   = CONFIG_KEY_LINE.match( line )
+    return key is not None and match.end() - start <= key.end( 1 )
+
+
 def reference_findings( text, path, first_line ):
     """
     Check rule 6: no reference without a path.
@@ -276,6 +299,7 @@ def reference_findings( text, path, first_line ):
         - one Finding per bare reference, at its line
         - a section mark is bare unless a path sits beside it in the same paragraph
         - a case label or step that the text defines itself is not a finding
+        - a match inside the key of a configuration line, is not a finding
         - a bare git sha is reported under the same rule; whether it should be is pending Rick's ruling
         - a sha that sits inside an already reported row, bug or task reference is not reported twice
 
@@ -295,6 +319,7 @@ def reference_findings( text, path, first_line ):
             if regex is BARE_SHA_REGEX and any( a <= m.start() and m.end() <= b for a, b in id_spans ): continue
             if regex is LABEL_REF_REGEX and m.group( 0 ) in local: continue
             if regex is STEP_REF_REGEX and m.group( 0 ).lower() in steps: continue
+            if regex is STEP_REF_REGEX and is_config_key_match( text, m ): continue
             findings.append( Finding( path, first_line + line_of_offset( text, m.start() ), "bare-ref", f"bare reference {m.group( 0 )!r}" ) )
     return findings
 

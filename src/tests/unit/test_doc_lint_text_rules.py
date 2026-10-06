@@ -401,3 +401,15 @@ def test_the_do_not_rule_is_the_one_rule_the_markdown_and_dart_linters_run_too()
     from cosa.repo.doc_lint import md_lint
     assert "Do not retry." not in ( md_lint.__doc__ or "" )
     assert [ f.rule for f in tr.lint_text( "Do not retry.", "a.md", 1, structure=False, markdown=True, words=WORDS ) if f.rule == "agent-imperative" ] == [ "agent-imperative" ]
+
+
+def test_a_step_word_inside_a_configuration_key_is_not_a_reference():
+    text = "Flags:\n    test fix expediter phase 1 engine = sdk | claude_code\n    test fix expediter phase 3 engine = sdk | claude_code"
+    assert tr.reference_findings( text, "a.py", 1 ) == []
+
+
+def test_a_step_word_in_prose_a_value_or_a_capitalised_key_is_still_a_reference():
+    text = "Phase 1 = the first stage.\nengine = phase 2\nSee phase 3 for details.\nthe engine for phase 4 is slow"
+    assert [ f.message for f in tr.reference_findings( text, "a.py", 1 ) ] == [
+        "bare reference 'Phase 1'", "bare reference 'phase 2'", "bare reference 'phase 3'", "bare reference 'phase 4'"
+    ]
