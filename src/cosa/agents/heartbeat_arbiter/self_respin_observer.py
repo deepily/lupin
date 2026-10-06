@@ -1,29 +1,23 @@
 """
-Self-re-spin liveness observer — the external check that a manager which typed
-`/clear` into its OWN pane actually came back, at low context, as the same seat.
+Checks from outside that a manager's self-clear came back as the same seat.
 
-WHY THIS EXISTS (row 9e0678f6, work item 1 — ships BEFORE the self_respin verb).
-A session that fires a self-clear cannot report its own outcome: it no longer
-holds the context that knew it was trying. A manager that fires and does not
-return is a silently dead seat — the exact failure the whole self-re-spin policy
-exists to prevent. So an EXTERNAL observer (the arbiter, or a peer manager) must
-verify the seat cleared and came back.
+A session that fires a self-clear cannot report its own outcome, because it no
+longer holds the context that knew it was trying. A manager that fires and does
+not return is a silently dead seat. So an outside observer (the arbiter, or a
+peer manager) must verify that the seat cleared and came back.
 
-THE ORACLE (Krishna's gate). "Came back at low context" is NOT "the seat is
-alive" — a seat that never cleared is also alive, so a bare alive-check greens
-whether or not the clear happened. The observer instead reads a real transition
-in the arbiter's OWN context-pressure payload: the marker records that the seat
-was `over_budget` (that is WHY the tick fired self_respin); RETURNED is that SAME
-seat now reading `within_budget`, with a fresh turn dated after the clear fired.
-There is no second "low" threshold — observer and verb share the ONE INI budget
-fraction via the payload's `status` field, so they can never disagree on "low."
+Being alive is not proof, because a seat that never cleared is also alive. The
+observer reads a real transition in the arbiter's own context-pressure payload.
+The marker records that the seat was `over_budget`. That is why the tick fired
+self_respin. `RETURNED` means the same seat now reads `within_budget`, with a
+fresh turn dated after the clear fired. There is no second "low" threshold.
+Observer and verb share the one INI budget fraction through the payload's
+`status` field, so they can never disagree on what "low" means.
 
-PURITY. `classify_marker` is a pure function of (marker, pressure_record, now) —
-stdlib only, no IO. The fleet helper `observe_fleet_self_respin` does the disk
-glob + the pressure fetch behind an injectable `fetch_pressure` seam, so both the
-alarm arm and the negative arm are unit-provable with fakes.
-
-Design note: planning-is-prompting/src/rnd/2026.08.13-manager-self-respin-mechanism.md
+`classify_marker` is a pure function of (marker, pressure_record, now), using
+only the stdlib and no IO. The fleet helper `observe_fleet_self_respin` does the
+disk glob and the pressure fetch. It sits behind an injectable `fetch_pressure`
+seam, so both the alarm arm and the negative arm are unit-provable with fakes.
 """
 
 import datetime
@@ -139,22 +133,22 @@ class SelfRespinVerdict( str, Enum ):
 
 @dataclass
 class SelfRespinAssessment:
-    """One marker's verdict + the human-readable reason + the alarm flag.
+    """One marker's verdict, the human-readable reason and the alarm flag.
 
-    return_latency_s / late are the LATENESS STAMP (row 491d5db8). RETURNED
-    answers "it came back"; these answer "did it come back IN TIME." They are
-    populated ONLY on a RETURNED verdict — return_latency_s is the observed
-    seconds from fired_at to the wake proof, and late is True when that proof
-    landed after expected_return_by. On every other verdict they stay
-    None / False. Making lateness visible (without turning RETURNED into an
-    alarm) is option 1 of the row: a wake that keeps arriving but ever later
-    can no longer hide behind a green verdict.
+    return_latency_s and late stamp how late a return was. `RETURNED` says the
+    seat came back. These say whether it came back in time. They are set only on
+    a `RETURNED` verdict. return_latency_s is the observed seconds from fired_at
+    to the wake proof. The late flag is True when that proof landed after
+    expected_return_by.
+    On every other verdict they stay None and False. Lateness stays visible
+    without turning `RETURNED` into an alarm. A wake that keeps arriving later and
+    later cannot hide behind a green verdict.
 
-    anchor names WHICH clock the timing rests on (row 855e4dd0): ANCHOR_KEYS_SENT
-    when the marker carried a usable keys_sent_at, ANCHOR_FIRE when it did not and
-    the verdict fell back to the schedule-time deadline. A stampless marker still
-    alarms — it just alarms on the weaker anchor, and this field is how a reader
-    tells which one produced the verdict instead of having to assume."""
+    anchor names which clock the timing rests on. It is ANCHOR_KEYS_SENT when the
+    marker carried a usable keys_sent_at. It is ANCHOR_FIRE when it did not, and
+    the verdict fell back to the schedule-time deadline. A marker without the
+    stamp still alarms, on the weaker anchor, and this field tells the reader
+    which anchor produced the verdict."""
     session_id       : str
     persona          : str
     verdict          : SelfRespinVerdict
@@ -170,7 +164,7 @@ class SelfRespinAssessment:
 # ---------------------------------------------------------------------------
 def _parse_iso( value ):
     """
-    Parse an ISO-8601 string into an AWARE datetime, defensively.
+    Parse an ISO-8601 string into an aware datetime, defensively.
 
     Requires:
         - value is anything (str / None / other)
@@ -178,10 +172,10 @@ def _parse_iso( value ):
     Ensures:
         - returns an aware datetime for a well-formed ISO-8601 string that
           carries a timezone offset
-        - returns None for None, a non-string, an unparseable string, OR a
-          NAIVE (offset-less) datetime — a naive value cannot be compared to the
+        - returns None for None, a non-string, an unparseable string, or a
+          naive (offset-less) datetime. A naive value cannot be compared to the
           aware `now` without raising TypeError, so it is treated as "cannot
-          judge" (NOT confirmed / PENDING) rather than crashing the observer.
+          judge" (not confirmed, `PENDING`) rather than crashing the observer.
           Every marker this module writes is aware (build_marker_dict stamps
           `.isoformat()` of an aware datetime); a naive value is a hand-written
           or legacy artifact and must not break the never-raises contract.
@@ -297,11 +291,11 @@ def missing_marker_fields( marker ):
     Ensures:
         - returns the MARKER_REQUIRED_FIELDS absent from `marker`, in declaration order
         - returns () for a complete marker
-        - keys on PRESENCE, never truthiness: `wake_nonce` and `pre_clear_pct` are
+        - keys on presence, never truthiness: `wake_nonce` and `pre_clear_pct` are
           legitimately None on real markers, and a truthiness test would report every
           no-wake re-spin as malformed
-        - a non-dict (None, list, scalar — i.e. an unreadable or non-marker payload)
-          reports EVERY field missing rather than raising
+        - a non-dict (None, list, scalar, or an unreadable or non-marker payload)
+          reports every field missing rather than raising
         - never raises
     """
     if not isinstance( marker, dict ):
@@ -321,24 +315,25 @@ def effective_deadline( marker, fired_at, deadline ):
 
     Requires:
         - marker is a parsed marker dict
-        - fired_at and deadline are AWARE datetimes (the caller parsed + validated
+        - fired_at and deadline are aware datetimes (the caller parsed and validated
           both; this function never re-judges them)
 
     Ensures:
         - returns ( effective, anchor )
-        - when the marker carries a well-formed `keys_sent_at` STRICTLY AFTER
-          fired_at, effective = keys_sent_at + ( deadline - fired_at ) — the same
-          total window, measured from the send — and anchor is ANCHOR_KEYS_SENT
-        - otherwise returns ( deadline + idle wait, ANCHOR_FIRE ): absent, non-string,
-          unparseable, naive, or at/before fired_at all take the old anchor, which
-          still reaches DEAD_NO_RETURN. A missing or junk stamp degrades to
-          today's behaviour — never to silence, never to an alarm of its own.
+        - when the marker carries a well-formed `keys_sent_at` strictly after
+          fired_at, effective = keys_sent_at + ( deadline - fired_at ), which is the
+          same total window measured from the send, and anchor is ANCHOR_KEYS_SENT
+        - otherwise returns ( deadline + idle wait, ANCHOR_FIRE ). A stamp that is
+          absent, non-string, unparseable, naive, or at/before fired_at all take the
+          old anchor, which still reaches DEAD_NO_RETURN. A missing or junk stamp
+          degrades to the old behaviour, never to silence and never to an alarm of
+          its own.
         - "idle wait" is the marker's IDLE_WAIT_MAX_SECONDS when it is a non-negative
           number, else 0. A fire that waits for an idle prompt stamps nothing until it
-          sends, so without this a seat that is merely BUSY would be called dead while
-          its fire is still legitimately waiting (row 698a5aaf). Old markers carry no
-          field and are judged exactly as before.
-        - effective is NEVER earlier than deadline
+          sends, so without this a seat that is merely busy would be called dead while
+          its fire is still waiting. Old markers carry no field and are judged
+          exactly as before.
+        - effective is never earlier than deadline
         - never raises
     """
     sent = _parse_iso( marker.get( KEYS_SENT_AT ) )
@@ -358,9 +353,10 @@ def build_marker_dict( *, session_id, persona, tmux_session, fired_at, delay_sec
                        wake_nonce=None, grace_seconds=DEFAULT_GRACE_SECONDS,
                        idle_wait_max_seconds=0 ):
     """
-    Build the self-re-spin marker dict the verb writes to disk BEFORE it schedules
-    the clear (the pre-clear facts must survive the context wipe — the cleared
-    session cannot report them).
+    Build the marker dict the self-respin verb writes before it schedules the clear.
+
+    The pre-clear facts must survive the context wipe, because the cleared session
+    cannot report them.
 
     Requires:
         - fired_at is an aware datetime (the moment the clear is scheduled)
@@ -372,11 +368,11 @@ def build_marker_dict( *, session_id, persona, tmux_session, fired_at, delay_sec
         - returns the full marker dict with expected_return_by =
           fired_at + delay_seconds + grace_seconds (ISO-8601)
         - records idle_wait_max_seconds, the most the fire point may wait for an idle
-          prompt; expected_return_by does NOT include it (it is the deadline for a seat
-          that is idle), the observer's stamp-less deadline does
-        - stamps MARKER_SCHEMA_VERSION, so a reader can tell WHICH CODE wrote this
+          prompt; expected_return_by does not include it (it is the deadline for a seat
+          that is idle), but the observer's stamp-less deadline does
+        - stamps MARKER_SCHEMA_VERSION, so a reader can tell which code wrote this
           marker instead of inferring the writer's vintage from which fields happen
-          to be absent (row b5035039)
+          to be absent
         - writes exactly MARKER_REQUIRED_FIELDS — the verb re-reads and asserts them
         - all fields JSON-serializable
     """
@@ -406,9 +402,11 @@ def build_marker_dict( *, session_id, persona, tmux_session, fired_at, delay_sec
 # ---------------------------------------------------------------------------
 def _identity_matches( marker, pressure_record ):
     """
+    Report whether the pressure record belongs to the same seat as the marker.
+
     Ensures:
-        - True iff the pressure record's session_id AND tmux_session both equal
-          the marker's — i.e. the seat came back as the SAME seat (Cheech's gate)
+        - True iff the pressure record's session_id and tmux_session both equal
+          the marker's, meaning the seat came back as the same seat
     """
     return (
         pressure_record.get( "session_id" )   == marker.get( "session_id" ) and
@@ -418,31 +416,32 @@ def _identity_matches( marker, pressure_record ):
 
 def _is_confirmed_return( marker, pressure_record, fired_at, now, wake_proof_nonce, wake_proof_at ):
     """
-    Is this a proven over_budget → within_budget return for the same seat, woken by
-    OUR OWN wake (not a stranger's hello) and PROVEN by the seat's own turn?
+    Say whether this is a proven over_budget to within_budget return on our own wake.
+
+    A stranger's hello must not count, and the seat's own turn must prove it.
 
     Requires:
         - pressure_record is a dict (the matched record; caller guarantees non-None)
-        - fired_at is an aware datetime (the caller parsed + validated it)
+        - fired_at is an aware datetime (the caller parsed and validated it)
         - now is an aware datetime
-        - wake_proof_nonce is the nonce the rehydrated seat ECHOED in its wake proof
+        - wake_proof_nonce is the nonce the rehydrated seat echoed in its wake proof
           artifact (str), or None when no proof exists
         - wake_proof_at is the aware datetime that proof was written, or None
 
     Ensures:
-        - True iff ALL hold:
+        - True iff all hold:
             * the marker recorded pre_clear_status == "over_budget" (there was a
-              high state to fall FROM — no transition otherwise)
+              high state to fall from, so no transition otherwise)
             * the record's current status == "within_budget" (fell to low)
-            * the record's last turn is FRESH: dated at/after the marker's fired_at
-            * a WAKE PROOF exists, written at/after fired_at, whose nonce EQUALS the
-              marker's own wake_nonce. This is CONSUMER-written (the seat had to take a
-              turn on our wake to produce it — proving ingestion, not just delivery)
-              and NONCE-BOUND (a peer DM cannot forge it — it does not know the nonce).
-              A blank marker nonce can never be matched, so a marker minted without a
-              nonce is never falsely RETURNED.
-        - a missing last_turn_age_s ⇒ not confirmed
-        - a missing / pre-fire / nonce-mismatched proof ⇒ not confirmed
+            * the record's last turn is fresh: dated at/after the marker's fired_at
+            * a wake proof exists, written at/after fired_at, whose nonce equals the
+              marker's own wake_nonce. The seat writes it itself (it had to take a
+              turn on our wake to produce it, which proves ingestion, not just
+              delivery) and it is bound to the nonce (a peer DM cannot forge it,
+              because it does not know the nonce). A blank marker nonce can never be
+              matched, so a marker minted without a nonce is never falsely `RETURNED`.
+        - a missing last_turn_age_s means not confirmed
+        - a missing, pre-fire, or nonce-mismatched proof means not confirmed
         - never raises
     """
     if marker.get( "pre_clear_status" ) != "over_budget":
@@ -466,32 +465,32 @@ def _is_confirmed_return( marker, pressure_record, fired_at, now, wake_proof_non
 
 def classify_marker( marker, pressure_record, *, now, wake_proof_nonce=None, wake_proof_at=None ):
     """
-    Classify ONE self-re-spin marker against the seat's live pressure record.
+    Classify one self-respin marker against the seat's live pressure record.
 
     Requires:
         - marker is a parsed marker dict (build_marker_dict shape)
-        - pressure_record is the arbiter context_pressure record for the SAME
+        - pressure_record is the arbiter context_pressure record for the same
           session_id, or None when the seat is absent from the pressure map
         - now is an aware datetime
         - wake_proof_nonce / wake_proof_at describe the seat's consumer-written wake
           proof (the nonce it echoed + when), or None/None when no proof exists —
-          RETURNED requires a proof whose nonce matches the marker's own wake_nonce
+          `RETURNED` requires a proof whose nonce matches the marker's own wake_nonce
 
     Ensures:
-        - MALFORMED_MARKER (alarm) when fired_at OR expected_return_by is missing,
-          naive, or unparseable — the marker cannot be time-judged, and degrading
-          it to PENDING would let a dead seat hide behind permanent "patience"
-          (Cheech's gate). Surfaced loudly BEFORE any other verdict.
+        - MALFORMED_MARKER (alarm) when fired_at or expected_return_by is missing,
+          naive, or unparseable. The marker cannot be time-judged, and degrading
+          it to `PENDING` would let a dead seat hide behind permanent patience. It is
+          surfaced loudly before any other verdict.
         - IDENTITY_MISMATCH (alarm) when a record exists but its session_id/
-          tmux_session disagree with the marker — a different seat answered
-        - RETURNED (no alarm) on a confirmed over→within transition, same seat,
+          tmux_session disagree with the marker, because a different seat answered
+        - `RETURNED` (no alarm) on a confirmed over to within transition, same seat,
           fresh turn after fired_at
-        - DEAD_NO_RETURN (alarm) when not returned AND now >= the EFFECTIVE deadline
-          — expected_return_by re-anchored on the marker's keys_sent_at when it
-          carries a usable one (row 855e4dd0). With no usable stamp the effective
-          deadline IS expected_return_by, so a stampless marker alarms exactly when
-          it does today: the fallback never buys a dead seat silence.
-        - PENDING (no alarm) otherwise (inside the window)
+        - DEAD_NO_RETURN (alarm) when not returned and now >= the effective deadline.
+          That is expected_return_by re-anchored on the marker's keys_sent_at when
+          it carries a usable one. With no usable stamp the effective deadline is
+          expected_return_by, so a stampless marker alarms when it always did:
+          the fallback never buys a dead seat silence.
+        - `PENDING` (no alarm) otherwise (inside the window)
         - every assessment carries `anchor` naming which clock decided its timing,
           so a reader can tell a strong-anchor verdict from a fallback one
         - never raises
@@ -608,46 +607,34 @@ def classify_marker( marker, pressure_record, *, now, wake_proof_nonce=None, wak
 # ---------------------------------------------------------------------------
 def _marker_patterns( base_dir ):
     """
-    The glob patterns a fleet-wide marker sweep has to cover.
+    List the glob patterns a fleet-wide marker sweep has to cover.
 
-    WHY THIS EXISTS RATHER THAN A SINGLE `_resolve_base_dir` (Rick's keying ruling,
-    row db56ac6d). A marker is written under the SEAT's own repo data root. A sweep
-    that globs one directory therefore sees only the seats that happen to share the
-    observer's ambient LUPIN_ROOT, and every other seat's marker is invisible — not
-    late, not malformed, ABSENT. This reader cannot be handed a repo the way the
-    boot-receipt finder can, because it takes no seat: it asks about EVERYBODY at
-    once. So the fix is not "pass it the repo", it is "sweep every repo".
-
-    🔴 EXACTLY ONE LEVEL DOWN, AND THIS IS MEASURED, NOT TIDINESS. A data root is a
-    DIRECT child of the parent, so `<parent>/*/` IS the shape of the thing. The
-    obvious alternative — a recursive `**` sweep, copied from
-    `respin_wake_check.find_misplaced_receipts` — was run against the live tree on
-    2026-09-03 and returned 82 markers where the single-root read returns 71. The
-    extra 11 live in `projects-data/lupin/self-respin-archive-pre-f7c5e349/`:
-    retired markers deliberately parked OUT of the observer's way. A recursive sweep
-    resurrects them — the observer re-classifies all 11 and the janitor, which
-    deletes any RETURNED marker past its TTL, deletes them for good.
-
-    ⇒ SO THE TWO SWEEPS DIFFER ON PURPOSE, and the difference is what each one is
-    FOR. `find_misplaced_receipts` is a DETECTOR whose whole job is to find files
-    OUTSIDE the writer's shape, so recursive is correct there and its docstring says
-    so. This is a READER of live markers, so it must match the writer's shape
-    exactly. Copying the pattern across would have been the same mistake the work
-    order for this change already made once — carrying a mechanism checked for one
-    family into another it was never checked for.
+    A marker is written under its own seat's repo data root. A sweep of one
+    directory sees only the seats that share the observer's ambient LUPIN_ROOT.
 
     Requires:
         - base_dir is a directory path or None
 
     Ensures:
-        - an EXPLICIT base_dir ⇒ that one directory's pattern and nothing else.
+        - an explicit base_dir gives that one directory's pattern and nothing else.
           Tests and explicit callers still mean what they say, so no existing caller
           changes behaviour.
-        - None ⇒ `<parent of the ambient root>/*/<prefix>*.json` — every repo root
+        - None gives `<parent of the ambient root>/*/<prefix>*.json`: every repo root
           under the parent, the ambient root included, at one level and no deeper
-        - a DEGENERATE parent (the ambient root has no parent, or its parent is the
-          filesystem root) falls back to the ambient root alone — a sweep must never
-          widen toward the filesystem root
+        - a degenerate parent (the ambient root has no parent, or its parent is the
+          filesystem root) falls back to the ambient root alone, because a sweep must
+          never widen toward the filesystem root
+        - the sweep covers every repo root because this reader takes no seat to
+          resolve a repo from. The marker of a seat outside the ambient root would
+          be absent, which is neither late nor malformed.
+        - the sweep goes exactly one level down, since a data root is a direct child
+          of the parent. A recursive `**` sweep would also reach the retired markers
+          parked in the lupin data root's self-respin archive. The observer would
+          re-classify them, and the janitor, which deletes any `RETURNED` marker
+          past its TTL, would delete them for good.
+        - this differs from find_misplaced_receipts, which is a detector that must
+          find files outside the writer's shape and so recurses. This is a reader
+          of live markers and must match the writer's shape exactly.
         - never raises
     """
     if base_dir is not None:
@@ -661,16 +648,16 @@ def _marker_patterns( base_dir ):
 
 def read_markers( base_dir=None ):
     """
-    Read every self-re-spin marker the sweep covers, skipping unreadable ones.
+    Read every self-respin marker the sweep covers, skipping unreadable ones.
 
     Requires:
-        - base_dir is a directory path or None (None ⇒ every repo root under the
-          parent of fleet_data_root(), resolved lazily — see _marker_scan_roots)
+        - base_dir is a directory path or None (None means every repo root under
+          the parent of fleet_data_root(), resolved lazily; see _marker_patterns)
 
     Ensures:
         - returns a list of parsed marker dicts (may be empty), ordered by path
-        - a missing directory ⇒ [] (not an error — nothing has fired)
-        - a malformed / unreadable marker file is skipped, never propagated
+        - a missing directory gives [] (not an error, since nothing has fired)
+        - a malformed or unreadable marker file is skipped, never propagated
         - never raises
     """
     return [ marker for _path, marker in _read_markers_with_paths( base_dir ) ]
@@ -678,6 +665,8 @@ def read_markers( base_dir=None ):
 
 def _resolve_base_dir( base_dir ):
     """
+    Resolve the directory that markers and samples live under.
+
     Ensures:
         - returns base_dir when provided (tests + explicit callers win)
         - returns fleet_data_root() (lazily imported to keep this leaf pure) when None
@@ -689,15 +678,22 @@ def _resolve_base_dir( base_dir ):
 
 
 def wake_proof_path( base, session_id ):
-    """Ensures: the canonical wake-proof artifact path for `session_id` (the ONE shape
-    the verb tells the seat to write and the observer reads back)."""
+    """
+    Return the wake-proof artifact path for `session_id`.
+
+    Ensures:
+        - returns the one shape the verb tells the seat to write and the observer
+          reads back
+    """
     return os.path.join( base, f"{WAKE_PROOF_PREFIX}{session_id}.marker" )
 
 
 def read_wake_proof( base, session_id ):
     """
-    Read the CONSUMER-written wake proof for `session_id` — the artifact the rehydrated
-    seat writes, echoing the marker's nonce, once it takes a turn on our wake.
+    Read the consumer-written wake proof for `session_id`.
+
+    The rehydrated seat writes it, echoing the marker's nonce, once it takes a turn
+    on our wake.
 
     Requires:
         - base is a resolved directory path; session_id is the seat's id
@@ -705,10 +701,10 @@ def read_wake_proof( base, session_id ):
     Ensures:
         - returns ( nonce, proof_at ): the nonce the seat echoed on the
           `SELF-RESPIN-WAKE-PROOF: <nonce>` line, and the file's mtime as an aware UTC
-          datetime. The nonce is the token proving the wake reached a TURN and was OURS
-          (a peer cannot echo an unknown nonce).
+          datetime. The nonce proves the wake reached a turn and was ours (a peer
+          cannot echo an unknown nonce).
         - ( None, None ) when the artifact is absent, unreadable, or carries no
-          proof-nonce line — no proof ⇒ the oracle will not confirm RETURNED
+          proof-nonce line, so with no proof the oracle will not confirm `RETURNED`
         - never raises
     """
     if not session_id:
@@ -737,25 +733,26 @@ def keys_sent_path( base, session_id ):
 
 def read_keys_sent_at( base, session_id ):
     """
-    Read the injector's send stamp for `session_id` — the moment the detached job
-    finished typing `/clear` + Enter into the pane.
+    Read the injector's send stamp for `session_id` from its sidecar file.
 
-    WHY A SIDECAR AND NOT A FIELD IN THE MARKER (row 855e4dd0). The injector is a
-    bash chain, and the marker is a JSON file this observer is reading on a 60s
-    tick. Having the chain read-modify-write that JSON risks handing the observer a
-    torn file for a tick; creating an empty sidecar is a single atomic operation
-    that cannot corrupt anything. The FILE'S MTIME IS THE TIMESTAMP, so the chain
-    formats no dates and the two sides cannot disagree on a format — exactly the
-    shape `read_wake_proof` already uses.
+    The stamp is the moment the detached job finished typing `/clear` and Enter
+    into the pane.
 
     Requires:
         - base is a resolved directory path; session_id is the seat's id
 
     Ensures:
-        - returns the sidecar's mtime as an AWARE UTC datetime
+        - returns the sidecar's mtime as an aware UTC datetime
         - returns None when session_id is blank, or the sidecar is absent or
-          unreadable — which is the ordinary case for every marker written before
-          this existed, and degrades to the schedule-time anchor
+          unreadable. That is the ordinary case for every marker written before the
+          sidecar existed, and it degrades to the schedule-time anchor.
+        - the stamp lives in a sidecar, not in the marker JSON. The injector is a
+          bash chain and this observer reads the marker on a 60s tick, so a
+          read-modify-write of that JSON could hand the observer a torn file.
+          Creating an empty sidecar is one atomic operation that cannot corrupt
+          anything.
+        - the file's mtime is the timestamp, so the chain formats no dates and the
+          two sides cannot disagree on a format (the shape `read_wake_proof` uses)
         - never raises
     """
     if not session_id:
@@ -774,8 +771,8 @@ def with_keys_sent( marker, base ):
 
     Ensures:
         - returns a marker dict carrying KEYS_SENT_AT when the sidecar exists
-        - returns the marker UNCHANGED (same object) when no sidecar exists, or when
-          the marker already carries the field — an explicit value always wins, so a
+        - returns the marker unchanged (same object) when no sidecar exists, or when
+          the marker already carries the field. An explicit value always wins, so a
           test fixture or a future in-marker writer is never clobbered by a stale file
         - never mutates the caller's dict when it does add the field (copies first),
           so a marker read once can be classified more than once safely
@@ -815,21 +812,23 @@ def _pressure_by_id( section ):
 # ---------------------------------------------------------------------------
 def observe_fleet_self_respin( *, base_dir=None, now=None, fetch_pressure=None ):
     """
-    Assess every in-flight self-re-spin against the live context-pressure payload.
+    Assess every in-flight self-respin against the live context-pressure payload.
 
     Requires:
-        - base_dir is a directory path or None (None ⇒ fleet_data_root())
-        - now is an aware datetime or None (None ⇒ datetime.now(UTC))
+        - base_dir is a directory path or None (None means every repo root under
+          the parent of fleet_data_root(), as read_markers does)
+        - now is an aware datetime or None (None means datetime.now(UTC))
         - fetch_pressure is a zero-arg callable returning the context_pressure
           section (a { "personas": { persona: record } } dict), or None to use
           the live :7999 reverse-proxy reader
 
     Ensures:
         - returns a list[ SelfRespinAssessment ], one per marker on disk
-        - each marker is matched to its pressure record BY session_id (a record
+        - each marker is matched to its pressure record by session_id (a record
           keyed under a persona the marker did not name still matches on id)
-        - an unreachable pressure fetch (personas None/missing) ⇒ every marker is
-          classified with a None record (PENDING inside the window, DEAD past it)
+        - an unreachable pressure fetch (personas None/missing) means every marker
+          is classified with a None record (`PENDING` inside the window,
+          DEAD_NO_RETURN past it)
         - never raises on a single bad marker
     """
     if now is None:
@@ -873,12 +872,14 @@ def observe_fleet_self_respin( *, base_dir=None, now=None, fetch_pressure=None )
 # ---------------------------------------------------------------------------
 def _read_markers_with_paths( base_dir=None ):
     """
-    Like read_markers, but pairs each parsed marker with its file path so the
-    janitor can delete it. Kept separate so read_markers stays untouched.
+    Read every marker like read_markers, paired with its file path.
+
+    The janitor needs the path to delete a marker. This is a separate function so
+    read_markers stays untouched.
 
     Ensures:
         - returns a list of ( path, marker_dict ), sorted by path
-        - a missing directory ⇒ [] ; an unreadable/malformed file is skipped
+        - a missing directory gives []; an unreadable or malformed file is skipped
         - never raises
     """
     paths = []
@@ -897,7 +898,13 @@ def _read_markers_with_paths( base_dir=None ):
 
 
 def _best_effort_unlink( path ):
-    """Ensures: removes `path`, returning True on success and False on any OSError; never raises."""
+    """
+    Remove `path`, tolerating failure.
+
+    Ensures:
+        - returns True on success and False on any OSError
+        - never raises
+    """
     try:
         os.remove( path )
         return True
@@ -908,24 +915,26 @@ def _best_effort_unlink( path ):
 def sweep_returned_markers( *, base_dir=None, now=None, fetch_pressure=None,
                             ttl_seconds=DEFAULT_RETURNED_TTL_SECONDS ):
     """
-    Delete self-re-spin markers that are DONE: confirmed RETURNED AND older than
-    the TTL. Hygiene only — the verb and observer both work without it.
+    Delete self-respin markers that are done: confirmed `RETURNED` and older than the TTL.
+
+    This is hygiene only. The verb and observer both work without it.
 
     Requires:
-        - base_dir is a directory path or None (None ⇒ fleet_data_root())
-        - now is an aware datetime or None (None ⇒ datetime.now(UTC))
+        - base_dir is a directory path or None (None means every repo root under
+          the parent of fleet_data_root(), as read_markers does)
+        - now is an aware datetime or None (None means datetime.now(UTC))
         - fetch_pressure is a zero-arg callable returning the context_pressure
           section, or None to use the live reader
         - ttl_seconds is a non-negative number of seconds
 
     Ensures:
         - returns the list of session_ids whose markers were deleted (may be empty)
-        - deletes a marker IFF classify_marker(...) == RETURNED AND
-          (now - fired_at) > ttl_seconds — a RETURNED verdict guarantees the
-          classifier already parsed fired_at, so no separate parse-guard is needed
-        - a marker that is PENDING, any alarm verdict, or RETURNED-but-younger than
-          the TTL is LEFT in place
-        - reuses classify_marker READ-ONLY (the oracle is not reimplemented here)
+        - deletes a marker iff classify_marker(...) == `RETURNED` and
+          (now - fired_at) > ttl_seconds. A `RETURNED` verdict guarantees the
+          classifier already parsed fired_at, so no separate parse guard is needed
+        - a marker that is `PENDING`, has any alarm verdict, or is `RETURNED` but
+          younger than the TTL is left in place
+        - reuses classify_marker read-only (the oracle is not reimplemented here)
         - a failed unlink is skipped (not counted, not raised)
         - never raises on a single bad marker or an unreachable pressure fetch
     """
@@ -981,7 +990,7 @@ def sweep_returned_markers( *, base_dir=None, now=None, fetch_pressure=None,
 # ---------------------------------------------------------------------------
 def build_respin_sample( marker, pressure_record, assessment, now ):
     """
-    Build ONE no-alarm sample row for an in-flight self-respin marker.
+    Build one no-alarm sample row for an in-flight self-respin marker.
 
     Requires:
         - marker is a parsed marker dict; assessment is its SelfRespinAssessment
@@ -990,21 +999,19 @@ def build_respin_sample( marker, pressure_record, assessment, now ):
 
     Ensures:
         - returns a JSON-serializable dict carrying schema_version, the marker's
-          pre_clear_status/pre_clear_pct, the CURRENT consumption_pct_of_window
-          (post_settle_pct — None when the record is absent or the field is
+          pre_clear_status/pre_clear_pct, the current consumption_pct_of_window
+          (post_settle_pct, None when the record is absent or the field is
           non-numeric), elapsed_s since fired_at (None when fired_at is
-          missing/naive/unparseable), the observed verdict, the ANCHOR that verdict's
-          timing rested on, and send_delay_s — the seconds between the fire and the
-          send, None whenever the marker carries no usable keys_sent_at
-        - decides NOTHING and emits NOTHING — pure construction
+          missing, naive, or unparseable), the observed verdict, the anchor that
+          verdict's timing rested on, and send_delay_s, the seconds between the fire
+          and the send (None whenever the marker carries no usable keys_sent_at)
+        - decides nothing and emits nothing; it is pure construction
         - never raises
-
-    WHY send_delay_s IS RECORDED (row 855e4dd0). The whole row turned on a number
-    nobody had: how long a BUSY pane sits on a queued `/clear` before it takes it.
-    Two hand-measured points existed — an idle seat at ~0s and a busy seat at
-    ~232s — and a grace window was being argued over on that. This is the sample
-    that turns the argument into a distribution. It costs one subtraction and,
-    exactly like the rest of this instrument, decides nothing.
+        - send_delay_s is recorded because the grace window depends on how long a
+          busy pane sits on a queued `/clear` before it takes it, and only two
+          hand-measured points existed (an idle seat at about 0s, a busy seat at
+          about 232s). The sample turns that into a distribution. It costs one
+          subtraction and, like the rest of this instrument, decides nothing.
     """
     fired_at = _parse_iso( marker.get( "fired_at" ) )
     elapsed  = ( now - fired_at ).total_seconds() if fired_at is not None else None
@@ -1035,15 +1042,15 @@ def build_respin_sample( marker, pressure_record, assessment, now ):
 
 def collect_respin_samples( *, base_dir=None, now=None, fetch_pressure=None ):
     """
-    Build one no-alarm sample per in-flight self-respin marker for THIS tick.
+    Build one no-alarm sample per in-flight self-respin marker for this tick.
 
     Mirrors observe_fleet_self_respin's glob + fetch + match, but instead of
     returning verdicts it returns the raw sample rows (schema-versioned). Reuses
-    classify_marker READ-ONLY to stamp the observed verdict beside the magnitudes.
+    classify_marker read-only to stamp the observed verdict beside the magnitudes.
 
-    Requires / Ensures: same seams as observe_fleet_self_respin (all injectable);
-    returns list[ sample_dict ] (one per marker), [] when no markers exist, and
-    records with a None pressure record when the fetch is unreachable. Never raises
+    Requires / Ensures: same seams as observe_fleet_self_respin (all injectable).
+    Returns list[ sample_dict ] (one per marker) and [] when no markers exist.
+    Records a None pressure record when the fetch is unreachable. Never raises
     on a single bad marker.
     """
     if now is None:
@@ -1079,30 +1086,26 @@ def append_respin_samples( samples, base_dir=None ):
 
     Requires:
         - samples is a list of JSON-serializable dicts (build_respin_sample shape)
-        - base_dir is a directory path or None (None ⇒ fleet_data_root())
-
-    ⚠️ THIS ONE STAYS AMBIENT ON PURPOSE, and it is the one base_dir seam on this
-    module that Rick's keying ruling does NOT move (row db56ac6d). The ruling is
-    about a SEAT's data — a marker, a receipt, a hold — which belongs under the
-    seat's own repo. This file is not a seat's data: it is the OBSERVER's own
-    fleet-wide instrument log, one writer, one reader, no seat. Splitting it per
-    repo would fragment a single time series into N of them and hand its future
-    readers the very multi-root sweep this change exists to remove from the marker
-    path. The markers are read from every root; the samples are written to one.
+        - base_dir is a directory path or None (None means fleet_data_root())
 
     Ensures:
         - appends one JSON line per sample to <base>/RESPIN_SAMPLES_FILENAME
-        - RETENTION: rotation happens BEFORE a write that WOULD push the live file
-          past RESPIN_SAMPLES_MAX_BYTES — the live file is renamed to `<file>.1`
-          (os.replace, overwriting any prior `.1`) and a fresh file started. Because
-          the cap is checked before (not after) the write, each file stays <= the
-          cap for any batch <= the cap, so `<file>` + `<file>.1` together stay UNDER
-          2× the cap, and the OLDEST samples (the previous `.1`) are the ones
-          dropped. Stat + rename per overflow; never a full rewrite.
-        - a serialization failure writes NOTHING and returns 0 (the batch is
+        - the samples are written to one ambient directory, while markers are read
+          from every repo root. A marker, receipt or hold is a seat's data and
+          belongs under that seat's own repo. This log is the observer's own
+          fleet-wide instrument, with one writer, one reader and no seat. Splitting
+          it per repo would fragment one time series into several.
+        - retention: rotation happens before a write that would push the live file
+          past RESPIN_SAMPLES_MAX_BYTES. The live file is renamed to `<file>.1`
+          (os.replace, overwriting any prior `.1`) and a fresh file is started.
+          The cap is checked before (not after) the write, so each file stays <= the
+          cap for any batch <= the cap, and `<file>` + `<file>.1` together stay
+          under 2x the cap. The oldest samples (the previous `.1`) are the ones
+          dropped. The cost is a stat and a rename per overflow, never a full rewrite.
+        - a serialization failure writes nothing and returns 0 (the batch is
           serialized up front, before any file is touched)
         - returns the number of lines successfully written
-        - best-effort: an OSError mid-write returns the count so far; NEVER raises
+        - best-effort: an OSError mid-write returns the count so far; never raises
           (this rides the observer tick)
     """
     if not samples:
@@ -1135,18 +1138,16 @@ def _fetch_live_pressure():   # pragma: no cover - live HTTP boundary, exercised
     """
     Fetch the live `context_pressure` section from the arbiter state service.
 
-    HOST-SIDE reader. Every caller of this function — the self_respin MCP verb's
-    `_live_own_pressure` and the observer loop's default fetch — runs on the HOST
-    (the MCP child in a tmux pane; the arbiter as a `systemctl --user` service),
-    NOT in a container. So it reads `arbiter local state url` (loopback,
-    http://127.0.0.1:8001/state), NEVER the container-scoped `arbiter vigilance
-    state url` (http://host.docker.internal:8001/state) — that hostname does not
-    resolve on the host, and reading it made EVERY self_respin marker record
-    pre_clear_status "unknown" (row 275cb0b9). The :7999 reverse-proxy router keeps
-    reading the vigilance key directly; it is unaffected.
-
     Ensures:
         - returns the section dict, or { "personas": None } on any failure
+        - reads `arbiter local state url` (loopback, http://127.0.0.1:8001/state)
+          and never the container-scoped `arbiter vigilance state url`
+          (http://host.docker.internal:8001/state). Every caller (the self_respin
+          MCP verb's `_live_own_pressure` and the observer loop's default fetch)
+          runs on the host, in a tmux pane or a `systemctl --user` service, not in
+          a container. That hostname does not resolve on the host, so reading it
+          would make every self_respin marker record pre_clear_status "unknown".
+          The :7999 reverse-proxy router keeps reading the vigilance key directly.
         - never raises
     """
     try:
@@ -1176,7 +1177,7 @@ STALE_MCP_REMEDY        = "restart the seat; a /clear doesn't reload the MCP"
 
 def run_stale_mcp_check( runner=None, script_path=None, timeout=STALE_MCP_RUN_TIMEOUT ):
     """
-    Run stale_mcp_check.py --json and return only the STALE process records.
+    Run stale_mcp_check.py --json and return only the stale process records.
 
     Requires:
         - runner( argv, timeout ) -> ( returncode, stdout ), or None for subprocess
@@ -1185,7 +1186,7 @@ def run_stale_mcp_check( runner=None, script_path=None, timeout=STALE_MCP_RUN_TI
     Ensures:
         - returns the list of records whose `stale` is True; [] when nothing is stale
         - exit 0 and exit 1 both carry a report; exit 2 means the check produced
-          nothing trustworthy, so it RAISES rather than reporting "nothing stale"
+          nothing trustworthy, so it raises rather than reporting "nothing stale"
 
     Raises:
         - RuntimeError on exit code 2, any other exit code, or unparseable output
@@ -1212,9 +1213,11 @@ def _run_subprocess( argv, timeout ):
 
 def _default_seat_lookup( record ):   # pragma: no cover - bridge/lineage IO boundary; injected in tests
     """
-    Map a stale-MCP record to ( seat_persona, manager_persona ) through the pane's
-    tmux session name -> the seat's bridge -> spawn lineage. ( None, None ) on any
-    miss; a seat whose manager cannot be resolved is never guessed at.
+    Map a stale-MCP record to ( seat_persona, manager_persona ), or ( None, None ).
+
+    The lookup goes from the pane's tmux session name to the seat's bridge to its
+    spawn lineage. Any miss gives ( None, None ), and a seat whose manager cannot
+    be resolved is never guessed at.
     """
     from lupin_cli.claude_code.hooks.lib.session_bridge import find_session_by_tmux, get_voice_persona
     from cosa.agents.heartbeat_arbiter.manager_resolver import resolve_manager
@@ -1235,15 +1238,18 @@ def _default_seat_lookup( record ):   # pragma: no cover - bridge/lineage IO bou
 # ---------------------------------------------------------------------------
 class SelfRespinObserverLoop:
     """
-    Standing self-re-spin liveness loop. The respin half is inert unless `arbiter self
-    respin observer enabled` is True. The stale-MCP half (row 97c5bd94) has its OWN gate,
-    `stale mcp check delivery enabled` (ConfigurationManager key, explicit default True,
-    no INI line yet), so it delivers with the observer flag False and switching it on
-    never switches respin advisories on. Each tick it (a) classifies every in-flight marker against the
-    live pressure and fires ONE advisory per alarm marker (DEAD_NO_RETURN /
-    IDENTITY_MISMATCH / MALFORMED_MARKER), and (b) sweeps confirmed-RETURNED markers
-    past their TTL. The pressure read, advisory sink, clock, and marker base dir are
-    ALL injectable, so the detection + flood-guard logic is unit-provable with fakes.
+    Standing self-respin liveness loop that alarms on dead seats and sweeps done markers.
+
+    The respin half is inert unless `arbiter self respin observer enabled` is True.
+    The stale-MCP half has its own gate, `stale mcp check delivery enabled`
+    (ConfigurationManager key, explicit default True, no INI line yet). It delivers
+    with the observer flag False, and switching it on never switches respin
+    advisories on. Each tick the loop does two things. (a) It classifies every
+    in-flight marker against the live pressure and fires one advisory per alarm
+    marker (DEAD_NO_RETURN / IDENTITY_MISMATCH / MALFORMED_MARKER). (b) It sweeps
+    confirmed-`RETURNED` markers past their TTL. The pressure read, advisory sink,
+    clock, and marker base dir are all injectable, so the detection and flood-guard
+    logic is unit-provable with fakes.
     """
 
     def __init__(
@@ -1259,18 +1265,21 @@ class SelfRespinObserverLoop:
         seat_lookup_fn    = None,
     ):
         """
+        Build the loop with injectable seams; no thread is started.
+
         Requires:
             - config_mgr exposes .get( key, default=, return_type= )
             - fetch_pressure_fn() -> the context_pressure section ({personas: {...}}),
               or None to use the live host-loopback reader. Production injects an
-              IN-PROCESS store read (the arbiter already holds the section — no HTTP
+              in-process store read (the arbiter already holds the section, so no HTTP
               self-call); tests inject a fake.
-            - base_dir is the marker directory or None (None ⇒ fleet_data_root())
-            - advisory_fn( message ) -> None emits ONE operator advisory (default: a
+            - base_dir is the marker directory or None (None means every repo root
+              under the parent of fleet_data_root(), as read_markers does)
+            - advisory_fn( message ) -> None emits one operator advisory (default: a
               banner print; production injects the throttled escalation rail)
             - now_fn() -> aware datetime (default: datetime.now(utc))
             - stale_mcp_fn() -> list of stale MCP records (see run_stale_mcp_check), or
-              None to leave the stale-MCP delivery OFF; production injects the real run
+              None to leave the stale-MCP delivery off; production injects the real run
             - dm_push_fn( recipient_persona, thread_id, body ) -> outcome dict whose
               "outcome" is "dispatched" on success (the arbiter's DM-push hop)
             - seat_lookup_fn( record ) -> ( seat_persona, manager_persona ), either None
@@ -1321,10 +1330,10 @@ class SelfRespinObserverLoop:
         Run one observe + sweep pass.
 
         Ensures:
-            - flag OFF -> no IO; returns {enabled:False, alarms:0, advised:0, swept:0}
-            - flag ON  -> classify every marker; fire ONE advisory per alarm marker
-              (one-shot per (session_id, verdict) — a still-alarming marker across
-              ticks fires nothing more), then sweep confirmed-RETURNED-past-TTL markers
+            - flag off -> no IO; returns {enabled:False, alarms:0, advised:0, swept:0}
+            - flag on  -> classify every marker; fire one advisory per alarm marker
+              (one-shot per (session_id, verdict), so a still-alarming marker across
+              ticks fires nothing more), then sweep confirmed-`RETURNED`-past-TTL markers
             - `_advised` is intersected with the live alarm set after the pass, so a
               marker that stops alarming (swept, or came back) drops its one-shot key
             - never raises: observe/sweep already swallow per-marker errors; a total
@@ -1382,11 +1391,11 @@ class SelfRespinObserverLoop:
               seat's manager; a process is keyed by ( pid, start_ticks ) (the stat integer, not
               the drifting start_epoch float) so a recycled
               pid is a new process, and one already told is never told again
-            - a DM the server ANSWERED and refused (an http_status, e.g. 422) is logged with
-              its status and body, and the tell goes to the operator advisory instead, ONCE
-              per process — it is not retried every tick (a refused DM retried silently for
-              ever is how nobody got told)
-            - a DM with NO http_status (refused connection, timeout: the server never
+            - a DM the server answered and refused (an http_status, e.g. 422) is logged with
+              its status and body, and the tell goes to the operator advisory instead, once
+              per process. It is not retried every tick (a refused DM retried silently for
+              ever would leave nobody told)
+            - a DM with no http_status (refused connection, timeout: the server never
               answered, e.g. :7999 restarting) is logged, not advised and not marked told,
               so the next tick retries the manager
             - a seat whose manager cannot be resolved (or with no DM hop wired) goes to
@@ -1441,19 +1450,20 @@ class SelfRespinObserverLoop:
 
     def record_once( self ) -> dict:
         """
-        Record ONE no-alarm instrument pass (row 39c88ee7): append this tick's
-        respin samples to the JSONL. This is the WHOLE deliverable of the
-        instrument row — it emits NOTHING, changes no verdict, and fires no
-        advisory; it only captures the raw magnitudes (pre_clear_pct, post-settle
-        pct, elapsed, verdict) for later calibration. Kept SEPARATE from sweep_once
-        precisely so the recorder can never perturb the alarm/sweep path.
+        Append this tick's respin samples to the JSONL as one no-alarm pass.
+
+        The recorder emits nothing, changes no verdict and fires no advisory. It only
+        captures the raw magnitudes (pre_clear_pct, post-settle pct, elapsed, verdict)
+        for later calibration.
 
         Ensures:
-            - flag OFF ⇒ no IO; returns { "enabled": False, "recorded": 0 }
-            - flag ON  ⇒ collect + append; returns { "enabled": True,
+            - flag off -> no IO; returns { "enabled": False, "recorded": 0 }
+            - flag on  -> collect + append; returns { "enabled": True,
               "recorded": <lines written> }
             - never raises (collector/appender already swallow per-tick errors; a
               total failure is demoted to a zero count so the daemon survives)
+            - it is kept separate from sweep_once so the recorder can never perturb
+              the alarm and sweep path
         """
         if not self._enabled():
             return { "enabled": False, "recorded": 0 }
@@ -1471,19 +1481,18 @@ class SelfRespinObserverLoop:
 
     def _emit_advisory( self, assessment ) -> None:
         """
-        Compose + fire the ONE operator advisory for an alarming marker.
+        Compose and fire the one operator advisory for an alarming marker.
 
         Ensures:
-            - names the persona/session, the verdict, the reason, AND the anchor the
+            - names the persona/session, the verdict, the reason, and the anchor the
               timing rested on; delegates delivery to the injected advisory_fn;
               never raises (sweep_once guards)
-
-        The anchor is spelled out here rather than left to the dataclass because
-        this string IS the surface an operator reads under time pressure (row
-        855e4dd0). A DEAD_NO_RETURN that rests on the schedule-time anchor is a
-        weaker claim than one that rests on a real send stamp — the seat may simply
-        not have reached a turn boundary yet — and an alarm that hides which of the
-        two it is asks the reader to assume.
+            - the anchor is spelled out in the message, not left to the dataclass,
+              because this string is what an operator reads under time pressure. A
+              DEAD_NO_RETURN resting on the schedule-time anchor is a weaker claim
+              than one resting on a real send stamp, since the seat may not have
+              reached a turn boundary yet. An alarm that hides which of the two it
+              is asks the reader to assume.
         """
         if assessment.anchor == ANCHOR_KEYS_SENT:
             anchor_note = "timed from when the keystrokes were sent"
@@ -1513,7 +1522,7 @@ class SelfRespinObserverLoop:
     # -- daemon lifecycle -----------------------------------------------------
 
     def _loop( self ) -> None:   # pragma: no cover - thread body; sweep_once covered directly
-        """Daemon loop until stop(); each sweep is exception-guarded so a transient error never kills it."""
+        """Loop until stop(), guarding each sweep so a transient error never kills it."""
         while not self._stop_event.is_set():
             try:
                 self.sweep_once()
@@ -1524,9 +1533,10 @@ class SelfRespinObserverLoop:
 
     def start( self ) -> bool:
         """
-        Spawn the daemon thread — ONLY if a flag is enabled (the observer's, or the
-        stale-MCP delivery's) and no thread runs.
-        Returns True if a thread was started, else False (the no-op rollout gate).
+        Spawn the daemon thread only if a flag is enabled and no thread runs.
+
+        The flags are the observer's and the stale-MCP delivery's. Returns True if a
+        thread was started, else False (the no-op rollout gate).
         """
         if not ( self._enabled() or self._stale_mcp_enabled() ):
             return False
@@ -1549,6 +1559,8 @@ class SelfRespinObserverLoop:
 # ---------------------------------------------------------------------------
 def render_observer_table( assessments ):
     """
+    Render the assessments as a fixed-width table.
+
     Ensures:
         - returns a multi-line string: header + one row per assessment
         - a friendly one-liner when there are no markers

@@ -1,29 +1,22 @@
 #!/usr/bin/env python3
 """
-Heartbeat Arbiter — v2.1 direct-state fleet render + snapshot (pure).
+Pure fleet liveness block, snapshot, table, tick and change signature for the arbiter.
 
-The consumer-side of the v2.1 "direct-state visibility" design (arbiter design
-`03` §10.2-§10.4). The arbiter rebuilds the fleet view every poll; THIS module
-turns that view (+ the per-session bridge-mtime liveness clock) into:
+This is the consumer side of the direct-state visibility design. The arbiter rebuilds the fleet view every poll.
+This module turns that view, plus the per-session bridge-mtime liveness clock, into the following.
 
-    - a per-session LIVENESS block — ages off direct signals + a verdict label,
-      kept ORTHOGONAL to the semantic `state` column (redline C4 / §10.2:
-      "Never collapse state and liveness");
-    - a JSON-able fleet SNAPSHOT for the `GET /api/arbiter/fleet-snapshot`
-      surface (§10.4);
-    - a full-fleet TABLE rendered on change, and a one-line TICK showing the
-      duration-since-last-change when nothing changed (§10.3 / D1);
-    - a change SIGNATURE over the SEMANTIC fields only (state/holding/stuck/
-      roster) so the continuously-advancing liveness ages do NOT count as a
-      "change" (else every poll would re-print the full table).
+    - a per-session liveness block: ages off direct signals plus a verdict label, kept orthogonal to the semantic `state` column (never collapse state and liveness)
+    - a JSON-able fleet snapshot for the `GET /api/arbiter/fleet-snapshot` surface
+    - a full-fleet table rendered on change, and a one-line tick showing the time since the last change when nothing changed
+    - a change signature over the semantic fields only (state, holding, stuck, roster)
 
-Liveness is shown as honest AGES, never a bare boolean — "a binary 'alive' is
-itself an inference; a timestamp is not" (source analysis §3). The verdict label
-(`LIVE` / `quiet Nm` / `stale Nm` / `offline`) rides OVER the ages but never
-hides them.
+The signature leaves out the liveness ages, because they advance continuously and every poll would otherwise re-print the full table.
+Liveness is shown as honest ages, never a bare boolean, because a binary "alive" is itself an inference and a timestamp is not.
+The verdict label (`LIVE`, `quiet Nm`, `stale Nm`, `offline`) rides over the ages but never hides them.
 
-Pure + never-raises. Design authority: lupin
-    src/rnd/v0.1.8/2026.06.04-heartbeat-hook/03-arbiter-design.md §10.
+Pure and never raises.
+
+Design: src/rnd/v0.1.8/2026.06.04-heartbeat-hook/03-arbiter-design.md (direct-state fleet render).
 """
 import datetime
 
@@ -47,11 +40,11 @@ DEFAULT_STALE_SECONDS   = 3600    # within an hour ⇒ stale Nm; beyond ⇒ offl
 
 def _fmt_age( seconds ):
     """
-    Human-compact age string: '4s' / '6m' / '2h' / '3d'; '—' for None/negative.
+    Format an age in seconds as a compact string such as 4s, 6m, 2h or 3d.
 
     Ensures:
-        - None ⇒ "—"; a future/negative age clamps to "0s"
-        - sub-minute ⇒ Ns, sub-hour ⇒ Nm, sub-day ⇒ Nh, else Nd (floored)
+        - None gives "—"; a future or negative age clamps to "0s"
+        - sub-minute gives Ns, sub-hour gives Nm, sub-day gives Nh, else Nd (floored)
         - never raises
     """
     if seconds is None:
@@ -90,14 +83,14 @@ def _event_age( last_event_ts, now ):
 
 def _verdict( freshest_age, live_seconds, quiet_seconds, stale_seconds ):
     """
-    Liveness verdict label from the FRESHEST direct-signal age (§10.2).
+    Return the liveness verdict label for the freshest direct-signal age.
 
     Ensures:
-        - None (no signal at all) ⇒ "offline"
-        - age <= live_seconds        ⇒ "LIVE"
-        - age <= quiet_seconds       ⇒ "quiet {age}"
-        - age <= stale_seconds       ⇒ "stale {age}"
-        - else                       ⇒ "offline"
+        - None (no signal at all) gives "offline"
+        - age <= live_seconds gives "LIVE"
+        - age <= quiet_seconds gives "quiet {age}"
+        - age <= stale_seconds gives "stale {age}"
+        - anything older gives "offline"
         - the label carries the age (never a bare state); never raises
     """
     if freshest_age is None:
@@ -119,93 +112,27 @@ def compute_liveness( view, bridge_mtime, now,
                       hold_mtime    = None,
                       transcript_mtime = None ):
     """
-    Build the per-session LIVENESS block — SIX distinct ages + verdict.
+    Build the per-session liveness block: distinct signal ages plus one verdict label.
 
-    The verdict rides the FRESHEST of up-to-SIX direct-signal ages (arbiter
-    liveness fix, Part 7 / Step 1.5 + DM-as-liveness toggle, 2026-06-17 +
-    hold-mtime, task 70be69f2) — the OLD code saw only {bridge, event}, so a
-    worker live-by-commons or live-by-idle_prompt (but with a stale stop-event)
-    read `offline`: the false WHOLE-FLEET-STALL bug. The ages stay DISTINCT
-    columns (never collapsed):
-        - bridge_age_s      — bridge-file mtime (wedge-resilient PRIMARY, §10.1)
-        - event_age_s       — last STOP/non-idle_prompt event ts (stop-event age)
-        - commons_age_s     — last commons_who activity ts
-        - idle_prompt_age_s — last kind=idle_prompt recency beacon ts (Step 1.3)
-        - dm_age_s          — last SENT ai_to_ai DM ts (DM-as-liveness toggle):
-          an EXPLICIT, store-sourced, hook-independent sign of LIFE that closes
-          the coordination-only / MCP-tool coverage hole — a manager whose only
-          activity is dm_send (no Read/Edit/Bash, so its bridge-mtime may never
-          bump) is genuinely alive but today ages into STALE. dm_age_s is ALWAYS
-          computed (an auditable column — "LIVE by DM @HH:MM"), but enters the
-          freshest-of union ONLY when `count_dm` is True (the runtime toggle
-          `arbiter count dm as liveness`, default TRUE). count_dm=False
-          reproduces the prior 4-signal verdict BYTE-IDENTICALLY (the
-          reversibility guarantee). DM is a LIFE signal, never a PROGRESS or
-          STATE signal (C4): dm_ts feeds liveness ONLY, never the progress
-          signature.
-        - hold_age_s        — `.heartbeat-hold-<sid>.json` file mtime (task
-          70be69f2): an interactive, no-`/loop` MANAGER that refreshes its hold
-          every Stop (held_at re-stamped → file mtime bumps) is provably ALIVE
-          even when it never posts to commons / bumps the bridge — the canonical
-          MANAGER-STALE false-positive (Tiberius's sess 6ec69a8c: hold rewritten
-          every turn yet reported "silent 75m+" because the detector read only
-          commons last_post_ts). hold_age is UNCONDITIONAL (no toggle): a fresh
-          hold mtime is the Stop hook having run = the process is alive, an
-          unambiguous fail-safe sign of LIFE. ADDITIVE — it can only make a
-          session read MORE alive, NEVER suppress a genuinely-dark one (a dark
-          session's hold mtime ages out with everything else). LIFE signal only,
-          never STATE / the progress signature (C4). hold_mtime=None ⇒ hold_age_s
-          is None and the verdict is byte-identical to the prior 5-signal block.
-        - transcript_age_s  — the session's transcript `.jsonl` file mtime (bug
-          fb332fcd): the harness appends to the transcript on EVERY assistant /
-          tool event, so its mtime bumps DURING a long single-turn tool sequence
-          (plan-mode drafting, a big multi-Read/Edit run) — exactly when NO Stop
-          fires and the other six signals all age past STALE. The canonical
-          MANAGER-STALE false-positive this closes: a manager deep in an APPROVED
-          PLAN emits no Stop for the whole plan turn, so bridge/event/commons/
-          idle_prompt/dm/hold all age out and the detector poked an actively-
-          working manager. transcript_age is UNCONDITIONAL (no toggle, like
-          hold_age): a fresh transcript mtime is the process actively doing work
-          = an unambiguous fail-safe sign of LIFE. ADDITIVE — it can only make a
-          session read MORE alive, NEVER suppress a genuinely-dark one (a
-          dark/exited session's transcript stops appending → its mtime ages out
-          with everything else, and a MISSING/unreadable transcript_path
-          contributes NO signal at all — None, never a spurious-fresh value).
-          LIFE signal only, never STATE / the progress signature (C4).
-          transcript_mtime=None ⇒ transcript_age_s is None and the verdict is
-          byte-identical to the prior 6-signal block.
-    A session is LIVE if ANY counted signal is fresh (bias-to-alive); offline
-    only when NONE is recent.
+    The verdict rides the freshest of up to seven direct-signal ages, and the ages stay distinct columns, never collapsed.
+    Counting only bridge and event ages made a worker read `offline` when it was live by commons or idle_prompt but had a stale stop-event. That was a false whole-fleet stall.
+    A session is `LIVE` if any counted signal is fresh (bias to alive), and offline only when none is recent.
 
     Requires:
-        - view is a per-session fleet-view dict (build_fleet_view output) — it
-          carries last_event_ts / commons_ts / idle_prompt_ts / dm_ts as
-          DISTINCT fields
+        - view is a per-session fleet-view dict (build_fleet_view output) carrying last_event_ts, commons_ts, idle_prompt_ts and dm_ts as distinct fields
         - bridge_mtime is an epoch-seconds float or None (get_bridge_mtime)
         - now is an aware datetime; thresholds are positive seconds
-        - count_dm is a bool — whether dm_age joins the freshest-of union
-        - hold_mtime is an epoch-seconds float or None (the hold-file mtime;
-          the arbiter reads it out-of-band per session, mirroring bridge_mtime)
+        - count_dm is a bool: whether dm_age joins the freshest-of union
+        - hold_mtime is an epoch-seconds float or None (the hold-file mtime; the arbiter reads it out-of-band per session, mirroring bridge_mtime)
+        - transcript_mtime is an epoch-seconds float or None (the transcript file mtime, read out-of-band like hold_mtime)
 
     Ensures:
-        - returns { bridge_age_s, event_age_s, commons_age_s, idle_prompt_age_s,
-          dm_age_s, hold_age_s, freshest_age_s, verdict } — ages are int seconds
-          (or None), verdict is the §10.2 label off `freshest_age_s = min(present
-          counted ages)`
-        - dm_age_s is ALWAYS present (auditable) regardless of count_dm; it joins
-          the freshest-of union ONLY when count_dm is True. count_dm=False ⇒ the
-          freshest_age_s + verdict are byte-identical to the prior 4-signal block
-        - hold_age_s is present iff hold_mtime is not None; when present it ALWAYS
-          joins the freshest-of union (unconditional fail-safe LIFE signal).
-          hold_mtime=None ⇒ hold_age_s is None and the verdict matches the prior
-          5-signal block (additive, reversible)
-        - transcript_age_s is present iff transcript_mtime is not None; when
-          present it ALWAYS joins the freshest-of union (unconditional fail-safe
-          LIFE signal, like hold_age_s). transcript_mtime=None ⇒ transcript_age_s
-          is None and the verdict matches the prior 6-signal block (additive,
-          reversible) — a missing/unreadable transcript is NO signal, so a
-          genuinely-dark session is never masked (bug fb332fcd non-negotiable #1)
-        - state is NOT consulted here (orthogonal columns, C4)
+        - returns { bridge_age_s, event_age_s, commons_age_s, idle_prompt_age_s, dm_age_s, hold_age_s, transcript_age_s, freshest_age_s, verdict }; ages are int seconds (or None) and the verdict is the `_verdict` label off `freshest_age_s = min(present counted ages)`
+        - the ages come from the bridge-file mtime (the wedge-resilient primary), the last stop (non-idle_prompt) event ts, the last commons_who ts, the last idle_prompt beacon ts, the last sent ai_to_ai DM ts, the hold-file mtime and the transcript mtime
+        - dm_age_s is always present (auditable) regardless of count_dm; it joins the freshest-of union only when count_dm is True. It is a store-sourced, hook-independent sign of life for a manager whose only activity is dm_send, whose bridge mtime may never bump. count_dm=False makes freshest_age_s and the verdict byte-identical to the prior 4-signal block. DM is a life signal, never a progress or state signal
+        - hold_age_s is present iff hold_mtime is not None; when present it always joins the freshest-of union. A fresh hold mtime means the Stop hook ran, so an interactive manager that refreshes its hold every turn is alive even if it never posts to commons. It can only make a session read more alive, never hide a dark one, whose hold mtime ages out like every other signal. hold_mtime=None means hold_age_s is None and the verdict matches the prior 5-signal block
+        - transcript_age_s is present iff transcript_mtime is not None; when present it always joins the freshest-of union. The harness appends to the transcript on every assistant or tool event, so its mtime bumps during a long single-turn tool sequence (plan-mode drafting, a big multi-file edit run) when no Stop fires and the other signals age past stale. A missing or unreadable transcript is no signal, so a dark session is never masked. transcript_mtime=None means transcript_age_s is None and the verdict matches the prior 6-signal block
+        - state is not consulted here (orthogonal columns)
         - never raises
     """
     is_view         = isinstance( view, dict )
@@ -256,12 +183,10 @@ def compute_liveness( view, bridge_mtime, now,
 
 def _sid_matches( a, b ):
     """
-    Prefix-tolerant session-id match (short 8-char ids vs full uuids).
+    Say whether two session ids match, tolerating short-id versus full-uuid forms.
 
-    Mirrors `manager_resolver._id_matches` — kept LOCAL so build_snapshot's role
-    membership test stays self-contained and pure (no import of a sibling's
-    private symbol). The fleet_view keys are often short 8-char ids while the
-    manager set carries full slugified uuids, so equality alone under-matches.
+    This mirrors `manager_resolver._id_matches` but is kept local, so build_snapshot's role membership test stays self-contained and imports no private sibling symbol.
+    The fleet_view keys are often short 8-char ids while the manager set carries full uuids, so equality alone under-matches.
 
     Ensures:
         - True when either id equals or is a prefix of the other; False if either
@@ -274,11 +199,10 @@ def _sid_matches( a, b ):
 
 def _lookup_dead( process_dead, sid ):
     """
-    Prefix-tolerant membership test for the confirmed-dead session set.
+    Say whether sid prefix-matches any entry of the confirmed-dead session set.
 
-    Mirrors _sid_matches' short-id/full-uuid tolerance so a `fleet_view` key
-    (often an 8-char id) matches a dead-set entry carrying the full uuid, and
-    vice-versa. A falsy / empty `process_dead` is never a match.
+    This mirrors _sid_matches, so a `fleet_view` key (often an 8-char id) matches a dead-set entry carrying the full uuid, and the reverse.
+    A falsy or empty `process_dead` is never a match.
 
     Ensures:
         - True iff some entry of process_dead prefix-matches sid; else False
@@ -301,88 +225,29 @@ def build_snapshot( fleet_view, bridge_mtimes, now,
                     transcript_mtimes    = None,
                     alive_threshold_seconds = None ):
     """
-    Build the JSON-able full-fleet snapshot for the GET endpoint (§10.4), enriched
-    with per-session hierarchy (Fleet-Status P1, design §4) and live-only-by-default
-    (Fleet-Status D6 / §5.2).
+    Build the JSON-able fleet snapshot with per-session hierarchy, live rows only by default.
+
+    Each row pairs the liveness block (see compute_liveness) with the role and manager hierarchy keys.
 
     Requires:
-        - fleet_view is { session_id: VIEW } (build_fleet_view output)
+        - fleet_view is { session_id: view } (build_fleet_view output)
         - bridge_mtimes is { session_id: epoch-float|None }
         - now is an aware datetime
 
     Ensures:
-        - returns { generated_at(iso), session_count, sessions: [row, ...] }
-          sorted by session_id for stable rendering/diffing
-        - PUBLISHED-VIEW PRUNE (D6 / §5.2): by default (include_offline=False) a
-          session whose computed liveness verdict is "offline" is OMITTED — the
-          published snapshot carries only the live fleet (LIVE/quiet/stale), so the
-          multi-day dead-session graveyard never reaches consumers. Pass
-          include_offline=True to retain offline rows (audit/back-compat). This
-          prunes the PUBLISHED snapshot ONLY — the arbiter's decision logic reads
-          `fleet_view`, not this snapshot, so routing/stall-detection are untouched.
-        - PID FAST-DEATH OVERRIDE (kill-0): `process_dead` is an optional iterable
-          of CONFIRMED-dead session-ids (default None). A row whose sid prefix-
-          matches one is forced verdict="offline" + liveness.process_dead=True,
-          regardless of its signal ages — so a /exit'd session drops in ~1 poll
-          instead of aging out over ~1h. Bias-to-alive: only a positive dead
-          reading overrides; an absent sid keeps its age verdict. The verdict
-          STRING set is unchanged (the frontend offline-split is untouched);
-          `process_dead` is an additive transparency flag on the liveness block.
-        - count_dm_as_liveness (default True, the `arbiter count dm as liveness`
-          toggle) is threaded verbatim to compute_liveness(count_dm=...): True ⇒
-          a session's SENT-DM age joins the freshest-of liveness union (a
-          coordination-only manager reads LIVE); False ⇒ each row's liveness
-          block is byte-identical to the prior 4-signal verdict (dm_age_s still
-          present for audit, just excluded from the union). DM feeds LIVENESS
-          only, never STATE / the progress signature (C4)
-        - hold_mtimes (default None, the task-70be69f2 hold-file-mtime liveness
-          source) is { session_id: epoch-float|None }; each row's hold mtime is
-          threaded to compute_liveness(hold_mtime=...) → its hold_age_s joins the
-          freshest-of union UNCONDITIONALLY (an interactive manager that only
-          Stop-refreshes its hold reads LIVE, not MANAGER-STALE). None / a missing
-          sid ⇒ hold_age_s None for that row, byte-identical to the prior block.
-          Hold-mtime feeds LIVENESS only, never STATE / the progress signature (C4)
-        - transcript_mtimes (default None, the bug-fb332fcd transcript-file-mtime
-          liveness source) is { session_id: epoch-float|None }; each row's
-          transcript mtime is threaded to compute_liveness(transcript_mtime=...) →
-          its transcript_age_s joins the freshest-of union UNCONDITIONALLY (a
-          manager mid-plan, appending its transcript every tool call but emitting
-          no Stop, reads LIVE not MANAGER-STALE). None / a missing sid ⇒
-          transcript_age_s None for that row, byte-identical to the prior block —
-          a missing/unreadable transcript is NO signal, so a genuinely-dark
-          session is never masked. Transcript-mtime feeds LIVENESS only, never
-          STATE / the progress signature (C4)
-        - alive_threshold_seconds (default None) gates the bug-65d1247f DISPLAY
-          sanitization: a row whose HOLDER SESSION is beyond the alive threshold
-          (dependency_graph.session_is_stale — the SAME predicate the peer-EDGE gate
-          uses, threaded from the arbiter's self.alive_threshold_seconds) renders its
-          `peer:X` holding_on as the neutral "none", so the displayed hold AGREES with
-          edge inference (37511bfb). None (the default) ⇒ NO gate, byte-identical to
-          the prior render; peer-prefix-gated (user:/commons: holds untouched);
-          fail-SAFE (missing/unparseable last_activity_ts ⇒ NOT stale ⇒ raw value
-          kept — never hide a LIVE hold). DISPLAY ONLY — edge inference + the :1070
-          deadlock escalation are untouched
-        - each row keeps STATE and LIVENESS as separate keys (C4) PLUS the two
-          hierarchy keys (role, manager):
-          { session_id, persona, state, holding_on, stuck, liveness{...},
-            role, manager }
-        - role = "manager" if the session-id (prefix-tolerantly) belongs to the
-          injected manager set (list_managers_fn) OR its persona is in the
-          DECLARED roster (`declared_managers`, case-insensitive — from
-          COSA_VOICE_MANAGERS__<PROJECT>; a declared manager badges as manager
-          even before its first spawn, Rick 2026-06-11), else "worker"
-        - manager = resolve_manager_fn(sid).manager_persona ONLY when its source
-          is "lineage"; for declared/unresolved/error → None (degrade-safe: we
-          NEVER show a guessed manager — None lands the row in the "Unmanaged"
-          group rather than mis-parenting a worker)
-        - INJECTED seams (both default None) keep this function pure + 100%-
-          testable with fakes, mirroring arbiter_job's resolve_active_managers_fn
-          injection. With neither injected → role="worker", manager=None for every
-          row (back-compatible flat snapshot)
-        - session_count reflects the EMITTED rows (post-prune), not the input size
-        - never raises — a throwing list_managers_fn degrades to an empty manager
-          set (all workers); a throwing resolve_manager_fn degrades that row to
-          manager=None
+        - returns { generated_at(iso), session_count, sessions: [row, ...] } sorted by session_id for stable rendering and diffing
+        - by default (include_offline=False) a session whose verdict is "offline" is omitted, so the dead-session graveyard never reaches consumers; include_offline=True keeps offline rows (audit, back-compat). Only the published snapshot is pruned: the arbiter's decision logic reads fleet_view, not this snapshot, so routing and stall detection are untouched
+        - process_dead is an optional iterable of confirmed-dead session ids (default None); a row whose sid prefix-matches one is forced to verdict "offline" with liveness.process_dead=True regardless of its signal ages, so an exited session drops in about one poll instead of aging out over about an hour. Bias to alive: only a positive dead reading overrides, and an absent sid keeps its age verdict. The verdict string set is unchanged; process_dead is an additive transparency flag
+        - count_dm_as_liveness (default True, the `arbiter count dm as liveness` toggle) is passed unchanged to compute_liveness(count_dm=...): True lets a session's sent-DM age join the freshest-of union (a coordination-only manager reads `LIVE`); False makes each liveness block byte-identical to the prior 4-signal verdict (dm_age_s still present for audit, only excluded from the union). DM feeds liveness only, never state or the progress signature
+        - hold_mtimes (default None) is { session_id: epoch-float|None }; each row's hold mtime is passed to compute_liveness(hold_mtime=...), so its hold_age_s joins the freshest-of union unconditionally (an interactive manager that only refreshes its hold at Stop reads `LIVE`, not stale). None or a missing sid means hold_age_s is None for that row, byte-identical to the prior block. Hold mtime feeds liveness only, never state or the progress signature
+        - transcript_mtimes (default None) is { session_id: epoch-float|None }; each row's transcript mtime is passed to compute_liveness(transcript_mtime=...), so its transcript_age_s joins the freshest-of union unconditionally (a manager mid-plan, appending its transcript on every tool call but emitting no Stop, reads `LIVE`, not stale). None or a missing sid means transcript_age_s is None for that row, byte-identical to the prior block; a missing or unreadable transcript is no signal, so a dark session is never masked. Transcript mtime feeds liveness only, never state or the progress signature
+        - alive_threshold_seconds (default None) gates display sanitization: a row whose holder session is beyond the alive threshold (dependency_graph.session_is_stale, the same predicate the peer-edge gate uses) shows its `peer:X` holding_on as the neutral "none", so the displayed hold agrees with edge inference. None means no gate, byte-identical to the prior render. Only peer-prefixed holds are gated (user: and commons: holds are untouched). Fail-safe: a missing or unparseable last_activity_ts is not stale, so the raw value is kept and a live hold is never hidden. Display only: edge inference and the deadlock escalation are untouched
+        - each row keeps state and liveness as separate keys plus the two hierarchy keys: { session_id, persona, state, holding_on, stuck, liveness{...}, role, manager }
+        - role = "manager" if the session id (prefix-tolerantly) belongs to the injected manager set (list_managers_fn) or its persona is in the declared roster (`declared_managers`, compared case-insensitively through canonical_persona_key, from `COSA_VOICE_MANAGERS__<PROJECT>`; a declared manager badges as manager even before its first spawn), else "worker"
+        - manager = resolve_manager_fn(sid).manager_persona only when its source is "lineage"; for declared, unresolved or error sources it is None; a guessed manager is never shown, and None lands the row in the "Unmanaged" group rather than mis-parenting a worker
+        - the seams list_managers_fn and resolve_manager_fn (both default None) keep this function pure and fully testable with fakes; with neither injected every row is role="worker", manager=None (flat, back-compatible)
+        - session_count reflects the emitted rows (post-prune), not the input size
+        - never raises: a throwing list_managers_fn degrades to an empty manager set (all workers); a throwing resolve_manager_fn degrades that row to manager=None
     """
     manager_ids = set()
     if list_managers_fn is not None:
@@ -481,43 +346,30 @@ def build_snapshot( fleet_view, bridge_mtimes, now,
 
 def carry_forward_lineage( snapshot, prior_lineage ):
     """
-    Retain last-known manager lineage across polls — the "Unmanaged" offline-row fix
-    (Fleet-Status, 2026-06-10).
+    Fill a missing manager from the last poll that resolved it, until the row is evicted.
 
-    A reaped worker loses BOTH lineage sources in the SAME instant
-    (`session_spawner.dismiss_sessions`): its bridge file is unlinked (kills the
-    PRIMARY `spawned_by` path) AND its spawn-manifest entry is dropped (kills the
-    FALLBACK manifest-name scan). So the very next poll's resolve_manager misses on
-    both paths → SOURCE_UNRESOLVED → build_snapshot sets manager=None → the row drops
-    to the "Unmanaged" group, even though it lingers in its ~1h "stale Nm" decay
-    window (published, not yet offline-pruned). The focus-bar badge — event-sourced
-    at spawn, client-cached — still shows the manager, so the table contradicting it
-    reads as a bug.
-
-    This replays the manager from the most recent poll that DID resolve it, until the
-    row evicts from the published snapshot.
+    A reaped worker loses both lineage sources at once: `session_spawner.dismiss_sessions` unlinks its bridge file and drops its spawn-manifest entry.
+    The next poll's resolve_manager misses on both paths, so build_snapshot sets manager=None. The row would drop to "Unmanaged" while it still lingers in its stale decay window.
+    The focus-bar badge still shows the manager, so that table would contradict it.
 
     Requires:
-        - snapshot is a build_snapshot() result (or falsy / non-dict → returned as-is
+        - snapshot is a build_snapshot() result (or falsy / non-dict, returned as-is
           with an empty next-lineage)
         - prior_lineage is { session_id: manager_persona } carried from the prior poll
-          (caller-owned, threaded across polls); None / non-dict → treated as {}
+          (caller-owned, threaded across polls); None / non-dict is treated as {}
 
     Ensures:
         - returns ( snapshot, next_lineage ):
-            * a row with a non-None manager REFRESHES next_lineage[sid]; row untouched
+            * a row with a non-None manager refreshes next_lineage[sid]; the row is untouched
               (fresh lineage always wins over a carried value)
-            * a row with manager None whose sid is in prior_lineage is FILLED —
+            * a row with manager None whose sid is in prior_lineage is filled:
               row["manager"] = prior_lineage[sid], row["manager_retained"] = True
-              (honest transparency flag) — and keeps carrying in next_lineage
-            * a row with manager None and no prior entry stays genuinely Unmanaged
-            * next_lineage is PRUNED to the snapshot's CURRENT sids — a row gone from
-              the published snapshot (evicted: offline-pruned, or left the fleet)
-              FORGETS its lineage. Bounded; matches "until row eviction".
-        - NEVER invents lineage — only ever replays a persona THIS fleet resolved
-          before — and NEVER raises (a malformed snapshot/row degrades to a skipped
-          row / an empty carry); the manager field stays orthogonal to the semantic
-          frame_signature, so the carry causes NO spurious table re-render
+              (a transparency flag), and it keeps carrying in next_lineage
+            * a row with manager None and no prior entry stays unmanaged
+            * next_lineage is pruned to the snapshot's current sids: a row gone from
+              the published snapshot (offline-pruned, or left the fleet) forgets its lineage,
+              which keeps the map bounded
+        - never invents lineage, only replays a persona this fleet resolved before, and never raises (a malformed snapshot or row degrades to a skipped row or an empty carry); the manager field stays orthogonal to the semantic frame_signature, so the carry causes no spurious table re-render
     """
     prior        = prior_lineage if isinstance( prior_lineage, dict ) else { }
     next_lineage = { }
@@ -541,23 +393,19 @@ def carry_forward_lineage( snapshot, prior_lineage ):
 
 def prune_offline_rows( snapshot ):
     """
-    The D6/§5.2 offline-prune as a standalone PURE helper (post-game 2026-06-11).
+    Drop offline rows from a snapshot and recount, giving the published live-only view.
 
-    The arbiter now builds ONE full snapshot (include_offline=True) so its
-    post-game detectors (manager-staleness F2, fleet-dark F3) can see offline
-    rows, then derives the PUBLISHED live-only view through this helper — the
-    published contract (live rows only, recounted) is unchanged from the old
-    in-build prune. Design: src/rnd/v0.1.8/
-    2026.06.11-arbiter-missed-poke-postgame-and-outreach-logging.md §3.2.
+    The arbiter builds one full snapshot (include_offline=True) so its detectors (manager staleness, fleet-dark) can see offline rows.
+    It derives the published view through this helper. The published contract is live rows only, recounted.
 
     Requires:
         - snapshot is a build_snapshot() result (or any malformed value)
 
     Ensures:
-        - returns a NEW top-level dict: same generated_at, `sessions` filtered to
+        - returns a new top-level dict: same generated_at, `sessions` filtered to
           rows whose liveness verdict != "offline" (non-dict rows dropped), and
-          `session_count` recounted to the EMITTED rows
-        - row dicts are SHARED with the input (not copied) — callers must not
+          `session_count` recounted to the emitted rows
+        - row dicts are shared with the input (not copied); callers must not
           mutate rows after the split
         - a falsy / non-dict snapshot degrades to an empty snapshot dict
         - never raises
@@ -580,15 +428,10 @@ def prune_offline_rows( snapshot ):
 
 def frame_signature( snapshot ):
     """
-    A hashable signature over the SEMANTIC fields only — NOT the liveness ages.
+    Return a hashable signature over the semantic fields only, not the liveness ages.
 
     Ensures:
-        - returns a tuple capturing { session_id, persona, state, holding_on,
-          stuck, verdict } per session (sorted) — the verdict is a coarse
-          liveness *bucket* (LIVE/quiet/stale/offline), included so a session
-          crossing a liveness threshold counts as a change, but the raw
-          continuously-advancing ages are EXCLUDED so a steady fleet does NOT
-          re-print every poll (§10.3 change-vs-tick)
+        - returns a tuple capturing { session_id, persona, state, holding_on, stuck, verdict } per session, in row order (build_snapshot sorts rows by session_id); the verdict is a coarse liveness bucket (`LIVE`, quiet, stale, offline), included so a session crossing a liveness threshold counts as a change, but the raw continuously-advancing ages are excluded, so a steady fleet does not re-print every poll
         - never raises
     """
     sig = [ ]
@@ -606,11 +449,11 @@ def frame_signature( snapshot ):
 
 def render_fleet_table( snapshot ):
     """
-    Render the full-fleet table (printed when the frame changes — §10.3).
+    Render the full-fleet table, printed when the frame changes.
 
     Ensures:
-        - returns a multi-line string: a header line + one row per session
-          with STATE and LIVENESS in SEPARATE columns (C4), liveness shown as
+        - returns a multi-line string: a header line plus one row per session
+          with state and liveness in separate columns, liveness shown as
           honest ages plus the verdict label
         - an empty fleet renders a single "(no sessions)" line under the header
         - never raises
@@ -637,14 +480,13 @@ def render_fleet_table( snapshot ):
 
 def render_tick( now, last_change_at, session_count ):
     """
-    Render the one-line heartbeat tick for an UNCHANGED frame (§10.3 / D1).
+    Render the one-line tick for an unchanged frame, showing the time since the last change.
 
-    Rick's proviso: show the DURATION SINCE the last change, not just the clock
-    — e.g. `tick · no changes for 12m (since 22:29) · 5 sessions · 22:41`.
+    The tick shows the duration since the last change, not just the clock. Example: `tick · no changes for 12m (since 22:29) · 5 sessions · 22:41`.
 
     Requires:
         - now is an aware datetime; session_count is an int
-        - last_change_at is an aware datetime or None (None ⇒ never-changed yet)
+        - last_change_at is an aware datetime or None (None means never changed yet)
 
     Ensures:
         - returns the single-line tick string with the since-duration + counts

@@ -1,40 +1,38 @@
 """
-Turn-age watchdog — the generalized held-turn DETECTOR (wedge fix f1a21917
-lever (ii), design §3).
+Turn-age watchdog: detects a session whose turn is held open by a dangling tool call.
 
-A fire-and-forget cosa-voice notify() held session 25c7441c's CC turn 54m47s
-(tool_use 01:52:53Z → tool_result 02:47:39Z, released only by process death).
-While the turn was open the Stop phase could not run, so tmux-injected messages
-sat undrained and the wedge forced a manager re-spin. Lever (i-a) (MCP_TOOL_TIMEOUT
-in the fleet spawn env) PREVENTS the unbounded hang; this watchdog is the
-arbiter-side DETECTION complement that would have surfaced the wedge ~10 min in
-instead of 55 min + a re-spin — and it catches EVERY variant of the held-turn
-class (in-turn tool hang, stop-phase hold), not just notify.
+A fire-and-forget cosa-voice notify() can hold a CC turn open for tens of
+minutes, released only by process death. While the turn is open the Stop phase
+cannot run. Tmux-injected messages then sit undrained, and the wedge forces a
+manager re-spin. Setting MCP_TOOL_TIMEOUT in the fleet spawn env prevents the
+unbounded hang. This watchdog is the arbiter-side detection complement. At the
+default threshold it surfaces a wedge about 10 minutes in, instead of after 55
+minutes and a re-spin. It catches every variant of the held-turn class (in-turn
+tool hang, stop-phase hold), not just notify.
 
-**Signature of a held turn** (interim-mitigation §6, made continuous): a live CC
-session whose transcript's LAST `tool_use` has no matching `tool_result` for longer
-than the threshold, while its tmux pane shows no active stream. → ONE operator
-advisory (detection-only, NO auto-kill; advisory tier, never a poke → LOW blast).
+**Signature of a held turn**: a live CC session whose transcript's last
+`tool_use` has no matching `tool_result` for longer than the threshold. Its tmux
+pane also shows no active stream. That raises one operator advisory. The advisory
+is detection-only with no auto-kill. It is an advisory tier and never a poke, so
+the blast radius is low.
 
-**Flood-guard (fresh lesson from re-announce flood e1bbe011).** The advisory is
-ONE-SHOT per unique `(session_id, tool_use_id)` dangling turn: a still-dangling
-turn across sweeps fires NOTHING, and the `_advised` marker set is intersect-cleared
-against the live dangling set each pass (mirrors the arbiter's `_escalated &= live`
-idiom) so a resolved wedge drops its marker and only a genuinely NEW dangling
-tool_use can advise again. No fresh forensic row per sweep.
+**Flood guard.** The advisory is one-shot per unique `(session_id, tool_use_id)`
+dangling turn. A turn still dangling across sweeps fires nothing. The `_advised`
+marker set is intersect-cleared against the live dangling set each pass, as the
+arbiter's `_escalated &= live` idiom does. A resolved wedge then drops its marker,
+and only a new dangling tool_use can advise again. Without this guard a
+re-announce flood would write a fresh advisory row on every sweep.
 
 **Disabled by default.** Gated on `arbiter turn age watchdog enabled` (default
-False, [Lupin: Baseline]) — a defense-in-depth rollout gate sibling to
+False, [Lupin: Baseline]), a defense-in-depth rollout gate sibling to
 `follow through escalation enabled`. With the flag off, `sweep_once` is a no-op
 (no transcript/pane IO) and `start()` refuses to spawn the daemon. Activation
 (and the :8001 arbiter restart it needs) is manager/Rick territory.
 
-The session lister, transcript reader, pane-activity oracle, advisory sink, and
-clock are ALL injectable, so the detection logic + flood-guard are 100% unit-tested
-with fakes; only the literal external IO readers (the `_default_*` boundaries) are
-pragma'd — the same convention as the arbiter's other `_default_*` seams.
-
-Canonical design: src/rnd/v0.1.9/2026.07.03-notify-turn-hold-fix-design.md §3.
+The session lister, transcript reader, pane-activity oracle, advisory sink and
+clock are all injectable. The detection logic and flood guard are therefore fully
+unit-tested with fakes. Only the external IO readers (the `_default_*` boundaries)
+are marked no-cover, the same convention as the arbiter's other `_default_*` seams.
 """
 
 import json
@@ -75,23 +73,23 @@ def _iter_content_blocks( entry ):
 
 def find_dangling_tool_use( entries ):
     """
-    Find the LAST tool_use in a transcript that has no matching tool_result — the
-    held-turn signature (interim-mitigation §6: "the last tool_use id with no
-    tool_result").
+    Find the last tool_use in a transcript that has no matching tool_result.
+
+    That dangling call is the held-turn signature.
 
     Requires:
         - entries is an iterable of parsed transcript objects in chronological
           (append) order
 
     Ensures:
-        - returns ( tool_use_id, timestamp ) of the FINAL tool_use block when its
+        - returns ( tool_use_id, timestamp ) of the final tool_use block when its
           id never appears as a tool_result's tool_use_id anywhere in the
           transcript (the turn is still waiting on it)
         - returns None when there is no tool_use at all, or when the final tool_use
-          DID receive a result (the turn proceeded)
-        - keying on the FINAL tool_use (not any-dangling) avoids false positives:
+          did receive a result (the turn proceeded)
+        - keying on the final tool_use (not any-dangling) avoids false positives:
           a normal transcript never starts a later tool_use until the prior one
-          returns, so an un-resulted EARLIER tool_use with a resulted later one is
+          returns, so an un-resulted earlier tool_use with a resulted later one is
           an artifact, not a held turn. (Conservative bias: in a rare parallel-call
           final message where a sibling is held but the last-listed block resolved,
           this under-reports rather than floods — the safer error for an advisory.)
@@ -157,11 +155,13 @@ def age_seconds( timestamp, now ):
 
 class TurnAgeWatchdog:
     """
-    Standalone held-turn detector daemon. Inert unless `arbiter turn age watchdog
-    enabled` is True. Mirrors the FollowThroughEscalationWatcher shape (INI-gate,
-    sweep_once, one-shot markers, daemon lifecycle) but has NO dependency on the
-    ArbiterConsumerJob — it reads transcripts + panes directly — so it runs as its
-    own daemon rather than riding the job poll (zero arbiter_job.py coupling).
+    Standalone held-turn detector daemon, inert unless the INI flag is True.
+
+    The flag is `arbiter turn age watchdog enabled`. The class mirrors the
+    FollowThroughEscalationWatcher shape (INI gate, sweep_once, one-shot markers,
+    daemon lifecycle). It has no dependency on the ArbiterConsumerJob and reads
+    transcripts and panes directly. It runs as its own daemon rather than riding
+    the job poll, so it has no arbiter_job.py coupling.
     """
 
     def __init__(
@@ -188,7 +188,7 @@ class TurnAgeWatchdog:
             - pane_active_fn( tmux_session ) -> bool answering "is this pane showing
               an active stream right now?" (default: capture the pane twice and
               compare — changed == active); injected for tests
-            - advisory_fn( message ) -> None emits ONE operator advisory on the
+            - advisory_fn( message ) -> None emits one operator advisory on the
               throttled outreach rail (default: a structured banner log); injected
               so production supplies the durable-commons hop and tests assert it
             - now_fn() -> tz-aware datetime (default: datetime.now(utc)); injected
@@ -228,21 +228,21 @@ class TurnAgeWatchdog:
         Run one held-turn detection pass over the live CC sessions.
 
         Ensures:
-            - flag OFF -> no IO at all; returns {enabled:False, advised:0, candidates:0}
-            - flag ON  -> for each live session with a transcript:
+            - flag off -> no IO at all; returns {enabled:False, advised:0, candidates:0}
+            - flag on  -> for each live session with a transcript:
                 * find_dangling_tool_use over its transcript; skip if none
                 * skip if the dangling tool_use's age <= threshold (or un-ageable)
-                * a dangling+aged turn's (session, tool_use) key is recorded LIVE so
+                * a dangling+aged turn's (session, tool_use) key is recorded as live so
                   its one-shot marker persists while it stays dangling+aged
-                * a pane that is actively streaming is SKIPPED (not yet a stuck turn;
+                * a pane that is actively streaming is skipped (not yet a stuck turn;
                   no advisory, no candidate — it may advise later if the stream stops)
                 * a dangling+aged+not-streaming turn is a held-turn candidate; it
-                  fires ONE advisory_fn(...) and is marked advised UNLESS already
+                  fires one advisory_fn(...) and is marked advised unless already
                   advised (one-shot per unique tool_use)
             - after the pass, `_advised` is intersected with the live dangling set so
               markers clear when a wedge resolves (its key leaves the live set) —
-              one-shot-THEN-cleared, never a per-sweep re-fire
-            - swallow-safe per session: a transcript-reader / pane blow-up on ONE
+              one-shot-then-cleared, never a per-sweep re-fire
+            - swallow-safe per session: a transcript-reader / pane blow-up on one
               session is demoted to a skip, never kills the sweep
 
         Returns:
@@ -290,7 +290,7 @@ class TurnAgeWatchdog:
 
     def _emit_advisory( self, session, tool_use_id, age, threshold ) -> None:
         """
-        Compose + fire the ONE operator advisory for a detected held turn.
+        Compose and fire the one operator advisory for a detected held turn.
 
         Ensures:
             - builds a human-readable advisory naming the session/persona, the
@@ -317,10 +317,12 @@ class TurnAgeWatchdog:
 
     def _default_session_lister( self ):   # pragma: no cover - live bridge-scan IO boundary
         """
-        Default session lister: scan the live persona'd session bridges and project
-        the fields the sweep needs. Skips buffer/listener bridges + dead PIDs. Never
-        raises (a malformed bridge is skipped). Unit tests inject a fake; exercised
-        at the :8001 integration tier like the arbiter's other `_default_*` readers.
+        Default session lister: scan live persona'd session bridges for the sweep.
+
+        It projects the fields the sweep needs and skips buffer and listener
+        bridges and dead PIDs. It never raises, because a malformed bridge is
+        skipped. Unit tests inject a fake. It is exercised at the :8001
+        integration tier, like the arbiter's other `_default_*` readers.
         """
         from lupin_cli.claude_code.hooks.lib.session_bridge import (
             SESSION_DIR, _extract_pid_from_filename, _is_pid_alive,
@@ -352,9 +354,11 @@ class TurnAgeWatchdog:
 
     def _default_transcript_reader( self, transcript_path ):   # pragma: no cover - transcript file IO boundary
         """
-        Default transcript reader: parse a JSONL transcript into a list of objects,
-        chronological order preserved. Swallows IO/parse errors to an empty list
-        (an unreadable transcript is a non-candidate, never a false advisory).
+        Default transcript reader: parse a JSONL transcript into a list of objects.
+
+        Chronological order is preserved. IO and parse errors are swallowed to an
+        empty list, so an unreadable transcript is a non-candidate and never a
+        false advisory.
         """
         entries = [ ]
         try:
@@ -373,10 +377,12 @@ class TurnAgeWatchdog:
 
     def _default_pane_active( self, tmux_session ):   # pragma: no cover - tmux capture IO boundary
         """
-        Default pane-activity oracle: capture the pane twice ~0.4s apart; a CHANGED
-        capture == an active stream. A pane that can't be resolved/captured reads as
-        NOT active (False) so the dangling-age governs — biased toward surfacing a
-        genuinely stuck turn (advisory is low-blast). Never raises.
+        Default pane-activity oracle: capture the pane twice about 0.4s apart.
+
+        A changed capture means an active stream. A pane that cannot be resolved
+        or captured reads as not active (False), so the dangling age governs. That
+        biases toward surfacing a stuck turn, which is safe because an advisory has
+        a low blast radius. It never raises.
         """
         import subprocess
         import time
@@ -408,9 +414,11 @@ class TurnAgeWatchdog:
 
     def _loop( self ) -> None:
         """
-        Daemon loop until stop(); Event.wait(timeout) so shutdown interrupts the nap
-        immediately. Each sweep is exception-guarded so a transient IO error never
-        kills the daemon. Naps the LIVE arbiter tick (sweeps every tick).
+        Daemon loop until stop(), sweeping once per live arbiter tick.
+
+        It waits with Event.wait(timeout), so shutdown interrupts the nap
+        immediately. Each sweep is exception-guarded, so a transient IO error
+        never kills the daemon.
         """
         while not self._stop_event.is_set():
             try:
@@ -421,9 +429,10 @@ class TurnAgeWatchdog:
 
     def start( self ) -> bool:
         """
-        Spawn the daemon thread — ONLY if the flag is enabled and no thread is
-        already running. Returns True if a thread was started, else False (the
-        no-op rollout gate: a disabled watchdog never spawns).
+        Spawn the daemon thread, only if the flag is enabled and no thread runs.
+
+        Returns True if a thread was started, else False. That is the no-op
+        rollout gate: a disabled watchdog never spawns.
         """
         if not self._enabled():
             return False

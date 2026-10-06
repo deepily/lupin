@@ -1,23 +1,22 @@
 #!/usr/bin/env python3
 """
-Outreach pending ledger — the re-announce-on-return persistence leaf (Item B §3.5
-of `src/rnd/v0.1.8/2026.06.11-arbiter-outreach-delivery-receipts-and-local-
-timestamps.md`).
+Pending ledger that keeps undelivered owner-bound advisories until they land.
 
-A Rick-bound advisory whose live push reported `user_not_available` (his WS was
-offline — the 2026-06-11 latent L1 failure mode) must NOT evaporate: it enters
-this ledger and the arbiter re-announces it each poll (bounded by the reannounce
-interval) until a delivered outcome or TTL expiry — the milestone-must-land
-doctrine, mechanized.
+An advisory whose live push reported `user_not_available` must not evaporate.
+That status means the owner's WebSocket was offline. The advisory enters this
+ledger. The arbiter re-announces it each poll, bounded by the reannounce
+interval, until a delivered outcome or TTL expiry.
 
-File-backed (NOT in-memory) by explicit design: the ledger survives BOTH the 12h
-job recycle AND a full service restart, so a stall advisory fired while Rick
-sleeps still greets his morning return across a deploy. Pattern mirrored
-line-for-line from the stop-hook oracle's `heartbeat_acked_ledger`: degrade-safe
-reads (any error ⇒ empty — telemetry must never kill a poll), atomic writes
-(tmp-write + per-writer-suffixed rename), merge-don't-clobber.
+The ledger is file-backed, not in-memory. It survives both the 12h job recycle
+and a full service restart. A stall advisory fired while the owner is away is
+therefore still announced on return, even across a deploy.
 
-Schema — a JSON object keyed by outreach_id:
+The pattern mirrors the stop-hook oracle's `heartbeat_acked_ledger`. Reads
+degrade to empty on any error, because telemetry must never kill a poll. Writes
+are atomic (tmp-write plus per-writer-suffixed rename). Merges never clobber.
+
+The schema is a JSON object keyed by outreach_id.
+Each entry has these fields:
     { "<outreach_id>": { "message": str, "kind": str, "case": int|None,
                          "created_ts": iso, "attempts": int,
                          "last_attempt_ts": iso, "last_outcome": str }, ... }
@@ -39,8 +38,8 @@ def read_pending( path ) -> dict:
         - returns a dict of outreach_id -> entry dict (empty dict when the file
           is missing, unreadable, malformed, or not a JSON object)
         - only dict-valued entries are kept (malformed members are skipped)
-        - DEGRADE-SAFE: never raises — any error ⇒ empty dict (a ledger read
-          must never break a poll)
+        - degrade-safe: never raises, and any error gives an empty dict (a
+          ledger read must never break a poll)
     """
     try:
         with open( path ) as f:
@@ -67,7 +66,7 @@ def write_pending( path, entries: dict ) -> None:
         - write is atomic (tmp-write + rename); the temp file carries a
           per-writer pid+uuid suffix so concurrent writers never share a path
         - raises OSError if the target directory is not writable (a ledger that
-          CANNOT persist must fail loud at the write site — the caller's
+          cannot persist must fail loud at the write site — the caller's
           journaled swallow makes it visible, not silent)
     """
     path = Path( path )
@@ -90,7 +89,7 @@ def add_pending( path, outreach_id: str, *, message: str, kind: str, case,
 
     Ensures:
         - the ledger contains an entry for outreach_id with attempts=1 and
-          last_attempt_ts=created_ts (an existing entry for the SAME id is
+          last_attempt_ts=created_ts (an existing entry for the same id is
           refreshed, never duplicated — merge-don't-clobber on the id key)
         - other entries are preserved
         - returns the resulting ledger dict

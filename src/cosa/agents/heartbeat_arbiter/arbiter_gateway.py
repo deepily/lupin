@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 """
-Heartbeat Arbiter — production commons gateway (Rachel's wiring lane).
+Heartbeat arbiter production commons gateway, backed by the in-process CommonsStore.
 
 The server-side, in-process implementation of the `ArbiterGateway` protocol
 (arbiter_job.ArbiterGateway). The arbiter runs inside the CJ Flow agentic pool,
-so it talks to the commons via the `CommonsStore` directly — NOT the cosa-voice
-MCP tool surface (that is for CC sessions). All I/O is behind the injected
-`store`, so the gateway LOGIC is 100% unit-testable with a FakeStore; only the
-`from_environment` IO-boundary constructor is `pragma: no cover` (exercised at
-the :8000 integration tier, mirroring LupinCommonsGateway).
+so it talks to the commons through the `CommonsStore` directly. The cosa-voice
+MCP tool surface is for CC sessions and is not used here.
 
-Three methods the consumer needs:
-    - who()       → list active sessions (liveness SECONDARY + roster)
+All I/O is behind the injected `store`, so the gateway logic is fully unit
+testable with a FakeStore. Only the `from_environment` IO-boundary constructor
+is `pragma: no cover`. It is exercised at the :8000 integration tier, as
+LupinCommonsGateway is.
+
+The consumer needs three methods:
+    - who()       → list active sessions (secondary liveness signal + roster)
     - send_to()   → auto-ping a blocker via their DM topic
     - post()      → the manager-surface roster/recommendation
 """
@@ -47,20 +49,20 @@ class LupinArbiterGateway:
         Derive a server-pattern-safe DM topic from a recipient identifier.
 
         Ensures:
-            - Routes through the shared `persona_slug` root (Phase 4 of the
-              persona-name-normalization plan) so the topic ALWAYS equals
-              `dm-{persona_slug( identifier, sep='_' )}` — byte-identical to the
-              Poker gateway, the cascade scheduler, and the MCP DM layer
-              (`_derive_dm_topic`). Accent-proof: "Mr Radio" → "dm-mr_radio",
-              "María" → "dm-maria". The prior accent-leaky
-              `re.sub( ..., re.UNICODE )` kept accents, regenerating the SPLIT
-              topic "dm-maría" (the live bug: both dm-maría.md and dm-maria.md
-              existed) — this seam now converges on the canonical "dm-maria".
+            - Routes through the shared `persona_slug` root, so the topic always
+              equals `dm-{persona_slug( identifier, sep='_' )}`. That is
+              byte-identical to the Poker gateway, the cascade scheduler and the
+              MCP DM layer (`_derive_dm_topic`).
+            - Accent-proof: "Mr Radio" gives "dm-mr_radio" and "María" gives
+              "dm-maria". A slug that kept accents would split one persona's DMs
+              across two topic files, "dm-maría" and "dm-maria"
         """
         return f"dm-{persona_slug( identifier, sep='_' )}"
 
     def who( self, retention_hours: int = 24 ) -> List[ dict ]:
         """
+        List the active commons sessions in the retention window.
+
         Ensures:
             - Returns the CommonsStore.who() rows (active sessions in the
               retention window): {session_id, persona_name, ..., last_post_ts}
@@ -75,9 +77,9 @@ class LupinArbiterGateway:
             - Appends `body` to dm-<recipient> via the store, stamped with the
               arbiter persona + a {kind: "arbiter-ping", recipient_persona}
               metadata envelope (so the recipient's UI renders a DM badge)
-            - caller `metadata` (2026.06.11 receipts design: outreach_id /
-              question_id / expects_ack — the §3.4 threading keys) is merged
-              OVER the defaults
+            - caller `metadata` (for example the receipt threading keys
+              outreach_id, question_id and expects_ack) is merged over the
+              defaults
         """
         envelope = { "kind": "arbiter-ping", "recipient_persona": recipient }
         if metadata:
@@ -112,11 +114,11 @@ class LupinArbiterGateway:
 
     def read( self, topic: str, since=None, limit: int = 50 ) -> List[ dict ]:
         """
-        Tail a reserved commons topic (v2.2 B3 — e.g. `fleet-decision-needed`).
+        Tail a reserved commons topic, for example `fleet-decision-needed`.
 
         Ensures:
             - Returns CommonsStore.read() entries for `topic` (ascending when
-              `since` supplied; newest-first otherwise) — pure OBSERVATION,
+              `since` supplied; newest-first otherwise) — pure observation,
               side-effect-free (never posts/writes); the arbiter never actuates
         """
         return self._store.read( topic, since=since, limit=limit )

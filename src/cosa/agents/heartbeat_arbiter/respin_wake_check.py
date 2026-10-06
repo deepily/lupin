@@ -1,63 +1,38 @@
 """
-Re-spin wake check — make a re-spin that loses its wake FAIL LOUD (row b0570b67).
+Re-spin wake check: make a re-spin that loses its wake fail loudly.
 
-WHY THIS EXISTS. On 2026-08-21 Pocholo's self_respin fired its `/clear` at 21:26
-and the wake prompt never arrived. The seat sat at an empty prompt for twenty
-minutes until Cheech read the pane and typed the wake by hand. The same evening,
-Krishna's successor rehydrated from a STALE copy under ~/.claude/mementos rather
-than the live record. Two different ways to produce a successor that is
-technically alive and actually useless — and BOTH are silent. The seat looks
-IDLE rather than BROKEN, so nothing alarms and no peer notices.
+Why this exists: a self_respin fired its clear and the wake prompt never arrived.
+The seat sat at an empty prompt for twenty minutes until a peer typed the wake by hand.
+Another successor rehydrated from a stale copy under ~/.claude/mementos, not the live record.
+Both failures are silent, because the seat looks idle rather than broken.
 
-RICK RULED THE SHAPE (2026-08-22, three options offered, genuine keypress): do
-NOT chase why the wake drops. Verify the successor actually came up, and shout
-if it did not. The underlying drop stays in the code and that is an accepted
-trade, not an oversight.
+The chosen shape: never chase why the wake drops. Verify the successor came up, and shout if it did not.
+The underlying drop stays in the code as an accepted trade.
 
-THE ORACLE, and why it is ONE artifact for TWO failures. The question "did it
-wake?" and the question "did it read the right memento?" have the same witness:
-the file the rehydrated seat actually opened at boot. So the successor writes a
-BOOT RECEIPT naming that file, and the check reads it:
+One oracle covers both failures. "Did it wake?" and "did it read the right memento?" share one witness,
+the file the rehydrated seat opened at boot. The successor writes a boot receipt naming that file:
 
-  · NO RECEIPT past the deadline        ⇒ it never woke                   (Pocholo)
-  · RECEIPT naming a mirror-slot copy   ⇒ it woke and read the wrong file (Krishna)
-  · RECEIPT naming a long-stale record  ⇒ it woke onto old state
-  · RECEIPT naming nothing at all       ⇒ it woke but consumed no seed
-  · RECEIPT naming ANOTHER PERSONA's    ⇒ it woke into somebody else's world
-  · RECEIPT naming a fresh root record  ⇒ RETURNED
+  - no receipt past the deadline: it never woke
+  - receipt naming a mirror-slot copy: it woke and read the wrong file
+  - receipt naming a long-stale record: it woke onto old state
+  - receipt naming nothing at all: it woke but consumed no seed
+  - receipt naming another persona's record: it woke into somebody else's state
+  - receipt naming a fresh root record: `RETURNED`
 
-THE QUESTION THE FIRST CUT DID NOT ASK (row c3670edc, 2026-08-24). Every test
-above is about the FILE — is it live, is it current. None was about the READER.
-So a successor handed another persona's record walked the whole ladder and came
-out RETURNED: it booted, it resolved a memento, the slot was live, the record was
-fresh. The one failure mode where a seat is confidently and coherently wrong was
-the one the check certified as healthy, and a manager who reads RETURNED stops
-looking. `WRONG_PERSONA` is that missing question. The shape is borrowed from
-`reap_memento.verify_seat_memento`, which already refuses "a prior holder's
-memento in this slot" — the same check, moved to where the reader is.
+The persona check asks about the reader, not the file. A record can be live and current
+and still belong to somebody else, so `WRONG_PERSONA` compares the seat with the record's owner.
+The shape follows `reap_memento.verify_seat_memento`, which refuses a prior holder's memento.
 
-CONSUMER-WRITTEN, ALWAYS. The receipt is written by the REHYDRATED SEAT's own
-SessionStart, never by the thing that fired the re-spin. A receipt written by
-the injector would prove only that the injector reached its write line —
-`tmux send-keys` has no ingestion feedback, so an injector-written proof
-certifies itself. Only a seat that genuinely booted can leave this file. Same
-discipline as the self_respin wake proof next door
-(cosa.agents.heartbeat_arbiter.self_respin_observer).
+The receipt is always written by the rehydrated seat's own SessionStart, never by the injector.
+An injector-written receipt would prove only that the injector reached its write line, because
+`tmux send-keys` gives no ingestion feedback. Same discipline as `self_respin_observer`.
 
-WHY THE PREDECESSOR'S OWN RECEIPT CANNOT GREEN THE CHECK. A self_respin keeps
-its session id, so the seat's PRE-clear boot already left a receipt under that
-id. The check therefore never asks "does a receipt exist" — it asks "is there a
-receipt dated AFTER the re-spin fired". `fired_at` is the whole guard.
+The predecessor's receipt cannot green the check. A self_respin keeps its session id, so the
+pre-clear boot already left a receipt; the check asks for one dated after `fired_at`.
 
-WHERE THE SHOUT GOES. To the manager who fired the re-spin, by DM — not into a
-log. The entire defect is that nobody was told; a check that writes a line
-nobody reads has reproduced the bug it was built to catch. Delivery is an
-injected `alert_fn` seam so the rail is the caller's choice and the decision
-tree stays unit-provable.
-
-PURITY. `classify_wake` is a pure function of (receipt, fired_at, now, policy) —
-stdlib only, no IO. Every side-effecting seam (disk read, clock, sleep, alert
-delivery) is injectable.
+The shout goes by DM to the manager who fired the re-spin, not into a log, because a line nobody
+reads reproduces the defect. Delivery is an injected `alert_fn` seam.
+`classify_wake` is pure (stdlib only, no IO); every other side effect is injectable.
 """
 
 import datetime
@@ -130,9 +105,8 @@ class WakeVerdict( Enum ):
 class WakeAssessment:
     """One successor's verdict, the human-readable reason, and the alarm flag.
 
-    `memento_path` rides along even on an alarm because the first thing a manager
-    reading a STALE_SLOT wants is which file the seat actually opened — an alarm
-    that withholds it asks the reader to go find out."""
+    `memento_path` rides along even on an alarm, because a manager reading a
+    `STALE_SLOT` wants to know which file the seat actually opened."""
     session_id   : "str | None"
     persona      : "str | None"
     verdict      : WakeVerdict
@@ -171,10 +145,10 @@ class WakeAssessment:
 
 def _parse_iso( value ):
     """
-    Parse an ISO-8601 stamp to an AWARE datetime, or None.
+    Parse an ISO-8601 stamp to an aware datetime, or None.
 
-    A NAIVE stamp is rejected rather than assumed-local: this check compares it
-    against `fired_at` to decide whether a receipt predates the re-spin, and a
+    A naive stamp is rejected rather than assumed local. The check compares the
+    stamp with `fired_at` to decide whether a receipt predates the re-spin, and a
     wrong-by-hours comparison would green a dead seat.
 
     Requires:
@@ -212,7 +186,7 @@ def classify_memento_slot( memento_path, repo_root, mirror_root=None ):
           and its own io/mementos sub-slot fail identically, so they are not worth
           distinguishing to a reader
         - SLOT_UNKNOWN when it matches none of them
-        - the repo tests run FIRST, so a repo that happens to live under the
+        - the repo tests run first, so a repo that happens to live under the
           mirror root is still reported as a repo slot
         - never raises
     """
@@ -261,45 +235,30 @@ _RULE_CHARS = set( "\u2550=-_" )   # the characters a horizontal rule is drawn f
 
 def describe_block( block ):
     """
-    Measure the memento block the boot path actually PRODUCED.
+    Measure the memento block the boot path actually produced.
 
-    🔴 WHY THIS EXISTS. Every other field on the receipt describes the memento
-    FILE — which file was opened, when it was written, whose it is. None of them
-    describes the BLOCK, and the block is the only thing a session ever sees.
-    So three outcomes share one silence today:
-
-        (1) resolved, block produced, DELIVERED          — the healthy case
-        (2) resolved, block produced, LOST in transit    — between the hook's
-                                                           additionalContext and
-                                                           the session
-        (3) resolved, block came back EMPTY              — producer-side
-
-    This splits (3) from (1)+(2). It does NOT prove delivery — nothing written
-    at the producing end can. That needs an echo from the far end, and even an
-    echo leaves two states (not received / received-and-ignored) rather than
-    zero. Do not read a healthy `block_bytes` as proof a seat received anything.
-
-    THE HEADLINE IS FOUND BY A PREDICATE, NOT A POSITION. Taking line index 2
-    would be an enumeration in hiding: it encodes today's rule-then-headline
-    layout, and goes silently wrong the first time a blank line or a second rule
-    is added above it. The predicate is "the first line that carries content
-    other than the horizontal rule", which survives that edit.
+    This describes the block, the only thing a session sees; every other receipt field describes the file.
+    It splits "block came back empty" from "block produced", but a healthy `block_bytes` is no
+    proof a seat received anything. That needs an echo from the far end.
 
     Requires:
         - block is the rendered block string, or "" / None when none was produced
 
     Ensures:
         - returns a dict with block_bytes, block_sha256, block_headline
-        - block_bytes counts UTF-8 BYTES, never characters — the two differ on
-          exactly the emoji-carrying headlines this block is built from
-        - a block of None returns all three fields as None — NOT MEASURED,
-          because nothing was supplied. This is a DIFFERENT fact from an empty
+        - block_bytes counts UTF-8 bytes, never characters — the two differ on
+          emoji-carrying headlines this block is built from
+        - a block of None returns all three fields as None — not measured,
+          because nothing was supplied. This is a different fact from an empty
           block and the two must never render alike
-        - block_sha256 is taken over those same bytes for every SUPPLIED input
+        - block_sha256 is taken over those same bytes for every supplied input
           including the empty string, so a produced-but-empty block carries a
           stable, recognisable digest that a not-measured null cannot imitate
         - block_headline is None when the block carries no content line
         - never raises
+        - block_headline is found by a predicate, never by position: the first line
+          with content other than the horizontal rule, which survives a blank line
+          or a second rule being added above it
     """
     # 🔴 None AND "" ARE DIFFERENT FACTS AND MUST NOT COLLAPSE (CLAYTON 😎,
     # 2026-09-06 — credit CORRECTED 2026-09-06 01:30; the commit that added this
@@ -340,21 +299,20 @@ def build_receipt_dict( *, session_id, persona, tmux_session, memento_path,
     """
     Build the receipt body a rehydrated seat writes at SessionStart.
 
-    The slot is classified HERE, at write time, because this is the only moment
-    the seat's own repo_root is known for certain. A reader resolving the slot
-    later would have to guess which repo the seat sat in, and a wrong guess turns
-    a mirror read into a clean bill of health.
+    The slot is classified here, at write time, because only now is the seat's own repo_root known.
+    A reader resolving it later would have to guess the repo, and a wrong guess turns a
+    mirror read into a clean bill of health.
 
     Requires:
         - session_id is the seat's session id
         - memento_path is the file the boot path actually opened, or None
         - booted_at is an aware datetime
 
-    TWO PERSONAS, AND THEY ARE NOT THE SAME FIELD. `persona` is who the SEAT
-    thinks it is; `memento_persona` is who the RECORD says it belongs to. Every
-    other field here describes the FILE — is it live, is it current — and a file
-    can be both while belonging to somebody else. Recording the record's own
-    claim is what lets the reader ask the one question the rest cannot.
+    The two personas are different fields. `persona` is who the seat thinks it is;
+    `memento_persona` is who the record says it belongs to. Every other field here
+    describes the file, and a file can be live and current while belonging to
+    somebody else. Recording the record's own claim lets the reader ask the one
+    question the rest cannot.
 
     Requires:
         - session_id is the seat's session id
@@ -368,9 +326,9 @@ def build_receipt_dict( *, session_id, persona, tmux_session, memento_path,
           memento path, its written_at stamp, its declared persona, the
           classified slot, and the three block_* measurements
         - memento_slot is SLOT_NONE when no memento resolved
-        - the block_* fields describe what was PRODUCED, never what was
-          RECEIVED — see describe_block
-        - block_error names the exception type when the render RAISED, and is
+        - the block_* fields describe what was produced, never what was
+          received — see describe_block
+        - block_error names the exception type when the render raised, and is
           None otherwise. Zero bytes with block_error None is a clean empty
           block; zero bytes with a name is a crash, and the two want different
           fixes
@@ -410,12 +368,11 @@ def write_boot_receipt( *, session_id, persona=None, tmux_session=None,
                         memento_persona=None, repo_root=None, base_dir=None,
                         now=None, block=None, block_error=None ):
     """
-    Write this seat's boot receipt. Best-effort — a boot must never fail on it.
+    Write this seat's boot receipt, best-effort because a boot must never fail on it.
 
-    Called from the rehydrated seat's SessionStart, INCLUDING the boot where no
-    memento resolved. A silent skip on that path would make "woke but consumed
-    nothing" indistinguishable from "never woke", which is the whole distinction
-    this file exists to draw.
+    Called from the rehydrated seat's SessionStart, including the boot where no
+    memento resolved. A silent skip there would make "woke but consumed nothing"
+    look like "never woke", the distinction this file exists to draw.
 
     Requires:
         - session_id is a non-empty string — the id is the only key the reader
@@ -483,18 +440,9 @@ def persona_slugs( value ):
     """
     Every slug a persona name could legitimately have been written as.
 
-    A SET, not a string, and that is the whole design. The two writers in this
-    fleet disagree: `memento_io.slugify` does NOT fold accents, so "María"
-    becomes "mar-a", while `register_session._persona_slugs` folds first and
-    produces "maria". Both spellings name the same seat and both exist on disk —
-    planning-is-prompting holds 18 records under `maria` and one under `mar-a`.
-    Reducing each side to ONE canonical slug and comparing would report a live
-    roster persona as an impostor every time she re-spun, and a check that cries
-    wolf on a real seat gets switched off inside a day.
-
-    So each side yields the set of forms it could have been written as, and the
-    caller reports a mismatch only when the two sets are DISJOINT — i.e. when no
-    spelling of one is a spelling of the other.
+    Returns a set because each writer yields a different spelling. The caller reports
+    a mismatch only when two such sets are disjoint, meaning no spelling of one is a
+    spelling of the other.
 
     Requires:
         - value is a persona name string, or anything defensively
@@ -502,10 +450,16 @@ def persona_slugs( value ):
     Ensures:
         - returns a frozenset of lowercase [a-z0-9-] slugs: the accent-folded
           form, plus the naive form when it differs ("María" -> maria, mar-a)
-        - returns an EMPTY frozenset for a non-string, an empty string, or a name
+        - returns an empty frozenset for a non-string, an empty string, or a name
           with no alphanumerics at all (an emoji-only persona) — an unknowable
-          identity must never be reported as a MISMATCHED one
+          identity must never be reported as a mismatched one
         - never raises
+        - the set holds both spellings because `memento_io.slugify` does not fold
+          accents ("María" becomes "mar-a") while `register_session._persona_slugs`
+          folds first and produces "maria"; both spellings name the same seat
+        - reducing each side to one canonical slug would report a live roster persona
+          as an impostor each time that persona re-spun, and a check that cries wolf
+          on a real seat gets switched off
     """
     lowered = _norm( value )
     if not lowered:
@@ -526,12 +480,11 @@ def persona_slugs( value ):
 
 def find_receipt_by_identity( base_dir, *, persona=None, tmux_session=None, since=None ):
     """
-    Find a successor's receipt when its session id is NOT known in advance.
+    Find a successor's receipt when its session id is not known in advance.
 
-    A self_respin keeps its session id, so its caller can read by id. A re-spin
-    done as dismiss-then-spawn cannot: the successor mints a brand-new id the
-    manager never sees. What DOES carry across that boundary is the persona and
-    the tmux session name, so those are what this matches on.
+    A self_respin keeps its session id, so its caller can read by id. A dismiss-then-spawn
+    re-spin cannot, because the successor mints a new id. The persona and the tmux session
+    name do carry across, so this matches on those.
 
     Requires:
         - base_dir is a directory path
@@ -541,7 +494,7 @@ def find_receipt_by_identity( base_dir, *, persona=None, tmux_session=None, sinc
         - since is an aware datetime, or None for no recency floor
 
     Ensures:
-        - returns the NEWEST matching receipt dict booted at/after `since`, or None
+        - returns the newest matching receipt dict booted at/after `since`, or None
         - a receipt with an unreadable booted_at is skipped when `since` is set,
           because it cannot be shown to postdate the re-spin
         - never raises
@@ -585,20 +538,10 @@ def find_receipt_by_identity( base_dir, *, persona=None, tmux_session=None, sinc
 
 def receipt_is_misplaced( path, correct_base_dir ):
     """
-    Is this receipt file OUTSIDE the directory the check actually reads?
+    Say whether this receipt file sits outside the directory the check reads.
 
-    Mirrors `heartbeat_hold.hold_is_misplaced` deliberately, down to the fail-safe:
-    the two families have the same defect and should not have two different shapes
-    for the reader to learn.
-
-    ⚠️ THE PREDICATE IS ABOUT THE PARENT, NOT ABOUT ANCESTRY, and that is the whole
-    difference from the holds version. `find_receipt_by_identity` globs
-    `<base_dir>/<prefix>*.json` NON-RECURSIVELY, so a receipt one level DEEPER
-    inside the correct root is just as invisible as one in a sibling repo. An
-    ancestry test would call that nested file correctly placed and it would still
-    never be found — a detector agreeing with the defect it exists to catch.
-    Measured: a receipt at <base>/nested/ returns None from the finder exactly as a
-    receipt in a sibling root does.
+    Mirrors `heartbeat_hold.hold_is_misplaced`, down to the fail-safe, because the
+    two families share one defect and should share one shape.
 
     Requires:
         - path is a path-like or string; correct_base_dir is the directory the
@@ -607,8 +550,14 @@ def receipt_is_misplaced( path, correct_base_dir ):
     Ensures:
         - True iff `path`'s immediate parent is not `correct_base_dir`
         - fail-safe: an unresolvable base dir or path returns False — the detector
-          never OVER-flags a receipt it cannot place, because a false "misplaced"
+          never over-flags a receipt it cannot place, because a false "misplaced"
           sends a manager to fix a writer that is working
+        - the predicate tests the parent, never ancestry: `find_receipt_by_identity`
+          globs `<base_dir>/<prefix>*.json` non-recursively, so a receipt one level
+          deeper inside the correct root is as invisible as one in a sibling repo,
+          and an ancestry test would call that nested file correctly placed
+        - measured: a receipt at <base>/nested/ returns None from the finder just
+          as a receipt in a sibling root does
     """
     if correct_base_dir is None:
         return False
@@ -621,26 +570,25 @@ def receipt_is_misplaced( path, correct_base_dir ):
 def find_misplaced_receipts( correct_base_dir, *, persona=None, tmux_session=None,
                              since=None, search_root=None, glob_fn=None ):
     """
-    Find receipts for THIS seat that exist but sit where the finder cannot see them.
+    Find receipts for this seat that exist but sit where the finder cannot see them.
 
-    This is the counterpart the receipt family never had. It searches RECURSIVELY,
-    which is the only way to observe the thing being detected: the defect IS the
-    non-recursive glob, so a detector that globs the same way is guaranteed to find
-    nothing and report a clean result — the vacuous-green shape.
+    It searches recursively, because that is the only way to see this defect. The
+    defect is the finder's non-recursive glob, so a detector using the same glob
+    would find nothing and report a clean result.
 
     Requires:
         - correct_base_dir is the directory `find_receipt_by_identity` globs
         - at least one of persona / tmux_session identifies the seat; with both
-          absent NOTHING is returned, matching find_receipt_by_identity's own rule
+          absent nothing is returned, matching find_receipt_by_identity's own rule
           that a blank query must never claim some arbitrary seat's receipt
-        - search_root defaults to the PARENT of correct_base_dir — the zone that
+        - search_root defaults to the parent of correct_base_dir — the zone that
           holds the sibling roots a receipt actually lands in when it goes astray
         - since is an aware datetime, or None for no recency floor
 
     Ensures:
         - returns a list of {"path", "receipt"} dicts, oldest path first, for every
-          matching receipt whose immediate parent is NOT correct_base_dir
-        - a receipt the finder WOULD have found is never included — this reports
+          matching receipt whose immediate parent is not correct_base_dir
+        - a receipt the finder would have found is never included — this reports
           only what the existing read is blind to
         - never raises; an unreadable tree yields []
     """
@@ -712,25 +660,25 @@ def classify_wake( receipt, *, fired_at, now,
         - expect_memento is False for a re-spin seeded with no memento at all
 
     Ensures:
-        - PENDING (no alarm) when no usable receipt yet and now < fired_at + deadline
-        - DEAD_NO_WAKE (ALARM) when no receipt and the deadline has passed
-        - a receipt dated at/before fired_at is treated as the PREDECESSOR's and
+        - `PENDING` (no alarm) when no usable receipt yet and now < fired_at + deadline
+        - DEAD_NO_WAKE (alarm) when no receipt and the deadline has passed
+        - a receipt dated at/before fired_at is treated as the predecessor's and
           so as no receipt at all — the guard that stops a self_respin's own
           pre-clear boot from greening its successor's check
-        - MALFORMED_RECEIPT (ALARM) when fired_at/now is missing, or a present
+        - MALFORMED_RECEIPT (alarm) when fired_at/now is missing, or a present
           receipt carries an unreadable booted_at once past the deadline
-        - SEED_NOT_CONSUMED (ALARM) when it woke, expect_memento, and none resolved
-        - WRONG_PERSONA (ALARM) when the record it read declares a persona that
-          differs from the seat's own — checked BEFORE slot and age, because a
+        - SEED_NOT_CONSUMED (alarm) when it woke, expect_memento, and none resolved
+        - WRONG_PERSONA (alarm) when the record it read declares a persona that
+          differs from the seat's own — checked before slot and age, because a
           record can be live and current and still be somebody else's
-        - a mismatch is reported ONLY when both personas yield slugs AND no
+        - a mismatch is reported only when both personas yield slugs and no
           spelling of one is a spelling of the other; either side unknown is
           unprovable, and an unprovable mismatch is not an alarm
-        - STALE_SLOT (ALARM) when it woke and read a slot outside the live family
-        - STALE_MEMENTO (ALARM) when it woke, read a live slot, and that record's
+        - STALE_SLOT (alarm) when it woke and read a slot outside the live family
+        - STALE_MEMENTO (alarm) when it woke, read a live slot, and that record's
           written_at is older than max_memento_age_seconds
-        - RETURNED (no alarm) otherwise
-        - a live-slot record with NO written_at stamp is RETURNED, not stale: an
+        - `RETURNED` (no alarm) otherwise
+        - a live-slot record with no written_at stamp is `RETURNED`, not stale: an
           undated record is unmeasurable, and inventing an alarm out of an absent
           measurement is how a check earns its way into being ignored
         - never raises
@@ -835,28 +783,18 @@ def render_alert( assessment, *, fired_at=None ):
     Requires:
         - assessment is a WakeAssessment
 
-    🔴 THE IDENTITY CLAUSE HAS THREE STATES, NOT TWO, AND THAT IS THE WHOLE POINT OF
-    THIS FUNCTION'S 2026-09-03 REWRITE (row 7ad5eba6). It used to render
-    `assessment.persona or "unknown persona"` and `assessment.session_id or
-    "unknown session"`. On the live path the arm supplies NEITHER — measured: the
-    watch is handed `tmux_session` and nothing else — and on a no-receipt
-    DEAD_NO_WAKE there is no receipt to fall back to either. So the alert printed
-    "unknown persona / unknown session" on EVERY such alarm, unconditionally.
-
-    ⚠️ A reader cannot tell a constant from a variable by looking at one sample.
-    A manager read that string as evidence about the ARM, built five one-variable
-    cases on it, and reached a diagnosis that had to be retracted off a closed row.
-    The string was never wrong; it simply never varied, and nothing said so.
-
-    ⇒ So the three states are now DIFFERENT WORDS, and the middle one is the state
-    that was invisible:
-      · identity KNOWN            -> "<persona> / <session id>"
-      · identity NOT SUPPLIED     -> names the tmux session it was armed on and says
-                                     plainly that no persona or session id reached
-                                     the watch — actionable, because the tmux name
-                                     is the one identity that survives a re-spin
-      · nothing known at all      -> says so outright, rather than dressing an empty
-                                     hand as an unknown seat
+    The identity clause has three states, not two. It used to render `persona or
+    "unknown persona"` and `session_id or "unknown session"`. On the live path the
+    arm supplies neither, only `tmux_session`, and a no-receipt DEAD_NO_WAKE has no
+    receipt to fall back to, so every such alert read "unknown persona / unknown
+    session". A string that never varies reads as evidence about the arm, which
+    misleads the reader, so the three states now render as different words:
+      - identity known: "<persona> / <session id>"
+      - identity not supplied: names the tmux session it was armed on and says
+        that no persona or session id reached the watch; the tmux name is the one
+        identity that survives a re-spin
+      - nothing known at all: says so outright, rather than dressing an empty
+        hand as an unknown seat
 
     Requires:
         - assessment is a WakeAssessment
@@ -864,7 +802,7 @@ def render_alert( assessment, *, fired_at=None ):
     Ensures:
         - names the verdict, the identity, the reason, and — when one is known — the
           memento file the seat actually opened
-        - the three identity states above render as three DISTINGUISHABLE strings, so
+        - the three identity states above render as three distinguishable strings, so
           a reader can tell "we were never told who this is" from "we were told and
           it is unknown"
         - never raises
@@ -908,12 +846,12 @@ def check_respin_wake( *, fired_at, session_id=None, persona=None, tmux_session=
 
     Requires:
         - fired_at is an aware datetime
-        - session_id identifies a same-seat re-spin (self_respin), OR
+        - session_id identifies a same-seat re-spin (self_respin), or
           persona/tmux_session identify a dismiss-then-spawn successor
         - base_dir is a directory path, or None to resolve fleet_data_root()
 
     Ensures:
-        - returns the FIRST settled WakeAssessment (anything but PENDING), or the
+        - returns the first settled WakeAssessment (anything but `PENDING`), or the
           post-deadline assessment when it never settles
         - sleeps at most poll_interval_seconds and never past the deadline — a
           check that outlives its own window is a check nobody waits for
@@ -969,12 +907,11 @@ def check_respin_wake( *, fired_at, session_id=None, persona=None, tmux_session=
 
 def verify_respin_wake( *, alert_fn, fired_at, **kwargs ):
     """
-    Run the bounded watch and SHOUT on failure.
+    Run the bounded watch and call alert_fn when the verdict is an alarm.
 
-    The shout is the point. The re-spin defect is not that a successor died — it
-    is that nobody was told, so the seat read as idle for twenty minutes.
-    Delivery is injected so the caller picks the rail (a DM to the firing manager
-    in production) and the decision tree stays testable.
+    The defect is that nobody was told a successor died, not the death itself. Delivery is
+    injected so the caller picks the rail (a DM to the firing manager in production)
+    and the decision tree stays testable.
 
     Requires:
         - alert_fn is a callable taking one message string
@@ -1000,8 +937,8 @@ def start_wake_watch( *, alert_fn, fired_at, thread_factory=None, **kwargs ):
     """
     Run `verify_respin_wake` on a daemon thread so the caller returns immediately.
 
-    A manager that fired a re-spin must not block ninety seconds to learn it
-    worked — the watch has to be free, or it will be skipped.
+    A manager that fired a re-spin must not block for ninety seconds to learn it
+    worked. The watch has to be free, or it will be skipped.
 
     Requires:
         - alert_fn is a callable taking one message string
@@ -1034,32 +971,31 @@ def arm_watches_for_spawn( spawn_result, *, alert_fn, fired_at, start_fn=None,
         - spawn_result is the dict session_spawner.spawn_sessions returned
         - alert_fn is the shout rail; fired_at is an aware datetime
         - start_fn is an injected start_wake_watch stand-in, or None
-        - base_dir_for is an injected callable taking ONE spawn record and
+        - base_dir_for is an injected callable taking one spawn record and
           returning that seat's data root, or None to keep today's behaviour
 
-    ⚠️ THE RESOLVER IS INJECTED, NOT IMPORTED, AND THAT IS THE WHOLE POINT.
-    Resolving a project NAME to a repo root lives in `lupin_mcp.session_spawner`,
-    and importing that here would drag requests / urllib3 / certifi / websockets
-    into a module the :8001 arbiter loads on a deliberately LIGHT venv — where a
-    missing import kills a worker THREAD while the process stays `active` and
-    /health still answers 200 (measured 2026-08-08, invisible for two days). This
-    module keeps even `fleet_data_root` behind a function-local import for the
-    same reason. So the CALLER resolves and this leaf only forwards.
+    The resolver is injected, never imported. Resolving a project name to a repo
+    root lives in `lupin_mcp.session_spawner`, and importing it here would drag
+    requests, urllib3, certifi and websockets into a module the :8001 arbiter
+    loads on a light venv. There a missing import kills a worker thread while the
+    process stays `active` and /health still answers 200. This module keeps even
+    `fleet_data_root` behind a function-local import for the same reason, so the
+    caller resolves and this leaf only forwards.
 
     Ensures:
-        - arms a watch ONLY for records whose status is "spawned" — a record that
+        - arms a watch only for records whose status is "spawned" — a record that
           failed to launch is already loud at the call site, and a wake alarm on
           top of it would report the same thing twice under a different name
         - watches on the tmux session_name, which is the only identity that
           survives dismiss-then-spawn (the successor mints its own session id)
-        - each watch reads the SEAT'S OWN data root when base_dir_for supplies
-          one — the boot-receipt WRITER already keys on the spawned seat's repo
+        - each watch reads the seat's own data root when base_dir_for supplies
+          one — the boot-receipt writer already keys on the spawned seat's repo
           (register_session, `fleet_data_root( repo_root )`), so a reader keyed on
           the firing manager's ambient LUPIN_ROOT looks in the wrong directory for
           any cross-repo spawn and reports DEAD_NO_WAKE for a seat that woke fine
         - a base_dir_for that returns None, or raises, leaves that record on the
           ambient default: a resolver failure must never cost the watch itself
-        - an explicit base_dir in kwargs WINS over base_dir_for — a caller naming
+        - an explicit base_dir in kwargs wins over base_dir_for — a caller naming
           one directory outright is not overridden by a per-record guess
         - returns the list of started watch handles
         - a spawn_result of the wrong shape arms nothing rather than raising

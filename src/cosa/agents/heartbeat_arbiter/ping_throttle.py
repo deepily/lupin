@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-Heartbeat Arbiter — auto-ping throttle / per-edge backoff (pure).
+Heartbeat arbiter auto-ping throttle: pure per-edge backoff and rate-cap decisions.
 
-The arbiter (doc 03 §6.1 / §7) DMs a blocker at most once per (holder, awaited,
-reason) edge per backoff window — never re-pinging every poll (the no-storm
-invariant, Sam-TTS lesson) — and honors a global fleet-wide rate cap across all
-arbiter-originated DMs.
+The arbiter DMs a blocker at most once per (holder, awaited, reason) edge per
+backoff window. It never re-pings every poll, which keeps a ping storm from
+forming. It also honors a global fleet-wide rate cap across all arbiter-originated
+DMs.
 
-Pure decisions only: the consumer holds the per-edge state (last-ping ts +
-attempt count) and the recent-DM count; these functions decide. Clear-on-resume
-(dropping an edge when the holder stops awaiting) is the consumer's wiring.
+These functions only decide. The consumer holds the per-edge state (last-ping ts
+and attempt count) and the recent-DM count. Clear-on-resume, which drops an edge
+when the holder stops awaiting, is the consumer's wiring.
 
 Design authority: lupin →
     src/rnd/v0.1.8/2026.06.04-heartbeat-hook/03-arbiter-design.md §6.1 / §7.
@@ -55,7 +55,7 @@ def backoff_for_attempt( attempt, schedule=DEFAULT_BACKOFF_SCHEDULE ):
 
 def should_ping( last_ping_ts, now, backoff_seconds ):
     """
-    Should this edge be pinged NOW? (per-edge throttle)
+    Should this edge be pinged now? (per-edge throttle)
 
     Requires:
         - last_ping_ts is an aware datetime or None (None = never pinged)
@@ -63,7 +63,7 @@ def should_ping( last_ping_ts, now, backoff_seconds ):
         - backoff_seconds is a positive number
 
     Ensures:
-        - Returns True iff never pinged, OR the backoff window has elapsed
+        - Returns True iff never pinged, or the backoff window has elapsed
           ((now - last_ping_ts) >= backoff_seconds)
         - Returns False conservatively if the timestamps are unusable
         - Never raises
@@ -79,7 +79,7 @@ def should_ping( last_ping_ts, now, backoff_seconds ):
 
 def under_global_cap( recent_ping_count, cap ):
     """
-    Is the fleet-wide arbiter-DM rate under the global cap? (§7 no-storm)
+    Is the fleet-wide arbiter-DM rate under the global cap? (no-storm check)
 
     Requires:
         - recent_ping_count is the count of arbiter DMs in the current window (int)
@@ -94,13 +94,11 @@ def under_global_cap( recent_ping_count, cap ):
 
 def in_window( sent_ts, now, window_seconds ):
     """
-    The subset of `sent_ts` whose age (now − ts) is within the trailing window
-    [0, window_seconds] (Item C, 2026-06-24 outreach-DM throttle).
+    Keep the send timestamps whose age is within the trailing window.
 
-    The PURE pruning primitive the consumer uses to bound its per-recipient
-    send-history list AND to count sends in the trailing window. Future-dated /
-    unusable entries are dropped (fail-safe: a junk ts can never inflate the count
-    and so never wrongly suppress an outreach).
+    The consumer uses it to bound its per-recipient send history and count sends.
+    Future-dated or unusable entries are dropped, so a junk ts can never inflate
+    the count and wrongly suppress an outreach.
 
     Requires:
         - sent_ts is an iterable of aware datetimes (or None); now is an aware
@@ -124,11 +122,11 @@ def in_window( sent_ts, now, window_seconds ):
 
 def trailing_window_allows( sent_ts, now, max_messages, window_seconds ):
     """
-    Is a NEW outreach to this recipient allowed under the trailing-window rate
-    limit — N (`max_messages`) messages per Y (`window_seconds`) — (Item C)?
+    Is a new outreach to this recipient allowed under the trailing-window rate limit?
 
-    The per-recipient counterpart to the per-edge `should_ping` + the fleet-wide
-    `under_global_cap`: caps the COUNT of recent sends in a sliding window.
+    The limit is N (`max_messages`) messages per Y (`window_seconds`). This is the
+    per-recipient counterpart to the per-edge `should_ping` and the fleet-wide
+    `under_global_cap`. It caps the count of recent sends in a sliding window.
 
     Requires:
         - sent_ts is an iterable of aware datetimes (the recipient's prior sends)
@@ -136,9 +134,9 @@ def trailing_window_allows( sent_ts, now, max_messages, window_seconds ):
         - max_messages (N) and window_seconds (Y·60) are numbers
 
     Ensures:
-        - returns True (DISABLED — never suppress, fail-safe) when max_messages <= 0
-          OR window_seconds <= 0
-        - otherwise returns True iff FEWER than max_messages of `sent_ts` fall in the
+        - returns True (disabled — never suppress, fail-safe) when max_messages <= 0
+          or window_seconds <= 0
+        - otherwise returns True iff fewer than max_messages of `sent_ts` fall in the
           trailing window (in_window) — i.e. there is room for one more
         - never raises
     """

@@ -1,29 +1,34 @@
 #!/usr/bin/env python3
 """
-Heartbeat-Arbiter recipient routing (Round 2b-2) — the ratified Part-6 model.
+Heartbeat-arbiter recipient routing: the ratified table mapping each case to a tier.
 
-A PURE encoding of the 12-case routing table (design `2026.06.08-arbiter-
-consumption-gap-and-operator-loop.md` Part 6, judgment calls RESOLVED by Rick
-2026-06-08). Every distinct arbiter output maps to exactly one RECIPIENT TIER;
-the arbiter consumer (arbiter_job) executes the tier via its seams (notify_fn =
-Rick via durable-post + live-push; send_to = directed manager/blocker DM).
+A pure encoding of the routing table. Every distinct arbiter output maps to
+exactly one recipient tier. The arbiter consumer (arbiter_job) executes the tier
+through its seams. The notify_fn seam reaches Rick by durable post plus live
+push. The send_to seam sends a directed DM to a manager or blocker.
 
-Keeping the table as a pure leaf means the routing is AUDITABLE + 100%-testable
-in isolation: the 12-case parametrized test asserts `CASE_TIERS` mirrors the
-Part-6 table cell-for-cell, and the executor test asserts each tier emits to the
-right recipients. No I/O, no seams here — the table is the contract.
+Keeping the table as a pure leaf makes the routing auditable and testable in
+isolation. A parametrized test asserts that `CASE_TIERS` mirrors the ratified
+table cell for cell. The executor test asserts that each tier emits to the
+right recipients. There is no I/O and there are no seams here. The table is the
+contract.
 
-The three recipient tiers + two cuts (Part 6 "pattern that falls out"):
-  • OPERATOR (Rick) only, push      — infra + self-health (#1/#2/#3) + decisions
-                                       (#10, Rick-primary): managers don't act on
-                                       containers; decisions are the human's domain.
-  • Rick + ALL active managers, push — fleet-level crises (#5 deadlock, #8 orphan
-                                       worker, #9 manager-down, #11 fleet-stall):
-                                       resilient to owning-manager-down; rare+severe.
-  • Owning manager / the blocker, DM — the per-worker manager nudge (#7) and the
-                                       blocker (#4, rewritten + cc its manager).
-  • CUT: drop the roster broadcast    — #6 → /state pull-state.
-  • CUT: demote the poll-error        — #12 → log; escalate to Rick only if PERSISTENT.
+The three recipient tiers and two cuts:
+Operator (Rick) only, push: infra and self-health (#1/#2/#3) plus decisions
+(#10, Rick-primary). Managers do not act on containers.
+Decisions are the human's domain.
+
+Rick plus all active managers, push: fleet-level crises (#5 deadlock,
+#8 orphan worker, #9 manager-down, #11 fleet-stall). The tier is resilient
+to the owning manager being down, and the cases are rare and severe.
+
+Owning manager or the blocker, DM: the per-worker manager nudge (#7) and
+the blocker (#4, rewritten, cc its manager).
+
+Cut, drop the roster broadcast: #6 becomes the /state pull-state.
+
+Cut, demote the poll-error: #12 is logged.
+It escalates to Rick only if persistent.
 """
 
 # ── recipient tiers ─────────────────────────────────────────────────────────
@@ -173,14 +178,14 @@ CASE_TIERS = {
 
 def tier_for( case: int ) -> str:
     """
-    The Part-6 recipient tier for an arbiter output case (1..12).
+    The ratified recipient tier for an arbiter output case (1..20).
 
     Requires:
-        - case is an int in 1..12
+        - case is an int in 1..20
 
     Ensures:
         - returns the ratified tier string for `case`
-        - raises KeyError for an unknown case (fail loud — a new output MUST be
+        - raises KeyError for an unknown case (fail loud — a new output must be
           routed explicitly, never silently defaulted)
     """
     return CASE_TIERS[ case ]

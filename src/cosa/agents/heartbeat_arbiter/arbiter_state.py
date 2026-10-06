@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
 """
-Heartbeat Arbiter — consumer wiring state (Rachel's lane).
+Heartbeat arbiter consumer wiring state: the objects the poll loop carries across polls.
 
-Pure state objects the ArbiterConsumerJob carries ACROSS polls. They hold no
-decision logic (that lives in Tiffany's leaves) and do no I/O — just the
-bookkeeping the poll loop needs:
+The ArbiterConsumerJob carries these pure state objects from one poll to the next.
+They hold no decision logic, which lives in the leaf modules, and do no I/O.
+They keep only the bookkeeping the poll loop needs:
 
-    - FleetEventAccumulator: the glob/tail returns only NEW records per poll;
-      this accumulates a BOUNDED per-session tail (oldest→newest) so
+    - FleetEventAccumulator: the glob/tail returns only new records per poll.
+      This accumulates a bounded per-session tail (oldest→newest). So
       `build_fleet_view` sees each session's current state ([-1]) plus a window
-      for "repeated cap_reached" stuck-detection (§4). Bounded by maxlen.
+      for repeated "cap_reached" stuck-detection. The tail is bounded by maxlen.
 
-    - PingLedger: per-edge last-ping timestamp + clear-on-resume. The throttle
-      DECISION is the `ping_throttle` leaf's job (should_ping / backoff); this
-      only remembers when we last pinged each (holder→awaited→reason) edge and
-      forgets edges that are no longer active (the holder resumed or re-held
-      elsewhere ⇒ the §6.1 "clear the edge on resume" rule).
+    - PingLedger: per-edge last-ping timestamp with clear-on-resume. Whether to
+      ping is the `ping_throttle` leaf's decision (should_ping / backoff). The
+      ledger only remembers when each (holder→awaited→reason) edge was last
+      pinged. It forgets edges that are no longer active, meaning the holder
+      resumed or re-held elsewhere, so the edge is cleared on resume.
 
-Both are pure + deterministic (no clock, no I/O) — 100%-testable in isolation.
+Both are pure and deterministic (no clock, no I/O), so they test in isolation.
 """
 from collections import deque
 
@@ -33,7 +33,7 @@ class FleetEventAccumulator:
         - maxlen is a positive int (per-session record cap)
 
     Ensures:
-        - update(events_by_session) appends each session's NEW records to its
+        - update(events_by_session) appends each session's new records to its
           bounded tail (oldest→newest), dropping the oldest beyond maxlen
         - snapshot() returns {session_id: list(records)} for build_fleet_view
         - never raises on well-formed {sid: list} input
@@ -49,7 +49,7 @@ class FleetEventAccumulator:
 
         Requires:
             - events_by_session is {session_id: [record dict, ...]} (the
-              glob/tail output for THIS poll — new records only)
+              glob/tail output for this poll — new records only)
 
         Ensures:
             - each session's tail grows by its new records, capped at maxlen
@@ -64,6 +64,8 @@ class FleetEventAccumulator:
 
     def snapshot( self ):
         """
+        Return each session's accumulated tail, oldest to newest.
+
         Ensures:
             - Returns {session_id: list(records oldest→newest)} — the input
               shape build_fleet_view consumes (uses [-1] for current state)
@@ -77,18 +79,16 @@ class FleetEventAccumulator:
 
 class PingLedger:
     """
-    Per-edge last-ping bookkeeping + clear-on-resume (§6.1).
+    Per-edge last-ping bookkeeping with clear-on-resume.
 
-    An "edge" is a (holder→awaited→reason) blocker relationship, keyed by a
-    string the `ping_throttle.edge_key` leaf produces. This ledger does NOT
-    decide whether to ping (that is the throttle leaf, given the last-ping ts);
-    it only REMEMBERS the last ping per edge and forgets edges that are no
-    longer active.
+    An "edge" is a (holder→awaited→reason) blocker, keyed by `ping_throttle.edge_key`.
+    The ledger never decides whether to ping, since the throttle leaf does that.
+    It only remembers the last ping per edge and forgets edges no longer active.
 
     Ensures:
         - get_last(edge_key) → the recorded last-ping value or None
         - record_ping(edge_key, ts) → store ts for the edge
-        - clear_resolved(active_edge_keys) → drop every edge NOT in the active
+        - clear_resolved(active_edge_keys) → drop every edge not in the active
           set (resumed/re-held elsewhere) and return the dropped keys
         - never raises
     """
@@ -106,13 +106,13 @@ class PingLedger:
 
     def clear_resolved( self, active_edge_keys ):
         """
-        Drop ledger entries for edges that are no longer active (§6.1 clear-on-resume).
+        Drop ledger entries for edges that are no longer active (clear-on-resume).
 
         Requires:
             - active_edge_keys is an iterable of currently-active edge keys
 
         Ensures:
-            - removes every tracked edge NOT in active_edge_keys
+            - removes every tracked edge not in active_edge_keys
             - returns the set of dropped edge keys
         """
         active  = set( active_edge_keys )

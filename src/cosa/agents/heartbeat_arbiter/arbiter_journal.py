@@ -1,24 +1,20 @@
 #!/usr/bin/env python3
 """
-Arbiter journal line builder — the ONE owner of the structured-log line shape.
+Arbiter journal line builder: the single owner of the structured-log line shape.
 
-Item A of `src/rnd/v0.1.8/2026.06.11-arbiter-outreach-delivery-receipts-and-
-local-timestamps.md`: Rick's verbatim — the ISO-UTC `ts` is "impenetrable"; every
-arbiter journal line now ALSO carries a human-parsable `ts_local` field rendered
-in a deploy-tunable timezone (INI key `arbiter journal local timezone`, default
-America/New_York), format `2026-06-11-at-17-28-46-(EDT)`.
+The ISO-UTC `ts` is hard to read, so every journal line also carries a
+human-parsable `ts_local` field. It is rendered in a deploy-tunable timezone
+(INI key `arbiter journal local timezone`, default America/New_York), in the
+format `2026-06-11-at-17-28-46-(EDT)`.
 
-Before this module the line shape was copy-pasted SIX times (`_default_log_fn`
-in arbiter_live_notify / health_watcher / fleet_arbiter_loop /
-context_pressure_writer / arbiter_job + the app wiring default) — one-name-rule
-violation that ALSO produced the §1.4 loop-label misattribution (every
-fleet-arbiter event journaled as `loop: health_watcher` because assemble_app
-passed the health watcher's default everywhere). Those sites now delegate here;
-`make_log_fn( loop=... )` stamps the TRUE emitting loop per wiring.
+Every emitter delegates here instead of keeping its own copy of the line shape.
+Separate copies had drifted: assemble_app passed the health watcher's default
+everywhere, so every fleet-arbiter event was journaled as `loop: health_watcher`.
+`make_log_fn( loop=... )` stamps the true emitting loop per wiring.
 
-Degrade-safe by the observer invariant: an invalid/unknown timezone must never
-take the watcher down — it falls back to UTC rendering and the FALLBACK ITSELF
-is journaled loudly once at build time (`journal_tz_invalid`).
+The builder is degrade-safe: an invalid or unknown timezone must never take the
+watcher down. It falls back to UTC rendering and journals the fallback loudly
+once at build time (`journal_tz_invalid`).
 """
 import datetime
 import json
@@ -48,16 +44,16 @@ DELIVERED_OUTCOMES  = frozenset( { "queued", "delivered_via_listener" } )
 
 def format_ts_local( dt: datetime.datetime, tz: Any ) -> str:
     """
-    Render an aware datetime in Rick's human format for the given tzinfo.
+    Render an aware datetime in the human `ts_local` format for the given tzinfo.
 
     Requires:
-        - dt is an AWARE datetime
+        - dt is an aware datetime
         - tz is a tzinfo (ZoneInfo)
 
     Ensures:
         - returns the same instant as `dt` rendered "%Y-%m-%d-at-%H-%M-%S-(%Z)"
-          (e.g. "2026-06-11-at-17-28-46-(EDT)"; DST handled by the tz database —
-          the same wall format yields "(EST)" in January)
+          (e.g. "2026-06-11-at-17-28-46-(EDT)"; DST is handled by the tz database,
+          so the same format yields "(EST)" in January)
     """
     return dt.astimezone( tz ).strftime( TS_LOCAL_FORMAT )
 
@@ -75,19 +71,19 @@ def make_log_fn(
 
     Requires:
         - service is a non-empty string
-        - loop (if given) names the TRUE emitting loop (§1.4 fix)
+        - loop (if given) names the true emitting loop
         - tz_name (if given) is a tz-database name; invalid → UTC fallback
         - now_fn (if given) is a 0-arg callable returning an aware UTC datetime
         - emit_fn (if given) is a 1-arg callable taking the serialized line
           (test seam; default prints flushed to stdout → systemd journal)
 
     Ensures:
-        - returns log_fn( event, **fields ) printing ONE JSON object:
+        - returns log_fn( event, **fields ) printing one JSON object:
           { ts, ts_local, service, [loop,] event, **fields }
         - `ts` stays the machine-sortable ISO-8601 UTC instant (unchanged
-          contract); `ts_local` is the SAME instant in the resolved tz,
+          contract); `ts_local` is the same instant in the resolved tz,
           format "2026-06-11-at-17-28-46-(EDT)"
-        - an invalid tz_name journals ONE `journal_tz_invalid` line at build
+        - an invalid tz_name journals one `journal_tz_invalid` line at build
           time and renders ts_local in UTC thereafter (never raises)
         - non-serializable field values are stringified ( default=str )
     """

@@ -1,30 +1,28 @@
 #!/usr/bin/env python3
 """
-Operator-gate URGENCY routing (PURE) — proactive-manager A2 (fcb5dbc0, design D4).
+Operator-gate urgency routing: pure decisions on how each open gate reaches the human.
 
-The arbiter is the SINGLE pusher of operator gates (`gate_class='operator'` — the
-store's fleet-wide "awaiting the human operator" queue). D4 routes each OPEN gate
-by its `urgency` tier so the human is neither flooded nor starved:
+The arbiter is the single pusher of operator gates (`gate_class='operator'`, the
+store's fleet-wide "awaiting the human operator" queue). Each open gate is routed
+by its `urgency` tier. The human is then neither flooded nor starved.
 
-    urgent → push immediately (interrupt)
-    normal → batched into a periodic digest (cadence INI-configurable)
-    low    → sits in the queue until the human PULLS it (never auto-pushed)
+    Urgent → push immediately (interrupt).
+    Normal → batched into a periodic digest (cadence INI-configurable).
+    Low    → sits in the queue until the human pulls it (never auto-pushed).
 
-This module owns ONLY the pure routing DECISION — partition by tier + the digest
-cadence debounce. It performs NO I/O and emits NO pushes: the arbiter
-(`arbiter_job.py`) gathers the open operator gates, calls these transforms, then
-does the actual interrupt / digest emission and stamps the digest clock. Keeping
-the decision pure here (the `heartbeat_work_owed` discipline) makes it
-exhaustively unit-testable and decouples it from the arbiter's push plumbing — the
-thin arbiter wiring is the ONLY part that touches `arbiter_job.py` (deferred to the
-post-Lane-B arbiter pass; this pure core carries zero collision risk).
+This module owns only the pure routing decision: partition by tier, plus the
+digest cadence debounce. It performs no I/O and emits no pushes. The arbiter
+(`arbiter_job.py`) gathers the open operator gates and calls these transforms.
+It then does the actual interrupt and digest emission and stamps the digest clock.
+
+Keeping the decision pure here (the `heartbeat_work_owed` discipline) makes it
+exhaustively unit-testable. It also decouples the decision from the arbiter's
+push plumbing, so the thin arbiter wiring is the only part that touches
+`arbiter_job.py`.
 
 The tier strings mirror `cosa.rest.task_store_rules.VALID_URGENCIES` (the store
-enum, default "normal"); kept as literals here so the pure agent module takes no
-dependency on the rest layer.
-
-Design authority: planning-is-prompting ->
-    planning-is-prompting/src/rnd/2026.06.23-proactive-manager-doctrine-and-mechanism.md §D4.
+enum, default "normal"). They are kept as literals here so the pure agent module
+takes no dependency on the rest layer.
 """
 
 import datetime
@@ -71,7 +69,7 @@ def _urgency_of( gate ):
     Ensures:
         - returns the gate's `urgency` when it is one of the three known tiers
         - returns URGENCY_DIGEST ("normal", the store default) for a missing /
-          unknown / non-string urgency — a gate is NEVER dropped and NEVER
+          unknown / non-string urgency — a gate is never dropped and never
           spuriously escalated to an interrupt (urgent is strictly opt-in)
     """
     value = gate.get( "urgency" ) if isinstance( gate, dict ) else None
@@ -82,7 +80,7 @@ def _urgency_of( gate ):
 
 def partition_by_urgency( gates ):
     """
-    Partition open operator gates into the three D4 routes (PURE).
+    Partition open operator gates into the three urgency routes (pure).
 
     Requires:
         - gates is an iterable of gate-row dicts, or None
@@ -94,7 +92,7 @@ def partition_by_urgency( gates ):
         - a non-dict entry is skipped; a gate with a missing/unknown urgency is
           routed to "digest" (the safe default tier — never dropped, never an
           interrupt)
-        - input order is preserved within each bucket; PURE (no clock, no IO)
+        - input order is preserved within each bucket; pure (no clock, no IO)
     """
     out = { "interrupt": [ ], "digest": [ ], "queue": [ ] }
     bucket = { URGENCY_INTERRUPT: "interrupt", URGENCY_DIGEST: "digest", URGENCY_QUEUE: "queue" }
@@ -107,7 +105,7 @@ def partition_by_urgency( gates ):
 
 def digest_due( last_digest_ts, now, cadence_seconds=DEFAULT_DIGEST_CADENCE_SECONDS ):
     """
-    Has the NORMAL-urgency digest cadence elapsed? The pure debounce predicate.
+    Has the normal-urgency digest cadence elapsed? The pure debounce predicate.
 
     Requires:
         - last_digest_ts is the arbiter's most-recent digest-emission stamp
@@ -117,10 +115,10 @@ def digest_due( last_digest_ts, now, cadence_seconds=DEFAULT_DIGEST_CADENCE_SECO
 
     Ensures:
         - returns True when there is no datable prior digest (None / unparseable
-          ⇒ bias-to-emit a first digest) OR the age >= cadence_seconds
-        - Boundary: age EXACTLY == cadence is due (>=)
-        - a future stamp (clock skew) reads NOT due (age < cadence); never raises
-        - PURE: no clock read, no IO
+          → bias-to-emit a first digest) or the age >= cadence_seconds
+        - Boundary: age exactly == cadence is due (>=)
+        - a future stamp (clock skew) reads not due (age < cadence); never raises
+        - pure: no clock read, no IO
     """
     parsed = _parse_iso( last_digest_ts )
     if parsed is None:
@@ -135,13 +133,11 @@ def digest_due( last_digest_ts, now, cadence_seconds=DEFAULT_DIGEST_CADENCE_SECO
 def route_operator_gates( gates, last_digest_ts, now,
                           cadence_seconds=DEFAULT_DIGEST_CADENCE_SECONDS ):
     """
-    The actionable D4 routing verdict the arbiter consumes (PURE).
+    The actionable routing verdict the arbiter consumes (pure).
 
-    Combines partition_by_urgency + digest_due into one verdict so the arbiter's
-    single-pusher loop is a thin consumer: interrupt every gate in `interrupt`;
-    emit `digest` as ONE batch + stamp the digest clock ONLY when `digest_due` is
-    True AND `digest` is non-empty; `queue` is never auto-pushed (surfaced only
-    when the human pulls it via task_query(gate_class=operator, urgency=low)).
+    Combines partition_by_urgency and digest_due into one verdict, so the arbiter's
+    single-pusher loop is a thin consumer. The queue is surfaced only when the
+    human pulls it via task_query(gate_class=operator, urgency=low).
 
     Requires:
         - gates is an iterable of open operator-gate dicts, or None
@@ -154,10 +150,13 @@ def route_operator_gates( gates, last_digest_ts, now,
             "digest_due": bool,                  # whether the cadence elapsed
             "queue":     [low gates],            # pull-only, never auto-pushed
           }
-        - `digest` is the EMPTY list when the cadence has not elapsed (the normal
+        - `digest` is the empty list when the cadence has not elapsed (the normal
           gates wait for the next due sweep) — so the arbiter emits a digest iff
           `digest` is truthy
-        - PURE: no clock read, no IO; never raises on well-formed dict input
+        - pure: no clock read, no IO; never raises on well-formed dict input
+        - the arbiter interrupts every gate in `interrupt`, and emits `digest` as
+          one batch and stamps the digest clock only when `digest_due` is True
+          and `digest` is non-empty; `queue` is never auto-pushed
     """
     parts = partition_by_urgency( gates )
     due   = digest_due( last_digest_ts, now, cadence_seconds )

@@ -1,27 +1,22 @@
 #!/usr/bin/env python3
 """
-Lineage-carry persistence — the file-backed half of the Fleet-Status offline-
-lineage fix (F-A of `src/rnd/v0.1.8/2026.06.11-arbiter-lineage-persistence-and-
-persona-matching.md`).
+Persists the arbiter's lineage-carry map to a JSON file so it survives restarts.
 
-A reaped worker loses BOTH lineage sources at the moment of reap
-(`dismiss_sessions` drops its manifest record AND unlinks its bridge), so the
-arbiter's in-poll `carry_forward_lineage` map is the ONLY thing keeping its
-decaying Fleet-Status row under its manager — and that map was in-memory: each
-:8001 restart (4× on 2026-06-11 alone) wiped it, dumping Cheech + old-Rio into
-"(Unmanaged)". This module persists the carry to a small JSON file so the
-mapping survives restarts for exactly the rows' decay window.
+A reaped worker loses both lineage sources at reap: `dismiss_sessions` drops its
+manifest record and unlinks its bridge. The in-poll `carry_forward_lineage` map
+is then the only thing keeping its decaying Fleet-Status row under its manager.
+That map is in memory, so a :8001 restart would dump the row into "(Unmanaged)".
+This file keeps the mapping alive for the rows' decay window.
 
-Shape — a flat JSON object, session_id -> last-known manager persona:
+Shape is a flat JSON object, session_id -> last-known manager persona:
     { "<session_id>": "Tiberius", ... }
 
-Bounded by construction: the caller persists the POST-prune mapping
-(`carry_forward_lineage` prunes to the current full-snapshot sids each poll),
-so the file tracks exactly the decay-window population and a row that evicts
-from the snapshot evicts from the file on the same poll.
+The file stays small because the caller persists the already-pruned mapping.
+`carry_forward_lineage` prunes to the current full-snapshot session ids each poll.
+A row that leaves the snapshot therefore leaves the file on the same poll.
 
-Same file family + idioms as `outreach_ledger` (io/arbiter/, degrade-safe
-reads ⇒ empty, atomic per-writer-suffixed tmp-write + rename).
+Same file family and idioms as `outreach_ledger` (io/arbiter/, reads that
+degrade to empty, atomic per-writer tmp-write then rename).
 """
 import json
 import os
@@ -39,10 +34,10 @@ def read_carry( path ) -> dict:
     Ensures:
         - returns { session_id: manager_persona } (empty dict when the file is
           missing, unreadable, malformed, or not a JSON object)
-        - only non-empty-string keys AND values are kept (a malformed member is
+        - only non-empty-string keys and values are kept (a malformed member is
           skipped, never propagated into the snapshot)
-        - DEGRADE-SAFE: never raises — any error ⇒ empty dict (a carry read
-          must never break a poll; worst case is today's pre-fix behavior)
+        - degrade-safe: never raises, and any error gives an empty dict (a carry
+          read must never break a poll; the worst case is no carried lineage)
     """
     try:
         with open( path ) as f:

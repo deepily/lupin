@@ -1,52 +1,45 @@
 #!/usr/bin/env python3
 """
-Heartbeat-Arbiter manager resolution (v2.2 closed-loop, lane B6 / decision D5).
+Heartbeat-Arbiter manager resolution: find a stuck worker's manager from spawn lineage.
 
-Resolve a stuck worker's MANAGER for the manager-tap DM (B2) from spawn-lineage,
-so — with multiple groups — each stuck worker routes to ITS OWN manager
-automatically. **Never hardcode a persona name** (D5).
+The manager-tap DM routes each stuck worker to its own manager, so with several groups
+every worker reaches the right manager automatically. Never hardcode a persona name.
 
-The PRIMARY lineage source is the child bridge's `spawned_by` field — the
-manager's real session id, globally unique, collision-proof:
+The primary lineage source is the child bridge's `spawned_by` field. It holds the manager's
+real session id, which is globally unique and collision-proof:
 
     worker session_id
       → bridge.spawned_by              (find_session_by_id)
       → manager persona                (get_voice_persona)
 
-For LEGACY bridges that predate `spawned_by`, the resolver falls back to the
-original multi-hop manifest join. That join is keyed by tmux session_NAME,
-which is persona-indexed and REUSED (`cc-<role>-<persona>-<N>` recurs across
-every same-persona manager session and survives in stale manifests), so it is
-structurally ambiguous — the multi-match guard below then refuses to guess:
+Legacy bridges that predate `spawned_by` fall back to a multi-hop manifest join. That join
+is keyed by the tmux session name. The name is persona-indexed and reused: `cc-<role>-<persona>-<N>`
+recurs across every same-persona manager session and survives in stale manifests. The join is
+therefore ambiguous, and the multi-match guard below refuses to guess:
 
     worker session_id
       → bridge.tmux_session            (find_session_by_id)
       → manifest record session_name match across ~/.claude/sessions/spawned-*.json
-      → manager_session_id             (parsed from the manifest FILENAME)
+      → manager_session_id             (parsed from the manifest filename)
       → manager persona                (get_voice_persona)
 
-The manager id is parsed from `spawned-<id>.json`. That filename is produced by
-`session_spawner._manifest_path`, whose inline slugify maps non-[alnum-_] chars
-to "_" (it does NOT truncate — confirmed; no length cap → no truncation
-collision surface). Real CC session_ids are UUIDs (hex + hyphens) for which the
-slugify is the identity, so the round-trip is exact.
+The manager id is parsed from `spawned-<id>.json`. That filename comes from
+`session_spawner._manifest_path`, whose inline slugify maps characters outside alphanumerics,
+"-" and "_" to "_". It never truncates, so there is no length-collision surface. Real CC
+session ids are UUIDs (hex and hyphens), for which the slugify changes nothing, so the round
+trip is exact.
 
-Two collision/robustness guards (María's B6 review anchors) keep "never a
-wrong-manager DM" airtight:
-  • **Round-trip guard** — trust a parsed id ONLY if `_manifest_path(id).name`
-    reproduces the actual filename EXACTLY (re-applying the *same* transform that
-    produced it, not a different slug). A lossy/non-round-tripping filename →
-    skip → unresolved.
-  • **Multi-match guard** — if the worker's tmux_session resolves to MORE THAN
-    ONE manager-id (collision / cross-manifest ambiguity), return None →
-    unresolved. Exactly-one-else-escalate.
+Two guards keep a wrong-manager DM from going out:
+  - Round-trip guard: trust a parsed id only if `_manifest_path(id).name` reproduces the actual
+    filename exactly, re-applying the same transform that produced it. A lossy filename is
+    skipped, so the worker stays unresolved.
+  - Multi-match guard: if the worker's tmux_session resolves to more than one manager id
+    (collision or cross-manifest ambiguity), return None. Exactly one match, else escalate.
 
-**Layered degradation (D5 + Tiberius's escalate-don't-guess):**
-  lineage (a single manager_session_id AND a DM-able persona both resolve)
-    → declared manager-on-duty fallback (config)
-      → UNRESOLVED → caller escalates to Rick.
-**Prefer UNRESOLVED over a wrong-manager DM** on any brittle/ambiguous hop.
-Never raises.
+Layered degradation runs in three steps. First lineage, when a single manager_session_id and a
+DM-able persona both resolve. Then the declared manager-on-duty fallback (config). Last
+unresolved, where the caller escalates to the owner. Prefer unresolved over a wrong-manager DM
+on any brittle or ambiguous hop. Never raises.
 """
 import os
 from pathlib import Path
@@ -78,12 +71,12 @@ def find_manager_session_id( tmux_session: str, session_dir: Path = SESSION_DIR 
 
     Ensures:
         - returns the manager_session_id parsed from the matching manifest's
-          filename iff EXACTLY ONE manager-id resolves, where a resolution
-          requires (i) a manifest record with that session_name AND (ii) the
+          filename iff exactly one manager-id resolves, where a resolution
+          requires (i) a manifest record with that session_name and (ii) the
           parsed id round-trips `_manifest_path(id).name == filename` (the same
           transform that produced the filename — guards the lossy edge)
         - returns None on: no match · empty/missing tmux_session · a brittle
-          (non-round-tripping) filename · MULTI-MATCH (>1 manager-id resolves —
+          (non-round-tripping) filename · multi-match (>1 manager-id resolves —
           collision / cross-manifest ambiguity → escalate-don't-guess) · OSError
         - never raises
     """
@@ -122,13 +115,11 @@ def _id_matches( a, b ):
 
 def list_manager_session_ids( session_dir: Path = SESSION_DIR ):
     """
-    Enumerate every MANAGER session-id that owns a (round-trip-valid) spawn manifest.
+    Enumerate every manager session-id that owns a round-trip-valid spawn manifest.
 
-    The inverse of `find_manager_session_id`: instead of resolving ONE worker's
-    manager, list ALL managers — a session is a manager iff it spawned ≥1 child
-    (a `spawned-<id>.json` manifest exists). The id is parsed from the filename
-    and trusted ONLY if it round-trips `_manifest_path(id).name == filename` (same
-    guard as find_manager_session_id — a lossy/non-round-tripping name is skipped).
+    The inverse of `find_manager_session_id`. A session is a manager iff it spawned at
+    least one child, meaning a `spawned-<id>.json` manifest exists. A filename that fails
+    the round-trip check `_manifest_path(id).name == filename` is lossy and skipped.
 
     Requires:
         - session_dir is the spawn-manifest directory
@@ -159,27 +150,11 @@ def resolve_active_managers(
     declared_managers : Optional[ list ]     = None,
 ):
     """
-    Resolve the managers ON DUTY for the Part-6 fleet-crisis fanout (Rick + ALL
-    active managers), phantom-guarded.
+    Resolve the managers on duty for the fleet-crisis fanout, with a phantom guard.
 
-    A persona is an ACTIVE MANAGER iff it satisfies BOTH:
-      (1) MANAGER-ROLE — its session owns a spawn-lineage manifest (it spawned
-          ≥1 child; via `list_managers`) OR its persona is in the DECLARED
-          manager roster (`declared_managers`, from COSA_VOICE_MANAGERS__<PROJECT>
-          — a declared manager counts even before its first spawn; Rick 2026-06-11).
-      (2) PROCESS-ALIVE — its session is present in `bridge_sessions` (the
-          PID + mtime-filtered live-bridge discovery, `find_active_voice_persona_sessions`).
-          This is the PHANTOM GUARD: a reaped manager whose commons `last_post_ts`
-          LINGERS in `who_rows` is EXCLUDED, because its dead bridge is absent from
-          bridge_sessions. (Raw commons_who is the phantom-prone signal — bridge
-          presence is the authoritative process-liveness axis, per the Round-1
-          union doctrine.) The guard applies to DECLARED managers identically —
-          declaration grants role, never liveness.
-
-    `who_rows` (commons_who) SEEDS the candidate set (a manager visible on commons
-    OR discovered via its bridge); the bridge-presence check then GUARDS it. The
-    persona name prefers the authoritative bridge value, falling back to the
-    who-row persona.
+    A persona is an active manager iff it has both of these. A manager role: a spawn manifest
+    via `list_managers`, or a place in the declared roster. A live process: its session is
+    present in `bridge_sessions`.
 
     Requires:
         - who_rows is a list of commons_who rows (dicts) or None
@@ -188,13 +163,21 @@ def resolve_active_managers(
         - declared_managers is a list of persona names or None
 
     Ensures:
-        - returns a SORTED list of DISTINCT active-manager personas
-        - includes a declared persona iff a LIVE bridge carries it
-          (punct/case-tolerant match via the shared persona normalizer — F-B;
+        - returns a sorted list of distinct active-manager personas
+        - includes a declared persona iff a live bridge carries it
+          (punct/case-tolerant match via the shared persona normalizer;
           the bridge's casing is emitted — the bridge is the authoritative
           name surface)
-        - excludes non-managers (no manifest AND not declared) AND phantoms
-          (commons-recent but no live bridge) AND managers with no DM-able persona
+        - excludes non-managers (no manifest and not declared) and phantoms
+          (commons-recent but no live bridge) and managers with no DM-able persona
+        - a declared manager counts even before its first spawn (the roster comes from
+          `COSA_VOICE_MANAGERS__<PROJECT>`); declaration grants role, never liveness
+        - phantom guard: a reaped manager whose last commons post still shows in who_rows is
+          excluded, because its dead bridge is absent from bridge_sessions (a PID and mtime
+          filtered live-bridge discovery); raw commons_who is phantom-prone, so bridge presence
+          is the authority on process liveness
+        - who_rows seeds the candidate set and the bridge check then filters it; the persona
+          name prefers the bridge value and falls back to the who-row persona
         - never raises
     """
     list_managers   = list_managers   if list_managers   is not None else list_manager_session_ids
@@ -258,7 +241,7 @@ def resolve_manager(
     session_dir      : Path                 = SESSION_DIR,
 ) -> dict:
     """
-    Resolve a worker's manager (D5), layered with escalate-don't-guess.
+    Resolve a worker's manager from spawn lineage, falling back to a declared manager.
 
     Requires:
         - worker_session_id is a session id string
@@ -267,27 +250,26 @@ def resolve_manager(
         - returns { manager_session_id, manager_persona, source } where source ∈
           { "lineage", "declared", "unresolved" }
         - the manager_session_id comes from the child bridge's `spawned_by`
-          (PRIMARY — authoritative, globally unique), falling back to the
-          tmux_session → manifest-name scan ONLY when `spawned_by` is
+          (primary — authoritative, globally unique), falling back to the
+          tmux_session → manifest-name scan only when `spawned_by` is
           absent/empty (legacy bridges that predate the field)
-        - PERSONA-AT-SPAWN SNAPSHOT (owner-lineage drift fix, 2026-06-22): when
-          the bridge carries BOTH `spawned_by` AND a non-blank `spawned_by_persona`
-          (the manager persona FROZEN at spawn), the manager persona is read from
-          that snapshot — NEVER re-derived from the manager session's CURRENT
-          persona. Re-derivation (`persona_lookup(spawned_by)`) DRIFTS as personas
-          recycle across /clear/compaction, so a finished/dead worker would be
-          mis-attributed to the manager's LATER persona (and carry_forward_lineage
-          would cache that wrong value into death). The snapshot is worker-keyed
-          and immune to that drift. Re-derivation remains ONLY for legacy bridges
-          predating the snapshot (snapshot absent/blank/non-string).
-        - "lineage" requires BOTH a manager_session_id (via either source) AND
+        - persona-at-spawn snapshot: when the bridge carries both `spawned_by` and a
+          non-blank `spawned_by_persona` (the manager persona frozen at spawn), the manager
+          persona is read from that snapshot — never re-derived from the manager session's
+          current persona. Re-derivation (`persona_lookup(spawned_by)`) drifts as personas
+          recycle across /clear and compaction, so a finished or dead worker would be
+          attributed to the manager's later persona (and carry_forward_lineage would cache
+          that wrong value). The snapshot is worker-keyed and immune to that drift.
+          Re-derivation remains only for legacy bridges predating the snapshot (snapshot
+          absent, blank or non-string)
+        - "lineage" requires both a manager_session_id (via either source) and
           a DM-able manager persona; a hit without a usable persona degrades
           (never DM a None persona)
         - on a lineage miss → "declared" (the config manager-on-duty fallback) if
           provided, else "unresolved"
-        - on ANY error/brittle hop → degrades the same way (declared else
-          unresolved); NEVER mis-routes, NEVER raises
-        - "unresolved" signals the caller to escalate to Rick
+        - on any error/brittle hop → degrades the same way (declared else
+          unresolved); never mis-routes, never raises
+        - "unresolved" signals the caller to escalate to the owner
     """
     bridge_lookup  = bridge_lookup  or _default_bridge_lookup
     persona_lookup = persona_lookup or _default_persona_lookup

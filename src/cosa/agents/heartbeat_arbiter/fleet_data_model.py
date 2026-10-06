@@ -1,33 +1,26 @@
 #!/usr/bin/env python3
 """
-Heartbeat Arbiter — fleet data-model transform (pure).
+Pure transform from heartbeat events and commons_who rows to a per-session fleet view.
 
-The arbiter (doc 03 §4) rebuilds a per-session "fleet view" each poll from the
-heartbeat-events exhaust + a `commons_who` snapshot. THIS is the pure transform:
-an accumulated per-session record tail (+ who rows + now) → a flat per-session
-view dict the other arbiter leaves (dependency_graph, idle_roster) and the
-consumer's behaviors consume.
+The arbiter rebuilds a per-session fleet view each poll from the heartbeat-events exhaust and a `commons_who` snapshot.
+This module is the pure transform. An accumulated per-session record tail, the who rows and now go in.
+A flat per-session view dict comes out, for dependency_graph, idle_roster and the consumer's behaviors.
 
-Liveness is **event-file-ts PRIMARY, commons_who SECONDARY** (doc 03 N3): the
-event-file ts is `:7999`-free (local read), so liveness degrades gracefully
-when `:7999` saturates; commons_who only enriches it. `last_activity_ts` is the
-most-recent of either signal — used for both alive (broad window) and quiet
-(narrow window, idle_roster). The commons_who secondary signal is matched by
-**session_id** (persona can be borrowed/duplicated — Rachel's catch) and is
-PHANTOM-GUARDED by live-bridge presence (Fleet-Status §5.2(b), 2026-06-09): a
-commons echo from a session absent from the live-bridge discovery is retention
-residue of a reaped process, not liveness — it is nulled so the session reads
-offline and the publish-prune evicts it (mirrors the manager-roster guard in
-manager_resolver.resolve_active_managers).
+Liveness is event-file ts first and commons_who second. The event-file ts is a local read, so liveness degrades gracefully when `:7999` saturates.
+The commons_who signal only enriches it. `last_activity_ts` is the most recent of either signal.
+It serves both alive (broad window) and quiet (narrow window, idle_roster).
 
-Input contract (Rachel's wiring): `events_by_session` is the ACCUMULATED tail
-per session (oldest→newest, ~50 records) — `[-1]` is the current state; the
-list is scanned for REPEATED cap_reached (the §4 "stuck" signal).
+The commons_who signal is matched by session_id, because a persona can be borrowed or duplicated.
+It is also phantom-guarded by live-bridge presence. A commons echo from a session absent from the live-bridge discovery is retention residue of a reaped process, not liveness.
+That echo is set to None, so the session reads offline and the publish-prune evicts it.
+This mirrors the manager-roster guard in manager_resolver.resolve_active_managers.
 
-Pure + never-raises.
+Input contract: `events_by_session` is the accumulated tail per session (oldest to newest, about 50 records).
+The last record is the current state. The list is scanned for repeated cap_reached, which is the stuck signal.
 
-Design authority: lupin →
-    src/rnd/v0.1.8/2026.06.04-heartbeat-hook/03-arbiter-design.md §4 / N3.
+Pure and never raises.
+
+Design: src/rnd/v0.1.8/2026.06.04-heartbeat-hook/03-arbiter-design.md (arbiter fleet view).
 """
 import datetime
 
@@ -98,7 +91,7 @@ def _age_seconds( ts, now ):
 
 
 def _is_recent( ts, now, window_seconds ):
-    """True iff ts is non-None and within `window_seconds` of now (future ts ⇒ recent)."""
+    """True iff ts is non-None and within `window_seconds` of now; a future ts counts as recent."""
     age = _age_seconds( ts, now )
     return age is not None and age <= window_seconds
 
@@ -114,9 +107,9 @@ def _newer( a, b ):
 
 def _who_matches( row_sid, sid ):
     """
-    Does a commons_who row's session_id refer to this session? Prefix-tolerant
-    because commons_who returns BOTH full-uuid and short rows (and event files
-    are keyed by the short id).
+    Say whether a commons_who row's session_id refers to this session.
+
+    Matching is prefix-tolerant because commons_who returns both full-uuid and short rows, and event files are keyed by the short id.
     """
     if not row_sid or not sid:
         return False
@@ -137,20 +130,17 @@ def _commons_ts_for_session( who_rows, sid ):
 
 def _dm_ts_for_session( dm_activity, sid ):
     """
-    Most-recent SENT-DM ts for this session_id (prefix-matched), or None.
+    Return the most recent SENT-DM ts for this session_id (prefix-matched), or None.
 
-    The DM-as-liveness mirror of `_commons_ts_for_session`: `dm_activity` is the
-    arbiter's per-poll { session_id: max(created_at) } map of SENT ai_to_ai DM
-    activity (the IMPURE store read lives in the orchestrator seam, NOT here).
-    Prefix-tolerant on the session-id (short 8-char vs full-uuid forms) so a map
-    keyed by one form matches a canonical view id of the other.
+    This mirrors `_commons_ts_for_session`. `dm_activity` is the arbiter's per-poll { session_id: max(created_at) } map of sent ai_to_ai DMs.
+    The store read lives in the orchestrator seam, not here. Matching is prefix-tolerant, so a short-id key matches a full-uuid view id.
 
     Requires:
         - dm_activity is { session_id: datetime } (aware) or None; sid is a
           canonical session-id string
 
     Ensures:
-        - returns the MAX datetime among prefix-matching map entries, or None
+        - returns the max datetime among prefix-matching map entries, or None
           (no match / empty / None map); never raises
     """
     best = None
@@ -163,41 +153,26 @@ def _dm_ts_for_session( dm_activity, sid ):
 
 
 def _count_stuck_episodes( events ):
-    """Count LIVE cap_reached+owed records in the accumulated tail — those NOT
-    consumed by a later recovery.
+    """
+    Count cap_reached+owed records in the tail that no later recovery consumed.
 
-    5a1f17f8 (a): a cap_reached is CONSUMED when a RECOVERY outcome appears LATER in
-    the ordered (oldest→newest) tail — the session moved to defended quiescence (or
-    resumed), so that prior wedge no longer stands. Only cap_reached+owed AFTER the
-    last recovery count as live stuck evidence.
+    A cap_reached record is consumed when a recovery outcome appears later in the ordered (oldest to newest) tail.
+    The session then moved to defended quiescence or resumed, so that earlier wedge no longer stands.
+    Only cap_reached+owed records after the last recovery count as live stuck evidence.
 
-    bug 52b8ed6b: the recovery class is `RECOVERY_OUTCOMES` = { honored, idle }, NOT
-    `honored` alone. An `idle` recovery (the session's explicit "nothing owed" beacon)
-    previously consumed NOTHING, so a recovered session stayed flagged `stuck` until the
-    events tail rolled off — PERMANENT LIVE-STUCK (sam: still announced stuck at 21:49
-    EDT while idle, owing nothing, bridge 0s fresh, from caps recovered 8h earlier).
+    The recovery class is `RECOVERY_OUTCOMES`, which holds honored and idle, not honored alone.
+    Without idle, a session that recovered by going idle stayed flagged stuck until the events tail rolled off.
 
-    MONOTONE + SAFE: broadening the recovery class can only CONSUME MORE caps, so the
-    derived `stuck` flag can only flip True→False, NEVER False→True. No consumer of the
-    flag (attention roster · poke gate · /state snapshot · terminal render · UI table)
-    can ever see a NEW stuck session — only fewer.
+    Broadening the recovery class can only consume more caps, so the derived stuck flag can only flip from True to False, never the reverse.
+    No consumer of the flag can see a new stuck session, only fewer.
 
-    TRUE POSITIVE PRESERVED BY CONSTRUCTION: a genuinely wedged session OWES work
-    (`work_owed: True`) and therefore can NEVER emit `idle` (which is written only when
-    work_owed is false) — its caps are never consumed, it stays stuck, and it is still
-    poked and still announced. Recovery consumes the PAST; it grants no immunity — a
-    session that recovers and then wedges again re-arms on its new caps.
+    A wedged session owes work (`work_owed: True`) and so can never emit idle, which is written only when work_owed is false.
+    Its caps are never consumed, it stays stuck, and it is still poked.
+    Recovery consumes the past and grants no immunity: a session that recovers and wedges again re-arms on its new caps.
 
-    Why: the offset-reset replay (a :8001 restart re-reads the events file from byte 0,
-    bug 5a1f17f8 root cause) re-surfaces HISTORICAL cap_reached as if fresh. In the real
-    streams those are followed by `honored` recoveries (Mr Radio's 2026-07-02 fixture:
-    one cap_reached at 21:27Z + FIVE honored after it, yet replayed as fresh STUCK on
-    two restarts). Gating on a later honored makes the `stuck` signal robust to replay
-    WITHOUT a now/threshold knob — deterministic, order-respecting. A genuinely wedged
-    session emits repeated cap_reached with NO intervening honored → last_recovery stays
-    behind them → they all count → the true-positive is preserved. This composes with
-    the durable-offset fix (b): (a) is the belt for any replayed/lingering record, (b)
-    stops the re-read at the source.
+    The rule also makes the flag robust to replay. A :8001 restart re-reads the events file from byte 0 and re-surfaces old cap_reached records as fresh.
+    In real streams those are followed by honored recoveries, so gating on a later recovery needs no now or threshold knob.
+    It composes with the durable-offset fix, which stops the re-read at the source.
     """
     last_recovery = -1
     for i, e in enumerate( events ):
@@ -220,14 +195,10 @@ KIND_IDLE_PROMPT = "idle_prompt"
 
 def _canonicalize_ids( all_ids ):
     """
-    Collapse heterogeneous session-id forms (short 8-char vs full uuid) to one
-    canonical id each, reusing the prefix-match logic (review N3).
+    Map each raw session id, short or full uuid, to one canonical id.
 
-    The four union sources key sessions differently — event files use SHORT
-    8-char ids, commons_who returns BOTH short + full, bridges/commons use full
-    uuids. A naive set-union would double-count a session present as a short-id
-    event AND a full-uuid bridge. We group ids that prefix-match (`_who_matches`)
-    and elect the LONGEST id of each group as canonical (full uuid wins).
+    Event files use short 8-char ids, commons_who returns both short and full rows, and bridges use full uuids.
+    A plain set union would count one session twice. Ids that prefix-match (`_who_matches`) form a group, and the longest id in the group is canonical.
 
     Requires:
         - all_ids is an iterable of session-id strings (falsy entries ignored)
@@ -250,94 +221,29 @@ def _canonicalize_ids( all_ids ):
 
 def build_fleet_view( events_by_session, who_rows, now, alive_threshold_seconds, bridge_sessions=None, dm_activity=None ):
     """
-    Build the per-session fleet view as the UNION of all liveness signals.
+    Build the per-session fleet view as the union of five liveness signal sources.
 
-    The roster is the UNION of FIVE sources (arbiter liveness fix, Part 7 /
-    Step 1.4 + DM-as-liveness toggle, 2026-06-17) — a session enters the view if
-    it appears in ANY of:
-        (a) bridge-discovered   — `bridge_sessions` (the arbiter passes this IN;
-            it does the IO via find_active_voice_persona_sessions — the leaf
-            stays pure),
-        (b) commons-active      — `who_rows`,
-        (c) idle_prompt-recent  — kind=idle_prompt records in events_by_session,
-        (d) stop-event sessions — the prior event-sourced members,
-        (e) dm-active           — `dm_activity` (per-session SENT ai_to_ai DM ts;
-            the arbiter passes this IN — the store read is in the orchestrator
-            seam, the leaf stays pure).
-    The old code iterated (d) ONLY and could merely ANNOTATE — so live workers
-    with no stop-event were invisible (the false WHOLE-FLEET-STALL bug). Now we
-    ADD union members.
-
-    The ACTIVITY axis (last_outcome/state/stuck/holding/stop-event ts) is built
-    from NON-idle_prompt records only (kind filter, N2): an idle_prompt record
-    must NEVER become `state` and must NEVER feed the stop-event age. It feeds
-    `idle_prompt_ts` ONLY.
-
-    Heterogeneous id forms (short 8-char event ids vs full-uuid bridge/commons
-    ids) are canonicalized BEFORE dedup (`_canonicalize_ids`, N3) so a session
-    present under both forms yields ONE view keyed by its canonical (longest) id.
+    Roster sources: (a) bridge_sessions, (b) who_rows, (c) idle_prompt records, (d) stop-event records, (e) dm_activity.
+    The activity axis (outcome, state, stuck, holding, stop-event ts) reads non-idle_prompt records only; idle_prompt feeds idle_prompt_ts alone.
+    Short and full-uuid ids are canonicalized first (`_canonicalize_ids`), so one session yields one view.
 
     Requires:
-        - events_by_session is a dict { session_id: list[event-record-dict] }
-          (the ACCUMULATED tail per session, oldest→newest) or None
+        - events_by_session is { session_id: list[event-record-dict] } (the accumulated tail, oldest to newest) or None
         - who_rows is a list of commons_who rows (dicts) or None
         - now is an aware datetime; alive_threshold_seconds is a positive number
-        - bridge_sessions is { session_id: persona_name|None } (the arbiter's
-          bridge discovery) or None — membership + naming source (a)
-        - dm_activity is { session_id: datetime(aware) } (the arbiter's per-poll
-          SENT ai_to_ai DM-activity map) or None — membership + liveness source
-          (e). None / empty ⇒ the prior 4-source behavior (no dm_ts anywhere)
+        - bridge_sessions is { session_id: persona_name|None } (the arbiter's bridge discovery) or None; it is membership source (a) and the naming source
+        - dm_activity is { session_id: datetime(aware) } (per-poll sent ai_to_ai DM map) or None; None or empty means the prior 4-source behavior, no dm_ts anywhere
 
     Ensures:
-        - Returns dict { canonical_session_id: VIEW } for every session with ≥1
-          REAL signal (an event record, an idle_prompt record, a commons match,
-          a bridge presence, or a SENT-DM ts); a bare empty event list with no
-          other signal is NOT a member (preserves the old "skip empty/untrackable"
-          behavior)
-        - PHANTOM GUARD (Fleet-Status §5.2(b)): a session ABSENT from
-          bridge_sessions has its commons_ts NULLED — the commons echo of a
-          reaped/dead process (commons_who retention) must not count as
-          liveness, so such a session's verdict rests on its event/idle_prompt
-          ages alone and reads "offline" once those age out (a commons-ONLY
-          bridge-absent member is offline immediately). Membership is judged on
-          the RAW signal, so the phantom remains an auditable (offline) roster
-          row. Bridge-present sessions keep commons as a secondary signal —
-          unchanged. Mirrors manager_resolver.resolve_active_managers.
-        - VIEW (flat dict): session_id · persona · last_outcome ·
-          last_event_ts(datetime|None — STOP/non-idle_prompt) ·
-          commons_ts(datetime|None; None when bridge-absent, see guard) ·
-          idle_prompt_ts(datetime|None) ·
-          dm_ts(datetime|None — SENT ai_to_ai DM ts; NOT phantom-guarded) ·
-          last_task_transition_ts(datetime|None) ·
-          last_activity_ts(datetime|None; max of the LIVENESS ts) · alive(bool) ·
-          state · holding_on · stuck · poke_count · cap · reaped(bool)
-        - reaped is True iff a kind="reaped" tombstone is present (the host-side
-          reaper appended it); kept OFF the activity axis (never `state` / never
-          feeds last_event_ts), it makes the session a member so its row can be
-          force-offlined + pruned (fleet_render.build_snapshot)
-        - last_task_transition_ts is the ts of the latest kind="task_transition"
-          PROGRESS beacon (arbiter signs-of-life Fix 2) — a task-store WRITE.
-          Kept OFF the activity axis (never `state`, never feeds last_event_ts /
-          last_activity_ts / `alive`): it is a PROGRESS-only signal, consumed
-          exclusively by _fleet_progress_signature, so liveness and progress stay
-          orthogonal. A task_transition record DOES confer membership.
-        - dm_ts is the per-session MAX SENT ai_to_ai DM ts (DM-as-liveness
-          toggle). UNLIKE commons_ts it is NOT phantom-guarded by bridge presence
-          — the coverage hole it closes IS the bridge-absent coordination-only
-          manager (only activity is dm_send → bridge-mtime never bumps), so
-          guarding it on bridge presence would defeat the feature. Kept OFF the
-          activity axis (never `state`/last_event_ts/last_activity_ts/`alive`): a
-          LIFE signal consumed ONLY by the verdict seam (compute_liveness, where
-          the `arbiter count dm as liveness` toggle gates whether it drives the
-          verdict). A SENT-DM ts DOES confer membership.
-        - the LIVENESS ts fields (last_event_ts/commons_ts/idle_prompt_ts/dm_ts)
-          stay SEPARATE so the verdict seam (fleet_render.compute_liveness) can
-          derive its distinct ages; last_task_transition_ts is orthogonal
-          (progress)
-        - persona prefers the bridge-discovered name, then the last activity
-          record, then the idle_prompt record, then the reaped tombstone, then
-          the task_transition record
-        - Never raises
+        - returns { canonical_session_id: view } for every session with at least one real signal (an event record, an idle_prompt record, a commons match, a bridge presence or a sent-DM ts); a bare empty event list with no other signal is not a member
+        - phantom guard: a session absent from bridge_sessions has commons_ts set to None, because the commons echo of a reaped process (commons_who retention) must not count as liveness; its verdict then rests on its event and idle_prompt ages alone (a commons-only bridge-absent member is offline immediately). Membership is judged on the raw signal, so the phantom stays an auditable offline row; bridge-present sessions keep commons as a secondary signal
+        - view keys: session_id, persona, last_outcome, last_event_ts, commons_ts (None when bridge-absent), idle_prompt_ts, dm_ts (not phantom-guarded), last_task_transition_ts, last_activity_ts (max of the liveness ts), alive, state, holding_on, stuck, poke_count, cap, reaped
+        - reaped is True iff a kind="reaped" tombstone is present; the tombstone stays off the activity axis (never `state`, never feeds last_event_ts) and makes the session a member, so fleet_render.build_snapshot can force it offline and prune it
+        - last_task_transition_ts is the ts of the latest kind="task_transition" progress beacon, a task-store write. It is never `state` and never feeds last_event_ts, last_activity_ts or `alive`; only _fleet_progress_signature consumes it, so liveness and progress stay orthogonal. A task_transition record does confer membership
+        - dm_ts is the per-session max sent ai_to_ai DM ts. Unlike commons_ts it is not phantom-guarded by bridge presence, because the case it covers is the bridge-absent coordination-only manager whose only activity is dm_send. It is never `state` (and stays off last_event_ts, last_activity_ts and `alive`) and feeds only the verdict seam (compute_liveness), where the `arbiter count dm as liveness` toggle gates it. A sent-DM ts does confer membership
+        - the liveness ts fields (last_event_ts, commons_ts, idle_prompt_ts, dm_ts) stay separate so compute_liveness can derive distinct ages; last_task_transition_ts is orthogonal (progress)
+        - persona prefers the bridge-discovered name, then the last activity record, then the idle_prompt record, then the reaped tombstone, then the task_transition record
+        - never raises
     """
     events_by_session = events_by_session or { }
     bridge_sessions   = bridge_sessions or { }
