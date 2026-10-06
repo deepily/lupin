@@ -73,20 +73,20 @@ REJECTION_INVALID  = "Question contains invalid content"
 class AskFlow:
     """Runs one v2 request through the four branches and returns a result dict.
 
-        Requires:
-            - cache exposes lookup(question) -> CacheLookup, and (when
-              writeback_enabled) snapshot_from_result(...) + write_back(snap,
-              writeback_enabled=...).
-            - router exposes route(question) -> (command, raw_args).
-            - expeditor exposes extract(command, raw_args, question, spec) -> Extraction.
-            - executor exposes submit(Work, StageTrace) -> Outcome.
-            - pending exposes put()/get()/set_status() (PendingRequests).
+    Requires:
+        - cache exposes lookup(question) -> CacheLookup, and (when
+          writeback_enabled) snapshot_from_result(...) + write_back(snap,
+          writeback_enabled=...).
+        - router exposes route(question) -> (command, raw_args).
+        - expeditor exposes extract(command, raw_args, question, spec) -> Extraction.
+        - executor exposes submit(Work, StageTrace) -> Outcome.
+        - pending exposes put()/get()/set_status() (PendingRequests).
 
-        Ensures:
-            - ask() returns a result dict carrying every response field and never
-              raises for an agent/replay/router/extract failure; each degrades.
-            - writeback_enabled with a cache missing the write-back methods raises at
-              construction (fail-loud wiring, not a silent no-op).
+    Ensures:
+        - ask() returns a result dict carrying every response field and never
+          raises for an agent/replay/router/extract failure; each degrades.
+        - writeback_enabled with a cache missing the write-back methods raises at
+          construction (fail-loud wiring, not a silent no-op).
     """
 
     def __init__(
@@ -162,11 +162,11 @@ class AskFlow:
     ) -> dict:
         """Route one question through router, cache, arguments and executor.
 
-                This is the only path that may reach needs-input, because it is the one with a human waiting at the other end.
+        This is the only path that may reach needs-input, because it is the one with a human waiting at the other end.
 
-                parent_id_hash names the monopolize job this ask was made for. It rides the per-request trace to the
-                queued executor. The executor stamps it on the job as spawned_by_id_hash, so the consumer admits the job through a monopoly hold.
-                It travels on the trace, not in ctx, because ctx is unpacked in many places. Absent (None or empty), nothing is recorded.
+        parent_id_hash names the monopolize job this ask was made for. It rides the per-request trace to the
+        queued executor. The executor stamps it on the job as spawned_by_id_hash, so the consumer admits the job through a monopoly hold.
+        It travels on the trace, not in ctx, because ctx is unpacked in many places. Absent (None or empty), nothing is recorded.
         """
         trace = StageTrace( trace_dir=self.trace_dir )
         trace.mark( "t_recv" )
@@ -318,28 +318,28 @@ class AskFlow:
     ) -> dict:
         """Run work whose command is already decided: the door beside ask.
 
-                It skips cache lookup, routing and argument extraction, because the caller already named the command or built the job. It then joins the path ask shares: build, run, guarded write-back, notify.
-                A new named job arrives as command plus args. A saved job being continued arrives as job, an object the in-process caller already holds.
-                It never parks. A submit caller is usually a service that would never read a parked question. Missing arguments come back as status needs_input with args_missing filled in. Only ask may reach needs-input.
-                The queue directives scheduled_at, monopolize and parent_id_hash are not agent arguments. args cannot carry them, because args is checked against the command's argument contract. They reach the job through the factory and mean something only on the agentic path.
-                Requires:
-                    - exactly one of (`command`, `job`) is supplied.
-                    - when `command` is supplied it resolves in the registry, and `args` carries
-                      every one of that command's required arguments.
+        It skips cache lookup, routing and argument extraction, because the caller already named the command or built the job. It then joins the path ask shares: build, run, guarded write-back, notify.
+        A new named job arrives as command plus args. A saved job being continued arrives as job, an object the in-process caller already holds. Taking the built job spares that caller describing it in a command string, which would be a lossy round trip with no gain.
+        It never parks. A submit caller is usually a service that would never read a parked question. Missing arguments come back as status needs_input with args_missing filled in. Only ask may reach needs-input.
+        The queue directives scheduled_at, monopolize and parent_id_hash are not agent arguments. args cannot carry them, because args is checked against the command's argument contract. They reach the job through the factory and mean something only on the agentic path.
+        Requires:
+            - exactly one of (`command`, `job`) is supplied.
+            - when `command` is supplied it resolves in the registry, and `args` carries
+              every one of that command's required arguments.
 
-                Ensures:
-                    - returns the same terminal dict shape `ask` returns; never raises for a
-                      routing or agent failure.
-                    - `status="waiting"` is a success, not a degrade. A queued executor returning
-                      "waiting" with a job_id means the work was accepted and is running behind
-                      the response.
-                    - a snapshotable, completed result is written back through the same guarded
-                      path `ask` uses.
+        Ensures:
+            - returns the same terminal dict shape `ask` returns; never raises for a
+              routing or agent failure.
+            - `status="waiting"` is a success, not a degrade. A queued executor returning
+              "waiting" with a job_id means the work was accepted and is running behind
+              the response.
+            - a snapshotable, completed result is written back through the same guarded
+              path `ask` uses.
 
-                Raises:
-                    - ValueError when neither or both of (`command`, `job`) are supplied. That is
-                      a caller bug, not a runtime condition, and a flow that guessed which one you
-                      meant would run the wrong work silently.
+        Raises:
+            - ValueError when neither or both of (`command`, `job`) are supplied. That is
+              a caller bug, not a runtime condition, and a flow that guessed which one you
+              meant would run the wrong work silently.
         """
         if ( command is None ) == ( job is None ):
             raise ValueError(
@@ -438,20 +438,20 @@ class AskFlow:
     @staticmethod
     def _split_queue_directives( args: dict ) -> tuple:
         """
-                Pull the two runtime scheduling arguments out of a set the expeditor produced.
+        Pull the two runtime scheduling arguments out of a set the expeditor produced.
 
-                The expeditor offers scheduled_at and monopolize as universal runtime arguments for every agentic command. So a spoken "run the deep research at ten tomorrow" comes back as ordinary argument keys.
-                They are not agent arguments. create_agentic_job reads its arguments by name and does not name them. Left in place, they are dropped silently and the job runs at once.
-                The v1 queue removed them at this point and set them on the job afterwards. The normalisation below is v1's too, kept word for word so "immediately" keeps its meaning for the user.
+        The expeditor offers scheduled_at and monopolize as universal runtime arguments for every agentic command. So a spoken "run the deep research at ten tomorrow" comes back as ordinary argument keys.
+        They are not agent arguments. create_agentic_job reads its arguments by name and does not name them. Left in place, they are dropped silently and the job runs at once.
+        The v1 queue removed them at this point and set them on the job afterwards. The normalisation below is v1's too, kept word for word so "immediately" keeps its meaning for the user.
 
-                Requires:
-                    - args is the argument dict the expeditor returned
+        Requires:
+            - args is the argument dict the expeditor returned
 
-                Ensures:
-                    - returns ( args_without_them, scheduled_at, monopolize )
-                    - the input dict is not mutated, since the caller may still want it whole
-                    - "immediately" / "now" / "none" mean no schedule, not a date string
-                    - "yes" / "true" / "1" mean monopolize; any other string does not
+        Ensures:
+            - returns ( args_without_them, scheduled_at, monopolize )
+            - the input dict is not mutated, since the caller may still want it whole
+            - "immediately" / "now" / "none" mean no schedule, not a date string
+            - "yes" / "true" / "1" mean monopolize; any other string does not
         """
         remaining    = { k: v for k, v in args.items() if k not in ( "scheduled_at", "monopolize" ) }
         scheduled_at = args.get( "scheduled_at" )
@@ -473,21 +473,21 @@ class AskFlow:
     ) -> dict:
         """Run an agentic command the router chose, extracting its arguments from prose.
 
-                resolve() covers only the conversational class and returns None for every agentic command. This arm is the second reader that makes agentic commands work on the voice door.
-                Unlike submit, it extracts and parks. The human who spoke is still there, so a missing argument goes through the interview and is parked for resume.
-                It skips the cache, because an agentic job is long-running work with a job id, not a reusable answer. It returns before the lookup.
+        resolve() covers only the conversational class and returns None for every agentic command. This arm is the second reader that makes agentic commands work on the voice door.
+        Unlike submit, it extracts and parks. The human who spoke is still there, so a missing argument goes through the interview and is parked for resume.
+        It skips the cache, because an agentic job is long-running work with a job id, not a reusable answer. It returns before the lookup.
 
-                Requires:
-                    - spec is an agentic AgentSpec from resolve_agentic( command )
-                    - question is the human's words; raw_args is whatever the router pulled out
+        Requires:
+            - spec is an agentic AgentSpec from resolve_agentic( command )
+            - question is the human's words; raw_args is whatever the router pulled out
 
-                Ensures:
-                    - complete arguments build the job and run it through the same path a
-                      submitted agentic job takes, so there is one spelling of "build this and
-                      run it", not two
-                    - a missing argument parks and asks when interactive, and returns the
-                      question without parking when not
-                    - an extraction failure degrades to the receptionist rather than raising
+        Ensures:
+            - complete arguments build the job and run it through the same path a
+              submitted agentic job takes, so there is one spelling of "build this and
+              run it", not two
+            - a missing argument parks and asks when interactive, and returns the
+              question without parking when not
+            - an extraction failure degrades to the receptionist rather than raising
         """
         arg_spec = self._arg_spec_for( command, spec.required_args )
         trace.mark( "t_extract" )
@@ -515,20 +515,20 @@ class AskFlow:
     ) -> dict:
         """Build an agentic job from ( command, args ) and run it like any other submit.
 
-                This is what every submit endpoint did in its own handler: check the declared arguments, call create_agentic_job, queue the result. Doing it here lets those doors retire into one.
-                The argument check comes from spec.required_args, the same JOB_ARG_CONTRACTS entry the expeditor reads. A job that gains a required argument gains it here with no edit.
-                The factory also receives scheduled_at and monopolize. parent_id_hash becomes the job's spawned_by_id_hash. That lets the queue consumer admit a monopolizing sweep's own children through the hold. A door that dropped it would leave those children deferred with nothing to show why.
+        This is what every submit endpoint did in its own handler: check the declared arguments, call create_agentic_job, queue the result. Doing it here lets those doors retire into one.
+        The argument check comes from spec.required_args, the same JOB_ARG_CONTRACTS entry the expeditor reads. A job that gains a required argument gains it here with no edit.
+        The factory also receives scheduled_at and monopolize. parent_id_hash becomes the job's spawned_by_id_hash. That lets the queue consumer admit a monopolizing sweep's own children through the hold. A door that dropped it would leave those children deferred with nothing to show why.
 
-                Requires:
-                    - spec is an agentic AgentSpec from resolve_agentic( command )
+        Requires:
+            - spec is an agentic AgentSpec from resolve_agentic( command )
 
-                Ensures:
-                    - missing arguments return the same non-parking needs_input refusal a
-                      conversational submit returns; nothing is built and nothing is queued
-                    - a factory that cannot build the command degrades to the receptionist
-                      rather than raising out of the door
-                    - a built job runs through the same path as a job handed over whole, so
-                      there is one spelling of "run this and report it", not two
+        Ensures:
+            - missing arguments return the same non-parking needs_input refusal a
+              conversational submit returns; nothing is built and nothing is queued
+            - a factory that cannot build the command degrades to the receptionist
+              rather than raising out of the door
+            - a built job runs through the same path as a job handed over whole, so
+              there is one spelling of "run this and report it", not two
         """
         refusal = self._refuse_bad_source_documents( trace, command, args, ctx )
         if refusal is not None: return refusal
@@ -594,7 +594,7 @@ class AskFlow:
     def _submit_prebuilt( self, trace: StageTrace, job: Any, question: str, ctx: tuple ) -> dict:
         """Run a job the caller already built, with no registry lookup and no argument work.
 
-                snapshotable is False because a caller handing over a constructed job has not said the result is a reusable answer. Writing one back on a guess would put rows in the cache that ask would later replay.
+        snapshotable is False because a caller handing over a constructed job has not said the result is a reusable answer. Writing one back on a guess would put rows in the cache that ask would later replay.
         """
         work    = Work( "agent", job, ctx[ 0 ], ctx[ 1 ], ctx[ 2 ], snapshotable=False )
         outcome = self.executor.submit( work, trace )
@@ -623,8 +623,8 @@ class AskFlow:
                              known: list, ctx: tuple ) -> dict:
         """Refuse an under-specified submit without parking it.
 
-                The ask path stores a pending entry and asks the human the first question. Doing that here would park a question at a service account. The entry would sit until it expired, and the caller would get a pending_id it cannot answer.
-                So this returns the same shape minus the park: no pending_id, nothing stored, status="needs_input".
+        The ask path stores a pending entry and asks the human the first question. Doing that here would park a question at a service account. The entry would sit until it expired, and the caller would get a pending_id it cannot answer.
+        So this returns the same shape minus the park: no pending_id, nothing stored, status="needs_input".
         """
         trace.mark( "t_first_useful" )
         trace.update( args_missing=missing, args_known=known )
@@ -636,24 +636,24 @@ class AskFlow:
     def _refuse_bad_source_documents( self, trace: StageTrace, command: str, args: dict, ctx: tuple ) -> Optional[ dict ]:
         """Validate `source_document` at the door, or return the refusal that stops the submit.
 
-                An unresolvable, out-of-scope or missing source document is refused before the job is created, not inside the agent after it starts. A job already accepted that cannot read its own input fails somewhere far less visible. This runs on the door's thread and its refusal is the door's answer.
-                It mutates args on success. The caller names a document the way the doc-viewer does, as `<scope>/<path>`, and the agent needs a real absolute path. Resolving once here means the agent never re-derives it differently from what was validated.
-                The unwired case refuses. With no scope registry injected this cannot tell an allowed path from any other. A scope check that silently does not run would let the argument through unvalidated, which means arbitrary file read.
+        An unresolvable, out-of-scope or missing source document is refused before the job is created, not inside the agent after it starts. A job already accepted that cannot read its own input fails somewhere far less visible. This runs on the door's thread and its refusal is the door's answer.
+        It mutates args on success. The caller names a document the way the doc-viewer does, as `<scope>/<path>`, and the agent needs a real absolute path. Resolving once here means the agent never re-derives it differently from what was validated.
+        The unwired case refuses. With no scope registry injected this cannot tell an allowed path from any other. A scope check that silently does not run would let the argument through unvalidated, which means arbitrary file read.
 
-                Requires:
-                    - args is the mutable dict of arguments this submit will run with
+        Requires:
+            - args is the mutable dict of arguments this submit will run with
 
-                Ensures:
-                    - returns None when there is nothing to refuse, including when the argument
-                      is absent, which is legal because it is optional
-                    - returns a terminal refusal dict when the argument is present and bad, or
-                      when a near-miss spelling of it is present (see _near_miss_source_document_key)
-                    - on success replaces args[ SOURCE_DOCUMENT_ARG ] with the list of resolved,
-                      real, absolute paths
-                    - never raises
+        Ensures:
+            - returns None when there is nothing to refuse, including when the argument
+              is absent, which is legal because it is optional
+            - returns a terminal refusal dict when the argument is present and bad, or
+              when a near-miss spelling of it is present (see _near_miss_source_document_key)
+            - on success replaces args[ SOURCE_DOCUMENT_ARG ] with the list of resolved,
+              real, absolute paths
+            - never raises
 
-                Raises:
-                    - None. The door answers with a refusal, not a stack trace
+        Raises:
+            - None. The door answers with a refusal, not a stack trace
         """
         near_miss = self._near_miss_source_document_key( args )
         if near_miss is not None:
@@ -689,18 +689,18 @@ class AskFlow:
     def _near_miss_source_document_key( args: dict ) -> Optional[ str ]:
         """Return an argument key that was probably meant to be `source_document`.
 
-                /api/v2/submit binds args as a free-form dict, so a key no command declares is accepted without comment. A misspelled source_document would run the job and the research would read nothing, with no error anywhere and a report that looks like any other.
-                The check is narrow by scope. Rejecting every unrecognised key on every command would change behaviour for any caller that passes an extra key today, and needs its own blast-radius review. This catches the one shape being introduced.
+        /api/v2/submit binds args as a free-form dict, so a key no command declares is accepted without comment. A misspelled source_document would run the job and the research would read nothing, with no error anywhere and a report that looks like any other.
+        The check is narrow by scope. Rejecting every unrecognised key on every command would change behaviour for any caller that passes an extra key today, and needs its own blast-radius review. This catches the one shape being introduced.
 
-                Requires:
-                    - args is the caller's argument dict
+        Requires:
+            - args is the caller's argument dict
 
-                Ensures:
-                    - returns None when no key resembles the canonical spelling, or when the
-                      canonical spelling itself is present (an exact key is never a near miss)
-                    - returns the offending key when one normalizes to the canonical form or is
-                      within a close-match cutoff of it
-                    - never raises
+        Ensures:
+            - returns None when no key resembles the canonical spelling, or when the
+              canonical spelling itself is present (an exact key is never a near miss)
+            - returns the offending key when one normalizes to the canonical form or is
+              within a close-match cutoff of it
+            - never raises
         """
         if SOURCE_DOCUMENT_ARG in args: return None
 
@@ -716,13 +716,13 @@ class AskFlow:
                          route_reason: str, message: str ) -> dict:
         """Emit a door-level refusal: the submit shape for "no, and here is why".
 
-                It has the same shape as _submit_needs_input but a different meaning. needs_input means the caller left something out and can supply it. This means what the caller supplied cannot be used.
-                Collapsing them would make a bad path read as a missing argument, and the caller would retry the same bad path forever.
+        It has the same shape as _submit_needs_input but a different meaning. needs_input means the caller left something out and can supply it. This means what the caller supplied cannot be used.
+        Collapsing them would make a bad path read as a missing argument, and the caller would retry the same bad path forever.
 
-                Ensures:
-                    - nothing is built and nothing is queued
-                    - the refusal text reaches the caller as the answer, so it is readable in the
-                      same response rather than only in a log
+        Ensures:
+            - nothing is built and nothing is queued
+            - the refusal text reaches the caller as the answer, so it is readable in the
+              same response rather than only in a log
         """
         trace.mark( "t_first_useful" )
         return self._emit( trace, path="needs_input", status="needs_input",
@@ -734,21 +734,21 @@ class AskFlow:
     def resume( self, pending_id: str, answer: str, websocket_id: str, speak: bool=True ) -> dict:
         """Fold a human's answer into a parked request and drive it to a terminal result.
 
-                It runs on the caller's thread and spawns no background thread of its own. The park site stores a continuation. This second turn runs it to completion rather than handing it to a worker and returning early.
-                The router in routers/v2_ask.py awaits it through run_in_threadpool, so it executes on a worker thread, not on the event loop.
-                It claims the whole turn atomically. A second resume of a completed conversation would otherwise index an empty missing list, and two concurrent resumes would put answers in the wrong slots. Both are refused as already_resumed.
+        It runs on the caller's thread and spawns no background thread of its own. The park site stores a continuation. This second turn runs it to completion rather than handing it to a worker and returning early.
+        The router in routers/v2_ask.py awaits it through run_in_threadpool, so it executes on a worker thread, not on the event loop.
+        It claims the whole turn atomically. A second resume of a completed conversation would otherwise index an empty missing list, and two concurrent resumes would put answers in the wrong slots. Both are refused as already_resumed.
 
-                Requires:
-                    - pending_id identifies a parked entry; answer is the human's reply to
-                      that entry's first missing argument.
+        Requires:
+            - pending_id identifies a parked entry; answer is the human's reply to
+              that entry's first missing argument.
 
-                Ensures:
-                    - a missing or expired pending_id refuses loudly (status='expired',
-                      route_reason='pending_expired'), never a 500, never a silent no-op.
-                    - the answer fills the first missing arg; if more remain, the same
-                      pending_id is re-asked (status stays 'pending'); if complete, the
-                      agent runs and the entry advances pending -> running -> done|failed
-                      (the AI-observable completion seam).
+        Ensures:
+            - a missing or expired pending_id refuses loudly (status='expired',
+              route_reason='pending_expired'), never a 500, never a silent no-op.
+            - the answer fills the first missing arg; if more remain, the same
+              pending_id is re-asked (status stays 'pending'); if complete, the
+              agent runs and the entry advances pending -> running -> done|failed
+              (the AI-observable completion seam).
         """
         trace = StageTrace( trace_dir=self.trace_dir )
         trace.mark( "t_recv" )
@@ -840,17 +840,17 @@ class AskFlow:
     def _has_question( question: Optional[ str ] ) -> bool:
         """Say whether question is a question at all, by the rule _unfit_reason uses.
 
-                Blank, absent and whitespace-only all mean no question, and they must mean it in one place. The three sites in submit that ask this would otherwise drift apart. A looser one is how a routing command gets logged as a person's words, or cached under a key nobody will ever say.
+        Blank, absent and whitespace-only all mean no question, and they must mean it in one place. The three sites in submit that ask this would otherwise drift apart. A looser one is how a routing command gets logged as a person's words, or cached under a key nobody will ever say.
         """
         return bool( question and question.strip() )
 
     @staticmethod
     def _unfit_reason( question: str ):
         """
-                Why this question is refused, or None if it is fit to process.
+        Why this question is refused, or None if it is fit to process.
 
-                The three rules and their wording are v1's, kept verbatim so a user hears the same refusal after the switch.
-                It returns the spoken reason and a route_reason, so the trace records which rule fired rather than a flat "rejected".
+        The three rules and their wording are v1's, kept verbatim so a user hears the same refusal after the switch.
+        It returns the spoken reason and a route_reason, so the trace records which rule fired rather than a flat "rejected".
         """
         if not AskFlow._has_question( question ):
             return ( REJECTION_EMPTY, "empty_question" )
@@ -862,13 +862,13 @@ class AskFlow:
 
     def _log_query( self, trace: StageTrace, ctx: tuple, snapshot_id, cache_hit: bool ) -> None:
         """
-                Write this request to the query log, v1's _log_query_with_results.
+        Write this request to the query log, v1's _log_query_with_results.
 
-                The flow writes it, so the query log keeps growing for voice traffic. It has one call site, at the terminal chokepoint. Every exit funnels through _emit, so a refusal, a needs-input park and an answered question are all logged.
-                A logging failure never breaks a request. It is swallowed with a debug print, because a question must not fail over an analytics row.
-                Two fields are left out, rather than filled with something that would read as fact:
-                  - embeddings: CacheLookup does not return the vectors, and v2 skips embedding on a tier-1 exact hit. Generating them to log them would re-add the cost v2 avoids.
-                  - cache_hits: v1's flags mean an embedding was generated and came back non-empty, which is not what v2's embed_cached reports. One fact under the other's column name is a quiet wrongness.
+        The flow writes it, so the query log keeps growing for voice traffic. It has one call site, at the terminal chokepoint. Every exit funnels through _emit, so a refusal, a needs-input park and an answered question are all logged.
+        A logging failure never breaks a request. It is swallowed with a debug print, because a question must not fail over an analytics row.
+        Two fields are left out, rather than filled with something that would read as fact:
+          - embeddings: CacheLookup does not return the vectors, and v2 skips embedding on a tier-1 exact hit. Generating them to log them would re-add the cost v2 avoids.
+          - cache_hits: v1's flags mean an embedding was generated and came back non-empty, which is not what v2's embed_cached reports. One fact under the other's column name is a quiet wrongness.
         """
         if self.query_log is None:
             return
@@ -903,13 +903,13 @@ class AskFlow:
     def _near_match_replay( self, trace: StageTrace, lookup: Any, ctx: tuple, interactive: bool, question: str ) -> tuple:
         """Decide whether a below-exact candidate may be replayed, and under what reason.
 
-                Returns ( snapshot, route_reason ) to replay, or ( None, None ) to route on. There are three branches, as in v1:
-                  - the score is out of range, below 0 or above 100: refuse the measurement and route. A replay used to need a tier-1 exact hit, so no float ever decided one. The gist tier and this branch reopen that door, so the guard lives here.
-                  - confirmation on: ask "Is that the same as: ...?" and replay only on a yes. Anything else, a timeout included, routes. The prompt defaults to no, because a wrong replay is a confident answer to a question nobody asked.
-                  - confirmation off (the INI key `similarity confirmation enabled` set to false): auto-accept with no prompt, as v1 does. Each branch names itself in the emitted route_reason.
-                Before any ask it also routes on a candidate that names a different quantity (near_match_guard). It routes on a row _may_serve will not serve too, since the answer cannot change the outcome.
-                A non-interactive caller is declined without being asked, because an unattended caller cannot consent.
-                The ask blocks this thread for the whole retry ladder, as v1's does. That is affordable because the handler runs off the event loop through run_in_threadpool. It is not affordable when nobody is listening, which is what `interactive` decides.
+        Returns ( snapshot, route_reason ) to replay, or ( None, None ) to route on. There are three branches, as in v1:
+          - the score is out of range, below 0 or above 100: refuse the measurement and route. A replay used to need a tier-1 exact hit, so no float ever decided one. The gist tier and this branch reopen that door, so the guard lives here.
+          - confirmation on: ask "Is that the same as: ...?" and replay only on a yes. Anything else, a timeout included, routes. The prompt defaults to no, because a wrong replay is a confident answer to a question nobody asked.
+          - confirmation off (the INI key `similarity confirmation enabled` set to false): auto-accept with no prompt, as v1 does. Each branch names itself in the emitted route_reason.
+        Before any ask it also routes on a candidate that names a different quantity (near_match_guard). It routes on a row _may_serve will not serve too, since the answer cannot change the outcome.
+        A non-interactive caller is declined without being asked, because an unattended caller cannot consent.
+        The ask blocks this thread for the whole retry ladder, as v1's does. That is affordable because the handler runs off the event loop through run_in_threadpool. It is not affordable when nobody is listening, which is what `interactive` decides.
         """
         if self.confirmation_threshold is None:
             return ( None, None )
@@ -973,7 +973,7 @@ class AskFlow:
     def _user_confirms( self, candidate: Any, score: float, ctx: tuple ) -> bool:
         """Ask the user whether the near match is the same question. Yes, or route.
 
-                The request is the queue's, field for field. A confirmer that raises counts as a no: a broken notification path is not evidence that two questions are the same. A replay served because the ask broke is the wrong-but-close answer this branch exists to prevent.
+        The request is the queue's, field for field. A confirmer that raises counts as a no: a broken notification path is not evidence that two questions are the same. A replay served because the ask broke is the wrong-but-close answer this branch exists to prevent.
         """
         _user_id, user_email, _session_id, _websocket_id, _speak = ctx
         request = NotificationRequest(
@@ -1032,12 +1032,12 @@ class AskFlow:
                       question: Optional[ str ]=None ) -> Any:
         """Construct an agent the way the queue constructs one.
 
-                question is the user's original text; agent_question is that text with the expeditor's extracted values folded in. Both are needed: the gist and the salutation are read off the original, while the agent is asked the composed one.
-                Five kwargs match push_job: question_gist, debug, verbose, auto_debug, inject_bugs. Three differ from v1, each by a ruling:
-                  - question: the flow passes the composed question. v1 never ran the expeditor for conversational commands, so the agent re-parsed the raw text. Passing the raw question here would drop the extracted arguments.
-                  - last_question_asked: the flow passes the intended form, salutation plus the stripped question. v1 builds salutations + " " + question from the original, which still holds the salutation, so "hey what is the weather" would reach every agent as "hey hey what is the weather".
-                  - push_counter: v1's counter lives on the queue singleton, which the flow cannot see without reading through the executor into its queue. That coupling is what the executor seam prevents, and the inline executor has no queue. It stays -1.
-                debug=True and verbose=False are v1's literals, not the flow's own flags. push_job hardcodes them and ignores the queue's. An agent keeps the debug output it had under v1.
+        question is the user's original text; agent_question is that text with the expeditor's extracted values folded in. Both are needed: the gist and the salutation are read off the original, while the agent is asked the composed one.
+        Five kwargs match push_job: question_gist, debug, verbose, auto_debug, inject_bugs. Three differ from v1, each by a ruling:
+          - question: the flow passes the composed question. v1 never ran the expeditor for conversational commands, so the agent re-parsed the raw text. Passing the raw question here would drop the extracted arguments.
+          - last_question_asked: the flow passes the intended form, salutation plus the stripped question. v1 builds salutations + " " + question from the original, which still holds the salutation, so "hey what is the weather" would reach every agent as "hey hey what is the weather".
+          - push_counter: v1's counter lives on the queue singleton, which the flow cannot see without reading through the executor into its queue. That coupling is what the executor seam prevents, and the inline executor has no queue. It stays -1.
+        debug=True and verbose=False are v1's literals, not the flow's own flags. push_job hardcodes them and ignores the queue's. An agent keeps the debug output it had under v1.
         """
         user_id, user_email, session_id, websocket_id, _speak = ctx
         original            = question if question is not None else agent_question
@@ -1067,8 +1067,8 @@ class AskFlow:
     ) -> dict:
         """Build and run a pre-existing agent; degrade to the receptionist on failure.
 
-                snapshotable defaults to the registry's answer for this command. A caller passes it only to say no more strongly than the registry does.
-                The write guard also refuses the write for any route_reason the router did not choose, which is how submit stays out of the cache.
+        snapshotable defaults to the registry's answer for this command. A caller passes it only to say no more strongly than the registry does. No caller does today. submit does not. Without a question it has no sensible row to file under, and the write guard already refuses every submit. The has_question test in submit now decides only what is logged and which text the agent receives.
+        The write guard also refuses the write for any route_reason the router did not choose, which is how submit stays out of the cache.
         """
         may_cache      = spec.snapshotable if snapshotable is None else snapshotable
         may_cache      = self._write_guard( trace, spec, route_reason, may_cache )
@@ -1090,13 +1090,13 @@ class AskFlow:
     def _may_serve( cls, trace: StageTrace, snapshot: Any, why: str ) -> bool:
         """Decide whether a cached row may be served as an answer: the read guard.
 
-                Only a row confirmed correct is served. answer_is_correct must be True; None (never answered) and False (the user said no) both refuse.
-                The one exemption is an exact hit (why="exact_hit") whose verdict is not False. It is the same question whose answer this user already received, so re-running it gives the same answer later and at cost. An exact hit the user marked wrong is still refused.
-                Near matches and the fallback after a failed re-execution stay guarded, because the row served there is not the question that was asked.
-                The exemption is keyed on why, not on a score, so a 99.9 never counts as close enough. The test is is True, not truthiness, so the string "true" or the number 1 is not read as consent.
-                Read the hydrated object, never the raw column: the record builder makes the object uniform and the column is not. A missing attribute means refuse.
-                The only verdict ever asked of the user is the end-of-execution "was this answer correct?". It lands on a daemon thread, so a timeout leaves it None. This guard only consumes it and adds no prompt.
-                A refused row is marked in the trace, so "guard refused it" can be told from "cache is broken".
+        Only a row confirmed correct is served. answer_is_correct must be True; None (never answered) and False (the user said no) both refuse.
+        The one exemption is an exact hit (why="exact_hit") whose verdict is not False. It is the same question whose answer this user already received, so re-running it gives the same answer later and at cost. An exact hit the user marked wrong is still refused.
+        Near matches and the fallback after a failed re-execution stay guarded, because the row served there is not the question that was asked.
+        The exemption is keyed on why, not on a score, so a 99.9 never counts as close enough. The test is is True, not truthiness, so the string "true" or the number 1 is not read as consent.
+        Read the hydrated object, never the raw column: the record builder makes the object uniform and the column is not. A missing attribute means refuse.
+        The only verdict ever asked of the user is the end-of-execution "was this answer correct?". It lands on a daemon thread, so a timeout leaves it None. This guard only consumes it and adds no prompt.
+        A refused row is marked in the trace, so "guard refused it" can be told from "cache is broken".
         """
         # AN EXACT MATCH IS EXEMPT (Rick, 2026-09-04, row fe1c0d3f). A tier-1 hit is the
         # SAME question, verbatim or normalized, whose answer this user already received.
@@ -1173,15 +1173,15 @@ class AskFlow:
     def _unresolved_routed_command( cls, command: str ) -> Optional[ str ]:
         """The route to record for a command that did not resolve.
 
-                A command that failed to resolve usually means no route was chosen, and recording it would assert a decision the router did not make. One sub-case is a real route: the receptionist is a positive choice in the router's own command list, so user_picked_receptionist means somebody selected it. Recording None there would throw away a real route.
-                It derives from _unresolved_route_reason rather than re-deriving, because two copies of "is this the deliberate pick" would drift.
+        A command that failed to resolve usually means no route was chosen, and recording it would assert a decision the router did not make. One sub-case is a real route: the receptionist is a positive choice in the router's own command list, so user_picked_receptionist means somebody selected it. Recording None there would throw away a real route.
+        It derives from _unresolved_route_reason rather than re-deriving, because two copies of "is this the deliberate pick" would drift.
 
-                Requires:
-                    - command is the command the router or the caller named
+        Requires:
+            - command is the command the router or the caller named
 
-                Ensures:
-                    - returns the command when it is the deliberate receptionist pick
-                    - returns None otherwise; route_reason already says which door it was
+        Ensures:
+            - returns the command when it is the deliberate receptionist pick
+            - returns None otherwise; route_reason already says which door it was
         """
         return command if cls._unresolved_route_reason( command ) == "user_picked_receptionist" else None
 
@@ -1189,17 +1189,17 @@ class AskFlow:
     def _unresolved_route_reason( cls, command: str ) -> str:
         """Say why an unresolvable command is going to the receptionist.
 
-                It reads the incoming command, never the emitted one. The degrade callers pass their own literal reason and never reach this helper, so the marker cannot be set by a degrade.
-                On submit the caller hands over the command, so a deliberate pick is literal. On ask the command is the router's output. The marker then means the router classified the utterance as asking for the receptionist: a model prediction, not a click.
-                That is still the right label. The router's command list carries an explicit none for "I cannot place this", which resolves here to unknown_command. So the receptionist is a positive choice there. A low-confidence router lands on none. A misclassification is a wrong routing decision, not a wrong label.
+        It reads the incoming command, never the emitted one. The degrade callers pass their own literal reason and never reach this helper, so the marker cannot be set by a degrade.
+        On submit the caller hands over the command, so a deliberate pick is literal. On ask the command is the router's output. The marker then means the router classified the utterance as asking for the receptionist: a model prediction, not a click.
+        That is still the right label. The router's command list carries an explicit none for "I cannot place this", which resolves here to unknown_command. So the receptionist is a positive choice there. A low-confidence router lands on none. A misclassification is a wrong routing decision, not a wrong label.
 
-                Requires:
-                    - command is the command the router or the caller named
+        Requires:
+            - command is the command the router or the caller named
 
-                Ensures:
-                    - returns "user_picked_receptionist" only when that command is the
-                      receptionist, i.e. somebody asked for it by name
-                    - returns "unknown_command" otherwise
+        Ensures:
+            - returns "user_picked_receptionist" only when that command is the
+              receptionist, i.e. somebody asked for it by name
+            - returns "unknown_command" otherwise
         """
 
         return "user_picked_receptionist" if command == cls.RECEPTIONIST_COMMAND else "unknown_command"
@@ -1208,9 +1208,9 @@ class AskFlow:
     def _write_guard( cls, trace: StageTrace, spec: Any, route_reason: str, may_cache: bool ) -> bool:
         """The write guard: two refusals that only narrow may_cache, never widen it.
 
-                1. The router must have chosen the agent. A submit caller hands over a command it decided on, so a row it wrote would say "this agent answers that question" on the caller's authority alone. The user overrode the router, so the result is not evidence about the question and is not cached.
-                2. A CRUD-capable command is never cached, whatever the flag says. resolve() returns snapshotable=False for a command it forks to a CRUD agent only when `crud for dataframes agents enabled` is on. With the flag off the plain spec keeps snapshotable=True while spec.factory is TodoListAgent or CalendaringAgent. Keying on crud_factory asks the durable question, whether the command is about mutable user data, and answers the same with the flag either way.
-                Both refusals are recorded in the trace, because a row that is not written leaves nothing behind to explain itself.
+        1. The router must have chosen the agent. A submit caller hands over a command it decided on, so a row it wrote would say "this agent answers that question" on the caller's authority alone. The user overrode the router, so the result is not evidence about the question and is not cached.
+        2. A CRUD-capable command is never cached, whatever the flag says. resolve() returns snapshotable=False for a command it forks to a CRUD agent only when `crud for dataframes agents enabled` is on. With the flag off the plain spec keeps snapshotable=True while spec.factory is TodoListAgent or CalendaringAgent. Keying on crud_factory asks the durable question, whether the command is about mutable user data, and answers the same with the flag either way.
+        Both refusals are recorded in the trace, because a row that is not written leaves nothing behind to explain itself.
         """
         if not may_cache:
             return False
@@ -1235,10 +1235,10 @@ class AskFlow:
                        routed_command: Optional[ str ]=None ) -> dict:
         """Run the receptionist inline as the else branch; its failure is terminal.
 
-                primary_error carries the failure that caused the degrade. Without it the emitted error is the fallback's. That says why the receptionist died and nothing about why the real agent did.
-                routed_command is the route the router actually chose. It is None where no route resolved: router_error (the router answered "unknown") and the unknown_command doors. Their command string names nothing servable, and recording it would assert a route the router did not choose. route_reason already says which door it was.
-                What ran is not lost. path is "receptionist" here and nowhere else in this flow, so it already marks the fallback.
-                The replayed_snapshot_id rides the same seam. This method builds a new Outcome from the receptionist run. That discards every field of a failed replay's outcome, so the caller that ran the replay passes the id in.
+        primary_error carries the failure that caused the degrade. Without it the emitted error is the fallback's. That says why the receptionist died and nothing about why the real agent did.
+        routed_command is the route the router actually chose. It is None where no route resolved: router_error (the router answered "unknown") and the unknown_command doors. Their command string names nothing servable, and recording it would assert a route the router did not choose. route_reason already says which door it was.
+        What ran is not lost. path is "receptionist" here and nowhere else in this flow, so it already marks the fallback.
+        The replayed_snapshot_id rides the same seam. This method builds a new Outcome from the receptionist run. That discards every field of a failed replay's outcome, so the caller that ran the replay passes the id in.
         """
         if primary_error: trace.set( "primary_agent_error", primary_error )
         work    = Work( "receptionist", self._build_agent( self.receptionist_factory, question, ctx ),
@@ -1299,9 +1299,9 @@ class AskFlow:
     def _is_replayable( outcome: Any, agent_class_name: str ) -> bool:
         """Say whether a row written from this outcome could ever be served back.
 
-                This is the safety net under the code fix. Persisting the agent's code is what makes v2 rows replayable. This refuses to write the ones that still could not be: an agent that produced no code and whose class run_code() cannot serve codeless.
-                Such a row is dead on arrival. Every hit on it raises "Cannot execute empty code list", degrades to the receptionist, and the row sits in the table costing a read forever.
-                The codeless set is imported from the module that decides it, so the writer and run_code cannot disagree about which classes need code.
+        This is the safety net under the code fix. Persisting the agent's code is what makes v2 rows replayable. This refuses to write the ones that still could not be: an agent that produced no code and whose class run_code() cannot serve codeless.
+        Such a row is dead on arrival. Every hit on it raises "Cannot execute empty code list", degrades to the receptionist, and the row sits in the table costing a read forever.
+        The codeless set is imported from the module that decides it, so the writer and run_code cannot disagree about which classes need code.
         """
         if agent_class_name in CODELESS_AGENT_CLASSES:
             return True
@@ -1338,20 +1338,20 @@ class AskFlow:
     def _spoken_line( outcome: Any, agent_label: Optional[ str ], path: str ) -> Optional[ str ]:
         """Say what this exit speaks: the answer, or v1's ack when the work was queued.
 
-                A queued job has no answer yet, so waiting speaks the ack instead of the answer, never as well. That keeps it to one spoken line per request whichever executor is wired.
-                It returns None when a waiting outcome has no label to name, as with the receptionist. The v1 queue speaks a random filler line built from word lists on the queue. Reproducing it here would move queue-owned state into the flow.
-                It also returns None on a queued replay, which is why it takes path. A queued replay looks like a queued new job (status waiting, truthy agent_label). It created no job, and v1 speaks the cached answer itself. Without this the request gets two spoken lines. Both replay branches call _finish with the literal path "replay". One check covers the exact-hit and near-match arms.
+        A queued job has no answer yet, so waiting speaks the ack instead of the answer, never as well. That keeps it to one spoken line per request whichever executor is wired.
+        It returns None when a waiting outcome has no label to name, as with the receptionist. The v1 queue speaks a random filler line built from word lists on the queue. Reproducing it here would move queue-owned state into the flow.
+        It also returns None on a queued replay, which is why it takes path. A queued replay looks like a queued new job (status waiting, truthy agent_label). It created no job, and v1 speaks the cached answer itself. Without this the request gets two spoken lines. Both replay branches call _finish with the literal path "replay". One check covers the exact-hit and near-match arms.
 
-                Requires:
-                    - outcome carries `status` and `answer`
-                    - path is the same literal `_finish` was called with
+        Requires:
+            - outcome carries `status` and `answer`
+            - path is the same literal `_finish` was called with
 
-                Ensures:
-                    - status != "waiting" -> outcome.answer, on every path including replay
-                      (a replay that already has its answer in hand still speaks it)
-                    - status == "waiting" and path == "replay" -> None (v1 speaks it)
-                    - status == "waiting" and no agent_label -> None (the receptionist)
-                    - otherwise -> the "New <agent> job..." ack
+        Ensures:
+            - status != "waiting" -> outcome.answer, on every path including replay
+              (a replay that already has its answer in hand still speaks it)
+            - status == "waiting" and path == "replay" -> None (v1 speaks it)
+            - status == "waiting" and no agent_label -> None (the receptionist)
+            - otherwise -> the "New <agent> job..." ack
         """
         if outcome.status != "waiting":
             return outcome.answer
@@ -1382,8 +1382,8 @@ class AskFlow:
                queue_position: Optional[ int ]=None, submit_details: Optional[ dict ]=None ) -> dict:
         """Assemble the response dict and write the authoritative trace line.
 
-                It stamps t_complete here, the single chokepoint every terminal exit funnels through: agent, replay and receptionist via _finish, needs_input, resume's interview-continue, and the expired refusal. So t_recv to t_complete is the completion-symmetric span for v1's running-to-completed.
-                _finish calls _maybe_write_back before _emit, so t_complete is always stamped after the snapshot write. It follows _speak on the answer path, so a few microseconds of TTS dispatch fall inside v2's span. That bias is conservative: v2 reads slightly slower, never faster.
+        It stamps t_complete here, the single chokepoint every terminal exit funnels through: agent, replay and receptionist via _finish, needs_input, resume's interview-continue, and the expired refusal. So t_recv to t_complete is the completion-symmetric span for v1's running-to-completed.
+        _finish calls _maybe_write_back before _emit, so t_complete is always stamped after the snapshot write. It follows _speak on the answer path, so a few microseconds of TTS dispatch fall inside v2's span. That bias is conservative: v2 reads slightly slower, never faster.
         """
         # ONE ROUTE MUST REACH THE OUTPUT VOCABULARY UNDER ONE NAME (row 759a895b).
         # `math` is a registered alias of `agent router go to math`, and resolve() honours

@@ -166,7 +166,7 @@ class QueuedExecutor:
     """Hands the work to the existing FIFO queue instead of running it here.
 
     This is the v1 tail of `push_job` in `src/cosa/rest/todo_fifo_queue.py`: scope the id,
-    push onto the todo queue, answer `waiting`. The queue consumer runs the job later.
+    push onto the todo queue, answer `waiting`. The queue consumer runs the job later and the websocket carries the result.
     The flow's two status gates treat `waiting` as success; the write-back guard does not.
 
     Requires:
