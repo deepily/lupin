@@ -237,8 +237,9 @@ class BFEOrchestrator:
 
     def set_resume_phase( self, phase_ordinal: int ) -> None:
         """
-        Mark phases up to phase_ordinal as completed so phase methods can skip
-        work that has already been done on resume.
+        Record the phase ordinal that a resumed run treats as already completed.
+
+        Stores phase_ordinal in the resume marker; nothing in this file reads it yet.
 
         Requires:
             - phase_ordinal >= 0
@@ -487,11 +488,8 @@ class BFEOrchestrator:
         """
         Parse a DiagnosisResult from the Lead agent's raw text response.
 
-        Handles:
-            - Clean JSON objects
-            - JSON wrapped in markdown fences
-            - JSON embedded in prose text
-            - Parse failures (returns low-confidence fallback)
+        Handles clean JSON objects, JSON wrapped in markdown fences and JSON embedded in
+        prose. A parse failure returns a low-confidence fallback.
 
         Args:
             raw_response: Raw text from Lead agent
@@ -555,7 +553,7 @@ class BFEOrchestrator:
         """
         Create a low-confidence fallback DiagnosisResult.
 
-        The 0.1 confidence is deliberately below the default threshold (0.7)
+        The 0.1 confidence is set below the default threshold (0.7)
         to trigger refinement if iterations remain.
 
         Args:
@@ -734,11 +732,8 @@ class BFEOrchestrator:
         """
         Parse a list of ProposedFix from the Lead agent's raw text response.
 
-        Handles:
-            - Clean JSON arrays
-            - JSON wrapped in markdown fences
-            - JSON embedded in prose text
-            - Parse failures (returns single fallback proposal)
+        Handles clean JSON arrays, JSON wrapped in markdown fences and JSON embedded in
+        prose. A parse failure returns a single fallback proposal.
 
         Args:
             raw_response: Raw text from Lead agent
@@ -990,9 +985,7 @@ class BFEOrchestrator:
 
         Natural break point where user selects from proposals and approves.
         Auto-selects if single high-confidence fix. Supports feedback-driven
-        retry on rejection.
-
-        Future: Phase 5 will add trust proxy L1-L5 gating here.
+        retry on rejection. A later phase is meant to add trust proxy gating here.
 
         Args:
             fixes: List of ProposedFix proposals
@@ -1140,10 +1133,9 @@ class BFEOrchestrator:
         """
         Run the fix phase: Coder applies fix, Tester validates.
 
-        Session 1cfcdf73 (2026-04-10): Thin shim delegating to shared FixExecutor.
-        The BFE-specific concerns (state transitions, plan doc update, completion
-        notification, files_changed exposure) stay in this shim; the SDK loop,
-        retry logic, and escalation live in `shared/fix_executor.py`.
+        Thin shim delegating to shared FixExecutor. State transitions, plan document update,
+        completion notification and files_changed exposure stay in this shim.
+        The SDK loop, retry logic and escalation live in `shared/fix_executor.py`.
 
         Requires:
             - diagnosis is a valid DiagnosisResult
@@ -1232,12 +1224,10 @@ class BFEOrchestrator:
         plan_path: str,
     ) -> FixResult:
         """
-        Phase 5: Run git operations post-fix (commit / branch / PR).
+        Run git operations after the fix: commit only, or branch plus pull request.
 
-        Trust-to-git mapping:
-            - L1-L2 (shadow/suggest): commit_only on current branch
-            - L3+ (active): branch_and_pr via gh
-            - Proxy unavailable: commit_only (safe default)
+        Trust levels 1-2 (shadow, suggest) commit only, on the current branch.
+        Level 3 and above (active) use branch_and_pr via gh. An unavailable proxy commits only.
 
         Requires:
             - fix_result is a FixResult
@@ -1247,7 +1237,7 @@ class BFEOrchestrator:
         Ensures:
             - fix_result.git_strategy / commit_hash / branch_name / pr_url populated on success
             - Plan document Git References section updated
-            - State transitions: FIXING → COMMITTING → COMPLETED
+            - State transitions: `FIXING` to `COMMITTING` to `COMPLETED`
             - Skipped (no-op) if fix not successful or no files changed
 
         Args:
@@ -1310,7 +1300,7 @@ class BFEOrchestrator:
         return self._finalize_git_strategy( fix_result, plan_path, voice_io )
 
     def _finalize_git_strategy( self, fix_result: FixResult, plan_path: str, voice_io ) -> FixResult:
-        """Update plan doc with git references; used by run_git_strategy as exit hook."""
+        """Write git references into the plan doc; used by run_git_strategy as its exit hook."""
         try:
             writer = PlanWriter( user_email=self.dead_job_context.user_email, debug=self.debug )
             writer.update_git_references( plan_path, fix_result )
@@ -1320,15 +1310,14 @@ class BFEOrchestrator:
 
     def _resolve_trust_level( self ) -> int:
         """
-        Return trust level 1-5 from the proxy, falling back to L1 on failure.
+        Return trust level 1-5 from the proxy, falling back to level 1 on failure.
 
-        Session 1cfcdf73: Thin shim delegating to shared GitStrategist. Kept on
-        BFEOrchestrator for backwards compatibility with existing unit tests
-        that call `orch._resolve_trust_level()`.
+        Thin shim delegating to shared GitStrategist. Kept on BFEOrchestrator for
+        backwards compatibility with existing unit tests that call `orch._resolve_trust_level()`.
 
         Ensures:
             - Always returns int between 1 and 5
-            - L1 on any error (conservative default)
+            - Level 1 on any error (conservative default)
         """
         return GitStrategist.resolve_trust_level( self.proxy )
 
@@ -1337,9 +1326,8 @@ class BFEOrchestrator:
         """
         Generate a fix/YYYY-MM-DD-{slug} branch name from text.
 
-        Session 1cfcdf73: Thin shim delegating to shared GitStrategist. Kept on
-        BFEOrchestrator for backwards compatibility with existing unit tests
-        that call `BFEOrchestrator._generate_slug(...)`.
+        Thin shim delegating to shared GitStrategist. Kept on BFEOrchestrator for
+        backwards compatibility with existing unit tests that call `BFEOrchestrator._generate_slug(...)`.
 
         Requires:
             - text is a string (may be empty)
@@ -1499,25 +1487,16 @@ class BFEOrchestrator:
     @asynccontextmanager
     async def worktree_scope( self ):
         """
-        Enter worktree isolation for Phase 3 + Phase 5 (run_fix + run_git_strategy).
+        Async context manager giving a job worktree isolation for run_fix and run_git_strategy.
 
-        Caller pattern (from job.py):
-            async with orchestrator.worktree_scope():
-                fix_result = await orchestrator.run_fix( ... )
-                if fix_result.success and orchestrator.last_files_changed:
-                    fix_result = await orchestrator.run_git_strategy( ... )
-
-        When `cosa worktree enabled` is true, a dedicated worktree is created
-        under `<sandbox_root>/<job_id>`. `_build_coder_options`,
-        `_build_tester_options`, and `run_git_strategy` automatically route
-        through `self._worktree_cwd`.
-
-        When disabled, the context is a no-op and emits a warning if the
-        current working tree has uncommitted changes (safety guard).
+        The caller in job.py wraps run_fix, then run_git_strategy when the fix succeeded and last_files_changed is set.
+        When `cosa worktree enabled` is true, a worktree is created under `<sandbox_root>/<job_id>`.
+        `_build_coder_options`, `_build_tester_options` and `run_git_strategy` then route through `self._worktree_cwd`.
 
         Ensures:
             - self._worktree_cwd is None on entry and exit (no leaked state)
             - Cleanup runs even if the caller raises
+            - When `cosa worktree enabled` is false the context is a no-op and warns if the current working tree has uncommitted changes (safety guard)
         """
         from cosa.agents.shared.worktree_context import WorktreeContext
         async with WorktreeContext( job_id=self.job_id, debug=self.debug ) as wt:
@@ -1534,10 +1513,10 @@ class BFEOrchestrator:
 
     async def _warn_on_uncommitted_changes_if_any( self ) -> None:
         """
-        Safety guard (Bug 9): when worktree isolation is disabled AND the
-        current working tree has uncommitted changes, log a visible warning.
+        Warn when worktree isolation is off and the working tree has uncommitted changes.
 
-        Does NOT block execution — the user opted into this mode by leaving
+        This is the safety guard for that mode. It logs a visible warning.
+        It never blocks execution, because the user opted into this mode by leaving
         `cosa worktree enabled=false`. Purely a heads-up.
         """
         try:
@@ -1587,7 +1566,7 @@ class BFEOrchestrator:
         Render the 'Worktree Artifacts' section of the BFE completion abstract.
 
         Pure static helper so unit tests can drive it directly. Returns an
-        empty list when no fix was applied AND no commit was made (nothing
+        empty list when no fix was applied and no commit was made (nothing
         to report).
 
         BFE is single-fix (vs. TFE's multi-cluster), so this reads a single
@@ -1618,11 +1597,8 @@ class BFEOrchestrator:
         """
         Compact single-line summary of a ToolUseBlock for progress notifications.
 
-        Replaces the old bare `Coder: {block.name}` breadcrumbs with a
-        tool-specific digest that surfaces the key argument. Parity with TFE's
-        `TFEOrchestrator._summarize_tool_use`. Truncated to 100 chars.
-
-        Filed 2026-04-18 (Session be57a252).
+        Gives a tool-specific digest that surfaces the key argument instead of the bare
+        tool name. Parity with TFE's `TFEOrchestrator._summarize_tool_use`. Truncated to 100 chars.
         """
         name = block.name
         inp  = block.input or {}

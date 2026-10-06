@@ -105,7 +105,7 @@ class FixResult( BaseModel ):
 
     Ensures:
         - Clear success/failure signal for retry decision
-        - Phase 5 git fields populated after run_git_strategy() completes
+        - Git strategy fields populated after run_git_strategy() completes
     """
     applied        : bool
     success        : bool
@@ -160,7 +160,7 @@ def create_initial_state( dead_job_id: str, extra_context: str = "" ) -> BFEStat
         - dead_job_id is non-empty
 
     Ensures:
-        - Returns BFEState with phase=PACKAGING and all fields initialized
+        - Returns BFEState with phase=`PACKAGING` and all fields initialized
 
     Args:
         dead_job_id: The id_hash of the dead job to fix

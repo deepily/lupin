@@ -1,9 +1,9 @@
 """
 COSA Bug Fix Expediter Agent Package.
 
-An agentic job that takes a dead (failed/interrupted) job's context,
-runs a three-phase forensic pipeline (diagnose -> propose -> fix),
-and optionally retries the original job.
+An agentic job that takes the context of a dead (failed or interrupted) job.
+It runs a three-phase forensic pipeline (diagnose, propose, fix) and can
+retry the original job afterwards.
 """
 
 from .config import BugFixExpediterConfig

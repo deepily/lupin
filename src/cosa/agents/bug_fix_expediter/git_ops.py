@@ -1,8 +1,8 @@
 """
-Async git operations module for Bug Fix Expediter Phase 5.
+Async git operations for the Bug Fix Expediter git strategy step.
 
 Provides commit/branch/push/PR primitives via asyncio.create_subprocess_exec().
-All methods return dicts — NEVER raise. Failures populate an `error` key.
+All methods return dicts and never raise. Failures populate an `error` key.
 
 Design:
     - Low-level `_run_git(*args)` runs `git <args>` with timeout
@@ -21,7 +21,7 @@ from typing import Optional
 
 class GitOps:
     """
-    Async wrapper around git CLI + gh CLI for BFE Phase 5.
+    Async wrapper around the git CLI and gh CLI for the BFE git strategy step.
 
     Requires:
         - cwd is None or an existing directory path
