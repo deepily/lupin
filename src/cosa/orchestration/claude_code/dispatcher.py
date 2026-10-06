@@ -3,10 +3,11 @@
 Cosa Task Dispatcher - Routes tasks to appropriate Claude Code runtime.
 
 Supports two modes:
-    Option A (BOUNDED): Print mode for discrete tasks with natural completion
-    Option B (INTERACTIVE): SDK client for open-ended sessions with bidirectional control
+    `TaskType.BOUNDED`: print mode for discrete tasks with natural completion
+    `TaskType.INTERACTIVE`: SDK client for open-ended sessions with bidirectional control
 
 Usage:
+```
     from cosa.orchestration import ClaudeCodeDispatcher, Task, TaskType
 
     dispatcher = ClaudeCodeDispatcher()
@@ -26,6 +27,7 @@ Usage:
         prompt="Let's work on the auth refactor",
         type=TaskType.INTERACTIVE
     ) )
+```
 
 Requirements:
     pip install claude-agent-sdk  # For interactive mode only
@@ -209,7 +211,7 @@ class ClaudeCodeDispatcher:
 
         Requires:
             - task.type is a valid TaskType
-            - For INTERACTIVE: claude-agent-sdk installed
+            - For `TaskType.INTERACTIVE`: claude-agent-sdk installed
 
         Ensures:
             - Returns TaskResult with execution outcome
@@ -240,15 +242,13 @@ class ClaudeCodeDispatcher:
 
     async def _run_bounded( self, task: Task ) -> TaskResult:
         """
-        Option A: Print mode for bounded tasks with streaming output.
+        Run a bounded task in print mode with streaming output.
 
-        Runs Claude Code with -p flag and stream-json output format.
-        Streams output line by line to the on_message callback.
-        Claude can use MCP tools to ask questions, but user cannot
-        inject input unprompted.
+        Runs Claude Code with -p and stream-json, passing each output line to on_message.
+        Claude can use MCP tools to ask questions, but the user cannot inject input.
 
         Requires:
-            - task is a valid Task with BOUNDED type
+            - task is a valid Task with type `TaskType.BOUNDED`
             - self.on_message callback is set
 
         Ensures:
@@ -524,15 +524,12 @@ Use notify() for progress. Use converse() when you need input."""
         """
         Inject a message into an active interactive session.
 
-        Queues the message for the session to process. If preserve_context is True,
-        the conversation history from the current session is prepended to the message
-        so Claude has context when the new session starts.
-
-        If force_interrupt is True, also interrupts the current response so the
-        queued message is processed immediately after the current response loop exits.
+        Queues the message. With preserve_context, the session history is prepended.
+        With force_interrupt, the current response is also interrupted, so the queued
+        message is processed as soon as the current response loop exits.
 
         Requires:
-            - task_id corresponds to an active INTERACTIVE session
+            - task_id corresponds to an active `TaskType.INTERACTIVE` session
             - Session is in active_sessions dictionary
 
         Ensures:
