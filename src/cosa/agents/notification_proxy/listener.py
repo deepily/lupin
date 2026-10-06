@@ -36,8 +36,7 @@ _AUTH_LOGIN_TIMEOUT_SECONDS = 30
 
 class WebSocketListener:
     """
-    Async WebSocket client that connects, authenticates, subscribes
-    to events, and dispatches them to a callback.
+    WebSocket client that logs in, subscribes to events and calls back.
 
     Requires:
         - email is a valid mock test email
@@ -72,7 +71,7 @@ class WebSocketListener:
 
         Ensures:
             - Stores connection parameters
-            - Does NOT connect (call run() to start)
+            - Does not connect (call run() to start)
 
         Args:
             email: User email for JWT authentication
@@ -110,8 +109,8 @@ class WebSocketListener:
         """
         The `Bearer <jwt>` this listener logged in with, or None before its first login.
 
-        Row e20e249a: the answer door requires a credential, and the responder borrows this
-        one so every answer the proxy posts carries the login it already holds.
+        The answer door requires a credential. The responder borrows this one, so every
+        answer the proxy posts carries the login it already holds.
         """
         return self._token
 

@@ -1,40 +1,39 @@
 """
-Scalar guard for predicted batch answers (row ceca10f3).
+Scalar guard for predicted batch answers.
 
-A prediction whose per-question answer is a non-scalar (an object or a list)
-must never be stamped as a high-confidence answer on the user's behalf. When
-`String( value )` reaches the client it renders "[object Object]" (object) or
-"a,b,c" (list) into the input and presents that garbage as a >= 0.9-confidence
-answer the user is invited to accept.
+A prediction whose per-question answer is a non-scalar, an object or a list, must never
+be stamped as a high-confidence answer on the user's behalf. When `String( value )`
+reaches the client, it renders "[object Object]" for an object and "a,b,c" for a list.
+It puts that text in the input and presents it as a >= 0.9-confidence answer.
 
-The rule is DROP, not coerce. A dropped header becomes a question the user
-actually gets asked; a coerced one is a wrong answer submitted for them. The
-producers that build predicted answers already return None on an empty map, so
-dropping the last non-scalar cleanly degrades to "ask the user".
+The rule is to drop the entry, not to coerce it. A dropped header becomes a question the
+user actually gets asked. A coerced one is a wrong answer submitted for them. The
+producers that build predicted answers already return None on an empty map. Dropping the
+last non-scalar therefore degrades cleanly to "ask the user".
 
-Wired into the two producers that build + stamp predicted answers:
+Two producers build and stamp predicted answers, and both call this guard:
     - notification_proxy/strategies/expediter_rules.py
     - notification_proxy/strategies/llm_script_matcher.py
-The downstream client guard (notifications.js _batchPredictedAnswers) stays as
-belt-and-suspenders for any producer not enumerated here.
+The client guard in notifications.js (_batchPredictedAnswers) stays as a second layer
+for any producer not listed here.
 """
 
 
 def drop_non_scalar_answers( answers, context ):
     """
-    Keep only scalar header->value answers; DROP (never coerce) the rest.
+    Keep only scalar header-to-value answers; drop the rest and never coerce them.
 
     Requires:
-        - answers is a dict mapping header (str) -> value, OR any value
+        - answers is a dict mapping header (str) -> value, or any other value
           (a non-dict is treated as "no usable answers")
         - context is a short str naming the call site, used in the drop log
 
     Ensures:
-        - returns a NEW dict; the input is never mutated
+        - returns a new dict; the input is never mutated
         - keeps an entry only when its value is str / int / float / bool;
           numbers and bools are stringified so the payload is uniformly str
         - a non-dict `answers` yields an empty dict
-        - every dropped entry is logged LOUD (header, value type, context) so a
+        - every dropped entry is logged loudly (header, value type, context) so a
           non-scalar prediction is visible, not silent
 
     Args:

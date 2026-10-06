@@ -2,9 +2,9 @@
 """
 Notification Router / Responder for the Notification Proxy Agent.
 
-Receives notification events from the WebSocket listener, determines
-if a response is needed, routes to the appropriate strategy (rules
-or LLM fallback), and submits the response via REST API.
+Receives notification events from the WebSocket listener and decides whether a
+response is needed. It routes to the right strategy, rules or LLM fallback, and
+submits the response through the REST API.
 
 References:
     - src/cosa/rest/routers/notifications.py (POST /api/notify/response)
@@ -76,8 +76,7 @@ CHOICE_ESCAPE_LABELS = ( DOC_CHOICE_DESCRIBE_LABEL, DOC_CHOICE_CANCEL_LABEL )
 
 class NotificationResponder:
     """
-    Routes response-required notifications to the appropriate strategy
-    and submits answers via the REST API.
+    Routes notifications that need a response to a strategy and posts the answer.
 
     Requires:
         - At least one strategy is available
@@ -446,7 +445,7 @@ class NotificationResponder:
 
         Ensures:
             - POSTs to /api/notify/response
-            - sends the token authorization_fn returns when one is wired (row e20e249a)
+            - sends the token authorization_fn returns when one is wired
             - Returns True on success (HTTP 200)
             - Returns False on any error
             - Logs the response for debugging

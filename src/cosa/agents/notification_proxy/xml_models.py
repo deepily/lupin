@@ -22,7 +22,7 @@ class ScriptMatcherResponse( BaseXMLModel ):
     """
     XML response from Phi-4 for Q&A script matching.
 
-    Used by ALL response types (OPEN_ENDED, OPEN_ENDED_BATCH, MULTIPLE_CHOICE, YES_NO).
+    Used by all response types (OPEN_ENDED, OPEN_ENDED_BATCH, MULTIPLE_CHOICE, YES_NO).
     The LLM fuzzy-matches an incoming notification question to a Q&A script entry
     and returns the scripted answer inside this XML structure.
 
@@ -227,7 +227,16 @@ class BatchScriptMatcherResponse( BaseXMLModel ):
     which Phi-4 can generate reliably. Each entry maps a batch question header to its
     matched script answer.
 
-    XML structure:
+    Requires:
+        - LLM returns valid XML with <response> root tag
+        - Each <entry> has <header>, <matched_index>, and <answer> child elements
+
+    Ensures:
+        - entries is a list of dicts with header, matched_index, answer keys
+        - get_answers_dict() returns {header: answer} mapping
+        - to_xml() generates nested <entries><entry>...</entry></entries> structure
+
+    Example:
         <response>
           <entries>
             <entry>
@@ -244,15 +253,6 @@ class BatchScriptMatcherResponse( BaseXMLModel ):
           <confidence>0.9</confidence>
           <reasoning>Matched all batch questions to script entries</reasoning>
         </response>
-
-    Requires:
-        - LLM returns valid XML with <response> root tag
-        - Each <entry> has <header>, <matched_index>, and <answer> child elements
-
-    Ensures:
-        - entries is a list of dicts with header, matched_index, answer keys
-        - get_answers_dict() returns {header: answer} mapping
-        - to_xml() generates nested <entries><entry>...</entry></entries> structure
 
     References:
         - CodeResponse pattern in src/cosa/agents/io_models/xml_models.py (List[str] with custom to_xml)
