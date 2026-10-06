@@ -1,13 +1,13 @@
 """
 TFE Resume Resolver — dispatch free-form resume input to a target job ID.
 
-Session 9056c113 (continued, 2026-04-12): Phase D4b-D4d deferred work.
 Accepts any of: TFE job ID, plan doc path, checkpoint JSON path, or natural
 language description. Returns a ResumeTarget with the resolved job ID and
-metadata for UI/voice disambiguation.
+metadata for UI and voice disambiguation.
 
-Phase 1 scope: Exact-match paths (job ID + plan doc). Fuzzy natural-language
-matching via LLM is Phase 2 (needs new INI keys + prompt template + response model).
+Exact-match paths (job ID and plan doc) resolve directly. Fuzzy natural-language
+matching goes through an LLM, which needs its own INI keys, prompt template and
+response model.
 
 See: src/rnd/v0.1.6/2026.04.10-test-fix-expediter/15-file-path-resume-and-voice-parsing.md
 """
@@ -108,7 +108,7 @@ def _resolve_by_job_id( job_id_input: str, user_email: str ) -> ResumeTarget:
         - user_email is a valid email (for scoping when job_id is bare)
 
     Ensures:
-        - Returns ResumeTarget with job_id set if found AND stalled
+        - Returns ResumeTarget with job_id set if found and stalled
         - Returns "not_found" with diagnostic if missing, not stalled, or not owned
     """
     from cosa.rest.job_persistence import get_checkpoint_for_job
@@ -147,10 +147,9 @@ def _resolve_by_plan_path( plan_path_input: str, user_email: str ) -> ResumeTarg
     """
     Resolve a TFE plan doc path to its associated stalled job.
 
-    Parses the source TestSuiteJob ID from the filename pattern:
-        YYYY.MM.DD-N-clusters-from-{source_id_no_dashes}-cN-plan.md
-
-    Then queries job_history for any TFE job whose metadata points to this plan.
+    Parses the source TestSuiteJob ID from the filename pattern
+    YYYY.MM.DD-N-clusters-from-{source_id_no_dashes}-cN-plan.md, then queries
+    job_history for any TFE job whose metadata points to this plan.
 
     Requires:
         - plan_path_input is a non-empty string
@@ -329,12 +328,9 @@ def list_resume_candidates( user_email: str, max_count: int = 20 ) -> list[ dict
     """
     Build a list of candidate stalled/recent TFE jobs for fuzzy matching.
 
-    Combines two sources:
-    1. Stalled TFE jobs (highest priority — resumable)
-    2. Recent completed/failed TFE jobs (context for disambiguation)
-
-    Each candidate is a flat dict suitable for JSON serialization into
-    an LLM prompt or a UI disambiguation modal.
+    Sources are stalled TFE jobs (highest priority, resumable) and recent
+    completed or failed ones. Each candidate is a flat dict for JSON
+    serialization into an LLM prompt or a UI disambiguation modal.
 
     Requires:
         - user_email is a non-empty string

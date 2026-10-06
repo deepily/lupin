@@ -1,9 +1,8 @@
 """
 State models for the TestFixExpediter pipeline.
 
-Session 1cfcdf73 (2026-04-10): Parallel to BFE's state.py but shaped for
-test-failure input (many failures → K clusters) rather than dead-job
-input (one crash). Reuses BFE's `DiagnosisResult`, `ProposedFix`, and
+Parallel to BFE's state.py but shaped for test-failure input (many
+failures grouped into K clusters) rather than dead-job input (one crash). Reuses BFE's `DiagnosisResult`, `ProposedFix`, and
 `FixResult` types where possible; extends with TFE-specific fields.
 
 See: src/rnd/v0.1.6/2026.04.10-test-fix-expediter/06-phase3-fix-delegation-plan.md
@@ -79,10 +78,10 @@ class FailureCluster( BaseModel ):
     A grouped subset of test failures sharing a common root cause.
 
     Produced by `cluster.py::heuristic_seed()` and optionally refined by
-    `cluster.py::llm_refine()` in Phase 0.
+    `cluster.py::llm_refine()` in the clustering stage.
 
     Requires:
-        - cluster_id is a non-empty string (e.g., "C1", "C2")
+        - cluster_id is a non-empty string (for example "C" plus a position number)
         - failure_indices is a non-empty list of indices into the
           TestRemediationContext.failures list
         - confidence is between 0.0 and 1.0
@@ -184,7 +183,7 @@ def create_initial_state(
         - remediation_snapshot_path is non-empty (relative to io/)
 
     Ensures:
-        - Returns TFEState with phase=LOADING and all fields initialized
+        - Returns TFEState with phase set to the `LOADING` value and all fields initialized
     """
     return TFEState(
         source_test_suite_job_id = source_test_suite_job_id,
@@ -224,7 +223,7 @@ class CheckpointData( TypedDict ):
     """
     Serialized mid-execution state for resume.
 
-    Stored in metadata_json["checkpoint"] when a TFE job transitions to STALLED.
+    Stored in metadata_json["checkpoint"] when a TFE job transitions to `STALLED`.
     Retrieved by the resume factory to reconstruct the orchestrator at the stall
     phase and continue execution from the next phase.
 
@@ -256,12 +255,12 @@ class VoiceGateTimeoutError( Exception ):
 
     Ensures:
         - Carries the phase where timeout occurred
-        - Carries `delivered`: True when the ask REACHED a human and no answer
-          came back (a real silence-timeout); False when it is unknown whether
-          the ask was delivered (default, and the conservative choice for a
-          mechanism/transport failure). Row 38a0b373: a log reader must be able
-          to tell a delivered-but-unanswered gate from one that never reached
-          anyone — both fail open to the default, but for opposite reasons.
+        - Carries `delivered`: True when the ask reached a human and no answer
+          came back (a real silence-timeout). False when it is unknown whether
+          the ask was delivered (the default, and the conservative choice for a
+          mechanism or transport failure). A log reader must be able to tell a
+          delivered-but-unanswered gate from one that never reached anyone.
+          Both fail open to the default, but for opposite reasons.
     """
     def __init__( self, phase: str, message: str = "", delivered: bool = False ):
         self.phase     = phase
@@ -271,18 +270,11 @@ class VoiceGateTimeoutError( Exception ):
 
 class VoiceGateUnreachableError( Exception ):
     """
-    Voice gate could not reach the human at all — the call itself failed.
+    Voice gate failed to reach the human because the asking call itself broke.
 
-    Distinct from VoiceGateTimeoutError on purpose. A timeout means the
-    question was asked and no answer came back; this means the asking
-    mechanism broke (transport down, MCP unavailable, serialization error).
-    Both mean "no human answered", and both must checkpoint-and-stall — but
-    collapsing them into one type would make the record unable to say which
-    happened, which is the same defect this exception exists to remove.
-
-    Before this existed, the orchestrator caught the generic exception and
-    AUTO-APPROVED: a gate that could not reach a human answered for them,
-    in a value indistinguishable from a real approval.
+    Distinct from VoiceGateTimeoutError: a timeout means the question was asked and no answer came back.
+    This error means the asking mechanism broke (transport down, MCP unavailable, serialization error). Both mean no human answered and both must checkpoint-and-stall, but one shared type could not record which happened.
+    The orchestrator once caught the generic exception and auto-approved. That answered for the human in a value that looked like a real approval.
 
     Requires:
         - phase is a valid BFEPhase/TFEPhase value string
@@ -303,7 +295,7 @@ class StalledException( Exception ):
     Orchestrator requests a clean stall with checkpoint.
 
     Raised when a voice gate times out and the orchestrator has saved its state.
-    Caught by job._execute() to transition the job to STALLED without treating
+    Caught by job._execute() to transition the job to `STALLED` without treating
     it as a failure.
 
     Requires:
@@ -311,8 +303,8 @@ class StalledException( Exception ):
         - phase is a valid TFEPhase value string
 
     Ensures:
-        - job._execute() catches this and transitions to STALLED
-        - NOT treated as a failure — this is a clean yield point
+        - job._execute() catches this and transitions to `STALLED`
+        - not treated as a failure; this is a clean yield point
     """
     def __init__( self, checkpoint: dict, phase: str, message: str = "" ):
         self.checkpoint = checkpoint

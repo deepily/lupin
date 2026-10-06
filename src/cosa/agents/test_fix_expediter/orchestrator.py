@@ -1,13 +1,13 @@
 """
-TestFixExpediter Orchestrator — Phase 0 through Phase 6.
+TestFixExpediter pipeline orchestrator, from clustering through validation rerun.
 
-Phase status (audited 2026-04-15 — previous "STUB" labels were stale):
-    0. Cluster   — ✅ REAL: heuristic seed + cap-enforced LLM refinement
-    1. Diagnose  — ✅ REAL: Opus lead agent via Claude Agent SDK
-    2. Propose   — ✅ REAL: per-cluster proposal + aggregate voice gate
-    3. Fix       — ✅ REAL: delegates to shared FixExecutor
-    5. Git       — ✅ REAL: shared GitStrategist.commit_and_pr_multi (multi-commit, single PR)
-    6. Rerun     — ✅ REAL: async TestSuiteJob resubmit with recursion guard
+Every phase is a working implementation, not a stub. In order, the phases are:
+    - Cluster: a heuristic seed, then language-model refinement that enforces the cluster cap.
+    - Diagnose: an Opus lead agent through the Claude Agent SDK.
+    - Propose: one proposal per cluster, then one aggregate voice gate.
+    - Fix: delegates to the shared FixExecutor.
+    - Git: the shared GitStrategist.commit_and_pr_multi, which makes several commits and one PR.
+    - Rerun: an asynchronous TestSuiteJob resubmit with a recursion guard.
 
 Design refs:
     - src/rnd/v0.1.6/2026.04.10-test-fix-expediter/03-phase0-clustering-plan.md
@@ -280,8 +280,7 @@ class TFEOrchestrator:
 
     def set_resume_phase( self, phase_ordinal: int ) -> None:
         """
-        Mark phases up to phase_ordinal as already completed so phase
-        methods skip work that has already been done.
+        Mark phases up to phase_ordinal as completed so phase methods skip their work.
 
         Requires:
             - phase_ordinal >= 0
@@ -624,8 +623,8 @@ class TFEOrchestrator:
         Per-cluster fix proposals. Aggregated voice gate selects a subset.
 
         Requires:
-            - self.clusters is populated (Phase 0 ran)
-            - self.diagnoses is populated (Phase 1 ran)
+            - self.clusters is populated (the cluster phase ran)
+            - self.diagnoses is populated (the diagnose phase ran)
             - SDK_AVAILABLE (falls back to empty proposals otherwise)
 
         Ensures:
@@ -1095,11 +1094,11 @@ class TFEOrchestrator:
         Resolve a voice-gate timeout per the configured policy.
 
         Policies:
-            - "stall"    → re-raise VoiceGateTimeoutError (current behavior; STALLED job)
-            - "top_1"    → return single highest-confidence proposal
-            - "top_n"    → return top-N highest-confidence proposals (N from config)
-            - "none"     → return [] (exit cleanly with no_fixes_selected)
-            - "delegate" → RESERVED for UPE online-learning integration (NotImplementedError today)
+            - "stall": re-raise VoiceGateTimeoutError, which leaves the job in the stalled state
+            - "top_1": return the single highest-confidence proposal
+            - "top_n": return the top-N highest-confidence proposals (N from config)
+            - "none": return an empty list, so the job exits cleanly with no_fixes_selected
+            - "delegate": reserved for the UPE online-learning integration; raises NotImplementedError today
 
         Proposals are sorted by `confidence` desc; ties keep input order.
         Unknown policy values fall back to "stall" with a warning.
@@ -1147,31 +1146,28 @@ class TFEOrchestrator:
         proposals: list[ TFEProposedFix ],
     ) -> list[ TFEProposedFix ]:
         """
-        RESERVED HOOK — Delegate the voice-gate timeout decision to the
-        Universal Prediction Engine (UPE) using its online-learned model
-        of operator priors.
+        Reserved hook: delegate a voice-gate timeout to the Universal Prediction Engine (UPE).
 
-        Not implemented today. UPE's online-learning surface is ~2 dev
-        branches out (per 2026-04-28 design discussion). When UPE lands,
-        the policy `delegate` becomes a real option and the implementation
-        of this method materializes per the contract sketched in
-        `05-voice-gate-policy-evolution.md`:
+        It would use the UPE's online-learned model of operator priors. Not implemented
+        today: the UPE online-learning surface is about two dev branches away. When UPE
+        lands, the policy `delegate` becomes a real option and this method follows the
+        contract sketched in `05-voice-gate-policy-evolution.md`:
 
             - Build a delegate request: agent_type, gate_type, context
               (proposals + cluster summary + diagnoses), operator_user_id,
               min_confidence threshold, request_id (for feedback tracking).
             - Call UPE; receive (answer, confidence, abstained, reasoning,
               training_signal_id).
-            - If abstained or confidence < min_confidence → fall through to
+            - If it abstained or confidence < min_confidence, fall through to
               the configured `voice gate fallback policy` (default "stall").
-            - Otherwise return the predicted subset of proposals AND persist
+            - Otherwise return the predicted subset of proposals and persist
               training_signal_id alongside the applied fix so post-hoc
               operator approval/revert can flow back to UPE as a learning
               signal.
 
-        Until that work lands, this method raises NotImplementedError so a
-        misconfigured `voice gate timeout policy = delegate` fails loudly
-        instead of silently falling through to `stall`.
+        Until that work lands, this method raises NotImplementedError. A misconfigured
+        `voice gate timeout policy = delegate` then fails loudly instead of silently
+        falling through to `stall`.
         """
         raise NotImplementedError(
             "voice_gate_timeout_policy='delegate' is reserved for the UPE online-learning "
@@ -1254,17 +1250,14 @@ class TFEOrchestrator:
 
     async def run_phase3_fix( self ) -> list:
         """
-        Apply the selected fixes via the shared FixExecutor.
+        Apply the selected fixes through the shared FixExecutor, one cluster at a time.
 
-        For each TFEProposedFix in `self.selected_fixes`:
-          1. Look up the corresponding FailureCluster + TestDiagnosisResult
-          2. Build a FixContext (duck-typed pass-through) from cluster + diagnosis
-          3. Call `FixExecutor.execute_fix(...)` with `prompt_builder_key="tfe"`
-          4. Collect the FixResult + files_changed, attribute to the cluster
-          5. If `continue_on_cluster_failure == false` and a cluster fails, abort
+        Each selected fix is matched to its cluster and diagnosis, then run by
+        `FixExecutor.execute_fix(...)` with `prompt_builder_key="tfe"`.
+        If `continue_on_cluster_failure == false`, a failed cluster aborts the rest.
 
         Requires:
-            - self.selected_fixes is populated (Phase 2 ran and user selected)
+            - self.selected_fixes is populated (the propose phase ran and the user selected)
             - self.clusters and self.diagnoses are populated
             - SDK_AVAILABLE (falls back to empty results otherwise)
 
@@ -1433,12 +1426,12 @@ class TFEOrchestrator:
         abstract: Optional[ str ] = None,
     ) -> None:
         """
-        Bridge TFE's `_notify(self, message, priority, abstract)` signature
-        to the shared FixExecutor's `notify_fn(voice_io, message, priority, abstract)`
-        signature (which mirrors BFE's `_notify(voice_io, ...)`).
+        Adapt TFE's `_notify` to the shared FixExecutor's `notify_fn` signature.
 
-        The `voice_io_module` arg is ignored here because TFE's `_notify`
-        uses its own cosa_interface directly.
+        TFE's `_notify(self, message, priority, abstract)` is bridged to
+        `notify_fn(voice_io, message, priority, abstract)`, which mirrors BFE's
+        `_notify(voice_io, ...)`. The `voice_io_module` arg is ignored here because
+        TFE's `_notify` uses its own cosa_interface directly.
         """
         await self._notify( message, priority=priority, abstract=abstract )
 
@@ -1529,12 +1522,11 @@ class TFEOrchestrator:
         cosa_interface_module,
     ) -> tuple:
         """
-        Verify the fix via a Tester agent that runs pytest against the
-        cluster's failing tests.
+        Verify a fix with a Tester agent that runs pytest on the cluster's failing tests.
 
-        Mirrors BFE's _verify_fix but uses TFE's TESTER_SYSTEM_PROMPT and
-        the test-aware build_verification_prompt (which instructs the Tester
-        to use `pytest -k` filtered by cluster test names).
+        Mirrors BFE's _verify_fix but uses TFE's `TESTER_SYSTEM_PROMPT` and the
+        test-aware build_verification_prompt, which tells the Tester to use
+        `pytest -k` filtered by cluster test names.
 
         Returns:
             tuple: (passed: bool, tester_output: str)
@@ -1615,7 +1607,7 @@ class TFEOrchestrator:
     @asynccontextmanager
     async def worktree_scope( self ):
         """
-        Enter worktree isolation for Phase 3 + Phase 5 (FixExecutor + GitStrategist).
+        Enter worktree isolation for the fix and git phases (FixExecutor and GitStrategist).
 
         Caller pattern (from job.py):
             async with orchestrator.worktree_scope():
@@ -1624,8 +1616,8 @@ class TFEOrchestrator:
 
         When `cosa worktree enabled` is true, a dedicated worktree is created
         under `<sandbox_root>/<job_id>`. `_build_tfe_coder_options`,
-        `_build_tfe_tester_options`, and Phase 5 git ops automatically route
-        through `self._worktree_cwd`.
+        `_build_tfe_tester_options`, and the git phase's git operations automatically
+        route through `self._worktree_cwd`.
 
         When disabled, the context is a no-op and emits a warning if the
         current working tree has uncommitted changes (safety guard).
@@ -1645,9 +1637,10 @@ class TFEOrchestrator:
 
     async def _warn_on_uncommitted_changes_if_any( self ) -> None:
         """
-        Safety guard (Bug 9): when worktree isolation is disabled AND the
-        current working tree has uncommitted changes, log a visible warning.
-        Non-blocking — the user opted into that mode.
+        Warn when worktree isolation is disabled and the working tree is dirty.
+
+        The warning is logged only when the current working tree has uncommitted changes.
+        It never blocks, because the user opted into that mode.
         """
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -1679,7 +1672,7 @@ class TFEOrchestrator:
             - self.selected_fixes : list of TFEProposedFix with cluster_id
             - self.fix_results : list of FixResult parallel to selected_fixes
             - self.files_changed_by_cluster : dict[cluster_id → list[str]]
-            - self.branch_name, self.commit_hashes, self.pr_url : Phase 5 outputs
+            - self.branch_name, self.commit_hashes, self.pr_url : outputs of the git phase
         """
         if not self.selected_fixes:
             return []
@@ -1721,13 +1714,9 @@ class TFEOrchestrator:
         """
         Compact single-line summary of a ToolUseBlock for progress notifications.
 
-        Replaces the old bare `Coder: {block.name}` breadcrumbs (which produced
-        long runs of identical-looking 'Coder: Bash' entries with no context)
-        with a tool-specific digest that surfaces the key argument. Truncated
-        to 100 chars to keep notification text tight.
-
-        Filed 2026-04-18 (Session be57a252) after operator noted the prior
-        format was "almost meaningless without more context."
+        A bare `Coder: {block.name}` line gave long runs of identical entries with no
+        context, so this builds a tool-specific digest that surfaces the key argument.
+        The argument is truncated to 100 chars to keep notification text tight.
         """
         name = block.name
         inp  = block.input or {}
@@ -1746,20 +1735,20 @@ class TFEOrchestrator:
     @staticmethod
     def _derive_budget_tier( proposed, cluster=None ) -> str:
         """
-        Auto-derive Coder turn-budget tier (Option A, 2026-04-18).
+        Derive the Coder turn-budget tier from a proposal's affected-file count.
 
         Tiers:
-            - small  : single-file test_patch or config_change — trivial flips
-            - large  : 4+ affected files — visual baselines, broad refactors
-            - medium : everything else — single-file code_patch, 2-3 file anythings, retries
+            - small  : single-file test_patch or config_change, a trivial flip
+            - large  : 4 or more affected files, such as visual baselines or broad refactors
+            - medium : everything else, such as single-file code_patch, two or three files, retries
 
-        File-count source (2026-04-19 fix after tfe-a1c6e15a post-game):
-            1. `proposed.changes` list length (preferred — what the proposer explicitly enumerated)
-            2. `cluster.affected_files_guess` length (fallback — TFE proposals often
-               leave `changes` empty, so every proposal would otherwise fall to `medium`)
-            3. 0 if neither source populated
+        File-count source, in order:
+            1. `proposed.changes` list length (preferred: what the proposer explicitly enumerated)
+            2. `cluster.affected_files_guess` length (fallback)
+            3. 0 if neither source is populated
 
-        Defensive fallback: if no file info is discoverable, returns "medium".
+        TFE proposals often leave `changes` empty, so without the fallback every proposal
+        would fall to `medium`. If no file information is discoverable, returns "medium".
         """
         n_files = len( proposed.changes ) if proposed.changes else 0
         if n_files == 0 and cluster is not None:
@@ -1813,24 +1802,14 @@ class TFEOrchestrator:
 
     async def run_phase5_git( self ) -> dict:
         """
-        Run multi-cluster git strategy via the shared GitStrategist.
+        Commit and open one PR for all successful cluster fixes via the shared GitStrategist.
 
-        For each successful Phase 3 fix:
-          - Look up the files changed for that cluster
-          - Build a commit message keyed on `fix(tfe): {cluster_id} {title}`
-          - Pass the whole batch to `GitStrategist.commit_and_pr_multi()` as
-            a list of (cluster_id, title, files, commit_message) tuples
-
-        Trust-level → git strategy mapping is resolved via the shared
-        `GitStrategist.resolve_trust_level(proxy)` helper. TFE doesn't have
-        its own trust proxy yet (Phase 5 of the design uses `inherit` mode),
-        so we pass `None` and rely on the L1 fallback for first runs. Future
-        iterations can pass a SWE trust proxy.
-
-        Dry-run mode: skips real git operations and returns a synthetic result.
+        Each successful fix that changed files gets a commit message keyed on
+        `fix(tfe): {cluster_id} {title}`; the batch goes to `GitStrategist.commit_and_pr_multi()`.
+        Trust level comes from `_resolve_tfe_trust_level`, as TFE wires no proxy. Dry-run skips git.
 
         Requires:
-            - self.fix_results is populated (Phase 3 ran)
+            - self.fix_results is populated (the fix phase ran)
             - self.files_changed_by_cluster is populated
 
         Ensures:
@@ -2021,14 +2000,14 @@ class TFEOrchestrator:
 
     def _resolve_tfe_trust_level( self ) -> int:
         """
-        Resolve trust level for TFE Phase 5.
+        Resolve the trust level for the TFE git phase from `self.config.trust_mode`.
 
-        Reads `self.config.trust_mode`:
-          - "inherit" → L1 (conservative default — TFE doesn't wire a proxy yet)
-          - "fixed_l1" → 1
-          - "fixed_l3" → 3
-          - "shadow"  → 1 (passive mode — compute but don't escalate)
-          - anything else → 1 (safe fallback)
+        Mapping:
+          - "inherit" gives level 1, the conservative default, because TFE wires no proxy yet
+          - "fixed_l1" gives 1
+          - "fixed_l3" gives 3
+          - "shadow" gives 1 (passive mode: compute but do not escalate)
+          - anything else gives 1 (safe fallback)
         """
         mode = self.config.trust_mode
         if mode == "fixed_l3":
@@ -2067,21 +2046,16 @@ class TFEOrchestrator:
         """
         Queue a validation TestSuiteJob targeting the affected suites.
 
-        Per plan doc 08-phase6-rerun-validation-plan.md:
-          - Guard: only if at least one Phase 3 fix succeeded
-          - Recursion guard: set metadata["triggered_by_tfe"] = self.job_id
-          - Rerun scope: `affected` (default — only original suites) or `full`
-          - Does NOT wait on the validation run — it's a peer job
-          - Populates self.artifacts-equivalent via `self.validation_run_job_id`
-
-        In dry_run, emits a breadcrumb and sets validation_run_job_id to a
-        synthetic placeholder.
+        Runs only if a fix succeeded; sets `triggered_by_tfe = self.job_id` as a recursion guard.
+        Scope is `affected` (default, original suites) or `full`. It does not wait on the peer job.
+        See: src/rnd/v0.1.6/2026.04.10-test-fix-expediter/08-phase6-rerun-validation-plan.md
 
         Requires:
-            - self.fix_results is populated (Phase 3 ran)
+            - self.fix_results is populated (the fix phase ran)
 
         Ensures:
             - Returns the validation TestSuiteJob ID if queued, else None
+            - Sets self.validation_run_job_id to that ID (a placeholder in dry_run)
             - Never raises
         """
         self.current_phase = TFEPhase.RESUBMITTING
@@ -2234,7 +2208,7 @@ class TFEOrchestrator:
 
 
 def quick_smoke_test():
-    """Quick smoke test for TFEOrchestrator Phase 0 + Phase 1 wiring."""
+    """Smoke test TFEOrchestrator clustering, parsing, cancellation and later phases."""
     from cosa.agents.test_fix_expediter.state import TestRemediationContext
 
     cu.print_banner( "TFE Orchestrator Smoke Test", prepend_nl=True )

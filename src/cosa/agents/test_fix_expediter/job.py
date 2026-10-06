@@ -1,18 +1,14 @@
 """
 TestFixExpediter background job for queue-based execution.
 
-Session 1cfcdf73 (2026-04-10): Parallel to BFE's job.py. Takes a remediation
-snapshot (from a failed TestSuiteJob), runs the TFE pipeline (cluster →
-diagnose → propose → fix → git → rerun), and returns a conversational answer.
-
-**Step 6 scaffolding**: `_execute()` loads the snapshot, runs the orchestrator
-phase stubs, and returns a placeholder conversational answer. Full pipeline
-wiring lands incrementally in steps 7-12.
+Parallel to the job.py of the bug fix expediter. Takes a remediation snapshot
+from a failed TestSuiteJob and runs the TFE pipeline: cluster, diagnose,
+propose, fix, git, rerun. It returns a conversational answer.
 
 Example:
     job = TestFixExpediterJob(
         remediation_snapshot_path = "test-suite/2026.04.10-at-14:53-e2e-remediation.json",
-        source_test_suite_job_id  = "ts-abc12345",
+        source_test_suite_job_id  = "ts-example",
         user_id                   = "user123",
         user_email                = "user@example.com",
         session_id                = "wise-penguin",
@@ -39,9 +35,8 @@ class TestFixExpediterJob( AgenticJobBase ):
     Background job for TestFixExpediter execution.
 
     Runs the TFE pipeline on a remediation snapshot from a failed
-    TestSuiteJob. **Step 6 scaffolding**: `_execute()` exercises the
-    orchestrator phase stubs to prove end-to-end wiring. Full pipeline
-    lands in steps 7-12 per the approved plan.
+    TestSuiteJob. `_execute()` loads the snapshot, builds the orchestrator
+    and walks its phases through to the validation rerun.
 
     Attributes:
         remediation_snapshot_path: Path to the snapshot JSON (relative to io/)
@@ -88,8 +83,8 @@ class TestFixExpediterJob( AgenticJobBase ):
             user_id: System ID of the job owner
             user_email: Email address for notification routing
             session_id: WebSocket session for notifications
-            original_test_types: Suites the original job ran (for Phase 6 rerun)
-            original_pytest_args: Original pytest args (for Phase 6 rerun)
+            original_test_types: Suites the original job ran (for the validation rerun)
+            original_pytest_args: Original pytest args (for the validation rerun)
             dry_run: Simulate execution without making changes
             lead_model_override:   Optional per-invocation override of the TFE
                                    lead model (e.g. "claude-sonnet-4-6" for E2E
@@ -138,14 +133,11 @@ class TestFixExpediterJob( AgenticJobBase ):
 
     def do_all( self ) -> str:
         """
-        Synchronous entry point for queue consumer.
+        Synchronous entry point for the queue consumer.
 
-        Runs `_execute()` in an event loop, sets the `AgenticJobBase` lifecycle
-        state (`self.state`), captures full Python traceback into `self.error`
-        on failure, and returns a conversational answer string. Exception
-        handling follows the BFE pattern (`bug_fix_expediter/job.py:107-157`)
-        so dead TFE jobs carry complete forensic data for queue serialization
-        + job_history persistence.
+        Runs `_execute()` in an event loop and sets the `AgenticJobBase` state.
+        On failure it captures the full traceback into `self.error` and re-raises,
+        as the BFE job does, so dead jobs keep forensic data for job_history.
 
         Returns:
             str: Conversational answer for UI display
@@ -221,16 +213,13 @@ class TestFixExpediterJob( AgenticJobBase ):
 
     async def _execute( self ) -> str:
         """
-        Run the TFE pipeline.
+        Run the TFE pipeline and return its conversational answer.
 
-        Sets cosa-voice routing (SENDER_ID + TARGET_USER) for BFE's delegated
-        notification dispatcher, then wraps phase orchestration in a try/except
-        that emits an urgent voice notification with the full traceback on
-        crash before re-raising (do_all's handler captures self.error).
-
-        **Step 6 scaffolding**: loads the snapshot, instantiates the
-        orchestrator, walks the phase stubs, and returns a placeholder.
-        Full pipeline wiring lands in steps 7-12.
+        Sets cosa-voice routing (SENDER_ID and TARGET_USER) for the delegated
+        notification dispatcher of the bug fix expediter. It then loads the
+        snapshot, builds the orchestrator and walks the phases. A crash emits an
+        urgent voice notification with the full traceback and re-raises,
+        so the handler in do_all captures `self.error`.
         """
         from cosa.agents.test_fix_expediter.config import TestFixExpediterConfig
         from cosa.agents.test_fix_expediter.snapshot_loader import (
@@ -508,11 +497,11 @@ class TestFixExpediterJob( AgenticJobBase ):
 
     def _write_final_report( self, status: str, summary_line: str ):
         """
-        Write a comprehensive final-report markdown file for this TFE run and
-        store its path in `self.artifacts["report_path"]`.
+        Write the final-report markdown file for a TFE run and record its path.
 
-        Called at each terminal exit of the TFE pipeline (happy path, stall).
-        Never blocks the job on failure — returns None and logs a warning if
+        The path is stored in `self.artifacts["report_path"]`. Called at each
+        terminal exit of the TFE pipeline (happy path, stall).
+        Never blocks the job on failure: it returns None and logs a warning if
         writing fails.
 
         The report captures artifacts accumulated in-memory during the run:
