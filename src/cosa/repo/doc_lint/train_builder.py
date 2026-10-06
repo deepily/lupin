@@ -28,6 +28,8 @@ CLAIM_PREFIX      = "docs-sweep-claim:"
 SKIPPED_STATUSES  = ( "dropped", "parked" )
 EVENT_TRANSITIONS = ( "amended", "amended_post_terminal" )
 EVENT_TOLERANCE   = timedelta( seconds=120 )
+OVERWRITE_EVENT   = "patched"
+BODY_DELTA_REGEX  = re.compile( r"(?:^|; )body: " )
 DEFAULT_DATA_ROOT = "/mnt/DATA01/include/www.deepily.ai/projects-data/lupin"
 DEFAULT_SIZE      = 11
 TEMP_ROOTS        = ( "/tmp", "/var/tmp", "/dev/shm" )
@@ -46,7 +48,7 @@ def store_rows():
 
     Ensures:
         - returns [ { id, title, owner_persona, status, body, events } ] for every lupin row under the sweep correlation key, terminal rows included
-        - events holds each row's audit trail as { actor, transition, ts }, which is what an approval is checked against
+        - events holds each row's audit trail as { actor, transition, ts, reason }, which is what an approval and an overwrite are checked against
         - the query is scoped by project and correlation key, so the store's unscoped-query guard is never reached
 
     Raises:
@@ -63,7 +65,7 @@ def store_rows():
             "owner_persona" : i.owner_persona,
             "status"        : i.status,
             "body"          : i.body,
-            "events"        : [ { "actor": e.actor, "transition": e.transition, "ts": e.ts.isoformat() } for e in repo.get_events( i.id ) ]
+            "events"        : [ { "actor": e.actor, "transition": e.transition, "ts": e.ts.isoformat(), "reason": e.reason } for e in repo.get_events( i.id ) ]
         } for i in items ]
 
 
@@ -142,6 +144,7 @@ def claim_of( body ):
 
     Ensures:
         - returns the parsed { package, writer } of the first docs-sweep-claim line in the text before the first amendment
+        - a second claim line is ignored: the manager writes one when minting the row, so the first is the one he wrote
         - returns None when there is no such line
         - a line that is not a JSON object with string package and writer is a ValueError, never a guess
 
@@ -192,6 +195,27 @@ def event_agrees( events, actor, stamp ):
     return False
 
 
+def overwrite_event( events ):
+    """
+    Find the first event that overwrote a row's body.
+
+    Requires:
+        - events is [ { actor, transition, ts, reason } ]; reason may be missing or None
+
+    Ensures:
+        - returns the first `patched` event whose reason holds a `body: old -> new` delta, which the store writes whenever an edit changes the body
+        - a `patched` event for another field, such as the owner or the priority, is not an overwrite
+        - the delta always opens the reason, so a body change cannot hide; a field value that holds the text `; body: ` is read as an overwrite, which refuses and never approves
+        - returns None when no event overwrote the body
+
+    Raises:
+        - nothing
+    """
+    for event in events:
+        if event.get( "transition" ) == OVERWRITE_EVENT and BODY_DELTA_REGEX.search( event.get( "reason" ) or "" ): return event
+    return None
+
+
 def checks_problem( checks, data_root, package, hashes ):
     """
     Say what is wrong with an approval's checks directory, or None.
@@ -235,7 +259,7 @@ def judge_package( row, package, root, data_root ):
 
     Ensures:
         - returns ( entry, None ) for an approved package, entry being { row_id, approver, checks, commits }, commits full shas
-        - returns ( None, reason ) when the row is dropped or parked, has no claim line or one for another package, has no
+        - returns ( None, reason ) when the row is dropped or parked, has a body that was overwritten, has no claim line or one for another package, has no
           approval, has an approval whose stamp no amended event confirms, was approved by its writer or its owner, has a
           verdict that is not pass, has a checks directory that is not durable, whole, passing and for this package, or lists
           a commit that is not a full sha of an existing commit
@@ -244,6 +268,8 @@ def judge_package( row, package, root, data_root ):
         - nothing
     """
     if row[ "status" ] in SKIPPED_STATUSES: return None, f"the claim row is {row[ 'status' ]}"
+    overwrite = overwrite_event( row.get( "events" ) or [] )
+    if overwrite is not None: return None, f"the claim row body was overwritten by {overwrite.get( 'actor' )} at {overwrite.get( 'ts' )}; mint a new claim row"
     try:
         claim = claim_of( row[ "body" ] )
         actor, stamp, approval = approval_of( row[ "body" ] )

@@ -341,13 +341,13 @@ def test_store_rows_reads_the_repository_directly_scoped_and_with_each_rows_audi
             return [ item ]
         def get_events( self, item_id ):
             seen[ "events_for" ] = item_id
-            return [ types.SimpleNamespace( actor=TIB, transition="amended", ts=when ) ]
+            return [ types.SimpleNamespace( actor=TIB, transition="amended", ts=when, reason=None ) ]
     @contextlib.contextmanager
     def fake_get_db():
         yield "SESSION"
     monkeypatch.setitem( sys.modules, "cosa.rest.db.database", types.SimpleNamespace( get_db=fake_get_db ) )
     monkeypatch.setitem( sys.modules, "cosa.rest.db.repositories.task_repository", types.SimpleNamespace( TaskRepository=FakeRepo ) )
-    assert tb.store_rows() == [ { "id": "uuid-1", "title": "docs sweep: a", "owner_persona": "Rio", "status": "queued", "body": "b", "events": [ { "actor": TIB, "transition": "amended", "ts": when.isoformat() } ] } ]
+    assert tb.store_rows() == [ { "id": "uuid-1", "title": "docs sweep: a", "owner_persona": "Rio", "status": "queued", "body": "b", "events": [ { "actor": TIB, "transition": "amended", "ts": when.isoformat(), "reason": None } ] } ]
     assert seen[ "session" ] == "SESSION" and seen[ "events_for" ] == "uuid-1"
     assert seen[ "kwargs" ] == { "project": "lupin", "correlation_key": "epic:v022-docs-and-reuse", "include_terminal": True, "limit": 1000 }
 
@@ -470,3 +470,78 @@ def test_main_writes_train_json_into_an_out_directory_that_already_exists( world
 def test_a_run_that_cannot_start_keeps_the_size_it_was_asked_for( world, tmp_path ):
     code = tb.main( [ "--repo-root", str( world.root ), "--out", str( tmp_path / "o" ), "--rows-json", "/no/such/rows.json", "--size", "5" ], io.StringIO() )
     assert code == 2 and json.loads( ( tmp_path / "o" / "train.json" ).read_text( encoding="utf-8" ) )[ "size" ] == 5
+
+
+def patched( reason, actor="Cheech 78067fb5", ts="2026-10-05T22:30:00+00:00" ):
+    return { **event( actor, "patched", ts ), "reason": reason }
+
+
+OVERWRITE = "body: 'old' -> 'new'"
+
+
+def test_an_approved_row_whose_body_was_overwritten_afterwards_is_refused_naming_who_and_when( world ):
+    row, _ = approved_row( world, events=[ event(), patched( OVERWRITE, "Maya 1a2b3c4d", "2026-10-05T23:15:00+00:00" ) ] )
+    assert refusal_for( world, row ) == "the claim row body was overwritten by Maya 1a2b3c4d at 2026-10-05T23:15:00+00:00; mint a new claim row"
+
+
+def test_a_body_overwrite_before_the_approval_is_refused_too( world ):
+    row, _ = approved_row( world, events=[ patched( OVERWRITE ), event() ] )
+    assert "was overwritten by Cheech 78067fb5" in refusal_for( world, row )
+
+
+def test_a_row_with_only_amended_events_is_approved( world ):
+    row, _ = approved_row( world, events=[ event(), event( "Maria 1a2b3c4d" ) ] )
+    assert refusal_for( world, row )[ 0 ][ "package" ] == "a"
+
+
+@pytest.mark.parametrize( "reason", [ "owner_persona: 'Rio' -> 'Maya'", "no-op patch (no field changed)", None, "priority: 1 -> 2 | reason: the body: of the row", "title: 'x' -> 'y'" ] )
+def test_an_edit_that_does_not_change_the_body_is_not_an_overwrite( world, reason ):
+    row, _ = approved_row( world, events=[ event(), patched( reason ) ] )
+    assert refusal_for( world, row )[ 0 ][ "package" ] == "a"
+
+
+@pytest.mark.parametrize( "reason", [ "body: 'a' -> 'b'", "title: 'x' -> 'y'; body: 'a' -> 'b'", "body: 'a' -> 'b' | reason: fix" ] )
+def test_a_body_delta_is_found_first_or_after_other_fields( world, reason ):
+    row, _ = approved_row( world, events=[ event(), patched( reason ) ] )
+    assert "was overwritten" in refusal_for( world, row )
+
+
+def test_a_body_delta_on_an_event_that_is_not_a_patch_is_not_an_overwrite( world ):
+    row, _ = approved_row( world, events=[ event(), { **event( transition="amended_post_terminal" ), "reason": OVERWRITE } ] )
+    assert refusal_for( world, row )[ 0 ][ "package" ] == "a"
+
+
+def test_overwrite_event_returns_the_first_one_and_none_when_there_is_none():
+    first, second = patched( OVERWRITE, "A 11111111" ), patched( OVERWRITE, "B 22222222" )
+    assert tb.overwrite_event( [ event(), first, second ] ) is first and tb.overwrite_event( [ event() ] ) is None and tb.overwrite_event( [] ) is None
+
+
+def test_store_rows_carries_each_events_reason( monkeypatch ):
+    item = types.SimpleNamespace( id="u", title="docs sweep: a", owner_persona="Rio", status="queued", body="b" )
+    when = datetime( 2026, 10, 5, 22, 2, 28, tzinfo=timezone.utc )
+    class FakeRepo:
+        def __init__( self, session ): pass
+        def query_tasks( self, **kwargs ): return [ item ]
+        def get_events( self, item_id ): return [ types.SimpleNamespace( actor=TIB, transition="patched", ts=when, reason=OVERWRITE ) ]
+    @contextlib.contextmanager
+    def fake_get_db():
+        yield "SESSION"
+    monkeypatch.setitem( sys.modules, "cosa.rest.db.database", types.SimpleNamespace( get_db=fake_get_db ) )
+    monkeypatch.setitem( sys.modules, "cosa.rest.db.repositories.task_repository", types.SimpleNamespace( TaskRepository=FakeRepo ) )
+    assert tb.store_rows()[ 0 ][ "events" ] == [ { "actor": TIB, "transition": "patched", "ts": when.isoformat(), "reason": OVERWRITE } ]
+
+
+def test_a_title_with_another_bracket_prefix_is_not_a_claim( world ):
+    result = train( world, [ claim( "a", title="[COSA] docs sweep: a" ), claim( "a", title="[LUPIN]docs sweep: a" ) ] )
+    assert result[ "refused" ] == [] and result[ "not_claimed" ] == 4
+
+
+def test_a_checks_file_that_differs_from_the_approved_one_by_a_trailing_newline_is_refused( world ):
+    row, checks = approved_row( world )
+    with open( checks / "result.json", "a", encoding="utf-8" ) as handle: handle.write( "\n" )
+    assert refusal_for( world, row ) == f"result.json in {checks} has changed since it was approved"
+
+
+def test_a_body_with_two_claim_lines_uses_the_first():
+    body = claim_line( "pkg/first", "One" ) + "\n" + claim_line( "pkg/second", "Two" )
+    assert tb.claim_of( body ) == { "package": "pkg/first", "writer": "One" }
