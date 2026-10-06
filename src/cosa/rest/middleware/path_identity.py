@@ -1,41 +1,35 @@
 """
-Authorization for routes that name a user in the URL — in the PATH (row d90baf3d) or in a
-QUERY parameter (row 44d8e89c).
+Guards for routes that name a user in the URL path or in a query parameter.
 
-`require_api_key_or_jwt` answers "may this caller in at all". A route such as
-`DELETE /api/notifications/bulk/{user_email}` needs a second answer: "is the user named in the
-path THIS caller". Without it any valid credential reads or deletes any user's history by
+`require_api_key_or_jwt` answers whether a caller may come in at all. A route such as
+`DELETE /api/notifications/bulk/{user_email}` needs a second answer: is the user named in the
+path this caller. Without it, any valid credential reads or deletes any user's history by
 writing someone else's email into the URL.
 
-THE RULE (Mr. Radio's ruling, 2026-09-16): owner-only, no admin bypass. The path key must equal
-the caller's user id, or — compared without regard to case — the caller's account email. An API
-key is resolved to the user who owns it, so a key and a login token for the same person are
-treated alike. No caller needs an admin bypass: the admin "Not Mine" mode sends the admin's own
-email plus `exclude_own_jobs`, never another user's email.
+The rule is owner-only, with no admin bypass. The path key must equal the caller's user id,
+or, compared without regard to case, the caller's account email. An API key is resolved to the
+user who owns it, so a key and a login token for the same person are treated alike. No caller
+needs an admin bypass: the admin "Not Mine" mode sends the admin's own email plus
+`exclude_own_jobs`, never another user's email.
 
-WHERE THE NAME SITS IS NOT A DIFFERENT RULE, so both guards live here and share
-`_key_is_owned`. What differs is what they read and what they RETURN:
+Where the name sits is not a different rule, so both guards live here and share `_key_is_owned`.
+They differ in what they read and what they return:
 
   `require_path_identity_owner`   reads `request.path_params`, returns the caller's user id.
-  `require_query_identity_owner`  reads `request.query_params`, returns the caller's ACCOUNT
-                                  EMAIL — the audit identity. Row 44d8e89c: `POST
-                                  /api/proxy/ratify/{decision_id}` and `DELETE
-                                  /api/proxy/decision/{decision_id}` wrote `ratified_by` /
-                                  `deleted_by` from the query string the caller typed, so the
-                                  audit trail recorded a claim rather than a fact. Passing the
-                                  ownership check is not enough to make the typed string the
-                                  right thing to STORE: `_key_is_owned` also accepts the
-                                  caller's bare user id, and it compares email without regard
-                                  to case, so two callers who are the same person can write two
-                                  different strings into the same column. The credential is the
-                                  one source that cannot disagree with itself.
+  `require_query_identity_owner`  reads `request.query_params`, returns the caller's account
+                                  email, which is the audit identity.
 
-⚠️ A ROUTE-LEVEL `Depends` RAISING 401 PREEMPTS THE HANDLER'S OWN 422 — measured with a
-TestClient on 2026-09-26, both for a request carrying the query parameter and for one omitting
-it. That ordering is what the query guard needs to be worth anything on these two routes: a
-BARE uncredentialed call to either used to answer 422 for the missing `user_email`, which reads
-like a refusal and is not one (row 2d6f2221 measured the well-formed call reaching the
-database). Now the credential is what answers first.
+The query guard returns the email so the audit column records a fact, not a claim. This serves
+`POST /api/proxy/ratify/{decision_id}` and `DELETE /api/proxy/decision/{decision_id}`.
+They write `ratified_by` and `deleted_by` from it. Passing the ownership check does not make a
+typed string the right thing to store. `_key_is_owned` also accepts the bare user id and compares
+email without regard to case. So one person could write two different strings into one column.
+The credential is the one source that cannot disagree with itself.
+
+A route-level `Depends` that raises 401 preempts the handler's own 422, with or without the
+query parameter present. The query guard depends on that ordering. An uncredentialed call would
+otherwise answer 422 for the missing `user_email`, which reads like a refusal and is not one.
+With the guard, the credential answers first.
 """
 
 import asyncio
@@ -119,8 +113,7 @@ async def require_query_identity_owner(
     authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ]
 ) -> str:
     """
-    FastAPI dependency: refuse a caller who is not the user named in the QUERY STRING, and
-    return the caller's account email for the handler to record.
+    FastAPI dependency: refuse a caller not named in the query string, return their email.
 
     Requires:
         - authenticated_user_id comes from `require_api_key_or_jwt`, which has already rejected
@@ -129,13 +122,13 @@ async def require_query_identity_owner(
     Ensures:
         - returns the caller's account email when every identity key in the query names the caller
         - raises 403 when any key names someone else, or the caller's user record is gone
-        - returns the email when the query names NO user, leaving the handler's own required-
-          parameter validation to answer 422. A missing query parameter is a malformed REQUEST,
-          unlike the path case, where a route declaring no identity parameter is a WIRING error
-          and gets a 500 — so this guard has no 500 arm and must not invent one
+        - returns the email when the query names no user, leaving the handler's own required-
+          parameter validation to answer 422. A missing query parameter is a malformed request.
+          In the path case a route with no identity parameter is a wiring error and gets a 500,
+          so this guard has no 500 arm and must not invent one
         - never trusts the key it was given as the identity: the email comes from the user record
           the credential resolved to, so a caller who passes the check by sending their bare user
-          id, or their email in different case, still writes ONE canonical string to the audit
+          id, or their email in different case, still writes one canonical string to the audit
           column
 
     Raises:

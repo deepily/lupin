@@ -34,12 +34,10 @@ from cosa.rest.db.repositories import ApiKeyRepository
 
 def _validate_api_key_sync( api_key: str ) -> Optional[str]:
     """
-    Synchronous API-key validation — run OFF the event loop via asyncio.to_thread.
+    Synchronous API-key validation, meant to run off the event loop via asyncio.to_thread.
 
-    Each call does a blocking SQLAlchemy session checkout PLUS one bcrypt.checkpw
-    (~hundreds of ms of CPU) per active key. Every X-API-Key request — i.e. every
-    fleet notify/ask — used to pay that ON the shared :7999 event loop, serializing
-    the whole server behind bcrypt (the FM-7/HTTP-starvation hot path).
+    Each call does a blocking database session checkout and one bcrypt check per active key.
+    That costs hundreds of milliseconds of CPU, so it must not run on the shared event loop.
 
     Requires:
         - api_key is string from X-API-Key header
@@ -51,9 +49,8 @@ def _validate_api_key_sync( api_key: str ) -> Optional[str]:
         - returns None if key invalid or inactive
         - updates last_used_at timestamp on success
         - timing-safe comparison (bcrypt)
-        - a row whose stored hash is malformed is SKIPPED and logged by id; it
+        - a row whose stored hash is malformed is skipped and logged by id; it
           never aborts the sweep, so keys ordered after it are still checked
-          (row 23a43f57)
 
     Raises:
         - None (returns None on error)
@@ -116,8 +113,8 @@ async def validate_api_key( api_key: str ) -> Optional[str]:
     """
     Validate API key and return user_id if valid.
 
-    Lever B (messaging plane, surgical pass 2): the DB checkout + per-key bcrypt
-    work runs in a worker thread so it can no longer starve the event loop.
+    The database checkout and the per-key bcrypt work run in a worker thread,
+    so they cannot starve the event loop.
 
     Requires:
         - api_key is string from X-API-Key header
@@ -210,7 +207,7 @@ async def require_api_key_or_jwt(
     authorization: Annotated[str | None, Header()] = None
 ) -> str:
     """
-    FastAPI dependency for dual authentication: API key OR JWT Bearer token.
+    FastAPI dependency for dual authentication: an API key or a JWT Bearer token.
 
     Accepts either X-API-Key header (bcrypt validated) or Authorization: Bearer <jwt>.
     Used by endpoints that need to serve both external CLI clients (API key)
@@ -282,30 +279,16 @@ async def authenticated_account_email(
     """
     The login-account email on the caller's access token, or None.
 
-    WHAT THIS IS FOR, AND WHY IT IS SEPARATE FROM `require_api_key_or_jwt`. That
-    dependency answers "may this caller in at all" and returns a user UUID. Some gates
-    need a second, different fact: WHO the caller is as a person, in the vocabulary the
-    gate's configuration speaks. The holding-area approver gate is the first — see
-    `cosa.rest.task_approval_settings` and row 9d3a975e, where a browser holding a
-    perfectly valid token could not approve anything because nothing ever asked it.
-
-    🔴 IT AUTHENTICATES NOTHING AND MUST NEVER BE THE ONLY DEPENDENCY ON A ROUTE. Pair
-    it with `require_api_key_or_jwt`, which is what rejects an absent or bad credential.
-    This returns None rather than raising, precisely so a route that also accepts API
-    keys (which carry no account) keeps working — a raise here would 401 every CLI
-    caller on a route that had merely become account-AWARE.
-
-    ⚠️ IT DOES NOT TRUST THE STRING IT WAS GIVEN. The signature and expiry are checked
-    by `decode_and_validate_token`, so an unsigned or expired token yields None, not an
-    email. Returning the claim unverified would hand any caller an approver identity for
-    the price of base64.
-
+    Unlike `require_api_key_or_jwt`, which admits callers, this names the person.
+    It authenticates nothing, so always pair it with `require_api_key_or_jwt` on a route.
+    It returns None instead of raising, so routes that also accept API keys keep working.
+    An unsigned or expired token also gives None, because `decode_and_validate_token` checks both.
     Requires:
         - authorization is the raw Authorization header, or None
 
     Ensures:
         - returns the token's `email` claim when the header carries a Bearer access
-          token whose SIGNATURE and EXPIRY both validate
+          token whose signature and expiry both validate
         - returns None for: no header, a non-Bearer scheme, an API-key caller, a token
           that fails validation, and a valid token carrying no email claim
         - never raises
