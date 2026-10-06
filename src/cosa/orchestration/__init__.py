@@ -21,7 +21,7 @@ Example:
         id="task-001",
         project="lupin",
         prompt="Run tests and fix failures",
-        `type=TaskType.BOUNDED`
+        type=TaskType.BOUNDED
     ) )
 
 Subpackages:
