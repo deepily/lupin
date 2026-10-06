@@ -1,11 +1,11 @@
 """
 Duplicate detection over Python definitions: an exact structural pass and a near pass.
 
-Exact pass: two functions are clones when their ASTs are equal after docstrings are removed
-and every name, attribute and constant is erased. Near pass: the pre-order sequence of AST
-node types is cut into overlapping shingles, and two functions are reported when the Jaccard
+Exact pass: two functions are clones when their ASTs are equal after docstrings are removed.
+Every name, attribute and constant is erased first. Near pass: the pre-order sequence of AST
+node types is cut into overlapping shingles. Two functions are reported when the Jaccard
 similarity of their shingle sets reaches the threshold. The report holds structural
-similarity only; behaviour that matches under different vocabulary is found by review.
+similarity only. Behaviour that matches under different vocabulary is found by review.
 """
 import ast
 import collections
@@ -30,6 +30,8 @@ class _Norm( ast.NodeTransformer ):
 
 def normalised( node ):
     """
+    Return a normalised copy of a function definition, used to compare structure only.
+
     Ensures:
         - returns a copy of a def with docstrings, names, constants, decorators and its own name erased
     """
@@ -46,13 +48,20 @@ def _preorder_types( node ):
 
 
 def shingles( node ):
-    """Ensures: returns the set of SHINGLE-long windows over the pre-order node types, each hashed to an int."""
+    """
+    Return the shingle set of a definition.
+
+    Ensures:
+        - returns the set of SHINGLE-long windows over the pre-order node types, each hashed to an int
+    """
     seq = _preorder_types( normalised( node ) )
     return { hash( tuple( seq[ i:i + SHINGLE ] ) ) for i in range( max( len( seq ) - SHINGLE + 1, 1 ) ) }
 
 
 def _functions( spec, paths ):
     """
+    Yield every public function and method in the given Python files.
+
     Ensures:
         - yields ( id, node ) for every public function and method of the given files, ids as in the index
     """
@@ -77,7 +86,7 @@ def find_duplicates( spec, paths, min_nodes=DEFAULT_MIN_NODE, threshold=DEFAULT_
         - returns { "provenance", "exact", "near" }
         - exact is a list of id lists (size >= 2), largest first
         - near is a list of { "ids": [a, b], "jaccard": float } for pairs at or above the
-          threshold whose normalised trees are NOT identical (candidates are pairs sharing a rare shingle), sorted by similarity then ids
+          threshold whose normalised trees are not identical (candidates are pairs sharing a rare shingle), sorted by similarity then ids
         - only definitions with at least min_nodes AST nodes take part
     """
     groups, sets = collections.defaultdict( list ), {}

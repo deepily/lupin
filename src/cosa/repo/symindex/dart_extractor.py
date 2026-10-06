@@ -1,10 +1,10 @@
 """
-Dart extractor for the symbol index: declarations of a Flutter tree, read with the Dart analyzer.
+Dart extractor for the symbol index: reads a Flutter tree with the Dart analyzer.
 
 Implements the extractor contract in extractor_contract for language "dart". The parse is
-syntactic only (the analyzer's parseString), run by dart_extract.dart inside a scratch pub
-project under the repo's data directory, so nothing is written into the tree being indexed and
-no `pub get` runs there.
+syntactic only (the analyzer's parseString). It is run by dart_extract.dart inside a scratch
+pub project under the repo's data directory. Nothing is written into the tree being indexed,
+and no `pub get` runs there.
 """
 
 import json

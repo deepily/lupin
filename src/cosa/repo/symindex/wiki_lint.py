@@ -2,14 +2,15 @@
 Lint the code wiki against the generated symbol index; produce the librarian's work queue.
 
 Findings (one dict each):
-  stale              a page pins symbol@hash and the code changed since
-  dangling           a page pins a symbol that no longer exists
-  unindexed          a capability page missing from INDEX.md, so it can never be selected
-  orphan             a public symbol in a package that has a page, which no page covers
-  orphan_package     a package with no capability page: one finding with a count, not one per symbol
-  pin_algorithm_changed  a pinned page records a different pin algorithm than the index; reported once
-  pin_algorithm_missing  a pinned page records no pin algorithm at all; reported once
-                     either of the two switches stale checks off for every page, because every pin would differ
+  - stale: a page pins symbol@hash and the code changed since
+  - dangling: a page pins a symbol that no longer exists
+  - unindexed: a capability page missing from `INDEX.md`, so it can never be selected
+  - orphan: a public symbol in a package that has a page, which no page covers
+  - orphan_package: a package with no capability page. One finding with a count, not one per symbol.
+  - pin_algorithm_changed: a pinned page records a different pin algorithm than the index. Reported once.
+  - pin_algorithm_missing: a pinned page records no pin algorithm at all. Reported once.
+
+Either of the two pin_algorithm findings switches stale checks off for every page, because every pin would differ.
 """
 import pathlib
 import re
@@ -23,7 +24,12 @@ LINK_RE     = re.compile( r"\[\[([\w-]+)\]\]" )
 
 
 def _package( symbol_id ):
-    """Ensures: returns the first two dotted parts of an id (for example "cosa.rest"), after any "repo:" prefix."""
+    """
+    Return the package part of a symbol id.
+
+    Ensures:
+        - returns the first two dotted parts of an id (for example "cosa.rest"), after any "repo:" prefix
+    """
     return ".".join( symbol_id.split( ":" )[ -1 ].split( "." )[ :2 ] )
 
 
@@ -32,13 +38,13 @@ def queue( wiki_dir, gen ):
     Produce the lint findings for a wiki directory against one index generation.
 
     Requires:
-        - wiki_dir holds capabilities/*.md and optionally INDEX.md
+        - wiki_dir holds capabilities/*.md and optionally `INDEX.md`
         - gen is a published generation directory
     Ensures:
         - returns the list of finding dicts, each with a "kind"
         - an empty or missing wiki returns only orphan_package findings
         - the pin-algorithm check runs once, before any page is judged, so page order cannot change the result
-        - duplicate ids in the index cannot hide a finding: ids are unique by construction
+        - duplicate ids in the index cannot hide a finding: the builder makes ids unique
     """
     wiki  = pathlib.Path( wiki_dir )
     live  = { r[ "id" ]: r[ "pin" ] for r in read_symbols( gen ) }

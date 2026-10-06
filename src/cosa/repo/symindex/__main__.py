@@ -1,11 +1,11 @@
 """
 Command line for the symbol index:  python -m cosa.repo.symindex <command>
 
-  build   [--root R] [--out D]            build and publish the index; exit 3 if a tool was missing
-  fresh   [--root R] [--out D]            exit 0 when the published index matches the tree, else 1
-  dups    [--root R] [--min-nodes N] [--threshold T] [--json]
-  diff    OLD_GEN NEW_GEN [--all]         symbols added, removed or changed between two generations
-  lint    [--root R] [--out D] [--wiki W] wiki findings as JSON lines; exit 1 when any
+  - build   [--root R] [--out D]            build and publish the index; exit 3 if a tool was missing
+  - fresh   [--root R] [--out D]            exit 0 when the published index matches the tree, else 1
+  - dups    [--root R] [--min-nodes N] [--threshold T] [--json]
+  - diff    OLD_GEN NEW_GEN [--all]         symbols added, removed or changed between two generations
+  - lint    [--root R] [--out D] [--wiki W] wiki findings as JSON lines; exit 1 when any
 """
 import argparse
 import json

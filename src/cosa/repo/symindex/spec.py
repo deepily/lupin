@@ -1,8 +1,8 @@
 """
 Index specification: which directories of a repository are indexed, and which are skipped.
 
-The skip rules match directory names in the path RELATIVE to the index root, so a fixture
-repository that lives under a `tests/` directory is still indexed when it is the root.
+The skip rules match directory names in the path relative to the index root.
+A fixture repository under a `tests/` directory is therefore still indexed when it is the root.
 """
 import hashlib
 import os
@@ -46,7 +46,7 @@ def git_toplevel( start=None ):
     Return the git working-tree root that contains `start` (default: the current directory).
 
     Requires:
-        - git is on PATH
+        - git is on `PATH`
     Ensures:
         - returns an absolute pathlib.Path
     Raises:
@@ -60,6 +60,8 @@ def git_toplevel( start=None ):
 
 def is_lupin_tree( root ):
     """
+    Say whether a directory is a lupin checkout.
+
     Ensures:
         - True iff `root` holds the lupin source layout (src/cosa and src/lupin_mcp)
     """
@@ -74,7 +76,7 @@ def spec_for( root ):
     Ensures:
         - a lupin tree indexes the lupin packages and the web client's js directory
         - a Flutter tree (pubspec.yaml + lib/) indexes lib/ as Dart
-        - any other tree indexes every Python and JS/TS file under the root
+        - any other tree indexes every Python, JavaScript and TypeScript file under the root
     """
     root = pathlib.Path( root ).resolve()
     skip = set( SKIP_PARTS )
@@ -89,8 +91,10 @@ def spec_for( root ):
 
 def skipped( rel_path, skip_parts ):
     """
+    Say whether a relative path is excluded from the index.
+
     Ensures:
-        - True iff a DIRECTORY component of the relative path is in skip_parts
+        - True iff a directory component of the relative path is in skip_parts
         - the file name itself is never matched, only checked against SKIP_SUFFIXES
     """
     rel = pathlib.PurePosixPath( rel_path )
@@ -100,6 +104,8 @@ def skipped( rel_path, skip_parts ):
 
 def iter_files( spec, roots, suffixes ):
     """
+    List the indexable files under some roots.
+
     Ensures:
         - returns a sorted list of absolute paths under `roots` with one of `suffixes`
         - a path is dropped when it would be skipped relative to spec.root
@@ -116,8 +122,10 @@ def iter_files( spec, roots, suffixes ):
 
 def all_files( spec ):
     """
+    List every file the index covers.
+
     Ensures:
-        - returns the full indexed population: Python, JS/TS and Dart files, one sorted list
+        - returns the full indexed population: Python, JavaScript, TypeScript and Dart files, one sorted list
         - build() and the freshness check both read this function, so they never disagree
     """
     return sorted( set( iter_files( spec, spec.py_roots, { ".py" } ) )
@@ -127,6 +135,8 @@ def all_files( spec ):
 
 def manifest( spec ):
     """
+    Return a digest that changes whenever the set of indexed files changes.
+
     Ensures:
         - returns a hex digest of the sorted (relative path, mtime_ns, size) set of indexed files
         - an added, deleted, resized or touched file changes the digest

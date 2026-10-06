@@ -3,7 +3,7 @@ JavaScript and TypeScript symbol extraction with the TypeScript compiler, run un
 
 The compiler is already a dependency of the repository (the typecheck gate runs it), so this
 adds no package. `node` is found by absolute path because the cosa-voice subprocess may not
-have nvm's bin directory on PATH.
+have nvm's bin directory on `PATH`.
 """
 import glob
 import json
@@ -20,9 +20,11 @@ TIMEOUT   = 300
 
 def find_node():
     """
+    Find a node executable and return its absolute path.
+
     Ensures:
         - returns the absolute path of a node executable, searched in this order:
-          $LUPIN_NODE, PATH, then the newest ~/.nvm/versions/node/*/bin/node
+          $LUPIN_NODE, `PATH`, then the newest ~/.nvm/versions/node/*/bin/node
     Raises:
         - DependencyMissing( "node" ) when none is found
     """
@@ -37,6 +39,8 @@ def find_node():
 
 def find_typescript( root ):
     """
+    Find the directory of the `typescript` package for an index root.
+
     Ensures:
         - returns the directory of the `typescript` package: <root>/node_modules/typescript,
           else the one beside the main checkout found through $LUPIN_ROOT
@@ -57,7 +61,7 @@ def typescript_version( ts_dir ):
 
 def extract_js( root, files ):
     """
-    Extract the function, class and method symbols of JS/TS files.
+    Extract the function, class and method symbols of JavaScript and TypeScript files.
 
     Requires:
         - files are absolute paths under root

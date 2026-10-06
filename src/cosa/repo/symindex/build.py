@@ -79,13 +79,13 @@ def _assign_ids( spec, records ):
 
 def environment( spec ):
     """
-    Report the extraction tools as they are NOW, without extracting anything.
+    Report the extraction tools as they are now, without extracting anything.
 
     Ensures:
         - returns ( pin_algorithm, missing ): the algorithm string a build would record (Python minor,
           the extractor-logic version, then the TypeScript and Dart parser versions) and the sorted
           list of tools that are not available
-        - Python is always present; JS/TS needs node and the typescript package; Dart needs the
+        - Python is always present; JavaScript and TypeScript need node and the typescript package; Dart needs the
           extractor module and its check_dependencies() to pass. A tool the tree does not use is
           never required
     """
@@ -156,6 +156,8 @@ def collect( spec ):
 
 def _route_files( spec, recs, py_files ):
     """
+    Collect the route facts of each Python file that defines or includes routers.
+
     Ensures:
         - returns the per-file route facts for routes.resolve(): router prefixes, include_router
           prefixes, import aliases and decorated handlers
@@ -194,6 +196,8 @@ def _jsonl( records ):
 
 def _write_generation( tmp, spec, data, man ):
     """
+    Write every file of one index generation into tmp.
+
     Requires:
         - tmp is an empty directory
     Ensures:
@@ -256,6 +260,8 @@ def build( root=None, out_dir=None ):
 
 def _prune( out, keep_name ):
     """
+    Remove old generations and stale temporary directories.
+
     Ensures:
         - removes all but the newest KEEP_GENERATIONS gen-* directories, never `keep_name`
         - removes .tmp-* directories left by a crashed build once they are over an hour old
@@ -269,6 +275,8 @@ def _prune( out, keep_name ):
 
 def current_generation( out_dir ):
     """
+    Find the live generation directory.
+
     Ensures:
         - returns the Path of the live generation directory, or None when nothing is published
     """
@@ -282,13 +290,20 @@ def read_header( gen ):
 
 
 def read_symbols( gen, all_symbols=False ):
-    """Ensures: returns the list of symbol dicts of a generation (public only unless all_symbols)."""
+    """
+    Read the symbol records of a generation.
+
+    Ensures:
+        - returns the list of symbol dicts of a generation (public only unless all_symbols)
+    """
     text = ( pathlib.Path( gen ) / ( "symbols-all.jsonl" if all_symbols else "symbols.jsonl" ) ).read_text( encoding="utf-8" )
     return [ json.loads( line ) for line in text.splitlines() if line ]
 
 
 def is_fresh( spec, out_dir ):
     """
+    Say whether the published index still matches the tree and the available tools.
+
     Ensures:
         - True iff a generation is published, its manifest equals the manifest of the tree now (so
           added, deleted, resized and touched files make it stale), it was built with the same pin
@@ -304,6 +319,8 @@ def is_fresh( spec, out_dir ):
 
 def ensure( root=None, out_dir=None ):
     """
+    Return the live generation, building it first when it is missing or stale.
+
     Ensures:
         - returns the live generation Path, building it first when the index is missing or stale
     """

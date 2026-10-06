@@ -1,9 +1,9 @@
 """
 FastAPI route extraction by AST, with router prefixes resolved.
 
-A route hangs on an APIRouter or on a FastAPI() application (also one created inside a function);
-its path is the `prefix=` literal of the APIRouter, plus any
-`include_router( x, prefix= )` literal that names that router, plus the decorator's path.
+A route hangs on an APIRouter or on a FastAPI() application, also one created inside a function.
+Its path joins three parts. The first is the `prefix=` literal of the APIRouter. The second is any
+`include_router( x, prefix= )` literal that names that router. The third is the decorator's path.
 The app's live route table is never imported, because that would import the whole server.
 """
 import ast
@@ -61,6 +61,8 @@ def scan_file( tree ):
 
 def route_decorators( node ):
     """
+    List the route decorators of one function definition.
+
     Ensures:
         - returns [ ( receiver name, HTTP method, path literal ) ] for each route decorator of a def
         - a decorator whose first argument is not a string literal is skipped
@@ -82,7 +84,7 @@ def resolve( per_file ):
           where decorated is [ ( receiver, method, path, symbol id ) ]
     Ensures:
         - returns a sorted list of strings "METHOD /full/path -> symbol  (file)"
-        - an include prefix applies to exactly the router it names: `m.r` reaches router `r` in the
+        - an include prefix applies only to the router it names: `m.r` reaches router `r` in the
           module `m` (an import alias is followed to the module's name); a bare `r` reaches the router
           in the same file, or the one its import alias names; other routers get no extra prefix
         - a receiver that is not a known router produces no route

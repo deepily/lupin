@@ -1,9 +1,9 @@
 """
 The check_exists decision table as a pure function (see README-reuse-decision-table.md).
 
-No file, network or model access happens here: the caller supplies the answers received and the
-state of the pipeline, and gets back the verdict, the cause, every cause that holds, the shortlist
-and the nearest entries. An answer that is malformed is reported under its own cause and never
+No file, network or model access happens here. The caller supplies the answers received and the
+state of the pipeline. It gets back the verdict, the cause, every cause that holds, the shortlist
+and the nearest entries. A malformed answer is reported under its own cause and never
 contributes to a verdict.
 """
 import math
@@ -19,7 +19,7 @@ def malformed_reason( probabilities, policy=POLICY ):
     Check one answer's probabilities.
 
     Ensures:
-        - returns None when they are valid: exactly the keys reuse, extend and unrelated, each a
+        - returns None when they are valid: the keys reuse, extend and unrelated and no others, each a
           finite real number in [0, 1] (a bool is not a number), summing to 1 within sum_tolerance
         - otherwise returns the first reason: not_a_mapping, missing_or_extra_keys, not_a_number,
           not_finite, out_of_range or sum_not_one
@@ -40,6 +40,8 @@ def malformed_reason( probabilities, policy=POLICY ):
 
 def call_facts( probabilities ):
     """
+    Return the overlap, confidence and choice of one valid answer.
+
     Requires:
         - probabilities is valid (malformed_reason returned None)
     Ensures:
@@ -67,12 +69,12 @@ def decide( answers, expected_ids, failed_ids, flags, policy=POLICY ):
           response lacked them. The probabilities themselves are validated here
         - expected_ids is the collection of every index entry id the sweep should have covered
         - failed_ids is the collection of ids whose call failed after retries
-        - flags is a set drawn from CAUSES naming the pipeline problems already known
+        - flags is a set drawn from `CAUSES` naming the pipeline problems already known
           (NOT_LUPIN_TREE, DEPENDENCY_MISSING, INDEX_STALE, KEY_UNREADABLE)
     Ensures:
         - returns { verdict, cause, causes, shortlist, shortlist_total, nearest, malformed, missing }
-        - verdict is REUSE, EXTEND, NEW or UNCERTAIN_READ_SOURCE; cause is None unless UNCERTAIN
-        - causes lists every cause that holds, in the order of CAUSES
+        - verdict is `REUSE`, `EXTEND`, `NEW` or `UNCERTAIN_READ_SOURCE`; cause is None unless `UNCERTAIN_READ_SOURCE`
+        - causes lists every cause that holds, in the order of `CAUSES`
         - coverage is set equality: CALL_FAILED holds when any call failed or any expected id is
           neither answered nor failed nor malformed; `missing` is the sorted list of those ids
         - MALFORMED_ANSWER holds when an answer has an invalid probability mapping, an id that is
@@ -81,7 +83,7 @@ def decide( answers, expected_ids, failed_ids, flags, policy=POLICY ):
         - a call is relevant when p_overlap >= threshold and doubtful when p_overlap >= floor
           and confidence < the confidence bar, so unrelated entries never cause uncertainty
         - shortlist holds the relevant entries and `nearest` the best entries by p_overlap whatever
-          their value, each cut to policy["shortlist"], so a NEW verdict still names what to read
+          their value, each cut to policy["shortlist"], so a `NEW` verdict still names what to read
     """
     expected  = set( expected_ids )
     failed    = set( failed_ids )

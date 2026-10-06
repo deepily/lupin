@@ -13,6 +13,8 @@ from cosa.repo.symindex.spec import is_lupin_tree
 
 def data_dir( index_root ):
     """
+    Return the reuse-review data directory of the repository that index_root belongs to.
+
     Requires:
         - index_root is a repository root
     Ensures:
@@ -24,6 +26,8 @@ def data_dir( index_root ):
 
 def default_out_dir( index_root ):
     """
+    Return the directory a generated index is written to by default.
+
     Ensures:
         - a lupin tree writes its generated index to <root>/src/docs/index (gitignored)
         - any other root writes to <data dir>/index/<repo name>, so a read-only tree such as
