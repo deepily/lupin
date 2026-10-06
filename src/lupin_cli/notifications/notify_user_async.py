@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Claude Code async notification client with Pydantic validation (Phase 2.4).
+Claude Code async notification client with Pydantic validation.
 
 This script sends fire-and-forget notifications to Lupin via WebSocket delivery.
 Uses Pydantic models for type-safe validation and structured responses.
@@ -48,11 +48,9 @@ def calculate_retry_intervals( timeout_seconds: int ) -> list:
     """
     Calculate adaptive retry intervals based on timeout duration.
 
-    For short timeouts (≤10s): Aggressive linear retries to catch WebSocket
-    auth completion (which takes 5-10 seconds empirically).
-
-    For long timeouts (>10s): Exponential backoff with 5s cap to reduce
-    server load while maintaining responsiveness.
+    Short timeouts (10s or less) get aggressive linear retries to catch WebSocket
+    auth completion, which takes 5-10 seconds empirically.
+    Longer timeouts get exponential backoff capped at 5s to reduce server load.
 
     Requires:
         - timeout_seconds is a positive integer
@@ -117,7 +115,7 @@ def notify_user_async(
         - Uses Pydantic validation for all data
 
     Raises:
-        - No exceptions raised (all handled internally)
+        - No error propagates to the caller (all are handled internally)
 
     Args:
         request: AsyncNotificationRequest model (already validated)

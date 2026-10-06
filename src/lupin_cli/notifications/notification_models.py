@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Pydantic models for notification requests and responses (Phase 2.3).
+Pydantic models for notification requests and responses.
 
 Provides type-safe validation for CLI and API interactions with the
 Lupin notification system. These models ensure data integrity for
@@ -33,14 +33,14 @@ import re
 
 def extract_sender_from_message( message: str, agent_type: str = "claude.code" ) -> Optional[str]:
     """
-    Extract sender ID from message prefix like [LUPIN] or [COSA].
+    Extract sender ID from a message prefix such as `[LUPIN]` or `[COSA]`.
 
     Requires:
         - message is a string
         - agent_type is a valid agent identifier (e.g., "claude.code", "deep.research")
 
     Ensures:
-        - Returns {agent_type}@{project}.deepily.ai if [PREFIX] found
+        - Returns {agent_type}@{project}.deepily.ai if a `[PREFIX]` is found
         - Returns None if no prefix found
         - Project name is lowercased
 
@@ -81,8 +81,8 @@ def parse_sender_id( sender_id: str ) -> dict:
         parse_sender_id( "claude.code@lupin.deepily.ai" )
         -> { "agent_type": "claude.code", "project": "lupin", "session_id": None, ... }
 
-        parse_sender_id( "claude.code@lupin.deepily.ai#a1b2c3d4" )
-        -> { "agent_type": "claude.code", "project": "lupin", "session_id": "a1b2c3d4", ... }
+        parse_sender_id( "claude.code@lupin.deepily.ai#sess01" )
+        -> { "agent_type": "claude.code", "project": "lupin", "session_id": "sess01", ... }
 
     Args:
         sender_id: Full sender_id string
@@ -374,7 +374,7 @@ class NotificationRequest(BaseModel):
             - Converts enums to string values
             - Includes optional parameters if set
             - Excludes None values for cleaner API calls
-            - Does NOT include api_key (moved to headers in Phase 2.5)
+            - Does not include api_key (it travels in the X-API-Key header)
 
         Returns:
             dict: Query parameters for requests.post()
@@ -462,8 +462,8 @@ class RespondedEvent(SSEEventBase):
         status: Always "responded"
         response: User's response value (yes/no or text)
         default_used: Whether default value was used (always False)
-        answered_by: Who the SERVER saw post the answer — { user_id, account_email,
-            method } — or None from a server that predates row e20e249a
+        answered_by: Who the server saw post the answer ({ user_id, account_email,
+            method }), or None from a server that predates this field
     """
     status: Literal["responded"] = "responded"
     response: str
@@ -741,8 +741,8 @@ class AsyncNotificationRequest(BaseModel):
         Ensures:
             - Returns dict with all required parameters
             - Converts enums to string values
-            - Does NOT include response_requested (fire-and-forget mode)
-            - Does NOT include api_key (moved to headers in Phase 2.5)
+            - Does not include response_requested (fire-and-forget mode)
+            - Does not include api_key (it travels in the X-API-Key header)
 
         Returns:
             dict: Query parameters for requests.post()

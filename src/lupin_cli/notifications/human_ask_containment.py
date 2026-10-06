@@ -1,59 +1,39 @@
 """
-A TEST CANNOT ASK A HUMAN. The boundary, and why it is here rather than anywhere more
-obvious.
+Refuses blocking human asks from inside a pytest run; the boundary sits at the ask.
 
-🔴 THE INCIDENT (row e625e608, 2026-09-04). Plain `pytest src/tests/unit/ -q` runs fired
-**33 REAL blocking yes/no prompts at Rick** on the live notification surface, between
-18:33:24 and 18:48:36. He experienced it as one permission prompt re-firing however he
-answered — it was never one prompt retrying, it was SEPARATE TESTS EACH FIRING A SEPARATE
-ASK, seconds apart, each naming a different fixture row.
+Plain unit-tier runs once fired 33 real blocking yes/no prompts at the operator on the live
+notification surface, seconds apart. Each prompt came from a separate test and named a
+different fixture row, though the operator saw it as one prompt re-firing however he answered.
 
-⚠️ **TWO DIFFERENT TIERS LEAKED, AND ONE RAN FROM A PROPERLY CONFIGURED SERVED CHECKOUT.**
-This matters because the first report of the incident emphasised that one offending
-process had `LUPIN_ROOT` pointing into `/tmp`. That explained only the
-`sender_id: claude.code@unknown.deepily.ai` stamp on the later prompts — it never
-explained the leak. Do not read this as one misconfigured seat: it is every unit tier,
-including correct ones. (A third tier ran continuously throughout and produced none, so it
-is not "any tier at any time" either — it is which tests get collected and reached.)
+Two different tiers leaked, one of them from a correctly configured served checkout. The
+stray `LUPIN_ROOT` in one process explained only the wrong `sender_id` stamp on later prompts.
+So this was not one misconfigured seat. The people running the tiers did nothing wrong:
+they ran the full tier, and the harness had no boundary.
 
-⚠️ THE PEOPLE WHO RAN THE TIERS DID NOTHING WRONG. They were told to run the FULL tier
-rather than a hand-picked population, and they did. The harness had no boundary.
+Why the existing network guard could not catch this, and why that is correct:
 
-=== WHY THE EXISTING NETWORK GUARD COULD NOT CATCH THIS, AND WHY THAT IS CORRECT ===
+`cosa.utils.unit_network_guard` blocks outbound dials in the unit tier. Its `is_loopback()`
+returns True for `127.0.0.1` and `localhost`, because TestClient and the real-socket
+tests bind loopback. In that module's own words, a guard that breaks legitimate tests gets
+switched off, which is worse than no guard.
 
-`cosa.utils.unit_network_guard` already blocks outbound dials in the unit tier. It did not
-fire, and it *should* not have: its `is_loopback()` deliberately returns True for
-`127.0.0.1` / `localhost`, because TestClient and the real-socket arms bind loopback on
-purpose, and — in that module's own words — "a guard that breaks legitimate tests gets
-switched off, which is worse than no guard."
+The human notification surface lives at `localhost:7999`, so the ask travels the one route
+the network guard must leave open. Widening it would break every TestClient test. At the
+network layer the harmful call and the legitimate ones look the same, so the boundary has to
+sit at the ask. That is forced, not a preference.
 
-⇒ **The human notification surface lives at `localhost:7999`.** So the ask travels the one
-route the network guard is REQUIRED to leave open. Widening that guard to catch it would
-break every TestClient test in the repo.
+Why not rely on each test stubbing the ask:
 
-⇒ **THEREFORE THE BOUNDARY BELONGS AT THE ASK, NOT AT THE SOCKET.** That is not a
-preference; it is forced, because at the network layer the harmful call and the legitimate
-ones are indistinguishable.
+That lasts until the next unstubbed test. Containment that depends on every future test author
+remembering to patch a seam is a convention, not a control. The offending tests had no stub
+references at all, and nothing would tell the author of the next one.
 
-=== WHY NOT "THAT TEST SHOULD HAVE STUBBED IT" ===
-
-Because it lasts exactly until the next unstubbed test. Containment that depends on every
-future test author remembering to patch a seam is a convention, not a control, and this
-repo's standing position is that a rule which depends on remembering is not installed. The
-offending tests had ZERO stub references; the next test written will not have any either,
-and nothing would tell its author.
-
-=== THE SHAPE, BORROWED FROM A GATE THAT ALREADY WORKS ===
-
-`_resolved_operator_attestation` (routers/tasks.py) refuses an accountless caller because
-`account_email` is None for every API-key seat — no allowlist, no registry, nothing to
-remember, and no way to type past it. This is the same move one layer down: the ask path
-reads a fact the caller can neither forge nor forget, and refuses.
-
-`PYTEST_CURRENT_TEST` is that fact. **pytest sets it itself, per test, with no cooperation
-from anyone** — so a test cannot escape detection by neglecting to opt in, which is the
-whole failure mode being closed. It also carries the node id, so the refusal NAMES the
-test that tried.
+The shape is borrowed from `_resolved_operator_attestation` (routers/tasks.py). That gate
+refuses an accountless caller because `account_email` is None for every API-key seat, so it
+needs no allowlist, no registry and nothing to remember. The ask path likewise reads a fact
+the caller can neither forge nor forget. `PYTEST_CURRENT_TEST` is that fact: pytest sets it
+itself for each test, so a test cannot escape detection by neglecting to opt in. It also
+carries the node id, so the refusal names the test that tried.
 """
 import os
 
@@ -85,11 +65,11 @@ def test_node_id():
 
 def containment_is_waived():
     """
-    Whether the caller has EXPLICITLY waived containment for this process.
+    Whether the caller has explicitly waived containment for this process.
 
     Ensures:
-        - True only for the exact string "1", so a stray empty or "0" value cannot
-          silently open the door
+        - True only for the string "1" (surrounding whitespace is ignored), so a stray
+          empty or "0" value cannot silently open the door
         - never raises
     """
     return os.environ.get( ALLOW_ENV_VAR, "" ).strip() == "1"
@@ -97,7 +77,7 @@ def containment_is_waived():
 
 def refusal_for_human_ask( question=None ):
     """
-    The refusal when a TEST tries to block on a human, or None when the call is legitimate.
+    The refusal message when a test tries to block on a human, or None when legitimate.
 
     Requires:
         - question is the spoken text of the ask, or None
@@ -106,14 +86,14 @@ def refusal_for_human_ask( question=None ):
         - returns None when not running under pytest — the production path is untouched,
           and that is the case which must stay fast and silent
         - returns None when containment is explicitly waived
-        - otherwise returns a non-empty message NAMING the test node id, so the refusal
+        - otherwise returns a non-empty message naming the test node id, so the refusal
           identifies the culprit rather than the victim
         - never raises
 
-    ⚠️ RETURNS A MESSAGE RATHER THAN RAISING, so the caller decides the failure mode. A
+    It returns a message rather than raising, so the caller decides the failure mode. A
     module that raised from inside a notification helper would turn a containment breach
-    into an exception in whatever unrelated code happened to trigger it, and the caller is
-    the only place that knows whether it can degrade or must stop.
+    into an exception in unrelated code that happened to trigger it. Only the caller
+    knows whether it can degrade or must stop.
     """
     node = test_node_id()
     if node is None:            return None
