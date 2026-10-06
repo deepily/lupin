@@ -1,60 +1,35 @@
 #!/usr/bin/env python3
 """
-Prove the presentation review-gate SILENCE-timeout path — store row 19328449.
+Prove presentation review gates reach a connected user, who answers them.
 
-WHAT THIS PROVES (and what the prior run did NOT).
-  Commit 0477becf made all four presentation gates fail open: response_default
-  = "Approve", 600s timeout. Run ts-c27db4d8 / job pr-bf7ac6f5 completed via
-  `source=dispatch_failed` — but that is the DELIVERY-FAILED path (the ask never
-  reached a human because /api/notify 503'd: no connected session). The OTHER
-  path — ask DELIVERED to a connected session, human stays SILENT, the 600s wall
-  clock expires — had never been exercised. This harness exercises exactly that.
+All four presentation gates fail open: the default is "Approve" with a 600 second timeout.
+An earlier overnight run completed through `source=dispatch_failed`, the delivery-failed path,
+where /api/notify answered 503 for lack of a session. The connected-session path was never exercised.
 
-THE COLLAPSE (why the log source alone can't prove it).
-  voice_io.present_choices catches EVERY exception in one block and stamps
-  default_source="dispatch_failed" (voice_io.py:875-881). A delivered-but-silent
-  600s timeout raises VoiceGateTimeoutError (agent_notification_dispatcher.py:
-  552-580) and lands in that SAME block → ALSO "dispatch_failed". So the label
-  does not distinguish the two paths. Confirmed by Mr Radio 2026-08-03; the
-  label split is filed as a separate post-demo row. The proof therefore rests on
-  DELIVERY + WALL-TIME, not on the source string.
+Ensures:
+  - The verdict passes only if all five checks hold: delivered, connected through the wait,
+    every gate answered, every gate resolved as responded, and the job reached done.
+  - Delivered means a `notification_queue_update` frame reached the session. /api/notify pushes
+    that frame only when the session is connected; the 503 offline branch pushes nothing.
+  - Connected through the wait means no socket drop and no gap between liveness samples above
+    `MAX_LIVENESS_GAP`. A connect-then-drop would give a late dispatch failure that mimics silence.
+  - The log source label cannot separate the two paths. `voice_io.present_choices` catches every
+    exception and stamps `dispatch_failed`, and a delivered-but-silent timeout raises
+    `VoiceGateTimeoutError` into that same block. Proof rests on delivery and notification state.
+  - A fresh non-service user is both submitter and gate target. The tester account is a configured
+    voice gate service account, so the gate would redirect to the operator's real inbox.
+    Delivering there is off limits, and editing that config would change product behaviour.
+    The redirect is a separate routing hop, orthogonal to whether the gate resolves.
+  - The silent mode (answer mode off) exists in the class, but `main` always runs answer mode.
+    The elapsed-time thresholds are recorded in the evidence file and are not checked in the verdict.
 
-PROOF CRITERIA (all four required for a PASS):
-  1. DELIVERED — the silent session receives a `notification_queue_update` WS
-     frame for the gate ask. This frame is pushed ONLY on the is_connected=True
-     branch of /api/notify (notifications.py:1240-1351); the 503/offline branch
-     pushes nothing. Frame received ⇒ delivery succeeded, full stop.
-  2. CONNECTED THROUGH THE WAIT — the session stays connected for the ENTIRE
-     ~600s between frame-received and gate-resolution, sampled continuously
-     (Mr Radio's tightening: a connect-then-drop yields a late dispatch_failed
-     that mimics silence). Max inter-sample gap must stay small; any WS drop
-     disqualifies the run.
-  3. ~600s ELAPSED — the gate resolves after ~the full timeout, not the seconds
-     a 503 takes. Delivered + ~600s is the airtight pair.
-  4. JOB REACHES done — the build completes end to end on the defaults.
+Venue is :8000 in monopolize mode. The submit is a real build costing about 15 minutes of tokens,
+so schedule it after midnight EDT once the idle check passes (see CLAUDE.md, testing venues).
 
-WHY A FRESH NON-SERVICE USER (not the tester account).
-  `interactive.job.tester@lupin.deepily.ai` is a configured `voice gate service
-  account` (lupin-app.ini:1823), so the gate REDIRECTS its target to the operator
-  `ricardo.felipe.ruiz@gmail.com` (Rick's real inbox) — which is precisely why
-  ts-c27db4d8 went 503→dispatch_failed overnight. Delivering to Rick's inbox or
-  editing the service-account config are both off-limits (Rick's inbox is his;
-  config edits change product behaviour three days from a demo). Instead we
-  register a throwaway NON-service user and use it as BOTH submitter and gate
-  target: no redirect, so the gate targets a session WE control. The
-  delivered+silent+600s→default MECHANISM is identical; the operator-redirect is
-  a separate, already-exercised routing hop, orthogonal to whether silence
-  resolves to the default.
-
-VENUE: :8000 (monopolize). Submit is a REAL build (~15 min tokens) — schedule
-  post-midnight EDT per CLAUDE.md. This script is the harness; run it once the
-  :8000 idle check + scheduling discipline (§TESTING VENUES) is satisfied.
-
-USAGE:
-  python3 prove_gate_silence.py --base http://localhost:8000 \
-      --evidence /path/to/evidence.json
-  Env knobs: PRESENTATION_SOURCE_DOC (default the strategy doc), GATE_TIMEOUT
-  (default 600, only affects the disqualify thresholds, NOT the server).
+Usage:
+  python3 prove_gate_silence.py --base http://localhost:8000 --evidence /path/to/evidence.json
+  Env knobs: `PRESENTATION_SOURCE_DOC` (default the strategy doc), `GATE_TIMEOUT` (default 600,
+  only affects the recorded thresholds, not the server).
 """
 
 import os
@@ -102,9 +77,11 @@ def _strong_password():
 
 def _headers_from_options( response_options ):
     """
-    Pull the question headers out of a gate's response_options so we can answer
-    each one. response_options is {questions:[{header, options:[...]}]} — carried
-    on the frame as a dict or a JSON string. Returns [] if unparseable.
+    Return the question headers from a gate's response_options, or [] if unparseable.
+
+    The headers let the caller answer each question. response_options is a dict with a
+    questions list of items carrying header and options. It arrives on the frame as a dict
+    or as a JSON string. Returns an empty list when it is None or cannot be parsed.
     """
     if response_options is None:
         return []
@@ -153,11 +130,12 @@ def register_and_login( base, email, password ):
 # ── the silent, connected session ─────────────────────────────────────────────
 class SilentConnectedUser:
     """
-    Hold a real authenticated queue WebSocket open as `email`, record every gate
-    ask (`notification_queue_update`) as delivery proof, and sample liveness
-    continuously. In answer_mode (Direction A) it ANSWERS each gate promptly by
-    posting the continue_label to /api/notify/response, so the job proceeds on a
-    HUMAN answer, not a declared default. With answer_mode off it stays silent.
+    Hold an authenticated queue WebSocket open and record every gate ask as delivery proof.
+
+    Each gate ask arrives as a `notification_queue_update` frame, and liveness is sampled
+    continuously. In answer mode (Direction A) it answers each gate promptly. It posts the
+    continue_label to /api/notify/response, so the job proceeds on a human answer, not a
+    declared default. With answer mode off it stays silent.
     """
 
     def __init__( self, base, session_id, jwt, answer_mode=False, continue_label="Approve" ):
@@ -370,10 +348,12 @@ def _find( jobs, job_id ):
 
 def read_notification_state( base, jwt, nid ):
     """
-    PURE READ of {state, response_value, responded_at} for one gate ask
-    (GET /api/notifications/response/{id}). state=='responded' + a real
-    response_value == a HUMAN answer; 'expired' == a declared-default timeout.
-    This is the Direction-A discriminator, server-side, without container logs.
+    Read the state and response value of one gate notification without changing anything.
+
+    Calls GET /api/notifications/response/{id} and returns state, response_value and responded_at.
+    State responded with a real response_value means a human answered; state expired means a
+    declared-default timeout. This is the Direction-A discriminator, read server-side without
+    container logs.
     """
     try:
         r = requests.get(
@@ -400,11 +380,13 @@ def pool_status( base, jwt ):
 
 def require_lock_clear( base, jwt ):
     """
-    HARD precondition (row 19328449 finding): a directly-submitted non-monopolize
-    pr- job is deferred as FOREIGN intake while ANY monopolizer holds the pool
-    (queue_consumer.py:106-124 Gate B) — the exact mechanism that wedged Krishna's
-    ts-→pr- run. Refuse to submit unless monopolize_id is null, or the run silently
-    deadlocks and burns the ~15min window.
+    Refuse to submit while any monopolizer holds the pool; return the pool status otherwise.
+
+    This is a hard precondition. A directly submitted non-monopolize pr- job is deferred as
+    foreign intake while any monopolizer holds the pool (queue_consumer.py:106-124, Gate B).
+    That mechanism wedged an earlier run that went from a ts- job to a pr- job.
+    Raises RuntimeError unless monopolize_id is null, because otherwise the run silently
+    deadlocks and burns the window of about 15 minutes.
     """
     ps = pool_status( base, jwt )
     mono_id = ps.get( "monopolize_id" )
@@ -419,14 +401,14 @@ def require_lock_clear( base, jwt ):
 
 def lock_clear_banner( ps ):
     """
-    Report the monopolize-slot check at its true width.
+    Return the banner line that reports the monopolize-slot check and its blind spot.
 
-    `require_lock_clear` reads ONE field. It answers "will Gate B defer this
-    foreign pr- job", which is an identity question about the monopolize slot --
-    not "is :8000 free". Shared-pool jobs can be inflight and more queued behind
-    them with the slot clear, and this precondition cannot see any of it. The
-    line therefore names the field it read and names the blind spot; the venue
-    question is answered by list-pending, per CLAUDE.md section TESTING VENUES.
+    `require_lock_clear` reads one field. It answers whether Gate B will defer this foreign
+    pr- job, an identity question about the monopolize slot, not whether :8000 is free.
+    Shared-pool jobs can be inflight and more queued behind them with the slot clear, and
+    this precondition cannot see any of it. The line therefore names the field it read and
+    names the blind spot. The venue question is answered by list-pending, per the testing
+    venues section of CLAUDE.md.
     """
     return (
         f"[proof] no monopolizer holds the :8000 slot "
@@ -437,8 +419,9 @@ def lock_clear_banner( ps ):
 
 def poll_until_terminal( base, jwt, job_id, overall_timeout, on_tick=None ):
     """
-    Poll running/done/dead until the job lands in done or dead (or we time out).
-    Returns ("done"|"dead"|"timeout", job_dict_or_None).
+    Poll the queues until the job is in done or dead, or the overall timeout passes.
+
+    Returns a tuple of the state ("done", "dead" or "timeout") and the job dict or None.
     """
     deadline = time.monotonic() + overall_timeout
     seen_running = False
@@ -461,15 +444,18 @@ def poll_until_terminal( base, jwt, job_id, overall_timeout, on_tick=None ):
 # ── verdict (Direction A — human-answered) ────────────────────────────────────
 def build_verdict_direction_a( silent, job_state, job, gate_states ):
     """
-    DIRECTION A — the path nobody has seen work: the gate REACHES a connected
-    client and the job proceeds on the HUMAN's answer, not a declared default.
+    Build the Direction-A verdict: did every gate reach the client and get a human answer?
 
-    The discriminator is NOT timing (an answered gate and a pre-fix TypeError
-    gate both resolve fast). It is the notification's final STATE: 'responded'
-    with a real response_value == a human answer; 'expired' == a declared-default
-    timeout. Every gate must be delivered (frame), answered (POST 200), and
-    resolved 'responded' — and the job must reach done. gate_states maps each
-    delivered notification_id → its read {state, response_value}.
+    Direction A is the path nobody had seen work. The gate reaches a connected client and the
+    job proceeds on the human's answer, not a declared default.
+
+    Ensures:
+      - The discriminator is not timing, since an answered gate and a pre-fix TypeError gate
+        both resolve fast. It is the final notification state: responded with a real
+        response_value means a human answer, and expired means a declared-default timeout.
+      - Every gate must be delivered (frame), answered (POST 200) and resolved as responded.
+      - The job must reach done.
+      - gate_states maps each delivered notification_id to its read state and response_value.
     """
     live         = silent.liveness_report()
     deliveries   = silent.deliveries
