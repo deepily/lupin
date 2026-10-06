@@ -5,6 +5,10 @@ The lock is a git ref, `refs/sweep-locks/<slug>`, that points at a blob holding 
 Git creates a ref only if none exists. It changes or deletes one only if the ref still holds the value the caller names.
 So two seats cannot both take a lock, and a seat cannot release another seat's lock. Two takeovers of the same stale
 lock have one winner. The store row stays the visible claim; this ref is the lock.
+
+The lock is cooperative, not access control. Persona and session are the caller's own word, and `show` prints them.
+A seat that passes the holder's identity can release or take over that holder's lock. It stops two
+honest seats working one package; it does not stop a seat that lies.
 """
 
 import argparse
@@ -17,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 NAMESPACE   = "refs/sweep-locks/"
 ZERO_OID    = "0" * 40
 STALE_AFTER = timedelta( hours=24 )
+FUTURE_SKEW = timedelta( minutes=5 )
 SLUG_REGEX  = re.compile( r"^[A-Za-z0-9][A-Za-z0-9._-]*$" )
 
 
@@ -42,16 +47,21 @@ def slug_of( package ):
     Turn a package directory into the ref name part of its lock.
 
     Requires:
-        - package is a str naming a directory, such as `src/cosa/repo`
+        - package is a str naming a directory, such as `src/cosa/repo`, with at most one trailing slash
 
     Ensures:
-        - returns the path with slashes made `--`, and a trailing slash dropped
-        - two different packages never share a slug, because a path cannot hold `--` between two directory names that are not that pair
+        - returns the directory names joined by a single `-`, each name with `_` written `_5f` and `-` written `_2d`
+        - two different paths never share a slug: the escape leaves `-` only as the separator, so the slug can be read back
+        - `src/a--b` and `src/a/b` give `src-a_2d_2db` and `src-a-b`
 
     Raises:
-        - ValueError when the result is empty, starts with a dot or a dash, holds a character a ref name should not, or has `..` or ends in `.lock`
+        - ValueError when a directory name is empty, `.` or `..`, which covers a leading slash, a doubled slash and a path that is empty
+        - ValueError when the slug does not start with a letter or digit, holds a character a ref name should not, ends in `.` or `.lock`, or holds `..`
     """
-    slug = package.strip( "/" ).replace( "/", "--" )
+    if package.endswith( "/" ): package = package[ : -1 ]
+    names = package.split( "/" )
+    if any( name in ( "", ".", ".." ) for name in names ): raise ValueError( f"package {package!r} cannot name a lock" )
+    slug  = "-".join( name.replace( "_", "_5f" ).replace( "-", "_2d" ) for name in names )
     if not SLUG_REGEX.match( slug ) or ".." in slug or slug.endswith( ".lock" ) or slug.endswith( "." ):
         raise ValueError( f"package {package!r} cannot name a lock" )
     return slug
@@ -161,6 +171,7 @@ def takeover( root, package, persona, session, now=None ):
 
     Ensures:
         - returns ( True, holder ) when this call replaced the stale holder, holder being the new record
+        - a lock stamped more than five minutes in the future is stale too, since a holder's fast clock must not freeze the package
         - returns ( False, reason ) when the lock is free, younger than 24 hours, unreadable in age, or another takeover won
         - of two takeovers of one stale lock exactly one gets True, because the swap names the holder it replaces
 
@@ -178,7 +189,7 @@ def takeover( root, package, persona, session, now=None ):
         return False, "the lock's time cannot be read, so it is not provably stale"
     since = since if since.tzinfo else since.replace( tzinfo=timezone.utc )
     age   = now - since
-    if age < STALE_AFTER: return False, f"the lock is {age} old; a takeover needs {STALE_AFTER}"
+    if since - now <= FUTURE_SKEW and age < STALE_AFTER: return False, f"the lock is {age} old; a takeover needs {STALE_AFTER}"
     blob = _record_blob( root, package, persona, session, now )
     code, _, _ = _run( root, "update-ref", NAMESPACE + slug_of( package ), blob, held[ "blob" ] )
     if code != 0: return False, "another seat took the lock over first"
@@ -200,7 +211,7 @@ def main( argv=None, out=None ):
         - nothing
     """
     out    = out if out is not None else sys.stdout
-    parser = argparse.ArgumentParser( description="Per-package lock of the docs-rewrite sweep." )
+    parser = argparse.ArgumentParser( description="Per-package lock of the docs-rewrite sweep. Cooperative: --persona and --session are your own word, not checked against anything." )
     parser.add_argument( "verb", choices=( "take", "release", "takeover", "show" ) )
     parser.add_argument( "package", help="the package directory, such as src/cosa/repo" )
     parser.add_argument( "--persona", help="the seat's persona name" )
