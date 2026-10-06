@@ -3,6 +3,8 @@ DM Quality Judge: grades a peer-DM body for brevity, directness and tone.
 
 Design: src/rnd/v0.1.9/2026.07.31-dm-verbosity-reduction/2026.07.31-dm-verbosity-reduction-phase1-2-plan.md
 
+This work is Phase 2 of the DM Verbosity Reduction plan.
+
 The engine is a hybrid:
 
     - Length: a deterministic Python bucket, because LLMs are bad at counting.

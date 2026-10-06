@@ -425,6 +425,7 @@ def length_bucket( word_count ):
 
     Ensures:
         - returns {"emoji", "weight", "detail", "overage"} with a weight in [-2, 2]
+        - this judge exists to curb token burn; the length grade is its quantitative half
         - "emoji" is the band's face repeated max(1, word_count // LENGTH_FACE_INTERVAL)
           times (display-only intensity); "weight" is unaffected
         - the top row starts at 251+, so 250 is unambiguously in the -1 row
