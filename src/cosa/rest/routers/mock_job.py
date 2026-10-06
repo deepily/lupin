@@ -1,18 +1,20 @@
 """
-Mock job endpoints — RETIRED (rows 432511fd / a3c59f2d, Rick 2026-09-29).
+Mock job endpoints, retired.
 
-`POST /api/mock-job/submit` (door 14) answers 410 and names `/api/v2/submit`. What it did is
-not gone: the command `agent router go to mock job` (cosa.agents.test_harness.mock_submit)
-reproduces both of its modes — the zero-cost MockAgenticJob, and the RuntimeArgumentExpeditor
-test that builds a dry-run job of the command a voice command matches — and the four suites
-that called the door (the 12-scenario proxy suite, the swe-team proxy suite, the expeditor
-mock-job smoke and the CJ Flow pause/schedule e2e) now reach it through the v2 door.
+`POST /api/mock-job/submit` answers 410 and names `/api/v2/submit`. What it did is not
+gone. The command `agent router go to mock job` (cosa.agents.test_harness.mock_submit)
+reproduces both of its modes. One mode is the zero-cost MockAgenticJob. The other is the
+RuntimeArgumentExpeditor test, which builds a dry-run job of the command a voice command
+matches. Four suites called the old door: the 12-scenario proxy suite, the swe-team proxy
+suite, the expeditor mock-job smoke and the CJ Flow pause/schedule e2e. They now reach the
+command through the v2 door.
 
-`GET /api/mock-job/health` stays: three of those suites probe it before they run, and it
+`GET /api/mock-job/health` stays. Three of those suites probe it before they run, and it
 queues nothing, so it is not one of the queue doors.
 
-The old handler and its request/response models are DELETED rather than left unreachable
-under a raise; recover them from git (`git log -S submit_mock_job -- src/cosa/rest/routers/mock_job.py`).
+The old handler and its request and response models are deleted rather than left
+unreachable under a raise. Recover them from git with
+`git log -S submit_mock_job -- src/cosa/rest/routers/mock_job.py`.
 """
 
 from fastapi import APIRouter
@@ -35,7 +37,7 @@ async def submit_mock_job():
 
     Ensures:
         - never returns; raises HTTPException( 410 ) naming /api/v2/submit and the
-          REMOVE BY 2026-12-31 date
+          remove-by date
     """
     gone( "/api/mock-job/submit" )
 

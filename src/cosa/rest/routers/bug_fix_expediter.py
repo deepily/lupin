@@ -6,7 +6,7 @@ single tombstone: the route stays registered and answers 410 Gone naming
 `/api/v2/submit`, which is where that work enters now.
 
 The request and response models went with the handler. They described a body nothing
-accepts any more, and a Pydantic model that no route reads is a shape a caller can still
+accepts any more. A Pydantic model that no route reads is a shape a caller can still
 find and reasonably believe in.
 """
 
@@ -60,6 +60,6 @@ async def submit_bug_fix():
 
     Ensures:
         - never returns; raises HTTPException( 410 ) naming /api/v2/submit and the
-          REMOVE BY 2026-12-31 date
+          remove-by date
     """
     gone( "/api/bug-fix-expediter/submit" )

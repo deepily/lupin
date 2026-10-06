@@ -11,8 +11,6 @@ Security:
 - Path validation prevents directory traversal
 - Only serves files within io/ directory
 - Validates file extension against content type
-
-Generated on: 2026-01-20
 """
 
 import os
@@ -71,11 +69,6 @@ async def get_io_file(
     """
     Serve files from the io/ directory with security validation.
 
-    Supports serving:
-    - Markdown files (.md) - research reports, podcast scripts
-    - Audio files (.mp3, .wav) - podcast audio
-    - Documents (.pdf, .txt, .json)
-
     Requires:
         - path is a relative path within io/ directory
         - File must exist
@@ -96,6 +89,9 @@ async def get_io_file(
     Raises:
         HTTPException 400: Invalid or unsafe path
         HTTPException 404: File not found
+
+    Supported types are markdown files (.md) for research reports and podcast scripts, audio
+    files (.mp3, .wav) for podcast audio, and documents (.pdf, .txt, .json).
     """
     # Decode the path (FastAPI does this, but be explicit)
     decoded_path = unquote( path )

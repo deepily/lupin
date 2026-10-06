@@ -1,26 +1,17 @@
 """
 Shared directory-listing primitives for the doc/io file-serving endpoints.
 
-Both `/api/docs/file` and `/api/io/file` now respond polymorphically:
+Both `/api/docs/file` and `/api/io/file` respond polymorphically:
 - If path resolves to a file → existing PlainTextResponse / FileResponse
-- If path resolves to a directory → JSONResponse with listing per §3.2
+- If path resolves to a directory → JSONResponse with a directory listing
 
-The per-extension `view_url` routing table (§3.4a) lives here so both
-endpoints stay honest. Frontend consumes `view_url` as-is — no JS-side
-extension sniffing.
+The per-extension `view_url` routing table lives here so both endpoints stay honest.
+The frontend consumes `view_url` as-is, with no JS-side extension sniffing.
 
-Extended 2026-05-12 (multi-repo doc viewer): `scope` may now be any
-registered external scope name (lupin, cosa-voice, claude-plans, etc.).
-Updated 2026-05-16 for path-prefix routing per the 2026-05-15 unification
-(Q-R2): `/app/docs` URLs now carry the project name as the first segment
-of `path`; the legacy `?scope=` query param is retired server-side. The
-/api/io/file and /app/audio endpoints continue to accept io-relative
-paths without a project prefix.
-
-Design docs:
-- src/rnd/v0.1.7/2026.05.12-doc-viewer-directory-listing.md (original)
-- src/rnd/v0.1.7/2026.05.12-multi-repo-doc-viewer.md (multi-repo extension)
-- src/rnd/v0.1.7/2026.05.15-doc-viewer-scope-unification.md (path-prefix routing)
+`scope` may be any registered external scope name (lupin, cosa-voice, claude-plans, etc.).
+`/app/docs` URLs carry the project name as the first segment of `path`, and the legacy
+`?scope=` query param is retired server-side. The /api/io/file and /app/audio endpoints
+accept io-relative paths without a project prefix.
 """
 
 import os
@@ -32,21 +23,7 @@ from cosa.rest.routers._scope_registry import _is_secrets_path
 
 def _build_view_url( rel_path: str, scope: str, kind: str, ext: str ) -> str:
     """
-    Build the viewer/player/download URL for a directory entry.
-
-    Single source of truth for the per-extension routing table. Per the
-    2026-05-15 unification (Q-R2), `/app/docs?path=` URLs are now project-
-    prefixed (path-prefix routing); the `?scope=` query param is retired
-    server-side. The /api/io/file and /app/audio endpoints continue to
-    accept io-relative paths without a project prefix.
-
-    Routing table:
-    - directory → /app/docs?path=<scope>/<rel> (project-prefixed)
-    - .md/.txt/.json/.yaml/.yml → /app/docs?path=<scope>/<rel> (project-prefixed)
-    - source-code extensions → /app/docs?path=<scope>/<rel> (plain <pre> in viewer)
-    - .mp3/.wav (io only) → /app/audio?path=<rel> (io-relative; player page)
-    - .pdf, images (io only) → /api/io/file?path=<rel> (io-relative; inline)
-    - .pptx (io only) → /api/io/file?path=<rel>&download=true (io-relative)
+    Build the viewer, player or download URL for a directory entry.
 
     Requires:
         - rel_path is a non-empty path string relative to the scope root
@@ -60,6 +37,14 @@ def _build_view_url( rel_path: str, scope: str, kind: str, ext: str ) -> str:
         - rel_path is URL-encoded via quote(safe="")
         - /app/docs URLs include the project prefix as the first path segment
         - /api/io/file and /app/audio URLs stay io-relative (no prefix)
+
+    This is the single source of truth for the per-extension routing table:
+    - directory → /app/docs?path=<scope>/<rel> (project-prefixed)
+    - .md/.txt/.json/.yaml/.yml → /app/docs?path=<scope>/<rel> (project-prefixed)
+    - source-code extensions → /app/docs?path=<scope>/<rel> (plain <pre> in viewer)
+    - .mp3/.wav (io only) → /app/audio?path=<rel> (io-relative; player page)
+    - .pdf, images (io only) → /api/io/file?path=<rel> (io-relative; inline)
+    - .pptx (io only) → /api/io/file?path=<rel>&download=true (io-relative)
     """
     encoded = quote( rel_path, safe="" )
 
@@ -105,14 +90,14 @@ def list_directory(
           whitelist logic)
 
     Ensures:
-        - returns dict shaped per §3.2:
+        - returns dict shaped like
           {kind: "directory", scope, path, parent, entries: [...]}
-        - hidden entries (names starting with ".") are excluded (Q5)
+        - hidden entries (names starting with ".") are excluded
         - file entries are filtered to those whose extension is in allowed_exts
-        - entries are sorted directories-first, then alphabetical case-insensitive (Q4)
+        - entries are sorted directories-first, then alphabetical case-insensitive
         - each entry carries a `view_url` from _build_view_url
         - directory entries have size=None; file entries have size=int (bytes)
-        - parent is None if rel_dir has no dirname OR parent_validator rejects it
+        - parent is None if rel_dir has no dirname or parent_validator rejects it
     """
     rel_dir_norm = rel_dir.rstrip( "/" )
 

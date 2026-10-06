@@ -7,17 +7,14 @@ Built at FastAPI startup from `[Lupin: Baseline]` INI keys:
     external repo <name> path                   = /absolute/in-container/path
     external repo <name> allowed prefixes       = src/, docs/, ...
 
-Each registered scope becomes addressable via `/api/docs/file?scope=<name>&path=<rel>`.
+Each registered scope becomes addressable via `/api/docs/file?path=<name>/<rel>`.
 
-Built-in scopes (`docs`, `io`) are NOT in this registry — they predate it and live
-inline in `docs_files.py` / `io_files.py`. The registry exposes only USER-CONFIGURED
+Built-in scopes (`docs`, `io`) are not in this registry. They live inline in
+`docs_files.py` and `io_files.py`. The registry exposes only user-configured
 external scopes.
 
-Secrets blocklist (§3e) applies to ALL scopes, registered or built-in, and runs
-AFTER the per-scope whitelist (defense-in-depth).
-
-Design doc: src/rnd/v0.1.7/2026.05.12-multi-repo-doc-viewer.md
-Generated on: 2026-05-12
+The secrets blocklist applies to all scopes, registered or built-in. It runs
+after the per-scope whitelist, as defense in depth.
 """
 
 import os
@@ -41,21 +38,21 @@ class ScopeConfig:
     Frozen description of one external scope.
 
     Fields:
-        name             : Short scope name (used in `?scope=<name>`).
-        root             : Absolute filesystem path inside the container.
-        allowed_prefixes : Tuple of path prefixes (relative to root). Empty tuple
-                           AND no manifest → wildcard ("all paths under root are
-                           reachable" subject to MEDIA_TYPES + secrets blocklist).
-                           When a manifest is present, the manifest's
-                           `allowed_prefixes` is authoritative; this field is
-                           treated as the fallback for repos that ship neither.
-        manifest         : Optional `DocviewManifest` loaded from
-                           `<root>/.docview.yml` at build time. When present,
-                           the manifest's allowed_prefixes, allowed_root_files,
-                           and extra_blocklist are the authority for this scope.
+        name             : Short scope name, the first `path` segment.
+        root             : Absolute path inside the container.
+        allowed_prefixes : Tuple of path prefixes under root. An empty tuple
+                           with no manifest is a wildcard. Every path under root is then
+                           reachable, subject to `MEDIA_TYPES` and the secrets blocklist.
+                           When a manifest is present, its `allowed_prefixes` is
+                           authoritative. This field is the fallback for other repos.
+        manifest         : Optional `DocviewManifest` loaded from `<root>/.docview.yml`
+                           at build time. When present, its allowed_prefixes,
+                           allowed_root_files, and extra_blocklist are the authority
+                           for this scope.
         extra_blocklist_patterns: Pre-compiled regex patterns derived from
                            manifest.extra_blocklist (if any). Empty tuple
                            when no manifest or no extras.
+
     """
 
     name                     : str
@@ -287,87 +284,77 @@ CREDENTIAL_MAX_NESTED_PARSES = 64
 
 def is_credential_file( full_path: str ) -> bool:
     """
-    Return True iff the FILE AT `full_path` is credential material — FAIL CLOSED.
+    Return True iff the file at `full_path` is credential material, failing closed.
 
-    The doc viewer's last line of defence: the whitelist said yes and the name
+    This is the doc viewer's last line of defence. The whitelist said yes and the name
     blocklist said yes, and the bytes still get the final word.
-
-    🔴 FAIL CLOSED (Tiffany's constraint 2). Unreadable, wrongly-encoded, gone,
-    permission-denied — every one of them returns True and BLOCKS. A content check
-    that serves a file it could not read is worse than no check at all, because it
-    looks like protection while providing none. The one thing that must never happen
-    is "I could not tell, so I served it".
-
-    🔴 NOT GATED ON THE EXTENSION (constraint 3). Every text file is sniffed, not
-    just `*.json`. Gating on `.json` would let `key.txt` walk straight through and
-    would re-introduce, one layer down, the exact filename dependency this check
-    exists to remove.
-
-    🔴 BOUNDED READ, IN TWO STAGES (constraint 4). The first CREDENTIAL_SNIFF_BYTES
-    decide almost every file. If that window is FILLED by something that is trying to
-    be a JSON container, the read widens once to CREDENTIAL_MAX_SNIFF_BYTES, because
-    a signature outside the window is a signature this function cannot see — Clayton
-    measured a real credential hidden that way behind one big leading field. Both
-    stages are bounded, so deciding still never means slurping an arbitrary file.
-
-    ⚠️ ACCEPTED LIMIT, stated rather than assumed: a JSON container larger than
-    CREDENTIAL_MAX_SNIFF_BYTES whose only credential material sits past that mark is
-    SERVED. Closing that would mean refusing every large JSON document on the grounds
-    that it might be hiding something, which costs more than it buys.
 
     Requires:
         - full_path is a filesystem path the caller intends to serve
 
     Ensures:
-        - True for a JSON object AT ANY NESTING DEPTH, inside objects or arrays, or
-          carried as JSON TEXT inside a string, declaring type service_account /
+        - True for a JSON object at any nesting depth, inside objects or arrays, or
+          carried as JSON text inside a string, declaring type service_account /
           authorized_user / external_account, or carrying private_key /
           private_key_id / refresh_token / client_secret with a real string value, or
           with a list holding one
-        - True for any PEM PRIVATE KEY block, bare or wrapped
-        - True when the file cannot be read or decoded, for ANY reason
-        - False only when the prefix was read successfully AND carries no signature —
+        - True for any PEM private key block, bare or wrapped
+        - True when the file cannot be read or decoded, for any reason
+        - False only when the prefix was read successfully and carries no signature —
           so a tokenizer legitimately named token.json is served, while a credential
           under the same name is refused
 
     Raises:
         - nothing; every failure path blocks instead
+
+    Fail closed: an unreadable, wrongly encoded, missing or permission-denied file returns
+    True and blocks. A check that serves a file it could not read looks like protection while
+    providing none. Serving a file because "I could not tell" must never happen.
+
+    The check is not gated on the extension. Every text file is sniffed, not just `*.json`.
+    Gating on `.json` would let `key.txt` through and bring back the filename dependency.
+
+    The read is bounded, in two stages. The first `CREDENTIAL_SNIFF_BYTES` decide almost
+    every file. If that window is filled by something that looks like a JSON container, the
+    read widens once to `CREDENTIAL_MAX_SNIFF_BYTES`. A signature outside the window cannot
+    be seen, and a real credential was measured hidden that way behind one big leading field.
+
+    Accepted limit: a JSON container larger than `CREDENTIAL_MAX_SNIFF_BYTES`, whose only
+    credential material sits past that mark, is served. Refusing every large JSON document
+    would cost more than it buys.
+
     """
     return credential_verdict( full_path ) != "clean"
 
 
 def credential_verdict( full_path: str ) -> str:
     """
-    Say WHY the file is being refused, not just that it is — FAIL CLOSED either way.
+    Say why a file is refused, failing closed either way.
 
-    WHAT THIS SPLITS (row ee1670bc). `is_credential_file` answers one bit, and two very
-    different facts were collapsing into it. An unreadable file — a disk error, a
-    permission bit, a bind-mount that never came up — blocked, correctly, and then the
-    doc viewer told the reader "this file's CONTENT is credential material". That is a
-    true refusal attached to a false explanation, and it sends whoever is debugging to
-    look for a credential that was never there.
-
-    THE FLOOR DOES NOT MOVE. Unreadable still refuses. `is_credential_file` is now
-    defined as `credential_verdict( path ) != "clean"`, so its contract is unchanged
-    down to the unreadable case, and every mutation proof written against it still
-    holds. Only the EXPLANATION becomes available to the caller.
+    `is_credential_file` answers one bit, so an unreadable file and a credential look alike.
+    The doc viewer must not tell the reader that an unreadable file's content is credential
+    material. That false explanation sends the person debugging after a credential never there.
 
     Requires:
         - full_path is a filesystem path the caller intends to serve
 
     Ensures:
-        - "unreadable"  the bytes could not be obtained or decoded, for ANY reason —
+        - "unreadable"  the bytes could not be obtained or decoded, for any reason —
                         missing, permission-denied, not utf-8, a failing disk. The
                         caller should say so; it is not a statement about content
         - "credential"  the bytes were read and carry credential material
-        - "clean"       the bytes were read and carry no signature — the ONLY verdict
+        - "clean"       the bytes were read and carry no signature — the only verdict
                         that permits serving
         - never "clean" for a file it could not read, and never raises: an error while
-          DECIDING is itself a refusal (that promise used to stop at the read — see
-          the wrap below)
+          deciding is itself a refusal, at any point in the check
 
     Raises:
         - nothing; every failure path refuses instead
+
+    The floor does not move. An unreadable file still refuses. `is_credential_file` is
+    defined as `credential_verdict( path ) != "clean"`, so its contract is unchanged down to
+    the unreadable case. Only the explanation is available to the caller.
+
     """
     try:
         with open( full_path, "r", encoding="utf-8" ) as handle:
@@ -396,22 +383,21 @@ def credential_verdict( full_path: str ) -> str:
 
 def _the_window_may_be_hiding_the_signature( prefix: str ) -> bool:
     """
-    Return True iff the first window ran out mid-file on a JSON container, which is
-    the only case where reading further can change the answer.
+    Return True iff the first window ran out mid-file on a JSON container.
 
-    A file SHORTER than the window was read whole, so there is nothing further to
-    see. Text that is not a JSON container is decided as prose and reading more of it
-    changes nothing. Everything else stops at one window.
+    Only then can reading further change the answer. A file shorter than the window was read
+    whole. Text that is not a JSON container is decided as prose. Everything else stops at one window.
 
     Requires:
         - prefix is the text read by the first stage
 
     Ensures:
-        - True only when the window was filled AND the text opens a JSON object or
+        - True only when the window was filled and the text opens a JSON object or
           array once the invisible lead-in is stripped
 
     Raises:
         - nothing
+
     """
     if len( prefix ) < CREDENTIAL_SNIFF_BYTES:
         return False
@@ -421,14 +407,13 @@ def _the_window_may_be_hiding_the_signature( prefix: str ) -> bool:
 
 def _strip_leadin_noise( text: str ) -> str:
     """
-    Drop every leading character a reader cannot see, in ANY order, until a visible
-    one appears.
+    Drop every leading character a reader cannot see, in any order, up to a visible one.
 
     Requires:
         - text is decoded text (possibly empty)
 
     Ensures:
-        - returns text with leading whitespace AND leading Unicode category Cf
+        - returns text with leading whitespace and leading Unicode category Cf
           (format) characters removed, interleaved in any order
         - returns text unchanged when its first character is visible
         - returns "" for text that is entirely invisible
@@ -436,11 +421,11 @@ def _strip_leadin_noise( text: str ) -> str:
     Raises:
         - nothing
 
-    WHY A CHARACTER CLASS AND NOT A LONGER lstrip() ARGUMENT: two strips in a fixed
-    order cannot handle interleaving. `lstrip( "﻿" )` then `lstrip()` leaves
-    `" ﻿{...}"` with the mark back at the front, which SERVED a complete ADC
-    credential. Category Cf is what U+FEFF, U+200B, U+2060 and the direction marks
-    are, so this closes the class rather than the one codepoint that got caught.
+    The strip uses a character class, not a longer `lstrip()` argument. Two strips in a fixed
+    order cannot handle interleaving. `lstrip( "﻿" )` then `lstrip()` leaves `" ﻿{...}"` with
+    the mark back at the front, which would serve a complete ADC credential. Category Cf covers
+    U+FEFF, U+200B, U+2060 and the direction marks, so this closes the class and not one codepoint.
+
     """
     i = 0
     while i < len( text ) and ( text[ i ].isspace() or unicodedata.category( text[ i ] ) == "Cf" ):
@@ -450,23 +435,25 @@ def _strip_leadin_noise( text: str ) -> str:
 
 def _prefix_looks_like_credential( prefix: str ) -> bool:
     """
-    Decide on an already-read prefix. Split out so the decision is testable without
-    a filesystem, and so `is_credential_file` holds only the fail-closed IO.
+    Decide on an already-read prefix, so the decision is testable without a filesystem.
+
+    `is_credential_file` then holds only the fail-closed IO.
 
     Requires:
-        - prefix is decoded text, possibly TRUNCATED mid-token
+        - prefix is decoded text, possibly truncated mid-token
 
     Ensures:
         - True on a PEM private-key header, which needs no parsing
-        - True on a parseable JSON value carrying a credential type or field AT ANY
-          DEPTH, inside objects or arrays
-        - True when the prefix is a TRUNCATED JSON container that already shows a
+        - True on a parseable JSON value carrying a credential type or field at any
+          depth, inside objects or arrays
+        - True when the prefix is a truncated JSON container that already shows a
           credential field — a key does not become safe because the read stopped
           early, which is the same fail-closed rule applied to truncation
         - False for an empty prefix, which carries no signature to act on
 
     Raises:
         - nothing
+
     """
     if not prefix:
         return False
@@ -556,16 +543,11 @@ def _decode_json_unicode_escapes( text: str ) -> str:
 
 def _value_is_secret_material( value ) -> bool:
     """
-    Return True iff `value` is a real secret string rather than a schema or a
-    template.
+    Return True iff `value` is a real secret string and not a schema or a template.
 
-    THE TRADE THIS ENCODES, decided deliberately rather than discovered later: once
-    the search goes to any depth, a bare key NAME stops being enough to refuse on. An
-    OpenAPI spec names `client_secret` under `securitySchemes` and a template shows
-    `"client_secret": "<yours>"` — both are documents, and both would be refused by a
-    name-only rule the moment it stopped looking only at the top level. A credential
-    carries the secret AS A STRING; a schema carries an object, and a template carries
-    a placeholder.
+    A bare key name is not enough to refuse on, because an OpenAPI spec names `client_secret`
+    and a template shows `"client_secret": "<yours>"`. Both are documents. A credential carries
+    the secret as a string. A schema carries an object, and a template a placeholder.
 
     Requires:
         - nothing; any parsed JSON value is acceptable
@@ -576,6 +558,7 @@ def _value_is_secret_material( value ) -> bool:
 
     Raises:
         - nothing
+
     """
     if not isinstance( value, str ):
         return False
@@ -587,7 +570,7 @@ def _value_is_secret_material( value ) -> bool:
 
 def _object_declares_a_credential( node: dict ) -> bool:
     """
-    Return True iff this ONE object is itself credential material.
+    Return True iff this one object is itself credential material.
 
     Requires:
         - node is a parsed JSON object
@@ -599,6 +582,7 @@ def _object_declares_a_credential( node: dict ) -> bool:
 
     Raises:
         - nothing
+
     """
     declared_type = node.get( "type" )
     if isinstance( declared_type, str ) and declared_type.strip() in _CREDENTIAL_TYPE_VALUES:
@@ -610,18 +594,11 @@ def _object_declares_a_credential( node: dict ) -> bool:
 
 def _credential_field_carries_secret_material( value ) -> bool:
     """
-    Return True iff a credential FIELD's value carries secret material, whether it
-    holds the secret directly or holds a LIST of secret lines.
+    Return True iff a credential field's value carries secret material, directly or as a list.
 
-    WHY THE LIST ARM EXISTS (bug 0cbf69c0, found by Tiffany reviewing the depth fix):
-    `_value_is_secret_material` answers about ONE value and correctly says no to a
-    list, because a list is not a string. The walk then descends into the list's
-    ITEMS — but they are strings, not objects, so nothing ever tests them. A key
-    written as an array of PEM-less lines fell straight between the two, and with no
-    `type` field to catch it the file was SERVED.
-
-    Placeholder discrimination is kept, item by item: a list of `<your key here>`
-    lines is still a template, and templates are documents.
+    A key written as an array of lines would fall between two checks. `_value_is_secret_material`
+    says no to a list, and the walk tests objects, not string items. This closes that gap.
+    A list of `<your key here>` lines is still a template.
 
     Requires:
         - nothing; any parsed JSON value is acceptable, including None for a key the
@@ -634,6 +611,7 @@ def _credential_field_carries_secret_material( value ) -> bool:
 
     Raises:
         - nothing
+
     """
     pending = [ value ]
     while pending:
@@ -650,26 +628,7 @@ def _credential_field_carries_secret_material( value ) -> bool:
 
 def _parsed_value_carries_a_credential( parsed ) -> bool:
     """
-    Return True iff a credential object sits ANYWHERE in the parsed value.
-
-    🔴 THE DEPTH FIX. The previous check read `key in parsed` on the top-level object
-    only, so six shapes walked through — the first of them being the client_secret
-    JSON the GCP console hands you, which puts every field one level down under
-    `"installed"` or `"web"`. Arrays were served outright. Nesting is not an attack
-    here so much as the NORMAL shape of a downloaded credential.
-
-    Walks with an explicit stack rather than recursion, so nesting depth is bounded by
-    the file, not by the interpreter's stack — no depth cap to tune, and no crash on a
-    deeply nested document.
-
-    🔴 THE PAYLOAD FIX (bug b17ffefd). The walk crossed objects and arrays and STOPPED
-    AT A STRING, so a whole credential carried as JSON TEXT inside another JSON file
-    was never opened: `{"google_credentials": "{\\"type\\": \\"service_account\\", ...}"}`
-    was served. That is the ordinary shape of terraform tfvars, a kubernetes secret and
-    a compose env file — the credential is a string as far as the outer document is
-    concerned, and a real key as far as anything reading it is concerned. A string that
-    opens a JSON container is now re-parsed and pushed back onto the stack, up to
-    CREDENTIAL_MAX_NESTED_PARSES times per file.
+    Return True iff a credential object sits anywhere in the parsed value.
 
     Requires:
         - parsed is a value returned by json.loads
@@ -681,6 +640,21 @@ def _parsed_value_carries_a_credential( parsed ) -> bool:
 
     Raises:
         - nothing
+
+    Nesting is the normal shape of a downloaded credential. The client_secret JSON from the GCP
+    console puts every field one level down, under `"installed"` or `"web"`. So the check reads
+    objects and arrays to any depth, and does not stop at the top-level object.
+
+    The walk uses an explicit stack, not recursion. Nesting depth is bounded by the file and
+    not by the interpreter's stack, so there is no depth cap to tune and no crash on a deeply
+    nested document.
+
+    The walk also crosses strings. A whole credential can be carried as JSON text inside
+    another JSON file, such as `{"google_credentials": "{\\"type\\": \\"service_account\\", ...}"}`.
+    That is the ordinary shape of terraform tfvars, a kubernetes secret and a compose env file.
+    A string that opens a JSON container is re-parsed and pushed back onto the stack, up to
+    `CREDENTIAL_MAX_NESTED_PARSES` times per file.
+
     """
     pending       = [ parsed ]
     reparses_left = CREDENTIAL_MAX_NESTED_PARSES
@@ -704,8 +678,9 @@ def _parsed_value_carries_a_credential( parsed ) -> bool:
 
 def _opens_a_json_container( text: str ) -> bool:
     """
-    Return True iff `text` starts a JSON object or array once the invisible lead-in is
-    gone. The cheap test that decides whether a parse is worth attempting at all.
+    Return True iff `text` starts a JSON object or array once the invisible lead-in is gone.
+
+    It is the cheap test that decides whether a parse is worth attempting at all.
 
     Requires:
         - text is decoded text, possibly empty
@@ -715,31 +690,18 @@ def _opens_a_json_container( text: str ) -> bool:
 
     Raises:
         - nothing
+
     """
     return _strip_leadin_noise( text )[ : 1 ] in _JSON_CONTAINER_OPENERS
 
 
 def _json_carried_in_a_string( text: str ) -> object:
     """
-    Return the value parsed out of a string that carries JSON, or None when it does
-    not parse.
+    Return the value parsed out of a string that carries JSON, or None when it does not parse.
 
-    None means "there is nothing here to walk". A string that looked like a container
-    and did not parse is text — it carries no object for the field test to read, and
-    guessing at it would be the raw-substring scan the parsed path exists to avoid.
-
-    🔴 PARSE THE SAME TEXT THE GATE JUDGED (Tiffany, follow-up on the payload fix).
-    `_opens_a_json_container` strips the invisible lead-in before deciding a string is
-    worth parsing; this function used to parse the RAW string. So a value beginning
-    with a BOM or a zero-width space passed the gate and then failed the parse ON THE
-    VERY CHARACTER THE GATE HAD REMOVED, returned None, and the credential inside it
-    was SERVED. Two functions disagreeing about which text they are talking about is
-    the whole defect — they now read the same bytes.
-
-    MEASURED before this fix, all three SERVED a complete service-account key:
-    `{"note": "<BOM>{...key...}"}`, the same shape inside a list, and the zero-width
-    space in place of the BOM. Without a lead-in character the same payload BLOCKED,
-    which is why this hid — every fixture written for the payload fix was clean-led.
+    None means there is nothing here to walk. A string that looked like a container and did not
+    parse is text. It carries no object for the field test to read, and guessing at it would be
+    the raw-substring scan the parsed path exists to avoid.
 
     Requires:
         - text is a string whose first visible character opens a JSON container
@@ -749,10 +711,18 @@ def _json_carried_in_a_string( text: str ) -> object:
         - returns None when the text is not parseable JSON
         - returns None when the text nests too deep for the parser rather than
           letting RecursionError escape to the caller (see the note in
-          `_prefix_looks_like_credential` — it is NOT an Exception subclass)
+          `_prefix_looks_like_credential` — it is not an Exception subclass)
 
     Raises:
         - nothing
+
+    It parses the same text the gate judged. `_opens_a_json_container` strips the invisible
+    lead-in before deciding a string is worth parsing, so this function must parse the stripped
+    text too. A value that began with a BOM or a zero-width space would otherwise pass the gate and
+    then fail the parse on the very character the gate had removed. It would return None, and the
+    credential inside would be served. Two functions that disagree about which text they discuss
+    are the whole defect, so both read the same text.
+
     """
     try:
         return json.loads( _strip_leadin_noise( text ) )
@@ -762,7 +732,7 @@ def _json_carried_in_a_string( text: str ) -> object:
 
 def _is_secrets_path( relative_path: str ) -> bool:
     """
-    Return True iff any path segment matches a SECRETS_BLOCKLIST_PATTERNS entry.
+    Return True iff any path segment matches a `SECRETS_BLOCKLIST_PATTERNS` entry.
 
     Requires:
         - relative_path is a non-empty project-relative path string with no
@@ -770,9 +740,10 @@ def _is_secrets_path( relative_path: str ) -> bool:
 
     Ensures:
         - returns True if any segment of `relative_path` matches any blocklist
-          pattern (basename AND any intermediate directory name are checked)
+          pattern (basename and any intermediate directory name are checked)
         - returns False otherwise
         - empty input returns False (cheap guard for callers)
+
     """
     if not relative_path:
         return False
@@ -794,15 +765,9 @@ def _is_whitelisted_in_scope( scope_cfg: ScopeConfig, relative_path: str ) -> bo
     """
     Return True iff `relative_path` is permitted by the scope's whitelist.
 
-    Resolution order (Phase 3 manifest extension):
-        1. If `scope_cfg.manifest` is set, the manifest's `allowed_prefixes` +
-           `allowed_root_files` is the authority for this scope. Empty manifest
-           lists mean "no paths permitted" (explicit-opt-in semantics).
-        2. If no manifest, fall back to the INI-derived
-           `scope_cfg.allowed_prefixes`. Empty → wildcard (per Q2-C
-           missing-manifest semantics).
-        3. Bare scope-root listing (empty relative_path) is always allowed so
-           directory listings work.
+    With a manifest, its `allowed_prefixes` and `allowed_root_files` are the authority, and
+    empty lists permit no paths. Without one, the INI-derived `scope_cfg.allowed_prefixes`
+    apply, and empty means wildcard. The bare scope-root listing is always allowed.
 
     Requires:
         - scope_cfg is a ScopeConfig instance
@@ -812,6 +777,7 @@ def _is_whitelisted_in_scope( scope_cfg: ScopeConfig, relative_path: str ) -> bo
         - returns True when the path passes the active whitelist (manifest or
           INI prefixes), False otherwise
         - empty relative_path returns True (root listing affordance)
+
     """
     if not relative_path:
         return True
@@ -843,12 +809,13 @@ def _is_whitelisted_in_scope( scope_cfg: ScopeConfig, relative_path: str ) -> bo
 
 def _is_secrets_path_for_scope( scope_cfg: ScopeConfig, relative_path: str ) -> bool:
     """
-    Combined floor + per-scope extra blocklist check.
+    Combined floor and per-scope extra blocklist check.
 
-    The universal floor (`SECRETS_BLOCKLIST_PATTERNS`) is checked first. If
-    no floor pattern matches, the scope's `extra_blocklist_patterns` (from
-    `manifest.extra_blocklist`, if any) are checked. Per Q4-B repos can only
-    ADD patterns; they cannot remove floor patterns.
+    The universal floor (`SECRETS_BLOCKLIST_PATTERNS`) is checked first. If no floor
+    pattern matches, the scope's `extra_blocklist_patterns` (from
+    `manifest.extra_blocklist`, if any) are checked. A repo can only add patterns.
+    It cannot remove floor patterns.
+
     """
     if _is_secrets_path( relative_path ):
         return True
@@ -872,14 +839,11 @@ _stat = os.stat
 
 def _ancestor_matching_root( real_path: str, roots ):
     """
-    The ancestor of `real_path` (or itself) that is the SAME DIRECTORY as one of `roots`, else None.
+    The ancestor of `real_path`, or itself, that is the same directory as a root, else None.
 
-    Identity is `(st_dev, st_ino)`, never the spelling. 🔴 WHY (measured 2026-09-30, rows
-    cc39cee6 and the doc-viewer false rejection): in the container the repo is mounted at TWO
-    prefixes, `/var/lupin` and `/var/external-projects/lupin`, one host directory. Eleven
-    `io/test-suite/artifacts/*-latest.log` links point at the first spelling, so a prefix test
-    against the second refused eleven files that live inside the scope. A sibling such as
-    `lupin-evil` shares a prefix with nothing and an identity with nothing, so it stays refused.
+    Identity is `(st_dev, st_ino)`, never the spelling. The repo is mounted at two prefixes,
+    `/var/lupin` and `/var/external-projects/lupin`, one host directory. A prefix test would
+    refuse files inside the scope. A sibling such as `lupin-evil` shares an identity with nothing.
 
     Requires:
         - real_path is an absolute, already-resolved path
@@ -889,6 +853,7 @@ def _ancestor_matching_root( real_path: str, roots ):
         - returns the matching ancestor's path, which a caller may relativize against
         - a root that cannot be stat'd is skipped, never raises
         - a path that does not exist yet is judged by its nearest existing ancestor
+
     """
     identities = []
     for root in roots:
@@ -910,13 +875,13 @@ def _ancestor_matching_root( real_path: str, roots ):
 
 
 def landed_within_roots( real_path: str, roots ) -> bool:
-    """True when `real_path` lands inside (or at) a directory with the identity of one of `roots`."""
+    """True when `real_path` lands inside, or at, a directory with the identity of a root."""
     return _ancestor_matching_root( real_path, roots ) is not None
 
 
 def landed_relative_path( real_path: str, root: str ) -> str:
     """
-    `real_path` relative to `root`, even when it landed under another SPELLING of `root`.
+    `real_path` relative to `root`, even when it landed under another spelling of `root`.
 
     Requires:
         - landed_within_roots( real_path, [ root ] ) is True
@@ -925,6 +890,7 @@ def landed_relative_path( real_path: str, root: str ) -> str:
         - returns "" for the root itself, else a path with no leading `..`
         - the guards that judge a path by its relative form (blocklist, whitelist) therefore
           see `io/x.log`, not `../../lupin/io/x.log`
+
     """
     anchor = _ancestor_matching_root( real_path, [ root ] )
     rel    = os.path.relpath( real_path, anchor )
@@ -940,21 +906,22 @@ def resolve_in_scope( scope_cfg: ScopeConfig, decoded_path: str ) -> str:
         - decoded_path is a URL-decoded relative path (no leading slash); may be ""
 
     Ensures:
-        - returns the REAL absolute path — symlinks followed — which lands inside the scope
-          root's DIRECTORY (identity, so a second mount prefix of the same directory counts)
+        - returns the real absolute path, with symlinks followed, which lands inside the scope
+          root's directory (identity, so a second mount prefix of the same directory counts)
         - raises ValueError if the real path escapes the scope root
-        - a link planted in the scope that lands OUTSIDE it answers the same ValueError whether or
-          not its target exists (row 9b80ef75): two answers would let whoever planted the link
-          probe which outside paths exist. A link whose missing target lies INSIDE the scope
+        - a link planted in the scope that lands outside it answers the same ValueError whether or
+          not its target exists: two answers would let whoever planted the link
+          probe which outside paths exist. A link whose missing target lies inside the scope
           passes here and is an ordinary missing file for the caller.
 
     Raises:
         - ValueError
 
-    `realpath`, not `normpath` (row 9ab0bddb). normpath collapses `..` textually and
-    never follows a symlink, so a link planted inside the root was judged by the name
-    the caller typed while `open()` read wherever it pointed. Callers re-run their
-    guards on `landed_relative_path( returned, scope_cfg.root )`.
+    It uses `realpath`, not `normpath`. `normpath` collapses `..` textually and never follows a
+    symlink, so a link planted inside the root would be judged by the name the caller typed while
+    `open()` read wherever it pointed. Callers re-run their guards on
+    `landed_relative_path( returned, scope_cfg.root )`.
+
     """
     root      = os.path.realpath( scope_cfg.root )
     joined    = os.path.join( root, decoded_path )

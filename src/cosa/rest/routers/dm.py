@@ -1,18 +1,16 @@
 """
-DM API — `/api/dm/<verb>` notification-native AI↔AI direct messaging.
+DM API: `/api/dm/<verb>` notification-native AI to AI direct messaging.
 
-One coherent `/api/dm` namespace whose verb sub-routes each mirror a `dm_<verb>`
-cosa-voice MCP tool 1:1. Phase 1 ships `POST /api/dm/send` (the relocated,
-renamed legacy peer-DM endpoint); Phase 2 adds the siblings `/respond`, `/get`,
-`/list` against the same router.
+One `/api/dm` namespace whose verb sub-routes each mirror a `dm_<verb>` cosa-voice MCP tool
+one to one. The router carries `POST /api/dm/send` (the relocated, renamed legacy peer-DM
+endpoint) and its siblings `/respond`, `/get` and `/list`.
 
-A peer DM is an ordinary notification carrying the body INLINE with
-direction="ai_to_ai" — no commons board, no claim-check, no commons_read
-re-fetch. Resolution reuses the commons same-user persona→session resolver;
-delivery rides job_id routing to the recipient's cc-listener.
+A peer DM is an ordinary notification that carries the body inline with
+direction="ai_to_ai". It uses no commons board, no claim-check and no commons_read
+re-fetch. Resolution reuses the commons same-user persona to session resolver.
+Delivery rides job_id routing to the recipient's cc-listener.
 
 Design:
-    src/rnd/v0.1.8/2026.06.16-dm-api-namespace-design.md (namespace)
     src/rnd/v0.1.8/2026.06.13-cosa-voice-token-reduction/02-notification-native-aixai-design.md (send semantics)
 """
 
@@ -52,14 +50,14 @@ router = APIRouter( prefix="/api/dm", tags=["dm"] )
 
 class DmSendRequest( BaseModel ):
     """
-    POST /api/dm/send request body — notification-native AI↔AI DM.
+    POST /api/dm/send request body for a notification-native AI to AI DM.
 
-    The recipient is addressed by persona name (preferred) or explicit session
-    id; resolution is same-user scoped. The message body travels INLINE (no
-    claim-check). Threading is carried by `reply_to` (the message being answered)
-    and `thread_id` (conversation correlation; defaults to a fresh id server-side
-    when omitted). `sender_persona`/`sender_icon` carry the SENDER's identity so
-    the recipient can frame it as "[DM from <persona> <icon>]".
+    The recipient is addressed by persona name (preferred) or explicit session id.
+    Resolution is same-user scoped. The message body travels inline, with no claim-check.
+    Threading is carried by `reply_to` (the message being answered) and `thread_id`
+    (conversation correlation, defaulting to a fresh id server-side when omitted).
+    `sender_persona` and `sender_icon` carry the sender's identity, so the recipient can
+    frame it as "[DM from <persona> <icon>]".
     """
     sender_session_id    : str             = Field( ..., min_length=1, max_length=128 )
     body                 : str             = Field( ..., min_length=1 )
@@ -86,13 +84,14 @@ def _persist_dm_send_sync(
     sender_persona, sender_icon, reply_to, thread_id, job_id
 ):
     """
-    Synchronous DB persist for a peer DM — run OFF the event loop via
-    asyncio.to_thread. The notifications table IS the audit substrate (no commons
-    board mirror), so the body + direction + provenance + threading land in
-    first-class columns.
+    Persist a peer DM to the notifications table, synchronously.
+
+    Run it off the event loop with asyncio.to_thread. The notifications table is the audit
+    substrate, with no commons board mirror. The body, direction, provenance and threading
+    therefore land in first-class columns.
 
     Requires:
-        - recipient_user_id is a UUID string (same-user scoping → the sender's user)
+        - recipient_user_id is a UUID string (same-user scoping, so the sender's user)
 
     Ensures:
         - creates the Notification row with direction='ai_to_ai' + DM fields
@@ -166,7 +165,7 @@ def get_dm_project_audit():
     Snapshot of the un-projected-DM audit.
 
     Ensures:
-        - returns a COPY (the sender list included), so a reader cannot mutate
+        - returns a copy (the sender list included), so a reader cannot mutate
           the live counters by holding the result
     """
     snapshot = dict( _dm_project_audit )
@@ -176,7 +175,7 @@ def get_dm_project_audit():
 
 def format_dm_project_audit_line():
     """
-    One readable line carrying BOTH counts — including the zeros.
+    One readable audit line carrying both counts, including the zeros.
 
     Ensures:
         - contains `projected=<n>` and `un_projected=<n>` unconditionally
@@ -193,14 +192,11 @@ def format_dm_project_audit_line():
 
 def _make_sender_id_builder( host_builder ):
     """
-    Adapt the host-shaped `build_sender_id_for_cc` into the two-argument seam
-    `execute_dm_send` calls.
+    Adapt `build_sender_id_for_cc` into the two-argument seam `execute_dm_send` calls.
 
-    When the caller SENT its project, the stamp is built from that project
-    directly — `build_sender_id_for_cc` is never consulted, because its whole
-    resolution chain answers "what project is THIS PROCESS in?" and this process
-    is the server. When the caller sent nothing, the host builder runs exactly as
-    it does today (the step-1 transition contract).
+    When the caller sent its project, the stamp is built from it and `build_sender_id_for_cc` is never consulted.
+    Its resolution chain answers "what project is this process in?", and this process is the server.
+    When the caller sent nothing, the host builder runs exactly as before.
 
     Requires:
         - host_builder( session_id ) -> sender_id str (the legacy 1-arg helper)
@@ -208,7 +204,7 @@ def _make_sender_id_builder( host_builder ):
     Ensures:
         - returns a callable ( session_id, project=None ) -> sender_id str
         - a supplied project produces `claude.code@<project>.deepily.ai#<sid>`
-          via the SHARED build_sender_id formatter — never a locally-formatted
+          via the shared build_sender_id formatter, never a locally-formatted
           string, so the one format stays owned in one place
         - an absent project delegates to host_builder unchanged
     """
@@ -286,7 +282,7 @@ def get_dm_length_audit():
     Snapshot of the DM length audit, with derived averages.
 
     Ensures:
-        - returns a COPY (a reader cannot mutate the live counters by holding it)
+        - returns a copy (a reader cannot mutate the live counters by holding it)
         - includes avg_chars / avg_words / avg_sentences, all 0.0 (never
           divide-by-zero) when count is 0
     """
@@ -319,13 +315,13 @@ def format_dm_length_audit_line():
 
 def _record_dm_length( body_text ):
     """
-    Count one dm_send body's length (Phase 1 DM Verbosity Reduction A/B).
+    Count the length of one dm_send body for the DM verbosity A/B comparison.
 
     Requires:
         - body_text is the caller-supplied DM body string
 
     Ensures:
-        - measures body_text AS SUPPLIED, before any timestamp/frame prefix is
+        - measures body_text as supplied, before any timestamp/frame prefix is
           added elsewhere in the send path, so constant per-DM overhead never
           pollutes the arm-to-arm delta
         - increments count, total_chars, total_words, total_sentences
@@ -364,16 +360,16 @@ _DM_CORPUS_DIR_ENV = "LUPIN_DM_CORPUS_DIR"
 
 def _resolve_dm_corpus_dir():
     """
-    The directory the DM traffic corpus is written to — outside the repo, always.
+    The directory the DM traffic corpus is written to, always outside the repo.
 
     Ensures:
         - returns $LUPIN_DM_CORPUS_DIR when set (the container's mount point)
         - otherwise returns <fleet data root>/dm-corpus, the same convention hold
           files and the rest of the fleet's runtime state already use
-        - NEVER returns a path inside the repo checkout. The last-resort fallback,
-          used only if the fleet-root helper cannot be imported, derives the same
-          location arithmetically rather than degrading to src/tmp/ — a silent
-          degradation back into the tree would undo the whole point of the move.
+        - never returns a path inside the repo checkout. The last-resort fallback is
+          used only if the fleet-root helper cannot be imported. It derives the same
+          location arithmetically rather than degrading to src/tmp/. A silent
+          degradation back into the tree would undo the point of the move.
 
     Raises:
         - nothing
@@ -415,11 +411,11 @@ _PROCESS_BOOT_ID = uuid.uuid4().hex[ :12 ]
 
 def _resolve_git_sha():
     """
-    The commit this process's tree was at when it booted — resolved ONCE.
+    The commit this process's tree was at when it booted, resolved once at import.
 
-    A long-lived server imports its tree at boot and serves those bytes for its whole
-    life (auto-reload is off), so the sha that matters is the one read at import, not
-    the one a reader would get by running git later.
+    A long-lived server imports its tree at boot and serves those bytes for its whole life,
+    because auto-reload is off. The sha that matters is therefore the one read at import.
+    It is not the one a reader would get by running git later.
 
     Ensures:
         - returns a short sha string, or "unknown" on any failure
@@ -449,7 +445,7 @@ def _process_provenance():
     Ensures:
         - returns a fresh dict (a caller cannot mutate the shared stamp)
         - every value is JSON-serializable
-        - identifies the PROCESS (boot_id, pid, host, port) and the CODE
+        - identifies the process (boot_id, pid, host, port) and the code
           (git_sha, writer, schema version) separately, because they answer
           different questions and a single "version" field answers neither well
 
@@ -475,9 +471,12 @@ _DM_TRAFFIC_PRODUCTION_PATH = _DM_TRAFFIC_JSONL
 
 
 def _running_under_pytest():
-    """True iff this process is executing a pytest test (pytest sets
-    PYTEST_CURRENT_TEST per test). The one signal a self-guard can read without the
-    cooperation of whoever writes the next test."""
+    """
+    True when this process is executing a pytest test.
+
+    Pytest sets PYTEST_CURRENT_TEST per test. It is the one signal a self-guard can read
+    without the cooperation of whoever writes the next test.
+    """
     return os.environ.get( "PYTEST_CURRENT_TEST" ) is not None
 
 
@@ -485,41 +484,40 @@ def _persist_dm_row( *, body_text, from_persona, from_session, from_project,
                      to_persona, to_session, quality, experiment=None,
                      delivered_text=None, tutor=None ):
     """
-    Append ONE JSON line describing this sent DM to the traffic corpus.
+    Append one JSON line describing this sent DM to the traffic corpus.
 
     Requires:
-        - identities are passed IN by the caller (dm.py send path), where they are
-          already resolved — this writer resolves nothing itself
+        - identities are passed in by the caller (dm.py send path), where they are
+          already resolved; this writer resolves nothing itself
         - quality is DmQualityJudge.judge()'s dict ({"length","directness","tone",
-          "overall"}) or None when the judge toggle is OFF / the DM was not delivered
+          "overall"}) or None when the judge toggle is off or the DM was not delivered
         - experiment is the two-arm-pilot field dict (schedule_id, effective_arm,
-          length_gate, delivery_outcome, ...) when the send fell INSIDE the experiment
+          length_gate, delivery_outcome, ...) when the send fell inside the experiment
           window, or None outside it
-        - body_text is what the SENDER SUBMITTED; delivered_text is what the recipient
+        - body_text is what the sender submitted; delivered_text is what the recipient
           actually received (None means "identical to submitted")
         - tutor is _apply_dm_tutor's meta dict, or None when the tutor never ran
 
     Ensures:
-        - SELF-GUARD (row f5d6dc5e): refuses to write the PRODUCTION corpus from any
-          pytest process, even if the conftest redirect fixture is not in play — the
-          check lives in the code being protected, so it cannot be forgotten by
-          whoever adds the next test. LIMIT, stated plainly rather than left implied:
-          this catches PYTEST ONLY. A hand-run script that imports this module and
-          sends a DM is caught by NEITHER this guard NOR the fixture — which is exactly
-          why every row also carries `origin`, so such a contaminant can at least be
-          identified after the fact instead of inferred from a timezone.
-        - AUDITABLE: every row carries `origin` — "live" for a real send, "test" for a
-          write made from within pytest (to a redirected sink) — so a reader filters on
+        - self-guard: refuses to write the production corpus from any pytest process,
+          even if the conftest redirect fixture is not in play. The check lives in the
+          code being protected, so whoever adds the next test cannot forget it. Limit,
+          stated plainly rather than left implied: this catches pytest only. A hand-run script that imports this module and sends
+          a DM is caught by neither this guard nor the fixture. That is why every row
+          also carries `origin`, so such a contaminant can at least be identified after the
+          fact instead of inferred from a timezone.
+        - auditable: every row carries `origin`, "live" for a real send and "test" for a
+          write made from within pytest (to a redirected sink), so a reader filters on
           the field instead of guessing from where the process happened to run. It also
-          carries `arm` (row f4bb1cdb), the config-derived feedback experiment arm in
-          force ("signal_only" today), so the two-arm study is split by reading the row.
-        - FAIL-SOFT: the whole body is wrapped in try/except and NEVER raises into
-          the send path. dm_send is the fleet's comms bus; a corpus-write failure
+          carries `arm`, the config-derived feedback experiment arm in force
+          ("signal_only" today), so the two-arm study is split by reading the row.
+        - fail-soft: the whole body is wrapped in try/except and never raises into
+          the send path. dm_send is the fleet's comms bus, so a corpus-write failure
           must not take a DM down (and by call-site placement the DM is already
           sent when this runs). On failure it prints a warning and returns.
-        - ADDITIVE: does not touch the in-memory counter or its audit line
+        - additive: does not touch the in-memory counter or its audit line
         - grade fields carry the judge's integer weight per dimension, or null when
-          `quality` is None (judge off) — the row is still written either way
+          `quality` is None (judge off); the row is still written either way
     """
     under_pytest = _running_under_pytest()
     # SELF-GUARD: a pytest process may never write the real corpus. When the sink IS
@@ -625,13 +623,14 @@ _dm_quality_judge = None
 
 def get_dm_quality_judgment_enabled():
     """
-    Resolve the `dm quality judgment enabled` toggle from lupin-app.ini at call
-    time — runtime-tunable, same precedent as the cosa-voice spoken-char-cap read.
+    Resolve the `dm quality judgment enabled` toggle from lupin-app.ini at call time.
+
+    The toggle is runtime-tunable, the same precedent as the cosa-voice spoken-char-cap read.
 
     Ensures:
         - returns True only when the ini key is explicitly True
         - returns False if the key is absent or on any config-read error (the
-          safe CONTROL default) — never raises
+          safe control default), never raises
     """
     from cosa.config.configuration_manager import ConfigurationManager
     try:
@@ -642,15 +641,15 @@ def get_dm_quality_judgment_enabled():
 
 
 def get_dm_feedback_arm():
-    """The DM feedback EXPERIMENT ARM in force, derived from config (row f4bb1cdb).
+    """
+    The DM feedback experiment arm in force, derived from config.
 
-    Rick 2026-08-02: `dm reject on overage` False OR ABSENT → "signal_only" (arm A, the
-    current feedback-only world); True → "reject_on_overage" (arm B). A MISSING key is a
-    VALID arm-A state, never an error — so a config-read failure resolves to arm A too,
-    NOT fail-closed. Nothing ACTS on True yet: no reject path exists. The value only
-    LABELS each corpus row so arm A stays separable from a future arm B by READING the
-    row, instead of inferring the condition from when the row was written (the same
-    timestamp-inference mistake the `origin` stamp already retired).
+    `dm reject on overage` False or absent gives "signal_only" (arm A, the current
+    feedback-only behaviour). True gives "reject_on_overage" (arm B). A missing key is a valid
+    arm A state, not an error. A config-read failure also resolves to arm A, not fail-closed.
+    Nothing acts on True yet, because no reject path exists. The value only labels each corpus
+    row. Arm A therefore stays separable from a future arm B by reading the row. Inferring the
+    condition from when the row was written is the mistake the `origin` stamp already retired.
     """
     from cosa.config.configuration_manager import ConfigurationManager
     try:
@@ -762,13 +761,7 @@ _FAB_NOT_PATHS = frozenset(
 
 def _parse_path_fab_mode( raw ):
     """
-    Resolve the INI path-guard mode, failing toward the STRONGER check.
-
-    ⚠️ A TYPO MUST NOT SILENTLY WEAKEN A GUARD (María, 2026-08-26). The first cut treated
-    "anything that is not `pointer`" as the legacy branch, so `Pointr` in the ini would have
-    rolled the fleet back to the blind pattern with nothing said. An unrecognised value now
-    resolves to `pointer` AND says so on stdout: the reader gets a wrong-looking config
-    reported, never a guard quietly doing less than it says.
+    Resolve the INI path-guard mode, failing toward the stronger check.
 
     Requires:
         - raw is a string or None
@@ -781,6 +774,12 @@ def _parse_path_fab_mode( raw ):
 
     Raises:
         - nothing
+
+    A typo must not silently weaken a guard. Treating anything that is not `pointer` as the
+    legacy branch would let a misspelling such as `Pointr` roll the fleet back to the blind
+    pattern with nothing said. An unrecognised value therefore resolves to `pointer` and says
+    so on stdout. The reader gets a wrong-looking config reported, never a guard quietly doing
+    less than it says.
     """
     value = ( raw or "" ).strip().lower()
     if value in ( "", "pointer" ): return "pointer"
@@ -844,13 +843,12 @@ def get_dm_tutor_config():
     """
     Read the tutor's runtime knobs from lupin-app.ini.
 
-    Runtime-configurable was Rick's explicit requirement — "so that we can dial it
-    down if we find that the length of the DMs is rising to the enforced limit" —
-    so nothing here is a constant in code.
+    Every knob is runtime-configurable, so the tutor can be dialled down if the length of the
+    DMs rises to the enforced limit. Nothing here is a constant in code.
 
     Ensures:
         - returns a dict with enabled / trigger_claims / gate_enabled / gate_max_claims
-        - a config-read failure returns the defaults with enabled FALSE, so an
+        - a config-read failure returns the defaults with enabled False, so an
           unreadable config delivers original messages rather than routing every DM
           in the fleet through a model on assumptions
 
@@ -880,59 +878,42 @@ def get_dm_tutor_config():
 
 def _restore_dropped_pointers( original, rewritten ):
     """
-    Put back any path or URL the rewrite lost. Returns the repaired text.
-
-    ⚠️ THE DEFECT THIS FIXES WAS LIVE (Cheech, 2026-08-13): the tutor paraphrased a
-    path out of a real DM and left the literal words "probe script path" in its place.
-    The house rule the tutor exists to teach is "three sentences and A PATH" — so the
-    single element the rule names by name is the one the rewrite destroyed, and the
-    recipient was handed a message whose pointer had become prose.
-
-    WHY THIS IS CODE AND NOT A PROMPT LINE. Asking the model to reproduce a path
-    verbatim is a request that fails silently and only in the cases that matter — long
-    messages, unusual paths. Lifting the pointers out of the model's reach and putting
-    them back is a guarantee. It is the same reasoning that keeps the sentence COUNT in
-    code: a model is the wrong instrument for exactness.
+    Put back any path or URL the rewrite lost, and return the repaired text.
 
     Requires:
-        - original and rewritten are strings
-
-    ⚠️ ONLY PATHS COME BACK, AND ONLY ONE LINE OF THEM (Rick, 2026-08-21, row
-    a0151611). This guard used to append EVERY dropped pointer token as its own line,
-    8-hex row ids included, so a DM carrying fifteen identifiers was delivered with a
-    run of bare hashes under it: "what is obviously pointless and nonsensical is 10 to
-    12 lines of hashes… a standalone nonsensical out-of-context hash has no place
-    there." A path survives losing the sentence around it — it still says where to
-    look. An id does not. So the restore selects on `restorable_pointers`, which drops
-    the bare-identifier shape, and appends at most ONE line.
-
-    ONE LINE, EVERY DROPPED PATH ON IT (Rick's ruling, 2026-08-21). Discarding a real
-    pointer is the exact defect this guard was built for, so the rare message that
-    loses two paths gets both back — joined by a space, on the one appended line, in
-    first-seen order. That cost one thing and it was paid rather than absorbed: a
-    multi-pointer line did NOT match the counter's whole-line structure rule, so a
-    compliant three-claim rewrite plus a two-path line counted FOUR. `_ATTACHMENT` now
-    recognises a RUN of pointers as structure, which is what this module's own rule
-    ("a line that asserts nothing is structure") always implied.
-
-    Requires:
-        - original and rewritten are strings
+        - original is a string
+        - rewritten is a string
 
     Ensures:
         - a path, URL or bare filename present in `original` and absent from the
           rewrite is restored, whether it stood on its own line in the original or was
-          buried mid-sentence (row a74f2176)
-        - a BARE 8-hex row id is never restored — dropped by the model, it stays gone
-        - a pointer the rewrite ALREADY kept is not duplicated — membership is checked
-          against the rewrite's whole text, so a path the model correctly carried
-          through inline (not as its own line) still counts as kept
+          buried mid-sentence
+        - a bare 8-hex row id is never restored: dropped by the model, it stays gone
+        - a pointer the rewrite already kept is not duplicated. Membership is checked
+          against the rewrite's whole text, so a path the model carried through inline
+          (not as its own line) still counts as kept
         - returns `rewritten` unchanged when nothing restorable was dropped
-        - at most ONE line is appended, carrying every dropped path joined by a space,
-          which the counter treats as structure, so repairing a message can never push
-          it back over the trigger
+        - at most one line is appended, carrying every dropped path joined by a space.
+          The counter treats that line as structure, so repairing a message can never
+          push it back over the trigger
 
     Raises:
         - nothing
+
+    The tutor can paraphrase a path out of a real DM and leave words such as "probe script path" in
+    its place. The house rule is "three sentences and a path", so such a rewrite destroys the one element the rule names.
+
+    This is code, not a prompt line. Asking the model to reproduce a path verbatim fails silently, and only in the cases
+    that matter, such as long messages and unusual paths. Lifting the pointers out of the model's reach and putting them
+    back is a guarantee. The same reasoning keeps the sentence count in code, because a model is the wrong instrument for exactness.
+
+    Only paths come back, and only one line of them. Appending every dropped token as its own line, 8-hex row ids included,
+    delivered a DM carrying fifteen identifiers with a run of bare hashes under it. A path survives losing its sentence and
+    still says where to look. An id does not. So the restore selects on `restorable_pointers`, which drops the bare-identifier shape.
+
+    Every dropped path goes on that one line, joined by a space, in first-seen order, because discarding a real pointer is the
+    defect this guard exists for. A multi-pointer line once failed the counter's whole-line structure rule, so a compliant
+    three-claim rewrite plus a two-path line counted four. `_ATTACHMENT` now recognises a run of pointers as structure.
     """
     try:
         from cosa.agents.dm_tutor.sentences import restorable_pointers
@@ -1027,12 +1008,12 @@ def _load_lowercase_words( path ):
 
     Ensures:
         - returns a frozenset of the non-blank lines, stripped
-        - returns an EMPTY frozenset if the file cannot be read, after saying so on
+        - returns an empty frozenset if the file cannot be read, after saying so on
           stdout. An empty set exempts nothing, so an unreadable list degrades to the
-          pre-V3 behaviour — MORE blocking, never less. Failing toward the permissive
+          earlier behaviour, which blocks more and never less. Failing toward the permissive
           side would silently disarm the guard, which is the opposite of what a missing
           file should do
-        - NEVER raises. This runs at import; one bad file must not take the whole DM
+        - never raises. This runs at import, and one bad file must not take the whole DM
           send path down with it
     """
     try:
@@ -1045,8 +1026,9 @@ def _load_lowercase_words( path ):
 
 def _strict_wordlist_path():
     """
-    Absolute path of the vendored list. Separate from the load so a test can point at
-    a fixture without monkeypatching `open`.
+    Absolute path of the vendored word list.
+
+    It is separate from the load so a test can point at a fixture without monkeypatching `open`.
 
     Ensures:
         - returns the project-root-relative path resolved through the canonical helper
@@ -1066,12 +1048,7 @@ _FAB_LOWERCASE_WORDS = _load_lowercase_words( _strict_wordlist_path() )
 
 def _strict_exempt( token, wordlist ):
     """
-    True when `token` is a capitalised form of a LOWERCASE word-list entry.
-
-    ⚠️ THE CURLY APOSTROPHE IS NOT COSMETIC. The rewriter is a language model and emits
-    U+2019 constantly. The vendored list holds ASCII apostrophes, so without this
-    normalisation "Update's" is exempt and "Update’s" is blocked — the same word, the
-    same meaning, opposite verdicts, decided by a character nobody can see in a diff.
+    True when `token` is a capitalised form of an entry in the lowercase word list.
 
     Requires:
         - token is a string, wordlist is a set of lowercase strings
@@ -1079,6 +1056,11 @@ def _strict_exempt( token, wordlist ):
     Ensures:
         - returns True iff the lowercased, apostrophe-normalised token is in wordlist
         - never raises
+
+    The curly apostrophe is not cosmetic. The rewriter is a language model and often emits
+    U+2019. The vendored list holds ASCII apostrophes. Without the normalisation, "Update's" is
+    exempt and "Update’s" is blocked. That is the same word and meaning with opposite verdicts,
+    decided by a character nobody can see in a diff.
     """
     return token.lower().replace( "\u2019", "'" ) in wordlist
 
@@ -1096,11 +1078,11 @@ _FAB_TERMINAL_STOP = re.compile( r"(?<=[\w])([.,;:!?)\]}])(?=\s|$)" )
 
 def _fabricated_paths_legacy( original, rewritten ):
     """
-    The pre-2026-08-26 path check, verbatim: a set difference over `_FAB_PATH_LEGACY`.
+    The earlier path check, kept as a rollback: a set difference over `_FAB_PATH_LEGACY`.
 
-    Reached only when `dm tutor path fabrication guard mode` is "legacy". It cannot see a
-    bare filename — that blindness IS the defect of row f3d96537 — but it does refuse an
-    invented SLASHED path or URL, which is what makes it a rollback rather than a downgrade.
+    Reached only when `dm tutor path fabrication guard mode` is "legacy". It cannot see a bare
+    filename, which is the defect the pointer mode fixes. It does refuse an invented slashed path
+    or URL. That is what makes it a rollback rather than a downgrade.
 
     Requires:
         - original and rewritten are strings
@@ -1124,33 +1106,6 @@ def _fabricated_paths( original, rewritten, product_names=_FAB_NOT_PATHS ):
     """
     Pointer-shaped tokens the rewrite asserts that the original never vouched for.
 
-    ⚠️ THE DEFECT THIS FIXES WAS LIVE (María, 2026-08-26, row f3d96537). The condenser
-    read the prose "seven guards in dm.py" and delivered `seven-guards-in-dm.py` — a
-    filename nobody has ever written, in the slot Rick ruled protected (a0151611). The
-    old check could not see it: it carried its own path pattern requiring a slash or a
-    URL scheme, so a bare filename was not a path to it, while the RESTORE side's
-    recogniser had known that shape all along. This asks the restore side's question.
-
-    ⚠️ AND IT IS NOT A SET DIFFERENCE OVER TOKENS, WHICH IS THE PART THAT COSTS MAIL.
-    Measured on the 4,489 delivered rewrites in the corpus, a plain token-set difference
-    flags 47 of them (1.05%) — because `restorable_pointers` lifts the WHOLE path out of
-    the original, so a rewrite abbreviating `src/cosa/rest/todo_fifo_queue.py` to
-    `todo_fifo_queue.py` reads as an invention. That is honest mail, and refusing it is
-    this guard's own failure mode. So membership is a SUBSTRING test against the whole
-    original — the exact mirror of `_restore_dropped_pointers`, which asks `p not in
-    rewritten`. Same idea, same direction, one shape.
-
-    Two further ways a rewrite can be faithful and still look novel, each earned by
-    reading the hits rather than assumed:
-      · CASE. "Registry.py" opening a sentence is `registry.py` capitalised, not a new
-        file — 11 of the 26 substring hits were exactly this.
-      · AN ELIDED SUFFIX. A sender writes "executor.py:106, :108, :115"; the rewrite
-        expands ":108" to "executor.py:108" and cites precisely what was meant.
-
-    ⚠️ ALL THREE RELAXATIONS ARE FITTED, NOT VALIDATED. They were derived by reading the
-    hits on this corpus, so a rate computed on that same corpus is in-sample and must not
-    be quoted as the cost. The out-of-sample figure is in the writeup.
-
     Requires:
         - original and rewritten are strings
         - product_names is a set of lowercase names
@@ -1162,13 +1117,30 @@ def _fabricated_paths( original, rewritten, product_names=_FAB_NOT_PATHS ):
         - a token of the form `file.ext:LINE` is not returned when `original` carries
           both the file and that `:LINE` suffix
         - a name in `product_names` is never returned
-        - a pointer that ENDS a sentence is seen: terminal punctuation is lifted off the
+        - a pointer that ends a sentence is seen: terminal punctuation is lifted off the
           word before the recogniser reads it
         - never raises: an unreadable comparison returns [], which leaves the tutor
           exactly as safe as it was before this check existed
 
     Raises:
         - nothing
+
+    The condenser once read the prose "seven guards in dm.py" and delivered `seven-guards-in-dm.py`, a filename
+    nobody wrote, in the slot the house rule protects. The older check required a slash or a URL scheme, so a bare
+    filename was not a path to it. The restore side's recogniser knew that shape all along, and this check asks its question.
+
+    It is not a set difference over tokens, and that is the part that costs real mail. Measured on 4,489 delivered
+    rewrites, a plain token-set difference flags 47 of them (1.05%). `restorable_pointers` lifts the whole path out of the
+    original, so a rewrite abbreviating `src/cosa/rest/todo_fifo_queue.py` to `todo_fifo_queue.py` reads as an invention.
+    That is honest mail, and refusing it is this guard's own failure mode. So membership is a substring test against the
+    whole original, the mirror of `_restore_dropped_pointers`, which asks `p not in rewritten`.
+
+    Two further ways a rewrite can be faithful and still look novel were found by reading the hits:
+        - case: "Registry.py" opening a sentence is `registry.py` capitalised, not a new file (11 of the 26 substring hits).
+        - an elided suffix: a sender writes "executor.py:106, :108", and the rewrite expands ":108" to "executor.py:108".
+
+    All three relaxations are fitted, not validated. They were derived by reading the hits on this corpus, so a rate
+    computed on that same corpus is in-sample and must not be quoted as the cost.
     """
     try:
         from cosa.agents.dm_tutor.sentences import restorable_pointers
@@ -1191,47 +1163,43 @@ def _fabricated_paths( original, rewritten, product_names=_FAB_NOT_PATHS ):
 def _fabricated_facts( original, rewritten, strict=True, product_names=_FAB_NOT_PATHS,
                        path_mode="pointer" ):
     """
-    Checkable facts the rewrite asserts that the original never did. Empty = clean.
-
-    ⚠️ THE FAILURE THIS BOUNDS is a different class from losing something. On
-    2026-08-13 the tutor turned a message about a task-store row into three sentences
-    about "the reviewer" wanting documentation. There was no reviewer. Cheech put the
-    point better than I did: a DROPPED path is visibly missing, so he asked — an
-    INVENTED one READS AS SIGNAL, and his first instinct was to work out which reviewer
-    and which change. Only the rest of the message being incoherent stopped him.
-
-    And it is UNBOUNDED: a rewriter that can add one fact can add any fact. No trigger
-    value limits that, which is why raising the trigger was the wrong answer — it
-    changes how often the dice are rolled, not what happens when they land wrong.
+    Checkable facts the rewrite asserts that the original never did. Empty means clean.
 
     Requires:
         - original and rewritten are strings
 
     Ensures:
         - returns { class: [values] } for numbers, hex ids, paths and capitalised names
-          present in `rewritten` but NOT in `original`
-        - `path_mode="legacy"` falls back to the PRE-2026-08-26 pattern, which
+          present in `rewritten` but not in `original`
+        - `path_mode="legacy"` falls back to the earlier pattern, which
           still refuses an invented slashed path or URL and cannot see a bare filename;
-          EVERY other value, recognised or not, asks the restore side's recogniser. The
+          every other value, recognised or not, asks the restore side's recogniser. The
           rollback is to the old behaviour, never to none, and a typo cannot cause one
-        - NAMES are matched POSITION-INDEPENDENTLY against every word of the original,
-          case-folded. An earlier version excluded sentence-initial words to cut false
-          positives and thereby missed a fabricated name in the commonest position of
-          all — the start of a sentence. The control caught that before it shipped.
+        - names are matched position-independently against every word of the original,
+          case-folded. Excluding sentence-initial words to cut false
+          positives missed a fabricated name in the commonest position of
+          all, the start of a sentence. The control caught that before it shipped.
         - never raises
 
-    MEASURED against the 27 real rewrite pairs in the live corpus, not assumed:
-        · fires on a fabricated sha, number, path and name (controls)
-        · silent on a faithful rewrite and on a faithful reordering
-        · blocks 1 of 27 real pairs (4%) — and that one replaced "Force-recreated" with
-          "Deployed", a meaning change worth refusing anyway
+    Raises:
+        - nothing
 
-    KNOWN LIMIT, stated because glossing it would be the same defect this guards
-    against: it cannot see a fabricated COMMON NOUN. "the reviewer" is lowercase and
-    passes untouched. A content-word novelty rule was measured as the alternative and
-    REJECTED on the same corpus — it would have blocked 23 of 27, because paraphrasing
-    is the entire point of the tutor. That class needs the fail-first prompt regression,
-    which is not built.
+    The failure this bounds is a different class from losing something. The tutor once turned a message about a
+    task-store row into three sentences about "the reviewer" wanting documentation. There was no reviewer. A dropped
+    path is visibly missing, so the reader asks. An invented one reads as signal, and the reader starts working out
+    which reviewer and which change. It is unbounded: a rewriter that can add one fact can add any fact. No trigger
+    value limits that. Raising the trigger was the wrong answer, because it changes how often the dice are rolled,
+    not what happens when they land wrong.
+
+    Measured against the 27 real rewrite pairs in the live corpus:
+        - fires on a fabricated sha, number, path and name (controls)
+        - silent on a faithful rewrite and on a faithful reordering
+        - blocks 1 of 27 real pairs (4%). That one replaced "Force-recreated" with "Deployed",
+          a meaning change worth refusing anyway.
+
+    Known limit: it cannot see a fabricated common noun. "the reviewer" is lowercase and passes untouched. A content-word
+    novelty rule was measured as the alternative and rejected on the same corpus, because it would have blocked 23 of 27.
+    Paraphrasing is the entire point of the tutor. That class needs the fail-first prompt regression, which is not built.
     """
     try:
         def classes( text ):
@@ -1316,44 +1284,42 @@ def _quantity_bindings( text ):
 
 def _rescoped_quantities( original, rewritten ):
     """
-    Quantities the rewrite moved to the other side of a ledger. Empty = clean.
-
-    ⚠️ THE FAILURE THIS BOUNDS is not fabrication, and `_fabricated_facts` is blind to it
-    by construction. On 2026-08-14 the tutor turned
-
-        "tonight's 72 commits undercount by whatever is in them"   (the 72 are COUNTED)
-
-    into
-
-        "the roll-up undercounts by 72 commits plus whatever is in the 7 modified files"
-                                                                   (the 72 are MISSING)
-
-    Every number in the output was in the input, so nothing was invented — a quantity
-    changed which clause it was bound to. María had just published a roll-up containing
-    those 72 commits; as delivered, a peer appeared to be telling her the number was
-    wrong. She asked whether the line was the sender's, and that is the only reason it
-    was caught.
+    Quantities the rewrite moved to the other side of a ledger. Empty means clean.
 
     Requires:
         - original and rewritten are strings
 
     Ensures:
-        - returns { quantity: [ markers gained ] } for quantities present in BOTH texts
+        - returns { quantity: [ markers gained ] } for quantities present in both texts
           that gained a ledger marker they did not have
-        - a quantity only the rewrite carries is IGNORED — that is the fabrication
+        - a quantity only the rewrite carries is ignored: that is the fabrication
           guard's job, and double-reporting would make each guard's count unreadable
         - never raises
 
-    MEASURED on the live corpus — 315 real rewrite pairs, 193 carrying a quantity:
-        · refusing any altered sentence with a numeral   → 104/193 (54%), unusable
-        · refusing on ANY scope word gained              →   5/193 (2.6%), and all four
-          extra blocks were read and benign ("D IS sections 7, 9" → "D INCLUDES …")
-        · refusing on a LEDGER marker gained             →   1/193 (0.5%) — the real
-          inversion, and nothing else in a day's traffic
+    The failure this bounds is not fabrication, and `_fabricated_facts` is blind to it by
+    construction. The tutor once turned
 
-    KNOWN LIMIT, stated rather than glossed: the ledger vocabulary is a closed set, so
-    this catches the shape that occurred, not every re-scoping. A rewrite that inverts a
-    meaning without one of those markers passes untouched.
+        "tonight's 72 commits undercount by whatever is in them"   (the 72 are counted)
+
+    into
+
+        "the roll-up undercounts by 72 commits plus whatever is in the 7 modified files"
+                                                                   (the 72 are missing)
+
+    Every number in the output was in the input, so nothing was invented. A quantity changed
+    which clause it was bound to. The author of the roll-up containing those 72 commits would have
+    read a peer as saying the number was wrong.
+
+    Measured on the live corpus of 315 real rewrite pairs, 193 carrying a quantity:
+        - refusing any altered sentence with a numeral: 104/193 (54%), unusable
+        - refusing on any scope word gained: 5/193 (2.6%), and all four extra blocks were read
+          and benign ("D is sections 7, 9" became "D includes ...")
+        - refusing on a ledger marker gained: 1/193 (0.5%), the real inversion and nothing else
+          in a day's traffic
+
+    Known limit: the ledger vocabulary is a closed set, so this catches the shape that occurred,
+    not every re-scoping. A rewrite that inverts a meaning without one of those markers passes
+    untouched.
     """
     try:
         before, after = _quantity_bindings( original ), _quantity_bindings( rewritten )
@@ -1490,19 +1456,19 @@ def _retraction_scope_start( line, echo=False ):
     """
     Where a retraction scope opens on one line, or None if it never does.
 
-    Scope runs from the START OF THE CLAUSE carrying the marker to the end of the
-    line, not from the marker itself. Both orders occur in real banners — "USED TO
-    NAME 12 AM – 9 AM" puts the marker first, "12 AM – 9 AM was wrong" puts it last —
-    and a scope anchored at the marker would miss the second one entirely.
-
     Requires:
         - line is a string
-        - echo is True when scanning a REWRITE (the generous vocabulary) and False when
-          scanning the sender's ORIGINAL (the narrow one)
+        - echo is True when scanning a rewrite (the generous vocabulary) and False when
+          scanning the sender's original (the narrow one)
 
     Ensures:
         - returns an index into `line`, or None when no marker is present
         - never raises
+
+    Scope runs from the start of the clause carrying the marker to the end of the line, not from
+    the marker itself. Both orders occur in real banners. "used to name 12 am - 9 am" puts the
+    marker first, and "12 am - 9 am was wrong" puts it last. A scope anchored at the marker would
+    miss the second one entirely.
     """
     if not line: return None
 
@@ -1525,21 +1491,21 @@ def _retraction_scope_start( line, echo=False ):
 
 def _retraction_split( text ):
     """
-    Literals `text` states as CURRENT, and the ones it states only as RETRACTED.
-
-    Scope is the LINE and not the whole body, deliberately. A correction banner is a
-    paragraph; the live value that replaced it is a different paragraph or a table row.
-    Marking the whole body from the first marker onward would swallow the replacement and
-    protect the very literal the document is trying to promote.
+    Literals `text` states as current, and the ones it states only as retracted.
 
     Requires:
         - text is a string
 
     Ensures:
         - returns ( live, retracted_only ) as two sets of literals
-        - a literal appearing on both sides is LIVE — the sender asserts it somewhere,
+        - a literal appearing on both sides is live: the sender asserts it somewhere,
           so the rewrite is free to assert it too
         - never raises
+
+    Scope is the line and not the whole body. A correction banner is a paragraph, and the live
+    value that replaced it is a different paragraph or a table row. Marking the whole body from
+    the first marker onward would swallow the replacement and protect the very literal the
+    document is trying to promote.
     """
     live, retracted = set(), set()
     for line in ( text or "" ).splitlines():
@@ -1553,23 +1519,23 @@ def _retraction_split( text ):
 
 def _retracted_assertions( original, rewritten ):
     """
-    Retracted values the rewrite asserts as current. Empty = clean.
+    Values the original retracted that the rewrite asserts as current. Empty is clean.
 
     Requires:
         - original and rewritten are strings
 
     Ensures:
-        - returns the sorted literals the ORIGINAL wrote only inside a retraction scope
-          and the REWRITE writes outside one
-        - returns [] when the original retracts nothing — the overwhelmingly common case,
+        - returns the sorted literals the original wrote only inside a retraction scope
+          and the rewrite writes outside one
+        - returns [] when the original retracts nothing, the overwhelmingly common case,
           and the whole check costs one literal pass on those
-        - a rewrite that KEEPS the marker is clean, which is the behaviour we want: the
+        - a rewrite that keeps the marker is clean, which is the behaviour we want: the
           fix is marker preservation, not silence about the past
         - never raises
 
-    KNOWN LIMIT, stated rather than glossed: the marker vocabulary is a closed set, so
-    this catches retractions written the way this fleet writes them, not every possible
-    one. A retraction phrased without one of these markers passes untouched.
+    Known limit: the marker vocabulary is a closed set, so this catches retractions written the
+    way this fleet writes them, not every possible one. A retraction phrased without one of these
+    markers passes untouched.
     """
     try:
         _live, retracted = _retraction_split( original )
@@ -1590,29 +1556,28 @@ def _retracted_assertions( original, rewritten ):
 
 def _invented_id_labels( original, rewritten ):
     """
-    Type nouns the rewrite attached to an id that the sender never attached. Empty = clean.
-
-    ⚠️ THE FAILURE THIS BOUNDS is a fabricated fact that the fabrication guard cannot see,
-    because the invented word is a lowercase COMMON NOUN — the limit `_fabricated_facts`
-    names in its own docstring. Observed live: a store row `0c4e8cfa` delivered as
-    "commit hash 0c4e8cfa", and a session `6794a377` delivered as "bug 6794a377".
-
-    The reader's natural recovery — go look up that commit — fails silently, because the
-    id resolves to nothing in git. It is invisible to the sender, who sees only what they
-    wrote, and it reads exactly like the sender being sloppy: the filer of this row
-    corrected a peer twice for mislabelling ids the peer had labelled correctly.
-
-    A CORRECT guess is still reported. When the condenser calls row `52912c4f` a "row" it
-    happens to be right — and a reader cannot distinguish that from a wrong guess, which
-    is the failure itself.
+    Type nouns the rewrite attached to an id the sender never did. Empty means clean.
 
     Requires:
         - original and rewritten are strings
 
     Ensures:
-        - returns { hex_id: [ nouns gained ] } for ids present in BOTH texts
-        - an id only the REWRITE carries is ignored — that is the fabrication guard's job
+        - returns { hex_id: [ nouns gained ] } for ids present in both texts
+        - an id only the rewrite carries is ignored: that is the fabrication guard's job
         - never raises
+
+    The failure this bounds is a fabricated fact that the fabrication guard cannot see, because
+    the invented word is a lowercase common noun. `_fabricated_facts` names that limit in its own
+    docstring. It was seen live: a store row id delivered as "commit hash <id>", and a session id
+    delivered as "bug <id>".
+
+    The reader's natural recovery is to go look up that commit. It fails silently, because the id
+    resolves to nothing in git. It is invisible to the sender, who sees only what they wrote. It
+    looks like the sender being sloppy, and a peer was corrected twice for mislabelling
+    ids they had labelled correctly.
+
+    A correct guess is still reported. When the condenser calls a row id a "row" it happens to be
+    right. A reader cannot distinguish that from a wrong guess, which is the failure itself.
     """
     try:
         before, after = _id_label_bindings( original ), _id_label_bindings( rewritten )
@@ -1630,24 +1595,23 @@ def _strip_invented_id_labels( original, rewritten ):
     """
     Delete type nouns the rewrite invented, keeping the compression. Repair, not refusal.
 
-    WHY REPAIR RATHER THAN REFUSE, measured on the live corpus (134 rewrite pairs carrying
-    a bare hex id): 18 invent a noun. Refusing all 18 costs 13.4% of the tutor's output on
-    a defect that is usually precisely repairable — one word, deletable without touching
-    anything else the sender meant. Stripping fixes 12 of them cleanly.
-
-    THE OTHER 6 ARE WHY THE CALLER MUST RE-CHECK. A naive strip cannot reach a noun that
-    sits AFTER its id ("92062fe2, the commit, ...") or one exposed only once another is
-    removed. A repair that reports success while the wrong noun is still on the wire is
-    worse than a refusal, so `_apply_dm_tutor` re-runs the detector on the repaired body
-    and refuses if anything survives.
-
     Requires:
         - original and rewritten are strings
 
     Ensures:
         - returns `rewritten` with invented type nouns removed where they can be reached
-        - the ID ITSELF is never touched — losing it would be the pointer defect again
+        - the id itself is never touched: losing it would be the pointer defect again
         - returns `rewritten` unchanged if anything raises
+
+    Repair is chosen over refusal, measured on the live corpus: 134 rewrite pairs carried a bare
+    hex id, and 18 of them invent a noun. Refusing all 18 costs 13.4% of the tutor's output on a
+    defect that is usually precisely repairable, one word deletable without touching anything
+    else the sender meant. Stripping fixes 12 of them cleanly.
+
+    The other 6 are why the caller must re-check. A naive strip cannot reach a noun that sits
+    after its id ("<id>, the commit, ...") or one exposed only once another is removed. A repair
+    that reports success while the wrong noun is still on the wire is worse than a refusal. So
+    `_apply_dm_tutor` re-runs the detector on the repaired body and refuses if anything survives.
     """
     try:
         repaired = rewritten
@@ -1721,20 +1685,20 @@ _ATTRIB_ROLE = re.compile(
 
 def _attribution_personas():
     """
-    The fleet's persona names, read from the SAME key that allocates them.
-
-    Hardcoding the roster here would rot the moment somebody joins the pool — the check
-    would stop recognising a real name as attribution and start flagging that person's
-    DMs. The voice pool is the live list, so it is the one to read.
+    The fleet's persona names, read from the same key that allocates them.
 
     Ensures:
         - returns a lowercase list of persona names from `cc session voice persona pool`
         - returns [] if the config cannot be read, which costs recall and never
-          correctness: a rewrite that keeps a pronoun still passes, and one that keeps
-          only a name is flagged unnecessarily — the cheap direction
+          correctness. A rewrite that keeps a pronoun still passes. One that keeps
+          only a name is flagged unnecessarily, which is the cheap direction
 
     Raises:
         - nothing
+
+    Hardcoding the roster here would rot the moment somebody joins the pool. The check would stop
+    recognising a real name as attribution and start flagging that person's DMs. The voice pool is
+    the live list, so it is the one to read.
     """
     from cosa.config.configuration_manager import ConfigurationManager
     try:
@@ -1747,12 +1711,7 @@ def _attribution_personas():
 
 def _attribution_prose( text ):
     """
-    The claim-carrying prose, with pointer tokens blanked — what a person check may read.
-
-    ⚠️ THE POINTERS MUST GO, and this was measured rather than guessed. A restored line
-    reading `.claude-memento-cheech-80c17315.md` contains a persona name, so a rewrite
-    that had thrown every person away scored as ATTRIBUTED because of the filename under
-    it. Two of the six misses in the first calibration run were that one line.
+    The claim-carrying prose with pointer tokens blanked, as a person check may read it.
 
     Requires:
         - text is a string
@@ -1765,6 +1724,10 @@ def _attribution_prose( text ):
 
     Raises:
         - nothing
+
+    The pointers must go. A restored line reading `.claude-memento-<persona>-<id>.md` contains a
+    persona name. A rewrite that had thrown every person away then scored as attributed because of
+    the filename under it. Two of the six misses in the first calibration run were that one line.
     """
     try:
         from cosa.agents.dm_tutor.sentences import prose_lines, pointer_tokens
@@ -1932,12 +1895,7 @@ _ACT_NEGATOR = { "not", "never", "cannot", "won't", "wont", "don't", "dont", "di
 
 def _sender_act_polarities( text ):
     """
-    The polarity of every speech act THE SENDER PERFORMS, as a set of ints.
-
-    Not every polarity word in the text — that was the first cut, and it refused real
-    traffic. "The linter rejected the file" carries a listed verb and is a report about a
-    third party, not an act by the sender; flipping it to "accepted" is a FACT flip, which
-    belongs to the fabrication family and is explicitly out of this guard's scope.
+    The polarity of every speech act the sender performs, as a set of ints.
 
     Requires:
         - text is a string
@@ -1945,16 +1903,22 @@ def _sender_act_polarities( text ):
     Ensures:
         - returns a set drawn from { +1, -1 }, empty when the sender performs no such act
         - only counts an act with a first-person subject within three words before it
-        - SKIPS a negated occurrence entirely rather than guessing its sign: "I do not
-          approve" is a refusal, but reading it as one means parsing scope, and a guard
-          that refuses is the wrong place to guess. Dropping it is the safe direction
-          because FLIPPED only fires on a single-polarity original — one dropped act
-          makes the check quieter, never wronger.
+        - skips a negated occurrence entirely rather than guessing its sign
         - matching is word-boundaried and case-insensitive, so "disapprove" is not a match
-        - NEVER raises
+        - never raises
 
     Raises:
         - nothing
+
+    This is not every polarity word in the text. That first cut refused real traffic. "The linter
+    rejected the file" carries a listed verb and is a report about a third party, not an act by
+    the sender. Flipping it to "accepted" is a fact flip, which belongs to the fabrication family
+    and is explicitly out of this guard's scope.
+
+    "I do not approve" is a refusal, but reading it as one means parsing scope. A guard that
+    refuses is the wrong place to guess. Dropping the occurrence is the safe direction, because the
+    flipped check only fires on a single-polarity original. One dropped act makes the check
+    quieter, never wronger.
     """
     try:
         found  = set()
@@ -1979,30 +1943,7 @@ def _sender_act_polarities( text ):
 
 def _altered_speech_acts( original, rewritten ):
     """
-    Why the rewrite performs a DIFFERENT act than the sender did, or "" when it does not.
-
-    Three conditions, any of which fires. Each is the narrowest form that catches its
-    measured case, and each is independent — a rewrite can flip a polarity without
-    touching attribution, and vice versa.
-
-      FLIPPED       the original performs acts of one polarity only and the rewrite
-                    performs the opposite one. Restricted to a single-polarity original
-                    because a message that both approves one thing and refuses another
-                    carries both signs already, and comparing sets there would fire on
-                    every ordinary mixed verdict.
-
-      SUBSTITUTED   the original names exactly one persona and the rewrite names exactly
-                    one, and they are different people. This is case #2 and it is the one
-                    `_dropped_attribution` structurally cannot see, because the count of
-                    named people never changes. Held to one-and-one deliberately: with two
-                    or more names on either side, which name attaches to which act is a
-                    question this cannot answer from counting, and guessing would flag
-                    every honest summary that mentions a second person.
-
-      COMMANDED     the rewrite opens a sentence with a bare imperative the original never
-                    issued. This is case #1 — an opinion promoted to an order. It compares
-                    the SET of imperative verbs, so a rewrite that keeps the sender's own
-                    "delete" is untouched and only a NEW one fires.
+    Why the rewrite performs a different act than the sender did, or "" when it does not.
 
     Requires:
         - original and rewritten are strings
@@ -2011,12 +1952,31 @@ def _altered_speech_acts( original, rewritten ):
         - returns "" when the rewrite performs the same acts as the original
         - returns a short human-readable reason otherwise, naming what changed, so the
           finding is auditable rather than a bare boolean
-        - NEVER raises: on any internal failure it returns "", so a broken check flags
-          nothing rather than blocking every DM in the fleet — the same fail-open posture
-          the other four guards take, and for the same reason
+        - never raises: on any internal failure it returns "", so a broken check flags
+          nothing rather than blocking every DM in the fleet. The other four guards take the
+          same fail-open posture, for the same reason
 
     Raises:
         - nothing
+
+    Three conditions are checked, and any of them fires. Each is the narrowest form that catches its
+    measured case, and each is independent. A rewrite can flip a polarity without touching
+    attribution, and the reverse.
+
+      flipped: the original performs acts of one polarity only and the rewrite performs the
+      opposite one. This is restricted to a single-polarity original. A message that both approves
+      one thing and refuses another already carries both signs, and comparing sets there would
+      fire on every ordinary mixed verdict.
+
+      substituted: the original names exactly one persona and the rewrite names exactly one,
+      and they are different people. `_dropped_attribution` structurally cannot see this, because
+      the count of named people never changes. It is held to one and one. With two or more names on
+      either side, which name attaches to which act cannot be answered from counting. Guessing
+      would flag every honest summary that mentions a second person.
+
+      commanded: the rewrite opens a sentence with a bare imperative the original never issued,
+      an opinion promoted to an order. It compares the set of imperative verbs. A rewrite that
+      keeps the sender's own "delete" is untouched, and only a new one fires.
     """
     try:
         orig    = _attribution_prose( original or "" )
@@ -2072,23 +2032,6 @@ def _dropped_attribution( original, rewritten, min_persons=3 ):
     """
     Why a reader may not be able to attribute this rewrite, or "" when they can.
 
-    ⚠️ THIS NO LONGER DECIDES DELIVERY (row 20026f56). It used to; the caller now records
-    what it says and sends the rewrite anyway, with a sharper notice attached. Read a
-    non-empty return as "flag this one", never as "refuse this one".
-
-    Two conditions, either of which fires:
-
-      DROPPED   the original points at people at least `min_persons` times and the
-                rewrite points at none. The threshold exists because a message that
-                mentions one person in passing can lose that mention without costing the
-                reader anything, while one built on who-did-what cannot. Measured across
-                the 75 labelled pairs, the threshold trades recall for precision:
-                min 1 → 0.62 precision, min 3 → 0.71, min 5 → 0.75 at half the recall.
-
-      FRAMED    the rewrite introduces a role noun that names nobody where the original
-                used no such frame — "the developer has completed a review" in place of
-                a name the sender wrote.
-
     Requires:
         - original and rewritten are strings
         - min_persons is a positive int
@@ -2096,12 +2039,28 @@ def _dropped_attribution( original, rewritten, min_persons=3 ):
     Ensures:
         - returns "" when the reader can attribute the rewrite
         - returns a short human-readable reason otherwise, which the caller records on
-          the corpus row — a finding nobody can read is an unauditable one
-        - NEVER raises: on any internal failure it returns "", so a broken check flags
+          the corpus row, because a finding nobody can read is an unauditable one
+        - never raises: on any internal failure it returns "", so a broken check flags
           nothing rather than mislabelling every DM in the fleet
 
     Raises:
         - nothing
+
+    This no longer decides delivery. The caller records what it says and sends the rewrite anyway,
+    with a sharper notice attached. Read a non-empty return as "flag this one", never as "refuse
+    this one".
+
+    Two conditions are checked, and either fires:
+
+      dropped: the original points at people at least `min_persons` times and the rewrite points
+      at none. The threshold exists because a message that mentions one person in passing can lose
+      that mention without costing the reader anything, while one built on who-did-what cannot.
+      Measured across the 75 labelled pairs, the threshold trades recall for precision: min 1 gives
+      0.62 precision, min 3 gives 0.71, and min 5 gives 0.75 at half the recall.
+
+      framed: the rewrite introduces a role noun that names nobody where the original used no
+      such frame, for example "the developer has completed a review" in place of a name the
+      sender wrote.
     """
     try:
         personas = _attribution_personas()
@@ -2125,12 +2084,11 @@ def _dropped_attribution( original, rewritten, min_persons=3 ):
 
 def _count_claims( body_text ):
     """
-    The CANONICAL sentence count — the claim counter (ruling 4, 2026-08-12).
+    The canonical sentence count, taken from the claim counter.
 
-    A sentence is a unit that carries a claim; structure (tables, code fences,
-    headings, pointer lines, the canned P.S.) asserts nothing and is not counted.
-    This is the counter the tutor's trigger reads, so the audit and the trigger can
-    never disagree about how long a message is.
+    A sentence is a unit that carries a claim. Structure asserts nothing and is not counted: tables, code
+    fences, headings, pointer lines and the canned P.S. This is the counter the tutor's trigger reads, so
+    the audit and the trigger can never disagree about how long a message is.
 
     Ensures:
         - returns a non-negative int
@@ -2155,15 +2113,15 @@ def _apply_dm_tutor( body_text, config=None, rewrite_fn=None ):
         - body_text is a string
 
     Ensures:
-        - returns ( text_to_deliver, meta_dict ) and NEVER raises
-        - text_to_deliver is body_text UNCHANGED on every path except a successful,
+        - returns ( text_to_deliver, meta_dict ) and never raises
+        - text_to_deliver is body_text unchanged on every path except a successful,
           gate-passing rewrite
         - meta_dict always states the outcome explicitly, so a corpus reader can tell
           "the tutor was off", "it did not fire", "it fired and failed" and "it fired
-          and rewrote" apart. These were one silence before; a row that merely lacks a
-          rewrite cannot say WHICH of those four happened
-        - `tutor_claims_out` is recorded only when a rewrite came back, so a null is
-          honestly "no output existed", not "output measured as zero"
+          and rewrote" apart. Before this, they were one silence: a row that merely lacks a
+          rewrite cannot say which of those four happened
+        - `tutor_claims_out` is recorded only when a rewrite came back, so a null
+          means "no output existed", not "output measured as zero"
 
     Raises:
         - nothing
@@ -2377,17 +2335,17 @@ def get_dm_quality_audit():
     Snapshot of the DM quality audit, with derived average weights.
 
     Ensures:
-        - returns a COPY (a reader cannot mutate the live counters by holding it)
+        - returns a copy (a reader cannot mutate the live counters by holding it)
         - includes avg_length/avg_directness/avg_tone/avg_overall, all 0.0 (the
           same `if count else 0.0` divide-by-zero guard as get_dm_length_audit)
           when count is 0
-        - avg_directness/avg_tone divide by qualitative_count, NOT count. In
-          LENGTH-ONLY mode qualitative_count stays 0 and both read 0.0 — a
+        - avg_directness/avg_tone divide by qualitative_count, not count. In
+          length-only mode qualitative_count stays 0 and both read 0.0, a
           "nothing was graded" zero, which is why qualitative_count ships in
           the snapshot: a reader can tell it from a real average of zero
-        - includes avg_overage, the mean words-to-target ratio. UNLIKE avg_length it
+        - includes avg_overage, the mean words-to-target ratio. Unlike avg_length it
           has no floor, so it still moves when traffic is dominated by DMs past the
-          -2 saturation point — which is precisely the population this feature aims at
+          -2 saturation point, which is precisely the population this feature aims at
     """
     snapshot = dict( _dm_quality_audit )
     count    = snapshot[ "count" ]
@@ -2427,13 +2385,13 @@ def _record_dm_quality( quality ):
     Requires:
         - quality is the dict returned by DmQualityJudge.judge()
           ({"length","directness","tone","overall"}); Length and Overall always
-          carry an int weight, Directness and Tone carry an int OR None
+          carry an int weight, Directness and Tone carry an int or None
 
     Ensures:
         - increments count + the Length/Overall totals and the overage sum on
           every grade
-        - a None Directness/Tone weight (LENGTH-ONLY mode) is SKIPPED, not
-          coerced to 0, and does not increment qualitative_count — so the
+        - a None Directness/Tone weight (length-only mode) is skipped, not
+          coerced to 0, and does not increment qualitative_count, so the
           qualitative averages stay averages of grades that actually happened
         - emits one audit line (same convention as _record_dm_length)
     """
@@ -2458,18 +2416,18 @@ def _record_dm_quality( quality ):
 
 def _maybe_grade_dm_quality( body_text ):
     """
-    Grade a DM body IFF the DM Quality Judge toggle is ON (treatment arm).
+    Grade a DM body only if the DM Quality Judge toggle is on (treatment arm).
 
     Requires:
         - body_text is the caller-supplied DM body string
 
     Ensures:
-        - toggle OFF (control, default): returns None — no judge call and no audit
+        - toggle off (control, default): returns None, with no judge call and no audit
           tally, so the deferred job writes a corpus row with null grades
-        - THIS RUNS ON THE GRADING WORKER, not in the send (row ec5cf83a). Nothing
-          about the function changed; where it is CALLED did. No caller may put it
+        - this runs on the grading worker, not in the send. Nothing
+          about the function changed; where it is called did. No caller may put it
           back in a request's timeline.
-        - toggle ON (treatment): builds the judge lazily (once per process), grades
+        - toggle on (treatment): builds the judge lazily (once per process), grades
           the body, tallies the quality audit, and returns the quality dict
         - never raises: DmQualityJudge.judge itself never raises (a judge that
           cannot even be built still returns a safe all-🤷/0 grade)
@@ -2529,8 +2487,11 @@ _dm_grade_audit       = {
 
 
 def get_dm_grade_audit():
-    """A copy of the deferred-grade counters (accepted / refused / pending /
-    failed). A copy, not the dict, so a reader cannot mutate the tally."""
+    """
+    A copy of the deferred-grade counters: accepted, refused, pending and failed.
+
+    It is a copy, not the dict, so a reader cannot mutate the tally.
+    """
     with _dm_grade_lock:
         return dict( _dm_grade_audit )
 
@@ -2543,8 +2504,11 @@ def reset_dm_grade_audit():
 
 
 def _get_dm_grade_executor():
-    """The single grading worker, built on first use so a server that never
-    sends a DM never starts a thread."""
+    """
+    The single grading worker, built on first use.
+
+    A server that never sends a DM never starts a thread.
+    """
     global _dm_grade_executor
     if _dm_grade_executor is None:
         _dm_grade_executor = ThreadPoolExecutor( max_workers=1, thread_name_prefix="dm-grade" )
@@ -2559,17 +2523,16 @@ def _submit_deferred_grade( job ):
         - job is a 0-arg callable
 
     Ensures:
-        - SELF-GUARD (same shape as _persist_dm_row's, row f5d6dc5e): under pytest
-          the deferral is ALWAYS refused and no worker is ever started. A unit test
-          cannot reach the live grader through this default, and no grading thread
-          can outlive the test that spawned it — which is how the toggle pins the
-          send-path tests rely on stopped working the moment grading became
-          asynchronous: the background call landed AFTER the patch context exited
-          and dialled :3001 for real. A test that WANTS to exercise grading injects
+        - self-guard (same shape as _persist_dm_row's): under pytest the deferral is always
+          refused and no worker is ever started. A unit test cannot reach the live grader
+          through this default, and no grading thread can outlive the test that spawned it.
+          Without it, the toggle pins that send-path tests rely on stopped working once grading
+          became asynchronous: the background call landed after the patch context exited and
+          dialled :3001 for real. A test that wants to exercise grading injects
           `defer_grade_fn` and owns the timing.
         - returns True iff the job was accepted onto the worker
-        - returns False, and runs NOTHING, when _DM_GRADE_MAX_PENDING jobs are
-          already outstanding — the caller then writes its row ungraded
+        - returns False, and runs nothing, when _DM_GRADE_MAX_PENDING jobs are
+          already outstanding; the caller then writes its row ungraded
         - a job that raises is caught, counted and printed; the worker survives
 
     Raises:
@@ -2625,11 +2588,10 @@ def format_dm_grade_notice( message_id, quality ):
         - quality is DmQualityJudge.judge()'s dict
 
     Ensures:
-        - NAMES THE MESSAGE IT GRADES (Mr Radio's constraint, 2026-08-19). A late
-          grade with no anchor is the same confusion arriving slower: by the time it
-          lands the sender may have sent three more DMs, and a bare "👎 too long"
-          cannot say which one it means.
-        - a dimension whose weight is None (LENGTH-ONLY mode) is shown as withheld
+        - names the message it grades. A late grade with no anchor is the same confusion
+          arriving slower: by the time it lands the sender may have sent three more DMs, and a
+          bare "👎 too long" cannot say which one it means.
+        - a dimension whose weight is None (length-only mode) is shown as withheld
           rather than as a zero
     """
     def dimension( name ):
@@ -2647,21 +2609,21 @@ def push_dm_grade_to_sender( *, notification_queue, authenticated_user_id, sende
     Deliver a finished grade back to the seat that sent the DM.
 
     Requires:
-        - sender_session_id is the SENDER's session id (routing is by its 8-char head,
+        - sender_session_id is the sender's session id (routing is by its 8-char head,
           the same job_id convention the DM itself uses)
 
     Ensures:
-        - the sender keeps seeing its own grades. That feedback IS the live
-          intervention — arm `signal_only`, "grade shown, nothing refused" — so moving
+        - the sender keeps seeing its own grades. That feedback is the live
+          intervention, arm `signal_only` ("grade shown, nothing refused"), so moving
           the grade off the send path without this would have quietly ended the
           experiment rather than relocated it.
-        - BEST-EFFORT AND SILENT (Mr Radio's constraint): a reaped seat is a normal
-          outcome, not an error. The push is fire-and-forget onto the notification
-          queue, which routes by job_id and simply reaches nobody when that seat is
-          gone; anything raised is caught and printed, never propagated. A grading
-          worker that dies on a departed recipient would take every LATER grade with it.
-        - NOT a DM. It rides push_notification directly, so it never re-enters the send
-          path — a grade delivered by dm_send would itself be graded, forever.
+        - best-effort and silent: a reaped seat is a normal outcome, not an error. The push is
+          fire-and-forget onto the notification queue, which routes by job_id and simply reaches
+          nobody when that seat is gone. Anything raised is caught and printed, never
+          propagated. A grading worker that dies on a departed recipient would take every
+          later grade with it.
+        - not a DM. It rides push_notification directly, so it never re-enters the send
+          path; a grade delivered by dm_send would itself be graded, forever.
         - returns True iff the notice was pushed
 
     Raises:
@@ -2692,32 +2654,32 @@ def push_dm_grade_to_sender( *, notification_queue, authenticated_user_id, sende
 def _defer_grade_and_persist( *, defer_fn, grade_quality_fn, body_text, persist_kwargs,
                               deliver_grade_fn=None ):
     """
-    Grade `body_text` and write its corpus row OFF the send path.
+    Grade `body_text` and write its corpus row off the send path.
 
     Requires:
         - defer_fn( job ) -> bool accepts a 0-arg callable and reports whether it
           took it (the production default is _submit_deferred_grade)
-        - persist_kwargs is every _persist_dm_row argument EXCEPT `quality`
+        - persist_kwargs is every _persist_dm_row argument except `quality`
         - deliver_grade_fn( quality ), when given, hands the finished grade back to
-          the sender. It runs AFTER the row is written — the corpus is the durable
-          record and must not be at the mercy of a delivery — and its failures are
+          the sender. It runs after the row is written, because the corpus is the durable
+          record and must not be at the mercy of a delivery. Its failures are
           caught here as well as inside it
 
     Ensures:
         - the caller's timeline contains no model call: on the accepted path this
           returns as soon as the job is queued
-        - EXACTLY ONE corpus row is written per call, whether the deferral was
+        - exactly one corpus row is written per call, whether the deferral was
           accepted (written by the worker, with the grade) or refused (written
           here, with quality=None)
-        - a grader that RAISES still leaves a row, ungraded. DmQualityJudge.judge
+        - a grader that raises still leaves a row, ungraded. DmQualityJudge.judge
           is contracted never to raise, and this catches it anyway: a broken
           contract would otherwise cost the corpus its row as well as its grade,
           and the row is the part that cannot be recomputed later
-        - a REFUSED deferral delivers no grade, because there is no grade — the row
+        - a refused deferral delivers no grade, because there is no grade: the row
           is written ungraded and the sender simply hears nothing
 
     Raises:
-        - nothing the caller must handle — _persist_dm_row is fail-soft
+        - nothing the caller must handle, because _persist_dm_row is fail-soft
     """
     def _job():
         try:
@@ -2738,18 +2700,17 @@ def _defer_grade_and_persist( *, defer_fn, grade_quality_fn, body_text, persist_
 
 def _record_dm_project( sender_session_id, sender_project ):
     """
-    Count one DM on whichever side of the caller-supplied-project seam it lands,
-    and emit the audit line.
+    Count one DM on its side of the caller-supplied-project seam, and emit the audit line.
 
     Requires:
         - sender_session_id is the caller's session id (named in the warning so
-          an operator can identify WHICH seat still needs a respawn)
+          an operator can identify which seat still needs a respawn)
         - sender_project is the caller-supplied project, or None
 
     Ensures:
         - increments exactly one counter
-        - an absent project ALSO prints a warning naming the session and the
-          project the stamp will fall back to — accept-and-warn, never silent
+        - an absent project also prints a warning naming the session and the
+          project the stamp will fall back to: accept-and-warn, never silent
         - the remembered offender list holds distinct sessions up to
           `_DM_AUDIT_SENDER_CAP`; the counter keeps rising past the cap
     """
@@ -2796,10 +2757,6 @@ def _prepare_outbound( *, body, target_session_id, build_sender_id, new_id_fn, n
     """
     Build the sender_id, threading, and EDT-stamped body for an outbound DM.
 
-    This is the PRE-DELIVERY step: nothing here persists or pushes anything, so a
-    failure in it means the DM was never attempted (distinct from a delivery-time
-    failure). Shared verbatim by the baseline and experiment send paths.
-
     Requires:
         - build_sender_id( sender_session_id, sender_project ) -> sender_id str
         - new_id_fn() -> a fresh message id str
@@ -2808,7 +2765,11 @@ def _prepare_outbound( *, body, target_session_id, build_sender_id, new_id_fn, n
         - returns ( sender_id, job_id, message_id, thread_id, stamped_body )
         - job_id is the recipient's 8-char session hash (the persisted addressee)
         - stamped_body carries the central EDT prefix unless the body is already
-          stamped (idempotent, bug f49a8b34 / bc8d9d82)
+          stamped (idempotent)
+
+    This is the pre-delivery step. Nothing here persists or pushes anything, so a failure in it
+    means the DM was never attempted, unlike a delivery-time failure. The baseline and experiment
+    send paths share it verbatim.
     """
     sender_id    = build_sender_id( body.sender_session_id, body.sender_project )
     job_id       = target_session_id[ :8 ]
@@ -2822,11 +2783,7 @@ def _prepare_outbound( *, body, target_session_id, build_sender_id, new_id_fn, n
 def _dispatch_outbound( *, prep, body, authenticated_user_id, notification_queue,
                         persist_fn, target_session_id, target_persona ):
     """
-    Persist + push the ai_to_ai DM and build the 201 result dict.
-
-    This is the DELIVERY step: a failure here means delivery was ATTEMPTED (which is
-    why the experiment path marks the row "failed" before calling it). Shared verbatim
-    by the baseline and experiment send paths.
+    Persist and push the ai_to_ai DM, and build the 201 result dict.
 
     Requires:
         - prep is the tuple from _prepare_outbound
@@ -2836,13 +2793,16 @@ def _dispatch_outbound( *, prep, body, authenticated_user_id, notification_queue
         - returns the 201 result dict (message_id, thread_id, recipient_session,
           recipient_session_hash8, recipient_persona, dispatched,
           delivery_confirmed)
-        - `dispatched` is HAND-OFF, not receipt: persisted + queued to the
+        - `dispatched` is hand-off, not receipt: persisted and queued to the
           recipient's listener. `delivery_confirmed` is always False and says so
-          explicitly — the recipient may buffer the message and never drain it
-          (row 298af249)
+          explicitly, because the recipient may buffer the message and never drain it
 
     Raises:
         - propagates any persist_fn / push_notification error to the caller
+
+    This is the delivery step. A failure here means delivery was attempted, which is why the
+    experiment path marks the row "failed" before calling it. The baseline and experiment send
+    paths share it verbatim.
     """
     sender_id, job_id, message_id, thread_id, stamped_body = prep
     db_id = persist_fn(
@@ -2912,25 +2872,24 @@ def _execute_experiment( *, body, assignment, arrival_utc, target_session_id, ta
                          authenticated_user_id, notification_queue, build_sender_id, persist_fn,
                          new_id_fn, now_fn, grade_quality_fn, defer_grade_fn ):
     """
-    Run the in-window (experiment) send path: resolve the arm, apply the length gate,
-    and write ONE corpus row that survives a crash (plan items 3/4/5).
+    Run the in-window experiment send: resolve the arm, gate length, write one corpus row.
 
     Requires:
         - assignment is the slot dict from dm_experiment.assignment_at (non-None), so
           this send fell inside a declared experiment interval
-        - arrival_utc is the SINGLE resolved arrival instant (never re-read here)
+        - arrival_utc is the single resolved arrival instant (never re-read here)
 
     Ensures:
         - arm resolution: an operator override (if set) beats the scheduled arm; the
           arbiter sender is exempt from the gate; otherwise the slot's arm applies
-        - length gate: `rejecting` + over threshold + not exempt → HTTP 413 with a body
-          that states the action WITHOUT naming the threshold (undisclosed)
-        - the `quality` key is ABSENT from every in-window 201 (both arms) — a
+        - length gate: `rejecting` + over threshold + not exempt gives HTTP 413 with a body
+          that states the action without naming the threshold (undisclosed)
+        - the `quality` key is absent from every in-window 201 (both arms), because a
           present-but-empty grade would itself signal measurement
-        - exactly ONE corpus row is written, in a finally, so a crash before or during
+        - exactly one corpus row is written, in a finally, so a crash before or during
           delivery still persists an honest `delivery_outcome` (never null/absent):
           not_attempted (never delivered), failed (delivery raised), delivered (ok)
-        - `follows_rejection` reflects this sender's previous attempt IN THIS SLOT only
+        - `follows_rejection` reflects this sender's previous attempt in this slot only
 
     Raises:
         - propagates a delivery-time error after the row is flushed with "failed"
@@ -3069,68 +3028,45 @@ def execute_dm_send(
     deliver_grade_fn = None,
 ):
     """
-    Pure-logic core for POST /api/dm/send — notification-native AI↔AI DM.
+    Pure-logic core for POST /api/dm/send: a notification-native AI to AI DM.
 
-    Resolves the recipient (same-user scoped), persists the DM to the
-    notifications table (direction='ai_to_ai' + body inline + sender provenance
-    + threading), then pushes it to the recipient session's listener via job_id
-    routing. No commons board, no claim-check, no watcher.
-
-    The outbound body is prefixed with Rick's central EDT stamp
-    "[YYYY.MM.DD at HH:MM:SS] " (2026-06-24) — the SAME bracketed prefix the arbiter
-    pings carry, sourced from the shared cosa.utils.edt_timestamp formatter. This is
-    the single server-side DM chokepoint (send AND respond reuse this core), so the
-    stamp lands on EVERY peer DM in every direction. The arbiter pings ride a
-    DISJOINT path (CommonsStore, not /api/dm/send) and are NOT re-stamped here.
+    Resolves the recipient (same-user scoped), persists the DM, then pushes it to the recipient's listener via job_id routing.
 
     Requires:
         - body is a DmSendRequest
-        - resolve_recipient_fn( recipient_session_id, recipient_persona,
-          authenticated_user_id ) -> {"http_status":200,"session_id","persona_name"}
-          OR {"http_status":422,"detail"}
-        - build_sender_id( sender_session_id, sender_project ) -> sender_id str,
-          where `sender_project` is the CALLER-supplied project or None. Two
-          arguments, not one: the server cannot answer "what project is the
-          caller?" from inside its own container, so the caller supplies it
-          (row 12b5a766). None means the caller did not send one — the builder
-          then falls back to today's server-side resolution and the omission is
-          counted by `_record_dm_project`.
+        - resolve_recipient_fn( recipient_session_id, recipient_persona, authenticated_user_id ) -> {"http_status":200,
+          "session_id","persona_name"} or {"http_status":422,"detail"}
+        - build_sender_id( sender_session_id, sender_project ) -> sender_id str, where `sender_project` is the
+          caller-supplied project or None. Two arguments, not one: the server cannot answer "what project is the caller?"
+          from inside its own container. None means the caller did not send one. The builder then falls back to the
+          earlier server-side resolution and the omission is counted by `_record_dm_project`.
         - persist_fn( ... ) -> db notification id str
-        - now_fn (if given) is a 0-arg callable returning an aware datetime — a
-          TEST-ONLY seam for a deterministic stamp; production leaves it None and
-          the central formatter stamps the real UTC-now instant
-        - defer_grade_fn( job ) -> bool decides WHERE the grade + corpus row run.
-          Production leaves it None → the grading worker. A test injects an inline
-          runner so the row exists by the time it asserts on it.
-        - deliver_grade_fn( quality ) is the seam for HOW the finished grade reaches
-          the sender. Production leaves it None → push_dm_grade_to_sender.
+        - now_fn (if given) is a 0-arg callable returning an aware datetime, a test-only seam for a deterministic stamp.
+          Production leaves it None and the central formatter stamps the real UTC-now instant
+        - defer_grade_fn( job ) -> bool decides where the grade + corpus row run. Production leaves it None (the grading
+          worker). A test injects an inline runner so the row exists by the time it asserts on it.
+        - deliver_grade_fn( quality ) is the seam for how the finished grade reaches the sender. Production leaves it
+          None (push_dm_grade_to_sender).
 
     Ensures:
-        - NO MODEL CALL HAPPENS IN THIS FUNCTION'S TIMELINE (row ec5cf83a). Grading
-          is queued and returns; a grader that is slow, dead or absent costs the
-          sender nothing and fails no send. The 201 therefore carries NO `quality`
-          key — the grade does not exist yet, and a message with no grade yet is a
-          normal state
+        - no model call happens in this function's timeline. Grading is queued and returns; a grader that is slow, dead
+          or absent costs the sender nothing and fails no send. The 201 therefore carries no `quality` key: the grade does not exist yet, and a message with no grade yet is normal
         - 422 (recipient unresolved) is returned unchanged for AI self-correction
-        - 201 persists + pushes the ai_to_ai notification (body EDT-prefixed in BOTH
-          the persisted row and the pushed message) and returns
-          {http_status, message_id, thread_id, recipient_session,
-           recipient_session_hash8, recipient_persona, dispatched,
-           delivery_confirmed}
-        - `dispatched: True` means HANDED OFF (persisted + queued), never read.
-          `delivery_confirmed: False` states that limit rather than leaving a
-          caller to infer it from the word "dispatched" (row 298af249)
-        - `recipient_session` is the FULL resolved session id (unchanged
-          contract — reusable as `recipient_session_id` on a subsequent send);
-          `recipient_session_hash8` is the 8-char form actually persisted and
-          the form `/api/dm/list` filters on. Both are returned so neither name
-          has to mean two shapes (row 2565956b, Rio's ruling 2026-07-21).
+        - 201 persists + pushes the ai_to_ai notification (body EDT-prefixed in both the persisted row and the pushed
+          message) and returns {http_status, message_id, thread_id, recipient_session, recipient_session_hash8,
+          recipient_persona, dispatched, delivery_confirmed}
+        - `dispatched: True` means handed off (persisted + queued), never read. `delivery_confirmed: False` states that
+          limit rather than leaving a caller to infer it from the word "dispatched"
+        - `recipient_session` is the full resolved session id (reusable as `recipient_session_id` on a subsequent send);
+          `recipient_session_hash8` is the 8-char form actually persisted, which `/api/dm/list` filters on. Both are
+          returned so neither name has to mean two shapes.
         - thread_id defaults to the fresh message_id when not supplied (new thread)
-        - threading / reply_to / sender persona+icon metadata are UNTOUCHED — only
-          the body string is prefixed
+        - threading / reply_to / sender persona+icon metadata are untouched; only the body string is prefixed
 
     Raises:
         - None (DB/push errors propagate to the route)
+
+    The outbound body gets the central EDT stamp from cosa.utils.edt_timestamp, in send and respond alike. Arbiter pings are not re-stamped here.
     """
     if new_id_fn is None:
         new_id_fn = lambda: str( uuid.uuid4() )
@@ -3360,10 +3296,10 @@ async def post_dm_send(
 
 class DmRespondRequest( BaseModel ):
     """
-    POST /api/dm/respond request body — a threaded peer-DM reply.
+    POST /api/dm/respond request body: a threaded peer-DM reply.
 
-    Identical to DmSendRequest except `reply_to` and `thread_id` are REQUIRED:
-    a reply must name the message it answers and the conversation it continues.
+    Identical to DmSendRequest except `reply_to` and `thread_id` are required.
+    A reply must name the message it answers and the conversation it continues.
     """
     sender_session_id    : str             = Field( ..., min_length=1, max_length=128 )
     body                 : str             = Field( ..., min_length=1 )
@@ -3439,25 +3375,24 @@ def _serialize_dm( notification ):
         - returns a JSON-safe dict; created_at is ISO 8601 (or None)
         - the body is exposed as "body" (the message column) to match the
           dm_send/dm_respond request vocabulary
-        - `recipient_session_hash8` names the ADDRESSEE explicitly. It is the same
-          value as `job_id` (which on an ai_to_ai row IS the recipient's 8-char
+        - `recipient_session_hash8` names the addressee explicitly. It is the same
+          value as `job_id` (which on an ai_to_ai row is the recipient's 8-char
           session hash), surfaced under a name that says what it is. Before this,
           a reader had to know that a field called "job_id" meant "who this was
-          sent to" — and a reader who did NOT know it could conclude only that a
-          DM was VISIBLE to them, never that it was ADDRESSED to them. That gap
-          produced a false cross-session finding on 2026-07-16 (row 2565956b).
-        - 🔴 THE NAME CARRIES ITS SHAPE ON PURPOSE. `execute_dm_send` returns a
-          key called `recipient_session` holding the FULL session id, while what
-          is PERSISTED is `target_session_id[ :8 ]`. Calling this field
+          sent to". A reader who did not know it could conclude only that a
+          DM was visible to them, never that it was addressed to them.
+        - the name carries its shape. `execute_dm_send` returns a
+          key called `recipient_session` holding the full session id, while what
+          is persisted is `target_session_id[ :8 ]`. Calling this field
           `recipient_session` too would have given one well-chosen name two value
-          shapes — a consumer comparing them would never match, and feeding the
+          shapes. A consumer comparing them would never match, and feeding the
           send receipt back as a list filter would silently return zero rows.
-          This row exists because a column named `recipient_id` does not hold a
-          recipient; shipping a second name that means two things would have been
+          A column named `recipient_id` does not hold a
+          recipient, and shipping a second name that means two things would be
           the same defect in miniature. The `_hash8` suffix makes the shape part
-          of the name. (The send response is deliberately NOT truncated to match:
+          of the name. The send response is not truncated to match:
           narrowing a field this fix does not own would discard information its
-          consumers may rely on.)
+          consumers may rely on.
         - `job_id` is retained unchanged for the existing consumers that already
           filter on it; this is an added name, not a rename.
     """
@@ -3560,45 +3495,21 @@ def resolve_dm_list_scope( session_id, scope ):
     """
     Decide the effective addressee filter for a /api/dm/list read.
 
-    The route authenticates a USER, not a session — that is the whole reason this
-    resolution exists. The caller must TELL us which session it is; the server
-    cannot derive it from the credential. Absence therefore means "I did not ask
-    to be scoped", which must stay account-wide so the pre-existing
-    client-side-filtering consumer keeps working untouched.
-
-    🔴 NORMALIZES THE WIDTH, AND THAT IS THE POINT. The addressee is persisted as
-    an 8-char prefix, but the most natural thing a caller has in hand is a FULL
-    session id — `execute_dm_send` hands one back under `recipient_session`.
-    Comparing a full uuid against an 8-char column matches nothing, so the
-    obvious move (feed the send receipt back in) would return ZERO ROWS and look
-    like "no DMs" rather than like a mistake. Truncating here makes both widths
-    work. A filter that silently returns nothing for a well-formed input is worse
-    than one that rejects it, and this one cannot tell the difference — so it
-    accepts both instead of failing quietly on one.
-
-    🔴 AND WHAT IT CANNOT NORMALIZE, IT REJECTS OUT LOUD. An id SHORTER than the
-    persisted width can never equal an 8-char column value, so filtering on it
-    would return zero rows — and a silent zero is indistinguishable from "you
-    have no messages." That is the same failure shape as the row itself: a
-    plausible small answer to a question the resolver never understood. So a
-    too-short id is a 400, not an empty list. The caller learns it asked wrong
-    instead of concluding its inbox is empty.
-
     Requires:
         - session_id: the caller's session id (full or 8-char), or None/""
         - scope: "session" (default), "account", or None
 
     Ensures:
         - Returns ( recipient_session|None, effective_scope_label, error|None )
-        - a supplied session_id is stripped and TRUNCATED to 8 chars, so a full
+        - a supplied session_id is stripped and truncated to 8 chars, so a full
           uuid and its own 8-char prefix resolve identically
-        - a stripped session_id SHORTER than 8 chars returns an error string —
+        - a stripped session_id shorter than 8 chars returns an error string:
           it cannot match, and must not fail as an empty result
-        - scope="account" ALWAYS yields None — an explicit, auditable wide read
+        - scope="account" always yields None, an explicit, auditable wide read
         - a missing/blank session_id yields None regardless of scope, and the
           label reports "account", never a session scope the server did not apply
           (the label must never claim a narrowing that did not happen)
-        - Never raises
+        - never raises
 
     Args:
         session_id: caller-supplied session id, any width
@@ -3606,6 +3517,19 @@ def resolve_dm_list_scope( session_id, scope ):
 
     Returns:
         tuple: ( recipient_session|None, "session"|"account", error|None )
+
+    The route authenticates a user, not a session, and that is the whole reason this resolution exists. The caller must
+    tell us which session it is, because the server cannot derive it from the credential. Absence therefore means "I did
+    not ask to be scoped". That must stay account-wide so the pre-existing client-side-filtering consumer keeps working.
+
+    It normalises the width. The addressee is persisted as an 8-char prefix, but the most natural thing a caller has in
+    hand is a full session id, since `execute_dm_send` hands one back under `recipient_session`. Comparing a full uuid
+    against an 8-char column matches nothing, so feeding the send receipt back in would return zero rows and look like
+    "no DMs" rather than like a mistake. Truncating here makes both widths work.
+
+    What it cannot normalise, it rejects out loud. An id shorter than the persisted width can never equal an 8-char
+    column value, so filtering on it would return zero rows, and a silent zero is indistinguishable from "you have no
+    messages". So a too-short id is a 400, not an empty list, and the caller learns it asked wrong.
     """
     if scope == "account":                       return None, "account", None
     if session_id is None or not str( session_id ).strip(): return None, "account", None
@@ -3623,21 +3547,11 @@ def resolve_dm_list_scope( session_id, scope ):
 def execute_dm_list( *, thread_id, since, limit, authenticated_user_id, thread_fn, inbox_fn,
                      session_id=None, scope="session" ):
     """
-    Pure-logic core for GET /api/dm/list — list/poll a thread or the inbox.
-
-    ⚠️ SCOPING, STATED PLAINLY BECAUSE THE OLD DOCSTRING'S "INBOX" WAS FALSE.
-    `authenticated_user_id` scopes to a SERVICE ACCOUNT, not a session: peer DMs
-    persist with `recipient_user_id = <the sender's own account>`, so every
-    session on one account shares one pool — and since the write path currently
-    stamps one and the same account for the entire fleet, that pool is the whole
-    fleet's traffic. Passing `session_id` narrows to the DMs actually ADDRESSED
-    to that session (see get_dm_inbox for the job_id overload + 8-char-prefix
-    caveats). Omitting it keeps the legacy account-wide read, which is what the
-    existing client-side-filtering hook relies on.
+    Pure-logic core for GET /api/dm/list: list or poll a thread or the inbox.
 
     Requires:
-        - thread_id: a conversation id (thread view) OR None/"" (inbox view)
-        - since: None, or an ISO-8601 timestamp string (poll — rows strictly newer)
+        - thread_id: a conversation id (thread view) or None/"" (inbox view)
+        - since: None, or an ISO-8601 timestamp string (poll, rows strictly newer)
         - limit: requested row cap (clamped to [1, 200])
         - authenticated_user_id: the caller's user uuid (string)
         - thread_fn(thread_id, recipient_id, since, limit, recipient_session) (asc)
@@ -3648,23 +3562,30 @@ def execute_dm_list( *, thread_id, since, limit, authenticated_user_id, thread_f
     Ensures:
         - 400 if `since` is a non-ISO string
         - thread view when thread_id is truthy, else inbox view
-        - 400 if `session_id` is too short to ever match an addressee — a filter
+        - 400 if `session_id` is too short to ever match an addressee: a filter
           that cannot match must say so, not return an empty list that reads as
           "no messages"
-        - 400 if `scope` is not one of DM_LIST_SCOPES — an unrecognized scope is
-          REJECTED, never silently treated as "session". A caller who spells the
+        - 400 if `scope` is not one of DM_LIST_SCOPES: an unrecognised scope is
+          rejected, never silently treated as "session". A caller who spells the
           wide read "all" must not receive a narrow one under a label saying
           "session"; that would be a quiet wrong answer to a well-formed request
         - the addressee filter is resolved by resolve_dm_list_scope; an
           account-wide read requires either scope="account" or an absent
-          session_id — a wide view is never the silent outcome of a session read
-        - the response ECHOES the scope actually applied, so a caller can tell
+          session_id, so a wide view is never the silent outcome of a session read
+        - the response echoes the scope actually applied, so a caller can tell
           whether it was narrowed rather than assuming it was
         - 200 with {thread_id, since, count, scope, recipient_session_hash8,
           messages}
 
     Raises:
         - None (DB errors propagate from the fns to the route)
+
+    `authenticated_user_id` scopes to a service account, not a session. Peer DMs persist with
+    `recipient_user_id = <the sender's own account>`, so every session on one account shares one
+    pool. The write path currently stamps one and the same account for the entire fleet, so that
+    pool is the whole fleet's traffic. Passing `session_id` narrows to the DMs actually addressed
+    to that session (see get_dm_inbox for the job_id overload and 8-char-prefix caveats). Omitting
+    it keeps the legacy account-wide read, which the existing client-side-filtering hook relies on.
     """
     if scope is not None and scope not in DM_LIST_SCOPES:
         return { "http_status": 400,

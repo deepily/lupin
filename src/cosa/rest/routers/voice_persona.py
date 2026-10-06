@@ -1,15 +1,14 @@
 """
 Per-session voice persona endpoints.
 
-Each new Claude Code session is uniformly randomly assigned a voice/persona
-at SessionStart from a 6-voice allocatable pool so the user can audibly
-distinguish parallel sessions in the notifications UI accordion. Sam (the
-global ElevenLabs default) is reserved as the system-wide TTS default voice
-and is NOT in the allocatable pool.
+Each new Claude Code session is assigned a voice and persona uniformly at random at
+SessionStart. The pick comes from a 6-voice allocatable pool, so the user can tell parallel
+sessions apart by ear in the notifications UI accordion. Sam, the global ElevenLabs
+default, is reserved as the system-wide TTS default voice and is not in the allocatable pool.
 
 The bridge file at ~/.claude/sessions/cc-{PPID}.json is the canonical state.
 This module mirrors `speakerphone.py` structurally:
-    - module-level asyncio.Lock for atomic scan→pick→write
+    - module-level asyncio.Lock for atomic scan, pick and write
     - dependency-injected ConfigurationManager + WebSocketManager
     - bridge file is ground truth, WS broadcast is best-effort confirmation
     - dead-PID bridges are filtered on every read (implicit sweeper)
@@ -20,11 +19,10 @@ Endpoints:
     POST /api/cosa-voice/voice-persona/{session_id}/release    — clear bridge field
     GET  /api/cosa-voice/voice-persona/pool                    — diagnostics snapshot
 
-Orthogonal to speakerphone mode (Phase 3 of solo/chorus refactor): a session
-can have a persona regardless of speakerphone_on state, and solo-mode's
-displacement scan does NOT touch the voice_persona field.
+This is orthogonal to speakerphone mode. A session can have a persona regardless of
+speakerphone_on state. Solo mode's displacement scan does not touch the voice_persona field.
 
-See: src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md
+Design: src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md
 """
 
 import asyncio
@@ -64,11 +62,7 @@ _voice_persona_lock = asyncio.Lock()
 
 def _resolve_manager_persona( worker_session_id ):
     """
-    Resolve the spawning manager's persona for the focus-bar manager badge
-    (2026-06-08, Rick). A worker's bridge carries `spawned_by` = the MANAGER's
-    session_id (set by session_spawner at spawn). We read that, then read the
-    manager's own voice_persona, and shape a compact badge dict (glyph + color +
-    initial) the client superimposes on the worker's focus-bar avatar.
+    Resolve the spawning manager's persona for the focus-bar manager badge.
 
     Requires:
         - worker_session_id is a non-empty session_id string
@@ -77,8 +71,13 @@ def _resolve_manager_persona( worker_session_id ):
         - returns { "icon", "color", "name", "initial" } when the worker was
           spawned by a manager whose persona is resolvable
         - returns None for a top-level / root session (no `spawned_by`), an
-          unresolvable manager persona, or any read failure (NEVER raises — this
+          unresolvable manager persona, or any read failure (never raises, because this
           runs inside the best-effort voice_persona_assigned emit path)
+
+    A worker's bridge carries `spawned_by`, the manager's session_id, set by session_spawner
+    at spawn. This function reads that, then reads the manager's own voice_persona. It shapes
+    a compact badge dict (glyph, color and initial) that the client superimposes on the
+    worker's focus-bar avatar.
     """
     import json
     try:
@@ -99,13 +98,13 @@ def _manager_badge_for( manager_persona ):
     """
     Shape a manager's voice_persona into the focus-bar manager badge.
 
-    One definition shared by `_resolve_manager_persona` (one worker, reads its own
-    bridges) and senders-visible (many workers, resolved against one bridge index —
-    row 41da77bb), so the badge cannot differ by which path built it.
-
     Ensures:
         - returns { "icon", "color", "name", "initial" } for a non-empty persona dict
         - returns None for anything else (None, empty, not a dict)
+
+    One definition is shared by two callers. `_resolve_manager_persona` reads one worker's
+    own bridges. senders-visible resolves many workers against one bridge index. A shared
+    definition means the badge cannot differ by which path built it.
     """
     if not isinstance( manager_persona, dict ) or not manager_persona:
         return None
@@ -144,11 +143,10 @@ async def get_voice_persona_pool(
     config_mgr = Depends( get_config_manager )
 ) -> JSONResponse:
     """
-    Return the configured pool, the set of currently-occupied persona names,
-    and the names that are free for allocation right now.
+    Return the configured pool, the occupied persona names and the free names.
 
-    Live-PID dead-bridge filter applies (so a stale persona on a dead-PID
-    bridge counts as free).
+    The dead-bridge filter on live PIDs applies, so a stale persona on a dead-PID
+    bridge counts as free.
     """
     pool   = load_persona_pool_from_config( config_mgr )
     stale_seconds = config_mgr.get(
@@ -214,51 +212,41 @@ async def allocate_voice_persona_endpoint(
 
     Four operating modes, selected by `requested_persona_name` / `persona_chain`:
 
-    1. **No request** (legacy SessionStart hook contract). Idempotent: if
-       the bridge already has a non-null voice_persona, return it as-is.
-       Otherwise pick uniformly at random from the unallocated pool.
+    1. **No request** (legacy SessionStart hook contract). Idempotent: if the bridge
+       already has a non-null voice_persona, return it as-is. Otherwise pick uniformly
+       at random from the unallocated pool.
 
-    2. **Request matches existing** (idempotent same-name request). Return
-       existing as-is, `newly_allocated=False`, `swapped=False`.
+    2. **Request matches existing** (idempotent same-name request). Return existing
+       as-is, `newly_allocated=False`, `swapped=False`.
 
-    3. **Request differs from existing OR no existing** (request-or-swap).
-       Atomically (a) verify the requested name is in the pool (else 422)
-       (b) verify it is not held by another session (else 409 with holding
-       persona name + available pool names in the response body) (c) write
-       the new persona to the bridge, releasing the prior allocation if
-       any. Broadcasts `voice_persona_assigned` + (on detected swap) a
-       "Voice re-assigned: X → Y" announcement.
+    3. **Request differs from existing, or no existing** (request-or-swap). Atomically:
+       (a) verify the requested name is in the pool (else 422).
+       (b) verify it is not held by another session (else 409, with the holding persona
+       name and available pool names in the body).
+       (c) write the new persona to the bridge, releasing the prior allocation if any.
+       Broadcasts `voice_persona_assigned` and, on a detected swap, a "Voice re-assigned:
+       X → Y" announcement.
 
-    4. **Chain** (`persona_chain`, SessionStart hook path — replaced the
-       retired `preferred_persona_name` soft path 2026-06-11). STRICT
-       ordered-fallback walk: each named element tried in order, first FREE
-       one wins; `*` means "then take anything free"; misses before the
-       satisfying element are reported via a `voice_persona_conflict`
-       notification only when the wildcard had to fire. A chain exhausted
-       without `*` raises 409 AND pushes the conflict notification — the
-       session stays persona-less (Sam TTS fallback), predictable-fail by
-       design (Rick, 2026-06-11). Like the old soft path, a chain does NOT
-       override an existing allocation (idempotent across /clear).
-       See: src/rnd/v0.1.8/2026.06.11-multi-manager-env-var-and-persona-preference-transport-fix.md
+    4. **Chain** (`persona_chain`, the SessionStart hook path). A strict ordered-fallback
+       walk: each named element is tried in order and the first free one wins. `*`
+       means "then take anything free". Misses before the satisfying element are
+       reported through a `voice_persona_conflict` notification, only when the wildcard
+       had to fire. A chain exhausted without `*` raises 409 and pushes the conflict
+       notification. The session stays persona-less (Sam TTS fallback), so the failure is
+       predictable. A chain does not override an existing allocation, so it is idempotent
+       across /clear.
 
-    When `previous_persona_name` is supplied AND a new persona is actually
-    allocated, the "Voice re-assigned" announcement uses that name. When a
-    swap is detected via the bridge's prior persona, that name is used
-    instead. Used by the SessionStart hook on /clear-with-overwrite and by
-    the /plan-session-start slash command to make voice changes audible.
+    If `previous_persona_name` is supplied and a new persona is allocated, the "Voice
+    re-assigned" announcement uses that name. If a swap is detected through the bridge's
+    prior persona, that name is used instead. The SessionStart hook uses this on
+    /clear-with-overwrite. /plan-session-start uses it to make voice changes audible.
 
-    Returns 409 Conflict body shape (per Rachel's R1 design):
-        { "detail": {
-            "message": "...", "requested": "...",
-            "holding_session_id": "...", "holding_persona_name": "...",
-            "available": [<pool names not in use>]
-        } }
+    Returns 409 Conflict body shape:
+        { "detail": { "message": "...", "requested": "...", "holding_session_id": "...",
+          "holding_persona_name": "...", "available": [<pool names not in use>] } }
 
-    Returns 422 Unprocessable Entity body shape (requested name not in pool):
-        { "detail": {
-            "message": "...", "requested": "...",
-            "available": [<pool names not in use>]
-        } }
+    Returns 422 body shape (requested name not in pool):
+        { "detail": { "message": "...", "requested": "...", "available": [<unused names>] } }
     """
     if not find_session_path_by_id( session_id ):
         raise HTTPException( status_code=404, detail=f"No active session bridge found for session_id={session_id}" )
@@ -650,18 +638,6 @@ async def voice_persona_sample(
     """
     Synthesize a short voice sample for the dev-tools persona-reference page.
 
-    Why a separate endpoint (vs. /api/get-speech-elevenlabs): the existing
-    streaming TTS path delivers PCM chunks over WebSocket and requires an
-    open audio session — appropriate for the live notification UI but heavy
-    for a static reference page that just needs to play six sample clips.
-    This endpoint calls the ElevenLabs HTTP TTS API and returns the audio
-    as a single response body, so the page can `<audio>.src = blobURL` it.
-
-    Pool-membership check: the voice_id must match an entry in the
-    configured persona pool (`cc session voice persona pool` in
-    lupin-app.ini). This prevents the endpoint from being used to burn
-    ElevenLabs quota on arbitrary voice_ids.
-
     Requires:
         - body.voice_id is a non-empty string
         - body.text is a non-empty string
@@ -673,6 +649,16 @@ async def voice_persona_sample(
         - Returns 400 if voice_id is not in pool
         - Returns 503 if ElevenLabs upstream fails
         - Never raises (all paths return Response or JSONResponse)
+
+    This is a separate endpoint from /api/get-speech-elevenlabs. The existing streaming
+    TTS path delivers PCM chunks over WebSocket and needs an open audio session. That suits
+    the live notification UI but is heavy for a static page that plays six sample clips.
+    This endpoint calls the ElevenLabs HTTP TTS API and returns the audio as one response
+    body, so the page can set `<audio>.src` to a blob URL.
+
+    The pool-membership check keeps the endpoint from being used to burn ElevenLabs quota
+    on arbitrary voice_ids. The voice_id must match an entry in the configured persona pool
+    (`cc session voice persona pool` in lupin-app.ini).
     """
     if not body.voice_id or not body.text:
         raise HTTPException( status_code=400, detail="voice_id and text are both required" )

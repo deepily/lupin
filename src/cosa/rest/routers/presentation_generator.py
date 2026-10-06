@@ -9,13 +9,12 @@ The request and response models went with the handler, and so did the todo-queue
 websocket dependencies. A Pydantic model no route reads is a shape a caller can still
 find and reasonably believe in.
 
-⚠️ `validate_source_path` LEFT THIS MODULE BEFORE THE DOOR DID, and the order was not an
-accident. This door was the only place a presentation source path was checked for escaping
-the project root — nothing downstream repeated it. Retiring the door and moving the guard
-in the same commit would have been fine; retiring it FIRST would have opened a hole for as
-long as that took. The guard is now `presentation_generator/job.py::
-source_path_is_inside_the_project`, raising where the file is actually opened, so it
-protects every caller rather than one door.
+`validate_source_path` left this module before the door did, and that order matters. This
+door was the only place a presentation source path was checked for escaping the project
+root. Nothing downstream repeated the check. Retiring the door first would have opened a
+hole for as long as the move took. The guard is now
+`presentation_generator/job.py::source_path_is_inside_the_project`. It raises where the
+file is actually opened, so it protects every caller rather than one door.
 
 What a caller sends instead:
 
@@ -96,7 +95,7 @@ async def submit_presentation_job():
 
     Ensures:
         - never returns; raises HTTPException( 410 ) naming /api/v2/submit and the
-          REMOVE BY 2026-12-31 date
+          remove-by date
     """
     gone( "/api/presentation-generator/submit" )
 

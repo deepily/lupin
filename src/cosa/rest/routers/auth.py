@@ -276,7 +276,7 @@ async def register( request: RegisterRequest, http_request: Request ) -> Registe
 )
 async def login( login_request: LoginRequest, request: Request ) -> LoginResponse:
     """
-    Authenticate user and return tokens with rate limiting (Phase 8).
+    Authenticate user and return tokens with rate limiting.
 
     Requires:
         - Valid email and password
@@ -382,12 +382,7 @@ async def login( login_request: LoginRequest, request: Request ) -> LoginRespons
 )
 async def refresh( request: RefreshRequest ) -> RefreshResponse:
     """
-    Refresh access token using refresh token.
-
-    Implements token rotation security pattern:
-    - Old refresh token is revoked
-    - New refresh token is issued
-    - New access token is issued
+    Refresh access token using refresh token, rotating the refresh token.
 
     Requires:
         - Valid, non-revoked refresh token
@@ -404,6 +399,9 @@ async def refresh( request: RefreshRequest ) -> RefreshResponse:
 
     Returns:
         RefreshResponse: New token pair
+
+    Rotation means the old refresh token is revoked, and a new refresh token and a new access
+    token are issued.
     """
     # Rotate token (validates, revokes old, issues new)
     success, message, new_refresh_token = rotate_refresh_token(

@@ -1,23 +1,22 @@
 """
 Commons broadcast endpoints.
 
-Per AC1 + AC2 + AC3 + AC4 + AC5 + AC14 of
-src/rnd/v0.1.7/2026.05.09-inter-session-commons/03-phase2-user-broadcast-design.md.
+Design: `src/rnd/v0.1.7/2026.05.09-inter-session-commons/03-phase2-user-broadcast-design.md`.
 
-**Template**: `src/cosa/rest/routers/speakerphone.py` (per F4 REUSE).
+The template for this module is `src/cosa/rest/routers/speakerphone.py`.
 
 Two endpoints:
-- `GET /api/commons/active-sessions` — recipient-preview chip-row data
-- `POST /api/commons/broadcast-to-cc-sessions` — fanout to active CC sessions
+- `GET /api/commons/active-sessions` returns the recipient-preview chip-row data.
+- `POST /api/commons/broadcast-to-cc-sessions` fans a message out to active CC sessions.
 
 Design split:
-- **Pure-logic helpers** (this module's `_*` and `*` non-route functions) are in
-  the 100% coverage gate. All take dependencies explicitly — no module-level
-  side effects, no FastAPI plumbing.
-- **Route handlers** are thin dispatchers — they pull singletons from the module
-  state and delegate to the helpers. Route bodies are `# pragma: no cover`'d to
-  keep the gate enforceable from unit tests alone (per AC12: "endpoint
-  integration tests do NOT contribute to the gate").
+- **Pure-logic helpers** (the `_*` and other non-route functions in this module) are in
+  the 100% coverage gate. They take their dependencies explicitly. They have no
+  module-level side effects and no FastAPI plumbing.
+- **Route handlers** are thin dispatchers. They pull singletons from the module
+  state and delegate to the helpers. Route bodies are `# pragma: no cover`, which
+  keeps the gate enforceable from unit tests alone. Endpoint integration tests do
+  not contribute to the gate.
 """
 
 import asyncio
@@ -84,11 +83,10 @@ class BroadcastRequestBody( BaseModel ):
 
 class RecipientResolutionError( BaseModel ):
     """
-    422 response body when recipient resolution fails for an inter-session DM
-    (`_resolve_dm_recipient`, the dm_send / POST /api/dm/send path; per Phase 0
-    Q3-rev amendment 2026-05-15).
+    422 response body when a recipient cannot be resolved for an inter-session DM.
 
-    Surfaces actionable feedback so the AI caller can self-correct without
+    It is raised by `_resolve_dm_recipient`, on the dm_send and POST /api/dm/send path.
+    It gives the AI caller actionable feedback, so the caller can self-correct without
     involving the human user. Fields:
     - `error`                      — categorical failure mode (Literal)
     - `supplied_persona`           — original input echoed back
@@ -97,11 +95,12 @@ class RecipientResolutionError( BaseModel ):
     - `candidate_alternatives`     — currently-active sessions the AI could
                                      try instead (sourced from commons_who()
                                      output at the moment of failure)
-    - `session_id_only_candidates` — active sessions with NO persona (released or never
-                                     named); addressable by `recipient_session_id` only,
-                                     kept out of `candidate_alternatives` so a nameless
-                                     row is not mistaken for corruption (row 4b2dd847)
+    - `session_id_only_candidates` — active sessions with no persona (released or never
+                                     named). They are addressable by `recipient_session_id`
+                                     only. They stay out of `candidate_alternatives` so a
+                                     nameless row is not mistaken for corruption.
     - `suggested_next_action`      — one-sentence guidance string
+
     """
     error                       : str       = Field( ..., min_length=1 )
     supplied_persona            : Optional[ str ] = Field( default=None )
@@ -122,15 +121,18 @@ _SYSTEM_REMINDER_CLOSE_LC = "</system-reminder>"
 
 
 def _body_contains_reminder_framing( body: str ) -> bool:
-    """True if body has literal `<system-reminder>` / `</system-reminder>` (case-insensitive) — per T1."""
+    """True if the body holds a `<system-reminder>` or `</system-reminder>` tag, ignoring case."""
     lowered = body.lower()
     return _SYSTEM_REMINDER_OPEN_LC in lowered or _SYSTEM_REMINDER_CLOSE_LC in lowered
 
 
 def validate_broadcast_body( message: Optional[ str ] ) -> Tuple[ bool, Optional[ str ] ]:
     """
-    Validate the broadcast `message` field. Returns (valid, error_detail).
-    Per AC1: empty/whitespace → 400; system-reminder substring → 400.
+    Validate the broadcast `message` field and return ( valid, error_detail ).
+
+    An empty or whitespace-only message is rejected with a 400. So is a message that
+    contains a system-reminder tag.
+
     """
     if not isinstance( message, str ) or not message.strip():
         return ( False, "message body is required" )
@@ -141,8 +143,11 @@ def validate_broadcast_body( message: Optional[ str ] ) -> Tuple[ bool, Optional
 
 def validate_broadcast_id( broadcast_id: Optional[ str ] ) -> Tuple[ bool, Optional[ str ] ]:
     """
-    Validate caller-supplied `broadcast_id`. None is allowed (server generates).
-    Per AC1: invalid UUIDv4 shape → 400.
+    Validate the caller-supplied `broadcast_id`, where None is allowed.
+
+    None is allowed because the server generates an id then. An id that is not a
+    valid UUIDv4 is rejected with a 400.
+
     """
     if broadcast_id is None:
         return ( True, None )
@@ -153,9 +158,11 @@ def validate_broadcast_id( broadcast_id: Optional[ str ] ) -> Tuple[ bool, Optio
 
 def build_pseudo_sender_id( user_id: str ) -> str:
     """
-    Build the server-pseudo-sender-id used for `broadcasts` topic posts.
-    Per AC4 + F8: `broadcast-<8-hex-of-sha256(user_id)>`. Hyphen, NEVER `@`
-    (would fail `commons_store._HEADER_RE` round-trip).
+    Build the server pseudo sender id for `broadcasts` topic posts.
+
+    The form is `broadcast-<8-hex-of-sha256(user_id)>`. It uses a hyphen and never `@`,
+    because an `@` would fail the `commons_store._HEADER_RE` round-trip.
+
     """
     digest = hashlib.sha256( user_id.encode( "utf-8" ) ).hexdigest()[ :8 ]
     return f"broadcast-{digest}"
@@ -163,8 +170,10 @@ def build_pseudo_sender_id( user_id: str ) -> str:
 
 def _load_bridge_fields( bridge_path: Any ) -> Optional[ Dict[ str, Any ] ]:
     """
-    Open a bridge file and return its content as dict, or None on failure.
-    Extracted so unit tests can mock at the source.
+    Open a bridge file and return its content as a dict, or None on failure.
+
+    It is separate so unit tests can mock it at the source.
+
     """
     try:
         with open( bridge_path ) as f:
@@ -175,18 +184,15 @@ def _load_bridge_fields( bridge_path: Any ) -> Optional[ Dict[ str, Any ] ]:
 
 def _bridge_last_activity_epoch( bridge: Dict[ str, Any ] ) -> Optional[ float ]:
     """
-    Extract the bridge's last-activity epoch seconds. Tries common field names;
-    returns None if unparseable. Defensive against schema drift.
+    Return the bridge's last-activity time in epoch seconds, or None if unparseable.
 
-    2026-05-13 fix (per `src/rnd/v0.1.7/2026.05.13-broadcast-stale-bridge-phantom.md`):
-    falls back to the nested `idle_detection.last_interaction_at` ISO string
-    that the real bridge writer (`set_idle_detection_field` in
-    `session_bridge.py:1055-1103`) actually populates. The previous lookup at
-    top-level `last_activity_epoch` / `last_activity` / `updated_at` matched
-    NONE of the fields the writer produces — `_bridge_last_activity_epoch`
-    returned None for every bridge and the activity-age filter became a no-op,
-    letting dead-PID phantoms through (inside Docker where the host-PID
-    liveness check is disabled).
+    It tries the numeric fields `last_activity_epoch`, `last_activity` and `updated_at` first.
+    It then falls back to the ISO string in `idle_detection.last_interaction_at`. That nested
+    field is the one the real bridge writer, `set_idle_detection_field` in `session_bridge.py`,
+    actually populates. Without the fallback the lookup returns None for every bridge, and the
+    activity-age filter does nothing. Dead-PID phantoms then get through inside Docker, where
+    the host-PID liveness check is disabled. The function is defensive against schema drift.
+
     """
     # Numeric epoch fields — checked first for back-compat with any future
     # writer that adds them.
@@ -211,50 +217,43 @@ def _bridge_last_activity_epoch( bridge: Dict[ str, Any ] ) -> Optional[ float ]
 
 def _sender_id_for_bridge( session_id, bridge ) -> Optional[ str ]:
     """
-    The notification sender_id for a session, derived from its bridge.
+    The notification sender_id for a session, read from its bridge.
 
     Requires:
         - session_id is a string (a full session uuid, or already an 8-hex hash)
         - bridge is a dict (foreign data — any key may be missing or wrong-typed)
 
     Ensures:
-        - Returns the bridge's OWN `sender_id`, written by the SessionStart hook
-          on the host, verbatim — this function does NOT derive it
+        - Returns the bridge's own `sender_id`, written by the SessionStart hook
+          on the host, verbatim — this function does not derive it
         - Returns None when the bridge carries no `sender_id`, or one that is not
-          a non-empty string. NONE, never a sentinel: `"unknown"` has no "#", so
+          a non-empty string. None, never a sentinel: `"unknown"` has no "#", so
           `sessionHashOf` returns null on the phone, the hash-merge never fires,
-          and every unidentified seat collapses onto ONE bogus rail row — a fresh
-          duplicate-shaped defect in the exact surface this exists to fix. Null is
-          already the shape under test there (focus_chat_bloc.dart:444, pinned by
-          focus_live_seat_roster_test.dart:81), so it needs no client change
+          and every unidentified seat collapses onto one bogus rail row. Null is
+          already the shape under test there (`focus_chat_bloc.dart`, pinned by
+          `focus_live_seat_roster_test.dart`), so it needs no client change
         - Never raises
-
-    🔴 IT USED TO DERIVE THIS, AND THAT WAS THE BUG (row 2184bebb, added 82b163b9,
-    fixed 2026-09-22). It called `detect_project_for_path( bridge["cwd"] )` — a
-    `.git` walk over a HOST path, executed INSIDE the lupin-rest container, where
-    that path does not exist. Verified with docker exec, not inferred: neither the
-    worktree nor its `.git` is visible from in there. The walk found nothing and
-    fell back to the cwd BASENAME, so every worktree seat was served as
-    `claude.code@seat-cc-author-<name>.deepily.ai#<hash>` while the same seat's
-    notifications said `claude.code@lupin.deepily.ai#<hash>`. Two identities for
-    one seat; three of us appeared TWICE on Rick's focus rail. Main-checkout seats
-    looked correct only by accident, their basename being "lupin".
-
-    ⚠️ DO NOT REINSTATE A FALLBACK. Inferring the project from the path segment
-    before `/.claude/worktrees/` was considered and BANNED by Mr. Radio's ruling
-    (2026-09-19), including as a silent last resort: the session is the only party
-    that KNOWS its identity, an inference that reads today's layout breaks the day
-    someone nests a worktree or renames a repo, and a wrong identity that looks
-    like a right one is the defect itself, not a mitigation of it. A bridge with
-    no `sender_id` is a seat the server cannot address, and saying so is the
-    correct answer.
 
     Args:
         session_id: The session's id, as the roster reports it
         bridge: The session's bridge dict
 
     Returns:
-        str or None: The sender_id, or None when it cannot be derived honestly
+        str or None: The sender_id, or None when the bridge does not carry one
+
+    Why no derivation: the function must not derive the id from the bridge's `cwd`.
+    A `.git` walk over a host path runs inside the lupin-rest container, where that path
+    does not exist. The walk finds nothing and falls back to the cwd basename. A worktree
+    seat would then be served under a different identity from the one its notifications use,
+    and would appear twice on the focus rail.
+
+    A fallback must not be added. Inferring the project from the path segment before
+    `/.claude/worktrees/` is banned, even as a silent last resort. The session is the only
+    party that knows its identity. An inference that reads today's layout breaks the day
+    someone nests a worktree or renames a repo. A wrong identity that looks like a right
+    one is the defect itself, not a mitigation. A bridge with no `sender_id` is a seat the
+    server cannot address, and returning None says so.
+
     """
     sender_id = bridge.get( "sender_id" )
     return sender_id if isinstance( sender_id, str ) and sender_id else None
@@ -266,23 +265,20 @@ def project_session_response(
     bridge       : Dict[ str, Any ],
 ) -> Dict[ str, Any ]:
     """
-    Build the response dict for one session per AC2 + T8.
+    Build the response dict for one session, with no filesystem-derived field.
 
-    **NEVER includes the bridge Path or any filesystem-derived field.**
+    It never includes the bridge Path or any other filesystem-derived field.
     Only these fields are exposed: session_id, sender_id, persona_name,
     persona_icon, persona_color, last_seen_iso, speakerphone_on.
 
-    `sender_id` (added 2026-09-17, Tiffany's ask for the phone's focus rail):
-    the notification routing key, `claude.code@<project>.deepily.ai#<hash8>`.
-    A client cannot rebuild it from `session_id` alone — the project segment
-    varies per seat (@lupin, @lupin-mobile, @plan) — and the rail keys on the
-    full id, so seeding the rail from this roster needs the id served here.
-    Derived, never read from the bridge: no bridge writes a `sender_id` field.
-    The project comes from the bridge's `cwd` snapshot through
-    `detect_project_for_path`, which is the SAME walk every other emitter uses
-    (row 6597cea9: a second copy of that walk is how one seat became two rows).
-    It is None when the bridge has no usable `cwd`, rather than a guess — the
-    consumer can then fall back instead of routing to a wrong id.
+    `sender_id` is the notification routing key, `claude.code@<project>.deepily.ai#<hash8>`,
+    read from the bridge through `_sender_id_for_bridge`. It is None when the bridge carries
+    none. A client cannot rebuild it from `session_id` alone, because the project segment
+    varies per seat. The phone's focus rail keys on the full id, so the roster must serve it.
+
+    `last_seen_iso` falls back to `idle_detection.last_interaction_at` when the bridge has no
+    top-level ISO field, so the API returns a real time instead of always None.
+
     """
     # 2026-05-13 fix: same projection mismatch as `_bridge_last_activity_epoch`.
     # Fall back to `idle_detection.last_interaction_at` so the API returns a real
@@ -318,43 +314,31 @@ def filter_and_project_sessions(
     mtime_fn                          : Callable[ [ Any ], float ] = lambda p: p.stat().st_mtime,
 ) -> Tuple[ List[ Dict[ str, Any ] ], List[ Dict[ str, Any ] ] ]:
     """
-    Apply all AC2 filters + T7 + T8 projection to the raw 3-tuple list.
+    Apply the session filters and the response projection to the raw 3-tuple list.
 
-    Returns `( included, filtered_out )` — fanout receipts (F3, 2026-06-11).
-    Every gate that previously dropped a session SILENTLY now emits a
-    `filtered_out` entry `{ "session_id", "reason" }` (the mtime gate adds
-    `age_seconds` + `threshold_seconds`) so a broadcast miss is visible to the
-    sender instead of vanishing. Reasons: `bridge_unreadable`,
-    `owner_mismatch`, `stale_bridge_mtime`, `bridge_vanished`,
-    `originator_excluded` (intentional, reported for completeness).
-    See: src/rnd/v0.1.8/2026.06.10-broadcast-miss-duplicate-listener-root-cause.md §3
+    Returns `( included, filtered_out )`. Every gate that drops a session emits a
+    `filtered_out` entry `{ "session_id", "reason" }`. A broadcast miss is therefore visible
+    to the sender instead of vanishing. The mtime gate adds `age_seconds` and
+    `threshold_seconds`. The reasons are `bridge_unreadable`, `owner_mismatch`,
+    `stale_bridge_mtime`, `bridge_vanished` and `originator_excluded`. The last one is
+    intentional and reported for completeness.
 
-    1. Open each bridge via `bridge_loader` — skip on parse fail
-    2. Filter by `owner_user_id == authenticated_user_id` (T7 + Q9 same-user scoping).
-       **Graceful degradation (2026-05-13 fix carried forward to 2026-05-14)**:
-       bridges that LACK an `owner_user_id` field pass through. The original
-       2026-05-13 fix scoped on the listener's `user_id`, but that turned out
-       to be the service-account identity (e.g. `claude.code@<repo>.deepily.ai`),
-       NOT the human owner. For any human caller, every stamped bridge was
-       therefore rejected — same UX symptom in reverse. Per
-       `src/rnd/v0.1.7/2026.05.14-broadcast-listener-stamps-wrong-user-id.md`
-       (Option C), scoping now reads a NEW `owner_user_id` field that the
-       listener will eventually stamp with the HUMAN OWNER's UUID. Until the
-       writer-side change (`_stamp_owner_user_id_on_bridge`) lands, every
-       bridge hits the graceful branch and passes through — restoring the
-       user's reported symptom from "1 of 4 visible" to "all 4 visible".
-       Once the writer lands, the equality branch tightens automatically
-       with zero code change here.
-       (The legacy `user_id` field is preserved on the bridge for telemetry —
-       it identifies the listener service account that wrote the bridge — but
-       is no longer used for scoping.)
-    3. Filter by LIVENESS (bridge-file mtime newer than threshold) — `mtime_fn`
-       is injectable (defaults to `path.stat().st_mtime`) for filesystem-free
-       unit tests, mirroring the `now_epoch_fn` injection in `execute_broadcast`.
-       Replaces the pre-2026-06-05 `last_interaction_at` interaction-recency
-       check so dormant-but-alive workers stay reachable by broadcast.
-    4. Optionally exclude originator's session (when `include_originator=False`)
-    5. Project to response shape via `project_session_response` (T8 — no Path leak)
+    1. Open each bridge via `bridge_loader` and skip it on a parse failure.
+    2. Filter by `owner_user_id == authenticated_user_id`, which scopes to the same user.
+       Bridges that lack an `owner_user_id` field pass through. The listener's own `user_id`
+       is the service-account identity, not the human owner, so scoping on it would reject
+       every stamped bridge for a human caller. Scoping reads `owner_user_id`, which the
+       listener will eventually stamp with the human owner's UUID. Until the writer-side
+       change `_stamp_owner_user_id_on_bridge` lands, every bridge takes the pass-through
+       branch. After it lands, the equality branch tightens with no change here. The legacy
+       `user_id` field stays on the bridge for telemetry and is no longer used for scoping.
+    3. Filter by liveness, meaning the bridge-file mtime is newer than the threshold.
+       `mtime_fn` is injectable, defaulting to `path.stat().st_mtime`, for filesystem-free
+       unit tests. It mirrors the `now_epoch_fn` injection in `execute_broadcast`. The mtime
+       is used instead of interaction recency so that dormant-but-alive workers stay reachable.
+    4. Optionally exclude the originator's session, when `include_originator=False`.
+    5. Project to the response shape via `project_session_response`, so no Path leaks.
+
     """
     out          : List[ Dict[ str, Any ] ] = [ ]
     filtered_out : List[ Dict[ str, Any ] ] = [ ]
@@ -412,10 +396,12 @@ def perform_fanout(
     build_sender_id       : Callable[ [ str ], Optional[ str ] ],
 ) -> Tuple[ int, List[ str ] ]:
     """
-    Per-recipient fanout: post to `broadcasts` topic + push `action:broadcast_received` notification.
+    Post to the `broadcasts` topic and push `action:broadcast_received`, once per recipient.
 
-    Per AC4 + AC5 + F10 (per-recipient failure isolation): if `push_notification`
-    fails for recipient K, log + continue. Returns `(successful_count, failed_recipient_sids)`.
+    Each recipient is isolated from the others. If `push_notification` fails for one
+    recipient, the failure is logged and the loop continues.
+    Returns `(successful_count, failed_recipient_sids)`.
+
     """
     pseudo_sid = build_pseudo_sender_id( sender_user_id )
     successful = 0
@@ -479,23 +465,24 @@ def execute_broadcast(
     mtime_fn                           : Callable[ [ Any ], float ] = lambda p: p.stat().st_mtime,
 ) -> Dict[ str, Any ]:
     """
-    Full broadcast execution pipeline — pure-logic core of the POST endpoint.
+    Run the full broadcast pipeline, the pure-logic core of the POST endpoint.
 
-    Returns a dict with one of these shapes:
+    Returns a dict in one of four shapes:
+
       {"http_status": 400, "detail": "..."}
       {"http_status": 429, "retry_after": float}
       {"http_status": 409, "detail": "broadcast_id collision"}
       {"http_status": 200, "broadcast_id": "...", "recipients": int, "failed_recipients": [...],
        "filtered_out": [...], "status": "..."}
 
-    `filtered_out` (F3 fanout receipts, 2026-06-11) lists every enumerated
-    session the recipient filter dropped, with the reason — so a silent
-    broadcast miss (e.g. the 8h mtime gate) is visible to the sender. Present
-    in BOTH 200 shapes; the zero-recipient response is the case the receipts
-    exist for.
+    The field `filtered_out` lists every enumerated session the recipient filter dropped, with the
+    reason. A silent broadcast miss, such as the 8h mtime gate, is therefore visible to the
+    sender. It is present in both 200 shapes. The zero-recipient response is the case it
+    exists for.
 
-    Raises nothing — all error states are returned as dicts for the route
-    handler to translate into FastAPI responses.
+    Raises nothing. All error states are returned as dicts for the route handler to
+    translate into FastAPI responses.
+
     """
     # AC1: body validation
     ok, err = validate_broadcast_body( body.message )
@@ -584,21 +571,20 @@ def _entry_passes_same_user_scoping(
     bridge_owner_lookup   : Callable[ [ str ], Optional[ str ] ],
 ) -> bool:
     """
-    Per-entry same-user scoping check.
+    Check whether one history entry passes same-user scoping.
 
-    Mirrors the graceful-degradation pattern from `filter_and_project_sessions`
-    (broadcast filter — Q1 of `2026.05.14-broadcast-listener-stamps-wrong-user-id.md`).
+    It mirrors the pass-through pattern in `filter_and_project_sessions`, the broadcast filter.
 
-    Returns True iff at least one is satisfied:
-      1. `entry.metadata.sender_user_id == authenticated_user_id` (direct attribution —
-         e.g. `broadcasts` topic where `perform_fanout` stamps the sender's UUID per AC4
-         of the Phase 2 broadcast design)
-      2. `entry.metadata.target_session_id` is in `user_session_ids` (you-as-recipient —
-         e.g. per-recipient `broadcasts` fanout entries OR broadcast-acks targeting you)
-      3. `bridge_owner_lookup(entry.sender_session_id)` matches the caller, OR the lookup
-         returns `None` (graceful fallback — bridges lacking `owner_user_id` pass through,
-         same pattern as the broadcast-recipient filter; tightens to strict isolation
-         once every listener bridge stamps `owner_user_id`)
+    Returns True if at least one of these is satisfied:
+      1. `entry.metadata.sender_user_id == authenticated_user_id`. This is direct attribution,
+         for example the `broadcasts` topic, where `perform_fanout` stamps the sender's UUID.
+      2. `entry.metadata.target_session_id` is in `user_session_ids`. You are the recipient,
+         for example per-recipient `broadcasts` fanout entries or broadcast-acks targeting you.
+      3. `bridge_owner_lookup(entry.sender_session_id)` matches the caller, or the lookup
+         returns `None`. Bridges that lack `owner_user_id` pass through, as in the
+         broadcast-recipient filter. This tightens to strict isolation once every listener
+         bridge stamps `owner_user_id`.
+
     """
     md = entry.get( "metadata" ) or { }
     # Branch 1: direct sender-user attribution
@@ -623,8 +609,9 @@ def _project_history_entry( entry: Dict[ str, Any ], topic: str ) -> Dict[ str, 
     """
     Build the response shape for one history entry.
 
-    Per AC1 + AC5 + AC6: includes `topic` + `topic_kind` so the frontend can render
-    the topic-chip-prefix for free-form topics (Q2 ratified — non-reserved get a chip).
+    It includes `topic` and `topic_kind`, so the frontend can render the topic-chip prefix
+    for free-form topics. Non-reserved topics get a chip.
+
     """
     return {
         "ts"                : entry.get( "ts" ),
@@ -665,25 +652,24 @@ def _dedupe_broadcasts_by_id(
     merged: List[ Tuple[ str, Dict[ str, Any ] ] ],
 ) -> List[ Tuple[ str, Dict[ str, Any ] ] ]:
     """
-    Collapse per-recipient `broadcasts`-topic fanout rows into one row per
-    `metadata.broadcast_id`, keeping the first occurrence (newest after the
-    DESC sort upstream).
+    Collapse per-recipient `broadcasts` fanout rows into one row per `metadata.broadcast_id`.
 
-    Required by the Recent Activity surface
-    (`src/rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md`):
-    Phase 2's `perform_fanout` (this module, line ~348) writes ONE `broadcasts`
-    row per recipient by design — supports the `target_session_id` branch of
-    `_entry_passes_same_user_scoping`. For an admin-overview stream those N
-    rows are noise; the admin wants "one broadcast = one row".
+    It keeps the first occurrence, which is the newest after the descending sort upstream.
 
-    Mutation contract: input list is read-only. The kept entry is shallow-copied
-    with `target_session_id` stripped from its `metadata` — the dedup'd row
-    represents the broadcast as a whole, not any one recipient slice.
+    The Recent Activity surface needs this. `perform_fanout` in this module writes one
+    `broadcasts` row per recipient, which supports the `target_session_id` branch of
+    `_entry_passes_same_user_scoping`. For an admin-overview stream those rows are noise.
+    The admin wants one broadcast as one row.
 
-    Non-`broadcasts` topics pass through unchanged (e.g. `broadcast-acks`
-    per-recipient rows are the intended chip-row UX). Broadcasts-topic entries
-    missing `metadata.broadcast_id` pass through unchanged (defensive — a
-    malformed entry shouldn't disappear silently).
+    Mutation contract: the input list is read-only. The kept entry is shallow-copied
+    with `target_session_id` stripped from its `metadata`. The deduplicated row represents
+    the broadcast as a whole, not any one recipient slice.
+
+    Topics other than `broadcasts` pass through unchanged. For example, `broadcast-acks`
+    per-recipient rows are the intended chip-row UX. Broadcasts-topic entries missing
+    `metadata.broadcast_id` also pass through unchanged. A malformed entry should not
+    disappear silently.
+
     """
     seen_broadcast_ids : Set[ str ]                              = set()
     out                : List[ Tuple[ str, Dict[ str, Any ] ] ] = [ ]
@@ -710,36 +696,27 @@ def _dedupe_broadcast_acks_by_recipient(
     merged: List[ Tuple[ str, Dict[ str, Any ] ] ],
 ) -> List[ Tuple[ str, Dict[ str, Any ] ] ]:
     """
-    Collapse `broadcast-acks`-topic rows that share `(broadcast_id,
-    sender_session_id, metadata.status)` down to a single row, keeping the
-    first occurrence (newest after the DESC sort upstream).
+    Collapse `broadcast-acks` rows that share one key into a single row.
 
-    Symptom case: a single recipient session writes the same ack 3-4× within
-    milliseconds (e.g. status="completed" for the same broadcast_id from the
-    same sender_session_id). Observed in production
-    `io/commons/broadcast-acks.md` on 2026-05-15 around 15:16:43Z, where one
-    recipient logged three identical `status="completed"` rows for broadcast
-    `adedc24b…` at .852328 / .852596 / .854790 — bodies and metadata
-    bit-identical.
+    The key is `(broadcast_id, sender_session_id, metadata.status)`. The function keeps the
+    first occurrence, which is the newest after the descending sort upstream.
 
-    Sister to `_dedupe_broadcasts_by_id` — same shape, different key. The
-    underlying write-side multiplicity (something is causing N
-    `notification_queue_update` deliveries → N `_handle_broadcast_received`
-    → N `_post_ack` calls in `src/lupin_mcp/broadcast_handler.py`) is a
-    SEPARATE investigation; this consumer-side filter is the agreed-upon
-    shipping fix per Rick's voice direction (2026-05-15 evening, session
-    06aba5f7 Arnold 🪨), following the precedent set by the broadcasts-topic
-    dedupe (`_dedupe_broadcasts_by_id`) that landed earlier the same day in
-    session c4139ece (María 🌸). Bug filing in `bug-fix-queue.md` rev
-    2026-05-15 captures the four ranked plausible causes for the write-side
-    multiplicity that next investigation should run with.
+    The symptom case is a single recipient session writing the same ack three or four times
+    within milliseconds. For example, one recipient logged three identical
+    `status="completed"` rows for the same broadcast, with bodies and metadata bit-identical.
 
-    Mutation contract: input list is read-only. Only `broadcast-acks` topic
-    entries with all three keys present are subject to dedup. Defensive
-    passthrough on any missing/non-string key (a malformed entry shouldn't
-    disappear silently).
+    It is the sister of `_dedupe_broadcasts_by_id`, with the same shape and a different key.
+    The write-side multiplicity is a separate problem. Something causes several
+    `notification_queue_update` deliveries, which cause several `_handle_broadcast_received`
+    calls and several `_post_ack` calls in `src/lupin_mcp/broadcast_handler.py`. This
+    consumer-side filter is the agreed fix until that is investigated.
 
-    Non-`broadcast-acks` topics pass through unchanged.
+    Mutation contract: the input list is read-only. Only `broadcast-acks` topic entries
+    with all three keys present are subject to dedup. Any entry with a missing or
+    non-string key passes through. A malformed entry should not disappear silently.
+
+    Topics other than `broadcast-acks` pass through unchanged.
+
     """
     seen_keys : Set[ Tuple[ str, str, str ] ]            = set()
     out       : List[ Tuple[ str, Dict[ str, Any ] ] ]   = [ ]
@@ -778,29 +755,27 @@ def execute_broadcast_history(
     """
     Aggregate commons entries across topics for the broadcast-card Recent Activity stream.
 
-    Per `src/rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md` (AC1, AC4, AC5,
-    AC6, AC9). Ratifications:
-      Q2 — topic chips for free-form topics (kept in projection via `topic_kind`)
-      Q5 — `presence` + `system-events` excluded by default (caller-supplied
-            `excluded_topics` enforces this)
-      Q6 — `hours` window mirrors the existing history-window dropdown semantics
-      Q7 — flat reverse-chronological (sorted by `ts` DESC across topics)
-
-    Pipeline:
-      1. Resolve effective `since` cutoff from (`since_iso`, `hours`).
-      2. Enumerate active topics via `store._all_topic_names()`, drop excluded.
-      3. For each topic, fetch entries via `store.read(t, since=cutoff, limit=max_ceiling)`.
-      4. Apply per-entry same-user scoping via `_entry_passes_same_user_scoping`.
-      5. Merge across topics, sort newest-first.
-      6. Cap to `min(limit, max_entries_ceiling)`.
-      7. Project to the response shape via `_project_history_entry`.
-
     Returns:
         {
             "entries"     : [ ...projected entries, newest first... ],
             "since_used"  : "<iso>" | None,
-            "next_cursor" : None,    # v1 — pagination deferred per design "Open follow-ups"
+            "next_cursor" : None,    # v1 — pagination is deferred
         }
+
+    Pipeline:
+      1. Resolve the effective `since` cutoff from `since_iso` and `hours`.
+      2. Enumerate active topics via `store._all_topic_names()` and drop excluded ones.
+      3. For each topic, fetch entries via `store.read(t, since=cutoff, limit=max_ceiling)`.
+      4. Apply per-entry same-user scoping via `_entry_passes_same_user_scoping`.
+      5. Merge across topics and sort newest-first.
+      6. Cap to `min(limit, max_entries_ceiling)`.
+      7. Project to the response shape via `_project_history_entry`.
+
+    Design choices: free-form topics keep a topic chip, through `topic_kind` in the projection.
+    The caller-supplied `excluded_topics` removes `presence` and `system-events` by default.
+    The `hours` window mirrors the history-window dropdown. The stream is flat, sorted by
+    `ts` descending across topics.
+
     """
     cutoff_iso = _resolve_since_cutoff( since_iso, hours, now_iso_fn )
 
@@ -851,31 +826,31 @@ def execute_broadcast_history(
 
 def _session_id_matches( canonical: Optional[ str ], supplied: str ) -> bool:
     """
-    True when a supplied recipient session id addresses a candidate's canonical
-    session id, tolerating the short/full forms a session advertises about
-    itself (bug d57dbfea).
+    True when a supplied recipient session id addresses a candidate's canonical session id.
 
-    `get_session_info()` reports a session's `session_id` in SHORT (8-char)
-    form, while the bridge scan keys candidates on the FULL `stable_session_id`.
-    So a manager replying to a worker that advertised its short id supplies a
-    PREFIX of the candidate's canonical id — exact equality would miss it. This
-    is the only addressing channel for a null-persona worker (no name to resolve
-    by), so prefix tolerance is what makes it reachable.
-
-    Exact equality is tried first; otherwise the shorter of the two must be a
-    >= 8-char prefix of the longer. The 8-char floor avoids a 1-2 char id
-    colliding with every candidate. Ambiguity (more than one candidate matching
-    a short prefix) is detected and reported by the caller, not collapsed here.
+    It tolerates the short and full forms a session advertises about itself.
 
     Requires:
         - supplied is a non-empty string (pydantic enforces min_length=1)
 
     Ensures:
-        - returns True iff canonical == supplied, OR the shorter of the pair is
+        - returns True iff canonical == supplied, or the shorter of the pair is
           a >= 8-char prefix of the longer
         - returns False when canonical is falsy (a null-persona candidate still
-          carries a real session_id, so this only guards genuinely-empty ids)
+          carries a real session_id, so this only guards truly empty ids)
         - never raises
+
+    `get_session_info()` reports a session's `session_id` in short (8-char) form, while the
+    bridge scan keys candidates on the full `stable_session_id`. A manager replying to a worker
+    that advertised its short id therefore supplies a prefix of the candidate's canonical id,
+    and exact equality would miss it. This is the only addressing channel for a null-persona
+    worker, which has no name to resolve by.
+
+    Exact equality is tried first. Otherwise the shorter of the two must be a prefix of at
+    least 8 characters. The 8-character floor stops a 1-2 character id colliding with every
+    candidate. The caller detects and reports ambiguity, meaning more than one candidate
+    matching a short prefix. This function does not collapse it.
+
     """
     if not canonical or not supplied:
         return False
@@ -897,20 +872,16 @@ def _resolve_dm_recipient(
     mtime_fn              : Callable[ [ Any ], float ] = lambda p: p.stat().st_mtime,
 ) -> Dict[ str, Any ]:
     """
-    Resolve an inter-session DM recipient to a concrete session_id + persona_name.
+    Resolve an inter-session DM recipient to a concrete session_id and persona_name.
 
-    Per Phase 0 Q3-rev (2026-05-15 ratified):
-    - session_id takes precedence over persona when both supplied
-    - persona resolution chain: exact → case-insensitive → punct/whitespace-tolerant
-      (PHI-4 LLM disambiguator stubbed for v1; can be wired in v1.1)
-    - Failures return 422 with rich `RecipientResolutionError` body so the AI
-      caller can self-correct (Rick's amendment).
-
-    Same-user scoping via `filter_and_project_sessions` (Phase 2 T7 inheritance).
+    A supplied session_id takes precedence over persona. The persona chain is exact, then
+    case-insensitive, then punctuation- and whitespace-tolerant (the LLM disambiguator is stubbed).
+    Failures return a 422 with a `RecipientResolutionError` body. Scoping uses `filter_and_project_sessions`.
 
     Returns:
       {"http_status": 200, "session_id": str, "persona_name": str | None}
       {"http_status": 422, "detail": <RecipientResolutionError model_dump>}
+
     """
     active_sessions, _filtered_out = filter_and_project_sessions(
         raw_sessions                     = raw_sessions_fn(),
@@ -1035,7 +1006,7 @@ def get_notification_queue():
 
 
 def _require_initialized():
-    """Raise if commons singletons not yet wired (step 8 wires them at app startup)."""
+    """Raise if the commons singletons are not yet wired at app startup."""
     if _commons_store is None or _commons_rate_limiter is None or _commons_ack_watcher is None:
         raise HTTPException( status_code=503, detail="commons subsystem not initialized" )
 

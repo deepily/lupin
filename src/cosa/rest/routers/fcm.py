@@ -1,29 +1,25 @@
 """
-FCM token-registration endpoints — the mobile silent-relay wake channel (S6 §3.1).
+FCM token-registration endpoints, the mobile silent-relay wake channel.
 
-The mobile app registers its FCM device token here so the parent can summon it
+The mobile app registers its FCM device token here. The parent can then summon the app
 with a content-free `ws_wake` push when notifications arrive and no live mobile
-WebSocket exists (see `cosa.rest.fcm_wake_service`). Tokens persist in the
-`fcm_tokens` table (durable across restarts, F-S6-S2-1a).
+WebSocket exists (see `cosa.rest.fcm_wake_service`). Tokens persist in the `fcm_tokens`
+table, durable across restarts.
 
-Endpoints (cascade-ratified contract, amended 2026-06-12 under OSQ-6):
-    POST /api/fcm/register-token   (JWT) — body { token, platform, user_email } → { "status": "ok" }
-    POST /api/fcm/push-pause       (admin) — body { paused, minutes? } → pause state (row 7df08e59)
-    GET  /api/fcm/push-pause       (admin) — → pause state
-    POST /api/fcm/unregister-token (JWT) — body { token } → { "status": "ok" }
-        (was DELETE /api/fcm/register-token with JSON body — switched because
-        DELETE-with-body is dropped by some proxies/LBs on the GCP cutover path)
+Endpoints:
+    POST /api/fcm/register-token   (JWT) — body { token, platform, user_email } → { "status": "ok" }.
+    POST /api/fcm/push-pause       (admin) — body { paused, minutes? } → pause state.
+    GET  /api/fcm/push-pause       (admin) — → pause state.
+    POST /api/fcm/unregister-token (JWT) — body { token } → { "status": "ok" }.
+        (a POST, not a DELETE with a body. Some proxies and load balancers drop
+        a DELETE body on the GCP cutover path.)
 
-Handlers are SYNC `def` by design (Rachel R2): they hold sync DB sessions, and
-FastAPI runs sync handlers on the threadpool — `async def` with sync `get_db()`
-inside would block the event loop (the :7999 starvation pattern Lane 1 fixed).
+Handlers are sync `def`. They hold sync DB sessions, and FastAPI runs sync handlers on
+the threadpool. An `async def` with a sync `get_db()` inside would block the event loop.
 
-The push-pause handlers are the deliberate exception and are `async def`: they touch no
-database, only an in-memory flag, and the auto-resume timer is armed with
-`loop.call_later`, which is not thread-safe and needs the server's running event loop —
-a threadpool handler has none.
-
-See: src/lupin-mobile/src/rnd/2026.06.11-focus-mode-voice-chat/15-section-s6-fcm-backend-interface.md
+The push-pause handlers are the exception and are `async def`. They touch no database,
+only an in-memory flag. The auto-resume timer is armed with `loop.call_later`, which is
+not thread-safe and needs the server's running event loop. A threadpool handler has none.
 """
 
 import asyncio
@@ -65,11 +61,6 @@ def register_fcm_token(
     """
     Persist (upsert) an FCM device token for the authenticated user.
 
-    The user binding stored with the token is the AUTHENTICATED uid — the wake
-    trigger resolves tokens by the same uid notifications target. The body's
-    user_email is the S6 §3.1 contract field, stored alongside for operator
-    legibility.
-
     Requires:
         - body.token is a non-empty FCM registration token
         - caller is authenticated (JWT or API key)
@@ -80,6 +71,10 @@ def register_fcm_token(
 
     Raises:
         - None beyond auth/validation middleware (422 on malformed body)
+
+    The user binding stored with the token is the authenticated uid, because the wake trigger
+    resolves tokens by the same uid notifications target. The body's user_email is the
+    contract field, stored alongside for operator legibility.
     """
     with get_db() as session:
         repo = FcmTokenRepository( session )
@@ -106,10 +101,6 @@ def unregister_fcm_token(
     """
     Remove an FCM device token registration.
 
-    Best-effort by contract: logout flows fire this without awaiting guarantees,
-    so an unknown token is a success (the end state — token not registered —
-    already holds).
-
     Requires:
         - body.token is a non-empty string
         - caller is authenticated (JWT or API key)
@@ -120,6 +111,9 @@ def unregister_fcm_token(
 
     Raises:
         - None beyond auth/validation middleware (422 on malformed body)
+
+    This is best-effort by contract. Logout flows fire it without awaiting guarantees, so
+    an unknown token is a success. The end state, token not registered, already holds.
     """
     with get_db() as session:
         repo    = FcmTokenRepository( session )

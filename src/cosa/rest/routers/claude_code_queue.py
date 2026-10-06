@@ -3,59 +3,40 @@ The two retired Claude Code submission doors.
 
 This module used to submit Claude Code tasks to the CJ Flow queue. It now holds two
 tombstones: `/api/claude-code/submit` (the canonical path) and
-`/api/claude-code/queue/submit` (its alias) each stay registered and answer 410 Gone
+`/api/claude-code/queue/submit` (its alias). Each stays registered and answers 410 Gone,
 naming `/api/v2/submit`, which is where that work enters now.
 
-RICK'S RULING, 2026-08-21: *"A Claude code job should absolutely be upgraded and updated
-to use the front door submit under V2. Under no circumstances should we allow it to die on
-the vine."* The upgrade and the tombstone are the same decision, not opposite ones: the job
-keeps running, and the doors that used to build it now say where it runs instead. A door
-that quietly 404s teaches a stale caller nothing; one that names its replacement teaches it
-the fix.
+A Claude Code job is upgraded to use the front door `submit` under v2. It is not allowed to
+die on the vine. The upgrade and the tombstone are the same decision. The job keeps running,
+and the old doors say where it runs now. A door that quietly 404s teaches a stale caller
+nothing. One that names its replacement teaches it the fix.
 
-BOTH PATHS, NOT JUST THE ALIAS. The repo-wide door inventory listed only
-`/api/claude-code/queue/submit`. The canonical `/api/claude-code/submit` is the one
-CLAUDE.md told the fleet to use, the one the notifications UI posted to, and the one both
-smoke tests and the billing probe named — retiring the alias alone would have left the door
-everyone actually uses wide open.
+Both paths are retired, not just the alias. The canonical path is the one CLAUDE.md told
+the fleet to use and the notifications UI posted to. Retiring the alias alone would leave
+the door everyone uses wide open.
 
-WHAT THE CALLER DOES INSTEAD:
+The caller posts to `/api/v2/submit`. The `command` is `agent router go to claude code`.
+The job arguments ride in an `args` object. A `scheduled_at` value looks like
+`2026-08-22T11:00:00-04:00`.
 
-    POST /api/v2/submit
-    { "command"      : "agent router go to claude code",
-      "args"         : { "prompt": "…", "project": "lupin", "task_type": "BOUNDED",
-                         "max_turns": 50, "dry_run": false },
-      "websocket_id" : "<session id>",
-      "scheduled_at" : "2026-08-22T11:00:00-04:00",
-      "monopolize"   : false }
+`prompt`, `project`, `task_type`, `max_turns` and `dry_run` are arguments to the job, so
+they ride in `args`. `websocket_id`, `scheduled_at` and `monopolize` are directives to the
+queue. They say when to run it, whether it runs alone, and where to speak. They stay
+top-level, because no argument contract names a scheduling instruction.
 
-`prompt` / `project` / `task_type` / `max_turns` / `dry_run` are arguments to the job, so
-they ride in `args`. `websocket_id` / `scheduled_at` / `monopolize` are directives to the
-QUEUE — when to run it, whether it runs alone, where to speak — so they stay top-level;
-`args` is checked against the command's own argument contract, and no contract names a
-scheduling instruction.
+Nothing this handler did is lost. The new door does all of it:
+  - the job is built by the same `create_agentic_job` this handler called;
+  - the id is scoped through the same `user_job_tracker.register_scoped_job`, in the queued
+    executor (`executor.py`) rather than here;
+  - `scheduled_at` and `monopolize` land on the job in the factory;
+  - the 400s for a token with no uid or email are the 401s `submit` already raises;
+  - the `task_type` validation moved into `ClaudeCodeJob.__init__`. `submit` checks that
+    required arguments are present, not which values they may take. In `__init__` the check
+    also covers the voice path and the in-process callers.
 
-NOTHING THIS HANDLER DID IS LOST, and each piece is worth naming because "the new door does
-it too" is the claim a tombstone rests on:
-  · the job is built by the same `create_agentic_job` this handler called;
-  · the id is scoped through the same `user_job_tracker.register_scoped_job`, in the queued
-    executor (executor.py) rather than here;
-  · `scheduled_at` and `monopolize` land on the job in the factory;
-  · the 400s for a token with no uid or email are the 401s `submit` already raises;
-  · the `task_type` validation — the ONE thing `submit` does not do, because it checks that
-    a command's required arguments are PRESENT, not which values they may take — moved into
-    `ClaudeCodeJob.__init__`, where it also covers the voice path and the in-process
-    callers rather than one endpoint.
-
-The bodies are DELETED rather than left unreachable under a raise: unreachable code is code
-nobody can test and everybody must still read. Recover them from git if any of their
-handling turns out to be worth carrying into the flow.
-
-The request and response models went with them. They described a body nothing accepts any
-more, and a Pydantic model no route reads is a shape a caller can still find and reasonably
-believe in.
-
-Generated on: 2026-01-27; URL canonicalized 2026-05-11; retired 2026-08-21.
+The old bodies are deleted rather than left unreachable under a raise, because unreachable
+code is code nobody can test and everybody must still read. The request and response models
+went with them. A Pydantic model no route reads is a shape a caller can still believe in.
 """
 
 from fastapi import APIRouter
@@ -88,7 +69,7 @@ async def submit_claude_code_to_queue():
 
     Ensures:
         - never returns; raises HTTPException( 410 ) naming /api/v2/submit and the
-          REMOVE BY 2026-12-31 date
+          `REMOVE BY` date from `REMOVE_BY`
     """
     gone( "/api/claude-code/submit" )
 
@@ -106,6 +87,6 @@ async def submit_claude_code_to_queue_alias():
 
     Ensures:
         - never returns; raises HTTPException( 410 ) naming /api/v2/submit and the
-          REMOVE BY 2026-12-31 date
+          `REMOVE BY` date from `REMOVE_BY`
     """
     gone( "/api/claude-code/queue/submit" )

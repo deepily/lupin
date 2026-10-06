@@ -1,39 +1,36 @@
 #!/usr/bin/env python3
 """
-Heartbeat-Arbiter fleet-snapshot endpoints — v2.1 direct-state visibility
-(arbiter design `03` §10.4, redline C2).
+Heartbeat-arbiter fleet-snapshot and fleet-size-cap endpoints.
 
-Mirrors `GET /api/queue/pool-status`: a single queryable HTTP surface on
-`:7999` that returns the arbiter's latest fleet snapshot (every session's
-direct state + honest last-seen liveness ages), so Rick / the manager / a peer
-can read true fleet state from a distance — seen, never inferred.
+Mirrors `GET /api/queue/pool-status`: one queryable HTTP surface on `:7999` that returns
+the arbiter's latest fleet snapshot. The snapshot holds every session's direct state and
+honest last-seen liveness ages. An operator, a manager or a peer can then read true fleet
+state from a distance. State is seen, never inferred.
 
-Endpoints (all authenticated via `require_api_key_or_jwt` — X-API-Key OR
-Bearer JWT, the canonical machine-or-human credential, C2):
-    - GET  /api/arbiter/fleet-state    — NEW authoritative surface (L4): a thin
-      reverse-proxy that PULLS the single-pane composite from the standalone
-      lupin-arbiter-app service at :8001/state (R3 — :8001 NEVER pushes here).
-    - GET  /api/arbiter/context-pressure — read-only per-persona context-headroom
-      service: PULLS :8001/state and returns JUST the `context_pressure` section
-      (persona-keyed budget-headroom map, design 2026.06.09 Decisions 1-5).
+Endpoints, all authenticated through `require_api_key_or_jwt` (an `X-API-Key` or a Bearer
+JWT, the canonical machine-or-human credential):
+    - GET  /api/arbiter/fleet-state    — the authoritative surface: a thin reverse-proxy
+      that pulls the single-pane composite from the standalone lupin-arbiter-app service at
+      `:8001/state`. `:8001` never pushes here.
+    - GET  /api/arbiter/context-pressure — read-only per-persona context-headroom service.
+      It pulls `:8001/state` and returns just the `context_pressure` section, a
+      persona-keyed budget-headroom map.
     - GET  /api/arbiter/fleet-size-cap — the fleet-size dial: the enforced cap, the
       configured ceiling, and the live manager/worker split occupying it.
-    - PUT  /api/arbiter/fleet-size-cap — SET the cap. Writes through to the
-      configuration FILE and returns what it re-read from disk, never an echo of the
-      request (Rick: "those values are serialized and reused the next time").
-    - GET  /api/arbiter/fleet-snapshot — LEGACY v2.1: read the cached snapshot.
-    - POST /api/arbiter/fleet-snapshot — LEGACY v2.1: the in-process arbiter
-      PUSHES its latest snapshot here (updates the server singleton directly).
+    - PUT  /api/arbiter/fleet-size-cap — set the cap. It writes through to the
+      configuration file and returns what it re-read from disk, never an echo of the
+      request, because the values are serialized and reused the next time.
+    - GET  /api/arbiter/fleet-snapshot — legacy: read the cached snapshot.
+    - POST /api/arbiter/fleet-snapshot — legacy: the in-process arbiter pushes its latest
+      snapshot here, which updates the server singleton directly.
 
-SUPERSEDED (2026-06-07, R0/R3): the standalone host-side **lupin-arbiter-app
-service on :8001** is now authoritative — it exposes `GET /state` (the single
-pane) and the :7999 reverse-proxy `GET /api/arbiter/fleet-state` PULLS from it
-(deploy doc R3). The legacy in-process GET/POST `/api/arbiter/fleet-snapshot`
-pair STAYS until the R0 cutover (feature-flag preservation — both coexist);
-**post-cutover `/api/arbiter/fleet-state` WINS** and the in-process snapshot
-pair retires with the in-process arbiter, which is gated OFF by the
-`arbiter in-process bootstrap enabled` flag (R0). The former redline-C2
-("there is NO standalone arbiter HTTP server") is retired with it.
+The standalone host-side lupin-arbiter-app service on `:8001` is authoritative. It exposes
+`GET /state` (the single pane), and the `:7999` reverse-proxy `GET /api/arbiter/fleet-state`
+pulls from it. The legacy in-process GET and POST `/api/arbiter/fleet-snapshot` pair stays
+until the cutover, and both coexist behind a feature flag. After the cutover,
+`/api/arbiter/fleet-state` wins. The in-process snapshot pair retires with the in-process
+arbiter, which is gated off by the `arbiter in-process bootstrap enabled` flag. The old
+rule that there is no standalone arbiter HTTP server is retired with it.
 """
 from typing import Annotated, Any, Dict, List, Optional
 
@@ -46,7 +43,7 @@ from cosa.rest import arbiter_snapshot_store as snapshot_store
 
 
 def _pull_arbiter_state( url: str, timeout: int ) -> Dict[ str, Any ]:   # pragma: no cover - literal httpx call boundary (live :8001 pull)
-    """The ONE external IO boundary: GET :8001/state and return its JSON body."""
+    """The one external IO boundary: GET `:8001/state` and return its JSON body."""
     return httpx.get( url, timeout=timeout ).raise_for_status().json()
 
 
@@ -143,22 +140,22 @@ async def get_fleet_state(
         - authenticated caller (X-API-Key or Bearer JWT)
 
     Ensures:
-        - PULLS :8001/state (R3 — :7999 never pushes to :8001) and returns its
+        - pulls :8001/state (:7999 never pushes to :8001) and returns its
           composite body verbatim when reachable
         - on any httpx failure (connect refused / timeout / non-2xx) returns an
           explicit { status: "unreachable", ... } envelope with null sections —
           a HTTP 200 (mirroring the awaiting idiom: the proxy is up, the upstream
           watcher is not), never a 5xx or a hung request
-        - reads the upstream URL + timeout LAZILY from the shared config singleton
-          (no module-scope ConfigurationManager → import/collection never touches
-          LUPIN_CONFIG_MGR_CLI_ARGS)
-        - injects ONE top-level `app_timezone` field (the configured IANA zone,
-          e.g. "America/New_York") into the otherwise-verbatim composite — the
-          SINGLE deviation from verbatim-proxy, :7999-local (no :8001 change). The
-          client feeds it to Intl.DateTimeFormat to render the last-updated stamp
-          in the operator's DST-aware zone (Fleet-Status design §4.1). Omitted on
-          the unreachable envelope by design → the client falls back to browser-
-          local zone (display-only, never blocks the table).
+        - reads the upstream URL and timeout lazily from the shared config singleton
+          (no module-scope ConfigurationManager, so import and collection never touch
+          `LUPIN_CONFIG_MGR_CLI_ARGS`)
+        - injects one top-level `app_timezone` field (the configured IANA zone,
+          e.g. "America/New_York") into the otherwise-verbatim composite. This is the
+          single deviation from verbatim-proxy, local to :7999 (no :8001 change). The
+          client feeds it to Intl.DateTimeFormat to render the last-updated stamp in
+          the operator's DST-aware zone. Omitted on the unreachable envelope by
+          design, so the client falls back to the browser-local zone (display-only,
+          never blocks the table).
     """
     from cosa.rest.dependencies.config import get_config_manager
     config_mgr = get_config_manager()
@@ -194,14 +191,13 @@ async def get_context_pressure(
     authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ]
 ):
     """
-    Reverse-proxy ONLY the `context_pressure` section of :8001/state (Decision 3:
-    the dedicated public surface; the section also rides the /fleet-state composite).
+    Reverse-proxy only the `context_pressure` section of :8001/state.
 
     Requires:
         - authenticated caller (X-API-Key or Bearer JWT)
 
     Ensures:
-        - PULLS :8001/state (R3 — :7999 never pushes) and returns the
+        - pulls :8001/state (:7999 never pushes) and returns the
           `context_pressure` section verbatim when present
         - returns the explicit { status: "awaiting", personas: {} } placeholder
           when the upstream composite lacks the section (e.g. the deployed
@@ -209,8 +205,11 @@ async def get_context_pressure(
         - on any httpx failure returns an explicit { status: "unreachable", ... }
           envelope with a null personas map — an HTTP 200 (the proxy is up, the
           upstream watcher is not), never a 5xx or a hung request
-        - reads the upstream URL + timeout LAZILY from the shared config singleton
+        - reads the upstream URL and timeout lazily from the shared config singleton
           (same keys as /arbiter/fleet-state)
+
+    This is the dedicated public surface for the section. The section also rides the
+    /fleet-state composite.
     """
     from cosa.rest.dependencies.config import get_config_manager
     config_mgr = get_config_manager()
@@ -231,29 +230,28 @@ async def get_context_pressure(
 
 class FleetSizeCapIn( BaseModel ):
     """
-    Body for PUT /api/arbiter/fleet-size-cap — the one number the operator is setting.
+    Body for PUT /api/arbiter/fleet-size-cap, the one number the operator is setting.
 
-    `ge=1` is declared here rather than hand-rolled in the handler, so a nonsense
-    value is refused by Pydantic with a 422 naming the field. The UPPER bound is NOT
-    declared here and cannot be: the ceiling is `cc session fleet size cap maximum`,
-    read at call time, so the handler checks it against the live key.
+    `ge=1` is declared here rather than hand-rolled in the handler, so Pydantic refuses
+    a nonsense value with a 422 naming the field. The upper bound is not declared here
+    and cannot be. The ceiling is `cc session fleet size cap maximum`, read at call time,
+    so the handler checks it against the live key.
     """
     cap : int = Field( ge=1, description="The fleet-wide session cap to persist." )
 
 
 def _live_fleet_counts():
     """
-    The manager/worker split, counted the SAME way the spawn gate counts it.
+    The manager/worker split, counted the same way the spawn gate counts it.
 
     Ensures:
         - returns a fleet_size_cap.census() dict, or None when the fleet cannot be read
         - never raises
 
-    🔴 IT USES THE GATE'S OWN CENSUS AND CLASSIFIER ON PURPOSE. A pane that counted
-    the fleet by a second route would agree with the gate on every ordinary day and
-    disagree on exactly the day somebody needed it — an operator would read "6 of 8"
-    while the spawn path refused at 8. One derivation, or the two silently coincide
-    until they do not.
+    It uses the gate's own census and classifier. A pane that counted the fleet by a
+    second route would agree with the gate on an ordinary day and disagree on the day
+    somebody needed it. An operator would read "6 of 8" while the spawn path refused at 8.
+    One derivation is the rule, since two would coincide until they do not.
     """
     try:
         from lupin_cli.claude_code.hooks.lib.session_bridge import find_active_sessions
@@ -283,7 +281,7 @@ def _fleet_size_cap_payload():
 
     Ensures:
         - returns { cap, ceiling, live } where `live` is the census dict or None
-        - `cap` prefers the value ON DISK over the cached configuration singleton
+        - `cap` prefers the value on disk over the cached configuration singleton
         - never raises
     """
     from cosa.rest.dependencies.config import get_config_manager
@@ -303,8 +301,12 @@ def _fleet_size_cap_payload():
 
 
 def _safe_live_counts():
-    """`_live_fleet_counts` with a second belt, so a patched-or-broken census costs the
-    SPLIT and never the cap. The pane degrades to a number, never to an error."""
+    """
+    `_live_fleet_counts` with a second guard, so a broken census costs the split only.
+
+    A patched or broken census never costs the cap. The pane degrades to a number,
+    never to an error.
+    """
     try:
         return _live_fleet_counts()
     except Exception:
@@ -331,37 +333,29 @@ def get_fleet_size_cap(
 
     Ensures:
         - returns { cap, ceiling } from resolve_fleet_cap / resolve_fleet_ceiling
-        - reads the configuration manager LAZILY, inside the handler, so the values
+        - reads the configuration manager lazily, inside the handler, so the values
           move when the INI moves rather than being frozen at import
-        - `ceiling` is `cc session fleet size cap maximum` and is NEVER clamped to
+        - `ceiling` is `cc session fleet size cap maximum` and is never clamped to
           anything else — see below
         - never raises: an unreadable config falls back to the module defaults, the
           same fail-soft the spawn path uses, so the pane degrades to a number rather
           than to an error
 
-    🔴 THE CEILING IS SERVED VERBATIM AND IS DELIBERATELY NOT CLAMPED — not to the
-    persona pool, not to the live session count, not to anything. Rick ruled the maximum
-    must be configurable so he can tweak it over time; a dial silently trimmed below the
-    number he typed cannot be told apart from a key that was ignored. The control shows
-    what the key says.
+    The ceiling is served verbatim and is not clamped to the persona pool, to the live
+    session count, or to anything else. The maximum must be configurable so the operator
+    can tweak it over time. A dial silently trimmed below the number typed cannot be told
+    apart from a key that was ignored. The control shows what the key says.
 
-    🔨 IT IS NO LONGER READ-ONLY — CORRECTED 2026-09-04, AND THE OLD CLAIM IS NAMED
-    RATHER THAN DELETED BECAUSE HALF OF IT WAS RIGHT. This docstring used to say a write
-    "needs shared storage (a compose mount and an env var) and a change to the resolver".
+    The dial is writable, through PUT below. The container and the host process
+    read and write one file: the checkout's `src` is bind-mounted read-write in
+    the container, and the host MCP process carries `LUPIN_ROOT` with the same
+    `Lupin: Development` block. No compose change, environment variable or recreate is
+    needed. `ConfigurationManager` is a process-lifetime singleton with no reload, so a
+    write alone would reach the file while a long-running process kept its boot-time cap.
+    `resolve_fleet_cap` therefore takes a `disk_fn` and prefers the value on disk.
 
-    · THE STORAGE HALF WAS WRONG, and it was reasoned rather than measured. `docker
-      inspect lupin-rest-dev` reports the checkout's `src` bind-mounted at
-      `/var/lupin/src` with `rw=true`, and the host MCP process carries
-      `LUPIN_ROOT=<the checkout>` with the same `Lupin: Development` block. Container
-      and host already read and write ONE file. No compose change, no env var, no
-      recreate.
-    · THE RESOLVER HALF WAS RIGHT. `ConfigurationManager` is a process-lifetime
-      singleton with no reload, so a write would have reached the file while the
-      long-running MCP kept its boot-time cap. `resolve_fleet_cap` now takes a `disk_fn`
-      and prefers the value on disk — see PUT below.
-
-    ⚠️ `live` MAY BE None. A census that cannot be taken costs the SPLIT, never the cap:
-    the pane degrades to a number rather than to an error.
+    `live` may be None. A census that cannot be taken costs the split, never the cap.
+    The pane degrades to a number rather than to an error.
     """
     return _fleet_size_cap_payload()
 
@@ -386,27 +380,26 @@ def put_fleet_size_cap(
         - body.cap >= 1 (enforced by the model, not here)
 
     Ensures:
-        - a cap above the live ceiling is REFUSED with 422 naming both numbers
-        - on success the value is written to the configuration FILE, not only to
+        - a cap above the live ceiling is refused with 422 naming both numbers
+        - on success the value is written to the configuration file, not only to
           the in-process singleton, and survives a restart
         - the in-process configuration manager is updated too, so this container's
           own next GET agrees with the disk instead of serving its boot-time value
-        - RETURNS { cap, ceiling, live } built by re-reading the file — the `cap`
-          in the response is what the FILE says, never what the request said
+        - returns { cap, ceiling, live } built by re-reading the file — the `cap`
+          in the response is what the file says, never what the request said
         - a refusal by the INI writer (key absent, or defined twice) surfaces as a
           409 carrying the writer's own message verbatim
 
-    🔴 THE RESPONSE IS A RE-READ AND NOT AN ECHO, AND THAT IS THE POINT OF THE
-    ENDPOINT. An echo makes the response unfalsifiable: it looks identical whether
-    the write reached the disk, landed in a section nobody reads, or never happened.
-    The client repaints the dial from this body, so an echo would move the slider to
-    a number the spawn path is not enforcing — which is a dial that appears to work
-    and governs nothing, the exact defect this endpoint exists to close.
+    The response is a re-read, not an echo, which is what the endpoint exists for. An echo
+    makes the response unfalsifiable. It looks identical whether the write reached the
+    disk, landed in a section nobody reads, or never happened. The client repaints the dial
+    from this body. An echo would move the slider to a number the spawn path is not
+    enforcing, a dial that appears to work and governs nothing.
 
-    ⚠️ THE 409 IS A REFUSAL, NOT A CRASH. `locate_key` declines when the key is
-    absent or defined twice, and its message names every line it found. Passing that
-    through verbatim is what lets an operator fix the file; swallowing it and
-    returning the old cap would report a successful no-op.
+    The 409 is a refusal, not a crash. `locate_key` declines when the key is absent or
+    defined twice, and its message names every line it found. Passing that through
+    verbatim lets an operator fix the file. Swallowing it and returning the old cap would
+    report a successful no-op.
     """
     from fastapi import HTTPException
     from cosa.rest.dependencies.config import get_config_manager

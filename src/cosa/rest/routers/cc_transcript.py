@@ -1,47 +1,41 @@
 #!/usr/bin/env python3
 """
-CC transcript console — the REST half: the backlog door and the watchable-seat roster.
+CC transcript console, the REST half: the backlog door and the watchable-seat roster.
 
-Plan: `src/rnd/v0.2.1/2026.09.27-console-tee-live-stream-plan.md` §2 item 4, §3.
-Names per ruling OSQ-6. ACs A2.2 · A2.4 · A2.9 · A3.4 · A3.6 · A3.7.
+Design: `src/rnd/v0.2.1/2026.09.27-console-tee-live-stream-plan.md`.
 
 Endpoints:
     - GET /api/cc-transcript/{cc_session_id} — backlog and gap repair, three directions
     - GET /api/cc-transcript-roster          — the watchable-seat roster
 
-WHY THE ROSTER IS A SIBLING PATH AND NOT `/api/cc-transcript/roster`
---------------------------------------------------------------------
-A literal segment under the same prefix collides with `{cc_session_id}`: FastAPI would match
-`/api/cc-transcript/roster` against the parameterised route too, and which one wins depends on
-DECLARATION ORDER. That resolves correctly today and breaks silently the first time someone
-reorders the decorators — and the symptom is a roster request answered as a lookup for a seat
-literally named "roster", i.e. an empty transcript rather than an error. A sibling path cannot
-collide at all, so the hazard is designed out rather than guarded.
+The roster is a sibling path, not `/api/cc-transcript/roster`. A literal segment under the
+same prefix collides with `{cc_session_id}`. FastAPI would match `/api/cc-transcript/roster`
+against the parameterised route too, and which one wins depends on declaration order. That
+resolves correctly today and breaks silently when someone reorders the decorators. The
+symptom is a roster request answered as a lookup for a seat named "roster", which is an
+empty transcript rather than an error. A sibling path cannot collide at all.
 
-🔴 ADMIN ONLY, AND THE TWO SURFACES USE TWO DIFFERENT GATES
------------------------------------------------------------
-Ruling Q5: admin only, no redaction in v1. These REST routes use `require_admin`; the WebSocket
-verbs use `websocket_manager.session_is_admin[ session_id ]`. They are different mechanisms, so
-a test exercising one proves NOTHING about the other, and a criterion naming only one is
+Both routes are admin only, and the two surfaces use two different gates. There is no
+redaction in v1. These REST routes use `require_admin`. The WebSocket verbs use
+`websocket_manager.session_is_admin[ session_id ]`. They are different mechanisms. A test
+exercising one proves nothing about the other, and a criterion naming only one is
 satisfiable by a gate that refuses everybody.
 
-⚠️ The positive admin arm is proved at the OVERRIDE tier, not against the live auth stack: the
-only admin accounts are `admin@lupin.deepily.ai` and Rick's own, and the fleet holds neither
-password, so no test in this repo has ever watched an admin write SUCCEED — only a non-admin
-fail. Rick ruled 2026-09-27 that v1 ships on the `dependency_overrides[ require_admin ]`
-positive arm, with a dev-only test admin account as a separate follow-up. That proves the route
-WIRING, not the live gate. Stated, never rounded down to "tested".
+The positive admin arm is proved at the override tier, not against the live auth stack. The
+only admin accounts are `admin@lupin.deepily.ai` and the project owner's own, and the fleet
+holds neither password. So no test in this repo has watched an admin write succeed, only a
+non-admin fail. v1 ships on the `dependency_overrides[ require_admin ]` positive arm. That
+proves the route wiring, not the live gate.
 
-🔴 THE ROSTER IS A PROJECTION, AND ITS GATE IS ITS OWN
-------------------------------------------------------
-`/api/arbiter/fleet-state` is guarded by `require_api_key_or_jwt`, which is LOOSER than admin.
-The console is admin-only, so this projection carries its own `require_admin` rather than
-inheriting fleet-state's. Assert against the projection, never against `/arbiter/fleet-state`.
+The roster is a projection, and its gate is its own. `/api/arbiter/fleet-state` is guarded
+by `require_api_key_or_jwt`, which is looser than admin. The console is admin only, so this
+projection carries its own `require_admin` rather than inheriting that one. Assert against
+the projection, never against `/arbiter/fleet-state`.
 
-AND AN UNREACHABLE ARBITER IS NOT AN EMPTY FLEET. `/arbiter/fleet-state` answers HTTP 200 with
-`{"status": "unreachable", ...}` when `:8001` is down — the proxy is up, the upstream is not. A
-projection that mapped that to `[]` would report a healthy, empty fleet, and nobody would go
-looking for the arbiter (A3.7).
+An unreachable arbiter is not an empty fleet. `/arbiter/fleet-state` answers HTTP 200 with
+`{"status": "unreachable", ...}` when `:8001` is down, because the proxy is up and the
+upstream is not. A projection that mapped that to `[]` would report a healthy, empty fleet,
+and nobody would go looking for the arbiter.
 """
 
 from typing import Annotated, Any, Dict, List, Optional
@@ -75,13 +69,13 @@ async def get_cc_transcript_roster(
     Project the fleet roster, marking which seats can actually be watched.
 
     Requires:
-        - the caller holds the admin role (enforced by require_admin, not by this body)
+        - the caller holds the admin role (enforced by `require_admin`, not by this body)
 
     Ensures:
         - returns { status, seats[], session_count }, each seat carrying `session_id`,
           `project`, `last_ts` and `transcript_watchable`
-        - `status` is "unreachable" with an empty seat list when :8001 cannot be reached —
-          DISTINGUISHABLE from a genuinely empty fleet, which returns status "ok" (A3.7)
+        - `status` is "unreachable" with an empty seat list when :8001 cannot be reached,
+          which is distinguishable from an empty fleet, which returns status "ok"
         - `transcript_watchable` is False for a seat with no live transcript file
         - never raises: an unreadable roster degrades to the unreachable envelope
     """
@@ -136,13 +130,13 @@ async def get_cc_transcript(
 
     Ensures:
         - returns { cc_session_id, file_epoch, offset, next_offset, blocks }
-        - with NO direction given, defaults to the ruled backlog tail
-          (`cc transcript backlog tail bytes`) — the open case, which is what a client with no
-          prior offset actually wants; defaulting to a forward read from 0 would hand it the
-          START of a 197 KB file and silently contradict ruling Q6
+        - with no direction given, defaults to the backlog tail
+          (`cc transcript backlog tail bytes`). That is the open case, which is what a
+          client with no prior offset wants. A forward read from 0 would hand it the start
+          of a large file
         - a seat with no resolvable transcript returns empty blocks with a null epoch and
-          `watchable: false` — a 200, because "this seat is not printing" is an answer
-        - blocks are budgeted per `cc transcript block budget bytes`; 0 means UNBOUNDED
+          `watchable: false`, a 200, because "this seat is not printing" is an answer
+        - blocks are budgeted per `cc transcript block budget bytes`; 0 means unbounded
     """
     settings        = load_settings()
     transcript_path = resolve_transcript_path( cc_session_id )
@@ -180,9 +174,9 @@ async def _fetch_fleet_state():
     """
     Read the fleet composite, reusing the arbiter router's own handler.
 
-    Calling the handler rather than re-implementing the `:8001` pull keeps ONE place that knows
-    the upstream URL, the timeout and the unreachable envelope's shape. A second implementation
-    would be a second thing to keep in step, and the two would agree until they did not.
+    Calling the handler rather than re-implementing the `:8001` pull keeps one place that
+    knows the upstream URL, the timeout and the unreachable envelope's shape. A second
+    implementation would be a second thing to keep in step.
 
     Ensures:
         - returns the composite dict, or the arbiter's own unreachable envelope
@@ -221,9 +215,9 @@ def _project_seats( sessions ):
     Ensures:
         - returns one row per dict session, carrying session_id, project, last_ts and
           transcript_watchable
-        - `session_id` is carried through at the SAME WIDTH the fleet reports, because the
-          roster join depends on it matching the stream's `cc_session_id` exactly (A3.6).
-          Three id widths circulate in this fleet, and a silent mismatch shows up as a roster
+        - `session_id` is carried through at the same width the fleet reports, because the
+          roster join depends on it matching the stream's `cc_session_id` exactly. Three
+          id widths circulate in this fleet, and a silent mismatch shows up as a roster
           row that cannot be watched
         - a non-dict entry is skipped rather than crashing the roster
     """

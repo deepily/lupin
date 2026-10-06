@@ -2,11 +2,8 @@
 WebSocket and authentication endpoints for the COSA system.
 
 This module provides FastAPI router endpoints for WebSocket connections
-and authentication testing. Supports both audio streaming and queue
-update WebSocket connections with user authentication and session management.
-
-Generated on: 2025-01-24
-Updated: 2025-08-01 - Added Design by Contract documentation
+and authentication testing. Supports audio streaming and queue-event
+WebSocket connections, with user authentication and session management.
 """
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
@@ -121,10 +118,9 @@ def _undelivered_max_age_hours() -> int:
     """
     Resolve the undelivered-drain age cap (hours) from config.
 
-    Storm guard (2026-06-03 incident): the durable-outbox drain must not replay
-    stale rows on reconnect. The cap bounds how far back the "N missed" count and
-    the pull-able inbox reach. Runtime-tunable via the INI key, mirroring the
-    TTS spoken-char-cap pattern.
+    The durable-outbox drain must not replay stale rows on reconnect. The cap bounds how
+    far back the "N missed" count and the pull-able inbox reach. It is runtime-tunable
+    through the INI key, mirroring the TTS spoken-char-cap pattern.
 
     Ensures:
         - returns the configured int cap (default 24 hours)
@@ -134,13 +130,14 @@ def _undelivered_max_age_hours() -> int:
 
 def _compute_undelivered_count( user_id ) -> int:
     """
-    Count the user's undelivered (missed-while-offline) notifications for the
-    auth_success "N missed" surfacing (messaging-coordination plane, lever D).
+    Count the user's undelivered notifications for the auth_success "N missed" surfacing.
+
+    Undelivered means missed while offline. This is part of the messaging-coordination plane.
 
     Ensures:
         - returns the count of notifications in state created/queued for this user,
           bounded by the undelivered age cap (storm guard)
-        - NEVER raises — returns 0 on any error (a count failure must not break auth)
+        - never raises — returns 0 on any error (a count failure must not break auth)
     """
     try:
         import uuid as _uuid
@@ -220,19 +217,19 @@ async def auth_test(current_user: dict = Depends(get_current_user)):
 async def websocket_audio_endpoint(websocket: WebSocket, session_id: str):
     """
     WebSocket endpoint for real-time TTS audio streaming.
-    
+
+    Args:
+        websocket: WebSocket connection object
+        session_id: Unique session identifier for this client
+
     Preconditions:
         - session_id must be a valid session identifier
         - WebSocket connection must be established
-        
+
     Postconditions:
         - Manages WebSocket connection lifecycle
         - Stores connection in websocket_manager for audio streaming
         - Handles disconnection cleanup
-        
-    Args:
-        websocket: WebSocket connection object
-        session_id: Unique session identifier for this client
     """
     # Get dependencies from main module
     import lupin_app.main as main_module
@@ -380,21 +377,21 @@ async def handle_cc_transcript_verb( websocket, session_id, message ):
 
     Requires:
         - websocket is the caller's live socket
-        - session_id is the BROWSER session id (the socket's own id)
+        - session_id is the browser session id (the socket's own id)
         - message carries `type` and, for both verbs, `cc_session_id`
 
     Ensures:
-        - a NON-ADMIN caller is refused, and receives an error frame naming the reason, with
-          no blocks and no watch registered (ruling Q5, the WS half of the gate)
-        - a watch registers the caller and STARTS the seat's tailer only if this was the
-          seat's FIRST watcher; the tailer is shared by every watcher of that seat
+        - a non-admin caller is refused, and receives an error frame naming the reason, with
+          no blocks and no watch registered (the WebSocket half of the admin gate)
+        - a watch registers the caller and starts the seat's tailer only if this was the
+          seat's first watcher; the tailer is shared by every watcher of that seat
         - a watch honours `from_offset`, so the server never silently starts at the current
           end of the file and opens a gap against the client's REST backlog
-        - a non-null `file_epoch` naming a file that is no longer current is REFUSED with
-          `cc_transcript_state {state: epoch_mismatch}` and NO blocks — never silently
+        - a non-null `file_epoch` naming a file that is no longer current is refused with
+          `cc_transcript_state {state: epoch_mismatch}` and no blocks — never silently
           rebased, which would hand the client a whole new file as its own continuation
-        - an unwatch deregisters the caller and STOPS the tailer only when the seat has lost
-          its LAST watcher
+        - an unwatch deregisters the caller and stops the tailer only when the seat has lost
+          its last watcher
         - a missing `cc_session_id` is refused rather than registering a watch on ""
         - never raises out to the receive loop: a bad verb must not drop the socket
     """
@@ -524,7 +521,7 @@ async def _stop_watching_cc_transcript( session_id, cc_session_id ):
     Deregister a watcher and stop the seat's tailer if it was the last.
 
     Ensures:
-        - the tailer is stopped and forgotten only when NO watcher remains
+        - the tailer is stopped and forgotten only when no watcher remains
         - an unwatch for a seat this session was not watching is a no-op
     """
     websocket_manager = get_websocket_manager()
@@ -550,15 +547,15 @@ async def stop_cc_transcript_tailers_for_disconnect( session_id ):
     """
     Stop the tailers a disconnecting session left with no watchers.
 
-    🔴 THIS IS THE OTHER HALF OF THE SWEEP, AND IT IS ASYNC, WHICH IS WHY IT IS NOT INSIDE
-    `disconnect()`. `WebSocketManager.disconnect()` is synchronous and is called from
-    threads, so it can remove the REGISTRY entries but cannot await a tailer's stop. It
-    therefore drops the watches and this coroutine reaps the tailers those drops emptied.
-
     Ensures:
         - every seat the session was the last watcher of has its tailer stopped
         - a session that was watching nothing costs one dict scan and no awaits
         - never raises
+
+    This is the other half of the sweep, and it is async, which is why it is not inside
+    `disconnect()`. `WebSocketManager.disconnect()` is synchronous and is called from
+    threads, so it can remove the registry entries but cannot await a tailer's stop. It
+    drops the watches, and this coroutine reaps the tailers those drops emptied.
     """
     websocket_manager = get_websocket_manager()
 
@@ -568,7 +565,7 @@ async def stop_cc_transcript_tailers_for_disconnect( session_id ):
 
 async def _emit_to_cc_transcript_watchers( cc_session_id, event_name, payload ):
     """
-    Fan one console frame out to the seat's watchers, and ONLY to them.
+    Fan one console frame out to the seat's watchers, and only to them.
 
     The watcher set is the single filter: `emit_to_session` applies no subscription check, so
     there is exactly one place a frame can be dropped.
@@ -591,22 +588,22 @@ async def _emit_to_cc_transcript_watchers( cc_session_id, event_name, payload ):
 async def websocket_queue_endpoint(websocket: WebSocket, session_id: str):
     """
     WebSocket endpoint for real-time queue updates and events.
-    
-    PHASE 2: WebSocket with authentication for user-specific updates.
-    
+
+    The connection authenticates for user-specific updates.
+
+    Args:
+        websocket: WebSocket connection object
+        session_id: Unique session identifier for this client
+
     Preconditions:
         - session_id must be a valid session identifier
         - WebSocket connection must be established
         - First message must contain authentication token
-        
+
     Postconditions:
         - Manages WebSocket connection for queue updates
         - Associates connection with authenticated user
         - Handles disconnection cleanup
-        
-    Args:
-        websocket: WebSocket connection object
-        session_id: Unique session identifier for this client
     """
     # Get dependencies from main module
     import lupin_app.main as main_module

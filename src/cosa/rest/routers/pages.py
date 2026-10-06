@@ -3,8 +3,6 @@ Pages router — maps clean /app/* URLs to static HTML files.
 
 Pure file-serving router using FileResponse. No business logic,
 no authentication enforcement (auth is handled client-side by each page's JS).
-
-Generated on: 2026-02-21
 """
 
 import os
@@ -54,13 +52,12 @@ def _serve_file( relative_path: str ):
 
     Ensures:
         - Returns FileResponse with text/html media type
-        - Sets `Cache-Control: no-cache` so browsers revalidate the SPA
-          shell on every load. Prevents the stale-HTML trap that bit the
-          doc-viewer on 2026-05-21 (Rachel's PNG plot rendered as bytecode
-          because the browser cached the pre-image-MIME-dispatch HTML).
-          `FileResponse` still emits `ETag` + `Last-Modified` headers, so
-          revalidation is a cheap conditional GET — server returns 304
-          Not Modified when content is unchanged.
+        - Sets `Cache-Control: no-cache` so browsers revalidate the single-page app
+          shell on every load. This prevents a stale-HTML trap. A browser that cached
+          the old doc-viewer HTML rendered a PNG plot as bytecode, because that HTML
+          predated image media-type dispatch. `FileResponse` still emits `ETag` and
+          `Last-Modified` headers, so revalidation is a cheap conditional GET. The
+          server returns 304 Not Modified when content is unchanged.
 
     Raises:
         - 404 if file not found (FastAPI default behavior)
@@ -86,19 +83,17 @@ async def page_notifications( classic: bool = False, config_mgr: ConfigurationMa
     """
     Serve the legacy notifications page, or 302-redirect to the multiplexer.
 
-    Saturday-cutover (2026-06-14) mechanics: the redirect is gated on the
-    `legacy notifications redirect enabled` INI key (default False) so the flip
-    is a one-line config change, not a code change. The route stays alive so
-    bookmarks keep working (plan §02 checklist row 1).
-
     Requires:
         - `legacy notifications redirect enabled` is a boolean INI key (default False)
 
     Ensures:
-        - Flag OFF (default): serves notifications.html unchanged
-        - Flag ON: returns 302 RedirectResponse to /app/multiplexer
-        - Flag ON + `?classic=1`: serves notifications.html (escape hatch for the
-          held-back JS-client E2E suites + the MVD "Classic UI" link)
+        - Flag off (default): serves notifications.html unchanged
+        - Flag on: returns 302 RedirectResponse to /app/multiplexer
+        - Flag on + `?classic=1`: serves notifications.html (escape hatch for the
+          held-back JS-client E2E suites and the MVD "Classic UI" link)
+
+    The redirect is gated on the INI key, so flipping it is a one-line config change and
+    not a code change. The route stays alive so bookmarks keep working.
     """
     redirect_enabled = config_mgr.get( "legacy notifications redirect enabled", default=False, return_type="boolean" )
     if redirect_enabled and not classic:
@@ -164,16 +159,16 @@ async def page_audio():
 @router.get( "/app/console", include_in_schema=False )
 async def page_console():
     """
-    Serve the standalone live-console page (row 27760534, Rick's ruling 2026-09-28).
-
-    One seat's live CC console in its own tab. The page reads `?seat=` and `?title=`
-    client-side, so this handler takes no parameters and a reload or bookmark serves the
-    same shell; a missing or malformed seat is reported by the page itself.
+    Serve the standalone live-console page.
 
     Requires:
         - html/console.html exists under the static directory
 
     Ensures:
         - Returns the console page shell with the no-cache revalidation header
+
+    The page shows one seat's live CC console in its own tab. It reads `?seat=` and `?title=`
+    client-side. This handler therefore takes no parameters, and a reload or bookmark serves
+    the same shell. The page itself reports a missing or malformed seat.
     """
     return _serve_file( _ROUTE_TABLE[ "/app/console" ] )

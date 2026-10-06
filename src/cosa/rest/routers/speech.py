@@ -1,11 +1,9 @@
 """
 Speech processing endpoints for speech-to-text and text-to-speech functionality.
 
-Provides comprehensive audio processing capabilities including Whisper-based STT
-for MP3 and WAV files, WebSocket-based TTS streaming with OpenAI and ElevenLabs
-integration, and multimodal content processing with agent request detection.
-
-Generated on: 2025-01-24
+Provides audio processing capabilities. These include Whisper-based STT for MP3 and
+WAV files, and WebSocket-based TTS streaming with OpenAI and ElevenLabs integration.
+They also include multimodal content processing with agent request detection.
 """
 
 from fastapi import APIRouter, Request, Query, HTTPException, File, UploadFile, Depends, WebSocket
@@ -40,14 +38,14 @@ router = APIRouter(prefix="/api", tags=["speech"])
 
 def _run_whisper_with_retry( whisper_pipeline, path, debug=False, **kwargs ):
     """
-    DEPRECATED 2026-05-16 — retained for one release cycle for any external
-    callers. Use `cosa.memory.speech_to_text_provider.SpeechToTextProvider`
-    instead; its local-mode `transcribe()` carries identical OOM-retry
-    semantics + adds the model-server HTTP-proxy alternative.
+    Run Whisper inference with CUDA OOM retry (deprecated).
 
-    See: src/rnd/v0.1.7/2026.05.16-model-server-carveout/01-design.md (Phase 3.3)
+    Retained for any external callers. Use
+    `cosa.memory.speech_to_text_provider.SpeechToTextProvider` instead. Its local-mode
+    `transcribe()` carries identical OOM-retry semantics and adds the model-server
+    HTTP-proxy alternative.
 
-    Run Whisper inference with CUDA OOM retry.
+    Design: src/rnd/v0.1.7/2026.05.16-model-server-carveout/01-design.md
     """
     try:
         return whisper_pipeline( path, **kwargs )
@@ -163,9 +161,9 @@ def insert_stt_io_row( input_type: str, input: str, output_raw: str, output_fina
     """
     Record one speech-to-text request in the input/output table.
 
-    One helper for every speech door (F5 of the spoken-ask plan): the MP3 door, the WAV
-    door and /api/v2/ask-audio each built their own InputAndOutputTable per request, and
-    a third copy of that would have been a fourth build site in the tree.
+    Every speech door shares this helper: the MP3 door, the WAV door and /api/v2/ask-audio.
+    Each used to build its own InputAndOutputTable per request, and a further copy would
+    have been another build site in the tree.
 
     Requires:
         - input_type names the door, e.g. "stt_mp3", "stt_wav", "stt_wav_ask"
@@ -189,13 +187,7 @@ def insert_stt_io_row( input_type: str, input: str, output_raw: str, output_fina
 # Global dependencies (temporary access via main module)
 def get_whisper_pipeline():
     """
-    Dependency to get Whisper pipeline from main module.
-
-    Post-carve-out (2026-05-16) note: this dependency still exists because
-    the in-process local-mode path needs the pipeline handle. The
-    `SpeechToTextProvider` injected via `get_speech_provider()` accepts the
-    pipeline as a kwarg and dispatches to it when running in local mode;
-    in remote mode the pipeline arg is unused and may be None.
+    Dependency to get the Whisper pipeline from the main module.
 
     Requires:
         - lupin_app.main module is available
@@ -203,13 +195,17 @@ def get_whisper_pipeline():
 
     Ensures:
         - Returns the Whisper pipeline instance if loaded
-        - Returns None when running in remote (model-server) mode — the
-          provider's dispatch will route the call via HTTP and ignore the
-          None pipeline. (No more 503 from this dep — the provider raises
-          a 503 only when BOTH local-load failed AND remote-mode is off.)
+        - Returns None when running in remote (model-server) mode. The provider's
+          dispatch routes the call over HTTP and ignores the None pipeline. This
+          dependency raises no 503 any more. The provider raises a 503 only when both
+          the local load failed and remote mode is off.
 
     Raises:
         - ImportError if main module not available
+
+    The in-process local-mode path needs the pipeline handle. The `SpeechToTextProvider`
+    injected through `get_speech_provider()` accepts the pipeline as a kwarg and dispatches to
+    it in local mode. In remote mode the pipeline arg is unused and may be None.
     """
     import lupin_app.main as main_module
     return getattr( main_module, "whisper_pipeline", None )
@@ -219,15 +215,13 @@ def get_speech_provider() -> SpeechToTextProvider:
     """
     Dependency returning the `SpeechToTextProvider` singleton.
 
-    Phase 3.3 hook for the model-server carve-out. The provider's
-    `transcribe()` method dispatches between in-process Whisper (local mode)
-    and HTTP proxy to lupin-model-server (remote mode). Until the Phase 3.6
-    lifespan switch lands AND the compute container is bounced with
-    `LUPIN_MODEL_SERVER_URL` injected, the provider defaults to local mode
-    and delegates to the existing `whisper_pipeline` handle — identical
-    behavior to the pre-carve-out call path.
+    The provider's `transcribe()` method dispatches between in-process Whisper (local mode)
+    and an HTTP proxy to lupin-model-server (remote mode). The provider defaults to local mode
+    and delegates to the existing `whisper_pipeline` handle. That is identical to the
+    behavior before the model-server carve-out. It stays that way until the lifespan switch
+    lands and the compute container is bounced with `LUPIN_MODEL_SERVER_URL` injected.
 
-    See: src/rnd/v0.1.7/2026.05.16-model-server-carveout/01-design.md
+    Design: src/rnd/v0.1.7/2026.05.16-model-server-carveout/01-design.md
     """
     import lupin_app.main as main_module
     return SpeechToTextProvider(
@@ -301,18 +295,18 @@ def get_ask_flow():
     """
     Dependency to get the v2 AskFlow from the main module.
 
-    Door 8, 2026-08-21. Rick: there are two ways to ask — post your text to the ask
-    endpoint, or SPEAK, which gets transcribed and then passed to the ask endpoint. So
-    this route's agent branch hands the transcription to the same flow the typed door
-    uses, in-process. The route is NOT a tombstone: its other branch is dictation,
-    snapshot search and insert-at-cursor, which have no text-endpoint replacement.
-
-    Read off the module the same way the other routers read the queue, and for the
-    same reason: lifespan builds it and hangs it there.
-
     Ensures:
         - Returns the flow, or None before lifespan has finished. The agent branch
           fails loud on None rather than falling back to a direct queue push.
+
+    There are two ways to ask. One is to post text to the ask endpoint. The other is to
+    speak, which is transcribed and then passed to the ask endpoint. This route's agent
+    branch hands the transcription to the same flow the typed door uses, in-process. The
+    route is not a tombstone. Its other branch is dictation, snapshot search and
+    insert-at-cursor, which have no text-endpoint replacement.
+
+    The flow is read off the module the same way the other routers read the queue, and for the
+    same reason: lifespan builds it and hangs it there.
     """
     import lupin_app.main as main_module
     return main_module.ask_flow
@@ -336,8 +330,8 @@ async def upload_and_transcribe_mp3_file(
     current_user: Optional[dict] = Depends(get_optional_user)
 ):
     """
-    Upload and transcribe MP3 audio file using Whisper model with multimodal processing.
-    
+    Upload and transcribe an MP3 audio file with Whisper and multimodal processing.
+
     Requires:
         - request.body() contains valid base64 encoded MP3 audio data
         - whisper_pipeline is initialized and functional
@@ -347,24 +341,24 @@ async def upload_and_transcribe_mp3_file(
 
     Ensures:
         - Audio is saved to a new uniquely named file (save_audio_upload) and that
-          file is removed when the request ends — success, OOM or any error
+          file is removed when the request ends, on success, OOM or any error
         - Whisper transcription is completed with chunked processing
         - MultiModalMunger processes transcription with agent detection
-        - Agent requests go through the v2 ask flow and REQUIRE a signed-in user
+        - Agent requests go through the v2 ask flow and require a signed-in user
           (401 otherwise); the flow's result lands in munger.results
         - Non-agent requests (dictation, snapshot search, insert-at-cursor) are
           logged to InputAndOutputTable and still need no token at all
         - Response is saved to /io/last_response.json in JSON format
         - Returns JSONResponse with processed transcription results
-        
+
     Raises:
-        - HTTPException with 401 status if the transcription is an AGENT request and
+        - HTTPException with 401 status if the transcription is an agent request and
           no signed-in user was supplied
         - HTTPException with 500 status if base64 decoding fails
         - HTTPException with 500 status if file writing fails
         - HTTPException with 500 status if Whisper transcription fails
         - HTTPException with 500 status if multimodal processing fails
-        
+
     Args:
         request: FastAPI request containing base64 encoded MP3 audio
         prefix: Optional prefix for transcription processing context
@@ -372,7 +366,7 @@ async def upload_and_transcribe_mp3_file(
         prompt_verbose: Verbosity level for processing (default: "verbose")
         websocket_id: Optional session id for routing the answer's events back to
             this client; derived from the user id when the caller does not send one
-        
+
     Returns:
         JSONResponse: Processed transcription with munger JSON format
     """
@@ -1062,8 +1056,8 @@ async def stream_tts_elevenlabs(
     debug_simulate_error: bool = False
 ):
     """
-    ElevenLabs WebSocket streaming with optimized low-latency configuration for conversational AI.
-    
+    Stream TTS through the ElevenLabs WebSocket with a low-latency configuration.
+
     Requires:
         - session_id exists in ws_manager.active_connections
         - msg is a non-empty string for TTS conversion
@@ -1072,7 +1066,7 @@ async def stream_tts_elevenlabs(
         - voice_id is a valid ElevenLabs voice identifier
         - stability and similarity_boost are floats between 0.0-1.0
         - ElevenLabs WebSocket streaming API is accessible
-        
+
     Ensures:
         - Establishes WebSocket connection to ElevenLabs streaming endpoint
         - Configures optimized chunk length schedule for low latency (~150-250ms)
@@ -1082,10 +1076,10 @@ async def stream_tts_elevenlabs(
         - Handles ElevenLabs protocol messages (audio, isFinal, error)
         - Sends completion signal with timing and chunk count statistics
         - Gracefully handles connection failures and API errors
-        
+
     Raises:
         - None (handles all exceptions gracefully with error reporting)
-        
+
     Args:
         session_id: Session ID for active WebSocket connection
         msg: Text content to convert to speech
@@ -1360,9 +1354,9 @@ async def websocket_pcm_tts_endpoint(
     """
     WebSocket endpoint for PCM 24000 streaming from ElevenLabs.
 
-    Connects to ElevenLabs with output_format=pcm_24000 and forwards
-    raw PCM chunks to the browser for Web Audio API playback with
-    precise scheduling (similar to Gemini Live approach).
+    Connects to ElevenLabs with output_format=pcm_24000 and forwards raw PCM chunks to
+    the browser. The browser plays them through the Web Audio API with precise scheduling,
+    similar to the Gemini Live approach.
 
     Requires:
         - ElevenLabs API key available via du.get_api_key("eleven11")

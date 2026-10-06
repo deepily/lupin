@@ -1,20 +1,20 @@
 """
 The retired Deep Research to Podcast submission door.
 
-This module used to submit chained research→podcast jobs to the CJ Flow queue. It now
-holds a single tombstone: the route stays registered and answers 410 Gone naming
-`/api/v2/submit`, which is where that work enters now.
+This module used to submit chained research→podcast jobs to the CJ Flow queue. It now holds a single
+tombstone: the route stays registered and answers 410 Gone naming `/api/v2/submit`,
+which is where that work enters now.
 
 The request and response models went with the handler, and so did the todo-queue
 dependency. A Pydantic model no route reads is a shape a caller can still find and
 reasonably believe in.
 
-What a caller sends instead:
+What a caller sends instead.
 
     POST /api/v2/submit
     {
         "command": "agent router go to research to podcast",
-        "args": { "query": "State of AI safety in 2026", "budget": 3.00, "target_languages": [ "en" ] }
+        "args": { "query": "AI safety", "budget": 3, "target_languages": [ "en" ] }
     }
 """
 
@@ -87,7 +87,7 @@ async def submit_research_to_podcast():
 
     Ensures:
         - never returns; raises HTTPException( 410 ) naming /api/v2/submit and the
-          REMOVE BY 2026-12-31 date
+          remove-by date
     """
     gone( "/api/deep-research-to-podcast/submit" )
 

@@ -4,8 +4,6 @@ Queue management endpoints.
 Provides REST API endpoints for managing COSA job queues including
 pushing jobs to todo queue, retrieving queue contents with user filtering,
 and resetting all queues.
-
-Generated on: 2025-01-24
 """
 
 import asyncio
@@ -131,12 +129,6 @@ def _count_interactions_for_jobs( job_ids ):
     """
     Bulk-count non-hidden notifications grouped by job_id for the supplied list.
 
-    Used by the done- and dead-bucket handlers to populate `has_interactions`
-    accurately (replacing the old `bool(job.session_id)` proxy that gave false
-    positives whenever a job had a session but no notifications).
-
-    Single batched query against the indexed notifications.job_id column.
-
     Requires:
         - job_ids: list of job_id strings (may be empty)
 
@@ -144,6 +136,11 @@ def _count_interactions_for_jobs( job_ids ):
         - Returns dict mapping each input job_id to its non-hidden notification count
         - Empty input returns {} without issuing a query
         - Returns {} on database failure (logged) — caller treats as all-zero counts
+
+    The done- and dead-bucket handlers use this to populate `has_interactions` accurately.
+    The old `bool(job.session_id)` proxy gave false positives whenever a job had a session
+    but no notifications. This is a single batched query against the indexed
+    notifications.job_id column.
     """
     if not job_ids:
         return {}
@@ -182,7 +179,7 @@ async def push():
 
     Ensures:
         - never returns; raises HTTPException( 410 ) naming /api/v2/ask
-          and the REMOVE BY 2026-12-31 date
+          and the `REMOVE BY` date from `REMOVE_BY`
     """
     gone( "/api/push" )
 
@@ -237,7 +234,7 @@ async def push_agentic():
 
     Ensures:
         - never returns; raises HTTPException( 410 ) naming /api/v2/submit
-          and the REMOVE BY 2026-12-31 date
+          and the `REMOVE BY` date from `REMOVE_BY`
     """
     gone( "/api/push-agentic" )
 
@@ -260,7 +257,7 @@ async def get_pool_status(
 
     Ensures:
         - Returns dict with keys inflight_agentic_jobs, max_agentic_workers, pending_in_pool
-        - Phase 2 semantics: inflight = submitted-but-not-done (running + pending);
+        - inflight = submitted-but-not-done (running + pending);
           pending = queued inside pool's internal queue, not yet picked up by a worker;
           UI "running" count = inflight - pending
     """
@@ -288,17 +285,7 @@ async def get_queue(
     """
     Retrieve jobs from queue with role-based user filtering.
 
-    **PHASE 1 IMPLEMENTATION:** User-filtered queue views with role-based access control
-
-    Authorization Rules:
-    - Regular users: Can ONLY query their own jobs (user_filter ignored or must match self)
-    - Admin users: Can query own, specific user's, or all users' jobs
-
-    Query Parameters:
-        - user_filter: Optional[str]
-            - None (omit): Current user's jobs (default for all users)
-            - "*": ALL users' jobs (admin only)
-            - "user_id_xyz": Specific user's jobs (admin only)
+    User-filtered queue views with role-based access control.
 
     Requires:
         - queue_name is one of: 'todo', 'run', 'done', 'dead'
@@ -321,13 +308,20 @@ async def get_queue(
         queue_name: The queue to retrieve ('todo'|'run'|'done'|'dead')
         current_user: Authenticated user info from token
         user_filter: Optional filter (None=self, "*"=all, or user_id)
-        todo_queue: Todo queue dependency
-        running_queue: Running queue dependency
-        done_queue: Done queue dependency
-        dead_queue: Dead queue dependency
+        todo_queue, running_queue, done_queue, dead_queue: Queue dependencies
 
     Returns:
         dict: Queue data with job arrays, metadata, and filtering info
+
+    Authorization Rules:
+    - Regular users: Can only query their own jobs (user_filter ignored or must match self)
+    - Admin users: Can query own, specific user's, or all users' jobs
+
+    Query Parameters:
+        - user_filter: Optional[str]
+            - None (omit): Current user's jobs (default for all users)
+            - "*": all users' jobs (admin only)
+            - "user_id_xyz": Specific user's jobs (admin only)
     """
 
     # Step 1: Authorize the filter request
@@ -611,7 +605,7 @@ async def get_job_interactions(
     Requires:
         - job_id is a valid job identifier
         - current_user is authenticated
-        - Job belongs to current user OR user is admin
+        - Job belongs to current user or user is admin
 
     Ensures:
         - Returns job metadata + interaction history
@@ -964,19 +958,9 @@ async def cancel_job(
     """
     Cancel a job in either of the two states a caller can meaningfully cancel from.
 
-    The running queue is consulted first, so a job that has already started is
-    stopped gracefully rather than yanked out from under itself. If it has not
-    started, it is removed from the todo queue — that covers every pre-running
-    state, because a scheduled job sits in todo carrying a `scheduled_at` it is
-    simply not yet eligible against; there is no separate scheduled queue.
-
-    Row 4b87fe61: this endpoint used to look only in the running queue, so the
-    cheapest and safest moment to cancel — before any work has been done — was the
-    one moment it refused, with a 404 that read as "no such job".
-
     Requires:
         - current_user is authenticated
-        - Job belongs to current user OR user is admin
+        - Job belongs to current user or user is admin
 
     Ensures:
         - A queued job is removed from the todo queue and a job_removed event
@@ -1000,6 +984,12 @@ async def cancel_job(
 
     Returns:
         dict: {status, job_id, queue, message}
+
+    The running queue is consulted first, so a job that has already started is stopped
+    gracefully rather than yanked out from under itself. If it has not started, it is
+    removed from the todo queue. That covers every pre-running state. A scheduled job sits
+    in todo carrying a `scheduled_at` it is not yet eligible against, and there is no
+    separate scheduled queue. Cancelling before any work has been done must not refuse.
     """
     user_id = current_user[ "uid" ]
 
@@ -1092,14 +1082,6 @@ async def delete_all_queue_jobs(
     """
     Bulk delete all jobs from an in-memory queue.
 
-    For running jobs, signals cancellation on each before removal.
-    Admins get a full queue.clear(); regular users get per-job deletion
-    scoped to their own user_id (same auth model as single-job delete).
-
-    Route-order note: this literal-path handler is declared BEFORE the
-    parameterized `/queue/{queue_name}/{job_id}` sibling so FastAPI matches
-    `/queue/done/all` here rather than binding `job_id="all"` and returning 404.
-
     Requires:
         - queue_name is one of: 'todo', 'run', 'done', 'dead'
         - current_user is authenticated
@@ -1111,6 +1093,14 @@ async def delete_all_queue_jobs(
 
     Raises:
         - HTTPException 400: Invalid queue name
+
+    For running jobs, cancellation is signalled on each before removal. Admins get a full
+    queue.clear(). Regular users get per-job deletion scoped to their own user_id, the same
+    auth model as single-job delete.
+
+    Route-order note: this literal-path handler is declared before the parameterized
+    `/queue/{queue_name}/{job_id}` sibling, so FastAPI matches `/queue/done/all` here
+    rather than binding `job_id="all"` and returning 404.
     """
     user_id = current_user[ "uid" ]
 
@@ -1177,16 +1167,11 @@ async def delete_queue_job(
     """
     Forcefully remove a job from an in-memory queue.
 
-    For running jobs, also signals cancellation so the execution thread stops.
-    For todo jobs, the underlying TodoFifoQueue.delete_by_id_hash wakes the
-    consumer via condition.notify so it recalculates eligibility.
-    Emits a job_removed WebSocket event so other connected clients update.
-
     Requires:
         - queue_name is one of: 'todo', 'run', 'done', 'dead'
         - job_id identifies an existing job in the specified queue
         - current_user is authenticated
-        - Job belongs to current user OR user is admin
+        - Job belongs to current user or user is admin
 
     Ensures:
         - Job is removed from the specified queue
@@ -1203,13 +1188,15 @@ async def delete_queue_job(
         queue_name: Target queue ('todo', 'run', 'done', 'dead')
         job_id: Target job ID
         current_user: Authenticated user info
-        running_queue: Running queue dependency
-        done_queue: Done queue dependency
-        dead_queue: Dead queue dependency
-        todo_queue: Todo queue dependency
+        running_queue, done_queue, dead_queue, todo_queue: Queue dependencies
 
     Returns:
         dict: {status, job_id, queue}
+
+    For running jobs, cancellation is also signalled so the execution thread stops. For
+    todo jobs, `TodoFifoQueue.delete_by_id_hash` wakes the consumer through
+    condition.notify so it recalculates eligibility. A job_removed WebSocket event lets
+    other connected clients update.
     """
     user_id = current_user[ "uid" ]
 
@@ -1296,25 +1283,13 @@ async def get_job_history(
     """
     Query paginated job history with optional filters.
 
-    🔴 WHY `user_filter` EXISTS HERE AT ALL (bug e205a3b1). It did not, and FastAPI
-    DROPS an unknown query parameter silently — so `?user_filter=*` came back 200 with
-    the caller's OWN rows and `filtered_by` still pinned to their uid. The sibling
-    endpoint `/api/get-queue/{queue_name}` refuses the same request with a 403 naming
-    the admin rule. Same permission model, two ways of saying no: one honest, one that
-    hands the caller a partial view they believe is complete.
-
-    MEASURED on 2026-08-17: two seats read the same `:8000` queue and got opposite
-    answers — one saw two scheduled jobs, one saw none — because the rows belonged to
-    a different account and nothing said so. The widening flag was passed and ignored.
-    Accept-and-ignore is what turned a wrong flag into a confident wrong answer.
-
     Requires:
         - Authenticated user (Bearer token)
 
     Ensures:
         - Admin users see all jobs by default (user_id=None filter)
         - Regular users see only their own jobs by default
-        - A `user_filter` the caller is not entitled to raises 403 — NEVER a silently
+        - A `user_filter` the caller is not entitled to raises 403 — never a silently
           narrowed 200
         - Results are paginated and sorted by created_at DESC
         - exclude_ids supports the overlay model: frontend passes live Done/Dead job IDs
@@ -1325,10 +1300,16 @@ async def get_job_history(
         - HTTPException 403: caller is not entitled to the requested user_filter
 
     Notes:
-        - '!self' (admin only) returns every account's jobs EXCEPT the caller's — the
-          multiplexer jobs pane's "Not Mine" view (row 83c3ff74). It used to 400,
-          because the store could only filter by equality; it now takes an exclusion.
-          `filtered_by` reports it as "!<uid>", the authorizer's own sentinel.
+        - '!self' (admin only) returns every account's jobs except the caller's. It is the
+          multiplexer jobs pane's "Not Mine" view. `filtered_by` reports it as "!<uid>",
+          the authorizer's own sentinel.
+
+    The `user_filter` parameter exists here so that FastAPI does not silently drop it.
+    FastAPI drops an unknown query parameter, so `?user_filter=*` would come back 200 with
+    the caller's own rows and `filtered_by` still pinned to their uid. The sibling endpoint
+    `/api/get-queue/{queue_name}` refuses the same request with a 403 naming the admin
+    rule. Both follow one permission model. Accept-and-ignore would hand the caller a
+    partial view they believe is complete, a confident wrong answer.
     """
     from cosa.rest.job_persistence import query_job_history
 
@@ -1429,10 +1410,6 @@ async def delete_all_job_history(
     """
     Bulk delete job history from PostgreSQL.
 
-    Route-order note: this literal-path handler is declared BEFORE the
-    parameterized `/job-history/{job_id}` sibling so FastAPI matches
-    `/job-history/all` here rather than binding `job_id="all"` and returning 404.
-
     Requires:
         - Authenticated user (Bearer token)
         - days is None, 'all', or a numeric string matching 1/7/14/30
@@ -1443,6 +1420,10 @@ async def delete_all_job_history(
 
     Raises:
         - HTTPException 400: Invalid days parameter
+
+    Route-order note: this literal-path handler is declared before the parameterized
+    `/job-history/{job_id}` sibling, so FastAPI matches `/job-history/all` here rather
+    than binding `job_id="all"` and returning 404.
     """
     from cosa.rest.job_persistence import delete_job_history_bulk
 
@@ -1538,7 +1519,7 @@ async def retry_job_history():
 
     Ensures:
         - never returns; raises HTTPException( 410 ) naming /api/v2/ask
-          and the REMOVE BY 2026-12-31 date
+          and the `REMOVE BY` date from `REMOVE_BY`
     """
     gone( "/api/job-history/{job_id}/retry" )
 
@@ -1561,13 +1542,10 @@ async def pause_job(
     """
     Pause a job in the todo queue.
 
-    A paused job remains in the queue but is skipped by the consumer during
-    eligibility checks. Resume the job to make it eligible again.
-
     Requires:
         - job_id identifies a job currently in the todo queue
         - current_user is authenticated
-        - Job belongs to current user OR user is admin
+        - Job belongs to current user or user is admin
 
     Ensures:
         - Job's paused flag is set to True
@@ -1576,6 +1554,9 @@ async def pause_job(
     Raises:
         - HTTPException 404: Job not found in todo queue
         - HTTPException 403: User does not own this job
+
+    A paused job remains in the queue but is skipped by the consumer during eligibility
+    checks. Resume the job to make it eligible again.
     """
     user_id = current_user[ "uid" ]
 
@@ -1636,14 +1617,10 @@ async def resume_job(
     """
     Resume a paused job in the todo queue.
 
-    Clears the paused flag and notifies the consumer thread to recalculate
-    eligibility. If the job's scheduled_at has already passed, it becomes
-    immediately eligible.
-
     Requires:
         - job_id identifies a paused job in the todo queue
         - current_user is authenticated
-        - Job belongs to current user OR user is admin
+        - Job belongs to current user or user is admin
 
     Ensures:
         - Job's paused flag is set to False
@@ -1653,6 +1630,9 @@ async def resume_job(
     Raises:
         - HTTPException 404: Job not found in todo queue
         - HTTPException 403: User does not own this job
+
+    This clears the paused flag and notifies the consumer thread to recalculate eligibility.
+    If the job's scheduled_at has already passed, it becomes immediately eligible.
     """
     user_id = current_user[ "uid" ]
 
@@ -1728,7 +1708,7 @@ async def resume_stalled_job():
 
     Ensures:
         - never returns; raises HTTPException( 410 ) naming /api/v2/resume-job
-          and the REMOVE BY 2026-12-31 date
+          and the `REMOVE BY` date from `REMOVE_BY`
     """
     gone( "/api/jobs/{id_hash}/resume-from-checkpoint" )
 
@@ -1746,6 +1726,6 @@ async def resume_tfe_smart():
 
     Ensures:
         - never returns; raises HTTPException( 410 ) naming /api/v2/resume-job
-          and the REMOVE BY 2026-12-31 date
+          and the `REMOVE BY` date from `REMOVE_BY`
     """
     gone( "/api/test-fix-expediter/resume-from" )

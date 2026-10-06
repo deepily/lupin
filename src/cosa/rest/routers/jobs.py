@@ -2,10 +2,8 @@
 Job and snapshot management endpoints.
 
 Provides REST API endpoints for managing job lifecycle including
-snapshot deletion and audio answer retrieval. Currently implements
-stub functionality for Phase 1 development.
-
-Generated on: 2025-01-24
+snapshot deletion and audio answer retrieval. Both endpoints are
+currently stubs.
 """
 
 from fastapi import APIRouter, HTTPException
@@ -43,25 +41,23 @@ def get_static_dir():
 )
 async def delete_snapshot(id: str):
     """
-    Delete a completed job snapshot.
-    
-    PHASE 1 STUB: Returns mock success response for testing.
-    
+    Delete a completed job snapshot (stub: returns a mock success response for testing).
+
     Requires:
         - id is a non-empty string identifier
         - id does not start with "invalid" (for stub validation)
-        
+
     Ensures:
         - Returns success status with job ID and timestamp
         - Raises 404 HTTPException for invalid IDs
         - Provides mock deletion confirmation
-        
+
     Raises:
         - HTTPException with 404 status for invalid or missing IDs
-        
+
     Args:
         id: The job identifier to delete
-        
+
     Returns:
         dict: Deletion status with confirmation details
     """
@@ -85,29 +81,27 @@ async def delete_snapshot(id: str):
 )
 async def get_answer(id: str):
     """
-    Retrieve audio answer for completed job.
-    
-    PHASE 1 STUB: Returns a placeholder audio file for testing.
-    
+    Retrieve the audio answer for a completed job (stub: returns a placeholder audio file).
+
     Requires:
         - id is a non-empty string identifier
         - lupin_app.main module is accessible
         - static_dir contains audio/gentle-gong.mp3 file
         - Placeholder audio file exists in static directory
-        
+
     Ensures:
         - Returns FileResponse with audio/mpeg media type
         - Uses placeholder gentle-gong.mp3 for all requests
         - Sets appropriate filename with job ID
         - Raises 404 if placeholder audio file missing
-        
+
     Raises:
         - HTTPException with 404 status if audio file not found
         - ImportError if main module not accessible
-        
+
     Args:
         id: The job identifier to get audio for
-        
+
     Returns:
         FileResponse: Audio file stream for playback
     """

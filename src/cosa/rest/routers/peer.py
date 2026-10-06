@@ -1,12 +1,12 @@
 """
 Peer Queue Proxy + Watcher Router.
 
-Provides admin endpoints that let the dev server (:7999) observe and watch
-queue state on a peer Lupin server (typically the test server at :8000)
-without the user having to authenticate against the peer directly.
+Provides admin endpoints that let the dev server (:7999) observe and watch queue state
+on a peer Lupin server, typically the test server at :8000. The user does not have to
+authenticate against the peer directly.
 
 Endpoints:
-    GET  /api/admin/peer-queue/{queue_name}         — one-shot queue read
+    GET  /api/admin/peer-queue/{queue_name}         — one-shot queue read.
     POST /api/admin/peer-queue-watch/start          — start background watcher
     POST /api/admin/peer-queue-watch/stop           — stop watcher for caller
     GET  /api/admin/peer-queue-watch/status         — current watcher state
@@ -14,21 +14,20 @@ Endpoints:
 Auth:
     All endpoints require admin role via Depends( require_admin ).
 
-    Outbound auth to the peer uses a service-account JWT obtained via
-    POST /auth/login against the peer itself (Option B). Credentials come
-    from LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL/_PASSWORD env vars.
+    Outbound auth to the peer uses a service-account JWT obtained via POST /auth/login
+    against the peer itself. Credentials come from the
+    LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL and _PASSWORD env vars.
     Tokens are cached per-host and refreshed on 401.
 
-    JWT pass-through (forwarding the caller's Authorization header) was
-    tried first but doesn't work: dev and test share the JWT signing
-    secret but have SEPARATE user databases, so the peer's verify_jwt_token
-    → get_user_by_id() fails with "User not found".
+    JWT pass-through, forwarding the caller's Authorization header, does not work.
+    Dev and test share the JWT signing secret but have separate user databases.
+    The peer's verify_jwt_token → get_user_by_id() therefore fails with "User not found".
 
 SSRF protection:
     The target host must appear in config key "peer queue allowed hosts"
     (comma-separated list under [Lupin: Baseline]). Values are docker-compose
-    service names + in-container port (7999), e.g. "lupin-rest-test:7999" —
-    NOT host-mapped ports, since the dev container reaches peers over the
+    service names + in-container port (7999), e.g. "lupin-rest-test:7999". They are
+    not host-mapped ports, since the dev container reaches peers over the
     compose network.
 
 Drain notification:
@@ -305,8 +304,9 @@ async def _watcher_loop(
     sender_id        : str
 ):
     """
-    Background task: poll the peer queue, fire notification on drain, exit.
-    Updates _watcher_state[user_id] on every iteration for /status to read.
+    Poll the peer queue as a background task, fire a notification on drain, then exit.
+
+    It updates _watcher_state[user_id] on every iteration for /status to read.
     """
     state = _watcher_state[ user_id ]
     try:

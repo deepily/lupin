@@ -1,27 +1,23 @@
 """
-Unified task store REST surface — /api/tasks/* (Phase 1).
+Unified task store REST surface, `/api/tasks/*`.
 
-The deterministic owed-work API (design R4): arbiter, managers, workers, and
-Rick all query the SAME store through these endpoints. Receipts are
-first-class: a ->done transition without valid receipt_refs is REJECTED
-(design T3 / §4.1 AC1 — the mechanical no-confabulation enforcement).
+The deterministic owed-work API: the arbiter, managers, workers and the operator all query
+the same store through these endpoints. Receipts are first class. A `->done` transition
+without valid `receipt_refs` is rejected, which is the mechanical guard against confabulated
+completion.
 
-Endpoints (all authenticated via require_api_key_or_jwt — X-API-Key OR Bearer
-JWT, §4.1 AC2; hook writers use the host API-key file, same lane as the
-Arbiter + Stop-hook liveness path):
-    - POST /api/tasks                  — create item (always status=queued)
-    - POST /api/tasks/{id}/transition  — state change; structural rules enforced
-    - GET  /api/tasks                  — filtered query (owner/status/gate/manager/project/class)
-    - GET  /api/tasks/{id}             — one item
-    - GET  /api/tasks/{id}/events      — the append-only audit trail (R3)
+Every endpoint authenticates through `require_api_key_or_jwt`, so an X-API-Key or a Bearer
+JWT works. Hook writers use the host API-key file, the same lane as the arbiter and the
+Stop-hook liveness path. The endpoints:
+    - POST /api/tasks                  - create item (always status=queued)
+    - POST /api/tasks/{id}/transition  - state change; structural rules enforced
+    - GET  /api/tasks                  - filtered query (owner/status/gate/manager/project/class)
+    - GET  /api/tasks/{id}             - one item
+    - GET  /api/tasks/{id}/events      - the append-only audit trail
 
-DEBT-CLEAN MANDATE (design §2.2 C4): every handler here is a sync `def` —
-FastAPI runs them in its threadpool. The DB layer is sync SQLAlchemy via
-get_db(); sync work NEVER runs inside an `async def` handler (the legacy
-notifications.py starvation pattern this surface must not grow).
-
-Canonical design: planning-is-prompting ->
-planning-is-prompting/src/rnd/2026.06.11-unified-task-store-design.md (v0.4, Rick-ruled §3.1).
+Every handler here is a sync `def`, so FastAPI runs it in its threadpool. The DB layer is sync
+SQLAlchemy through `get_db()`. Sync work never runs inside an `async def` handler, which is the
+starvation pattern of the legacy `notifications.py` that this surface must not grow.
 """
 
 from datetime import datetime, timezone, timedelta
@@ -74,23 +70,22 @@ router = APIRouter( prefix="/api", tags=[ "tasks" ] )
 
 def _canon_persona( value ):
     """
-    Canonicalize an OPTIONAL persona-identity string to the store key.
-
-    The single API-boundary choke point that guarantees the store invariant —
-    every `owner_persona` / `accountable_manager` value the store holds (and
-    every value any caller queries it by) is the SAME canonical key, so a
-    persona whose name carries an accent/punctuation ("María", "Mr. Radio") can
-    never split into mismatched "maría"/"maria"/"mr. radio"/"mr radio" rows
-    (the 2026-06-18 false-idle bug-class).
+    Canonicalize an optional persona-identity string to the store key.
 
     Requires:
         - value is a str or None
 
     Ensures:
-        - None / "" / whitespace-only / all-punctuation -> None (a falsy filter
+        - None, "", whitespace-only and all-punctuation values -> None (a falsy filter
           stays falsy: an absent owner filter must keep matching every row, and
           a blank create field stays blank rather than becoming "")
         - otherwise returns canonical_persona_key( value ) (store-key parity)
+
+    This is the single API-boundary choke point for the store invariant. Every `owner_persona`
+    and `accountable_manager` value the store holds, and every value any caller queries it by,
+    is the same canonical key. A persona whose name carries an accent or punctuation ("María",
+    "Mr. Radio") can therefore never split into mismatched "maría", "maria", "mr. radio" and
+    "mr radio" rows.
     """
     if value is None:
         return None
@@ -99,20 +94,7 @@ def _canon_persona( value ):
 
 def _canon_project( value ):
     """
-    Canonicalize a project name to the store's single alias form — the
-    project-axis twin of `_canon_persona` (bug de653086 / its sibling c6751cf8).
-
-    The owed-work oracle scopes by `resolve_project_name()`, which alias-
-    normalizes through the ONE `_PROJECT_ALIASES` table (e.g.
-    "planning-is-prompting" -> "plan"). A row written under the RAW repo name
-    therefore splits OUT of the oracle's `project=` filter, and the owning
-    session false-idles while genuinely owing work (the alias-axis sibling of
-    the 2026-06-18 persona-drift P0). The MCP client wrappers already alias on
-    write, but a NON-wrapper POST (or a future caller) would store raw — so this
-    is the SERVER-side choke point, symmetric with persona canonicalization,
-    that makes read and write agree on ONE canonical form regardless of which
-    client wrote the row. Reuses the single shared `canonicalize_project_name`
-    (no second alias map) and is idempotent on already-canonical names.
+    Canonicalize a project name to the store's single alias form.
 
     Requires:
         - value is a str or None
@@ -122,6 +104,16 @@ def _canon_project( value ):
         - a known alias key -> its canonical short name
           ("planning-is-prompting" -> "plan")
         - any other name -> returned unchanged (already-canonical / non-aliased)
+
+    This is the project-axis twin of `_canon_persona`. The owed-work oracle scopes by
+    `resolve_project_name()`, which alias-normalizes through the one `_PROJECT_ALIASES` table
+    (for example "planning-is-prompting" -> "plan"). A row written under the raw repo name
+    would split out of the oracle's `project=` filter, and the owning session would false-idle
+    while it owes work. The MCP client wrappers already alias on write, but a non-wrapper POST
+    would store the raw name. This server-side choke point makes read and write agree on one
+    canonical form, whichever client wrote the row. It reuses the shared
+    `canonicalize_project_name`, with no second alias map, and is idempotent on
+    already-canonical names.
     """
     return canonicalize_project_name( value )
 
@@ -129,12 +121,6 @@ def _canon_project( value ):
 def _canon_blocked_by( blocked_by ):
     """
     Canonicalize persona-typed refs inside a blocked_by list (identity parity).
-
-    A typed ref is { "kind": item|persona|user, "id": ... }. Only kind=="persona"
-    ids name a persona, so only those are routed through canonical_persona_key;
-    item/user refs (and any malformed/non-dict entry) pass through untouched so
-    this helper never changes what task_store_rules.validate_blocked_by_refs
-    sees structurally — it only normalizes the persona id's spelling.
 
     Requires:
         - blocked_by is the candidate value (any type; only a list of dict refs
@@ -146,6 +132,12 @@ def _canon_blocked_by( blocked_by ):
           canonicalizes to a non-empty key; left verbatim otherwise (so an
           un-canonicalizable id still hits the rules' non-empty-string check)
         - item / user / malformed refs unchanged
+
+    A typed ref is { "kind": item|persona|user, "id": ... }. Only kind=="persona" ids name a
+    persona, so only those are routed through canonical_persona_key. Item and user refs, and
+    any malformed or non-dict entry, pass through untouched. The helper therefore never changes
+    what `task_store_rules.validate_blocked_by_refs` sees structurally. It only normalizes the
+    spelling of a persona id.
     """
     if not isinstance( blocked_by, list ):
         return blocked_by
@@ -167,26 +159,23 @@ class TaskCreateIn( BaseModel ):
     """
     Create body for POST /api/tasks.
 
-    Creation DEFAULTS to status=queued (the creation event stamps "->queued");
-    enum membership for item_class/gate_class/priority/authority is validated
-    by task_store_rules.validate_create in the handler (one rules home, not
-    per-layer duplication).
+    Creation defaults to status=queued, and the creation event stamps "->queued". The handler
+    validates enum membership for item_class, gate_class, priority and authority through
+    `task_store_rules.validate_create`. The rules live in one place and are not duplicated
+    per layer.
 
-    ONE-CALL BLOCKED MINT (Rick's ruling 2026-07-20): `status` may also be
-    "blocked", minting an already-blocked row in a single call. A blocked mint
-    carries `blocked_by` (>=1 typed ref) and `next_chase_ts` (kind-aware — a
-    persona blocker requires it), enforced by rules.validate_create_status which
-    REUSES the same ->blocked invariant a transition applies. A blocked mint is
-    additionally MANAGER-ONLY (guarded in the handler via is_manager_figure).
-    `status` is otherwise whitelisted to queued|blocked — done/dropped/parked/
-    claimed/in_progress/review are NOT mintable.
+    `status` may also be "blocked", which mints an already-blocked row in one call. A blocked
+    mint carries `blocked_by` (at least one typed ref) and `next_chase_ts`, which a persona
+    blocker requires. `rules.validate_create_status` enforces both and reuses the same
+    `->blocked` invariant a transition applies. A blocked mint is also manager-only, guarded in
+    the handler through `is_manager_figure`. `status` is otherwise limited to queued or blocked.
+    The statuses done, dropped, parked, claimed, in_progress and review are not mintable.
 
-    ⚠️ BOTH PARAGRAPHS ABOVE ARE NARROWED BY THE CREATE DOOR (Rick 2026-09-08, landed
-    2026-09-11, row 2d786391). With the holding default ON, an omitted status mints
-    `not_approved`, and an EXPLICIT live status (queued or blocked) is refused 403
-    unless the row is P0 or the caller is the operator's validated login — see
-    `task_approval_settings.refusal_for_live_mint`. A seat's one-call blocked mint is
-    therefore retired; the manager guard below still covers the two paths that pass.
+    The create door narrows both paragraphs above. With the holding default on, an omitted
+    status mints `not_approved`. An explicit live status (queued or blocked) is refused with 403
+    unless the row is P0 or the caller is the operator's validated login. See
+    `task_approval_settings.refusal_for_live_mint`. A seat's one-call blocked mint is therefore
+    retired, and the manager guard still covers the two paths that pass.
     """
     # `extra='forbid'` — row 98854a4b. This model shipped on pydantic's DEFAULT
     # (IGNORE), so an undeclared field vanished on a 201: measured live, a POST
@@ -280,12 +269,11 @@ class TaskTransitionIn( BaseModel ):
 
 class TaskCorrelateIn( BaseModel ):
     """
-    Body for POST /api/tasks/{id}/correlate (Phase 2 — cross-session respawn
-    adoption: re-stamp an item's correlation_key onto a successor session's
-    harness task id instead of forking a duplicate item).
+    Body for POST /api/tasks/{id}/correlate, the cross-session respawn adoption seam.
 
-    Terminal items are rejected in the handler (no re-keying closed history);
-    authority enum membership is validated there too (one rules home).
+    It re-stamps an item's correlation_key onto a successor session's harness task id instead of
+    forking a duplicate item. The handler rejects terminal items, so closed history is never
+    re-keyed. It also validates the authority enum there, so the rules live in one place.
     """
     # `extra='forbid'` — row 98854a4b, same rationale + same caller sweep as
     # TaskCreateIn above: the store already treated this as a HARD wire-level
@@ -299,15 +287,14 @@ class TaskCorrelateIn( BaseModel ):
 
 class TaskAmendIn( BaseModel ):
     """
-    Body for POST /api/tasks/{id}/amend (Phase 2.2 — append-only body amendment).
+    Body for POST /api/tasks/{id}/amend, an append-only body amendment.
 
-    Appends a persona-stamped + UTC-timestamped block to a NON-terminal item's
-    body WITHOUT rewriting the existing text — the durable-record seam for a
-    live item whose scope is legitimately reframed mid-flight (Krishna's
-    2026-07-02 friction). Distinct from PATCH `body`, which OVERWRITES: an amend
-    can NEVER lose prior spec history. `note` is the text appended; `reason`
-    stamps the audit event (mirrors the PATCH reason discipline), falling back to
-    an auto-marker when absent. `actor`/`authority` stamp the event, not the item.
+    It appends a persona-stamped, UTC-timestamped block to the body of a non-terminal item
+    without rewriting the existing text. This is the durable-record seam for a live item whose
+    scope is legitimately reframed mid-flight. It differs from PATCH `body`, which overwrites,
+    because an amend can never lose prior spec history. `note` is the text appended. `reason`
+    stamps the audit event, mirroring the PATCH reason discipline, and falls back to an
+    auto-marker when absent. `actor` and `authority` stamp the event, not the item.
     """
     # `extra='forbid'` — row 98854a4b, same rationale + same caller sweep as
     # TaskCreateIn above: the store already treated this as a HARD wire-level
@@ -322,17 +309,16 @@ class TaskAmendIn( BaseModel ):
 
 class TaskPatchIn( BaseModel ):
     """
-    Body for PATCH /api/tasks/{id} (Phase 2.1 — item-field edit).
+    Body for PATCH /api/tasks/{id}, an item-field edit.
 
-    Edits the mutable presentation/ownership fields of a NON-terminal item.
-    `status` / `blocked_by` / `next_chase_ts` / `receipt_refs` /
-    `correlation_key` are DELIBERATELY ABSENT — they ride the transition oracle
-    (validate_transition) and the /correlate seam, NEVER an item-PATCH.
-    `extra='forbid'` makes that a HARD wire-level invariant: naming any of them
-    is a 422, not a silent drop (reviewer ruling 2026-06-15 — PATCH can never
-    bypass the oracle). `actor`/`authority`/`reason` stamp the audit event, not
-    the item — `reason` is NOT an editable field (the manager-supplied "why" for
-    a reassignment); when absent the event records the auto-generated field delta.
+    It edits the mutable presentation and ownership fields of a non-terminal item. `status`,
+    `blocked_by`, `next_chase_ts`, `receipt_refs` and `correlation_key` are left out of this body.
+    They ride the transition oracle (`validate_transition`) and the /correlate
+    seam, never an item PATCH. `extra='forbid'` makes that a hard wire-level invariant, because
+    naming any of them is a 422 and not a silent drop. PATCH can therefore never bypass the
+    oracle. `actor`, `authority` and `reason` stamp the audit event, not the item. `reason` is
+    not an editable field. It is the manager-supplied "why" for a reassignment, and when absent
+    the event records the auto-generated field delta.
     """
     model_config = ConfigDict( extra="forbid" )
 
@@ -354,33 +340,28 @@ class TaskPatchIn( BaseModel ):
 
 def _serialize_item( item, blocker_statuses=None ) -> dict:
     """
-    Serialize a TaskItem to the wire shape (field names identical to the
-    model — one name at every layer).
+    Serialize a TaskItem to the wire shape, with field names identical to the model.
 
     Requires:
         - item is a flushed TaskItem (id/created_ts/updated_ts populated)
         - blocker_statuses maps blocker-id -> status (or None for looked-up-and-absent);
-          omitted/None means NO blocker was resolved, and every row then reports
-          blocker_terminal False — a caller that did not look cannot make a finding
+          omitted/None means no blocker was resolved, and every row then reports
+          blocker_terminal False, because a caller that did not look cannot make a finding
 
     Ensures:
         - returns a JSON-safe dict; nullable timestamps serialize as None
-        - `park_reason_stale` is DERIVED, never stored: the frozen-quote
-          divergence flag (design §3.3). ADVISORY ONLY — it changes no
-          owed-ness, unparks nothing, blocks nothing; it marks the quote
-          untrustworthy and stops there.
-          ⚠️ TRUE means "the body changed since capture"; FALSE means "it did
-          not" — NEVER "the reason is still true" (row aa543525 §2). A park
-          reason whose basis lived OUTSIDE the row dies without touching the
-          row and so reads FRESH forever; four such rows were measured
-          2026-07-25, each quoting a stand-down that had already evaporated.
-          The chase is the backstop for that class, not this flag.
-        - `blocker_terminal` is DERIVED, never stored (row 00a6bde2): the row is
-          `blocked` on an item that can never transition again, so the wait is
-          unsatisfiable. ADVISORY, exactly like park_reason_stale — the DISPOSITION
-          of a stranded row is split (a `done` blocker means the precondition
-          happened; a `dropped` one means somebody decided otherwise) and neither
-          arm is a serializer's business.
+        - `park_reason_stale` is derived, never stored. It is the frozen-quote
+          divergence flag, advisory only: it changes no owed-ness, unparks nothing and
+          blocks nothing. It marks the quote untrustworthy and stops there.
+          True means "the body changed since capture". False means "it did not", and
+          never "the reason is still true". A park reason whose basis lived outside the
+          row dies without touching the row, so each such row reads fresh forever. The chase is the
+          backstop for that class, not this flag.
+        - `blocker_terminal` is derived, never stored. It says the row is `blocked` on an
+          item that can never transition again, so the wait is unsatisfiable. It is
+          advisory, like park_reason_stale. What to do with a stranded row is
+          split: a `done` blocker means the precondition happened, and a `dropped` one
+          means somebody decided otherwise. Neither arm is a serializer's business.
     """
     return {
         "id"                  : str( item.id ),
@@ -481,74 +462,38 @@ TERSE_ADVISORY_FIELDS = frozenset( {
 
 def _serialize_item_terse( item, blocker_statuses=None ) -> dict:
     """
-    Serialize a TaskItem to the TERSE projection (§G token win).
+    Serialize a TaskItem to the terse projection used for board glances.
 
-    The on-demand "see my list" query (a manager board glance, a worker's
-    owed-work peek) needs the at-a-glance fields, NOT the full row — `body` in
-    particular can be multi-paragraph, and the audit trail (/events) is already
-    a separate surface. This projection drops `body` and every non-glance field,
-    keeping ONLY id / title / item_class / status / blocked_by / next_chase_ts / priority /
-    park_reason_stale — so a list query over MCP costs a fraction of the
-    full-row token weight (cosa-voice token-efficiency is goal #1). Field names
-    are IDENTICAL to the full shape (one name at every layer) — a terse row is a
-    strict subset.
-
-    `park_reason_stale` is here DELIBERATELY, against the projection's own
-    minimalism: the terse shape is what a board glance actually reads, so a
-    staleness flag omitted from it is a flag nobody sees — which is design
-    option 3 (document the defect, detect nothing) wearing option 1's clothes
-    (§3.3). It costs one boolean per row. A row that was never parked reports
-    False, so the flag is silent on the overwhelming majority of rows.
-
-    `project` rides here for a different reason, and it is a cost argument (row d23147e8,
-    2026-07-25). It was ABSENT from terse, and there is no distinct-project-values endpoint — so
-    answering "what project strings actually exist in this store?" required pulling 1,227 FULL
-    rows. María ran exactly that census once: 9 distinct values, ONE of them an orphan alias
-    (`google-skills-distillation` vs `skills-distillation`) that had hidden a live row from a
-    project-scoped partition BY CONSTRUCTION. A census that expensive is never routine, which is
-    precisely why the NEXT orphan also gets found by accident. `project` is a short string; adding
-    it makes the check habitual instead of heroic.
-
-    `title_trimmed` rides here on the SAME argument again, and it is the fourth
-    application of it rather than a new policy (row a6cb24e8, 2026-08-31). The store
-    trims a title at 60 chars and files the tail into `body` — and THIS projection
-    drops `body`. So on the one surface where a reader meets a title alone, the
-    recovered tail is invisible, and the trim leaves no ellipsis or any other mark:
-    a truncated title simply stops, indistinguishable from a short one. Rio ⚡
-    measured a live P1 whose 60-char title asserts a diagnosis the row's own
-    amendment retracts — a board glance returns a claim the row disproves.
-
-    ⚠️ IT OVER-REPORTS BY CONSTRUCTION, and that is the deliberate direction. The
-    predicate is length-only, so a title that is NATURALLY exactly 60 chars reports
-    True. A false positive costs a reader one look at a body with nothing missing;
-    a false negative is the defect this exists to surface. Erring the other way
-    would need a stored flag and a migration — worth doing, and not this change.
-
-    `blocker_terminal` rides here on the SAME argument, and the argument is stronger:
-    blocked rows are EXCLUDED from the workable-now count by design, so a stranded row
-    is invisible in exactly the way a finished row is — it costs nothing to look at and
-    yields nothing when looked at. The board's burn-down silently includes work that can
-    never move. A flag that is not in the projection a board glance reads is a flag
-    nobody sees. It costs one boolean per row, and every non-blocked row reports False.
+    It drops `body` and every non-glance field, so a list query over MCP costs a fraction of
+    the full-row token weight. Field names match the full shape, so a terse row is a subset.
 
     Requires:
         - item is a flushed TaskItem (id populated)
         - blocker_statuses as per _serialize_item; omitted means no finding is possible
 
     Ensures:
-        - returns a JSON-safe dict with EXACTLY the keys in the literal below; nullable
+        - returns a JSON-safe dict with only the keys in the literal below; nullable
           next_chase_ts serializes as None
-        - park_reason_stale is DERIVED (never stored) and ADVISORY — identical
+        - park_reason_stale is derived (never stored) and advisory, with identical
           semantics to the full shape's, computed by the same predicate, so the
           two projections can never disagree about staleness
-        - blocker_terminal is likewise DERIVED and ADVISORY, computed by the same
+        - blocker_terminal is likewise derived and advisory, computed by the same
           predicate as the full shape's, for the same reason
-        - title_trimmed is STORED and ADVISORY: it is what soft_guard_title
-          actually did to this row's title on its last write, read straight off the
-          column. It is NOT re-derived from length, so it does not move when the
-          cap moves (bug 769b3574) and it clears when a retitle repairs a title.
-          Backfilled rows may over-report — see migration 47513717b7e5 — which is
-          the harmless direction: one wasted look at a body with nothing missing
+        - title_trimmed is stored and advisory: it is what soft_guard_title did to this
+          row's title on its last write, read off the column. It is not re-derived from
+          length, so it does not move when the cap moves and it clears when a retitle
+          repairs a title. Backfilled rows may over-report (migration 47513717b7e5),
+          which is the harmless direction: one wasted look at a body with nothing missing
+
+    Each glance field is here because a flag a board glance cannot see is a flag nobody sees.
+    `park_reason_stale` and `blocker_terminal` cost one boolean per row. Blocked rows are
+    excluded from the workable-now count, so a stranded row would otherwise hide in the burn-down.
+    `project` is here for cost: there is no distinct-project endpoint, and one census pulled
+    1,227 full rows to find an orphan alias that had hidden a live row from a scoped partition.
+    `title_trimmed` is here because the store trims a title at 60 chars into `body`, which this
+    projection drops, and the trim leaves no mark. Its predicate is length-only, so a title that
+    is naturally 60 chars over-reports. That direction is chosen: a false positive costs one look
+    at a body, while a false negative hides the defect the flag exists to surface.
     """
     return {
         "id"                : str( item.id ),
@@ -592,39 +537,34 @@ def _serialize_item_terse( item, blocker_statuses=None ) -> dict:
 
 def _reject_unsatisfiable_blockers( repo, blocked_by ):
     """
-    422 a `blocked_by` naming an item that can NEVER satisfy the wait (row 00a6bde2).
-
-    THE CHEAP HALF OF THE FIX, at the seam where the mistake is made. Two ways an
-    item-kind edge is born dead:
-
-        TERMINAL  — the blocker is already `done`/`dropped`. Terminal is terminal: it
-                    can never transition again, so nothing will ever release this row.
-        ABSENT    — the id resolves to no row at all. Nothing can transition it either,
-                    and unlike the prose arm of this defect there is no ambiguity about
-                    what an unresolvable id in a TYPED `{kind:"item"}` field is.
-
-    ⚠️ THIS REACHES NONE OF THE SIX LIVE INSTANCES, and saying so is the point. All six
-    blockers went terminal LONG AFTER their edge was written — write-side validation is
-    structurally incapable of catching that, which is why the READ-side `blocker_terminal`
-    flag is the load-bearing half and this is the convenience. A fix that shipped only
-    this half would close the door on new instances while every existing one stayed
-    invisible, and would look complete.
-
-    PERSONA AND USER REFS ARE UNTOUCHED. Neither has a resolvable lifecycle — persona
-    liveness has no registry at all (rows 6f8fd858 / 91067e47) and `commons_who` reports
-    silence, not absence. Rejecting on an unresolvable persona would block legitimate
-    writes on the strength of an instrument that does not exist.
+    Reject with 422 a `blocked_by` that names an item which can never satisfy the wait.
 
     Requires:
         - repo is a TaskRepository bound to the live session
         - blocked_by is the caller's post-canonicalization value (any type)
 
     Ensures:
-        - raises HTTPException(422) naming EVERY offending id and its reason, never
-          just the first — a caller fixing one edge should not have to submit again to
+        - raises HTTPException(422) naming every offending id and its reason, never
+          just the first, so a caller fixing one edge should not have to submit again to
           discover the next
         - returns None when every item-kind ref resolves to a non-terminal row
-        - a value carrying no item-kind refs issues NO query and always passes
+        - a value carrying no item-kind refs issues no query and always passes
+
+    This is the cheap half of the fix, at the seam where the mistake is made. An item-kind
+    edge is born dead in two ways. The blocker is already `done` or `dropped`, and terminal is
+    terminal, so nothing will ever release the row. Or the id resolves to no row at all, so
+    nothing can transition it either. In a typed `{kind:"item"}` field there is no ambiguity
+    about what an unresolvable id means.
+
+    This check cannot catch a blocker that went terminal after its edge was written. Write-side
+    validation is structurally unable to, so the read-side `blocker_terminal` flag is the half
+    that carries the weight and this check is the convenience. A fix that shipped only this half
+    would close the door on new instances while every existing one stayed invisible.
+
+    Persona and user refs are untouched. Neither has a resolvable lifecycle. Persona liveness
+    has no registry at all, and `commons_who` reports silence, not absence. Rejecting on an
+    unresolvable persona would block legitimate writes on the strength of an instrument that
+    does not exist.
     """
     ref_ids = item_blocker_ids( blocked_by )
     if not ref_ids: return
@@ -659,20 +599,19 @@ def _lock_row_and_pledge( repo, task_id, pledge_id ):
     """
     Row-lock a request's target and its pledged row, in id order.
 
-    Sword of Damocles (row ab8c5728). The filing door and the verdict door both hold two
-    rows at once; taking them in one fixed order is what stops a crossed pair from
-    deadlocking.
-
     Requires:
         - repo is the caller's TaskRepository inside an open transaction
         - task_id is a UUID; pledge_id is a UUID or None
 
     Ensures:
         - returns ( target_row_or_None, pledged_row_or_None )
-        - no pledge → only the target is locked
-        - a pledge naming the target itself → one lock, the same row returned twice (the
+        - no pledge -> only the target is locked
+        - a pledge naming the target itself -> one lock, the same row returned twice (the
           pledge rule refuses it; locking it twice would be a second statement for nothing)
         - otherwise both are locked, lower id first
+
+    The filing door and the verdict door both hold two rows at once. Taking them in one fixed
+    order is what stops a crossed pair from deadlocking.
     """
     if pledge_id is None:
         return repo.get_by_id_for_update( task_id ), None
@@ -686,20 +625,19 @@ def _lock_row_and_pledge( repo, task_id, pledge_id ):
 
 def _requester_persona( actor, account_email ):
     """
-    The persona filing a request, resolved by the SERVER — never the typed actor name.
-
-    Sword of Damocles ruling (Mr. Radio agreeing with María, 2026-09-14 22:49 EDT): "it
-    better be yours" is checked against an identity the caller cannot type. Row b8205986
-    closed the hole a caller-declared string opened.
+    The persona filing a request, resolved by the server and never from the typed actor name.
 
     Requires:
         - actor is the request's declared actor ("<persona> <session id>")
-        - account_email is the VALIDATED login email, or None for an API-key seat
+        - account_email is the validated login email, or None for an API-key seat
 
     Ensures:
         - a logged-in approver account resolves to its configured persona
         - otherwise the persona the session bridge holds for the actor's session id
         - None when neither resolves; never parses a name out of `actor`
+
+    The check that the pledged row belongs to the requester runs against an identity the caller
+    cannot type. A caller-declared string would leave that check open to a forged name.
     """
     account_persona = approval.approver_persona_for_account( account_email )
     if account_persona is not None: return account_persona
@@ -713,17 +651,7 @@ def _requester_persona( actor, account_email ):
 
 def _resolve_blocker_statuses( repo, items ):
     """
-    Resolve every item-kind blocker across a PAGE of rows in one query (row 00a6bde2).
-
-    ONE QUERY FOR THE PAGE. The alternative — resolving per row inside the serializer —
-    puts an N+1 on the board glance that the terse projection exists to make cheap.
-    Collected here, asked once, handed to the serializers as a plain dict.
-
-    SCOPED TO WHAT WAS ASKED, and that scoping is load-bearing rather than an
-    optimization: `statuses_for_ids` answers with an explicit None for an id it looked
-    up and did not find, and `blocker_is_terminal` reads a MISSING key as "no evidence".
-    So resolving only the page's own blockers keeps every un-asked id correctly silent
-    instead of accidentally flagged.
+    Resolve every item-kind blocker across a page of rows in one query.
 
     Requires:
         - repo is a TaskRepository bound to the live session
@@ -732,7 +660,14 @@ def _resolve_blocker_statuses( repo, items ):
     Ensures:
         - returns { blocker_id_str: status_or_None } covering every item-kind blocker id
           appearing in `items`, and nothing else
-        - returns {} — issuing no query — when no row carries an item-kind blocker
+        - returns {} (issuing no query) when no row carries an item-kind blocker
+
+    Resolving per row inside the serializer would put an N+1 on the board glance that the terse
+    projection exists to make cheap, so the ids are collected here, asked once, and handed to
+    the serializers as a plain dict. The scoping to what was asked is required, not an
+    optimization. `statuses_for_ids` answers with an explicit None for an id it looked up and
+    did not find, and `blocker_is_terminal` reads a missing key as "no evidence". Resolving only
+    the page's own blockers keeps every un-asked id correctly silent instead of flagged.
     """
     ref_ids = [ ]
     for item in items:
@@ -742,23 +677,7 @@ def _resolve_blocker_statuses( repo, items ):
 
 def _serialize_within_char_budget( items, serialize, budget: int ):
     """
-    Serialize rows until the accumulated payload reaches a CHARACTER budget.
-
-    THE SECOND BOUND (mini-plan 02 T3). `limit` caps ROWS, and a row cap is not a
-    size cap: the same 100-row page measured 21,379 chars terse and 424,209 chars
-    full on 2026-07-21, because rows carry multi-KB bodies. This bound governs the
-    quantity that actually costs the caller — bytes — and it is INDEPENDENT of the
-    row bound: whichever binds first wins, and the caller is TOLD which.
-
-    A stop is NEVER silent: the second return value is the flag the response
-    publishes as `truncated`, and the caller always also receives the honest
-    `total`. A degraded response that does not announce its degradation is worse
-    than an error.
-
-    The FIRST row is admitted unconditionally, even when it alone exceeds the
-    budget. A budget that can return zero rows for a non-empty result set is a
-    pagination dead end — the caller advances `offset` forever and never makes
-    progress. One oversized row plus `truncated: true` is honest AND advanceable.
+    Serialize rows until the accumulated payload reaches a character budget.
 
     Requires:
         - items is an iterable of TaskItem
@@ -766,13 +685,27 @@ def _serialize_within_char_budget( items, serialize, budget: int ):
         - budget is a non-negative integer character count (0 == unbounded)
 
     Ensures:
-        - budget == 0 means UNBOUNDED (the explicit caller opt-out); every item is
+        - budget == 0 means unbounded (the explicit caller opt-out); every item is
           serialized and truncated is False
         - returns ( rows, truncated ) where rows is a prefix of the serialized
           items, in the order given
-        - truncated is True IFF at least one item was left unserialized
+        - truncated is True if and only if at least one item was left unserialized
         - len( rows ) >= 1 whenever items is non-empty
         - truncated is False whenever every item was serialized
+
+    `limit` caps rows, and a row cap is not a size cap. One 100-row page measured 21,379 chars
+    terse and 424,209 chars full, because rows carry multi-KB bodies. This second bound governs
+    bytes, the quantity that costs the caller. It is independent of the row bound. Whichever
+    binds first wins, and the caller is told which.
+
+    A stop is never silent. The second return value is the flag the response publishes as
+    `truncated`, and the caller always also receives the honest `total`. A degraded response
+    that does not announce its degradation is worse than an error.
+
+    The first row is admitted unconditionally, even when it alone exceeds the budget. A budget
+    that can return zero rows for a non-empty result set is a pagination dead end, because the
+    caller advances `offset` forever and never makes progress. One oversized row plus
+    `truncated: true` is honest and advanceable.
     """
     rows      = [ ]
     truncated = False
@@ -796,31 +729,27 @@ def _serialize_within_char_budget( items, serialize, budget: int ):
 
 def _serialize_event( event ) -> dict:
     """
-    Serialize a TaskEvent to the wire shape.
-
-    Requires:
-        - event is a flushed TaskEvent (id/ts populated)
-
-    `title` rides here because an event stream WITHOUT it is unreadable by a human (row
-    2c6a87f3). The completed-work accordion's design measured the gap: this projection returned
-    `item_id` and nothing else identifying, so the single most important at-a-glance column was
-    not on the wire and a client would have needed one extra fetch PER EVENT to recover it.
-
-    🔴 IT IS READ THROUGH THE RELATIONSHIP, WHICH MAKES EAGER LOADING A CONTRACT AND NOT AN
-    OPTIMISATION. Both repository readers (`query_events`, `get_events`) attach
-    `joinedload( TaskEvent.item )`; drop either and this line becomes one SELECT per event,
-    across a page capped at 500. A guard counts the queries rather than trusting the comment.
-
-    ⚠️ NOT `getattr`-guarded, deliberately. `item_id` is NOT NULL with an ON DELETE CASCADE, so
-    an event without its item cannot exist — a missing relationship is a torn read that should
-    fail loudly here, not render as a blank title somebody later reports as a UI bug.
+    Serialize a TaskEvent to the wire shape, including the owning item's title.
 
     Requires:
         - event is a flushed TaskEvent (id/ts populated)
         - event.item is loaded (both repository readers eager-load it)
+        - the owning item's `title` is read through that relationship, so no extra query runs
 
     Ensures:
         - returns a JSON-safe dict mirroring the audit-trail row, plus the owning item's title
+
+    `title` is on the wire because an event stream without it is unreadable by a human. Without
+    it a client would need one extra fetch per event to recover the most important column.
+
+    Eager loading is a contract here, not an optimisation, because `title` is read through the
+    relationship. Both repository readers (`query_events`, `get_events`) attach
+    `joinedload( TaskEvent.item )`. Drop either and this line becomes one query per event,
+    across a page capped at 500. A guard counts the queries rather than trusting this comment.
+
+    The read is not guarded with `getattr`. `item_id` is `NOT NULL` with `ON DELETE CASCADE`,
+    so an event without its item cannot exist. A missing relationship is a torn read that
+    should fail loudly here, not render as a blank title that someone later reports as a UI bug.
     """
     return {
         "id"           : event.id,
@@ -847,7 +776,7 @@ def _reject_if_errors( errors: list ) -> None:
         - no-op when errors is empty
 
     Raises:
-        - HTTPException 422 carrying EVERY violation (caller sees all at once)
+        - HTTPException 422 carrying every violation (caller sees all at once)
     """
     if errors:
         raise HTTPException( status_code=422, detail={ "errors": errors } )
@@ -875,7 +804,7 @@ def _also_refused( others: list ) -> str:
 
 def _raise_create_refusals( priority_denial, status_errors, live_mint_refusal, epic_refusal ) -> None:
     """
-    Raise one refusal carrying every create rule the call broke (row 631a812e).
+    Raise one refusal carrying every create rule the call broke.
 
     Requires:
         - priority_denial is the priority firewall's refusal string, or None
@@ -907,25 +836,23 @@ def _raise_create_refusals( priority_denial, status_errors, live_mint_refusal, e
 
 def _blocked_mint_denial_detail( reason: str ) -> str:
     """
-    Build the 403 detail for a rejected blocked-MINT, keyed on the classifier
-    reason (bug dd3b3666). The old single message asserted "you are not a
-    manager" even when the truth was "your bridge predates the stamp field the
-    check reads — restart" — misdiagnosing every session alive across a future
-    bridge-schema addition.
+    Build the 403 detail for a rejected blocked mint, keyed on the classifier reason.
 
     Requires:
         - reason is one of the manager_figure.DENIAL_* constants
 
     Ensures:
-        - DENIAL_STALE_BRIDGE → names the ABSENT stamp field and prescribes a
-          session RESTART (which re-stamps the bridge at SessionStart). It states
-          the OBSERVATION and not a cause: on 2026-08-30 (row 6325123c) the message
-          asserted "this session started before the stamp existed" to a session
-          started that same day — Phase 4.6 stamped the file and _record_listener_pid
-          then wrote a pre-stamp dict over it, so the field was absent for a reason
-          the message ruled out. A message must not assert a cause it never checked.
-        - DENIAL_NO_SESSION_ID / DENIAL_DENIED → the permission message, unchanged
-          in intent (a genuinely-denied caller is still told it is not a manager)
+        - DENIAL_STALE_BRIDGE -> names the absent stamp field and prescribes a
+          session restart (which re-stamps the bridge at SessionStart). It states
+          the observation and not a cause. A message must not assert a cause it never checked.
+        - DENIAL_NO_SESSION_ID / DENIAL_DENIED -> the permission message, unchanged
+          in intent (a denied caller is still told it is not a manager)
+
+    A single message that always said "you are not a manager" was wrong when the truth was
+    that the session's bridge predates the stamp field the check reads. It misdiagnosed every
+    session alive across a bridge-schema addition. One session that started the same day still
+    got "this session started before the stamp existed", because the bridge writer overwrote
+    the stamp with a pre-stamp dict. The field was absent for a reason the message ruled out.
     """
     if reason == DENIAL_STALE_BRIDGE:
         return (
@@ -985,9 +912,9 @@ def create_task(
 
     Ensures:
         - enum fields validated via rules.validate_create (422 on violation)
-        - an over-long title is SOFT-guarded (non-destructive, never rejected):
+        - an over-long title is soft-guarded (non-destructive, never rejected):
           trimmed to the cap, with the overflow moved into an empty body
-          (rules.soft_guard_title, design 2026.06.29 §4.3 / handoff #1)
+          (rules.soft_guard_title)
         - item + creation event written atomically (one get_db() transaction)
         - returns the serialized item (201) plus a `title_guard` advisory field
           (None when the title was under the cap)
@@ -1455,7 +1382,7 @@ def transition_task(
 
     Ensures:
         - 404 when the item does not exist
-        - structural rules validated against the CURRENT status inside the
+        - structural rules validated against the current status inside the
           same transaction that applies the change (no read-then-write race)
         - item update + event append are atomic (one get_db() transaction)
         - returns { item, event } serialized
@@ -1476,23 +1403,22 @@ def transition_task(
 
 def _apply_transition_under_lock( session, repo, item, task_id, payload, background_tasks, account_email ):
     """
-    Everything the transition door does once it holds the row lock — its whole gate order.
-
-    🔴 EXTRACTED, NOT COPIED (row c9fafb9d, Rick's Q2 2026-09-10: "Approval moves it").
-    Approving a manager's request must PERFORM the move through the same path as Rick's
-    own board click, so the transition door and the request-verdict door both call this.
-    The body is the handler's, moved verbatim; a second copy of the gate order would
-    drift from the first the day either is edited.
+    Run the whole transition gate order once the caller holds the row lock.
 
     Requires:
         - session / repo are the caller's open transaction; item is row-locked in it
         - task_id is item's id; payload validates against TaskTransitionIn
-        - account_email is the caller's VALIDATED login email, or None
+        - account_email is the caller's validated login email, or None
 
     Ensures:
         - exactly what `transition_task` documents after its 404: every refusal raises
           HTTPException inside the caller's transaction, so `get_db` rolls it back
         - returns { item, event } serialized, or the asynchronous path's 202 response
+
+    Approving a manager's request must perform the move through the same path as the operator's
+    own board click, so the transition door and the request-verdict door both call this. The
+    body was moved out of the handler verbatim. A second copy of the gate order would drift
+    from the first the day either is edited.
     """
 
     # Identity parity (Phase 2): persona-typed blocked_by ids are stored
@@ -1918,47 +1844,36 @@ def _apply_transition_under_lock( session, repo, item, task_id, payload, backgro
 
 def _resolved_operator_attestation( receipt_refs, account_email ):
     """
-    The value the server will record for an `operator_attestation` receipt, or None
-    when the caller did not claim one.
+    The value the server will record for an `operator_attestation` receipt, or None.
 
     Requires:
         - receipt_refs is the caller's receipts value (any type; non-dict is treated
           as "no attestation claimed", because shape errors belong to the rules layer)
-        - account_email is the email off a VALIDATED access token, or None
+        - account_email is the email off a validated access token, or None
 
     Ensures:
         - returns None when no `operator_attestation` key is present
-        - raises HTTPException(403) when the key IS present and the caller has no
-          resolvable login identity — that is every API-key caller, which is every
+        - raises HTTPException(403) when the key is present and the caller has no
+          resolvable login identity, which is every API-key caller and so every
           agent seat in the fleet
-        - otherwise returns the SERVER-RESOLVED identity, never the caller's string
+        - otherwise returns the server-resolved identity, never the caller's string
 
-    🔴 WHY THIS IS A FUNCTION IN THE ROUTER AND NOT A RULE IN task_store_rules.
+    This is a function in the router, not a rule in task_store_rules, because the operator's
+    click is the receipt and an agent must never be able to mint one. The only unforgeable fact
+    in this request is `account_email`, which comes off a signature-validated token.
+    `payload.actor` cannot do the job. It is declared by the caller, and `is_approver` is a
+    string match, so a seat can type an approver's persona. The rules module is pure and has no
+    account to read, so a check placed there would validate shape and enforce nothing.
 
-    Rick ruled his click IS the receipt (row 1e12cc08), and María attached one
-    non-negotiable to that ruling: "An agent must never be able to mint one." The
-    only unforgeable fact available anywhere in this request is `account_email`,
-    which comes off a signature-validated token. `payload.actor` cannot do this job
-    — it is caller-DECLARED and `is_approver` is a string match, so a seat can type
-    an approver's persona. The approval gate's own comment says as much: it "refuses
-    an honest non-approver and cannot stop a dishonest one".
+    The return value is overwritten, not merely approved. `identity_for_account` resolves the
+    account to a persona (or the email itself), and that is what gets recorded. A logged-in
+    non-approver cannot attest as "rick", because the string they sent never reaches the
+    ledger. Checking the caller's value and then storing it would leave the ledger saying
+    whatever they typed.
 
-    ⇒ The rules module is pure and has no account to read, so a check placed there
-    would validate shape and enforce nothing while LOOKING like enforcement. That
-    is the one failure mode this design has, and it is why the check lives here.
-
-    🔴 AND THE RETURN VALUE IS OVERWRITTEN, NOT MERELY APPROVED. `identity_for_account`
-    resolves the account to a persona (or the email itself), and THAT is what gets
-    recorded. A logged-in non-approver therefore cannot attest as "rick": the string
-    they sent never reaches the ledger. Checking the caller's value and then storing
-    the caller's value would leave the ledger saying whatever they typed — an
-    authorization check whose result nothing downstream uses.
-
-    ⚠️ THIS IS AN IDENTITY GATE, NOT AN APPROVER GATE, AND THE DIFFERENCE IS
-    DELIBERATE. Any logged-in human may attest; only an accountless caller is
-    refused. Narrowing it to the approver allowlist is a POLICY question that is
-    Rick's to rule, and it is not smuggled in here — the row asked that agents be
-    unable to mint one, which is exactly what this refuses.
+    This is an identity gate and not an approver gate. Any logged-in human may attest, and only
+    an accountless caller is refused. Narrowing it to the approver allowlist is a policy
+    question for the operator, and it is not decided here.
     """
     if not isinstance( receipt_refs, dict ):        return None
     if rules.OPERATOR_ATTESTATION_KEY not in receipt_refs: return None
@@ -1981,35 +1896,31 @@ def _resolved_operator_attestation( receipt_refs, account_email ):
 
 def _resolved_manager_attestation( receipt_refs, session_id, account_email, closer_is_manager, manager_refusal_detail ):
     """
-    The value the server will record for a `manager_attestation` receipt, or None when
-    the caller did not claim one (row adaf7698).
+    The value the server will record for a `manager_attestation` receipt, or None.
 
     Requires:
         - receipt_refs is the caller's receipts value (any type; non-dict is treated as
           "no attestation claimed", because shape errors belong to the rules layer)
         - session_id is the session id parsed from the caller's actor, or None
-        - account_email is the email off a VALIDATED access token, or None
-        - closer_is_manager is the router's ONE manager check for this request, and
+        - account_email is the email off a validated access token, or None
+        - closer_is_manager is the router's one manager check for this request, and
           manager_refusal_detail is that check's refusal text (None when it passed).
           The router always runs the check when the key is present, so a claim can
           never arrive here with the check skipped
 
     Ensures:
         - returns None when no `manager_attestation` key is present
-        - raises HTTPException(403) when the key IS present and the caller is not a
+        - raises HTTPException(403) when the key is present and the caller is not a
           manager, naming why and what to do instead
-        - otherwise returns the SERVER-RESOLVED identity, never the caller's string:
+        - otherwise returns the server-resolved identity, never the caller's string:
           the login account's identity when there is one, else the manager seat's
           bridge persona plus its session id
 
-    Modelled on `_resolved_operator_attestation`, and it is placed in the router for
-    that function's reason: the rules module is pure and cannot tell a manager from a
-    worker typing the key. It differs in WHO passes. The operator door wants a login
-    account; this one wants a manager, which for an agent seat means the bridge.
-
-    🔴 THE VALUE IS OVERWRITTEN, NOT MERELY APPROVED. A manager typing "rick" records
-    their own seat. Checking the caller and then storing the caller's string would
-    leave the ledger saying whatever they typed.
+    This is modelled on `_resolved_operator_attestation` and lives in the router for the same
+    reason: the rules module is pure and cannot tell a manager from a worker typing the key. It
+    differs in who passes. The operator door wants a login account. This one wants a manager,
+    which for an agent seat means the bridge. The value is overwritten, not merely approved, so
+    a manager typing "rick" records their own seat.
     """
     if not isinstance( receipt_refs, dict ):              return None
     if rules.MANAGER_ATTESTATION_KEY not in receipt_refs: return None
@@ -2064,8 +1975,8 @@ def correlate_task(
         - 404 when the item does not exist
         - 422 when the item is terminal (no re-keying closed history) or
           authority is not a valid enum member
-        - row-locked read (N3 parity) so the terminal check cannot be raced
-          by a concurrent ->done/->dropped transition
+        - row-locked read (parity with the transition door) so the terminal check cannot be
+          raced by a concurrent ->done/->dropped transition
         - correlation_key update + 're-correlated' event append are atomic
           (one get_db() transaction)
         - returns { item, event } serialized
@@ -2121,20 +2032,19 @@ def amend_task(
         - authenticated caller (X-API-Key or Bearer JWT)
         - task_id is a valid UUID (FastAPI 422s malformed ids)
         - payload validates against TaskAmendIn (min_length=1 lets a
-          whitespace-only note through the wire — the handler strip-guards it)
+          whitespace-only note through the wire, so the handler strip-guards it)
 
     Ensures:
         - 404 when the item does not exist
         - 422 when authority is not a valid enum member or the note is blank after
-          strip — every violation reported at once
-        - a TERMINAL item is NOT rejected (Rick's ruling 2026-08-02, row
-          3c569786): amend is the ONE write verb allowed on a closed row, so a
-          gate verdict written after a worker self-closes has a durable home. The
-          repository marks it a post-terminal addendum + stamps an
+          strip, with every violation reported at once
+        - a terminal item is not rejected: amend is the only write verb allowed on a
+          closed row, so a gate verdict written after a worker self-closes has a durable
+          home. The repository marks it a post-terminal addendum and stamps an
           'amended_post_terminal' event; status is never moved. transition / edit
           / correlate stay refused on a terminal row (unchanged)
-        - row-locked read (N3 parity) so the status read that SELECTS the
-          post-terminal marker cannot be raced by a concurrent ->done/->dropped
+        - row-locked read (parity with the transition door) so the status read that selects
+          the post-terminal marker cannot be raced by a concurrent ->done/->dropped
           transition
         - the router owns the clock (datetime.now(utc)) so the repo stays
           deterministic; body append + 'amended'/'amended_post_terminal' event
@@ -2194,14 +2104,14 @@ def amend_task(
 
 class ManagerPullRequest( BaseModel ):
     """
-    A flip of Rick's manager-pull toggle. One field, and it is REQUIRED.
+    A flip of the operator's manager-pull toggle. One field, and it is required.
 
-    🔴 `StrictBool`, NOT `bool`. Pydantic's lenient bool accepts the STRING "true", and
-    `bool( "false" )` is True — so a lenient field would let a caller sending "false"
-    switch the toggle ON while believing they had turned it off. That is the exact
-    defect this endpoint exists to make unreachable, and accepting it here would put it
-    back one layer up. The reader still PARSES strings, deliberately, for the operator
-    who hand-edits the file; nothing should ever ARRIVE as one.
+    The field is `StrictBool`, not `bool`. Pydantic's lenient bool accepts the string "true",
+    and `bool( "false" )` is True. A lenient field would let a caller sending "false" switch
+    the toggle on while believing they had turned it off. This endpoint exists to make that
+    defect unreachable, and accepting it here would put it back one layer up. The reader still
+    parses strings, for the operator who hand-edits the file, but nothing should ever arrive
+    as one.
     """
     model_config = ConfigDict( extra="forbid" )
 
@@ -2212,20 +2122,19 @@ class ManagerPullRequest( BaseModel ):
 
 class ApprovalSettingsRequest( BaseModel ):
     """
-    One or more approval settings to write. Every field is optional; omitted means
-    LEAVE UNCHANGED, which is what makes this a patch rather than a replace.
+    One or more approval settings to write; an omitted field is left unchanged.
 
-    🔴 `StrictBool`, NOT `bool`, AND IT IS THE WHOLE SAFETY OF THE DOOR. Pydantic's
-    lenient bool coerces the string "false", and "false" is exactly the value this
-    module has been bitten by twice — `bool( "false" )` is True, so a lenient model
-    would let a caller switch a gate ON by sending the word "off".
+    That makes this a patch rather than a replace. Every field is optional.
 
-    ⚠️ `extra="forbid"` IS DELIBERATE AND IS A CHOICE, not a default. Pydantic IGNORES
-    unknown fields unless told otherwise, so a typo'd key — `enforcment_active` — would
-    return 200 having changed nothing, and the operator would conclude the switch is
-    broken. The alternative (ignore extras, as the rest of this router does) was
-    rejected for exactly that reason: a setting ignored in SILENCE is the failure mode
-    this file documents at length.
+    The fields are `StrictBool`, not `bool`, and that is the whole safety of the door.
+    Pydantic's lenient bool coerces the string "false", and `bool( "false" )` is True. A
+    lenient model would let a caller switch a gate on by sending the word "off".
+
+    `extra="forbid"` is a choice, not a default. Pydantic ignores unknown fields unless told
+    otherwise. A typo'd key such as `enforcment_active` would then return 200 having changed
+    nothing, and the operator would conclude the switch is broken. The rest of this router
+    ignores extras. That was rejected here, because a setting ignored in silence is a
+    failure mode this file documents at length.
     """
     model_config = ConfigDict( extra="forbid" )
 
@@ -2249,11 +2158,10 @@ def get_approval_settings(
     """
     Serve the live settings and their provenance.
 
-    ⚠️ THE READ IS NOT OPERATOR-GATED AND THE WRITE IS, WHICH IS A DELIBERATE
-    ASYMMETRY. Reading which gates are on is how a seat understands a refusal it just
-    got; hiding it would make every refusal unexplainable and send people to the file.
-    Nothing here is secret either — these values already appear verbatim in the refusal
-    messages this module emits to any caller who trips one.
+    The read is not operator-gated and the write is. Reading which gates are on is how a seat
+    understands a refusal it just got. Hiding it would make every refusal unexplainable and
+    send people to the file. Nothing here is secret either, because these values already appear
+    verbatim in the refusal messages this module emits to any caller who trips one.
     """
     return approval.current_settings()
 
@@ -2275,22 +2183,20 @@ def patch_approval_settings(
     Write the settings the caller named, and report what actually took effect.
 
     Ensures:
-        - a non-operator is refused 403, INCLUDING every agent seat holding only the
-          shared fleet API key — that is the cost Rick accepted when he closed the
-          actor door
+        - a non-operator is refused 403, including every agent seat holding only the
+          shared fleet API key
         - a body naming no setting is 422 rather than a silent no-op
-        - a bad value is 422 and NOTHING is written: `set_overrides` validates every
+        - a bad value is 422 and nothing is written: `set_overrides` validates every
           key before touching the file, so a two-key call cannot half-apply
-        - returns the settings READ BACK after the write, never the values asked for
+        - returns the settings read back after the write, never the values asked for
 
-    🔴 WHY `caller_is_operator` AND NOT `require_admin`. `caller_is_operator` takes no
-    `actor` parameter, so there is no typed-name path to leave open by accident — it
-    resolves a signature-validated token and consults nothing a caller declares.
-    `require_admin` is a WIDER set, and this file decides WHO MAY APPROVE; the door to
-    it must not be wider than the thing it guards. The sibling `PATCH
-    /tasks/manager-pull` uses `require_admin` and is deliberately NOT changed here —
-    narrowing an existing door is a policy change and Rick's call, not a side effect of
-    adding a new one.
+    The gate is `caller_is_operator` and not `require_admin`. `caller_is_operator` takes no
+    `actor` parameter, so there is no typed-name path to leave open by accident. It resolves a
+    signature-validated token and consults nothing a caller declares. `require_admin` is a wider
+    set, and this file decides who may approve, so the door to it must not be wider than the
+    thing it guards. The sibling `PATCH /tasks/manager-pull` uses `require_admin` and is not
+    changed here. Narrowing an existing door is a policy change, not a side effect of adding a
+    new one. The cost of closing the actor door is that agent seats on the shared key are refused.
     """
     if not priority_firewall.caller_is_operator( account_email ):
         raise HTTPException(
@@ -2338,7 +2244,7 @@ def get_manager_pull( authenticated_user_id : Annotated[ str, Depends( require_a
 
     Ensures:
         - returns { disabled, source } where source is "override" or "config"
-        - the SOURCE is included for the reason the ratio endpoint includes its own: the
+        - the source is included for the reason the ratio endpoint includes its own: the
           value alone cannot tell an operator whether the INI is in force or is being
           masked by a saved override, which is the one confusion a two-layer scheme
           reliably creates
@@ -2367,8 +2273,8 @@ def set_manager_pull(
 
     Ensures:
         - a non-boolean is refused by the model at 422 before this body runs
-        - returns the value read back AFTER the write, never the value asked for
-        - a write failure is a 500 that says the live value is UNCHANGED, so an operator
+        - returns the value read back after the write, never the value asked for
+        - a write failure is a 500 that says the live value is unchanged, so an operator
           is never left believing a failed flip took
     """
     try:
@@ -2414,9 +2320,9 @@ class RequestVerdictIn( BaseModel ):
     """
     The operator's answer to a pending promote/demote request.
 
-    `verdict` is validated for MEMBERSHIP in the lifecycle module rather than here — a
-    second copy of the legal set is a second thing to keep in sync, and the refusal it
-    produces there already explains why 'pending' is not a verdict.
+    `verdict` is validated for membership in the lifecycle module and not here. A second copy
+    of the legal set is a second thing to keep in sync. The refusal it produces there
+    already explains why 'pending' is not a verdict.
     """
     model_config = ConfigDict( extra="forbid" )
 
@@ -2431,10 +2337,10 @@ class RequestVerdictIn( BaseModel ):
 
 class RequestFileIn( BaseModel ):
     """
-    A manager's request that Rick promote or demote one row (row c9fafb9d, rule 3).
+    A manager's request that the operator promote or demote one row.
 
     `move` is validated for membership in the lifecycle module, for the reason
-    `RequestVerdictIn` gives. `actor` carries the session id the manager check reads; it
+    `RequestVerdictIn` gives. `actor` carries the session id the manager check reads. It
     is recorded beside the authenticated identity and confers nothing on its own.
     """
     model_config = ConfigDict( extra="forbid" )
@@ -2470,18 +2376,17 @@ def get_request_badges(
         - authenticated caller (X-API-Key or Bearer JWT)
 
     Ensures:
-        - returns { "task_area": int, "holding_area": int }, BOTH keys always present
-        - counts ONLY pending requests — a denied one is finished and a manager must
-          re-file, so counting it would keep an answered question pulsing at Rick forever
+        - returns { "task_area": int, "holding_area": int }, both keys always present
+        - counts only pending requests, because a denied one is finished and a manager must
+          re-file, so counting it would keep an answered question pulsing at the operator forever
         - the two counts are never added together: no list holds both kinds, so a combined
           total would be a number true of nothing
-        - a row whose `request_move` is not a ruled move RAISES rather than being dropped
+        - a row whose `request_move` is not a ruled move raises rather than being dropped
           from a count a human reads as complete (badge_for_move's contract)
 
-    ⚠️ THE QUERY FILTERS ON `request_state` IN THE DATABASE, not in Python. The board
-    renders this on every paint, and a scan that pulls every row to discard almost all of
-    them is the shape that looks fine on a hundred rows and is the reason the store's own
-    query guard exists.
+    The query filters on `request_state` in the database, not in Python. The board renders
+    this on every paint. A scan that pulls every row to discard almost all of them looks fine
+    on a hundred rows, and it is the reason the store's own query guard exists.
     """
     with get_db() as session:
         pending = session.query( TaskItem.request_move, TaskItem.request_state ).filter(
@@ -2535,27 +2440,27 @@ def file_request(
         - 404 when the item does not exist
         - 422 when `move` is not requestable, or `reason` is blank
         - 409 when the row cannot make `move` from its current status, naming where it is
-        - 403 when the caller is not a manager, via `task_promotion_gate.manager_refusal` —
-          the same check the close door asks, fail-closed on an unreadable bridge
-        - the Sword of Damocles rule (row ab8c5728), exactly as
-          `task_request_pledge.refusal_for_pledge` rules it: an admit must pledge
-          `deletion_task_id` while `sword_of_damocles_active` is on; a pledge must be a
-          different, existing, live row owned by the requester's SERVER-RESOLVED persona and
-          not already pledged on another pending admit. Its status code is the rule's own
-        - 409 when a request is already pending on the row — UNLESS it is an admit whose
+        - 403 when the caller is not a manager, via `task_promotion_gate.manager_refusal`,
+          the same check the close door asks, failing closed on an unreadable bridge
+        - the Sword of Damocles rule, as `task_request_pledge.refusal_for_pledge` rules it:
+          an admit must pledge `deletion_task_id` while `sword_of_damocles_active` is on. A
+          pledge must be a different, existing, live row owned by the requester's
+          server-resolved persona and not already pledged on another pending admit. Its status
+          code is the rule's own
+        - 409 when a request is already pending on the row, unless it is an admit whose
           pledge has died since filing, which may be re-filed with a live one
         - otherwise: request_state 'pending', request_move, request_ts and
           request_deletion_id written under a row lock with a `request_filed` event; the
-          row's status is NOT touched
+          row's status is not touched
         - returns the serialized item
 
-    🔒 LOCK ORDER: the target and the pledged row are locked in id order, the same order
-    the verdict door takes them, so two requests crossing on a pair of rows cannot deadlock,
-    and two requests pledging one row serialise on its lock.
+    Lock order: the target and the pledged row are locked in id order, the same order the
+    verdict door takes them. Two requests crossing on a pair of rows cannot deadlock, and two
+    requests pledging one row serialise on its lock.
 
-    ⚠️ THE CHECK ORDER IS THE DESIGN'S (§2): where the row is before who is asking, so a
-    worker asking the wrong question learns that first; who is asking before whether a
-    request is pending, so the queue's contents are not disclosed to a non-manager.
+    The check order is where the row is, then who is asking, then whether a request is pending.
+    A worker asking the wrong question learns that first, and the queue's contents are not
+    disclosed to a non-manager.
     """
     if not payload.reason.strip():
         raise HTTPException( status_code=422, detail="`reason` is blank. Rick reads it on his board to decide — say why this row should move." )
@@ -2671,41 +2576,35 @@ def record_request_verdict(
 
     Ensures:
         - 404 when the item does not exist
-        - 409 when the item carries NO request — there is nothing to answer, and that is a
+        - 409 when the item carries no request, since there is nothing to answer and that is a
           different mistake from being refused permission to answer
-        - 403 / 422 exactly as `refusal_for_verdict` rules: not the operator, not a
-          verdict, or already answered — each with its own sentence naming what to do next
+        - 403 / 422 as `refusal_for_verdict` rules: not the operator, not a
+          verdict, or already answered, each with its own sentence naming what to do next
         - the verdict is written with a row lock, so two callers cannot both read
           `pending` and both write
-        - ⚠️ A DENIAL DOES NOT TOUCH THE TICKET. It finishes the REQUEST; it does not move,
-          close, or alter the row (Mr. Radio's reading A, 2026-09-09; Rick 2026-09-10, "No
-          means take no action whatsoever").
-        - 🔨 AN APPROVAL PERFORMS THE MOVE (Rick's Q2, 2026-09-10): an admit lands in
-          'queued', a demote in 'not_approved' carrying the verdict's `next_chase_ts`,
-          through `_apply_transition_under_lock` — the transition door's own gate order. Any
-          refusal on that path returns that gate's status and detail, and rolls back the
-          verdict with it, so the request stays pending
-        - ⚔️ AN APPROVED ADMIT THAT PLEDGED A TICKET DROPS IT IN THE SAME TRANSACTION (Sword
-          of Damocles, row ab8c5728, Q2), through the same transition path. A pledge that
-          died after filing, or that now belongs to someone other than the persona who
-          pledged it (RB-2), is refused 409 before anything is written, and the request stays
-          pending for the manager to re-file. An admit filed with no pledge is admitted alone
+        - a denial does not touch the ticket. It finishes the request and does not move,
+          close, or alter the row. No means take no action whatsoever
+        - an approval performs the move: an admit lands in 'queued', a demote in
+          'not_approved' carrying the verdict's `next_chase_ts`, through
+          `_apply_transition_under_lock`, the transition door's own gate order. Any refusal on
+          that path returns that gate's status and detail, and rolls back the verdict with
+          it, so the request stays pending
+        - an approved admit that pledged a ticket drops it in the same transaction, through
+          the same transition path. A pledge that died after filing, or that now belongs to
+          someone other than the persona who pledged it, is refused 409 before anything is
+          written, and the request stays pending for the manager to re-file. An admit filed
+          with no pledge is admitted alone
         - 409 when the request was re-filed between the unlocked read of its pledge and the
-          lock, since the verdict would otherwise answer a request nobody showed Rick
+          lock, since the verdict would otherwise answer a request nobody showed the operator
         - returns the serialized item (after the move, when approved)
 
-    🔴 WHO COUNTS AS THE OPERATOR, AND THE ALTERNATIVE I DID NOT TAKE. This binds to
-    `approver_persona_for_account`, so it tracks the approver allowlist — which Rick
-    emptied, leaving `UNCONDITIONAL_APPROVERS = ( "rick", )` as the only resolution. The
-    alternative was to hardcode against UNCONDITIONAL_APPROVERS so that re-adding a
-    manager to the allowlist could never let them answer.
-    ⇒ I took the allowlist because it opens NO new path: anyone Rick puts back on that
-      list may already promote and demote directly, so letting them answer a request adds
-      nothing they could not do more simply. Binding to the allowlist also keeps ONE place
-      that says who approves, which is the property `approver_persona_for_account`'s own
-      docstring is built around.
-    ⇒ Recorded rather than assumed, because the two behave identically TODAY and diverge
-      the moment anyone edits that config — which is exactly when nobody re-reads this.
+    Who counts as the operator: this binds to `approver_persona_for_account`, so it tracks the
+    approver allowlist, which is empty and leaves `UNCONDITIONAL_APPROVERS = ( "rick", )` as the
+    only resolution. The alternative was to hardcode against `UNCONDITIONAL_APPROVERS`, so that
+    re-adding a manager to the allowlist could never let them answer. The allowlist was chosen
+    because it opens no new path: anyone put back on that list may already promote and demote
+    directly. Binding to it also keeps one place that says who approves. The two behave
+    identically today and diverge the moment that config is edited.
     """
     # ONE FACT, RESOLVED ONCE, FROM THE VALIDATED ACCOUNT. `refusal_for_verdict` says in
     # its own docstring that callers must pass a FACT and never a claim — row b8205986
@@ -2848,27 +2747,28 @@ def patch_task(
         - authenticated caller (X-API-Key or Bearer JWT)
         - task_id is a valid UUID (FastAPI 422s malformed ids)
         - payload validates against TaskPatchIn (extra='forbid' rejects any
-          non-editable field at the wire — the hard no-oracle-bypass invariant)
+          non-editable field at the wire, the hard no-oracle-bypass invariant)
 
     Ensures:
         - 422 when no editable field is set, an enum field is invalid, or
           authority is not a valid enum member (every violation at once)
         - 404 when the item does not exist
         - 422 when the item is terminal (no edits to closed history)
-        - row-locked read (N3 parity) so the terminal check cannot be raced
-          by a concurrent ->done/->dropped transition
+        - row-locked read (parity with the transition door) so the terminal check cannot be
+          raced by a concurrent ->done/->dropped transition
         - 422 when `title` exceeds rules.TITLE_SOFT_CAP, naming the actual length
-          and the cap (Rick's ruling 2026-09-01, bug 6ce252e7). The EDIT door
-          rejects where the CREATE door trims fail-open: a create is unattended
-          and losing it loses the filing, while an editor is present to shorten
-          the string and is the only party who knows which half is the qualifier
-        - `title_guard` is consequently ALWAYS None on this path — an edit that
-          cannot trim cannot relocate an overflow either. The key stays in the
+          and the cap
+        - `title_guard` is consequently always None on this path, because an edit
+          that cannot trim cannot relocate an overflow either. The key stays in the
           response because it is part of the PATCH contract
-        - `title_trimmed` is written on EVERY title edit and is always False —
-          a retitle that repairs a previously-trimmed row must clear the flag
+        - `title_trimmed` is written on every title edit and is always False,
+          because a retitle that repairs a previously-trimmed row must clear the flag
         - field update + 'patched' event append are atomic (one transaction)
         - returns { item, event, persona_flag, title_guard } serialized
+
+    The edit door rejects an over-long title where the create door trims and fails open. A
+    create is unattended and losing it loses the filing. An editor is present to shorten the
+    string and is the only party who knows which half is the qualifier.
     """
     fields = payload.model_dump( exclude_unset=True, exclude={ "actor", "authority", "reason" } )
 
@@ -3049,63 +2949,41 @@ def query_tasks(
 
     Requires:
         - authenticated caller (X-API-Key or Bearer JWT)
-        - provided enum filters (status/gate_class/item_class) are members of
-          their enums — a typo'd filter is a caller bug surfaced as 422, not
-          an honest-looking empty result
+        - provided enum filters (status/gate_class/item_class) are members of their enums, since a
+          typo'd filter is a caller bug surfaced as 422, not an honest-looking empty result
 
     Ensures:
-        - count_only=False (default): returns
-          { tasks, count, total, has_more, truncated, warnings } matching ALL
-          provided filters, ordered created_ts descending, stable tiebreak on id.
-          `count` is the PAGE length (len(tasks)) — UNCHANGED meaning, it
-          saturates at `limit`. The four keys beside it (mini-plan 02, 2026-07-21)
-          exist because `count` alone was being read as the SIZE OF THE RESULT and
-          never was: measured, a scoped query reported count:100 while offset=100
-          returned 100 more rows, with no total / has_more / truncated to say so.
-          `total` is a true COUNT(*) over the SAME filters, page-independent (NOT
-          derived from len(tasks)); `has_more` = offset + count < total;
-          `truncated` is True when the RESPONSE_CHAR_BUDGET bound stopped
-          serialization before the row bound did; `warnings` carries the
-          heavy-pull nudge and the truncation notice to the CALLER (they were
-          stdout-only, an audience that cannot act on them). ADDED keys only —
-          the multiplexer parses this shape (see the count_only branch comment).
-        - count_only=True (O2 / §G token win): returns { count, breakdown } —
-          `count` is a true SQL COUNT(*) over the SAME filters, NO rows
-          serialized, independent of limit/offset (those params are ignored in
-          this mode). The owed source reads this so a session with >100 owed
-          rows is counted exactly. count_only takes precedence over terse (a
-          count needs no rows at all).
-          `breakdown` (c191be39, 2026-07-20) is { status: count } over that same
-          admitted set via ONE GROUP BY — the status that used to die at this
-          seam, which made the Stop hook report every `queued` row as
-          "in-progress". Statuses with no rows are OMITTED, never zero-filled.
-          Under owed_only=true the `parked` key IS the expired-parked set (park-
-          active rows never survive admission). ALWAYS returned — no opt-in flag,
-          because a flag a caller can forget is the shape that caused the bug.
-          It appears ONLY in this branch: the full-row response is UNCHANGED, and
-          the multiplexer parses that one.
-        - terse=True (§G token win, count_only=False): returns { tasks: [...],
-          count } where each row is the at-a-glance projection (id / title /
-          item_class / status / blocked_by / next_chase_ts / priority / park_reason_stale —
-          `body` and the other full-row fields dropped), so an on-demand "see my
-          list" query over MCP costs a fraction of the full-row token weight.
-          park_reason_stale rides the TERSE shape deliberately: a staleness flag
-          carried only by the full row is a flag nobody reads (§3.3).
-        - owed_only=True (PARKED-STATUS 2026-07-19) selects the OWED set —
-          queued U in_progress U (parked AND NOT park-active) — computed
-          SERVER-SIDE. Park-expiry is evaluated at READ time and never written
-          back, so a status-enumerating caller CANNOT reconstruct this: an
-          expired parked row still carries status="parked" in the column.
-          Callers pass this ONE flag and never put "parked" in a status tuple;
-          that is what makes it fail-CLOSED (there is no second thing to forget).
-          Honors an explicit `status` filter by narrowing within it.
-        - hide_parked=True (DEFAULT — the board-hygiene behavior) suppresses
-          park-ACTIVE rows without touching the status set, so blocked/claimed/
-          review rows stay on the board exactly as today. EXPIRED parked rows
-          remain VISIBLE: they have rejoined, and a row that pokes you while
-          staying invisible on the board is the incoherence this build removes.
-          Pass status="parked" (or hide_parked=false) to surface the parked set —
-          that is the audit surface.
+        - count_only=False (default): returns { tasks, count, total, has_more, truncated, warnings }
+          matching all provided filters, ordered created_ts descending, tiebreak on id. `count` is the
+          page length (len(tasks)) and saturates at `limit`. It was read as the size of the result and
+          never was: a scoped query reported count:100 while offset=100 returned 100 more rows, with no
+          total, has_more or truncated to say so. `total` is a true `COUNT(*)` over the same filters,
+          not derived from len(tasks). `has_more` = offset + count < total. `truncated` is True when the
+          RESPONSE_CHAR_BUDGET bound stopped serialization before the row bound did. `warnings` carries
+          the heavy-pull nudge and the truncation notice to the caller, since stdout is an audience that
+          cannot act on them. Keys were added only, because the multiplexer parses this shape
+        - count_only=True: returns { count, breakdown }. `count` is a true SQL `COUNT(*)` over the same
+          filters, no rows serialized, and limit/offset are ignored. The owed source reads this so a
+          session with >100 owed rows is counted exactly. count_only takes precedence over terse (a
+          count needs no rows at all). `breakdown` is { status: count } over the same admitted set via
+          one `GROUP BY`, the status that used to die at this seam and made the Stop hook report every
+          `queued` row as in-progress. Statuses with no rows are omitted, never zero-filled. Under
+          owed_only=true the `parked` key is the expired-parked set. It is always returned, with no
+          opt-in flag, and appears only here
+        - terse=True (count_only=False): returns { tasks: [...], count } where each row is the
+          at-a-glance projection (id / title / item_class / status / blocked_by / next_chase_ts /
+          priority / park_reason_stale, with `body` and the other full-row fields dropped), so a "see my
+          list" query over MCP costs a fraction of the full-row token weight. park_reason_stale rides
+          the terse shape because a staleness flag carried only by the full row is a flag nobody reads
+        - owed_only=True selects the owed set, queued U in_progress U (parked `AND NOT` park-active),
+          computed server-side. Park-expiry is evaluated at read time and never written back, so a
+          status-enumerating caller cannot reconstruct this: an expired parked row still carries
+          status="parked". Callers pass this one flag and never put "parked" in a status tuple, so it
+          fails closed, with no second thing to forget. An explicit `status` filter narrows it
+        - hide_parked=True (default) suppresses park-active rows without touching the status set, so
+          blocked/claimed/review rows stay on the board. Expired parked rows remain visible, because
+          they have rejoined. status="parked" or hide_parked=false surfaces the parked set, the audit
+          surface
     """
     errors = [ ]
     if status is not None and status not in rules.VALID_STATUSES:
@@ -3563,10 +3441,10 @@ def query_event_stream(
           value is a 422 request-validation error, surfaced by the framework)
 
     Ensures:
-        - returns { events: [...], count } matching ALL provided filters
+        - returns { events: [...], count } matching all provided filters
         - ordered ts descending, stable tiebreak on id descending (newest first)
         - each event carries the owning item's `title`, eager-loaded (never N+1)
-        - `to_status` matches the target of the transition — `to_status=done` returns every
+        - `to_status` matches the target of the transition, so `to_status=done` returns every
           `*->done` event whatever the source status, which the exact-match `transition`
           filter cannot express without 21 separate calls
         - an unknown `to_status` is a 422 naming the valid set, never an empty result
@@ -3599,29 +3477,25 @@ def query_event_stream(
 
 def _resolve_task_ref( repo, task_ref: str ):
     """
-    Resolve a caller-supplied task reference — a full UUID or an 8-hex prefix —
-    to exactly one item, or raise the HTTPException the caller should see.
-
-    THE DEFECT THIS CLOSES (f45b37a9 leg 1): every brief, DM and cross-reference
-    in this fleet names rows by 8-hex prefix, and no read verb accepted that
-    form — `task_get("86ce4c43")` 422'd on uuid parsing. The identifier the
-    fleet communicates in could not fetch the thing it names.
+    Resolve a task reference, a full UUID or an 8-hex prefix, to exactly one item.
 
     Requires:
         - repo is a TaskRepository
         - task_ref is the raw path value
 
     Ensures:
-        - a full UUID goes STRAIGHT to get_by_id and never prefix-scans, so
+        - a full UUID goes straight to get_by_id and never prefix-scans, so
           every existing caller's behavior is unchanged
         - a hex prefix resolving to exactly one item returns that item
-        - AMBIGUITY IS AN ERROR, NEVER A SILENT FIRST-MATCH: >1 match raises 422
-          NAMING every candidate id, so the caller can disambiguate. Picking one
-          silently would resolve an identifier to something other than what the
-          caller meant with nothing saying so — the very defect class this came
-          from
+        - ambiguity is an error, never a silent first-match: more than one match raises 422
+          naming every candidate id, so the caller can disambiguate
         - no match raises 404 quoting the ref the caller actually typed
-        - an unparseable ref raises 422 WITHOUT touching the database
+        - an unparseable ref raises 422 without touching the database
+
+    Every brief, DM and cross-reference in this fleet names rows by 8-hex prefix. A read verb
+    that accepted only a full UUID could not fetch the thing the fleet names. Picking one match
+    silently would resolve an identifier to something other than what the caller meant, with
+    nothing saying so.
     """
     kind, value = rules.classify_task_ref( task_ref )
 
@@ -3744,83 +3618,43 @@ def get_flow_ratio(
     """
     Serve the closed-vs-new ratio for a rolling window.
 
-    Rick's durable, mechanical replacement for the ticket moratorium he declared by
-    voice on 2026-09-01: "It's way too easy for you guys to add tickets to the list and
-    way too hard to get them removed."
-
     Requires:
         - authenticated caller (X-API-Key or Bearer JWT)
-        - window_hours in [ 1, 8760 ]; project is None (fleet-wide, Rick's Q5) or an
-          exact project name
+        - window_hours in [ 1, 8760 ]; project is None (fleet-wide) or an exact project name
 
     Ensures:
-        - returns { created, closed, ratio, verdict, room_for, close_needed, headroom,
-          window_hours, allow_below, window_start, project }
-        - 🔴 `room_for` IS THE DISPLAY NUMBER AND `headroom` IS NOT. They differ by
-          exactly one wherever there is any room, and that is Rick's ruling of
-          2026-09-05 13:11:13 EDT by keypress, not a defect:
-              `room_for`  LOOP semantics — how many more leave the ratio under the
-                          threshold AFTER they land. 0 means AT CAPACITY, STILL LEGAL and
-                          renders as `FULL`; None when the gate already refuses, because
-                          the honest answer past the line is negative rather than zero
-              `headroom`  GATE boundary, DIAGNOSTIC ONLY — the exact count the gate
-                          admits, always exactly one MORE, because the gate judges each
-                          create against the counts BEFORE it lands
-          WORKED EXAMPLE — created 10, closed 13, allow_below 1.00:
-              `room_for` = 2   <- rendered. After 3 creates the ratio is no longer under
-              `headroom` = 3   <- the gate really admits 3: create #3 is judged at
-                                  12/13 = 0.92 BEFORE it lands; #4 is judged at 13/13
-                                  = 1.00 and refused
-          ⇒ `headroom` == `room_for` + 1 wherever there is any room. They agree ONLY when
-            both are 0. Re-derive rather than trusting the sentence — it is pinned by
-            test_the_badge_under_reports_the_gate_by_exactly_one.
-          ⚠️ An earlier version of this docstring said the number "cannot disagree with
-          the behaviour it describes". That is now true of `headroom` ONLY. The DISPLAY
-          disagrees by one, deliberately and by ruling — it errs toward reporting no room
-          while the gate would still accept one, which is the safer error for a
-          moratorium. A consumer that switches to `headroom` also destroys the `FULL`
-          state; the number and the word are one choice, not two
-        - both are obtained by ASKING `ratio_gate_advisory` and counting, never by
-          re-deriving its comparison here, so neither can drift from the gate's rules —
-          the ruled offset is a stated constant applied to the gate's own answer
-        - None means no bound was found; P0 and the mirror lane are exempt from the gate
-          and so are not described by either number at all
-        - `close_needed` is closures required before the gate would admit again; 0 when it
-          already admits, None when no number of closures opens it (a zero threshold is
-          shut for everything, so naming a target would name one that does not exist)
-        - `ratio` is created ÷ closed to 2dp, or None when closed == 0 — None rather than
-          a sentinel number, so a consumer cannot accidentally compare it. The header
-          renders None as an em dash
-        - `verdict` is computed HERE, not by each consumer, so the header and the gate
-          cannot drift apart:
-              closed == 0 and created == 0  -> "idle"    an idle window is not a failing
-                                                         window
-              closed == 0 and created  > 0  -> "refuse"  a window where nothing was
-                                                         finished is exactly what the gate
-                                                         is for. This is the COMMON case on
-                                                         a quiet day, not an exotic
-                                                         divide-by-zero
-              ratio < allow_below           -> "allow"   the operator's live threshold,
-                                                         echoed back in the payload
-              otherwise                     -> "refuse"
-        - counts come from SQL COUNT, never a page length — see
-          TaskRepository.count_created_and_closed for why that is the whole reason this
-          endpoint exists rather than a frontend paging the event stream
+        - returns { created, closed, ratio, verdict, room_for, close_needed, headroom, window_hours,
+          allow_below, window_start, project }
+        - `room_for` is the display number and `headroom` is not. They differ by exactly one wherever
+          there is any room, by ruling and not by defect. `room_for` has loop semantics: how many more
+          leave the ratio under the threshold after they land. 0 means at capacity, still legal, and
+          renders as `FULL`. It is None when the gate already refuses, because the honest answer past
+          the line is negative rather than zero. `headroom` is the gate boundary, diagnostic only: the
+          exact count the gate admits, always exactly one more, because the gate judges each create
+          against the counts before it lands. With created 10, closed 13 and allow_below 1.00,
+          `room_for` = 2 <- rendered, since the ratio is no longer under after 3 creates, and `headroom`
+          = 3 <- create #3 is judged at 12/13 before it lands and #4 at 13/13 and refused. So `headroom`
+          == `room_for` + 1 wherever there is any room, and they agree only when both are 0. `headroom`
+          cannot disagree with the gate and the display can, by one. It errs toward reporting no room
+          while the gate would still accept one, the safer error for a moratorium, so switching to
+          `headroom` would destroy the `FULL` state
+        - both are obtained by asking `ratio_gate_advisory` and counting, never by re-deriving its
+          comparison here, so neither can drift from the gate's rules. None means no bound was found; P0
+          and the mirror lane are exempt from the gate and so are not described by either number at all
+        - `close_needed` is closures required before the gate would admit again; 0 when it already
+          admits, None when no number of closures opens it (a zero threshold is shut for everything, so
+          naming a target would name one that does not exist)
+        - `ratio` is created / closed to 2dp, or None when closed == 0. It is None rather than a
+          sentinel number, so a consumer cannot accidentally compare it. The header renders None as an
+          em dash
+        - `verdict` is computed here, not by each consumer, so the header and the gate cannot drift
+          apart: closed == 0 and created == 0 -> "idle"; closed == 0 and created > 0 -> "refuse" (a
+          window where nothing was finished is what the gate is for); ratio < allow_below -> "allow";
+          otherwise "refuse"
+        - counts come from SQL `COUNT`, never a page length (TaskRepository.count_created_and_closed)
 
-    ⚠️ THE WINDOW SIZE CAN FLIP THE VERDICT, which is why it is echoed back rather than
-    assumed. Measured on the live board 2026-09-01, minutes apart:
-
-        24h    created  10 / closed  13    ratio 0.77    allow
-        168h   created 211 / closed 191    ratio 1.10    refuse
-
-    Over a day the fleet closes faster than it files; over a week it does not. 24h is
-    Rick's ruling and it stands — he holds the threshold as an operator dial and tunes it
-    on criteria of his own. Recorded so a consumer showing a number also shows which
-    window produced it.
-
-    ⚠️ `dropped` IS NOT A CLOSURE (Rick's Q2), excluded in the repository. Named again
-    here only so a reader of this endpoint is not surprised that clearing dead rows moves
-    nothing — that exclusion is what stops the gate being defeated by deleting evidence.
+    The window can flip the verdict, so it is echoed back: one live board gave 0.77 (allow) at 24h
+    and 1.10 (refuse) at 168h. `dropped` is not a closure, so deleting evidence cannot defeat the gate.
     """
     # Resolved per-request so an operator move takes effect without a bounce. An
     # explicit ?window_hours= still wins — the caller asked a specific question.
@@ -3915,7 +3749,7 @@ class FlowRatioSettingsRequest( BaseModel ):
     """
     A PATCH of the operator's ratio controls. Every field is optional.
 
-    ⚠️ OMITTING A FIELD LEAVES IT ALONE — it does not reset it. An operator dragging the
+    Omitting a field leaves it alone and does not reset it. An operator dragging the
     threshold slider must not silently revert a window someone else set, so this is a
     partial update rather than a replace.
     """
@@ -3945,7 +3779,7 @@ def get_flow_ratio_settings(
 
     Ensures:
         - returns { window_hours, allow_below, window_source, threshold_source }
-        - the SOURCE fields are included deliberately: a number alone cannot tell an
+        - the source fields are included because a number alone cannot tell an
           operator whether the INI is in force or is being masked by a saved override,
           which is the one confusion a two-layer scheme reliably creates
     """
@@ -3966,32 +3800,31 @@ def patch_flow_ratio_settings(
     """
     Persist an operator override for the ratio window and/or threshold.
 
-    🔴 ADMIN-GATED ON PURPOSE, AND THIS IS A JUDGEMENT CALL WORTH CHALLENGING. The READ
-    above uses the same guard as the board itself, because anyone who can see the ratio
-    should see the threshold that produced it. The WRITE moves the number that refuses
-    other people's creates, so it is gated harder. If the operator who needs the slider
-    turns out not to hold the admin role, this answers 403 — loudly, and fixable by
-    granting the role. The alternative failure, a quietly open door onto the fleet's
-    gate, is the one you cannot see.
-
     Requires:
-        - an authenticated ADMIN
+        - an authenticated admin
         - at least one of window_hours / allow_below
 
     Ensures:
         - a supplied value is persisted so it survives a bounce and is visible to every
           server sharing this data root; an omitted one is left alone (PATCH, not replace)
-        - returns the LIVE settings after the write, never an echo of the request — the
-          two differ whenever a value clamps, and a UI echoing its own request would then
+        - returns the live settings after the write, never an echo of the request, because
+          the two differ whenever a value clamps, and a UI echoing its own request would then
           display a number the gate is not using
         - 422 on a body naming neither field, rather than a silent no-op reported as
           success
 
     Raises:
         - HTTPException 422 when the body changes nothing, or a value is not a number
-        - HTTPException 500 when the override cannot be persisted. NOT swallowed: a
-          slider that reports success while saving nothing is the exact failure this
+        - HTTPException 500 when the override cannot be persisted. It is not swallowed: a
+          slider that reports success while saving nothing is the failure this
           endpoint exists to prevent
+
+    The write is admin-gated, and that is a judgement call that can be challenged. The read
+    uses the same guard as the board, because anyone who can see the ratio should see the
+    threshold that produced it. The write moves the number that refuses other people's creates,
+    so it is gated harder. If the operator who needs the slider does not hold the admin role,
+    this answers 403, loudly, and granting the role fixes it. The alternative failure, a quietly
+    open door onto the fleet's gate, is the one you cannot see.
     """
     if request_body.window_hours is None and request_body.allow_below is None:
         raise HTTPException(
@@ -4049,14 +3882,14 @@ def _serialize_ticket( ticket ):
     One promotion ticket, as the caller polling it needs to see it.
 
     Ensures:
-        - `state` is always present — it is the whole answer
-        - `response_body` is included ONLY when it exists, and is the EXACT
+        - `state` is always present, as it is the whole answer
+        - `response_body` is included only when it exists, and is the exact
           `{ item, event }` a synchronous 200 would have carried, serialized inside the
-          transaction that wrote it rather than re-read here (design 5.4.1)
-        - `refusal` carries the reason for BOTH `refused` and `superseded`, which are
+          transaction that wrote it rather than re-read here
+        - `refusal` carries the reason for both `refused` and `superseded`, which are
           different facts and must not be collapsed by a reader
-        - `answer_by` (Rick's answer window) and `resolves_by` (the stall deadline) ride
-          together with `deadlines` saying which is which (row dbe42964); `answer_by` is
+        - `answer_by` (the operator's answer window) and `resolves_by` (the stall deadline)
+          ride together with `deadlines` saying which is which; `answer_by` is
           null on a ticket minted before the column existed
     """
     return {
@@ -4092,17 +3925,16 @@ def list_promotion_tickets(
     limit: int             = Query( default=50, ge=1, le=500 ),
 ):
     """
-    The pending listing that design 4 says the task row cannot be.
-
-    🔴 IT IS THE SUPPLEMENT, NEVER THE MECHANISM. Mr. Radio's measurement on this row is
-    why: all three rows Rick was listed on had already passed their chase times and
-    rejoined the owed count silently, and nothing fired at him. A state that expires into
-    a list is a state nobody looks at. The stalled path PUSHES an urgent notification;
-    this endpoint is for somebody who came to ask.
+    List promotion tickets, the pending listing that the task row cannot provide.
 
     Ensures:
         - returns { tickets, count }, newest first
         - state='all' lists every state; any other value filters exactly
+
+    This endpoint is the supplement and never the mechanism. A state that expires into a list
+    is a state nobody looks at: rows the operator was listed on passed their chase times and
+    rejoined the owed count silently, and nothing fired at them. The stalled path pushes an
+    urgent notification, and this endpoint is for somebody who came to ask.
     """
     with get_db() as session:
         query = session.query( TaskPromotionTicket )
@@ -4126,15 +3958,16 @@ def get_promotion_ticket(
     authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ],
 ):
     """
-    🔴 THIS ENDPOINT IS THE CONDITION OF THE RULING, NOT A CONVENIENCE. Maria's binding
-    requirement on going asynchronous: the caller must be able to OBSERVE the resolution.
-    A 202 whose ticket id nothing can read is the same defect with the waiting moved
-    somewhere nobody looks - so the 202 and this door are one feature, and shipping the
-    first without the second would have met the letter of the ruling and none of it.
+    Serve one promotion ticket with its full state.
 
     Ensures:
-        - 404 when no such ticket exists - never an empty success
+        - 404 when no such ticket exists, never an empty success
         - returns the ticket's full state including response_body when resolved
+
+    This endpoint is a condition of the asynchronous design, not a convenience. The caller must
+    be able to observe the resolution. A 202 whose ticket id nothing can read is the same
+    defect with the waiting moved somewhere nobody looks, so the 202 and this door are one
+    feature.
     """
     with get_db() as session:
         ticket = session.get( TaskPromotionTicket, ticket_id )
@@ -4257,17 +4090,17 @@ def get_epic_stories(
     Serve the epic story text that annotates the epic-grouped board.
 
     Requires:
-        - authenticated caller (X-API-Key or Bearer JWT — same guard as /api/tasks)
+        - authenticated caller (X-API-Key or Bearer JWT, the same guard as /api/tasks)
 
     Ensures:
         - returns { stories: {...}, count } where `stories` is the file verbatim
           and `count` counts the real epic keys (the `_README` key excluded)
-        - a MISSING file returns { stories: {}, count: 0 } with 200, NEVER a 5xx:
+        - a missing file returns { stories: {}, count: 0 } with 200, never a 5xx:
           a missing story file must degrade the board to de-slugged names, not
           take the panel down. The absence is the nudge, and the nudge must not
           be an outage
-        - an UNPARSEABLE file raises 500 — that is a real defect a human edited
-          into the file, and it must be loud rather than silently empty
+        - an unparseable file raises 500, a real defect a human edited into the
+          file, and it must be loud rather than silently empty
     """
     path = cu.get_project_root() + EPIC_STORIES_REL_PATH
     if not os.path.exists( path ):

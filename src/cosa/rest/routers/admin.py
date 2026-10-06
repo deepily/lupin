@@ -347,7 +347,7 @@ async def update_roles(
     admin_user: Dict = Depends( require_admin )
 ) -> MessageResponse:
     """
-    Update user roles with self-protection.
+    Change user roles with self-protection.
 
     Requires:
         - Admin role authorization
@@ -491,7 +491,7 @@ async def reset_user_password(
     Ensures:
         - Generates crypto-secure password
         - Password meets strength requirements
-        - Password returned ONCE (not stored)
+        - Password returned once (not stored)
         - Logs to audit trail with reason
         - Returns temporary password
 
@@ -1242,7 +1242,7 @@ def _refresh_source_allowed() -> tuple[ bool, str ]:
         - LUPIN_ENV env var and config key are independently set
 
     Ensures:
-        - Returns (True, env) only when LUPIN_ENV is "test"/"testing" AND
+        - Returns (True, env) only when LUPIN_ENV is "test"/"testing" and
           config key "admin refresh source enabled" is True
         - Returns (False, reason) otherwise
     """

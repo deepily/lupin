@@ -1,10 +1,10 @@
 """
-Heartbeat router — the fleet on/off switch for the Stop poke (row 3526fb95).
+Heartbeat router — the fleet on/off switch for the Stop poke.
 
     GET /api/heartbeat/poke-mute   (any authenticated caller) → { muted, set_by, set_at }
     PUT /api/heartbeat/poke-mute   (admin role only) body { muted } → same shape
 
-A plain switch (Rick's ruling): no timer, no expiry. It stays as set until an admin flips
+A plain switch: no timer, no expiry. It stays as set until an admin flips
 it back. Clients are the multiplexer, the legacy notification client and the phone.
 
 A Claude session authenticates with X-API-Key. It may read the switch and may not flip

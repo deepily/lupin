@@ -5,8 +5,6 @@ Provides endpoints for:
 - Viewing research reports stored locally or in GCS
 - Submitting research jobs to the queue system
 - Health checks for the deep research subsystem
-
-Generated on: 2026-01-18
 """
 
 import os
@@ -32,23 +30,23 @@ router = APIRouter( tags=[ "deep-research" ] )
 
 def _is_within( candidate, base ):
     """
-    Report whether candidate lies inside base, comparing on a PATH BOUNDARY.
-
-    A bare `startswith` is not a containment test: "/proj/io-secrets" starts with
-    "/proj/io" while sitting entirely outside it. commonpath compares whole path
-    segments, so a sibling whose NAME merely shares a prefix cannot slip through.
+    Report whether candidate lies inside base, comparing on a path boundary.
 
     Requires:
         - candidate is an absolute path that has already been symlink-resolved
         - base is an absolute path
 
     Ensures:
-        - returns True iff candidate IS base or sits beneath it
+        - returns True iff candidate is base or sits beneath it
         - returns False for a sibling sharing a textual prefix ("io-secrets" vs "io")
         - returns False rather than raising when the two share no common root
 
     Raises:
         - nothing; a ValueError from commonpath is caught and reported as False
+
+    A bare `startswith` is not a containment test. "/proj/io-secrets" starts with "/proj/io"
+    while sitting entirely outside it. commonpath compares whole path segments, so a sibling
+    whose name merely shares a prefix cannot slip through.
     """
     base = os.path.realpath( base )
     try:
@@ -111,7 +109,7 @@ async def submit_research():
 
     Ensures:
         - never returns; raises HTTPException( 410 ) naming /api/v2/submit and the
-          REMOVE BY 2026-12-31 date
+          remove-by date
     """
     gone( "/api/deep-research/submit" )
 

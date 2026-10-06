@@ -1,41 +1,31 @@
 """
 The retired queue doors, and the one refusal they all share.
 
-RICK'S RULING, 2026-08-21: *"They should be gone permanently with the new door named
-in the error message. Also we should tag each of those disabled doors with an
-expiration date. By the end of 2026 they should be gone. Say it loud and say it
-proud — dead by the end of the year."*
+Every retired door is gone permanently. Its refusal names the new door in the error message.
+Each retired door carries an expiration date: by the end of 2026 they are gone.
 
-TWO DOORS ARE HERE, NOT SIXTEEN — AND THE REASON IS THE WHOLE POINT OF THIS FILE.
-Eighteen doors put work on the queue. Two survive (`/api/v2/ask`, `/api/v2/submit`),
-one more survives alongside them (`/api/v2/resume`), and sixteen die. But
-`/api/v2/submit` HAS NOT BEEN BUILT YET — at this commit `v2_ask.py` mounts `ask` and
-`resume` and nothing else. Retiring the twelve submit-shaped doors now would point
-twelve refusals at a route that answers 404, which teaches a caller strictly less than
-the 500 it replaced. So this commit retires only the doors whose replacement actually
-answers, and the rest follow the commit that builds `submit`.
-(Cheech's ruling, 2026-08-21: *"a 410 that names a door that does not exist yet is a
-refusal pointing at nothing."*)
+Two doors are listed here, not sixteen, because only the doors whose replacement answers
+can be retired. Eighteen doors once put work on the queue. Two survive (`/api/v2/ask`,
+`/api/v2/submit`), one more survives alongside them (`/api/v2/resume`), and sixteen die.
+A refusal that names a door which does not exist is a refusal pointing at nothing. It
+teaches a caller less than the error it replaced.
 
-WHY 410 AND NOT 404. A tombstone, deliberately. A deleted route is invisible, and
-nothing would stop someone re-adding `/api/podcast-generator/submit` next year
-because the product needs it. 410 Gone says the path existed, was retired on
-purpose, and names its replacement — so a caller reading the failure learns the fix
-instead of filing a bug.
+The refusal is a 410, not a 404. It is a tombstone. A deleted route is invisible, and
+nothing would stop someone re-adding `/api/podcast-generator/submit` because the product
+needs it. A 410 says the path existed, was retired, and names its replacement.
+A caller reading the failure learns the fix instead of filing a bug.
 
-WHY THE DATE IS IN THE MESSAGE AND NOT ONLY IN A COMMENT. A comment is read by
-whoever opens this file. The callers that still hit these paths live in two
-separately-managed repos (`src/lupin-mobile`, `src/lupin-plugin-firefox`) whose
-owners will never open it. The refusal itself has to carry the date.
+The date is in the message, not only in a comment. A comment is read by whoever opens this
+file. The callers that still hit these paths live in two separately managed repos
+(`src/lupin-mobile`, `src/lupin-plugin-firefox`), whose owners will never open it. The
+refusal itself has to carry the date.
 
-WHY NO AUTH DEPENDENCY ON A TOMBSTONE. An unauthenticated caller must learn the same
-thing an authenticated one does. If the stub kept `Depends( get_current_user )` the
-answer to a stale client would be 401 — which teaches nobody anything and reads like
-a credentials problem.
+A tombstone has no auth dependency. An unauthenticated caller must learn the same thing an
+authenticated one does. If the stub kept `Depends( get_current_user )`, a stale client
+would get a 401. That teaches nobody anything and reads like a credentials problem.
 
-Source of the door list: Chloé's repo-wide inventory,
-`src/rnd/v0.2.0/_archive/F/2026.08.21-cascade-resume-artifacts/2026.08.21-queue-entry-point-inventory-corrected.md`,
-each path re-resolved from its `APIRouter` prefix at build time rather than copied.
+Each path in the door list is re-resolved from its `APIRouter` prefix at build time, not
+copied.
 """
 
 from fastapi import HTTPException
@@ -196,15 +186,15 @@ def refusal_detail( path: str ) -> str:
     Build the refusal body for one retired door.
 
     Requires:
-        - path is a key of RETIRED_DOORS (the full route, prefix included)
+        - path is a key of `RETIRED_DOORS` (the full route, prefix included)
 
     Ensures:
         - the string names the replacement door
-        - the string contains REMOVE BY <date>, so a caller who only ever sees the
+        - the string contains `REMOVE BY <date>`, so a caller who only ever sees the
           failure still learns when the tombstone itself disappears
 
     Raises:
-        - KeyError if path is not a retired door — a typo must not produce a
+        - KeyError if path is not a retired door. A typo must not produce a
           plausible-looking refusal that names the wrong replacement
     """
     replacement = RETIRED_DOORS[ path ]
@@ -243,11 +233,12 @@ def gone( path: str ) -> None:
 
 def tombstone_description( path: str ) -> str:
     """
-    Build the OpenAPI description for one retired door, so `/docs` says the same
-    thing the refusal says.
+    Build the OpenAPI description for one retired door.
+
+    The description matches the refusal, so `/docs` says what the refusal says.
 
     Requires:
-        - path is a key of RETIRED_DOORS
+        - path is a key of `RETIRED_DOORS`
 
     Ensures:
         - returns a one-line description naming the replacement and the date

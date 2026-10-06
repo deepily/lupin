@@ -1,23 +1,20 @@
 """
 Whitelisted documentation file serving endpoint.
 
-Sibling to io_files.py — serves project source-tree docs and (per the
-multi-repo extension on 2026-05-12) external-repo files via `?scope=<name>`.
+Sibling to io_files.py. It serves project source-tree docs and external-repo files.
+A request names its file as `?path=<project>/<rel>`, where the first segment names a
+registered project. The registry is built on first use from the INI keys for external
+repos, and `_invalidate_scope_registry` drops it so INI changes take effect.
 
-Built-in `scope=docs` preserves backwards compatibility: the legacy narrow
-whitelist (src/docs/, src/rnd/, src/workflow/, root *.md) under the project
-root. Every other `scope` value is resolved through SCOPE_REGISTRY built at
-startup from `[Lupin: Baseline]` INI keys (see _scope_registry.py).
+The legacy `?scope=` query parameter is retired. Its presence answers 400.
 
 Security model:
 - JWT auth required on all requests (Depends(get_current_user)).
 - Path normalized to block `..` traversal; resolved path must stay within
   scope root.
-- Secrets blocklist (filename pattern match) applied to ALL scopes after
+- Secrets blocklist (filename pattern match) applied to all scopes after
   per-scope whitelist (defense-in-depth).
-- Only text-document and source-code extensions are allowed (MEDIA_TYPES).
-
-Generated on: 2026-05-04, extended 2026-05-12.
+- Only text-document and source-code extensions are allowed (`MEDIA_TYPES`).
 """
 
 import contextlib
@@ -134,7 +131,6 @@ def _invalidate_scope_registry() -> None:
     Registered with `cosa.config.cache_registry` at import time. Called by
     `/api/init` (via `invalidate_all()`) after `config_mgr.init()` so any
     INI changes to `external repo *` keys take effect without a restart.
-    Resolves Mr. Radio's `/api/init` invalidation bug (filed 2026-05-15).
     """
     global _SCOPE_REGISTRY
     _SCOPE_REGISTRY = None
@@ -145,20 +141,20 @@ register_invalidator( "scope_registry", _invalidate_scope_registry )
 
 def _resolve_scoped( path: str, registry: dict ) -> tuple:
     """
-    Resolve a `<project>/<rel>` doc path through EVERY guard the viewer applies.
+    Resolve a `<project>/<rel>` doc path through every guard the viewer applies.
 
-    Extracted 2026-09-24 (ticket 416d4b00) so the upload endpoint asks the SAME gate
-    the read path does rather than restating it: two copies of a path rule agree until
-    they do not, and the day they disagree is the day upload writes where read refuses.
+    The upload endpoint asks the same gate the read path does, rather than restating it.
+    Two copies of a path rule agree until they do not. The day they disagree is the day
+    upload writes where read refuses.
 
     Requires:
         - path is the raw `<project>/<rel>` string (URL-decoding happens here)
         - registry maps scope name -> ScopeConfig (the caller may add built-ins)
 
     Ensures:
-        - returns ( project_name, scope_cfg, rel_path, full_path ), full_path REAL
+        - returns ( project_name, scope_cfg, rel_path, full_path ), full_path real
           (symlinks followed) and inside the scope root
-        - the path was judged both as TYPED and where it LANDS: floor blocklist,
+        - the path was judged both as typed and where it lands: floor blocklist,
           per-scope blocklist and whitelist
 
     Raises:
@@ -256,41 +252,38 @@ async def get_docs_file(
     current_user: dict = Depends( get_current_user ),
 ):
     """
-    Serve a documentation file OR directory listing via the unified scope registry.
+        Serve a documentation file or directory listing via the unified scope registry.
 
-    URL format: `?path=<project>/<rel>` where the first path segment names a
-    registered project (see GET /api/docs/scopes). The remainder is resolved
-    under that project's root subject to:
-      (a) the universal secrets blocklist floor (~46 patterns covering
-          credentials, dev artifacts, IDE files, personal config)
-      (b) the project's `.docview.yml` whitelist if present (otherwise
-          wildcard semantics per Q2-C); plus any `extra_blocklist`
-          regex patterns declared in the manifest
+        URL format: `?path=<project>/<rel>`. The first path segment names a registered
+        project (see GET /api/docs/scopes), and the remainder is resolved under its root.
 
-    Polymorphic by resolved path type:
-        - File → PlainTextResponse with appropriate media type
-        - Directory → JSONResponse with {kind, scope, path, parent, entries}
+        Requires:
+            - JWT bearer token in Authorization header (enforced by get_current_user)
+            - path is `<project>/<rel>` form; URL-decoded automatically; leading slashes stripped
+            - File extension must be in MEDIA_TYPES (for file branch)
 
-    Requires:
-        - JWT bearer token in Authorization header (enforced by get_current_user)
-        - path is `<project>/<rel>` form; URL-decoded automatically; leading slashes stripped
-        - File extension must be in MEDIA_TYPES (for file branch)
+        Ensures:
+            - 200 + appropriate response on success
+            - 401 if missing/invalid auth (raised by get_current_user)
+            - 400 for missing project prefix, unknown project, paths outside the whitelist,
+              traversal artifacts, unsupported extensions, or secrets-blocklist matches
+            - 404 if the resolved path does not exist on disk
 
-    Ensures:
-        - 200 + appropriate response on success
-        - 401 if missing/invalid auth (raised by get_current_user)
-        - 400 for missing project prefix, unknown project, paths outside the whitelist,
-          traversal artifacts, unsupported extensions, or secrets-blocklist matches
-        - 404 if the resolved path does not exist on disk
+        Raises:
+            - HTTPException 401: invalid/missing auth (from get_current_user)
+            - HTTPException 400: invalid/unsafe path, unknown project, unsupported extension,
+                                 secrets blocklist match, or presence of the retired
+                                 `?scope=` query parameter
+            - HTTPException 404: file or directory not found
+            - HTTPException 500: read failure
 
-    Raises:
-        - HTTPException 401: invalid/missing auth (from get_current_user)
-        - HTTPException 400: invalid/unsafe path, unknown project, unsupported extension,
-                             secrets blocklist match, OR presence of the retired
-                             `?scope=` query parameter (aggressive-deprecation policy
-                             ratified 2026-05-21 — see R&D doc-viewer-scope-unification §AC4b.7)
-        - HTTPException 404: file or directory not found
-        - HTTPException 500: read failure
+        The remainder is subject to the universal secrets blocklist floor (about 46 patterns)
+    and to the project's `.docview.yml` whitelist if present, plus any `extra_blocklist`
+    patterns. Without a manifest the whitelist is a wildcard.
+
+    The response depends on the resolved path type. A file returns a PlainTextResponse with
+        the appropriate media type. A directory returns a JSONResponse with
+        {kind, scope, path, parent, entries}.
     """
     # ---------------------------------------------------------------------
     # Aggressive deprecation of legacy `?scope=` query parameter.
@@ -406,7 +399,7 @@ def _landed_path_of_fd( fd: int ) -> str:
 
 def _judge_landed( scope_cfg: ScopeConfig, landed: str ) -> str:
     """
-    Apply the viewer's guards to the path an opened descriptor LANDED on.
+    Apply the viewer's guards to the path an opened descriptor landed on.
 
     Requires:
         - landed is an absolute path read from /proc for an open descriptor
@@ -429,7 +422,7 @@ def _judge_landed( scope_cfg: ScopeConfig, landed: str ) -> str:
 
 def _open_judged_file( full_path: str, scope_cfg: ScopeConfig ) -> int:
     """
-    Open `full_path`, then judge the opened file; return the descriptor (the caller closes it).
+    Open `full_path`, then judge the opened file. The caller closes the descriptor.
 
     Ensures:
         - the descriptor is a regular file that landed inside the scope and passed the guards
@@ -452,7 +445,7 @@ def _open_judged_file( full_path: str, scope_cfg: ScopeConfig ) -> int:
 
 def _pin_directory( full_dir: str, scope_cfg: ScopeConfig ) -> int:
     """
-    Open `full_dir` as a directory descriptor and judge where THAT landed; the caller closes it.
+    Open `full_dir` as a directory descriptor and judge where it landed. The caller closes it.
 
     Ensures:
         - the descriptor is a directory inside the scope that passes the hidden-folder write gate,
@@ -473,7 +466,7 @@ def _pin_directory( full_dir: str, scope_cfg: ScopeConfig ) -> int:
 
 def _serve( full_path: str, rel_path: str, scope: str, parent_validator, scope_cfg: ScopeConfig ) -> JSONResponse | PlainTextResponse | FileResponse:
     """
-    Common file/directory dispatch — shared by legacy `docs` branch and registry branch.
+    Common file/directory dispatch for the registry branch.
 
     Requires:
         - full_path is an absolute filesystem path inside the scope root (caller verified)
@@ -486,8 +479,7 @@ def _serve( full_path: str, rel_path: str, scope: str, parent_validator, scope_c
         - directory → JSONResponse with the standard listing shape; secrets blocklist
           filtering applied per-entry inside list_directory
         - file (image/*, audio/*, video/*, application/pdf) → FileResponse streaming
-          binary bytes with the matching media_type (images 2026-05-21; audio, video
-          and PDF 2026-09-24, ticket 668aa0a3)
+          binary bytes with the matching media_type
         - file (text/*) → PlainTextResponse with the appropriate MEDIA_TYPES entry
         - 404 if path doesn't exist; 400 if extension not in MEDIA_TYPES; 500 on read failure
     """
@@ -597,9 +589,9 @@ def _upload_registry() -> dict:
     """
     The scopes an upload may target: every registered repo, plus the built-in io folder.
 
-    io is not in the registry (it is a reserved name, served by /api/io/file), but it IS
-    browsable in the viewer, and Rick ruled "any folder I can browse". It gets a wildcard
-    ScopeConfig so it passes through the very same gate as the repos.
+    io is not in the registry, because it is a reserved name served by /api/io/file. It is
+    browsable in the viewer, and any folder the operator can browse must accept an upload.
+    It gets a wildcard ScopeConfig, so it passes through the same gate as the repos.
     """
     registry = dict( _get_scope_registry() )
     registry[ "io" ] = ScopeConfig(
@@ -650,9 +642,8 @@ def _refuse_hidden_folder( rel_dir: str ) -> None:
     """
     Refuse a target folder with any hidden segment (`.git`, `.claude`, `.github`, …).
 
-    The write gate is stricter than the read gate on purpose: a hook, a settings file or
-    a git internal is read harmlessly but executes once written (adversarial review of
-    ticket 416d4b00, finding 1).
+    The write gate is stricter than the read gate. A hook, a settings file or a git
+    internal is read harmlessly but executes once written.
     """
     if any( seg.startswith( "." ) for seg in rel_dir.split( "/" ) if seg ):
         raise HTTPException( status_code=400, detail="Uploads never write into a hidden folder" )
@@ -700,9 +691,9 @@ def _upload_failure( step, where, e ):
         - e is an OSError carrying an errno
 
     Ensures:
-        - returns 403 for EROFS / EACCES / EPERM, 500 for anything else — the same split
+        - returns 403 for EROFS / EACCES / EPERM, 500 for anything else, the same split
           the single catch-all used, so no caller's contract changes
-        - the detail names the STEP and the ERRNO SYMBOL, never a diagnosis of the folder
+        - the detail names the step and the errno symbol, never a diagnosis of the folder
         - never raises; the caller raises what this returns
     """
     code   = errno.errorcode.get( e.errno, str( e.errno ) )
@@ -754,14 +745,14 @@ async def upload_docs_file(
         - `dir` names an existing folder that passes the viewer's read guards
 
     Ensures:
-        - the bytes land atomically: written to a hidden temp file in the SAME folder,
+        - the bytes land atomically: written to a hidden temp file in the same folder,
           then os.replace'd into place, so a reader never sees a half-written file
           and a failed upload leaves nothing behind
         - an existing name is never overwritten unless on_conflict == "replace"
-        - every write step that fails names ITSELF and its errno, rather than every
-          failure claiming the folder is not writable (row b84bbf1c)
+        - every write step that fails names itself and its errno, rather than every
+          failure claiming the folder is not writable
         - cleanup is best-effort and can never replace the error it would hide
-        - a text upload is refused if its CONTENT is credential material — the same
+        - a text upload is refused if its content is credential material — the same
           check the viewer applies before serving it
         - every successful upload is logged with who, where, how big and how
 

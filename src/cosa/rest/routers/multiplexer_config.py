@@ -5,8 +5,8 @@ Exposes display-tuning values that the multiplexer's `boot.ts` fetches once at
 boot time and threads into the renderer (e.g., the `safeStringifyMeta` byte cap).
 No PII; no auth required.
 
-Authored 2026-05-06 for Phase 6a (jobs surface) F20 — `MAX_META_BYTES` cap is
-sourced from `ConfigurationManager` INI rather than hardcoded into the bundle.
+The `MAX_META_BYTES` cap is sourced from the `ConfigurationManager` INI rather than
+hardcoded into the bundle.
 """
 
 from fastapi import APIRouter, Depends
@@ -29,7 +29,7 @@ class MultiplexerConfigResponse( BaseModel ):
 
     Field names use snake_case to match server convention. Keys here become
     properties on the JSON object that `boot.ts` reads via
-    `configureMetaDisplayCap(serverConfig)` per Phase 6a design F20.
+    `configureMetaDisplayCap(serverConfig)`.
     """
     multiplexer_max_meta_display_bytes: int
     # Lane E WP13 (F6) — INI default seed for the TTS preview-fraction slider.

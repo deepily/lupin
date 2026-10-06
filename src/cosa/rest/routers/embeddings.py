@@ -1,11 +1,9 @@
 """
 Embedding generation API endpoints.
 
-Exposes the server's already-warm GPU embedding model via HTTP so that
-external scripts (e.g. seed_proxy_decisions.py) can generate embeddings
-without loading a second copy of the model into VRAM.
-
-Generated on: 2026-02-24
+Exposes the server's already-warm GPU embedding model via HTTP. External scripts, such
+as seed_proxy_decisions.py, can then generate embeddings without loading a second copy
+of the model into VRAM.
 """
 
 import asyncio

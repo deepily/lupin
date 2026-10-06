@@ -4,8 +4,6 @@ System administration and health monitoring endpoints.
 Provides essential system management capabilities including health checks,
 configuration refresh, session ID generation, authentication testing,
 and WebSocket session management with cleanup functionality.
-
-Generated on: 2025-01-24
 """
 
 import os
@@ -66,15 +64,15 @@ router = APIRouter(tags=["system"])
 async def health_check():
     """
     Basic health check endpoint for service status monitoring.
-    
+
     Requires:
         - FastAPI application is running and responsive
-        
+
     Ensures:
         - Returns healthy status with service identification
         - Includes current timestamp in ISO format
         - Provides version information for monitoring systems
-        - Includes `code_identity`, captured at IMPORT (row ce89669e remedy 1)
+        - Includes `code_identity`, captured at import
         - Response is consistently formatted for health checks
 
     Raises:
@@ -143,14 +141,11 @@ async def health():
 )
 async def busy():
     """
-    Report whether a job is currently running, for bounce-dev-server.sh's guard.
+    Report whether a job is currently running, for the bounce-dev-server.sh guard.
 
-    A restart of :7999 destroys any in-flight job — Rick lost a podcast job exactly
-    this way (row 08919110). The bounce script is a host shell script with no auth
-    credential, so it needs an UNAUTHENTICATED read to REFUSE a bounce that would kill
-    live work. The existing job-state surfaces (/queue/pool-status, /get-queue/run)
-    both require get_current_user, and /health's two-field contract is frozen — so this
-    small endpoint exists specifically for the guard (Rick's ruling 2026-08-02).
+    A restart of :7999 destroys any in-flight job. The bounce script has no auth credential,
+    so it needs an unauthenticated read to refuse a bounce that would kill live work. The
+    other job-state surfaces require get_current_user, and /health's contract is frozen.
 
     Requires:
         - lupin_app.main is importable and jobs_run_queue / jobs_todo_queue are
@@ -162,16 +157,16 @@ async def busy():
         - inflight_agentic_jobs = the CJ-flow shared agentic pool's in-flight count
           (running_fifo_queue.get_pool_status()); run_queue_size = the run FIFO queue
           depth. Either > 0 means a restart would destroy running work.
-        - todo_queue_size = the ingress FIFO depth: work ACCEPTED but not yet started.
-          Zero pool field moves for a queued job, which is why it is reported here.
-        - Every count is FLEET-WIDE, not per-user: these read the queue objects directly
-          rather than /api/get-queue/{q}, which filters to the caller and returns 403 to a
-          non-admin asking for user_filter="*" (measured 2026-08-25 with the gate account).
-        - Adds NO field to /health — that endpoint's 2-field contract is pinned by a test.
+        - todo_queue_size = the ingress FIFO depth: work accepted but not yet started.
+          No pool field moves for a queued job, which is why it is reported here.
+        - Every count is fleet-wide, not per-user: these read the queue objects directly
+          rather than /api/get-queue/{q}. That endpoint filters to the caller and returns
+          403 to a non-admin asking for user_filter="*".
+        - Adds no field to /health — that endpoint's 2-field contract is pinned by a test.
 
     Raises:
-        - Propagates only if jobs_run_queue is absent/uninitialized. The HOST guard
-          treats ANY non-200 or unreachable response as FAIL-OPEN, so a transient error
+        - Propagates only if jobs_run_queue is absent/uninitialized. The host guard
+          treats any non-200 or unreachable response as fail-open, so a transient error
           here never blocks a recovery bounce.
     """
     import lupin_app.main as main_module
@@ -202,32 +197,14 @@ async def busy():
 )
 async def code_identity():
     """
-    The running process's frozen code identity (row ce89669e remedy 1).
-
-    WHY THIS ENDPOINT EXISTS
-        `:8000` bind-mounts `./src` and runs `reload=False`, so the file inside the
-        container is the host's current file while the imported module is whatever
-        loaded at process start. Every cheap check reads the filesystem and answers
-        the wrong question confidently:
-
-            docker exec <c> grep -c <symbol> <file>       -> hits that are not running
-            docker exec <c> git rev-parse --short HEAD    -> the HOST's working tree
-
-        Measured 2026-07-27: the `:8000` container reported a sha committed on the
-        host minutes earlier, against a process nearly an hour old.
-
-    HOW TO USE IT
-        Compare `imported_at` against a commit's AUTHOR date. If the commit is newer,
-        the running process does not have it, whatever any file or any in-container
-        `git` says. `src/scripts/verify-running-code.sh` makes the same comparison
-        against `docker inspect`; this makes it available without a docker socket.
+    The running process's frozen code identity, captured at import.
 
     Requires:
         - FastAPI application is running and responsive
 
     Ensures:
-        - Returns the record captured at import; the value does NOT move between
-          requests, by construction
+        - Returns the record captured at import; the value does not move between
+          requests
         - Never re-reads the repository (a per-request read would reproduce exactly
           the lie this endpoint exists to remove)
 
@@ -236,6 +213,17 @@ async def code_identity():
 
     Returns:
         dict: git_sha, git_branch, git_sha_source, imported_at, pid
+
+    Why the endpoint exists: `:8000` bind-mounts `./src` and runs `reload=False`. The file
+    inside the container is the host's current file, while the imported module is whatever
+    loaded at process start. Every cheap check reads the filesystem and answers the wrong
+    question confidently. `docker exec <c> grep -c <symbol> <file>` finds hits that are not
+    running. `docker exec <c> git rev-parse --short HEAD` reports the host's working tree.
+
+    How to use it: compare `imported_at` against a commit's author date. If the commit is
+    newer, the running process does not have it, whatever any file or any in-container
+    `git` says. `src/scripts/verify-running-code.sh` makes the same comparison against
+    `docker inspect`. This endpoint makes it available without a docker socket.
     """
     return get_code_identity()
 
@@ -296,19 +284,11 @@ async def init( config_block_id: Optional[ str ] = None, admin_user: Dict = Depe
     Optionally accepts a config_block_id query parameter to hot-swap
     the server's configuration block and database connection at runtime.
 
-    🔴 ADMIN-ONLY SINCE 2026-09-23 (rows 977eaaf2 / f9e71d8e). This route carried
-    NO auth dependency of any kind — a bare GET, on a router declared
-    `APIRouter( tags=["system"] )` with no router-level dependencies, included by
-    `main.py:1432` with none either, behind only CORS and a security-header
-    middleware. Anyone who could reach the port could swap the active config block
-    AND the database connection underneath a running server. Verified at the PATH,
-    not just the route definition, before this gate was added.
-
     Requires:
         - caller holds a JWT carrying the "admin" role (401 without a token, 403 without the role)
         - FastAPI application is running with initialized components
         - Configuration files exist at specified paths (lupin-app.ini)
-        - LUPIN_CONFIG_MGR_CLI_ARGS environment variable is set
+        - `LUPIN_CONFIG_MGR_CLI_ARGS` environment variable is set
         - lupin_app.main module is accessible with global components
 
     Ensures:
@@ -322,6 +302,11 @@ async def init( config_block_id: Optional[ str ] = None, admin_user: Dict = Depe
 
     Returns:
         dict: Success/error status with config state and timestamp
+
+    The route is admin only. The router declares no router-level dependencies, and
+    `main.py` includes it with none, behind only CORS and a security-header middleware.
+    Without the admin dependency, anyone who could reach the port could swap the active
+    config block and the database connection underneath a running server.
     """
     try:
         from cosa.rest.db.database import swap_database
@@ -506,32 +491,30 @@ async def get_session_id(
 async def auth_test(current_user: dict = Depends(get_current_user)):
     """
     Test endpoint to verify authentication system functionality.
-    
+
     Requires:
         - Valid JWT authentication token in Authorization header
         - get_current_user dependency is properly configured
         - Firebase authentication system is accessible
-        
+
     Ensures:
         - Returns success status with authenticated user information
         - Confirms authentication system is working correctly
         - Includes user details from JWT token payload
         - Provides timestamp for testing verification
-        
+
     Raises:
         - HTTPException with 401 status if authentication fails
         - HTTPException with 401 status if token is invalid/missing
-        
+
     Args:
         current_user: Authenticated user information from JWT token
-        
+
     Returns:
         dict: Success message, user details, and timestamp
-        
+
     Note:
-        REFACTORING CHANGE: This endpoint now returns 401 (Unauthorized) status
-        when called without auth token, fixing test expectations.
-        Changed from 403 to 401 on 2025.09.28.
+        Called without an auth token, this endpoint returns 401 (Unauthorized), not 403.
     """
     return {
         "status": "success",
@@ -657,8 +640,8 @@ async def get_websocket_state():
     """
     Get complete internal state of WebSocket manager for debugging.
 
-    **DEBUG ENDPOINT**: This endpoint exposes internal WebSocket manager state
-    for troubleshooting connection and authentication issues. Should be removed
+    This is a debug endpoint. It exposes internal WebSocket manager state
+    for troubleshooting connection and authentication issues. It should be removed
     or protected in production environments.
 
     Requires:
@@ -747,7 +730,7 @@ async def get_client_config( user_id: str = Depends( get_current_user_id ) ):
     """
     Return client-side configuration parameters for authenticated users.
 
-    **Authentication**: REQUIRED - JWT token validated via dependency injection
+    Authentication is required: the JWT token is validated through dependency injection.
 
     Requires:
         - Valid JWT token in Authorization header
@@ -771,19 +754,6 @@ async def get_client_config( user_id: str = Depends( get_current_user_id ) ):
             "token_refresh_dedup_window_ms": 60000,       # 60 secs in milliseconds
             "websocket_heartbeat_interval_secs": 30,      # Reference value (secs)
             "app_timezone": "America/New_York"            # IANA timezone for display
-        }
-
-    Example:
-        GET /api/config/client
-        Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-
-        Response 200:
-        {
-            "token_refresh_check_interval_ms": 600000,
-            "token_expiry_threshold_secs": 300,
-            "token_refresh_dedup_window_ms": 60000,
-            "websocket_heartbeat_interval_secs": 30,
-            "app_timezone": "America/New_York"
         }
     """
     # Note: user_id parameter required by Depends() - validates JWT token
@@ -1014,10 +984,9 @@ async def bounce_dev_server( current_user = Depends( get_current_user ) ):
     """
     Trigger the sanctioned managed bounce of the dev server from a web client.
 
-    The web process lives inside the container it would restart, so it cannot run
-    the bounce itself. This endpoint only drops a trigger file the host-side watcher
-    picks up. It first verifies the watcher is alive and that no bounce is already
-    running, so the button reflects reality instead of silently succeeding.
+    The web process lives inside the container it would restart, so it cannot run the
+    bounce itself. This endpoint only drops a trigger file for the host-side watcher.
+    It first verifies the watcher is alive and no bounce is already running.
 
     Requires:
         - Valid JWT (Authorization: Bearer …) — same as the clients' other POSTs
@@ -1025,7 +994,7 @@ async def bounce_dev_server( current_user = Depends( get_current_user ) ):
 
     Ensures:
         - 409 if a bounce is already in progress (checked first, so a heartbeat that
-          goes quiet DURING a bounce is not misreported as a dead watcher)
+          goes quiet during a bounce is not misreported as a dead watcher)
         - 503 with a plain reason if the watcher heartbeat is missing or stale
         - 202 otherwise, and the trigger file is written; the watcher runs
           bounce-dev-server.sh and the server self-emits the all-clear on startup

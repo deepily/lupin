@@ -3,8 +3,6 @@ Statistics and Analytics API endpoints.
 
 Provides time-saved dashboard data and solution replay analytics
 for tracking the value of cached solutions.
-
-Generated on: 2026-01-16
 """
 
 from fastapi import APIRouter, Depends
@@ -77,7 +75,7 @@ async def get_time_saved_stats(
 
     Ensures:
         - Returns user-specific time saved statistics
-        - Includes both time saved FOR user and BY user for others
+        - Includes both time saved for the user and time saved by the user for others
     """
     snapshot_mgr = get_snapshot_mgr()
     user_id = current_user[ "uid" ]

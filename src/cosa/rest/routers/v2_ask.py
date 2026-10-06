@@ -1,18 +1,18 @@
-"""CJ Flow v2 — the /api/v2/ask endpoint (unit D, plan §5, §8).
+"""CJ Flow v2 — the /api/v2/ask endpoint.
 
 One authenticated POST routes a question through AskFlow's four branches and
-returns the §8 result dict as a typed body. The endpoint never waits for a human
-(a missing argument parks the request and returns the first question at once) and
-never 500s for an agent/replay/router/extract failure — AskFlow degrades each to
+returns the terminal result dict as a typed body. The endpoint never waits for a human
+(a missing argument parks the request and returns the first question at once). It never
+500s for an agent, replay, router or extract failure, because AskFlow degrades each to
 the receptionist. The only 4xx paths are auth (401, via get_current_user), body
-validation (422, via the Pydantic Field constraints), and the feature gate (503,
-when `v2 flow enabled` is off).
+validation (422, via the Pydantic Field constraints), and the feature gate. The gate
+answers 503 when `v2 flow enabled` is off.
 
-The real collaborator stack (V2Cache, RouterClient, RuntimeArgumentExpeditor,
-InlineExecutor, PendingRequests) is imported lazily inside build_ask_flow so this
-module stays importable without a live Postgres/model server, and is built once
-per process. Unit tests override get_ask_flow with a fake flow via
-app.dependency_overrides — no real stack is touched on :7999.
+The real collaborator stack is V2Cache, RouterClient, RuntimeArgumentExpeditor,
+InlineExecutor and PendingRequests. It is imported lazily inside build_ask_flow, so this
+module stays importable without a live Postgres or model server. It is built once
+per process. Unit tests override get_ask_flow with a fake flow through
+app.dependency_overrides, so no real stack is touched on :7999.
 """
 
 from __future__ import annotations
@@ -68,18 +68,18 @@ class AskRequest( BaseModel ):
 class SubmitRequest( BaseModel ):
     """Request body for POST /api/v2/submit — work whose command is already decided.
 
-    `question` is OPTIONAL here and required on `ask`, which is the whole difference
-    between the two doors. `ask` is handed prose and has to work out what it means;
-    `submit` is handed the answer to that question up front, so the text is only carried
-    along for the record and for anything downstream that shows the user what ran.
+    `question` is optional here and required on `ask`, which is the whole difference
+    between the two doors. `ask` is handed prose and has to work out what it means.
+    `submit` is handed the answer up front. The text is only carried along for the
+    record and for anything downstream that shows the user what ran.
 
-    THE LAST THREE FIELDS ARE QUEUE DIRECTIVES, NOT ARGUMENTS, and that is why they are
+    The last three fields are queue directives, not arguments. That is why they are
     top-level fields rather than keys inside `args`. `args` is checked against the
-    command's own argument contract, so a scheduling instruction put in there would have
-    to be written into some agent's contract as though the agent took it — and no agent
-    does. Each retiring door declared these same three on its own request model and set
-    them on the job after building it; they arrive here for the same reason and are
-    passed on only when the caller actually set one.
+    command's own argument contract. A scheduling instruction put there would have to be
+    written into some agent's contract as though the agent took it, and no agent does.
+    Each retiring door declared these same three on its own request model. They arrive
+    here for the same reason, and are passed on only when the caller actually set one.
+
     """
     command        : str            = Field( ..., min_length=1, max_length=200,
                                              description="The routing command, e.g. 'agent router go to weather'" )
@@ -105,7 +105,7 @@ class ResumeRequest( BaseModel ):
 
 
 class AskResponse( BaseModel ):
-    """The §8 terminal result of one v2 request."""
+    """The terminal result of one v2 request."""
     path           : str                 = Field( ..., description="replay | agent | needs_input | receptionist" )
     status         : str                 = Field( ..., description="done | waiting | parked | needs_input | expired | failed" )
     route_reason   : str                 = Field( ..., description="Why this branch was taken" )
@@ -145,12 +145,13 @@ class AgentOption( BaseModel ):
 
 
 class AutoRouteOption( BaseModel ):
-    """The dropdown's 'no command named — let the router decide' entry.
+    """The dropdown's "no command named, let the router decide" entry.
 
-    Carried in the RESPONSE rather than hand-written into the page, so the front end
-    holds no agent list of its own at all — not even the one legitimate option. See
+    It is carried in the response rather than hand-written into the page. The front end
+    then holds no agent list of its own, not even the one legitimate option. See
     registry.AUTO_ROUTE_VALUE for why that is a named sentinel and not an exemption
     written into a guard.
+
     """
     value       : str = Field( ..., description="Sentinel option value; never a registry command" )
     label       : str = Field( ..., description="What to show the user" )
@@ -178,22 +179,20 @@ _INSTALLED_FLOW: Optional[ tuple ] = None   # ( AskFlow, enabled: bool )
 
 def install_ask_flow( flow: Any, enabled: bool ) -> None:
     """
-    Hand `get_ask_flow` the flow lifespan built, so the door and the in-process
-    callers share ONE object.
-
-    WHY THIS EXISTS AT ALL. Before step 12 the flow was built by the request-time
-    dependency and memoised per config-manager. That is one flow per process only
-    because ConfigurationManager is a @singleton — an accident that happened to
-    hold, not a guarantee. It also meant the flow did not exist until the first
-    HTTP request, and the boot-time catch-up restore runs long before that. Step 12
-    builds it in lifespan instead; this is how the already-built object reaches the
-    route rather than being rebuilt behind it.
+    Hand `get_ask_flow` the flow lifespan built, so one object serves every caller.
 
     Requires:
         - flow is the AskFlow lifespan constructed, enabled is `v2 flow enabled`.
 
     Ensures:
         - get_ask_flow() serves this flow, and applies the same 503 gate to it.
+
+    Without this, the request-time dependency built the flow and memoised it per
+    config-manager. That is one flow per process only because ConfigurationManager is a
+    @singleton, which is not a guarantee. The flow also did not exist until the first HTTP
+    request, and the boot-time catch-up restore runs long before that. Lifespan builds the
+    flow instead, and this is how the already-built object reaches the route rather than
+    being rebuilt behind it.
     """
     global _INSTALLED_FLOW
     _INSTALLED_FLOW = ( flow, enabled )
@@ -213,8 +212,8 @@ def build_ask_flow( config_mgr: Any, todo_queue: Any=None ) -> tuple:
         - returns ( AskFlow, enabled ) where enabled reflects `v2 flow enabled`.
         - imports the cache/router/expeditor/executor/pending stack lazily so
           this module is importable with no live Postgres or model server.
-        - writeback ships ON when `v2 snapshot writeback enabled` is true, wired
-          through AskFlow's own fail-loud construction guard (row 41333974).
+        - writeback ships on when `v2 snapshot writeback enabled` is true, wired
+          through AskFlow's own fail-loud construction guard.
     """
     # Lazy — heavy singletons (embedding provider, LLM factory) build only here.
     from cosa.agents.runtime_argument_expeditor.expeditor import RuntimeArgumentExpeditor
@@ -247,21 +246,22 @@ def build_ask_flow( config_mgr: Any, todo_queue: Any=None ) -> tuple:
     confirmation_enabled   = config_mgr.get( "similarity confirmation enabled",   default=True, return_type="boolean" )
 
     def _source_document_scopes() -> dict:
-        """The scopes a `source_document` may name — Rick's Q1 ruling, 2026-09-08.
+        """The scopes a `source_document` may name.
 
-        THE DOC-VIEWER'S REGISTRY PLUS THE TWO BUILT-INS, and deliberately not a second
-        allowlist: the set of files a research job may READ is then the same set a human
-        may BROWSE at /api/docs/file and /api/io/file. Two allowlists that disagree about
-        which files are reachable is the failure this avoids, and it is the reason this
+        They are the doc-viewer's registry plus the two built-ins, and not a
+        second allowlist. The set of files a research job may read is then the same set a
+        human may browse at /api/docs/file and /api/io/file. Two allowlists that disagree
+        about which files are reachable is the failure this avoids. That is why this
         resolves through build_scope_registry rather than listing directories here.
 
-        `docs` and `io` are added by hand because build_scope_registry SKIPS them by name
-        (_RESERVED_SCOPE_NAMES) — they are built-ins served from the project root rather
-        than entries in the `external repos` INI block, so the registry that describes
-        external repos legitimately does not carry them.
+        `docs` and `io` are added by hand because build_scope_registry skips them by name
+        (`_RESERVED_SCOPE_NAMES`). They are built-ins served from the project root. They are
+        not entries in the `external repos` INI block, so the registry that describes
+        external repos does not carry them.
 
-        Called per request rather than cached: the registry is cheap to rebuild and a
-        cached copy would freeze whatever was mounted when the flow was constructed.
+        It is called per request rather than cached. The registry is cheap to rebuild, and
+        a cached copy would freeze whatever was mounted when the flow was constructed.
+
         """
         import cosa.utils.util as cu
         from cosa.rest.routers._scope_registry import ScopeConfig, build_scope_registry
@@ -298,10 +298,10 @@ def get_ask_flow() -> Any:
 
     Ensures:
         - serves the flow lifespan installed, when there is one. On the server there
-          always is, and it is the SAME object the in-process callers submit to —
-          which is the point: one flow means one guarded write-back path.
+          always is, and it is the same object the in-process callers submit to,
+          so one flow means one guarded write-back path.
         - otherwise builds from INI and caches it keyed by config-mgr identity. That
-          is the pre-step-12 behaviour, kept for apps that never run lifespan (every
+          is the original behaviour, kept for apps that never run lifespan (every
           unit-test app builds a bare FastAPI and overrides this dependency anyway).
         - raises HTTP 503 when `v2 flow enabled` is off — the feature gate, applied
           to both paths.
@@ -328,41 +328,38 @@ async def v2_agents(
     current_user : dict = Depends( get_current_user ),
     flow         : Any  = Depends( get_ask_flow ),
 ) -> AgentsResponse:
-    """List every command the registry knows — a PURE PROJECTION of REGISTRY.
-
-    The read endpoint the front end was missing (2026.08.22 plan §5.1). The Q&A
-    card's agent list used to be sixteen hand-typed `<option>` tags in
-    notifications.html, one of five hand-maintained lists describing the same set;
-    this door is how that list stops being written by hand.
-
-    PURE PROJECTION means: every registry command appears, exactly once, carrying
-    its own fields. Nothing is filtered here — not the two expediters, not the
-    control command, not `none`. A client renders what it should render by reading
-    `user_initiable` (the Q&A dropdown) or `speakable` (a voice surface); the door
-    does not decide that for them, because the moment it filters, the set-equality
-    that proves the door matches the table stops being checkable.
-
-    WHY IT DEPENDS ON THE FLOW. It needs `crud_enabled` — the labels must name the
-    agent that will ACTUALLY run, so `todo` reads "todo (CRUD)" when the fork is on.
-    Reading the INI key here would be a FOURTH read of `crud for dataframes agents
-    enabled`, and a fourth read is a fourth thing to drift. The flow already holds
-    the value it will itself route with, so the label a user picks and the agent
-    they get cannot disagree. The 503 that comes with the dependency is coherent:
-    when `v2 flow enabled` is off, /api/v2/submit is off too, and a dropdown that
-    drives it has nothing to drive.
+    """List every command the registry knows, as a pure projection of `REGISTRY`.
 
     Requires:
         - an authenticated user (get_current_user).
 
     Ensures:
-        - `agents` carries one entry per REGISTRY command — set-equal to REGISTRY,
-          which is the §6 gate 1 assertion.
+        - `agents` carries one entry per `REGISTRY` command — set-equal to `REGISTRY`,
+          which is the first gate assertion.
         - the CRUD fork is applied exactly as resolve() applies it, by calling
           resolve() itself rather than reimplementing the fork.
         - `auto_route` carries the sentinel option, so the page hand-writes no
           option at all.
         - never 500s for an unknown-shaped spec: every field read is declared on
           AgentSpec or on the command's JOB_ARG_CONTRACTS entry.
+
+    This is the read endpoint the front end needs. The Q&A card's agent list used to be
+    sixteen hand-typed `<option>` tags in notifications.html, one of five hand-maintained
+    lists describing the same set. This door is how that list stops being written by hand.
+
+    Pure projection means every registry command appears exactly once, carrying its own
+    fields. Nothing is filtered here, not the two expediters, not the control command and
+    not `none`. A client renders what it should by reading `user_initiable` (the Q&A
+    dropdown) or `speakable` (a voice surface). If the door filtered, the set-equality
+    that proves the door matches the table would stop being checkable.
+
+    It depends on the flow because it needs `crud_enabled`. The labels must name the agent
+    that will actually run, so `todo` reads "todo (CRUD)" when the fork is on. Reading the
+    INI key `crud for dataframes agents enabled` here would be a fourth read, and a fourth
+    read is a fourth thing to drift. The flow already holds the value it routes with, so
+    the label a user picks and the agent they get cannot disagree. The 503 that comes with
+    the dependency is coherent. When `v2 flow enabled` is off, /api/v2/submit is off too,
+    and a dropdown that drives it has nothing to drive.
     """
     from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
     from cosa.rest.v2.registry import (
@@ -414,7 +411,7 @@ async def v2_ask(
     flow         : Any  = Depends( get_ask_flow ),
 ) -> AskResponse:
     """
-    Route one question through CJ Flow v2 and return the §8 result.
+    Route one question through CJ Flow v2 and return the terminal result.
 
     Requires:
         - an authenticated user (get_current_user) carrying uid + email.
@@ -487,13 +484,13 @@ async def ask_audio(
 
     Requires:
         - an authenticated user carrying uid + email
-        - file is audio the transcriber reads; websocket_id, when given, is a QUERY parameter
+        - file is audio the transcriber reads; websocket_id, when given, is a query parameter
 
     Ensures:
         - a non-200 means nothing was asked: 401 identity, 503 flow disabled or GPU OOM,
           500 any other failure reading, saving or transcribing the audio, 422 empty speech
         - a 200 body is NDJSON: a transcript line, then exactly one ask or error line
-        - the ask is started BEFORE the response exists, so a client that disconnects after
+        - the ask is started before the response exists, so a client that disconnects after
           line 1 does not cancel it; its answer still reaches the session's WebSocket
         - the uploaded audio is removed on every path
 
@@ -592,11 +589,7 @@ async def transcribe(
     config_mgr       : Any        = Depends( speech.get_config_manager ),
 ) -> TranscribeResponse:
     """
-    Transcribe spoken audio and return the words, asking nothing (row fcebf532).
-
-    For a client that must show the transcript before deciding to send it — the phone's Quick
-    Ask review and its focus-mode voice reply. It is /api/v2/ask-audio with the ask removed, so
-    it takes no flow dependency and is not behind the `v2 flow enabled` gate.
+    Transcribe spoken audio and return the words, asking nothing.
 
     Requires:
         - an authenticated user carrying uid + email
@@ -611,6 +604,11 @@ async def transcribe(
 
     Raises:
         - HTTPException 401 / 422 / 500 / 503 as above
+
+    This serves a client that must show the transcript before deciding to send it, such as
+    the phone's Quick Ask review and its focus-mode voice reply. It is /api/v2/ask-audio with
+    the ask removed, so it takes no flow dependency and is not behind the `v2 flow enabled`
+    gate.
     """
     user_id, _ = identity_or_401( current_user )
     temp_path  = None
@@ -649,9 +647,9 @@ async def v2_submit(
 ) -> AskResponse:
     """Run work whose command is already decided — the door beside /api/v2/ask.
 
-    Rick's entry-point ruling, 2026-08-21: two doors survive at v2. `ask` takes a bare
-    question and works out what it is; `submit` takes work whose command the caller has
-    already chosen, so it skips routing and argument extraction entirely.
+    Two doors survive at v2. `ask` takes a bare question and works out what it is.
+    `submit` takes work whose command the caller has already chosen, so it skips routing
+    and argument extraction entirely.
 
     Requires:
         - an authenticated user (get_current_user) carrying uid + email.
@@ -663,10 +661,11 @@ async def v2_submit(
           degrades to the receptionist exactly as it does on `ask`.
         - user_id / user_email come from the token, never the client body.
         - a command missing arguments comes back status='needs_input' with args_missing
-          filled in, and is NEVER parked: there is no human behind a submit to answer it.
+          filled in, and is never parked: there is no human behind a submit to answer it.
         - scheduled_at / monopolize / parent_id_hash reach the built job only on the
           agentic path, which is the only path that builds one; on the other paths the
           flow records that they were dropped rather than discarding them in silence.
+
     """
     user_id, user_email = identity_or_401( current_user )
 
@@ -717,8 +716,8 @@ async def v2_resume(
     Ensures:
         - returns AskResponse; an expired/unknown pending_id degrades to a
           needs_input refusal (status='expired'), never a 500.
-        - resume runs OFF the event loop, in a worker thread. It used to run on
-          the loop itself; that is what made /health time out during a call.
+        - resume runs off the event loop, in a worker thread. Running it on the loop
+          itself would make /health time out during a call.
     """
     user_id, user_email = identity_or_401( current_user )
 
@@ -784,14 +783,14 @@ class ResumeJobResponse( BaseModel ):
 
 def _job_owner_id( id_hash: str ):
     """
-    The user id that owns `id_hash`, read from its job_history row (row a758bd0f).
+    The user id that owns `id_hash`, read from its job_history row.
 
     Requires:
         - id_hash is a job id_hash string
 
     Ensures:
         - returns the row's user_id, or None when no row exists
-        - the owner is NEVER parsed out of the id string: its suffix is a user_id for ordinary
+        - the owner is never parsed out of the id string: its suffix is a user_id for ordinary
           queue jobs and an email for `tfe-` ids, so a parse would lock out real owners
     """
     from cosa.rest.job_persistence import get_original_args_for_job
@@ -800,7 +799,7 @@ def _job_owner_id( id_hash: str ):
 
 
 def _not_resumable_detail( target_id: str ) -> str:
-    """The one 404 text for every reason a direct resume is refused, so a refusal never says which."""
+    """The one 404 text for every reason a direct resume is refused, so a refusal never says why."""
     return f"Job {target_id} not found, not stalled, has no checkpoint, or cannot be resumed"
 
 
@@ -829,7 +828,7 @@ async def v2_resume_job(
           factory (the old `/api/jobs/{id_hash}/resume-from-checkpoint` behaviour);
           everything else goes through the TFE resolver (the old
           `/api/test-fix-expediter/resume-from` behaviour, including its `ambiguous`
-          answer with candidates and NO job pushed).
+          answer with candidates and no job pushed).
         - returns status='resumed' with the new job id and its resume phase, and
           queue_position = the todo queue's size right after the push.
         - the model / thinking-effort overrides reach the reconstructed job; None

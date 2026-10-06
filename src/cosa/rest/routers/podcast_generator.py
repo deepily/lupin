@@ -1,35 +1,35 @@
 """
 The retired Podcast Generator submission door.
 
-This module used to accept EITHER a research file path or a plain-English description of
-one, resolve the description by fuzzy-matching the user's research documents, ask the user
-which document they meant and what languages and audience they wanted, and only then queue
-a podcast job. It now holds a single tombstone: the route stays registered and answers 410
-Gone naming `/api/v2/ask`.
+This module used to accept either a research file path or a plain-English description
+of one. It resolved the description by fuzzy-matching the user's research documents. It
+asked the user which document they meant and what languages and audience they wanted.
+Only then did it queue a podcast job. It now holds a single tombstone. The route stays
+registered and answers 410 Gone naming `/api/v2/ask`.
 
-WHY `ask` AND NOT `submit`, WHICH EVERY OTHER JOB-QUEUEING DOOR NAMES. Because this door
-was never really submit-shaped. Its description path held a CONVERSATION — it could come
-back and ask you a question, and it could end with "cancelled" because you declined. That
-is what `/api/v2/ask` does and precisely what `/api/v2/submit` refuses to do by design:
-submit is for work whose command and arguments are already decided. Pointing this door at
-submit would have named the one door that cannot do what this one did.
+The tombstone names `ask` and not `submit`, which every other job-queueing door names.
+This door was never submit-shaped. Its description path held a conversation. It could
+come back and ask a question, and it could end with "cancelled" because the user declined.
+That is what `/api/v2/ask` does and what `/api/v2/submit` refuses to do: submit is for work
+whose command and arguments are already decided. Pointing this door at submit would name
+the one door that cannot do what this one did.
 
-Rick ruled it directly (2026-08-21): the Submit Agentic Jobs accordion is being retired,
-and Q&A — already on `/api/v2/ask` — is the entrance. So the accordion's podcast card is
-deleted rather than rewired, and asking for a podcast is asking a question.
+The Submit Agentic Jobs accordion is retired, and Q&A on `/api/v2/ask` is the entrance.
+So the accordion's podcast card is deleted rather than rewired, and asking for a podcast
+is asking a question.
 
-WHAT WENT WITH THE HANDLER. The request and response models, the todo-queue and websocket
-dependencies, the path guard, `is_research_path`, `match_research_docs` and
-`get_user_document_selection`. None of it is orphaned work that needs re-homing: the ask
-flow runs the Runtime Argument Expeditor, which owns document resolution (`fuzzy_file_match`)
-and missing-argument collection, and asks its questions on the same notification-answer
+The request and response models, the todo-queue and websocket dependencies, the path
+guard, `is_research_path`, `match_research_docs` and `get_user_document_selection` went
+with the handler. None of it is orphaned work that needs re-homing. The ask flow runs the
+Runtime Argument Expeditor, which owns document resolution (`fuzzy_file_match`) and
+missing-argument collection. It asks its questions on the same notification-answer
 surface this endpoint used.
 
-THE INI FLAG WENT TOO. `podcast card uses runtime argument expeditor` gated which resolver
-this handler used — its own, or the expeditor's. This module was its only reader, so with
-the handler gone the flag reads nothing and is removed from `lupin-app.ini` and the
-splainer alongside it. A configuration key that no longer changes any behaviour is worse
-than no key: someone will flip it and conclude the system ignored them.
+The INI flag `podcast card uses runtime argument expeditor` went too. It gated which
+resolver this handler used, its own or the expeditor's. This module was its only reader,
+so with the handler gone the flag reads nothing. It is removed from `lupin-app.ini` and the
+splainer. A configuration key that no longer changes any behaviour is worse than no key,
+because someone will flip it and conclude the system ignored them.
 
 What a caller sends instead:
 
@@ -82,7 +82,7 @@ async def submit_podcast_job():
 
     Ensures:
         - never returns; raises HTTPException( 410 ) naming /api/v2/ask and the
-          REMOVE BY 2026-12-31 date
+          remove-by date
     """
     gone( "/api/podcast-generator/submit" )
 

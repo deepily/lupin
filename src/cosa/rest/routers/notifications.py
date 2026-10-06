@@ -4,8 +4,6 @@ Notification management endpoints.
 Provides REST API endpoints for managing user notifications including
 sending notifications from Claude Code, retrieving user notifications,
 and managing notification lifecycle (played/deleted status).
-
-Generated on: 2025-01-24
 """
 
 from fastapi import APIRouter, Query, HTTPException, Depends, Body, Header
@@ -62,19 +60,21 @@ except ImportError:
 
 def _voice_persona_for_sender_id( resolved_sender_id ):
     """
-    Resolve a sender_id (e.g., 'claude.code@lupin.deepily.ai#c7333045') to a
-    voice persona dict by reading the session bridge file. Returns None on
-    any failure (sender_id missing #suffix, bridge missing, persona not set,
-    or session_bridge module not importable).
+    Resolve a sender_id to a voice persona dict by reading the session bridge file.
 
-    The 8-char prefix after '#' is matched against bridge files via
-    find_session_path_by_id (which already understands the prefix-or-full
-    form), so we can pass it directly to get_voice_persona.
+    A sender_id looks like 'claude.code@lupin.deepily.ai#<8-hex>'. The function returns
+    None on any failure. Failures are a sender_id with no #suffix, a missing bridge, no
+    persona set, or a session_bridge module that cannot be imported.
 
-    Defensively stamps `display_name` on the returned dict if the bridge
-    file predates the lowercase-key rename (legacy bridges have only `name`).
-    Pool names are stored lowercase no-punctuation per project key convention;
-    `display_name` is the proper-noun form for UI rendering.
+    The 8-char prefix after '#' is matched against bridge files via find_session_path_by_id.
+    That function already understands the prefix-or-full form. So the prefix goes straight
+    to get_voice_persona.
+
+    It defensively stamps `display_name` on the returned dict if the bridge file predates
+    the lowercase-key rename. Legacy bridges have only `name`. Pool names are stored
+    lowercase without punctuation, per the project key convention. `display_name` is the
+    proper-noun form for UI rendering.
+
     """
     if _bridge_get_voice_persona is None or not resolved_sender_id or "#" not in resolved_sender_id:
         return None
@@ -92,12 +92,14 @@ def _voice_persona_for_sender_id( resolved_sender_id ):
 
 def _manager_persona_for_sender_id( resolved_sender_id ):
     """
-    Resolve a sender_id to its SPAWNING MANAGER's persona badge dict
-    ({icon,color,name,initial}) for the focus-bar manager badge (Rick 2026-06-08), so a
-    force-refreshed page hydrates the badge for EXISTING workers instead of waiting for
-    the next live voice_persona_assigned event (the cold-reload gap). Returns None for
-    root sessions or any failure. Mirrors _voice_persona_for_sender_id's #-suffix
-    (session-prefix) extraction.
+    Resolve a sender_id to its spawning manager's persona badge dict, or None.
+
+    The badge dict is `{icon,color,name,initial}`. It feeds the focus-bar manager badge,
+    so a force-refreshed page hydrates the badge for existing workers. Otherwise the page
+    would wait for the next live voice_persona_assigned event, the cold-reload gap.
+    It returns None for root sessions or any failure. It extracts the #-suffix
+    (session prefix) the same way `_voice_persona_for_sender_id` does.
+
     """
     if _resolve_manager_persona is None or not resolved_sender_id or "#" not in resolved_sender_id:
         return None
@@ -188,12 +190,14 @@ def _lookup_ask_idempotency( idempotency_key ):
 
 def _read_notification_state_sync( notification_id ):
     """
-    Read one notification's {state, response_value, responded_at} for the ask
-    re-attach poll (bug f433fbae D2). Mirrors get_notification_response's fetch.
+    Read one notification's {state, response_value, responded_at} for the ask re-attach poll.
+
+    It mirrors the fetch in get_notification_response.
 
     Ensures:
         - returns None when the row is gone
         - otherwise returns the three fields verbatim (responded_at as a datetime|None)
+
     """
     with get_db() as session:
         repo = NotificationRepository( session )
@@ -215,11 +219,7 @@ ANSWERED_BY_KEY = "answered_by"
 
 def _answered_by( authenticated_user_id, account_email, x_api_key ):
     """
-    Who posted an answer, as the SERVER knows it — never as the caller claims it.
-
-    Row e20e249a. Rick selected "Fix who first (Recommended)" (event 13250 on d2b1b59a):
-    the answer door took no credentials and stored nothing about who posted, so a yes to a
-    promotion ask could not be told from anybody else's yes.
+    Say who posted an answer, as the server knows it and never as the caller claims it.
 
     Requires:
         - authenticated_user_id is what `require_api_key_or_jwt` returned, so the request
@@ -230,12 +230,16 @@ def _answered_by( authenticated_user_id, account_email, x_api_key ):
 
     Ensures:
         - method is "api_key" when the request carried an X-API-Key header.
-          `require_api_key_or_jwt` tries the key FIRST and refuses a bad one, so on an
+          `require_api_key_or_jwt` tries the key first and refuses a bad one, so on an
           authenticated request a present key is what let the caller in
         - otherwise method is "jwt"
-        - account_email is kept only for "jwt": a request carrying BOTH headers got in on
+        - account_email is kept only for "jwt": a request carrying both headers got in on
           its key, so the token's email is not credited to it
         - never raises
+
+    The answer door takes credentials and stores who posted. Without that, a yes to a
+    promotion ask could not be told from anybody else's yes.
+
     """
     method = "api_key" if x_api_key else "jwt"
     return {
@@ -247,7 +251,7 @@ def _answered_by( authenticated_user_id, account_email, x_api_key ):
 
 def _stored_answered_by( stored_response_value ):
     """
-    The server-stamped who-answered on a STORED answer, or None.
+    The server-stamped who-answered on a stored answer, or None.
 
     Requires:
         - stored_response_value is a notification row's response_value (dict, other, or None)
@@ -255,6 +259,7 @@ def _stored_answered_by( stored_response_value ):
     Ensures:
         - returns the dict's "answered_by" entry when the stored value is a dict carrying one
         - returns None for a non-dict, and for a row stored before the door stamped it
+
     """
     if not isinstance( stored_response_value, dict ): return None
     return stored_response_value.get( ANSWERED_BY_KEY )
@@ -262,23 +267,7 @@ def _stored_answered_by( stored_response_value ):
 
 def _stored_response_dict( response_value, answered_by=None ):
     """
-    What `/api/notify/response` stores for a request's response_value.
-
-    Every reader takes the answer out with `.get( "value" )` (`_extract_response_value`,
-    `notify_user_sync`), so a plain string answer is wrapped under "value". A dict is stored
-    as sent. The multiplexer used to send `{ "response": "yes" }`, which was stored with no
-    "value" key and read back as no answer (P0 5ebd2aff;
-    test_both_clients_answers_read_back_the_same.py).
-
-    WHO ANSWERED (row e20e249a). When the door passes `answered_by`, it lands in every shape
-    an answer can take, so no reader has to know which shape it is holding:
-
-        str   (yes_no, and multiple_choice / batch sent as a JSON string)
-              -> { "value": <str>, "source": "ui", "answered_by": {...} }
-        dict  -> a COPY of the dict with "answered_by" set, REPLACING any value the caller
-                 sent under that key
-        other (a JSON number, list or bool)
-              -> { "value": <as sent>, "source": "ui", "answered_by": {...} }
+    Build what `/api/notify/response` stores as a request's response_value.
 
     Requires:
         - response_value is a non-empty str, a dict, or another JSON value
@@ -286,8 +275,24 @@ def _stored_response_dict( response_value, answered_by=None ):
 
     Ensures:
         - with answered_by None: a str becomes { "value": response_value, "source": "ui" }
-          and anything else is returned unchanged (the same object), as before this row
-        - with answered_by given: the shapes above, and the caller's dict is never mutated
+          and anything else is returned unchanged (the same object), with nothing stamped on it before storage
+        - with answered_by given: the shapes below, and the caller's dict is never mutated
+
+    Every reader takes the answer out with `.get( "value" )` (`_extract_response_value`,
+    `notify_user_sync`), so a plain string answer is wrapped under "value". A dict is stored
+    as sent. A dict with no "value" key reads back as no answer. The multiplexer once sent
+    `{ "response": "yes" }` and hit exactly that.
+
+    When the door passes `answered_by`, it lands in every shape an answer can take, so no
+    reader has to know which shape it is holding:
+
+        str   (yes_no, and multiple_choice / batch sent as a JSON string)
+              -> { "value": <str>, "source": "ui", "answered_by": {...} }
+        dict  -> a copy of the dict with "answered_by" set, replacing any value the caller
+                 sent under that key
+        other (a JSON number, list or bool)
+              -> { "value": <as sent>, "source": "ui", "answered_by": {...} }
+
     """
     if isinstance( response_value, str ):
         stored = { "value": response_value, "source": "ui" }
@@ -303,8 +308,7 @@ def _stored_response_dict( response_value, answered_by=None ):
 
 
 def _extract_response_value( response_value ):
-    """Pull the scalar answer out of a stored response_value (dict-wrapped or bare),
-    coerced to a string RespondedEvent/ExpiredEvent can carry. None → None."""
+    """Pull the scalar answer out of a stored response_value, as a string; None gives None."""
     if response_value is None:
         return None
     val = response_value.get( "value" ) if isinstance( response_value, dict ) else response_value
@@ -313,17 +317,19 @@ def _extract_response_value( response_value ):
 
 async def _ask_reattach_generator( notification_id, timeout_seconds ):
     """
-    Re-attach SSE for a duplicate idempotency_key (bug f433fbae D2): stream the
-    ORIGINAL ask's outcome by polling its DB row, so a re-POST does not mint a second
-    card. Self-contained — never touches the in-memory pending_responses event, so it
-    is safe regardless of whether the original stream is alive.
+    Re-attach SSE for a duplicate idempotency_key, streaming the original ask's outcome.
+
+    It polls the original ask's DB row, so a re-POST does not mint a second card. It is
+    self-contained. It never touches the in-memory pending_responses event, so it is safe
+    whether or not the original stream is alive.
 
     Ensures:
-        - first frame is an ack carrying the ORIGINAL notification_id
+        - first frame is an ack carrying the original notification_id
         - a landed human answer (responded_at set) yields a `responded` frame
         - a manufactured default (response_value set, not responded) yields an
           `expired` frame with default_used=True
         - budget exhausted with neither yields an `expired` frame with no default
+
     """
     yield f"data: {json.dumps({'status': 'ack', 'notification_id': notification_id})}\n\n"
     deadline      = datetime.now( timezone.utc ) + timedelta( seconds=timeout_seconds )
@@ -438,8 +444,7 @@ def get_local_timestamp():
 
 def get_formatted_time_display():
     """
-    Get formatted time display string with timezone abbreviation.
-    Format: "HH:MM TZ" (e.g., "17:45 EST")
+    Get a "HH:MM TZ" time string with the timezone abbreviation, e.g. "17:45 EST".
 
     Requires:
         - lupin_app.main module is available
@@ -450,6 +455,7 @@ def get_formatted_time_display():
         - Returns formatted time string like "17:45 EST"
         - Uses configured timezone or defaults to America/New_York
         - Falls back to simple time format if timezone configuration is invalid
+
     """
     import lupin_app.main as main_module
     config_mgr = main_module.config_mgr
@@ -467,8 +473,9 @@ def get_formatted_time_display():
 
 def get_formatted_date_display():
     """
-    Get formatted date display string in ISO format (YYYY-MM-DD).
-    Uses configured timezone to ensure correct date near midnight.
+    Get an ISO date string (YYYY-MM-DD) in the configured timezone.
+
+    The configured timezone keeps the date correct near midnight.
 
     Requires:
         - lupin_app.main module is available
@@ -479,6 +486,7 @@ def get_formatted_date_display():
         - Returns formatted date string like "2026-01-08"
         - Uses configured timezone or defaults to America/New_York
         - Falls back to local date if timezone configuration is invalid
+
     """
     import lupin_app.main as main_module
     config_mgr = main_module.config_mgr
@@ -496,7 +504,7 @@ def get_formatted_date_display():
 
 def resolve_sender_id( explicit_sender_id: Optional[str], message: str ) -> str:
     """
-    Resolve sender ID using precedence: explicit > extracted from [PREFIX] > default.
+    Resolve the sender ID by precedence: explicit, then message `[PREFIX]`, then default.
 
     Requires:
         - explicit_sender_id is None or a valid sender ID string
@@ -504,7 +512,7 @@ def resolve_sender_id( explicit_sender_id: Optional[str], message: str ) -> str:
 
     Ensures:
         - Returns explicit_sender_id if provided
-        - Otherwise extracts from [PREFIX] in message (e.g., [LUPIN] -> claude.code@lupin.deepily.ai)
+        - Otherwise extracts from `[PREFIX]` in message (e.g., `[LUPIN]` -> claude.code@lupin.deepily.ai)
         - Falls back to claude.code@unknown.deepily.ai if no sender can be determined
 
     Args:
@@ -513,6 +521,7 @@ def resolve_sender_id( explicit_sender_id: Optional[str], message: str ) -> str:
 
     Returns:
         str: Resolved sender ID in claude.code@{project}.deepily.ai format
+
     """
     # Priority 1: Explicit sender_id
     if explicit_sender_id:
@@ -539,11 +548,10 @@ def _persist_notification_sync(
     reply_to=None, thread_id=None
 ):
     """
-    Synchronous DB persist for notify_user — run OFF the event loop via
-    asyncio.to_thread (lever B, messaging-coordination plane).
+    Persist a notify_user notification synchronously, off the event loop.
 
-    Moving this blocking DB I/O off the single async event loop stops the notify
-    path from stalling every other request under fleet load (the FM-7 black-hole).
+    It runs through asyncio.to_thread. The blocking DB I/O would otherwise stall every other
+    request on the single async event loop under fleet load.
 
     Ensures:
         - creates the Notification row; marks it 'delivered' when is_connected
@@ -551,6 +559,7 @@ def _persist_notification_sync(
 
     Raises:
         - propagates DB errors to the caller (handled there as non-fatal)
+
     """
     with get_db() as session:
         repo = NotificationRepository( session )
@@ -579,8 +588,7 @@ def _persist_notification_sync(
 
 def _update_notification_state_sync( notification_id, state ):
     """
-    Synchronous notification state update — run OFF the event loop via
-    asyncio.to_thread (lever B, surgical pass 2).
+    Set a notification's state synchronously, off the event loop via asyncio.to_thread.
 
     Requires:
         - notification_id is a UUID string
@@ -591,6 +599,7 @@ def _update_notification_state_sync( notification_id, state ):
 
     Raises:
         - propagates DB errors to the caller (handled there as non-fatal)
+
     """
     with get_db() as session:
         repo = NotificationRepository( session )
@@ -604,13 +613,7 @@ def _persist_response_required_sync(
     sender_persona=None, sender_icon=None
 ):
     """
-    Synchronous DB persist for a response-required notification — run OFF the
-    event loop via asyncio.to_thread (lever B, surgical pass 2).
-
-    This is the blocking-ask hot path: every ask_yes_no / ask_multiple_choice /
-    converse from every fleet session lands here. The inline `with get_db()`
-    version blocked the shared :7999 event loop on session checkout + two
-    round-trips per ask (the FM-7 black-hole).
+    Persist a response-required notification synchronously, off the event loop.
 
     Requires:
         - target_system_id is a UUID string
@@ -624,6 +627,11 @@ def _persist_response_required_sync(
 
     Raises:
         - propagates DB errors to the caller
+
+    This is the blocking-ask hot path. Every ask_yes_no, ask_multiple_choice and converse
+    call from every fleet session lands here. An inline `with get_db()` would block the shared
+    event loop on session checkout and two round-trips per ask. It runs via asyncio.to_thread.
+
     """
     with get_db() as session:
         repo = NotificationRepository( session )
@@ -660,12 +668,7 @@ def _persist_response_required_sync(
 
 def _mark_notification_expired_sync( notification_id ):
     """
-    Synchronous expiry mark for a timed-out response-required notification —
-    run OFF the event loop via asyncio.to_thread (lever B, surgical pass 2).
-
-    Fires inside the SSE event_generator on ask timeout; the inline version
-    blocked the event loop for a DB write at exactly the moment a fleet of
-    asks expires together.
+    Mark a timed-out response-required notification expired, off the event loop.
 
     Requires:
         - notification_id is a UUID string
@@ -675,6 +678,11 @@ def _mark_notification_expired_sync( notification_id ):
 
     Raises:
         - propagates DB errors to the caller
+
+    It fires inside the SSE event_generator on ask timeout, through asyncio.to_thread.
+    An inline version would block the event loop for a DB write just when a fleet of asks
+    expires together.
+
     """
     with get_db() as session:
         repo = NotificationRepository( session )
@@ -697,9 +705,7 @@ def _mark_notification_expired_sync( notification_id ):
 
 def _submit_response_sync( notification_id, response_value, answered_by=None ):
     """
-    Synchronous DB read/validate/update for a notification response — run OFF
-    the event loop via asyncio.to_thread (lever B, surgical pass 2). Fires per
-    ask answer.
+    Read, validate and update a notification response synchronously, off the event loop.
 
     Requires:
         - notification_id is a UUID string
@@ -709,18 +715,20 @@ def _submit_response_sync( notification_id, response_value, answered_by=None ):
         - validates notification exists, is unanswered, and is within the grace
           period when expired
         - persists the response (wrapping plain strings as {value, source}), with the
-          server's `answered_by` stamped into it when one is passed (row e20e249a)
+          server's `answered_by` stamped into it when one is passed
         - returns ( recipient_id, job_id ) for the WebSocket broadcast
 
     Raises:
         - HTTPException 422 if notification_id is not a well-formed UUID. This
-          case used to be a 500 — a client error reported as a server error —
+          case used to be a 500, a client error reported as a server error,
           and is the reason the parse now happens before the DB is opened.
         - HTTPException 404 if the notification does not exist
         - HTTPException 400 if already responded / grace period exceeded
-        - HTTPException 500 if the response update fails. STILL 500, deliberately:
-          a genuine server failure must keep saying so, or "stop returning 500"
-          is satisfied by never returning 500.
+        - HTTPException 500 if the response update fails. A genuine server failure
+          must keep saying so, or "stop returning 500" is satisfied by never returning 500.
+
+    It runs through asyncio.to_thread and fires once per ask answer.
+
     """
     # 🔴 PARSE BEFORE THE DB, AND SAY WHO BROKE. A malformed id used to raise
     # ValueError from `uuid.UUID()` INSIDE the handler body; it crossed
@@ -819,11 +827,11 @@ def _submit_response_sync( notification_id, response_value, answered_by=None ):
 
 def _mark_answer_delivered_sync( notification_id ):
     """
-    Stamp answer_delivered_at on a notification — run OFF the event loop via
-    asyncio.to_thread. The router's arm of the three RECEIPT-gated setters (§4.3):
-    setter (a) calls this when the live SSE waiter is woken (the asking coroutine
-    consumed the value). Setters (b)/(c) share the same repo write via the
-    answers-owed ack endpoint.
+    Stamp answer_delivered_at on a notification, off the event loop via asyncio.to_thread.
+
+    This is the router's arm of the three receipt-gated setters. Setter (a) calls it when the
+    live SSE waiter is woken, because the asking coroutine consumed the value. Setters (b)
+    and (c) share the same repo write through the answers-owed ack endpoint.
 
     Requires:
         - notification_id is a UUID string
@@ -833,6 +841,7 @@ def _mark_answer_delivered_sync( notification_id ):
 
     Raises:
         - propagates DB errors to the caller (handled there as non-fatal)
+
     """
     with get_db() as session:
         repo = NotificationRepository( session )
@@ -875,19 +884,8 @@ async def notify_user(
     """
     Claude Code notification endpoint for user communication.
 
-    Supports both fire-and-forget notifications (Phase 1) and response-required
-    notifications with SSE blocking (Phase 2.1).
-
-    **Fire-and-Forget Mode** (response_requested=False):
-    - Queues notification for WebSocket delivery
-    - Returns immediately without blocking
-    - Existing behavior unchanged
-
-    **Response-Required Mode** (response_requested=True):
-    - Creates notification in database with expiration
-    - Pushes to WebSocket for UI rendering
-    - Returns SSE stream that blocks until response/timeout
-    - Supports offline detection (immediate default return)
+    Supports both fire-and-forget notifications and response-required
+    notifications with SSE blocking.
 
     Requires:
         - Valid API key (X-API-Key) or Bearer JWT (validated by require_api_key_or_jwt)
@@ -901,7 +899,8 @@ async def notify_user(
         - Validates all input parameters against allowed values
         - Converts target email to system ID for routing
         - Fire-and-forget: Queues notification and returns immediately
-        - Response-required: Creates database record, returns SSE stream
+        - Response-required: Creates database record with expiration, pushes to WebSocket
+          for UI rendering, returns SSE stream that blocks until response or timeout
         - Offline detection: Returns default immediately if user not connected
         - Logs all notification attempts and results
 
@@ -913,18 +912,15 @@ async def notify_user(
 
     Args:
         authenticated_user_id: Service account user ID (from API key validation)
-        message: The notification message text
-        type: Type of notification (task, progress, alert, custom)
-        priority: Priority level (low, medium, high, urgent)
-        target_user: Target user email address
-        response_requested: Whether notification requires response (Phase 2.1)
-        response_type: Response type (yes_no, open_ended) for Phase 2.1
-        timeout_seconds: Timeout for response-required notifications (Phase 2.1)
-        response_default: Default value for timeout/offline (Phase 2.1)
-        title: Terse technical title for voice-first UX (Phase 2.1)
+        message, type, priority, target_user: The notification text, type, priority and target email
+        response_requested: Whether the notification requires a response
+        response_type, timeout_seconds, response_default: Response type, timeout, and the
+            default used on timeout or when the user is offline
+        title: Terse technical title for voice-first UX
 
     Returns:
-        dict (fire-and-forget) or StreamingResponse (SSE for response-required)
+        dict (fire-and-forget, response_requested=False) or StreamingResponse (SSE, response-required)
+
     """
     # Auth validation handled by require_api_key_or_jwt middleware (API key or Bearer JWT)
     # authenticated_user_id contains the validated user ID
@@ -1729,17 +1725,17 @@ async def submit_notification_response(
     x_api_key: Annotated[ str | None, Header() ] = None,
 ):
     """
-    Submit user response to a response-required notification (Phase 2.1).
+    Submit the user's response to a response-required notification.
 
-    This endpoint is called by the client UI when the user responds to a notification
-    (clicks Yes/No button, submits text input, etc.). It updates the database,
-    signals the waiting SSE stream, and broadcasts WebSocket events.
+    The client UI calls this when the user responds, by clicking Yes/No or submitting
+    text input. It updates the database, signals the waiting SSE stream, and broadcasts
+    WebSocket events.
 
     Requires:
         - notification_id is a valid UUID of an existing notification
         - response_value is a dict with response data
         - Notification exists in database with state='delivered'
-        - the caller authenticated with X-API-Key or a Bearer JWT (row e20e249a)
+        - the caller authenticated with X-API-Key or a Bearer JWT
 
     Ensures:
         - Updates database with response_value and state='responded'
@@ -1748,10 +1744,9 @@ async def submit_notification_response(
         - Signals waiting SSE stream via asyncio.Event
         - Broadcasts notification_responded WebSocket event
         - Accepts responses within the grace period after expiration. The window is
-          the `notification grace period seconds` INI key (300s / 5 min as shipped),
-          NOT the 30s this line claimed until 2026-09-05. Measured that day: a press
-          36.6s past expiry was accepted with 200. The key is named rather than its
-          value repeated, so re-tuning the window cannot make this sentence wrong again.
+          the `notification grace period seconds` INI key, not a fixed 30s. The key is
+          named rather than its value repeated, so re-tuning the window cannot make this
+          sentence wrong
         - Returns success confirmation
 
     Raises:
@@ -1766,6 +1761,7 @@ async def submit_notification_response(
 
     Returns:
         dict: Success status and response details
+
     """
     try:
         # Extract fields from request body
@@ -1965,14 +1961,14 @@ def _project_undelivered_notification( n ) -> dict:
 # FastAPI does not capture "undelivered" as a {user_id} path parameter.
 def _undelivered_max_age_hours() -> int:
     """
-    Resolve the undelivered-drain age cap (hours) from config.
+    Resolve the undelivered-drain age cap, in hours, from config.
 
-    Storm guard (2026-06-03 incident): the durable-outbox drain must not replay
-    stale rows on reconnect. The cap bounds how far back the pull-able inbox
-    reaches. Runtime-tunable via the INI key.
+    The durable-outbox drain must not replay stale rows on reconnect. The cap bounds how far
+    back the pull-able inbox reaches. It is runtime-tunable through the INI key.
 
     Ensures:
         - returns the configured int cap (default 24 hours)
+
     """
     import lupin_app.main as main_module
     return main_module.config_mgr.get( "notification undelivered max age hours", default=24, return_type="int" )
@@ -2032,10 +2028,7 @@ async def get_undelivered_notifications(
 
 def _project_owed_answer( n, requesting_session_hash8=None ):
     """
-    Project an owed-answer Notification row to the replayed-answer envelope (§4.3,
-    rulings 6/7). Every replayed answer carries its ORIGINAL question text plus its
-    responded_at — a bare answer with no question attached is worse than nothing
-    (the model would bind it to whatever it is doing now).
+    Project an owed-answer Notification row to the replayed-answer envelope.
 
     Requires:
         - n is an owed Notification row (responded, not yet handed back)
@@ -2043,7 +2036,12 @@ def _project_owed_answer( n, requesting_session_hash8=None ):
     Ensures:
         - `question` is the original ask text; `response_value` is the human's answer
         - `from_earlier_session` is True iff the asking session differs from the
-          requesting one (ruling 6 — delivered, but FLAGGED as an earlier session's)
+          requesting one (delivered, but flagged as an earlier session's)
+
+    Every replayed answer carries its original question text and its responded_at. A bare
+    answer with no question attached is worse than nothing, because the model would bind it
+    to whatever it is doing now.
+
     """
     asker_hash8 = n.sender_id.split( "#", 1 )[ 1 ].strip() if n.sender_id and "#" in n.sender_id else None
     from_earlier_session = bool( requesting_session_hash8 and asker_hash8 and asker_hash8 != requesting_session_hash8 )
@@ -2076,40 +2074,35 @@ async def get_answers_owed(
     limit: int = Query(100, description="Maximum owed answers to return.")
 ):
     """
-    Pull the answers owed to `persona` — answered asks not yet handed back (§4.4).
+    Pull the answers owed to `persona`, meaning answered asks not yet handed back.
 
     Requires:
         - a valid API key or Bearer JWT (X-API-Key lane resolves the human owner —
-          the row's recipient_id; NOT the listener's ambient service-account id.
-          D-V1 is the negative control that proves this on real credentials)
+          the row's recipient_id; not the listener's ambient service-account id.
+          A negative-control test proves this on real credentials)
         - persona is a non-empty retrieval key
 
     Ensures:
         - returns owed envelopes (question + answer + responded_at + flag), oldest
           answer first (ordered/cursored on responded_at)
-        - SERVING does NOT set answer_delivered_at — only /ack does (ack-on-consume)
+        - serving does not set answer_delivered_at — only /ack does (ack-on-consume)
 
     Raises:
         - HTTPException 500 on query failure
 
-    ⚠️ AUTHENTICATED, NOT AUTHORIZED — a RULED design decision, not an oversight
-    (Rick, 2026-08-01: "let's leave it where it is, this is one trusted fleet…
-    let's make sure we document this behavior"). This endpoint checks that the
-    caller holds a valid credential; it does NOT check that the credential
-    belongs to `persona`. Any valid key can pull any persona's owed answers.
+    The endpoint is authenticated, not authorized. This is a ruled design choice. It checks that the caller holds a
+    valid credential. It does not check that the credential belongs to `persona`. Any valid key
+    can pull any persona's owed answers.
 
-    This is one property read two ways. `persona` is matched ALONE (ruling 6)
-    precisely so a returning session can pull what accumulated in its absence —
-    the caller's own identity is never a parameter of the query. That is what
-    makes the service-account lane failure unexpressible rather than merely
-    unused (the D-V1 negative control), and it is the same reason the endpoint
-    cannot tell one caller's request from another's.
+    This is one property read two ways. `persona` is matched alone, so a returning session can
+    pull what accumulated in its absence. The caller's own identity is never a parameter of the
+    query. That makes the service-account lane failure unexpressible and not merely unused. It
+    is also why the endpoint cannot tell one caller's request from another's.
 
-    The trust boundary, stated so a later reader need not re-derive it: every
-    credential here belongs to a session in this fleet. If that stops being true
-    — an outside integration, a shared key, a key that outlives its seat — this
-    becomes a real hole, and closing it means binding keys to personas, which
-    they are not today. Filed and closed as `fd245188`.
+    The trust boundary: every credential here belongs to a session in this fleet. If that stops
+    being true, because of an outside integration, a shared key or a key that outlives its seat,
+    this becomes a real hole. Closing it means binding keys to personas, which they are not today.
+
     """
     try:
         max_age_hours = _undelivered_max_age_hours()
@@ -2153,7 +2146,7 @@ async def ack_answer_owed(
     request_body: Dict[str, Any] = Body(..., description="Request body with notification_id")
 ):
     """
-    Ack an owed answer as consumed — the pull/re-attach receipt (§4.3 setters b/c).
+    Ack an owed answer as consumed, the pull and re-attach receipt.
 
     Requires:
         - a valid API key or Bearer JWT
@@ -2161,12 +2154,13 @@ async def ack_answer_owed(
 
     Ensures:
         - answer_delivered_at is stamped so catch-up will not re-surface the row
-        - the row is NOT deleted (ruling 2)
+        - the row is not deleted
 
     Raises:
         - HTTPException 422 if notification_id is missing
         - HTTPException 404 if the notification does not exist
         - HTTPException 500 on update failure
+
     """
     notification_id = request_body.get( "notification_id" )
     if not notification_id:
@@ -2203,7 +2197,7 @@ async def get_notification_response(
     notification_id: str
 ):
     """
-    Read one notification's response state — the re-attach poll target (§4.5 step 2).
+    Read one notification's response state, the re-attach poll target.
 
     Requires:
         - a valid API key or Bearer JWT
@@ -2211,13 +2205,14 @@ async def get_notification_response(
 
     Ensures:
         - returns { state, response_value, responded_at } (responded_at ISO or None)
-        - PURE READ — never sets answer_delivered_at (serving is not a receipt); the
+        - pure read: never sets answer_delivered_at (serving is not a receipt); the
           caller decides landed-ness on `responded_at IS NOT NULL` and acks separately
         - 404 when the notification does not exist
 
     Raises:
         - HTTPException 404 if the notification does not exist
         - HTTPException 500 on read failure
+
     """
     try:
         def _fetch_response_sync():
@@ -2259,10 +2254,9 @@ async def dismiss_undelivered_notifications(
     """
     Soft-dismiss the authenticated user's undelivered (missed-while-offline) notifications.
 
-    Backs the "reset" button beside the "N missed while away" indicator. Sets is_hidden=True
-    on every row the badge counts (mirroring the count query, including the 24h age cap) so
-    the badge zeroes; notification state is left untouched so the never-delivered audit trail
-    survives. Reversible by flipping is_hidden back.
+    Backs the reset button beside the "N missed while away" indicator. It sets is_hidden=True
+    on every row the badge counts, mirroring the count query's 24h age cap, so the badge zeroes.
+    Notification state is untouched, so the audit trail survives. Flipping is_hidden back reverses it.
 
     Requires:
         - a valid API key or Bearer JWT (authenticated_user_id is the recipient's system UUID)
@@ -2275,6 +2269,7 @@ async def dismiss_undelivered_notifications(
     Raises:
         - HTTPException 400 if authenticated_user_id is not a valid UUID
         - HTTPException 500 on update failure
+
     """
     try:
         recipient_uuid = uuid.UUID( authenticated_user_id )
@@ -2306,12 +2301,15 @@ async def dismiss_undelivered_notifications(
 
 
 class PredictionVoteRequest( BaseModel ):
-    """Body for POST /api/notify/prediction-vote/{notification_id}.
+    """
+    Body for POST /api/notify/prediction-vote/{notification_id}.
 
     The client supplies the hint context it is voting on. `question` and `response_type`
-    are OPTIONAL because the endpoint authoritatively resolves them from the persisted
-    notification when the client omits them (the notification.message IS persisted; the
-    prediction hint's predicted_value is NOT, so the client must supply predicted_value)."""
+    are optional. The endpoint resolves them from the persisted notification when the client
+    omits them, because notification.message is persisted. The prediction hint's
+    predicted_value is not persisted, so the client must supply predicted_value.
+
+    """
     vote            : Literal[ "up", "down" ]
     predicted_value : Any = None
     question        : Optional[ str ] = None
@@ -2397,17 +2395,17 @@ async def vote_on_prediction_hint(
 
 def _project_broadcast_ack( n ) -> dict:
     """
-    Project one saved `commons_broadcast_ack` row to the per-broadcast read's wire
-    shape (row 4f320c27 S4).
+    Project one saved `commons_broadcast_ack` row to the per-broadcast read's wire shape.
 
-    The identity fields are lifted OUT of `payload` and onto the envelope, because a
-    consumer folding a tally should not have to know that a broadcast_id lives one
-    level down. `payload` itself is NOT echoed — everything it carries is named here,
-    and a second copy under a different key is a second thing to keep in step.
+    The identity fields are lifted out of `payload` and onto the envelope. A consumer
+    folding a tally should not have to know that a broadcast_id lives one level down.
+    `payload` itself is not echoed, because everything it carries is named here. A second
+    copy under a different key is a second thing to keep in step.
 
-    A row whose payload is NULL still projects: every identity field comes back None
-    rather than raising. That row is a pre-S3 ack or a corrupted write, and the honest
-    answer is an ack with no attribution, not a 500 on the whole broadcast.
+    A row whose payload is NULL still projects. Every identity field comes back None instead of
+    raising. That row is an old ack or a corrupted write. The honest answer is an ack with no
+    attribution, not a 500 on the whole broadcast.
+
     """
     payload = n.payload or { }
     return {
@@ -2448,7 +2446,7 @@ async def get_broadcast_acks(
 
     Requires:
         - a valid API key or Bearer JWT; the caller's system UUID is the scope, and
-          there is NO user id in the path — a seat cannot read another account's acks
+          there is no user id in the path — a seat cannot read another account's acks
 
     Ensures:
         - returns one projected ack per acking session, newest first
@@ -2460,6 +2458,7 @@ async def get_broadcast_acks(
         - HTTPException 400 if authenticated_user_id is not a valid UUID
         - HTTPException 500 on query failure — never a silent empty list, which would
           read to a caller as "nobody acked"
+
     """
     try:
         recipient_uuid = uuid.UUID( authenticated_user_id )
@@ -2530,9 +2529,9 @@ async def get_user_notifications(
 
     Ensures:
         - Retrieves the user's notifications, filtered by played state and by
-          priorities BEFORE the limit is applied — so a page asked for low/medium is
-          never filled with urgent/high items it then has to discard (row e25f8868)
-        - Orders them in QUEUE order by default, which puts urgent and high FIRST
+          priorities before the limit is applied — so a page asked for low/medium is
+          never filled with urgent/high items it then has to discard
+        - Orders them in queue order by default, which puts urgent and high first
           whatever their age; sort=oldest orders by creation time instead
         - Limits results to the specified number if provided
         - Includes metadata about query parameters and results
@@ -2544,6 +2543,7 @@ async def get_user_notifications(
 
     Returns:
         dict: User notifications with metadata
+
     """
     wanted = None
     if priorities is not None:
@@ -2766,8 +2766,8 @@ async def bulk_delete_notifications(
     """
     Bulk delete notifications for a user within the specified time window.
 
-    This endpoint is used by the "Clear All" button in the Notifications UI.
-    It deletes all notifications matching the current history filter.
+    The "Clear All" button in the Notifications UI uses this endpoint. It deletes all
+    notifications matching the current history filter.
 
     Requires:
         - user_email is a valid registered email address
@@ -2775,8 +2775,8 @@ async def bulk_delete_notifications(
 
     Ensures:
         - All notifications matching user and time filter are permanently deleted
-        - When exclude_own_jobs is True, only deletes notifications NOT triggered by
-          user's own jobs (and NOT system notifications with NULL job_id)
+        - When exclude_own_jobs is True, only deletes notifications not triggered by
+          user's own jobs (and not system notifications with NULL job_id)
         - Returns count of deleted notifications
 
     Raises:
@@ -2791,6 +2791,7 @@ async def bulk_delete_notifications(
 
     Returns:
         JSON with deleted count and status
+
     """
     try:
         # Validate hours if provided
@@ -3077,8 +3078,8 @@ async def delete_sender_conversation( sender_id: str, user_email: str ):
     """
     Delete all notifications in a conversation between sender and recipient.
 
-    Allows users to delete an entire conversation (all notifications from a specific
-    sender) rather than deleting individual notifications.
+    It lets users delete an entire conversation, meaning all notifications from a specific
+    sender, rather than deleting individual notifications.
 
     Requires:
         - sender_id is a valid sender identifier (e.g., claude.code@lupin.deepily.ai)
@@ -3086,7 +3087,7 @@ async def delete_sender_conversation( sender_id: str, user_email: str ):
         - User exists in auth database
 
     Ensures:
-        - All notifications matching sender_id AND recipient deleted
+        - All notifications matching sender_id and recipient deleted
         - Returns count of deleted notifications
         - Returns 404 if user not found (not if conversation empty)
 
@@ -3100,6 +3101,7 @@ async def delete_sender_conversation( sender_id: str, user_email: str ):
 
     Returns:
         JSON with deleted count
+
     """
     try:
         # Look up user to get UUID
@@ -3453,18 +3455,10 @@ async def get_visible_senders(
     exclude_own_jobs: bool = Query( False, description="Exclude notifications from user's own jobs (admin 'not mine' filter)" )
 ):
     """
-    Get list of senders with visible notifications for a user.
+    Get the list of senders with visible notifications for a user.
 
-    Enhanced version of get_senders that respects is_hidden flag and
-    includes new_count for unread notification badges.
-
-    🔴 THE BODY RUNS OFF THE EVENT LOOP (row 41da77bb). Every step of it blocks — the
-    database query and the bridge-file reads — and this server runs ONE uvicorn worker
-    (main.py `workers=1`). Run inline in an `async def`, an unwindowed call held the
-    only event loop for 51.9 s on 2026-09-10 and `/health` waited 40 s behind it, so
-    every notify, DM and task create in the fleet stalled. It stays `async def` and
-    hands the body to the thread pool, which frees the loop and keeps every existing
-    `await get_visible_senders( ... )` caller working unchanged.
+    It extends get_senders. It respects the is_hidden flag and includes new_count for
+    unread notification badges.
 
     Requires:
         - user_email is a valid registered email address
@@ -3487,17 +3481,26 @@ async def get_visible_senders(
 
     Returns:
         List of sender activity summaries with counts
+
+    The body runs off the event loop. Every step blocks, both the database query and the
+    bridge-file reads, and this server runs one uvicorn worker (main.py `workers=1`). Run inline
+    in an `async def`, a long unwindowed call would hold the only event loop. `/health` would
+    wait behind it, and every notify, DM and task create in the fleet would stall. The function
+    stays `async def` and hands the body to the thread pool. That frees the loop and keeps every
+    existing `await get_visible_senders( ... )` caller working unchanged.
+
     """
     return await run_in_threadpool( _visible_senders_sync, user_email, hours, include_hidden, exclude_own_jobs )
 
 
 def _sender_session_suffix( resolved_sender_id ):
     """
-    The session part of a sender id ('claude.code@lupin.deepily.ai#c7333045' → 'c7333045').
+    The session part of a sender id: 'claude.code@lupin.deepily.ai#<hash>' gives '<hash>'.
 
     Ensures:
         - returns the stripped text after the first '#'
         - returns None when the id is empty, has no '#', or has nothing after it
+
     """
     if not resolved_sender_id or "#" not in resolved_sender_id:
         return None
@@ -3506,16 +3509,7 @@ def _sender_session_suffix( resolved_sender_id ):
 
 def _stamp_sender_personas( activities ):
     """
-    Stamp voice_persona and manager_persona on every activity from ONE bridge scan.
-
-    🔴 WHY NOT `_voice_persona_for_sender_id` / `_manager_persona_for_sender_id` PER SENDER
-    (row 41da77bb). Each of those scans the whole sessions directory, 2-3 scans per
-    sender. Measured 2026-09-10: 7,475 entries (6,866 of them cc-listener-* leftovers),
-    3.92 ms a scan, 5,180 senders ≈ 40.6 s of a 51.9 s call. This builds the index once
-    and resolves every sender against it, with the same match rule
-    (`session_bridge.find_in_bridge_index`) and the same badge shape
-    (`voice_persona._manager_badge_for`), so the records it produces are the ones the
-    per-sender helpers produce.
+    Stamp voice_persona and manager_persona on every activity from one bridge scan.
 
     Requires:
         - activities is a list of dicts, each with an optional "sender_id"
@@ -3526,6 +3520,14 @@ def _stamp_sender_personas( activities ):
         - both fields are None when the session_bridge helpers could not be imported
         - manager_persona is None when the voice_persona router could not be imported
         - never raises for a sender whose bridge is missing or malformed
+
+    It does not call `_voice_persona_for_sender_id` or `_manager_persona_for_sender_id` per
+    sender. Each of those scans the whole sessions directory, two or three times per sender.
+    With thousands of senders and thousands of bridge entries, that cost most of a 50 s call.
+    This builds the index once and resolves every sender against it. It uses the same match rule
+    (`session_bridge.find_in_bridge_index`) and the same badge shape
+    (`voice_persona._manager_badge_for`), so the records are the ones the per-sender helpers produce.
+
     """
     index_ready = _build_live_bridge_index is not None and _find_in_bridge_index is not None
     index       = _build_live_bridge_index() if ( activities and index_ready ) else []
@@ -3557,13 +3559,14 @@ def _voice_persona_from_bridge( entry ):
 
 def _manager_persona_from_bridge( index, entry ):
     """
-    The spawning manager's badge for an indexed bridge, as `_manager_persona_for_sender_id` returns it.
+    The manager badge for an indexed bridge, as `_manager_persona_for_sender_id` returns it.
 
     Ensures:
         - returns None for no entry, a root session (no `spawned_by`), a manager with no
           resolvable persona, or when the badge helper could not be imported
-        - resolves the manager against the SAME index (prefix-tolerant, as get_voice_persona is)
+        - resolves the manager against the same index (prefix-tolerant, as get_voice_persona is)
         - never raises
+
     """
     if entry is None or _manager_badge_for is None:
         return None
@@ -3797,10 +3800,7 @@ async def generate_session_gist(
     """
     Generate a 3-4 word gist from conversation messages and abstracts.
 
-    Uses the Gister class (LLM-powered) to extract a concise summary
-    from session notifications for semantic session naming. Abstracts
-    are prioritized as they contain richer semantic signal (plan details,
-    technical context, URLs).
+    It uses the LLM-powered Gister class to summarize session notifications into a name.
 
     Requires:
         - messages and/or abstracts are lists of strings
@@ -3819,6 +3819,10 @@ async def generate_session_gist(
 
     Returns:
         dict: {"gist": "short summary"}
+
+    Abstracts are prioritized because they carry richer semantic signal, such as plan details,
+    technical context and URLs.
+
     """
     from cosa.memory.gister import Gister
 

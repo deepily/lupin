@@ -9,12 +9,12 @@ The request and response models went with the handler, and so did the todo-queue
 dependency. A Pydantic model no route reads is a shape a caller can still find and
 reasonably believe in.
 
-⚠️ THIS ROUTER CARRIES NO PREFIX, which is why the decorator below takes the FULL path
-while the prefixed routers in this directory take only the tail. Copying the tail form
-here would mount the door at `/submit` and the real path would answer 404 — the one answer
-a tombstone must never give.
+This router carries no prefix. The decorator below therefore takes the full path, while
+the prefixed routers in this directory take only the tail. Copying the tail form here
+would mount the door at `/submit`, and the real path would answer 404. That is the one
+answer a tombstone must never give.
 
-What a caller sends instead:
+What a caller sends instead.
 
     POST /api/v2/submit
     {
@@ -82,7 +82,7 @@ async def submit_swe_team_task():
 
     Ensures:
         - never returns; raises HTTPException( 410 ) naming /api/v2/submit and the
-          REMOVE BY 2026-12-31 date
+          remove-by date
     """
     gone( "/api/swe-team/submit" )
 
