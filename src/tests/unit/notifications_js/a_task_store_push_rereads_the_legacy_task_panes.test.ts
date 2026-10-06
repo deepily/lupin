@@ -49,6 +49,9 @@ beforeEach( () => {
 } );
 
 type UI = Record<string, unknown> & {
+  startTaskListPolling: () => void;
+  stopTaskListPolling: () => void;
+  startFinishedTasksPolling: () => void;
   handleQueueMessage: ( event: { data: string } ) => void;
   refreshTaskList: () => Promise<void>;
   refreshFinishedTasks: () => Promise<void>;
@@ -99,6 +102,7 @@ function makeUI( opts: { listPolling?: boolean; finishedPolling?: boolean; holdL
   ui.taskListPollIntervalHandle = opts.listPolling === false ? null : 1;
   ui._finishedTasksTimer        = opts.finishedPolling === false ? null : 1;
   ui._taskListFetchInFlight     = false;
+  ui.TASK_LIST_POLL_INTERVAL_MS = 60000;
   ui._finishedTasksFetchInFlight = false;
 
   ui.fetchTaskList = async () => {
@@ -253,4 +257,95 @@ test( "a finished-tasks read that fails on a push is logged and does not throw i
   assert.equal( errors[ 0 ]![ 0 ], "task_store_changed: finished tasks refresh failed:" );
   assert.equal( ( errors[ 0 ]![ 1 ] as Error ).message, "boom from finished" );
   assert.equal( ui._finishedTasksFetchInFlight, false, "the in-flight guard was left set after the failure" );
+} );
+
+
+// ── the real start and stop methods set the signals the handler reads ─────────
+//
+// Every test above sets the two poll handles by hand. These three go through the methods
+// the page calls, so a start method that stopped setting its handle would be seen here.
+
+test( "after the real startTaskListPolling a push re-reads the list, and after stopTaskListPolling it does not", async () => {
+  const { ui, counts } = makeUI( { listPolling: false, finishedPolling: false } );
+  try {
+    ui.startTaskListPolling();
+    await settleAll();
+    assert.equal( counts.list, 1, "setup: starting the poll reads once" );
+
+    ui.handleQueueMessage( pushFrame() );
+    await settleAll();
+    assert.equal( counts.list, 2, "a push after the real start method did not re-read the list" );
+  } finally {
+    ui.stopTaskListPolling();
+  }
+  ui.handleQueueMessage( pushFrame() );
+  await settleAll();
+  assert.equal( counts.list, 2, "a push after the real stop method still re-read the list" );
+} );
+
+test( "after the real startFinishedTasksPolling a push re-reads the finished tasks", async () => {
+  const { ui, counts } = makeUI( { listPolling: false, finishedPolling: false } );
+  ui.handleQueueMessage( pushFrame() );
+  await settleAll();
+  assert.equal( counts.finished, 0, "control: before the pane is started a push reads nothing" );
+  try {
+    ui.startFinishedTasksPolling();
+    await settleAll();
+    assert.equal( counts.finished, 1, "setup: starting the pane reads once" );
+
+    ui.handleQueueMessage( pushFrame() );
+    await settleAll();
+    assert.equal( counts.finished, 2, "a push after the real start method did not re-read the finished tasks" );
+  } finally {
+    clearInterval( ui._finishedTasksTimer as ReturnType<typeof setInterval> );
+  }
+} );
+
+
+// ── a burst on the task list shares one read ──────────────────────────────────
+
+test( "three pushes during a task-list tick in flight cause exactly one more list read", async () => {
+  const { ui, counts, listGates } = makeUI( { holdList: true, finishedPolling: false } );
+  const tickRun = ui.refreshTaskList();
+  await settleAll();
+  assert.equal( counts.list, 1, "setup: the tick's read is in flight" );
+
+  ui.handleQueueMessage( pushFrame() );
+  ui.handleQueueMessage( pushFrame() );
+  ui.handleQueueMessage( pushFrame() );
+  await settleAll();
+  listGates[ 0 ]!();
+  await tickRun;
+  await settleAll();
+  assert.equal( counts.list, 2, "setup: one fresh read began after the tick ended" );
+  listGates[ 1 ]!();
+  await settleAll();
+  assert.equal( counts.list, 2, "the three pushes each started a read instead of sharing one" );
+  assert.equal( ui._taskListFetchInFlight, false );
+} );
+
+
+// ── a read that fails with a push pending does not leave the flag set ─────────
+
+test( "a finished-tasks read that throws with a push pending clears the flag and starts no further read", async () => {
+  const h = makeUI( { listPolling: false } );
+  const { ui, counts, errors } = h;
+  let fail!: ( e: Error ) => void;
+  ui.fetchFinishedTasks = () => {
+    counts.finished += 1;
+    return new Promise( ( _resolve, reject ) => { fail = reject; } );
+  };
+  const firstRead = ui.refreshFinishedTasks();
+  await settleAll();
+  ui.handleQueueMessage( pushFrame() );
+  await settleAll();
+  assert.equal( ui._finishedTasksPushPending, true, "setup: the push during the read was recorded" );
+
+  fail( new Error( "boom mid-read" ) );
+  await assert.rejects( firstRead, /boom mid-read/ );
+  await settleAll();
+  assert.equal( ui._finishedTasksPushPending, false, "the flag was left set after the read threw" );
+  assert.equal( ui._finishedTasksFetchInFlight, false );
+  assert.equal( counts.finished, 1, "a further read began after the failed one" );
+  assert.deepEqual( errors, [], "the failed read here was the test's own call, not the handler's" );
 } );
