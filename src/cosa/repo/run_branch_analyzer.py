@@ -1,63 +1,38 @@
 #!/usr/bin/env python3
 """
-Branch Analyzer - Command Line Interface
+Command line interface for the branch analyzer: compares two git branches.
 
-Professional command-line interface for analyzing git branch changes.
-Uses argparse for robust argument parsing and provides clear help text.
+Uses argparse, follows POSIX command-line conventions, and prints clear help and error messages. Exit codes: 0 success, 1 error, 2 invalid arguments.
+Supports console, JSON and markdown output, shows progress on long runs, and resolves HEAD.
 
-Design Principles:
-- Clear, helpful error messages
-- Follows POSIX command-line conventions
-- Exit codes: 0=success, 1=error, 2=invalid args
-- Progress feedback for long operations
-- Supports all output formats (console/JSON/markdown)
-- Automatic HEAD resolution to actual branch names
+Default behavior:
+    With no arguments it compares your current branch to main:
+    - `--repo-path` defaults to . (the current directory).
+    - `--base` defaults to main (configurable through the config file).
+    - `--head` defaults to HEAD, resolved to your current branch name.
 
-Default Behavior:
-    By default (no arguments), compares your current branch to main:
-    - --repo-path defaults to . (current directory)
-    - --base defaults to main (configurable via config file)
-    - --head defaults to HEAD (auto-resolves to your current branch name)
+Usage examples:
+    python -m cosa.repo.run_branch_analyzer.  Current branch against main.
+    python -m cosa.repo.run_branch_analyzer --repo-path cosa.  Another repo.
+    python -m cosa.repo.run_branch_analyzer --base develop --head feature-branch.  Two named branches.
+    python -m cosa.repo.run_branch_analyzer --config my_config.yaml.
+    python -m cosa.repo.run_branch_analyzer --output json > analysis.json.
+    python -m cosa.repo.run_branch_analyzer --save-output report.txt.
+    python -m cosa.repo.run_branch_analyzer --verbose.  Or --debug.
 
-Usage Examples:
-    # Basic usage - compare current branch to main
-    python -m cosa.repo.run_branch_analyzer
-
-    # Analyze different repository (e.g., COSA from Lupin src)
-    cd /path/to/lupin/src
-    python -m cosa.repo.run_branch_analyzer --repo-path cosa
-
-    # Compare specific branches
-    python -m cosa.repo.run_branch_analyzer --base develop --head feature-branch
-
-    # Custom config
-    python -m cosa.repo.run_branch_analyzer --config my_config.yaml
-
-    # JSON output
-    python -m cosa.repo.run_branch_analyzer --output json > analysis.json
-
-    # Save to file
-    python -m cosa.repo.run_branch_analyzer --save-output report.txt
-
-    # Verbose/debug modes
-    python -m cosa.repo.run_branch_analyzer --verbose
-    python -m cosa.repo.run_branch_analyzer --debug
-
-Command Line Arguments:
-    --repo-path PATH      Repository to analyze (default: . = current directory)
-    --base BRANCH         Base branch - what you're comparing FROM (default: main)
-    --head BRANCH         Head branch - what you're comparing TO (default: HEAD, auto-resolved)
-    --config FILE         Configuration file path
-    --output FORMAT       Output format: console, json, markdown (default: console)
-    --save-output FILE    Save output to file instead of stdout
-    --verbose, -v         Verbose output
-    --debug, -d           Debug mode (shows branch resolution details)
-    --help, -h            Show this help message
+Command line arguments:
+    `--repo-path PATH`    Repository to analyze (default: . = current directory).
+    `--base BRANCH`       Base branch, the one you compare from (default: main).
+    `--head BRANCH`       Head branch, the one you compare to (default: HEAD, auto-resolved).
+    `--config FILE`       Configuration file path.
+    `--output FORMAT`     Output format: console, json, markdown (default: console).
+    `--save-output FILE`  Save output to a file instead of stdout.
+    `--verbose`, `-v`     Verbose output.
+    `--debug`, `-d`       Debug mode (shows branch resolution details).
 
 Understanding HEAD:
-    When you use --head HEAD (the default), the tool automatically resolves it to your
-    actual branch name. For example, if you're on "wip-feature-x", the output will show
-    "wip-feature-x → main" (not "HEAD → main").
+    With `--head` HEAD, the default, the tool resolves HEAD to your actual branch name.
+    On branch "wip-feature-x" the output names that branch as the head, not "HEAD".
 """
 
 import sys

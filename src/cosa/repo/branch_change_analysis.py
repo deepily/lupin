@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Analyze git diff between current branch and main branch.
-Categorize changes by file type and separate code from comments for Python/JS.
+Analyze the git diff between the current branch and main, by file type.
+
+Categorize changes by file type and separate code from comments for Python and JavaScript.
 """
 
 import subprocess

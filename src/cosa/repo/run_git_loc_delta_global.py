@@ -1,50 +1,30 @@
 """
-Cross-repo daily LoC delta roll-up CLI.
+Cross-repo daily LoC delta roll-up CLI that computes every figure from git.
 
-Sister tool to `cosa.repo.run_git_loc_delta`. Where the per-branch tool answers
-"what did I do on each day of THIS branch in THIS repo," this tool answers
-"what did I do across N repos on each day in a date window."
+Sister tool to `cosa.repo.run_git_loc_delta`. The per-branch tool answers what happened on each day of one branch in one repo.
+This tool answers what happened across N repos on each day in a date window.
 
-**It computes from git.** For each repo it runs a date-windowed, branch-agnostic
-analysis (`git log --since --until --branches --no-merges`) and aggregates the
-results in memory.
+For each repo it runs a date-windowed, branch-agnostic analysis (`git log --since --until --branches --no-merges`) and aggregates the results in memory.
+Per-repo CSVs are an artifact, not an input; nothing here reads them.
 
-Rewritten 2026-07-13 (Mr. Radio 🦉) to close bugs `bbff93a3` + `37a8beeb`. Design +
-receipts: `src/rnd/v0.1.9/2026.07.13-loc-rollup-branch-agnostic-window-and-commit-dedup.md`.
+Why it computes from git: an earlier version read each repo's most recent `io/git-loc-delta/*-loc-delta.csv`.
+Session-end wrote that CSV in branch mode (`main..<branch>`), and the tool concatenated the files and date-filtered the rows. Two defects followed structurally.
 
-WHAT THIS TOOL USED TO DO, AND WHY IT WAS WRONG
------------------------------------------------
-It used to read each repo's most recent `io/git-loc-delta/*-loc-delta.csv` — a CSV
-written by session-end in **branch mode** (`main..<branch>`) — concatenate them, and
-date-filter the rows. Two defects followed structurally:
+1. Under-report. A date filter cannot add back commits the CSV never saw.
+   A commit reachable from `main` sits on the baseline side of `main..<branch>` and was uncountable, forever.
+   A fresh repo whose first-phase work went straight to main under-reported by 1,607 lines, 36% of its entire existence, silently.
 
-1. **Under-report** (`bbff93a3`). A date filter cannot add back commits the CSV never
-   saw. Any commit reachable from `main` sits on the BASELINE side of `main..<branch>`
-   and was uncountable, forever. google/skills-distillation — a fresh repo whose Phase-1
-   work went straight to main — under-reported by exactly 1,607 lines: 36% of the repo's
-   entire existence, silently.
+2. Commit double-count. The per-repo CSVs are tidy-long, one row per (date, file_type).
+   The `commits` column holds the unique SHAs touching that file type, so summing it across file types counts a commit touching .py and .md twice.
+   The CSV carries no SHA column, so this could not be de-duplicated afterward, and no regeneration of CSVs could have reached it.
 
-2. **Commit double-count** (`37a8beeb`). The per-repo CSVs are tidy-long, one row per
-   (date, file_type), and the `commits` column holds the unique SHAs touching THAT
-   file type. Summing that column across file types counts a commit touching .py + .md
-   twice. The CSV carries no SHA column, so this was un-dedupable post-hoc — no
-   regeneration of CSVs could have reached it.
+Computing from git closes both and removes the stale-CSV class. The old refresh-stale-CSVs step could never run.
+`--branch` and `--since` are mutually exclusive in argparse, so that step failed into staleness quietly.
 
-Computing from git closes both, and moots the entire stale-CSV class along with them
-(the workflow's "refresh stale CSVs" step could never run: `--branch` and `--since` are
-mutually exclusive in argparse — it failed INTO staleness, quietly).
-
-Per-repo CSVs are now an **artifact**, not an input. Nothing here reads them.
-
-THE ONE RULE FOR COMMIT COUNTS
-------------------------------
-A commit count is ONLY ever a `len()` over a SHA set, or a sum along an axis a SHA
-cannot straddle. A SHA has exactly one date and belongs to exactly one repo — so summing
-per-(repo, date) counts is safe. A SHA does NOT have one file_type. **Never sum commits
-across file types.** That was the bug.
-
-Author: Rachel 🕊️ (CoSA session `e13fed4f`, 2026-05-21) — original CSV-aggregating design.
-Rewritten to compute from git by Mr. Radio 🦉 (Lupin session `cec2ec5b`, 2026-07-13).
+The one rule for commit counts: a count is only ever a `len()` over a SHA set.
+The only other safe count is a sum along an axis a SHA cannot straddle.
+A SHA has exactly one date and belongs to exactly one repo, so summing per-(repo, date) counts is safe.
+A SHA does not have one file_type, so never sum commits across file types.
 """
 
 import argparse
@@ -78,21 +58,17 @@ def _normalize_window_bounds( since: Optional[str], until: Optional[str] ) -> Tu
     """
     Pin a bare YYYY-MM-DD window to full-day boundaries git cannot drift.
 
-    git's approxidate resolves a BARE date to that date AT THE CURRENT WALL-CLOCK
-    TIME, not midnight. So `--since=D --until=D` is an empty interval by
-    construction, and a bare `--since=D` silently drops a different set of the
-    day's early commits every hour the tool runs. The slash wrapper normalizes
-    for its own callers; a direct CLI caller of this aggregator bypasses it and
-    hits the raw defect — so pin here, where every one of this tool's git walks
-    reads the bound (row d5bfe470, item 2).
+    git resolves a bare date to that date at the current wall-clock time, not midnight, so `--since=D --until=D` is an empty interval.
+    A bare `--since=D` also drops a different set of the day's early commits every hour the tool runs.
+    The slash wrapper normalizes for its own callers; a direct caller of this aggregator bypasses it, so every git walk here reads the pinned bound.
 
     Requires:
         - since / until are date/datetime strings git accepts, or None
 
     Ensures:
         - None passes through unchanged
-        - a BARE ISO date becomes the START of its day for `since` (" 00:00:00")
-          and the END of its day for `until` (" 23:59:59") — the inclusive
+        - a bare ISO date becomes the start of its day for `since` (" 00:00:00")
+          and the end of its day for `until` (" 23:59:59"), the inclusive
           full-day window the caller meant
         - any value already carrying a time, or a relative expression like
           "1 day ago", passes through verbatim; it is already unambiguous and
@@ -120,14 +96,9 @@ def _largest_commit_for_repo(
     """
     Return the single largest-churn commit in the window for one repo, or None.
 
-    "Largest" is the commit with the greatest (added + deleted) summed over its
-    non-binary file rows. Reuses GitLogParser with the SAME selection flags the
-    analyzer walked, so this figure cannot skew from the totals it sits beside —
-    same repo, same window, same branch scope, same merge policy (row d5bfe470,
-    item 1). This is REPORTED, never used to filter: a squash-merge that folds
-    already-counted work into one dated commit is exactly what inflates a window,
-    and surfacing concentration lets the reader see it without guessing at the
-    commit's shape (remedy b was withdrawn for keying on shape).
+    Largest means the greatest added plus deleted lines summed over the commit's non-binary file rows.
+    It reuses GitLogParser with the analyzer's selection flags (same repo, window, branch scope and merge policy), so it cannot skew from the totals beside it.
+    It is reported, never used to filter. A squash-merge folding already-counted work into one commit inflates a window; surfacing concentration shows that without guessing at commit shape.
 
     Requires:
         - repo_path is an absolute path to a git repository with commits
@@ -186,7 +157,7 @@ def _commit_subject( repo_path: str, sha: str, timeout: int = 30 ) -> str:
 
     Best-effort annotation only: the subject lets a reader recognize a squash-merge
     by name on the largest-commit line. A failure here degrades to an empty subject,
-    never a crash — the churn figures are the load-bearing part.
+    never a crash, because the churn figures are what matter.
 
     Ensures:
         - Returns the commit subject stripped of surrounding whitespace on success
@@ -323,7 +294,7 @@ def create_parser() -> argparse.ArgumentParser:
 
 def _is_git_repo( repo_path: str ) -> bool:
     """
-    Return True iff `repo_path` is a git repository root OR a linked checkout.
+    Return True iff `repo_path` is a git repository root or a linked checkout.
 
     Ensures:
         - True iff `{repo_path}/.git` exists (dir for a normal clone, file for a worktree)
@@ -333,18 +304,11 @@ def _is_git_repo( repo_path: str ) -> bool:
 
 def _is_linked_checkout( repo_path: str ) -> bool:
     """
-    Return True iff `{repo_path}/.git` is a FILE rather than a directory.
+    Return True iff `{repo_path}/.git` is a file rather than a directory.
 
-    A `.git` FILE means this is a **linked checkout** — a worktree or submodule whose
-    real git dir lives elsewhere. By construction it **shares another repository's object
-    database and refs**, so it can NEVER be a distinct repo for roll-up purposes.
-
-    Credit: María 🌸 (PIP) — this is her GUARD 1, and it is NOT redundant with
-    `_git_common_dir`. It is a **pure filesystem test that needs no git command to
-    succeed**, so it holds exactly where the identity probe cannot: on an ORPHANED
-    worktree whose admin dir has been pruned, `git rev-parse --git-common-dir` FATALS.
-    The two are complements — identity is stronger wherever git answers; this one works
-    when git won't.
+    A `.git` file marks a linked checkout, a worktree or submodule whose real git dir lives elsewhere. It shares another repository's objects and refs, so it is never a distinct repo for roll-up purposes.
+    This is a pure filesystem test that needs no git command to succeed. It holds where `_git_common_dir` cannot: on an orphaned worktree whose admin dir was pruned, `git rev-parse --git-common-dir` fails fatally.
+    The two are complements: identity is stronger wherever git answers, and this test works when git will not.
 
     Ensures:
         - True iff `{repo_path}/.git` exists and is a regular file
@@ -357,28 +321,9 @@ def _git_common_dir( repo_path: str, timeout: int = 30 ) -> Optional[str]:
     """
     Return the absolute `--git-common-dir` for `repo_path`, or None if git can't say.
 
-    THIS IS THE REPO'S IDENTITY. Two paths that resolve to the same common dir share an
-    object database and a ref namespace — they are the SAME REPOSITORY seen from two
-    places, no matter how different the working directories look.
-
-    Why it matters (bug found 2026-07-13, after the first fix shipped): lupin has **13
-    worktrees**. A worktree's `.git` is a FILE, not a directory, and it shares the parent's
-    objects and refs — so a date-windowed, branch-agnostic walk inside a worktree returns
-    THE PARENT'S COMMITS, in full. Hand the roll-up `lupin` plus one worktree and it
-    reports lupin's work TWICE, under two different names:
-
-        --repos lupin                     -> +11,407 / 40 commits
-        --repos lupin lupin-wt-<lane>     -> +22,814 / 80 commits   (exactly doubled)
-
-    With all 13 worktrees discovered, lupin's LoC would be multiplied by ~14. That is the
-    same silent-confidently-wrong failure this module was rewritten to kill, inverted: I
-    would have traded an under-count for a far worse over-count.
-
-    Deduping on the common dir is a MECHANISM, not a special case. A "`.git` must be a
-    directory" check would also work for worktrees, but it is a rule about one filesystem
-    layout; this is a rule about repository IDENTITY, so it also catches symlinked roots,
-    bind-mounted duplicates, and `--repos . $(pwd)` — every way the same repo can arrive
-    twice under two names.
+    This is the repo's identity. Two paths with the same common dir share an object database and refs, so they are one repository seen from two places.
+    A worktree's `.git` is a file sharing its parent's objects, so a windowed walk inside it returns the parent's commits in full. Rostering both reports the work twice, and 13 worktrees would multiply it about 14 times.
+    Deduping on identity is a mechanism, not a special case. It also catches symlinked roots, bind-mounted duplicates and `--repos . $(pwd)`, which a rule about `.git` being a directory would miss.
 
     Ensures:
         - Returns an absolute path string, or None if the command fails
@@ -406,16 +351,9 @@ def _has_any_commits( repo_path: str, timeout: int = 30 ) -> bool:
     """
     Return True iff the repo has at least one commit on any ref.
 
-    A freshly-`git init`'d repo with zero commits is a legitimate roster entry — the
-    roll-up's whole subject is FRESH repos (bug bbff93a3), so one appearing before its
-    first commit must be reported as empty, not blow up the run. But `git log` on such a
-    repo exits 128 (`fatal: your current branch 'main' does not have any commits yet`),
-    which surfaces as a GitCommandError. Checking up front is cheaper and clearer than
-    pattern-matching that stderr string.
-
-    (Under `--branches` the empty repo happens to walk cleanly — zero refs, zero commits,
-    exit 0 — so this only ever bit the `--head-only` path. That asymmetry is exactly the
-    kind of thing that hides until someone runs the other flag.)
+    A freshly initialized repo with zero commits is a legitimate roster entry, so it must be reported as empty rather than fail the run.
+    `git log` on it exits 128 and surfaces as a GitCommandError; checking up front is cheaper and clearer than matching that stderr text.
+    Under `--branches` an empty repo walks cleanly, so this only matters on the `--head-only` path, an asymmetry that hides until someone runs the other flag.
 
     Ensures:
         - True iff `git rev-list -n 1 --all` names a commit
@@ -433,23 +371,20 @@ def _has_any_commits( repo_path: str, timeout: int = 30 ) -> bool:
 
 def _resolve_repo_names( repo_paths: List[str] ) -> Dict[str, str]:
     """
-    Map each repo path → a UNIQUE display name.
+    Map each repo path to a unique display name.
 
     Requires:
         - repo_paths are absolute
 
     Ensures:
-        - Returns { repo_path: repo_name } with NO duplicate names
-        - The common case is the basename (`.../projects/lupin` → `lupin`)
-        - On a basename COLLISION, both entries are qualified with their parent dir
+        - Returns { repo_path: repo_name } with no duplicate names
+        - The common case is the basename (`.../projects/lupin` becomes `lupin`)
+        - On a basename collision, both entries are qualified with their parent dir
           (`google/lupin` vs `acme/lupin`) so they stay distinguishable
 
-    Why this exists: repo identity keys the commit-count map. Two roster entries sharing a
-    basename (`google/foo` and `other/foo` — entirely possible, the roster is globbed
-    across grouping dirs) would collide on `(repo_name, date)` and the second would
-    OVERWRITE the first's commit count. That is a SILENT UNDERCOUNT — the exact failure
-    class this module was rewritten to kill (bbff93a3/37a8beeb). Caught in review of that
-    very rewrite: two repos named `lupin` reported 1 commit instead of 2.
+    Why this exists: repo identity keys the commit-count map.
+    Two roster entries sharing a basename (`google/foo` and `other/foo`, possible because the roster is globbed across grouping dirs) would collide on `(repo_name, date)`.
+    The second would overwrite the first's commit count, a silent undercount; two repos named `lupin` reported 1 commit instead of 2.
     """
     names:  Dict[str, str] = {}
     counts: Dict[str, int] = {}
@@ -489,16 +424,16 @@ def _analyze_repos(
     Ensures:
         - Returns ( combined_df, commits_by_repo_date, coverage_reports,
                     empty_repos, skipped_repos, largest_commit )
-        - `largest_commit` is the single highest-churn commit ACROSS all analyzed
+        - `largest_commit` is the single highest-churn commit across all analyzed
           repos in the window (see _largest_commit_for_repo), or None when the
-          window holds no commits. Reported alongside the total so a reader can
-          see concentration — one squashed PR folding already-counted work — with
-          no rule firing (row d5bfe470, item 1).
+          window holds no commits. It is reported alongside the total so a reader
+          can see concentration, such as one squashed PR folding already-counted
+          work, with no rule firing.
         - `combined_df` has CSV_COLUMNS; one row per (repo, date, file_type).
           `repo_date_commits` repeats the (repo, date) unique-commit count across that
-          group's file-type rows — see CSV_COLUMNS for why it must never be summed
+          group's file-type rows; see CSV_COLUMNS for why it must never be summed
           across them.
-        - `commits_by_repo_date` maps (repo, date) → unique commit count. THIS is the
+        - `commits_by_repo_date` maps (repo, date) to the unique commit count. This is the
           authoritative commit source; the DataFrame column is for the artifact only.
         - `empty_repos` are git repos with zero commits in the window (not an error)
         - `skipped_repos` are paths that are not git repositories (warned, not fatal)
@@ -677,19 +612,19 @@ def _build_aggregated_daily( df: pd.DataFrame, commits_by_repo_date: Dict[Tuple[
     Build the `daily` dict expected by plot_summary().
 
     Requires:
-        - commits_by_repo_date maps (repo, date) → unique commit count
+        - commits_by_repo_date maps (repo, date) to the unique commit count
 
     Ensures:
         - Returns dict[date_str -> {added, deleted, files_touched, commits,
                                    by_repo: [...], by_file_type: [...]}]
         - by_repo / by_file_type lists are sorted by `added` descending
-        - `commits` at BOTH the date level and the by_repo level come from
-          commits_by_repo_date — NEVER from summing the frame's per-file-type rows.
+        - `commits` at both the date level and the by_repo level come from
+          commits_by_repo_date, never from summing the frame's per-file-type rows.
           A SHA belongs to exactly one repo and has exactly one date, so summing
           per-(repo, date) counts across repos is exact. Summing across file_type
-          would double-count (bug 37a8beeb).
-        - by_file_type rows carry NO commits key: a commit is not decomposable by file
-          type, and offering the number is what invited the bug.
+          would double-count.
+        - by_file_type rows carry no commits key: a commit is not decomposable by file
+          type, and offering the number is what invited the double-count.
     """
     out = {}
     for date_str, group in df.groupby( "date" ):
@@ -732,7 +667,7 @@ def _build_summary( df: pd.DataFrame, commits_by_repo_date: Dict[Tuple[str, str]
     Ensures:
         - Returns {total_added, total_deleted, total_files, total_commits,
                    total_days, net, repos}
-        - total_commits sums commits_by_repo_date over ALL (repo, date) keys. Exact:
+        - total_commits sums commits_by_repo_date over all (repo, date) keys. Exact:
           each SHA contributes to exactly one (repo, date) bucket.
     """
     if df.empty:
@@ -1002,25 +937,20 @@ def main( argv: Optional[list] = None ) -> int:
 
 def quick_smoke_test() -> None:
     """
-    Quick smoke test for the global aggregator.
+    Quick smoke test for the global aggregator, run against real git repos in a tempdir.
 
-    Builds THREE REAL GIT REPOS in a tempdir (the old smoke test synthesized CSVs —
-    which is precisely how a tool that never touched git passed its own tests while
-    under-reporting by 36%):
-
-      - repo_main_only : ALL work committed straight to `main`, no WIP branch.
-                         This is the bbff93a3 regression case — the old CSV-reading
-                         path scored it ZERO.
-      - repo_branched  : work on `main`, THEN more on a WIP branch cut from it.
-                         Must report BOTH.
-      - repo_multitype : one commit touching .py AND .md. The 37a8beeb regression
-                         case — must count ONE commit, not two.
-      - not_a_repo     : a plain directory. Must be skipped, not fatal.
+    It builds real repos because the old smoke test synthesized CSVs, so a tool that never touched git passed it while under-reporting.
+    The repos are repo_main_only (all work straight on `main`) and repo_branched (work on `main`, then more on a branch cut from it).
+    The third is repo_multitype (one commit touching .py and .md); a fourth path, not_a_repo, is a plain directory.
 
     Ensures:
-        - Tests complete with ✓ or ✗ indicators
+        - Tests complete with pass or fail indicators
+        - repo_main_only is counted although it has no branch work, which the old CSV path scored as zero
+        - repo_branched reports both its main-side and branch-side work
+        - repo_multitype counts one commit, not two
+        - not_a_repo is skipped, not fatal
         - Uses cu.print_banner formatting
-        - Does NOT raise (catches all exceptions)
+        - Does not raise (catches all exceptions)
         - Cleans up tempfiles on exit
     """
     import shutil

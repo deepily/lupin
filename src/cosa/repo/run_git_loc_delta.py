@@ -2,10 +2,10 @@
 CLI entry point for the Daily LoC Delta tool.
 
 Usage:
-    python -m cosa.repo.run_git_loc_delta [OPTIONS]
+    python -m cosa.repo.run_git_loc_delta [`OPTIONS`]
 
 See `--help` for the full flag list. Mirrors the CLI shape of
-`run_branch_analyzer.py` (Reuse Map R4).
+`run_branch_analyzer.py`.
 
 Exit codes:
     0 — success
@@ -198,10 +198,9 @@ def _resolve_target_root( repo_path: str ) -> str:
     """
     Resolve the target repo's filesystem root.
 
-    Uses `git rev-parse --show-toplevel` so the resolved root always points
-    at the repo containing `repo_path`, regardless of which subdir the user
-    invoked from. Falls back to `os.path.abspath(repo_path)` if the path is
-    not a git repository (or if `git` is missing).
+    Uses `git rev-parse --show-toplevel`, so the root is the repo containing `repo_path`
+    whichever subdir the user invoked from. Falls back to `os.path.abspath(repo_path)`
+    when the path is not a git repository or `git` is missing.
 
     Requires:
         - repo_path is a string pointing at a directory (relative or absolute)
@@ -246,10 +245,9 @@ def _default_csv_path( mode: str, target_root: str, repo_name: str, branch: Opti
     """
     Return the default CSV save path under `{target_root}/io/git-loc-delta/`.
 
-    - **branch mode** → `{target_root}/io/git-loc-delta/{repo_name}-{branch-slug}-loc-delta.csv`
-      (stable per-branch filename; daily reruns overwrite in place until merge)
-    - **today / explicit mode** → `{target_root}/io/git-loc-delta/{YYYY-MM-DD}-loc-delta.csv`
-      (date-stamped; daily reruns produce a dated history)
+    Branch mode uses `{repo_name}-{branch-slug}-loc-delta.csv`, a stable per-branch name,
+    so daily reruns overwrite in place until merge. Today and explicit modes use
+    `{YYYY-MM-DD}-loc-delta.csv`, date-stamped so daily reruns build a dated history.
 
     Requires:
         - mode is one of: "today", "explicit", "branch"
@@ -276,11 +274,9 @@ def _default_plot_path( mode: str, target_root: str, repo_name: str, branch: Opt
     """
     Return the default PNG plot path under `{target_root}/io/git-delta-analysis/`.
 
-    Sister directory to `git-loc-delta/` — keeps raw CSV data separate from
-    derived plot artifacts per Rick's directive.
-
-    - **branch mode** → `{target_root}/io/git-delta-analysis/{repo_name}-{branch-slug}-plot.png`
-    - **explicit (--since/--until)** → `{target_root}/io/git-delta-analysis/{since}_to_{until_or_today}-plot.png`
+    Sister directory to `git-loc-delta/`, which keeps raw CSV data apart from derived plots.
+    Branch mode uses `{repo_name}-{branch-slug}-plot.png`. Explicit mode, from --since
+    and --until, uses `{since}_to_{until_or_today}-plot.png`.
 
     Requires:
         - mode is "branch" or "explicit" (never called for "today")
@@ -306,11 +302,9 @@ def _emit_plot( args, result: dict, mode: str, target_root: str, repo_name: str 
     Ensures:
         - Returns 0 on success, 1 on failure
         - --today mode emits a stderr warning and returns 0 (non-fatal skip)
+        - Fewer than 2 dates of daily data emits a stderr warning and returns 0 (non-fatal skip)
         - Output path resolved via --plot-output override or _default_plot_path
-
-    Failure modes (returns 1):
-        - daily has < 2 dates after analysis (multi-day required for plotting)
-        - matplotlib rendering raises (defensive; should not normally happen)
+        - Returns 1 only when matplotlib rendering raises (defensive; should not normally happen)
     """
     if mode == "today":
         print(
