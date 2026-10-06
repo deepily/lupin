@@ -193,7 +193,8 @@ def _derive_container_host_prefix( container_paths, host_root ):
         - the anchor is the config entry for this project set against
           `cu.get_project_root()`; stripping the shared trailing component gives the
           mapping, so it follows if the projects tree moves or is mounted elsewhere
-        - the config paths are container-side (/var/external-projects/...) and do not
+        - the mapping reconstructs the docker-compose bind-mount of the projects tree to
+          /var/external-projects; the config paths are container-side and do not
           exist on the host where the arbiter runs; reusing them unchanged reached none
           of the 45 holds measured
         - the trailing-component match is a hypothesis, not proof; every translated
@@ -1056,11 +1057,11 @@ def build_fleet_arbiter_job_factory(
 
 class FleetArbiterLoop:
     """
-    The :8001-side fleet-arbiter supervisor.
+    Runs one ArbiterConsumerJob at a time, relaunching a fresh one on each clean cap-exit.
 
-    Runs one ArbiterConsumerJob at a time on a background thread. It launches a fresh
-    job after each clean cap-exit, which fixes the 12h self-perpetuation gap. Runs are
-    sequential, so only one job runs at a time.
+    This is the :8001-side fleet-arbiter supervisor. It runs the job on a background
+    thread, and the relaunch fixes the 12h self-perpetuation gap. Runs are sequential,
+    so only one job runs at a time.
     """
 
     def __init__(

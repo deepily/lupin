@@ -246,7 +246,7 @@ def _build_context_pressure_loop( cfg, store, *, clock=None, log_fn=None ):
 
     Reads the budget-policy keys (1M window 0.50, 200K window 0.75, default 0.50,
     config-tunable) and the leaf knobs. The writer is read-only and takes no notify
-    or commons seam. The critical-level recommender stays separately gated.
+    or commons seam. The CRITICAL-level recommender stays separately gated.
 
     Requires:
         - cfg exposes .get( key, default, return_type ) (real or fake)
@@ -705,8 +705,8 @@ def _build_arbiter_outreach_hops( cfg, gateway ):   # pragma: no cover - literal
           persist=True, one forensic row). live_retry_fn is the raw persist=False
           transport: a re-announce re-sends the same text, so it must bypass
           content-dedup, and it skips the DB insert so retries never mint
-          duplicate rows. dm_push_fn is the register-question hop (None when
-          its gate is off)
+          duplicate rows. dm_push_fn is the hop that POSTs the DM body inline to
+          /api/dm/send (None when its gate is off)
     """
     from cosa.utils.config_loader import get_api_config, load_api_key
     from lupin_arbiter_app.arbiter_live_notify import (
