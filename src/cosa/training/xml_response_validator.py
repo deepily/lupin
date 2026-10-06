@@ -104,7 +104,7 @@ class XmlResponseValidator:
     
     def contains_correct_response_values( self, response: str, answer: str ) -> bool:
         """
-        Check if the most common formatting error (```xml) is hiding a correct <response>...</response>
+        Check whether a ```xml fence is hiding a correct <response>...</response> block.
         
         Requires:
             - response is a string

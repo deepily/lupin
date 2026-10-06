@@ -1357,10 +1357,9 @@ class XmlCoordinator:
 
 def quick_smoke_test():
     """
-    Critical smoke test for XmlCoordinator - validates functionality and detects v000 dependencies.
-    
-    This test is essential for v000 deprecation as XmlCoordinator has known v000 dependencies
-    that must be resolved before v000 agent removal.
+    Smoke test for XmlCoordinator that also scans the file for v000 references.
+
+    XmlCoordinator has known v000 dependencies that must be resolved before v000 agent removal.
     """
     import cosa.utils.util as du
     

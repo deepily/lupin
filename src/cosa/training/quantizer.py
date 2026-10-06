@@ -194,14 +194,12 @@ class Quantizer:
 
 def quick_smoke_test():
     """
-    LIGHTWEIGHT STRUCTURAL smoke test for Quantizer - validates architecture only.
-    
-    ⚠️  IMPORTANT: This test validates STRUCTURE ONLY, not runtime ML behavior.
-    ⚠️  This module requires significant GPU resources and models for actual operation.
-    ⚠️  This smoke test only verifies the module can be imported and basic structure accessed.
-    
-    This test is essential for v000 deprecation as quantizer.py is critical
-    for model quantization infrastructure, but too resource-intensive for full testing.
+    Lightweight smoke test for Quantizer that validates structure only.
+
+    It checks structure only, not runtime machine-learning behavior.
+    The module needs significant GPU resources and models to run for real.
+    This test only verifies that the module imports and its basic structure is reachable.
+    A full test of the quantization path is too resource-intensive to run here.
     """
     import cosa.utils.util as du
     

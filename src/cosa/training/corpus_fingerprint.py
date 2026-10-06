@@ -1,31 +1,30 @@
 """
 Corpus fingerprint — does this training artifact match the corpus on disk?
 
-The training script used to ask whether the dataset EXISTS. It never asked
-whether it is CURRENT, so a corpus edit followed by a training run trained on
-the previous corpus and looked completely normal doing it (row 11390b57).
+The training script used to check only that the dataset exists, never that it
+is current. A corpus edit followed by a training run trained on the previous
+corpus and looked completely normal doing it.
 
-The fix, as ruled: hash the corpus, stamp the hash into the artifact at
-generation, and REFUSE on mismatch. Refuse rather than silently regenerate —
+The fix is to hash the corpus, stamp the hash into the artifact at generation,
+and refuse on mismatch. It refuses rather than silently regenerating, because
 a run that quietly rebuilds can quietly rebuild from the wrong side.
 
 Two decisions worth knowing before reading the code:
 
-1. We hash the LOADER-VISIBLE projection, not raw bytes. Every corpus read in
-   xml_coordinator.py passes clean=True, skip_empty=True, skip_comments=True,
-   so a comment edit or a line-ending change cannot reach training. Hashing raw
-   bytes would refuse such a run, and a false refusal on a P1 path is how a
-   guard gets switched off. We reuse du.get_file_as_list rather than
-   reimplementing the skip rules — a second copy of "what counts as a comment"
-   drifts, and the hash then quietly stops matching the training input.
+1. The hash covers the loader-visible projection, not raw bytes. Every corpus
+   read in xml_coordinator.py passes clean=True, skip_empty=True and
+   skip_comments=True, so a comment edit or a line-ending change cannot reach
+   training. Hashing raw bytes would refuse such a run, and a false refusal on
+   a P1 path is how a guard gets switched off. It reuses du.get_file_as_list
+   rather than reimplementing the skip rules. A second copy of what counts as
+   a comment drifts, and the hash then stops matching the training input.
 
-2. We hash WHOLE files even where the caller later shuffles and slices. Two
-   call sites (xml_coordinator.py:360, 437) pass randomize=True and slice
-   [0:100], so a change past that cut cannot affect the artifact yet still
-   flips the hash. That is a false refusal, not a false pass, and it is
-   deliberate: narrowing the hash to the post-truncation set would couple it to
-   the shuffle seed and the slice width, which is far easier to get quietly
-   wrong.
+2. It hashes whole files even where the caller later shuffles and slices. Two
+   call sites in xml_coordinator.py pass randomize=True and slice [0:100], so
+   a change past that cut cannot affect the artifact yet still flips the hash.
+   That is a false refusal, not a false pass. Narrowing the hash to the
+   post-truncation set would couple it to the shuffle seed and the slice
+   width. That coupling is far easier to get quietly wrong.
 """
 import hashlib
 import json
@@ -73,7 +72,7 @@ EXIT_ARTIFACT_ABSENT = 2
 
 def _loader_visible_lines( abs_path: str ) -> list[str]:
     """
-    Read one corpus file exactly the way the training loader reads it.
+    Read one corpus file the same way the training loader reads it.
 
     Requires:
         - abs_path is a readable text file
@@ -233,12 +232,11 @@ def artifact_exists( path_prefix: str ) -> bool:
 
 def describe_mismatch( stamped: dict, current: dict ) -> str:
     """
-    Say WHICH SIDE is stale, not merely that the two sides differ.
+    Say which side is stale, not merely that the two sides differ.
 
-    A guard that reports "these differ" makes the reader supply a direction from
-    whatever they already believe — which is the error this row exists to stop.
-    So every line is labelled: ARTIFACT-SIDE is the corpus the dataset was built
-    from, CORPUS-SIDE is the corpus on disk right now.
+    A bare "these differ" makes the reader guess a direction from prior belief.
+    So every line is labelled: `ARTIFACT-SIDE` is the corpus the dataset was
+    built from, `CORPUS-SIDE` is the corpus on disk right now.
 
     Requires:
         - stamped and current are fingerprint dicts with corpus_hash and files
@@ -350,7 +348,7 @@ def main( argv: list[str] ) -> int:
 
     Requires:
         - argv names a sub-command, either "verify" or "stamp"
-        - argv may carry --project-root PATH; otherwise the project root is used
+        - argv may carry --project-root followed by a path; otherwise the project root is used
 
     Ensures:
         - "verify" prints the report and returns 0 proceed / 1 refuse /

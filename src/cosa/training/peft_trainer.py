@@ -317,7 +317,7 @@ class PeftTrainer:
 
     def _update_lora_env( self, env_file_path=None ):
         """
-        Update ~/.lora_env with the latest quantized model path for this model.
+        Write the latest quantized model path for this model into ~/.lora_env.
 
         Requires:
             - self.model_name is set
@@ -1138,7 +1138,7 @@ class PeftTrainer:
             - Loads and parses training/test data
             - Prints total row counts, effective sample counts
             - Prints per-command distribution with imbalance analysis
-            - Does NOT load any model or perform training
+            - Does not load any model or perform training
         """
         import re
 
@@ -1728,28 +1728,28 @@ class PeftTrainer:
     
     def get_prompt( self, instruction, input, output="" ):
         """
-        Formats a prompt for a given model based on instruction, input, and optional output.
-        
-        Preconditions:
+        Format a prompt for this model from an instruction, an input and an optional output.
+
+        Requires:
         - instruction and input must be valid strings.
         - self.model_name must be one of the supported model names.
-        
-        Postconditions:
+
+        Ensures:
         - A formatted prompt string is returned in the appropriate format for the model type.
         - If output is empty, the prompt is formatted for inference (generation).
         - If output is provided, the prompt is formatted for training.
-        
+
+        Raises:
+        - ValueError: If self.model_name is not one of the supported models.
+
         Parameters:
         - instruction (str): The instruction or task description.
         - input (str): The input data for the task.
         - output (str, optional): The expected output or response. Defaults to "".
-        
+
         Returns:
         - str: A formatted prompt string suitable for the specified model type.
-        
-        Raises:
-        - ValueError: If self.model_name is not one of the supported models.
-        
+
         Notes:
         - The prompt format is loaded from the model-specific configuration file
         - For some models, the closing tag is only included if output is provided
@@ -2199,7 +2199,7 @@ class PeftTrainer:
             - If resume_from_merged is provided, it must be a valid directory containing a merged adapter
 
         Ensures:
-            - If resume_from_merged is provided, phases 1-3 (pre-validation, fine-tuning, merge) are skipped
+            - If resume_from_merged is provided, the pre-validation, fine-tuning and merge phases are skipped
             - If pre_training_stats is True (and not resuming), validation is performed before training
             - The model is fine-tuned with LoRA adapters (unless resuming)
             - The LoRA adapter is merged with the base model (unless resuming)
@@ -2559,14 +2559,12 @@ def parse_arguments() -> argparse.Namespace:
 
 def quick_smoke_test():
     """
-    LIGHTWEIGHT STRUCTURAL smoke test for PeftTrainer - validates architecture only.
-    
-    ⚠️  IMPORTANT: This test validates STRUCTURE ONLY, not runtime ML behavior.
-    ⚠️  This module requires significant GPU resources, datasets, and time for actual operation.
-    ⚠️  This smoke test only verifies the module can be imported and basic structure accessed.
-    
-    This test is essential for v000 deprecation as peft_trainer.py is critical
-    for model fine-tuning infrastructure, but too resource-intensive for full testing.
+    Lightweight smoke test for PeftTrainer that validates structure only.
+
+    It checks structure only, not runtime machine-learning behavior.
+    The module needs significant GPU resources, datasets and time to run for real.
+    This test only verifies that the module imports and its basic structure is reachable.
+    A full test of the fine-tuning path is too resource-intensive to run here.
     """
     import cosa.utils.util as du
     

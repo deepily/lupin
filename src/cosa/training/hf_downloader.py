@@ -21,7 +21,7 @@ class HuggingFaceDownloader:
             - No network requests are made during initialization
             
         Raises:
-            - No exceptions are raised during initialization
+            - no exception is raised during initialization
         """
         self.token = token
 

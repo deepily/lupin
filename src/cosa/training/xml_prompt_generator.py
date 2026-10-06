@@ -155,7 +155,7 @@ class XmlPromptGenerator:
         Ensures:
             - Returns command name to file path mapping loaded from JSON config
             - All file paths are tested for existence
-            - Does NOT include agentic job commands (those have their own getter)
+            - Does not include agentic job commands (those have their own getter)
         """
         config_path = self.path_prefix + "/src/conf/training/agent-router-simple-commands.json"
         with open( config_path, "r" ) as f:
@@ -230,35 +230,22 @@ class XmlPromptGenerator:
     
     def _assert_agent_router_json_commands_match_speakable( self ) -> None:
         """
-        Refuse to build a corpus whose command set is not exactly the served menu.
+        Refuse to build a corpus whose command set differs from the served command menu.
 
-        WHAT THIS CLOSES (row 95924f2d, step 4). The MENU is already single-sourced —
-        `_compile_agent_router_commands` reads `speakable_commands()`, and no JSON can
-        move it. This guard makes the ROW SET obey the same source, in both directions:
-
-          · a JSON key that is NOT speakable would build rows whose answer is a command
-            the menu inside those very rows never offers. The earlier subset-of-REGISTRY
-            check let that through: the two expediters are registered on purpose and
-            non-speakable on purpose, so naming one in a JSON passed the guard and still
-            trained a label the menu omits.
-          · a speakable command with NO JSON key gets zero rows — a command the served
-            prompt offers and the model has never been trained to emit. That is the
-            starvation half, and it is silent: nothing counts the rows per command.
-
-        WHY THE ORACLE MOVED FROM `REGISTRY` TO `speakable_commands()`. Checking against
-        the whole registry was chosen to let the documented system-triggered exemptions
-        through. But those commands are exactly the ones that must NOT appear in the
-        corpus, because the training instruction interpolates the speakable menu. The
-        exemption belongs in the registry (`speakable=False`) and therefore belongs OUT
-        of the JSONs — which is where it already is, by care. This makes it construction.
+        The menu comes from `speakable_commands()`; this guard makes the row set follow it.
+        A JSON key that is not speakable would train a label the menu never offers.
+        A speakable command with no JSON key gets zero rows, silently, since nothing counts rows.
 
         Requires:
             - the three agent_router_*_commands dicts are loaded
 
         Ensures:
             - returns None when the JSON key union equals the speakable command set
-            - raises ValueError naming BOTH directions of the difference otherwise,
+            - raises ValueError naming both directions of the difference otherwise,
               before any row is built
+            - checks against `speakable_commands()`, never the whole registry: system-triggered
+              commands are registered but not speakable, and must stay out of the JSONs because
+              the training instruction interpolates the speakable menu
 
         Raises:
             - ValueError if the JSON key union and speakable_commands() differ
@@ -287,17 +274,11 @@ class XmlPromptGenerator:
 
     def registry_ordered_training_commands( self, command_index: dict ) -> list:
         """
-        Order one JSON index's commands by the REGISTRY, so the registry decides which
-        commands get training rows and the JSON only says where their phrasings live.
+        Order one JSON index's commands by the registry's speakable order.
 
-        The three row loops used to iterate a JSON's own `.keys()`, which made the JSON
-        the definition of what exists AND the source of each row's label. Iterating the
-        registry's speakable order instead means the loop variable — the string that
-        becomes the row's answer — comes from the registry itself.
-
-        Membership is already pinned by `_assert_agent_router_json_commands_match_speakable`,
-        which runs at construction, so this returns every key of `command_index` and drops
-        nothing; the filter is a belt, not the policy.
+        The registry decides which commands get rows and supplies each row's label string.
+        The guard `_assert_agent_router_json_commands_match_speakable` already pins
+        membership, so this drops nothing; the filter is a safety net.
 
         Requires:
             - command_index maps a full routing string to its phrasing-file path or config
@@ -311,15 +292,11 @@ class XmlPromptGenerator:
 
     def _compile_agent_router_commands( self ) -> str:
         """
-        Compile the router command MENU that every training instruction interpolates.
+        Compile the router command menu that every training instruction interpolates.
 
-        Single-sourced from the v2 registry (2026.08.16 single-source design §2.4):
-        the menu is exactly the speakable commands the served router prompt lists, so
-        the training menu and the served prompt cannot disagree by construction — the
-        18-vs-19 drift this row exists to end. The three agent-router JSONs REMAIN the
-        source of the example phrasings (row generation, §5.3); they no longer define
-        WHICH commands exist. `speakable_commands()` fails loud if its order tuple and
-        the registry ever disagree, so a stale menu cannot pass silently.
+        The menu is the v2 registry's speakable commands, so it cannot disagree with the
+        served router prompt. The three agent-router JSONs supply example phrasings only.
+        `speakable_commands()` fails loudly if its order tuple and the registry disagree.
 
         Requires:
             - cosa.rest.v2.router_prompt_generator.speakable_commands is importable
@@ -797,9 +774,8 @@ class XmlPromptGenerator:
         Gets placeholder TFE resume targets for test-fix-expediter resume training.
 
         Values are limited to the two forms resume_resolver.resolve_resume_target
-        actually implements — a tfe-* job ID, or a plan doc path ending in
-        "-plan.md" / containing "/plans/". Its natural-language branch is a
-        Phase 2 stub, so free-text targets are deliberately excluded.
+        implements: a tfe-* job ID, or a plan doc path ending in "-plan.md" or
+        containing "/plans/". Its natural-language branch is a stub, so no free text.
 
         Requires:
             - requested_length is None or positive integer
