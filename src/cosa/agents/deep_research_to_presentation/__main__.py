@@ -5,7 +5,7 @@ CLI Entry Point for Deep Research to Presentation Generation Pipeline.
 This module provides a command-line interface for running the chained
 Deep Research to Presentation Generation workflow.
 
-Usage:
+Example:
     # Voice-driven mode (default)
     python -m cosa.agents.deep_research_to_presentation \\
         --query "Your research topic" \\
@@ -34,7 +34,6 @@ Usage:
         --query "Compare React and Vue frameworks" \\
         --user-email dev@example.com \\
         --budget 3.00 \\
-
         --duration 20 \\
         --theme default \\
         --cli-mode \\

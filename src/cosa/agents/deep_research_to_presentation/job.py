@@ -190,7 +190,7 @@ class DeepResearchToPresentationJob( AgenticJobBase ):
         """
         Build the chained agent this job runs, so the job-to-agent hand-off can be tested.
 
-        A method, not an expression inside `_execute`, because `_execute` runs the whole pipeline.
+        A method, not an expression inside `_execute`, because `_execute` runs the whole pipeline: notifications, research, slides and storage.
         That needs real services, so a test could only prove its own copy of the arguments.
         The `test_source_document_reaches_the_model_*` tests drive it on a job the real factory built.
 
