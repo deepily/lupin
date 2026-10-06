@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-CLI Entry Point for Deep Research → Presentation Generation Pipeline.
+CLI Entry Point for Deep Research to Presentation Generation Pipeline.
 
 This module provides a command-line interface for running the chained
-Deep Research → Presentation Generation workflow.
+Deep Research to Presentation Generation workflow.
 
 Usage:
     # Voice-driven mode (default)
@@ -34,6 +34,7 @@ Usage:
         --query "Compare React and Vue frameworks" \\
         --user-email dev@example.com \\
         --budget 3.00 \\
+
         --duration 20 \\
         --theme default \\
         --cli-mode \\

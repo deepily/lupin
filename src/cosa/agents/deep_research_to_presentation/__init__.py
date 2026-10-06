@@ -3,7 +3,7 @@
 COSA Deep Research to Presentation Agent Package.
 
 A wrapper agent that orchestrates a chained workflow:
-Deep Research → Presentation Generation.
+Deep Research to Presentation Generation.
 
 This agent:
 1. Runs Deep Research on a given query
@@ -27,7 +27,9 @@ Usage:
         budget     = 3.00,
         cli_mode   = False,  # Voice-driven (default)
     )
+
     result = await agent.run_async()
+
     print( f"Research: {result.research_path}" )
     print( f"Presentation: {result.marp_path}" )
 """
