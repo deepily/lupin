@@ -495,7 +495,7 @@ class NotificationRepository( BaseRepository[Notification] ):
 
         The only reader of answer_delivered_at. The owed predicate has three terms: response_requested, `responded_at` not NULL,
         `answer_delivered_at` NULL. The `responded_at` term is an invariant. An offline or expired persist carries a machine
-        default with `responded_at` NULL and must never be served as an owed answer. Retrieval matches on sender_persona alone.
+        default with `responded_at` NULL and must never be served as an owed answer. The predicate is spelled out in full. It uses the same three terms, in the same words, as the ORM partial index in postgres_models.py and the concurrent migration. That coupling is why it is stated here. Retrieval matches on sender_persona alone.
 
         Requires:
             - sender_persona: a non-empty persona key (never None — a persona-less
@@ -595,7 +595,7 @@ class NotificationRepository( BaseRepository[Notification] ):
 
         Delivery state is ignored here. An ack that landed while a browser was open is already marked delivered.
         The undelivered inbox could therefore not rebuild the tally. There is no ack table; this reads the saved `notifications` rows.
-        The latest-wins fold is in Python, not `DISTINCT ON`, because a seat can ack twice and the set is only dozens of rows.
+        The latest-wins fold is in Python, not `DISTINCT ON`. That would push the fold into Postgres but bind the method to one dialect. A seat can ack twice, and the set is only dozens of rows.
 
         Requires:
             - recipient_id: the broadcast originator's user UUID (the authorization
@@ -667,8 +667,7 @@ class NotificationRepository( BaseRepository[Notification] ):
         """
         Soft-dismiss the recipient's undelivered notifications (the "reset missed" action).
 
-        Sets is_hidden=True on every row the "N missed while away" badge counts. The notification state is left
-        untouched, keeping the audit trail that these rows were never delivered. The filter mirrors
+        Sets is_hidden=True on every row the "N missed while away" badge counts. The notification state is left untouched, keeping the audit trail that these rows were never delivered. The dismiss is reversible: flip is_hidden back. The filter mirrors
         count_undelivered_for_recipient, so afterwards that count is 0 for the same recipient and cap.
 
         Requires:

@@ -96,7 +96,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
 
     def get_by_id_for_update( self, id: uuid.UUID ) -> Optional[TaskItem]:
         """
-        Load one item under a row lock, refreshing this session's copy of the row.
+        Load one item with `SELECT ... FOR UPDATE` for read-validate-write, refreshing its row.
 
         The lock makes the second of two concurrent transitions wait, so the terminal lockout cannot be bypassed. The lock alone does not refresh a row the session already holds. populate_existing does, so never remove it. Without it, a session still holding a live reference to the row keeps its old attribute values. Guards: test_the_for_update_read_refreshes_a_row_the_session_already_holds, test_every_locked_read_is_the_first_load_in_its_session.
 
@@ -443,7 +443,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
 
     def _db_clock_now( self ) -> datetime:
         """
-        Read the database clock as a timezone-aware UTC datetime.
+        Read the database clock: the one clock every compared timestamp must come from.
 
         Every timestamp that gets compared to another must come from this one clock.
         `task_store_owed.park_reason_is_stale` compares park_reason_captured_at with body_changed_ts, and both come from here.
@@ -484,7 +484,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
         """
         Read the database clock for the park write's single timestamp.
 
-        That one instant goes into updated_ts, park_reason_captured_at and the park event's ts, in one statement. A flush-then-read-back cannot commit: the first flush writes status='parked' with park_reason_captured_at still NULL. The per-statement `CHECK` named ck_task_items_parked_requires_captured_at rejects that. PostgreSQL cannot defer a `CHECK`. The updated_ts column is assigned explicitly. That suppresses its onupdate, so a parked row is not born stale. The database clock is used because the staleness comparison must not cross clocks.
+        That one instant goes into updated_ts, park_reason_captured_at and the park event's ts, in one statement. A flush-then-read-back cannot commit: the first flush writes status='parked' with park_reason_captured_at still NULL. The per-statement `CHECK` named ck_task_items_parked_requires_captured_at rejects that. PostgreSQL cannot defer a `CHECK`. The updated_ts column is assigned explicitly. That suppresses its onupdate, so a parked row is not born stale. Every other updated_ts in this table is written by onupdate=func.now(), the database's clock. The staleness comparison must therefore not cross clocks. A false fresh result would be a parked row quietly failing to report an expired quote. On PostgreSQL now() is transaction_timestamp(), stable across the transaction. The explicit assignment returns the same value onupdate would have written.
 
         Requires:
             - an open session/transaction (the caller's; this reads, never writes)
@@ -715,7 +715,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
         authority : str,
     ) -> TaskEvent:
         """
-        Write the operator's verdict onto a pending request and append its event.
+        Write the operator's verdict onto a pending promote/demote request and append its event.
 
         The verdict door used to set request_state inline and append nothing, so an answer left no record of who gave it.
         Routing the write through here records the actor and makes the door visible to the identity census.
@@ -753,13 +753,13 @@ class TaskRepository( BaseRepository[TaskItem] ):
         """
         Append a stamped amendment block to a live item's body and append an 'amended' event.
 
-        Unlike apply_patch, which overwrites the body, this never rewrites existing text. The original body is kept verbatim and the note goes below a divider naming the actor and the UTC time. A successor reading the store therefore sees the full amendment history inline. On a terminal row the divider and event read post-terminal addendum, and the status stays unchanged.
+        Unlike apply_patch, which overwrites the body, this never rewrites existing text. The original body is kept verbatim and the note goes below a divider naming the actor and the UTC time. A successor reading the store therefore sees the full amendment history inline. On a terminal row the divider and event read post-terminal addendum, and the status stays unchanged. Post-terminal amend exists because a gate verdict written after a worker self-closes its row has nowhere durable to go otherwise.
 
         Requires:
             - item is a TaskItem loaded in this session (row-locked by the router).
               It may be terminal, because amend is the one write verb the store allows on a terminal row.
               The status selects the divider and event
-            - note is the caller's amendment text (wire-checked for length; the router rejects a whitespace-only note)
+            - note is the caller's amendment text (wire-checked for length, 1..4000; the router rejects a whitespace-only note)
             - now is a timezone-aware datetime (the router owns the clock so this method stays deterministic)
             - reason is an optional justification stamping the audit event; None or "" means auto-describe the amendment
 
@@ -823,7 +823,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
             - limit is a non-negative int
 
         Ensures:
-            - returns items with status='blocked' and next_chase_ts not NULL and next_chase_ts <= now
+            - returns items with status='blocked' and next_chase_ts `IS NOT NULL` and next_chase_ts <= now
             - ordered by next_chase_ts ascending (longest-overdue first)
             - read-only: never mutates (the consumer re-arms via apply_chase)
 
@@ -1146,7 +1146,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
         """
         Count the admitted set per status in one `GROUP BY`, over count_tasks's set.
 
-        The Stop-hook count seam once collapsed a multi-status owed set into one integer, so every queued row looked in progress. The status has to survive the seam, and the safe place to recover it is here, server-side. A per-status client loop cannot see a park-expiry rejoin and double-counts expired-parked rows. Grouping puts each row in exactly one bucket. The `parked` bucket holds expired-parked rows, and keys are raw stored statuses.
+        The Stop-hook count seam once collapsed a multi-status owed set into one integer, so every queued row looked in progress. The status has to survive the seam, and the safe place to recover it is here, server-side. A per-status client loop cannot see a park-expiry rejoin and double-counts expired-parked rows. Grouping puts each row in exactly one bucket. Park-active rows are already excluded by owed_status_clause, so every parked row that survives admission has provably rejoined and needs no extra filtering. The `parked` bucket holds expired-parked rows, and keys are raw stored statuses.
 
         Requires:
             - each filter is either None (no constraint) or an exact-match value
@@ -1238,7 +1238,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
         """
         Count the admitted set per project, with no project filter in the signature.
 
-        `project` is free text, so a typo mints a project silently and permanently. A caller querying one project name gets a clean, smaller number while rows sit under a variant spelling. So project is not a parameter here: the buckets must show the values the caller's own `project=` did not match. Every other filter goes through the same helpers as count_tasks and query_tasks, so the buckets stay comparable.
+        `project` is free text, so a typo mints a project silently and permanently. A caller querying one project name gets a clean, smaller number while rows sit under a variant spelling. So project is not a parameter here: the buckets must show the values the caller's own `project=` did not match. Every other filter goes through the same helpers as count_tasks and query_tasks, so the buckets stay comparable. The buckets answer "under my other constraints, what projects exist". They do not answer what exists in the whole store, which would report projects the owner and status filters had already ruled out.
 
         Requires:
             - each filter is either None (no constraint) or an exact-match value
@@ -1284,7 +1284,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
 
         The owed-count callers, such as the Stop-hook store-count seam, need a cardinality, not the rows.
         A page length saturates at the page size, so a seat with more than 100 owed rows would read exactly 100.
-        This computes the true total, independent of any page bound.
+        This computes the true total, independent of any page bound (query_tasks and the endpoint cap limit at 500).
 
         Requires:
             - each filter is either None (no constraint) or an exact-match value
@@ -1395,7 +1395,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
         """
         Count the rows this caller has admitted out of the holding area since `since`.
 
-        This backs the rule that a manager requests one ticket at a time and never fires a batch. There is no batch endpoint to refuse. The UI's batch approve is a client-side loop of single-row transitions. Only how many arrived, and how fast, tells a batch from a ticket, and the event trail already records that. It is a policy control, not a security boundary: actor is caller-declared, so varying it splits the count.
+        This backs the rule that a manager requests one ticket at a time and never fires a batch. There is no batch endpoint to refuse. The UI's batch approve is a client-side loop of single-row transitions. Only how many arrived, and how fast, tells a batch from a ticket. The event trail already records that, in the same transaction that moved the row. This is a query rather than a counter. It adds no new state. There is no in-memory counter to lose on a bounce. The evidence for any refusal is a row somebody can read. It is a policy control, not a security boundary: actor is caller-declared, so varying it splits the count.
 
         Requires:
             - actor is the caller-declared actor string; since is a tz-aware datetime
@@ -1428,7 +1428,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
         """
         Count creations and closures in a time window, in SQL.
 
-        This feeds the closed-vs-new ratio gate. query_events cannot answer it. Its filters are exact-match, closures arrive as several strings, and a page length caps at the endpoint limit. Created matches the prefix pattern "->%" (an empty left side). Closed matches "%->done". Patterns replace status lists, so a new status cannot undercount silently. The dropped status is excluded from closed. Otherwise dropping stale rows and minting new ones would hold the ratio forever. A row created directly into done matches both patterns and counts once in each (pinned by test_a_row_born_done_would_count_as_both).
+        This feeds the closed-vs-new ratio gate. query_events cannot answer it. Its filters are exact-match, closures arrive as several strings, and a page length caps at 500, the limit of query_tasks and the endpoint. Created matches the prefix pattern "->%" (an empty left side). Closed matches "%->done". Patterns replace status lists, so a new status cannot undercount silently. The dropped status is excluded from closed, and the accepted cost is that legitimate board hygiene earns no credit. Otherwise dropping stale rows and minting new ones would hold the ratio forever. A row created directly into done matches both patterns and counts once in each (pinned by test_a_row_born_done_would_count_as_both).
 
         Requires:
             - since is a datetime bounding TaskEvent.ts inclusively (>=)
@@ -1494,7 +1494,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
 
         Ensures:
             - TaskEvent added and flushed (id populated); commit is not called
-            - the event is parked on the session so that its commit (never a rollback)
+            - the event is parked on the session so that its `COMMIT` (never a rollback)
               emits one task_store_changed (task_store_change_notifier)
             - event.ts == ts when supplied, else the func.now() default
 
