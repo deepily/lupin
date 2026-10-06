@@ -1,30 +1,30 @@
 """
-Analyse the DM-verbosity two-arm pilot corpus (plan item 7).
+Analyse the DM-verbosity two-arm pilot corpus.
 
-The unit of evidence is 14 matched clock-hour pairs, NOT the thousands of
-messages — messages are correlated within session and hour, so each hour
-contributes one number per arm and Wednesday mirrors Tuesday at every clock
-hour. Two co-primaries that must AGREE:
+The unit of evidence is 14 matched clock-hour pairs, not the thousands of
+messages. Messages are correlated within session and hour, so each hour
+contributes one number per arm, and Wednesday mirrors Tuesday at every clock
+hour. Two co-primaries must agree:
 
-    A — all attempts:      hour-level mean( max( words - 60, 0 ) ) per eligible attempt
-    B — first attempts:    the same, over rows where follows_rejection is False
+    A - all attempts:      hour mean of excess words, per eligible attempt
+    B - first attempts:    the same, over rows with follows_rejection False
 
-Both are reported rejecting-minus-blind across the matched pairs, with an exact
-sign-flip randomization interval (each pair's arm assignment was randomized, so
-under the null each pair's difference may flip sign).
+Both are reported as rejecting minus blind across the matched pairs, with an
+exact sign-flip randomization interval. Each pair's arm assignment was
+randomized, so under the null each pair's difference may flip sign.
 
-    Both move   -> sessions genuinely wrote shorter.
+    Both move    -> sessions wrote shorter.
     Only A moves -> we measured retries, not restraint.
-    Neither     -> no effect at this dose in one hour.
+    Neither      -> no effect at this dose in one hour.
 
-Classifier (Maria's ruling): a row is in-experiment iff experiment == "two-arm-v1"
--> use effective_arm. The 776 legacy rows carry arm == "signal_only" and are
-NEVER pooled into an arm — an observational baseline under a third condition.
+Classifier: a row is in-experiment iff experiment == "two-arm-v1"; use
+effective_arm. The 776 legacy rows carry arm == "signal_only" and are never
+pooled into an arm. They are an observational baseline under a third condition.
 
-Bootstrap standalone: sets sys.path from LUPIN_ROOT first; the analysis logic
+Standalone bootstrap: sets sys.path from LUPIN_ROOT first. The analysis logic
 imports no cosa, so the unit tests exercise it in isolation.
 
-Run:  python src/scripts/dm-experiment/analyze_arms.py [--corpus PATH] [--counts-only]
+Run:  python src/scripts/dm-experiment/analyze_arms.py [--corpus <path>] [--counts-only]
 """
 
 import os
@@ -77,6 +77,8 @@ def load_rows( path ):
 
 def is_experiment_row( row ):
     """
+    Tell whether a row was written under the two-arm experiment.
+
     Ensures:
         - returns True iff the row was written under the two-arm experiment
           (experiment == "two-arm-v1"); legacy signal_only rows return False
@@ -86,8 +88,10 @@ def is_experiment_row( row ):
 
 def is_self_addressed( row ):
     """
+    Tell whether a row's sender and recipient are the same session.
+
     Ensures:
-        - returns True iff the row's sender and recipient are the SAME session
+        - returns True iff the row's sender and recipient are the same session
         - a row missing either session id returns False — an unknown pair is not
           evidence of self-addressing, and guessing would silently shrink the
           denominator
@@ -99,23 +103,21 @@ def is_self_addressed( row ):
 
 def eligible_rows( rows ):
     """
-    The behavioural population: in-experiment attempts that are NOT exempt,
-    NOT transient TEMP- dogfood slots, and NOT self-addressed.
+    Return the in-experiment attempts that are not exempt, transient or self-addressed.
 
     Ensures:
         - returns experiment rows whose length_gate is not "exempt"
-        - the exempt arbiter poker is excluded — it is out of the experiment by
-          design, so it must not enter either arm's denominator
-        - rows whose slot_id starts with "TEMP-" are excluded IN CODE, not by
-          deletion — a transient live-gate-smoke slot must never reach the
-          analysis whether or not someone remembers to delete it. This is the
-          single chokepoint feeding co-primaries, secondaries, and counts.
+        - the exempt arbiter poker is excluded: it is outside the experiment,
+          so it must not enter either arm's denominator
+        - rows whose slot_id starts with "TEMP-" are excluded in code, not by
+          deletion, so a transient slot must never reach the analysis whether
+          or not someone remembers to delete it; this is the single chokepoint
+          feeding co-primaries, secondaries, and counts
         - self-addressed rows (sender session == recipient session) are excluded
-          for the same reason and by the same mechanism. The pilot measures
-          PEER DM verbosity; a session messaging itself is not peer traffic, so
-          it belongs to no arm. Excluding in code rather than by deleting rows
-          keeps the corpus append-only and the exclusion auditable — the rows
-          stay readable, they just stop voting. Rick's ruling, 2026-08-04.
+          the same way; the pilot measures peer DM verbosity, and a session
+          messaging itself is not peer traffic, so it belongs to no arm
+        - excluding in code rather than by deleting rows keeps the corpus
+          append-only and the exclusion auditable: the rows stay readable
     """
     return [ r for r in rows
              if is_experiment_row( r )
@@ -146,6 +148,8 @@ def _mean( values ):
 
 def hour_arm_excess( rows_for_arm ):
     """
+    Mean excess words over one arm's rows in one clock hour.
+
     Ensures:
         - returns the mean excess-words over the given arm's rows in one hour,
           or None when the arm made no eligible attempt that hour
@@ -162,7 +166,7 @@ def matched_pair_diffs( rows, first_attempts_only=False ):
         - first_attempts_only selects co-primary B (follows_rejection is False)
 
     Ensures:
-        - returns a list of dicts, one per clock hour where BOTH arms made an
+        - returns a list of dicts, one per clock hour where both arms made an
           eligible attempt: {hour, blind, rejecting, diff, first_day_arm}
         - first_day_arm is the arm of the chronologically-earlier day at that hour
           (the order-effect key: which arm was seen first)
@@ -202,6 +206,8 @@ def matched_pair_diffs( rows, first_attempts_only=False ):
 
 def _percentile( sorted_values, pct ):
     """
+    Nearest-rank percentile of an already-sorted list.
+
     Ensures:
         - returns the pct-th percentile of an already-sorted list (nearest-rank),
           or None for an empty list
@@ -269,6 +275,8 @@ def randomization_test( diffs ):
 
 def co_primary( rows, first_attempts_only ):
     """
+    Matched-pair diffs and their randomization test for one co-primary.
+
     Ensures:
         - returns {pairs, test} for co-primary A (first_attempts_only False) or
           B (True) — the matched-pair diffs and their randomization test
@@ -305,10 +313,12 @@ def _arm_rows( rows, arm ):
 
 def _repeated_rejection_loops( arm_rows ):
     """
+    Count rejected attempts that directly follow a rejected attempt.
+
     Ensures:
         - returns the count of rejected attempts whose immediately-prior attempt
-          in the same slot was also rejected (follows_rejection True AND this
-          attempt rejected) — a proxy for a session stuck resending over-length
+          in the same slot was also rejected (follows_rejection True and this
+          attempt rejected), a proxy for a session stuck resending over-length
     """
     return sum( 1 for r in arm_rows
                 if r.get( "length_gate" ) == "rejected" and r.get( "follows_rejection", False ) )
@@ -316,15 +326,17 @@ def _repeated_rejection_loops( arm_rows ):
 
 def _parse_ts( value ):
     """
+    Parse an ISO-8601 stamp into a timezone-aware datetime, or None.
+
     Requires:
         - value is an ISO-8601 string, or None
 
     Ensures:
         - returns a timezone-aware datetime, treating a naive stamp as UTC
           (the corpus writes `ts` naive and `delivered_at`/`assigned_at_utc`
-          aware — comparing the two forms raises, so both are normalised here)
+          aware; comparing the two forms raises, so both are normalised here)
         - returns None for None or an unparseable string, so one malformed
-          stamp drops ONE row instead of failing the whole analysis
+          stamp drops one row instead of failing the whole analysis
     """
     if not value: return None
     try:
@@ -337,13 +349,15 @@ def _parse_ts( value ):
 
 def delivery_delay_seconds( row ):
     """
+    Seconds from arm assignment to delivery for one row, or None.
+
     Ensures:
         - returns (delivered_at - assigned_at_utc) in seconds for a row that
-          carries BOTH stamps, else None
-        - a negative delta is returned as-is rather than clamped — a clock
+          carries both stamps, else None
+        - a negative delta is returned as-is rather than clamped: a clock
           that runs backwards is a finding, not something to hide
         - `assigned_at_utc` is the arm-assignment instant, so this measures the
-          delay the SENDER waited, not the corpus write latency
+          delay the sender waited, not the corpus write latency
     """
     assigned  = _parse_ts( row.get( "assigned_at_utc" ) )
     delivered = _parse_ts( row.get( "delivered_at" ) )
@@ -353,17 +367,19 @@ def delivery_delay_seconds( row ):
 
 def secondaries( rows ):
     """
+    Per-arm secondary metrics: threshold share, bunching, tokens, delay.
+
     Ensures:
         - returns per-arm secondary metrics: pct >= threshold, attempts per
           delivered message, bunching share in [140,149], repeated-rejection
           loops, mean est_tokens per attempt and per delivered message, mean
-          est_tokens per delivered message ALL-IN (total spent over delivered,
-          so refused drafts are counted, not hidden — row 35d0a451), and mean
-          delivery delay in seconds
-        - the delivered-only and all-in means are reported SIDE BY SIDE, neither
+          est_tokens per delivered message all-in (total spent over delivered,
+          so refused drafts are counted, not hidden), and mean delivery delay
+          in seconds
+        - the delivered-only and all-in means are reported side by side, neither
           replacing the other: for an arm with no refusals they are equal; for
-          the rejecting arm the all-in figure is higher by exactly the tokens
-          burned on drafts the gate refused
+          the rejecting arm the all-in figure is higher by the tokens burned
+          on drafts the gate refused
         - est_tokens is labelled an estimate (chars/4) wherever reported
         - mean_delivery_delay_s reports alongside delivery_delay_n, the number
           of delivered rows that actually carried both stamps — a mean over an
@@ -405,6 +421,8 @@ def secondaries( rows ):
 
 def counts_only( rows ):
     """
+    Report distinct slots per (date, arm) against the expected seven.
+
     Ensures:
         - returns {(date, arm): {distinct_slots, ok}} against
           EXPECTED_SLOTS_PER_ARM_PER_DAY — the Tue/Wed 23:00 check that seven
@@ -426,6 +444,8 @@ def _fmt( value ):
 
 def format_report( rows ):
     """
+    Plain-text report of both co-primaries, order effect and secondaries.
+
     Ensures:
         - returns a plain-text report of both co-primaries, order effect, and
           secondaries — verdict-first, no markdown
@@ -458,7 +478,12 @@ def format_report( rows ):
 
 
 def format_counts( rows ):
-    """Ensures: returns a plain-text --counts-only report, flagging any (date,arm) not at 7 slots."""
+    """
+    Plain-text slot-coverage report for --counts-only.
+
+    Ensures:
+        - returns a plain-text --counts-only report, flagging any (date,arm) not at 7 slots
+    """
     report = counts_only( rows )
     lines  = [ f"Slot coverage (expected {EXPECTED_SLOTS_PER_ARM_PER_DAY} per arm per day):" ]
     if not report:
@@ -480,7 +505,7 @@ def main( argv=None ):
     CLI entry: print the full analysis, or the --counts-only coverage check.
 
     Ensures:
-        - loads the corpus (default the live path, or --corpus PATH)
+        - loads the corpus (default the live path, or --corpus <path>)
         - --counts-only prints the per-(date,arm) slot-coverage check
         - otherwise prints both co-primaries, order effect, and secondaries
         - returns 0

@@ -1,18 +1,18 @@
 """
 Generate the immutable, git-tracked DM-verbosity two-arm pilot schedule.
 
-Writes `src/conf/dm-experiment-schedule.json` from a RECORDED seed (20260804,
-Maria's ruling 2026-08-03) so the file reproduces BYTE-IDENTICALLY on a re-run.
+Writes `src/conf/dm-experiment-schedule.json` from a recorded seed (20260804),
+so a re-run reproduces the file byte for byte.
 
-Design: `src/rnd/v0.2.0/2026.08.04-dm-verbosity-reduction/2026.08.04-dm-verbosity-pilot-plan.md`
-(item 2). Two arms — `blind` vs `rejecting` — across 28 hourly slots (14 per
-day, Tue 2026-08-04 + Wed 2026-08-05, 09:00-23:00 America/New_York). Seven of
-each arm per day; Wednesday mirrors Tuesday at every clock hour; no run of the
-same arm longer than two hours. The server's `assignment_at()` consumes the
-UTC intervals recorded here.
+Design: `src/rnd/v0.2.0/2026.08.04-dm-verbosity-reduction/2026.08.04-dm-verbosity-pilot-plan.md`.
+Two arms, `blind` and `rejecting`, across 28 hourly slots: 14 per day on
+TUESDAY_DATE and WEDNESDAY_DATE, 09:00-23:00 America/New_York. Each day has
+seven of each arm, Wednesday mirrors Tuesday at every clock hour, and no arm
+runs longer than two hours. The server's `assignment_at()` consumes the UTC
+intervals recorded here.
 
-Bootstrap standalone (runs before cosa is guaranteed importable): sets
-`sys.path` from LUPIN_ROOT first; the pure schedule logic below imports no
+Standalone bootstrap (runs before cosa is guaranteed importable): sets
+`sys.path` from LUPIN_ROOT first. The pure schedule logic below imports no
 cosa, so the unit tests can exercise it in isolation.
 
 Run:  python src/scripts/dm-experiment/generate_schedule.py [--check]
@@ -272,13 +272,9 @@ def _extension_day_arms( rng ):
     """
     Draw the two randomized arm sequences the extension block is built from.
 
-    The late sequence covers EXT_LATE_HOURS on Thursday; the early sequence covers
+    The late sequence covers EXT_LATE_HOURS on Thursday, the early one
     EXT_EARLY_HOURS on Friday. Their mirrors supply Friday-late and Saturday-early,
     so every clock hour in 09-22 carries both arms inside the extension.
-
-    Rejection-samples the pair together, because Friday is assembled from the EARLY
-    sequence plus the MIRROR of the late one — its run length spans the join and
-    cannot be checked from either sequence alone.
 
     Requires:
         - rng is a seeded random.Random instance
@@ -286,6 +282,9 @@ def _extension_day_arms( rng ):
     Ensures:
         - returns ( late_arms, early_arms ), balanced 2/2 and 5/5 respectively
         - every assembled day (Thu, Fri, Sat) has max run <= MAX_RUN
+        - the pair is sampled together because Friday is the early sequence plus
+          the mirror of the late one, so a run can span that join and no single
+          sequence can see it
 
     Raises:
         - ValueError if no arrangement is found within the attempt budget
@@ -375,17 +374,9 @@ def _week2_day_arms( rng ):
     """
     Draw the four randomized arm sequences the week-2 block is built from.
 
-    Each sequence supplies one half-day and its MIRROR supplies the matching clock
-    hours on the following day, so every hour in 09-22 carries both arms:
-
-        late_a  -> Tue 15-22, mirrored onto Wed 15-22
-        early_b -> Wed 09-14, mirrored onto Thu 09-14
-        late_c  -> Thu 15-22, mirrored onto Fri 15-22
-        early_d -> Fri 09-14, mirrored onto Sat 09-14
-
-    All four are rejection-sampled TOGETHER because three of the five days are
-    assembled from two different sequences (an early half plus the mirror of a
-    late one). A run can straddle that join, and no single sequence can see it.
+    Each sequence supplies one half-day and its mirror supplies the matching hours
+    on the next day, so every hour in 09-22 carries both arms. The sequences are
+    late_a (Tue 15-22), early_b (Wed 09-14), late_c (Thu 15-22), early_d (Fri 09-14).
 
     Requires:
         - rng is a seeded random.Random instance
@@ -393,6 +384,9 @@ def _week2_day_arms( rng ):
     Ensures:
         - returns ( late_a, early_b, late_c, early_d ), balanced 4/4 and 3/3
         - every assembled day has max run <= MAX_RUN
+        - all four are sampled together because three of the five days are an
+          early half plus the mirror of a late one, so a run can straddle that
+          join and no single sequence can see it
 
     Raises:
         - ValueError if no arrangement is found within the attempt budget
@@ -507,23 +501,22 @@ def _assert_blocks_are_disjoint( slots ):
     """
     Fail loudly unless every block occupies its own stretch of wall clock.
 
-    Corpus rows record the arm they were collected under but NOT the block id, so
-    a row is attributed to a block by its timestamp. That attribution is sound
-    only while the blocks do not overlap — the moment two blocks cover the same
-    instant, every pooled figure silently mixes windows and no reader can
-    separate them after the fact.
-
-    Written while the windows ARE disjoint, on purpose: this assert cannot be
-    added later without first deciding what the already-collected ambiguous rows
-    belong to. (Mr Radio raised it, 2026-08-11; the analyzer needs the same
-    guarantee and gets it from here.)
+    Corpus rows record their arm but not the block id, so a row is attributed to
+    a block by its timestamp. The analyzer needs the same guarantee and gets it
+    from here.
 
     Requires:
         - slots is the full slot list, each carrying start_utc, end_utc, block
 
     Ensures:
-        - returns None when no two slots from DIFFERENT blocks overlap and no
+        - returns None when no two slots from different blocks overlap and no
           slot_id is reused
+        - the attribution by timestamp is sound only while blocks do not overlap;
+          overlapping blocks would mix windows in every pooled figure, and no
+          reader could separate them afterwards
+        - the check is added while the windows are disjoint because adding it
+          later would first need a decision on which block the already-collected
+          ambiguous rows belong to
 
     Raises:
         - AssertionError naming the first overlapping pair or duplicated id
