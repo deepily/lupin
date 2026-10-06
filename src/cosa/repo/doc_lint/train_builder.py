@@ -28,6 +28,7 @@ APPROVAL_PREFIX   = "docs-sweep-approval:"
 WITHDRAWAL_PREFIX = "docs-sweep-withdrawal:"
 CLAIM_PREFIX      = "docs-sweep-claim:"
 SKIPPED_STATUSES  = ( "dropped", "parked" )
+LANDED_STATUSES   = ( "done", )
 EVENT_TRANSITIONS = ( "amended", "amended_post_terminal" )
 EVENT_TOLERANCE   = timedelta( seconds=120 )
 OVERWRITE_EVENT   = "patched"
@@ -336,11 +337,13 @@ def build_train( root, rows, order, size, data_root ):
         - rows come from store_rows; order lists package directories in sweep order; size is at least 1
 
     Ensures:
-        - returns { head, size, packages, commits, bisect_order, deferred, refused, not_claimed }
+        - returns { head, size, packages, commits, bisect_order, deferred, refused, landed, not_claimed }
         - a claim title is `docs sweep: <dir>` with an optional leading `[LUPIN] ` and nothing else before it
         - packages are the approved ones in sweep order, cut at size; deferred names the approved ones past the cut
         - commits are each package's commits in package order, without repeats; bisect_order is the package order
-        - a package with two claim rows is refused, not guessed; a package with no claim row is only counted in not_claimed
+        - a claim row with a landed status (done) is left out of the train and its package is listed in landed as { package, row_ids }, apart from refused
+        - a package whose claim rows are all landed is never judged; a package that also has a live claim row is judged on the live rows alone
+        - a package with two live claim rows is refused, not guessed; a package with no claim row is only counted in not_claimed
         - a claim for a package that is not in the sweep order is refused by name, never dropped
         - a refused package never stops the others
 
@@ -352,11 +355,16 @@ def build_train( root, rows, order, size, data_root ):
     for row in rows:
         match = TITLE_REGEX.match( row[ "title" ] )
         if match: claims.setdefault( match.group( 1 ), [] ).append( row )
-    approved, refused, not_claimed = [], [], 0
+    approved, refused, landed, not_claimed = [], [], [], 0
     for package in order:
         if package not in claims:
             not_claimed += 1
             continue
+        done = [ r for r in claims[ package ] if r[ "status" ] in LANDED_STATUSES ]
+        if done and len( done ) == len( claims[ package ] ):
+            landed.append( { "package": package, "row_ids": [ r[ "id" ] for r in done ] } )
+            continue
+        claims[ package ] = [ r for r in claims[ package ] if r[ "status" ] not in LANDED_STATUSES ]
         if len( claims[ package ] ) > 1:
             refused.append( { "package": package, "reason": f"{len( claims[ package ] )} claim rows for this package" } )
             continue
@@ -375,6 +383,7 @@ def build_train( root, rows, order, size, data_root ):
         "bisect_order" : [ e[ "package" ] for e in packages ],
         "deferred"     : [ e[ "package" ] for e in approved[ size : ] ],
         "refused"      : refused,
+        "landed"       : landed,
         "not_claimed"  : not_claimed
     }
 
@@ -387,7 +396,7 @@ def main( argv=None, out=None ):
         - argv is a list of arguments, or None for sys.argv[ 1: ]
 
     Ensures:
-        - writes train.json in --out, which it creates, and prints one line per refused package and a summary
+        - writes train.json in --out, which it creates, and prints one line per refused package, one per landed package and a summary
         - returns 0 when the train holds at least one package, 1 when it holds none, 2 when the run could not start
         - on a run that could not start, train.json holds every key with an empty train and refused_run naming the cause
         - rows come from the store unless --rows-json names a file; the order comes from a live sweep unless --sweep-json names one
@@ -404,7 +413,7 @@ def main( argv=None, out=None ):
     parser.add_argument( "--sweep-json", help="a sweep_packages --json output that fixes the order" )
     parser.add_argument( "--rows-json", help="a JSON list of claim rows to use instead of reading the store" )
     args   = parser.parse_args( sys.argv[ 1: ] if argv is None else argv )
-    empty  = { "head": None, "size": args.size, "packages": [], "commits": [], "bisect_order": [], "deferred": [], "refused": [], "not_claimed": 0, "refused_run": None }
+    empty  = { "head": None, "size": args.size, "packages": [], "commits": [], "bisect_order": [], "deferred": [], "refused": [], "landed": [], "not_claimed": 0, "refused_run": None }
     try:
         if args.size < 1: raise ValueError( "--size must be at least 1" )
         if args.rows_json:
@@ -426,7 +435,8 @@ def main( argv=None, out=None ):
         out.write( f"REFUSED: {train[ 'refused_run' ]}\n" )
         return 2
     for item in train[ "refused" ]: out.write( f"REFUSED {item[ 'package' ]}: {item[ 'reason' ]}\n" )
-    out.write( f"train of {len( train[ 'packages' ] )} packages, {len( train[ 'commits' ] )} commits, {len( train[ 'refused' ] )} refused, {len( train[ 'deferred' ] )} deferred, at {train[ 'head' ]}\n" )
+    for item in train[ "landed" ]: out.write( f"LANDED {item[ 'package' ]}: {', '.join( item[ 'row_ids' ] )}\n" )
+    out.write( f"train of {len( train[ 'packages' ] )} packages, {len( train[ 'commits' ] )} commits, {len( train[ 'refused' ] )} refused, {len( train[ 'landed' ] )} landed, {len( train[ 'deferred' ] )} deferred, at {train[ 'head' ]}\n" )
     return 0 if train[ "packages" ] else 1
 
 

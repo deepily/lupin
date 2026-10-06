@@ -230,10 +230,25 @@ def test_the_claim_line_is_required_and_must_name_this_package( world ):
     assert refusal_for( world, row ).startswith( "the claim line is not JSON" )
 
 
-@pytest.mark.parametrize( "status", [ "not_approved", "queued", "in_progress", "blocked", "done" ] )
-def test_a_claim_row_in_a_live_or_done_status_may_go( world, status ):
+@pytest.mark.parametrize( "status", [ "not_approved", "queued", "in_progress", "blocked" ] )
+def test_a_claim_row_in_a_live_status_may_go( world, status ):
     row, _ = approved_row( world, status=status )
     assert train( world, [ row ] )[ "bisect_order" ] == [ "a" ]
+
+
+def test_a_done_claim_row_is_left_out_and_listed_as_landed_not_refused( world ):
+    done, _ = approved_row( world, row_id="r-done", status="done" )
+    live, _ = approved_row( world, package="b", name="cb", commits=[ world.shas[ "two" ] ] )
+    result  = train( world, [ done, live ] )
+    assert result[ "bisect_order" ] == [ "b" ] and result[ "commits" ] == [ world.shas[ "two" ] ]
+    assert result[ "landed" ] == [ { "package": "a", "row_ids": [ "r-done" ] } ] and result[ "refused" ] == []
+
+
+def test_a_done_row_beside_a_live_row_for_the_same_package_is_ignored_not_counted_as_a_second_claim( world ):
+    done, _ = approved_row( world, row_id="r-done", status="done" )
+    live, _ = approved_row( world, row_id="r-live", name="c2", status="in_progress" )
+    result  = train( world, [ done, live ] )
+    assert result[ "bisect_order" ] == [ "a" ] and result[ "landed" ] == [] and result[ "refused" ] == []
 
 
 @pytest.mark.parametrize( "status", [ "dropped", "parked" ] )
@@ -366,7 +381,7 @@ def test_main_builds_a_train_json_from_rows_and_a_pinned_sweep_order( world, tmp
     result = json.loads( ( tmp_path / "o" / "deep" / "train.json" ).read_text( encoding="utf-8" ) )
     assert result[ "size" ] == 11
     assert code == 0 and result[ "bisect_order" ] == [ "a" ] and result[ "refused_run" ] is None and result[ "refused" ] == [ { "package": "b", "reason": "no approval amendment" } ]
-    assert stream.getvalue() == f"REFUSED b: no approval amendment\ntrain of 1 packages, 1 commits, 1 refused, 0 deferred, at {result[ 'head' ]}\n"
+    assert stream.getvalue() == f"REFUSED b: no approval amendment\ntrain of 1 packages, 1 commits, 1 refused, 0 landed, 0 deferred, at {result[ 'head' ]}\n"
 
 
 def test_main_with_no_approved_package_exits_1_and_writes_every_key( world, tmp_path ):
@@ -374,7 +389,7 @@ def test_main_with_no_approved_package_exits_1_and_writes_every_key( world, tmp_
     code = tb.main( [ "--repo-root", str( world.root ), "--out", str( tmp_path / "o" ), "--rows-json", rows, "--data-root", str( world.data ) ], io.StringIO() )
     result = json.loads( ( tmp_path / "o" / "train.json" ).read_text( encoding="utf-8" ) )
     assert code == 1 and result[ "packages" ] == [] and result[ "refused" ] == [ { "package": "a", "reason": "no approval amendment" } ]
-    assert set( result ) == { "head", "size", "packages", "commits", "bisect_order", "deferred", "refused", "not_claimed", "refused_run" }
+    assert set( result ) == { "head", "size", "packages", "commits", "bisect_order", "deferred", "refused", "landed", "not_claimed", "refused_run" }
 
 
 @pytest.mark.parametrize( "extra, message", [
@@ -624,3 +639,14 @@ def test_the_literal_withdrawal_string_the_brief_tells_reviewers_to_type_voids_t
     row = claim( "a", [ ( TIB, approval( checks, [ s[ "one" ] ] ) ), ( TIB, "docs-sweep-withdrawal: found a real loss" ) ] )
     assert refusal_for( world, row ) == f"the approval was withdrawn by {TIB} at {TS}"
     assert tb.WITHDRAWAL_PREFIX == "docs-sweep-withdrawal:" and tb.APPROVAL_PREFIX == "docs-sweep-approval:"
+
+
+def test_main_prints_one_line_per_landed_package_and_keeps_it_in_train_json( world, tmp_path ):
+    done, _ = approved_row( world, row_id="r-done", status="done" )
+    live, _ = approved_row( world, package="b", name="cb", commits=[ world.shas[ "two" ] ] )
+    rows    = _write( tmp_path / "rows.json", [ done, live ] )
+    stream  = io.StringIO()
+    code    = tb.main( [ "--repo-root", str( world.root ), "--out", str( tmp_path / "o" ), "--rows-json", rows, "--data-root", str( world.data ) ], stream )
+    result  = json.loads( ( tmp_path / "o" / "train.json" ).read_text( encoding="utf-8" ) )
+    assert code == 0 and result[ "landed" ] == [ { "package": "a", "row_ids": [ "r-done" ] } ]
+    assert stream.getvalue() == f"LANDED a: r-done\ntrain of 1 packages, 1 commits, 0 refused, 1 landed, 0 deferred, at {result[ 'head' ]}\n"
