@@ -31,8 +31,8 @@ def arithmetic( operands, operator ):
     """
     Evaluate plain arithmetic over a list of operands, folding left to right.
 
-    add and multiply are naturally n-ary; subtract, divide, modulo and power
-    fold from the left, so [ 100, 20, 5 ] with "subtract" is ( 100 - 20 ) - 5.
+    Add and multiply take any number of operands. Subtract, divide, modulo and
+    power fold from the left, so [ 100, 20, 5 ] with "subtract" is ( 100 - 20 ) - 5.
 
     Requires:
         - operands is a list of at least 2 numerics
@@ -339,13 +339,11 @@ def compare_prices( items ):
 
 def mortgage( principal, annual_rate, term_years, down_payment=0 ):
     """
-    Calculate monthly mortgage payment using standard amortization formula.
+    Calculate the monthly mortgage payment with the standard amortization formula.
 
-    Formula: M = P[r(1+r)^n] / [(1+r)^n - 1]
-    Where:
-        P = loan amount (principal - down_payment)
-        r = monthly interest rate (annual_rate / 100 / 12)
-        n = total number of payments (term_years * 12)
+    Formula: M = P[r(1+r)^n] / [(1+r)^n - 1].
+    P is the loan amount (principal - down_payment). The monthly rate r is annual_rate / 100 / 12.
+    The payment count n is term_years * 12.
 
     Requires:
         - principal is a positive number

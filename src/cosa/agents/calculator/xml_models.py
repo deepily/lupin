@@ -20,37 +20,39 @@ class CalcIntent( BaseXMLModel ):
     """
     Calculator intent extracted from natural language by LLM.
 
-    Handles XML responses for calculator operations:
-    <calc_intent>
-        <operation>convert</operation>
-        <value>10</value>
-        <value_2></value_2>
-        <from_unit>kilometers</from_unit>
-        <to_unit>miles</to_unit>
-        <items></items>
-        <principal></principal>
-        <annual_rate></annual_rate>
-        <term_years></term_years>
-        <down_payment></down_payment>
-        <confidence>0.95</confidence>
-        <raw_query>how many miles is 10 kilometers</raw_query>
-    </calc_intent>
+    Example:
+        <calc_intent>
+            <operation>convert</operation>
+            <value>10</value>
+            <value_2></value_2>
+            <from_unit>kilometers</from_unit>
+            <to_unit>miles</to_unit>
+            <items></items>
+            <principal></principal>
+            <annual_rate></annual_rate>
+            <term_years></term_years>
+            <down_payment></down_payment>
+            <confidence>0.95</confidence>
+            <raw_query>how many miles is 10 kilometers</raw_query>
+        </calc_intent>
 
-    Fields (all str per BaseXMLModel convention — LLM I/O is always text):
-        operation: Calculation type (arithmetic, convert, compare_prices, mortgage)
-        operator: Arithmetic operator (add, subtract, multiply, divide, modulo, power)
-        operands: JSON array of numbers for arithmetic, e.g. [34, 67, 129]
-        value: Primary numeric value (amount to convert)
-        value_2: Secondary numeric value (unused currently, reserved)
-        from_unit: Source unit for conversion
-        to_unit: Target unit for conversion
-        items: JSON array of {name, price, quantity, unit} for price comparison
-        principal: Loan amount for mortgage
-        annual_rate: Interest rate (%) for mortgage
-        term_years: Loan term in years for mortgage
-        down_payment: Down payment amount for mortgage
-        confidence: Float-as-string confidence score (0.0-1.0)
-        raw_query: Original natural language query
+    All fields are str, because LLM I/O is always text.
+
+    Attributes:
+        operation: Calculation type (arithmetic, convert, compare_prices, mortgage).
+        operator: Arithmetic operator (add, subtract, multiply, divide, modulo, power).
+        operands: JSON array of numbers for arithmetic, e.g. [34, 67, 129].
+        value: Primary numeric value (amount to convert).
+        value_2: Secondary numeric value. Reserved; nothing reads it yet.
+        from_unit: Source unit for conversion.
+        to_unit: Target unit for conversion.
+        items: JSON array of {name, price, quantity, unit} for price comparison.
+        principal: Loan amount for mortgage.
+        annual_rate: Interest rate (%) for mortgage.
+        term_years: Loan term in years for mortgage.
+        down_payment: Down payment amount for mortgage.
+        confidence: Float-as-string confidence score (0.0-1.0).
+        raw_query: Original natural language query.
     """
 
     operation   : str = Field( ..., description="Calculation type: arithmetic, convert, compare_prices, mortgage, unsupported" )

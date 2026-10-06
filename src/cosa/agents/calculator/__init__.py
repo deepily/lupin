@@ -1,13 +1,13 @@
 """
 Everyday Calculator Agent — Intent-Dispatched Deterministic Calculations.
 
-Handles unit conversions, price comparisons, and mortgage calculations
-via LLM intent extraction + pure Python dispatch (no code generation).
+Handles arithmetic, unit conversions, price comparisons and mortgage calculations.
+An LLM extracts the intent, then pure Python does the work. No code is generated.
 
 Modules:
-    agent.py            — CalculatorAgent (AgentBase subclass)
-    xml_models.py       — CalcIntent (BaseXMLModel subclass)
-    dispatcher.py       — dispatch() + format_result_for_voice()
-    calc_operations.py  — Pure Python: convert(), compare_prices(), mortgage()
-    conversion_tables.py — Unit conversion factors (dict-based)
+    - agent.py — CalculatorAgent (AgentBase subclass).
+    - xml_models.py — CalcIntent (BaseXMLModel subclass).
+    - dispatcher.py — dispatch() and format_result_for_voice().
+    - calc_operations.py — Pure Python: arithmetic(), convert(), compare_prices(), mortgage().
+    - conversion_tables.py — Unit conversion factors (dict-based).
 """

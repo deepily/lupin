@@ -250,13 +250,10 @@ def _pluralize_unit( unit, value ):
 
 def extract_calc_intent_xml( raw_response ):
     """
-    Extract <calc_intent>...</calc_intent> XML block from raw LLM response text.
+    Extract the <calc_intent>...</calc_intent> XML block from raw LLM response text.
 
-    Handles common LLM response patterns:
-    - Clean XML output
-    - XML wrapped in markdown code fences
-    - XML preceded by preamble text
-    - XML followed by explanation text
+    Handles clean XML, XML wrapped in markdown code fences, and XML with
+    preamble or explanation text before or after it.
 
     Requires:
         - raw_response is a string (may contain noise around XML)
