@@ -2,48 +2,33 @@
 """
 XML response model for the DM compression agent.
 
-The rewriter receives a FROZEN message body — one whose immutable literals have
-already been replaced by `[[L00]]` placeholders — and returns a shorter version
-of the same message with every placeholder untouched.
+The rewriter receives a frozen message body, whose immutable literals were already replaced
+by `[[Lnn]]` placeholders. It returns a shorter version with every placeholder untouched.
 
-WHY XML AND NOT JSON. Measured on 2,977 real DMs: 9% need XML escaping, 77%
-need JSON escaping, and JSON's hostile characters (double quote 55%, newline
-64%) are the two most common characters in this traffic after letters and
-spaces — 19,195 characters requiring escape versus XML's 556, a factor of 34.5.
-More decisive than the ratio: XML has `<![CDATA[ ... ]]>`, which lets us tell
-the model "this span is literal, do not touch it". JSON has no equivalent, so it
-would demand exactly the per-character transcription accuracy the freeze
-protocol exists to stop depending on.
+Why XML and not JSON: measured on 2,977 real DMs, 9% need XML escaping and 77% need JSON
+escaping. JSON's hostile characters (double quote 55%, newline 64%) are the most common
+characters after letters and spaces. 19,195 characters need escape against XML's 556.
+More decisive, XML has `<![CDATA[ ... ]]>`, which tells the model "this span is literal, do not touch it".
+JSON has no equivalent, so it would demand the per-character transcription accuracy.
+The freeze protocol exists to stop depending on that accuracy.
 
-🔴 THE DEFECT THIS FILE EXISTS TO WORK AROUND, AND WHY IT IS THE DANGEROUS ONE.
-
-`BaseXMLModel.from_xml()` escapes bare ampersands BEFORE parsing
-(`util_xml_pydantic.py:193`) so that an LLM writing "Q&A" does not produce
-invalid XML. Inside a CDATA section nothing is ever unescaped, so that injected
-`&amp;` survives into the parsed value. The base class's own repair step is what
-corrupts the payload:
+The defect this file works around is the dangerous one. `BaseXMLModel.from_xml()` escapes
+bare ampersands before parsing, so an LLM writing "Q&A" does not produce invalid XML.
+Inside a CDATA section nothing is ever unescaped, so that injected `&amp;` survives into
+the parsed value. The base class's own repair step corrupts the payload:
 
     sent      "Q&A about the queue"
     returned  "Q&amp;A about the queue"
 
-**Phase 1's validator cannot see it.** A bare `&` in prose is neither a
-placeholder nor a verify-tier literal, so a body corrupted this way passes every
-structural check and gets delivered. Fail-closed never fires. 88 corpus bodies
-(3%) carry a bare `&`.
-
-That makes the `from_xml` override below a safety fix, not a tidiness one — and
-it is why the falsification test pairs an ampersand WITH a placeholder: that is
+The freeze validator cannot see it. A bare `&` in prose is neither a placeholder nor a
+verify-tier literal. A corrupted body therefore passes every structural check and is delivered.
+Fail-closed never fires, and 88 corpus bodies (3%) carry a bare `&`. The `from_xml` override
+is therefore a safety fix. The falsification test pairs an ampersand with a placeholder,
 the shape where every structural check passes while the prose is wrong.
 
-**Its obvious sibling is not silent, so it needs no workaround**: a body
-containing `</response>` makes the base class's suffix-stripper truncate
-mid-CDATA, `from_xml` raises `XMLParsingError`, and the pipeline fails closed.
-Zero corpus bodies contain a root tag. Loud is fine; silent is not.
-
-⚠️ Do not build on the base class's `</result>` / `</output>` handling. The
-closing-tag loop's `break` sits outside its `if`, so only `</response>` is ever
-reached — the other two are dead branches. Ours always uses `<response>`.
-(Found by María, 2026-08-07. Not ours to fix here.)
+The base class strips everything after the first `</response>`, `</result>` or `</output>`.
+A `</response>` inside the body is lifted out with its CDATA span, so the stripper never
+sees it. Our model always uses `<response>` as its root tag.
 """
 
 import re
@@ -108,9 +93,8 @@ class DmCompressionResponse( BaseXMLModel ):
         """
         Refuse an empty compressed body.
 
-        A blank rewrite is not a compression, it is a deletion. Raising here puts
-        the message on the fail-closed path where the original is delivered,
-        instead of letting an empty string travel as though it were a result.
+        A blank rewrite is a deletion, not a compression. Raising here puts the message on
+        the fail-closed path, where the original is delivered.
 
         Requires:
             - v is a string
@@ -133,9 +117,8 @@ class DmCompressionResponse( BaseXMLModel ):
         """
         Serialize with the compressed body wrapped in CDATA.
 
-        Hand-built rather than routed through xmltodict, because xmltodict would
-        escape the payload into entities — and carrying the payload verbatim is
-        the entire reason for using CDATA.
+        Hand-built because xmltodict would escape the payload into entities.
+        Carrying the payload verbatim is the reason for using CDATA.
 
         Requires:
             - self.compressed is a non-empty string
@@ -161,16 +144,11 @@ class DmCompressionResponse( BaseXMLModel ):
     @classmethod
     def from_xml( cls, xml_string ):
         """
-        Parse, holding the base class's ampersand repair OUT of CDATA spans.
+        Parse, keeping the base class's ampersand repair away from CDATA spans.
 
-        The base implementation escapes every bare `&` in the document before
-        parsing. That is right for ordinary tag text and wrong for CDATA, where
-        nothing is ever unescaped, so the injected `&amp;` lands in the value.
-
-        The approach: lift every CDATA span out behind a sentinel, hand the
-        remainder to the base class so all of its OTHER repairs still apply
-        (prefix stripping, suffix stripping, entity fixing), then restore the
-        spans verbatim.
+        The base class escapes every bare `&`, which corrupts CDATA, so each CDATA span
+        is lifted out behind a sentinel. The rest goes to the base class for its other
+        repairs, and the spans are then restored verbatim.
 
         Requires:
             - xml_string is a string
@@ -211,32 +189,15 @@ class DmCompressionResponse( BaseXMLModel ):
         """
         A structural example for `{{PYDANTIC_XML_EXAMPLE}}` injection.
 
-        PLACEHOLDER CONTENT, per the convention every agent here follows. The
-        injected example teaches SHAPE and must not read as an answer, because
-        models copy a plausible-looking answer verbatim. The judge's own file
-        records two earlier attempts that failed in opposite directions: an enum
-        hint echoed back as malformed XML, and a filled plausible grade copied
-        byte-for-byte.
-
-        The `[[L00]]` here is deliberate — it shows the model that a placeholder
-        passes through untouched, which is the one behaviour this agent depends
-        on absolutely.
-
-        ⚠️ Returns an INSTANCE, not a string. `PromptTemplateProcessor` calls
-        `.to_xml()` on whatever comes back (`prompt_template_processor.py:99`).
-        Returning an already-serialized string raises `AttributeError` there —
-        and `AgentBase` wraps the whole processing step in a bare `except`
-        (`agent_base.py:159`), so the exception is SWALLOWED and the template
-        ships unprocessed: a literal `{{PYDANTIC_XML_EXAMPLE}}` in the prompt and
-        no `</stop>` sentinel, with nothing raised anywhere. That is a second
-        silent path to the same broken prompt the plan warns about in §3b, and
-        the construction test is what catches both.
+        The content is placeholder text, because models copy a plausible-looking answer.
+        Returns an instance, not a string, because `PromptTemplateProcessor` calls `.to_xml()`.
+        A string raises `AttributeError` there, which `AgentBase` swallows silently.
 
         Requires:
             - nothing
 
         Ensures:
-            - returns a DmCompressionResponse instance (NOT a string)
+            - returns a DmCompressionResponse instance (not a string)
         """
         return cls(
             thoughts   = "What you cut, and what you kept",

@@ -1,18 +1,16 @@
 """
 The freeze protocol — extract, placehold, validate, restore.
 
-Nothing here calls a model. The whole point of this module is that it can be
-exercised at corpus scale for free, and that it is what makes the model call in
-phase 2 safe.
+Nothing here calls a model, so it can be exercised at corpus scale for free.
+It is what makes the later model call safe.
 
-The claim this module makes, stated exactly (expert review, 2026-08-06):
+The claim this module makes, stated exactly:
 
     Exact preservation of selected byte spans through a lossy rewrite.
 
-It does NOT claim the rewrite preserved meaning. A placeholder can survive
-perfectly and end up attached to the wrong claim; that failure is called
-relocation, it passes every structural check here, and catching it is a
-separate layer's job.
+It does not claim the rewrite preserved meaning. A placeholder can survive perfectly
+and end up attached to the wrong claim. That failure is called relocation, it passes
+every structural check here, and catching it is a separate layer's job.
 """
 
 import hashlib
@@ -270,16 +268,10 @@ def _verify_patterns():
     """
     Derive the verify-tier patterns from _PATTERNS on every call.
 
-    Deliberately NOT snapshotted into a module-level list. A snapshot is taken
-    once at import, so anything that changes a pattern in _PATTERNS afterwards
-    leaves the two views disagreeing — the freeze path sees the new pattern and
-    the verify path keeps the old one.
-
-    That is not hypothetical. It fooled a falsification pass: reverting the
-    section-pointer fix in _PATTERNS left the verify path still holding the
-    fixed pattern, the guard test kept passing, and the guard looked absent when
-    it was real. A test harness that cannot reliably break the thing it is
-    testing reports the wrong answer in both directions.
+    The result is not snapshotted into a module-level list at import.
+    A later change to _PATTERNS would leave the freeze path and the verify path disagreeing.
+    That once fooled a falsification pass: the verify path kept the fixed pattern, so the
+    guard test kept passing and the guard looked absent.
     """
     return [ ( kind, pattern ) for kind, tier, pattern in _PATTERNS if tier == "VERIFY" ] + [ _INT_PATTERN ]
 
@@ -397,12 +389,9 @@ class Placeholder:
     """
     One frozen literal and the opaque token standing in for it.
 
-    Placeholders are occurrence-unique, NOT literal-unique. The plan originally
-    specified "same literal -> same placeholder"; the expert review overrode it
-    (§4) because collapsing occurrences destroys provenance — two copies of the
-    same sha in two different claims can both survive while swapping claims,
-    and nothing downstream can tell. `group_id` keeps the equivalence
-    relationship as metadata, which is where it belongs.
+    Placeholders are occurrence-unique, not literal-unique. Sharing one placeholder per
+    literal would destroy provenance: two copies of a sha in different claims could swap
+    claims unnoticed. `group_id` keeps the equivalence relationship as metadata.
     """
     token            : str
     literal          : str
@@ -517,15 +506,8 @@ def resolve_spans( spans ):
     """
     Reduce overlapping candidates to one non-overlapping set.
 
-    The review (§2) called for exactly this instead of a sequence of
-    independent regex replacements: "a quoted span containing backticks
-    containing a SHA should become one non-overlapping extracted span, not
-    three nested substitutions."
-
-    Precedence, in order:
-        1. longest span wins  — the enclosing construct beats what it encloses
-        2. taxonomy rank      — earlier in _PATTERNS wins a length tie
-        3. leftmost           — deterministic final tiebreak
+    A quoted span containing backticks containing a sha becomes one extracted span.
+    Precedence: longest span wins, then earlier rank in _PATTERNS, then leftmost.
 
     Requires:
         - spans is an iterable of Span
@@ -560,10 +542,9 @@ def segment_clauses( text ):
     """
     Split text into clause spans.
 
-    Clause identity is what makes relocation detectable at all: a placeholder
-    that stays inside its own clause cannot have been re-attached to a
-    different claim. The review calls clause confinement "the cheapest
-    meaningful improvement" over bare order-monotonicity.
+    Clause identity makes relocation detectable: a placeholder that stays inside its
+    own clause cannot have been re-attached to a different claim. Clause confinement is
+    the cheapest meaningful improvement over bare order-monotonicity.
 
     Requires:
         - text is a string
@@ -591,13 +572,9 @@ def count_verify_literals( text, namespace ):
     """
     Count the verify-tier literals standing in text, ignoring placeholders.
 
-    Placeholders are stripped first so that digits inside a token body cannot
-    be mistaken for content. The same stripping is applied to both sides of the
-    comparison, which is what makes the counts comparable.
-
-    Removable boilerplate is stripped first and on both sides of the
-    comparison, so the rewriter deleting a leading salute is not read as
-    corrupting a literal.
+    Placeholders and removable boilerplate are stripped first, on both sides.
+    So token digits are not read as content, and a deleted salute is not read as a
+    corrupted literal.
 
     Requires:
         - text is a string
@@ -624,22 +601,11 @@ def count_verify_literals( text, namespace ):
 
 def count_all_literals( text, namespace="" ):
     """
-    Count EVERY literal class in place — not just the cheap VERIFY tier.
+    Count every literal class in place, not just the cheap verify tier.
 
-    🔴 WHY THIS EXISTS. `count_verify_literals` covers the VERIFY tier only:
-    PORT, ISSUE, SECTION, DELTA, GLYPH, MONEY, NUMUNIT, INT. Everything Rick
-    actually asked to protect — SHA, FILELINE, PATH, URL, IDENT, SEMVER, UUID,
-    EMAIL — is HARD or SOFT tier, substituted rather than checked, so a caller
-    that does not freeze gets NO protection for hashes from that function.
-
-    That gap was named as a blocker in the tutor plan and then walked into
-    anyway by the first tutor gate, which called the narrow function. It
-    surfaced on real output: a rewrite turned `lupin-app.ini:1398` into
-    `lupin-app.ini`, dropping the line number, and the gate passed it.
-
-    The tier split exists to decide what to SUBSTITUTE, and substitution costs
-    tokens. Checking in place costs nothing for any class, so there is nothing
-    to economise here and no reason to inherit that split.
+    `count_verify_literals` covers only the verify tier. Shas, file-line references, paths,
+    URLs and emails are hard or soft tier, so a caller that does not freeze gets no
+    protection for them there. Checking in place is free, so this ignores the tier split.
 
     Requires:
         - text is a string
@@ -708,20 +674,9 @@ def _derive_namespace( text ):
     """
     Derive a per-message namespace, but only when the plain form could collide.
 
-    The review preferred a namespace over escaping ("a per-message namespace or
-    nonce is preferable to merely escaping collisions") because escaping has to
-    be undone, and undoing it is another place to be wrong.
-
-    A namespace on EVERY message would be honest and expensive: it is 2-3 extra
-    tokens on every placeholder, paid on all traffic to defend against
-    something that occurs in almost none of it. So it is empty by default and
-    appears only on messages that could actually collide.
-
-    "Could collide" is judged by the validator's own matchers, not by the exact
-    delimiter. The corpus contains `(L207)` and `(L345)` written as ordinary
-    line references, which the loose matcher reads as a mangled placeholder and
-    the validator then rejects as invented. Anything those matchers would trip
-    on gets a namespace, which puts the prose out of their reach.
+    A namespace beats escaping, which has to be undone, but costs 2-3 tokens per placeholder.
+    "Could collide" is judged by the validator's own matchers, not the exact delimiter.
+    Line references such as `(L207)` read as mangled placeholders to the loose matcher.
 
     Requires:
         - text is a string
@@ -760,13 +715,11 @@ def _token_pattern( namespace ):
 
 def _loose_token_pattern( namespace ):
     """
-    Deliberately sloppy matcher for things that were *meant* to be placeholders.
+    Sloppy matcher for things that were meant to be placeholders.
 
-    This is the instrument behind check 3. Comparing its hit count against the
-    exact parser's is what turns "the model mangled a token" from a list of
-    shapes to enumerate into a single measurement: any split, truncation,
-    dropped bracket, or substituted delimiter changes one count and not the
-    other.
+    This is the instrument behind check 3. Comparing its hit count against the exact
+    parser's turns "the model mangled a token" into one measurement. Any split, truncation,
+    dropped bracket, or substituted delimiter changes one count and not the other.
     """
     return re.compile(
         "[" + re.escape( _LOOKALIKE_OPEN ) + "]{1,2}"
@@ -893,10 +846,9 @@ def validate( rewritten, frozen_msg ):
     """
     Check a rewritten body against the placeholders that were sent out.
 
-    The six checks are the plan's, with the review's correction to check 6: a
-    rewritten message cannot be byte-equal to the original, so the byte-equality
-    guarantee belongs to the extractor/restorer round trip alone, and what is
-    checked here is that every mapped literal and occurrence survives.
+    A rewritten message cannot be byte-equal to the original, so check 6 only requires
+    that every mapped literal and occurrence survives. The byte-equality guarantee belongs
+    to the extractor and restorer round trip alone.
 
     Requires:
         - rewritten is a string
@@ -1060,10 +1012,9 @@ def restore( rewritten, frozen_msg, strict=True ):
     """
     Put the literals back.
 
-    Fail-closed is the entire safety posture. If restoration cannot be
-    completed exactly, the caller delivers the original uncompressed: the worst
-    case becomes "no compression on this message" instead of "a corrupted line
-    number someone acts on."
+    Fail-closed is the whole safety posture. If restoration cannot be completed exactly,
+    the caller delivers the original uncompressed. The worst case is then no compression,
+    never a corrupted line number someone acts on.
 
     Requires:
         - rewritten is a string

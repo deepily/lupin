@@ -1,46 +1,35 @@
 """
-A synthetic DM corpus for the freeze property tests — deterministic, in-repo, no artifact.
+A synthetic DM corpus for the freeze property tests: deterministic, in-repo, no artifact.
 
-WHY THIS EXISTS. The six corpus tests in `test_freeze.py` read a 4 MB snapshot of REAL
-fleet DM traffic from `src/tmp/`, which is gitignored. Present, the module reported 494
-passed; absent, 488 passed and 6 skipped — both reading as success, with `git status`
-structurally unable to say which run you got. Mr. Radio ruled 2026-08-30 that the real
-snapshot NEVER goes in the repo: 2,951 real message bodies and two dozen personal email
-addresses do not belong in a public tree, and this repo's own secret scanner cannot read
-`.jsonl` at all, so it could not vouch for them either.
+Why it exists: the corpus tests in `test_freeze.py` once read a 4 MB snapshot of real fleet
+DM traffic from the gitignored `src/tmp/`. With the file present the module reported 494
+passed. With it absent, 488 passed and 6 skipped, and `git status` could not say which run you got.
+The real snapshot never goes in the repo. It holds real message bodies and personal email
+addresses, and the repo's secret scanner cannot read `.jsonl` files.
 
-🔴 THE POINT IS THAT A CORPUS IN CODE CANNOT GO MISSING. Replacing one gitignored file
-with a committed file would fix this instance; generating the bodies in a committed module
-ends the class. No path to check, no artifact to forget, and no second mode in which the
-same suite measures less and still says "passed".
+A corpus in code cannot go missing. Generating the bodies in a committed module leaves no
+path to check and no artifact to forget. The suite has no second mode in which it measures
+less and still says "passed".
 
-WHAT THESE TESTS ACTUALLY DISCRIMINATE ON — and why plausible chatter is the wrong target.
-All six are PROPERTY tests: freeze/restore round-trips, placeholder tokens never colliding
-with source text, the validator's verdict not depending on a span's label, resolved spans
-never overlapping, no unrestored placeholder reaching delivery, and `compress_or_original`
-never raising. None cares whether the text reads like a real conversation. What they need
-is text that strains the SPAN EXTRACTOR: every pattern kind, and the awkward arrangements
-— nesting, adjacency, and literals sitting on each other's boundaries.
+What the tests discriminate on: all six are property tests. They cover freeze and restore
+round-trips, and placeholder tokens never colliding with source text. They also cover the
+validator's verdict not depending on a span's label, and resolved spans never overlapping.
+The last two are no unrestored placeholder reaching delivery and `compress_or_original`
+never raising. None cares whether the text reads like a conversation. They need text that
+strains the span extractor: every pattern kind, plus nesting, adjacency, and literals on
+each other's boundaries.
 
-🔴 WHAT THIS DOES NOT COVER — READ BEFORE TRUSTING A GREEN FROM IT.
-· It exercises the kinds THIS FILE KNOWS TO BUILD. The coverage test derives the kind list
-  from `freeze._PATTERNS` at runtime, so a NEW pattern added to freeze.py reddens instead
-  of being silently unexercised. That guard is why the coverage claim is checkable — it is
-  not a claim that the ARRANGEMENTS are exhaustive. They are not, and cannot be.
-· It cannot produce the thing that made real traffic valuable: combinations nobody designed.
-  Both defects recorded in `test_freeze.py`'s own comments were found because real text did
-  something unexpected. A generator written by the same person who wrote the checks cannot
-  supply that, and this file must not be described as if it does.
-· It is not a statistical model of fleet traffic. Lengths and shapes here stress the
-  extractor; they do not resemble how anyone writes.
+What it does not cover, so read a green with care:
+ - It exercises only the kinds this file builds. The coverage test derives the kind list from
+   `freeze._PATTERNS` at runtime, so a new pattern reddens it. That does not make the
+   arrangements exhaustive, and they cannot be.
+ - It cannot produce combinations nobody designed, which is what real traffic supplied.
+ - It is not a statistical model of fleet traffic. Lengths and shapes stress the extractor.
 
-⇒ Read a green here as "the invariants hold on adversarial text we thought of", never as
-"the invariants hold on real traffic". The second claim needs real traffic, and real
-traffic is not going in this repo.
+A green means the invariants hold on adversarial text we thought of, never on real traffic.
 
-DETERMINISM. `synth_corpus()` takes an explicit seed and returns the same bodies every
-call, so a failure is reproducible from the seed alone and two machines cannot disagree
-about what the suite measured.
+Determinism: `synth_corpus()` takes an explicit seed and returns the same bodies every call.
+A failure is reproducible from the seed alone.
 """
 
 import random
@@ -132,10 +121,10 @@ def synth_corpus( count=600, seed=20260830 ):
     Ensures:
         - returns a list of str bodies, never shorter than the adversarial set plus one
           body per literal kind
-        - the SAME seed always yields the SAME bodies, so a failure is reproducible from
+        - the same seed always yields the same bodies, so a failure is reproducible from
           the seed alone
         - every kind in `_LITERALS` appears somewhere in the result
-        - the adversarial cases come FIRST, so a truncated slice (`corpus[ :300 ]`, which
+        - the adversarial cases come first, so a truncated slice (`corpus[ :300 ]`, which
           four of the six tests take) still contains them — a generator whose hard cases
           sort to the end is tested by nobody
     """

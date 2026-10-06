@@ -1,18 +1,14 @@
 #!/usr/bin/env python3
 """
-The DM compression agent — the rewriter half of arm 4.
+The DM compression agent, the rewriter half of arm 4.
 
-Takes a FROZEN message body (placeholders already substituted by Phase 1's
-freeze protocol), asks the local Phi-4 to shorten it, and hands back the model's
-output still holding its placeholders. It does NOT restore, validate, or decide
-what to deliver — `pipeline.py` does that, using Phase 1's machinery unchanged.
+Takes a frozen message body, with placeholders already substituted by the freeze protocol.
+Asks the local Phi-4 to shorten it, and hands back the output still holding its placeholders.
+It does not restore, validate, or decide what to deliver. `pipeline.py` does that, using
+the freeze machinery unchanged.
 
-WHY A LOCAL MODEL. The original plan spent its §2 hunting for a hosted endpoint
-cheap enough to pay for itself — a $1.70/M blended ceiling, a Flash-class target,
-a table showing Opus loses money. Rick's direction closed that question by
-pointing at the Phi-4-14B already serving on :3001. A local vLLM has no
-per-token cost, so the only remaining budget is LATENCY, because this sits in
-the DM delivery path.
+Why a local model: a local vLLM serving Phi-4-14B on :3001 has no per-token cost.
+That leaves latency as the only budget, because this agent sits in the DM delivery path.
 """
 
 import cosa.utils.util as du
@@ -24,10 +20,8 @@ class DmCompressionAgent( AgentBase ):
     """
     Rewrites one frozen DM body into a shorter one, preserving its placeholders.
 
-    Shaped after `MathAgent` — the minimal canonical `AgentBase` form — with a
-    bounded retry loop borrowed from `DmQualityJudge`, because the base class
-    does not have one and a transient vLLM hiccup should not cost a message its
-    compression.
+    Shaped after `MathAgent`, the minimal canonical `AgentBase` form.
+    It makes one model call through the inherited `run_prompt` and does no synchronous retry.
     """
 
     ROUTING_COMMAND = "dm compression rewrite"
@@ -76,7 +70,7 @@ class DmCompressionAgent( AgentBase ):
             - frozen_text is a non-empty string carrying [[Lnn]] placeholders
             - the routing command is registered in MODEL_MAPPING, in
               agent_model_map, and in the INI (see the module docstring of
-              xml_models.py and §4 of the Phase 2 plan)
+              xml_models.py)
 
         Ensures:
             - self.prompt holds the template with the frozen body substituted

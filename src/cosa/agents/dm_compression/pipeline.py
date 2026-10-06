@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """
-The two halves joined: freeze → rewrite → validate → restore, or the original.
+The two halves joined: freeze, rewrite, validate, restore, or deliver the original.
 
-Phase 1 built the safety kernel. Phase 2 built the rewriter. This is the only
-place they meet, and it is deliberately thin — every decision it makes was
-already made and tested somewhere else.
+The freeze protocol is the safety kernel and the compression agent is the rewriter.
+This is the only place they meet, and it stays thin.
 
     freeze( body )  ──bypass?──────────────────────────────► original
           │
@@ -12,12 +11,10 @@ already made and tested somewhere else.
                                    │
                                    └──not ok──────────────► original
 
-🔑 The failure posture, stated once: **every path that is not a clean success
-delivers the original.** A model that times out, returns malformed XML, drops a
-placeholder, mangles a delimiter, alters a bare integer, or gets truncated at
-`max_tokens` all land in the same place — "no compression on this message". The
-worst case is a message that did not get shorter, never a message that got
-corrupted.
+Failure posture: every path that is not a clean success delivers the original.
+A model that times out, returns malformed XML, or drops a placeholder lands in the same place.
+So does one that mangles a delimiter, alters a bare integer, or is truncated at `max_tokens`.
+The worst case is a message that did not get shorter, never one that got corrupted.
 """
 
 import cosa.utils.util as du
@@ -38,19 +35,18 @@ def compress_dm( body, agent_factory=None, band_target=None, debug=False ):
     Requires:
         - body is a string
         - band_target, when given, is the fraction to aim for (0.45 = 45%) and
-          is injected into the prompt as a per-message instruction. This is arm
-          B of the prompt experiment; None is the control.
+          is injected into the prompt as a per-message instruction; None is the control
         - agent_factory, when given, is a callable taking frozen_text and
           returning an object with .run_prompt() -> dict carrying a
-          "compressed" key. That is AgentBase's real invocation method — there
-          is no .run(). A stub exposing .run() will pass every unit test and
-          fail against the live agent, which is exactly what happened once.
+          "compressed" key. That is AgentBase's real invocation method; there
+          is no .run(). A stub exposing .run() passes every unit test and
+          fails against the live agent.
 
     Ensures:
         - returns ( text_to_deliver, fallback_reason )
         - fallback_reason is None only when a compressed body is being delivered
-        - the returned text NEVER contains an unrestored placeholder
-        - never raises — every failure becomes a fallback with a reason
+        - the returned text never contains an unrestored placeholder
+        - never raises; every failure becomes a fallback with a reason
 
     Raises:
         - nothing
