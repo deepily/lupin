@@ -26,9 +26,10 @@ Fail-closed never fires, and 88 corpus bodies (3%) carry a bare `&`. The `from_x
 is therefore a safety fix. The falsification test pairs an ampersand with a placeholder,
 the shape where every structural check passes while the prose is wrong.
 
-The base class strips everything after the first `</response>`, `</result>` or `</output>`.
-A `</response>` inside the body is lifted out with its CDATA span, so the stripper never
-sees it. Our model always uses `<response>` as its root tag.
+The base class strips everything after the first closing root tag. It tries `</response>` first.
+It moves on to `</result>` and `</output>` only when `</response>` is absent. That
+handling is not relied on: our model always uses `<response>` as its root tag. A `</response>` inside the body
+is lifted out with its CDATA span, so the stripper never sees it.
 """
 
 import re
@@ -190,14 +191,17 @@ class DmCompressionResponse( BaseXMLModel ):
         A structural example for `{{PYDANTIC_XML_EXAMPLE}}` injection.
 
         The content is placeholder text, because models copy a plausible-looking answer.
-        Returns an instance, not a string, because `PromptTemplateProcessor` calls `.to_xml()`.
-        A string raises `AttributeError` there, which `AgentBase` swallows silently.
+        The placeholder token in the example is deliberate: it shows the model that a placeholder passes through untouched.
+        It returns an instance, not a string, because `PromptTemplateProcessor` calls `.to_xml()`.
 
         Requires:
             - nothing
 
         Ensures:
-            - returns a DmCompressionResponse instance (not a string)
+            - returns a DmCompressionResponse instance (not a string). A string raises `AttributeError`
+              in `PromptTemplateProcessor`, and `AgentBase` swallows it silently: the template ships
+              unprocessed, a literal `{{PYDANTIC_XML_EXAMPLE}}` stays in the prompt, there is no
+              `</stop>` sentinel, nothing raises, and the construction test is what catches it
         """
         return cls(
             thoughts   = "What you cut, and what you kept",

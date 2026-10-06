@@ -603,9 +603,9 @@ def count_all_literals( text, namespace="" ):
     """
     Count every literal class in place, not just the cheap verify tier.
 
-    `count_verify_literals` covers only the verify tier. Shas, file-line references, paths,
-    URLs and emails are hard or soft tier, so a caller that does not freeze gets no
-    protection for them there. Checking in place is free, so this ignores the tier split.
+    `count_verify_literals` covers only the `VERIFY` tier: `PORT`, `ISSUE`, `SECTION`, `DELTA`, `GLYPH`, `MONEY`,
+    `NUMUNIT` and `INT`. `SHA`, `FILELINE`, `PATH`, `URL`, `IDENT`, `SEMVER`, `UUID` and `EMAIL` are `HARD` or `SOFT` tier.
+    A caller that does not freeze gets no protection for them there. Checking in place is free, so this ignores the split.
 
     Requires:
         - text is a string

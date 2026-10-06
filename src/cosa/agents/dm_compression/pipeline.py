@@ -3,7 +3,7 @@
 The two halves joined: freeze, rewrite, validate, restore, or deliver the original.
 
 The freeze protocol is the safety kernel and the compression agent is the rewriter.
-This is the only place they meet, and it stays thin.
+This is the only place they meet, and it stays thin because every decision it makes was already made and tested elsewhere.
 
     freeze( body )  ──bypass?──────────────────────────────► original
           │
