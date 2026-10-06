@@ -1,24 +1,25 @@
 """
-DM Quality Judge — grades a peer-DM body for brevity/directness/tone.
+DM Quality Judge: grades a peer-DM body for brevity, directness and tone.
 
-Phase 2 of the DM Verbosity Reduction plan (Rick 2026-07-31 —
-src/rnd/v0.1.9/2026.07.31-dm-verbosity-reduction/). A HYBRID engine:
+Design: src/rnd/v0.1.9/2026.07.31-dm-verbosity-reduction/2026.07.31-dm-verbosity-reduction-phase1-2-plan.md
 
-    - Length  : deterministic Python bucket (LLMs are bad at counting).
-    - Directness + Tone : a fixed-rubric Mistral judge call.
-    - Overall : Python combination (equal weight to the quantitative vs the
-                qualitative CATEGORY), round-half-up, bucketed to 5 Likert levels.
+The engine is a hybrid:
 
-Modeled directly on the house LlmAnswerVerifier/VerificationResponse pattern
-(cosa/agents/notification_proxy/). LLM I/O is always text — the model emits a
-grade LABEL ("good", "exemplary", ...), never a number; Python does all the
-arithmetic. A judge-call failure returns a safe all-🤷/0 fallback (the DM still
-sends).
+    - Length: a deterministic Python bucket, because LLMs are bad at counting.
+    - Directness and tone: a fixed-rubric Mistral judge call.
+    - Overall: a Python combination. The quantitative and the qualitative
+      category weigh equally; the result is rounded half-up to 5 Likert levels.
 
-TWO VERSIONS LIVE SIDE BY SIDE as of 2026-08-01 (row ca7a2cbf). v1 is the module
-above and remains the default. v2 (judge_v2.py) replaces the Directness GRADE with an
-EXTRACTION checked against the source text. Choose with `dm quality judge version`;
-callers should go through get_dm_quality_judge() rather than naming a class, so the
+It follows the house LlmAnswerVerifier/VerificationResponse pattern
+(cosa/agents/notification_proxy/). LLM I/O is always text: the model emits a
+grade label ("good", "exemplary", ...), never a number, and Python does all the
+arithmetic. A judge-call failure returns an "unavailable" result with no weight
+and its own emoji, so the DM still sends.
+
+Two versions live side by side. v1 is the module above and is the default.
+The v2 judge (judge_v2.py) replaces the directness grade with an extraction, which is
+checked against the source text. Choose with `dm quality judge version`.
+Callers go through get_dm_quality_judge() rather than naming a class, so the
 switch lives in one place.
 """
 
@@ -40,7 +41,7 @@ def get_dm_quality_judge( version=None, **kwargs ):
           judge(body_text) contract and the same result shape, so no caller branches
         - an unreadable config, or any version value that is not 1 or 2, returns v1 —
           the version key is not a place to fail a DM send, and v1 is the known path
-        - the import of each judge is LOCAL to its branch: v2 is not imported at all
+        - the import of each judge is local to its branch: v2 is not imported at all
           when v1 is selected, so a future v2 import error cannot take down the
           default path
 

@@ -2,28 +2,29 @@
 """
 XML response models + deterministic scoring for DM Quality Judge **v2**.
 
-THE ONE IDEA. v1 asked the model to GRADE directness and the grade could never be
-checked. v2 asks it to LOCATE the verdict — quote it, index it, name the stray
-sentences after it — and computes the weight in Python. A grade can never be
-validated; a quote can be compared against the source text.
+The idea: v1 asked the model to grade directness, and a grade can never be
+checked. The v2 judge asks it to locate the verdict instead. It quotes the verdict,
+indexes it and names the stray sentences after it, and Python computes the
+weight. A quote can be compared against the source text.
 
-WHAT IS GROUNDED AND WHAT IS NOT (say this plainly, every time):
-    - The POSITION of the verdict is fully validated. The quote must equal a real
-      numbered sentence, at the index the model gave, at that sentence's FIRST
-      occurrence. A model that invents, paraphrases, or miscounts is REJECTED, not
-      averaged in.
-    - The STRAY classification is NOT. Deciding that sentence 4 carries nothing the
-      reader needs is the same payload judgement the 2026-08-01 measurement showed
-      this model failing at. The indices list makes it checkable for SHAPE (in range,
-      after the payload, no duplicates) — not true. So position weight and final
-      weight are reported SEPARATELY, and the ungrounded half stays visible.
+What is grounded and what is not:
+    - The position of the verdict is fully validated. The quote must equal a real
+      numbered sentence, at the index the model gave, at that sentence's first
+      occurrence. A model that invents, paraphrases, or miscounts is rejected,
+      not averaged in.
+    - The stray classification is not. Deciding that sentence 4 carries nothing
+      the reader needs is the same payload judgement this model failed at in
+      measurement. The indices list makes it checkable for shape (in range, after
+      the payload, no duplicates), not for truth.
+    - So position weight and final weight are reported separately, and the
+      ungrounded half stays visible.
 
 Companion to xml_models.py (v1), which is untouched. The shared Likert table,
-weight→emoji map and label normalizer are IMPORTED from there, never re-declared.
+weight-to-emoji map and label normalizer are imported from there, never
+re-declared.
 
 References:
     - src/rnd/v0.1.9/2026.07.31-dm-verbosity-reduction/2026.08.01-dm-judge-v2-plan.md
-    - the two expert opinions in that same directory (-claude.md, -gpt.md)
 """
 
 import re
@@ -121,22 +122,21 @@ class ExtractionError( ValueError ):
     """
     Raised when the model's extraction cannot be reconciled with the source text.
 
-    This is DELIBERATELY not a grade. The whole point of v2 is that an unverifiable
-    answer is refused rather than scored: judge_v2 catches this, retries, and on
-    exhaustion returns a NAMED non-answer that the discrimination probe drops from
-    its ordering. An ExtractionError that quietly became a `meh` would rebuild, one
-    level out, the exact defect this design exists to remove.
+    This is not a grade. An unverifiable answer is refused rather than scored:
+    judge_v2 catches this and retries. On exhaustion it returns a named non-answer,
+    which the discrimination probe drops from its ordering. An ExtractionError that
+    quietly became a `meh` would rebuild, one level out, the defect v2 exists to
+    remove.
     """
 
 
 def split_sentences( body_text ):
     """
-    Split a DM body into sentences — deliberately boring, and the ONLY splitter.
+    Split a DM body into sentences with a plain rule; this is the only splitter.
 
-    The list this returns is both (a) what the model is shown, numbered, and (b) what
-    the validator compares the model's quote against. Those must be the SAME list:
-    two independent splits that disagree would reject correct model output and accept
-    nothing useful.
+    The list this returns is what the model is shown, numbered, and also what the
+    validator compares the quote against. Those must be the same list, because two
+    splits that disagree would reject correct model output.
 
     Requires:
         - body_text is a string (may be empty)
@@ -146,9 +146,9 @@ def split_sentences( body_text ):
         - an empty or whitespace-only body returns []
         - splits on . ! ? (and runs of them) followed by whitespace, tolerating
           closing quotes/brackets before the space
-        - does NOT split on a decimal point ("30.5 seconds"), because the period is
+        - does not split on a decimal point ("30.5 seconds"), because the period is
           not followed by whitespace
-        - does NOT split after a known abbreviation ("etc. ", "vs. ") or a single-
+        - does not split after a known abbreviation ("etc. ", "vs. ") or a single-
           letter initial ("R. Ruiz")
         - the concatenation of the result, space-joined, equals the whitespace-
           normalized input — no character is invented or dropped
@@ -199,9 +199,9 @@ def _normalize_for_match( text ):
 
     Ensures:
         - whitespace runs collapse to one space, ends stripped, case folded
-        - nothing else is removed — punctuation is SIGNIFICANT here, because a quote
-          that drops the final period is a paraphrase, and a paraphrase is the thing
-          the check exists to catch
+        - nothing else is removed; punctuation is significant here, because a quote
+          that drops the final period is a paraphrase, and catching paraphrases is
+          what the check is for
     """
     return " ".join( str( text ).split() ).strip().casefold()
 
@@ -216,7 +216,7 @@ def parse_index( raw ):
     Ensures:
         - returns a non-negative int
         - accepts "1", " 1 ", "1." and a bare "none"/"n/a"/"" as NO_PAYLOAD_INDEX
-        - raises ExtractionError on anything else — NEVER guesses, because a guessed
+        - raises ExtractionError on anything else — never guesses, because a guessed
           index would be scored as if it had been verified
     """
     text = str( raw ).strip().lower().rstrip( "." )
@@ -256,13 +256,13 @@ def validate_extraction( quote, payload_index, stray_indices, sentences ):
     """
     Check the model's extraction against the source text. Raise, or return silently.
 
-    This function IS the design. Everything v2 claims over v1 rests on these checks
-    actually running, which is why the unit tier feeds each one an input that MUST be
-    rejected — a check nobody has watched fail is not known to be running.
+    Everything v2 claims over v1 rests on these checks running. The unit tier
+    therefore feeds each one an input that must be rejected. A check nobody has
+    watched fail is not known to be running.
 
     Requires:
         - quote is a string; payload_index is an int; stray_indices is a list of ints
-        - sentences is the split_sentences output for the SAME body
+        - sentences is the split_sentences output for the same body
 
     Ensures:
         - returns None when the extraction is reconcilable with the source
@@ -272,14 +272,14 @@ def validate_extraction( quote, payload_index, stray_indices, sentences ):
         1. index in range — 1..len(sentences), or exactly 0 for "no payload"
         2. no-payload consistency — index 0 means no quote and no strays; claiming a
            quote while claiming no payload is incoherent, not lenient
-        3. quote EQUALS the whole numbered sentence (whitespace/case-normalized).
-           Equality, NOT containment: containment lets a model quote the clean clause
+        3. quote equals the whole numbered sentence (whitespace/case-normalized).
+           Equality, not containment: containment lets a model quote the clean clause
            of a sentence that also buries a blocker, land index 1 with no strays, and
-           collect the top of the scale on a body that should not get it
+           earn the top grade on a body that should not get it
         4. first occurrence — when the same sentence text appears twice, the index
-           must be the FIRST one, or a model could pick whichever copy grades better
+           must be the first one, or a model could pick whichever copy grades better
            and pass every other check
-        5. stray indices — each in range, each strictly AFTER the payload, none
+        5. stray indices — each in range, each strictly after the payload, none
            repeated
     """
     if not sentences:
@@ -331,7 +331,7 @@ def validate_extraction( quote, payload_index, stray_indices, sentences ):
 
 def structural_code( payload_index, stray_count ):
     """
-    Map a VALIDATED (index, stray count) onto GPT's structural code.
+    Map a validated (index, stray count) onto its structural code.
 
     Requires:
         - payload_index and stray_count are non-negative ints that already passed
@@ -354,7 +354,7 @@ def structural_code( payload_index, stray_count ):
 
 def position_weight( payload_index ):
     """
-    The weight from POSITION ALONE — the fully-validated half of the directness score.
+    The directness weight from the verdict's position alone, the fully validated half.
 
     Requires:
         - payload_index is a non-negative int that passed validate_extraction
@@ -367,7 +367,7 @@ def position_weight( payload_index ):
 
 def code_weight( code ):
     """
-    The weight a structural code WOULD carry if the concision half were weighted.
+    The weight a structural code would carry if the concision half were weighted.
 
     Requires:
         - code is a key of STRUCTURE_TO_WEIGHT
@@ -377,16 +377,16 @@ def code_weight( code ):
           degrading to 0, because every caller derives its code from structural_code
           and a miss means the table and the mapper have drifted apart
 
-    NOTE: this is no longer what the judge scores — see directness_weight below and
-    the CONCISION_ADJUSTMENT_ENABLED note. It is kept because the structural code is
-    still computed and reported, and because the follow-up work needs it.
+    The judge no longer scores with this; see directness_weight and the comment on
+    CONCISION_ADJUSTMENT_ENABLED. It is kept because the structural code is still
+    computed and reported, and the follow-up work needs it.
     """
     return STRUCTURE_TO_WEIGHT[ code ]
 
 
 def directness_weight( payload_index, stray_count ):
     """
-    THE directness weight the judge scores.
+    The directness weight the judge scores.
 
     Requires:
         - payload_index and stray_count are non-negative ints that already passed
@@ -409,12 +409,11 @@ def directness_weight( payload_index, stray_count ):
 
 class DmDirectnessExtraction( BaseXMLModel ):
     """
-    The model's OBSERVATIONS about where the verdict sits. Carries NO grade.
+    The model's observations about where the verdict sits; it carries no grade.
 
-    Field order is generation order, and generation order matters: a grade token
-    emitted before its evidence cannot have been informed by that evidence. Here the
-    question does not arise, because there is no grade field at all — Python computes
-    the weight from these three observations after checking them.
+    Field order is generation order, so a grade token emitted before its evidence
+    cannot be informed by it. There is no grade field here: Python computes the
+    weight from these three observations after checking them.
 
     Requires:
         - the LLM returns <response> with the three dash-cased child tags
@@ -430,12 +429,12 @@ class DmDirectnessExtraction( BaseXMLModel ):
 
     def to_xml( self, root_tag="response", pretty=True ):
         """
-        Serialize with DASH-cased tags, matching this repo's XML convention.
+        Serialize with dash-cased tags, matching this repo's XML convention.
 
         BaseXMLModel.to_xml() calls model_dump() without by_alias, so a declared alias
-        is honoured parsing IN and ignored going OUT. Ask Pydantic for the aliases it
-        already knows rather than hand-building a dict, so a renamed field cannot
-        drift from its tag.
+        is honoured when parsing and ignored when serializing. Ask Pydantic for the
+        aliases it already knows rather than hand-building a dict, so a renamed field
+        cannot drift from its tag.
         """
         import xmltodict
         return xmltodict.unparse(
@@ -447,11 +446,11 @@ class DmDirectnessExtraction( BaseXMLModel ):
         """
         Structure-teaching example for {{PYDANTIC_XML_EXAMPLE}} injection.
 
-        The injected example is a ROUND TRIP — the template processor fills the marker
-        from this instance's own to_xml() — so it is well-formed BY CONSTRUCTION. That
-        property is why the marker exists and why v2 keeps it: the 2026-08-01 session
-        removed a structural example from the v1 prompt to stop the model copying a
-        plausible grade, and the model immediately began emitting unclosed tags.
+        The injected example is a round trip: the template processor fills the marker
+        from this instance's own to_xml(), so the example is always well-formed.
+        That is why the marker exists and why v2 keeps it. Removing a structural
+        example from the v1 prompt, to stop the model copying a plausible grade,
+        made the model emit unclosed tags.
 
         The content is descriptive prose, never a usable answer. There is no grade to
         copy here, which removes the failure mode entirely for this schema.
@@ -465,19 +464,18 @@ class DmDirectnessExtraction( BaseXMLModel ):
 
 class DmToneJudgement( BaseXMLModel ):
     """
-    The tone half of v2 — the SAME rubric v1 uses, with one change: evidence first.
+    The tone half of v2: the same rubric v1 uses, with the evidence field first.
 
-    Tone was never the defect. On the 2026-08-01 2x2 it graded all four bodies
-    correctly, including naming the invented vocabulary in the body whose directness
-    it got wrong. So the rubric is left alone and only the field ORDER changes: the
-    evidence tag now precedes the grade tag, so the grade token is generated after
-    the words it is supposed to rest on (Claude expert §3.1).
+    Tone was never the defect: it graded all four measured bodies correctly. The
+    rubric is unchanged and only the field order differs.
 
     Requires:
         - the LLM returns <response> with <tone-evidence> then <tone>
 
     Ensures:
         - tone is a grade-label string; tone_weight() maps it via v1's GRADE_TABLE
+        - the evidence tag precedes the grade tag, so the grade token is generated
+          after the words it rests on
     """
 
     tone_evidence : str = Field( default="", description="The specific words or phrases the grade rests on", alias="tone-evidence" )
@@ -504,9 +502,9 @@ class DmToneJudgement( BaseXMLModel ):
         """
         Structure-teaching example — evidence tag first, grade tag second.
 
-        The grade placeholder keeps Rick's verbatim CHOOSE-ONE form (2026-08-01): the
-        live Phi-4 substitutes a real label rather than echoing the brackets, which
-        retired the earlier "placeholders do not work here" conclusion.
+        The grade placeholder keeps the bracketed choose-one form. The live Phi-4
+        substitutes a real label rather than echoing the brackets, so that form is
+        safe for this model.
         """
         return cls( **{
             "tone-evidence" : "QUOTE THE SPECIFIC WORDS YOUR GRADE RESTS ON",

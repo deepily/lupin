@@ -3,17 +3,17 @@
 XML response model for the DM Quality Judge.
 
 Defines DmQualityJudgeResponse — the Mistral judge's grade of a peer-DM body on
-the two QUALITATIVE dimensions (Directness, Tone). Length is graded separately
-in Python (judge.py), so it is NOT a field here.
+the two qualitative dimensions (directness, tone). Length is graded separately
+in Python (judge.py), so it is not a field here.
 
 Modeled on cosa/agents/notification_proxy/xml_models.py (VerificationResponse):
-    - all fields are `str` — "LLM I/O is always text". The model emits a grade
-      LABEL ("good", "exemplary", ...); Python maps the label to a weight/emoji.
+    - all fields are `str`, because LLM I/O is always text. The model emits a grade
+      label ("good", "exemplary", ...); Python maps the label to a weight/emoji.
     - None values coerce to "" (xmltodict emits None for empty tags).
     - BaseXMLModel.from_xml() parses; malformed XML raises XMLParsingError.
 
 The canonical grade label ⇄ weight ⇄ emoji table lives here (GRADE_TABLE) so the
-judge, the audit counter, and the tests all read ONE source.
+judge, the audit counter, and the tests all read one source.
 """
 
 import re
@@ -88,29 +88,19 @@ def normalize_grade_label( label ):
 
     Ensures:
         - returns a key present in GRADE_TABLE
-        - lowercases, strips, and COLLAPSES any run of whitespace/hyphens/underscores
+        - lowercases, strips, and collapses any run of whitespace/hyphens/underscores
           to a single underscore ("Needs Improvement" / "needs-improvement" /
           "needs _ improvement" / "needs__improvement" → "needs_improvement")
-        - applies observed-typo aliases (e.g. "meah" → "meh"), bug a5f7b36d
+        - applies observed-typo aliases (e.g. "meah" → "meh")
         - an unknown or blank label degrades to "meh" (never raises)
-
-    🔴 WHY A COLLAPSE AND NOT TWO .replace() CALLS (bug ca7a2cbf, 2026-08-01). The
-       live 24B GPTQ model emits `needs _ improvement` — spaces AROUND the
-       underscore, the same sloppiness that produced spaced TAGS in a5f7b36d.
-       Sequential replaces turned that into `needs___improvement`, which is not in
-       GRADE_TABLE, so the most-frequent multi-word label in the whole scale fell
-       through to the `meh` fallback SILENTLY, on every occurrence.
-
-       That fallback exists for a genuinely unrecognizable label. It was instead
-       swallowing a perfectly recoverable one and reporting 0 — a real grade of
-       -1 rendered as neutral, with nothing anywhere saying a label had been
-       dropped. Measured live: Tone read `meh` for every DM tested while the model
-       was in fact returning `needs_improvement`.
-
-       ⇒ The lesson is about the FALLBACK, not the spacing. A degrade-to-neutral
-         that cannot distinguish "I do not recognize this" from "I failed to parse
-         something I should have recognized" reports both as a considered judgement
-         of `meh`.
+        - the collapse is one regex, not two .replace() calls: the live 24B GPTQ
+          model emits `needs _ improvement` with spaces around the underscore, and
+          sequential replaces turn that into `needs___improvement`, which is not in
+          GRADE_TABLE, so a recoverable label would fall through to the `meh`
+          fallback silently and report 0 instead of its real grade
+        - the `meh` fallback is for a label nobody can recognize; it cannot tell
+          "unrecognized" from "failed to parse", so a parse miss reads as a
+          considered `meh`
     """
     if not label:
         return _FALLBACK_LABEL
@@ -144,11 +134,11 @@ class DmQualityJudgeResponse( BaseXMLModel ):
     XML response from the Mistral DM Quality Judge.
 
     Grades a peer-DM body on the two qualitative dimensions. Length is Python-only
-    and is NOT part of this response.
+    and is not part of this response.
 
     Requires:
         - the LLM returns XML with a <response> root and <directness>/<tone>
-          grade LABELS drawn from GRADE_TABLE
+          grade labels drawn from GRADE_TABLE
 
     Ensures:
         - directness / tone are grade-label strings (default "meh")
@@ -182,7 +172,7 @@ class DmQualityJudgeResponse( BaseXMLModel ):
 
     def to_xml( self, root_tag="response", pretty=True ):
         """
-        Serialize with DASH-cased tags, matching this repo's XML convention.
+        Serialize with dash-cased tags, matching this repo's XML convention.
 
         Requires:
             - the model's dash aliases are declared on the note fields
@@ -191,12 +181,12 @@ class DmQualityJudgeResponse( BaseXMLModel ):
             - `<directness-note>` / `<tone-note>` in the output, never underscores
             - every other field is unchanged
 
-        BaseXMLModel.to_xml() calls model_dump() WITHOUT by_alias, so a declared
-        alias is honoured on the way IN (parsing) and silently ignored on the way
-        OUT. Every other dash-cased model in this repo works around that by
-        hand-building a literal dict in its own to_xml() override; this does the
-        same job by asking Pydantic for the aliases it already knows about, so a
-        renamed field cannot drift from its tag.
+        BaseXMLModel.to_xml() calls model_dump() without by_alias, so a declared
+        alias is honoured when parsing and silently ignored when serializing.
+        Every other dash-cased model in this repo works around that by
+        hand-building a literal dict in its own to_xml() override. This one asks
+        Pydantic for the aliases it already knows, so a renamed field cannot
+        drift from its tag.
         """
         import xmltodict
         return xmltodict.unparse(
@@ -224,30 +214,24 @@ class DmQualityJudgeResponse( BaseXMLModel ):
         """
         Get an example instance for prompt-template injection.
 
-        PLACEHOLDER CONTENT, matching the shape every other agent in this repo uses
-        (`agents/math.txt` injects `<thoughts>Your thoughts</thoughts>`,
-        `<idea1>Your first idea</idea1>`). The injected example teaches STRUCTURE;
-        it must not read as an ANSWER.
+        The content is placeholder text, as in every other agent in this repo.
+        For instance `agents/math.txt` injects `<thoughts>Your thoughts</thoughts>`
+        and `<idea1>Your first idea</idea1>`. The injected example teaches structure;
+        it must not read as an answer.
 
-        Two earlier attempts here were both wrong, in opposite directions, and the
-        history matters because each one looks correct on its own:
+        Two other forms fail, in opposite directions:
 
-          - `[one of: terrible, needs_improvement, ...]` (bug a5f7b36d) — an ENUM
-            HINT in brackets. The 24B echoed the brackets verbatim as malformed
-            XML. That failure was read as "placeholders don't work here," and the
-            conclusion drawn was to go fully concrete.
-          - `good` / "Leads with the verdict in the first sentence." — a filled,
-            PLAUSIBLE grade. It is well-formed, and the model copied it byte-for-
-            byte onto messages it did not describe, including the single word
-            "yes". Removing it to stop the copying took the well-formedness
-            lesson with it, and the model began emitting unclosed tags.
+          - A bracketed enum hint such as `[one of: terrible, needs_improvement, ...]`.
+            The 24B echoed the brackets verbatim as malformed XML, because
+            bracket-enum syntax is not prose.
+          - A filled, plausible grade such as `good` plus a note that the message
+            leads with the verdict. It is well-formed, but a plausible grade is
+            a usable answer. The model copied it byte-for-byte onto messages it
+            did not describe, including the single word "yes".
 
-        Neither failure was about placeholders-vs-concrete. `[one of: ...]` failed
-        because bracket-enum syntax is not prose; a plausible grade failed because
-        it is a usable answer. Math's form is neither: plain descriptive prose that
-        no model would mistake for a verdict. The grade vocabulary is already
-        stated in the prompt's Task section, so nothing is lost by not repeating it
-        here.
+        Plain descriptive prose that no model would mistake for a verdict avoids
+        both. The grade vocabulary is already stated in the prompt's Task section,
+        so nothing is lost by not repeating it here.
         """
         return cls(
             directness        = "[CHOOSE ONE: {terrible|bad|meh|good|exemplary}]",

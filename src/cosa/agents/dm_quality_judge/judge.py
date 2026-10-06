@@ -5,17 +5,18 @@ DM Quality Judge — hybrid grader for a peer-DM body.
     - Length  : Python-only 5-level bucket on the word count (LLMs count badly).
     - Directness + Tone : one fixed-rubric Mistral judge call (this module).
     - Overall : Python combination, equal weight to the quantitative (Length) vs
-                the qualitative (Directness+Tone) CATEGORY, round-half-up.
+                the qualitative (Directness+Tone) category, round-half-up.
 
 Modeled on cosa/agents/notification_proxy/verification.py (LlmAnswerVerifier):
 same LlmClientFactory client, same PromptTemplateProcessor, same 3-attempt/backoff
-retry, same graceful-degradation contract (a failure NEVER raises to the caller —
-it returns a NAMED non-answer, weight None with its own emoji, and the DM still sends).
+retry. It keeps the same graceful-degradation contract: a failure never raises to the
+caller. It returns a named non-answer (weight None, with its own emoji) and the DM
+still sends.
 
-🔴 A NON-ANSWER IS NOT A GRADE, on either axis (Rick, 2026-08-01). Every dimension the
-judge did not actually grade carries weight None — never 0, which is `meh` and averages
-into Overall — and its own emoji from NONANSWER_EMOJI, never 🤷, which is `meh`'s face.
-Overall falls back to Length alone the moment EITHER qualitative dimension is a
+A non-answer is not a grade, on either axis. Every dimension the judge did not
+actually grade carries weight None, never 0, which is `meh` and averages into Overall.
+It also carries its own emoji from NONANSWER_EMOJI, never 🤷, which is `meh`'s face.
+Overall falls back to Length alone as soon as either qualitative dimension is a
 non-answer.
 
 References:
@@ -100,8 +101,9 @@ _RETRY_NUDGE                = "Begin your reply with <response>.\n\n"
 # hot-reload, via a cache_registry invalidator. So editing a threshold in the ini and
 # hitting GET /api/init takes effect with NO server bounce.
 def _resolve_threshold( config_key, default ):
-    """Read an int length threshold from lupin-app.ini, default on absence/any error.
-    Never raises — a broken config read must not stop this module from importing."""
+    """Read an int length threshold from lupin-app.ini, falling back to the default.
+
+    Never raises: a broken config read must not stop this module from importing."""
     from cosa.config.configuration_manager import ConfigurationManager
     try:
         return ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ).get(
@@ -112,12 +114,10 @@ def _resolve_threshold( config_key, default ):
 
 def _reload_length_thresholds():
     """
-    (Re)resolve all five DM-length thresholds from lupin-app.ini into this module's
-    globals, and sync judge_v2's own imported copy of QUALITATIVE_WORD_LIMIT.
+    Reload the five DM-length thresholds from lupin-app.ini into this module's globals.
 
-    Called once at import, then again on every /api/init hot-reload via the
-    cache_registry invalidator registered below — so an ini edit plus a GET /api/init
-    takes effect with no server bounce.
+    Runs at import and on every /api/init hot-reload (cache_registry invalidator), so an
+    ini edit takes effect with no server bounce.
 
     Requires:
         - lupin-app.ini is readable (any error falls back to the per-key default, via
@@ -125,8 +125,8 @@ def _reload_length_thresholds():
 
     Ensures:
         - the five module globals are rebound to the current ini values
-        - judge_v2.QUALITATIVE_WORD_LIMIT (its OWN binding, from `from judge import ...`)
-          is rebound to match IF judge_v2 is already imported — a sys.modules reach, not
+        - judge_v2.QUALITATIVE_WORD_LIMIT (its own binding, from `from judge import ...`)
+          is rebound to match if judge_v2 is already imported — a sys.modules reach, not
           a source edit, so judge_v2's import and the length tests keep working untouched
         - length_bucket, which reads these globals at call time, reflects the new values
           on its next call (no restart)
@@ -246,12 +246,10 @@ def _canonical_by_key( known_fields ):
 
 def _extract_unclosed_fields( span, known_fields=_KNOWN_FIELDS ):
     """
-    Recover field values from a <response>...</response> span whose child tags
-    were opened but never closed (bug d9c3e1a2's failure-2 shape: <directness>,
-    <directness_note>, <tone>, <tone_note> all open, none closed — but the
-    <response>/</response> wrapper IS present, so the caller's fast path would
-    otherwise return the span unmodified and expat would hard-fail on the
-    unclosed children).
+    Recover field values from a response span whose child tags were opened but never closed.
+
+    The wrapper is present, so the caller's fast path would return the span unmodified
+    and expat would hard-fail on the unclosed children.
 
     Requires:
         - span is the extracted "<response>...</response>" string, tags already
@@ -269,14 +267,12 @@ def _extract_unclosed_fields( span, known_fields=_KNOWN_FIELDS ):
           the close tag immediately precedes the next open tag and gets
           stripped the same way
 
-    ⚠️ known_fields IS A PARAMETER, and it has to be (found live 2026-08-01 while
-       wiring v2). This function REBUILDS the span from the known fields it finds,
-       so any tag NOT in that tuple is DELETED. v2's tone response is
-       <tone-evidence> + <tone>: called with v1's tuple it matched <tone> only,
-       silently dropped the evidence, and the judge reported a graded tone with a
-       blank justification. Nothing raised — the XML was well-formed both before
-       and after, so only reading the emitted detail caught it. A repair layer that
-       edits toward a hardcoded schema is a data-loss bug for every other schema.
+    known_fields is a parameter because this function rebuilds the span from the known
+    fields it finds, so any tag not in that tuple is deleted. The v2 tone response is
+    <tone-evidence> plus <tone>. Called with the v1 tuple it matched <tone> only and
+    silently dropped the evidence, so the judge reported a graded tone with a blank
+    justification. Nothing raised, because the XML was well-formed before and after.
+    A repair layer that edits toward a hardcoded schema loses data for every other schema.
     """
     inner = span
     if inner.startswith( "<response>" ):
@@ -305,15 +301,10 @@ def _extract_unclosed_fields( span, known_fields=_KNOWN_FIELDS ):
 
 def _is_garbage_output( text ):
     """
-    Cheap pre-check for LLM output not worth running through the XML repair
-    pipeline at all (bug d9c3e1a2's failure-1: a response of 10^100+ repeated
-    "0" characters — previously burned a full repair+parse+expat-exception
-    cycle before the retry backoff, for output that was never going to parse).
+    Cheap pre-check for LLM output not worth running through the XML repair pipeline.
 
-    Deliberately does NOT flag "no '<' present" as garbage — the curly-brace
-    degenerate mode ("{ directness_meh } { tone _ good }", bug 2201516e) has no
-    angle brackets either and IS recoverable; that check would have discarded
-    a real, already-handled signal.
+    A response of one repeated character, such as a huge run of zeros, never parses.
+    Repairing it would burn a full parse cycle before the retry backoff.
 
     Requires:
         - text is a string (the model's verbatim response)
@@ -321,8 +312,11 @@ def _is_garbage_output( text ):
     Ensures:
         - returns True only if text is >=95% one repeated character (checked
           only at length >=20, so short real answers can't false-positive)
-        - returns False otherwise — NEVER a false positive on real XML or on
+        - returns False otherwise — never a false positive on real XML or on
           the curly-brace degenerate mode
+        - text with no '<' is not garbage: the curly-brace degenerate mode
+          ("{ directness_meh } { tone _ good }") has no angle brackets either and is
+          recoverable, so flagging it would discard a real, already-handled signal
     """
     if len( text ) >= 20:
         most_common_count = max( text.count( ch ) for ch in set( text ) )
@@ -335,10 +329,8 @@ def _repair_llm_xml( raw, known_fields=_KNOWN_FIELDS ):
     """
     Repair the malformed XML the live Mistral judge emits into parseable XML.
 
-    The 24B GPTQ model produces (captured in src/tests/unit/fixtures/dm_judge/):
-        - an unclosed prolog:  `<?xml version="1.0" encoding "utf-8" ?`  (no `>`)
-        - spaced tags:         `< response >`, `< / directness >`
-        - multi-word tags:     `< directness note >`, `< directness _ note >`
+    The model emits an unclosed `<?xml` prolog (fixtures: src/tests/unit/fixtures/dm_judge/).
+    It also emits spaced tags (`< / directness >`) and multi-word tags (`< directness _ note >`).
 
     Requires:
         - raw is a string (the model's verbatim output)
@@ -346,11 +338,11 @@ def _repair_llm_xml( raw, known_fields=_KNOWN_FIELDS ):
     Ensures:
         - drops any `<?xml ...` prolog (even unclosed — stops at the next `<`, so it
           never devours the real content)
-        - collapses each tag's inner whitespace/underscores to ONE underscore and
+        - collapses each tag's inner whitespace/underscores to one underscore and
           removes the spaces around the brackets/slash
         - returns only the `<response>...</response>` span when both ends are present
           (drops a trailing `</stop>` sentinel or any post-root chatter)
-        - when the root wrapper is MISSING (bug 46690a76 — the model drops
+        - when the root wrapper is missing (the model drops
           `<response>` on long input and emits bare top-level siblings, sometimes
           with an orphan `</response>`), synthesizes a single root around the known
           child-tag span so xmltodict does not reject it as multi-root
@@ -425,44 +417,32 @@ def length_bucket( word_count ):
     """
     Deterministic 5-level Length grade on a word count (no LLM).
 
-    The table (Rick 2026-07-31, row-5 boundary fixed to 251+ by Krishna's review
-    so 250 is unambiguously row 4):
-
         ≤ 60   → ⭐ +2     91–150  → 🤷  0     251+ → 😞 −2
         61–90  → 👍 +1     151–250 → 👎 −1
-
-    THE SCALE SATURATES AT 251, AND `overage` IS HOW A CONSUMER SEES PAST IT (row
-    0fc5b8f0, 2026-08-01). Surfaced by Rick's broadcast about a ~1000-word DM: 251
-    words and 1000 words both score 😞 −2, so every consumer reading the WEIGHT — the
-    audit averages, Overall, any future gate — cannot tell a message 4× over target
-    from one 16× over. This judge exists to curb token burn, and a scale that cannot
-    rank the worst offenders against each other is blind exactly where it is aimed.
-
-    THE WEIGHT IS DELIBERATELY UNCHANGED. Adding a −3/−4 would be the other obvious
-    fix and it breaks a documented contract: `weight in [-2, 2]` is asserted in this
-    docstring, relied on by combine_overall's clamp, and assumed by every reader of
-    WEIGHT_TO_EMOJI. So the ranking information is added ALONGSIDE the grade instead
-    of by stretching it — no consumer changes behaviour, and one that wants to rank
-    over-long DMs now has a number to rank on.
-
-    `overage` is the ratio to target, rounded to one decimal: 60 words → 1.0,
-    1000 words → 16.7. It is on EVERY result, not only the saturated ones, because a
-    field that appears only in the bad case is a field consumers forget to read.
 
     Requires:
         - word_count is a non-negative int
 
     Ensures:
         - returns {"emoji", "weight", "detail", "overage"} with a weight in [-2, 2]
-        - "emoji" is the band's face REPEATED max(1, word_count // LENGTH_FACE_INTERVAL)
-          times (display-only intensity, row f4bb1cdb); "weight" is unaffected
+        - "emoji" is the band's face repeated max(1, word_count // LENGTH_FACE_INTERVAL)
+          times (display-only intensity); "weight" is unaffected
+        - the top row starts at 251+, so 250 is unambiguously in the -1 row
         - the boundaries are the resolved config thresholds (defaults 60/90/150/250),
           inclusive-left as written above (≤60→⭐, 61→👍, ...); these are re-read on
           every /api/init hot-reload (_reload_length_thresholds), so a call after an ini
           edit + GET /api/init reflects the new boundaries with no server bounce
-        - overage is word_count / LENGTH_TARGET_WORDS, rounded to 1dp, and is
-          STRICTLY INCREASING in word_count past the saturation point — which is the
-          whole reason it exists
+        - overage is word_count / LENGTH_TARGET_WORDS, rounded to 1dp (60 words → 1.0,
+          1000 words → 16.7), and is strictly increasing in word_count past the
+          saturation point
+        - the scale saturates at 251: 251 words and 1000 words both score -2, so a reader
+          of the weight cannot tell a message 4x over target from one 16x over, and
+          overage carries that ranking information instead
+        - the weight is never widened to -3/-4: weight in [-2, 2] is relied on by
+          combine_overall's clamp and by every reader of WEIGHT_TO_EMOJI, so the ranking
+          number is added alongside the grade and no consumer changes behaviour
+        - overage is on every result, not only the saturated ones, because a field that
+          appears only in the bad case is a field consumers forget to read
     """
     if   word_count <= LENGTH_EXCELLENT_LIMIT: emoji, weight = "⭐", 2
     elif word_count <= LENGTH_GOOD_LIMIT:      emoji, weight = "👍", 1
@@ -505,10 +485,10 @@ def length_bucket( word_count ):
 
 def round_half_up( x ):
     """
-    Round half UP (toward +infinity on a .5 tie) — a deliberate, explicit tie-break.
+    Round half up (toward +infinity on a .5 tie), as an explicit tie-break.
 
-    NOT Python's built-in round(), which rounds half-to-EVEN and would be
-    inconsistent boundary-to-boundary. Ties are intentionally LENIENT: −0.5 → 0,
+    This is not Python's built-in round(), which rounds half-to-even and would be
+    inconsistent boundary to boundary. Ties are intentionally lenient: −0.5 → 0,
     +0.5 → 1 (a DM on a category boundary rounds toward the kinder grade).
 
     Requires:
@@ -522,19 +502,10 @@ def round_half_up( x ):
 
 def combine_overall( length_weight, directness_weight, tone_weight, length_detail ):
     """
-    Combine the three dimension weights into the OVERALL grade.
+    Combine the three dimension weights into the overall grade.
 
-    Equal weight to the two CATEGORIES, not to the three dimensions (Rick's
-    correction — a flat 3-way average lets the 2 LLM-judged dimensions outvote
-    Length 2-to-1):
-
-        qualitative_weight = avg( directness_weight, tone_weight )
-        overall_weight     = round_half_up( 0.5*length_weight + 0.5*qualitative_weight )
-        overall_weight     = clamp to [-2, 2], then bucket to its emoji
-
-    `note` is PYTHON-TEMPLATED (never an LLM field — the overall grade is computed
-    here, so its note is too): it names which category scored lower as a plain
-    ordering, WITHOUT asserting that anything caused harm.
+    Equal weight goes to the two categories, Length and Directness plus Tone.
+    A flat 3-way average would let the two LLM-judged dimensions outvote Length 2-to-1.
 
     Requires:
         - the three weights are ints in [-2, 2]
@@ -542,8 +513,14 @@ def combine_overall( length_weight, directness_weight, tone_weight, length_detai
 
     Ensures:
         - returns {"emoji", "weight", "note"} with weight in [-2, 2]
-        - Rick's worked example: length=−2, directness=+2, tone=+2 →
+        - worked example: length=−2, directness=+2, tone=+2 →
           qualitative=2 → round_half_up(0.5*−2 + 0.5*2)=round_half_up(0)=0 → 🤷
+        - qualitative_weight = avg( directness_weight, tone_weight ), and
+          overall_weight = round_half_up( 0.5*length_weight + 0.5*qualitative_weight ),
+          clamped to [-2, 2], then bucketed to its emoji
+        - note is python-templated (never an LLM field, since the overall grade is
+          computed here): it names which category scored lower as a plain ordering,
+          without asserting that anything caused harm
     """
     # LENGTH-ONLY MODE (Rick, 2026-08-01: "stick with length for now — that's quantitative
     # and we can calculate a grade very easily"). When the qualitative half carries NO
@@ -592,9 +569,9 @@ def _fallback_dimension():
     The dimension result when the judge could not produce one at all.
 
     Ensures:
-        - weight is None, NOT 0. 0 is `meh` — a real grade on this scale — and a judge
+        - weight is None, not 0. 0 is `meh` — a real grade on this scale — and a judge
           that never ran has not said `meh` about anything. The emoji stays 🤷 because
-          that is what "no opinion" has always looked like here, but the WEIGHT has to
+          that is what "no opinion" has always looked like here, but the weight has to
           be un-averageable or combine_overall will blend a silence into a score.
     """
     return { "emoji": NONANSWER_EMOJI[ "unavailable" ], "weight": None, "detail": _JUDGE_UNAVAILABLE_DETAIL }
@@ -602,29 +579,27 @@ def _fallback_dimension():
 
 def _withheld_dimension():
     """
-    The dimension result when the qualitative half is SWITCHED OFF (Rick, 2026-08-01).
+    The dimension result when the qualitative half is switched off.
 
     Ensures:
-        - weight is None, NOT 0 — and that is the whole point. 0 is `meh`, a real grade
-          on this scale, and today's investigation was one long demonstration of what
-          happens when a non-answer is published in the same value space as an answer.
+        - weight is None, not 0. 0 is `meh`, a real grade on this scale, and a
+          non-answer published in the same value space as an answer gets mistaken for one.
           None cannot be averaged, cannot be compared, and cannot be mistaken for an
           opinion by any consumer that does not explicitly handle it
-        - the emoji is 🚫 rather than 🤷: 🤷 is what an UNAVAILABLE judge and an
-          OVER-LENGTH body already return, and "we chose not to grade this" is a third
+        - the emoji is 🚫 rather than 🤷: 🤷 is what an unavailable judge and an
+          over-length body already return, and "we chose not to grade this" is a third
           thing that must not wear either of their faces
     """
     return { "emoji": NONANSWER_EMOJI[ "withheld" ], "weight": None, "detail": _QUALITATIVE_OFF_DETAIL }
 
 
 def _too_long_dimension():
-    """A non-answer dimension result for a body past QUALITATIVE_WORD_LIMIT — the honest
-    'not graded at this length' signal, distinct from the judge-unavailable one.
+    """A non-answer dimension result for a body past QUALITATIVE_WORD_LIMIT.
 
-    Takes no arguments: the detail carries NO threshold and NO word count (row 2cb46818,
-    Rick 2026-08-06). Disclosing the enforced 150 turns the deterrent into a budget, and a
-    bare word count only invites arithmetic against the advertised ~60 target — so the
-    former `word_count` parameter was dropped as dead once the detail stopped naming it."""
+    This is the honest "not graded at this length" signal, distinct from the judge-unavailable one.
+    It takes no arguments, and the detail carries no threshold and no word count.
+    Disclosing the enforced limit would turn the deterrent into a budget.
+    A bare word count would only invite arithmetic against the advertised target."""
     return { "emoji": NONANSWER_EMOJI[ "too_long" ], "weight": None, "detail": _TOO_LONG_DETAIL }
 
 
@@ -633,9 +608,9 @@ def _get_qualitative_enabled():
     Read `dm quality qualitative enabled` from lupin-app.ini at construction.
 
     Ensures:
-        - returns a bool; DEFAULTS TO FALSE, because as of 2026-08-01 the qualitative
-          half does not work (row ca7a2cbf) and a default that turns it on would
-          re-publish grades Rick switched off
+        - returns a bool; defaults to False, because the qualitative
+          half does not work and a default that turns it on would
+          re-publish grades that were switched off
         - a missing key or unreadable config returns False rather than raising — the
           judge must never take a DM send down, and False is the safe direction here
     """
@@ -657,8 +632,8 @@ class DmQualityJudge:
           (a missing server degrades gracefully — see Ensures)
 
     Ensures:
-        - judge() returns {"length", "directness", "tone", "overall"} — ALWAYS the
-          same shape, ALWAYS present, and NEVER raises
+        - judge() returns {"length", "directness", "tone", "overall"} — always the
+          same shape, always present, and never raises
         - a judge-call failure (client unavailable, or 3 exhausted retries) yields
           🤷/0 Directness+Tone with detail="judge unavailable"; Length + Overall
           are still computed normally (Length is Python-only)
@@ -683,7 +658,7 @@ class DmQualityJudge:
             - a client-build failure sets available=False (judge() then falls back)
 
         Args:
-            llm_spec_key: model identifier for LlmClientFactory (the DISTINCT judge key)
+            llm_spec_key: model identifier for LlmClientFactory (the distinct judge key)
             prompt_template_path: path (relative to project root) for the judge template
             debug: enable debug output
             verbose: enable verbose output
