@@ -209,7 +209,7 @@ def test_the_module_says_what_it_does_not_cover():
 
     doc = module.__doc__
 
-    assert "WHAT THIS DOES NOT COVER" in doc
+    assert "What it does not cover" in doc
     assert "combinations nobody designed" in doc, (
         "the disclosure must name the thing real traffic gave us and this cannot" )
-    assert "never as" in doc, "it must say how NOT to read a green from this corpus"
+    assert "never on real traffic" in doc, "it must say how NOT to read a green from this corpus"
