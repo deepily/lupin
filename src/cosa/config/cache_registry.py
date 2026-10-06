@@ -12,16 +12,16 @@ Design contract:
       called at import time (mirrors FastAPI router self-registration
       pattern)
     - `invalidate_all()` snapshots the registry under a `threading.RLock`,
-      RELEASES the lock, then calls each invalidator outside the lock
+      releases the lock, then calls each invalidator outside the lock
       (avoids deadlock if an invalidator re-enters the registry)
-    - Per-fn try/except: exceptions in one invalidator do NOT prevent
-      others from running; failed names are tracked internally + logged
-      at WARN level
-    - Re-registration with the same name REPLACES the prior fn (idempotent
-      for hot-reload safety; satisfies AC1.1)
+    - Per-fn try/except: exceptions in one invalidator do not prevent
+      others from running; failed names are tracked internally and logged
+      at `WARN` level
+    - Re-registration with the same name replaces the prior fn (idempotent
+      for hot-reload safety)
 
 Anchors:
-    - Design doc: src/rnd/v0.1.7/2026.05.15-doc-viewer-scope-unification.md §7 Phase 1
+    - Design doc: src/rnd/v0.1.7/2026.05.15-doc-viewer-scope-unification.md §7
     - Pattern source: PredictionEngine.reset() classmethod (the original
       lazy-singleton-reset shape this generalizes)
 """
@@ -52,7 +52,7 @@ def register_invalidator( name: str, fn: Callable[ [], None ] ) -> None:
 
     Ensures:
         - subsequent `invalidate_all()` calls fn() after config_mgr reload
-        - re-registration with the same name REPLACES the previous fn (AC1.1)
+        - re-registration with the same name replaces the previous fn
         - registration is idempotent in the hot-reload sense: same module
           re-imported (e.g., reload-on-edit during dev) does not duplicate
           the entry
@@ -75,13 +75,11 @@ def invalidate_all() -> List[ str ]:
 
     Ensures:
         - returns List[str] of names whose invalidator returned cleanly
-        - exceptions in one invalidator do NOT prevent others from running
-          (AC1.2)
+        - exceptions in one invalidator do not prevent others from running
         - failed (name, exception) pairs stored in _LAST_RUN_FAILURES for
-          test inspection; also printed at WARN level
-        - registry snapshot is taken under lock; fns are called OUTSIDE the
+          test inspection; also printed at `WARN` level
+        - registry snapshot is taken under lock; fns are called outside the
           lock to avoid deadlock if an invalidator re-enters the registry
-          (AC1.5)
     """
     global _LAST_RUN_FAILURES
 
@@ -113,7 +111,7 @@ def _clear_for_tests() -> None:
     """Test-only: drop every registered invalidator and the failure ledger.
 
     Tests should call this in a fixture teardown to prevent cross-test
-    pollution. NOT for production use.
+    pollution. Not for production use.
     """
     global _LAST_RUN_FAILURES
     with _REGISTRY_LOCK:

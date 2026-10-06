@@ -72,12 +72,12 @@ def singleton( cls: type ) -> Callable[..., Any]:
 
 class MissingConfigKeyError( Exception ):
     """
-    Raised by ConfigurationManager.get_required() when a key a caller cannot
-    proceed without is absent from — or blank in — the resolved config block.
+    Raised by get_required() when a needed key is absent or blank in the config block.
 
-    Carries the key, the resolved block id, and the config path so the message
-    names WHERE to fix it, not just WHAT was missing. get() is unaffected: a
-    caller that tolerates absence keeps using get() and still gets None.
+    The key is one a caller cannot proceed without. The exception carries the key,
+    the resolved block id, and the config path, so the message names where to fix it.
+    get() is unaffected.
+    A caller that tolerates absence keeps using get() and still gets None.
     """
 
     def __init__( self, key: str, block_id: str, config_path: Optional[str], blank: bool=False ) -> None:
@@ -112,7 +112,7 @@ class ConfigurationManager():
 
         Requires:
             - If env_var_name is provided, the environment variable must exist and contain valid config info
-            - Either env_var_name OR (config_path and splainer_path) must be provided
+            - Either env_var_name or (config_path and splainer_path) must be provided
             - config_path and splainer_path must be valid file paths if provided
 
         Ensures:
@@ -615,7 +615,7 @@ class ConfigurationManager():
 
     def in_config( self, config_key: str ) -> bool:
         """
-        Check if configuration key exists (DEPRECATED).
+        Check if configuration key exists (deprecated).
         
         Requires:
             - config_key is a non-empty string
@@ -828,9 +828,7 @@ class ConfigurationManager():
         Get a configuration value the caller cannot proceed without.
 
         Use this instead of get() wherever the result is concatenated, indexed,
-        or used in arithmetic — those callers cannot survive a None and have no
-        way to notice they got one. get()'s behaviour is deliberately unchanged:
-        a caller that genuinely tolerates absence keeps get().
+        or used in arithmetic.
 
         Requires:
             - key is a non-empty string
@@ -848,6 +846,10 @@ class ConfigurationManager():
             - MissingConfigKeyError if the key exists but its value is blank — a
               required key set to nothing is a configuration error, not a value
             - ValueError if return_type is invalid
+
+        Notes:
+            - Those callers cannot survive a None and have no way to notice they got one.
+            - get()'s behaviour is unchanged: a caller that tolerates absence keeps get().
         """
 
         if not self.exists( key ):
