@@ -1,11 +1,9 @@
 """
 QueryLogRepository — Postgres storage for the ``query_log`` telemetry table.
 
-Write-only telemetry: the 3 embedding columns are stored but NEVER ANN-searched
-(no vector index). Storage-only; embeddings + cache-hit flags are supplied by the
-caller. F6: the version column is ``normalization_version`` (underscore).
-
-Created: 2026-07-01 (Lane B · Tiffany 💍) · v0.2.0
+Write-only telemetry: the 3 embedding columns are stored but never ANN-searched (no vector index).
+Storage only: the caller supplies embeddings and cache-hit flags.
+The version column is ``normalization_version`` (underscore).
 """
 
 from datetime import datetime

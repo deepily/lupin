@@ -1,12 +1,8 @@
 """
-InputAndOutputRepository — Postgres+pgvector storage for the keystone
-``input_and_output`` table.
+Postgres and pgvector storage for the keystone ``input_and_output`` table.
 
-Storage-only: embeddings are SUPPLIED by the caller
-(the Lane-C memory layer keeps embedding generation), and ``get_knn_by_input``
-takes a pre-computed query embedding and runs the dot (`<#>`) nearest-k search.
-
-Created: 2026-07-01 (Lane B · Tiffany 💍) · v0.2.0
+Storage only: the caller supplies embeddings, and the memory layer keeps embedding generation.
+``get_knn_by_input`` takes a pre-computed query embedding and runs the dot (`<#>`) nearest-k search.
 """
 
 from typing import Any, Dict, List, Optional, Tuple
@@ -105,20 +101,18 @@ class InputAndOutputRepository( BaseRepository[InputAndOutput] ):
 
     def get_all_qnr( self, max_rows: int = 50 ) -> List[InputAndOutput]:
         """
-        List agent-router rows (input_type LIKE 'agent router go to %').
+        List agent-router rows (input_type `LIKE 'agent router go to %'`), newest first.
 
         Requires:
             - max_rows is a positive int
 
         Ensures:
             - returns up to max_rows rows whose input_type starts with the router prefix
-            - returns the MOST RECENT such rows, newest first, ordered by id
+            - returns the most recent such rows, newest first, ordered by id
 
         Note:
-            Until row a203d91d this was a LIMIT with no ORDER BY. Postgres is free to
-            return any rows it likes for an unordered LIMIT, so the receptionist's
-            "memory" was an arbitrary sample rather than the recent conversation, and
-            two identical calls could return different sets. id is the autoincrement
+            The order is explicit because Postgres may return any rows for an unordered `LIMIT`. That would make the
+            receptionist's "memory" an arbitrary sample, and identical calls could differ. id is the autoincrement
             primary key, so descending id is insertion order, newest first.
         """
         return self.session.query( InputAndOutput ).filter(

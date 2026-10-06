@@ -1,12 +1,8 @@
 """
-QuestionEmbeddingRepository — Postgres storage for the ``question_embeddings``
-text→embedding cache.
+Postgres storage for the ``question_embeddings`` text-to-embedding cache.
 
-Exact-match KV cache (btree on ``question``) — NOT ANN-searched. Storage-only:
-``get_embedding`` returns the cached vector or None (the Lane-C memory layer
-generates on a miss, then calls ``add_embedding``).
-
-Created: 2026-07-01 (Lane B · Tiffany 💍) · v0.2.0
+An exact-match key-value cache (btree on ``question``), not ANN-searched. Storage only:
+``get_embedding`` returns the cached vector or None. The memory layer generates on a miss, then calls ``add_embedding``.
 """
 
 from typing import List, Optional
@@ -57,7 +53,7 @@ class QuestionEmbeddingRepository( BaseRepository[QuestionEmbedding] ):
 
         Ensures:
             - returns the stored embedding as a list of floats, or None on a miss
-            - does NOT generate on a miss (Lane C owns generation)
+            - does not generate on a miss (the memory layer owns generation)
         """
         row = self.session.query( QuestionEmbedding ).filter(
             QuestionEmbedding.question == question

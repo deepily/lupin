@@ -140,7 +140,7 @@ class FailedLoginAttemptRepository(BaseRepository[FailedLoginAttempt]):
             - minutes: Look back period in minutes (default: 15)
 
         Ensures:
-            - Efficient COUNT query
+            - Efficient `COUNT` query
             - Case-insensitive email matching
 
         Returns:
@@ -167,7 +167,7 @@ class FailedLoginAttemptRepository(BaseRepository[FailedLoginAttempt]):
             - minutes: Look back period in minutes (default: 15)
 
         Ensures:
-            - Efficient COUNT query
+            - Efficient `COUNT` query
 
         Returns:
             Number of failed attempts

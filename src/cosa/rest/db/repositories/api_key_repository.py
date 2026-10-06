@@ -55,13 +55,9 @@ class ApiKeyRepository(BaseRepository[ApiKey]):
         Returns:
             Created ApiKey instance
 
-        ⚠️ THIS EXAMPLE USED TO SHOW hashlib.sha256(...).hexdigest() AND WAS
-        ACTIVELY DANGEROUS (row 323049bb, corrected 2026-08-24). Keys are
-        validated with bcrypt.checkpw (middleware/api_key_auth.py, and the
-        get_active_keys example below), so a key stored as a SHA-256 digest can
-        NEVER authenticate — checkpw would reject it forever, and the failure
-        would look like a bad key rather than a bad write. Copying the old
-        example was enough to mint a dead credential.
+        The hash must be bcrypt, never a SHA-256 digest. Keys are validated with bcrypt.checkpw
+        (middleware/api_key_auth.py), so a key stored as a SHA-256 digest can never authenticate. The failure
+        would look like a bad key rather than a bad write.
 
         Example:
             import bcrypt
@@ -173,7 +169,7 @@ class ApiKeyRepository(BaseRepository[ApiKey]):
 
     def update_last_used( self, key_id: uuid.UUID ) -> bool:
         """
-        Update last used timestamp for API key.
+        Set the last-used timestamp of an API key to now.
 
         Requires:
             - key_id: API key UUID

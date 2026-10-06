@@ -1,11 +1,8 @@
 """
-EmbeddingCacheRepository — Postgres storage for the ``embedding_cache``
-normalized_text→embedding cache.
+Postgres storage for the ``embedding_cache`` normalized_text-to-embedding cache.
 
-Exact-match KV cache (btree on ``normalized_text``) — NOT ANN-searched.
-Storage-only: embeddings are always supplied by the caller.
-
-Created: 2026-07-01 (Lane B · Tiffany 💍) · v0.2.0
+An exact-match key-value cache (btree on ``normalized_text``), not ANN-searched.
+Storage only: the caller always supplies the embeddings.
 """
 
 from typing import List, Optional

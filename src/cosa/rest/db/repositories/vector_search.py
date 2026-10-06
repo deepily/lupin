@@ -1,44 +1,34 @@
 """
 Shared dot-product (inner-product) nearest-k search for the pgvector repos.
 
-Metric ruling (design §4.2, P0-confirmed): every ANN column is searched by DOT
-PRODUCT and the keystone vectors are NOT L2-normalized — so the operator is
-INNER PRODUCT, ``<#>`` (``max_inner_product`` in pgvector's SQLAlchemy binding),
-NEVER cosine ``<=>``.
+Every ANN column is searched by dot product, and the keystone vectors are not normalized to unit length.
+So the operator is inner product, ``<#>`` (``max_inner_product`` in pgvector's SQLAlchemy binding).
+It is never cosine ``<=>`` by default.
 
 Similarity scale:
-    Callers expect ``similarity_pct = dot * 100``. pgvector's ``<#>`` returns the
-    NEGATIVE inner product, so ``dot = -(col <#> q)`` and therefore
-    ``similarity_pct = -(col <#> q) * 100``. This module returns that scale, so
-    thresholds and the equivalence harness compare like-for-like.
+    Callers expect ``similarity_pct = dot * 100``. pgvector's ``<#>`` returns the negative inner product.
+    So ``dot = -(col <#> q)`` and ``similarity_pct = -(col <#> q) * 100``. This module returns that scale,
+    so thresholds and the equivalence harness compare like for like.
 
-``metric="cosine"`` — added 2026-08-02 (bug 78f21b1b), Rick's ruling
-------------------------------------------------------------------
-``dot * 100`` is a PERCENTAGE ONLY IF BOTH VECTORS ARE UNIT LENGTH. That held
-when embeddings came from OpenAI ``text-embedding-3-small``, which returns
-L2-normalized vectors — for unit vectors dot IS cosine. It stopped holding when
-the provider moved to the local ``nomic-ai`` models, which do not normalize:
-measured query norm **19.809** against stored (OpenAI-era) rows at norm 1.000.
+``metric="cosine"``:
+    ``dot * 100`` is a percentage only if both vectors are unit length. That held for OpenAI
+    ``text-embedding-3-small``, which returns unit-length vectors, where dot is cosine. It stopped
+    holding with the local ``nomic-ai`` models, which do not normalize: a measured query norm of
+    19.809 against stored rows at norm 1.000.
 
-Same arithmetic, ~20x the number. A live voice question scored **1024.15%** for a
-true cosine of **0.517**, and the caller's ``>= 100.0`` branch read that as a
-PERFECT EXACT MATCH — so an unrelated cached row was replayed instead of routing
-to an agent. Nothing failed loudly because both models emit 768 dimensions: the
-vectors stayed shape-compatible while becoming scale-incompatible.
+    The score then came out about 20 times too high. A live question scored 1024.15% for a true cosine of
+    0.517. The caller's ``>= 100.0`` branch read that as a perfect exact match, so an unrelated
+    cached row was replayed. Nothing failed loudly because both models emit 768 dimensions: the vectors
+    stayed shape-compatible while becoming scale-incompatible.
 
-``metric="cosine"`` divides by BOTH norms (pgvector ``<=>``), so the score is
-correct regardless of either side's vector length — including for future
-embedding models, normalized or not. That is the point: the previous convention
-depended on an unwritten, untested precondition that silently left.
+    ``metric="cosine"`` divides by both norms (pgvector ``<=>``), so the score is correct whatever
+    either side's vector length, normalized or not. The ``dot`` convention depended on an unwritten,
+    untested precondition.
 
-⚠️ The ``dot`` default is UNCHANGED and remains correct for callers whose
-thresholds were tuned against it (proxy decisions, input_and_output). This is
-opt-in per caller, not a global re-scale. The metric ruling above still governs
-the INDEX opclass (``vector_ip_ops``); a cosine search does not use that index,
-which is irrelevant at snapshot-table scale and noted here so it is not
-rediscovered as a mystery.
-
-Created: 2026-07-01 (Lane B · Tiffany 💍) · v0.2.0
+The ``dot`` default is unchanged and stays correct for callers whose thresholds were tuned against it
+(proxy decisions, input_and_output). Cosine is opt-in per caller, not a global re-scale. The index
+opclass (``vector_ip_ops``) is still inner product. A cosine search does not use that index, which
+is irrelevant at snapshot-table scale.
 """
 
 from typing import Any, List, Optional, Tuple
@@ -58,8 +48,7 @@ def dot_topk(
     metric:          str = "dot",
 ) -> List[Tuple[float, Any]]:
     """
-    Return the top-``limit`` rows of ``model`` by descending dot product against
-    ``query_embedding`` on ``vector_column``.
+    Return the top-``limit`` rows of ``model`` nearest to ``query_embedding``.
 
     Requires:
         - session is an active SQLAlchemy Session
@@ -69,17 +58,20 @@ def dot_topk(
         - limit is a positive int
 
     Ensures:
-        - orders by ``vector_column <#> query_embedding`` ASC (strongest dot first)
-          and returns at most ``limit`` rows AFTER applying ``exclude_filter``
+        - orders by ``vector_column <#> query_embedding`` ascending (strongest dot first),
+          or by cosine distance when ``metric="cosine"``, and returns at most ``limit``
+          rows after applying ``exclude_filter``
         - each element is ``( similarity_pct, entity )`` with
-          ``similarity_pct = -(col <#> q) * 100`` (i.e. dot * 100)
+          ``similarity_pct = -(col <#> q) * 100`` (dot * 100), or ``( 1 - cosine distance ) * 100``
+          when ``metric="cosine"``
         - when clamp is True, similarity_pct is clamped to [0.0, 100.0]
           (mirrors ProxyDecisionEmbeddings.find_similar)
         - when threshold_pct is not None, rows whose similarity_pct <
-          threshold_pct are dropped (applied AFTER the limit)
+          threshold_pct are dropped (applied after the limit)
         - result is sorted by similarity_pct descending
 
     Raises:
+        - ValueError if metric is neither "dot" nor "cosine"
         - SQLAlchemy exceptions on a malformed query / dimension mismatch
     """
     if metric == "cosine":

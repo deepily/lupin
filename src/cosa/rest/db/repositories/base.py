@@ -15,9 +15,7 @@ class BaseRepository(Generic[ModelType]):
     """
     Base repository providing common CRUD operations for any SQLAlchemy model.
 
-    Generic type parameter ModelType allows type-safe operations:
-        user_repo = BaseRepository[User]( User, session )
-        user: User = user_repo.get_by_id( user_id )  # Type checker knows this is User
+    The generic type parameter ModelType makes operations type-safe.
 
     Requires:
         - model: SQLAlchemy model class (e.g., User, RefreshToken)
@@ -27,6 +25,10 @@ class BaseRepository(Generic[ModelType]):
         - Type-safe operations via Python generics
         - Common CRUD methods available to all repositories
         - No direct session management (caller handles commit/rollback)
+
+    Example:
+        user_repo = BaseRepository[User]( User, session )
+        user: User = user_repo.get_by_id( user_id )  # Type checker knows this is User
     """
 
     def __init__( self, model: Type[ModelType], session: Session ):
@@ -90,7 +92,7 @@ class BaseRepository(Generic[ModelType]):
         Ensures:
             - Entity added to session
             - flush() called to get auto-generated ID
-            - Commit NOT called (caller must commit)
+            - Commit is not called (caller must commit)
 
         Returns:
             Created entity instance (with ID populated)
@@ -115,7 +117,7 @@ class BaseRepository(Generic[ModelType]):
 
     def update( self, id: Any, **kwargs ) -> Optional[ModelType]:
         """
-        Update entity by ID.
+        Set the given attributes on an entity, found by ID.
 
         Requires:
             - id: Primary key value
@@ -124,7 +126,7 @@ class BaseRepository(Generic[ModelType]):
         Ensures:
             - Updates specified attributes only
             - flush() called to propagate changes
-            - Commit NOT called (caller must commit)
+            - Commit is not called (caller must commit)
             - Returns None if entity not found
 
         Returns:
@@ -152,7 +154,7 @@ class BaseRepository(Generic[ModelType]):
 
         Ensures:
             - Entity removed from session
-            - Commit NOT called (caller must commit)
+            - Commit is not called (caller must commit)
             - Returns False if entity not found
 
         Returns:
@@ -175,7 +177,7 @@ class BaseRepository(Generic[ModelType]):
         Count total number of entities.
 
         Ensures:
-            - Returns total count (efficient COUNT query)
+            - Returns total count (efficient `COUNT` query)
             - No entities loaded into memory
 
         Returns:

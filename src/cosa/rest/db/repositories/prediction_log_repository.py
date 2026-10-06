@@ -78,7 +78,7 @@ class PredictionLogRepository( BaseRepository[PredictionLog] ):
     def update_outcome( self, notification_id: str, actual_value: Optional[dict],
                         accuracy_match: Optional[bool], accuracy_detail: Optional[dict] ) -> Optional[PredictionLog]:
         """
-        Update prediction with actual outcome and accuracy comparison.
+        Record the actual outcome and accuracy comparison on a prediction.
 
         Requires:
             - notification_id: UUID string of the notification
@@ -88,7 +88,7 @@ class PredictionLogRepository( BaseRepository[PredictionLog] ):
 
         Ensures:
             - Finds the prediction_log row by notification_id
-            - Updates actual_value, accuracy_match, accuracy_detail, responded_at
+            - Sets actual_value, accuracy_match, accuracy_detail, responded_at
             - Returns updated PredictionLog or None if not found
 
         Raises:

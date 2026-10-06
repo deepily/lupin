@@ -125,7 +125,7 @@ class NotificationRepository( BaseRepository[Notification] ):
             - Response fields populated if response_requested
             - Abstract stored if provided (for supplementary context)
             - payload stored verbatim when provided, NULL otherwise — the structured
-              side-channel a broadcast ack's identity rides in (row 4f320c27)
+              side-channel a broadcast ack's identity rides in
 
         Returns:
             Created Notification instance
@@ -195,18 +195,10 @@ class NotificationRepository( BaseRepository[Notification] ):
         recipient_session: Optional[str] = None
     ) -> List[Notification]:
         """
-        Load one peer-DM conversation thread (the `/api/dm/list?thread_id=` read).
+        Load one peer-DM conversation thread, oldest first (the `/api/dm/list?thread_id=` read).
 
-        A peer DM persists in the notifications table with direction='ai_to_ai' and
-        a `thread_id` correlating every message in a conversation. This returns that
-        thread in chronological (ascending) order — the natural read order for a
-        conversation — optionally tailing only messages newer than `since` (poll).
-
-        ⚠️ `recipient_id` IS NOT A RECIPIENT ON THIS PATH. Peer DMs are persisted
-        with `recipient_user_id = <the SENDER's own authenticated account>` (see
-        routers/dm.py), so this column scopes to a USER — every session sharing
-        one service account shares one pool. `recipient_session` is the addressee
-        filter; see get_dm_inbox for the full note on the job_id overload.
+        A peer DM has direction='ai_to_ai' and a `thread_id` shared by every message in a conversation.
+        `recipient_id` is the sender's own account, not an addressee; `recipient_session` is the addressee filter.
 
         Requires:
             - thread_id: the conversation id (Notification.thread_id)
@@ -215,12 +207,12 @@ class NotificationRepository( BaseRepository[Notification] ):
             - since: None (whole thread) or a datetime (only created_at > since)
             - limit: positive int cap on rows returned
             - recipient_session: None (whole thread as before) or an 8-char session
-              hash restricting rows to those ADDRESSED to that session
+              hash restricting rows to those addressed to that session
 
         Ensures:
             - returns ai_to_ai, non-hidden rows for this thread + recipient
             - when recipient_session is given, only rows whose job_id equals it
-            - when recipient_session is None, behavior is UNCHANGED (account-wide)
+            - when recipient_session is None, behavior is unchanged (account-wide)
             - when since is set, only rows strictly newer than `since`
             - ordered by created_at ascending (oldest first — conversation order)
             - honors limit
@@ -250,58 +242,24 @@ class NotificationRepository( BaseRepository[Notification] ):
         recipient_session: Optional[str] = None
     ) -> List[Notification]:
         """
-        Load the peer-DM inbox (the `/api/dm/list` no-thread read / poll).
+        Load the peer-DM inbox, newest first (the `/api/dm/list` no-thread read and poll).
 
-        Peer DMs (direction='ai_to_ai') newest first — optionally tailing only
-        messages newer than `since` for a lightweight poll.
-
-        ⚠️ WHAT "INBOX" MEANS HERE — read this before trusting the word.
-        `recipient_id` DOES NOT HOLD A RECIPIENT on this path. routers/dm.py
-        persists every peer DM with `recipient_user_id = <the SENDER's own
-        authenticated account>`, so this column scopes to a SERVICE ACCOUNT —
-        not to a session and not to an addressee. Without `recipient_session`
-        this returns EVERY DM sent by ANY session on that account, including
-        conversations the caller is not party to. Measured 2026-07-21: one
-        session's unfiltered read returned 50 messages across 7 sender sessions
-        and 7 threads, ZERO of them addressed to it; a second session's returned
-        200+ across 12 personas.
-
-        DO NOT assume accounts partition the fleet by project. They do not, in
-        practice: the DM write path stamps `@lupin` for EVERY session regardless
-        of its actual project (a `plan` session's DMs are written as `@lupin`),
-        so today one pool holds the whole fleet and `recipient_id` partitions
-        NOTHING. That is a separate upstream defect; it is recorded here only so
-        no future reader rebuilds a scoping assumption on a per-project split
-        that the data does not contain. `recipient_session` is the ONLY predicate
-        here that actually narrows to an addressee.
-
-        THE ADDRESSEE lives in `job_id` — written at routers/dm.py as
-        `job_id = target_session_id[ :8 ]` and used to route delivery to the
-        recipient's cc-listener. `recipient_session` filters on it.
-
-        🔴 TWO PROPERTIES OF THAT PREDICATE, STATED SO THE NEXT READER HAS THEM:
-          1. `job_id` is OVERLOADED. For other notification types it carries a
-             real agentic job id (e.g. "dr-a1b2c3d4"); only for direction
-             'ai_to_ai' does it carry a recipient session. This filter is sound
-             ONLY in combination with the direction=='ai_to_ai' clause above.
-             Do not lift it to a query that lacks that clause.
-          2. It is TRUNCATED to 8 characters, so this is a PREFIX MATCH, NOT AN
-             ID MATCH. Two sessions whose ids share their first 8 hex chars
-             would be indistinguishable here. Collisions are unlikely, NOT
-             impossible — this is a known, accepted limitation of scoping on a
-             borrowed column rather than a dedicated recipient_session_id.
+        `recipient_id` scopes to a service account, not an addressee: routers/dm.py stores every DM under the sender's own
+        account, so one pool holds the whole fleet. Only `recipient_session` narrows, by matching `job_id`.
 
         Requires:
-            - recipient_id: Valid user UUID (same-ACCOUNT scoping — see above)
+            - recipient_id: Valid user UUID (same-account scoping, see above)
             - since: None (whole inbox) or a datetime (only created_at > since)
             - limit: positive int cap on rows returned
-            - recipient_session: None (account-wide, the legacy behavior) or an
-              8-char session hash restricting rows to those addressed to it
+            - recipient_session: None (account-wide, the legacy behavior) or an 8-char
+              session hash restricting rows to those addressed to it. `job_id` holds a recipient session only for
+              direction 'ai_to_ai', so never reuse this filter without that clause. It is cut to 8 characters, so it is
+              a prefix match and two sessions sharing 8 hex characters are indistinguishable, an accepted limit
 
         Ensures:
             - returns ai_to_ai, non-hidden rows for this account
             - when recipient_session is given, only rows whose job_id equals it
-            - when recipient_session is None, behavior is UNCHANGED (account-wide),
+            - when recipient_session is None, behavior is unchanged (account-wide),
               which is what keeps the existing client-side-filtering hook working
             - when since is set, only rows strictly newer than `since`
             - ordered by created_at descending (newest first — inbox order)
@@ -332,7 +290,7 @@ class NotificationRepository( BaseRepository[Notification] ):
 
         Ensures:
             - Returns list of {sender_id, last_activity, notification_count}
-            - EXCLUDES NON_CONVERSATION_TYPES, so a seat never appears as a sender
+            - Excludes NON_CONVERSATION_TYPES, so a seat never appears as a sender
               purely for having acked a broadcast
             - Ordered by last_activity descending (most recent first)
             - Used for activity-anchored window loading
@@ -431,7 +389,7 @@ class NotificationRepository( BaseRepository[Notification] ):
 
     def update_state( self, notification_id: uuid.UUID, new_state: str ) -> Optional[Notification]:
         """
-        Update notification state.
+        Set the state of one notification to a new value.
 
         Requires:
             - notification_id: Valid notification UUID
@@ -501,14 +459,11 @@ class NotificationRepository( BaseRepository[Notification] ):
 
     def mark_answer_delivered( self, notification_id: uuid.UUID ) -> Optional[Notification]:
         """
-        Stamp the late-answer handback mark (answer_delivered_at) — §4.3 contract.
+        Stamp the late-answer handback mark (answer_delivered_at) on a notification.
 
-        This is the ONLY writer of answer_delivered_at, called by exactly the three
-        RECEIPT-gated setters: (a) the live SSE waiter being woken, (b) the pull
-        endpoint's ack-on-consume, (c) a §4.5 re-attach land. It is NEVER called on
-        a send signal, a successful send_json, an emit attempt, or on merely
-        SERVING a row — those leave the mark NULL so the row stays owed and catch-up
-        re-delivers. The state row is NOT deleted (ruling 2); only this mark moves.
+        The only writer of answer_delivered_at, called by the receipt-gated setters: the live SSE waiter being woken,
+        the pull endpoint's ack-on-consume and a re-attach landing. Never call it on a send, an emit attempt or merely serving a row.
+        Those leave the mark NULL, so the row stays owed and catch-up re-delivers it.
 
         Requires:
             - notification_id: Valid notification UUID
@@ -536,36 +491,22 @@ class NotificationRepository( BaseRepository[Notification] ):
         max_age_hours: Optional[int] = None, since: Optional[datetime] = None
     ) -> List[Notification]:
         """
-        Get the answers OWED to a persona — answered asks not yet handed back (§4.4).
+        Get the answers owed to a persona: answered asks not yet handed back to it.
 
-        The one reader of answer_delivered_at. Its WHERE is the owed predicate,
-        stated in full with the SAME THREE TERMS (in the same words) as §4.1's ORM
-        index and the concurrent migration:
-
-            response_requested AND responded_at IS NOT NULL AND answer_delivered_at IS NULL
-
-        - `responded_at IS NOT NULL` is the §3 design-level invariant, NOT cosmetic:
-          an offline/expired persist carries a machine default with responded_at
-          NULL and must NEVER be served as an owed answer (the forged-answer defect).
-        - Retrieval is persona-keyed (ruling 6): matches on sender_persona ALONE.
-          session_hash8 is NOT a filter here — it is a returned field the endpoint
-          uses to set the earlier-session flag.
-
-        ⚠️ ORDER + CURSOR are on `responded_at`, NOT `created_at`. Copying the
-        undelivered idiom's created_at cursor wholesale would strand a 20-hour-old
-        ask answered two minutes ago behind a cursor that already passed its
-        creation time (D-V4). The `since` cursor advances on responded_at.
-        The 24h age cap still keys on `created_at` (the storm-guard semantics).
+        The only reader of answer_delivered_at. The owed predicate has three terms: response_requested, `responded_at` not NULL,
+        `answer_delivered_at` NULL. The `responded_at` term is an invariant. An offline or expired persist carries a machine
+        default with `responded_at` NULL and must never be served as an owed answer. Retrieval matches on sender_persona alone.
 
         Requires:
             - sender_persona: a non-empty persona key (never None — a persona-less
               ask stamps NULL and is unretrievable by persona, the accepted gap)
             - max_age_hours: None (no cap) or a positive int (hours), on created_at
-            - since: None or a responded_at cursor; only rows answered AFTER it
+            - since: None or a responded_at cursor; only rows answered after it
 
         Ensures:
             - Returns rows matching the three-term owed predicate for this persona
-            - Ordered by responded_at ascending (oldest answer first); honors limit
+            - Ordered by responded_at ascending (oldest answer first); honors limit.
+              Order and cursor use responded_at, not created_at, so an old ask answered just now is not stranded behind the cursor
 
         Returns:
             List of owed Notification instances
@@ -610,25 +551,18 @@ class NotificationRepository( BaseRepository[Notification] ):
 
     def get_undelivered_for_recipient( self, recipient_id: uuid.UUID, limit: int = 100, max_age_hours: Optional[int] = None ) -> List[Notification]:
         """
-        Get the recipient's UNDELIVERED notifications (the pull-able AFK inbox).
+        Get the recipient's undelivered notifications (the pull-able AFK inbox), oldest first.
 
-        Lever D of the messaging-coordination plane (FM-18): a notification that
-        never reached the user — still in 'created'/'queued', never 'delivered' —
-        is what the user "missed" while offline. This is the durable, pull-able
-        record so a returning/AFK user can recover what a failed push dropped.
-
-        The `max_age_hours` cap is the structural guard against the durable-outbox
-        drain replaying STALE rows as a TTS storm on reconnect (the 2026-06-03
-        incident: a server bounce drained months-old undelivered rows). When set,
-        only rows newer than the cutoff are returned — applies to today's backlog
-        AND any future row that goes stale-while-undelivered (live-path coverage).
+        A notification still in 'created' or 'queued' never reached the user, who missed it while offline.
+        `max_age_hours` stops stale rows replaying as a TTS storm on reconnect. When set,
+        only rows newer than the cutoff are returned, including rows that go stale while undelivered.
 
         Requires:
             - recipient_id: Valid user UUID
             - max_age_hours: None (no age cap) or a positive int (hours)
 
         Ensures:
-            - Returns notifications with state in ('created', 'queued') ONLY
+            - Returns notifications with state in ('created', 'queued') only
               (excludes delivered / responded / expired)
             - Excludes soft-deleted/archived rows (is_hidden = True)
             - When max_age_hours is set, excludes rows older than that many hours
@@ -657,36 +591,17 @@ class NotificationRepository( BaseRepository[Notification] ):
         limit        : int = 500
     ) -> List[Notification]:
         """
-        The saved acks for ONE broadcast, scoped to one recipient, one row per
-        acking session with the latest ack winning (row 4f320c27 S4).
+        Get the saved acks for one broadcast and one recipient, the latest per acking session.
 
-        🔴 THIS READ IGNORES DELIVERY STATE, AND THAT IS THE POINT. The undelivered
-        drain answers "what did I miss while offline" and therefore skips anything
-        already delivered to a socket. An ack that landed while a browser was open
-        is marked delivered instantly, so a reload asking the undelivered inbox to
-        rebuild the tally gets NOTHING back — the recovery that looks fixed and
-        recovers nothing. This asks a different question: "which seats have acked
-        this broadcast", whose answer does not depend on whether a socket happened
-        to be open at the time. `state` and `delivered_at` are not filtered on here
-        and must not be added; the undelivered drain's own filter stays as it is.
-
-        NOT A NEW AGGREGATE (María's line, 2026-09-23). There is no ack table and no
-        ack cache — this reads the same `notifications` rows S3 writes, and it works
-        only because those acks are saved. An aggregate that did not depend on the
-        saved rows would be option C, which Rick did not choose.
-
-        WHY THE LATEST-WINS FOLD IS IN PYTHON. A seat can ack the same broadcast more
-        than once (`broadcast_handler` re-posts on a status change — pending, then
-        completed), so a raw read returns duplicates per session and a tally built on
-        it double-counts. `DISTINCT ON` would push the fold into Postgres but binds
-        this method to one dialect for a set bounded by the live fleet size, which is
-        dozens of rows. The fold below is the whole rule, visible in one place.
+        Delivery state is ignored here. An ack that landed while a browser was open is already marked delivered.
+        The undelivered inbox could therefore not rebuild the tally. There is no ack table; this reads the saved `notifications` rows.
+        The latest-wins fold is in Python, not `DISTINCT ON`, because a seat can ack twice and the set is only dozens of rows.
 
         Requires:
             - recipient_id: the broadcast originator's user UUID (the authorization
               scope — an ack is readable only by the account it was addressed to)
             - broadcast_id: the broadcast's id as written into payload['broadcast_id']
-            - limit: positive int cap on the PRE-fold row scan
+            - limit: positive int cap on the pre-fold row scan
 
         Ensures:
             - returns only rows of type 'commons_broadcast_ack' for this recipient
@@ -721,13 +636,11 @@ class NotificationRepository( BaseRepository[Notification] ):
 
     def count_undelivered_for_recipient( self, recipient_id: uuid.UUID, max_age_hours: Optional[int] = None ) -> int:
         """
-        Count the recipient's UNDELIVERED notifications (lever D — accurate "N missed").
+        Count the recipient's undelivered notifications (lever D, an accurate "N missed" figure).
 
-        Unlike `get_undelivered_for_recipient` (which caps at `limit` for paging), this
-        is an UNBOUNDED count, so the auth_success "N missed" surfacing is not silently
-        capped at the page size. The `max_age_hours` cap mirrors the getter so the
-        surfaced "N missed" count matches what is actually pullable (no phantom count
-        of stale rows the getter would skip — and no stale-backlog storm trigger).
+        Unlike `get_undelivered_for_recipient`, which caps at `limit` for paging, this count is unbounded, so the
+        "N missed" figure is not capped at the page size. The `max_age_hours` cap mirrors the getter, so the count
+        matches what is actually pullable and never includes stale rows the getter would skip.
 
         Requires:
             - recipient_id: Valid user UUID
@@ -752,17 +665,11 @@ class NotificationRepository( BaseRepository[Notification] ):
 
     def dismiss_undelivered_for_recipient( self, recipient_id: uuid.UUID, max_age_hours: Optional[int] = None ) -> int:
         """
-        Soft-dismiss the recipient's UNDELIVERED notifications (the "reset missed" action).
+        Soft-dismiss the recipient's undelivered notifications (the "reset missed" action).
 
-        Sets is_hidden=True on every row the "N missed while away" badge counts, so the
-        badge and the pull-able inbox both drop to zero. The notification STATE is left
-        untouched ('created'/'queued') — preserving the honest audit trail that these
-        rows were never actually delivered. is_hidden is the column the count/getter
-        queries already filter on, so no schema change is needed and the dismiss is
-        reversible (flip is_hidden back).
-
-        The filter MIRRORS count_undelivered_for_recipient exactly so that, after this
-        call, count_undelivered_for_recipient returns 0 for the same recipient + cap.
+        Sets is_hidden=True on every row the "N missed while away" badge counts. The notification state is left
+        untouched, keeping the audit trail that these rows were never delivered. The filter mirrors
+        count_undelivered_for_recipient, so afterwards that count is 0 for the same recipient and cap.
 
         Requires:
             - recipient_id: Valid user UUID
@@ -772,7 +679,7 @@ class NotificationRepository( BaseRepository[Notification] ):
             - sets is_hidden=True on rows in state 'created'/'queued', is_hidden=False
             - When max_age_hours is set, only rows newer than the cutoff are dismissed
               (matches the windowed badge — older rows already fall out of the count)
-            - does NOT change notification state (audit trail preserved)
+            - does not change notification state (audit trail preserved)
             - flushes the session
 
         Returns:
@@ -797,7 +704,7 @@ class NotificationRepository( BaseRepository[Notification] ):
         Used by background cleanup tasks to identify and expire timed-out notifications.
 
         Ensures:
-            - Returns notifications where state='delivered' AND expires_at < now
+            - Returns notifications where state='delivered' and expires_at < now
             - Only includes notifications with non-null expires_at
             - Ordered by expires_at ascending (oldest expiration first)
 
@@ -825,71 +732,34 @@ class NotificationRepository( BaseRepository[Notification] ):
         expected_state : Optional[str] = None
     ) -> Optional[Notification]:
         """
-        Mark notification as expired (timeout reached).
+        Mark a notification as expired because its timeout was reached.
+
+        `apply_default` is False on the orphan-sweeper path: nobody waits, so a stamped default would claim an answer reached someone.
+        `expected_state` is checked in the `UPDATE`'s `WHERE` clause, not by an `if`: a re-read is served stale from the session identity map.
+        Only the committed row can refuse the write, so a human answer landing between read and write is never overwritten.
 
         Requires:
             - notification_id: Valid notification UUID
             - apply_default: whether to stamp response_default as the answer
-            - expected_state: the state the COMMITTED row must still be in for
+            - expected_state: the state the committed row must still be in for
               this write to happen at all, or None to write unconditionally
 
         Ensures:
             - state set to 'expired'
-            - when expected_state is not None, the write happens IFF the
-              committed row is still in that state; otherwise NOTHING is
+            - when expected_state is not None, the write happens only if the
+              committed row is still in that state; otherwise nothing is
               written and None is returned
             - applies response_default as a "timeout_default" response_value
               when apply_default is True (the default, so every pre-existing
               caller is unchanged) and a default is configured
-            - writes NO response_value when apply_default is False
+            - writes no response_value when apply_default is False
 
-        WHY apply_default EXISTS (row bf4f65c3). On the TIMEOUT path a waiter
-        is still attached and the default is genuinely returned to it, so
-        recording it is true. The orphan SWEEPER reaches rows whose asking
-        client walked away: nobody is waiting and nothing consumes the value,
-        so stamping one would assert that an answer was supplied when none
-        ever reached anyone. The sweeper passes False.
-
-        WHY expected_state EXISTS, AND WHY IT IS A `WHERE` CLAUSE AND NOT AN
-        `if` (row bf4f65c3). Both writers of this row read it first and write
-        it second, in separate transactions. A /respond landing between another
-        caller's read and its write was overwritten: the row kept the human's
-        response_value and had its state stamped 'expired' anyway, so it
-        carried a real answer while claiming nobody ever gave one.
-
-        A RE-READ HERE WOULD NOT HAVE CLOSED IT, AND THAT IS MEASURED RATHER
-        THAN REASONED. Real Postgres 16.14, two sessions, one row: the sweeper
-        loads the candidate through get_expired_notifications(), a second
-        session commits the human's answer, and then, in the sweeper's own
-        session at the same instant —
-
-            get_by_id( ... ).state          -> 'delivered'   (the SCAN-TIME value)
-            raw SQL, same session           -> 'responded'   (the truth)
-
-        BaseRepository.get_by_id is `query().filter().first()`, and SQLAlchemy
-        serves an object already in the identity map without refreshing it. So
-        the obvious `if notification.state == expected` guard would have PASSED
-        and stamped 'expired' over the answer exactly as the unguarded code
-        does. The same run reproduces that overwrite directly: state='expired'
-        on a row still carrying {'value': 'yes', 'source': 'ui'}.
-
-        Putting the state in the WHERE clause hands the decision to Postgres,
-        which evaluates it against the COMMITTED row. The write either matches
-        or it does not, and there is no window between the two. Measured both
-        ways at the same sha — it REFUSES when a peer answered first, and it
-        WRITES when nobody did, which is what makes the refusal a guard rather
-        than a permanent no.
-
-        Receipt: src/tests/smoke/test_mark_expired_refuses_to_overwrite_a_live_answer.py
+        Test: src/tests/smoke/test_mark_expired_refuses_to_overwrite_a_live_answer.py
 
         Returns:
-            Updated Notification instance, or None — which means EITHER the
-            row does not exist OR expected_state was given and the row had
-            already moved on. Those are two different facts wearing one
-            return value; a caller that needs to tell them apart must ask the
-            row directly. The sweeper deliberately does not, because it treats
-            both as "not mine to close" — but it does COUNT them, so a refusal
-            is visible rather than reported as a sweep.
+            Updated Notification instance, or None when the row does not exist or
+            expected_state was given and the row had already moved on. A caller that
+            must tell these apart asks the row. The sweeper counts both as not its to close.
         """
         if expected_state is not None:
             # synchronize_session="fetch" so an in-session ORM object's state
@@ -989,7 +859,7 @@ class NotificationRepository( BaseRepository[Notification] ):
             - recipient_id: Valid user UUID
 
         Ensures:
-            - All notifications matching sender_id AND recipient_id deleted
+            - All notifications matching sender_id and recipient_id deleted
             - Returns count of deleted notifications
 
         Returns:
@@ -1034,7 +904,7 @@ class NotificationRepository( BaseRepository[Notification] ):
 
         Ensures:
             - Returns dict of date_string -> list of notifications
-            - Date keys sorted descending (newest first: 2025-01-02, 2025-01-01, ...)
+            - Date keys sorted descending (newest first)
             - Each date key is ISO format (YYYY-MM-DD) in specified timezone
             - Notifications within each date ordered by created_at ascending
 
@@ -1248,11 +1118,11 @@ class NotificationRepository( BaseRepository[Notification] ):
 
         Ensures:
             - Returns list of {sender_id, last_activity, notification_count, new_count}
-            - EXCLUDES NON_CONVERSATION_TYPES, so a seat never appears in the operator
+            - Excludes NON_CONVERSATION_TYPES, so a seat never appears in the operator
               focus bar purely for having acked a broadcast
             - Excludes senders with all notifications hidden (unless include_hidden)
             - When exclude_job_ids provided, excludes notifications matching those job IDs
-              AND notifications with NULL job_id (system/direct notifications are "mine")
+              and notifications with NULL job_id (system/direct notifications are "mine")
             - Ordered by last_activity descending (most recent first)
 
         Returns:
@@ -1375,8 +1245,8 @@ class NotificationRepository( BaseRepository[Notification] ):
             - recipient_id: Valid user UUID
             - hours: Optional filter - only delete notifications within N hours (None = all)
             - exclude_job_ids: Optional list of job IDs to scope deletion to "not mine"
-              When provided, only deletes notifications whose job_id is NOT in this list
-              AND whose job_id is NOT NULL (system notifications are "mine", not deleted)
+              When provided, only deletes notifications whose job_id is not in this list
+              and whose job_id is not NULL (system notifications are "mine", not deleted)
 
         Ensures:
             - All notifications matching filters are permanently deleted

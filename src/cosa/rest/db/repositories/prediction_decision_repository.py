@@ -1,14 +1,9 @@
 """
-PredictionDecisionRepository — Postgres+pgvector storage for the
-``prediction_decisions`` decision-proxy VECTOR store.
+Postgres and pgvector store for the decision-proxy ``prediction_decisions`` vectors.
 
-DISTINCT from the relational ``proxy_decisions`` log served by
-ProxyDecisionRepository — this is the 1:1 vector mirror whose
-``question_embedding`` IS ANN-searched (HNSW dot). Storage-only: embeddings are
-supplied by the caller. ``find_similar`` does dot nearest-k, similarity clamped
-to [0,100], threshold applied as a percentage.
-
-Created: 2026-07-01 (Lane B · Tiffany 💍) · v0.2.0
+Distinct from the relational ``proxy_decisions`` log served by ProxyDecisionRepository. This is the 1:1 vector
+mirror whose ``question_embedding`` is ANN-searched (HNSW dot). Storage only: the caller supplies embeddings.
+``find_similar`` does dot nearest-k, similarity clamped to [0,100], threshold applied as a percentage.
 """
 
 from typing import List, Optional, Tuple
@@ -111,8 +106,9 @@ class PredictionDecisionRepository( BaseRepository[PredictionDecision] ):
 
     def delete_all( self ) -> int:
         """
-        Delete every row in prediction_decisions (test reset; the table itself
-        is alembic-managed and kept).
+        Delete every row in prediction_decisions (test reset; the table is kept).
+
+        The table itself is alembic-managed.
 
         Ensures:
             - removes all rows; returns the count deleted (caller commits)
@@ -121,7 +117,7 @@ class PredictionDecisionRepository( BaseRepository[PredictionDecision] ):
 
     def update_ratification_state( self, id: str, new_state: str ) -> Optional[PredictionDecision]:
         """
-        Update a decision's ratification_state.
+        Set a decision's ratification_state.
 
         Requires:
             - id is a string; new_state is a string

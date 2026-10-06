@@ -59,19 +59,6 @@ class AuthAuditLogRepository(BaseRepository[AuthAuditLog]):
             Created AuthAuditLog instance
 
         Example:
-            # Successful login
-            audit_repo.log_event(
-                event_type = "login",
-                user_id = user.id,
-                email = user.email,
-                ip_address = request.remote_addr,
-                details = {
-                    "user_agent": request.headers.get( "User-Agent" ),
-                    "method": "password"
-                },
-                success = True
-            )
-
             # Failed login attempt
             audit_repo.log_event(
                 event_type = "login_failed",
@@ -213,7 +200,7 @@ class AuthAuditLogRepository(BaseRepository[AuthAuditLog]):
             - hours: Look back period in hours (default: 24)
 
         Ensures:
-            - Efficient COUNT query
+            - Efficient `COUNT` query
 
         Returns:
             Number of events

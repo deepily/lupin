@@ -1,12 +1,9 @@
 """
-CanonicalSynonymRepository — Postgres storage for the ``canonical_synonyms``
-table.
+CanonicalSynonymRepository — Postgres storage for the ``canonical_synonyms`` table.
 
-Exact-match lookups on the three text keys (btree on question_normalized +
-snapshot_id) — the 3 embedding columns are stored but NOT ANN-searched.
-Storage-only: embeddings + normalization are supplied by the Lane-C memory layer.
-
-Created: 2026-07-01 (Lane B · Tiffany 💍) · v0.2.0
+Exact-match lookups on the three text keys (btree on question_normalized + snapshot_id).
+The 3 embedding columns are stored but not ANN-searched.
+Storage only: the memory layer supplies embeddings and normalization.
 """
 
 from datetime import datetime

@@ -1,14 +1,10 @@
 """
-Task repository for the unified task store (Phase 1).
+Task repository for the unified task store.
 
-Persistence-only layer: structural validation lives in
-cosa.rest.task_store_rules (pure functions, called by the router BEFORE any
-repository write). Every state change writes exactly one append-only
-TaskEvent row in the same session that updates the TaskItem — atomicity is
-the caller's get_db() transaction.
-
-Canonical design: planning-is-prompting ->
-planning-is-prompting/src/rnd/2026.06.11-unified-task-store-design.md (v0.4) §2.1-§2.2.
+This layer only persists. Structural validation lives in cosa.rest.task_store_rules,
+as pure functions the router calls before any repository write.
+Every state change writes one append-only TaskEvent row in the same session that updates the TaskItem.
+The caller's get_db() transaction makes the pair atomic. The design lives in the planning-is-prompting repository.
 """
 
 from datetime import datetime, timezone
@@ -75,13 +71,13 @@ from cosa.rest import task_store_change_notifier as change_notifier
 
 class TaskRepository( BaseRepository[TaskItem] ):
     """
-    Repository for TaskItem with the task-store query + transition operations.
+    Repository for TaskItem with the task-store query and transition operations.
 
     Extends BaseRepository with:
-        - create_item: item row + "->queued" creation event in one unit
-        - apply_transition: status change + append-only event in one unit
-        - query_tasks: the deterministic owed-work query (design R4)
-        - get_events: the per-item audit trail (design R3)
+        - create_item: item row plus "->queued" creation event in one unit
+        - apply_transition: status change plus append-only event in one unit
+        - query_tasks: the deterministic owed-work query, identical for every caller
+        - get_events: the per-item audit trail
     """
 
     def __init__( self, session: Session ):
@@ -100,160 +96,25 @@ class TaskRepository( BaseRepository[TaskItem] ):
 
     def get_by_id_for_update( self, id: uuid.UUID ) -> Optional[TaskItem]:
         """
-        Load one item under a row lock (SELECT ... FOR UPDATE), REPOPULATING
-        this session's copy of the row from that read, for a
-        read-validate-write transition.
+        Load one item under a row lock, refreshing this session's copy of the row.
 
-        Cold-review N3: without the lock, two concurrent transitions both
-        validate against the same stale from_status and the terminal lockout
-        is bypassable under race — and concurrent multi-session writes are
-        this store's reason to exist. The lock serializes transitions per
-        item: the second transaction blocks until the first commits.
+        The lock makes the second of two concurrent transitions wait, so the terminal lockout cannot be bypassed. The lock alone does not refresh a row the session already holds. populate_existing does, so never remove it. Without it, a session still holding a live reference to the row keeps its old attribute values. Guards: test_the_for_update_read_refreshes_a_row_the_session_already_holds, test_every_locked_read_is_the_first_load_in_its_session.
 
-        🔴 THE LOCK ALONE DOES NOT MAKE THE READ FRESH — `.populate_existing()`
-        IS WHAT DOES. IT IS LOAD-BEARING. DO NOT DELETE IT.
-
-        This docstring used to end "so validation always sees fresh state",
-        unconditionally, over a body that had no `.populate_existing()` in it.
-        That sentence was FALSE for any caller still holding the row.
-
-        POCHOLO 📣 reproduced it on real Postgres 16.14, SQLAlchemy 2.0.40,
-        two real sessions, one variable per arm. His write-up is
-        `src/rnd/v0.2.1/2026.09.06-with-for-update-does-not-refresh-a-held-object.md`
-        at commit 0d45bdda on branch `pocholo-land-orphan-sweeper` — it is the
-        authority, not this paragraph, and it asks to be quoted bare because two
-        summaries of it went stale in transit. His statement, verbatim:
-
-            "`with_for_update` serializes the row at the database and does not
-             repopulate the Python attributes of an object the session already
-             holds. The lock buys serialization, not freshness. A
-             `SELECT ... FOR UPDATE` that re-reads a row already in the
-             session's identity map returns the existing object with the
-             attributes it carried when that session last loaded it — the lock
-             is real, the refresh is not."
-
-        🔴 HIS PRECONDITION, EXACT, AND IT IS EASY TO GET BACKWARDS: not "a
-        session that once loaded the row" but a session STILL HOLDING A LIVE
-        REFERENCE to the loaded object. SQLAlchemy's identity map is WEAK — drop
-        the reference and the object is collected, and the next read goes to the
-        database and comes back fresh. He notes the loose version is wrong in
-        the REASSURING direction: two of his own first arms discarded the scan
-        result and made a genuinely exposed session look safe.
-
-        ⚠️ AND HIS CENSUS IS OF THE FORMS HE DROVE, at one sha on one Postgres
-        version — `get_by_id`, `session.get( with_for_update=True )` and
-        `query().with_for_update()` all STALE; `populate_existing()`,
-        `session.refresh()` and raw SQL fresh. It is not a proof that no other
-        read form is stale.
-
-        ⇒ HIS TABLE PUT THESE FOUR CALL SITES UNDER "SAFE BY CALLER FRESHNESS",
-        with a red "no" against surviving a dirty session injected by a caller.
-        `.populate_existing()` is what moves them to SAFE BY CONSTRUCTION.
-
-        Re-measured here on a real SQLAlchemy session (2026-09-06, Rio ⚡): a
-        second writer commits queued->done, and the re-read through this method
-        returned `queued` without `.populate_existing()` and `done` with it,
-        same Python object both times. The sentence is true now because the
-        code makes it true, not because the lock implies it.
-
-        🔴 THE FOUR CALL SITES WERE **UNGUARDED** — NOT BROKEN, AND NOT
-        GUARDED. UNGUARDED IS A TRUE STATEMENT THAT MUST NOT BE MISTAKEN FOR A
-        SAFE ONE. All four — routers/tasks.py transition (:995), correlate
-        (:1335), amend (:1406), patch (:1525) — read `item.status` expecting the
-        COMMITTED value, and all four were correct only because each happens to
-        be the FIRST load of that row in a freshly opened `with get_db()`.
-        Correct-by-accident reads identically to correct-by-construction, and
-        no test would have noticed the day one of them stopped being the first
-        load. That is why the guarantee moved INTO this method instead of
-        staying a habit at four call sites.
-
-        ⚠️ THE FALSE SENTENCE WAS BELIEVED AND ACTED ON — quoted to another seat
-        as settled precedent for a scan-then-mark sweeper, precisely the shape
-        it breaks, before anyone read the body. A docstring is what the next
-        reader trusts INSTEAD of reading the implementation, so a wrong one does
-        not merely fail to help: it manufactures the belief and spends the
-        caution that would have caught it.
-
-        Guard (delete the `.populate_existing()` below and it goes red, naming
-        the stale value): src/tests/unit/
-        test_the_for_update_read_refreshes_a_row_the_session_already_holds.py
-
-        🔴 AND THE TWO ARMS TOGETHER SAY SOMETHING NEITHER SAYS ALONE — measured
-        2026-09-06, full unit tier both times, against a 3-red baseline:
-
-            unwire the CALL SITE (routers/tasks.py:995 -> get_by_id)  56 new reds
-            break the METHOD's freshness (drop populate_existing)      2 new reds
-
-        The WIRING was already guarded and this reviewer predicted, on record,
-        that it was not — wrong, and pocholo 📣 was right to ask.
-        ⚠️ BUT READ THE 56 CORRECTLY, BECAUSE THE COUNT FLATTERS THE SUITE. Those
-        tests drive a MagicMock repository that stubs `get_by_id_for_update` by
-        NAME; calling anything else hands the route a bare mock whose `.status`
-        fails enum validation with a 422. So they guard the NAME OF THE CALL and
-        are blind to WHAT IT RETURNS — which is why breaking the freshness
-        inside the method left all 56 of them green. The only two that saw it
-        are the ones added here. Pocholo 📣's wording for it, so nobody reads the
-        56 as depth: "56 tests assert the call site names this method; 2 assert
-        what it hands back."
-
-        AND THE CENSUS IS NOW A PREDICATE, NOT A COUNT — Tiberius 👑's
-        suggestion, after he found the fifth call site this docstring said could
-        not exist. src/tests/unit/
-        test_every_locked_read_is_the_first_load_in_its_session.py enumerates the
-        call sites FROM THE TREE and asserts the property the Requires clause
-        needs — nothing may touch the session before the locked read — rather
-        than asserting how many there are. It carries a positive control on its
-        own walk, and it REPORTS rather than skips a call site whose session
-        comes from outside the function, which is the one shape an AST walk
-        cannot judge and is exactly the shape his resolver has.
         Requires:
-            - id: TaskItem UUID
-            - called inside the SAME get_db() transaction that will apply
-              the transition (the lock lives and dies with that transaction)
-            - the caller has NOT modified that instance earlier in this session
-              and left the change unflushed. BOTH session factories are built
-              autoflush=False — the module-level `SessionLocal`
-              (db/database.py:245-249) and the one rebuilt on the reconfigure
-              path (:280) — so this is the setting on EVERY construction path,
-              not one line somebody could flip. With autoflush=False,
-              populate_existing OVERWRITES a pending in-memory edit with the
-              database row; with autoflush=True the edit survives, because the
-              flush lands before the read. This method is for
-              load-validate-write, never for re-reading a row you have already
-              edited in memory.
-              🔴 THE CALL-SITE CENSUS IS A FACT ABOUT A MOMENT, NOT A PROPERTY.
-              FOUR callers in THIS tree at 3fe6ac26, 2026-09-06 — the four
-              routers/tasks.py sites named above — and each takes the locked
-              read as its first statement in a fresh session, so none of THOSE
-              is exposed. That is a count I took, not a guarantee anything
-              enforces. Tiberius 👑 reported a FIFTH at
-              src/cosa/rest/task_promotion_resolver.py:433 on branch
-              wt-tiberius-nonce-prestamp at 0ea90082, which does not exist in
-              this tree at all — verified both directions. A RESOLVER is exactly
-              the shape that holds a session across a scan and a mark, so
-              "none is exposed" may already be false on his branch and will need
-              re-deriving at the merge. Do not read the number as a bound.
-              MEASURED by Rio ⚡ on SQLite. REPRODUCED independently by
-              pocholo 📣 on Postgres 16.14 against the real model. One backend
-              each, 2026-09-06 — neither of us ran both, and an earlier cut of
-              this line said he ran both, which he corrected. He declined to
-              confirm it by agreeing and ran the arms instead, which is why it
-              is recorded as reproduced rather than as endorsed.
-              ⚠️ AND HIS CAVEAT, VERBATIM, because it is stricter than what
-              this reviewer was about to write: autoflush is decided in the
-              Session before any SQL is emitted, so the agreement is expected —
-              but "two backends agreeing is consistent with it being
-              backend-independent and does not establish it as a universal
-              truth." The mechanism is the reason to believe it; two data
-              points are not a proof of universality.
+            - id is a TaskItem UUID
+            - called inside the same get_db() transaction that will apply the transition,
+              since the lock lives and dies with that transaction
+            - the caller has not edited that instance earlier in this session and left it unflushed.
+              Both session factories are built with autoflush off, on every construction path, so populate_existing
+              overwrites a pending edit with the database row.
+              This method is for load-validate-write, never for re-reading a row already edited in memory.
 
         Ensures:
             - returns the row-locked entity, or None if not found
-            - the row is locked against concurrent writers for the life of the
-              transaction
-            - the returned instance's attributes are REPOPULATED from that
-              read even when this session already held the row, so a caller
-              validating on `item.status` sees the COMMITTED value
+            - the row is locked against concurrent writers for the life of the transaction
+            - the returned instance's attributes are repopulated from that read even when
+              this session already held the row, so a caller validating on item.status
+              sees the committed value
 
         Returns:
             TaskItem instance or None
@@ -270,26 +131,22 @@ class TaskRepository( BaseRepository[TaskItem] ):
         """
         Find items whose id starts with a compact (hyphen-free) hex prefix.
 
-        Supports the 8-hex form every brief in this fleet writes (f45b37a9 leg 1).
-        READ path only — the mutating routes keep strict UUID typing, because a
-        prefix that resolves wrong on a read is merely wrong while on a write it
-        would move a row nobody named.
+        Supports the 8-hex form that fleet briefs use. This is a read path only.
+        The mutating routes keep strict UUID typing. A prefix that resolves wrong on a read is merely wrong.
+        On a write it would move a row nobody named.
 
         Requires:
-            - compact_prefix is lowercase hex with hyphens ALREADY stripped
+            - compact_prefix is lowercase hex with the hyphens already stripped
               (task_store_rules.classify_task_ref produces exactly this shape);
               this method does not re-validate caller text
             - limit bounds the scan
 
         Ensures:
-            - returns items whose canonical hyphenated id starts with the
-              prefix, at most `limit` of them. BOUNDED deliberately: the caller
-              only needs to distinguish none / one / more-than-one, and an
-              unbounded LIKE on a table that only grows is the unscoped-query
-              defect in another costume
-            - the compact prefix is re-hyphenated to canonical UUID positions
-              before matching, so a prefix longer than 8 chars (which spans a
-              hyphen) still matches the stored rendering
+            - returns items whose canonical hyphenated id starts with the prefix, at most
+              `limit` of them. The bound is deliberate: the caller only needs to tell none
+              from one from more than one, and an unbounded `LIKE` on a growing table is an unscoped query
+            - the compact prefix is re-hyphenated to canonical UUID positions before matching,
+              so a prefix longer than 8 characters (which spans a hyphen) still matches
         """
         # Re-hyphenation via the SHARED rule — a bare LIKE on the compact form would
         # never match a prefix long enough to cross a hyphen. Single-sourced with the
@@ -306,38 +163,22 @@ class TaskRepository( BaseRepository[TaskItem] ):
 
     def statuses_for_ids( self, ref_ids ) -> dict:
         """
-        Resolve blocker ids to statuses in ONE query — the read-side half of row 00a6bde2.
+        Resolve blocker ids to statuses in one query for the whole page.
 
-        ONE QUERY PER PAGE, NOT ONE PER ROW. This runs on the read path of every
-        `task_query`, so a per-row lookup would put an N+1 on the board glance that the
-        terse projection exists to make cheap. The caller collects every item-kind blocker
-        id across the whole page and asks once.
-
-        ⚠️ AN ID THAT DOES NOT RESOLVE IS RETURNED AS AN EXPLICIT None, NOT OMITTED — and
-        that distinction is the entire contract. `blocker_is_terminal` treats a key present
-        with None as "looked up and ABSENT" (a finding: the edge points at nothing) and a
-        key MISSING as "never looked up" (no finding). Collapsing the two would make a
-        failed resolution indistinguishable from a blocker nobody asked about, which is the
-        same silent-bucket shape the row was filed about.
-
-        MALFORMED IDS ARE PART OF THE ANSWER, not an exception. `blocked_by` is app-typed
-        JSON, so an id that is not a UUID at all reached the column and must resolve to
-        None like any other dead reference — raising here would take down the whole query
-        over one bad edge.
+        This runs on every task_query read, so a per-row lookup would put an N+1 on the board glance. An id that does not resolve is returned as an explicit None, never omitted. `blocker_is_terminal` reads a present key with None as looked up and absent, and a missing key as never looked up. Malformed ids resolve to None too, because blocked_by is app-typed JSON and raising would fail the whole query.
 
         Requires:
-            - ref_ids is an iterable of candidate id strings (duplicates fine, order
-              irrelevant, empty fine)
+            - ref_ids is an iterable of candidate id strings (duplicates, any order and empty are all fine)
 
         Ensures:
-            - returns { id_str: status_str_or_None } with EXACTLY one key per distinct
-              input id — every id asked about is answered
-            - a full-UUID id that matches no row maps to None (a genuinely dead edge)
-            - an 8-hex-style PREFIX id resolves by prefix, exactly as `task_get` does, and
-              maps to that row's status when the prefix matches EXACTLY ONE row
-            - an AMBIGUOUS or unmatched prefix maps to None; the caller must not read that
-              as "dead" for a non-canonical id (see `blocker_is_terminal`)
-            - never raises; an empty input returns {} and issues NO query
+            - returns { id_str: status_str_or_None } with exactly one key per distinct input id,
+              so every id asked about is answered
+            - a full-UUID id that matches no row maps to None (a dead edge)
+            - an 8-hex-style prefix id resolves by prefix, as `task_get` does, and maps to that
+              row's status when the prefix matches exactly one row
+            - an ambiguous or unmatched prefix maps to None; the caller must not read that
+              as dead for a non-canonical id (see `blocker_is_terminal`)
+            - never raises; an empty input returns {} and issues no query
         """
         wanted = { str( ref_id ) for ref_id in ref_ids if ref_id }
         if not wanted: return { }
@@ -407,40 +248,28 @@ class TaskRepository( BaseRepository[TaskItem] ):
         Create a new task item plus its "->{status}" creation event.
 
         Requires:
-            - item_class/gate_class/priority/authority already validated by
+            - item_class, gate_class, priority and authority are already validated by
               task_store_rules.validate_create (router responsibility)
             - status is queued or blocked, already whitelist-validated by
-              task_store_rules.validate_create_status (router responsibility); a
-              blocked mint's blocked_by / next_chase_ts already satisfy the
-              ->blocked invariant (>=1 typed ref + kind-aware chase) — this method
-              never re-validates
-            - title, project, created_by are non-empty strings
-            - flag_suffix is an OPTIONAL advisory marker (e.g. the persona-flag
-              "[persona_flag: … off-roster]") the router folds into the creation
-              event's reason; None means no marker (the reason stays None)
+              task_store_rules.validate_create_status (router responsibility); a blocked mint's
+              blocked_by and next_chase_ts already satisfy the ->blocked invariant
+              (>=1 typed ref and a kind-aware chase); this method never re-validates
+            - title, project and created_by are non-empty strings
+            - flag_suffix is an optional advisory marker (such as the persona flag "[persona_flag: ... off-roster]")
+              the router folds into the creation event's reason; None means no marker
 
         Ensures:
-            - item created with the given status (DEFAULT 'queued' — today's
-              behavior). Per-status field consistency is DELEGATED to
-              task_store_rules.normalize_status_fields, which apply_transition
-              also calls — ONE implementation, so the two write paths cannot
-              drift (86ce4c43 #2). This method no longer owns those rules:
-                * status == 'blocked' -> blocked_by is the given list (or [] when
-                  None)
-                * any other status -> blocked_by := [], dropping stray refs (a
-                  non-blocked row waits on nothing)
-                * next_chase_ts is the caller's value on EVERY status — a chase is
-                  a SCHEDULE, not a WAIT, and is no longer nulled outside
-                  blocked/parked
-            - exactly one TaskEvent with transition='->{status}' appended (so a
-              blocked mint stamps '->blocked'), actor = created_by (the creator IS
-              the creation actor), reason = flag_suffix, EXTENDED with a
-              "[dropped: …]" marker naming any field the normalizer discarded, so
-              a discard is disclosed in the audit trail rather than swallowed on a
-              200 (zero schema, zero new events; both markers ride the existing
-              event reason)
+            - item created with the given status (default 'queued'). Per-status field consistency is
+              delegated to task_store_rules.normalize_status_fields, which apply_transition also calls,
+              so the two write paths cannot drift. This method no longer owns those rules:
+                * status == 'blocked' -> blocked_by is the given list (or [] when None)
+                * any other status -> blocked_by is [], dropping stray refs (a non-blocked row waits on nothing)
+                * next_chase_ts is the caller's value on every status, because a chase is a schedule, not a wait, and is no longer nulled outside blocked or parked
+            - exactly one TaskEvent with transition='->{status}' appended, actor = created_by,
+              reason = flag_suffix extended with a "[dropped: ...]" marker naming any field the
+              normalizer discarded, so a discard is disclosed in the audit trail rather than swallowed on a 200
             - flush() called so item.id is populated
-            - commit NOT called (caller's get_db() commits)
+            - commit is not called (the caller's get_db() commits)
 
         Returns:
             Created TaskItem instance (with id populated)
@@ -499,34 +328,28 @@ class TaskRepository( BaseRepository[TaskItem] ):
         park_reason   : Optional[str] = None,
     ) -> TaskEvent:
         """
-        Apply an ALREADY-VALIDATED transition: update the item + append the event.
+        Apply an already-validated transition: update the item and append the event.
 
         Requires:
-            - item is a TaskItem loaded in THIS session
+            - item is a TaskItem loaded in this session
             - the transition has passed task_store_rules.validate_transition
-              (router responsibility — this method never re-validates)
+              (router responsibility); this method never re-validates
 
         Ensures:
             - item.status set to to_status
-            - to_status == 'blocked': item.next_chase_ts + item.blocked_by set;
-              park_reason + park_reason_captured_at cleared
-            - to_status == 'parked': item.next_chase_ts set (the chase IS the
-              un-park — read-time expiry) + item.park_reason set; blocked_by
-              emptied (a parked item waits on nothing; a human ruled it not-now);
-              item.park_reason_captured_at AND item.updated_ts both stamped with
-              ONE DB-clock instant in a SINGLE statement, so they are equal by
-              construction (see _park_capture_ts — the §3.4 ordering, and why
-              the design's read-back sequence cannot commit)
-            - any OTHER status: item.next_chase_ts cleared, item.blocked_by
-              emptied, item.park_reason + item.park_reason_captured_at cleared
-              (an unblocked item is blocked on nothing; an unparked item carries
-              no park justification, and a capture time must not outlive the
-              quote it dates)
-            - exactly one TaskEvent ("from->to") appended with receipt_refs
-              + authority + reason (reason non-None for ->dropped by rule); on
-              ->parked that event's `ts` IS park_reason_captured_at, so the
-              column and the audit row record ONE instant, not two (AC10)
-            - flush() called; commit NOT called (caller's get_db() commits)
+            - to_status == 'blocked': item.next_chase_ts and item.blocked_by set;
+              park_reason and park_reason_captured_at cleared
+            - to_status == 'parked': item.next_chase_ts set (the chase is the un-park, by read-time expiry)
+              and item.park_reason set; blocked_by emptied (a parked item waits on nothing; it is not-now, not blocked).
+              item.park_reason_captured_at and item.updated_ts are stamped with one DB-clock instant
+              in a single statement, so they are always equal (see _park_capture_ts, which explains why the design's read-back sequence cannot commit)
+            - any other status: item.blocked_by emptied, item.next_chase_ts is the caller's value as on every status,
+              and park_reason and park_reason_captured_at cleared (an unblocked item is blocked on nothing; an unparked item carries no park
+              justification, and a capture time must not outlive the quote it dates)
+            - exactly one TaskEvent ("from->to") appended with receipt_refs, authority and reason
+              (reason is non-None for ->dropped by rule); on ->parked that event's ts equals
+              park_reason_captured_at, so the column and the audit row record one instant, not two
+            - flush() called; commit is not called (the caller's get_db() commits)
 
         Returns:
             The appended TaskEvent instance
@@ -593,15 +416,18 @@ class TaskRepository( BaseRepository[TaskItem] ):
         """
         Clear a pending request the row's new status has made impossible, with its own event.
 
+        Every status change comes through apply_transition, so the withdrawal lives here and not in a router.
+        It runs after the transition's own event, so the trail reads cause and then consequence.
+
         Requires:
-            - item.status is ALREADY the new status
+            - item.status is already the new status
 
         Ensures:
-            - when `task_request_lifecycle.request_is_stale` holds: request_state,
-              request_move and request_ts go to NULL and ONE 'request_withdrawn' event is
-              appended naming the move and the transition that stranded it
-            - otherwise nothing is written — an answered request, no request, or a pending
-              request the row can still make (a demote from queued -> in_progress) stays
+            - when `task_request_lifecycle.request_is_stale` holds: request_state, request_move and
+              request_ts go to NULL and one 'request_withdrawn' event is appended naming the move
+              and the transition that stranded it
+            - otherwise nothing is written: an answered request, no request, or a pending request
+              the row can still make (a demote from queued -> in_progress) stays
             - a withdrawal is neither a denial nor an approval, so it writes neither state
         """
         if not request_lifecycle.request_is_stale( item.request_state, item.request_move, item.status ): return
@@ -617,17 +443,11 @@ class TaskRepository( BaseRepository[TaskItem] ):
 
     def _db_clock_now( self ) -> datetime:
         """
-        Read the DATABASE clock, tz-normalized. **The one clock every timestamp
-        that gets COMPARED to another must come from.**
+        Read the database clock as a timezone-aware UTC datetime.
 
-        Two columns are compared by `task_store_owed.park_reason_is_stale`:
-        `park_reason_captured_at` (stamped at park) and `body_changed_ts` (stamped
-        on a real body change). Both come from here. Take either from
-        `datetime.now()` instead and the comparison becomes cross-clock, where skew
-        surfaces as a **false FRESH** — a parked row silently failing to report an
-        expired quote. That is the feature's own defect arriving in the direction
-        nobody notices, which is why the source is centralized here rather than
-        re-decided at each writer.
+        Every timestamp that gets compared to another must come from this one clock.
+        `task_store_owed.park_reason_is_stale` compares park_reason_captured_at with body_changed_ts, and both come from here.
+        Taking either from datetime.now() makes the comparison cross-clock, and skew then shows up as a false fresh result.
 
         Requires:
             - an open session/transaction (the caller's; this reads, never writes)
@@ -636,7 +456,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
             - returns a tz-aware UTC datetime from the DB clock
             - a naive return is converted to tz-aware UTC, so the value compares
               correctly against the tz-aware column on every backend
-            - commit NOT called; nothing is written here
+            - commit is not called; nothing is written here
 
         Returns:
             The database clock's current instant
@@ -662,46 +482,9 @@ class TaskRepository( BaseRepository[TaskItem] ):
 
     def _park_capture_ts( self ) -> datetime:
         """
-        Read the DATABASE clock for the park write's single timestamp — the one
-        instant stamped into `updated_ts`, `park_reason_captured_at`, and the
-        park event's `ts`.
+        Read the database clock for the park write's single timestamp.
 
-        WHY NOT THE POST-WRITE READ-BACK THE DESIGN DESCRIBES (§3.4). The design
-        says "capture the post-write `updated_ts`, read back in the same
-        transaction," which reads as: flush the park, read `updated_ts`, then
-        UPDATE `park_reason_captured_at` to match. THAT SEQUENCE CANNOT COMMIT.
-        The first flush writes status='parked' with `park_reason_captured_at`
-        still NULL, and `ck_task_items_parked_requires_captured_at` is evaluated
-        PER STATEMENT, not at commit — so the park 500s on its own CHECK before
-        the second statement is ever reached. PostgreSQL cannot defer a CHECK
-        (only UNIQUE/PK/FK/EXCLUDE take DEFERRABLE), so there is no version of
-        the two-step that works. Verified end-to-end, not reasoned about: the
-        read-back implementation passed 156 unit tests and then 500'd on the
-        first real park through the API.
-
-        So the write is SINGLE-STATEMENT: take the timestamp first, assign it to
-        both columns, flush once. `updated_ts` is assigned EXPLICITLY, which
-        suppresses its `onupdate=func.now()` for this statement — otherwise the
-        column would advance past the capture we just wrote and every parked row
-        would be BORN STALE, which is the trap §3.4 exists to name.
-
-        This satisfies §3.4's INTENT exactly — `park_reason_captured_at` equals
-        the `updated_ts` this write leaves on the row — and pins it harder than
-        a read-back could: the equality is true by construction rather than by
-        the two values happening to agree.
-
-        WHY THE DB CLOCK AND NOT `datetime.now()`. Every other `updated_ts` in
-        this table is written by `onupdate=func.now()`, i.e. the DATABASE's
-        clock. Staleness compares a capture against a LATER `updated_ts` written
-        by that path, so a capture taken from the APPLICATION's clock would make
-        the comparison cross-clock, and any skew would show up as a false FRESH
-        — a parked row quietly failing to report a quote that has expired, which
-        is the exact defect this build exists to detect. One clock, one value.
-
-        On PostgreSQL `now()` is `transaction_timestamp()` and is stable across
-        the transaction, so this returns precisely the value `onupdate` would
-        have written — the explicit assignment changes the mechanism, not the
-        number.
+        That one instant goes into updated_ts, park_reason_captured_at and the park event's ts, in one statement. A flush-then-read-back cannot commit: the first flush writes status='parked' with park_reason_captured_at still NULL. The per-statement `CHECK` named ck_task_items_parked_requires_captured_at rejects that. PostgreSQL cannot defer a `CHECK`. The updated_ts column is assigned explicitly. That suppresses its onupdate, so a parked row is not born stale. The database clock is used because the staleness comparison must not cross clocks.
 
         Requires:
             - an open session/transaction (the caller's; this reads, never writes)
@@ -710,7 +493,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
             - returns a tz-aware UTC datetime from the DB clock
             - a naive return is converted to tz-aware UTC, so the value compares
               correctly against the tz-aware column on every backend
-            - commit NOT called; nothing is written here
+            - commit is not called; nothing is written here
 
         Returns:
             The single timestamp for this park write
@@ -729,22 +512,20 @@ class TaskRepository( BaseRepository[TaskItem] ):
         authority       : str,
     ) -> TaskEvent:
         """
-        Re-stamp an item's correlation_key + append the audit event (Phase 2 —
-        the cross-session respawn adoption seam: a successor session
-        re-registers its harness task id onto the inherited item instead of
-        forking a duplicate).
+        Re-stamp an item's correlation_key and append the audit event.
+
+        This is the adoption seam for a respawned session. A successor re-registers its harness task id
+        onto the inherited item instead of forking a duplicate.
 
         Requires:
-            - item is a TaskItem loaded in THIS session (row-locked by the
-              router, N3 parity) and NOT terminal (router-validated)
-            - correlation_key / actor / authority already validated (router)
+            - item is a TaskItem loaded in this session (row-locked by the router) and not terminal (router-validated)
+            - correlation_key, actor and authority are already validated (router)
 
         Ensures:
             - item.correlation_key set to correlation_key (status untouched)
-            - exactly one TaskEvent appended: transition='re-correlated',
-              receipt_refs=None, reason='correlation_key: <old> -> <new>'
-              (R3 — the adoption is auditable)
-            - flush() called; commit NOT called (caller's get_db() commits)
+            - exactly one TaskEvent appended: transition='re-correlated', receipt_refs=None,
+              reason='correlation_key: <old> -> <new>', so the adoption is auditable
+            - flush() called; commit is not called (the caller's get_db() commits)
 
         Returns:
             The appended TaskEvent instance
@@ -766,58 +547,31 @@ class TaskRepository( BaseRepository[TaskItem] ):
         flag_suffix = None,
     ) -> TaskEvent:
         """
-        Apply an ALREADY-VALIDATED item-field edit + append a 'patched' event.
+        Apply an already-validated item-field edit and append a 'patched' event.
 
-        Touches ONLY the editable presentation/ownership fields the caller set;
-        status / blocked_by / next_chase_ts / receipt_refs / correlation_key are
-        NEVER written here — they ride apply_transition / apply_correlation, so
-        the transition oracle is never bypassed (reviewer ruling 2026-06-15).
+        Touches only the editable presentation and ownership fields the caller set.
+        status, blocked_by, next_chase_ts, receipt_refs and correlation_key are never written here.
+        They go through apply_transition and apply_correlation, so the transition rules are never bypassed.
 
         Requires:
-            - item is a TaskItem loaded in THIS session (row-locked by the
-              router, N3 parity) and NOT terminal (router-validated)
-            - fields keys are whitelist-validated editable field names
-              (router validated via task_store_rules.validate_patch); values
-              already wire-checked by the TaskPatchIn Pydantic model
-            - reason is an OPTIONAL caller-supplied justification (e.g. why a
-              task was reassigned); None / "" means "no justification given".
-              It is APPENDED to the field delta, never substituted for it
-            - flag_suffix is an OPTIONAL advisory marker (the persona-flag
-              "[persona_flag: … off-roster]") appended to the resolved event
-              reason; None means no marker (the reason is unchanged)
-
-        ⚠️ STAMPS `body_changed_ts` — ONLY when `body` is in `fields` AND its value
-        actually DIFFERS (bug 54924128, 2026-07-26). That condition IS the fix. The
-        other four free-edit fields (title / priority / gate_class / urgency) cannot
-        make a park quote untrue, so they must leave the marker alone; before this,
-        `park_reason_is_stale` read `updated_ts`, which every write bumps, and a
-        priority-only edit during a routine board recut defamed correct quotes —
-        0 of 2 live parked rows correctly flagged when it was found.
-
-        A no-op body write (same text) stamps NOTHING: the quote cannot have been
-        invalidated by text that did not change, and stamping there would re-import
-        the false-positive class through a narrower door.
-
-        ⚠️ THE DELTA IS NEVER SUBSTITUTED (bug a01e4e2a, 2026-08-28). This used to
-        read `reason if reason else <delta>`: a caller-supplied reason REPLACED the
-        computed before/after, so a `task_edit` overwriting a 60,000-character body
-        with a polite justification recorded only the justification and the prior
-        text was unrecoverable from the event log. That rewarded the careless caller
-        with the better audit trail. The delta now always leads and the caller's
-        reason rides after it.
+            - item is a TaskItem loaded in this session (row-locked by the router) and not terminal (router-validated)
+            - fields keys are whitelist-validated editable field names (router validated via
+              task_store_rules.validate_patch); values are already wire-checked by the TaskPatchIn model
+            - reason is an optional caller-supplied justification; None or "" means no justification given.
+              It is appended to the field delta, never substituted for it
+            - flag_suffix is an optional advisory marker (the persona flag "[persona_flag: ... off-roster]")
+              appended to the resolved event reason; None means no marker
 
         Ensures:
             - each provided field whose value differs is written onto the item
-            - body_changed_ts stamped from the DB clock IFF `body` changed value
-            - exactly one TaskEvent appended: transition='patched',
-              receipt_refs=None, reason ALWAYS opens with the field delta
-              ("k: old -> new; ...") — or the no-op marker when nothing actually
-              changed — and the caller-supplied `reason`, when non-empty, is
-              APPENDED after " | reason: " rather than replacing it (bug
-              a01e4e2a). flag_suffix is appended last when present, so delta +
-              caller reason + off-roster marker all survive on the one event
-              (R3 — zero schema churn)
-            - flush() called; commit NOT called (caller's get_db() commits)
+            - body_changed_ts is stamped from the DB clock only when body is in fields and its value
+              differs. The other free-edit fields cannot make a park quote untrue, and a same-text body write
+              changes nothing, so neither may move the marker
+            - exactly one TaskEvent appended: transition='patched', receipt_refs=None, reason always
+              opens with the field delta ("k: old -> new; ...") or the no-op marker when nothing changed.
+              A non-empty caller reason is appended after " | reason: " rather than replacing the delta,
+              so an overwritten body stays recoverable. flag_suffix is appended last when present, so all three parts survive on the one event
+            - flush() called; commit is not called (the caller's get_db() commits)
 
         Returns:
             The appended TaskEvent instance
@@ -858,34 +612,32 @@ class TaskRepository( BaseRepository[TaskItem] ):
         pledged_by  : Optional[str]       = None,
     ) -> TaskEvent:
         """
-        File a manager's promote/demote request on a row + append its event.
+        File a manager's promote or demote request on a row and append its event.
 
-        Row c9fafb9d, rule 3. The row's STATUS is never touched here: a request asks, it
-        does not move (Rick, 2026-09-08). One request per row — a re-file over an ANSWERED
-        request overwrites the three columns, and the verdict it replaces survives as its
-        own event, so the history lives in the audit trail rather than the columns.
+        The row's status is never touched here: a request asks, it does not move.
+        There is one request per row. A re-file over an answered request overwrites the three columns,
+        and the verdict it replaces survives as its own event in the audit trail.
 
         Requires:
-            - item is a TaskItem loaded in THIS session, row-locked by the router
-            - move has ALREADY passed `task_request_lifecycle.refusal_for_filing` and
-              `refusal_for_refiling` against the row's real state — this method decides
-              nothing
+            - item is a TaskItem loaded in this session, row-locked by the router
+            - move has already passed `task_request_lifecycle.refusal_for_filing` and
+              `refusal_for_refiling` against the row's real state; this method decides nothing
             - actor is the router's `recorded_actor(...)` result; reason is non-blank
-            - deletion_id, when given, has ALREADY passed `task_request_pledge.refusal_for_pledge`
-              under a lock on the pledged row (Sword of Damocles, row ab8c5728)
+            - deletion_id, when given, has already passed `task_request_pledge.refusal_for_pledge`
+              under a lock on the pledged row
             - pledged_by is the persona that rule resolved for the requester when deletion_id
               is given, else None
 
         Ensures:
             - request_state := 'pending', request_move := move, request_ts := the DB clock
-            - request_deletion_id := deletion_id, INCLUDING None — a re-file replaces the
-              old pledge rather than inheriting it, so a demote never carries one
-            - request_pledged_by := pledged_by, replaced the same way (RB-2)
+            - request_deletion_id := deletion_id, including None, so a re-file replaces the
+              old pledge rather than inheriting it and a demote never carries one
+            - request_pledged_by := pledged_by, replaced the same way
             - item.status untouched
-            - exactly one TaskEvent appended: transition='request_filed',
-              receipt_refs=None, reason naming the move, the prior request state, the
-              pledged row when there is one, and the caller's reason
-            - flush() called; commit NOT called (caller's get_db() commits)
+            - exactly one TaskEvent appended: transition='request_filed', receipt_refs=None,
+              reason naming the move, the prior request state, the pledged row when there is one,
+              and the caller's reason
+            - flush() called; commit is not called (the caller's get_db() commits)
 
         Returns:
             The appended TaskEvent instance
@@ -902,20 +654,20 @@ class TaskRepository( BaseRepository[TaskItem] ):
 
     def find_pending_admit_pledging( self, pledge_id: uuid.UUID, excluding_id: uuid.UUID ) -> Optional[uuid.UUID]:
         """
-        The row whose PENDING admit request already pledges `pledge_id` for deletion, if any.
+        Find the row whose pending admit request already pledges `pledge_id` for deletion, if any.
 
-        Sword of Damocles (row ab8c5728): one pledge pays for one admit. Called by the filing
-        door while it holds the lock on the pledged row, so two requests racing to pledge the
-        same row are serialised on that lock and the second one sees the first.
+        One pledge pays for one admit.
+        The filing door calls this while it holds the lock on the pledged row.
+        Two requests racing to pledge the same row therefore serialize on that lock, and the second sees the first.
 
         Requires:
-            - pledge_id / excluding_id are UUIDs; excluding_id is the row being filed on, so a
-              re-file over its own stranded request does not count against itself
+            - pledge_id and excluding_id are UUIDs; excluding_id is the row being filed on,
+              so a re-file over its own stranded request does not count against itself
 
         Ensures:
             - returns the id of one other row with request_state 'pending', request_move
               'admit' and request_deletion_id == pledge_id, or None
-            - an ANSWERED request does not count: its pledge was consumed or released
+            - an answered request does not count, because its pledge was consumed or released
         """
         row = (
             self.session.query( TaskItem.id )
@@ -929,11 +681,10 @@ class TaskRepository( BaseRepository[TaskItem] ):
 
     def pledge_facts_for_id( self, id: uuid.UUID ) -> tuple:
         """
-        Read one pledged row's ( status, owner_persona ) WITHOUT locking it.
+        Read one pledged row's ( status, owner_persona ) without locking it.
 
-        The filing door's stranding check (RB-2): a pending admit whose pledge died or changed
-        hands may be re-filed. That permission is only a re-file of the manager's own request —
-        the verdict re-reads both facts under its lock before anything is dropped.
+        The filing door uses this for its stranding check: a pending admit whose pledge died or changed hands may be re-filed.
+        That permission only re-files the manager's own request. The verdict re-reads both facts under its lock before anything is dropped.
 
         Ensures:
             - returns ( status, owner_persona ) of the row, or ( None, None ) when it does not exist
@@ -943,11 +694,10 @@ class TaskRepository( BaseRepository[TaskItem] ):
 
     def peek_request_deletion_id( self, id: uuid.UUID ) -> Optional[uuid.UUID]:
         """
-        Read a row's pledged deletion id WITHOUT locking it.
+        Read a row's pledged deletion id without locking it.
 
-        Exists only so the verdict door can learn which second row it must lock before it
-        locks the first, and so take both locks in id order — the same order the filing
-        door uses, which is what keeps the two doors from deadlocking on a crossed pair.
+        The verdict door uses it to learn which second row to lock before it locks the first.
+        It then takes both locks in id order, the same order the filing door uses, so the two doors cannot deadlock on a crossed pair.
         The caller re-reads the value under the lock and refuses if it moved.
 
         Ensures:
@@ -965,25 +715,23 @@ class TaskRepository( BaseRepository[TaskItem] ):
         authority : str,
     ) -> TaskEvent:
         """
-        Write the operator's verdict onto a pending promote/demote request + append its event.
+        Write the operator's verdict onto a pending request and append its event.
 
-        Row c9fafb9d. The verdict door used to set `request_state` on the row inline and
-        append nothing, so an answer Rick gave left no record of WHO gave it — and the
-        identity census (`test_the_edit_door_records_a_real_identity.py`) could not see the
-        door as a store writer at all. Routing the write through here gives it both.
+        The verdict door used to set request_state inline and append nothing, so an answer left no record of who gave it.
+        Routing the write through here records the actor and makes the door visible to the identity census.
 
         Requires:
-            - item is a TaskItem loaded in THIS session, row-locked by the router
-            - verdict has ALREADY passed `task_request_lifecycle.refusal_for_verdict`
-              against the row's real state — this method decides nothing
+            - item is a TaskItem loaded in this session, row-locked by the router
+            - verdict has already passed `task_request_lifecycle.refusal_for_verdict`
+              against the row's real state; this method decides nothing
             - actor is the router's `recorded_actor(...)` result, never a typed string
 
         Ensures:
-            - item.request_state := verdict; request_move / request_ts and the ticket's
-              status are untouched (a denial finishes the REQUEST, not the row)
+            - item.request_state := verdict; request_move, request_ts and the ticket's
+              status are untouched (a denial finishes the request, not the row)
             - exactly one TaskEvent appended: transition='request_<verdict>',
-              receipt_refs=None, reason naming the before/after state and the move
-            - flush() called; commit NOT called (caller's get_db() commits)
+              receipt_refs=None, reason naming the before and after state and the move
+            - flush() called; commit is not called (the caller's get_db() commits)
 
         Returns:
             The appended TaskEvent instance
@@ -1003,63 +751,30 @@ class TaskRepository( BaseRepository[TaskItem] ):
         reason    = None,
     ) -> TaskEvent:
         """
-        Append a persona-stamped + timestamped amendment block to a live item's
-        body + append an 'amended' audit event — the APPEND-ONLY body-amend seam
-        (Krishna's mid-flight scope-reframe friction, 2026-07-02).
+        Append a stamped amendment block to a live item's body and append an 'amended' event.
 
-        Unlike apply_patch (which OVERWRITES item.body destructively), this NEVER
-        rewrites the existing body: the original text is preserved verbatim and
-        the note is appended below a `[amendment · <actor> · <utc>]` divider, so
-        a successor rehydrating from the store reads the FULL amendment history
-        inline — closing the gap where the durable record of the CURRENT spec
-        leaked outside the store (scratchpad checklists / code comments /
-        transition reasons).
-
-        POST-TERMINAL ADDENDUM (Rick's ruling 2026-08-02, row 3c569786). Amend is
-        the ONE write verb the store allows on a TERMINAL row: a gate verdict
-        written after a worker self-closes their row has nowhere durable to go
-        otherwise. On a done/dropped item the divider reads `[post-terminal
-        addendum · <actor> · <utc> · row was '<status>' at write — added after
-        close, not a reopening]` and the audit event's transition is
-        'amended_post_terminal' (not 'amended'), so the addendum is unmistakable
-        from the original body and queryable in history. Status is NOT changed —
-        transition / edit / correlate remain refused on a terminal row.
+        Unlike apply_patch, which overwrites the body, this never rewrites existing text. The original body is kept verbatim and the note goes below a divider naming the actor and the UTC time. A successor reading the store therefore sees the full amendment history inline. On a terminal row the divider and event read post-terminal addendum, and the status stays unchanged.
 
         Requires:
-            - item is a TaskItem loaded in THIS session (row-locked by the router,
-              N3 parity). It MAY be terminal — a post-terminal amend is legal
-              (Rick 2026-08-02); the status read here selects the divider + event
-            - note is the caller's amendment text (wire-checked 1..4000 + the
-              router rejects a whitespace-only note)
-            - now is a timezone-aware datetime (the router owns the clock so this
-              method stays deterministic — mirrors apply_chase's injected time)
-            - reason is an OPTIONAL justification stamping the audit event; None /
-              "" means "auto-describe the amendment"
+            - item is a TaskItem loaded in this session (row-locked by the router).
+              It may be terminal, because amend is the one write verb the store allows on a terminal row.
+              The status selects the divider and event
+            - note is the caller's amendment text (wire-checked for length; the router rejects a whitespace-only note)
+            - now is a timezone-aware datetime (the router owns the clock so this method stays deterministic)
+            - reason is an optional justification stamping the audit event; None or "" means auto-describe the amendment
 
         Ensures:
-            - item.body := the original body (verbatim) + a blank line + the
-              stamped block when the body was non-empty; the stamped block ALONE
-              when the body was empty/None (no leading blank lines on a first
-              amendment)
-            - item.body_changed_ts stamped from the DB clock UNCONDITIONALLY — an
-              amend only ever APPENDS, so the body always changed. This is the
-              other half of bug 54924128's fix: the marker must still go TRUE on a
-              genuine body change, or the fix is indistinguishable from deleting
-              the feature. ⚠️ The DB clock, never datetime.now(): this value is
-              compared against park_reason_captured_at, and a cross-clock compare
-              would surface skew as a false FRESH (see _db_clock_now)
-            - the divider is the ordinary `[amendment · …]` on a non-terminal
-              row, and the distinct `[post-terminal addendum · … · row was
-              '<status>' at write — added after close, not a reopening]` on a
-              done/dropped row
-            - item.status is NEVER touched (an amend is not a transition) — a
-              terminal row stays terminal; nothing here reads as a reopening
-            - exactly one TaskEvent appended: transition='amended' on a live row,
-              'amended_post_terminal' on a terminal row (so late verdicts are
-              queryable), receipt_refs=None, reason = the caller-supplied `reason`
-              when it is non-empty, else an auto-marker naming the appended length
-              (R3 — the amendment is auditable either way)
-            - flush() called; commit NOT called (caller's get_db() commits)
+            - item.body := the original body (verbatim), a blank line and the stamped block when the body was non-empty;
+              the stamped block alone, with no leading blank lines, when the body was empty or None
+            - item.body_changed_ts is stamped from the DB clock unconditionally, because an amend only appends, so the body always changed and the marker must still go true on a real body change.
+              It uses the DB clock, never datetime.now(), since it is compared against park_reason_captured_at (see _db_clock_now)
+            - the divider is "[amendment . actor . utc]" on a non-terminal row, and
+              "[post-terminal addendum . actor . utc . row was '<status>' at write - added after close, not a reopening]" on a done or dropped row
+            - item.status is never touched (an amend is not a transition); a terminal row stays terminal and nothing here reads as a reopening
+            - exactly one TaskEvent appended: transition='amended' on a live row, 'amended_post_terminal'
+              on a terminal row, receipt_refs=None, reason = the caller's reason when non-empty,
+              else an auto-marker naming the appended length
+            - flush() called; commit is not called (the caller's get_db() commits)
 
         Returns:
             The appended TaskEvent instance
@@ -1099,18 +814,18 @@ class TaskRepository( BaseRepository[TaskItem] ):
 
     def query_chase_due( self, now: datetime, limit: int = 100 ) -> List[TaskItem]:
         """
-        Return blocked items whose next_chase_ts is at/before `now` (design I3 —
-        the chase consumer's due-list; "no 'pending X' graves" made operational).
+        Return blocked items whose next_chase_ts is at or before `now`.
+
+        This is the chase consumer's due list, so a blocked row never waits in silence.
 
         Requires:
             - now is a timezone-aware datetime (the chase cutoff)
             - limit is a non-negative int
 
         Ensures:
-            - returns items with status='blocked' AND next_chase_ts IS NOT NULL
-              AND next_chase_ts <= now
+            - returns items with status='blocked' and next_chase_ts not NULL and next_chase_ts <= now
             - ordered by next_chase_ts ascending (longest-overdue first)
-            - read-only — NEVER mutates (the consumer re-arms via apply_chase)
+            - read-only: never mutates (the consumer re-arms via apply_chase)
 
         Returns:
             List of TaskItem instances (may be empty)
@@ -1129,19 +844,19 @@ class TaskRepository( BaseRepository[TaskItem] ):
 
     def apply_chase( self, item: TaskItem, actor: str, authority: str, next_chase_ts: datetime ) -> TaskEvent:
         """
-        Record a chase on a blocked item: re-arm next_chase_ts (backoff) + append
-        a 'chased' audit event. NEVER changes status (the consumer chases, it
-        does not auto-transition — design: chasing is a nudge, not a decision).
+        Record a chase on a blocked item: re-arm next_chase_ts and append a 'chased' event.
+
+        Chasing is a nudge, not a decision, so this never changes the status.
 
         Requires:
-            - item is a blocked TaskItem loaded in THIS session
+            - item is a blocked TaskItem loaded in this session
             - next_chase_ts is the re-armed (future) chase time
 
         Ensures:
-            - item.next_chase_ts set to next_chase_ts; item.status UNTOUCHED
-            - exactly one TaskEvent appended: transition='chased',
-              receipt_refs=None, reason names the re-armed time (R3 — auditable)
-            - flush() called; commit NOT called (caller's get_db() commits)
+            - item.next_chase_ts set to next_chase_ts; item.status untouched
+            - exactly one TaskEvent appended: transition='chased', receipt_refs=None,
+              reason names the re-armed time, so the chase is auditable
+            - flush() called; commit is not called (the caller's get_db() commits)
 
         Returns:
             The appended TaskEvent instance
@@ -1174,39 +889,32 @@ class TaskRepository( BaseRepository[TaskItem] ):
         updated_until       : Optional[datetime] = None,
     ) -> List[TaskItem]:
         """
-        The deterministic owed-work query (design R4) — identical for every caller.
+        The deterministic owed-work query, identical for every caller.
 
-        The unscoped-query guard (design 2026.07.07) lives HERE at the repository
-        layer so it is universal + un-bypassable by any repo-direct caller (the
-        arbiter, the in-process watchers) — not just the REST/MCP surface.
+        The unscoped-query guard lives here at the repository layer, so no repo-direct caller can bypass it.
+        That covers the arbiter and the in-process watchers, not just the REST and MCP surface.
 
         Requires:
             - each filter is either None (no constraint) or an exact-match value
-            - limit/offset are non-negative ints
+            - limit and offset are non-negative ints
 
         Ensures:
-            - EXCLUDES terminal (done/dropped) rows by DEFAULT (include_terminal=
-              False) UNLESS an explicit terminal `status` filter is set (you asked
-              for terminal, you get it) — the 89->2 payload collapse. Pass
-              include_terminal=True to include terminal rows on an un-status'd query.
-            - HARD-FAILS with UnscopedQueryError when the query is UNSCOPED (no
-              narrowing filter — see task_store_rules.is_unscoped) AND would return
-              more than UNSCOPED_QUERY_THRESHOLD non-terminal rows AND
-              unscoped_audit is False. The count is a cheap COUNT(*) (count_tasks),
-              never a row materialization. A SCOPED query skips the guard entirely
-              (zero overhead on the common path).
-            - owed_only=True (PARKED-STATUS 2026-07-19) selects the OWED set:
-              queued U in_progress U (parked AND NOT park-active). It REPLACES the
-              status filter rather than narrowing it — see _apply_owed_filter.
-            - returns items matching ALL provided filters (AND semantics)
-            - ordered by created_ts descending (newest first), then id for
-              a stable total order
-            - paginated via limit/offset
+            - excludes terminal (done/dropped) rows by default (include_terminal=False) unless an explicit terminal `status` filter is set (an 89->2 payload collapse is why the default exists). Pass include_terminal=True to include
+              terminal rows on a query with no status
+            - hard-fails with UnscopedQueryError when the query is unscoped (no narrowing filter,
+              see task_store_rules.is_unscoped) and would return more than UNSCOPED_QUERY_THRESHOLD
+              non-terminal rows and unscoped_audit is False. The count is a cheap `COUNT(*)`
+              (count_tasks), never a row materialization. A scoped query skips the guard
+            - owed_only=True selects the owed set: queued, in_progress, and parked rows that are not park-active.
+              With no status filter it replaces the status selection rather than narrowing it; with an explicit status
+              it narrows within that status (see _apply_owed_filter)
+            - returns items matching all provided filters (every filter must match)
+            - ordered by created_ts descending (newest first), then id for a stable total order
+            - paginated via limit and offset
 
         Raises:
-            - UnscopedQueryError when the unscoped-over-threshold-not-audit
-              conjunction holds (the router maps it to HTTP 400; the MCP verb to
-              an error-dict)
+            - UnscopedQueryError when the query is unscoped, over the threshold and not an audit
+              (the router maps it to HTTP 400; the MCP verb to an error dict)
 
         Returns:
             List of TaskItem instances (may be empty)
@@ -1263,32 +971,24 @@ class TaskRepository( BaseRepository[TaskItem] ):
                                accountable_manager, project, item_class, correlation_key,
                                id_prefix, updated_since=None, updated_until=None ):
         """
-        The ONE place the exact-match filters are applied — shared by query_tasks,
-        count_tasks and status_breakdown.
+        Apply the exact-match filters in one place, shared by every count and page query.
 
-        EXTRACTED FOR THE SAME REASON `_apply_owed_filter` WAS, and the reason had
-        already come true here. That helper's own docstring says the two methods
-        "carried byte-identical filter blocks maintained by copy-paste" — and this
-        block was carried in THREE copies at the time `id_prefix` was added. Adding a
-        fourth by hand would have put the new filter on the page seam, the COUNT(*)
-        seam and the breakdown seam as three independent edits, any one of which
-        could be forgotten: the page would then narrow while the count did not, and
-        `has_more` would be computed against a different population than the rows it
-        describes. One helper means the three CANNOT disagree about which rows a
-        filter admits.
+        One helper means the page, the count and the breakdown cannot disagree about which rows a filter admits.
+        Separate copies would let one forgotten edit narrow the page but not the count.
+        Then has_more would describe a different population than the rows.
 
         Requires:
             - query is a TaskItem query; every filter is None or an exact value
-            - id_prefix, when present, is COMPACT lowercase hex (hyphens stripped)
-              exactly as `classify_task_ref` returns — this method does NOT
-              re-validate caller text, because a LIKE built from arbitrary input
-              turns an id lookup into a search surface
+            - id_prefix, when present, is compact lowercase hex (hyphens stripped) exactly as
+              `classify_task_ref` returns it; this method does not re-validate caller text,
+              because a `LIKE` built from arbitrary input turns an id lookup into a search surface
 
         Ensures:
-            - returns the query with one AND-ed filter per non-None argument
-            - id_prefix matches on the id's canonical HYPHENATED rendering via the
-              shared `hyphenate_compact_prefix` rule, so a prefix spanning a hyphen
-              still matches
+            - returns the query with one filter per non-None argument, all combined with and
+            - id_prefix matches on the id's canonical hyphenated rendering via the shared
+              `hyphenate_compact_prefix` rule, so a prefix spanning a hyphen still matches
+            - updated_since and updated_until bound updated_ts inclusively; they filter on
+              updated_ts and not created_ts, so a row closed inside the window is included
             - never raises
         """
         if owner_persona is not None:       query = query.filter( TaskItem.owner_persona == owner_persona )
@@ -1328,53 +1028,28 @@ class TaskRepository( BaseRepository[TaskItem] ):
     @staticmethod
     def _apply_owed_filter( query, owed_only, hide_parked, status, include_terminal, now ):
         """
-        The ONE place status/terminal/park selection is decided — shared VERBATIM by
-        query_tasks and count_tasks (PARKED-STATUS 2026-07-19).
+        Decide status, terminal and park selection in one place, for page and count alike.
 
-        Extracted deliberately. These two methods carried byte-identical filter
-        blocks maintained by copy-paste; the COUNT(*) seam is precisely where the
-        Stop-hook oracle diverges from what the UI shows, and a divergence there is
-        invisible to every predicate-level test. One helper means the count and the
-        page CANNOT disagree about what "owed" means.
-
-        TWO selection policies, ONE clause. Both call owed_clause; they differ only
-        in whether the STATUS ADMISSION also happens. The distinction is real and
-        each reader genuinely needs its own:
-
-          hide_parked=True (task_query R1, arbiter R3) — SUPPRESSION ONLY. These
-            readers already select "all non-terminal", which ALREADY contains parked
-            rows, so suppressing park-active ones is sufficient and an admission
-            would WRONGLY narrow them (it would drop blocked/claimed/review off the
-            board entirely).
-          owed_only=True (Stop-hook R2) — SUPPRESSION **plus** STATUS ADMISSION.
-            R2 selects only queued/in_progress, which never contained parked rows at
-            all, so suppression alone can NEVER re-admit an expired one: parking
-            MOVED the status out of "queued", and subtraction cannot restore a row
-            that was never in the set. That asymmetry is the defect that made the
-            purely-additive shape unbuildable.
+        One helper means the count and the page cannot disagree about what owed means.
+        The hide_parked flag only suppresses park-active rows from a selection that already holds every non-terminal row.
+        The owed_only flag also admits expired-parked rows, because suppression alone cannot restore a row that parking moved out of queued.
 
         Requires:
             - query is a SQLAlchemy Query over TaskItem
-            - owed_only / hide_parked are bools; status is a status string or None
-            - now is a tz-aware datetime, or None to resolve it here (the IO
-              boundary owns the clock so the predicates never read one — Rachel's
-              boundary test needs `now` injectable without patching module state)
+            - owed_only and hide_parked are bools; status is a status string or None
+            - now is a tz-aware datetime, or None to resolve it here (the IO boundary owns the clock,
+              so the predicates never read one and tests can inject it without patching module state)
 
         Ensures:
-            - owed_only=True selects queued U in_progress U (parked AND NOT
-              park-active). Exact RESTORATION, never a widening: park is legal ONLY
-              from OWED_BASE_STATUSES, so every expired-parked row provably came
-              from that same set. An explicit `status` filter is applied upstream
-              and is honored — owed_only then narrows within it.
-            - hide_parked=True suppresses park-active rows WITHOUT touching the
-              status set. Expired-parked rows stay VISIBLE — they have rejoined, and
-              a row that pokes you while staying invisible on the board is the exact
-              incoherence this build exists to remove.
-            - an EXPLICIT status="parked" filter DISABLES suppression entirely: you
-              asked for parked, you get all of them. This is the audit surface.
-            - owed_only takes precedence over hide_parked (it is the stricter,
-              fail-CLOSED policy); neither flag preserves the pre-existing
-              terminal-exclusion default EXACTLY when both are False
+            - owed_only=True selects queued, in_progress, and parked rows that are not park-active.
+              This is an exact restoration, never a widening, because park is legal only from the owed base statuses, so every expired-parked row provably came from that set.
+              An explicit `status` filter is applied upstream and honored; owed_only then narrows within it
+            - hide_parked=True suppresses park-active rows without touching the status set.
+              Expired-parked rows stay visible, since they have rejoined owed work
+            - an explicit status="parked" filter disables hide_parked suppression: you asked for parked, you get all of them, so the audit surface returns every parked row.
+              owed_only still suppresses park-active rows even then
+            - owed_only takes precedence over hide_parked (the stricter, fail-closed policy);
+              with both flags False the terminal-exclusion default applies exactly
             - never mutates the caller's query in place
         """
         # HOISTED out of the owed/park branch (2026-09-02). It used to be defaulted
@@ -1469,43 +1144,21 @@ class TaskRepository( BaseRepository[TaskItem] ):
         now                 : Optional[datetime] = None,
     ) -> dict:
         """
-        The PER-STATUS breakdown of the SAME admitted set count_tasks totals — ONE
-        GROUP BY, never N queries (c191be39, 2026-07-20).
+        Count the admitted set per status in one `GROUP BY`, over count_tasks's set.
 
-        WHY THIS EXISTS: the Stop-hook store-count seam collapsed a multi-status owed
-        set into one integer and the IO shell re-inflated it as all-in_progress, so
-        every `queued` row reported to its owner as "in-progress" and the oracle's
-        `todo_unstarted` signal became unreachable dead code. The status has to
-        survive the seam, and the ONLY safe place to recover it is HERE — server-side,
-        over the already-admitted set.
-
-        ⛔ THIS IS NOT A LICENSE TO ENUMERATE STATUSES CLIENT-SIDE. The retired
-        per-status client loop (deleted 2026-07-19) is forbidden for two independent
-        reasons that this method does NOT reintroduce: it could not see a park-expiry
-        rejoin, and it DOUBLE-COUNTED expired-parked rows. A GROUP BY partitions one
-        admitted set — every row lands in exactly one bucket by construction, so the
-        double-count is structurally unreachable rather than merely avoided.
-
-        `parked` IS the expired-parked bucket, with no extra filtering: park-ACTIVE
-        rows are already excluded by owed_status_clause, so every parked row that
-        survives admission has provably rejoined. The key carries the RAW status
-        string the column holds — inventing a `parked_expired` key here would imply a
-        derivation that does not happen.
+        The Stop-hook count seam once collapsed a multi-status owed set into one integer, so every queued row looked in progress. The status has to survive the seam, and the safe place to recover it is here, server-side. A per-status client loop cannot see a park-expiry rejoin and double-counts expired-parked rows. Grouping puts each row in exactly one bucket. The `parked` bucket holds expired-parked rows, and keys are raw stored statuses.
 
         Requires:
             - each filter is either None (no constraint) or an exact-match value
-            - the filter set is applied IDENTICALLY to count_tasks (same helper)
+            - the filter set is applied identically to count_tasks (same helper)
 
         Ensures:
-            - returns { status: count } over ONLY the statuses actually present —
-              absent statuses are OMITTED, never zero-filled (a zero-filled key is a
-              claim about a status the query never saw)
-            - sum( result.values() ) == count_tasks( <same filters> ) — asserted as a
-              REAL parity gate between two independent computations, deliberately NOT
-              derived one from the other (an invariant true by construction cannot
-              fail, so it can never tell you anything)
+            - returns { status: count } over only the statuses actually present;
+              absent statuses are omitted, never zero-filled, since a zero key claims a status the query never saw
+            - sum( result.values() ) == count_tasks( <same filters> ). The two are computed independently and not derived from each other,
+              because a check derived from the other side could never fail
             - {} when nothing matches
-            - no ORDER BY / LIMIT / OFFSET — a breakdown is order- and page-independent
+            - no `ORDER BY`, `LIMIT` or `OFFSET`; a breakdown is order- and page-independent
         """
         query = self.session.query( TaskItem.status, func.count( TaskItem.id ) )
 
@@ -1540,29 +1193,20 @@ class TaskRepository( BaseRepository[TaskItem] ):
         now                 : Optional[datetime] = None,
     ) -> dict:
         """
-        The PER-PRIORITY breakdown of the SAME admitted set count_tasks totals —
-        ONE GROUP BY, never N queries (Rick, 2026-07-27).
+        Count the admitted set per priority in one `GROUP BY`, over count_tasks's set.
 
-        WHY: the Stop-hook poke reported HOW MANY rows a seat owed and never WHICH
-        ones mattered. Rick's standing instruction is to work in descending priority,
-        and the poke that fires on every Stop had no priority in it at all — twelve
-        owed rows read as one undifferentiated pile whether six were P1 or none were.
-
-        Mirrors `count_tasks_by_status` exactly, including the sum-parity property:
-        sum( result.values() ) == count_tasks( <same filters> ), two independent
-        computations rather than one derived from the other.
+        The Stop-hook poke reported how many rows a seat owed and never which ones mattered.
+        Work goes in descending priority, so the poke needs the priority mix.
+        This mirrors count_tasks_by_status, including the sum parity with count_tasks.
 
         Requires:
             - each filter is either None (no constraint) or an exact-match value
-            - the filter set is applied IDENTICALLY to count_tasks (same helpers)
+            - the filter set is applied identically to count_tasks (same helpers)
 
         Ensures:
-            - returns { priority: count } over ONLY the priorities actually present —
-              an absent priority is absent, never a 0 bucket, so a caller cannot
-              mistake "no P0 rows" for "P0 was not measured"
-            - keys are the RAW stored priority strings (P0..P5 since row
-              0107c19e widened VALID_PRIORITIES on 2026-09-07; VALID_PRIORITIES
-              is the authority and this line is not a second copy of it)
+            - returns { priority: count } over only the priorities actually present;
+              an absent priority is absent, never a 0 bucket, so "no P0 rows" cannot be mistaken for "P0 was not measured"
+            - keys are the raw stored priority strings; VALID_PRIORITIES is the authority on which exist
         """
         query = self.session.query( TaskItem.priority, func.count( TaskItem.id ) )
         query = self._apply_scalar_filters(
@@ -1592,43 +1236,20 @@ class TaskRepository( BaseRepository[TaskItem] ):
         now                 : Optional[datetime] = None,
     ) -> dict:
         """
-        The PER-PROJECT breakdown of the admitted set WITH THE PROJECT FILTER
-        DELIBERATELY ABSENT — the aperture a project-scoped query can report
-        (bug `d23147e8`, item 3).
+        Count the admitted set per project, with no project filter in the signature.
 
-        WHY THIS EXISTS: `project` is free text. `TaskCreateIn.project` validates
-        only `min_length=1, max_length=255`, and `_canon_project` passes any
-        non-aliased name through unchanged, so a typo mints a project silently and
-        permanently. A caller who queries `project="skills-distillation"` while a
-        row sits under `"google-skills-distillation"` gets a clean, plausible,
-        SMALLER number and no indication anything was excluded. That is how
-        `52c1c41e` survived a census Rick's drop order was executed against.
-
-        ⛔ THE PROJECT FILTER IS NOT A PARAMETER HERE, AND ITS ABSENCE IS THE POINT.
-        Accepting one would let a caller scope the aperture to the very value whose
-        blind spot it exists to reveal — the buckets it must report are precisely
-        the ones the caller's `project=` did NOT match. A signature that cannot
-        express the wrong question cannot be asked it.
-
-        Every OTHER filter is applied, through the SAME two helpers `count_tasks`
-        and `query_tasks` use. That is what makes the result comparable: the buckets
-        answer "under my other constraints, what project values exist?" — not
-        "what exists in the store," which would report projects the caller's own
-        owner/status filters had already ruled out and read as a bigger blind spot
-        than there is.
+        `project` is free text, so a typo mints a project silently and permanently. A caller querying one project name gets a clean, smaller number while rows sit under a variant spelling. So project is not a parameter here: the buckets must show the values the caller's own `project=` did not match. Every other filter goes through the same helpers as count_tasks and query_tasks, so the buckets stay comparable.
 
         Requires:
             - each filter is either None (no constraint) or an exact-match value
-            - the filter set is applied IDENTICALLY to count_tasks, minus project
+            - the filter set is applied identically to count_tasks, minus project
 
         Ensures:
-            - returns { project: count } over ONLY the projects actually present in
-              the admitted set — an absent project is absent, never a 0 bucket
-            - the key is the RAW stored string, NOT alias-canonicalized: reporting
-              a canonical form would hide the orphan spelling that IS the finding
+            - returns { project: count } over only the projects actually present in the admitted set;
+              an absent project is absent, never a 0 bucket
+            - the key is the raw stored string, not alias-canonicalized, because a canonical form would hide the orphan spelling
             - sum( result.values() ) == count_tasks( <same filters, project=None> )
-            - a row whose project is NULL lands under the None key rather than being
-              dropped — a row with no project is exactly the case a census must see
+            - a row whose project is NULL lands under the None key rather than being dropped, since a row with no project is the case a census must see
         """
         query = self.session.query( TaskItem.project, func.count( TaskItem.id ) )
         query = self._apply_scalar_filters(
@@ -1659,32 +1280,23 @@ class TaskRepository( BaseRepository[TaskItem] ):
         now                 : Optional[datetime] = None,
     ) -> int:
         """
-        True COUNT(*) over the SAME filter set as query_tasks — no row materialization.
+        Count rows over the same filter set as query_tasks, with `COUNT(*)` and no row loading.
 
-        The O2 token win (cascade review §G): the owed-count callers (the Stop-hook
-        store-count seam) need a CARDINALITY, not the rows. query_tasks caps at
-        limit<=500 and the endpoint reports len(page) as its "count" — a page-length
-        that SATURATES once the true total exceeds the page size, so a session with
-        >100 owed rows would read exactly 100. This computes the genuine total via a
-        SQL COUNT(*) with identical AND-semantics filters, independent of any page
-        bound (and without serializing a single row).
+        The owed-count callers, such as the Stop-hook store-count seam, need a cardinality, not the rows.
+        A page length saturates at the page size, so a seat with more than 100 owed rows would read exactly 100.
+        This computes the true total, independent of any page bound.
 
         Requires:
             - each filter is either None (no constraint) or an exact-match value
 
         Ensures:
-            - EXCLUDES terminal (done/dropped) rows by DEFAULT (include_terminal=
-              False) UNLESS an explicit terminal `status` filter is set — parity
-              with query_tasks so the guard's count matches the payload it guards.
-              The Stop-hook owed-count seam always passes a (non-terminal) `status`
-              filter, so this default is behavior-neutral for it.
-            - owed_only=True applies the IDENTICAL selection as query_tasks via the
-              shared _apply_owed_filter, so the COUNT can never disagree with the
-              page it counts (PARKED-STATUS 2026-07-19). This is the seam the
-              Stop-hook oracle reads and the one place a silent divergence between
-              "what pokes you" and "what you can see" would live.
-            - returns the integer count of items matching ALL provided filters
-            - no ORDER BY / LIMIT / OFFSET — a count is order- and page-independent
+            - excludes terminal (done/dropped) rows by default (include_terminal=False) unless an
+              explicit terminal `status` filter is set, in parity with query_tasks so the guard's count matches the payload it guards.
+              The Stop-hook seam always passes a non-terminal status, so the default is neutral for it
+            - owed_only=True applies the identical selection as query_tasks through the shared _apply_owed_filter,
+              so the count can never disagree with the page it counts
+            - returns the integer count of items matching all provided filters
+            - no `ORDER BY`, `LIMIT` or `OFFSET`; a count is order- and page-independent
         """
         query = self.session.query( func.count( TaskItem.id ) )
 
@@ -1702,11 +1314,10 @@ class TaskRepository( BaseRepository[TaskItem] ):
 
     def get_events( self, item_id: uuid.UUID ) -> List[TaskEvent]:
         """
-        Return the append-only audit trail for one item (design R3).
+        Return the append-only audit trail for one item.
 
         Requires:
-            - item_id: TaskItem UUID (existence checked by the caller — a
-              missing item simply has no events)
+            - item_id is a TaskItem UUID (existence is checked by the caller; a missing item simply has no events)
 
         Ensures:
             - returns events ordered by id ascending (insertion == audit order)
@@ -1738,22 +1349,22 @@ class TaskRepository( BaseRepository[TaskItem] ):
         offset     : int = 0,
     ) -> List[TaskEvent]:
         """
-        The cross-item event stream (design backlog — Rick's fleet-wide audit):
-        the append-only trail across ALL items, filtered + newest-first.
-        Distinct from get_events, which is one item's trail.
+        Return the cross-item event stream, filtered and newest first.
+
+        This is the fleet-wide audit: the append-only trail across all items. get_events is one item's trail.
 
         Requires:
             - each filter is None (no constraint) or an exact-match value;
-              since/until bound TaskEvent.ts inclusively
-            - limit/offset are non-negative ints
+              since and until bound TaskEvent.ts inclusively
+            - limit and offset are non-negative ints
 
         Ensures:
-            - returns events matching ALL provided filters (AND semantics)
-            - project filters via a join to the owning TaskItem — events carry
-              no project column of their own (one name, no denormalized copy)
-            - ordered by ts descending then id descending (newest first, stable
-              total order)
-            - paginated via limit/offset
+            - returns events matching all provided filters (every filter must match)
+            - project filters via a join to the owning TaskItem, since events carry no project column of their own
+            - to_status matches transitions ending in "->{to_status}"; the router's validation of that value is required,
+              because % and _ are `LIKE` wildcards that would silently widen the match
+            - ordered by ts descending then id descending (newest first, stable total order)
+            - paginated via limit and offset
 
         Returns:
             List of TaskEvent instances (may be empty)
@@ -1782,40 +1393,22 @@ class TaskRepository( BaseRepository[TaskItem] ):
 
     def count_admissions_since( self, actor: str, since: datetime ) -> int:
         """
-        How many rows this caller has admitted OUT of the holding area since `since`.
+        Count the rows this caller has admitted out of the holding area since `since`.
 
-        THE COUNT BEHIND "NO MANAGER BATCHES" (Rick, 2026-09-04, row 998c7529's successor).
-        His words: "A manager should never be able to fire a batch. They should only ever
-        request 1 ticket at a time."
-
-        🔴 WHY THIS IS A QUERY AND NOT A COUNTER. There is no batch endpoint to refuse —
-        measured 2026-09-04: 14 task routes, 10 paths, zero bulk doors, and no task model
-        carrying a list of row ids. The UI's batch approve is a CLIENT-SIDE LOOP
-        (notifications.js `_applyHoldingBatch`) firing N single-row transitions, each one
-        byte-indistinguishable from a legitimate single request. So the only thing that can
-        tell a batch from a ticket is HOW MANY arrived and how fast — which the append-only
-        event trail already records, in the same transaction that moved each row.
-        ⇒ No new state, no in-memory counter to lose on a bounce, and the evidence for any
-        refusal is a row somebody can go and read.
-
-        ⚠️ POLICY CONTROL, NOT A SECURITY BOUNDARY, and it inherits that honestly from the
-        actor it keys on. `actor` is caller-DECLARED, so a caller who varies it between
-        requests is not counted together. That is the same limit `refusal_for_admission`
-        already documents about the approver allowlist; this does not widen it and does not
-        pretend to close it.
+        This backs the rule that a manager requests one ticket at a time and never fires a batch. There is no batch endpoint to refuse. The UI's batch approve is a client-side loop of single-row transitions. Only how many arrived, and how fast, tells a batch from a ticket, and the event trail already records that. It is a policy control, not a security boundary: actor is caller-declared, so varying it splits the count.
 
         Requires:
             - actor is the caller-declared actor string; since is a tz-aware datetime
 
         Ensures:
-            - counts ONLY admissions out of the holding area — events whose transition
-              begins "not_approved->" — never every transition the caller made
+            - counts only admissions out of the holding area, meaning events whose transition
+              begins "not_approved->", never every transition the caller made
             - excludes the not_approved->not_approved no-op, which admits nothing
             - counts in SQL, so a long window costs one round trip rather than N rows
             - returns 0 for an actor with no such events
 
         Returns:
-            int — admissions by this actor at or after `since`
+            int, the admissions by this actor at or after `since`
         """
         return (
             self.session.query( func.count( TaskEvent.id ) )
@@ -1833,69 +1426,22 @@ class TaskRepository( BaseRepository[TaskItem] ):
         project : Optional[str]      = None,
     ) -> dict:
         """
-        Count creations and closures in a time window — SERVER-SIDE, in SQL.
+        Count creations and closures in a time window, in SQL.
 
-        Feeds the closed-vs-new ratio gate (María's design,
-        planning-is-prompting/src/rnd/2026.09.01-closed-vs-new-ratio-gate.md), which is
-        Rick's durable, mechanical replacement for the ticket moratorium he declared by
-        voice: "It's way too easy for you guys to add tickets to the list and way too hard
-        to get them removed."
-
-        🔴 WHY THIS EXISTS RATHER THAN A CALLER PAGING query_events. Two reasons, both
-        measured rather than argued:
-
-        1. `query_events` filters are EXACT-MATCH ("each filter is None or an exact-match
-           value" — its own contract, one method up). Neither half of this question is an
-           exact match. Closures arrive as several distinct strings, and an enumeration is
-           a list somebody has to keep current: add a status, and the closure count
-           silently undercounts with nothing failing.
-
-        2. `query_events` returns a PAGE, and a caller counting `len( rows )` gets a number
-           that is right until it quietly is not. The endpoint caps `limit` at 500. This
-           returns a COUNT from the database, so there is no page to cap.
-
-        SUFFIX AND PREFIX MATCHING, and the census behind each (whole board,
-        `lupin_db_dev`, 2026-09-01):
-
-            created  = transition LIKE '->%'      an EMPTY left side is the creation stamp
-                       ->queued   2292
-                       ->blocked     4
-            closed   = transition LIKE '%->done'
-                       in_progress->done  941   queued->done  659   blocked->done  210
-                       review->done        56   parked->done   24
-
-        ⚠️ A HARDCODED '->queued' WOULD UNDERCOUNT, and the rate depends entirely on the
-        window you measure. María measured 2 of 10 creations as `->blocked` in one 24-hour
-        window — 20%. Across the whole board it is 4 of 2296 — 0.17%. Both numbers are
-        correct about different populations; neither is the rate. That is exactly why this
-        matches a PREFIX instead of a status list.
-
-        🔴 `dropped` IS EXCLUDED FROM `closed`, BY RULING, AND IT IS THE LOAD-BEARING
-        CHOICE. If dropping counted, the gate is trivially defeated: drop three stale rows,
-        mint three new ones, ratio holds at 1.0 forever and the list never shrinks — the
-        exact asymmetry this was filed against, wearing a green light. The cost is that
-        legitimate board hygiene earns no credit, accepted deliberately: the alternative is
-        a gate satisfied by deleting the evidence.
-
-        ⚠️ THE TWO PATTERNS CAN OVERLAP IN PRINCIPLE. A `->done` stamp — a row created
-        directly into done — matches BOTH, and would count once in each. That is the right
-        answer (a row really was created, and it really was closed), not a bug to suppress.
-        Measured today: ZERO such events exist, and no `->dropped` either. Pinned by
-        `test_a_row_born_done_would_count_as_both` so the assumption fails loudly rather
-        than drifting.
+        This feeds the closed-vs-new ratio gate. query_events cannot answer it. Its filters are exact-match, closures arrive as several strings, and a page length caps at the endpoint limit. Created matches the prefix pattern "->%" (an empty left side). Closed matches "%->done". Patterns replace status lists, so a new status cannot undercount silently. The dropped status is excluded from closed. Otherwise dropping stale rows and minting new ones would hold the ratio forever. A row created directly into done matches both patterns and counts once in each (pinned by test_a_row_born_done_would_count_as_both).
 
         Requires:
             - since is a datetime bounding TaskEvent.ts inclusively (>=)
-            - until is None (meaning "up to now") or a datetime bounding it inclusively
-            - project is None (fleet-wide, which is Rick's ruling) or an exact project name
+            - until is None (meaning up to now) or a datetime bounding it inclusively
+            - project is None (fleet-wide) or an exact project name
 
         Ensures:
             - returns { "created": int, "closed": int, "window_start": datetime,
                         "window_end": datetime | None, "project": str | None }
-            - counts come from SQL COUNT, never from len() of a page, so no cap applies
-            - the caller computes the ratio — division by zero is a POLICY question
-              (`closed == 0` with creations is a DENY, `0/0` is an ALLOW showing "—"),
-              and policy does not belong in a repository
+            - counts come from a SQL `COUNT`, never from len() of a page, so no cap applies
+            - items whose correlation_key starts with FLOW_EXCLUDED_KEY_PREFIX are excluded from both counts
+            - the caller computes the ratio, because division by zero is a policy question and policy does not belong in a repository:
+              closed == 0 with creations is a deny, and 0/0 is an allow
 
         Returns:
             dict as described above; both counts are 0 on an empty window, never None
@@ -1941,19 +1487,14 @@ class TaskRepository( BaseRepository[TaskItem] ):
 
         Requires:
             - item_id references an item present in this session
-            - actor/transition/authority are non-empty strings
-            - ts is an explicit event timestamp, or None for the column default
-              (func.now()). ONLY the park path passes it: the park event must
-              carry the SAME instant as park_reason_captured_at, because
-              rejecting design option 4 left us with two records of one fact and
-              AC10 requires them to AGREE. Passing the value rather than letting
-              both default to now() makes that agreement structural — it holds
-              on any backend, instead of riding PostgreSQL's transaction-stable
-              now(), which is the only reason the defaults would have matched.
+            - actor, transition and authority are non-empty strings
+            - ts is an explicit event timestamp, or None for the column default (func.now()).
+              Only the park path passes it, because the park event must carry the same instant as
+              park_reason_captured_at on any backend
 
         Ensures:
-            - TaskEvent added + flushed (id populated); commit NOT called
-            - the event is parked on the session so that its COMMIT (never a rollback)
+            - TaskEvent added and flushed (id populated); commit is not called
+            - the event is parked on the session so that its commit (never a rollback)
               emits one task_store_changed (task_store_change_notifier)
             - event.ts == ts when supplied, else the func.now() default
 

@@ -1,8 +1,8 @@
 """
-Approval-settings repository (row 80513825) — persistence only.
+Approval-settings repository — persistence only.
 
 Validation of keys and values lives in `cosa.rest.task_approval_settings`, which calls this
-AFTER validating. Every method runs inside the caller's `get_db()` transaction.
+after validating. Every method runs inside the caller's `get_db()` transaction.
 """
 
 from typing import Optional
@@ -42,7 +42,7 @@ class ApprovalSettingRepository( BaseRepository[ApprovalSetting] ):
         Write every key in `updates`, replacing any existing value.
 
         Requires:
-            - updates values are JSON-serialisable and ALREADY validated
+            - updates values are JSON-serialisable and already validated
 
         Ensures:
             - keys not named in `updates` are untouched

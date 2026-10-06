@@ -216,7 +216,7 @@ class RefreshTokenRepository(BaseRepository[RefreshToken]):
 
     def update_last_used( self, jti: uuid.UUID, ip_address: Optional[str] = None ) -> Optional[RefreshToken]:
         """
-        Update last used timestamp and optionally IP address for token.
+        Set the last used timestamp, and optionally the IP address, of a refresh token.
 
         Requires:
             - jti: JWT ID
