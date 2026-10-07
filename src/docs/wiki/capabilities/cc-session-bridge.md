@@ -22,7 +22,6 @@ One JSON file per running Claude Code process, named `cc-<pid>.json`, carries th
 - Use `atomic_write_json( path, data )` for any bridge write. It writes a temp file in the target's directory, sets mode 0660, then `os.replace`s it over the target. A reader sees a whole old or whole new document.
 - It returns `False` on `OSError`, `TypeError` or `ValueError`, prints the path and error to stderr, removes the temp file, and never raises. Check the return: a hook that ignores it fails silently apart from that stderr line.
 - The setters (`set_voice_persona`, `set_user_id`, `set_owner_user_id` and the like) read the file, change one field and write through it. They return `False` when no live bridge matches the id.
-- Two topic writers bypass `atomic_write_json`: the MCP `set_session_topic` and the notification listener's topic update both rewrite the file with a plain `open( "w" )` (bug row 767d7ad9).
 
 ## Canonical persona key
 - `canonical_persona_key( name )` is the one key for matching `owner_persona` rows. It delegates to `lupin_mcp.persona_normalization`.
