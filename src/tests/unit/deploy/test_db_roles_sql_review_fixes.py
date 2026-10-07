@@ -145,3 +145,8 @@ def test_every_role_is_still_created_without_createdb_so_only_the_alter_grants_i
 @pytest.mark.parametrize( "role", [ "lupin_app", "lupin_host" ] )
 def test_the_app_and_host_roles_are_never_given_createdb(role):
     assert not [ line for line in _code_lines() if role in line and _grants_createdb( line ) ]
+
+
+def test_the_createdb_alter_comes_after_the_statement_that_creates_the_role():
+    lines = _code_lines()
+    assert lines.index( "ALTER ROLE lupin_test CREATEDB;" ) > next( i for i, line in enumerate( lines ) if "CREATE ROLE" in line )
