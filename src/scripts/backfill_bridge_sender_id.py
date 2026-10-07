@@ -18,29 +18,7 @@ Why this exists:
     Until then the server serves null and the phone skips the seat.
     So a live seat vanishes from the focus rail instead of showing up cold.
 
-Clause 3 keeps this script from generating bugs.
-    Backfill a bridge only when both hold:
-    (i)  `os.path.isdir( cwd )`: the recorded directory still exists.
-    (ii) `resolve_project_for_path( cwd )` returns a name rather than None: a real `.git`
-         ancestor was found by walking up from it. That function refuses, so the check and
-         the name are one call.
-    `detect_project_for_path` falls back to the basename when it finds no `.git` ancestor,
-    and it never raises. That fallback is documented policy for `os.getcwd()`.
-    Measured results.
-        detect_project_for_path( "/mnt/.../lupin/.claude/worktrees/seat-DELETED" ) -> "lupin".
-        detect_project_for_path( "/no/such/place/at/all/seat-x" )                  -> "seat-x".
-        detect_project_for_path( "/tmp" )                                          -> "tmp".
-    That basename fallback is the mechanism of the original defect.
-    It is how the container produced `@seat-cc-author-<name>`.
-    A backfill trusting the return value would compute `claude.code@seat-x.deepily.ai#<hash>`
-    for any bridge whose cwd is gone, and write it into the bridge.
-    There it becomes durable and authoritative, because the server may not question it.
-    Today the defect is contained by being recomputed on every read.
-    Backfilling without clause 3 would make it permanent.
-    When either half fails, write nothing. Absent is the correct answer: the server serves
-    null and the phone skips the seat (`focus_chat_bloc.dart:444`, pinned by
-    `focus_live_seat_roster_test.dart:81`). A skipped seat is a visible gap.
-    A wrong identity is an invisible lie.
+Clause 3, described in `classify()`, keeps this script from generating bugs.
 
 Never a sentinel, never an overwrite:
     - Inferring the project from the path segment before `/.claude/worktrees/` is banned,
@@ -50,11 +28,6 @@ Never a sentinel, never an overwrite:
     - The string "unknown" is never written. It has no "#", so `sessionHashOf` returns null
       on the phone, the hash-merge never fires, and every unidentified seat would collapse
       onto one bogus rail row.
-
-Read the skipped counts, not the written count:
-    `skipped_cwd_missing` and `skipped_no_git_ancestor` count the bridges this script
-    refused to guess for. A run that writes many and skips none on a box with deleted
-    worktrees would mean clause 3 is not firing.
 
 Usage:
     python src/scripts/backfill_bridge_sender_id.py              # report only
@@ -96,6 +69,31 @@ def classify( bridge: dict ) -> tuple[ str, str | None ]:
         - A sender_id is returned only for "eligible", and only after both halves of
           clause 3 pass
         - Never raises
+
+    Notes:
+        Clause 3 keeps this script from generating bugs.
+            Backfill a bridge only when both hold:
+            (i)  `os.path.isdir( cwd )`: the recorded directory still exists.
+            (ii) `resolve_project_for_path( cwd )` returns a name rather than None: a real `.git`
+                 ancestor was found by walking up from it. That function refuses, so the check and
+                 the name are one call.
+            `detect_project_for_path` falls back to the basename when it finds no `.git` ancestor,
+            and it never raises. That fallback is documented policy for `os.getcwd()`.
+            Measured results.
+                detect_project_for_path( "/mnt/.../lupin/.claude/worktrees/seat-DELETED" ) -> "lupin".
+                detect_project_for_path( "/no/such/place/at/all/seat-x" )                  -> "seat-x".
+                detect_project_for_path( "/tmp" )                                          -> "tmp".
+            That basename fallback is the mechanism of the original defect.
+            It is how the container produced `@seat-cc-author-<name>`.
+            A backfill trusting the return value would compute `claude.code@seat-x.deepily.ai#<hash>`
+            for any bridge whose cwd is gone, and write it into the bridge.
+            There it becomes durable and authoritative, because the server may not question it.
+            Today the defect is contained by being recomputed on every read.
+            Backfilling without clause 3 would make it permanent.
+            When either half fails, write nothing. Absent is the correct answer: the server serves
+            null and the phone skips the seat (`focus_chat_bloc.dart:444`, pinned by
+            `focus_live_seat_roster_test.dart:81`). A skipped seat is a visible gap.
+            A wrong identity is an invisible lie.
     """
     existing = bridge.get( "sender_id" )
     if isinstance( existing, str ) and existing:
@@ -137,6 +135,15 @@ def classify( bridge: dict ) -> tuple[ str, str | None ]:
 
 
 def main() -> int:
+    """
+    Entry point: classify every bridge and report the counts.
+
+    Notes:
+        Read the skipped counts, not the written count:
+            `skipped_cwd_missing` and `skipped_no_git_ancestor` count the bridges this script
+            refused to guess for. A run that writes many and skips none on a box with deleted
+            worktrees would mean clause 3 is not firing.
+    """
     parser = argparse.ArgumentParser( description="Backfill sender_id into pre-Option-B bridges." )
     parser.add_argument( "--write",   action="store_true", help="actually modify bridges (default: report only)" )
     # An explicit no-op. Report-only is already the default, but `--dry-run` is what

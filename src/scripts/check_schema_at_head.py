@@ -13,19 +13,6 @@ itself rather than a corner feature. Preflight made no assertion about the schem
 A box could pass every assertion while running two migrations behind.
 The green was honest about only what it asserted.
 
-Why it uses the app's own resolvers and not a hand-rolled equivalent: `cosa.rest.db.auto_migrate`
-already exposes what is needed. It is the same code path `main.py` uses to migrate at startup.
-The check and the fix therefore agree. A second implementation would be a second authority.
-It would be free to drift from the thing it describes.
-
-  - `build_alembic_config()`  — an alembic Config built programmatically.
-      Warning: there is no `alembic.ini` in the container. The image bind-mounts only `./src`, and
-      `alembic.ini` lives at the repo root. Anything that reaches for the ini file works on the
-      dev box and fails on the VM.
-  - `resolve_database_url()`  — the URL.
-      Warning: `cfg.get_main_option( "sqlalchemy.url" )` returns None here and dies inside
-      `create_engine`. Use the resolver.
-
 Warning: it must run inside the container. That is where the venv, the app package, and DB
 reachability live. The rest of preflight's layer A runs on the host as the SSH user.
 That user can reach none of the three.
@@ -44,16 +31,6 @@ A migration that changes only an index, a constraint, or a column type moves the
 without changing the column set. Parity would report clean.
 Conversely a hand-edited DB can match head and still have drifted columns. Run both; they are cheap.
 `check_schema_parity.py` is not wired into preflight either, the same declared-and-unasserted shape.
-
-Three outcomes, not two:
-  0  `AT_HEAD`          schema matches the tree's head revision.
-  1  `DRIFT`            they disagree — this is the defect.
-  2  `CANNOT_DETERMINE` the question could not be answered.
-
-"The schema is behind" and "I could not read the schema" have different remedies: migrate versus
-fix connectivity. Collapsing them would reproduce, inside this check, the defect class the
-surrounding work exists to remove. The caller must treat 2 as blocking.
-The question is whether not-knowing makes the action unsafe, and here it does.
 
 Usage (from the host):
     docker exec <container> python /var/lupin/src/scripts/check_schema_at_head.py
@@ -109,6 +86,20 @@ def read_revisions():
 
     Returns:
         tuple( head_in_tree|None, current_in_db|None, reason|None )
+
+    Notes:
+        Why it uses the app's own resolvers and not a hand-rolled equivalent: `cosa.rest.db.auto_migrate`
+        already exposes what is needed. It is the same code path `main.py` uses to migrate at startup.
+        The check and the fix therefore agree. A second implementation would be a second authority.
+        It would be free to drift from the thing it describes.
+
+          - `build_alembic_config()`  — an alembic Config built programmatically.
+              Warning: there is no `alembic.ini` in the container. The image bind-mounts only `./src`, and
+              `alembic.ini` lives at the repo root. Anything that reaches for the ini file works on the
+              dev box and fails on the VM.
+          - `resolve_database_url()`  — the URL.
+              Warning: `cfg.get_main_option( "sqlalchemy.url" )` returns None here and dies inside
+              `create_engine`. Use the resolver.
     """
     try:
         from alembic.script import ScriptDirectory
@@ -155,6 +146,17 @@ def classify( head, current, reason ):
           not at head, and the remedy is the same migrate
         - equality -> `AT_HEAD`; inequality -> `DRIFT`
         - never raises
+
+    Notes:
+        Three outcomes, not two:
+          0  `AT_HEAD`          schema matches the tree's head revision.
+          1  `DRIFT`            they disagree — this is the defect.
+          2  `CANNOT_DETERMINE` the question could not be answered.
+
+        "The schema is behind" and "I could not read the schema" have different remedies: migrate versus
+        fix connectivity. Collapsing them would reproduce, inside this check, the defect class the
+        surrounding work exists to remove. The caller must treat 2 as blocking.
+        The question is whether not-knowing makes the action unsafe, and here it does.
     """
     if reason is not None:
         return ( EXIT_CANNOT_DETERMINE, "CANNOT_DETERMINE", reason )

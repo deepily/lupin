@@ -16,23 +16,7 @@ DELETE-per-table transaction, counts after, JSON receipts.
 It uses `DELETE`, not `TRUNCATE`,
 because truncate takes `ACCESS EXCLUSIVE` and blocks every live reader.
 
-Verification has two halves. The --verify-empty flag re-counts every in-scope table with a
-fresh psql call after the delete transaction has returned. It never uses the transaction's
-own 'after' row, which is pre-commit, and it fails on any non-zero count.
-The --verify-learn-back flag asks one question through /api/v2/ask and proves the cache
-still learns.
-A snapshot row appeared, it passes 9a (non-blank user_id, a routed command).
-A second ask re-runs rather than replays (9b's guard holds on the fresh, unconfirmed row).
-
-The learn-back check waits for that first ask to actually finish. On the agent path
-/api/v2/ask answers `status: "waiting"` with a job_id, and the snapshot is written when the
-queued job completes. Reading the answer off the immediate HTTP body would report failures
-against a working system. It polls the done/dead queues for the job, bounded by
---learn-back-timeout.
-It fails loudly and by name on a timeout: "the answer never arrived"
-is reported as a timeout, never as "the system is broken". Only once the fresh row is read
-back does it fire the second ask. With no row established, 9b is reported untested rather
-than passed.
+Verification has two halves, `verify_empty()` and `verify_learn_back()`.
 
 Dry-run is the default and touches nothing live: counts only, no pg_dump, no `DELETE`, no HTTP.
 The learn-back logs in and asks a question that writes a snapshot, so it runs only under
@@ -304,6 +288,15 @@ def verify_empty( after ):
 
     Ensures:
         - returns the list of tables that are not empty (empty list == pass)
+
+    Notes:
+        Verification has two halves. The --verify-empty flag re-counts every in-scope table with a
+        fresh psql call after the delete transaction has returned. It never uses the transaction's
+        own 'after' row, which is pre-commit, and it fails on any non-zero count.
+        The --verify-learn-back flag asks one question through /api/v2/ask and proves the cache
+        still learns.
+        A snapshot row appeared, it passes 9a (non-blank user_id, a routed command).
+        A second ask re-runs rather than replays (9b's guard holds on the fresh, unconfirmed row).
     """
     return [ t for t, n in after.items() if n != 0 ]
 
@@ -464,6 +457,16 @@ def settle_first_ask( first, db, base_url, token, before_ids, http, runner=subpr
           · budget expired         → a failure that says it timed out, not that it broke
           · landed in the dead queue → a failure that names the job's own error
           · finished with no fresh row → the cache did not learn
+
+        The learn-back check waits for that first ask to actually finish. On the agent path
+        /api/v2/ask answers `status: "waiting"` with a job_id, and the snapshot is written when the
+        queued job completes. Reading the answer off the immediate HTTP body would report failures
+        against a working system. It polls the done/dead queues for the job, bounded by
+        --learn-back-timeout.
+        It fails loudly and by name on a timeout: "the answer never arrived"
+        is reported as a timeout, never as "the system is broken". Only once the fresh row is read
+        back does it fire the second ask. With no row established, 9b is reported untested rather
+        than passed.
     """
     status   = first.get( "status" )
     failures = [ ]

@@ -11,32 +11,11 @@ masks it. The only rebuild is a human typing `npm run build`.
 `dist/` sits in the same directory but only moves on a rebuild.
 Same mount, two freshness rules, no signal telling them apart. This script is that signal.
 
-What it checks: it rebuilds each bundle into a temporary directory using the production flags read
-out of the build script itself. It compares the output's short sha256 to the hash the shipped
-`manifest.json` records. Nothing is written into the repository.
-A dry-run rebuild plus hash beat two other instruments measured on the same tree.
-An mtime comparison and a sourcemap `sourcesContent` comparison were both wrong.
-Both flagged `render/templates/taskListTable.ts`, whose only change was an 18-line comment block
-that minification strips. The source had drifted and the delivery had not. Only the second is staleness.
-
 What the silence means: drift that does not change the delivered bytes is reported `FRESH`.
 A barrel such as `render/index.ts` can join the import graph and tree-shake to nothing, so the hash does not move.
 A check keyed on the input set cries wolf there. The precise claim is narrower.
 One comparison catches every drift that changes the delivered bytes (content or population).
 It is silent on drift that does not.
-
-What it cannot see, and says so in its own output: it measures the tree it is run in.
-Work committed on another branch and not merged is invisible to it, whatever the instrument.
-An example is `render/epicBoardCollapse.ts` and `render/holdingAreaModel.ts` on a worktree branch.
-A green says nothing about such work and must never be read as if it did.
-Every report line therefore names the sha it measured and states the limit.
-
-Root resolution: the root comes from `__file__`, not `LUPIN_ROOT`. This script measures the tree it lives in.
-`LUPIN_ROOT` is inherited from the shell and keeps naming the main checkout from inside a worktree.
-That is how the pyc verifier blessed the wrong tree. `purge-pycache.sh` and
-`migrate-pyc-to-checked-hash.sh` derive their root from `BASH_SOURCE` for the same reason.
-A script shipped inside the tree it inspects can only be disagreed with by the environment, never informed by it.
-To aim this script, run the copy that lives in the tree you mean.
 
 Exit codes (four states, three codes):
     0  every judged bundle is `FRESH`: a rebuild would produce byte-identical output.
@@ -45,22 +24,6 @@ Exit codes (four states, three codes):
     2  `REFUSED`: could not answer (no esbuild, unparseable build script, a build that failed,
        or a bundle never built that something references). An unanswered question is never a clean 0.
 
-Why `NOT-BUILT` is a fourth state: `dist/diagnostic/` has never been built in this checkout.
-Calling that `REFUSED` would make exit 0 unreachable in the main checkout over a bundle nobody ships.
-An alarm that can never be cleared gets routed around.
-Measured over all tracked files, `dist/diagnostic` appears only in its own build driver's comments,
-`tsconfig.diagnostic.json`'s outDir and one R&D doc. No page loads it.
-The live page `static/html/test/diagnostic-websocket-test.html` loads the raw
-`/static/js/websocket-diagnostic.js` (200). `/static/dist/diagnostic/websocket-diagnostic.js`
-answers 404 and nothing asks for it. It is a dormant TypeScript port, same shape as `dist/nav`.
-So the distinction is drawn on consumers, not on the absence itself:
-
-    never built, nothing references its output   ->  `NOT-BUILT`   informational, exit 0 survives
-    never built, something does reference it     ->  `REFUSED`     a live 404, be loud
-
-A reference in the driver's own comments, a tsconfig `outDir`, or prose does not count.
-Prose means `src/rnd`, `history`, `src/docs` or a top-level `.md`. Those describe the output, they do not load it.
-A hit is not a use, applied to the tool's own population.
 """
 
 import argparse
@@ -235,6 +198,23 @@ def consumers_of( root, outdir ):
         - Measured over all tracked files: `dist/diagnostic` is named by its own driver, a tsconfig
           outDir and one R&D doc, and loaded by nothing. The page that might have loaded it fetches
           the raw pre-port .js instead.
+
+        Why `NOT-BUILT` is a fourth state: `dist/diagnostic/` has never been built in this checkout.
+        Calling that `REFUSED` would make exit 0 unreachable in the main checkout over a bundle nobody ships.
+        An alarm that can never be cleared gets routed around.
+        Measured over all tracked files, `dist/diagnostic` appears only in its own build driver's comments,
+        `tsconfig.diagnostic.json`'s outDir and one R&D doc. No page loads it.
+        The live page `static/html/test/diagnostic-websocket-test.html` loads the raw
+        `/static/js/websocket-diagnostic.js` (200). `/static/dist/diagnostic/websocket-diagnostic.js`
+        answers 404 and nothing asks for it. It is a dormant TypeScript port, same shape as `dist/nav`.
+        So the distinction is drawn on consumers, not on the absence itself:
+
+            never built, nothing references its output   ->  `NOT-BUILT`   informational, exit 0 survives
+            never built, something does reference it     ->  `REFUSED`     a live 404, be loud
+
+        A reference in the driver's own comments, a tsconfig `outDir`, or prose does not count.
+        Prose means `src/rnd`, `history`, `src/docs` or a top-level `.md`. Those describe the output, they do not load it.
+        A hit is not a use, applied to the tool's own population.
     """
     keys = [ outdir ]
     if outdir.startswith( STATIC_ROOT + "/" ):
@@ -297,6 +277,14 @@ def check_bundle( root, script_path, esbuild ):
     Notes:
         - The output basename is preserved because esbuild embeds a `//# sourceMappingURL=<basename>.map`
           comment, so a different filename changes the bytes and would manufacture a false `STALE`.
+
+        What it checks: it rebuilds each bundle into a temporary directory using the production flags read
+        out of the build script itself. It compares the output's short sha256 to the hash the shipped
+        `manifest.json` records. Nothing is written into the repository.
+        A dry-run rebuild plus hash beat two other instruments measured on the same tree.
+        An mtime comparison and a sourcemap `sourcesContent` comparison were both wrong.
+        Both flagged `render/templates/taskListTable.ts`, whose only change was an 18-line comment block
+        that minification strips. The source had drifted and the delivery had not. Only the second is staleness.
     """
     name   = script_path.stem.replace( "build-", "" )
     result = { "name": name, "script": script_path.name, "status": REFUSED, "reason": None,
@@ -420,6 +408,12 @@ def format_report( root, results, sha ):
     Notes:
         - The scope sentence is not optional decoration. A green here says nothing about unmerged
           or unwired work, and a reader who does not know that will over-read it.
+
+        What it cannot see, and says so in its own output: it measures the tree it is run in.
+        Work committed on another branch and not merged is invisible to it, whatever the instrument.
+        An example is `render/epicBoardCollapse.ts` and `render/holdingAreaModel.ts` on a worktree branch.
+        A green says nothing about such work and must never be read as if it did.
+        Every report line therefore names the sha it measured and states the limit.
     """
     lines = [
         f"check_bundle_freshness: tree {root}",
@@ -473,6 +467,14 @@ def main( argv=None ):
         - a NOT_BUILT bundle does not block EXIT_FRESH, but EXIT_FRESH still requires that at
           least one bundle was actually judged — an all-NOT_BUILT tree has measured nothing
           and must not report a clean zero
+
+    Notes:
+        Root resolution: the root comes from `__file__`, not `LUPIN_ROOT`. This script measures the tree it lives in.
+        `LUPIN_ROOT` is inherited from the shell and keeps naming the main checkout from inside a worktree.
+        That is how the pyc verifier blessed the wrong tree. `purge-pycache.sh` and
+        `migrate-pyc-to-checked-hash.sh` derive their root from `BASH_SOURCE` for the same reason.
+        A script shipped inside the tree it inspects can only be disagreed with by the environment, never informed by it.
+        To aim this script, run the copy that lives in the tree you mean.
     """
     parser = argparse.ArgumentParser(
         description="Would a rebuild change the delivered bundle bytes? ($LUPIN_ROOT is NOT consulted.)"
