@@ -16,6 +16,7 @@ Venue: :7999-eligible. No SSH, no network, no real docker.
 import json
 import os
 import re
+import shutil
 import stat
 import subprocess
 
@@ -482,3 +483,96 @@ def test_compose_safe_directory_env_covers_exactly_the_external_binds():
     assert n == len( binds )
     assert [ env[ f"GIT_CONFIG_KEY_{i}" ] for i in range( n ) ] == [ "safe.directory" ] * n
     assert sorted( env[ f"GIT_CONFIG_VALUE_{i}" ] for i in range( n ) ) == binds
+
+
+# ── B7: the two git hooks are links to the scripts the checkout ships ──────────────────────────
+
+HOOKS = ( ( "pre-commit", "pre-commit-chain.sh" ), ( "pre-push", "pre-push-chain.sh" ) )
+
+
+def _hook_status( hooks_dir, hook, script ):
+    r = _lib( f"pfv_git_hook_status '{hooks_dir}' '{hook}' '{script}'" )
+    return r.returncode, r.stdout.strip()
+
+
+def test_hook_status_matches_a_relative_and_an_absolute_link( tmp_path ):
+    script = tmp_path / "src" / "scripts" / "pre-push-chain.sh"; script.parent.mkdir( parents=True ); script.write_text( "#!/bin/sh\n" )
+    hooks  = tmp_path / ".git" / "hooks"; hooks.mkdir( parents=True )
+    os.symlink( "../../src/scripts/pre-push-chain.sh", hooks / "pre-push" )
+    os.symlink( str( script ), hooks / "pre-commit" )
+
+    assert _hook_status( hooks, "pre-push", script )   == ( 0, "MATCH" )
+    assert _hook_status( hooks, "pre-commit", script ) == ( 0, "MATCH" )
+
+
+def test_hook_status_names_each_way_a_hook_can_be_wrong( tmp_path ):
+    script = tmp_path / "pre-push-chain.sh"; script.write_text( "#!/bin/sh\n" )
+    other  = tmp_path / "other.sh"; other.write_text( "#!/bin/sh\n" )
+    hooks  = tmp_path / "hooks"; hooks.mkdir()
+
+    assert _hook_status( hooks, "pre-push", tmp_path / "gone.sh" ) == ( 2, "NO_SCRIPT" )
+    assert _hook_status( hooks, "pre-push", script )               == ( 3, "ABSENT" )
+
+    ( hooks / "pre-push" ).write_text( script.read_text() )
+    assert _hook_status( hooks, "pre-push", script )               == ( 4, "NOT_LINK" )
+
+    ( hooks / "pre-push" ).unlink(); os.symlink( str( other ), hooks / "pre-push" )
+    assert _hook_status( hooks, "pre-push", script )               == ( 5, f"WRONG_TARGET\t{other}" )
+
+    ( hooks / "pre-push" ).unlink(); os.symlink( str( tmp_path / "dangling.sh" ), hooks / "pre-push" )
+    assert _hook_status( hooks, "pre-push", script )               == ( 5, f"WRONG_TARGET\t{tmp_path / 'dangling.sh'}" )
+
+
+@pytest.fixture
+def hooked( venue, tmp_path ):
+    """The good venue with a hooks folder of its own, both hooks linked to the real scripts."""
+    hooks = tmp_path / "hooks"; hooks.mkdir()
+    for hook, script in HOOKS: os.symlink( f"{ROOT}/src/scripts/{script}", hooks / hook )
+    venue[ "env" ][ "PREFLIGHT_VM_GIT_HOOKS_DIR" ] = str( hooks )
+    venue[ "hooks" ] = hooks
+    return venue
+
+
+def test_B7_both_hooks_linked_pass( hooked ):
+    out = _run( hooked )
+    for hook, script in HOOKS:
+        assert "[OK]" in _line( out, f"git hook {hook} links to src/scripts/{script}" )
+
+
+@pytest.mark.parametrize( "hook,script", HOOKS )
+def test_B7_a_missing_hook_warns_by_name_with_the_link_command( hooked, hook, script ):
+    ( hooked[ "hooks" ] / hook ).unlink()
+    out = _run( hooked )
+
+    assert "[WARN]" in _line( out, f"git hook {hook} is not installed" )
+    assert f"ln -sf ../../src/scripts/{script} .git/hooks/{hook}" in out
+    kept = [ h for h, _ in HOOKS if h != hook ][ 0 ]
+    assert "[OK]" in _line( out, f"git hook {kept} links to" )
+
+
+def test_B7_a_hook_that_links_elsewhere_warns_and_names_where( hooked, tmp_path ):
+    other = tmp_path / "other.sh"; other.write_text( "#!/bin/sh\n" )
+    ( hooked[ "hooks" ] / "pre-push" ).unlink(); os.symlink( str( other ), hooked[ "hooks" ] / "pre-push" )
+    out = _run( hooked )
+
+    assert "[WARN]" in _line( out, f"git hook pre-push links to {other}, not to src/scripts/pre-push-chain.sh" )
+
+
+def test_B7_a_copied_hook_file_warns_that_it_is_not_a_link( hooked ):
+    ( hooked[ "hooks" ] / "pre-commit" ).unlink(); ( hooked[ "hooks" ] / "pre-commit" ).write_text( "#!/bin/sh\n" )
+    out = _run( hooked )
+
+    assert "[WARN]" in _line( out, "git hook pre-commit in" )
+    assert "is a file, not a link" in _line( out, "git hook pre-commit in" )
+
+
+def test_B7_a_checkout_without_the_script_says_it_predates_the_hook( hooked, tmp_path ):
+    # An older checkout: a tree that has the preflight and its library and no hook scripts.
+    old = tmp_path / "old"
+    ( old / "src" / "scripts" / "lib" ).mkdir( parents=True )
+    for rel in ( "src/scripts/preflight-vm.sh", "src/scripts/lib/preflight-vm-lib.sh" ): shutil.copy( f"{ROOT}/{rel}", old / rel )
+    hooked[ "env" ][ "LUPIN_ROOT" ] = str( old )
+    r = subprocess.run( [ "bash", str( old / "src/scripts/preflight-vm.sh" ), "--phase", "pre" ], env=hooked[ "env" ], capture_output=True, text=True, timeout=120 )
+
+    assert "[WARN]" in _line( r.stdout, "this checkout has no src/scripts/pre-push-chain.sh" )
+    assert "it predates the pre-push hook" in r.stdout

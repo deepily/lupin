@@ -112,6 +112,35 @@ to that reader and not to this check, so this check can refuse a file the reader
 A session picks the new entry
 up when it next starts; a session already running keeps the entry it started with.
 
+## The two git hooks
+
+| check | what must exist | level | symptom when missing |
+|---|---|---|---|
+| **B7** | `.git/hooks/pre-commit` links to `src/scripts/pre-commit-chain.sh`, and `.git/hooks/pre-push` links to `src/scripts/pre-push-chain.sh` | warn | Nothing. A commit or push the hook would have refused goes through; the first sign is a red `doclint` step in the merge pyramid |
+
+Git does not carry `.git/hooks`, so a fresh clone has neither link and an updated checkout keeps
+whatever it had.
+
+**How it is fixed.** A person runs these in the clone's main checkout. A Claude seat cannot: a
+guard refuses any seat that writes the hooks folder.
+
+```bash
+ln -sf ../../src/scripts/pre-commit-chain.sh .git/hooks/pre-commit
+ln -sf ../../src/scripts/pre-push-chain.sh   .git/hooks/pre-push
+```
+
+One pair serves every worktree of that clone. A second clone, such as the VM's, needs its own.
+
+`pre-commit` runs the secret scan, the R&D write guard and the documentation lint gate.
+`pre-push` refuses a push whose tip holds a docstring lint finding in a swept Python file.
+`git push --no-verify` skips it; the pyramid's `doclint` step cannot be skipped.
+
+If the preflight says the checkout "predates the hook", update the checkout first, then link.
+
+The check reads the folder git runs hooks from, so it follows `core.hooksPath`. A relative or an
+absolute link passes. A copied file warns, because a copy does not follow the script.
+Not checked: that the linked script is executable.
+
 ## Adding a new item to this list
 
 When a host turns out to be missing configuration that git does not carry:

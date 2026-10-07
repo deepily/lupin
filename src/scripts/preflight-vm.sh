@@ -476,6 +476,46 @@ else
     report pass BLOCK "no orphaned bytecode under $PYC_ROOT"
 fi
 
+# B7 — the two git hooks are links to the scripts this checkout ships (Rick, 2026-10-07).
+# A hook lives in .git/hooks, which git does not carry, so a fresh clone or an updated VM has
+# none until a person makes the links. A guard refuses a Claude seat that writes that folder.
+# Every phase: it is cheap, and the time to learn of a missing hook is before work starts.
+# WARN, not BLOCK: the merge pyramid runs the same lint gate, so a host without the hook is
+# unguarded at commit and push, not unfit to deploy onto.
+GIT_HOOKS_DIR="${PREFLIGHT_VM_GIT_HOOKS_DIR:-}"
+if [ -z "$GIT_HOOKS_DIR" ]; then
+    # --git-path follows core.hooksPath, so this is the folder git itself would run hooks from.
+    hooks_path="$( git -c "safe.directory=$REPO_ROOT" -C "$REPO_ROOT" rev-parse --git-path hooks 2>/dev/null || printf '' )"
+    case "$hooks_path" in
+        "")  GIT_HOOKS_DIR="$REPO_ROOT/.git/hooks" ;;
+        /*)  GIT_HOOKS_DIR="$hooks_path" ;;
+        *)   GIT_HOOKS_DIR="$REPO_ROOT/$hooks_path" ;;
+    esac
+fi
+for hook_row in "pre-commit:pre-commit-chain.sh" "pre-push:pre-push-chain.sh"; do
+    hook_name="${hook_row%%:*}"; hook_script="${hook_row##*:}"
+    hook_fix="cd $REPO_ROOT && ln -sf ../../src/scripts/$hook_script .git/hooks/$hook_name   # a person runs this; a Claude seat is refused"
+    hook_out="$( pfv_git_hook_status "$GIT_HOOKS_DIR" "$hook_name" "$REPO_ROOT/src/scripts/$hook_script" )"
+    case "${hook_out%%$'\t'*}" in
+        MATCH)
+            report pass WARN "git hook $hook_name links to src/scripts/$hook_script" ;;
+        NO_SCRIPT)
+            report fail WARN "this checkout has no src/scripts/$hook_script — it predates the $hook_name hook" \
+                          "update the checkout first (lupin-vm.sh push-bundle <branch> --checkout), then: $hook_fix" ;;
+        ABSENT)
+            report fail WARN "git hook $hook_name is not installed in $GIT_HOOKS_DIR — nothing checks a ${hook_name#pre-} on this clone" \
+                          "$hook_fix" ;;
+        NOT_LINK)
+            report fail WARN "git hook $hook_name in $GIT_HOOKS_DIR is a file, not a link — it will not follow src/scripts/$hook_script when the checkout updates" \
+                          "$hook_fix" ;;
+        WRONG_TARGET)
+            report fail WARN "git hook $hook_name links to ${hook_out#*$'\t'}, not to src/scripts/$hook_script" \
+                          "$hook_fix" ;;
+        *)
+            report unknown WARN "git hook $hook_name could not be read in $GIT_HOOKS_DIR" "$hook_fix" ;;
+    esac
+done
+
 if layer_runs B; then
 # B1/B2 — parity. POST-phase only: PRE runs before HEAD changes, so asserting the
 # old ref would be meaningless — and a meaningless assertion that passes is worse

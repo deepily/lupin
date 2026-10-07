@@ -1313,3 +1313,22 @@ pfv_config_mgr_args_resolve() {
         END { exit !found }' "$root$config_path" \
         || { printf 'no [%s] block in %s' "${block//+/ }" "$config_path"; return 1; }
 }
+
+# ── pfv_git_hook_status ─────────────────────────────────────────────────────
+# Say whether one git hook is a link to the script the repo ships for it.
+#   pfv_git_hook_status <hooks_dir> <hook_name> <script_path>
+# Prints one word and returns: MATCH 0 · NO_SCRIPT 2 (the checkout has no such script, so it
+# predates the hook) · ABSENT 3 · NOT_LINK 4 (a file someone copied; it goes stale on the next
+# update) · WRONG_TARGET 5 (prints the word, a tab, and where the link lands).
+# The hook is compared by where it lands, so a relative and an absolute link both pass.
+pfv_git_hook_status() {
+    local hooks_dir="$1" hook="$2" script="$3"
+    local path="$hooks_dir/$hook" lands wants
+    [ -f "$script" ] || { echo "NO_SCRIPT"; return 2; }
+    if [ ! -e "$path" ] && [ ! -L "$path" ]; then echo "ABSENT"; return 3; fi
+    [ -L "$path" ] || { echo "NOT_LINK"; return 4; }
+    lands="$( readlink -f "$path" 2>/dev/null || printf '' )"
+    wants="$( readlink -f "$script" )"
+    [ "$lands" = "$wants" ] && { echo "MATCH"; return 0; }
+    printf 'WRONG_TARGET\t%s\n' "${lands:-nowhere}"; return 5
+}
