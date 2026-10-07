@@ -175,18 +175,20 @@ def mask_jsdoc( text ):
     return "".join( chars )
 
 
-def _jsdoc_findings( path, comment, root ):
+def _jsdoc_findings( path, comment, root, not_checked=None ):
     """
     Run every rule over one JSDoc block.
 
     Requires:
         - comment is an extractor record of kind jsdoc
         - root is the repo working tree, or None to skip the Design path check
+        - not_checked is a list or None
 
     Ensures:
         - returns the findings of lint_text with the structure rules and the model-order rule
         - adds a docstring-length finding when the block is longer than DOCSTRING_MAX_LINES
-        - with root given, adds a dead-design finding for a Design: path that does not exist
+        - with root given, adds a dead-design finding for a Design: path inside the root that does not exist
+        - a Design: path outside the root is not judged, and goes to not_checked when that list is given
 
     Raises:
         - nothing
@@ -194,7 +196,7 @@ def _jsdoc_findings( path, comment, root ):
     text     = comment[ "text" ]
     first    = comment[ "start_line" ]
     findings = lint_text( mask_jsdoc( text ), path, first, structure=True, agent_rule=True )
-    if root is not None: findings += design_path_findings( text, path, first, root )
+    if root is not None: findings += design_path_findings( text, path, first, root, not_checked )
     lines = text.strip( "\n" ).count( "\n" ) + 1
     if lines > DOCSTRING_MAX_LINES:
         findings.append( Finding( path, first, "docstring-length", f"JSDoc block of {lines} lines, limit {DOCSTRING_MAX_LINES}" ) )
@@ -249,13 +251,14 @@ def _plain_findings( path, comment ):
     return findings
 
 
-def lint_comment( path, comment, root=None ):
+def lint_comment( path, comment, root=None, not_checked=None ):
     """
     Lint one extractor comment record.
 
     Requires:
         - comment holds kind, text, start_line, symbol_key and directive; commented_code is optional
         - root is the repo working tree, or None
+        - not_checked is a list or None
 
     Ensures:
         - a directive comment gives no findings
@@ -267,18 +270,19 @@ def lint_comment( path, comment, root=None ):
         - nothing
     """
     if comment[ "directive" ]: return []
-    if comment[ "kind" ] == "jsdoc": return _jsdoc_findings( path, comment, root )
+    if comment[ "kind" ] == "jsdoc": return _jsdoc_findings( path, comment, root, not_checked )
     if comment[ "kind" ] == "line-run" and comment.get( "commented_code", False ): return []
     return _plain_findings( path, comment )
 
 
-def lint_comments( path, comments, root=None ):
+def lint_comments( path, comments, root=None, not_checked=None ):
     """
     Lint every extractor record of one file.
 
     Requires:
         - comments is the list of that file's records: one file record and its comment records
         - root is the repo working tree, or None to skip the Design path check
+        - not_checked is a list or None; each Design: path outside the root is appended to it as ( path, line, design_path )
 
     Ensures:
         - returns a list of Finding sorted by line, then rule, then message
@@ -294,7 +298,7 @@ def lint_comments( path, comments, root=None ):
             errors = comment[ "parse_errors" ]
             if errors: findings.append( Finding( path, errors[ 0 ][ "line" ], "parse-error", f"does not parse: {errors[ 0 ][ 'message' ]}" ) )
             continue
-        findings += lint_comment( path, comment, root )
+        findings += lint_comment( path, comment, root, not_checked )
     return sorted( findings, key=lambda f: ( f.line, f.rule, f.message ) )
 
 
@@ -356,8 +360,8 @@ def main( argv=None, out=None ):
     configure_root( root )
     paths   = sorted( p for p in args.paths if in_scope( p ) ) if args.paths else tracked_files( root )
     by_file = run_extractor( root, paths )
-    findings = []
-    for path in paths: findings += lint_comments( path, by_file[ path ], root )
+    findings, skipped = [], []
+    for path in paths: findings += lint_comments( path, by_file[ path ], root, skipped )
     if args.changed is not None or args.staged:
         findings = filter_findings( findings, changed_line_ranges( root, args.changed, cached=args.staged ) )
     if args.json:
@@ -366,6 +370,7 @@ def main( argv=None, out=None ):
     else:
         for f in findings: out.write( f"{f.path}:{f.line}: {f.rule}: {f.message}\n" )
         out.write( f"{len( findings )} findings in {len( paths )} files\n" )
+        if skipped: out.write( f"Design paths not checked: {len( skipped )}\n" )
     return 1 if args.strict and findings else 0
 
 

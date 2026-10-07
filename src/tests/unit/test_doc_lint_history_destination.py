@@ -134,9 +134,19 @@ def test_the_design_lines_of_a_package_are_a_second_check( repo, tmp_path ):
     assert "DEAD DESIGN pkg/mod.py:3: Design path 'docs/gone.md' does not exist" in text
     ( repo / "pkg" / "mod.py" ).write_text( '"""Module."""\n', encoding="utf-8" )
     code, _, result = _run( repo, tmp_path / "out2", "--commit", "HEAD", "--design", str( repo / "docs" / "design.md" ), "--package", "pkg" )
-    assert code == 0 and result[ "design_lines" ] == { "checked": True, "dead": [] }
+    assert code == 0 and result[ "design_lines" ] == { "checked": True, "dead": [], "not_checked": [] }
     code, _, result = _run( repo, tmp_path / "out3", "--commit", "HEAD", "--design", str( repo / "docs" / "design.md" ) )
-    assert result[ "design_lines" ] == { "checked": False, "dead": [] }
+    assert result[ "design_lines" ] == { "checked": False, "dead": [], "not_checked": [] }
+
+
+def test_a_foreign_design_line_in_a_package_is_listed_as_not_checked_and_does_not_fail( repo, tmp_path ):
+    ( repo / "pkg" ).mkdir( exist_ok=True )
+    ( repo / "pkg" / "mod.py" ).write_text( '"""Mod.\n\nDesign: /mnt/DATA01/x/y.md\n"""\n', encoding="utf-8" )
+    _git( repo, "add", "." )
+    code, text, result = _run( repo, tmp_path / "out", "--commit", "HEAD", "--design", str( repo / "docs" / "design.md" ), "--package", "pkg" )
+    assert code == 0 and result[ "design_lines" ][ "dead" ] == []
+    assert result[ "design_lines" ][ "not_checked" ] == [ "pkg/mod.py:3: Design path '/mnt/DATA01/x/y.md' is outside the tree" ]
+    assert "Design paths not checked: 1\n" in text and text.endswith( "history claims found\n" )
 
 
 @pytest.mark.parametrize( "sort_text, worksheet, extra, message", [

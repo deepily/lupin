@@ -85,17 +85,19 @@ def template_findings( path, source, prose ):
     return findings
 
 
-def lint_source( path, source, root=None ):
+def lint_source( path, source, root=None, stats=None ):
     """
     Lint one markdown page.
 
     Requires:
         - path is the repo-relative path used in findings
         - root is the repo working tree, or None to skip the link checks
+        - stats is a dict that may hold a not_checked list, or None
 
     Ensures:
         - returns a list of Finding, sorted by line
         - front matter and fenced code are not linted as prose
+        - a Design: path outside the root is not judged, and goes to stats["not_checked"] when that list is there
 
     Raises:
         - nothing
@@ -105,7 +107,7 @@ def lint_source( path, source, root=None ):
     findings += template_findings( path, source, prose )
     if root is not None:
         findings += markdown_link_findings( prose, path, root )
-        findings += design_path_findings( prose, path, 1, root )
+        findings += design_path_findings( prose, path, 1, root, stats[ "not_checked" ] if stats is not None and "not_checked" in stats else None )
     return sorted( findings, key=lambda f: ( f.line, f.rule, f.message ) )
 
 
@@ -138,7 +140,13 @@ def main( argv=None, out=None ):
     Raises:
         - nothing beyond run_linter's
     """
-    return run_linter( "Lint markdown pages against the eight rules.", ( ".md", ), lint_source, sys.argv[ 1: ] if argv is None else argv, out )
+    stats = { "not_checked": [] }
+    return run_linter(
+        "Lint markdown pages against the eight rules.", ( ".md", ),
+        lambda path, source, root: lint_source( path, source, root, stats ),
+        sys.argv[ 1: ] if argv is None else argv, out,
+        footer=lambda: f"Design paths not checked: {len( stats[ 'not_checked' ] )}\n" if stats[ "not_checked" ] else ""
+    )
 
 
 if __name__ == "__main__":

@@ -159,21 +159,22 @@ def design_lines_check( root, package ):
         - root is a git working tree; package is a repo-relative directory, or None
 
     Ensures:
-        - returns { checked, dead }; with package None, checked is False and dead is empty
+        - returns { checked, dead, not_checked }; with package None, checked is False and both lists are empty
         - the docstrings are those of the package's own in-scope .py files, read from the working tree
-        - dead lists path:line: message for each Design: path that does not exist, found by the linter's own rule
+        - dead lists path:line: message for each Design: path inside the tree that does not exist, found by the linter's own rule
+        - not_checked lists path:line: message for each Design: path outside the tree, which is never judged and never fails the check
 
     Raises:
         - OSError when a package file cannot be read
         - SyntaxError when a package file does not parse
     """
-    if package is None: return { "checked": False, "dead": [] }
-    dead = []
+    if package is None: return { "checked": False, "dead": [], "not_checked": [] }
+    dead, skipped = [], []
     for path in sorted( p for p in tracked_files( root, ( ".py", ) ) if p.rpartition( "/" )[ 0 ] == package ):
         with open( f"{root}/{path}", encoding="utf-8" ) as handle: source = handle.read()
         for _, _, first_line, text in extract_docstrings( source ):
-            dead += [ f"{f.path}:{f.line}: {f.message}" for f in design_path_findings( text, path, first_line, root ) ]
-    return { "checked": True, "dead": dead }
+            dead += [ f"{f.path}:{f.line}: {f.message}" for f in design_path_findings( text, path, first_line, root, skipped ) ]
+    return { "checked": True, "dead": dead, "not_checked": [ f"{p}:{n}: Design path {d!r} is outside the tree" for p, n, d in skipped ] }
 
 
 def empty_result( sort_path, worksheet_path, message=None ):
@@ -199,7 +200,7 @@ def empty_result( sort_path, worksheet_path, message=None ):
         "found"          : 0,
         "missing"        : 0,
         "rows"           : [],
-        "design_lines"   : { "checked": False, "dead": [] },
+        "design_lines"   : { "checked": False, "dead": [], "not_checked": [] },
         "refused"        : message,
         "message"        : message or "",
         "pass"           : False
@@ -299,6 +300,7 @@ def main( argv=None, out=None ):
     for row in result[ "rows" ]:
         if not row[ "found" ]: out.write( f"MISSING n {row[ 'n' ]} {row[ 'id' ]}: {row[ 'quote' ]}\n" )
     for line in result[ "design_lines" ][ "dead" ]: out.write( f"DEAD DESIGN {line}\n" )
+    if result[ "design_lines" ][ "not_checked" ]: out.write( f"Design paths not checked: {len( result[ 'design_lines' ][ 'not_checked' ] )}\n" )
     out.write( f"{'PASS' if result[ 'pass' ] else 'FAIL'} {result[ 'message' ]}\n" )
     return 0 if result[ "pass" ] else 1
 

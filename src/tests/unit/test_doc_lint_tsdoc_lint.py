@@ -342,6 +342,16 @@ def test_design_path_is_checked_only_when_a_root_is_given( tmp_path ):
     assert _hits( [ _comment( "\nSummary.\n\nDesign: doc.md\n" ) ], root=tmp_path ) == []
 
 
+def test_an_absolute_and_a_parent_design_path_are_not_judged_and_are_counted_as_not_checked( tmp_path ):
+    skipped = []
+    for design in ( "/mnt/DATA01/x/planning-is-prompting/src/rnd/x.md", "../x.md", "src/../../x.md" ):
+        comment = _comment( f"\nSummary.\n\nDesign: {design}\n" )
+        assert _hits( [ comment ], root=tmp_path, not_checked=skipped ) == []
+    assert [ d for _, _, d in skipped ] == [ "/mnt/DATA01/x/planning-is-prompting/src/rnd/x.md", "../x.md", "src/../../x.md" ]
+    assert _hits( [ _comment( "\nSummary.\n\nDesign: missing.md\n" ) ], root=tmp_path, not_checked=skipped ) == [ ( 13, "dead-design" ) ]
+    assert len( skipped ) == 3
+
+
 # ---- the reduced set, headers, skips, parse errors -------------------------------------------
 
 def test_a_line_run_gets_the_reduced_rule_set_only():

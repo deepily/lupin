@@ -291,6 +291,14 @@ def test_design_paths_resolve_from_the_repo_root_and_skip_lines_with_a_removal_n
     assert [ ( f.line, f.message ) for f in found ] == [ ( 11, "Design path 'src/docs/gone.md' does not exist" ) ]
 
 
+@pytest.mark.parametrize( "design, outside", [
+    ( "/abs/x.md", True ), ( "..", True ), ( "../x.md", True ), ( "a/../../x.md", True ),
+    ( "src/x.md", False ), ( "a/../x.md", False ), ( "..x.md", False ), ( "a/..b/x.md", False ),
+] )
+def test_is_outside_root_decides_by_shape( design, outside ):
+    assert links.is_outside_root( design ) is outside
+
+
 def test_an_in_root_dead_design_path_is_still_a_finding_and_is_not_listed_as_not_checked( repo ):
     skipped = []
     found   = links.design_path_findings( "Design: src/docs/gone.md", "a.py", 1, str( repo ), skipped )
@@ -359,6 +367,21 @@ def test_md_page_rates_and_main( repo ):
     out = io.StringIO()
     assert md_lint.main( [ "--repo-root", str( repo ) ], out ) == 0
     assert "docs/p.md:1: caps" in out.getvalue()
+
+
+def test_md_lint_skips_a_foreign_design_path_and_prints_the_count_only_when_one_was_skipped( repo ):
+    skipped = []
+    stats   = { "not_checked": skipped }
+    assert md_lint.lint_source( "docs/p.md", "Design: /mnt/DATA01/x/y.md\n", str( repo ), stats ) == []
+    assert len( skipped ) == 1
+    _commit( repo, { "docs/p.md": "Design: /var/lupin/x/y.md\n" } )
+    out = io.StringIO()
+    assert md_lint.main( [ "--repo-root", str( repo ) ], out ) == 0
+    assert out.getvalue().endswith( "Design paths not checked: 1\n" )
+    _commit( repo, { "docs/p.md": "Fine.\n" } )
+    out = io.StringIO()
+    md_lint.main( [ "--repo-root", str( repo ) ], out )
+    assert "not checked" not in out.getvalue()
 
 
 # ---- registered tool descriptions are exempt from the injection rule -------------------------
