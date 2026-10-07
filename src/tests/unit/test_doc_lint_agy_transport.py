@@ -1394,3 +1394,25 @@ def test_run_all_raises_the_cut_short_wait_when_it_is_the_only_failure( monkeypa
 def test_an_unavailable_error_after_every_try_is_not_a_cut_short_wait():
     assert not issubclass( mt.ModelUnavailableError, mt.ModelWaitCutShort )
     assert issubclass( mt.ModelWaitCutShort, mt.ModelUnavailableError )
+
+
+def test_run_all_raises_the_earliest_cut_short_wait_when_every_failure_is_one( monkeypatch ):
+    def always_unavailable( model, prompt, timeout_seconds ):
+        raise agy_runtime.AgyUnavailable( "503 service unavailable" )
+
+    monkeypatch.setattr( mt, "_agy_call_once", always_unavailable )
+    monkeypatch.setattr( mt, "AGY_UNAVAILABLE_WAITS", ( 30, ) )
+    mt.AGY_WAKE.clear()
+    pair_c = { "id" : "c", "old" : "r", "new" : "s", "design" : None }
+
+    async def pair_stand_in( pair, *args, **kwargs ):
+        if pair[ "id" ] in ( "a", "b" ):
+            return await asyncio.to_thread( mt._agy_call, f"model-{pair[ 'id' ]}", "p", 5 )
+        await asyncio.sleep( 0.1 )
+        mt.AGY_WAKE.set()
+        return "c done"
+
+    monkeypatch.setattr( hn, "run_pair", pair_stand_in )
+
+    with pytest.raises( mt.ModelWaitCutShort, match="model-a" ):
+        asyncio.run( hn.run_all( [ PAIR_A, PAIR_B, pair_c ], None, None, parallel=3 ) )
