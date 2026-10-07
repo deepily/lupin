@@ -230,3 +230,9 @@ def test_the_doubtful_list_is_best_first_and_cut_to_the_shortlist_size():
     r    = _decide( rows )
     assert len( r[ "doubtful" ] ) == vd.POLICY[ "shortlist" ]
     assert r[ "doubtful" ][ 0 ][ "p_overlap" ] >= r[ "doubtful" ][ -1 ][ "p_overlap" ]
+
+
+def test_a_strong_match_does_not_hide_a_malformed_answer():
+    r = _decide( [ _ans( "weak", _DOUBTFUL ), _ans( "best", _STRONG ), _ans( "bad", _p( 0.9, 0.9, 0.9 ) ) ] )
+    assert ( r[ "verdict" ], r[ "causes" ] ) == ( "UNCERTAIN_READ_SOURCE", [ "MALFORMED_ANSWER" ] )      # LOW_CONFIDENCE is waived, this is not
+    assert r[ "malformed" ] == [ { "id": "bad", "reason": "sum_not_one" } ] and [ d[ "id" ] for d in r[ "doubtful" ] ] == [ "weak" ]
