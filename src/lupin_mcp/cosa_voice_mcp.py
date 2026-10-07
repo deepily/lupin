@@ -3725,51 +3725,23 @@ def commons_post(
     metadata : Optional[ dict ] = None,
 ) -> dict:
     """
-    Dual tier marker (depends on topic):
-    - **[SELF-DISCLOSURE]** — free-form / presence / incident topics (announcing your own state)
-    - **[ATTENTION-DEMANDING]** — coordination / help-wanted / contested-claim topics (summons peer attention)
+    Append an entry to a commons topic (the file-based inter-session blackboard). The tier depends on the topic: **[SELF-DISCLOSURE]** for free-form, presence and incident topics (announcing your own state); **[ATTENTION-DEMANDING]** for coordination, help-wanted and contested-claim topics (summons peer attention).
 
-    Append an entry to a commons topic (file-based inter-session blackboard).
+    Free-form topics auto-create on first post and keep 7 days by default; reserved topics (`broadcast-acks`, `presence`, `system-events`) are pre-seeded and may differ. Persona fields are stamped from the session bridge and immutable, so you cannot spoof another persona. Posting user-sensitive data is prohibited (see cross-session-communication.md §5).
 
-    Examples:
-        # Self-disclosure: announce your own state
-        commons_post(topic="presence", body="starting long migration", metadata={"kind": "status"})
-
-        # Threaded reply to a DM (closes the loop on a `COMMONS PEER MESSAGE`):
-        commons_post(
-            topic    = "dm-tiberius",
-            body     = "yes, that fix landed in commit f4e0370",
-            metadata = {"in_reply_to": "<question_id_from_system_reminder>", "kind": "answer"}
-        )
-
-    Free-form topics auto-create on first post. Reserved topics
-    (`broadcast-acks`, `presence`, `system-events`) are pre-seeded by the store.
-    Persona fields are stamped from the session bridge at post-time and are
-    immutable thereafter (per C4 ratification) — you cannot spoof another persona.
-
-    **Threading callout**: for a directed peer reply, use `dm_send(reply_to=...,
-    thread_id=...)` — the body travels inline and the recipient processes it
-    directly. `commons_post` is for the topic blackboard; a reply posted here
-    with `metadata={"in_reply_to": <qid>}` correlates to the original question
-    but lands on the blackboard only — the asker sees it on their next
-    `commons_read` poll (no push-back).
-
-    **Failure-mode hint**: posting user-sensitive data is prohibited —
-    see cross-session-communication.md §5 for the sensitive-content rules.
-    Free-form topics have a 7-day retention by default; reserved topics may
-    have different retention.
+    For a directed peer reply use `dm_send(reply_to=..., thread_id=...)`: the body travels inline and the recipient acts on it directly. A reply posted here with `metadata={"in_reply_to": <qid>}` correlates to the original question but lands on the blackboard only; the asker sees it on their next `commons_read` poll.
 
     Args:
         topic: Topic name (free-form or one of the reserved topics)
         body: The message body (any string)
-        metadata: Optional dict of extra metadata fields. Common patterns:
-            - `{"kind": "status"}` for presence pings
-            - `{"kind": "answer", "in_reply_to": <qid>}` for threaded replies
-            - `{"kind": "incident", "severity": "warn|error|info"}` for incidents
+        metadata: Optional dict of extra fields. Common patterns: `{"kind": "status"}` for presence pings; `{"kind": "answer", "in_reply_to": <qid>}` for threaded replies; `{"kind": "incident", "severity": "warn|error|info"}` for incidents
 
     Returns:
-        dict with `ts`, `sender_session_id`, `persona_name`, `persona_icon`,
-        `persona_color`, `body`, `metadata`
+        dict with `ts`, `sender_session_id`, `persona_name`, `persona_icon`, `persona_color`, `body`, `metadata`
+
+    Examples:
+        commons_post(topic="presence", body="starting long migration", metadata={"kind": "status"})
+        commons_post(topic="dm-tiberius", body="yes, that fix landed in commit f4e0370", metadata={"in_reply_to": "<question_id_from_system_reminder>", "kind": "answer"})
     """
     if not _commons_enabled(): return { "status": "error", "reason": "commons disabled" }
     persona = _commons_persona_fields()
@@ -3791,21 +3763,9 @@ def commons_read(
     limit : int = 50,
 ) -> list:
     """
-    **[READ — always allowed, no user permission needed]** Tail a commons topic.
+    **[READ — always allowed, no user permission needed]** Tail a commons topic. Returns newest-first when `since` is None, ascending when `since` is supplied. Honors `limit` strictly. A missing free-form topic returns an empty list (no error).
 
-    Examples:
-        # Most recent 10 entries on the DM topic addressed to you
-        commons_read(topic="dm-maria", limit=10)
-
-        # New entries since you last polled (Phase 1 polling-mode pattern)
-        commons_read(topic="dm-tiberius", since="2026-05-16T22:00:00+00:00")
-
-    Returns newest-first when `since` is None, ascending when `since` is supplied.
-    Honors `limit` strictly. Missing free-form topic → empty list (no error).
-
-    Common pattern: when a `COMMONS PEER MESSAGE` system-reminder arrives,
-    call `commons_read(topic=<topic>, limit=10)` and find the entry whose
-    `metadata.question_id` matches the system-reminder's `question_id`.
+    When a `COMMONS PEER MESSAGE` system-reminder arrives, call `commons_read(topic=<topic>, limit=10)` and find the entry whose `metadata.question_id` matches the reminder's `question_id`.
 
     Args:
         topic: Topic name to read from
@@ -3813,8 +3773,11 @@ def commons_read(
         limit: Maximum number of entries to return (default 50)
 
     Returns:
-        List of entry dicts, each containing ts, sender_session_id, persona_*,
-        body, metadata
+        List of entry dicts, each containing ts, sender_session_id, persona_*, body, metadata
+
+    Examples:
+        commons_read(topic="dm-maria", limit=10)    # the most recent 10 entries on the DM topic addressed to you
+        commons_read(topic="dm-tiberius", since="2026-05-16T22:00:00+00:00")    # new entries since you last polled
     """
     if not _commons_enabled(): return [ ]
     return _get_commons_store().read( topic=topic, since=since, limit=limit )
@@ -3868,38 +3831,24 @@ def commons_ask_sync(
     grace_seconds    : Optional[ float ] = None,
 ) -> dict:
     """
-    **[ATTENTION-DEMANDING + BLOCKING — rarely justified; consider `commons_ask_async` first]**
-    Post a question to commons and block until the first reply arrives + grace expires.
+    **[ATTENTION-DEMANDING + BLOCKING — rarely justified; consider `commons_ask_async` first]** Post a question to commons and block until the first reply arrives plus a grace period.
 
-    Example:
-        # Synchronously poll peers for the latest build hash, wait up to 60s
-        result = commons_ask_sync(topic="builds", body="latest hash?", timeout_seconds=60)
-        for entry in result["replies"]:
-            print(entry["body"])
+    Prefer `commons_ask_async` in nearly all cases: it returns immediately, starts a watcher that pushes the recipient's reply back to your tmux, and frees your session meanwhile. Use this variant only when downstream logic LITERALLY cannot proceed without the reply AND a fixed timeout is acceptable.
 
-    Hybrid first+grace timing (A3b ratification): the call blocks until the
-    FIRST matching reply arrives in `topic`, then waits an additional
-    `grace_seconds` to coalesce any fast follow-up replies, and returns the
-    accumulated list. Replies are correlated via `metadata.in_reply_to`
-    matching the question's auto-generated `question_id`.
-
-    **Prefer `commons_ask_async`** in nearly all cases — it returns immediately,
-    starts a Phase 3 watcher that pushes the recipient's reply back to your
-    tmux when it arrives, and frees your session to do other work in the
-    meantime. The sync variant is only justified when downstream logic
-    LITERALLY cannot proceed without the reply AND a fixed timeout is acceptable.
-
-    On timeout with zero replies, returns `{..., replies: []}`.
+    Timing: the call blocks until the FIRST matching reply arrives in `topic`, waits `grace_seconds` more to coalesce fast follow-ups, and returns the accumulated list. Replies are correlated via `metadata.in_reply_to` matching the question's auto-generated `question_id`. On timeout with zero replies it returns `{..., replies: []}`.
 
     Args:
         topic: Topic to post the question to (and listen on for replies)
         body: The question text
         timeout_seconds: Maximum wait for the first reply (default 120)
-        grace_seconds: Additional wait after first reply for follow-up replies
-            (default from `commons ask sync grace seconds` INI key; falls back to 1.0)
+        grace_seconds: Additional wait after the first reply for follow-ups (default from the `commons ask sync grace seconds` INI key; falls back to 1.0)
 
     Returns:
         dict `{question_id, posted_ts, replies: [entry, ...]}`
+
+    Example:
+        result = commons_ask_sync(topic="builds", body="latest hash?", timeout_seconds=60)    # poll peers for the latest build hash, wait up to 60s
+        for entry in result["replies"]: print(entry["body"])
     """
     if not _commons_enabled(): return { "status": "error", "reason": "commons disabled" }
     grace = grace_seconds if grace_seconds is not None else _commons_ask_sync_grace_default()
@@ -3924,22 +3873,9 @@ def commons_ask_async(
     question_id          : Optional[ str ] = None,
 ) -> dict:
     """
-    **[ATTENTION-DEMANDING — requires user trigger or clear coordination need]**
-    Post a question to a topic at large and return immediately (fire-and-forget,
-    polling-mode). For directed peer DMs use `dm_send` (body inline) instead.
+    **[ATTENTION-DEMANDING — requires user trigger or clear coordination need]** Post a question to a topic at large and return immediately (fire-and-forget, polling-mode). For directed peer DMs use `dm_send` (body inline) instead.
 
-    Example:
-        # Polling-mode: ask the topic at large, poll for replies yourself
-        result = commons_ask_async(topic="builds", body="latest hash?")
-        # Later: commons_read(topic="builds", since=result["posted_ts"]) → filter on in_reply_to
-
-    The message lands on the blackboard `topic`; peers see it on their next
-    `commons_read` poll, and the entry is durable. Correlate replies via
-    `metadata.in_reply_to == question_id`.
-
-    (The directed-DM / push-back-to-asker mode was removed in the cosa-voice
-    token-reduction full-removal pass, 2026-06-17 — it routed through the commons
-    claim-check path at ~3,700 tokens/received DM. Use `dm_send`, ~204 tokens.)
+    The message lands on the blackboard `topic` and is durable; peers see it on their next `commons_read` poll. Correlate replies via `metadata.in_reply_to == question_id`.
 
     Args:
         topic: Topic to post the question to
@@ -3948,6 +3884,10 @@ def commons_ask_async(
 
     Returns:
         dict `{question_id, posted_ts}`
+
+    Example:
+        result = commons_ask_async(topic="builds", body="latest hash?")    # poll-mode: ask the topic at large
+        # later: commons_read(topic="builds", since=result["posted_ts"]) and filter on in_reply_to
     """
     return _commons_ask_async_dispatch(
         topic       = topic,
