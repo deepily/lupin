@@ -2821,64 +2821,23 @@ def get_session_info() -> dict:
 @mcp.tool
 def self_respin( memento_path: str, memento_nonce: str, delay_seconds: int = 20, cycle_window_seconds: int = 300 ) -> dict:  # pragma: no cover - live MCP boundary; all logic + branches are covered in self_respin_core
     """
-    Self-re-spin: schedule a `/clear` into THIS session's OWN pane so it rehydrates
-    as the same seat (same session id, tmux, persona, board, lineage) at low
-    context — for the price of one memento write instead of a whole successor's
-    context. IRREVERSIBLE; every guard lives INSIDE this verb.
+    Self-re-spin: schedule a `/clear` into THIS session's OWN pane so it rehydrates as the same seat (same session id, tmux, persona, board, lineage). IRREVERSIBLE; every guard is inside this verb.
 
-    BEFORE CALLING: generate this cycle's nonce uuid FIRST, then write your memento
-    with the nonce already in it — ONE call, no separate stamping step:
+    BEFORE CALLING: generate the nonce uuid, then write your memento with it in ONE call:
 
-        python3 $PLANNING_IS_PROMPTING_ROOT/workflow/scripts/memento_io.py write \
-            --slot root --persona <you> --session-id <from get_session_info()> \
-            --self-respin-nonce <uuid>
+        python3 $PLANNING_IS_PROMPTING_ROOT/workflow/scripts/memento_io.py write --slot root --persona <you> --session-id <from get_session_info()> --self-respin-nonce <uuid>
 
-    Pass that same uuid as `memento_nonce`. Do NOT stamp it afterwards by hand or via
-    self_respin_core.stamp_nonce_into, which is RETIRED and now refuses.
+    Pass that uuid as `memento_nonce`. Do NOT stamp it afterwards by hand or via self_respin_core.stamp_nonce_into (retired). `write` exits 5 if record and mirror disagree.
 
-    ALREADY WROTE YOUR ROOT MEMENTO THIS SESSION? Then `write` refuses it as immutable
-    (exit 3) and the above is closed to you — which is the USUAL case on a second
-    self-respin, since the seat keeps its session id. Use `amend` instead, with the
-    nonce line as the LAST line of the amendment body you pipe in (there is no flag for
-    it; it is ordinary content, and amend appends). amend re-syncs record, mirror and
-    pointer in the same call, so it is safe on the point that matters here — but the
-    nonce then shares the AMENDMENT's timestamp, not the whole body's, so it proves the
-    amendment is fresh rather than the whole file. Two reasons, and the second is why appending was
-    not simply repaired (row c9f4d613): an append reaches the RECORD alone and leaves
-    the durable MIRROR one line short of it, so a restore yields a memento this verb
-    then refuses; and a fresh nonce appended to an hour-old body proves the STAMP is
-    fresh, never the body. Pre-stamping shares the body's own written_at, so the
-    freshness gate below is about what you actually clear into. cmd_write lands record
-    + mirror + pointer together and exits 5 if record and mirror disagree, so the
-    truncation this guard was born from (row 4cf9f9fd) stays unwritable. The verb confirms that exact nonce, a fresh timestamp, AND a body
-    that still has substance once the nonce line is removed — a stale, partial, or
-    nonce-only memento aborts the clear, so you never clear into nothing.
+    Already wrote your root memento this session? `write` refuses it as immutable (exit 3). Use `amend`, with the nonce line as the LAST line of the amendment body you pipe in (no flag needed). amend keeps record, mirror and pointer in step; the nonce proves only the amendment is fresh.
 
-    The verb then: (a) verifies the memento is complete + fresh this cycle;
-    (b) asks you a yes/no confirmation on the human surface, DEFAULTING TO YES so an
-    absent user does not cost the fleet a manager (offline / timeout → proceed; a
-    real "no" schedules nothing); (c) writes the observer's liveness marker plus a
-    one-shot fire token; (d) schedules a detached `/clear` that consumes the token
-    at the fire point, so a second fire after rehydrate no-ops.
+    The verb checks the exact nonce, a fresh timestamp, and a body with substance beyond the nonce line; a stale, partial or nonce-only memento aborts, and NOTHING is scheduled unless the memento verified AND the ask resolved yes (or default-yes) AND the observer marker is durable. It then asks you yes/no on the human surface, DEFAULTING TO YES so an absent user does not cost the fleet a manager (offline or timeout proceeds; a real "no" stops it), writes the observer's liveness marker and a one-shot fire token, and schedules a detached `/clear` that consumes the token. The session id comes from the local bridge, never an argument, so it can only aim at your own pane; nothing pre-supplies the confirmation or targets another session.
 
-    The session id is resolved from the local bridge — NEVER taken from a caller
-    argument — so this can only ever aim at your own pane. There is deliberately no
-    parameter to pre-supply the confirmation, substitute the ask, or target another
-    session: the irreversible guard is not skippable.
-
-    Requires:
-        - you have written your memento this cycle with the stamped nonce line
-        - memento_path points at that memento; memento_nonce is its nonce uuid
-        - delay_seconds is the detached sleep before the clear fires
-        - cycle_window_seconds bounds how old the memento nonce may be
+    Requires: your memento, written this cycle with the nonce line (`memento_path`; `memento_nonce` is its uuid); `delay_seconds`, the detached sleep before the clear; `cycle_window_seconds`, the oldest nonce allowed.
 
     Ensures:
-        - returns { status: scheduled|declined|aborted, reason, marker_path,
-          fire_token_path, expected_return_by }
-        - schedules NOTHING unless the memento verified AND the ask resolved yes/
-          default-yes AND the observer marker is durable on disk
-        - makes NO task-store calls (the observer owns done-state; this seat is
-          cleared before it could mark its own row)
+        - returns { status: scheduled|declined|aborted, reason, marker_path, fire_token_path, expected_return_by }
+        - makes NO task-store calls (the observer owns done-state)
     """
     refusal = _refuse_borrowed_identity( "self_respin" )
     if refusal is not None: return refusal
@@ -3305,61 +3264,22 @@ def spawn_sessions(
     model              : Optional[ str ] = None
 ) -> dict:
     """
-    **[SPAWN — host-side; launches real Claude Code sessions]** Spin up `count`
-    headless reviewer sessions on this (the manager's) behalf.
+    **[SPAWN — host-side; launches real Claude Code sessions]** Spin up `count` headless reviewer sessions for this manager.
 
-    Each child boots as a real interactive `claude` in a detached tmux session,
-    fires SessionStart (so it gets its own voice persona — Extra-N when the named
-    pool is exhausted), and reads `task_prompt` as its initial brief. Lineage is
-    recorded against this manager's session so `dismiss_sessions` /
-    `list_spawned_sessions` can find them. Results flow back over the existing
-    commons DM threading: instruct children in `task_prompt` to post findings to
-    the returned `collection_topic` (`dm-{your-persona}`).
-
-    Cost/throttle: each child consumes Max-plan OAuth and shares the rolling
-    window — schedule non-interactive cascades off-peak (post-midnight).
+    Each child boots as a real interactive `claude` in a detached tmux session, gets its own voice persona (Extra-N when the named pool is exhausted) and reads `task_prompt` as its brief. Lineage is recorded so `dismiss_sessions` and `list_spawned_sessions` find the children. Tell children in `task_prompt` to post findings to the returned `collection_topic` (`dm-{your-persona}`). Each child spends Max-plan OAuth from the shared window: batch work is scheduled 10 AM to 1 PM EDT, see CLAUDE.md for the table; no other hours. `config_warning` in the result means the INI config manager could not be built (INI model pins and the spawn cap were NOT applied); it names the cause.
 
     Args:
         count: number of reviewers (1..INI `cc session spawn max reviewers`)
-        task_prompt: brief template; tokens {role} {manager_session_id} {index}
-            are auto-substituted, plus any you reference and supply downstream
-        role: reviewer | author | observer | manager (templated into the brief)
-        project: child project (sets cwd / CLAUDE.md)
-        persona_preference: str | list — ordered persona CHAIN ("Rio,Krishna,*"
-            or ["Rio","Krishna","*"]): transported to each child via the
-            COSA_VOICE_PERSONA_CHAIN env var; the child's SessionStart walks
-            it strictly — first FREE element wins, `*` means "then take
-            anything free", exhaustion without `*` is a LOUD fail (child
-            stays persona-less; never silently re-allocated). Sibling spawns
-            walk the same chain and take successive unclaimed elements.
-        seed_memento: prior context that restores author continuity — EITHER a
-            PATH to a memento record (what CLAUDE.md's re-spin ladder prescribes, and
-            what the child opens itself) OR the memento CONTENT as a blob. Appended
-            verbatim to the child's task prompt; never read or resolved here.
-            🔴 This line used to say "path/ref" while `render_task_prompt`'s said
-            "blob" — one parameter, two contracts, same code (row 75b36135). The full
-            statement, with the 130-transcript measurement and its two limits, lives
-            on `render_task_prompt` in session_spawner.py.
-            ⚠️ It has a SECOND job that is not about content at all: `seed_memento`
-            being truthy is what arms the re-spin wake watch below. Deliberate (row
-            b0570b67), recorded here so the coupling is not a surprise.
-        dry_run: build + print the spawn commands without launching
-        model: explicit model id to pin each child to (e.g. "claude-opus-5").
-            Resolution: this explicit param → the INI role key
-            `cc session spawn model <role>` → the INI `cc session spawn model
-            default` key (covers unknown/new roles) → None. None resolves to NO
-            `--model` flag, so the child inherits the user default (fail-open;
-            today's behavior, zero-risk rollout). The cost-split default posture
-            (2026-08-17) is Fable-5-managers (via Rick's user default, zero code)
-            / Opus-5-workers (the `claude-opus-5` INI keys). The resolved
-            model is echoed on every roster entry + at the top level (spawn-ack
-            verification).
+        task_prompt: brief template; {role} {manager_session_id} {index} and tokens you supply are substituted
+        role: reviewer | author | observer | manager (fills the brief's {role})
+        project: child project (cwd, CLAUDE.md)
+        persona_preference: str | list, an ordered chain ("Rio,Krishna,*" or a list) sent to each child as COSA_VOICE_PERSONA_CHAIN. SessionStart takes the first FREE name, then `*` takes anything free; exhausting the chain without `*` is a LOUD failure (persona-less child, never re-allocated); siblings take successive names.
+        seed_memento: a PATH to a memento record (the child opens it) or the memento CONTENT as a blob, appended verbatim to the child's prompt, never read here. Truthy also arms the re-spin wake watch.
+        dry_run: print the commands, do not launch
+        model: explicit model id (e.g. "claude-opus-5"). Resolution: this param, INI `cc session spawn model <role>`, INI `cc session spawn model default`, then None (no `--model` flag: the child inherits the user default).
 
     Returns:
-        dict: { spawned:[{session_name, requested_role, status, model, ...}],
-                manager_persona, collection_topic, model, ... } or {status:"error",...}.
-        `config_warning` is added when the INI config manager could not be built
-        (INI model pins and spawn cap NOT applied); it names the cause.
+        dict: { spawned:[{session_name, requested_role, status, model}], manager_persona, collection_topic, model } or {status:"error"}
     """
     _wait_for_sender_id()
     from lupin_mcp import session_spawner
@@ -3486,79 +3406,17 @@ def dismiss_sessions( session_names: Optional[ List[ str ] ] = None, reason: str
     """
     **[REAP — host-side]** Tear down reviewer sessions THIS manager spawned.
 
-    Kills each target's tmux session (idempotent) and drops it from the lineage
-    manifest, freeing its Extra-N/pool persona slot. With `session_names=None`,
-    reaps ALL sessions this manager spawned.
+    Kills each target's tmux session (idempotent), drops it from the lineage manifest, frees its persona slot. `session_names` names the tmux sessions; None reaps ALL sessions this manager spawned. `reason` is recorded. Returns `dismissed`, `remaining`.
 
-    `write_memento` (defaults to the INI `cc session spawn write memento default`)
-    makes the reap PROVE each seat has a fresh+complete memento on disk BEFORE kill,
-    at the derivable slot `io/mementos/<persona-slug>.md` — and, when one is absent,
-    DM the still-alive child to write it and WAIT (bounded) for it to appear, so its
-    specialization survives a future re-spawn (pass that path back as `seed_memento`).
-    The result's `memento_outcomes` carries an EXPLICIT per-seat verdict (verified /
-    written / prior_holder_present / unproven_present / unparseable_present /
-    timeout_no_memento / skipped)
-    — a seat that produced no PROVABLE memento fails VISIBLY, never as a silent success
-    (row 0a36d83d — the flag used to be a no-op). The verdict splits FOUR recovery
-    actions apart, and the split exists so a manager can tell them apart WITHOUT
-    opening the file: `unproven_present` (THIS seat's own memento is at the slot — the
-    header parses and names this session — but a gate failed, and the reason names
-    which; the writer is fine, so a small staleness means it was still writing when the
-    window closed), `unparseable_present` (a file is on disk but carries NO parseable
-    memento-record header, so nothing attests to who wrote it or when — a WRITER
-    bypassed memento_io; OPEN AND READ it, RECOVERABLE), `prior_holder_present` (the
-    file at the slot parsed fine and names ANOTHER session — this seat's memento is NOT
-    there, so do not read it expecting their context; hunt for one written to the wrong
-    place, usually the repo root, or accept it was never written), and
-    `timeout_no_memento` (nothing readable on disk at all — ABSENT, unrecoverable).
-    The first two were ONE verdict until row 48b5f19e: measured on a live reap
-    2026-08-29, a seat 45 seconds past the poll deadline with a perfect memento and a
-    seat that hand-wrote a header-less slot drew the same string, and both read as
-    failures when only one was. Before the middle one
-    existed, a race and a lost memento returned the SAME verdict ten minutes apart
-    (row 3b0c5f90), which forced a manual check on every reap.
+    Re-spinning? Pass `respin_personas=["cheech","rio"]` for every seat you are bringing back; their rows keep owner. By default a reap moves each worker's open store rows off them (closed if receipted, else reassigned to the accountable or reaping manager), so a re-spin that omits the name leaves its rows on YOU. The result echoes `retained_owner_personas` (skipped) and `retained_unmatched` (named but not reaped in this batch: a typo protects nothing: check it). A named seat that does not return leaves its rows on a persona with no live session, and nothing checks. Retention is keyed on the persona NAME and freed names are re-granted, so a re-granted name can retain the wrong seat's rows: reap and re-spin in one batch.
 
-    ⚠️ **Read `memento_alarm` FIRST.** It is a single top-level line naming every seat
-    about to be killed without a proven memento, and it is `None` when there is nothing
-    to say. The per-seat verdicts were already honest and still got missed, because they
-    sit in a nested dict while the reap reports success around them (row 3b0c5f90).
-    A seat already carrying a fresh memento (a manual "prepare for re-spin" the
-    manager already did) is NOT asked again — the guard suppresses the duplicate.
+    Mementos: `write_memento` (None = INI `cc session spawn write memento default`, else a bool) makes the reap prove each seat has a fresh, complete memento at `io/mementos/<persona-slug>.md` before killing it; if none is there it DMs the live child to write one and waits (bounded). Pass that path back as `seed_memento` on respawn. Read `memento_alarm` first: names each seat killed without a proven memento, `None` if none. A seat with a fresh memento is not asked again.
 
-    ⚠️ **A REAP UN-ASSIGNS THE WORKER'S STORE ROWS. A RE-SPIN MUST SAY SO.**
-    By default every reaped worker's non-terminal rows are reconciled away from
-    them (closed-if-receipt, else reassigned to the accountable/reaping manager)
-    so nothing is left owned by a persona with no live session. When you are
-    re-spinning a persona straight back, that is WRONG: the memento carries the
-    context forward but ownership does not follow it, so the store stops showing
-    anyone on the lane — and it is self-concealing, because the rows land on YOU,
-    making your board look fuller while a worked lane reads as unworked.
-
-    **Pass `respin_personas=["cheech","rio"]` for every seat you are bringing
-    back.** Those rows keep their owner. The result echoes
-    `retained_owner_personas` (actually skipped) and `retained_unmatched` (named
-    but not reaped in this batch — a typo protects nothing, so check it).
-
-    ⚠️ **Two known limits, both real, neither hidden:**
-    1. **Retention is an unverified claim.** Nothing checks that the re-spin
-       actually happens. Name a seat and fail to bring it back and its rows sit
-       on a persona with no live session — the exact orphan the reconciliation
-       exists to prevent, now indistinguishable from a live-owned lane. The claim
-       is yours to keep.
-    2. **It is keyed on the persona NAME, and a name is not a seat.** A name can
-       be held by more than one live session, and freed names are re-granted
-       after a reap — so a claim naming a re-granted name can retain the WRONG
-       seat's rows. Prefer reaping-and-respinning in one batch you control.
-
-    Args:
-        session_names: explicit tmux session names, or None = all mine
-        reason: recorded teardown reason
-        write_memento: None → use INI default; else explicit bool
-        respin_personas: personas coming straight back — keep their row ownership
-
-    Returns:
-        dict: { dismissed:[{session_name, status}], remaining, memento_alarm,
-                memento_outcomes, retained_owner_personas, retained_unmatched, ... }
+    `memento_outcomes` gives one verdict per seat: verified, written, skipped, or a visible failure:
+    - `unproven_present`: its own memento is there but a gate failed; the reason names which (small staleness: still writing).
+    - `unparseable_present`: a file with no memento-record header (a writer bypassed memento_io): read it.
+    - `prior_holder_present`: names ANOTHER session, so not theirs to read; look elsewhere (usually the repo root) or accept it was never written.
+    - `timeout_no_memento`: nothing on disk; unrecoverable.
     """
     refusal = _refuse_borrowed_identity( "dismiss_sessions" )
     if refusal is not None: return refusal
@@ -3638,51 +3496,23 @@ def dismiss_sessions( session_names: Optional[ List[ str ] ] = None, reason: str
 @mcp.tool
 def list_spawned_sessions() -> dict:
     """
-    **[READ — host-side]** List the sessions THIS manager spawned, on TWO axes:
-    LIVENESS (probed from tmux) and IDENTITY (read from each child's bridge).
+    **[READ — host-side]** List the sessions THIS manager spawned, on two axes: LIVENESS (probed from tmux) and IDENTITY (read from each child's bridge).
 
-    ⚠️ THIS IS NOT A GENERAL HEALTH CHECK, and a live row is NOT proof of who is
-    sitting in it. The persona is written by the CHILD's SessionStart into the
-    child's own bridge file, well after the parent recorded the seat — so a seat
-    can be genuinely alive and genuinely nameless at the same time. Before you
-    address a seat by persona name, read `identity_complete`; if it is False,
-    `identity_warning` names every seat you must NOT address by name.
+    This is not a general health check, and a live row is not proof of who sits in it. A child's SessionStart writes its persona into its own bridge after the parent recorded the seat, so a seat can be alive and nameless. Before you address a seat by persona name, read `identity_complete`; if False, `identity_warning` names every seat you must NOT address by name.
 
     Per row, `persona_state` is one of:
-        "allocated"         — bridge found, persona named; `persona` is that name
-        "none"              — bridge found, persona explicitly null. The child
-                              wrote a bridge but has no persona in it.
-        "unknown_no_bridge" — no bridge on disk at all. Either the child is
-                              mid-boot (a real race — the parent writes the seat
-                              before the child writes its bridge) or its
-                              SessionStart never completed.
+        "allocated"         bridge found, persona named; `persona` is that name
+        "none"              bridge found, persona explicitly null
+        "unknown_no_bridge" no bridge on disk: the child is mid-boot, or its SessionStart never completed
+        "unreadable"        bridge found, persona record malformed: an instrument failure, NOT an absent persona
+    `persona` is null for every state but "allocated", and a null persona always comes with a state saying why.
 
-    ⏱️ NEITHER of those two is a failure verdict by itself. Measured on a live
-    spawn: a HEALTHY child goes unknown_no_bridge → none → allocated in about
-    one second. Both states are normal at one second old and damning at forty
-    minutes old, and nothing on disk can tell those apart — so read them WITH
-    `age_seconds`. The state reports what is on disk; the age is your evidence.
+    Neither "none" nor "unknown_no_bridge" is a failure by itself: a healthy child goes unknown_no_bridge, then none, then allocated in about a second. Both are normal at one second old and damning at forty minutes, so read them WITH `age_seconds`.
 
-    📍 WHAT THIS ANSWERS, AND WHAT IT DOES NOT. This repairs the ROSTER's
-    identity axis only. A persona-less session is inconsistently visible across
-    the identity-bearing surfaces, and they contradict each other — measured on
-    one live session, simultaneously: this roster said alive/live, `dm_send`
-    said recipient_unresolved (listing 7 live peers and omitting it), and no
-    bridge existed for it at all. An identity-verified row here is NOT a promise
-    that the session is addressable by DM, and `identity_complete: true` says
-    nothing about the other surfaces. Do not read this tool as the fleet's
-    source of truth for identity; there isn't one.
-        "unreadable"        — bridge found but the persona record is malformed.
-                              Instrument failure, NOT an absent persona.
-    `persona` is null for every state but "allocated" — a name is only ever
-    returned when it was actually read, and a null persona always arrives with a
-    state explaining why.
+    An identity-verified row is NOT a promise the session is addressable by DM (`dm_send` can still answer recipient_unresolved), and `identity_complete: true` says nothing about other surfaces. This roster is not the fleet's source of truth for identity.
 
     Returns:
-        dict: { sessions:[{session_name, requested_role, status, alive, model,
-                           persona, persona_state, identity_verified, age_seconds}],
-                count, identity_complete, identity_warning,
-                unattributable_bridges, manager_session_id }
+        dict: { sessions:[{session_name, requested_role, status, alive, model, persona, persona_state, identity_verified, age_seconds}], count, identity_complete, identity_warning, unattributable_bridges, manager_session_id }
     """
     _wait_for_sender_id()
     from lupin_mcp import session_spawner
