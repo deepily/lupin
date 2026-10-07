@@ -16,6 +16,7 @@ cosa.repo.doc_lint.jev_transport, the one HTTP path to Jev, and the key comes fr
 variable JEV_API_TOASTER only. A server started without the variable reports KEY_UNREADABLE.
 """
 import concurrent.futures
+import fnmatch
 import gzip
 import hashlib
 import json
@@ -58,6 +59,8 @@ PAGE_TEMPLATE = {
                       "unrelated": "The capability does not meaningfully overlap the need." } }
 MAX_PAGES        = 5                                          # the most capability pages Stage A may choose
 INDEX_LINE_RE    = re.compile( r"^- \[\[([\w-]+)\]\]\s*(?:—|-)?\s*(.*)$" )
+SCOPE_RE         = re.compile( r"`((?:cosa|lupin_\w+)[\w.]*)`(?:\s*\(([^)]*)\))?" )   # a named package, then an optional module list
+MODULE_NAME_RE   = re.compile( r"^[\w*]+$" )
 
 
 class ReuseError( Exception ):
@@ -477,6 +480,38 @@ def sweep( ctx, need, entries, frozen=False, template=None, model=None ):
              "attempts_answered": spent[ "answered" ], "attempts_failed": spent[ "failed" ], "failed_attempts": failed_attempts }
 
 
+def module_of( file ):
+    """Ensures: returns the dotted module of a src/ Python file, else None."""
+    if not file.startswith( "src/" ) or not file.endswith( ".py" ): return None
+    parts = file[ 4:-3 ].split( "/" )
+    return ".".join( parts[ :-1 ] if parts[ -1 ] == "__init__" else parts )
+
+
+def scope_of_line( text ):
+    """
+    The module paths an index line covers.
+
+    Ensures:
+        - a named package with a parenthesised module list covers only those modules, written pkg.module
+        - a named package with no list, or a parenthesis that is prose, covers the whole package
+        - returns the sorted, de-duplicated paths; a path may carry a * wildcard
+    """
+    out = set()
+    for pkg, listed in SCOPE_RE.findall( text ):
+        names = [ n.strip() for n in listed.split( "," ) ] if listed else []
+        if names and all( MODULE_NAME_RE.match( n ) for n in names ): out.update( f"{pkg}.{n}" for n in names )
+        else: out.add( pkg )
+    return sorted( out )
+
+
+def in_scope( file, scope ):
+    """Ensures: True when the file's module, or a package above it, matches a scope path."""
+    mod = module_of( file )
+    if mod is None: return False
+    parts = mod.split( "." )
+    return any( fnmatch.fnmatchcase( ".".join( parts[ :i ] ), s ) for s in scope for i in range( 1, len( parts ) + 1 ) )
+
+
 def page_candidates( wiki_dir, symbols ):
     """
     The capability pages the page-first step may ask Jev about.
@@ -484,12 +519,13 @@ def page_candidates( wiki_dir, symbols ):
     Requires:
         - symbols are the index's public symbol dicts, with id and file
     Ensures:
-        - returns [ { slug, text, files } ] in the order of the wiki index file: one per bullet line whose page exists
-          under capabilities/ and pins at least one symbol the index holds
-        - text is the line after its link; files are the sorted source files those symbols live in
-        - a pin that names no indexed symbol is ignored; a line the egress screen would drop is left out
+        - returns [ { slug, text, scope } ] in the order of the wiki index file: one per bullet line whose page exists
+          under capabilities/, pins at least one symbol the index holds, and names at least one package
+        - text is the line after its link; scope is scope_of_line() of that text
+        - pins only decide that a page can be asked about; a pin that names no indexed symbol is ignored
+        - a line the egress screen would drop is left out
     """
-    wiki, file_of = pathlib.Path( wiki_dir ), { r[ "id" ]: r[ "file" ] for r in symbols }
+    wiki, indexed = pathlib.Path( wiki_dir ), { r[ "id" ] for r in symbols }
     toc = wiki / "INDEX.md"
     out = []
     for line in toc.read_text( encoding="utf-8" ).splitlines() if toc.exists() else []:
@@ -497,16 +533,17 @@ def page_candidates( wiki_dir, symbols ):
         page = wiki / "capabilities" / f"{m.group( 1 )}.md" if m else None
         if page is None or not page.exists(): continue
         front = wl.FRONT_RE.match( page.read_text( encoding="utf-8" ) )
-        files = sorted( { file_of[ sid ] for sid, _ in wl.PIN_RE.findall( front.group( 1 ) if front else "" ) if sid in file_of } )
-        text  = m.group( 2 ).strip()
-        if files and not c1_hits( { "id": m.group( 1 ), "sig": "", "doc": text } ):
-            out.append( { "slug": m.group( 1 ), "text": text, "files": files } )
+        pinned = any( sid in indexed for sid, _ in wl.PIN_RE.findall( front.group( 1 ) if front else "" ) )
+        text   = m.group( 2 ).strip()
+        scope  = scope_of_line( text )
+        if pinned and scope and not c1_hits( { "id": m.group( 1 ), "sig": "", "doc": text } ):
+            out.append( { "slug": m.group( 1 ), "text": text, "scope": scope } )
     return out
 
 
 def pages_digest( pages ):
-    """Ensures: returns "" for no pages, else a sha1 over each page's slug and pinned files."""
-    return sha( canonical( [ [ p[ "slug" ], p[ "files" ] ] for p in pages ] ) ) if pages else ""
+    """Ensures: returns "" for no pages, else a sha1 over each page's slug and scope."""
+    return sha( canonical( [ [ p[ "slug" ], p[ "scope" ] ] for p in pages ] ) ) if pages else ""
 
 
 def l0_lines( wiki_dir ):
@@ -659,7 +696,7 @@ def _route( ctx, need, entries, pages, flags, frozen=False, plan=None, template=
     Decide one question: ask the pages, sweep what they cover, then fall back to every entry.
 
     Requires:
-        - entries are the sendable index entries; pages are page_candidates() dicts (slug, text, files)
+        - entries are the sendable index entries; pages are page_candidates() dicts (slug, text, scope)
         - when frozen, plan is the stored { asked, chosen, covered } and every answer must already be cached
     Ensures:
         - with no pages, one sweep of every entry decides (route "full")
@@ -681,7 +718,7 @@ def _route( ctx, need, entries, pages, flags, frozen=False, plan=None, template=
         chosen  = _choose_pages( sa[ "answers" ], policy )
         wanted  = { c[ "slug" ] for c in chosen }
         covered = [ e for e in entries if e[ "id" ] in set( plan[ "covered" ] ) ] if plan is not None else \
-                  [ e for e in entries if e[ "file" ] in { f for p in pages if p[ "slug" ] in wanted for f in p[ "files" ] } ]
+                  [ e for e in entries if any( in_scope( e[ "file" ], p[ "scope" ] ) for p in pages if p[ "slug" ] in wanted ) ]
         plan_out = { "asked": [ { "slug": a[ "id" ], "text": a[ "doc" ] } for a in asked ], "chosen": chosen, "covered": [ e[ "id" ] for e in covered ] }
         if covered:
             sb = sweep( ctx, need, covered, frozen=frozen, template=template, model=model )
