@@ -4,8 +4,9 @@
 #
 # What it checks. Git hands a pre-push hook one line per ref on standard input:
 #     <local ref> <local sha> <remote ref> <remote sha>
-# For each commit being pushed, this script checks that commit, not the working tree. It checks
-# the commit out into a throwaway worktree and runs that commit's own src/tests/run-doclint-gate.sh.
+# This script checks the tip of each pushed ref: the tree the remote will hold after the push.
+# It does not check the working tree, and it does not check the commits below a tip. It checks
+# the tip out into a throwaway worktree and runs that commit's own src/tests/run-doclint-gate.sh.
 # A dirty working tree, or a push made from another branch, cannot change what is checked.
 #
 # Install it deliberately, as the pre-commit chain is installed. The hooks directory is shared by
@@ -18,8 +19,12 @@
 #     1        a finding remains; the push is refused and the findings are printed
 #     other    the gate could not check; the push is refused, because a check that did not
 #              run is not a pass
-# A commit that has no gate script predates the gate. It is allowed, with a loud line, so an
-# old branch can still be pushed. A deleted ref is not checked.
+# A commit predates the gate when no commit in its history ever held the gate script. It is
+# allowed, with a loud line, so an old branch can still be pushed. A commit whose history held
+# the script and that lacks it now has removed the gate, and is refused. A deleted ref is not checked.
+#
+# A limit. A commit that edits the gate or the linter so that it always passes is not caught
+# here. Review and the merge pyramid are the control for that.
 #
 # Escape hatch: `git push --no-verify`. The merge pyramid runs the same gate and has no hatch.
 
@@ -42,6 +47,10 @@ trap cleanup EXIT
 check_commit() {
     local sha="$1" rc
     if ! git cat-file -e "$sha:$GATE_REL" 2> /dev/null; then
+        if [ -n "$( git log -1 --format=%H "$sha" -- "$GATE_REL" 2> /dev/null )" ]; then
+            echo "[pre-push-chain] REFUSED: ${sha:0:9} has removed $GATE_REL, which its history held." >&2
+            return 2
+        fi
         echo "[pre-push-chain] SKIPPED doc-lint for ${sha:0:9}: that commit has no $GATE_REL" >&2
         return 0
     fi

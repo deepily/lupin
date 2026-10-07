@@ -1,7 +1,7 @@
 """
 The pre-push hook, driven by real pushes from a scratch repository to a scratch bare remote.
 
-The hook checks the commit being pushed, in a throwaway worktree, with that commit's own gate.
+The hook checks the tip of each pushed ref, in a throwaway worktree, with that commit's own gate.
 Each test asserts both what git said and whether the remote received the ref, because a hook
 that prints a refusal and still lets the push through looks the same on the terminal.
 """
@@ -147,6 +147,87 @@ def test_a_gate_that_cannot_check_refuses_the_push( work ):
     assert done.returncode != 0
     assert f"[pre-push-chain] REFUSED the push: the doc-lint gate could not check {sha[ :9 ]} (exit 2)." in done.stderr
     assert not _remote_has( remote, "refs/heads/main" )
+
+
+def test_a_commit_that_removes_the_gate_its_history_held_is_refused( work ):
+    repo, remote = work
+    _write( repo, "src/app/loud.py", LOUD )
+    _commit( repo, "loud, with the gate present" )
+    os.remove( repo / "src" / "tests" / "run-doclint-gate.sh" )
+    sha = _commit( repo, "the gate script is deleted" )
+
+    done = _git( repo, "push", "-q", "origin", "main", check=False )
+
+    assert done.returncode != 0
+    assert f"[pre-push-chain] REFUSED: {sha[ :9 ]} has removed src/tests/run-doclint-gate.sh, which its history held." in done.stderr
+    assert "SKIPPED" not in done.stderr
+    assert not _remote_has( remote, "refs/heads/main" )
+
+
+def test_a_tip_that_cannot_be_checked_out_refuses_the_push( work ):
+    repo, remote = work
+    _write( repo, "src/app/a.py", CLEAN )
+    sha = _commit( repo, "clean" )
+    _write( repo, ".claude/worktrees", "a file where the worktree directory must go\n" )
+
+    done = _git( repo, "push", "-q", "origin", "main", check=False )
+
+    assert done.returncode != 0
+    assert f"[pre-push-chain] REFUSED: could not check out {sha[ :9 ]} to lint it. Nothing was checked." in done.stderr
+    assert not _remote_has( remote, "refs/heads/main" )
+
+
+def test_two_refs_at_one_commit_are_linted_once( work ):
+    repo, remote = work
+    _write( repo, "src/app/loud.py", LOUD )
+    _commit( repo, "loud" )
+
+    done = _git( repo, "push", "-q", "origin", "main", "main:refs/heads/copy", check=False )
+
+    assert done.returncode != 0
+    assert done.stderr.count( "DOCLINT GATE FAILED" ) == 1
+    assert not _remote_has( remote, "refs/heads/main" ) and not _remote_has( remote, "refs/heads/copy" )
+
+
+def test_one_bad_ref_among_two_refuses_the_whole_push( work ):
+    repo, remote = work
+    _write( repo, "src/app/a.py", CLEAN )
+    _commit( repo, "clean" )
+    _git( repo, "branch", "good" )
+    _write( repo, "src/app/loud.py", LOUD )
+    _commit( repo, "loud" )
+
+    done = _git( repo, "push", "-q", "origin", "good", "main", check=False )
+
+    assert done.returncode != 0
+    assert "DOCLINT GATE PASSED" in done.stderr and "DOCLINT GATE FAILED" in done.stderr
+    assert not _remote_has( remote, "refs/heads/good" ) and not _remote_has( remote, "refs/heads/main" )
+
+
+def test_a_tag_on_a_commit_with_a_finding_is_refused( work ):
+    repo, remote = work
+    _write( repo, "src/app/loud.py", LOUD )
+    _commit( repo, "loud" )
+    _git( repo, "tag", "-a", "v1", "-m", "an annotated tag" )
+
+    done = _git( repo, "push", "-q", "origin", "v1", check=False )
+
+    assert done.returncode != 0
+    assert "DOCLINT GATE FAILED" in done.stderr
+    assert not _remote_has( remote, "refs/tags/v1" )
+
+
+def test_only_the_tip_is_checked_so_a_finding_fixed_below_the_tip_is_pushed( work ):
+    repo, remote = work
+    _write( repo, "src/app/loud.py", LOUD )
+    _commit( repo, "loud" )
+    _write( repo, "src/app/loud.py", CLEAN )
+    sha = _commit( repo, "reworded" )
+
+    done = _git( repo, "push", "-q", "origin", "main", check=False )
+
+    assert done.returncode == 0, done.stderr
+    assert _git( remote, "rev-parse", "refs/heads/main" ).stdout.strip() == sha
 
 
 def test_deleting_a_remote_branch_is_not_checked( work ):
