@@ -439,8 +439,17 @@ def test_a_SEAT_transition_is_recorded_exactly_as_it_declared( repo, settings ):
 # `account_email`, which comes off a signature-validated token — the opposite of the
 # caller-declared string this census exists to catch. An exemption that let a door record
 # a typed name would be the defect; this one records something a caller cannot forge.
+#
+# `ask_to_unpark` joined 2026-10-07 (row 9dde52ef). It is a POST, so the route-derived half finds
+# it, and it writes a NOTIFICATION CARD, not a task row: the row is only locked and read, so the
+# repo-derived half never finds it. It is not exempt from attribution: the card names its asker
+# through `recorded_actor`, and the manager check behind it reads the server's session bridge.
+# An exempt door may still lock and read a row, by a named method only. The assertion below
+# fails on any repository call not listed here and on any write method.
+EXEMPT_READ_ONLY_REPO_CALLS = { "ask_to_unpark": ( "get_by_id_for_update", ) }
+
 NOT_STORE_WRITERS = { "patch_flow_ratio_settings", "delete_flow_ratio_settings",
-                      "set_manager_pull", "patch_approval_settings" }
+                      "set_manager_pull", "patch_approval_settings", "ask_to_unpark" }
 
 
 def _mutating_handlers():
@@ -599,9 +608,12 @@ def test_the_flow_ratio_settings_exemption_is_real_and_not_a_shrug():
     for name in NOT_STORE_WRITERS:
         assert name in handlers, f"exemption names {name}, which is not a route at all"
         body = _body_of( name )
-        assert "repo." not in body, (
-            f"{name} is exempted as a non-store-writer but touches a repository"
+        allowed = EXEMPT_READ_ONLY_REPO_CALLS.get( name, ( ) )
+        used    = set( re.findall( r"\brepo\.(\w+)\(", body ) )
+        assert used <= set( allowed ), (
+            f"{name} is exempted as a non-store-writer but calls repo methods beyond its named read-only ones: {sorted( used - set( allowed ) )}"
         )
+        assert not used & set( REPO_WRITE_METHODS ), f"{name} calls a repository WRITE method"
 
 
 # ───────────────────────────── the helper's own edges ────────────────────────

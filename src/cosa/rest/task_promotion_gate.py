@@ -779,6 +779,36 @@ def describe_who_answered( answered_by ):
 UNPARK_ASK_KIND = "unpark_ask"
 UNPARK_MOVE     = "parked->queued"
 
+# How long an un-park card waits for the operator. The ask is not held open (the manager is
+# not blocked on it), so the wait can be long; the answer door still takes a late answer for
+# its own grace period after this.
+UNPARK_ASK_TIMEOUT_SECONDS = 600
+
+
+def unpark_ask_text( actor, task_id, title ):
+    """
+    The question and the card abstract for an un-park ask.
+
+    Requires:
+        - actor is the asking manager's "persona + session id" string; title may be None
+
+    Ensures:
+        - returns a (question, abstract) pair
+        - the question names the row by its title and never carries the id, which a voice would read as gibberish
+        - the abstract names the row id, its title and the move, so the operator knows what a yes covers
+        - the abstract ends with `UNANSWERED_MEANS`, because silence refuses here as it does for a promotion
+    """
+    question = f"{actor} asks to un-park: {_spoken_title( title )}. Allow it?"
+    abstract = (
+        f"**Un-park a row**\n\n"
+        f"- row: `{task_id}`\n"
+        f"- title: {title}\n"
+        f"- move: parked to queued, nothing else\n"
+        f"- requested by: {actor}\n\n"
+        f"{UNANSWERED_MEANS}"
+    )
+    return question, abstract
+
 
 def unpark_ask_payload( task_id ):
     """

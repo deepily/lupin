@@ -58,6 +58,14 @@ Each item carries far richer vocabulary than the old harness list:
 - **HTTP**: `:7999 /api/tasks` — `routers/tasks.py` (handler) backed by `task_repository.py`. `GET /api/tasks?owner_persona=&status=` returns full-fidelity rows; `count_only=true` returns `{count}` via `func.count` (no row serialization) for the cheap poke path.
 - **MCP verbs** (what agents call): `task_create`, `task_query`, `task_transition` (cosa-voice server). `task_query` is the always-allowed owed-work read; `task_create` mints typed/cross-persona items; `task_transition` applies one state change with receipts.
 
+### Un-parking on the operator's card (row 9dde52ef)
+
+A park is the operator's own not-now, so un-parking is approver-only. One exception, ruled by Rick: a **manager** may move a row `parked -> queued` when the operator answered **yes on a card the server made for that row and that move**. Nothing else changes: `parked -> in_progress` and `parked -> done` stay refused, and a worker is refused whatever it types.
+
+- **Ask**: `POST /api/tasks/{task_id}/unpark-ask` (manager seat only; MCP verb `task_ask_unpark`). The server inserts the card itself, writes `payload = { kind: "unpark_ask", task_id, move: "parked->queued" }` (a column no public door can write on a question; `test_the_files_that_write_a_notification_payload_are_pinned` holds that), pushes it, and returns `card_id`. One unanswered card per row and park; a second ask gets 409 naming the first. The card text names the row id and title, and silence refuses.
+- **Cite**: after the operator answers yes, the manager sends the ordinary transition `parked -> queued` with `receipt_refs = { "approval_card": "<card_id>" }`. The door reads the card from the notification table and judges it in `task_promotion_gate.unpark_card_refusal`: exists, asked a question, answered (not the timed-out default), yes, posted on the operator's own login (`answered_by`), payload names this row and this move, made after the row was parked, and never used. Only then does `refusal_for_admission( unpark_card_ok=True )` let the move through.
+- **Record**: the server writes its own resolved card id onto the event, over whatever the caller typed. That event is the single-use record (`TaskRepository.approval_card_ids_used` counts `parked->queued` events only). The `approval_card` key is refused on every other move and for every caller but a manager's valid un-park, with one text, so a card cannot be burned by citing it and its existence is not disclosed.
+
 ---
 
 ## 3. Reader 1 — the heartbeat self-poke (Stop-hook liveness path)

@@ -166,6 +166,28 @@ class NotificationRepository( BaseRepository[Notification] ):
             state              = "created"
         )
 
+    def find_live_unpark_card( self, task_id: uuid.UUID, parked_since: datetime, now: datetime ) -> Optional[Notification]:
+        """
+        The newest un-park card for this row and this park that is still waiting for an answer.
+
+        Requires:
+            - task_id is the parked row; parked_since is when it was parked; now is aware
+
+        Ensures:
+            - matches only a card whose server-written payload names this row, made after the park
+            - a card is live while it asked a question, is created or delivered, and has not expired
+            - an answered, expired or older-park card is not returned
+            - returns None when there is none
+        """
+        return self.session.query( Notification ).filter(
+            Notification.payload[ "kind" ].astext    == "unpark_ask",
+            Notification.payload[ "task_id" ].astext == str( task_id ),
+            Notification.created_at                  >  parked_since,
+            Notification.response_requested.is_( True ),
+            Notification.state.in_( ( "created", "delivered" ) ),
+            Notification.expires_at                  >  now,
+        ).order_by( desc( Notification.created_at ) ).first()
+
     def get_by_recipient( self, recipient_id: uuid.UUID, limit: int = 100, offset: int = 0 ) -> List[Notification]:
         """
         Get notifications for a recipient.

@@ -295,6 +295,22 @@ def test_the_single_use_read_asks_for_the_events_that_carry_the_card():
     assert "receipt_refs ->> 'approval_card'" in str( where ) and str( card_id ) in str( where )
 
 
+def test_the_live_card_read_filters_on_the_payload_the_park_the_state_and_the_expiry():
+    session = MagicMock()
+    query   = session.query.return_value
+    query.filter.return_value   = query
+    query.order_by.return_value = query
+    query.first.return_value    = "the newest card"
+    found = NotificationRepository( session ).find_live_unpark_card( ROW_ID, PARKED_AT, CARD_MADE_AT )
+    assert found == "the newest card"
+    where = " ".join( str( clause.compile( dialect=postgresql.dialect(), compile_kwargs={ "literal_binds": True } ) )
+                      for clause in query.filter.call_args.args )
+    for fragment in ( "(notifications.payload ->> 'kind') = 'unpark_ask'", f"(notifications.payload ->> 'task_id') = '{ROW_ID}'",
+                      "notifications.created_at > '2026-10-07 20:00:00+00:00'", "notifications.response_requested IS true",
+                      "notifications.state IN ('created', 'delivered')", "notifications.expires_at > '2026-10-07 20:05:00+00:00'" ):
+        assert fragment in where, ( fragment, where )
+
+
 def test_the_single_use_read_returns_nothing_for_a_card_no_event_names():
     session = MagicMock()
     query   = session.query.return_value
@@ -600,9 +616,10 @@ def _create_notification_calls_that_pass_a_payload():
 
 
 def test_the_files_that_write_a_notification_payload_are_pinned():
+    """The ack watcher writes a payload on rows that ask nothing; the un-park door, on a card."""
     found, walked = _create_notification_calls_that_pass_a_payload()
     assert walked > 200, "the sweep found too few files to mean anything"
-    assert found == { "rest/commons_ack_watcher.py" }, found
+    assert found == { "rest/commons_ack_watcher.py", "rest/routers/tasks.py" }, found
 
 
 def test_the_payload_guard_would_notice_a_call_that_passes_one( tmp_path ):
@@ -610,3 +627,175 @@ def test_the_payload_guard_would_notice_a_call_that_passes_one( tmp_path ):
     import ast
     planted = ast.parse( "repo.create_notification( message='x', payload={ 'kind': 'unpark_ask' } )" )
     assert any( isinstance( n, ast.Call ) and any( k.arg == "payload" for k in n.keywords ) for n in ast.walk( planted ) )
+
+
+# ── the mint: POST /api/tasks/{id}/unpark-ask ───────────────────────────────
+
+OPERATOR_ID = uuid.UUID( "33333333-3333-4333-8333-333333333333" )
+
+
+class _MintTable( _Cards ):
+    """The notification table for the mint: it records what was created, pushed and moved."""
+
+    def __init__( self ):
+        super().__init__()
+        self.waiting = None
+        self.states  = [ ]
+
+    def create_notification( self, **fields ):
+        card = Notification( id=uuid.uuid4(), created_at=CARD_MADE_AT, state="created", **fields )
+        self.rows[ card.id ] = card
+        return card
+
+    def find_live_unpark_card( self, task_id, parked_since, now ):
+        self.asked = ( task_id, parked_since )
+        return self.waiting
+
+    def update_state( self, card_id, state ):
+        self.states.append( ( card_id, state ) )
+        self.rows[ card_id ].state = state
+
+
+class _Queue:
+    def __init__( self ): self.pushed = [ ]
+    def push_notification( self, **fields ): self.pushed.append( fields )
+
+
+class _Ws:
+    def __init__( self, connected=True ): self.connected = connected
+    def is_user_connected( self, user_id ): return self.connected
+
+
+@pytest.fixture
+def mint( monkeypatch, repo, seats, cards ):
+    table = _MintTable()
+    monkeypatch.setattr( tasks, "NotificationRepository", table )
+    cards.rows = table.rows
+    queue, ws = _Queue(), _Ws()
+    monkeypatch.setattr( "cosa.rest.user_service.get_user_by_email", lambda email: { "id": str( OPERATOR_ID ) } )
+    monkeypatch.setattr( "lupin_cli.notifications.notification_models.resolve_target_user", lambda *a, **k: "rick@example.com" )
+    monkeypatch.setattr( tasks, "datetime", type( "Clock", ( ), { "now": staticmethod( lambda tz=None: CARD_MADE_AT ) } ) )
+    table.queue, table.ws = queue, ws
+    return table
+
+
+def _ask( item, actor=MANAGER, mint_table=None, body=None ):
+    app = FastAPI()
+    app.include_router( tasks.router )
+    app.dependency_overrides[ require_api_key_or_jwt ]      = lambda: "test-user"
+    app.dependency_overrides[ authenticated_account_email ] = lambda: None
+    app.dependency_overrides[ tasks.get_notification_queue ] = lambda: mint_table.queue
+    app.dependency_overrides[ tasks.get_websocket_manager ]  = lambda: mint_table.ws
+    return TestClient( app ).post( f"/api/tasks/{item.id}/unpark-ask", json=body if body is not None else { "actor": actor } )
+
+
+def test_a_manager_asking_makes_one_card_bound_to_the_row_and_pushes_it( repo, settings, mint ):
+    item = _item()
+    repo.get_by_id_for_update.return_value = item
+
+    response = _ask( item, mint_table=mint )
+
+    assert response.status_code == 200, response.text
+    card = mint.rows[ uuid.UUID( response.json()[ "card_id" ] ) ]
+    assert card.payload == gate.unpark_ask_payload( ROW_ID )
+    assert card.response_requested is True and card.response_type == "yes_no" and card.response_default == "no"
+    assert card.recipient_id == OPERATOR_ID
+    assert card.expires_at == CARD_MADE_AT + timedelta( seconds = gate.UNPARK_ASK_TIMEOUT_SECONDS )
+    assert str( ROW_ID ) in card.abstract and item.title in card.abstract
+    assert item.title in card.message and str( ROW_ID ) not in card.message
+    assert len( mint.queue.pushed ) == 1
+    pushed = mint.queue.pushed[ 0 ]
+    assert pushed[ "id" ] == str( card.id ) and pushed[ "payload" ] == card.payload and pushed[ "human_only" ] is True
+    assert pushed[ "user_id" ] == str( OPERATOR_ID ) and pushed[ "response_default" ] == "no"
+    assert mint.asked == ( ROW_ID, PARKED_AT )
+
+
+def test_the_card_waits_as_delivered_when_the_operator_is_connected_and_created_when_not( repo, settings, mint ):
+    item = _item()
+    repo.get_by_id_for_update.return_value = item
+    assert _ask( item, mint_table=mint ).status_code == 200
+    mint.ws.connected = False
+    assert _ask( item, mint_table=mint ).status_code == 200
+    assert [ state for _, state in mint.states ] == [ "delivered", "created" ]
+
+
+def test_a_second_live_card_for_the_same_row_and_park_is_refused_and_names_the_first( repo, settings, mint ):
+    item = _item()
+    repo.get_by_id_for_update.return_value = item
+    mint.waiting = Notification( id=uuid.uuid4(), created_at=CARD_MADE_AT )
+
+    response = _ask( item, mint_table=mint )
+
+    assert response.status_code == 409 and str( mint.waiting.id ) in response.json()[ "detail" ]
+    assert mint.rows == { } and mint.queue.pushed == [ ]
+
+
+def test_a_worker_asking_is_refused_and_nothing_is_made( repo, settings, mint ):
+    item = _item()
+    repo.get_by_id_for_update.return_value = item
+
+    response = _ask( item, actor=WORKER, mint_table=mint )
+
+    assert response.status_code == 403
+    assert mint.rows == { } and mint.queue.pushed == [ ]
+
+
+def test_asking_about_a_row_that_does_not_exist_is_a_404( repo, settings, mint ):
+    item = _item()
+    repo.get_by_id_for_update.return_value = None
+    assert _ask( item, mint_table=mint ).status_code == 404
+    assert mint.rows == { }
+
+
+@pytest.mark.parametrize( "status", [ "queued", "in_progress", "not_approved" ] )
+def test_asking_about_a_row_that_is_not_parked_is_a_409( repo, settings, mint, status ):
+    item = _item( status=status, next_chase_ts=None )
+    repo.get_by_id_for_update.return_value = item
+    response = _ask( item, mint_table=mint )
+    assert response.status_code == 409 and "not parked" in response.json()[ "detail" ]
+    assert mint.rows == { }
+
+
+def test_an_unknown_operator_account_is_a_404_and_makes_no_card( repo, settings, mint, monkeypatch ):
+    item = _item()
+    repo.get_by_id_for_update.return_value = item
+    monkeypatch.setattr( "cosa.rest.user_service.get_user_by_email", lambda email: None )
+    response = _ask( item, mint_table=mint )
+    assert response.status_code == 404 and "operator's account" in response.json()[ "detail" ]
+    assert mint.rows == { }
+
+
+def test_the_body_cannot_name_another_row_or_carry_extra_fields( repo, settings, mint ):
+    item = _item()
+    repo.get_by_id_for_update.return_value = item
+    response = _ask( item, mint_table=mint, body={ "actor": MANAGER, "task_id": str( OTHER_ROW_ID ) } )
+    assert response.status_code == 422
+    assert mint.rows == { }
+
+
+def test_the_card_the_server_makes_lets_the_manager_un_park_once_the_operator_answers( repo, settings, mint ):
+    """Both doors in one path: ask, a real yes from the operator, then cite the id."""
+    item = _item()
+    _armed( repo, item )
+
+    asked = _ask( item, mint_table=mint )
+    assert asked.status_code == 200
+    card = mint.rows[ uuid.UUID( asked.json()[ "card_id" ] ) ]
+    _answered_yes_through_the_real_door( card )
+
+    moved = _post( item, "queued", MANAGER, receipt_refs={ "approval_card": str( card.id ) } )
+
+    assert moved.status_code == 200, moved.text
+    assert repo.apply_transition.call_args.kwargs[ "receipt_refs" ][ "approval_card" ] == str( card.id )
+
+
+def test_the_card_the_server_makes_does_not_let_the_manager_un_park_before_the_operator_answers( repo, settings, mint ):
+    item = _item()
+    _armed( repo, item )
+    asked = _ask( item, mint_table=mint )
+    card  = mint.rows[ uuid.UUID( asked.json()[ "card_id" ] ) ]
+
+    moved = _post( item, "queued", MANAGER, receipt_refs={ "approval_card": str( card.id ) } )
+
+    assert moved.status_code == 403 and "no answer yet" in moved.json()[ "detail" ]
+    repo.apply_transition.assert_not_called()

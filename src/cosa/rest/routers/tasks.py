@@ -47,6 +47,7 @@ from cosa.rest import task_approval_settings as approval
 from cosa.rest import task_promotion_gate as promotion_gate
 from cosa.rest import task_promotion_resolver as promotion_resolver
 from cosa.rest.db.repositories.notification_repository import NotificationRepository
+from cosa.rest.routers.notifications import get_notification_queue, get_websocket_manager
 from cosa.rest.postgres_models import TaskItem, TaskPromotionTicket
 from cosa.rest import task_request_lifecycle as request_lifecycle
 from cosa.rest import task_request_pledge as pledge_rules
@@ -271,6 +272,19 @@ class TaskTransitionIn( BaseModel ):
     # was a 422 for everybody. That protection ends the moment the field is declared,
     # which is exactly why `StrictBool` lands in the same edit rather than after it.
     asynchronous  : Optional[StrictBool] = Field( default=None, description="opt in to the asynchronous promotion path (202 + ticket). Boolean ONLY — a string is refused. Ignored unless the operator flag 'task approval promotion ask asynchronous' is on." )
+
+
+class UnparkAskIn( BaseModel ):
+    """
+    Body for POST /api/tasks/{id}/unpark-ask, a manager asking for the operator's approval.
+
+    The row id comes from the path and never from the body. A caller cannot ask about one row
+    and have the card bound to another. `actor` is the declared persona and session id, which
+    finds the manager session and words the card.
+    """
+    model_config = ConfigDict( extra="forbid" )
+
+    actor : str = Field( ..., min_length=1, max_length=255 )
 
 
 class TaskCorrelateIn( BaseModel ):
@@ -2056,6 +2070,111 @@ def correlate_task(
             authority       = payload.authority,
         )
         return { "item": _serialize_item( item ), "event": _serialize_event( event ) }
+
+
+@router.post(
+    "/tasks/{task_id}/unpark-ask",
+    summary     = "Ask the operator to approve un-parking a parked row",
+    description = "A manager asks; the server makes the card (bound to this row and the move parked to queued, "
+                  "in a field only the server writes), pushes it, and returns its id. After the operator answers "
+                  "yes, the manager cites the id as the approval_card receipt on the parked-to-queued transition. "
+                  "One unanswered card per row and park. Auth: X-API-Key or Bearer JWT, and a manager seat."
+)
+def ask_to_unpark(
+    task_id: uuid.UUID,
+    payload: UnparkAskIn,
+    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ],
+    account_email: Annotated[ str | None, Depends( authenticated_account_email ) ] = None,
+    notification_queue = Depends( get_notification_queue ),
+    ws_manager = Depends( get_websocket_manager ),
+):
+    """
+    Make and push the un-park card for one parked row.
+
+    Requires:
+        - the caller is a manager seat, resolved on the server from the session bridge
+        - the row is parked
+
+    Ensures:
+        - 403 when the caller is not a manager; 404 for an unknown row; 409 when the row is not parked
+        - 409, naming the waiting card, when an unanswered card for this row and park already exists
+        - otherwise inserts one card whose `payload` is `unpark_ask_payload( row )`, whose default
+          answer is "no", and returns { card_id, task_id, expires_at }
+        - the card is pushed to the operator only after the insert has committed, so an answer
+          cannot arrive for a card the database does not have yet
+        - the row is locked while the card is made, so two managers asking at once make one card
+    """
+    session_id = rules.session_id_from_created_by( payload.actor )
+    refusal    = promotion_gate.manager_refusal(
+        session_id, payload.actor,
+        is_manager_fn   = is_manager_figure,
+        classify_fn     = classify_manager_figure_denial,
+        account_persona = approval.approver_persona_for_account( account_email ),
+        move            = promotion_gate.MOVE_MANAGER_UNPARK,
+    )
+    if refusal is not None:
+        raise HTTPException( status_code=403, detail=refusal )
+
+    from cosa.rest.user_service import get_user_by_email
+    from lupin_cli.notifications.notification_models import resolve_target_user
+    operator = get_user_by_email( resolve_target_user() )
+    if not operator:
+        raise HTTPException( status_code=404, detail="The operator's account was not found, so no card can be sent." )
+
+    now = datetime.now( timezone.utc )
+    with get_db() as session:
+        repo = TaskRepository( session )
+        item = repo.get_by_id_for_update( task_id )
+        if item is None:
+            raise HTTPException( status_code=404, detail=f"task {task_id} not found" )
+        if item.status != rules.PARK_STATUS:
+            raise HTTPException( status_code=409, detail=f"task {task_id} is '{item.status}', not parked, so there is nothing to un-park" )
+        cards = NotificationRepository( session )
+        waiting = cards.find_live_unpark_card( item.id, item.park_reason_captured_at, now )
+        if waiting is not None:
+            raise HTTPException( status_code=409, detail=f"An un-park card for this row is already waiting for an answer: {waiting.id}. Use it, or let it expire." )
+        asker = recorded_actor( payload.actor, account_email )
+        question, abstract = promotion_gate.unpark_ask_text( asker, item.id, item.title )
+        sender_id  = promotion_gate.promotion_ask_sender_id( session_id )
+        expires_at = now + timedelta( seconds=promotion_gate.UNPARK_ASK_TIMEOUT_SECONDS )
+        ask_payload = promotion_gate.unpark_ask_payload( item.id )
+        card = cards.create_notification(
+            sender_id          = sender_id,
+            recipient_id       = uuid.UUID( str( operator[ "id" ] ) ),
+            message            = question,
+            type               = "custom",
+            priority           = "high",
+            title              = "Un-park a row",
+            abstract           = abstract,
+            response_requested = True,
+            response_type      = "yes_no",
+            response_default   = "no",
+            timeout_seconds    = promotion_gate.UNPARK_ASK_TIMEOUT_SECONDS,
+            expires_at         = expires_at,
+            payload            = ask_payload,
+        )
+        card_id = str( card.id )
+        recipient_id = str( card.recipient_id )
+        connected = ws_manager.is_user_connected( recipient_id )
+        cards.update_state( card.id, "delivered" if connected else "created" )
+    notification_queue.push_notification(
+        message            = question,
+        type               = "custom",
+        priority           = "high",
+        source             = "claude_code",
+        user_id            = recipient_id,
+        id                 = card_id,
+        title              = "Un-park a row",
+        response_requested = True,
+        response_type      = "yes_no",
+        response_default   = "no",
+        timeout_seconds    = promotion_gate.UNPARK_ASK_TIMEOUT_SECONDS,
+        human_only         = True,
+        sender_id          = sender_id,
+        abstract           = abstract,
+        payload            = ask_payload,
+    )
+    return { "card_id": card_id, "task_id": str( task_id ), "expires_at": expires_at.isoformat() }
 
 
 @router.post(
