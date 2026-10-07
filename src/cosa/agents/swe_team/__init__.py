@@ -8,7 +8,7 @@ Foundation modules:
 - config.py: SweTeamConfig dataclass
 - state.py: Pydantic state schemas, OrchestratorState/JobSubState enums
 - safety_limits.py: SAFETY_LIMITS dict, SafetyGuard, DANGEROUS_COMMANDS
-- agent_definitions.py: 6 role definitions (lead + coder active)
+- agent_definitions.py: 6 role definitions (lead, coder, tester active; the other three inactive)
 - orchestrator.py: SweTeamOrchestrator (dry-run + live delegation)
 - cosa_interface.py: Role-aware async notification wrappers
 - voice_io.py: Voice-first I/O layer (thin wrapper)
@@ -21,10 +21,10 @@ Lead + coder delegation loop:
 
 Tester verification loop (current):
 - test_runner.py: Orchestrator-level pytest validation helper
-- VerificationResult model in state.py
-- Coder-tester retry cycle in orchestrator.py
+- VerificationResult model (state.py) and the coder-tester retry cycle (orchestrator.py)
 
-Planned: trust-aware decision proxy; full team with CJ Flow integration.
+Decision proxy (current): proxy/ holds EngineeringStrategy, built by the orchestrator unless trust mode is "disabled".
+Queue job (current): job.py has SweTeamJob, which runs the orchestrator as a CJ Flow agentic job.
 
 Usage:
     # CLI (dry-run)
