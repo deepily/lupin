@@ -996,7 +996,7 @@ def test_a_crash_in_the_counted_check_still_allows_the_commit_with_the_loud_line
     _no_external( monkeypatch )
     _base( stamped, { "src/pkg/keep.py": CLEAN }, {} )
     _stage( stamped, { "src/tests/t.py": ONE } )
-    monkeypatch.setattr( gate.counts, "rules_stamp", lambda root: ( _ for _ in () ).throw( OSError( "rule file gone" ) ) )
+    monkeypatch.setattr( gate.counts, "rules_stamp", lambda root, read=None: ( _ for _ in () ).throw( OSError( "rule file gone" ) ) )
     rc, text = _gate( stamped )
     assert rc == 0 and "[doc-lint] GATE CRASHED, commit allowed: OSError: rule file gone" in text
 
@@ -1068,3 +1068,74 @@ def test_a_stale_table_commit_prints_no_counted_file_refusal_and_checks_no_file(
     assert rc == 3 and text.count( "REFUSED" ) == 2 and "the count table was cut under other rules" in text   # one refusal line plus the summary line
     assert "findings, the count table allows" not in text
     assert "counted scope: 0 files checked, 0 at or below their count, 0 over, 0 waivers honoured, table stale" in text
+
+
+RULE_FILE = counts.STAMP_FILES[ 0 ]
+
+
+def _commit_rules_and_table( repo, files, table ):
+    """Commit the rule files too, so the index holds them, with a table cut under the rules as they stand."""
+    _git( repo, "add", "-f", *counts.STAMP_FILES )
+    _base( repo, files, table )
+
+
+def test_a_staged_rule_edit_makes_the_table_stale( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _commit_rules_and_table( stamped, { "src/pkg/keep.py": CLEAN }, {} )
+    ( stamped / RULE_FILE ).write_text( "an edited rule\n", encoding="utf-8" )
+    _git( stamped, "add", "-f", RULE_FILE )
+    _stage( stamped, { "src/tests/t.py": CLEAN } )
+    rc, text = _gate( stamped )
+    assert rc == 3 and "the count table was cut under other rules" in text and "table stale" in text
+
+
+def test_an_unstaged_rule_edit_leaves_the_table_current_and_is_reported( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _commit_rules_and_table( stamped, { "src/pkg/keep.py": CLEAN }, {} )
+    ( stamped / RULE_FILE ).write_text( "an edit nobody staged\n", encoding="utf-8" )
+    _stage( stamped, { "src/tests/t.py": CLEAN } )
+    rc, text = _gate( stamped )
+    assert rc == 0 and "REFUSED" not in text and "table ok" in text
+    assert "WARNING: the rule files in the working tree differ from the staged ones" in text
+
+
+def test_a_rule_edit_staged_and_then_put_back_on_disk_still_stales_the_table( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _commit_rules_and_table( stamped, { "src/pkg/keep.py": CLEAN }, {} )
+    original = ( stamped / RULE_FILE ).read_text( encoding="utf-8" )
+    ( stamped / RULE_FILE ).write_text( "an edited rule\n", encoding="utf-8" )
+    _git( stamped, "add", "-f", RULE_FILE )
+    ( stamped / RULE_FILE ).write_text( original, encoding="utf-8" )                 # the disk copy matches the table again
+    _stage( stamped, { "src/tests/t.py": CLEAN } )
+    rc, text = _gate( stamped )
+    assert rc == 3 and "the count table was cut under other rules" in text
+
+
+def test_the_stamp_the_gate_reads_is_the_staged_one_and_a_clean_tree_has_no_warning( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _commit_rules_and_table( stamped, { "src/pkg/keep.py": CLEAN }, {} )
+    _stage( stamped, { "src/tests/t.py": CLEAN } )
+    rc, text = _gate( stamped )
+    assert rc == 0 and "table ok" in text and "differ from the staged ones" not in text
+
+
+def test_staged_bytes_reads_the_index_then_the_working_tree_then_raises( stamped ):
+    _stage( stamped, { "src/tests/a.py": "indexed\n" } )
+    ( stamped / "src" / "tests" / "a.py" ).write_text( "on disk\n", encoding="utf-8" )
+    assert gate.staged_bytes( str( stamped ), "src/tests/a.py" ) == b"indexed\n"
+    ( stamped / "loose.txt" ).write_text( "untracked\n", encoding="utf-8" )
+    assert gate.staged_bytes( str( stamped ), "loose.txt" ) == b"untracked\n"
+    with pytest.raises( OSError ):
+        gate.staged_bytes( str( stamped ), "nowhere.txt" )
+
+
+def test_the_rename_hint_names_at_most_three_deleted_entries( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    old   = lambda i: TWO + "".join( f"old{i}_{n} = {n}\n" for n in range( 30 ) )          # four unrelated files, none pairable
+    files = { f"src/lupin_mcp/d{i}.py": old( i ) for i in range( 4 ) }
+    _base( stamped, files, { path: 2 for path in files } )
+    _git( stamped, "rm", "-q", *files )
+    _stage( stamped, { "src/lupin_mcp/new.py": _doc( "This is NOT fine and NEVER bad." ) } )
+    rc, text = _gate( stamped )
+    named = text.split( "also deletes " )[ 1 ].split( ", which had an entry" )[ 0 ]
+    assert rc == 3 and named == "src/lupin_mcp/d0.py, src/lupin_mcp/d1.py, src/lupin_mcp/d2.py" and "d3.py" not in text

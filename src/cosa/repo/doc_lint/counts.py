@@ -147,25 +147,28 @@ def census( root, read=None ):
     return counts, len( paths )
 
 
-def rules_stamp( root ):
+def rules_stamp( root, read=None ):
     """
     Hash the files that decide what a finding is.
 
     Requires:
         - root is a working tree that holds every file in STAMP_FILES
+        - read( path ) returns a rule file's bytes, or None to read the working tree
 
     Ensures:
         - returns the first 16 hex characters of a sha256 over each path and its bytes
-        - reads the working tree, the files whose code counts the findings, so an unstaged edit to a rule file moves the stamp
         - the same rule files always give the same stamp
+        - given the staged reader, the stamp is that of the rules being committed, not of unstaged edits
 
     Raises:
         - OSError when a rule file is missing
     """
+    def disk( path ):
+        with open( f"{root}/{path}", "rb" ) as handle: return handle.read()
+    read   = read if read is not None else disk
     digest = hashlib.sha256()
     for path in STAMP_FILES:
-        with open( f"{root}/{path}", "rb" ) as handle: data = handle.read()
-        digest.update( path.encode( "utf-8" ) + b"\0" + data + b"\0" )
+        digest.update( path.encode( "utf-8" ) + b"\0" + read( path ) + b"\0" )
     return digest.hexdigest()[ : 16 ]
 
 

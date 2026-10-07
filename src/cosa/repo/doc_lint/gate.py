@@ -131,6 +131,25 @@ def staged_counted( root ):
     return paths, renamed_from, table_staged
 
 
+def staged_bytes( root, path ):
+    """
+    Read a file's bytes from the index, or from the working tree when the index has none.
+
+    Requires:
+        - root is a git working tree
+
+    Ensures:
+        - returns the staged bytes, so the stamp covers what is being committed
+        - a file the index does not hold is read from the working tree, so a rule file reached through a link still counts
+
+    Raises:
+        - OSError when the file is in neither place
+    """
+    res = subprocess.run( [ "git", "-C", root, "show", f":{path}" ], capture_output=True )
+    if res.returncode == 0: return res.stdout
+    with open( f"{root}/{path}", "rb" ) as handle: return handle.read()
+
+
 def head_table_text( root ):
     """
     Read the count table as the last commit has it.
@@ -212,6 +231,8 @@ def counted_check( root, ranges ):
         - with no table at HEAD and none staged, nothing is refused and the scope is reported as not checked
         - a staged table that raises an entry above HEAD is refused, unless it carries a new stamp
         - a new stamp must equal the stamp of the rule files now and the table must equal a census of the index
+        - the current stamp is that of the staged rule files, so a staged rule edit moves it and an unstaged one does not
+        - when the working-tree rule files differ from the staged ones, a warning says which stamp is which
         - a table whose stamp is not the current one refuses a commit that stages a counted file
         - a counted file above its allowance is refused; a renamed file inherits its old entry; a new file has none
 
@@ -238,7 +259,9 @@ def counted_check( root, ranges ):
     if table is None:
         if paths: warnings.append( "[doc-lint] WARNING: there is no count table at HEAD or staged, so the counted scope was NOT checked" )
         return refusals, warnings, stats
-    current = counts.rules_stamp( root )
+    current = counts.rules_stamp( root, read=lambda p: staged_bytes( root, p ) )
+    on_disk = counts.rules_stamp( root )
+    if on_disk != current: warnings.append( f"[doc-lint] WARNING: the rule files in the working tree differ from the staged ones (stamp {on_disk} on disk, {current} staged); counts were measured with the working-tree rules, and the stamp is the staged one" )
     if staged is not None and ( head is None or staged.stamp != head.stamp ):
         found, _walked = counts.census( root, read=lambda p: staged_source( root, p ) )
         problems       = counts.check_table( staged, found, current )

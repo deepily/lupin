@@ -154,6 +154,13 @@ def test_rules_stamp_moves_when_a_boundary_moves_between_two_rule_files( repo ):
     assert counts.rules_stamp( str( repo ) ) != first
 
 
+def test_rules_stamp_reads_what_the_given_reader_returns( repo ):
+    on_disk = counts.rules_stamp( str( repo ) )
+    staged  = counts.rules_stamp( str( repo ), read=lambda path: b"staged " + path.encode( "utf-8" ) )
+    assert staged != on_disk and staged == counts.rules_stamp( str( repo ), read=lambda path: b"staged " + path.encode( "utf-8" ) )
+    assert counts.rules_stamp( str( repo ), read=lambda path: ( repo / path ).read_bytes() ) == on_disk
+
+
 def test_rules_stamp_names_a_missing_rule_file( tmp_path ):
     with pytest.raises( OSError ):
         counts.rules_stamp( str( tmp_path ) )
