@@ -30,7 +30,8 @@ EPOCH_REL    = "src/conf/doc-gate-epoch.txt"
 CLEAN        = '"""\nAdd two numbers.\n"""\n'
 LOUD         = '"""\nThis module must NEVER change.\n"""\n'
 
-pytestmark = pytest.mark.skipif( not os.path.isdir( VENV ), reason="the gate needs a .venv beside the tree, and this tree has none" )
+# No skip when this tree has no .venv: the resolver also accepts the container interpreter, and a
+# tree with neither fails these tests by name. The venv guard lists this file as one that breaks.
 
 
 def _git( repo, *args, check=True ):
@@ -63,7 +64,7 @@ def rig( tmp_path ):
         ( hook_tree / rel ).parent.mkdir( parents=True, exist_ok=True )
         shutil.copy( os.path.join( PROJECT_ROOT, rel ), hook_tree / rel )
     os.symlink( os.path.join( PROJECT_ROOT, "src", "cosa" ), hook_tree / "src" / "cosa" )
-    os.symlink( VENV, hook_tree / ".venv" )
+    if os.path.isdir( VENV ): os.symlink( VENV, hook_tree / ".venv" )
 
     repo.mkdir()
     _git( tmp_path, "init", "-q", "--bare", str( remote ) )

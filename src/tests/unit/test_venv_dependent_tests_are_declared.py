@@ -96,6 +96,19 @@ BREAKS_WITHOUT_VENV = {
     #     .venv      14 passed
     #     no .venv   12 failed ·  2 passed   (restore control)
     "test_runner_filtered_run_banner.py",
+    # The documentation lint gate's runner and the pre-push hook (row 2c48c717). Both fixtures
+    # link PROJECT_ROOT/.venv into a scratch tree, and the scripts under test find their
+    # interpreter through resolve-venv-pytest.sh, which accepts that link or /opt/venv. Neither
+    # file skips when both are absent, so the tests fail by name.
+    #
+    # Measured both ways in one worktree (mr-radio-2c48c717-doclint-gate, on 0225b7535 plus this
+    # change), the `.venv` link moved aside and restored, the interpreter pinned to the main
+    # checkout, the two files run together, on a host with no /opt/venv:
+    #     .venv      37 passed
+    #     no .venv   26 failed, 11 passed
+    #     .venv      37 passed   (restore control)
+    "test_doclint_gate_runner.py",
+    "test_pre_push_chain.py",
 }
 
 # Detected, but measured GREEN without a venv. Each entry states why it survives, so the next

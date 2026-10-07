@@ -22,7 +22,8 @@ VENV         = os.path.join( PROJECT_ROOT, ".venv" )
 CLEAN        = '"""\nAdd two numbers.\n"""\n'
 LOUD         = '"""\nThis module must NEVER change.\n"""\n'
 
-pytestmark = pytest.mark.skipif( not os.path.isdir( VENV ), reason="the gate needs a .venv beside the tree, and this tree has none" )
+# No skip when this tree has no .venv: the resolver also accepts the container interpreter, and a
+# tree with neither fails these tests by name. The venv guard lists this file as one that breaks.
 
 
 def _git( repo, *args ):
@@ -43,7 +44,7 @@ def repo( tmp_path ):
         ( tmp_path / rel ).parent.mkdir( parents=True, exist_ok=True )
         shutil.copy( src, tmp_path / rel )
     os.symlink( os.path.join( PROJECT_ROOT, "src", "cosa" ), tmp_path / "src" / "cosa" )
-    os.symlink( VENV, tmp_path / ".venv" )
+    if os.path.isdir( VENV ): os.symlink( VENV, tmp_path / ".venv" )
     return tmp_path
 
 
@@ -214,7 +215,7 @@ def test_a_gate_that_exits_with_an_unknown_code_is_refused( repo ):
 def test_no_interpreter_exits_three( repo ):
     _write( repo, "src/app/a.py", CLEAN )
     _git( repo, "add", "src/app" )
-    os.unlink( repo / ".venv" )
+    if os.path.islink( repo / ".venv" ): os.unlink( repo / ".venv" )
 
     code, text = _run( repo )
 

@@ -119,5 +119,5 @@ def main( argv=None, out=None ):
     return EXIT_CLEAN
 
 
-if __name__ == "__main__":  # pragma: no cover - entry point, exercised by the runner script
+if __name__ == "__main__":  # pragma: no cover - reached only when the file is run as a script; an import never enters it
     sys.exit( main() )

@@ -24,6 +24,7 @@ TEXT     = "src/tests/unit/test_doc_lint_text_rules.py::"
 TOOLS    = "src/tests/unit/test_doc_lint_tools_and_gate.py::"
 PROSE    = "src/tests/unit/test_doc_lint_prose_judge.py::"
 TSDOC    = "src/tests/unit/test_doc_lint_tsdoc_lint.py::"
+SCOPE    = "src/tests/unit/test_doc_lint_scope_gate.py::"
 
 # ( rule, module, anchor, expression inside the anchor that names the rule, killing test, failure fragment )
 RULES = [
@@ -42,6 +43,7 @@ RULES = [
     ( "parse-error (tsdoc)", "tsdoc_lint", '"parse-error"', '"parse-error"', TSDOC + "test_a_parse_error_is_one_finding_at_its_first_line_and_the_comments_are_still_read", "parse-error" ),
     ( "docstring-length (tsdoc)", "tsdoc_lint", '"docstring-length"', '"docstring-length"', TSDOC + "test_jsdoc_longer_than_the_docstring_cap_is_flagged_once_at_its_start", "docstring-length" ),
     ( "unreadable", "cli", '"unreadable"', '"unreadable"', LINTERS + "test_run_linter_reports_text_json_strict_exit_and_unreadable_files", "could not read" ),
+    ( "unreadable (scope gate)", "scope_gate", '"unreadable", f"could not be read', '"unreadable"', SCOPE + "test_a_file_that_is_not_utf8_is_a_finding_and_is_still_counted", "binary.py:1: unreadable: could not be read: " ),
     ( "summary-length", "text_rules", '"summary-length"', '"summary-length"', TEXT + "test_summary_rule_flags_a_long_first_line_only_and_only_once", "summary-length" ),
     ( "preface-length", "text_rules", '"preface-length"', '"preface-length"', TEXT + "test_preface_rule_counts_lines_before_the_contract_and_ignores_contractless_text", "preface-length" ),
     ( "sentence-length", "text_rules", '"sentence-length"', '"sentence-length"', TEXT + "test_sentence_rule_skips_contract_sections_bullets_and_reports_each_long_sentence", "sentence-length" ),
