@@ -27,7 +27,7 @@ Agents ask a model for XML, and `BaseXMLModel` subclasses turn the reply into va
 ## Invariants
 - `from_xml` cuts text before `<?xml`, or else before `<response>`, `<result>` or `<output>` (tried in that order), and, trying `</response>`, `</result>`, `</output>` in that order, after the first occurrence of the first one present anywhere in the text (not the earliest closing tag). It escapes a bare `&`, keeps whitespace so code indentation survives, and raises `XMLParsingError` for bad XML and for validation failures alike.
 - `PydanticXmlParser.parse_xml_response` (reached through `XmlParserFactory.parse_agent_response`, not `from_xml`) raises `ValueError` for a routing command with no entry in its model map; there is no default model.
-- `recover_json_object` never raises: it returns `None` after logging the raw body at ERROR. If the text starts with a code fence it drops that line, and it cuts at the last triple-backtick it finds (`rfind`), whichever fence that is. It then tries the whole text, and only then the last balanced `{...}`.
+- `recover_json_object` never raises: it returns `None` after logging a bounded copy of the raw body at ERROR (over 4,000 characters, the head and tail 2,000 each). If the text starts with a code fence it drops that line, and it cuts at the last triple-backtick it finds (`rfind`), whichever fence that is. It then tries the whole text, and only then the last balanced `{...}`.
 - It repairs only unescaped `\n`, `\r` and `\t` inside strings; any other control character or structural error stays a failure.
 
 ## How to extend
